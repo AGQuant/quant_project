@@ -15,7 +15,7 @@ from gvm_engine import (
 )
 
 app = FastAPI(
-    title="GVM Stock Rating API",
+    title="Project Quant — Trading API",
     description="Proprietary GVM quant scoring engine — 25 individual parameter APIs",
     version="1.0.0"
 )
@@ -83,7 +83,7 @@ class StockRequest(BaseModel):
 @app.get("/")
 def root():
     return {
-        "message": "GVM Stock Rating API is live 🚀",
+        "message": "Project Quant — Trading API is live 🚀",
         "version": "1.0.0",
         "total_apis": 25,
         "docs": "/docs"
