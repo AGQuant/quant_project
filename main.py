@@ -1,3 +1,5 @@
+from sqlalchemy import create_engine, text
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -13,6 +15,67 @@ from gvm_engine import (
     api_dma50, api_dma200, api_return_52w_vs_index,
     api_g_score, api_v_score, api_m_score, api_gvm_score
 )
+
+def create_tables():
+    try:
+        engine = create_engine(os.environ.get("DATABASE_URL"))
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS gvm_scores (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    company_name VARCHAR(200),
+                    segment VARCHAR(100),
+                    gvm_score DECIMAL(5,2),
+                    growth_score DECIMAL(5,2),
+                    value_score DECIMAL(5,2),
+                    momentum_score DECIMAL(5,2),
+                    verdict VARCHAR(50),
+                    score_date DATE NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS raw_prices (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    price_date DATE NOT NULL,
+                    open DECIMAL(12,2),
+                    high DECIMAL(12,2),
+                    low DECIMAL(12,2),
+                    close DECIMAL(12,2),
+                    volume BIGINT,
+                    UNIQUE(symbol, price_date)
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS signals (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    signal_type VARCHAR(10),
+                    signal_date DATE NOT NULL,
+                    entry_price DECIMAL(12,2),
+                    target DECIMAL(12,2),
+                    stop_loss DECIMAL(12,2),
+                    strategy VARCHAR(50),
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(200) UNIQUE NOT NULL,
+                    name VARCHAR(200),
+                    plan VARCHAR(50) DEFAULT 'free',
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.commit()
+        print("Tables created successfully.")
+    except Exception as e:
+        print(f"Table creation error: {e}")
+
+create_tables()
 
 app = FastAPI(
     title="Project Quant — Trading API",
