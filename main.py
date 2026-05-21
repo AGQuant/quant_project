@@ -6,7 +6,7 @@ from gvm_engine import (
     api_profit_growth_5y, api_profit_growth_3y,
     api_qoq_sales_growth, api_qoq_profit_growth,
     api_opm, api_opm_expansion, api_fixed_asset_growth,
-    api_promoter_holding, api_inst_holding_change,
+    api_inst_holding_abs, api_inst_holding_change,
     api_roce, api_interest_coverage, api_dividend_yield,
     api_pe_ratio, api_potential_upside,
     api_return_1y, api_return_3y,
