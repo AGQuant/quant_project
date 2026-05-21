@@ -1,0 +1,10 @@
+service_account.json
+*.env
+.env
+__pycache__/
+*.pyc
+gvm_analytics.csv
+node_modules/
+.vscode/
+.DS_Store
+Thumbs.db
