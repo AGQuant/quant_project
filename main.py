@@ -2,6 +2,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import subprocess
+import logging
+
 from gvm_engine import (
     api_sales_growth_5y, api_sales_growth_3y,
     api_profit_growth_5y, api_profit_growth_3y,
@@ -30,28 +35,18 @@ def create_tables():
             password=parsed.password
         )
         cursor = conn.cursor()
-        
-        # GVM_SCORES — Full 80-column audit schema (DECIMAL(15,2) for raw/peer to prevent overflow)
-        cursor.execute("""DROP TABLE IF EXISTS gvm_scores CASCADE""")
-        cursor.execute("""CREATE TABLE gvm_scores (
+
+        # gvm_scores — CREATE ONLY, never drop (preserves daily history)
+        cursor.execute("""CREATE TABLE IF NOT EXISTS gvm_scores (
             id SERIAL PRIMARY KEY,
             symbol VARCHAR(20) NOT NULL,
             company_name VARCHAR(200),
             segment VARCHAR(100),
             rank INT,
             price DECIMAL(12,2),
-            
-            g_score DECIMAL(5,2),
-            v_score DECIMAL(5,2),
-            m_score DECIMAL(5,2),
-            gvm_score DECIMAL(5,2),
-            growth_label VARCHAR(50),
-            value_label VARCHAR(50),
-            momentum_label VARCHAR(50),
-            gvm_overall_label VARCHAR(50),
-            verdict VARCHAR(50),
-            punchline TEXT,
-            
+            g_score DECIMAL(5,2), v_score DECIMAL(5,2), m_score DECIMAL(5,2), gvm_score DECIMAL(5,2),
+            growth_label VARCHAR(50), value_label VARCHAR(50), momentum_label VARCHAR(50),
+            gvm_overall_label VARCHAR(50), verdict VARCHAR(50), punchline TEXT,
             sales_5y_raw DECIMAL(15,2), sales_5y_peer DECIMAL(15,2), sales_5y_rating DECIMAL(4,1),
             sales_3y_raw DECIMAL(15,2), sales_3y_peer DECIMAL(15,2), sales_3y_rating DECIMAL(4,1),
             profit_5y_raw DECIMAL(15,2), profit_5y_peer DECIMAL(15,2), profit_5y_rating DECIMAL(4,1),
@@ -61,43 +56,52 @@ def create_tables():
             opm_raw DECIMAL(15,2), opm_peer DECIMAL(15,2), opm_rating DECIMAL(4,1),
             opm_exp_raw DECIMAL(15,2), opm_exp_peer DECIMAL(15,2), opm_exp_rating DECIMAL(4,1),
             fa_growth_raw DECIMAL(15,2), fa_growth_peer DECIMAL(15,2), fa_growth_rating DECIMAL(4,1),
-            
             promoter_raw DECIMAL(15,2), promoter_rating DECIMAL(4,1),
             inst_change_raw DECIMAL(15,2), inst_change_peer DECIMAL(15,2), inst_change_rating DECIMAL(4,1),
             roce_raw DECIMAL(15,2), roce_peer DECIMAL(15,2), roce_rating DECIMAL(4,1),
             int_cov_raw DECIMAL(15,2), int_cov_peer DECIMAL(15,2), int_cov_rating DECIMAL(4,1),
             div_yield_raw DECIMAL(15,2), div_yield_peer DECIMAL(15,2), div_yield_rating DECIMAL(4,1),
-            
             pe_raw DECIMAL(15,2), pe_peer DECIMAL(15,2), pe_rating DECIMAL(4,1),
             upside_raw DECIMAL(15,2), upside_peer DECIMAL(15,2), upside_rating DECIMAL(4,1),
-            
             ret_1y_raw DECIMAL(15,2), ret_1y_peer DECIMAL(15,2), ret_1y_rating DECIMAL(4,1),
             ret_3y_raw DECIMAL(15,2), ret_3y_peer DECIMAL(15,2), ret_3y_rating DECIMAL(4,1),
             dma_50_raw DECIMAL(15,2), dma_50_peer DECIMAL(15,2), dma_50_rating DECIMAL(4,1),
             dma_200_raw DECIMAL(15,2), dma_200_peer DECIMAL(15,2), dma_200_rating DECIMAL(4,1),
             ret_52w_idx_raw DECIMAL(15,2), ret_52w_idx_peer DECIMAL(15,2), ret_52w_idx_rating DECIMAL(4,1),
-            
             score_date DATE NOT NULL,
             created_at TIMESTAMP DEFAULT NOW(),
             UNIQUE(symbol, score_date)
         )""")
-        
+
+        # raw_prices — includes adjusted_close + safe migration
         cursor.execute("""CREATE TABLE IF NOT EXISTS raw_prices (
-            id SERIAL PRIMARY KEY, symbol VARCHAR(20) NOT NULL,
-            price_date DATE NOT NULL, open DECIMAL(12,2),
-            high DECIMAL(12,2), low DECIMAL(12,2),
-            close DECIMAL(12,2), volume BIGINT,
-            UNIQUE(symbol, price_date))""")
+            id SERIAL PRIMARY KEY,
+            symbol VARCHAR(50) NOT NULL,
+            price_date DATE NOT NULL,
+            open DECIMAL(15,2), high DECIMAL(15,2),
+            low DECIMAL(15,2), close DECIMAL(15,2),
+            adjusted_close DECIMAL(15,2),
+            volume BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(symbol, price_date)
+        )""")
+        cursor.execute("""
+            ALTER TABLE raw_prices
+            ADD COLUMN IF NOT EXISTS adjusted_close DECIMAL(15,2);
+        """)
+
         cursor.execute("""CREATE TABLE IF NOT EXISTS signals (
             id SERIAL PRIMARY KEY, symbol VARCHAR(20),
             signal_type VARCHAR(50), created_at TIMESTAMP DEFAULT NOW())""")
+
         cursor.execute("""CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY, email VARCHAR(200) UNIQUE,
             created_at TIMESTAMP DEFAULT NOW())""")
+
         conn.commit()
         cursor.close()
         conn.close()
-        print("Tables created successfully")
+        print("Tables ready")
     except Exception as e:
         print(f"Table creation error: {e}")
 
@@ -300,6 +304,32 @@ def gvm_score(req: StockRequest):
     return api_gvm_score(req.dict())
 
 
+# ============================================
+# STARTUP + SCHEDULER
+# ============================================
+
 @app.on_event("startup")
 def startup_event():
     create_tables()
+
+
+def run_daily_update():
+    """Runs yahoo_daily_update.py at 3:45 PM IST (10:15 UTC) Mon-Fri"""
+    logging.info("[SCHEDULER] Daily OHLC update started")
+    try:
+        result = subprocess.run(
+            ["python", "yahoo_daily_update.py"],
+            capture_output=True, text=True, timeout=1800
+        )
+        logging.info(f"[SCHEDULER] Done: {result.stdout[-300:]}")
+    except Exception as e:
+        logging.error(f"[SCHEDULER] Failed: {e}")
+
+
+scheduler = BackgroundScheduler(timezone="UTC")
+scheduler.add_job(
+    run_daily_update,
+    CronTrigger(hour=10, minute=15, day_of_week="mon-fri")
+)
+scheduler.start()
+logging.basicConfig(level=logging.INFO)
