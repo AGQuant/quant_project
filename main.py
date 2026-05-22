@@ -27,7 +27,7 @@ def create_tables():
             port=parsed.port or 5432,
             dbname=parsed.path.lstrip('/'),
             user=parsed.username,
-            password=parsed.password, sslmode='disable'
+            password=parsed.password
         )
         cursor = conn.cursor()
         cursor.execute("""CREATE TABLE IF NOT EXISTS gvm_scores (
