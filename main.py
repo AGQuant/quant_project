@@ -30,13 +30,58 @@ def create_tables():
             password=parsed.password
         )
         cursor = conn.cursor()
-        cursor.execute("""CREATE TABLE IF NOT EXISTS gvm_scores (
-            id SERIAL PRIMARY KEY, symbol VARCHAR(20) NOT NULL,
-            company_name VARCHAR(200), segment VARCHAR(100),
-            gvm_score DECIMAL(5,2), growth_score DECIMAL(5,2),
-            value_score DECIMAL(5,2), momentum_score DECIMAL(5,2),
-            verdict VARCHAR(50), score_date DATE NOT NULL,
-            created_at TIMESTAMP DEFAULT NOW())""")
+        
+        # GVM_SCORES — Full 80-column audit schema
+        cursor.execute("""DROP TABLE IF EXISTS gvm_scores CASCADE""")
+        cursor.execute("""CREATE TABLE gvm_scores (
+            id SERIAL PRIMARY KEY,
+            symbol VARCHAR(20) NOT NULL,
+            company_name VARCHAR(200),
+            segment VARCHAR(100),
+            rank INT,
+            price DECIMAL(12,2),
+            
+            g_score DECIMAL(5,2),
+            v_score DECIMAL(5,2),
+            m_score DECIMAL(5,2),
+            gvm_score DECIMAL(5,2),
+            growth_label VARCHAR(50),
+            value_label VARCHAR(50),
+            momentum_label VARCHAR(50),
+            gvm_overall_label VARCHAR(50),
+            verdict VARCHAR(50),
+            punchline TEXT,
+            
+            sales_5y_raw DECIMAL(8,2), sales_5y_peer DECIMAL(8,2), sales_5y_rating DECIMAL(4,1),
+            sales_3y_raw DECIMAL(8,2), sales_3y_peer DECIMAL(8,2), sales_3y_rating DECIMAL(4,1),
+            profit_5y_raw DECIMAL(8,2), profit_5y_peer DECIMAL(8,2), profit_5y_rating DECIMAL(4,1),
+            profit_3y_raw DECIMAL(8,2), profit_3y_peer DECIMAL(8,2), profit_3y_rating DECIMAL(4,1),
+            qoq_sales_raw DECIMAL(8,2), qoq_sales_peer DECIMAL(8,2), qoq_sales_rating DECIMAL(4,1),
+            qoq_profit_raw DECIMAL(8,2), qoq_profit_peer DECIMAL(8,2), qoq_profit_rating DECIMAL(4,1),
+            opm_raw DECIMAL(8,2), opm_peer DECIMAL(8,2), opm_rating DECIMAL(4,1),
+            opm_exp_raw DECIMAL(8,2), opm_exp_peer DECIMAL(8,2), opm_exp_rating DECIMAL(4,1),
+            fa_growth_raw DECIMAL(8,2), fa_growth_peer DECIMAL(8,2), fa_growth_rating DECIMAL(4,1),
+            
+            promoter_raw DECIMAL(8,2), promoter_rating DECIMAL(4,1),
+            inst_change_raw DECIMAL(8,2), inst_change_peer DECIMAL(8,2), inst_change_rating DECIMAL(4,1),
+            roce_raw DECIMAL(8,2), roce_peer DECIMAL(8,2), roce_rating DECIMAL(4,1),
+            int_cov_raw DECIMAL(8,2), int_cov_peer DECIMAL(8,2), int_cov_rating DECIMAL(4,1),
+            div_yield_raw DECIMAL(8,2), div_yield_peer DECIMAL(8,2), div_yield_rating DECIMAL(4,1),
+            
+            pe_raw DECIMAL(8,2), pe_peer DECIMAL(8,2), pe_rating DECIMAL(4,1),
+            upside_raw DECIMAL(8,2), upside_peer DECIMAL(8,2), upside_rating DECIMAL(4,1),
+            
+            ret_1y_raw DECIMAL(8,2), ret_1y_peer DECIMAL(8,2), ret_1y_rating DECIMAL(4,1),
+            ret_3y_raw DECIMAL(8,2), ret_3y_peer DECIMAL(8,2), ret_3y_rating DECIMAL(4,1),
+            dma_50_raw DECIMAL(8,2), dma_50_peer DECIMAL(8,2), dma_50_rating DECIMAL(4,1),
+            dma_200_raw DECIMAL(8,2), dma_200_peer DECIMAL(8,2), dma_200_rating DECIMAL(4,1),
+            ret_52w_idx_raw DECIMAL(8,2), ret_52w_idx_peer DECIMAL(8,2), ret_52w_idx_rating DECIMAL(4,1),
+            
+            score_date DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(symbol, score_date)
+        )""")
+        
         cursor.execute("""CREATE TABLE IF NOT EXISTS raw_prices (
             id SERIAL PRIMARY KEY, symbol VARCHAR(20) NOT NULL,
             price_date DATE NOT NULL, open DECIMAL(12,2),
@@ -94,7 +139,6 @@ class DMARequest(BaseModel):
 class StockRequest(BaseModel):
     name: str
     price: float
-    # Growth
     sales_growth_5y: float;    peer_sales_growth_5y: float
     sales_growth_3y: float;    peer_sales_growth_3y: float
     profit_growth_5y: float;   peer_profit_growth_5y: float
@@ -104,16 +148,13 @@ class StockRequest(BaseModel):
     opm: float;                peer_opm: float
     opm_expansion: float;      peer_opm_expansion: float
     fixed_asset_growth: float; peer_fixed_asset_growth: float
-    # Reliability
     promoter_holding: float
     inst_holding_change: float; peer_inst_holding_change: float
     roce: float;                peer_roce: float
     interest_coverage: float;   peer_interest_coverage: float
     dividend_yield: float;      peer_dividend_yield: float
-    # Value
     pe: float; historical_pe: float; segment_pe: float
     potential_upside: float;    peer_potential_upside: float
-    # Momentum
     return_1y: float;           peer_return_1y: float
     return_3y: float;           peer_return_3y: float
     dma_50: float;  dma_200: float
@@ -262,4 +303,3 @@ def gvm_score(req: StockRequest):
 @app.on_event("startup")
 def startup_event():
     create_tables()
-
