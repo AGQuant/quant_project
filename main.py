@@ -1,8 +1,7 @@
-from sqlalchemy import create_engine, text
-import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import os
 from gvm_engine import (
     api_sales_growth_5y, api_sales_growth_3y,
     api_profit_growth_5y, api_profit_growth_3y,
@@ -16,64 +15,47 @@ from gvm_engine import (
     api_g_score, api_v_score, api_m_score, api_gvm_score
 )
 
+
 def create_tables():
     try:
-        engine = create_engine(os.environ.get("DATABASE_URL", "").replace("postgresql://", "postgresql+pg8000://"))
-        with engine.connect() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS gvm_scores (
-                    id SERIAL PRIMARY KEY,
-                    symbol VARCHAR(20) NOT NULL,
-                    company_name VARCHAR(200),
-                    segment VARCHAR(100),
-                    gvm_score DECIMAL(5,2),
-                    growth_score DECIMAL(5,2),
-                    value_score DECIMAL(5,2),
-                    momentum_score DECIMAL(5,2),
-                    verdict VARCHAR(50),
-                    score_date DATE NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """))
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS raw_prices (
-                    id SERIAL PRIMARY KEY,
-                    symbol VARCHAR(20) NOT NULL,
-                    price_date DATE NOT NULL,
-                    open DECIMAL(12,2),
-                    high DECIMAL(12,2),
-                    low DECIMAL(12,2),
-                    close DECIMAL(12,2),
-                    volume BIGINT,
-                    UNIQUE(symbol, price_date)
-                )
-            """))
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS signals (
-                    id SERIAL PRIMARY KEY,
-                    symbol VARCHAR(20) NOT NULL,
-                    signal_type VARCHAR(10),
-                    signal_date DATE NOT NULL,
-                    entry_price DECIMAL(12,2),
-                    target DECIMAL(12,2),
-                    stop_loss DECIMAL(12,2),
-                    strategy VARCHAR(50),
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """))
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(200) UNIQUE NOT NULL,
-                    name VARCHAR(200),
-                    plan VARCHAR(50) DEFAULT 'free',
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """))
-            conn.commit()
-        print("Tables created successfully.")
+        import pg8000
+        import urllib.parse
+        db_url = os.environ.get("DATABASE_URL", "")
+        parsed = urllib.parse.urlparse(db_url)
+        conn = pg8000.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            database=parsed.path.lstrip('/'),
+            user=parsed.username,
+            password=parsed.password
+        )
+        cursor = conn.cursor()
+        cursor.execute("""CREATE TABLE IF NOT EXISTS gvm_scores (
+            id SERIAL PRIMARY KEY, symbol VARCHAR(20) NOT NULL,
+            company_name VARCHAR(200), segment VARCHAR(100),
+            gvm_score DECIMAL(5,2), growth_score DECIMAL(5,2),
+            value_score DECIMAL(5,2), momentum_score DECIMAL(5,2),
+            verdict VARCHAR(50), score_date DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW())""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS raw_prices (
+            id SERIAL PRIMARY KEY, symbol VARCHAR(20) NOT NULL,
+            price_date DATE NOT NULL, open DECIMAL(12,2),
+            high DECIMAL(12,2), low DECIMAL(12,2),
+            close DECIMAL(12,2), volume BIGINT,
+            UNIQUE(symbol, price_date))""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS signals (
+            id SERIAL PRIMARY KEY, symbol VARCHAR(20),
+            signal_type VARCHAR(50), created_at TIMESTAMP DEFAULT NOW())""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY, email VARCHAR(200) UNIQUE,
+            created_at TIMESTAMP DEFAULT NOW())""")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("Tables created successfully")
     except Exception as e:
         print(f"Table creation error: {e}")
+
 
 create_tables()
 
@@ -89,6 +71,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ============================================
 # REQUEST MODELS
@@ -200,7 +183,7 @@ def fixed_asset_growth(req: ParamRequest):
 
 @app.post("/api/reliability/promoter-holding")
 def promoter_holding(req: PromoterRequest):
-    return api_promoter_holding(req.stock_val)
+    return api_inst_holding_abs(req.stock_val)
 
 @app.post("/api/reliability/inst-holding-change")
 def inst_holding_change(req: ParamRequest):
