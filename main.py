@@ -18,11 +18,11 @@ from gvm_engine import (
 
 def create_tables():
     try:
-        import pg8000
+        import psycopg
         import urllib.parse
         db_url = os.environ.get("DATABASE_URL", "")
         parsed = urllib.parse.urlparse(db_url)
-        conn = pg8000.connect(
+        conn = psycopg.connect(
             host=parsed.hostname,
             port=parsed.port or 5432,
             database=parsed.path.lstrip('/'),
@@ -262,3 +262,4 @@ def gvm_score(req: StockRequest):
 @app.on_event("startup")
 def startup_event():
     create_tables()
+
