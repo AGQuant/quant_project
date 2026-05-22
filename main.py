@@ -18,7 +18,7 @@ from gvm_engine import (
 
 def create_tables():
     try:
-        engine = create_engine(os.environ.get("DATABASE_URL", "").replace("postgres://", "postgresql+pg8000://"))
+        engine = create_engine(os.environ.get("DATABASE_URL", "").replace("postgresql://", "postgresql+pg8000://"))
         with engine.connect() as conn:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS gvm_scores (
