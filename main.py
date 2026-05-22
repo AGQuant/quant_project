@@ -25,7 +25,7 @@ def create_tables():
         conn = psycopg.connect(
             host=parsed.hostname,
             port=parsed.port or 5432,
-            database=parsed.path.lstrip('/'),
+            dbname=parsed.path.lstrip('/'),
             user=parsed.username,
             password=parsed.password
         )
