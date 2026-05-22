@@ -31,7 +31,7 @@ def create_tables():
         )
         cursor = conn.cursor()
         
-        # GVM_SCORES — Full 80-column audit schema
+        # GVM_SCORES — Full 80-column audit schema (DECIMAL(15,2) for raw/peer to prevent overflow)
         cursor.execute("""DROP TABLE IF EXISTS gvm_scores CASCADE""")
         cursor.execute("""CREATE TABLE gvm_scores (
             id SERIAL PRIMARY KEY,
@@ -52,30 +52,30 @@ def create_tables():
             verdict VARCHAR(50),
             punchline TEXT,
             
-            sales_5y_raw DECIMAL(8,2), sales_5y_peer DECIMAL(8,2), sales_5y_rating DECIMAL(4,1),
-            sales_3y_raw DECIMAL(8,2), sales_3y_peer DECIMAL(8,2), sales_3y_rating DECIMAL(4,1),
-            profit_5y_raw DECIMAL(8,2), profit_5y_peer DECIMAL(8,2), profit_5y_rating DECIMAL(4,1),
-            profit_3y_raw DECIMAL(8,2), profit_3y_peer DECIMAL(8,2), profit_3y_rating DECIMAL(4,1),
-            qoq_sales_raw DECIMAL(8,2), qoq_sales_peer DECIMAL(8,2), qoq_sales_rating DECIMAL(4,1),
-            qoq_profit_raw DECIMAL(8,2), qoq_profit_peer DECIMAL(8,2), qoq_profit_rating DECIMAL(4,1),
-            opm_raw DECIMAL(8,2), opm_peer DECIMAL(8,2), opm_rating DECIMAL(4,1),
-            opm_exp_raw DECIMAL(8,2), opm_exp_peer DECIMAL(8,2), opm_exp_rating DECIMAL(4,1),
-            fa_growth_raw DECIMAL(8,2), fa_growth_peer DECIMAL(8,2), fa_growth_rating DECIMAL(4,1),
+            sales_5y_raw DECIMAL(15,2), sales_5y_peer DECIMAL(15,2), sales_5y_rating DECIMAL(4,1),
+            sales_3y_raw DECIMAL(15,2), sales_3y_peer DECIMAL(15,2), sales_3y_rating DECIMAL(4,1),
+            profit_5y_raw DECIMAL(15,2), profit_5y_peer DECIMAL(15,2), profit_5y_rating DECIMAL(4,1),
+            profit_3y_raw DECIMAL(15,2), profit_3y_peer DECIMAL(15,2), profit_3y_rating DECIMAL(4,1),
+            qoq_sales_raw DECIMAL(15,2), qoq_sales_peer DECIMAL(15,2), qoq_sales_rating DECIMAL(4,1),
+            qoq_profit_raw DECIMAL(15,2), qoq_profit_peer DECIMAL(15,2), qoq_profit_rating DECIMAL(4,1),
+            opm_raw DECIMAL(15,2), opm_peer DECIMAL(15,2), opm_rating DECIMAL(4,1),
+            opm_exp_raw DECIMAL(15,2), opm_exp_peer DECIMAL(15,2), opm_exp_rating DECIMAL(4,1),
+            fa_growth_raw DECIMAL(15,2), fa_growth_peer DECIMAL(15,2), fa_growth_rating DECIMAL(4,1),
             
-            promoter_raw DECIMAL(8,2), promoter_rating DECIMAL(4,1),
-            inst_change_raw DECIMAL(8,2), inst_change_peer DECIMAL(8,2), inst_change_rating DECIMAL(4,1),
-            roce_raw DECIMAL(8,2), roce_peer DECIMAL(8,2), roce_rating DECIMAL(4,1),
-            int_cov_raw DECIMAL(8,2), int_cov_peer DECIMAL(8,2), int_cov_rating DECIMAL(4,1),
-            div_yield_raw DECIMAL(8,2), div_yield_peer DECIMAL(8,2), div_yield_rating DECIMAL(4,1),
+            promoter_raw DECIMAL(15,2), promoter_rating DECIMAL(4,1),
+            inst_change_raw DECIMAL(15,2), inst_change_peer DECIMAL(15,2), inst_change_rating DECIMAL(4,1),
+            roce_raw DECIMAL(15,2), roce_peer DECIMAL(15,2), roce_rating DECIMAL(4,1),
+            int_cov_raw DECIMAL(15,2), int_cov_peer DECIMAL(15,2), int_cov_rating DECIMAL(4,1),
+            div_yield_raw DECIMAL(15,2), div_yield_peer DECIMAL(15,2), div_yield_rating DECIMAL(4,1),
             
-            pe_raw DECIMAL(8,2), pe_peer DECIMAL(8,2), pe_rating DECIMAL(4,1),
-            upside_raw DECIMAL(8,2), upside_peer DECIMAL(8,2), upside_rating DECIMAL(4,1),
+            pe_raw DECIMAL(15,2), pe_peer DECIMAL(15,2), pe_rating DECIMAL(4,1),
+            upside_raw DECIMAL(15,2), upside_peer DECIMAL(15,2), upside_rating DECIMAL(4,1),
             
-            ret_1y_raw DECIMAL(8,2), ret_1y_peer DECIMAL(8,2), ret_1y_rating DECIMAL(4,1),
-            ret_3y_raw DECIMAL(8,2), ret_3y_peer DECIMAL(8,2), ret_3y_rating DECIMAL(4,1),
-            dma_50_raw DECIMAL(8,2), dma_50_peer DECIMAL(8,2), dma_50_rating DECIMAL(4,1),
-            dma_200_raw DECIMAL(8,2), dma_200_peer DECIMAL(8,2), dma_200_rating DECIMAL(4,1),
-            ret_52w_idx_raw DECIMAL(8,2), ret_52w_idx_peer DECIMAL(8,2), ret_52w_idx_rating DECIMAL(4,1),
+            ret_1y_raw DECIMAL(15,2), ret_1y_peer DECIMAL(15,2), ret_1y_rating DECIMAL(4,1),
+            ret_3y_raw DECIMAL(15,2), ret_3y_peer DECIMAL(15,2), ret_3y_rating DECIMAL(4,1),
+            dma_50_raw DECIMAL(15,2), dma_50_peer DECIMAL(15,2), dma_50_rating DECIMAL(4,1),
+            dma_200_raw DECIMAL(15,2), dma_200_peer DECIMAL(15,2), dma_200_rating DECIMAL(4,1),
+            ret_52w_idx_raw DECIMAL(15,2), ret_52w_idx_peer DECIMAL(15,2), ret_52w_idx_rating DECIMAL(4,1),
             
             score_date DATE NOT NULL,
             created_at TIMESTAMP DEFAULT NOW(),
