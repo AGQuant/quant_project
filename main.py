@@ -57,8 +57,6 @@ def create_tables():
         print(f"Table creation error: {e}")
 
 
-create_tables()
-
 app = FastAPI(
     title="Project Quant — Trading API",
     description="Proprietary GVM quant scoring engine — 25 individual parameter APIs",
@@ -259,3 +257,8 @@ def m_score(req: StockRequest):
 @app.post("/api/score/gvm-score")
 def gvm_score(req: StockRequest):
     return api_gvm_score(req.dict())
+
+
+@app.on_event("startup")
+def startup_event():
+    create_tables()
