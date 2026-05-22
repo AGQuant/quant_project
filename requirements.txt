@@ -7,4 +7,4 @@ python-dotenv==1.0.0
 gspread==6.1.2
 yfinance==0.2.40
 sqlalchemy==2.0.36
-psycopg2-binary==2.9.9
+pg8000==1.31.2
