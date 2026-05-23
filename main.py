@@ -125,6 +125,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount MCP server at /mcp
+from mcp_server import mcp
+app.mount("/mcp", mcp.streamable_http_app())
+
 
 # ============================================
 # REQUEST MODELS
@@ -181,6 +185,7 @@ def root():
         "message": "Project Quant — Trading API is live 🚀",
         "version": "1.0.0",
         "total_apis": 29,
+        "mcp": "/mcp",
         "docs": "/docs"
     }
 
