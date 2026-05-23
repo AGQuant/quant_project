@@ -109,10 +109,12 @@ def create_tables():
         print(f"Table creation error: {e}")
 
 
+# redirect_slashes=False fixes POST /mcp → 307 redirect issue
 app = FastAPI(
     title="Project Quant — Trading API",
     description="Proprietary GVM quant scoring engine — 29 APIs + MCP",
-    version="1.0.0"
+    version="1.0.0",
+    redirect_slashes=False
 )
 
 app.add_middleware(
@@ -139,6 +141,20 @@ async def oauth_metadata():
         "grant_types_supported": ["authorization_code"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"]
+    }
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource():
+    return {
+        "resource": BASE_URL,
+        "authorization_servers": [BASE_URL]
+    }
+
+@app.get("/.well-known/oauth-protected-resource/mcp")
+async def oauth_protected_resource_mcp():
+    return {
+        "resource": f"{BASE_URL}/mcp",
+        "authorization_servers": [BASE_URL]
     }
 
 @app.post("/register")
