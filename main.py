@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
+import psycopg
+import urllib.parse
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import subprocess
@@ -21,22 +23,27 @@ from gvm_engine import (
 )
 
 
+# ============================================
+# DB CONNECTION HELPER
+# ============================================
+
+def get_db_conn():
+    db_url = os.environ.get("DATABASE_URL", "")
+    parsed = urllib.parse.urlparse(db_url)
+    return psycopg.connect(
+        host=parsed.hostname,
+        port=parsed.port or 5432,
+        dbname=parsed.path.lstrip('/'),
+        user=parsed.username,
+        password=parsed.password
+    )
+
+
 def create_tables():
     try:
-        import psycopg
-        import urllib.parse
-        db_url = os.environ.get("DATABASE_URL", "")
-        parsed = urllib.parse.urlparse(db_url)
-        conn = psycopg.connect(
-            host=parsed.hostname,
-            port=parsed.port or 5432,
-            dbname=parsed.path.lstrip('/'),
-            user=parsed.username,
-            password=parsed.password
-        )
+        conn = get_db_conn()
         cursor = conn.cursor()
 
-        # gvm_scores — CREATE ONLY, never drop (preserves daily history)
         cursor.execute("""CREATE TABLE IF NOT EXISTS gvm_scores (
             id SERIAL PRIMARY KEY,
             symbol VARCHAR(20) NOT NULL,
@@ -73,7 +80,6 @@ def create_tables():
             UNIQUE(symbol, score_date)
         )""")
 
-        # raw_prices — includes adjusted_close + safe migration
         cursor.execute("""CREATE TABLE IF NOT EXISTS raw_prices (
             id SERIAL PRIMARY KEY,
             symbol VARCHAR(50) NOT NULL,
@@ -174,7 +180,7 @@ def root():
     return {
         "message": "Project Quant — Trading API is live 🚀",
         "version": "1.0.0",
-        "total_apis": 25,
+        "total_apis": 29,
         "docs": "/docs"
     }
 
@@ -302,6 +308,137 @@ def m_score(req: StockRequest):
 @app.post("/api/score/gvm-score")
 def gvm_score(req: StockRequest):
     return api_gvm_score(req.dict())
+
+
+# ============================================
+# G11-B — READ ENDPOINTS (Query from DB)
+# NOTE: specific routes (/top, /filter, /sector)
+# MUST come before /{symbol} — order matters in FastAPI
+# ============================================
+
+@app.get("/api/gvm/top")
+def get_top_stocks(n: int = 20, verdict: str = None):
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        latest = cur.fetchone()[0]
+        if verdict:
+            cur.execute("""
+                SELECT symbol, company_name, segment, rank, price,
+                       g_score, v_score, m_score, gvm_score, verdict
+                FROM gvm_scores WHERE score_date=%s AND verdict=%s
+                ORDER BY gvm_score DESC LIMIT %s
+            """, (latest, verdict, n))
+        else:
+            cur.execute("""
+                SELECT symbol, company_name, segment, rank, price,
+                       g_score, v_score, m_score, gvm_score, verdict
+                FROM gvm_scores WHERE score_date=%s
+                ORDER BY gvm_score DESC LIMIT %s
+            """, (latest, n))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return {"date": str(latest), "count": len(rows), "stocks": [
+            {"symbol": r[0], "company_name": r[1], "segment": r[2],
+             "rank": r[3], "price": float(r[4] or 0),
+             "g_score": float(r[5] or 0), "v_score": float(r[6] or 0),
+             "m_score": float(r[7] or 0), "gvm_score": float(r[8] or 0),
+             "verdict": r[9]} for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gvm/filter")
+def filter_stocks(min_score: float = 0, max_score: float = 10, verdict: str = None, n: int = 50):
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        latest = cur.fetchone()[0]
+        if verdict:
+            cur.execute("""
+                SELECT symbol, company_name, segment, rank, price,
+                       g_score, v_score, m_score, gvm_score, verdict
+                FROM gvm_scores WHERE score_date=%s AND verdict=%s
+                  AND gvm_score BETWEEN %s AND %s
+                ORDER BY gvm_score DESC LIMIT %s
+            """, (latest, verdict, min_score, max_score, n))
+        else:
+            cur.execute("""
+                SELECT symbol, company_name, segment, rank, price,
+                       g_score, v_score, m_score, gvm_score, verdict
+                FROM gvm_scores WHERE score_date=%s
+                  AND gvm_score BETWEEN %s AND %s
+                ORDER BY gvm_score DESC LIMIT %s
+            """, (latest, min_score, max_score, n))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return {"date": str(latest), "count": len(rows), "stocks": [
+            {"symbol": r[0], "company_name": r[1], "segment": r[2],
+             "rank": r[3], "price": float(r[4] or 0),
+             "g_score": float(r[5] or 0), "v_score": float(r[6] or 0),
+             "m_score": float(r[7] or 0), "gvm_score": float(r[8] or 0),
+             "verdict": r[9]} for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gvm/sector")
+def get_by_sector(segment: str, n: int = 20):
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        latest = cur.fetchone()[0]
+        cur.execute("""
+            SELECT symbol, company_name, segment, rank, price,
+                   g_score, v_score, m_score, gvm_score, verdict
+            FROM gvm_scores WHERE score_date=%s AND segment ILIKE %s
+            ORDER BY gvm_score DESC LIMIT %s
+        """, (latest, f"%{segment}%", n))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return {"segment": segment, "date": str(latest), "count": len(rows), "stocks": [
+            {"symbol": r[0], "company_name": r[1], "segment": r[2],
+             "rank": r[3], "price": float(r[4] or 0),
+             "g_score": float(r[5] or 0), "v_score": float(r[6] or 0),
+             "m_score": float(r[7] or 0), "gvm_score": float(r[8] or 0),
+             "verdict": r[9]} for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/gvm/{symbol}")
+def get_gvm_by_symbol(symbol: str):
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT symbol, company_name, segment, rank, price,
+                   g_score, v_score, m_score, gvm_score,
+                   growth_label, value_label, momentum_label,
+                   gvm_overall_label, verdict, punchline, score_date
+            FROM gvm_scores WHERE symbol=%s
+            ORDER BY score_date DESC LIMIT 1
+        """, (symbol.upper(),))
+        r = cur.fetchone()
+        cur.close(); conn.close()
+        if not r:
+            raise HTTPException(status_code=404, detail=f"{symbol} not found")
+        return {
+            "symbol": r[0], "company_name": r[1], "segment": r[2],
+            "rank": r[3], "price": float(r[4] or 0),
+            "g_score": float(r[5] or 0), "v_score": float(r[6] or 0),
+            "m_score": float(r[7] or 0), "gvm_score": float(r[8] or 0),
+            "growth_label": r[9], "value_label": r[10], "momentum_label": r[11],
+            "gvm_overall_label": r[12], "verdict": r[13],
+            "punchline": r[14], "score_date": str(r[15])
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================
