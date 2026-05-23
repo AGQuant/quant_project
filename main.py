@@ -1,13 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import os
 import psycopg
 import urllib.parse
+import secrets
+import logging
+import subprocess
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-import subprocess
-import logging
 
 from gvm_engine import (
     api_sales_growth_5y, api_sales_growth_3y,
@@ -21,6 +23,9 @@ from gvm_engine import (
     api_dma50, api_dma200, api_return_52w_vs_index,
     api_g_score, api_v_score, api_m_score, api_gvm_score
 )
+
+BASE_URL = "https://quantproject-production.up.railway.app"
+_issued_tokens: set = set()
 
 
 # ============================================
@@ -43,7 +48,6 @@ def create_tables():
     try:
         conn = get_db_conn()
         cursor = conn.cursor()
-
         cursor.execute("""CREATE TABLE IF NOT EXISTS gvm_scores (
             id SERIAL PRIMARY KEY,
             symbol VARCHAR(20) NOT NULL,
@@ -79,7 +83,6 @@ def create_tables():
             created_at TIMESTAMP DEFAULT NOW(),
             UNIQUE(symbol, score_date)
         )""")
-
         cursor.execute("""CREATE TABLE IF NOT EXISTS raw_prices (
             id SERIAL PRIMARY KEY,
             symbol VARCHAR(50) NOT NULL,
@@ -91,19 +94,13 @@ def create_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(symbol, price_date)
         )""")
-        cursor.execute("""
-            ALTER TABLE raw_prices
-            ADD COLUMN IF NOT EXISTS adjusted_close DECIMAL(15,2);
-        """)
-
+        cursor.execute("ALTER TABLE raw_prices ADD COLUMN IF NOT EXISTS adjusted_close DECIMAL(15,2);")
         cursor.execute("""CREATE TABLE IF NOT EXISTS signals (
             id SERIAL PRIMARY KEY, symbol VARCHAR(20),
             signal_type VARCHAR(50), created_at TIMESTAMP DEFAULT NOW())""")
-
         cursor.execute("""CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY, email VARCHAR(200) UNIQUE,
             created_at TIMESTAMP DEFAULT NOW())""")
-
         conn.commit()
         cursor.close()
         conn.close()
@@ -114,7 +111,7 @@ def create_tables():
 
 app = FastAPI(
     title="Project Quant — Trading API",
-    description="Proprietary GVM quant scoring engine — 25 individual parameter APIs",
+    description="Proprietary GVM quant scoring engine — 29 APIs + MCP",
     version="1.0.0"
 )
 
@@ -125,7 +122,74 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount MCP server at /mcp
+
+# ============================================
+# OAUTH 2.1 — Required by Claude.ai for MCP
+# Auto-approve flow (private server)
+# ============================================
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata():
+    return {
+        "issuer": BASE_URL,
+        "authorization_endpoint": f"{BASE_URL}/authorize",
+        "token_endpoint": f"{BASE_URL}/token",
+        "registration_endpoint": f"{BASE_URL}/register",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"]
+    }
+
+@app.post("/register")
+async def register_client(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return {
+        "client_id": f"claude-{secrets.token_hex(8)}",
+        "redirect_uris": body.get("redirect_uris", []),
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none"
+    }
+
+@app.get("/authorize")
+async def authorize(
+    response_type: str = "code",
+    client_id: str = "",
+    redirect_uri: str = "",
+    state: str = "",
+    code_challenge: str = "",
+    code_challenge_method: str = "S256"
+):
+    code = secrets.token_hex(16)
+    params = {"code": code}
+    if state:
+        params["state"] = state
+    sep = "&" if "?" in redirect_uri else "?"
+    return RedirectResponse(
+        url=redirect_uri + sep + urllib.parse.urlencode(params),
+        status_code=302
+    )
+
+@app.post("/token")
+async def issue_token(request: Request):
+    access_token = secrets.token_hex(32)
+    _issued_tokens.add(access_token)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": 86400,
+        "scope": "mcp"
+    }
+
+
+# ============================================
+# MCP SERVER — Mount at /mcp
+# ============================================
+
 from mcp_server import mcp
 app.mount("/mcp", mcp.streamable_http_app())
 
@@ -316,9 +380,8 @@ def gvm_score(req: StockRequest):
 
 
 # ============================================
-# G11-B — READ ENDPOINTS (Query from DB)
-# NOTE: specific routes (/top, /filter, /sector)
-# MUST come before /{symbol} — order matters in FastAPI
+# G11-B READ ENDPOINTS
+# MUST define /top, /filter, /sector before /{symbol}
 # ============================================
 
 @app.get("/api/gvm/top")
@@ -456,7 +519,6 @@ def startup_event():
 
 
 def run_daily_update():
-    """Runs yahoo_daily_update.py at 3:45 PM IST (10:15 UTC) Mon-Fri"""
     logging.info("[SCHEDULER] Daily OHLC update started")
     try:
         result = subprocess.run(
