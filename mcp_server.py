@@ -1,0 +1,79 @@
+# ============================================
+# MCP SERVER — Project Quant
+# Claude connects here to fetch live GVM data
+# Deployed on Railway alongside FastAPI
+# ============================================
+
+import httpx
+from mcp.server.fastmcp import FastMCP
+
+BASE_URL = "https://quantproject-production.up.railway.app"
+
+mcp = FastMCP("Scorr — Project Quant")
+
+
+@mcp.tool()
+async def get_gvm(symbol: str) -> dict:
+    """Fetch full GVM score for a stock. Pass NSE symbol e.g. RELIANCE, INFY, HDFCBANK"""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{BASE_URL}/api/gvm/{symbol}", timeout=10)
+        if r.status_code == 404:
+            return {"error": f"{symbol} not found in GVM universe"}
+        return r.json()
+
+
+@mcp.tool()
+async def get_top_stocks(n: int = 20, verdict: str = None) -> dict:
+    """
+    Get top N stocks by GVM score.
+    verdict options: 'Strong Buy', 'Buy', 'Accumulate', 'Wait & Watch', 'Avoid'
+    Leave verdict empty for overall top stocks.
+    """
+    params = {"n": n}
+    if verdict:
+        params["verdict"] = verdict
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{BASE_URL}/api/gvm/top", params=params, timeout=10)
+        return r.json()
+
+
+@mcp.tool()
+async def get_sector(segment: str, n: int = 20) -> dict:
+    """
+    Get top stocks in a sector/segment.
+    Example segments: 'IT', 'Pharma', 'Banking', 'Auto', 'FMCG', 'Defence'
+    """
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{BASE_URL}/api/gvm/sector",
+            params={"segment": segment, "n": n},
+            timeout=10
+        )
+        return r.json()
+
+
+@mcp.tool()
+async def get_filter(
+    min_score: float = 7.0,
+    max_score: float = 10.0,
+    verdict: str = None,
+    n: int = 50
+) -> dict:
+    """
+    Filter stocks by GVM score range.
+    Default: min 7.0, max 10.0 (Buy + Strong Buy zone)
+    """
+    params = {"min_score": min_score, "max_score": max_score, "n": n}
+    if verdict:
+        params["verdict"] = verdict
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            f"{BASE_URL}/api/gvm/filter",
+            params=params,
+            timeout=10
+        )
+        return r.json()
+
+
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http")
