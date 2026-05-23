@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import os
 import psycopg
@@ -8,6 +8,9 @@ import urllib.parse
 import secrets
 import logging
 import subprocess
+import json
+import uuid
+import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -109,7 +112,6 @@ def create_tables():
         print(f"Table creation error: {e}")
 
 
-# redirect_slashes=False fixes POST /mcp → 307 redirect issue
 app = FastAPI(
     title="Project Quant — Trading API",
     description="Proprietary GVM quant scoring engine — 29 APIs + MCP",
@@ -127,7 +129,6 @@ app.add_middleware(
 
 # ============================================
 # OAUTH 2.1 — Required by Claude.ai for MCP
-# Auto-approve flow (private server)
 # ============================================
 
 @app.get("/.well-known/oauth-authorization-server")
@@ -145,17 +146,11 @@ async def oauth_metadata():
 
 @app.get("/.well-known/oauth-protected-resource")
 async def oauth_protected_resource():
-    return {
-        "resource": BASE_URL,
-        "authorization_servers": [BASE_URL]
-    }
+    return {"resource": BASE_URL, "authorization_servers": [BASE_URL]}
 
 @app.get("/.well-known/oauth-protected-resource/mcp")
 async def oauth_protected_resource_mcp():
-    return {
-        "resource": f"{BASE_URL}/mcp",
-        "authorization_servers": [BASE_URL]
-    }
+    return {"resource": f"{BASE_URL}/mcp", "authorization_servers": [BASE_URL]}
 
 @app.post("/register")
 async def register_client(request: Request):
@@ -203,11 +198,162 @@ async def issue_token(request: Request):
 
 
 # ============================================
-# MCP SERVER — Mount at /mcp
+# MCP TOOL CALLER — calls our own REST APIs
 # ============================================
 
-from mcp_server import mcp
-app.mount("/mcp", mcp.streamable_http_app())
+async def _call_tool(name: str, args: dict) -> dict:
+    async with httpx.AsyncClient(timeout=10) as client:
+        if name == "get_gvm":
+            r = await client.get(f"{BASE_URL}/api/gvm/{args.get('symbol', '')}")
+            return r.json()
+        elif name == "get_top_stocks":
+            p = {"n": args.get("n", 20)}
+            if args.get("verdict"):
+                p["verdict"] = args["verdict"]
+            r = await client.get(f"{BASE_URL}/api/gvm/top", params=p)
+            return r.json()
+        elif name == "get_sector":
+            r = await client.get(f"{BASE_URL}/api/gvm/sector",
+                                 params={"segment": args.get("segment", ""), "n": args.get("n", 20)})
+            return r.json()
+        elif name == "get_filter":
+            p = {"min_score": args.get("min_score", 7.0),
+                 "max_score": args.get("max_score", 10.0),
+                 "n": args.get("n", 50)}
+            if args.get("verdict"):
+                p["verdict"] = args["verdict"]
+            r = await client.get(f"{BASE_URL}/api/gvm/filter", params=p)
+            return r.json()
+        return {"error": f"Unknown tool: {name}"}
+
+
+# ============================================
+# MCP SERVER — Direct JSON-RPC implementation
+# No library dependency — full control
+# ============================================
+
+MCP_TOOLS = [
+    {
+        "name": "get_gvm",
+        "description": "Fetch full GVM score for a stock from Railway DB. Pass NSE symbol e.g. RELIANCE, INFY, HDFCBANK, CARYSIL",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "NSE stock symbol"}
+            },
+            "required": ["symbol"]
+        }
+    },
+    {
+        "name": "get_top_stocks",
+        "description": "Get top N stocks ranked by GVM score from Railway DB. verdict options: 'Strong Buy', 'Buy', 'Accumulate', 'Wait & Watch', 'Avoid'",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer", "description": "Number of stocks to return", "default": 20},
+                "verdict": {"type": "string", "description": "Filter by verdict (optional)"}
+            }
+        }
+    },
+    {
+        "name": "get_sector",
+        "description": "Get top GVM-scored stocks in a sector. Example segments: IT, Pharma, Banking, Auto, FMCG, Defence, Healthcare",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "segment": {"type": "string", "description": "Sector or segment name"},
+                "n": {"type": "integer", "description": "Number of stocks", "default": 20}
+            },
+            "required": ["segment"]
+        }
+    },
+    {
+        "name": "get_filter",
+        "description": "Filter stocks by GVM score range from Railway DB",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "min_score": {"type": "number", "description": "Minimum GVM score", "default": 7.0},
+                "max_score": {"type": "number", "description": "Maximum GVM score", "default": 10.0},
+                "verdict": {"type": "string", "description": "Filter by verdict (optional)"},
+                "n": {"type": "integer", "description": "Number of results", "default": 50}
+            }
+        }
+    }
+]
+
+@app.get("/mcp")
+async def mcp_sse(request: Request):
+    """SSE endpoint for server-to-client messages"""
+    async def event_stream():
+        yield ": connected\n\n"
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
+
+@app.post("/mcp")
+async def mcp_handler(request: Request):
+    """MCP JSON-RPC 2.0 handler — streamable-http transport"""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "id": None,
+                             "error": {"code": -32700, "message": "Parse error"}})
+
+    method = body.get("method", "")
+    params = body.get("params", {})
+    req_id = body.get("id")
+
+    # Notifications — no response needed
+    if req_id is None and method.startswith("notifications/"):
+        return Response(status_code=202)
+
+    if method == "initialize":
+        return JSONResponse(
+            content={
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "Scorr — Project Quant", "version": "1.0.0"}
+                }
+            },
+            headers={"Mcp-Session-Id": str(uuid.uuid4())}
+        )
+
+    elif method == "tools/list":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": MCP_TOOLS}}
+
+    elif method == "tools/call":
+        tool_name = params.get("name")
+        tool_args = params.get("arguments", {})
+        try:
+            result = await _call_tool(tool_name, tool_args)
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]
+                }
+            }
+        except Exception as e:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32000, "message": str(e)}
+            }
+
+    elif method == "ping":
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
+
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": -32601, "message": f"Method not found: {method}"}
+    }
 
 
 # ============================================
@@ -397,7 +543,6 @@ def gvm_score(req: StockRequest):
 
 # ============================================
 # G11-B READ ENDPOINTS
-# MUST define /top, /filter, /sector before /{symbol}
 # ============================================
 
 @app.get("/api/gvm/top")
