@@ -12,6 +12,7 @@ import json
 import uuid
 import httpx
 import io
+from datetime import date, datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -105,6 +106,45 @@ def create_tables():
         cursor.execute("""CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY, email VARCHAR(200) UNIQUE,
             created_at TIMESTAMP DEFAULT NOW())""")
+
+        # DAY 32 ADDITIONS — sector_ratings + momentum_scores
+        cursor.execute("""CREATE TABLE IF NOT EXISTS sector_ratings (
+            id SERIAL PRIMARY KEY,
+            segment TEXT NOT NULL,
+            stocks_count INT,
+            mcap_weighted_gvm NUMERIC,
+            weighted_g NUMERIC,
+            weighted_v NUMERIC,
+            weighted_m NUMERIC,
+            simple_avg_gvm NUMERIC,
+            total_mcap NUMERIC,
+            top_stock TEXT,
+            top_stock_gvm NUMERIC,
+            verdict TEXT,
+            score_date DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(segment, score_date)
+        )""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS momentum_scores (
+            id SERIAL PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            score_date DATE NOT NULL,
+            latest_price NUMERIC,
+            ret_1y NUMERIC,
+            ret_3y NUMERIC,
+            dma_50 NUMERIC,
+            dma_200 NUMERIC,
+            ret_52w_vs_index NUMERIC,
+            ret_1y_rating NUMERIC,
+            ret_3y_rating NUMERIC,
+            dma_50_rating NUMERIC,
+            dma_200_rating NUMERIC,
+            ret_52w_idx_rating NUMERIC,
+            m_score NUMERIC,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(symbol, score_date)
+        )""")
+
         conn.commit()
         cursor.close()
         conn.close()
@@ -115,8 +155,8 @@ def create_tables():
 
 app = FastAPI(
     title="Project Quant — Trading API",
-    description="Proprietary GVM quant scoring engine — 29 APIs + MCP",
-    version="1.0.0",
+    description="Proprietary GVM quant scoring engine — 29 APIs + MCP + Sector + Momentum",
+    version="1.1.0",
     redirect_slashes=False
 )
 
@@ -401,6 +441,206 @@ async def load_screener_from_drive(request: Request):
 
 
 # ============================================
+# DAY 32 — ADMIN REFRESH ENDPOINTS
+# ============================================
+
+@app.post("/api/admin/refresh_sector_ratings")
+async def refresh_sector_ratings():
+    """
+    Recompute sector_ratings from latest gvm_scores. mcap-weighted GVM/G/V/M.
+    Call after daily GVM update.
+    """
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO sector_ratings
+                (segment, stocks_count, mcap_weighted_gvm, weighted_g, weighted_v,
+                 weighted_m, simple_avg_gvm, total_mcap, top_stock, top_stock_gvm,
+                 verdict, score_date)
+            SELECT s.segment, s.stocks, s.w_gvm, s.w_g, s.w_v, s.w_m,
+                   s.avg_gvm, s.total_mcap, t.symbol, t.gvm_score,
+                   CASE
+                       WHEN s.w_gvm >= 7.0 THEN 'Strong'
+                       WHEN s.w_gvm >= 6.5 THEN 'Buy'
+                       WHEN s.w_gvm >= 6.0 THEN 'Watch'
+                       ELSE 'Avoid'
+                   END,
+                   s.score_date
+            FROM (
+                SELECT segment, COUNT(*) AS stocks,
+                       ROUND(SUM(gvm_score * market_cap) / NULLIF(SUM(market_cap), 0), 2) AS w_gvm,
+                       ROUND(SUM(g_score * market_cap) / NULLIF(SUM(market_cap), 0), 2) AS w_g,
+                       ROUND(SUM(v_score * market_cap) / NULLIF(SUM(market_cap), 0), 2) AS w_v,
+                       ROUND(SUM(m_score * market_cap) / NULLIF(SUM(market_cap), 0), 2) AS w_m,
+                       ROUND(AVG(gvm_score)::numeric, 2) AS avg_gvm,
+                       SUM(market_cap) AS total_mcap,
+                       MAX(score_date) AS score_date
+                FROM gvm_scores
+                WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
+                AND market_cap IS NOT NULL
+                GROUP BY segment
+                HAVING COUNT(*) >= 3
+            ) s
+            LEFT JOIN LATERAL (
+                SELECT symbol, gvm_score
+                FROM gvm_scores
+                WHERE segment = s.segment AND score_date = s.score_date
+                ORDER BY gvm_score DESC LIMIT 1
+            ) t ON true
+            ON CONFLICT (segment, score_date) DO UPDATE SET
+                stocks_count = EXCLUDED.stocks_count,
+                mcap_weighted_gvm = EXCLUDED.mcap_weighted_gvm,
+                weighted_g = EXCLUDED.weighted_g,
+                weighted_v = EXCLUDED.weighted_v,
+                weighted_m = EXCLUDED.weighted_m,
+                simple_avg_gvm = EXCLUDED.simple_avg_gvm,
+                total_mcap = EXCLUDED.total_mcap,
+                top_stock = EXCLUDED.top_stock,
+                top_stock_gvm = EXCLUDED.top_stock_gvm,
+                verdict = EXCLUDED.verdict
+        """)
+        conn.commit()
+        cur.execute("""
+            SELECT COUNT(*) FROM sector_ratings
+            WHERE score_date = (SELECT MAX(score_date) FROM sector_ratings)
+        """)
+        count = cur.fetchone()[0]
+        cur.close(); conn.close()
+        return {"status": "ok", "sectors_refreshed": count}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/admin/refresh_momentum")
+async def refresh_momentum():
+    """
+    Recompute momentum_scores from raw_prices. 5-param M score.
+    Call after daily Yahoo OHLC update.
+    """
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+
+        # Compute raw momentum values
+        cur.execute("""
+            INSERT INTO momentum_scores
+                (symbol, score_date, latest_price, ret_1y, ret_3y,
+                 dma_50, dma_200, ret_52w_vs_index)
+            WITH d AS (SELECT MAX(price_date) AS dt FROM raw_prices),
+            nifty_1y AS (
+                SELECT (l.close / y.close - 1) * 100 AS pct
+                FROM (SELECT close FROM raw_prices
+                      WHERE symbol='NIFTY50' AND price_date=(SELECT dt FROM d)) l
+                CROSS JOIN (SELECT close FROM raw_prices
+                            WHERE symbol='NIFTY50'
+                            AND price_date <= (SELECT dt FROM d) - INTERVAL '365 days'
+                            ORDER BY price_date DESC LIMIT 1) y
+            ),
+            latest_px AS (
+                SELECT symbol, close AS latest_close FROM raw_prices
+                WHERE price_date = (SELECT dt FROM d)
+                AND symbol NOT IN ('NIFTY50','BANKNIFTY')
+            ),
+            px_1y AS (
+                SELECT DISTINCT ON (symbol) symbol, close AS close_1y
+                FROM raw_prices
+                WHERE price_date <= (SELECT dt FROM d) - INTERVAL '365 days'
+                AND symbol NOT IN ('NIFTY50','BANKNIFTY')
+                ORDER BY symbol, price_date DESC
+            ),
+            px_3y AS (
+                SELECT DISTINCT ON (symbol) symbol, close AS close_3y
+                FROM raw_prices
+                WHERE price_date <= (SELECT dt FROM d) - INTERVAL '1095 days'
+                AND symbol NOT IN ('NIFTY50','BANKNIFTY')
+                ORDER BY symbol, price_date DESC
+            ),
+            dma50 AS (
+                SELECT symbol, AVG(close) AS dma50_val
+                FROM (SELECT symbol, close,
+                             ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                      FROM raw_prices
+                      WHERE symbol NOT IN ('NIFTY50','BANKNIFTY')) x
+                WHERE rn <= 50 GROUP BY symbol
+            ),
+            dma200 AS (
+                SELECT symbol, AVG(close) AS dma200_val
+                FROM (SELECT symbol, close,
+                             ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                      FROM raw_prices
+                      WHERE symbol NOT IN ('NIFTY50','BANKNIFTY')) x
+                WHERE rn <= 200 GROUP BY symbol
+            )
+            SELECT lp.symbol, (SELECT dt FROM d), lp.latest_close,
+                   ROUND(((lp.latest_close / p1.close_1y - 1) * 100)::numeric, 2),
+                   ROUND(((lp.latest_close / p3.close_3y - 1) * 100)::numeric, 2),
+                   ROUND(((lp.latest_close / d50.dma50_val - 1) * 100)::numeric, 2),
+                   ROUND(((lp.latest_close / d200.dma200_val - 1) * 100)::numeric, 2),
+                   ROUND((((lp.latest_close / p1.close_1y - 1) * 100) -
+                          (SELECT pct FROM nifty_1y))::numeric, 2)
+            FROM latest_px lp
+            JOIN px_1y p1 USING (symbol)
+            LEFT JOIN px_3y p3 USING (symbol)
+            LEFT JOIN dma50 d50 USING (symbol)
+            LEFT JOIN dma200 d200 USING (symbol)
+            ON CONFLICT (symbol, score_date) DO UPDATE SET
+                latest_price = EXCLUDED.latest_price,
+                ret_1y = EXCLUDED.ret_1y,
+                ret_3y = EXCLUDED.ret_3y,
+                dma_50 = EXCLUDED.dma_50,
+                dma_200 = EXCLUDED.dma_200,
+                ret_52w_vs_index = EXCLUDED.ret_52w_vs_index
+        """)
+
+        # Apply ratings (2.5/5/7.5/10 scale)
+        cur.execute("""
+            UPDATE momentum_scores SET
+                ret_1y_rating = CASE
+                    WHEN ret_1y > 15 THEN 10
+                    WHEN ret_1y >= 5 THEN 7.5
+                    WHEN ret_1y >= 0 THEN 5 ELSE 2.5 END,
+                ret_3y_rating = CASE
+                    WHEN ret_3y IS NULL THEN 5
+                    WHEN ret_3y > 60 THEN 10
+                    WHEN ret_3y >= 30 THEN 7.5
+                    WHEN ret_3y >= 0 THEN 5 ELSE 2.5 END,
+                dma_50_rating = CASE
+                    WHEN dma_50 > 10 THEN 10
+                    WHEN dma_50 >= 3 THEN 7.5
+                    WHEN dma_50 >= 0 THEN 5 ELSE 2.5 END,
+                dma_200_rating = CASE
+                    WHEN dma_200 > 25 THEN 10
+                    WHEN dma_200 >= 10 THEN 7.5
+                    WHEN dma_200 >= 0 THEN 5 ELSE 2.5 END,
+                ret_52w_idx_rating = CASE
+                    WHEN ret_52w_vs_index > 15 THEN 10
+                    WHEN ret_52w_vs_index >= 5 THEN 7.5
+                    WHEN ret_52w_vs_index >= 0 THEN 5 ELSE 2.5 END
+            WHERE score_date = (SELECT MAX(score_date) FROM momentum_scores)
+        """)
+
+        # Composite M score
+        cur.execute("""
+            UPDATE momentum_scores SET
+                m_score = ROUND(((ret_1y_rating + ret_3y_rating + dma_50_rating +
+                                  dma_200_rating + ret_52w_idx_rating) / 5)::numeric, 2)
+            WHERE score_date = (SELECT MAX(score_date) FROM momentum_scores)
+        """)
+
+        conn.commit()
+        cur.execute("""
+            SELECT COUNT(*) FROM momentum_scores
+            WHERE score_date = (SELECT MAX(score_date) FROM momentum_scores)
+        """)
+        count = cur.fetchone()[0]
+        cur.close(); conn.close()
+        return {"status": "ok", "stocks_refreshed": count}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================
 # MCP TOOL CALLER — calls our own REST APIs
 # ============================================
 
@@ -462,6 +702,26 @@ async def _call_tool(name: str, args: dict) -> dict:
             if not file_id:
                 return {"error": "file_id required"}
             r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": file_id})
+            return r.json()
+        # DAY 32 NEW TOOLS
+        elif name == "get_sector_rating":
+            segment = args.get("segment")
+            n = args.get("n", 20)
+            if segment:
+                r = await client.get(f"{BASE_URL}/api/sector/rating/{segment}")
+            else:
+                r = await client.get(f"{BASE_URL}/api/sector/rating", params={"n": n})
+            return r.json()
+        elif name == "get_momentum":
+            symbol = args.get("symbol")
+            if symbol:
+                r = await client.get(f"{BASE_URL}/api/momentum/stock/{symbol}")
+            else:
+                p = {"n": args.get("n", 20), "min_score": args.get("min_score", 7.0)}
+                r = await client.get(f"{BASE_URL}/api/momentum/top", params=p)
+            return r.json()
+        elif name == "health_feeds":
+            r = await client.get(f"{BASE_URL}/api/health/feeds")
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
@@ -551,6 +811,38 @@ MCP_TOOLS = [
             },
             "required": ["file_id"]
         }
+    },
+    # DAY 32 NEW TOOLS
+    {
+        "name": "get_sector_rating",
+        "description": "Get mcap-weighted GVM rating for sectors. Returns Strong/Buy/Watch/Avoid verdict, weighted G/V/M scores, top stock per sector. Pass segment name for one, omit for top sectors.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "segment": {"type": "string", "description": "Optional sector name (partial match, e.g. 'Pharma', 'IT'). If omitted, returns top sectors."},
+                "n": {"type": "integer", "description": "Number of sectors when listing all", "default": 20}
+            }
+        }
+    },
+    {
+        "name": "get_momentum",
+        "description": "Get momentum scores (1Y/3Y return, DMA50, DMA200, vs Nifty) and M score for a stock. Pass symbol for one, omit for top stocks by momentum.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "NSE symbol for single stock. Omit for top list."},
+                "n": {"type": "integer", "description": "Number of stocks when listing top", "default": 20},
+                "min_score": {"type": "number", "description": "Minimum M score filter for top list", "default": 7.0}
+            }
+        }
+    },
+    {
+        "name": "health_feeds",
+        "description": "Status dashboard for all data feeds — shows latest date and freshness verdict (fresh/ok/stale) for gvm_scores, raw_prices, screener_raw, input_raw, sector_ratings, momentum_scores.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
     }
 ]
 
@@ -588,7 +880,7 @@ async def mcp_handler(request: Request):
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "Scorr — Project Quant", "version": "1.0.0"}
+                    "serverInfo": {"name": "Scorr — Project Quant", "version": "1.1.0"}
                 }
             },
             headers={"Mcp-Session-Id": str(uuid.uuid4())}
@@ -679,8 +971,8 @@ class StockRequest(BaseModel):
 def root():
     return {
         "message": "Project Quant — Trading API is live 🚀",
-        "version": "1.0.0",
-        "total_apis": 29,
+        "version": "1.1.0",
+        "total_apis": 38,
         "mcp": "/mcp",
         "docs": "/docs"
     }
@@ -766,7 +1058,7 @@ def potential_upside(req: ParamRequest):
 
 
 # ============================================
-# MOMENTUM PARAMETER APIs (5)
+# MOMENTUM PARAMETER APIs (5) — scoring functions
 # ============================================
 
 @app.post("/api/momentum/return-1y")
@@ -812,7 +1104,7 @@ def gvm_score(req: StockRequest):
 
 
 # ============================================
-# G11-B READ ENDPOINTS
+# G11-B READ ENDPOINTS (GVM)
 # ============================================
 
 @app.get("/api/gvm/top")
@@ -941,6 +1233,201 @@ def get_gvm_by_symbol(symbol: str):
 
 
 # ============================================
+# DAY 32 — SECTOR RATING ENDPOINTS
+# ============================================
+
+@app.get("/api/sector/rating")
+def sector_rating_all(n: int = 200):
+    """All sectors ranked by mcap-weighted GVM, with verdicts."""
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT segment, stocks_count,
+                   CAST(mcap_weighted_gvm AS FLOAT),
+                   CAST(weighted_g AS FLOAT), CAST(weighted_v AS FLOAT), CAST(weighted_m AS FLOAT),
+                   CAST(simple_avg_gvm AS FLOAT), CAST(total_mcap AS FLOAT),
+                   top_stock, CAST(top_stock_gvm AS FLOAT), verdict,
+                   score_date::TEXT
+            FROM sector_ratings
+            WHERE score_date = (SELECT MAX(score_date) FROM sector_ratings)
+            ORDER BY mcap_weighted_gvm DESC
+            LIMIT %s
+        """, (n,))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return {"count": len(rows), "sectors": [
+            {"segment": r[0], "stocks": r[1], "gvm": r[2],
+             "g": r[3], "v": r[4], "m": r[5],
+             "avg_gvm": r[6], "total_mcap": r[7],
+             "top_stock": r[8], "top_gvm": r[9],
+             "verdict": r[10], "score_date": r[11]} for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sector/rating/{segment}")
+def sector_rating_one(segment: str):
+    """Rating for one specific sector (partial match)."""
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT segment, stocks_count,
+                   CAST(mcap_weighted_gvm AS FLOAT),
+                   CAST(weighted_g AS FLOAT), CAST(weighted_v AS FLOAT), CAST(weighted_m AS FLOAT),
+                   CAST(simple_avg_gvm AS FLOAT), CAST(total_mcap AS FLOAT),
+                   top_stock, CAST(top_stock_gvm AS FLOAT), verdict,
+                   score_date::TEXT
+            FROM sector_ratings
+            WHERE segment ILIKE %s
+            AND score_date = (SELECT MAX(score_date) FROM sector_ratings)
+        """, (f"%{segment}%",))
+        r = cur.fetchone()
+        cur.close(); conn.close()
+        if not r:
+            raise HTTPException(status_code=404, detail=f"Sector '{segment}' not found")
+        return {"segment": r[0], "stocks": r[1], "gvm": r[2],
+                "g": r[3], "v": r[4], "m": r[5],
+                "avg_gvm": r[6], "total_mcap": r[7],
+                "top_stock": r[8], "top_gvm": r[9],
+                "verdict": r[10], "score_date": r[11]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# DAY 32 — MOMENTUM DATA ENDPOINTS
+# Note: Using /api/momentum/stock/{symbol} to avoid conflict with
+# existing POST /api/momentum/return-1y, dma50, dma200 scoring endpoints.
+# ============================================
+
+@app.get("/api/momentum/top")
+def momentum_top(n: int = 20, min_score: float = 7.0):
+    """Top stocks by M score, joined with GVM data."""
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT m.symbol,
+                   CAST(m.latest_price AS FLOAT),
+                   CAST(m.ret_1y AS FLOAT), CAST(m.ret_3y AS FLOAT),
+                   CAST(m.dma_50 AS FLOAT), CAST(m.dma_200 AS FLOAT),
+                   CAST(m.ret_52w_vs_index AS FLOAT),
+                   CAST(m.m_score AS FLOAT),
+                   g.segment,
+                   CAST(g.gvm_score AS FLOAT), g.verdict
+            FROM momentum_scores m
+            LEFT JOIN gvm_scores g ON g.symbol = m.symbol
+                AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            WHERE m.score_date = (SELECT MAX(score_date) FROM momentum_scores)
+            AND m.m_score >= %s
+            ORDER BY m.m_score DESC, m.ret_1y DESC
+            LIMIT %s
+        """, (min_score, n))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return {"count": len(rows), "stocks": [
+            {"symbol": r[0], "price": r[1],
+             "ret_1y": r[2], "ret_3y": r[3],
+             "dma_50": r[4], "dma_200": r[5],
+             "vs_nifty": r[6], "m_score": r[7],
+             "segment": r[8], "gvm_score": r[9], "verdict": r[10]} for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/momentum/stock/{symbol}")
+def momentum_for_symbol(symbol: str):
+    """Momentum scores for one stock — all 5 components + ratings + M score."""
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT symbol,
+                   CAST(latest_price AS FLOAT),
+                   CAST(ret_1y AS FLOAT), CAST(ret_3y AS FLOAT),
+                   CAST(dma_50 AS FLOAT), CAST(dma_200 AS FLOAT),
+                   CAST(ret_52w_vs_index AS FLOAT),
+                   CAST(ret_1y_rating AS FLOAT), CAST(ret_3y_rating AS FLOAT),
+                   CAST(dma_50_rating AS FLOAT), CAST(dma_200_rating AS FLOAT),
+                   CAST(ret_52w_idx_rating AS FLOAT),
+                   CAST(m_score AS FLOAT),
+                   score_date::TEXT
+            FROM momentum_scores
+            WHERE symbol = %s
+            AND score_date = (SELECT MAX(score_date) FROM momentum_scores)
+        """, (symbol.upper(),))
+        r = cur.fetchone()
+        cur.close(); conn.close()
+        if not r:
+            raise HTTPException(status_code=404, detail=f"{symbol} not in momentum_scores")
+        return {"symbol": r[0], "price": r[1],
+                "ret_1y": r[2], "ret_3y": r[3],
+                "dma_50": r[4], "dma_200": r[5],
+                "vs_nifty": r[6],
+                "rating_1y": r[7], "rating_3y": r[8],
+                "rating_dma50": r[9], "rating_dma200": r[10],
+                "rating_vs_idx": r[11],
+                "m_score": r[12], "score_date": r[13]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# DAY 32 — HEALTH / FEED STATUS
+# ============================================
+
+@app.get("/api/health/feeds")
+def health_feeds():
+    """Status of all data feeds — latest date and freshness verdict."""
+    try:
+        today = date.today()
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 'gvm_scores' AS source, MAX(score_date)::TEXT, COUNT(*) FROM gvm_scores
+            UNION ALL
+            SELECT 'raw_prices', MAX(price_date)::TEXT, COUNT(DISTINCT symbol) FROM raw_prices
+            UNION ALL
+            SELECT 'screener_raw', NULL, COUNT(*) FROM screener_raw
+            UNION ALL
+            SELECT 'input_raw', NULL, COUNT(*) FROM input_raw
+            UNION ALL
+            SELECT 'sector_ratings', MAX(score_date)::TEXT, COUNT(*) FROM sector_ratings
+            UNION ALL
+            SELECT 'momentum_scores', MAX(score_date)::TEXT, COUNT(*) FROM momentum_scores
+        """)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+
+        feeds = []
+        for r in rows:
+            source, latest, records = r[0], r[1], r[2]
+            if latest:
+                latest_dt = datetime.strptime(latest, "%Y-%m-%d").date()
+                days = (today - latest_dt).days
+                if days <= 1: freshness = "fresh"
+                elif days <= 3: freshness = "ok"
+                elif days <= 7: freshness = "stale"
+                else: freshness = "very_stale"
+            else:
+                freshness = "n/a"
+                days = None
+            feeds.append({
+                "source": source, "latest": latest, "records": records,
+                "freshness": freshness, "days_old": days
+            })
+        return {"checked_at": today.isoformat(), "feeds": feeds}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
 # STARTUP + SCHEDULER
 # ============================================
 
@@ -950,15 +1437,26 @@ def startup_event():
 
 
 def run_daily_update():
+    """Yahoo OHLC update + auto-refresh momentum + sector ratings."""
     logging.info("[SCHEDULER] Daily OHLC update started")
     try:
         result = subprocess.run(
             ["python", "yahoo_daily_update.py"],
             capture_output=True, text=True, timeout=1800
         )
-        logging.info(f"[SCHEDULER] Done: {result.stdout[-300:]}")
+        logging.info(f"[SCHEDULER] Yahoo update done: {result.stdout[-300:]}")
     except Exception as e:
-        logging.error(f"[SCHEDULER] Failed: {e}")
+        logging.error(f"[SCHEDULER] Yahoo failed: {e}")
+
+    # DAY 32 — auto-refresh momentum + sector_ratings after price update
+    try:
+        with httpx.Client(timeout=300) as client:
+            r1 = client.post(f"{BASE_URL}/api/admin/refresh_momentum")
+            logging.info(f"[SCHEDULER] Momentum refresh: {r1.json()}")
+            r2 = client.post(f"{BASE_URL}/api/admin/refresh_sector_ratings")
+            logging.info(f"[SCHEDULER] Sector refresh: {r2.json()}")
+    except Exception as e:
+        logging.error(f"[SCHEDULER] Auto-refresh failed: {e}")
 
 
 scheduler = BackgroundScheduler(timezone="UTC")
