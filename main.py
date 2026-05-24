@@ -21,14 +21,13 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.2.6
-# v1.2.6: Screener.in earnings auto-scrape (replaces V5 manual)
+# Scorr / Project Quant — main.py v1.2.7
+# v1.2.7: live env var read for Screener creds + diagnostic
+# v1.2.6: Screener.in earnings auto-scrape
 # v1.2.5: raw_prices uses price_date (not date)
-# v1.2.4: gvm_scores schema alignment
-# v1.2.3: GitHub auto-deploy + earnings_calendar loader
 # ============================================================
 
-VERSION = "1.2.6"
+VERSION = "1.2.7"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -42,8 +41,6 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "")
 DEPLOY_GUARD = os.getenv("DEPLOY_GUARD", "false").lower() == "true"
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
-SCREENER_EMAIL = os.getenv("SCREENER_EMAIL", "")
-SCREENER_PASSWORD = os.getenv("SCREENER_PASSWORD", "")
 
 app = FastAPI(title="Scorr API", version=VERSION)
 
@@ -107,6 +104,20 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": VERSION}
+
+@app.get("/api/admin/env_check")
+def env_check(x_admin_token: Optional[str] = Header(None)):
+    """Diagnostic: which env vars are visible to the running container. Returns NAMES + lengths only, never values."""
+    _check_admin(x_admin_token)
+    keys = sorted(os.environ.keys())
+    interesting = ["SCREENER_EMAIL", "SCREENER_PASSWORD", "GITHUB_TOKEN", "GITHUB_REPO",
+                   "ADMIN_TOKEN", "DATABASE_URL", "DEPLOY_GUARD", "RAILWAY_PUBLIC_DOMAIN"]
+    return {
+        "version": VERSION,
+        "all_keys_count": len(keys),
+        "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting},
+        "screener_match_keys": [k for k in keys if "SCREEN" in k.upper()],
+    }
 
 @app.get("/api/health/feeds")
 def health_feeds():
@@ -400,7 +411,7 @@ async def load_v5_from_drive(req: Request):
     return {"status": "ok", "results": results}
 
 # ============================================================
-# SCREENER.IN EARNINGS AUTO-SCRAPE (v1.2.6)
+# SCREENER.IN EARNINGS AUTO-SCRAPE
 # ============================================================
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
@@ -414,12 +425,12 @@ def _parse_screener_date(s: str):
     formats = [
         "%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%B-%Y",
         "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d",
-        "%d %b", "%d %B",  # year-less, assume current year
+        "%d %b", "%d %B",
     ]
     for fmt in formats:
         try:
             dt = datetime.strptime(s, fmt)
-            if dt.year == 1900:  # year-less parse
+            if dt.year == 1900:
                 dt = dt.replace(year=date.today().year)
                 if dt.date() < date.today() - timedelta(days=30):
                     dt = dt.replace(year=date.today().year + 1)
@@ -429,9 +440,14 @@ def _parse_screener_date(s: str):
     return None
 
 async def _screener_login_session():
-    """Login to Screener.in and return an httpx.AsyncClient with valid cookies."""
-    if not SCREENER_EMAIL or not SCREENER_PASSWORD:
-        raise HTTPException(500, "SCREENER_EMAIL / SCREENER_PASSWORD not configured in Railway env")
+    """Login to Screener.in. Reads env LIVE so set-after-deploy works."""
+    email = os.getenv("SCREENER_EMAIL", "").strip()
+    password = os.getenv("SCREENER_PASSWORD", "").strip()
+    if not email or not password:
+        keys = sorted([k for k in os.environ.keys() if "SCREEN" in k.upper()])
+        raise HTTPException(500,
+            f"SCREENER creds missing. email_len={len(email)} pwd_len={len(password)}. "
+            f"Env keys matching 'SCREEN': {keys}. Check Railway var spelling/scope.")
     client = httpx.AsyncClient(
         follow_redirects=True,
         timeout=60,
@@ -441,20 +457,18 @@ async def _screener_login_session():
             "Accept-Language": "en-US,en;q=0.9",
         }
     )
-    # Step 1: GET login page to capture CSRF token
     r = await client.get(SCREENER_LOGIN_URL)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     csrf_input = soup.find("input", {"name": "csrfmiddlewaretoken"})
     if not csrf_input:
         await client.aclose()
-        raise HTTPException(500, "CSRF token not found on Screener login page — site structure may have changed")
+        raise HTTPException(500, "CSRF token not found on Screener login page")
     csrf_token = csrf_input.get("value")
-    # Step 2: POST credentials
     login_data = {
         "csrfmiddlewaretoken": csrf_token,
-        "username": SCREENER_EMAIL,  # Django auth uses 'username' field even for email
-        "password": SCREENER_PASSWORD,
+        "username": email,
+        "password": password,
         "next": "",
     }
     r = await client.post(
@@ -462,30 +476,26 @@ async def _screener_login_session():
         data=login_data,
         headers={"Referer": SCREENER_LOGIN_URL},
     )
-    # Login succeeds if we land back on a non-login page OR get a Set-Cookie for sessionid
     if "sessionid" not in client.cookies:
         await client.aclose()
-        raise HTTPException(401, f"Screener login failed — no sessionid cookie. Status: {r.status_code}")
+        raise HTTPException(401, f"Screener login failed. Status: {r.status_code}. Check email/password.")
     log.info("Screener login OK")
     return client
 
 async def _scrape_upcoming_results(client: httpx.AsyncClient):
-    """Fetch /upcoming-results/ and parse the table. Returns list of dicts."""
+    """Fetch /upcoming-results/ and parse the table."""
     r = await client.get(SCREENER_UPCOMING_URL)
     r.raise_for_status()
     html = r.text
-    # Sanity check — if redirected to login, our session is invalid
     if "/login/" in str(r.url) or "Login to your account" in html:
         raise HTTPException(401, "Screener session expired during fetch")
     soup = BeautifulSoup(html, "html.parser")
-    # Strategy: find <table> elements. Screener typically has one main data table.
     tables = soup.find_all("table")
     if not tables:
-        raise HTTPException(500, "No <table> found on upcoming-results page — site may have changed")
+        raise HTTPException(500, "No <table> found on upcoming-results page")
     rows_out = []
     seen_tickers = set()
     for tbl in tables:
-        # Pandas read_html on the isolated table is most robust
         try:
             dfs = pd.read_html(io.StringIO(str(tbl)))
         except Exception:
@@ -493,9 +503,7 @@ async def _scrape_upcoming_results(client: httpx.AsyncClient):
         for df in dfs:
             if df.empty or len(df.columns) < 2:
                 continue
-            # Try to identify columns by header name (case-insensitive)
             cols_lower = {str(c).strip().lower(): c for c in df.columns}
-            # Find a "name" column and a "date" column
             name_col = None
             date_col = None
             event_col = None
@@ -508,7 +516,6 @@ async def _scrape_upcoming_results(client: httpx.AsyncClient):
                     event_col = orig
             if name_col is None or date_col is None:
                 continue
-            # Also try to find ticker — Screener often embeds it in the row via <a href="/company/TICKER/">
             ticker_map = {}
             for tr in tbl.find_all("tr"):
                 a = tr.find("a", href=re.compile(r"/company/[^/]+/"))
@@ -522,7 +529,6 @@ async def _scrape_upcoming_results(client: httpx.AsyncClient):
                 if not name or name.lower() in ("nan", "name", "company"): continue
                 ticker = ticker_map.get(name, "")
                 if not ticker:
-                    # fallback: derive from company name (uppercase, no spaces)
                     ticker = re.sub(r"[^A-Z0-9&]", "", name.upper())[:20]
                 if ticker in seen_tickers: continue
                 seen_tickers.add(ticker)
@@ -540,7 +546,6 @@ async def _scrape_upcoming_results(client: httpx.AsyncClient):
 
 @app.post("/api/admin/load_earnings_from_screener")
 async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None)):
-    """Login to Screener.in, scrape /upcoming-results/, replace earnings_calendar table."""
     _check_admin(x_admin_token)
     client = await _screener_login_session()
     try:
@@ -548,7 +553,7 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
     finally:
         await client.aclose()
     if not rows:
-        return {"status": "warn", "rows_scraped": 0, "message": "No rows parsed — check Screener page structure"}
+        return {"status": "warn", "rows_scraped": 0, "message": "No rows parsed"}
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM earnings_calendar")
         inserted = 0
@@ -736,6 +741,8 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "env_check", "description": "Diagnostic: which env vars are visible to the running container.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.",
      "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "load_input_from_drive", "description": "Reload input_raw table from a Google Drive CSV file ID.",
@@ -784,6 +791,10 @@ async def _call_tool(name, args):
             return r.json()
         elif name == "health_feeds":
             r = await client.get(f"{BASE_URL}/api/health/feeds")
+            return r.json()
+        elif name == "env_check":
+            r = await client.get(f"{BASE_URL}/api/admin/env_check",
+                                 headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
             return r.json()
         elif name == "run_sql":
             q = args["query"]
