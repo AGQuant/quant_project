@@ -6,6 +6,10 @@ Runs 4 AND-gate filters: Buy_Reversal, Buy_Momentum, Sell_Reversal, Sell_Momentu
 
 Replaces V5 Google Sheets logic. GVM replaces Finkhoz everywhere.
 
+RSI periods:
+  - RSI Month: 6 periods (6 months)
+  - RSI Weekly: 8 periods (8 weeks)
+
 Tables created:
   v5_filters   — editable threshold config (min/max per metric per signal type)
   v5_metrics   — daily computed values per stock
@@ -19,6 +23,10 @@ import pandas as pd
 import numpy as np
 
 log = logging.getLogger("scorr.v5")
+
+# RSI periods — user-tuned defaults
+RSI_MONTH_PERIOD = 6
+RSI_WEEK_PERIOD  = 8
 
 # ============================================================
 # SCHEMA
@@ -74,11 +82,10 @@ CREATE INDEX IF NOT EXISTS idx_v5_qual_date_type ON v5_qualified(score_date DESC
 # ============================================================
 # DEFAULT FILTERS — GVM replaces Finkhoz everywhere
 # ============================================================
-# Format: (signal_type, metric, min, max)
 DEFAULT_FILTERS = [
     # Buy Reversal — uptrend reversal entry
     ("Buy_Reversal", "gvm_score",    7,    10),
-    ("Buy_Reversal", "year_return",  0,    None),     # positive
+    ("Buy_Reversal", "year_return",  0,    None),
     ("Buy_Reversal", "dma_200",      0,    20),
     ("Buy_Reversal", "dma_50",       0,    8),
     ("Buy_Reversal", "rsi_month",    45,   75),
@@ -234,12 +241,12 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if len(df) >= 5:
         out["week_return"] = _safe_pct(latest_close, float(df["close"].iloc[-5]))
 
-    # 5. RSI — Monthly + Weekly resample
+    # 5. RSI — Monthly (period=6) + Weekly (period=8) resample
     df_indexed = df.set_index(pd.to_datetime(df["date"]))
     monthly_closes = df_indexed["close"].resample("M").last().dropna()
     weekly_closes = df_indexed["close"].resample("W").last().dropna()
-    out["rsi_month"] = _wilder_rsi(monthly_closes, period=14)
-    out["rsi_weekly"] = _wilder_rsi(weekly_closes, period=14)
+    out["rsi_month"]  = _wilder_rsi(monthly_closes, period=RSI_MONTH_PERIOD)
+    out["rsi_weekly"] = _wilder_rsi(weekly_closes,  period=RSI_WEEK_PERIOD)
 
     # 6. 52-week index = (price - 52w low) / (52w high - 52w low) * 100
     if len(df) >= 252:
@@ -303,7 +310,6 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         if irow and irow[0] and irow[2]:
             hi, lo, op = float(irow[0]), float(irow[1]), float(irow[2])
             if op > 0:
-                # Signed range: positive if close > open, negative if close < open
                 close_now = latest_close
                 signed = ((hi - lo) / op * 100) * (1 if close_now >= op else -1)
                 out["range_1d"] = signed
@@ -358,7 +364,7 @@ def evaluate_stock(metrics: Dict, signal_filters: Dict[str, Tuple]) -> bool:
     for metric, (mn, mx) in signal_filters.items():
         val = metrics.get(metric)
         if val is None:
-            return False  # missing data fails the gate
+            return False
         if mn is not None and val < mn:
             return False
         if mx is not None and val > mx:
@@ -371,7 +377,6 @@ def store_qualified(conn, symbol: str, signal_type: str, score_date: date,
     """Insert/update qualified stock."""
     with conn.cursor() as cur:
         import json as _json
-        # Strip non-serializable values from metrics
         clean_metrics = {k: float(v) if isinstance(v, (int, float)) and v is not None else None
                          for k, v in metrics.items()
                          if k not in ("symbol", "score_date")}
@@ -392,19 +397,16 @@ def run_v5_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
     """
     target_date = target_date or date.today()
 
-    # Load universe
     if symbols is None:
         with conn.cursor() as cur:
             cur.execute("SELECT DISTINCT symbol FROM v5_signals ORDER BY symbol")
             symbols = [r[0] for r in cur.fetchall()]
 
-    # Load filter config
     filters = load_filters(conn)
     if not filters:
         seed_default_filters(conn)
         filters = load_filters(conn)
 
-    # Wipe today's qualified rows so re-runs are clean
     with conn.cursor() as cur:
         cur.execute("DELETE FROM v5_qualified WHERE score_date = %s", (target_date,))
         conn.commit()
@@ -414,7 +416,6 @@ def run_v5_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
                "Sell_Reversal": 0, "Sell_Momentum": 0,
                "errors": []}
 
-    # Load CMP map once
     cmp_map = {}
     with conn.cursor() as cur:
         cur.execute("SELECT symbol, cmp FROM cmp_prices")
