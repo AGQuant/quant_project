@@ -21,13 +21,13 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.2.9
-# v1.2.9: backfill_intraday endpoint (range=15d Yahoo history)
-#         _fetch_intraday_yahoo now accepts range param
+# Scorr / Project Quant — main.py v1.3.0
+# v1.3.0: backfill_intraday added to MCP_TOOLS + _call_tool
+# v1.2.9: backfill_intraday HTTP endpoint + range param
 # v1.2.8: intraday_prices + cmp_prices + scheduler
 # ============================================================
 
-VERSION = "1.2.9"
+VERSION = "1.3.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -168,11 +168,6 @@ async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
     return results
 
 async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict]:
-    """
-    Fetch 5-min OHLCV from Yahoo Finance.
-    range_str: "1d" for today only, "15d" for 15-day backfill.
-    Yahoo supports 5m interval for up to 60 days history.
-    """
     ticker = _yahoo_ticker(symbol)
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}"
@@ -201,8 +196,7 @@ async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict
                 continue
             dt = datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)
             candles.append({
-                "symbol": symbol,
-                "ts":     dt,
+                "symbol": symbol, "ts": dt,
                 "open":   opens[j]   if j < len(opens)   else None,
                 "high":   highs[j]   if j < len(highs)   else None,
                 "low":    lows[j]    if j < len(lows)    else None,
@@ -429,10 +423,7 @@ def get_all_cmp():
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
-    """
-    One-time backfill: fetch 15 days of 5-min history for all futures stocks.
-    Uses Yahoo range=15d. Safe to re-run — ON CONFLICT DO NOTHING skips duplicates.
-    """
+    """Fetch 15 days of 5-min history for all futures stocks. Safe to re-run."""
     _check_admin(x_admin_token)
     futures = _get_futures_symbols()
     if not futures:
@@ -447,14 +438,14 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
             total_candles += len(candles)
         else:
             failed.append(sym)
-        await asyncio.sleep(0.25)  # polite rate limiting
+        await asyncio.sleep(0.25)
     _purge_intraday_old()
     log.info(f"Backfill complete: {total_candles} candles, {len(failed)} failed")
     return {
         "status": "ok",
         "symbols_attempted": len(futures),
         "symbols_failed": len(failed),
-        "failed_symbols": failed[:20],  # show first 20 failures
+        "failed_symbols": failed[:20],
         "total_candles": total_candles,
     }
 
@@ -694,8 +685,7 @@ async def load_v5_from_drive(req: Request):
                 elif table == "earnings_calendar":
                     for r in rows:
                         cur.execute("""
-                            INSERT INTO earnings_calendar
-                            (company_name, ticker, ex_date, record_date, event_type)
+                            INSERT INTO earnings_calendar (company_name, ticker, ex_date, record_date, event_type)
                             VALUES (%(company_name)s, %(ticker)s, %(ex_date)s, %(record_date)s, %(event_type)s)
                         """, r)
                 conn.commit()
@@ -972,6 +962,8 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "backfill_intraday", "description": "One-time backfill: fetch 15 days of 5-min OHLC for all 290 futures stocks from Yahoo. Safe to re-run.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "env_check", "description": "Diagnostic: which env vars are visible to the running container.",
@@ -1001,7 +993,7 @@ MCP_TOOLS = [
 ]
 
 async def _call_tool(name, args):
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=600) as client:  # 10min timeout for backfill
         if name == "get_gvm":
             r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}")
             return r.json()
@@ -1027,6 +1019,10 @@ async def _call_tool(name, args):
             return r.json()
         elif name == "get_cmp":
             r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}")
+            return r.json()
+        elif name == "backfill_intraday":
+            r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday",
+                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
             return r.json()
         elif name == "health_feeds":
             r = await client.get(f"{BASE_URL}/api/health/feeds")
