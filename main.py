@@ -19,13 +19,12 @@ import httpx
 import pandas as pd
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.2.3
-# Adds: _parse_result_dates + earnings_calendar loader
-#       GitHub read/write/list/delete endpoints + MCP tools
-#       Last manual VS Code push — all future deploys from chat
+# Scorr / Project Quant — main.py v1.2.4
+# v1.2.4: gvm_scores schema alignment (score_date, g_score, gvm_score etc.)
+# v1.2.3: GitHub auto-deploy + earnings_calendar loader
 # ============================================================
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -58,15 +57,12 @@ def get_conn():
     return psycopg.connect(DATABASE_URL)
 
 def create_tables():
-    """Idempotent table creation on every cold start."""
+    """Idempotent table creation on every cold start.
+    NOTE: gvm_scores, sector_ratings, momentum_scores already exist in production
+    with full schemas. The CREATE TABLE IF NOT EXISTS clauses below are safety nets
+    for fresh DB setups only — they do NOT alter existing tables.
+    """
     sql = """
-    CREATE TABLE IF NOT EXISTS gvm_scores (
-        symbol TEXT PRIMARY KEY,
-        run_date DATE,
-        g NUMERIC, v NUMERIC, m NUMERIC, gvm NUMERIC,
-        verdict TEXT, sector TEXT, market_cap NUMERIC,
-        full_data JSONB
-    );
     CREATE TABLE IF NOT EXISTS raw_prices (
         symbol TEXT, date DATE, open NUMERIC, high NUMERIC,
         low NUMERIC, close NUMERIC, volume BIGINT,
@@ -74,17 +70,6 @@ def create_tables():
     );
     CREATE TABLE IF NOT EXISTS input_raw (id SERIAL PRIMARY KEY, data JSONB);
     CREATE TABLE IF NOT EXISTS screener_raw (id SERIAL PRIMARY KEY, data JSONB);
-    CREATE TABLE IF NOT EXISTS sector_ratings (
-        sector TEXT PRIMARY KEY, run_date DATE,
-        avg_gvm NUMERIC, mcap_weighted_gvm NUMERIC,
-        stock_count INT, verdict TEXT
-    );
-    CREATE TABLE IF NOT EXISTS momentum_scores (
-        symbol TEXT PRIMARY KEY, run_date DATE,
-        return_1y NUMERIC, return_3y NUMERIC,
-        dma50 NUMERIC, dma200 NUMERIC, vs_nifty NUMERIC,
-        m_score NUMERIC
-    );
     CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, data JSONB);
     CREATE TABLE IF NOT EXISTS signals (id SERIAL PRIMARY KEY, data JSONB);
 
@@ -170,12 +155,12 @@ def health():
 def health_feeds():
     out = []
     queries = [
-        ("gvm_scores", "SELECT MAX(run_date), COUNT(*) FROM gvm_scores"),
+        ("gvm_scores", "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
         ("raw_prices", "SELECT MAX(date), COUNT(DISTINCT symbol) FROM raw_prices"),
         ("screener_raw", "SELECT NULL, COUNT(*) FROM screener_raw"),
         ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
-        ("sector_ratings", "SELECT MAX(run_date), COUNT(*) FROM sector_ratings"),
-        ("momentum_scores", "SELECT MAX(run_date), COUNT(*) FROM momentum_scores"),
+        ("sector_ratings", "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
+        ("momentum_scores", "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -215,12 +200,12 @@ def api_query(sql, params=None, single=False):
         return {"error": str(e)}
 
 # ============================================================
-# GVM READ ENDPOINTS
+# GVM READ ENDPOINTS (v1.2.4 — schema aligned)
 # ============================================================
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
-    r = api_query("SELECT symbol, g, v, m, gvm, verdict, sector, market_cap, full_data FROM gvm_scores WHERE symbol = %s", (symbol.upper(),), single=True)
+    r = api_query("SELECT symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap FROM gvm_scores WHERE symbol = %s", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} not found")
     return r
 
@@ -228,20 +213,20 @@ def get_gvm(symbol: str):
 def get_top(n: int, verdict: Optional[str] = None):
     n = min(max(n, 1), 100)
     if verdict:
-        return api_query("SELECT symbol, g, v, m, gvm, verdict, sector, market_cap FROM gvm_scores WHERE verdict = %s ORDER BY gvm DESC LIMIT %s", (verdict, n))
-    return api_query("SELECT symbol, g, v, m, gvm, verdict, sector, market_cap FROM gvm_scores ORDER BY gvm DESC LIMIT %s", (n,))
+        return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict = %s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
+    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
 
 @app.get("/api/sector/{sector}")
 def get_sector(sector: str):
-    return api_query("SELECT symbol, g, v, m, gvm, verdict, market_cap FROM gvm_scores WHERE LOWER(sector) = LOWER(%s) ORDER BY gvm DESC", (sector,))
+    return api_query("SELECT symbol, company_name, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE LOWER(segment) = LOWER(%s) ORDER BY gvm_score DESC", (sector,))
 
 @app.get("/api/filter")
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
-    return api_query("SELECT symbol, g, v, m, gvm, verdict, sector, market_cap FROM gvm_scores WHERE gvm >= %s AND gvm <= %s ORDER BY gvm DESC", (min_gvm, max_gvm))
+    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
 
 @app.get("/api/sectors")
 def get_sectors():
-    return api_query("SELECT sector, avg_gvm, mcap_weighted_gvm, stock_count, verdict FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
+    return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
 
 @app.get("/api/momentum/{symbol}")
 def get_momentum(symbol: str):
@@ -518,12 +503,8 @@ async def load_v5_from_drive(req: Request):
     return {"status": "ok", "results": results}
 
 # ============================================================
-# GITHUB AUTO-DEPLOY (v1.2.3 new)
+# GITHUB AUTO-DEPLOY
 # ============================================================
-# These endpoints let Claude read/write any file in the GitHub repo from chat.
-# Authentication: X-Admin-Token header must match ADMIN_TOKEN env.
-# Safety: DEPLOY_GUARD must be 'true' for any write operation.
-# Recovery: All actions create commits — any change reversible via git revert.
 
 GITHUB_API = "https://api.github.com"
 
@@ -538,7 +519,6 @@ def _gh_headers():
 
 def _check_admin(token: Optional[str]):
     if not ADMIN_TOKEN:
-        # If no admin token set, allow MCP-side calls only (MCP itself is OAuth-protected).
         return True
     if token != ADMIN_TOKEN:
         raise HTTPException(403, "Invalid admin token")
@@ -549,7 +529,6 @@ def _check_deploy_guard():
         raise HTTPException(403, "DEPLOY_GUARD is off — writes disabled. Set DEPLOY_GUARD=true in Railway to enable.")
 
 async def _gh_get_file(filepath: str) -> Dict[str, Any]:
-    """Fetch a file's content + SHA from GitHub. Returns {content, sha, size, exists}."""
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, headers=_gh_headers())
@@ -567,7 +546,6 @@ async def _gh_get_file(filepath: str) -> Dict[str, Any]:
         }
 
 async def _gh_put_file(filepath: str, new_content: str, commit_message: str, sha: Optional[str] = None) -> Dict[str, Any]:
-    """Create or update a file via GitHub Contents API."""
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
     payload = {
         "message": commit_message,
@@ -592,17 +570,15 @@ async def _gh_delete_file(filepath: str, commit_message: str, sha: str) -> Dict[
         return r.json()
 
 async def _gh_list_tree(path_prefix: str = "") -> List[Dict[str, Any]]:
-    """List files in the repo (root or under a path)."""
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{path_prefix}"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, headers=_gh_headers())
         r.raise_for_status()
         data = r.json()
-        if isinstance(data, dict):  # single file response
+        if isinstance(data, dict):
             data = [data]
         return [{"name": x["name"], "path": x["path"], "type": x["type"], "size": x.get("size", 0)} for x in data]
 
-# Read endpoint — no DEPLOY_GUARD check, reads are always safe
 @app.get("/api/admin/github_read")
 async def github_read(filepath: str, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -773,7 +749,7 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "get_v5_signals", "description": "Query V5 signals (Alert, Buy/Sell Reversal/Momentum). Optional filters by signal_type, cap_type, analyst_verdict.",
+    {"name": "get_v5_signals", "description": "Query V5 signals (Alert, Buy/Sell Reversal/Momentum).",
      "inputSchema": {"type": "object", "properties": {
          "signal_type": {"type": "string"}, "cap_type": {"type": "string"},
          "verdict": {"type": "string"}, "limit": {"type": "integer"}
@@ -782,11 +758,11 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_v5_portfolio", "description": "Get current V5 portfolio holdings.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "github_read", "description": "Read any file from the GitHub repo. Returns content + line count + size.",
+    {"name": "github_read", "description": "Read any file from the GitHub repo.",
      "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
-    {"name": "github_list", "description": "List files in the repo (root or a folder). Empty path = root.",
+    {"name": "github_list", "description": "List files in the repo.",
      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
-    {"name": "github_push", "description": "Create or update a file in the repo. Triggers Railway redeploy automatically. Requires DEPLOY_GUARD=true.",
+    {"name": "github_push", "description": "Create or update a file in the repo. Triggers Railway redeploy. Requires DEPLOY_GUARD=true.",
      "inputSchema": {"type": "object", "properties": {
          "filepath": {"type": "string"},
          "new_content": {"type": "string"},
