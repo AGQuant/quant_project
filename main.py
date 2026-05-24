@@ -224,12 +224,35 @@ async def _call_tool(name: str, args: dict) -> dict:
                 p["verdict"] = args["verdict"]
             r = await client.get(f"{BASE_URL}/api/gvm/filter", params=p)
             return r.json()
+        elif name == "run_sql":
+            query = args.get("query", "")
+            params = args.get("params", [])
+            blocked = ["drop table", "delete from", "truncate"]
+            if any(b in query.lower() for b in blocked):
+                return {"error": "Blocked. DROP/DELETE/TRUNCATE not allowed."}
+            try:
+                from psycopg.rows import dict_row
+                db_url = os.environ.get("DATABASE_URL", "")
+                with psycopg.connect(db_url, row_factory=dict_row) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(query, params or [])
+                        if cur.description is None:
+                            conn.commit()
+                            return {"status": "ok", "message": "Query executed."}
+                        rows = cur.fetchall()
+                        return {
+                            "status": "ok",
+                            "rows": len(rows),
+                            "columns": [d.name for d in cur.description],
+                            "data": [dict(r) for r in rows]
+                        }
+            except Exception as e:
+                return {"error": str(e)}
         return {"error": f"Unknown tool: {name}"}
 
 
 # ============================================
 # MCP SERVER — Direct JSON-RPC implementation
-# No library dependency — full control
 # ============================================
 
 MCP_TOOLS = [
@@ -279,12 +302,23 @@ MCP_TOOLS = [
                 "n": {"type": "integer", "description": "Number of results", "default": 50}
             }
         }
+    },
+    {
+        "name": "run_sql",
+        "description": "Run any SQL query on Railway PostgreSQL. Use for schema checks, data queries, migrations, analytics. Never use for DROP TABLE, DELETE without WHERE, TRUNCATE.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "SQL query to execute"},
+                "params": {"type": "array", "description": "Query parameters (optional)", "default": []}
+            },
+            "required": ["query"]
+        }
     }
 ]
 
 @app.get("/mcp")
 async def mcp_sse(request: Request):
-    """SSE endpoint for server-to-client messages"""
     async def event_stream():
         yield ": connected\n\n"
     return StreamingResponse(
@@ -306,7 +340,6 @@ async def mcp_handler(request: Request):
     params = body.get("params", {})
     req_id = body.get("id")
 
-    # Notifications — no response needed
     if req_id is None and method.startswith("notifications/"):
         return Response(status_code=202)
 
