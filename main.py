@@ -19,12 +19,13 @@ import httpx
 import pandas as pd
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.2.4
+# Scorr / Project Quant — main.py v1.2.5
+# v1.2.5: raw_prices uses price_date (not date)
 # v1.2.4: gvm_scores schema alignment (score_date, g_score, gvm_score etc.)
 # v1.2.3: GitHub auto-deploy + earnings_calendar loader
 # ============================================================
 
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -49,76 +50,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================
-# DB HELPERS
-# ============================================================
-
 def get_conn():
     return psycopg.connect(DATABASE_URL)
 
 def create_tables():
-    """Idempotent table creation on every cold start.
-    NOTE: gvm_scores, sector_ratings, momentum_scores already exist in production
-    with full schemas. The CREATE TABLE IF NOT EXISTS clauses below are safety nets
-    for fresh DB setups only — they do NOT alter existing tables.
-    """
     sql = """
-    CREATE TABLE IF NOT EXISTS raw_prices (
-        symbol TEXT, date DATE, open NUMERIC, high NUMERIC,
-        low NUMERIC, close NUMERIC, volume BIGINT,
-        PRIMARY KEY (symbol, date)
-    );
     CREATE TABLE IF NOT EXISTS input_raw (id SERIAL PRIMARY KEY, data JSONB);
     CREATE TABLE IF NOT EXISTS screener_raw (id SERIAL PRIMARY KEY, data JSONB);
     CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, data JSONB);
     CREATE TABLE IF NOT EXISTS signals (id SERIAL PRIMARY KEY, data JSONB);
-
     CREATE TABLE IF NOT EXISTS v5_signals (
-        id SERIAL PRIMARY KEY,
-        signal_type TEXT,
-        timestamp TEXT,
-        symbol TEXT,
-        finkhoz_rating NUMERIC,
-        record_price NUMERIC,
-        cap_type TEXT,
-        current_price NUMERIC,
-        return_pct NUMERIC,
-        hit_alert TEXT,
-        analyst_verdict TEXT,
-        alert_count INT,
-        alert_types TEXT,
-        event_date DATE,
-        event_type TEXT,
-        verdict_date DATE,
+        id SERIAL PRIMARY KEY, signal_type TEXT, timestamp TEXT, symbol TEXT,
+        finkhoz_rating NUMERIC, record_price NUMERIC, cap_type TEXT,
+        current_price NUMERIC, return_pct NUMERIC, hit_alert TEXT,
+        analyst_verdict TEXT, alert_count INT, alert_types TEXT,
+        event_date DATE, event_type TEXT, verdict_date DATE,
         loaded_at TIMESTAMP DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS v5_futures_open (
-        id SERIAL PRIMARY KEY,
-        symbol TEXT, open_date TEXT, type TEXT,
+        id SERIAL PRIMARY KEY, symbol TEXT, open_date TEXT, type TEXT,
         qty NUMERIC, entry_price NUMERIC, current_price NUMERIC,
         net_pl_pct NUMERIC, profit_per_lot NUMERIC, value NUMERIC,
-        remarks TEXT, status TEXT,
-        loaded_at TIMESTAMP DEFAULT NOW()
+        remarks TEXT, status TEXT, loaded_at TIMESTAMP DEFAULT NOW()
     );
-    CREATE TABLE IF NOT EXISTS v5_trades (
-        id SERIAL PRIMARY KEY, data JSONB,
-        loaded_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS v5_portfolio (
-        id SERIAL PRIMARY KEY, data JSONB,
-        loaded_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS v5_baskets (
-        id SERIAL PRIMARY KEY, basket_name TEXT, data JSONB,
-        loaded_at TIMESTAMP DEFAULT NOW()
-    );
+    CREATE TABLE IF NOT EXISTS v5_trades (id SERIAL PRIMARY KEY, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS v5_portfolio (id SERIAL PRIMARY KEY, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS v5_baskets (id SERIAL PRIMARY KEY, basket_name TEXT, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS earnings_calendar (
-        id SERIAL PRIMARY KEY,
-        company_name TEXT,
-        ticker TEXT,
-        ex_date TEXT,
-        record_date TEXT,
-        event_type TEXT,
+        id SERIAL PRIMARY KEY, company_name TEXT, ticker TEXT,
+        ex_date TEXT, record_date TEXT, event_type TEXT,
         loaded_at TIMESTAMP DEFAULT NOW()
     );
     """
@@ -130,18 +90,10 @@ def create_tables():
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
-# ============================================================
-# STARTUP
-# ============================================================
-
 @app.on_event("startup")
 async def startup():
     create_tables()
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
-
-# ============================================================
-# ROOT / HEALTH
-# ============================================================
 
 @app.get("/")
 def root():
@@ -156,7 +108,7 @@ def health_feeds():
     out = []
     queries = [
         ("gvm_scores", "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
-        ("raw_prices", "SELECT MAX(date), COUNT(DISTINCT symbol) FROM raw_prices"),
+        ("raw_prices", "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
         ("screener_raw", "SELECT NULL, COUNT(*) FROM screener_raw"),
         ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
         ("sector_ratings", "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
@@ -174,17 +126,10 @@ def health_feeds():
                 if latest:
                     days_old = (date.today() - r[0]).days
                     freshness = "ok" if days_old < 7 else "stale"
-                out.append({
-                    "source": name, "latest": latest, "records": count,
-                    "freshness": freshness, "days_old": days_old
-                })
+                out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
     except Exception as e:
         return {"error": str(e)}
     return {"checked_at": str(date.today()), "feeds": out}
-
-# ============================================================
-# DB QUERY HELPER
-# ============================================================
 
 def api_query(sql, params=None, single=False):
     try:
@@ -198,10 +143,6 @@ def api_query(sql, params=None, single=False):
     except Exception as e:
         log.error(f"api_query error: {e}")
         return {"error": str(e)}
-
-# ============================================================
-# GVM READ ENDPOINTS (v1.2.4 — schema aligned)
-# ============================================================
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
@@ -233,10 +174,6 @@ def get_momentum(symbol: str):
     r = api_query("SELECT * FROM momentum_scores WHERE symbol = %s", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} momentum not found")
     return r
-
-# ============================================================
-# DRIVE → DB LOADERS (existing)
-# ============================================================
 
 async def _drive_download(file_id: str) -> str:
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -275,10 +212,6 @@ async def load_screener(req: Request):
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
 
-# ============================================================
-# V5 PARSERS
-# ============================================================
-
 def _v5_clean(v):
     if v is None: return ""
     s = str(v).strip()
@@ -289,10 +222,8 @@ def _v5_num(v):
     s = _v5_clean(v)
     if not s: return None
     s = s.replace(",", "").replace("%", "").replace("₹", "").strip()
-    try:
-        return float(s)
-    except:
-        return None
+    try: return float(s)
+    except: return None
 
 def _find_header(df, must_have_cols):
     for i in range(min(10, len(df))):
@@ -312,21 +243,17 @@ def _parse_signal_tab(df, cap_type):
         sym = _v5_clean(row.get("Symbol"))
         if not sym or sym == "Symbol": continue
         rows.append({
-            "signal_type":     "Alert",
-            "timestamp":       _v5_clean(row.get("Timestamp")),
-            "symbol":          sym,
-            "finkhoz_rating":  _v5_num(row.get("Finkhoz Rating")),
-            "record_price":    _v5_num(row.get("Record Price")),
-            "cap_type":        cap_type,
-            "current_price":   _v5_num(row.get("Current Price")),
-            "return_pct":      _v5_num(row.get("Return %")),
-            "hit_alert":       _v5_clean(row.get("Hit Alert")),
+            "signal_type": "Alert", "timestamp": _v5_clean(row.get("Timestamp")),
+            "symbol": sym, "finkhoz_rating": _v5_num(row.get("Finkhoz Rating")),
+            "record_price": _v5_num(row.get("Record Price")), "cap_type": cap_type,
+            "current_price": _v5_num(row.get("Current Price")),
+            "return_pct": _v5_num(row.get("Return %")),
+            "hit_alert": _v5_clean(row.get("Hit Alert")),
             "analyst_verdict": _v5_clean(row.get("Analyst Verdict")) or _v5_clean(row.get("Verdict")),
-            "alert_count":     int(_v5_num(row.get("Alert Count")) or 0),
-            "alert_types":     _v5_clean(row.get("Alert Type")),
-            "event_date":      None,
-            "event_type":      _v5_clean(row.get("Event Type")),
-            "verdict_date":    None,
+            "alert_count": int(_v5_num(row.get("Alert Count")) or 0),
+            "alert_types": _v5_clean(row.get("Alert Type")),
+            "event_date": None, "event_type": _v5_clean(row.get("Event Type")),
+            "verdict_date": None,
         })
     return rows
 
@@ -347,22 +274,19 @@ def _parse_futures_open(df):
         if not sym or sym.startswith('NIFTY') or sym in ('nan', '', 'Open positions in Future'):
             continue
         rows.append({
-            "symbol":         sym,
-            "open_date":      _v5_clean(row.get('Open Date')),
-            "type":           _v5_clean(row.get('Type')),
-            "qty":            _v5_num(row.get('Qty')),
-            "entry_price":    _v5_num(row.get('Entry Price')),
-            "current_price":  _v5_num(row.get('Current Price')),
-            "net_pl_pct":     _v5_num(row.get('Net P/L%')),
+            "symbol": sym, "open_date": _v5_clean(row.get('Open Date')),
+            "type": _v5_clean(row.get('Type')), "qty": _v5_num(row.get('Qty')),
+            "entry_price": _v5_num(row.get('Entry Price')),
+            "current_price": _v5_num(row.get('Current Price')),
+            "net_pl_pct": _v5_num(row.get('Net P/L%')),
             "profit_per_lot": _v5_num(row.get('Profit / Lot')),
-            "value":          _v5_num(row.get('Value')),
-            "remarks":        _v5_clean(row.get('Remarks')),
-            "status":         _v5_clean(row.get('Status')),
+            "value": _v5_num(row.get('Value')),
+            "remarks": _v5_clean(row.get('Remarks')),
+            "status": _v5_clean(row.get('Status')),
         })
     return rows
 
 def _parse_v5_screener(df, signal_type):
-    """Parse Buy/Sell Reversal/Momentum tabs — screener matrix of NSE symbols."""
     rows = []
     seen = set()
     for _, row in df.iterrows():
@@ -373,11 +297,8 @@ def _parse_v5_screener(df, signal_type):
                 if sym and sym not in seen:
                     seen.add(sym)
                     rows.append({
-                        "signal_type":     signal_type,
-                        "timestamp":       str(date.today()),
-                        "symbol":          sym,
-                        "analyst_verdict": "Candidate",
-                        "alert_count":     0,
+                        "signal_type": signal_type, "timestamp": str(date.today()),
+                        "symbol": sym, "analyst_verdict": "Candidate", "alert_count": 0,
                     })
     return rows
 
@@ -388,8 +309,6 @@ def _parse_portfolio(df):
     return [{"row": json.dumps(r, default=str)} for r in df.to_dict(orient="records")]
 
 def _parse_result_dates(df):
-    """Parse Result_Date tab → earnings_calendar.
-       Columns: Company | TICKER | Ex Date | Record Date | Event Type"""
     rows = []
     for _, row in df.iterrows():
         ticker = _v5_clean(str(row.iloc[1]) if len(row) > 1 else '')
@@ -399,42 +318,28 @@ def _parse_result_dates(df):
         rec_raw = _v5_clean(str(row.iloc[3]) if len(row) > 3 else '')
         evt = _v5_clean(str(row.iloc[4]) if len(row) > 4 else '')
         if not ex_raw: continue
-        rows.append({
-            "company_name": company,
-            "ticker":       ticker,
-            "ex_date":      ex_raw,
-            "record_date":  rec_raw,
-            "event_type":   evt,
-        })
+        rows.append({"company_name": company, "ticker": ticker, "ex_date": ex_raw, "record_date": rec_raw, "event_type": evt})
     return rows
-
-# ============================================================
-# V5 BULK LOADER (Apps Script → Railway)
-# ============================================================
 
 @app.post("/api/admin/load_v5_from_drive")
 async def load_v5_from_drive(req: Request):
     body = await req.json()
     file_ids = body.get("file_ids", {})
-    if not file_ids:
-        raise HTTPException(400, "file_ids required")
-
+    if not file_ids: raise HTTPException(400, "file_ids required")
     FILE_MAP = {
-        "v5_futures_open.csv":   ("v5_futures_open",    _parse_futures_open,                                       "1=1"),
-        "v5_trades.csv":         ("v5_trades",          _parse_trades,                                              "1=1"),
-        "v5_portfolio.csv":      ("v5_portfolio",       _parse_portfolio,                                           "1=1"),
-        "v5_result_dates.csv":   ("earnings_calendar",  _parse_result_dates,                                        "1=1"),
-        "v5_alerts_large.csv":   ("v5_signals",         lambda df: _parse_signal_tab(df, "Large Cap"),              "cap_type = 'Large Cap' AND signal_type = 'Alert'"),
-        "v5_alerts_mid.csv":     ("v5_signals",         lambda df: _parse_signal_tab(df, "Mid Cap"),                "cap_type = 'Mid Cap' AND signal_type = 'Alert'"),
-        "v5_alerts_small.csv":   ("v5_signals",         lambda df: _parse_signal_tab(df, "Small Cap"),              "cap_type = 'Small Cap' AND signal_type = 'Alert'"),
-        "v5_buy_reversal.csv":   ("v5_signals",         lambda df: _parse_v5_screener(df, "Buy_Reversal"),          "signal_type = 'Buy_Reversal'"),
-        "v5_buy_momentum.csv":   ("v5_signals",         lambda df: _parse_v5_screener(df, "Buy_Momentum"),          "signal_type = 'Buy_Momentum'"),
-        "v5_sell_reversal.csv":  ("v5_signals",         lambda df: _parse_v5_screener(df, "Sell_Reversal"),         "signal_type = 'Sell_Reversal'"),
-        "v5_sell_momentum.csv":  ("v5_signals",         lambda df: _parse_v5_screener(df, "Sell_Momentum"),         "signal_type = 'Sell_Momentum'"),
+        "v5_futures_open.csv":  ("v5_futures_open",    _parse_futures_open, "1=1"),
+        "v5_trades.csv":        ("v5_trades",          _parse_trades, "1=1"),
+        "v5_portfolio.csv":     ("v5_portfolio",       _parse_portfolio, "1=1"),
+        "v5_result_dates.csv":  ("earnings_calendar",  _parse_result_dates, "1=1"),
+        "v5_alerts_large.csv":  ("v5_signals", lambda df: _parse_signal_tab(df, "Large Cap"), "cap_type = 'Large Cap' AND signal_type = 'Alert'"),
+        "v5_alerts_mid.csv":    ("v5_signals", lambda df: _parse_signal_tab(df, "Mid Cap"),   "cap_type = 'Mid Cap' AND signal_type = 'Alert'"),
+        "v5_alerts_small.csv":  ("v5_signals", lambda df: _parse_signal_tab(df, "Small Cap"), "cap_type = 'Small Cap' AND signal_type = 'Alert'"),
+        "v5_buy_reversal.csv":  ("v5_signals", lambda df: _parse_v5_screener(df, "Buy_Reversal"),  "signal_type = 'Buy_Reversal'"),
+        "v5_buy_momentum.csv":  ("v5_signals", lambda df: _parse_v5_screener(df, "Buy_Momentum"),  "signal_type = 'Buy_Momentum'"),
+        "v5_sell_reversal.csv": ("v5_signals", lambda df: _parse_v5_screener(df, "Sell_Reversal"), "signal_type = 'Sell_Reversal'"),
+        "v5_sell_momentum.csv": ("v5_signals", lambda df: _parse_v5_screener(df, "Sell_Momentum"), "signal_type = 'Sell_Momentum'"),
     }
-
     results = {}
-
     for fname, file_id in file_ids.items():
         if fname not in FILE_MAP:
             results[fname] = "skipped (no parser)"
@@ -462,23 +367,7 @@ async def load_v5_from_drive(req: Request):
                             VALUES (%(signal_type)s, %(timestamp)s, %(symbol)s, %(finkhoz_rating)s, %(record_price)s,
                                     %(cap_type)s, %(current_price)s, %(return_pct)s, %(hit_alert)s, %(analyst_verdict)s,
                                     %(alert_count)s, %(alert_types)s, %(event_date)s, %(event_type)s, %(verdict_date)s)
-                        """, {
-                            "signal_type":     r.get("signal_type"),
-                            "timestamp":       r.get("timestamp"),
-                            "symbol":          r.get("symbol"),
-                            "finkhoz_rating":  r.get("finkhoz_rating"),
-                            "record_price":    r.get("record_price"),
-                            "cap_type":        r.get("cap_type"),
-                            "current_price":   r.get("current_price"),
-                            "return_pct":      r.get("return_pct"),
-                            "hit_alert":       r.get("hit_alert"),
-                            "analyst_verdict": r.get("analyst_verdict"),
-                            "alert_count":     r.get("alert_count"),
-                            "alert_types":     r.get("alert_types"),
-                            "event_date":      r.get("event_date"),
-                            "event_type":      r.get("event_type"),
-                            "verdict_date":    r.get("verdict_date"),
-                        })
+                        """, {k: r.get(k) for k in ["signal_type","timestamp","symbol","finkhoz_rating","record_price","cap_type","current_price","return_pct","hit_alert","analyst_verdict","alert_count","alert_types","event_date","event_type","verdict_date"]})
                 elif table == "v5_futures_open":
                     for r in rows:
                         cur.execute("""
@@ -499,107 +388,73 @@ async def load_v5_from_drive(req: Request):
             results[fname] = f"{len(rows)} rows → {table}"
         except Exception as e:
             results[fname] = f"error: {str(e)[:200]}"
-
     return {"status": "ok", "results": results}
 
-# ============================================================
 # GITHUB AUTO-DEPLOY
-# ============================================================
-
 GITHUB_API = "https://api.github.com"
 
 def _gh_headers():
-    if not GITHUB_TOKEN:
-        raise HTTPException(500, "GITHUB_TOKEN not configured")
-    return {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    if not GITHUB_TOKEN: raise HTTPException(500, "GITHUB_TOKEN not configured")
+    return {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 
-def _check_admin(token: Optional[str]):
-    if not ADMIN_TOKEN:
-        return True
-    if token != ADMIN_TOKEN:
-        raise HTTPException(403, "Invalid admin token")
+def _check_admin(token):
+    if not ADMIN_TOKEN: return True
+    if token != ADMIN_TOKEN: raise HTTPException(403, "Invalid admin token")
     return True
 
 def _check_deploy_guard():
     if not DEPLOY_GUARD:
-        raise HTTPException(403, "DEPLOY_GUARD is off — writes disabled. Set DEPLOY_GUARD=true in Railway to enable.")
+        raise HTTPException(403, "DEPLOY_GUARD is off — writes disabled.")
 
-async def _gh_get_file(filepath: str) -> Dict[str, Any]:
+async def _gh_get_file(filepath):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, headers=_gh_headers())
-        if r.status_code == 404:
-            return {"exists": False, "content": None, "sha": None, "size": 0}
+        if r.status_code == 404: return {"exists": False, "content": None, "sha": None, "size": 0}
         r.raise_for_status()
         data = r.json()
         content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
-        return {
-            "exists": True,
-            "content": content,
-            "sha": data["sha"],
-            "size": data["size"],
-            "html_url": data.get("html_url"),
-        }
+        return {"exists": True, "content": content, "sha": data["sha"], "size": data["size"]}
 
-async def _gh_put_file(filepath: str, new_content: str, commit_message: str, sha: Optional[str] = None) -> Dict[str, Any]:
+async def _gh_put_file(filepath, new_content, commit_message, sha=None):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
-    payload = {
-        "message": commit_message,
-        "content": base64.b64encode(new_content.encode("utf-8")).decode("ascii"),
-        "branch": "main",
-    }
-    if sha:
-        payload["sha"] = sha
+    payload = {"message": commit_message, "content": base64.b64encode(new_content.encode("utf-8")).decode("ascii"), "branch": "main"}
+    if sha: payload["sha"] = sha
     async with httpx.AsyncClient(timeout=60) as c:
         r = await c.put(url, headers=_gh_headers(), json=payload)
         if r.status_code not in (200, 201):
             raise HTTPException(r.status_code, f"GitHub error: {r.text[:300]}")
         return r.json()
 
-async def _gh_delete_file(filepath: str, commit_message: str, sha: str) -> Dict[str, Any]:
+async def _gh_delete_file(filepath, commit_message, sha):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
     payload = {"message": commit_message, "sha": sha, "branch": "main"}
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.request("DELETE", url, headers=_gh_headers(), json=payload)
-        if r.status_code != 200:
-            raise HTTPException(r.status_code, f"GitHub delete error: {r.text[:300]}")
+        if r.status_code != 200: raise HTTPException(r.status_code, f"GitHub delete error: {r.text[:300]}")
         return r.json()
 
-async def _gh_list_tree(path_prefix: str = "") -> List[Dict[str, Any]]:
+async def _gh_list_tree(path_prefix=""):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{path_prefix}"
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, headers=_gh_headers())
         r.raise_for_status()
         data = r.json()
-        if isinstance(data, dict):
-            data = [data]
+        if isinstance(data, dict): data = [data]
         return [{"name": x["name"], "path": x["path"], "type": x["type"], "size": x.get("size", 0)} for x in data]
 
 @app.get("/api/admin/github_read")
 async def github_read(filepath: str, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    if not GITHUB_REPO:
-        raise HTTPException(500, "GITHUB_REPO not configured")
+    if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     info = await _gh_get_file(filepath)
-    if not info["exists"]:
-        raise HTTPException(404, f"File not found: {filepath}")
-    return {
-        "filepath": filepath,
-        "size": info["size"],
-        "sha": info["sha"],
-        "content": info["content"],
-        "lines": info["content"].count("\n") + 1,
-    }
+    if not info["exists"]: raise HTTPException(404, f"File not found: {filepath}")
+    return {"filepath": filepath, "size": info["size"], "sha": info["sha"], "content": info["content"], "lines": info["content"].count("\n") + 1}
 
 @app.get("/api/admin/github_list")
 async def github_list(path: str = "", x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    if not GITHUB_REPO:
-        raise HTTPException(500, "GITHUB_REPO not configured")
+    if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     files = await _gh_list_tree(path)
     return {"path": path or "/", "items": files, "count": len(files)}
 
@@ -607,109 +462,70 @@ async def github_list(path: str = "", x_admin_token: Optional[str] = Header(None
 async def github_push(req: Request, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     _check_deploy_guard()
-    if not GITHUB_REPO:
-        raise HTTPException(500, "GITHUB_REPO not configured")
+    if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     body = await req.json()
     filepath = body.get("filepath")
     new_content = body.get("new_content")
     commit_message = body.get("commit_message", f"chore: update {filepath}")
     create_if_missing = body.get("create_if_missing", True)
-    if not filepath or new_content is None:
-        raise HTTPException(400, "filepath and new_content required")
-
+    if not filepath or new_content is None: raise HTTPException(400, "filepath and new_content required")
     existing = await _gh_get_file(filepath)
     if not existing["exists"] and not create_if_missing:
         raise HTTPException(404, f"File {filepath} does not exist and create_if_missing=false")
     if existing["exists"] and existing["content"] == new_content:
         return {"status": "noop", "message": "Content identical, no commit made", "filepath": filepath}
-
     sha = existing["sha"] if existing["exists"] else None
     result = await _gh_put_file(filepath, new_content, commit_message, sha)
-    return {
-        "status": "ok",
-        "filepath": filepath,
-        "action": "updated" if existing["exists"] else "created",
-        "commit_sha": result.get("commit", {}).get("sha"),
-        "commit_url": result.get("commit", {}).get("html_url"),
-        "old_size": existing["size"],
-        "new_size": len(new_content),
-    }
+    return {"status": "ok", "filepath": filepath, "action": "updated" if existing["exists"] else "created",
+            "commit_sha": result.get("commit", {}).get("sha"), "commit_url": result.get("commit", {}).get("html_url"),
+            "old_size": existing["size"], "new_size": len(new_content)}
 
 @app.post("/api/admin/github_delete")
 async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     _check_deploy_guard()
-    if not GITHUB_REPO:
-        raise HTTPException(500, "GITHUB_REPO not configured")
+    if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     body = await req.json()
     filepath = body.get("filepath")
     commit_message = body.get("commit_message", f"chore: delete {filepath}")
-    if not filepath:
-        raise HTTPException(400, "filepath required")
+    if not filepath: raise HTTPException(400, "filepath required")
     existing = await _gh_get_file(filepath)
-    if not existing["exists"]:
-        raise HTTPException(404, f"File not found: {filepath}")
+    if not existing["exists"]: raise HTTPException(404, f"File not found: {filepath}")
     result = await _gh_delete_file(filepath, commit_message, existing["sha"])
-    return {
-        "status": "ok",
-        "filepath": filepath,
-        "action": "deleted",
-        "commit_sha": result.get("commit", {}).get("sha"),
-    }
+    return {"status": "ok", "filepath": filepath, "action": "deleted", "commit_sha": result.get("commit", {}).get("sha")}
 
-# ============================================================
-# OAUTH (for Claude MCP client)
-# ============================================================
-
-_oauth_codes: Dict[str, Dict] = {}
-_oauth_tokens: Dict[str, Dict] = {}
+# OAUTH
+_oauth_codes = {}
+_oauth_tokens = {}
 
 @app.get("/.well-known/oauth-authorization-server")
 def oauth_metadata():
-    return {
-        "issuer": BASE_URL,
-        "authorization_endpoint": f"{BASE_URL}/oauth/authorize",
-        "token_endpoint": f"{BASE_URL}/oauth/token",
-        "registration_endpoint": f"{BASE_URL}/oauth/register",
-        "scopes_supported": ["read", "write"],
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
-        "code_challenge_methods_supported": ["S256", "plain"],
-        "token_endpoint_auth_methods_supported": ["none", "client_secret_post"],
-    }
+    return {"issuer": BASE_URL, "authorization_endpoint": f"{BASE_URL}/oauth/authorize",
+            "token_endpoint": f"{BASE_URL}/oauth/token", "registration_endpoint": f"{BASE_URL}/oauth/register",
+            "scopes_supported": ["read", "write"], "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code"],
+            "code_challenge_methods_supported": ["S256", "plain"],
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_post"]}
 
 @app.get("/.well-known/oauth-protected-resource")
 def oauth_resource():
-    return {
-        "resource": BASE_URL,
-        "authorization_servers": [BASE_URL],
-        "scopes_supported": ["read", "write"],
-    }
+    return {"resource": BASE_URL, "authorization_servers": [BASE_URL], "scopes_supported": ["read", "write"]}
 
 @app.post("/oauth/register")
 async def oauth_register(req: Request):
     body = await req.json()
     cid = secrets.token_urlsafe(16)
-    return {
-        "client_id": cid,
-        "client_id_issued_at": int(time.time()),
-        "redirect_uris": body.get("redirect_uris", []),
-        "token_endpoint_auth_method": "none",
-        "grant_types": ["authorization_code"],
-        "response_types": ["code"],
-    }
+    return {"client_id": cid, "client_id_issued_at": int(time.time()),
+            "redirect_uris": body.get("redirect_uris", []),
+            "token_endpoint_auth_method": "none",
+            "grant_types": ["authorization_code"], "response_types": ["code"]}
 
 @app.get("/oauth/authorize")
 def oauth_authorize(client_id: str, redirect_uri: str, response_type: str = "code",
-                    state: str = "", code_challenge: str = "", code_challenge_method: str = "",
-                    scope: str = ""):
+                    state: str = "", code_challenge: str = "", code_challenge_method: str = "", scope: str = ""):
     code = secrets.token_urlsafe(24)
-    _oauth_codes[code] = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "code_challenge": code_challenge,
-        "created": time.time(),
-    }
+    _oauth_codes[code] = {"client_id": client_id, "redirect_uri": redirect_uri,
+                          "code_challenge": code_challenge, "created": time.time()}
     sep = "&" if "?" in redirect_uri else "?"
     return RedirectResponse(f"{redirect_uri}{sep}code={code}&state={state}")
 
@@ -717,17 +533,13 @@ def oauth_authorize(client_id: str, redirect_uri: str, response_type: str = "cod
 async def oauth_token(req: Request):
     form = await req.form()
     code = form.get("code")
-    if code not in _oauth_codes:
-        raise HTTPException(400, "Invalid code")
+    if code not in _oauth_codes: raise HTTPException(400, "Invalid code")
     info = _oauth_codes.pop(code)
     token = secrets.token_urlsafe(32)
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
-# ============================================================
-# MCP JSON-RPC SERVER
-# ============================================================
-
+# MCP SERVER
 MCP_TOOLS = [
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -749,12 +561,9 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "get_v5_signals", "description": "Query V5 signals (Alert, Buy/Sell Reversal/Momentum).",
-     "inputSchema": {"type": "object", "properties": {
-         "signal_type": {"type": "string"}, "cap_type": {"type": "string"},
-         "verdict": {"type": "string"}, "limit": {"type": "integer"}
-     }, "required": []}},
-    {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout (today + T+1).",
+    {"name": "get_v5_signals", "description": "Query V5 signals.",
+     "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "cap_type": {"type": "string"}, "verdict": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
+    {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_v5_portfolio", "description": "Get current V5 portfolio holdings.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -762,21 +571,13 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
     {"name": "github_list", "description": "List files in the repo.",
      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
-    {"name": "github_push", "description": "Create or update a file in the repo. Triggers Railway redeploy. Requires DEPLOY_GUARD=true.",
-     "inputSchema": {"type": "object", "properties": {
-         "filepath": {"type": "string"},
-         "new_content": {"type": "string"},
-         "commit_message": {"type": "string"},
-         "create_if_missing": {"type": "boolean"}
-     }, "required": ["filepath", "new_content", "commit_message"]}},
-    {"name": "github_delete", "description": "Delete a file from the repo. Requires DEPLOY_GUARD=true.",
-     "inputSchema": {"type": "object", "properties": {
-         "filepath": {"type": "string"},
-         "commit_message": {"type": "string"}
-     }, "required": ["filepath"]}},
+    {"name": "github_push", "description": "Create or update a file. Triggers Railway redeploy. Requires DEPLOY_GUARD=true.",
+     "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
+    {"name": "github_delete", "description": "Delete a file. Requires DEPLOY_GUARD=true.",
+     "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
 ]
 
-async def _call_tool(name: str, args: dict) -> Any:
+async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=60) as client:
         if name == "get_gvm":
             r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}")
@@ -822,14 +623,10 @@ async def _call_tool(name: str, args: dict) -> Any:
             r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]})
             return r.json()
         elif name == "get_v5_signals":
-            conds = []
-            vals = []
-            if args.get("signal_type"):
-                conds.append("signal_type = %s"); vals.append(args["signal_type"])
-            if args.get("cap_type"):
-                conds.append("cap_type = %s"); vals.append(args["cap_type"])
-            if args.get("verdict"):
-                conds.append("analyst_verdict = %s"); vals.append(args["verdict"])
+            conds, vals = [], []
+            if args.get("signal_type"): conds.append("signal_type = %s"); vals.append(args["signal_type"])
+            if args.get("cap_type"): conds.append("cap_type = %s"); vals.append(args["cap_type"])
+            if args.get("verdict"): conds.append("analyst_verdict = %s"); vals.append(args["verdict"])
             where = " AND ".join(conds) if conds else "1=1"
             limit = int(args.get("limit", 50))
             q = f"SELECT signal_type, symbol, cap_type, analyst_verdict, finkhoz_rating, current_price, return_pct, alert_types FROM v5_signals WHERE {where} ORDER BY id DESC LIMIT {limit}"
@@ -849,19 +646,19 @@ async def _call_tool(name: str, args: dict) -> Any:
                 return {"rows": [r[0] for r in cur.fetchall()]}
         elif name == "github_read":
             r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]},
-                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+                                 headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
             return r.json()
         elif name == "github_list":
             r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")},
-                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+                                 headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
             return r.json()
         elif name == "github_push":
             r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args,
-                                   headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
             return r.json()
         elif name == "github_delete":
             r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args,
-                                   headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
@@ -871,13 +668,11 @@ async def mcp_endpoint(req: Request):
     method = body.get("method")
     params = body.get("params", {})
     msg_id = body.get("id")
-
     if method == "initialize":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "Scorr", "version": VERSION},
-        }}
+            "serverInfo": {"name": "Scorr", "version": VERSION}}}
     if method == "tools/list":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS}}
     if method == "tools/call":
@@ -885,9 +680,7 @@ async def mcp_endpoint(req: Request):
         args = params.get("arguments", {})
         try:
             result = await _call_tool(name, args)
-            return {"jsonrpc": "2.0", "id": msg_id, "result": {
-                "content": [{"type": "text", "text": json.dumps(result, default=str)}]
-            }}
+            return {"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}}
         except Exception as e:
             return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32603, "message": str(e)}}
     if method in ("notifications/initialized", "notifications/cancelled"):
