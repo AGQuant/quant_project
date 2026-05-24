@@ -15,17 +15,20 @@ from datetime import datetime, date, timedelta
 from typing import Optional, Any, Dict, List
 import io
 import csv
+import re
 import httpx
 import pandas as pd
+from bs4 import BeautifulSoup
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.2.5
+# Scorr / Project Quant — main.py v1.2.6
+# v1.2.6: Screener.in earnings auto-scrape (replaces V5 manual)
 # v1.2.5: raw_prices uses price_date (not date)
-# v1.2.4: gvm_scores schema alignment (score_date, g_score, gvm_score etc.)
+# v1.2.4: gvm_scores schema alignment
 # v1.2.3: GitHub auto-deploy + earnings_calendar loader
 # ============================================================
 
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -39,6 +42,8 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "")
 DEPLOY_GUARD = os.getenv("DEPLOY_GUARD", "false").lower() == "true"
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+SCREENER_EMAIL = os.getenv("SCREENER_EMAIL", "")
+SCREENER_PASSWORD = os.getenv("SCREENER_PASSWORD", "")
 
 app = FastAPI(title="Scorr API", version=VERSION)
 
@@ -78,7 +83,7 @@ def create_tables():
     CREATE TABLE IF NOT EXISTS v5_baskets (id SERIAL PRIMARY KEY, basket_name TEXT, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS earnings_calendar (
         id SERIAL PRIMARY KEY, company_name TEXT, ticker TEXT,
-        ex_date TEXT, record_date TEXT, event_type TEXT,
+        ex_date DATE, record_date DATE, event_type TEXT,
         loaded_at TIMESTAMP DEFAULT NOW()
     );
     """
@@ -113,6 +118,7 @@ def health_feeds():
         ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
         ("sector_ratings", "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
         ("momentum_scores", "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
+        ("earnings_calendar", "SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -123,9 +129,12 @@ def health_feeds():
                 count = r[1] or 0
                 days_old = None
                 freshness = "n/a"
-                if latest:
-                    days_old = (date.today() - r[0]).days
-                    freshness = "ok" if days_old < 7 else "stale"
+                if latest and r[0]:
+                    try:
+                        days_old = (date.today() - r[0]).days
+                        freshness = "ok" if days_old < 7 else "stale"
+                    except Exception:
+                        pass
                 out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
     except Exception as e:
         return {"error": str(e)}
@@ -390,6 +399,178 @@ async def load_v5_from_drive(req: Request):
             results[fname] = f"error: {str(e)[:200]}"
     return {"status": "ok", "results": results}
 
+# ============================================================
+# SCREENER.IN EARNINGS AUTO-SCRAPE (v1.2.6)
+# ============================================================
+SCREENER_BASE = "https://www.screener.in"
+SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
+SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
+
+def _parse_screener_date(s: str):
+    """Parse Screener date formats: '23 Mar 2026', '23 Mar', '23-03-2026', etc."""
+    if not s: return None
+    s = str(s).strip()
+    if not s or s.lower() in ("nan", "none", "-", "n/a"): return None
+    formats = [
+        "%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d-%B-%Y",
+        "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d",
+        "%d %b", "%d %B",  # year-less, assume current year
+    ]
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(s, fmt)
+            if dt.year == 1900:  # year-less parse
+                dt = dt.replace(year=date.today().year)
+                if dt.date() < date.today() - timedelta(days=30):
+                    dt = dt.replace(year=date.today().year + 1)
+            return dt.date()
+        except ValueError:
+            continue
+    return None
+
+async def _screener_login_session():
+    """Login to Screener.in and return an httpx.AsyncClient with valid cookies."""
+    if not SCREENER_EMAIL or not SCREENER_PASSWORD:
+        raise HTTPException(500, "SCREENER_EMAIL / SCREENER_PASSWORD not configured in Railway env")
+    client = httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=60,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+    )
+    # Step 1: GET login page to capture CSRF token
+    r = await client.get(SCREENER_LOGIN_URL)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    csrf_input = soup.find("input", {"name": "csrfmiddlewaretoken"})
+    if not csrf_input:
+        await client.aclose()
+        raise HTTPException(500, "CSRF token not found on Screener login page — site structure may have changed")
+    csrf_token = csrf_input.get("value")
+    # Step 2: POST credentials
+    login_data = {
+        "csrfmiddlewaretoken": csrf_token,
+        "username": SCREENER_EMAIL,  # Django auth uses 'username' field even for email
+        "password": SCREENER_PASSWORD,
+        "next": "",
+    }
+    r = await client.post(
+        SCREENER_LOGIN_URL,
+        data=login_data,
+        headers={"Referer": SCREENER_LOGIN_URL},
+    )
+    # Login succeeds if we land back on a non-login page OR get a Set-Cookie for sessionid
+    if "sessionid" not in client.cookies:
+        await client.aclose()
+        raise HTTPException(401, f"Screener login failed — no sessionid cookie. Status: {r.status_code}")
+    log.info("Screener login OK")
+    return client
+
+async def _scrape_upcoming_results(client: httpx.AsyncClient):
+    """Fetch /upcoming-results/ and parse the table. Returns list of dicts."""
+    r = await client.get(SCREENER_UPCOMING_URL)
+    r.raise_for_status()
+    html = r.text
+    # Sanity check — if redirected to login, our session is invalid
+    if "/login/" in str(r.url) or "Login to your account" in html:
+        raise HTTPException(401, "Screener session expired during fetch")
+    soup = BeautifulSoup(html, "html.parser")
+    # Strategy: find <table> elements. Screener typically has one main data table.
+    tables = soup.find_all("table")
+    if not tables:
+        raise HTTPException(500, "No <table> found on upcoming-results page — site may have changed")
+    rows_out = []
+    seen_tickers = set()
+    for tbl in tables:
+        # Pandas read_html on the isolated table is most robust
+        try:
+            dfs = pd.read_html(io.StringIO(str(tbl)))
+        except Exception:
+            continue
+        for df in dfs:
+            if df.empty or len(df.columns) < 2:
+                continue
+            # Try to identify columns by header name (case-insensitive)
+            cols_lower = {str(c).strip().lower(): c for c in df.columns}
+            # Find a "name" column and a "date" column
+            name_col = None
+            date_col = None
+            event_col = None
+            for key, orig in cols_lower.items():
+                if name_col is None and ("name" in key or "company" in key):
+                    name_col = orig
+                if date_col is None and ("date" in key or "result" in key):
+                    date_col = orig
+                if event_col is None and ("type" in key or "purpose" in key or "agenda" in key):
+                    event_col = orig
+            if name_col is None or date_col is None:
+                continue
+            # Also try to find ticker — Screener often embeds it in the row via <a href="/company/TICKER/">
+            ticker_map = {}
+            for tr in tbl.find_all("tr"):
+                a = tr.find("a", href=re.compile(r"/company/[^/]+/"))
+                if a:
+                    href = a.get("href", "")
+                    m = re.search(r"/company/([^/]+)/", href)
+                    if m:
+                        ticker_map[a.get_text(strip=True)] = m.group(1)
+            for _, row in df.iterrows():
+                name = str(row[name_col]).strip()
+                if not name or name.lower() in ("nan", "name", "company"): continue
+                ticker = ticker_map.get(name, "")
+                if not ticker:
+                    # fallback: derive from company name (uppercase, no spaces)
+                    ticker = re.sub(r"[^A-Z0-9&]", "", name.upper())[:20]
+                if ticker in seen_tickers: continue
+                seen_tickers.add(ticker)
+                ex_date = _parse_screener_date(str(row[date_col]))
+                event_type = str(row[event_col]).strip() if event_col else "Quarterly Result"
+                if event_type.lower() in ("nan", ""): event_type = "Quarterly Result"
+                rows_out.append({
+                    "company_name": name,
+                    "ticker": ticker,
+                    "ex_date": ex_date,
+                    "record_date": None,
+                    "event_type": event_type,
+                })
+    return rows_out
+
+@app.post("/api/admin/load_earnings_from_screener")
+async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None)):
+    """Login to Screener.in, scrape /upcoming-results/, replace earnings_calendar table."""
+    _check_admin(x_admin_token)
+    client = await _screener_login_session()
+    try:
+        rows = await _scrape_upcoming_results(client)
+    finally:
+        await client.aclose()
+    if not rows:
+        return {"status": "warn", "rows_scraped": 0, "message": "No rows parsed — check Screener page structure"}
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM earnings_calendar")
+        inserted = 0
+        for r in rows:
+            try:
+                cur.execute("""
+                    INSERT INTO earnings_calendar
+                    (company_name, ticker, ex_date, record_date, event_type)
+                    VALUES (%(company_name)s, %(ticker)s, %(ex_date)s, %(record_date)s, %(event_type)s)
+                """, r)
+                inserted += 1
+            except Exception as e:
+                log.warning(f"row insert skipped ({r.get('ticker')}): {e}")
+        conn.commit()
+    return {
+        "status": "ok",
+        "source": "screener.in/upcoming-results",
+        "rows_scraped": len(rows),
+        "rows_inserted": inserted,
+        "loaded_at": datetime.now().isoformat(),
+    }
+
 # GITHUB AUTO-DEPLOY
 GITHUB_API = "https://api.github.com"
 
@@ -561,6 +742,8 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "load_earnings_from_screener", "description": "Scrape Screener.in /upcoming-results/ (auth required) and refresh earnings_calendar. Replaces V5 manual entry.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_signals", "description": "Query V5 signals.",
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "cap_type": {"type": "string"}, "verdict": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
     {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.",
@@ -578,7 +761,7 @@ MCP_TOOLS = [
 ]
 
 async def _call_tool(name, args):
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         if name == "get_gvm":
             r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}")
             return r.json()
@@ -622,6 +805,10 @@ async def _call_tool(name, args):
         elif name == "load_screener_from_drive":
             r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]})
             return r.json()
+        elif name == "load_earnings_from_screener":
+            r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener",
+                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+            return r.json()
         elif name == "get_v5_signals":
             conds, vals = [], []
             if args.get("signal_type"): conds.append("signal_type = %s"); vals.append(args["signal_type"])
@@ -639,7 +826,7 @@ async def _call_tool(name, args):
             with get_conn() as conn, conn.cursor() as cur:
                 cur.execute("SELECT ticker, ex_date, event_type FROM earnings_calendar WHERE UPPER(ticker) = %s ORDER BY id DESC LIMIT 5", (sym,))
                 rows = cur.fetchall()
-            return {"symbol": sym, "events": [{"ex_date": r[1], "event_type": r[2]} for r in rows]}
+            return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
         elif name == "get_v5_portfolio":
             with get_conn() as conn, conn.cursor() as cur:
                 cur.execute("SELECT data FROM v5_portfolio ORDER BY id LIMIT 200")
