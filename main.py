@@ -18,22 +18,24 @@ import csv
 import re
 import httpx
 import pandas as pd
+import numpy as np
 from bs4 import BeautifulSoup
 
-# V5 filter engine — separate module
 from v5_engine import (
     V5_SCHEMA_SQL, seed_default_filters, run_v5_engine,
     compute_metrics_for_symbol, load_filters, store_metrics
 )
+from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.4.0
-# v1.4.0: V5 engine integrated — filter computation + AND-gate evaluator
+# Scorr / Project Quant — main.py v1.5.0
+# v1.5.0: V6 backtest optimizer (6mo top 50, parameter sweep)
+# v1.4.0: V5 engine — filter computation + AND-gate
 # v1.3.0: backfill_intraday MCP tool
 # v1.2.8: intraday_prices + cmp_prices + scheduler
 # ============================================================
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -52,10 +54,8 @@ app = FastAPI(title="Scorr API", version=VERSION)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
 )
 
 def get_conn():
@@ -90,29 +90,20 @@ def create_tables():
         loaded_at TIMESTAMP DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS intraday_prices (
-        id SERIAL PRIMARY KEY,
-        symbol TEXT NOT NULL,
-        ts TIMESTAMP NOT NULL,
-        open NUMERIC,
-        high NUMERIC,
-        low NUMERIC,
-        close NUMERIC,
-        volume BIGINT,
+        id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, ts TIMESTAMP NOT NULL,
+        open NUMERIC, high NUMERIC, low NUMERIC, close NUMERIC, volume BIGINT,
         UNIQUE(symbol, ts)
     );
     CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_prices(symbol, ts DESC);
     CREATE TABLE IF NOT EXISTS cmp_prices (
-        symbol TEXT PRIMARY KEY,
-        cmp NUMERIC,
-        updated_at TIMESTAMP DEFAULT NOW()
+        symbol TEXT PRIMARY KEY, cmp NUMERIC, updated_at TIMESTAMP DEFAULT NOW()
     );
-    """ + V5_SCHEMA_SQL
+    """ + V5_SCHEMA_SQL + V6_BACKTEST_SCHEMA
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
         log.info("Tables ready")
-        # Seed V5 default filters (idempotent)
         with get_conn() as conn:
             seed_default_filters(conn)
     except Exception as e:
@@ -123,14 +114,12 @@ def _ist_now() -> datetime:
 
 def _is_market_hours() -> bool:
     now = _ist_now()
-    if now.weekday() >= 5:
-        return False
+    if now.weekday() >= 5: return False
     return now.replace(hour=9, minute=15, second=0, microsecond=0) <= now <= now.replace(hour=15, minute=30, second=0, microsecond=0)
 
 def _is_eod_window() -> bool:
     now = _ist_now()
-    if now.weekday() >= 5:
-        return False
+    if now.weekday() >= 5: return False
     return now.replace(hour=15, minute=45, second=0, microsecond=0) <= now <= now.replace(hour=16, minute=0, second=0, microsecond=0)
 
 def _get_futures_symbols() -> List[str]:
@@ -178,71 +167,51 @@ async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
 
 async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict]:
     ticker = _yahoo_ticker(symbol)
-    url = (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}"
-        f"?interval=5m&range={range_str}"
-    )
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=5m&range={range_str}"
     try:
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as c:
             r = await c.get(url)
             r.raise_for_status()
             data = r.json()
         chart = data.get("chart", {}).get("result", [])
-        if not chart:
-            return []
+        if not chart: return []
         result = chart[0]
         timestamps = result.get("timestamp", [])
         indicators = result.get("indicators", {}).get("quote", [{}])[0]
-        opens   = indicators.get("open",   [])
-        highs   = indicators.get("high",   [])
-        lows    = indicators.get("low",    [])
-        closes  = indicators.get("close",  [])
-        volumes = indicators.get("volume", [])
+        opens, highs, lows, closes, volumes = (indicators.get(k, []) for k in ("open","high","low","close","volume"))
         candles = []
         for j, ts in enumerate(timestamps):
             c_val = closes[j] if j < len(closes) else None
-            if c_val is None:
-                continue
+            if c_val is None: continue
             dt = datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)
-            candles.append({
-                "symbol": symbol, "ts": dt,
-                "open":   opens[j]   if j < len(opens)   else None,
-                "high":   highs[j]   if j < len(highs)   else None,
-                "low":    lows[j]    if j < len(lows)    else None,
-                "close":  c_val,
-                "volume": volumes[j] if j < len(volumes) else None,
-            })
+            candles.append({"symbol": symbol, "ts": dt,
+                "open": opens[j] if j < len(opens) else None,
+                "high": highs[j] if j < len(highs) else None,
+                "low":  lows[j]  if j < len(lows)  else None,
+                "close": c_val,
+                "volume": volumes[j] if j < len(volumes) else None})
         return candles
     except Exception as e:
         log.warning(f"intraday fetch {symbol} range={range_str}: {e}")
         return []
 
-def _upsert_cmp(cmp_map: Dict[str, float]):
+def _upsert_cmp(cmp_map):
     if not cmp_map: return
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for sym, price in cmp_map.items():
-                cur.execute("""
-                    INSERT INTO cmp_prices (symbol, cmp, updated_at)
-                    VALUES (%s, %s, NOW())
-                    ON CONFLICT (symbol) DO UPDATE
-                    SET cmp = EXCLUDED.cmp, updated_at = NOW()
-                """, (sym, price))
+                cur.execute("INSERT INTO cmp_prices (symbol, cmp, updated_at) VALUES (%s, %s, NOW()) ON CONFLICT (symbol) DO UPDATE SET cmp = EXCLUDED.cmp, updated_at = NOW()", (sym, price))
             conn.commit()
         log.info(f"CMP upserted: {len(cmp_map)} symbols")
     except Exception as e:
         log.error(f"_upsert_cmp failed: {e}")
 
-def _insert_intraday(candles: List[dict]):
+def _insert_intraday(candles):
     if not candles: return
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for c in candles:
-                cur.execute("""
-                    INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume)
-                    VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s)
-                    ON CONFLICT (symbol, ts) DO NOTHING
-                """, c)
+                cur.execute("INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume) VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s) ON CONFLICT (symbol, ts) DO NOTHING", c)
             conn.commit()
     except Exception as e:
         log.error(f"_insert_intraday failed: {e}")
@@ -252,10 +221,7 @@ def _purge_intraday_old():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s", (cutoff,))
-            deleted = cur.rowcount
             conn.commit()
-        if deleted:
-            log.info(f"Purged {deleted} old intraday rows")
     except Exception as e:
         log.error(f"_purge_intraday_old failed: {e}")
 
@@ -284,7 +250,6 @@ async def _task_fetch_intraday():
         await asyncio.sleep(0.2)
     _purge_intraday_old()
     _intraday_fetched_today = today
-    log.info(f"Intraday fetch done: {total} candles")
 
 async def _scheduler():
     log.info("Scheduler started")
@@ -317,24 +282,25 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
     interesting = ["SCREENER_EMAIL", "SCREENER_PASSWORD", "GITHUB_TOKEN", "GITHUB_REPO",
                    "ADMIN_TOKEN", "DATABASE_URL", "DEPLOY_GUARD", "RAILWAY_PUBLIC_DOMAIN"]
     return {"version": VERSION, "all_keys_count": len(keys),
-            "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting},
-            "screener_match_keys": [k for k in keys if "SCREEN" in k.upper()]}
+            "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting}}
 
 @app.get("/api/health/feeds")
 def health_feeds():
     out = []
     queries = [
-        ("gvm_scores",       "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
-        ("raw_prices",       "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
-        ("screener_raw",     "SELECT NULL, COUNT(*) FROM screener_raw"),
-        ("input_raw",        "SELECT NULL, COUNT(*) FROM input_raw"),
-        ("sector_ratings",   "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
-        ("momentum_scores",  "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
-        ("earnings_calendar","SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
-        ("intraday_prices",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
-        ("cmp_prices",       "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
-        ("v5_metrics",       "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v5_metrics"),
-        ("v5_qualified",     "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
+        ("gvm_scores", "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
+        ("raw_prices", "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
+        ("screener_raw", "SELECT NULL, COUNT(*) FROM screener_raw"),
+        ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
+        ("sector_ratings", "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
+        ("momentum_scores", "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
+        ("earnings_calendar", "SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
+        ("intraday_prices", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
+        ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
+        ("v5_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v5_metrics"),
+        ("v5_qualified", "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
+        ("v6_backtest_metrics", "SELECT MAX(score_date), COUNT(*) FROM v6_backtest_metrics"),
+        ("v6_backtest_results", "SELECT MAX(created_at)::date, COUNT(DISTINCT run_id) FROM v6_backtest_results"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -349,8 +315,7 @@ def health_feeds():
                     try:
                         days_old = (date.today() - r[0]).days
                         freshness = "ok" if days_old < 7 else "stale"
-                    except Exception:
-                        pass
+                    except Exception: pass
                 out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
     except Exception as e:
         return {"error": str(e)}
@@ -416,13 +381,9 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at FROM cmp_prices ORDER BY symbol")
 
-# ============================================================
-# V5 ENGINE ENDPOINTS
-# ============================================================
-
+# V5 ENGINE
 @app.post("/api/v5/run")
 async def v5_run(x_admin_token: Optional[str] = Header(None)):
-    """Run V5 engine: compute metrics + AND-gate for all 290 futures stocks."""
     _check_admin(x_admin_token)
     with get_conn() as conn:
         results = run_v5_engine(conn)
@@ -430,63 +391,58 @@ async def v5_run(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/v5/qualified")
 def v5_qualified(signal_type: Optional[str] = None, score_date: Optional[str] = None):
-    """Get qualified stocks. Filter by signal_type and/or score_date (YYYY-MM-DD)."""
-    if not score_date:
-        score_date = str(date.today())
+    if not score_date: score_date = str(date.today())
     if signal_type:
-        return api_query(
-            "SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified "
-            "WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC",
-            (signal_type, score_date))
-    return api_query(
-        "SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified "
-        "WHERE score_date = %s ORDER BY signal_type, gvm_score DESC",
-        (score_date,))
+        return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC", (signal_type, score_date))
+    return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE score_date = %s ORDER BY signal_type, gvm_score DESC", (score_date,))
 
 @app.get("/api/v5/metrics/{symbol}")
 def v5_metrics(symbol: str, score_date: Optional[str] = None):
-    """Get computed metrics for a stock."""
-    if not score_date:
-        score_date = str(date.today())
-    r = api_query(
-        "SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s",
-        (symbol.upper(), score_date), single=True)
+    if not score_date: score_date = str(date.today())
+    r = api_query("SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
     if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
     return r
 
 @app.get("/api/v5/filters")
 def v5_filters():
-    """Get current filter thresholds."""
     return api_query("SELECT signal_type, metric, min_val, max_val, updated_at FROM v5_filters ORDER BY signal_type, metric")
 
 @app.post("/api/v5/filter/update")
 async def v5_filter_update(req: Request, x_admin_token: Optional[str] = Header(None)):
-    """Update one filter threshold. Body: {signal_type, metric, min_val, max_val}."""
     _check_admin(x_admin_token)
     body = await req.json()
-    sig = body.get("signal_type")
-    metric = body.get("metric")
-    mn = body.get("min_val")
-    mx = body.get("max_val")
+    sig = body.get("signal_type"); metric = body.get("metric")
+    mn = body.get("min_val"); mx = body.get("max_val")
     if not sig or not metric: raise HTTPException(400, "signal_type and metric required")
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO v5_filters (signal_type, metric, min_val, max_val)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (signal_type, metric) DO UPDATE
-            SET min_val = EXCLUDED.min_val, max_val = EXCLUDED.max_val, updated_at = NOW()
-        """, (sig, metric, mn, mx))
+        cur.execute("INSERT INTO v5_filters (signal_type, metric, min_val, max_val) VALUES (%s, %s, %s, %s) ON CONFLICT (signal_type, metric) DO UPDATE SET min_val = EXCLUDED.min_val, max_val = EXCLUDED.max_val, updated_at = NOW()", (sig, metric, mn, mx))
         conn.commit()
     return {"status": "ok", "signal_type": sig, "metric": metric, "min_val": mn, "max_val": mx}
+
+# V6 BACKTEST OPTIMIZER
+@app.post("/api/v6/backtest/run")
+async def v6_backtest_run(x_admin_token: Optional[str] = Header(None)):
+    """Run V6 parameter optimizer: 6 months × top 50 F&O × single-parameter sweep."""
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        results = run_full_optimization(conn)
+    return results
+
+@app.get("/api/v6/backtest/results")
+def v6_backtest_results(run_id: Optional[str] = None, signal_type: Optional[str] = None):
+    """Get backtest results. Pass run_id for full detail."""
+    if run_id and signal_type:
+        return api_query("SELECT * FROM v6_backtest_results WHERE run_id = %s AND signal_type = %s ORDER BY composite_score DESC", (run_id, signal_type))
+    if run_id:
+        return api_query("SELECT signal_type, variant_label, num_signals, win_rate, avg_return, composite_score, filter_config FROM v6_backtest_results WHERE run_id = %s ORDER BY signal_type, composite_score DESC", (run_id,))
+    return api_query("SELECT run_id, MAX(created_at) as latest, COUNT(*) as rows FROM v6_backtest_results GROUP BY run_id ORDER BY latest DESC LIMIT 10")
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     futures = _get_futures_symbols()
-    if not futures: return {"status": "warn", "message": "No futures symbols found"}
-    log.info(f"Backfill started: {len(futures)} symbols, range=15d")
-    total_candles = 0
-    failed = []
+    if not futures: return {"status": "warn", "message": "No futures symbols"}
+    total_candles, failed = 0, []
     for sym in futures:
         candles = await _fetch_intraday_yahoo(sym, range_str="15d")
         if candles:
@@ -496,8 +452,7 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
             failed.append(sym)
         await asyncio.sleep(0.25)
     _purge_intraday_old()
-    return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed),
-            "failed_symbols": failed[:20], "total_candles": total_candles}
+    return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "failed_symbols": failed[:20], "total_candles": total_candles}
 
 @app.post("/api/admin/fetch_intraday_now")
 async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
@@ -505,7 +460,7 @@ async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
     global _intraday_fetched_today
     _intraday_fetched_today = None
     futures = _get_futures_symbols()
-    if not futures: return {"status": "warn", "message": "No futures symbols found"}
+    if not futures: return {"status": "warn", "message": "No futures symbols"}
     total = 0
     for sym in futures:
         candles = await _fetch_intraday_yahoo(sym, range_str="1d")
@@ -523,12 +478,12 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
     futures_set = set(_get_futures_symbols())
     all_symbols = _get_all_gvm_symbols()
     non_futures = [s for s in all_symbols if s not in futures_set]
-    if not non_futures: return {"status": "warn", "message": "No non-futures symbols found"}
+    if not non_futures: return {"status": "warn", "message": "No non-futures symbols"}
     cmp_map = await _fetch_cmp_yahoo(non_futures)
     _upsert_cmp(cmp_map)
     return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(non_futures)}
 
-async def _drive_download(file_id: str) -> str:
+async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
         r = await c.get(url)
@@ -565,12 +520,12 @@ async def load_screener(req: Request):
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
 
-# Screener.in earnings scrape
+# Screener.in scrape
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
 SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
 
-def _parse_screener_date(s: str):
+def _parse_screener_date(s):
     if not s: return None
     s = str(s).strip()
     if not s or s.lower() in ("nan", "none", "-", "n/a"): return None
@@ -583,15 +538,13 @@ def _parse_screener_date(s: str):
                 if dt.date() < date.today() - timedelta(days=30):
                     dt = dt.replace(year=date.today().year + 1)
             return dt.date()
-        except ValueError:
-            continue
+        except ValueError: continue
     return None
 
 async def _screener_login_session():
     email = os.getenv("SCREENER_EMAIL", "").strip()
     password = os.getenv("SCREENER_PASSWORD", "").strip()
-    if not email or not password:
-        raise HTTPException(500, "SCREENER creds missing")
+    if not email or not password: raise HTTPException(500, "SCREENER creds missing")
     client = httpx.AsyncClient(follow_redirects=True, timeout=60,
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "en-US,en;q=0.9"})
     r = await client.get(SCREENER_LOGIN_URL)
@@ -601,12 +554,10 @@ async def _screener_login_session():
     if not csrf_input:
         await client.aclose()
         raise HTTPException(500, "CSRF token not found")
-    r = await client.post(SCREENER_LOGIN_URL,
-        data={"csrfmiddlewaretoken": csrf_input.get("value"), "username": email, "password": password, "next": ""},
-        headers={"Referer": SCREENER_LOGIN_URL})
+    r = await client.post(SCREENER_LOGIN_URL, data={"csrfmiddlewaretoken": csrf_input.get("value"), "username": email, "password": password, "next": ""}, headers={"Referer": SCREENER_LOGIN_URL})
     if "sessionid" not in client.cookies:
         await client.aclose()
-        raise HTTPException(401, f"Screener login failed")
+        raise HTTPException(401, "Screener login failed")
     return client
 
 async def _scrape_upcoming_results(client):
@@ -653,10 +604,8 @@ async def _scrape_upcoming_results(client):
 async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     client = await _screener_login_session()
-    try:
-        rows = await _scrape_upcoming_results(client)
-    finally:
-        await client.aclose()
+    try: rows = await _scrape_upcoming_results(client)
+    finally: await client.aclose()
     if not rows: return {"status": "warn", "rows_scraped": 0}
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM earnings_calendar")
@@ -666,11 +615,11 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
                 cur.execute("INSERT INTO earnings_calendar (company_name, ticker, ex_date, record_date, event_type) VALUES (%(company_name)s, %(ticker)s, %(ex_date)s, %(record_date)s, %(event_type)s)", r)
                 inserted += 1
             except Exception as e:
-                log.warning(f"row skip ({r.get('ticker')}): {e}")
+                log.warning(f"row skip: {e}")
         conn.commit()
     return {"status": "ok", "rows_scraped": len(rows), "rows_inserted": inserted}
 
-# GitHub auto-deploy
+# GITHUB
 GITHUB_API = "https://api.github.com"
 
 def _gh_headers():
@@ -683,8 +632,7 @@ def _check_admin(token):
     return True
 
 def _check_deploy_guard():
-    if not DEPLOY_GUARD:
-        raise HTTPException(403, "DEPLOY_GUARD is off")
+    if not DEPLOY_GUARD: raise HTTPException(403, "DEPLOY_GUARD is off")
 
 async def _gh_get_file(filepath):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
@@ -749,8 +697,7 @@ async def github_push(req: Request, x_admin_token: Optional[str] = Header(None))
     create_if_missing = body.get("create_if_missing", True)
     if not filepath or new_content is None: raise HTTPException(400, "filepath and new_content required")
     existing = await _gh_get_file(filepath)
-    if not existing["exists"] and not create_if_missing:
-        raise HTTPException(404, f"File {filepath} does not exist")
+    if not existing["exists"] and not create_if_missing: raise HTTPException(404, f"File {filepath} does not exist")
     if existing["exists"] and existing["content"] == new_content:
         return {"status": "noop", "message": "Content identical", "filepath": filepath}
     sha = existing["sha"] if existing["exists"] else None
@@ -773,6 +720,7 @@ async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None
     result = await _gh_delete_file(filepath, commit_message, existing["sha"])
     return {"status": "ok", "filepath": filepath, "action": "deleted", "commit_sha": result.get("commit", {}).get("sha")}
 
+# OAUTH
 _oauth_codes = {}
 _oauth_tokens = {}
 
@@ -817,7 +765,7 @@ async def oauth_token(req: Request):
 MCP_TOOLS = [
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_top_stocks", "description": "Get top N stocks by GVM. Optional verdict filter.",
+    {"name": "get_top_stocks", "description": "Get top N stocks by GVM.",
      "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.",
      "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
@@ -827,20 +775,24 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock. days=1-15.",
+    {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks. Safe to re-run.",
+    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v5_engine", "description": "Run V5 filter engine: compute metrics + AND-gate for all 290 futures stocks. Returns qualified counts per signal type.",
+    {"name": "run_v5_engine", "description": "Run V5 filter engine: compute metrics + AND-gate for all 290 futures stocks.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today. Optional signal_type filter (Buy_Reversal, Buy_Momentum, Sell_Reversal, Sell_Momentum).",
+    {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.",
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
-    {"name": "get_v5_metrics", "description": "Get computed V5 metrics (DMA, RSI, returns, etc.) for one stock.",
+    {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_v5_filters", "description": "Get current V5 filter thresholds (editable config).",
+    {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer. 6 months × top 50 F&O stocks × single-parameter sweep. Takes 30-60 min compute. Returns optimized filters per signal type maximizing composite (win_rate × avg_return) on 5-day forward returns.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v6_backtest_results", "description": "Get V6 backtest results. Pass run_id for full details, else returns recent runs.",
+     "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "env_check", "description": "Diagnostic: which env vars are visible.",
@@ -863,63 +815,55 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
     {"name": "github_list", "description": "List files in the repo.",
      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
-    {"name": "github_push", "description": "Create or update a file. Triggers Railway redeploy. Requires DEPLOY_GUARD=true.",
+    {"name": "github_push", "description": "Create or update a file.",
      "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
-    {"name": "github_delete", "description": "Delete a file. Requires DEPLOY_GUARD=true.",
+    {"name": "github_delete", "description": "Delete a file.",
      "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
 ]
 
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
         if name == "get_gvm":
-            r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
             params = {}
             if args.get("verdict"): params["verdict"] = args["verdict"]
-            r = await client.get(f"{BASE_URL}/api/gvm/top/{args['n']}", params=params)
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/gvm/top/{args['n']}", params=params); return r.json()
         elif name == "get_sector":
-            r = await client.get(f"{BASE_URL}/api/sector/{args['sector']}")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/sector/{args['sector']}"); return r.json()
         elif name == "get_filter":
-            r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)})
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)}); return r.json()
         elif name == "get_sector_rating":
-            r = await client.get(f"{BASE_URL}/api/sectors")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
         elif name == "get_momentum":
-            r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
         elif name == "get_intraday":
-            r = await client.get(f"{BASE_URL}/api/intraday/{args['symbol']}", params={"days": args.get("days", 1)})
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/intraday/{args['symbol']}", params={"days": args.get("days", 1)}); return r.json()
         elif name == "get_cmp":
-            r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
         elif name == "backfill_intraday":
-            r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_v5_engine":
-            r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_qualified":
             params = {}
             if args.get("signal_type"): params["signal_type"] = args["signal_type"]
-            r = await client.get(f"{BASE_URL}/api/v5/qualified", params=params)
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/v5/qualified", params=params); return r.json()
         elif name == "get_v5_metrics":
-            r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}"); return r.json()
         elif name == "get_v5_filters":
-            r = await client.get(f"{BASE_URL}/api/v5/filters")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/v5/filters"); return r.json()
+        elif name == "run_v6_backtest":
+            r = await client.post(f"{BASE_URL}/api/v6/backtest/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_v6_backtest_results":
+            params = {}
+            if args.get("run_id"): params["run_id"] = args["run_id"]
+            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
+            r = await client.get(f"{BASE_URL}/api/v6/backtest/results", params=params); return r.json()
         elif name == "health_feeds":
-            r = await client.get(f"{BASE_URL}/api/health/feeds")
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
         elif name == "env_check":
-            r = await client.get(f"{BASE_URL}/api/admin/env_check", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/admin/env_check", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_sql":
             q = args["query"]
             try:
@@ -935,14 +879,11 @@ async def _call_tool(name, args):
             except Exception as e:
                 return {"error": str(e)}
         elif name == "load_input_from_drive":
-            r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_screener_from_drive":
-            r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_earnings_from_screener":
-            r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_signals":
             conds, vals = [], []
             if args.get("signal_type"): conds.append("signal_type = %s"); vals.append(args["signal_type"])
@@ -966,17 +907,13 @@ async def _call_tool(name, args):
                 cur.execute("SELECT data FROM v5_portfolio ORDER BY id LIMIT 200")
                 return {"rows": [r[0] for r in cur.fetchall()]}
         elif name == "github_read":
-            r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_list":
-            r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_push":
-            r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_delete":
-            r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
-            return r.json()
+            r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
@@ -1003,6 +940,3 @@ async def mcp_endpoint(req: Request):
     if method in ("notifications/initialized", "notifications/cancelled"):
         return Response(status_code=204)
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
-
-# Also need numpy for v5_engine
-import numpy as np  # noqa: E402
