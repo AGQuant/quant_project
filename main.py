@@ -21,13 +21,14 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.2.7
+# Scorr / Project Quant — main.py v1.2.8
+# v1.2.8: intraday_prices (5min, futures, 15d rolling)
+#         cmp_prices (non-futures, refresh every 5min)
+#         background scheduler (asyncio)
 # v1.2.7: live env var read for Screener creds + diagnostic
-# v1.2.6: Screener.in earnings auto-scrape
-# v1.2.5: raw_prices uses price_date (not date)
 # ============================================================
 
-VERSION = "1.2.7"
+VERSION = "1.2.8"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -83,6 +84,27 @@ def create_tables():
         ex_date DATE, record_date DATE, event_type TEXT,
         loaded_at TIMESTAMP DEFAULT NOW()
     );
+
+    -- 5-min OHLC for futures stocks only. Rolling 15 days.
+    CREATE TABLE IF NOT EXISTS intraday_prices (
+        id SERIAL PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        ts TIMESTAMP NOT NULL,
+        open NUMERIC,
+        high NUMERIC,
+        low NUMERIC,
+        close NUMERIC,
+        volume BIGINT,
+        UNIQUE(symbol, ts)
+    );
+    CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_prices(symbol, ts DESC);
+
+    -- Latest CMP only for non-futures stocks. One row per symbol, always upserted.
+    CREATE TABLE IF NOT EXISTS cmp_prices (
+        symbol TEXT PRIMARY KEY,
+        cmp NUMERIC,
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
     """
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -92,9 +114,258 @@ def create_tables():
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
+# ============================================================
+# MARKET HOURS HELPER
+# ============================================================
+
+def _ist_now() -> datetime:
+    """Current time in IST (UTC+5:30)."""
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+def _is_market_hours() -> bool:
+    """True if current IST time is within 9:15 AM – 3:30 PM Mon–Fri."""
+    now = _ist_now()
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    market_open  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return market_open <= now <= market_close
+
+def _is_eod_window() -> bool:
+    """True between 3:45 PM and 4:00 PM IST Mon–Fri — trigger for intraday 5min fetch."""
+    now = _ist_now()
+    if now.weekday() >= 5:
+        return False
+    eod_start = now.replace(hour=15, minute=45, second=0, microsecond=0)
+    eod_end   = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+    return eod_start <= now <= eod_end
+
+# ============================================================
+# FUTURES UNIVERSE
+# ============================================================
+
+def _get_futures_symbols() -> List[str]:
+    """Return distinct symbols from v5_signals — the F&O eligible universe."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT symbol FROM v5_signals ORDER BY symbol")
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.error(f"_get_futures_symbols failed: {e}")
+        return []
+
+def _get_all_gvm_symbols() -> List[str]:
+    """Return all symbols from gvm_scores."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT symbol FROM gvm_scores ORDER BY symbol")
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.error(f"_get_all_gvm_symbols failed: {e}")
+        return []
+
+# ============================================================
+# YAHOO FINANCE FETCHERS
+# ============================================================
+
+def _yahoo_ticker(symbol: str) -> str:
+    """Convert NSE symbol to Yahoo Finance ticker format."""
+    return f"{symbol}.NS"
+
+async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
+    """
+    Fetch latest CMP for a list of symbols via Yahoo Finance.
+    Uses yfinance-style query URL for batch quotes.
+    Returns {symbol: cmp} dict.
+    """
+    results = {}
+    # Yahoo batch quote URL — free, no auth needed
+    batch_size = 50  # stay well under URL limits
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i+batch_size]
+        tickers_str = " ".join(_yahoo_ticker(s) for s in batch)
+        url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={urllib.parse.quote(tickers_str)}&fields=regularMarketPrice,symbol"
+        try:
+            async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "Mozilla/5.0"}) as c:
+                r = await c.get(url)
+                r.raise_for_status()
+                data = r.json()
+                quotes = data.get("quoteResponse", {}).get("result", [])
+                for q in quotes:
+                    raw_sym = q.get("symbol", "")
+                    price   = q.get("regularMarketPrice")
+                    if raw_sym and price:
+                        # Strip .NS suffix back to NSE symbol
+                        nse_sym = raw_sym.replace(".NS", "")
+                        results[nse_sym] = float(price)
+        except Exception as e:
+            log.warning(f"CMP fetch batch {i//batch_size} error: {e}")
+        await asyncio.sleep(0.3)  # polite delay between batches
+    return results
+
+async def _fetch_intraday_yahoo(symbol: str) -> List[dict]:
+    """
+    Fetch today's 5-min OHLCV for a single symbol from Yahoo Finance.
+    interval=5m, range=1d  →  returns list of candle dicts.
+    """
+    ticker = _yahoo_ticker(symbol)
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}"
+        f"?interval=5m&range=1d"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "Mozilla/5.0"}) as c:
+            r = await c.get(url)
+            r.raise_for_status()
+            data = r.json()
+        chart = data.get("chart", {}).get("result", [])
+        if not chart:
+            return []
+        result  = chart[0]
+        timestamps = result.get("timestamp", [])
+        indicators = result.get("indicators", {}).get("quote", [{}])[0]
+        opens   = indicators.get("open",   [])
+        highs   = indicators.get("high",   [])
+        lows    = indicators.get("low",    [])
+        closes  = indicators.get("close",  [])
+        volumes = indicators.get("volume", [])
+        candles = []
+        for j, ts in enumerate(timestamps):
+            c_val = closes[j] if j < len(closes) else None
+            if c_val is None:
+                continue
+            # ts is Unix epoch UTC — convert to IST
+            dt = datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)
+            candles.append({
+                "symbol":  symbol,
+                "ts":      dt,
+                "open":    opens[j]   if j < len(opens)   else None,
+                "high":    highs[j]   if j < len(highs)   else None,
+                "low":     lows[j]    if j < len(lows)    else None,
+                "close":   c_val,
+                "volume":  volumes[j] if j < len(volumes) else None,
+            })
+        return candles
+    except Exception as e:
+        log.warning(f"intraday fetch {symbol}: {e}")
+        return []
+
+# ============================================================
+# DB WRITERS
+# ============================================================
+
+def _upsert_cmp(cmp_map: Dict[str, float]):
+    """Upsert CMP for non-futures symbols. One row per symbol, always replaced."""
+    if not cmp_map:
+        return
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            for sym, price in cmp_map.items():
+                cur.execute("""
+                    INSERT INTO cmp_prices (symbol, cmp, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (symbol) DO UPDATE
+                    SET cmp = EXCLUDED.cmp, updated_at = NOW()
+                """, (sym, price))
+            conn.commit()
+        log.info(f"CMP upserted: {len(cmp_map)} symbols")
+    except Exception as e:
+        log.error(f"_upsert_cmp failed: {e}")
+
+def _insert_intraday(candles: List[dict]):
+    """Insert 5-min candles. Skip duplicates via ON CONFLICT DO NOTHING."""
+    if not candles:
+        return
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            for c in candles:
+                cur.execute("""
+                    INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume)
+                    VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s)
+                    ON CONFLICT (symbol, ts) DO NOTHING
+                """, c)
+            conn.commit()
+        log.info(f"Intraday inserted: {len(candles)} candles")
+    except Exception as e:
+        log.error(f"_insert_intraday failed: {e}")
+
+def _purge_intraday_old():
+    """Delete intraday_prices rows older than 15 days."""
+    cutoff = datetime.utcnow() + timedelta(hours=5, minutes=30) - timedelta(days=15)
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s", (cutoff,))
+            deleted = cur.rowcount
+            conn.commit()
+        if deleted:
+            log.info(f"Purged {deleted} intraday rows older than 15 days")
+    except Exception as e:
+        log.error(f"_purge_intraday_old failed: {e}")
+
+# ============================================================
+# SCHEDULER TASKS
+# ============================================================
+
+_intraday_fetched_today: Optional[date] = None  # guard: fetch once per day at EOD
+
+async def _task_refresh_cmp():
+    """Every 5 mins during market hours: refresh CMP for all non-futures stocks."""
+    futures_set = set(_get_futures_symbols())
+    all_symbols = _get_all_gvm_symbols()
+    non_futures = [s for s in all_symbols if s not in futures_set]
+    if not non_futures:
+        log.info("CMP refresh: no non-futures symbols found")
+        return
+    log.info(f"CMP refresh: fetching {len(non_futures)} non-futures symbols")
+    cmp_map = await _fetch_cmp_yahoo(non_futures)
+    _upsert_cmp(cmp_map)
+
+async def _task_fetch_intraday():
+    """
+    At 3:45 PM IST: fetch today's full 5-min history for all futures stocks.
+    Also purges rows older than 15 days.
+    """
+    global _intraday_fetched_today
+    today = _ist_now().date()
+    if _intraday_fetched_today == today:
+        return  # already done today
+    futures = _get_futures_symbols()
+    if not futures:
+        log.info("Intraday fetch: no futures symbols found")
+        return
+    log.info(f"Intraday fetch: {len(futures)} futures symbols for {today}")
+    total_candles = 0
+    for sym in futures:
+        candles = await _fetch_intraday_yahoo(sym)
+        if candles:
+            _insert_intraday(candles)
+            total_candles += len(candles)
+        await asyncio.sleep(0.2)  # polite rate limiting
+    _purge_intraday_old()
+    _intraday_fetched_today = today
+    log.info(f"Intraday fetch complete: {total_candles} candles across {len(futures)} symbols")
+
+async def _scheduler():
+    """
+    Background scheduler loop.
+    - Every 5 mins: check if market hours → refresh CMP
+    - Every 5 mins: check if EOD window (3:45-4:00 PM IST) → fetch intraday 5-min
+    """
+    log.info("Scheduler started")
+    while True:
+        try:
+            if _is_market_hours():
+                await _task_refresh_cmp()
+            if _is_eod_window():
+                await _task_fetch_intraday()
+        except Exception as e:
+            log.error(f"Scheduler error: {e}")
+        await asyncio.sleep(300)  # 5 minutes
+
 @app.on_event("startup")
 async def startup():
     create_tables()
+    asyncio.create_task(_scheduler())
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
 @app.get("/")
@@ -123,13 +394,15 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
 def health_feeds():
     out = []
     queries = [
-        ("gvm_scores", "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
-        ("raw_prices", "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
-        ("screener_raw", "SELECT NULL, COUNT(*) FROM screener_raw"),
-        ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
-        ("sector_ratings", "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
-        ("momentum_scores", "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
-        ("earnings_calendar", "SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
+        ("gvm_scores",       "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
+        ("raw_prices",       "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
+        ("screener_raw",     "SELECT NULL, COUNT(*) FROM screener_raw"),
+        ("input_raw",        "SELECT NULL, COUNT(*) FROM input_raw"),
+        ("sector_ratings",   "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
+        ("momentum_scores",  "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
+        ("earnings_calendar","SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
+        ("intraday_prices",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
+        ("cmp_prices",       "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -194,6 +467,69 @@ def get_momentum(symbol: str):
     r = api_query("SELECT * FROM momentum_scores WHERE symbol = %s", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} momentum not found")
     return r
+
+# ============================================================
+# INTRADAY + CMP READ ENDPOINTS
+# ============================================================
+
+@app.get("/api/intraday/{symbol}")
+def get_intraday(symbol: str, days: int = 1):
+    """
+    Return 5-min candles for a futures stock.
+    days=1 (default) = today only. Max 15.
+    """
+    days = min(max(days, 1), 15)
+    cutoff = _ist_now() - timedelta(days=days)
+    return api_query(
+        "SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices "
+        "WHERE symbol = %s AND ts >= %s ORDER BY ts ASC",
+        (symbol.upper(), cutoff)
+    )
+
+@app.get("/api/cmp/{symbol}")
+def get_cmp(symbol: str):
+    """Return latest CMP for a non-futures stock."""
+    r = api_query("SELECT symbol, cmp, updated_at FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
+    if not r: raise HTTPException(404, f"{symbol} CMP not found")
+    return r
+
+@app.get("/api/cmp")
+def get_all_cmp():
+    """Return all CMPs — useful for bulk price checks."""
+    return api_query("SELECT symbol, cmp, updated_at FROM cmp_prices ORDER BY symbol")
+
+@app.post("/api/admin/fetch_intraday_now")
+async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
+    """Manual trigger: fetch today's 5-min data for all futures stocks right now."""
+    _check_admin(x_admin_token)
+    global _intraday_fetched_today
+    _intraday_fetched_today = None  # reset guard so it runs
+    futures = _get_futures_symbols()
+    if not futures:
+        return {"status": "warn", "message": "No futures symbols found"}
+    total = 0
+    for sym in futures:
+        candles = await _fetch_intraday_yahoo(sym)
+        if candles:
+            _insert_intraday(candles)
+            total += len(candles)
+        await asyncio.sleep(0.2)
+    _purge_intraday_old()
+    _intraday_fetched_today = _ist_now().date()
+    return {"status": "ok", "symbols": len(futures), "candles": total}
+
+@app.post("/api/admin/refresh_cmp_now")
+async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
+    """Manual trigger: refresh CMP for all non-futures stocks right now."""
+    _check_admin(x_admin_token)
+    futures_set = set(_get_futures_symbols())
+    all_symbols = _get_all_gvm_symbols()
+    non_futures = [s for s in all_symbols if s not in futures_set]
+    if not non_futures:
+        return {"status": "warn", "message": "No non-futures symbols found"}
+    cmp_map = await _fetch_cmp_yahoo(non_futures)
+    _upsert_cmp(cmp_map)
+    return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(non_futures)}
 
 async def _drive_download(file_id: str) -> str:
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -418,7 +754,6 @@ SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
 SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
 
 def _parse_screener_date(s: str):
-    """Parse Screener date formats: '23 Mar 2026', '23 Mar', '23-03-2026', etc."""
     if not s: return None
     s = str(s).strip()
     if not s or s.lower() in ("nan", "none", "-", "n/a"): return None
@@ -440,7 +775,6 @@ def _parse_screener_date(s: str):
     return None
 
 async def _screener_login_session():
-    """Login to Screener.in. Reads env LIVE so set-after-deploy works."""
     email = os.getenv("SCREENER_EMAIL", "").strip()
     password = os.getenv("SCREENER_PASSWORD", "").strip()
     if not email or not password:
@@ -465,17 +799,8 @@ async def _screener_login_session():
         await client.aclose()
         raise HTTPException(500, "CSRF token not found on Screener login page")
     csrf_token = csrf_input.get("value")
-    login_data = {
-        "csrfmiddlewaretoken": csrf_token,
-        "username": email,
-        "password": password,
-        "next": "",
-    }
-    r = await client.post(
-        SCREENER_LOGIN_URL,
-        data=login_data,
-        headers={"Referer": SCREENER_LOGIN_URL},
-    )
+    login_data = {"csrfmiddlewaretoken": csrf_token, "username": email, "password": password, "next": ""}
+    r = await client.post(SCREENER_LOGIN_URL, data=login_data, headers={"Referer": SCREENER_LOGIN_URL})
     if "sessionid" not in client.cookies:
         await client.aclose()
         raise HTTPException(401, f"Screener login failed. Status: {r.status_code}. Check email/password.")
@@ -483,7 +808,6 @@ async def _screener_login_session():
     return client
 
 async def _scrape_upcoming_results(client: httpx.AsyncClient):
-    """Fetch /upcoming-results/ and parse the table."""
     r = await client.get(SCREENER_UPCOMING_URL)
     r.raise_for_status()
     html = r.text
@@ -504,18 +828,12 @@ async def _scrape_upcoming_results(client: httpx.AsyncClient):
             if df.empty or len(df.columns) < 2:
                 continue
             cols_lower = {str(c).strip().lower(): c for c in df.columns}
-            name_col = None
-            date_col = None
-            event_col = None
+            name_col = date_col = event_col = None
             for key, orig in cols_lower.items():
-                if name_col is None and ("name" in key or "company" in key):
-                    name_col = orig
-                if date_col is None and ("date" in key or "result" in key):
-                    date_col = orig
-                if event_col is None and ("type" in key or "purpose" in key or "agenda" in key):
-                    event_col = orig
-            if name_col is None or date_col is None:
-                continue
+                if name_col is None and ("name" in key or "company" in key): name_col = orig
+                if date_col is None and ("date" in key or "result" in key): date_col = orig
+                if event_col is None and ("type" in key or "purpose" in key or "agenda" in key): event_col = orig
+            if name_col is None or date_col is None: continue
             ticker_map = {}
             for tr in tbl.find_all("tr"):
                 a = tr.find("a", href=re.compile(r"/company/[^/]+/"))
@@ -535,13 +853,7 @@ async def _scrape_upcoming_results(client: httpx.AsyncClient):
                 ex_date = _parse_screener_date(str(row[date_col]))
                 event_type = str(row[event_col]).strip() if event_col else "Quarterly Result"
                 if event_type.lower() in ("nan", ""): event_type = "Quarterly Result"
-                rows_out.append({
-                    "company_name": name,
-                    "ticker": ticker,
-                    "ex_date": ex_date,
-                    "record_date": None,
-                    "event_type": event_type,
-                })
+                rows_out.append({"company_name": name, "ticker": ticker, "ex_date": ex_date, "record_date": None, "event_type": event_type})
     return rows_out
 
 @app.post("/api/admin/load_earnings_from_screener")
@@ -568,13 +880,7 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
             except Exception as e:
                 log.warning(f"row insert skipped ({r.get('ticker')}): {e}")
         conn.commit()
-    return {
-        "status": "ok",
-        "source": "screener.in/upcoming-results",
-        "rows_scraped": len(rows),
-        "rows_inserted": inserted,
-        "loaded_at": datetime.now().isoformat(),
-    }
+    return {"status": "ok", "source": "screener.in/upcoming-results", "rows_scraped": len(rows), "rows_inserted": inserted, "loaded_at": datetime.now().isoformat()}
 
 # GITHUB AUTO-DEPLOY
 GITHUB_API = "https://api.github.com"
@@ -739,6 +1045,10 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock. days param = 1-15.",
+     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.",
+     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "env_check", "description": "Diagnostic: which env vars are visible to the running container.",
@@ -749,7 +1059,7 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_earnings_from_screener", "description": "Scrape Screener.in /upcoming-results/ (auth required) and refresh earnings_calendar. Replaces V5 manual entry.",
+    {"name": "load_earnings_from_screener", "description": "Scrape Screener.in /upcoming-results/ and refresh earnings_calendar.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_signals", "description": "Query V5 signals.",
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "cap_type": {"type": "string"}, "verdict": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
@@ -788,6 +1098,13 @@ async def _call_tool(name, args):
             return r.json()
         elif name == "get_momentum":
             r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}")
+            return r.json()
+        elif name == "get_intraday":
+            days = args.get("days", 1)
+            r = await client.get(f"{BASE_URL}/api/intraday/{args['symbol']}", params={"days": days})
+            return r.json()
+        elif name == "get_cmp":
+            r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}")
             return r.json()
         elif name == "health_feeds":
             r = await client.get(f"{BASE_URL}/api/health/feeds")
