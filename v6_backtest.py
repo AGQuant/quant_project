@@ -7,18 +7,25 @@ Single-parameter sweep optimization to find best thresholds for paper trading.
 Forward return window: 5 trading days
 Optimization metric: composite = win_rate × avg_return
 
+AUTO-TRIGGER: On import, fires a background thread that runs the full optimization
+once if v6_backtest_results table is empty. Allows zero-touch trigger after deploy.
+
 NOTE: GVM filter held constant (no historical GVM snapshots). 
       Tests the 10 technical filters: dma_50, dma_200, rsi_month, rsi_weekly,
       month_return, week_return, year_return, sector_day, sector_week,
       month_index, range_1d.
 """
 
+import os
 import logging
 import json as _json
+import threading
+import time as _time
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, List, Tuple
 import pandas as pd
 import numpy as np
+import psycopg
 
 log = logging.getLogger("scorr.v6backtest")
 
@@ -39,9 +46,8 @@ TOP_50_F_O = [
 ]
 
 FORWARD_DAYS = 5
-MIN_SIGNALS_FOR_VALID = 5  # need at least 5 signals to consider a filter combo
+MIN_SIGNALS_FOR_VALID = 5
 
-# Default V6 thresholds (replicating V5 sheet exactly, GVM swapped for Finkhoz, RSI 6/8)
 V6_BASELINE_FILTERS = {
     "Buy_Reversal": {
         "year_return":  (0, None),
@@ -57,17 +63,17 @@ V6_BASELINE_FILTERS = {
         "range_1d":     (0.5, 2),
     },
     "Buy_Momentum": {
-        "year_return":  (0, None),     # V5 sheet: Positive (not 10+)
-        "dma_200":      (10, 50),      # V5: 10-50
-        "dma_50":       (5, 25),       # V5: 5-25
+        "year_return":  (0, None),
+        "dma_200":      (10, 50),
+        "dma_50":       (5, 25),
         "rsi_month":    (55, 80),
         "rsi_weekly":   (55, 80),
         "month_return": (3, 15),
-        "week_return":  (1, 7),        # V5: 1-7
-        "sector_week":  (0, 5),        # V5: 0-5
-        "sector_day":   (0, 3),        # V5: 0-3
-        "month_index":  (50, 100),     # V5: 50-100
-        "range_1d":     (1, 5),        # V5: 1-5
+        "week_return":  (1, 7),
+        "sector_week":  (0, 5),
+        "sector_day":   (0, 3),
+        "month_index":  (50, 100),
+        "range_1d":     (1, 5),
     },
     "Sell_Reversal": {
         "month_index":  (0, 50),
@@ -95,54 +101,33 @@ V6_BASELINE_FILTERS = {
     },
 }
 
-
-# ============================================================
-# SCHEMA
-# ============================================================
-
 V6_BACKTEST_SCHEMA = """
 CREATE TABLE IF NOT EXISTS v6_backtest_metrics (
     id SERIAL PRIMARY KEY,
     symbol TEXT NOT NULL,
     score_date DATE NOT NULL,
-    dma_50 NUMERIC,
-    dma_200 NUMERIC,
-    rsi_month NUMERIC,
-    rsi_weekly NUMERIC,
-    month_return NUMERIC,
-    week_return NUMERIC,
-    year_return NUMERIC,
-    sector_day NUMERIC,
-    sector_week NUMERIC,
-    month_index NUMERIC,
-    range_1d NUMERIC,
-    close NUMERIC,
-    forward_return_5d NUMERIC,
+    dma_50 NUMERIC, dma_200 NUMERIC,
+    rsi_month NUMERIC, rsi_weekly NUMERIC,
+    month_return NUMERIC, week_return NUMERIC, year_return NUMERIC,
+    sector_day NUMERIC, sector_week NUMERIC,
+    month_index NUMERIC, range_1d NUMERIC,
+    close NUMERIC, forward_return_5d NUMERIC,
     UNIQUE(symbol, score_date)
 );
 CREATE INDEX IF NOT EXISTS idx_v6bt_date ON v6_backtest_metrics(score_date);
 
 CREATE TABLE IF NOT EXISTS v6_backtest_results (
     id SERIAL PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    signal_type TEXT NOT NULL,
-    variant_label TEXT NOT NULL,
-    filter_config JSONB,
-    num_signals INT,
-    win_rate NUMERIC,
-    avg_return NUMERIC,
-    composite_score NUMERIC,
+    run_id TEXT NOT NULL, signal_type TEXT NOT NULL,
+    variant_label TEXT NOT NULL, filter_config JSONB,
+    num_signals INT, win_rate NUMERIC, avg_return NUMERIC, composite_score NUMERIC,
     created_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_v6bt_run ON v6_backtest_results(run_id, signal_type);
 """
 
 
-# ============================================================
-# METRIC COMPUTATION (date-aware, no GVM)
-# ============================================================
-
-def _wilder_rsi(closes: pd.Series, period: int) -> Optional[float]:
+def _wilder_rsi(closes, period):
     if len(closes) < period + 1:
         return None
     delta = closes.diff()
@@ -162,13 +147,7 @@ def _safe_pct(num, denom):
     return float((num / denom - 1) * 100)
 
 
-def compute_backtest_metrics(conn, symbol: str, target_date: date,
-                              all_top50_closes: Dict[str, pd.DataFrame] = None) -> Dict:
-    """
-    Compute 10 technical metrics for a symbol as of target_date.
-    Uses ONLY data available up to and including target_date (no look-ahead).
-    Sector calc uses pre-fetched all_top50_closes dict to avoid N+1 queries.
-    """
+def compute_backtest_metrics(conn, symbol, target_date, all_top50_closes=None):
     out = {
         "symbol": symbol, "score_date": target_date,
         "dma_50": None, "dma_200": None, "rsi_month": None, "rsi_weekly": None,
@@ -177,7 +156,6 @@ def compute_backtest_metrics(conn, symbol: str, target_date: date,
         "range_1d": None, "close": None, "forward_return_5d": None,
     }
 
-    # Get this symbol's price history up to target_date
     with conn.cursor() as cur:
         cur.execute("""
             SELECT price_date, close, high, low, open FROM raw_prices
@@ -195,13 +173,11 @@ def compute_backtest_metrics(conn, symbol: str, target_date: date,
     latest_close = float(df["close"].iloc[-1])
     out["close"] = latest_close
 
-    # DMA
     if len(df) >= 50:
         out["dma_50"] = _safe_pct(latest_close, df["close"].tail(50).mean())
     if len(df) >= 200:
         out["dma_200"] = _safe_pct(latest_close, df["close"].tail(200).mean())
 
-    # Returns
     if len(df) >= 252:
         out["year_return"] = _safe_pct(latest_close, float(df["close"].iloc[-252]))
     if len(df) >= 21:
@@ -209,14 +185,12 @@ def compute_backtest_metrics(conn, symbol: str, target_date: date,
     if len(df) >= 5:
         out["week_return"] = _safe_pct(latest_close, float(df["close"].iloc[-5]))
 
-    # RSI (Month=6, Weekly=8)
     df_idx = df.set_index(pd.to_datetime(df["date"]))
     monthly = df_idx["close"].resample("M").last().dropna()
     weekly  = df_idx["close"].resample("W").last().dropna()
     out["rsi_month"]  = _wilder_rsi(monthly, period=6)
     out["rsi_weekly"] = _wilder_rsi(weekly,  period=8)
 
-    # Month index (range position over last 21 days)
     if len(df) >= 21:
         recent = df.tail(21)
         m_hi = float(recent["high"].max())
@@ -224,39 +198,27 @@ def compute_backtest_metrics(conn, symbol: str, target_date: date,
         if m_hi > m_lo:
             out["month_index"] = (latest_close - m_lo) / (m_hi - m_lo) * 100
 
-    # 1D Range from daily candle (proxy when intraday unavailable)
     today_row = df.iloc[-1]
-    o = float(today_row["open"])
-    h = float(today_row["high"])
-    l = float(today_row["low"])
-    c = float(today_row["close"])
+    o = float(today_row["open"]); h = float(today_row["high"])
+    l = float(today_row["low"]);  c = float(today_row["close"])
     if o > 0:
         signed = ((h - l) / o * 100) * (1 if c >= o else -1)
         out["range_1d"] = signed
 
-    # Sector returns from pre-fetched top50 dict
     if all_top50_closes:
         sec_day_rets, sec_week_rets = [], []
         for other_sym, other_df in all_top50_closes.items():
-            if other_sym == symbol:
-                continue
-            # Filter to target_date
+            if other_sym == symbol: continue
             sub = other_df[other_df["date"] <= target_date]
-            if len(sub) < 6:
-                continue
+            if len(sub) < 6: continue
             cl_now = float(sub["close"].iloc[-1])
             cl_1d  = float(sub["close"].iloc[-2]) if len(sub) >= 2 else None
             cl_5d  = float(sub["close"].iloc[-6]) if len(sub) >= 6 else None
-            if cl_1d:
-                sec_day_rets.append((cl_now / cl_1d - 1) * 100)
-            if cl_5d:
-                sec_week_rets.append((cl_now / cl_5d - 1) * 100)
-        if sec_day_rets:
-            out["sector_day"] = float(np.mean(sec_day_rets))
-        if sec_week_rets:
-            out["sector_week"] = float(np.mean(sec_week_rets))
+            if cl_1d: sec_day_rets.append((cl_now / cl_1d - 1) * 100)
+            if cl_5d: sec_week_rets.append((cl_now / cl_5d - 1) * 100)
+        if sec_day_rets: out["sector_day"] = float(np.mean(sec_day_rets))
+        if sec_week_rets: out["sector_week"] = float(np.mean(sec_week_rets))
 
-    # Forward 5-day return (used later, requires future data)
     with conn.cursor() as cur:
         cur.execute("""
             SELECT close FROM raw_prices
@@ -271,8 +233,7 @@ def compute_backtest_metrics(conn, symbol: str, target_date: date,
     return out
 
 
-def fetch_top50_close_history(conn, target_date: date) -> Dict[str, pd.DataFrame]:
-    """Pre-fetch all top 50 close histories up to target_date for sector calc."""
+def fetch_top50_close_history(conn, target_date):
     out = {}
     with conn.cursor() as cur:
         cur.execute("""
@@ -289,7 +250,7 @@ def fetch_top50_close_history(conn, target_date: date) -> Dict[str, pd.DataFrame
     return {s: pd.DataFrame(d) for s, d in out.items()}
 
 
-def store_backtest_metric(conn, m: Dict):
+def store_backtest_metric(conn, m):
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO v6_backtest_metrics
@@ -312,10 +273,8 @@ def store_backtest_metric(conn, m: Dict):
         conn.commit()
 
 
-def backfill_backtest_metrics(conn, start_date: date, end_date: date) -> Dict:
-    """Compute metrics for top 50 stocks across date range. Stores in v6_backtest_metrics."""
+def backfill_backtest_metrics(conn, start_date, end_date):
     log.info(f"Backtest backfill: {start_date} → {end_date}")
-    # Get all trading dates in range from raw_prices
     with conn.cursor() as cur:
         cur.execute("""
             SELECT DISTINCT price_date FROM raw_prices
@@ -325,30 +284,20 @@ def backfill_backtest_metrics(conn, start_date: date, end_date: date) -> Dict:
         dates = [r[0] for r in cur.fetchall()]
 
     total = 0
-    for d in dates:
-        # Pre-fetch top50 close history once per date
+    for i, d in enumerate(dates):
         top50_hist = fetch_top50_close_history(conn, d)
         for sym in TOP_50_F_O:
             m = compute_backtest_metrics(conn, sym, d, all_top50_closes=top50_hist)
             if m["close"] is not None:
                 store_backtest_metric(conn, m)
                 total += 1
+        if (i + 1) % 10 == 0:
+            log.info(f"Backfill progress: {i+1}/{len(dates)} dates, {total} metrics")
     log.info(f"Backfill done: {total} metric rows across {len(dates)} dates")
     return {"dates": len(dates), "metric_rows": total}
 
 
-# ============================================================
-# EVALUATOR + OPTIMIZER
-# ============================================================
-
-def evaluate_filter_set(conn, signal_type: str, filters: Dict[str, Tuple],
-                         start_date: date, end_date: date) -> Dict:
-    """
-    Apply filter set to stored backtest metrics. 
-    Return win_rate, avg_return, composite_score for forward 5d returns.
-    For Sell signals, profit = price drop, so invert returns.
-    """
-    # Build SQL WHERE clause from filters
+def evaluate_filter_set(conn, signal_type, filters, start_date, end_date):
     where_clauses = ["score_date >= %s", "score_date <= %s", "forward_return_5d IS NOT NULL"]
     params = [start_date, end_date]
     for metric, (mn, mx) in filters.items():
@@ -371,7 +320,6 @@ def evaluate_filter_set(conn, signal_type: str, filters: Dict[str, Tuple],
         return {"num_signals": len(rets), "win_rate": None, "avg_return": None, "composite_score": None}
 
     arr = np.array(rets)
-    # For Sell signals, invert: profit = price drops
     if signal_type.startswith("Sell"):
         arr = -arr
 
@@ -387,16 +335,10 @@ def evaluate_filter_set(conn, signal_type: str, filters: Dict[str, Tuple],
     }
 
 
-def sweep_single_metric(conn, signal_type: str, base_filters: Dict,
-                         metric: str, start_date: date, end_date: date) -> List[Dict]:
-    """
-    Try ±10%, ±20%, ±30% variations on a single metric's min and max.
-    Return results for each variation.
-    """
+def sweep_single_metric(conn, signal_type, base_filters, metric, start_date, end_date):
     results = []
     current_mn, current_mx = base_filters.get(metric, (None, None))
 
-    # Generate variations
     variations = []
     if current_mn is not None:
         for pct in (-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3):
@@ -407,7 +349,6 @@ def sweep_single_metric(conn, signal_type: str, base_filters: Dict,
             new_mx = current_mx * (1 + pct) if current_mx != 0 else current_mx + pct * 5
             variations.append((current_mn, round(new_mx, 2), f"max={round(new_mx,2)}"))
 
-    # Always include baseline
     variations.insert(0, (current_mn, current_mx, "baseline"))
 
     for new_mn, new_mx, label in variations:
@@ -421,34 +362,25 @@ def sweep_single_metric(conn, signal_type: str, base_filters: Dict,
     return results
 
 
-def optimize_signal_type(conn, signal_type: str, start_date: date, end_date: date,
-                         run_id: str) -> Dict:
-    """
-    Iteratively optimize each metric one at a time. Keep winning value, move to next.
-    Returns final best filter set + per-metric history.
-    """
+def optimize_signal_type(conn, signal_type, start_date, end_date, run_id):
     base = dict(V6_BASELINE_FILTERS[signal_type])
-    log.info(f"Optimizing {signal_type} from baseline: {base}")
+    log.info(f"Optimizing {signal_type} from baseline")
 
     history = {}
     for metric in list(base.keys()):
         sweep = sweep_single_metric(conn, signal_type, base, metric, start_date, end_date)
-        # Pick variation with highest composite_score AND >= MIN_SIGNALS
         valid = [s for s in sweep if s.get("composite_score") is not None]
         if not valid:
             continue
         best = max(valid, key=lambda x: x["composite_score"])
         if best["variant_label"] != "baseline":
-            # Update base with winning value
             new_mn, new_mx = list(best["filter_config"].values())[0]
             base[metric] = (new_mn, new_mx)
         history[metric] = {
             "best_label": best["variant_label"],
             "best_composite": best["composite_score"],
             "best_signals": best["num_signals"],
-            "all_variants": sweep,
         }
-        # Store result row
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO v6_backtest_results
@@ -461,7 +393,6 @@ def optimize_signal_type(conn, signal_type: str, start_date: date, end_date: dat
                   best["avg_return"], best["composite_score"]))
             conn.commit()
 
-    # Final baseline run
     final = evaluate_filter_set(conn, signal_type, base, start_date, end_date)
     return {
         "signal_type": signal_type,
@@ -471,13 +402,11 @@ def optimize_signal_type(conn, signal_type: str, start_date: date, end_date: dat
     }
 
 
-def run_full_optimization(conn) -> Dict:
-    """Main entry: backfill metrics (if needed) + optimize all 4 signal types."""
-    end_date = date.today() - timedelta(days=FORWARD_DAYS + 1)  # leave 5d forward buffer
-    start_date = end_date - timedelta(days=180)  # 6 months
+def run_full_optimization(conn):
+    end_date = date.today() - timedelta(days=FORWARD_DAYS + 1)
+    start_date = end_date - timedelta(days=180)
     run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S")
 
-    # Check if backfill needed
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(DISTINCT score_date) FROM v6_backtest_metrics WHERE score_date >= %s", (start_date,))
         existing_dates = cur.fetchone()[0]
@@ -486,11 +415,40 @@ def run_full_optimization(conn) -> Dict:
         log.info(f"Backfilling metrics (existing dates: {existing_dates})")
         backfill_backtest_metrics(conn, start_date, end_date)
 
-    # Optimize each signal type
-    results = {"run_id": run_id, "date_range": [str(start_date), str(end_date)],
-               "signals": {}}
+    results = {"run_id": run_id, "date_range": [str(start_date), str(end_date)], "signals": {}}
     for sig in ["Buy_Reversal", "Buy_Momentum", "Sell_Reversal", "Sell_Momentum"]:
         log.info(f"Optimizing {sig}...")
         results["signals"][sig] = optimize_signal_type(conn, sig, start_date, end_date, run_id)
 
     return results
+
+
+# ============================================================
+# AUTO-TRIGGER (fires on module import via background thread)
+# ============================================================
+
+def _auto_trigger_if_empty():
+    """Background thread: waits 30 sec, then runs backtest if results table empty."""
+    _time.sleep(30)
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        log.warning("Auto-trigger: DATABASE_URL not set, skipping")
+        return
+    try:
+        # Check if already run
+        with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM v6_backtest_results")
+            count = cur.fetchone()[0]
+        if count > 0:
+            log.info(f"Auto-trigger: {count} results exist, skipping")
+            return
+        log.info("Auto-trigger: starting V6 backtest in background")
+        with psycopg.connect(db_url) as conn:
+            result = run_full_optimization(conn)
+        log.info(f"Auto-trigger: V6 backtest complete - run_id={result.get('run_id')}")
+    except Exception as e:
+        log.error(f"Auto-trigger failed: {e}")
+
+
+# Fire background thread on module import
+threading.Thread(target=_auto_trigger_if_empty, daemon=True).start()
