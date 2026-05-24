@@ -11,6 +11,7 @@ import subprocess
 import json
 import uuid
 import httpx
+import io
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -198,11 +199,213 @@ async def issue_token(request: Request):
 
 
 # ============================================
+# ADMIN ENDPOINTS — Drive-to-DB loaders
+# ============================================
+
+def _drive_download(file_id: str) -> bytes:
+    """Download a public Google Drive file by ID."""
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    with httpx.Client(follow_redirects=True, timeout=120) as client:
+        r = client.get(url)
+        if r.status_code != 200:
+            raise Exception(f"Drive fetch failed: HTTP {r.status_code}")
+        return r.content
+
+
+@app.post("/api/admin/load_input_from_drive")
+async def load_input_from_drive(request: Request):
+    """
+    POST {"file_id": "1JVroa-OUM1mKBXcEjlzjrI0AJhsZ2lTo"}
+    Loads input.csv from Drive into input_raw table.
+    Requires file to be 'Anyone with link - Viewer'.
+    """
+    try:
+        import pandas as pd
+        body = await request.json()
+        file_id = body.get("file_id", "")
+        if not file_id:
+            return {"error": "file_id required"}
+
+        content = _drive_download(file_id)
+        df = pd.read_csv(io.BytesIO(content), dtype=str)
+
+        # Clean
+        df = df[df['NSE Code'].notna()].copy()
+        df['NSE Code'] = df['NSE Code'].astype(str).str.strip()
+        df = df[~df['NSE Code'].isin(['', 'nan'])]
+        df = df.drop_duplicates(subset='NSE Code', keep='first').reset_index(drop=True)
+
+        def clean(v):
+            if v is None or (isinstance(v, float) and pd.isna(v)): return None
+            s = str(v).strip()
+            return s if s and s.lower() != 'nan' else None
+
+        def num(v):
+            try:
+                if v is None or pd.isna(v): return None
+                return float(v)
+            except (ValueError, TypeError): return None
+
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("""CREATE TABLE IF NOT EXISTS input_raw (
+            id SERIAL PRIMARY KEY,
+            nse_code TEXT, company_name TEXT, bse_code TEXT, cmot_code TEXT,
+            market_cap NUMERIC, overview TEXT, key_takeaway TEXT,
+            gvm_segment TEXT, fy27_growth NUMERIC, finkhoz_rating NUMERIC,
+            loaded_at TIMESTAMP DEFAULT NOW()
+        )""")
+        cur.execute("DELETE FROM input_raw")
+
+        inserted = 0
+        for _, row in df.iterrows():
+            cur.execute("""
+                INSERT INTO input_raw (nse_code, company_name, bse_code, cmot_code, market_cap, overview, key_takeaway, gvm_segment, fy27_growth, finkhoz_rating)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                clean(row.get('NSE Code')), clean(row.get('Name')),
+                clean(row.get('BSE Code')), clean(row.get('CMOT Code')),
+                num(row.get('Market Capitalization')),
+                clean(row.get('Overview')), clean(row.get('Key Takeways')),
+                clean(row.get('Segment')),
+                num(row.get('FY27 EPS Est.')), num(row.get('Finkhoz Rating'))
+            ))
+            inserted += 1
+
+        conn.commit()
+        cur.close(); conn.close()
+        return {"status": "ok", "rows_loaded": inserted, "table": "input_raw"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/admin/load_screener_from_drive")
+async def load_screener_from_drive(request: Request):
+    """
+    POST {"file_id": "1KyKcNww_yne1RXs9MQ9dijBRiW-IJVU4"}
+    Loads screener.csv from Drive into screener_raw table.
+    """
+    try:
+        import pandas as pd
+        body = await request.json()
+        file_id = body.get("file_id", "")
+        if not file_id:
+            return {"error": "file_id required"}
+
+        content = _drive_download(file_id)
+        df = pd.read_csv(io.BytesIO(content), dtype=str)
+
+        # Use the same column mapping as screener_loader.py
+        SCREENER_COLUMNS = {
+            "Current Price": "price",
+            "Sales growth 5Years": "sales_growth_5y",
+            "Sales growth 3Years": "sales_growth_3y",
+            "Profit growth 5Years": "profit_growth_5y",
+            "Profit growth 3Years": "profit_growth_3y",
+            "YOY Quarterly sales growth": "qoq_sales_growth",
+            "YOY Quarterly profit growth": "qoq_profit_growth",
+            "OPM": "opm",
+            "OPM latest quarter": "opm_latest_q",
+            "OPM preceding year quarter": "opm_prev_year_q",
+            "Fixed Asset Growth": "fixed_asset_growth",
+            "FII holding": "fii_holding",
+            "DII holding": "dii_holding",
+            "Change in FII holding": "fii_change",
+            "Change in DII holding": "dii_change",
+            "Return on capital employed": "roce",
+            "Interest Coverage Ratio": "interest_coverage",
+            "Dividend yield": "dividend_yield",
+            "Price to Earning": "pe",
+            "Historical PE 10Years": "historical_pe",
+            "Industry PE": "segment_pe",
+            "Return over 1year": "return_1y",
+            "Return over 3years": "return_3y",
+            "DMA 50": "dma_50",
+            "DMA 200": "dma_200",
+            "52w Index": "return_52w_vs_index",
+            "Market Capitalization": "market_cap",
+            "Industry Group": "industry_group",
+        }
+
+        df = df.rename(columns={"NSE Code": "nse_code", "Name": "company_name"})
+        df = df.rename(columns=SCREENER_COLUMNS)
+
+        df = df[df['nse_code'].notna()].copy()
+        df['nse_code'] = df['nse_code'].astype(str).str.strip()
+        df = df[~df['nse_code'].isin(['', 'nan'])]
+        df = df.drop_duplicates(subset='nse_code', keep='first').reset_index(drop=True)
+
+        TEXT_COLS = {"nse_code", "company_name", "industry_group", "Industry", "ISIN Code", "BSE Code"}
+
+        for c in df.columns:
+            if c not in TEXT_COLS:
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+
+        for c in TEXT_COLS:
+            if c in df.columns:
+                df[c] = df[c].astype(str).replace({"nan": None, "None": None, "": None})
+
+        def pg_type(col):
+            return "TEXT" if col in TEXT_COLS else "NUMERIC"
+
+        cols_def = ",\n  ".join(f'"{c}" {pg_type(c)}' for c in df.columns)
+
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS screener_raw")
+        cur.execute(f"""CREATE TABLE screener_raw (
+            id SERIAL PRIMARY KEY,
+            {cols_def},
+            loaded_at TIMESTAMP DEFAULT NOW()
+        )""")
+        conn.commit()
+
+        cols = list(df.columns)
+        placeholders = ", ".join(["%s"] * len(cols))
+        col_names = ", ".join([f'"{c}"' for c in cols])
+        insert_sql = f"INSERT INTO screener_raw ({col_names}) VALUES ({placeholders})"
+
+        inserted = 0
+        batch = []
+        for _, row in df.iterrows():
+            vals = []
+            for c in cols:
+                v = row[c]
+                try:
+                    if v is None:
+                        vals.append(None)
+                    elif c in TEXT_COLS:
+                        s = str(v).strip()
+                        vals.append(s if s and s.lower() != "nan" else None)
+                    elif pd.isna(v):
+                        vals.append(None)
+                    else:
+                        vals.append(float(v))
+                except (ValueError, TypeError):
+                    vals.append(None)
+            batch.append(vals)
+            if len(batch) == 100:
+                cur.executemany(insert_sql, batch)
+                conn.commit()
+                inserted += len(batch)
+                batch = []
+        if batch:
+            cur.executemany(insert_sql, batch)
+            conn.commit()
+            inserted += len(batch)
+
+        cur.close(); conn.close()
+        return {"status": "ok", "rows_loaded": inserted, "table": "screener_raw"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================
 # MCP TOOL CALLER — calls our own REST APIs
 # ============================================
 
 async def _call_tool(name: str, args: dict) -> dict:
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         if name == "get_gvm":
             r = await client.get(f"{BASE_URL}/api/gvm/{args.get('symbol', '')}")
             return r.json()
@@ -248,6 +451,18 @@ async def _call_tool(name: str, args: dict) -> dict:
                         }
             except Exception as e:
                 return {"error": str(e)}
+        elif name == "load_input_from_drive":
+            file_id = args.get("file_id", "")
+            if not file_id:
+                return {"error": "file_id required"}
+            r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": file_id})
+            return r.json()
+        elif name == "load_screener_from_drive":
+            file_id = args.get("file_id", "")
+            if not file_id:
+                return {"error": "file_id required"}
+            r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": file_id})
+            return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 
@@ -313,6 +528,28 @@ MCP_TOOLS = [
                 "params": {"type": "array", "description": "Query parameters (optional)", "default": []}
             },
             "required": ["query"]
+        }
+    },
+    {
+        "name": "load_input_from_drive",
+        "description": "Reload input_raw table from a Google Drive file (must be Anyone-with-link-Viewer). Pass file_id from Drive URL.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "Google Drive file ID"}
+            },
+            "required": ["file_id"]
+        }
+    },
+    {
+        "name": "load_screener_from_drive",
+        "description": "Reload screener_raw table from a Google Drive file (must be Anyone-with-link-Viewer). Pass file_id from Drive URL.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "Google Drive file ID"}
+            },
+            "required": ["file_id"]
         }
     }
 ]
