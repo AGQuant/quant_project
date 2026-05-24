@@ -20,14 +20,20 @@ import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
 
+# V5 filter engine — separate module
+from v5_engine import (
+    V5_SCHEMA_SQL, seed_default_filters, run_v5_engine,
+    compute_metrics_for_symbol, load_filters, store_metrics
+)
+
 # ============================================================
-# Scorr / Project Quant — main.py v1.3.0
-# v1.3.0: backfill_intraday added to MCP_TOOLS + _call_tool
-# v1.2.9: backfill_intraday HTTP endpoint + range param
+# Scorr / Project Quant — main.py v1.4.0
+# v1.4.0: V5 engine integrated — filter computation + AND-gate evaluator
+# v1.3.0: backfill_intraday MCP tool
 # v1.2.8: intraday_prices + cmp_prices + scheduler
 # ============================================================
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -100,12 +106,15 @@ def create_tables():
         cmp NUMERIC,
         updated_at TIMESTAMP DEFAULT NOW()
     );
-    """
+    """ + V5_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
         log.info("Tables ready")
+        # Seed V5 default filters (idempotent)
+        with get_conn() as conn:
+            seed_default_filters(conn)
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -209,8 +218,7 @@ async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict
         return []
 
 def _upsert_cmp(cmp_map: Dict[str, float]):
-    if not cmp_map:
-        return
+    if not cmp_map: return
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for sym, price in cmp_map.items():
@@ -226,8 +234,7 @@ def _upsert_cmp(cmp_map: Dict[str, float]):
         log.error(f"_upsert_cmp failed: {e}")
 
 def _insert_intraday(candles: List[dict]):
-    if not candles:
-        return
+    if not candles: return
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for c in candles:
@@ -258,21 +265,16 @@ async def _task_refresh_cmp():
     futures_set = set(_get_futures_symbols())
     all_symbols = _get_all_gvm_symbols()
     non_futures = [s for s in all_symbols if s not in futures_set]
-    if not non_futures:
-        return
-    log.info(f"CMP refresh: {len(non_futures)} symbols")
+    if not non_futures: return
     cmp_map = await _fetch_cmp_yahoo(non_futures)
     _upsert_cmp(cmp_map)
 
 async def _task_fetch_intraday():
     global _intraday_fetched_today
     today = _ist_now().date()
-    if _intraday_fetched_today == today:
-        return
+    if _intraday_fetched_today == today: return
     futures = _get_futures_symbols()
-    if not futures:
-        return
-    log.info(f"Intraday EOD fetch: {len(futures)} symbols")
+    if not futures: return
     total = 0
     for sym in futures:
         candles = await _fetch_intraday_yahoo(sym, range_str="1d")
@@ -288,10 +290,8 @@ async def _scheduler():
     log.info("Scheduler started")
     while True:
         try:
-            if _is_market_hours():
-                await _task_refresh_cmp()
-            if _is_eod_window():
-                await _task_fetch_intraday()
+            if _is_market_hours(): await _task_refresh_cmp()
+            if _is_eod_window(): await _task_fetch_intraday()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -316,12 +316,9 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
     keys = sorted(os.environ.keys())
     interesting = ["SCREENER_EMAIL", "SCREENER_PASSWORD", "GITHUB_TOKEN", "GITHUB_REPO",
                    "ADMIN_TOKEN", "DATABASE_URL", "DEPLOY_GUARD", "RAILWAY_PUBLIC_DOMAIN"]
-    return {
-        "version": VERSION,
-        "all_keys_count": len(keys),
-        "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting},
-        "screener_match_keys": [k for k in keys if "SCREEN" in k.upper()],
-    }
+    return {"version": VERSION, "all_keys_count": len(keys),
+            "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting},
+            "screener_match_keys": [k for k in keys if "SCREEN" in k.upper()]}
 
 @app.get("/api/health/feeds")
 def health_feeds():
@@ -336,6 +333,8 @@ def health_feeds():
         ("earnings_calendar","SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
         ("intraday_prices",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
         ("cmp_prices",       "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
+        ("v5_metrics",       "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v5_metrics"),
+        ("v5_qualified",     "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -405,11 +404,7 @@ def get_momentum(symbol: str):
 def get_intraday(symbol: str, days: int = 1):
     days = min(max(days, 1), 15)
     cutoff = _ist_now() - timedelta(days=days)
-    return api_query(
-        "SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices "
-        "WHERE symbol = %s AND ts >= %s ORDER BY ts ASC",
-        (symbol.upper(), cutoff)
-    )
+    return api_query("SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices WHERE symbol = %s AND ts >= %s ORDER BY ts ASC", (symbol.upper(), cutoff))
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
@@ -421,13 +416,74 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at FROM cmp_prices ORDER BY symbol")
 
+# ============================================================
+# V5 ENGINE ENDPOINTS
+# ============================================================
+
+@app.post("/api/v5/run")
+async def v5_run(x_admin_token: Optional[str] = Header(None)):
+    """Run V5 engine: compute metrics + AND-gate for all 290 futures stocks."""
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        results = run_v5_engine(conn)
+    return results
+
+@app.get("/api/v5/qualified")
+def v5_qualified(signal_type: Optional[str] = None, score_date: Optional[str] = None):
+    """Get qualified stocks. Filter by signal_type and/or score_date (YYYY-MM-DD)."""
+    if not score_date:
+        score_date = str(date.today())
+    if signal_type:
+        return api_query(
+            "SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified "
+            "WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC",
+            (signal_type, score_date))
+    return api_query(
+        "SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified "
+        "WHERE score_date = %s ORDER BY signal_type, gvm_score DESC",
+        (score_date,))
+
+@app.get("/api/v5/metrics/{symbol}")
+def v5_metrics(symbol: str, score_date: Optional[str] = None):
+    """Get computed metrics for a stock."""
+    if not score_date:
+        score_date = str(date.today())
+    r = api_query(
+        "SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s",
+        (symbol.upper(), score_date), single=True)
+    if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
+    return r
+
+@app.get("/api/v5/filters")
+def v5_filters():
+    """Get current filter thresholds."""
+    return api_query("SELECT signal_type, metric, min_val, max_val, updated_at FROM v5_filters ORDER BY signal_type, metric")
+
+@app.post("/api/v5/filter/update")
+async def v5_filter_update(req: Request, x_admin_token: Optional[str] = Header(None)):
+    """Update one filter threshold. Body: {signal_type, metric, min_val, max_val}."""
+    _check_admin(x_admin_token)
+    body = await req.json()
+    sig = body.get("signal_type")
+    metric = body.get("metric")
+    mn = body.get("min_val")
+    mx = body.get("max_val")
+    if not sig or not metric: raise HTTPException(400, "signal_type and metric required")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO v5_filters (signal_type, metric, min_val, max_val)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (signal_type, metric) DO UPDATE
+            SET min_val = EXCLUDED.min_val, max_val = EXCLUDED.max_val, updated_at = NOW()
+        """, (sig, metric, mn, mx))
+        conn.commit()
+    return {"status": "ok", "signal_type": sig, "metric": metric, "min_val": mn, "max_val": mx}
+
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
-    """Fetch 15 days of 5-min history for all futures stocks. Safe to re-run."""
     _check_admin(x_admin_token)
     futures = _get_futures_symbols()
-    if not futures:
-        return {"status": "warn", "message": "No futures symbols found"}
+    if not futures: return {"status": "warn", "message": "No futures symbols found"}
     log.info(f"Backfill started: {len(futures)} symbols, range=15d")
     total_candles = 0
     failed = []
@@ -440,14 +496,8 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
             failed.append(sym)
         await asyncio.sleep(0.25)
     _purge_intraday_old()
-    log.info(f"Backfill complete: {total_candles} candles, {len(failed)} failed")
-    return {
-        "status": "ok",
-        "symbols_attempted": len(futures),
-        "symbols_failed": len(failed),
-        "failed_symbols": failed[:20],
-        "total_candles": total_candles,
-    }
+    return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed),
+            "failed_symbols": failed[:20], "total_candles": total_candles}
 
 @app.post("/api/admin/fetch_intraday_now")
 async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
@@ -455,8 +505,7 @@ async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
     global _intraday_fetched_today
     _intraday_fetched_today = None
     futures = _get_futures_symbols()
-    if not futures:
-        return {"status": "warn", "message": "No futures symbols found"}
+    if not futures: return {"status": "warn", "message": "No futures symbols found"}
     total = 0
     for sym in futures:
         candles = await _fetch_intraday_yahoo(sym, range_str="1d")
@@ -474,8 +523,7 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
     futures_set = set(_get_futures_symbols())
     all_symbols = _get_all_gvm_symbols()
     non_futures = [s for s in all_symbols if s not in futures_set]
-    if not non_futures:
-        return {"status": "warn", "message": "No non-futures symbols found"}
+    if not non_futures: return {"status": "warn", "message": "No non-futures symbols found"}
     cmp_map = await _fetch_cmp_yahoo(non_futures)
     _upsert_cmp(cmp_map)
     return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(non_futures)}
@@ -517,183 +565,7 @@ async def load_screener(req: Request):
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
 
-def _v5_clean(v):
-    if v is None: return ""
-    s = str(v).strip()
-    if s.lower() in ("nan", "none", "null", "#n/a", "#ref!"): return ""
-    return s
-
-def _v5_num(v):
-    s = _v5_clean(v)
-    if not s: return None
-    s = s.replace(",", "").replace("%", "").replace("₹", "").strip()
-    try: return float(s)
-    except: return None
-
-def _find_header(df, must_have_cols):
-    for i in range(min(10, len(df))):
-        vals = [str(v).strip() for v in df.iloc[i].values]
-        if all(c in vals for c in must_have_cols):
-            return i
-    return None
-
-def _parse_signal_tab(df, cap_type):
-    rows = []
-    hidx = _find_header(df, ["Timestamp", "Symbol"])
-    if hidx is None: return rows
-    df = df.copy()
-    df.columns = [str(v).strip() for v in df.iloc[hidx].values]
-    df = df.iloc[hidx+1:].reset_index(drop=True)
-    for _, row in df.iterrows():
-        sym = _v5_clean(row.get("Symbol"))
-        if not sym or sym == "Symbol": continue
-        rows.append({
-            "signal_type": "Alert", "timestamp": _v5_clean(row.get("Timestamp")),
-            "symbol": sym, "finkhoz_rating": _v5_num(row.get("Finkhoz Rating")),
-            "record_price": _v5_num(row.get("Record Price")), "cap_type": cap_type,
-            "current_price": _v5_num(row.get("Current Price")),
-            "return_pct": _v5_num(row.get("Return %")),
-            "hit_alert": _v5_clean(row.get("Hit Alert")),
-            "analyst_verdict": _v5_clean(row.get("Analyst Verdict")) or _v5_clean(row.get("Verdict")),
-            "alert_count": int(_v5_num(row.get("Alert Count")) or 0),
-            "alert_types": _v5_clean(row.get("Alert Type")),
-            "event_date": None, "event_type": _v5_clean(row.get("Event Type")),
-            "verdict_date": None,
-        })
-    return rows
-
-def _parse_futures_open(df):
-    rows = []
-    hidx = None
-    for i, row in df.iterrows():
-        vals = [str(v).strip() for v in row.values]
-        if 'Open Date' in vals and 'Entry Price' in vals:
-            hidx = i
-            break
-    if hidx is None: return rows
-    df = df.copy()
-    df.columns = [str(v).strip() for v in df.iloc[hidx].values]
-    df = df.iloc[hidx+1:].reset_index(drop=True)
-    for _, row in df.iterrows():
-        sym = _v5_clean(str(row.iloc[1]))
-        if not sym or sym.startswith('NIFTY') or sym in ('nan', '', 'Open positions in Future'):
-            continue
-        rows.append({
-            "symbol": sym, "open_date": _v5_clean(row.get('Open Date')),
-            "type": _v5_clean(row.get('Type')), "qty": _v5_num(row.get('Qty')),
-            "entry_price": _v5_num(row.get('Entry Price')),
-            "current_price": _v5_num(row.get('Current Price')),
-            "net_pl_pct": _v5_num(row.get('Net P/L%')),
-            "profit_per_lot": _v5_num(row.get('Profit / Lot')),
-            "value": _v5_num(row.get('Value')),
-            "remarks": _v5_clean(row.get('Remarks')),
-            "status": _v5_clean(row.get('Status')),
-        })
-    return rows
-
-def _parse_v5_screener(df, signal_type):
-    rows = []
-    seen = set()
-    for _, row in df.iterrows():
-        for val in row.values:
-            s = str(val).strip()
-            if s.startswith('NSE:') and '-EQ' in s:
-                sym = s.replace('NSE:', '').replace('-EQ', '').strip()
-                if sym and sym not in seen:
-                    seen.add(sym)
-                    rows.append({
-                        "signal_type": signal_type, "timestamp": str(date.today()),
-                        "symbol": sym, "analyst_verdict": "Candidate", "alert_count": 0,
-                    })
-    return rows
-
-def _parse_trades(df):
-    return [{"row": json.dumps(r, default=str)} for r in df.to_dict(orient="records")]
-
-def _parse_portfolio(df):
-    return [{"row": json.dumps(r, default=str)} for r in df.to_dict(orient="records")]
-
-def _parse_result_dates(df):
-    rows = []
-    for _, row in df.iterrows():
-        ticker = _v5_clean(str(row.iloc[1]) if len(row) > 1 else '')
-        if not ticker or ticker == 'TICKER': continue
-        company = _v5_clean(str(row.iloc[0]) if len(row) > 0 else '')
-        ex_raw = _v5_clean(str(row.iloc[2]) if len(row) > 2 else '')
-        rec_raw = _v5_clean(str(row.iloc[3]) if len(row) > 3 else '')
-        evt = _v5_clean(str(row.iloc[4]) if len(row) > 4 else '')
-        if not ex_raw: continue
-        rows.append({"company_name": company, "ticker": ticker, "ex_date": ex_raw, "record_date": rec_raw, "event_type": evt})
-    return rows
-
-@app.post("/api/admin/load_v5_from_drive")
-async def load_v5_from_drive(req: Request):
-    body = await req.json()
-    file_ids = body.get("file_ids", {})
-    if not file_ids: raise HTTPException(400, "file_ids required")
-    FILE_MAP = {
-        "v5_futures_open.csv":  ("v5_futures_open",    _parse_futures_open, "1=1"),
-        "v5_trades.csv":        ("v5_trades",          _parse_trades, "1=1"),
-        "v5_portfolio.csv":     ("v5_portfolio",       _parse_portfolio, "1=1"),
-        "v5_result_dates.csv":  ("earnings_calendar",  _parse_result_dates, "1=1"),
-        "v5_alerts_large.csv":  ("v5_signals", lambda df: _parse_signal_tab(df, "Large Cap"), "cap_type = 'Large Cap' AND signal_type = 'Alert'"),
-        "v5_alerts_mid.csv":    ("v5_signals", lambda df: _parse_signal_tab(df, "Mid Cap"),   "cap_type = 'Mid Cap' AND signal_type = 'Alert'"),
-        "v5_alerts_small.csv":  ("v5_signals", lambda df: _parse_signal_tab(df, "Small Cap"), "cap_type = 'Small Cap' AND signal_type = 'Alert'"),
-        "v5_buy_reversal.csv":  ("v5_signals", lambda df: _parse_v5_screener(df, "Buy_Reversal"),  "signal_type = 'Buy_Reversal'"),
-        "v5_buy_momentum.csv":  ("v5_signals", lambda df: _parse_v5_screener(df, "Buy_Momentum"),  "signal_type = 'Buy_Momentum'"),
-        "v5_sell_reversal.csv": ("v5_signals", lambda df: _parse_v5_screener(df, "Sell_Reversal"), "signal_type = 'Sell_Reversal'"),
-        "v5_sell_momentum.csv": ("v5_signals", lambda df: _parse_v5_screener(df, "Sell_Momentum"), "signal_type = 'Sell_Momentum'"),
-    }
-    results = {}
-    for fname, file_id in file_ids.items():
-        if fname not in FILE_MAP:
-            results[fname] = "skipped (no parser)"
-            continue
-        table, parser, where_clause = FILE_MAP[fname]
-        try:
-            csv_text = await _drive_download(file_id)
-            df = pd.read_csv(io.StringIO(csv_text), header=None)
-            rows = parser(df)
-            if not rows:
-                results[fname] = "0 rows parsed"
-                continue
-            with get_conn() as conn, conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {table} WHERE {where_clause}")
-                if table in ("v5_trades", "v5_portfolio"):
-                    for r in rows:
-                        cur.execute(f"INSERT INTO {table} (data) VALUES (%s::jsonb)", (r["row"],))
-                elif table == "v5_signals":
-                    for r in rows:
-                        cur.execute("""
-                            INSERT INTO v5_signals
-                            (signal_type, timestamp, symbol, finkhoz_rating, record_price,
-                             cap_type, current_price, return_pct, hit_alert, analyst_verdict,
-                             alert_count, alert_types, event_date, event_type, verdict_date)
-                            VALUES (%(signal_type)s, %(timestamp)s, %(symbol)s, %(finkhoz_rating)s, %(record_price)s,
-                                    %(cap_type)s, %(current_price)s, %(return_pct)s, %(hit_alert)s, %(analyst_verdict)s,
-                                    %(alert_count)s, %(alert_types)s, %(event_date)s, %(event_type)s, %(verdict_date)s)
-                        """, {k: r.get(k) for k in ["signal_type","timestamp","symbol","finkhoz_rating","record_price","cap_type","current_price","return_pct","hit_alert","analyst_verdict","alert_count","alert_types","event_date","event_type","verdict_date"]})
-                elif table == "v5_futures_open":
-                    for r in rows:
-                        cur.execute("""
-                            INSERT INTO v5_futures_open
-                            (symbol, open_date, type, qty, entry_price, current_price,
-                             net_pl_pct, profit_per_lot, value, remarks, status)
-                            VALUES (%(symbol)s, %(open_date)s, %(type)s, %(qty)s, %(entry_price)s, %(current_price)s,
-                                    %(net_pl_pct)s, %(profit_per_lot)s, %(value)s, %(remarks)s, %(status)s)
-                        """, r)
-                elif table == "earnings_calendar":
-                    for r in rows:
-                        cur.execute("""
-                            INSERT INTO earnings_calendar (company_name, ticker, ex_date, record_date, event_type)
-                            VALUES (%(company_name)s, %(ticker)s, %(ex_date)s, %(record_date)s, %(event_type)s)
-                        """, r)
-                conn.commit()
-            results[fname] = f"{len(rows)} rows → {table}"
-        except Exception as e:
-            results[fname] = f"error: {str(e)[:200]}"
-    return {"status": "ok", "results": results}
-
+# Screener.in earnings scrape
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
 SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
@@ -719,8 +591,7 @@ async def _screener_login_session():
     email = os.getenv("SCREENER_EMAIL", "").strip()
     password = os.getenv("SCREENER_PASSWORD", "").strip()
     if not email or not password:
-        keys = sorted([k for k in os.environ.keys() if "SCREEN" in k.upper()])
-        raise HTTPException(500, f"SCREENER creds missing. Env keys: {keys}")
+        raise HTTPException(500, "SCREENER creds missing")
     client = httpx.AsyncClient(follow_redirects=True, timeout=60,
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "en-US,en;q=0.9"})
     r = await client.get(SCREENER_LOGIN_URL)
@@ -735,7 +606,7 @@ async def _screener_login_session():
         headers={"Referer": SCREENER_LOGIN_URL})
     if "sessionid" not in client.cookies:
         await client.aclose()
-        raise HTTPException(401, f"Screener login failed. Status: {r.status_code}")
+        raise HTTPException(401, f"Screener login failed")
     return client
 
 async def _scrape_upcoming_results(client):
@@ -746,15 +617,12 @@ async def _scrape_upcoming_results(client):
         raise HTTPException(401, "Screener session expired")
     soup = BeautifulSoup(html, "html.parser")
     tables = soup.find_all("table")
-    if not tables:
-        raise HTTPException(500, "No table found")
+    if not tables: raise HTTPException(500, "No table found")
     rows_out = []
     seen_tickers = set()
     for tbl in tables:
-        try:
-            dfs = pd.read_html(io.StringIO(str(tbl)))
-        except Exception:
-            continue
+        try: dfs = pd.read_html(io.StringIO(str(tbl)))
+        except Exception: continue
         for df in dfs:
             if df.empty or len(df.columns) < 2: continue
             cols_lower = {str(c).strip().lower(): c for c in df.columns}
@@ -789,8 +657,7 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
         rows = await _scrape_upcoming_results(client)
     finally:
         await client.aclose()
-    if not rows:
-        return {"status": "warn", "rows_scraped": 0}
+    if not rows: return {"status": "warn", "rows_scraped": 0}
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM earnings_calendar")
         inserted = 0
@@ -803,6 +670,7 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
         conn.commit()
     return {"status": "ok", "rows_scraped": len(rows), "rows_inserted": inserted}
 
+# GitHub auto-deploy
 GITHUB_API = "https://api.github.com"
 
 def _gh_headers():
@@ -816,7 +684,7 @@ def _check_admin(token):
 
 def _check_deploy_guard():
     if not DEPLOY_GUARD:
-        raise HTTPException(403, "DEPLOY_GUARD is off — writes disabled.")
+        raise HTTPException(403, "DEPLOY_GUARD is off")
 
 async def _gh_get_file(filepath):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{filepath}"
@@ -945,6 +813,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
+# MCP TOOLS
 MCP_TOOLS = [
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -962,11 +831,19 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "backfill_intraday", "description": "One-time backfill: fetch 15 days of 5-min OHLC for all 290 futures stocks from Yahoo. Safe to re-run.",
+    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks. Safe to re-run.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v5_engine", "description": "Run V5 filter engine: compute metrics + AND-gate for all 290 futures stocks. Returns qualified counts per signal type.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today. Optional signal_type filter (Buy_Reversal, Buy_Momentum, Sell_Reversal, Sell_Momentum).",
+     "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
+    {"name": "get_v5_metrics", "description": "Get computed V5 metrics (DMA, RSI, returns, etc.) for one stock.",
+     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_v5_filters", "description": "Get current V5 filter thresholds (editable config).",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "env_check", "description": "Diagnostic: which env vars are visible to the running container.",
+    {"name": "env_check", "description": "Diagnostic: which env vars are visible.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.",
      "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -993,7 +870,7 @@ MCP_TOOLS = [
 ]
 
 async def _call_tool(name, args):
-    async with httpx.AsyncClient(timeout=600) as client:  # 10min timeout for backfill
+    async with httpx.AsyncClient(timeout=600) as client:
         if name == "get_gvm":
             r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}")
             return r.json()
@@ -1021,8 +898,21 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}")
             return r.json()
         elif name == "backfill_intraday":
-            r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday",
-                                  headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+            r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+            return r.json()
+        elif name == "run_v5_engine":
+            r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {})
+            return r.json()
+        elif name == "get_v5_qualified":
+            params = {}
+            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
+            r = await client.get(f"{BASE_URL}/api/v5/qualified", params=params)
+            return r.json()
+        elif name == "get_v5_metrics":
+            r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}")
+            return r.json()
+        elif name == "get_v5_filters":
+            r = await client.get(f"{BASE_URL}/api/v5/filters")
             return r.json()
         elif name == "health_feeds":
             r = await client.get(f"{BASE_URL}/api/health/feeds")
@@ -1113,3 +1003,6 @@ async def mcp_endpoint(req: Request):
     if method in ("notifications/initialized", "notifications/cancelled"):
         return Response(status_code=204)
     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
+
+# Also need numpy for v5_engine
+import numpy as np  # noqa: E402
