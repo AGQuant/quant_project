@@ -19,6 +19,7 @@ import re
 import httpx
 import pandas as pd
 import numpy as np
+import yfinance as yf
 from bs4 import BeautifulSoup
 
 from v5_engine import (
@@ -29,7 +30,8 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.0
+# Scorr / Project Quant — main.py v1.6.1
+# v1.6.1: Fix cmp_prices (yfinance batch), wire raw_prices EOD scheduler, run_yahoo_daily MCP
 # v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
 # v1.5.0: V6 backtest optimizer (6mo top 50, parameter sweep)
 # v1.4.0: V5 engine — filter computation + AND-gate
@@ -37,7 +39,7 @@ from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 # v1.2.8: intraday_prices + cmp_prices + scheduler
 # ============================================================
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -146,25 +148,40 @@ def _yahoo_ticker(symbol: str) -> str:
     return f"{symbol}.NS"
 
 async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
+    """Fetch CMP via yfinance in thread executor. Handles Yahoo auth natively."""
     results = {}
-    batch_size = 50
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i+batch_size]
-        tickers_str = " ".join(_yahoo_ticker(s) for s in batch)
-        url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={urllib.parse.quote(tickers_str)}&fields=regularMarketPrice,symbol"
+    batch_size = 150
+
+    def _yf_batch(batch: List[str]) -> Dict[str, float]:
         try:
-            async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "Mozilla/5.0"}) as c:
-                r = await c.get(url)
-                r.raise_for_status()
-                data = r.json()
-                for q in data.get("quoteResponse", {}).get("result", []):
-                    raw_sym = q.get("symbol", "")
-                    price = q.get("regularMarketPrice")
-                    if raw_sym and price:
-                        results[raw_sym.replace(".NS", "")] = float(price)
+            tickers = [f"{s}.NS" for s in batch]
+            data = yf.download(tickers, period="2d", progress=False,
+                               auto_adjust=True, threads=False)
+            if data is None or data.empty:
+                return {}
+            close = data["Close"] if "Close" in data.columns else None
+            if close is None:
+                return {}
+            last = close.iloc[-1]
+            out = {}
+            if isinstance(last, pd.Series):
+                for ticker, price in last.items():
+                    if not pd.isna(price):
+                        sym = str(ticker).replace(".NS", "").strip()
+                        out[sym] = float(price)
+            elif len(batch) == 1 and not pd.isna(last):
+                out[batch[0]] = float(last)
+            return out
         except Exception as e:
-            log.warning(f"CMP fetch batch {i//batch_size} error: {e}")
-        await asyncio.sleep(0.3)
+            log.warning(f"CMP yfinance batch error: {e}")
+            return {}
+
+    loop = asyncio.get_event_loop()
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        res = await loop.run_in_executor(None, _yf_batch, batch)
+        results.update(res)
+        await asyncio.sleep(1.5)
     return results
 
 async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict]:
@@ -228,6 +245,7 @@ def _purge_intraday_old():
         log.error(f"_purge_intraday_old failed: {e}")
 
 _intraday_fetched_today: Optional[date] = None
+_raw_prices_updated_today: Optional[date] = None
 
 async def _task_refresh_cmp():
     futures_set = set(_get_futures_symbols())
@@ -253,12 +271,30 @@ async def _task_fetch_intraday():
     _purge_intraday_old()
     _intraday_fetched_today = today
 
+async def _task_update_raw_prices():
+    """EOD 15:45 IST — run yahoo_daily_update to refresh raw_prices (last 7 days, all symbols)."""
+    global _raw_prices_updated_today
+    today = _ist_now().date()
+    if _raw_prices_updated_today == today:
+        return
+    log.info("EOD: Starting raw_prices daily update")
+    loop = asyncio.get_event_loop()
+    try:
+        import yahoo_daily_update as ydu
+        await loop.run_in_executor(None, ydu.main)
+        _raw_prices_updated_today = today
+        log.info("EOD: raw_prices update complete")
+    except Exception as e:
+        log.error(f"raw_prices EOD update failed: {e}")
+
 async def _scheduler():
     log.info("Scheduler started")
     while True:
         try:
             if _is_market_hours(): await _task_refresh_cmp()
-            if _is_eod_window(): await _task_fetch_intraday()
+            if _is_eod_window():
+                await _task_fetch_intraday()
+                await _task_update_raw_prices()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -449,7 +485,6 @@ def v6_compare(score_date: Optional[str] = None):
 # V6 BACKTEST OPTIMIZER
 @app.post("/api/v6/backtest/run")
 async def v6_backtest_run(x_admin_token: Optional[str] = Header(None)):
-    """Run V6 parameter optimizer: 6 months × top 50 F&O × single-parameter sweep."""
     _check_admin(x_admin_token)
     with get_conn() as conn:
         results = run_full_optimization(conn)
@@ -457,13 +492,13 @@ async def v6_backtest_run(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/v6/backtest/results")
 def v6_backtest_results(run_id: Optional[str] = None, signal_type: Optional[str] = None):
-    """Get backtest results. Pass run_id for full detail."""
     if run_id and signal_type:
         return api_query("SELECT * FROM v6_backtest_results WHERE run_id = %s AND signal_type = %s ORDER BY composite_score DESC", (run_id, signal_type))
     if run_id:
         return api_query("SELECT signal_type, variant_label, num_signals, win_rate, avg_return, composite_score, filter_config FROM v6_backtest_results WHERE run_id = %s ORDER BY signal_type, composite_score DESC", (run_id,))
     return api_query("SELECT run_id, MAX(created_at) as latest, COUNT(*) as rows FROM v6_backtest_results GROUP BY run_id ORDER BY latest DESC LIMIT 10")
 
+# ADMIN — DATA FEEDS
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -509,6 +544,21 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
     cmp_map = await _fetch_cmp_yahoo(non_futures)
     _upsert_cmp(cmp_map)
     return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(non_futures)}
+
+@app.post("/api/admin/run_yahoo_daily")
+async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
+    """Manually trigger Yahoo daily OHLC update for raw_prices. Takes 10-20 min."""
+    _check_admin(x_admin_token)
+    global _raw_prices_updated_today
+    _raw_prices_updated_today = None
+    loop = asyncio.get_event_loop()
+    try:
+        import yahoo_daily_update as ydu
+        await loop.run_in_executor(None, ydu.main)
+        _raw_prices_updated_today = _ist_now().date()
+        return {"status": "ok", "message": "raw_prices updated"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -808,6 +858,8 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (last 7 days, 1,720 symbols). Takes 10-20 min. Use after market close to refresh price history.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v5_engine", "description": "Run V5 filter engine: compute metrics + AND-gate for all 290 futures stocks.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.",
@@ -816,17 +868,17 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer. 6 months × top 50 F&O stocks × single-parameter sweep. Takes 30-60 min compute. Returns optimized filters per signal type maximizing composite (win_rate × avg_return) on 5-day forward returns.",
+    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer. 6 months × top 50 F&O stocks × single-parameter sweep.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v6_backtest_results", "description": "Get V6 backtest results. Pass run_id for full details, else returns recent runs.",
      "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
-    {"name": "run_v6_engine", "description": "Run V6 filter engine: backtest-optimized AND-gate against v6_filters. Reads v5_metrics, writes v6_qualified. Pass recompute=true to recompute metrics from raw_prices.",
+    {"name": "run_v6_engine", "description": "Run V6 filter engine: backtest-optimized AND-gate against v6_filters. Reads v5_metrics, writes v6_qualified.",
      "inputSchema": {"type": "object", "properties": {"recompute": {"type": "boolean"}}, "required": []}},
     {"name": "get_v6_qualified", "description": "Get stocks qualified by V6 (optimized) AND-gate today.",
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "score_date": {"type": "string"}}, "required": []}},
     {"name": "get_v6_filters", "description": "Get current V6 filter thresholds (backtest-optimized).",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6 qualified stocks per signal type for a given date. Returns counts, intersection, and exclusive sets.",
+    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6 qualified stocks per signal type for a given date.",
      "inputSchema": {"type": "object", "properties": {"score_date": {"type": "string"}}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -878,6 +930,8 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
         elif name == "backfill_intraday":
             r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "run_yahoo_daily":
+            r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_v5_engine":
             r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_qualified":
