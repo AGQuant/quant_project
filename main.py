@@ -30,15 +30,14 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.2
+# Scorr / Project Quant — main.py v1.6.3
+# v1.6.3: Restore V5→Railway pipeline (/api/admin/load_v5_signals_csv)
 # v1.6.2: /api/v5/live_metrics + /api/v5/metrics/all for V5 Apps Script wiring
-# v1.6.1: Fix cmp_prices (yfinance batch), wire raw_prices EOD scheduler, run_yahoo_daily MCP
+# v1.6.1: Fix cmp_prices (yfinance batch), wire raw_prices EOD scheduler
 # v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
-# v1.5.0: V6 backtest optimizer (6mo top 50, parameter sweep)
-# v1.4.0: V5 engine — filter computation + AND-gate
 # ============================================================
 
-VERSION = "1.6.2"
+VERSION = "1.6.3"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -147,7 +146,6 @@ def _yahoo_ticker(symbol: str) -> str:
     return f"{symbol}.NS"
 
 async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
-    """Fetch CMP via yfinance in thread executor. Handles Yahoo auth natively."""
     results = {}
     batch_size = 150
 
@@ -271,11 +269,9 @@ async def _task_fetch_intraday():
     _intraday_fetched_today = today
 
 async def _task_update_raw_prices():
-    """EOD 15:45 IST — run yahoo_daily_update to refresh raw_prices (last 7 days, all symbols)."""
     global _raw_prices_updated_today
     today = _ist_now().date()
-    if _raw_prices_updated_today == today:
-        return
+    if _raw_prices_updated_today == today: return
     log.info("EOD: Starting raw_prices daily update")
     loop = asyncio.get_event_loop()
     try:
@@ -435,7 +431,7 @@ def v5_qualified(signal_type: Optional[str] = None, score_date: Optional[str] = 
     return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE score_date = %s ORDER BY signal_type, gvm_score DESC", (score_date,))
 
 @app.get("/api/v5/metrics/{symbol}")
-def v5_metrics(symbol: str, score_date: Optional[str] = None):
+def v5_metrics_single(symbol: str, score_date: Optional[str] = None):
     if not score_date: score_date = str(date.today())
     r = api_query("SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
     if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
@@ -443,7 +439,6 @@ def v5_metrics(symbol: str, score_date: Optional[str] = None):
 
 @app.get("/api/v5/metrics/all")
 def v5_metrics_all():
-    """All 290 stocks' static metrics for latest computed date. Single call for Apps Script daily refresh."""
     return api_query("""
         SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
                rsi_month, rsi_weekly, daily_rsi,
@@ -457,19 +452,13 @@ def v5_metrics_all():
 
 @app.get("/api/v5/live_metrics")
 def v5_live_metrics():
-    """Real-time CMP + day% + hourly gain for all 290 futures. Single call for Apps Script 1-min refresh."""
     return api_query("""
-        SELECT
-            s.symbol,
+        SELECT s.symbol,
             lc.close AS cmp,
             fc.open AS day_open,
-            CASE WHEN fc.open > 0
-                THEN ROUND(((lc.close / fc.open - 1) * 100)::numeric, 2)
-            END AS day_pct,
+            CASE WHEN fc.open > 0 THEN ROUND(((lc.close / fc.open - 1) * 100)::numeric, 2) END AS day_pct,
             hc.close AS hour_ago_close,
-            CASE WHEN hc.close > 0
-                THEN ROUND(((lc.close / hc.close - 1) * 100)::numeric, 2)
-            END AS hourly_pct
+            CASE WHEN hc.close > 0 THEN ROUND(((lc.close / hc.close - 1) * 100)::numeric, 2) END AS hourly_pct
         FROM (SELECT DISTINCT symbol FROM v5_signals) s
         JOIN LATERAL (
             SELECT close FROM intraday_prices WHERE symbol = s.symbol
@@ -638,6 +627,111 @@ async def load_screener(req: Request):
             cur.execute("INSERT INTO screener_raw (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
+
+@app.post("/api/admin/load_v5_signals_csv")
+async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Header(None)):
+    """Load v5_signals from a Drive CSV exported by V5 Apps Script.
+    Body: {file_id, signal_type='Alert', replace=false}
+    CSV columns: Timestamp, Symbol, Finkhoz Rating, Record Price, Type,
+                 Current Price, Return %, Hit Alert, Analyst Verdict,
+                 Alert Count, Alert Type, Date, Event Type, Date of Verdict
+    """
+    _check_admin(x_admin_token)
+    body = await req.json()
+    file_id = body.get("file_id")
+    signal_type = body.get("signal_type", "Alert")
+    replace = body.get("replace", False)
+    if not file_id: raise HTTPException(400, "file_id required")
+
+    csv_text = await _drive_download(file_id)
+
+    try:
+        df = pd.read_csv(io.StringIO(csv_text))
+    except Exception as e:
+        return {"status": "error", "error": f"CSV parse failed: {e}"}
+
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Find symbol column — must have data
+    sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
+    if not sym_col:
+        return {"status": "error", "error": "No Symbol column found in CSV"}
+
+    df = df[df[sym_col].notna() & (df[sym_col].astype(str).str.strip().str.len() > 0)]
+    if df.empty:
+        return {"status": "warn", "rows": 0, "message": "No valid rows after filtering"}
+
+    def _sf(v):
+        try: return float(v) if pd.notna(v) else None
+        except: return None
+
+    def _si(v):
+        try: return int(float(v)) if pd.notna(v) else None
+        except: return None
+
+    def _ss(v):
+        s = str(v).strip() if pd.notna(v) else None
+        return None if not s or s.lower() in ("nan", "none") else s
+
+    def _sd(v):
+        try:
+            s = str(v).strip()
+            if not s or s.lower() in ("nan", "none", ""): return None
+            s = re.sub(r"\([^)]+\)", "", s).strip()
+            dt = pd.to_datetime(s, errors="coerce")
+            return dt.date() if pd.notna(dt) else None
+        except: return None
+
+    def _gc(df, *names):
+        for n in names:
+            match = next((c for c in df.columns if n.lower() in c.lower()), None)
+            if match: return match
+        return None
+
+    inserted, skipped = 0, 0
+    with get_conn() as conn, conn.cursor() as cur:
+        if replace:
+            cur.execute("DELETE FROM v5_signals WHERE signal_type = %s", (signal_type,))
+            conn.commit()
+
+        for _, row in df.iterrows():
+            sym = _ss(row.get(sym_col))
+            if not sym: continue
+            try:
+                cur.execute("""
+                    INSERT INTO v5_signals
+                    (signal_type, timestamp, symbol, finkhoz_rating, record_price, cap_type,
+                     current_price, return_pct, hit_alert, analyst_verdict, alert_count,
+                     alert_types, event_date, event_type, verdict_date)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    signal_type,
+                    _ss(row.get(_gc(df, "timestamp", "time"))),
+                    sym,
+                    _sf(row.get(_gc(df, "finkhoz", "rating"))),
+                    _sf(row.get(_gc(df, "record price", "record_price"))),
+                    _ss(row.get(_gc(df, "type", "cap"))),
+                    _sf(row.get(_gc(df, "current price", "current_price"))),
+                    _sf(row.get(_gc(df, "return"))),
+                    _ss(row.get(_gc(df, "hit alert", "hit_alert"))),
+                    _ss(row.get(_gc(df, "analyst verdict", "verdict"))),
+                    _si(row.get(_gc(df, "alert count", "count"))),
+                    _ss(row.get(_gc(df, "alert type", "alert_type", "alert_types"))),
+                    _sd(row.get(_gc(df, "^date$", "event_date", "date"))),
+                    _ss(row.get(_gc(df, "event type", "event_type"))),
+                    _sd(row.get(_gc(df, "verdict_date", "date of verdict"))),
+                ))
+                inserted += 1
+            except Exception as e:
+                skipped += 1
+                log.warning(f"v5_signals row skip ({sym}): {e}")
+
+        conn.commit()
+
+    return {
+        "status": "ok", "file_id": file_id, "signal_type": signal_type,
+        "rows_read": len(df), "rows_inserted": inserted, "rows_skipped": skipped
+    }
 
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
@@ -904,23 +998,23 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
     {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_v5_metrics_all", "description": "Get all 19 static metrics for all 290 stocks (latest date). For Apps Script daily refresh.",
+    {"name": "get_v5_metrics_all", "description": "Get all 19 static metrics for all 290 stocks (latest date).",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_live_metrics", "description": "Get real-time CMP, day%, and hourly gain for all 290 futures from intraday data. Single call for Apps Script 1-min refresh.",
+    {"name": "get_v5_live_metrics", "description": "Get real-time CMP, day%, and hourly gain for all 290 futures. Single call for 1-min refresh.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer. 6 months × top 50 F&O stocks × single-parameter sweep.",
+    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v6_backtest_results", "description": "Get V6 backtest results. Pass run_id for full details, else returns recent runs.",
+    {"name": "get_v6_backtest_results", "description": "Get V6 backtest results.",
      "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
-    {"name": "run_v6_engine", "description": "Run V6 filter engine: backtest-optimized AND-gate against v6_filters. Reads v5_metrics, writes v6_qualified.",
+    {"name": "run_v6_engine", "description": "Run V6 filter engine: backtest-optimized AND-gate against v6_filters.",
      "inputSchema": {"type": "object", "properties": {"recompute": {"type": "boolean"}}, "required": []}},
     {"name": "get_v6_qualified", "description": "Get stocks qualified by V6 (optimized) AND-gate today.",
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "score_date": {"type": "string"}}, "required": []}},
     {"name": "get_v6_filters", "description": "Get current V6 filter thresholds (backtest-optimized).",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6 qualified stocks per signal type for a given date.",
+    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6 qualified stocks per signal type.",
      "inputSchema": {"type": "object", "properties": {"score_date": {"type": "string"}}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -932,6 +1026,8 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a Drive CSV (exported by V5 Apps Script). Body: file_id, signal_type, replace.",
+     "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}, "signal_type": {"type": "string"}, "replace": {"type": "boolean"}}, "required": ["file_id"]}},
     {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_signals", "description": "Query V5 signals.",
@@ -1032,6 +1128,10 @@ async def _call_tool(name, args):
             r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_screener_from_drive":
             r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
+        elif name == "load_v5_signals_csv":
+            r = await client.post(f"{BASE_URL}/api/admin/load_v5_signals_csv",
+                json={"file_id": args["file_id"], "signal_type": args.get("signal_type","Alert"), "replace": args.get("replace", False)},
+                headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "load_earnings_from_screener":
             r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_signals":
