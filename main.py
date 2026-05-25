@@ -30,14 +30,15 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.3
-# v1.6.3: Restore V5→Railway pipeline (/api/admin/load_v5_signals_csv)
+# Scorr / Project Quant — main.py v1.6.4
+# v1.6.4: Restore /api/admin/load_v5_from_drive (original V5 Apps Script endpoint)
+# v1.6.3: /api/admin/load_v5_signals_csv individual file loader
 # v1.6.2: /api/v5/live_metrics + /api/v5/metrics/all for V5 Apps Script wiring
 # v1.6.1: Fix cmp_prices (yfinance batch), wire raw_prices EOD scheduler
 # v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
 # ============================================================
 
-VERSION = "1.6.3"
+VERSION = "1.6.4"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -628,51 +629,31 @@ async def load_screener(req: Request):
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
 
-@app.post("/api/admin/load_v5_signals_csv")
-async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Header(None)):
-    """Load v5_signals from a Drive CSV exported by V5 Apps Script.
-    Body: {file_id, signal_type='Alert', replace=false}
-    CSV columns: Timestamp, Symbol, Finkhoz Rating, Record Price, Type,
-                 Current Price, Return %, Hit Alert, Analyst Verdict,
-                 Alert Count, Alert Type, Date, Event Type, Date of Verdict
-    """
-    _check_admin(x_admin_token)
-    body = await req.json()
-    file_id = body.get("file_id")
-    signal_type = body.get("signal_type", "Alert")
-    replace = body.get("replace", False)
-    if not file_id: raise HTTPException(400, "file_id required")
-
-    csv_text = await _drive_download(file_id)
-
+async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: bool = True) -> dict:
+    """Parse V5 alerts CSV and store into v5_signals. Shared by load_v5_signals_csv and load_v5_from_drive."""
     try:
         df = pd.read_csv(io.StringIO(csv_text))
     except Exception as e:
         return {"status": "error", "error": f"CSV parse failed: {e}"}
 
     df.columns = [str(c).strip() for c in df.columns]
-
-    # Find symbol column — must have data
     sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
     if not sym_col:
-        return {"status": "error", "error": "No Symbol column found in CSV"}
+        return {"status": "error", "error": "No Symbol column found"}
 
     df = df[df[sym_col].notna() & (df[sym_col].astype(str).str.strip().str.len() > 0)]
     if df.empty:
-        return {"status": "warn", "rows": 0, "message": "No valid rows after filtering"}
+        return {"status": "warn", "rows": 0}
 
     def _sf(v):
         try: return float(v) if pd.notna(v) else None
         except: return None
-
     def _si(v):
         try: return int(float(v)) if pd.notna(v) else None
         except: return None
-
     def _ss(v):
         s = str(v).strip() if pd.notna(v) else None
         return None if not s or s.lower() in ("nan", "none") else s
-
     def _sd(v):
         try:
             s = str(v).strip()
@@ -681,8 +662,7 @@ async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Heade
             dt = pd.to_datetime(s, errors="coerce")
             return dt.date() if pd.notna(dt) else None
         except: return None
-
-    def _gc(df, *names):
+    def _gc(*names):
         for n in names:
             match = next((c for c in df.columns if n.lower() in c.lower()), None)
             if match: return match
@@ -693,7 +673,6 @@ async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Heade
         if replace:
             cur.execute("DELETE FROM v5_signals WHERE signal_type = %s", (signal_type,))
             conn.commit()
-
         for _, row in df.iterrows():
             sym = _ss(row.get(sym_col))
             if not sym: continue
@@ -706,32 +685,102 @@ async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Heade
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """, (
                     signal_type,
-                    _ss(row.get(_gc(df, "timestamp", "time"))),
+                    _ss(row.get(_gc("timestamp", "time"))),
                     sym,
-                    _sf(row.get(_gc(df, "finkhoz", "rating"))),
-                    _sf(row.get(_gc(df, "record price", "record_price"))),
-                    _ss(row.get(_gc(df, "type", "cap"))),
-                    _sf(row.get(_gc(df, "current price", "current_price"))),
-                    _sf(row.get(_gc(df, "return"))),
-                    _ss(row.get(_gc(df, "hit alert", "hit_alert"))),
-                    _ss(row.get(_gc(df, "analyst verdict", "verdict"))),
-                    _si(row.get(_gc(df, "alert count", "count"))),
-                    _ss(row.get(_gc(df, "alert type", "alert_type", "alert_types"))),
-                    _sd(row.get(_gc(df, "^date$", "event_date", "date"))),
-                    _ss(row.get(_gc(df, "event type", "event_type"))),
-                    _sd(row.get(_gc(df, "verdict_date", "date of verdict"))),
+                    _sf(row.get(_gc("finkhoz", "rating"))),
+                    _sf(row.get(_gc("record price", "record_price"))),
+                    _ss(row.get(_gc("type", "cap"))),
+                    _sf(row.get(_gc("current price", "current_price"))),
+                    _sf(row.get(_gc("return"))),
+                    _ss(row.get(_gc("hit alert", "hit_alert"))),
+                    _ss(row.get(_gc("analyst verdict", "verdict"))),
+                    _si(row.get(_gc("alert count", "count"))),
+                    _ss(row.get(_gc("alert type", "alert_type", "alert_types"))),
+                    _sd(row.get(_gc("^date$", "event_date", "date"))),
+                    _ss(row.get(_gc("event type", "event_type"))),
+                    _sd(row.get(_gc("verdict_date", "date of verdict"))),
                 ))
                 inserted += 1
             except Exception as e:
                 skipped += 1
                 log.warning(f"v5_signals row skip ({sym}): {e}")
-
         conn.commit()
 
-    return {
-        "status": "ok", "file_id": file_id, "signal_type": signal_type,
-        "rows_read": len(df), "rows_inserted": inserted, "rows_skipped": skipped
+    return {"status": "ok", "signal_type": signal_type, "rows_read": len(df), "rows_inserted": inserted, "rows_skipped": skipped}
+
+@app.post("/api/admin/load_v5_signals_csv")
+async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Header(None)):
+    """Load v5_signals from a single Drive CSV. Body: {file_id, signal_type, replace}"""
+    _check_admin(x_admin_token)
+    body = await req.json()
+    file_id = body.get("file_id")
+    signal_type = body.get("signal_type", "Alert")
+    replace = body.get("replace", False)
+    if not file_id: raise HTTPException(400, "file_id required")
+    csv_text = await _drive_download(file_id)
+    result = await _parse_and_store_signals(csv_text, signal_type, replace)
+    result["file_id"] = file_id
+    return result
+
+@app.post("/api/admin/load_v5_from_drive")
+async def load_v5_from_drive(req: Request):
+    """
+    Original V5 Apps Script endpoint — called by exportV5Tabs() every 15 min.
+    Routes each exported CSV filename to the correct Railway table.
+    Body: {file_ids: {"v5_alerts_large.csv": "fileId1", "v5_portfolio.csv": "fileId2", ...}}
+    """
+    body = await req.json()
+    file_ids = body.get("file_ids", {})
+    results = {}
+
+    ALERTS_MAP = {
+        "v5_alerts_large.csv": "Alert_Large",
+        "v5_alerts_mid.csv":   "Alert_Mid",
+        "v5_alerts_small.csv": "Alert_Small",
     }
+
+    for filename, file_id in file_ids.items():
+        fn = filename.lower().strip()
+        try:
+            if fn in ALERTS_MAP:
+                csv_text = await _drive_download(file_id)
+                results[filename] = await _parse_and_store_signals(csv_text, ALERTS_MAP[fn], replace=True)
+
+            elif "portfolio" in fn or "in_position" in fn:
+                csv_text = await _drive_download(file_id)
+                df = pd.read_csv(io.StringIO(csv_text))
+                rows = df.to_dict(orient="records")
+                with get_conn() as conn, conn.cursor() as cur:
+                    if "portfolio" in fn:
+                        cur.execute("DELETE FROM v5_portfolio")
+                    for row in rows:
+                        cur.execute("INSERT INTO v5_portfolio (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
+                    conn.commit()
+                results[filename] = {"status": "ok", "rows": len(rows)}
+
+            elif "trade" in fn:
+                csv_text = await _drive_download(file_id)
+                df = pd.read_csv(io.StringIO(csv_text))
+                rows = df.to_dict(orient="records")
+                with get_conn() as conn, conn.cursor() as cur:
+                    cur.execute("DELETE FROM v5_trades")
+                    for row in rows:
+                        cur.execute("INSERT INTO v5_trades (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
+                    conn.commit()
+                results[filename] = {"status": "ok", "rows": len(rows)}
+
+            else:
+                results[filename] = {"status": "skipped"}
+
+        except Exception as e:
+            results[filename] = {"status": "error", "error": str(e)[:100]}
+            log.warning(f"load_v5_from_drive {filename}: {e}")
+
+    loaded  = sum(1 for r in results.values() if r.get("status") == "ok")
+    skipped = sum(1 for r in results.values() if r.get("status") == "skipped")
+    errors  = sum(1 for r in results.values() if r.get("status") == "error")
+    log.info(f"load_v5_from_drive: {loaded} loaded, {skipped} skipped, {errors} errors")
+    return {"status": "ok", "files": len(file_ids), "loaded": loaded, "skipped": skipped, "errors": errors, "results": results}
 
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
@@ -1026,7 +1075,7 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a Drive CSV (exported by V5 Apps Script). Body: file_id, signal_type, replace.",
+    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a single Drive CSV. Body: file_id, signal_type, replace.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}, "signal_type": {"type": "string"}, "replace": {"type": "boolean"}}, "required": ["file_id"]}},
     {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
