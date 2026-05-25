@@ -30,7 +30,8 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.4
+# Scorr / Project Quant — main.py v1.6.5
+# v1.6.5: GET /api/v5/signals + GET /api/v5/portfolio REST endpoints for V7
 # v1.6.4: Restore /api/admin/load_v5_from_drive (original V5 Apps Script endpoint)
 # v1.6.3: /api/admin/load_v5_signals_csv individual file loader
 # v1.6.2: /api/v5/live_metrics + /api/v5/metrics/all for V5 Apps Script wiring
@@ -38,7 +39,7 @@ from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 # v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
 # ============================================================
 
-VERSION = "1.6.4"
+VERSION = "1.6.5"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -431,6 +432,45 @@ def v5_qualified(signal_type: Optional[str] = None, score_date: Optional[str] = 
         return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC", (signal_type, score_date))
     return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE score_date = %s ORDER BY signal_type, gvm_score DESC", (score_date,))
 
+@app.get("/api/v5/signals")
+def v5_signals_get(signal_type: Optional[str] = None, cap_type: Optional[str] = None,
+                   verdict: Optional[str] = None, limit: int = 200):
+    """REST endpoint for v5_signals. Supports signal_type, cap_type, verdict filters."""
+    limit = min(max(limit, 1), 500)
+    conds, vals = [], []
+    if signal_type: conds.append("signal_type = %s"); vals.append(signal_type)
+    if cap_type: conds.append("cap_type = %s"); vals.append(cap_type)
+    if verdict: conds.append("analyst_verdict = %s"); vals.append(verdict)
+    where = " AND ".join(conds) if conds else "1=1"
+    return api_query(
+        f"SELECT signal_type, symbol, cap_type, analyst_verdict, finkhoz_rating, "
+        f"record_price, current_price, return_pct, hit_alert, alert_types, "
+        f"event_date, event_type, loaded_at "
+        f"FROM v5_signals WHERE {where} ORDER BY loaded_at DESC, id DESC LIMIT {limit}",
+        vals
+    )
+
+@app.get("/api/v5/portfolio")
+def v5_portfolio_get():
+    """REST endpoint for v5_portfolio — current open positions."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT data FROM v5_portfolio ORDER BY id")
+            rows = [r[0] for r in cur.fetchall()]
+        if not rows:
+            return []
+        # Flatten JSONB rows into a list of dicts
+        result = []
+        for row in rows:
+            if isinstance(row, dict):
+                result.append(row)
+            elif isinstance(row, str):
+                try: result.append(json.loads(row))
+                except: pass
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/v5/metrics/{symbol}")
 def v5_metrics_single(symbol: str, score_date: Optional[str] = None):
     if not score_date: score_date = str(date.today())
@@ -630,7 +670,7 @@ async def load_screener(req: Request):
     return {"status": "ok", "rows": len(rows)}
 
 async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: bool = True) -> dict:
-    """Parse V5 alerts CSV and store into v5_signals. Shared by load_v5_signals_csv and load_v5_from_drive."""
+    """Parse V5 alerts CSV and store into v5_signals. Shared helper."""
     try:
         df = pd.read_csv(io.StringIO(csv_text))
     except Exception as e:
@@ -726,8 +766,7 @@ async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Heade
 async def load_v5_from_drive(req: Request):
     """
     Original V5 Apps Script endpoint — called by exportV5Tabs() every 15 min.
-    Routes each exported CSV filename to the correct Railway table.
-    Body: {file_ids: {"v5_alerts_large.csv": "fileId1", "v5_portfolio.csv": "fileId2", ...}}
+    Body: {file_ids: {"v5_alerts_large.csv": "fileId1", ...}}
     """
     body = await req.json()
     file_ids = body.get("file_ids", {})
@@ -745,7 +784,6 @@ async def load_v5_from_drive(req: Request):
             if fn in ALERTS_MAP:
                 csv_text = await _drive_download(file_id)
                 results[filename] = await _parse_and_store_signals(csv_text, ALERTS_MAP[fn], replace=True)
-
             elif "portfolio" in fn or "in_position" in fn:
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
@@ -757,7 +795,6 @@ async def load_v5_from_drive(req: Request):
                         cur.execute("INSERT INTO v5_portfolio (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
                     conn.commit()
                 results[filename] = {"status": "ok", "rows": len(rows)}
-
             elif "trade" in fn:
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
@@ -768,10 +805,8 @@ async def load_v5_from_drive(req: Request):
                         cur.execute("INSERT INTO v5_trades (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
                     conn.commit()
                 results[filename] = {"status": "ok", "rows": len(rows)}
-
             else:
                 results[filename] = {"status": "skipped"}
-
         except Exception as e:
             results[filename] = {"status": "error", "error": str(e)[:100]}
             log.warning(f"load_v5_from_drive {filename}: {e}")
@@ -1075,7 +1110,7 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a single Drive CSV. Body: file_id, signal_type, replace.",
+    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a single Drive CSV.",
      "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}, "signal_type": {"type": "string"}, "replace": {"type": "boolean"}}, "required": ["file_id"]}},
     {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1184,17 +1219,12 @@ async def _call_tool(name, args):
         elif name == "load_earnings_from_screener":
             r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_signals":
-            conds, vals = [], []
-            if args.get("signal_type"): conds.append("signal_type = %s"); vals.append(args["signal_type"])
-            if args.get("cap_type"): conds.append("cap_type = %s"); vals.append(args["cap_type"])
-            if args.get("verdict"): conds.append("analyst_verdict = %s"); vals.append(args["verdict"])
-            where = " AND ".join(conds) if conds else "1=1"
-            limit = int(args.get("limit", 50))
-            q = f"SELECT signal_type, symbol, cap_type, analyst_verdict, finkhoz_rating, current_price, return_pct, alert_types FROM v5_signals WHERE {where} ORDER BY id DESC LIMIT {limit}"
-            with get_conn() as conn, conn.cursor() as cur:
-                cur.execute(q, vals)
-                cols = [d[0] for d in cur.description]
-                return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
+            params = {}
+            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
+            if args.get("cap_type"): params["cap_type"] = args["cap_type"]
+            if args.get("verdict"): params["verdict"] = args["verdict"]
+            if args.get("limit"): params["limit"] = args["limit"]
+            r = await client.get(f"{BASE_URL}/api/v5/signals", params=params); return r.json()
         elif name == "check_blackout":
             sym = args["symbol"].upper()
             with get_conn() as conn, conn.cursor() as cur:
@@ -1202,9 +1232,7 @@ async def _call_tool(name, args):
                 rows = cur.fetchall()
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
         elif name == "get_v5_portfolio":
-            with get_conn() as conn, conn.cursor() as cur:
-                cur.execute("SELECT data FROM v5_portfolio ORDER BY id LIMIT 200")
-                return {"rows": [r[0] for r in cur.fetchall()]}
+            r = await client.get(f"{BASE_URL}/api/v5/portfolio"); return r.json()
         elif name == "github_read":
             r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_list":
