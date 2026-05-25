@@ -30,16 +30,15 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.1
+# Scorr / Project Quant — main.py v1.6.2
+# v1.6.2: /api/v5/live_metrics + /api/v5/metrics/all for V5 Apps Script wiring
 # v1.6.1: Fix cmp_prices (yfinance batch), wire raw_prices EOD scheduler, run_yahoo_daily MCP
 # v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
 # v1.5.0: V6 backtest optimizer (6mo top 50, parameter sweep)
 # v1.4.0: V5 engine — filter computation + AND-gate
-# v1.3.0: backfill_intraday MCP tool
-# v1.2.8: intraday_prices + cmp_prices + scheduler
 # ============================================================
 
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -442,6 +441,51 @@ def v5_metrics(symbol: str, score_date: Optional[str] = None):
     if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
     return r
 
+@app.get("/api/v5/metrics/all")
+def v5_metrics_all():
+    """All 290 stocks' static metrics for latest computed date. Single call for Apps Script daily refresh."""
+    return api_query("""
+        SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
+               rsi_month, rsi_weekly, daily_rsi,
+               month_return, week_return, year_return, prev_day_change,
+               sector_day, sector_week, month_index, week_index_52,
+               range_1d, range_3d, upper_bb, lower_bb
+        FROM v5_metrics
+        WHERE score_date = (SELECT MAX(score_date) FROM v5_metrics)
+        ORDER BY symbol
+    """)
+
+@app.get("/api/v5/live_metrics")
+def v5_live_metrics():
+    """Real-time CMP + day% + hourly gain for all 290 futures. Single call for Apps Script 1-min refresh."""
+    return api_query("""
+        SELECT
+            s.symbol,
+            lc.close AS cmp,
+            fc.open AS day_open,
+            CASE WHEN fc.open > 0
+                THEN ROUND(((lc.close / fc.open - 1) * 100)::numeric, 2)
+            END AS day_pct,
+            hc.close AS hour_ago_close,
+            CASE WHEN hc.close > 0
+                THEN ROUND(((lc.close / hc.close - 1) * 100)::numeric, 2)
+            END AS hourly_pct
+        FROM (SELECT DISTINCT symbol FROM v5_signals) s
+        JOIN LATERAL (
+            SELECT close FROM intraday_prices WHERE symbol = s.symbol
+            AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
+        ) lc ON true
+        JOIN LATERAL (
+            SELECT open FROM intraday_prices WHERE symbol = s.symbol
+            AND ts::date = CURRENT_DATE ORDER BY ts ASC LIMIT 1
+        ) fc ON true
+        LEFT JOIN LATERAL (
+            SELECT close FROM intraday_prices WHERE symbol = s.symbol
+            AND ts >= NOW() - INTERVAL '65 minutes' ORDER BY ts ASC LIMIT 1
+        ) hc ON true
+        ORDER BY s.symbol
+    """)
+
 @app.get("/api/v5/filters")
 def v5_filters():
     return api_query("SELECT signal_type, metric, min_val, max_val, updated_at FROM v5_filters ORDER BY signal_type, metric")
@@ -458,7 +502,7 @@ async def v5_filter_update(req: Request, x_admin_token: Optional[str] = Header(N
         conn.commit()
     return {"status": "ok", "signal_type": sig, "metric": metric, "min_val": mn, "max_val": mx}
 
-# V6 SHADOW ENGINE — backtest-optimized filters, paper-trade comparison
+# V6 SHADOW ENGINE
 @app.post("/api/v6/run")
 async def v6_run(x_admin_token: Optional[str] = Header(None), recompute: bool = False):
     _check_admin(x_admin_token)
@@ -482,7 +526,6 @@ def v6_compare(score_date: Optional[str] = None):
     with get_conn() as conn:
         return compare_v5_v6(conn, target)
 
-# V6 BACKTEST OPTIMIZER
 @app.post("/api/v6/backtest/run")
 async def v6_backtest_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -547,7 +590,6 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
-    """Manually trigger Yahoo daily OHLC update for raw_prices. Takes 10-20 min."""
     _check_admin(x_admin_token)
     global _raw_prices_updated_today
     _raw_prices_updated_today = None
@@ -597,7 +639,6 @@ async def load_screener(req: Request):
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
 
-# Screener.in scrape
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
 SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
@@ -696,7 +737,6 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
         conn.commit()
     return {"status": "ok", "rows_scraped": len(rows), "rows_inserted": inserted}
 
-# GITHUB
 GITHUB_API = "https://api.github.com"
 
 def _gh_headers():
@@ -797,7 +837,6 @@ async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None
     result = await _gh_delete_file(filepath, commit_message, existing["sha"])
     return {"status": "ok", "filepath": filepath, "action": "deleted", "commit_sha": result.get("commit", {}).get("sha")}
 
-# OAUTH
 _oauth_codes = {}
 _oauth_tokens = {}
 
@@ -838,7 +877,6 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
-# MCP TOOLS
 MCP_TOOLS = [
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -858,7 +896,7 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (last 7 days, 1,720 symbols). Takes 10-20 min. Use after market close to refresh price history.",
+    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (last 7 days, 1,720 symbols). Takes 10-20 min.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v5_engine", "description": "Run V5 filter engine: compute metrics + AND-gate for all 290 futures stocks.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -866,6 +904,10 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
     {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.",
      "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_v5_metrics_all", "description": "Get all 19 static metrics for all 290 stocks (latest date). For Apps Script daily refresh.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v5_live_metrics", "description": "Get real-time CMP, day%, and hourly gain for all 290 futures from intraday data. Single call for Apps Script 1-min refresh.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer. 6 months × top 50 F&O stocks × single-parameter sweep.",
@@ -940,6 +982,10 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/v5/qualified", params=params); return r.json()
         elif name == "get_v5_metrics":
             r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}"); return r.json()
+        elif name == "get_v5_metrics_all":
+            r = await client.get(f"{BASE_URL}/api/v5/metrics/all"); return r.json()
+        elif name == "get_v5_live_metrics":
+            r = await client.get(f"{BASE_URL}/api/v5/live_metrics"); return r.json()
         elif name == "get_v5_filters":
             r = await client.get(f"{BASE_URL}/api/v5/filters"); return r.json()
         elif name == "run_v6_backtest":
