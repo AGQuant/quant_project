@@ -1,19 +1,15 @@
 """
 V6 Backtest + Optimizer — Scorr / Project Quant
 =================================================
-Tests V6 filter thresholds on 6 months of historical data for top 50 F&O stocks.
-Single-parameter sweep optimization to find best thresholds for paper trading.
+Universe expanded to top 100 F&O stocks for statistically meaningful sample.
+Target: 100+ signals across 4 signal types in 6 months of historical data.
 
 Forward return window: 5 trading days
 Optimization metric: composite = win_rate × avg_return
 
-AUTO-TRIGGER: On import, fires a background thread that runs the full optimization
-once if v6_backtest_results table is empty. Allows zero-touch trigger after deploy.
-
-NOTE: GVM filter held constant (no historical GVM snapshots). 
-      Tests the 10 technical filters: dma_50, dma_200, rsi_month, rsi_weekly,
-      month_return, week_return, year_return, sector_day, sector_week,
-      month_index, range_1d.
+AUTO-TRIGGER: On import, fires a background thread that:
+  - Runs if v6_backtest_results is empty
+  - Re-runs if universe size changed (e.g. 50 → 100)
 """
 
 import os
@@ -29,11 +25,8 @@ import psycopg
 
 log = logging.getLogger("scorr.v6backtest")
 
-# ============================================================
-# CONSTANTS
-# ============================================================
-
-TOP_50_F_O = [
+# Universe — top 100 F&O by market cap
+TOP_100_F_O = [
     "RELIANCE", "HDFCBANK", "BHARTIARTL", "ICICIBANK", "SBIN", "TCS",
     "BAJFINANCE", "LT", "HINDUNILVR", "LICI", "INFY", "SUNPHARMA",
     "ADANIPOWER", "ADANIPORTS", "MARUTI", "AXISBANK", "KOTAKBANK", "ITC",
@@ -42,11 +35,23 @@ TOP_50_F_O = [
     "NESTLEIND", "DMART", "HINDZINC", "TATASTEEL", "HINDALCO", "ADANIGREEN",
     "ETERNAL", "SHRIRAMFIN", "GRASIM", "IOC", "EICHERMOT", "DIVISLAB",
     "VBL", "BSE", "ADANIENSOL", "SOLARINDS", "TVSMOTOR", "POWERINDIA",
-    "JIOFIN"
+    "JIOFIN", "TRENT", "TORNTPHARM", "PIDILITIND", "DLF", "MOTHERSON",
+    "BHEL", "PFC", "ABB", "POLYCAB", "BANKBARODA", "MUTHOOTFIN",
+    "CHOLAFIN", "TATAPOWER", "VEDL", "BRITANNIA", "IRFC", "BPCL",
+    "GVT&D", "JINDALSTEL", "UNIONBANK", "APOLLOHOSP", "LTM", "PNB",
+    "TATACONSUM", "HDFCAMC", "BAJAJHLDNG", "CANBK", "INDUSTOWER",
+    "INDIANB", "AMBUJACEM", "MARICO", "BOSCHLTD", "GODREJCP", "ZYDUSLIFE",
+    "LUPIN", "MANKIND", "GMRAIRPORT", "MAZDOCK", "MAXHEALTH", "HEROMOTOCO",
+    "LLOYDSME", "JSWENERGY", "ABCAPITAL", "UNITDSPR", "ASHOKLEY", "INDHOTEL",
+    "BHARATFORG", "SHREECEM", "RECLTD", "LODHA"
 ]
+
+# Alias for backwards compat — main.py imports may reference TOP_50_F_O
+TOP_50_F_O = TOP_100_F_O  # all callers now see top 100
 
 FORWARD_DAYS = 5
 MIN_SIGNALS_FOR_VALID = 5
+UNIVERSE_SIZE = len(TOP_100_F_O)
 
 V6_BASELINE_FILTERS = {
     "Buy_Reversal": {
@@ -121,6 +126,7 @@ CREATE TABLE IF NOT EXISTS v6_backtest_results (
     run_id TEXT NOT NULL, signal_type TEXT NOT NULL,
     variant_label TEXT NOT NULL, filter_config JSONB,
     num_signals INT, win_rate NUMERIC, avg_return NUMERIC, composite_score NUMERIC,
+    universe_size INT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_v6bt_run ON v6_backtest_results(run_id, signal_type);
@@ -147,7 +153,7 @@ def _safe_pct(num, denom):
     return float((num / denom - 1) * 100)
 
 
-def compute_backtest_metrics(conn, symbol, target_date, all_top50_closes=None):
+def compute_backtest_metrics(conn, symbol, target_date, all_universe_closes=None):
     out = {
         "symbol": symbol, "score_date": target_date,
         "dma_50": None, "dma_200": None, "rsi_month": None, "rsi_weekly": None,
@@ -205,9 +211,9 @@ def compute_backtest_metrics(conn, symbol, target_date, all_top50_closes=None):
         signed = ((h - l) / o * 100) * (1 if c >= o else -1)
         out["range_1d"] = signed
 
-    if all_top50_closes:
+    if all_universe_closes:
         sec_day_rets, sec_week_rets = [], []
-        for other_sym, other_df in all_top50_closes.items():
+        for other_sym, other_df in all_universe_closes.items():
             if other_sym == symbol: continue
             sub = other_df[other_df["date"] <= target_date]
             if len(sub) < 6: continue
@@ -233,14 +239,14 @@ def compute_backtest_metrics(conn, symbol, target_date, all_top50_closes=None):
     return out
 
 
-def fetch_top50_close_history(conn, target_date):
+def fetch_universe_close_history(conn, target_date):
     out = {}
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, price_date, close FROM raw_prices
             WHERE symbol = ANY(%s) AND price_date <= %s
             ORDER BY symbol, price_date ASC
-        """, (TOP_50_F_O, target_date))
+        """, (TOP_100_F_O, target_date))
         rows = cur.fetchall()
     for sym, dt, cl in rows:
         if sym not in out:
@@ -274,7 +280,7 @@ def store_backtest_metric(conn, m):
 
 
 def backfill_backtest_metrics(conn, start_date, end_date):
-    log.info(f"Backtest backfill: {start_date} → {end_date}")
+    log.info(f"Backtest backfill: {start_date} → {end_date} | universe={UNIVERSE_SIZE}")
     with conn.cursor() as cur:
         cur.execute("""
             SELECT DISTINCT price_date FROM raw_prices
@@ -285,9 +291,9 @@ def backfill_backtest_metrics(conn, start_date, end_date):
 
     total = 0
     for i, d in enumerate(dates):
-        top50_hist = fetch_top50_close_history(conn, d)
-        for sym in TOP_50_F_O:
-            m = compute_backtest_metrics(conn, sym, d, all_top50_closes=top50_hist)
+        univ_hist = fetch_universe_close_history(conn, d)
+        for sym in TOP_100_F_O:
+            m = compute_backtest_metrics(conn, sym, d, all_universe_closes=univ_hist)
             if m["close"] is not None:
                 store_backtest_metric(conn, m)
                 total += 1
@@ -385,15 +391,27 @@ def optimize_signal_type(conn, signal_type, start_date, end_date, run_id):
             cur.execute("""
                 INSERT INTO v6_backtest_results
                 (run_id, signal_type, variant_label, filter_config, 
-                 num_signals, win_rate, avg_return, composite_score)
-                VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+                 num_signals, win_rate, avg_return, composite_score, universe_size)
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
             """, (run_id, signal_type, f"{metric}::{best['variant_label']}",
                   _json.dumps(best["filter_config"]),
                   best["num_signals"], best["win_rate"],
-                  best["avg_return"], best["composite_score"]))
+                  best["avg_return"], best["composite_score"], UNIVERSE_SIZE))
             conn.commit()
 
     final = evaluate_filter_set(conn, signal_type, base, start_date, end_date)
+    # Store FINAL_OPTIMIZED row with full filter set
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO v6_backtest_results
+            (run_id, signal_type, variant_label, filter_config,
+             num_signals, win_rate, avg_return, composite_score, universe_size)
+            VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
+        """, (run_id, signal_type, "FINAL_OPTIMIZED",
+              _json.dumps({k: list(v) for k, v in base.items()}),
+              final.get("num_signals"), final.get("win_rate"),
+              final.get("avg_return"), final.get("composite_score"), UNIVERSE_SIZE))
+        conn.commit()
     return {
         "signal_type": signal_type,
         "optimized_filters": {k: list(v) for k, v in base.items()},
@@ -414,8 +432,17 @@ def run_full_optimization(conn):
     if existing_dates < 100:
         log.info(f"Backfilling metrics (existing dates: {existing_dates})")
         backfill_backtest_metrics(conn, start_date, end_date)
+    else:
+        # Even if dates exist, check if all 100 symbols are covered
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(DISTINCT symbol) FROM v6_backtest_metrics WHERE score_date >= %s", (start_date,))
+            existing_syms = cur.fetchone()[0]
+        if existing_syms < UNIVERSE_SIZE:
+            log.info(f"Universe expanded ({existing_syms} → {UNIVERSE_SIZE}). Re-backfilling.")
+            backfill_backtest_metrics(conn, start_date, end_date)
 
-    results = {"run_id": run_id, "date_range": [str(start_date), str(end_date)], "signals": {}}
+    results = {"run_id": run_id, "date_range": [str(start_date), str(end_date)],
+               "universe_size": UNIVERSE_SIZE, "signals": {}}
     for sig in ["Buy_Reversal", "Buy_Momentum", "Sell_Reversal", "Sell_Momentum"]:
         log.info(f"Optimizing {sig}...")
         results["signals"][sig] = optimize_signal_type(conn, sig, start_date, end_date, run_id)
@@ -423,26 +450,40 @@ def run_full_optimization(conn):
     return results
 
 
-# ============================================================
-# AUTO-TRIGGER (fires on module import via background thread)
-# ============================================================
-
-def _auto_trigger_if_empty():
-    """Background thread: waits 30 sec, then runs backtest if results table empty."""
+def _auto_trigger_if_needed():
+    """Background thread: waits 30 sec, then runs backtest if results stale or universe changed."""
     _time.sleep(30)
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         log.warning("Auto-trigger: DATABASE_URL not set, skipping")
         return
     try:
-        # Check if already run
+        # Check if universe changed (existing results from smaller universe)
         with psycopg.connect(db_url) as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM v6_backtest_results")
-            count = cur.fetchone()[0]
-        if count > 0:
-            log.info(f"Auto-trigger: {count} results exist, skipping")
+            # Add universe_size column if missing (migration safety)
+            try:
+                cur.execute("ALTER TABLE v6_backtest_results ADD COLUMN IF NOT EXISTS universe_size INT")
+                conn.commit()
+            except Exception:
+                pass
+            cur.execute("SELECT COUNT(*), COALESCE(MAX(universe_size), 0) FROM v6_backtest_results")
+            count, max_univ = cur.fetchone()
+        
+        # Re-run if: no results, OR previous universe was smaller
+        needs_run = count == 0 or (max_univ or 0) < UNIVERSE_SIZE
+        if not needs_run:
+            log.info(f"Auto-trigger: {count} results exist (universe={max_univ}), skipping")
             return
-        log.info("Auto-trigger: starting V6 backtest in background")
+        
+        # Clear old results before re-running with new universe
+        if count > 0:
+            log.info(f"Universe expanded ({max_univ} → {UNIVERSE_SIZE}). Clearing old results.")
+            with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM v6_backtest_results")
+                cur.execute("DELETE FROM v6_backtest_metrics")
+                conn.commit()
+        
+        log.info(f"Auto-trigger: starting V6 backtest (universe={UNIVERSE_SIZE})")
         with psycopg.connect(db_url) as conn:
             result = run_full_optimization(conn)
         log.info(f"Auto-trigger: V6 backtest complete - run_id={result.get('run_id')}")
@@ -450,5 +491,4 @@ def _auto_trigger_if_empty():
         log.error(f"Auto-trigger failed: {e}")
 
 
-# Fire background thread on module import
-threading.Thread(target=_auto_trigger_if_empty, daemon=True).start()
+threading.Thread(target=_auto_trigger_if_needed, daemon=True).start()
