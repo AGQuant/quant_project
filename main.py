@@ -30,16 +30,17 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.5
-# v1.6.5: GET /api/v5/signals + GET /api/v5/portfolio REST endpoints for V7
-# v1.6.4: Restore /api/admin/load_v5_from_drive (original V5 Apps Script endpoint)
-# v1.6.3: /api/admin/load_v5_signals_csv individual file loader
-# v1.6.2: /api/v5/live_metrics + /api/v5/metrics/all for V5 Apps Script wiring
-# v1.6.1: Fix cmp_prices (yfinance batch), wire raw_prices EOD scheduler
-# v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
+# Scorr / Project Quant — main.py v1.6.6
+# v1.6.6: v5_positions table + endpoint for V7 In Position dashboard
+# v1.6.5: GET /api/v5/signals + GET /api/v5/portfolio REST endpoints
+# v1.6.4: Restore /api/admin/load_v5_from_drive
+# v1.6.3: load_v5_signals_csv
+# v1.6.2: live_metrics + metrics/all
+# v1.6.1: cmp_prices yfinance fix, raw_prices EOD
+# v1.6.0: V6 shadow engine
 # ============================================================
 
-VERSION = "1.6.5"
+VERSION = "1.6.6"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -87,6 +88,11 @@ def create_tables():
     );
     CREATE TABLE IF NOT EXISTS v5_trades (id SERIAL PRIMARY KEY, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS v5_portfolio (id SERIAL PRIMARY KEY, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS v5_positions (
+        id SERIAL PRIMARY KEY,
+        data JSONB NOT NULL,
+        exported_at TIMESTAMP DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS v5_baskets (id SERIAL PRIMARY KEY, basket_name TEXT, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS earnings_calendar (
         id SERIAL PRIMARY KEY, company_name TEXT, ticker TEXT,
@@ -154,13 +160,10 @@ async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
     def _yf_batch(batch: List[str]) -> Dict[str, float]:
         try:
             tickers = [f"{s}.NS" for s in batch]
-            data = yf.download(tickers, period="2d", progress=False,
-                               auto_adjust=True, threads=False)
-            if data is None or data.empty:
-                return {}
+            data = yf.download(tickers, period="2d", progress=False, auto_adjust=True, threads=False)
+            if data is None or data.empty: return {}
             close = data["Close"] if "Close" in data.columns else None
-            if close is None:
-                return {}
+            if close is None: return {}
             last = close.iloc[-1]
             out = {}
             if isinstance(last, pd.Series):
@@ -188,9 +191,7 @@ async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=5m&range={range_str}"
     try:
         async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as c:
-            r = await c.get(url)
-            r.raise_for_status()
-            data = r.json()
+            r = await c.get(url); r.raise_for_status(); data = r.json()
         chart = data.get("chart", {}).get("result", [])
         if not chart: return []
         result = chart[0]
@@ -333,9 +334,9 @@ def health_feeds():
         ("intraday_prices", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
         ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
         ("v5_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v5_metrics"),
+        ("v5_positions", "SELECT MAX(exported_at)::date, COUNT(*) FROM v5_positions"),
         ("v5_qualified", "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
         ("v6_qualified", "SELECT MAX(score_date), COUNT(*) FROM v6_qualified"),
-        ("v6_backtest_metrics", "SELECT MAX(score_date), COUNT(*) FROM v6_backtest_metrics"),
         ("v6_backtest_results", "SELECT MAX(created_at)::date, COUNT(DISTINCT run_id) FROM v6_backtest_results"),
     ]
     try:
@@ -369,6 +370,31 @@ def api_query(sql, params=None, single=False):
     except Exception as e:
         log.error(f"api_query error: {e}")
         return {"error": str(e)}
+
+def _jsonb_rows(table: str, limit: int = 500) -> list:
+    """Read JSONB rows from a table — handles both data JSONB and specific-column schemas."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            # Try JSONB data column first
+            try:
+                cur.execute(f"SELECT data FROM {table} ORDER BY id LIMIT {limit}")
+                rows = []
+                for r in cur.fetchall():
+                    item = r[0]
+                    if isinstance(item, dict): rows.append(item)
+                    elif isinstance(item, str):
+                        try: rows.append(json.loads(item))
+                        except: pass
+                return rows
+            except Exception:
+                # Fall back to reading all columns
+                conn.rollback()
+                cur.execute(f"SELECT * FROM {table} ORDER BY id LIMIT {limit}")
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as e:
+        log.error(f"_jsonb_rows {table}: {e}")
+        return []
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
@@ -435,7 +461,6 @@ def v5_qualified(signal_type: Optional[str] = None, score_date: Optional[str] = 
 @app.get("/api/v5/signals")
 def v5_signals_get(signal_type: Optional[str] = None, cap_type: Optional[str] = None,
                    verdict: Optional[str] = None, limit: int = 200):
-    """REST endpoint for v5_signals. Supports signal_type, cap_type, verdict filters."""
     limit = min(max(limit, 1), 500)
     conds, vals = [], []
     if signal_type: conds.append("signal_type = %s"); vals.append(signal_type)
@@ -450,26 +475,20 @@ def v5_signals_get(signal_type: Optional[str] = None, cap_type: Optional[str] = 
         vals
     )
 
+@app.get("/api/v5/positions")
+def v5_positions_get():
+    """Live open positions from V5 In Position tab — refreshed every 15 min."""
+    return _jsonb_rows("v5_positions")
+
 @app.get("/api/v5/portfolio")
 def v5_portfolio_get():
-    """REST endpoint for v5_portfolio — current open positions."""
-    try:
-        with get_conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT data FROM v5_portfolio ORDER BY id")
-            rows = [r[0] for r in cur.fetchall()]
-        if not rows:
-            return []
-        # Flatten JSONB rows into a list of dicts
-        result = []
-        for row in rows:
-            if isinstance(row, dict):
-                result.append(row)
-            elif isinstance(row, str):
-                try: result.append(json.loads(row))
-                except: pass
-        return result
-    except Exception as e:
-        return {"error": str(e)}
+    """Screener portfolio from Live Portfolio tab."""
+    return _jsonb_rows("v5_portfolio")
+
+@app.get("/api/v5/trades")
+def v5_trades_get():
+    """Closed trade history from V5 Trade Log tab."""
+    return _jsonb_rows("v5_trades")
 
 @app.get("/api/v5/metrics/{symbol}")
 def v5_metrics_single(symbol: str, score_date: Optional[str] = None):
@@ -635,9 +654,7 @@ async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
-        r = await c.get(url)
-        r.raise_for_status()
-        return r.text
+        r = await c.get(url); r.raise_for_status(); return r.text
 
 @app.post("/api/admin/load_input_from_drive")
 async def load_input(req: Request):
@@ -670,21 +687,15 @@ async def load_screener(req: Request):
     return {"status": "ok", "rows": len(rows)}
 
 async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: bool = True) -> dict:
-    """Parse V5 alerts CSV and store into v5_signals. Shared helper."""
     try:
         df = pd.read_csv(io.StringIO(csv_text))
     except Exception as e:
         return {"status": "error", "error": f"CSV parse failed: {e}"}
-
     df.columns = [str(c).strip() for c in df.columns]
     sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
-    if not sym_col:
-        return {"status": "error", "error": "No Symbol column found"}
-
+    if not sym_col: return {"status": "error", "error": "No Symbol column found"}
     df = df[df[sym_col].notna() & (df[sym_col].astype(str).str.strip().str.len() > 0)]
-    if df.empty:
-        return {"status": "warn", "rows": 0}
-
+    if df.empty: return {"status": "warn", "rows": 0}
     def _sf(v):
         try: return float(v) if pd.notna(v) else None
         except: return None
@@ -707,7 +718,6 @@ async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: boo
             match = next((c for c in df.columns if n.lower() in c.lower()), None)
             if match: return match
         return None
-
     inserted, skipped = 0, 0
     with get_conn() as conn, conn.cursor() as cur:
         if replace:
@@ -745,12 +755,10 @@ async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: boo
                 skipped += 1
                 log.warning(f"v5_signals row skip ({sym}): {e}")
         conn.commit()
-
     return {"status": "ok", "signal_type": signal_type, "rows_read": len(df), "rows_inserted": inserted, "rows_skipped": skipped}
 
 @app.post("/api/admin/load_v5_signals_csv")
 async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Header(None)):
-    """Load v5_signals from a single Drive CSV. Body: {file_id, signal_type, replace}"""
     _check_admin(x_admin_token)
     body = await req.json()
     file_id = body.get("file_id")
@@ -764,38 +772,45 @@ async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Heade
 
 @app.post("/api/admin/load_v5_from_drive")
 async def load_v5_from_drive(req: Request):
-    """
-    Original V5 Apps Script endpoint — called by exportV5Tabs() every 15 min.
-    Body: {file_ids: {"v5_alerts_large.csv": "fileId1", ...}}
-    """
+    """Original V5 Apps Script endpoint. Routes each filename to correct Railway table."""
     body = await req.json()
     file_ids = body.get("file_ids", {})
     results = {}
-
     ALERTS_MAP = {
         "v5_alerts_large.csv": "Alert_Large",
         "v5_alerts_mid.csv":   "Alert_Mid",
         "v5_alerts_small.csv": "Alert_Small",
     }
-
     for filename, file_id in file_ids.items():
         fn = filename.lower().strip()
         try:
             if fn in ALERTS_MAP:
                 csv_text = await _drive_download(file_id)
                 results[filename] = await _parse_and_store_signals(csv_text, ALERTS_MAP[fn], replace=True)
-            elif "portfolio" in fn or "in_position" in fn:
+            elif "in_position" in fn:
+                # V5 In Position → v5_positions (trading positions with Entry, CMP, P&L)
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
                 rows = df.to_dict(orient="records")
                 with get_conn() as conn, conn.cursor() as cur:
-                    if "portfolio" in fn:
-                        cur.execute("DELETE FROM v5_portfolio")
+                    cur.execute("DELETE FROM v5_positions")
+                    for row in rows:
+                        cur.execute("INSERT INTO v5_positions (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
+                    conn.commit()
+                results[filename] = {"status": "ok", "rows": len(rows)}
+            elif "portfolio" in fn:
+                # Live Portfolio → v5_portfolio (screener portfolio)
+                csv_text = await _drive_download(file_id)
+                df = pd.read_csv(io.StringIO(csv_text))
+                rows = df.to_dict(orient="records")
+                with get_conn() as conn, conn.cursor() as cur:
+                    cur.execute("DELETE FROM v5_portfolio")
                     for row in rows:
                         cur.execute("INSERT INTO v5_portfolio (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
                     conn.commit()
                 results[filename] = {"status": "ok", "rows": len(rows)}
             elif "trade" in fn:
+                # Trade Log → v5_trades
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
                 rows = df.to_dict(orient="records")
@@ -810,7 +825,6 @@ async def load_v5_from_drive(req: Request):
         except Exception as e:
             results[filename] = {"status": "error", "error": str(e)[:100]}
             log.warning(f"load_v5_from_drive {filename}: {e}")
-
     loaded  = sum(1 for r in results.values() if r.get("status") == "ok")
     skipped = sum(1 for r in results.values() if r.get("status") == "skipped")
     errors  = sum(1 for r in results.values() if r.get("status") == "error")
@@ -843,30 +857,24 @@ async def _screener_login_session():
     if not email or not password: raise HTTPException(500, "SCREENER creds missing")
     client = httpx.AsyncClient(follow_redirects=True, timeout=60,
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "en-US,en;q=0.9"})
-    r = await client.get(SCREENER_LOGIN_URL)
-    r.raise_for_status()
+    r = await client.get(SCREENER_LOGIN_URL); r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     csrf_input = soup.find("input", {"name": "csrfmiddlewaretoken"})
     if not csrf_input:
-        await client.aclose()
-        raise HTTPException(500, "CSRF token not found")
+        await client.aclose(); raise HTTPException(500, "CSRF token not found")
     r = await client.post(SCREENER_LOGIN_URL, data={"csrfmiddlewaretoken": csrf_input.get("value"), "username": email, "password": password, "next": ""}, headers={"Referer": SCREENER_LOGIN_URL})
     if "sessionid" not in client.cookies:
-        await client.aclose()
-        raise HTTPException(401, "Screener login failed")
+        await client.aclose(); raise HTTPException(401, "Screener login failed")
     return client
 
 async def _scrape_upcoming_results(client):
-    r = await client.get(SCREENER_UPCOMING_URL)
-    r.raise_for_status()
+    r = await client.get(SCREENER_UPCOMING_URL); r.raise_for_status()
     html = r.text
-    if "/login/" in str(r.url) or "Login to your account" in html:
-        raise HTTPException(401, "Screener session expired")
+    if "/login/" in str(r.url) or "Login to your account" in html: raise HTTPException(401, "Screener session expired")
     soup = BeautifulSoup(html, "html.parser")
     tables = soup.find_all("table")
     if not tables: raise HTTPException(500, "No table found")
-    rows_out = []
-    seen_tickers = set()
+    rows_out = []; seen_tickers = set()
     for tbl in tables:
         try: dfs = pd.read_html(io.StringIO(str(tbl)))
         except Exception: continue
@@ -959,8 +967,7 @@ async def _gh_delete_file(filepath, commit_message, sha):
 async def _gh_list_tree(path_prefix=""):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{path_prefix}"
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, headers=_gh_headers())
-        r.raise_for_status()
+        r = await c.get(url, headers=_gh_headers()); r.raise_for_status()
         data = r.json()
         if isinstance(data, dict): data = [data]
         return [{"name": x["name"], "path": x["path"], "type": x["type"], "size": x.get("size", 0)} for x in data]
@@ -986,8 +993,7 @@ async def github_push(req: Request, x_admin_token: Optional[str] = Header(None))
     _check_deploy_guard()
     if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     body = await req.json()
-    filepath = body.get("filepath")
-    new_content = body.get("new_content")
+    filepath = body.get("filepath"); new_content = body.get("new_content")
     commit_message = body.get("commit_message", f"chore: update {filepath}")
     create_if_missing = body.get("create_if_missing", True)
     if not filepath or new_content is None: raise HTTPException(400, "filepath and new_content required")
@@ -1007,16 +1013,14 @@ async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None
     _check_deploy_guard()
     if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     body = await req.json()
-    filepath = body.get("filepath")
-    commit_message = body.get("commit_message", f"chore: delete {filepath}")
+    filepath = body.get("filepath"); commit_message = body.get("commit_message", f"chore: delete {filepath}")
     if not filepath: raise HTTPException(400, "filepath required")
     existing = await _gh_get_file(filepath)
     if not existing["exists"]: raise HTTPException(404, f"File not found: {filepath}")
     result = await _gh_delete_file(filepath, commit_message, existing["sha"])
     return {"status": "ok", "filepath": filepath, "action": "deleted", "commit_sha": result.get("commit", {}).get("sha")}
 
-_oauth_codes = {}
-_oauth_tokens = {}
+_oauth_codes = {}; _oauth_tokens = {}
 
 @app.get("/.well-known/oauth-authorization-server")
 def oauth_metadata():
@@ -1032,8 +1036,7 @@ def oauth_resource():
 
 @app.post("/oauth/register")
 async def oauth_register(req: Request):
-    body = await req.json()
-    cid = secrets.token_urlsafe(16)
+    body = await req.json(); cid = secrets.token_urlsafe(16)
     return {"client_id": cid, "client_id_issued_at": int(time.time()), "redirect_uris": body.get("redirect_uris", []),
             "token_endpoint_auth_method": "none", "grant_types": ["authorization_code"], "response_types": ["code"]}
 
@@ -1047,129 +1050,77 @@ def oauth_authorize(client_id: str, redirect_uri: str, response_type: str = "cod
 
 @app.post("/oauth/token")
 async def oauth_token(req: Request):
-    form = await req.form()
-    code = form.get("code")
+    form = await req.form(); code = form.get("code")
     if code not in _oauth_codes: raise HTTPException(400, "Invalid code")
-    info = _oauth_codes.pop(code)
-    token = secrets.token_urlsafe(32)
+    info = _oauth_codes.pop(code); token = secrets.token_urlsafe(32)
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
 MCP_TOOLS = [
-    {"name": "get_gvm", "description": "Fetch full GVM score for a stock.",
-     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_top_stocks", "description": "Get top N stocks by GVM.",
-     "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
-    {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.",
-     "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
-    {"name": "get_filter", "description": "Filter stocks by GVM range.",
-     "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
-    {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_momentum", "description": "Get momentum scores for a stock.",
-     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock.",
-     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
-    {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.",
-     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (last 7 days, 1,720 symbols). Takes 10-20 min.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v5_engine", "description": "Run V5 filter engine: compute metrics + AND-gate for all 290 futures stocks.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.",
-     "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
-    {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.",
-     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_v5_metrics_all", "description": "Get all 19 static metrics for all 290 stocks (latest date).",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_live_metrics", "description": "Get real-time CMP, day%, and hourly gain for all 290 futures. Single call for 1-min refresh.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v6_backtest_results", "description": "Get V6 backtest results.",
-     "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
-    {"name": "run_v6_engine", "description": "Run V6 filter engine: backtest-optimized AND-gate against v6_filters.",
-     "inputSchema": {"type": "object", "properties": {"recompute": {"type": "boolean"}}, "required": []}},
-    {"name": "get_v6_qualified", "description": "Get stocks qualified by V6 (optimized) AND-gate today.",
-     "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "score_date": {"type": "string"}}, "required": []}},
-    {"name": "get_v6_filters", "description": "Get current V6 filter thresholds (backtest-optimized).",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6 qualified stocks per signal type.",
-     "inputSchema": {"type": "object", "properties": {"score_date": {"type": "string"}}, "required": []}},
-    {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "env_check", "description": "Diagnostic: which env vars are visible.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.",
-     "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-    {"name": "load_input_from_drive", "description": "Reload input_raw table from a Google Drive CSV file ID.",
-     "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_screener_from_drive", "description": "Reload screener_raw table from a Google Drive CSV file ID.",
-     "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a single Drive CSV.",
-     "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}, "signal_type": {"type": "string"}, "replace": {"type": "boolean"}}, "required": ["file_id"]}},
-    {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_signals", "description": "Query V5 signals.",
-     "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "cap_type": {"type": "string"}, "verdict": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
-    {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.",
-     "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_v5_portfolio", "description": "Get current V5 portfolio holdings.",
-     "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "github_read", "description": "Read any file from the GitHub repo.",
-     "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
-    {"name": "github_list", "description": "List files in the repo.",
-     "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
-    {"name": "github_push", "description": "Create or update a file.",
-     "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
-    {"name": "github_delete", "description": "Delete a file.",
-     "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
+    {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
+    {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
+    {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
+    {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v5_engine", "description": "Run V5 filter engine.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
+    {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_v5_metrics_all", "description": "Get all 19 static metrics for all 290 stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v5_live_metrics", "description": "Get real-time CMP, day%, and hourly gain for all 290 futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v6_backtest_results", "description": "Get V6 backtest results.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
+    {"name": "run_v6_engine", "description": "Run V6 filter engine.", "inputSchema": {"type": "object", "properties": {"recompute": {"type": "boolean"}}, "required": []}},
+    {"name": "get_v6_qualified", "description": "Get stocks qualified by V6 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "score_date": {"type": "string"}}, "required": []}},
+    {"name": "get_v6_filters", "description": "Get current V6 filter thresholds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6.", "inputSchema": {"type": "object", "properties": {"score_date": {"type": "string"}}, "required": []}},
+    {"name": "health_feeds", "description": "Status dashboard for all data feeds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "env_check", "description": "Diagnostic: which env vars are visible.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "load_input_from_drive", "description": "Reload input_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "load_screener_from_drive", "description": "Reload screener_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a single Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}, "signal_type": {"type": "string"}, "replace": {"type": "boolean"}}, "required": ["file_id"]}},
+    {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v5_signals", "description": "Query V5 signals.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "cap_type": {"type": "string"}, "verdict": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
+    {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_v5_portfolio", "description": "Get screener portfolio holdings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "github_read", "description": "Read any file from the GitHub repo.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
+    {"name": "github_list", "description": "List files in the repo.", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
+    {"name": "github_push", "description": "Create or update a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
+    {"name": "github_delete", "description": "Delete a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
+    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
 
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
-        if name == "get_gvm":
-            r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
+        if name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
             params = {}
             if args.get("verdict"): params["verdict"] = args["verdict"]
             r = await client.get(f"{BASE_URL}/api/gvm/top/{args['n']}", params=params); return r.json()
-        elif name == "get_sector":
-            r = await client.get(f"{BASE_URL}/api/sector/{args['sector']}"); return r.json()
-        elif name == "get_filter":
-            r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)}); return r.json()
-        elif name == "get_sector_rating":
-            r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
-        elif name == "get_momentum":
-            r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
-        elif name == "get_intraday":
-            r = await client.get(f"{BASE_URL}/api/intraday/{args['symbol']}", params={"days": args.get("days", 1)}); return r.json()
-        elif name == "get_cmp":
-            r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
-        elif name == "backfill_intraday":
-            r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_yahoo_daily":
-            r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_v5_engine":
-            r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_sector": r = await client.get(f"{BASE_URL}/api/sector/{args['sector']}"); return r.json()
+        elif name == "get_filter": r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)}); return r.json()
+        elif name == "get_sector_rating": r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
+        elif name == "get_momentum": r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
+        elif name == "get_intraday": r = await client.get(f"{BASE_URL}/api/intraday/{args['symbol']}", params={"days": args.get("days", 1)}); return r.json()
+        elif name == "get_cmp": r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
+        elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "run_v5_engine": r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_qualified":
             params = {}
             if args.get("signal_type"): params["signal_type"] = args["signal_type"]
             r = await client.get(f"{BASE_URL}/api/v5/qualified", params=params); return r.json()
-        elif name == "get_v5_metrics":
-            r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}"); return r.json()
-        elif name == "get_v5_metrics_all":
-            r = await client.get(f"{BASE_URL}/api/v5/metrics/all"); return r.json()
-        elif name == "get_v5_live_metrics":
-            r = await client.get(f"{BASE_URL}/api/v5/live_metrics"); return r.json()
-        elif name == "get_v5_filters":
-            r = await client.get(f"{BASE_URL}/api/v5/filters"); return r.json()
-        elif name == "run_v6_backtest":
-            r = await client.post(f"{BASE_URL}/api/v6/backtest/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_v5_metrics": r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}"); return r.json()
+        elif name == "get_v5_metrics_all": r = await client.get(f"{BASE_URL}/api/v5/metrics/all"); return r.json()
+        elif name == "get_v5_live_metrics": r = await client.get(f"{BASE_URL}/api/v5/live_metrics"); return r.json()
+        elif name == "get_v5_filters": r = await client.get(f"{BASE_URL}/api/v5/filters"); return r.json()
+        elif name == "run_v6_backtest": r = await client.post(f"{BASE_URL}/api/v6/backtest/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v6_backtest_results":
             params = {}
             if args.get("run_id"): params["run_id"] = args["run_id"]
@@ -1184,16 +1135,13 @@ async def _call_tool(name, args):
             if args.get("signal_type"): params["signal_type"] = args["signal_type"]
             if args.get("score_date"): params["score_date"] = args["score_date"]
             r = await client.get(f"{BASE_URL}/api/v6/qualified", params=params); return r.json()
-        elif name == "get_v6_filters":
-            r = await client.get(f"{BASE_URL}/api/v6/filters"); return r.json()
+        elif name == "get_v6_filters": r = await client.get(f"{BASE_URL}/api/v6/filters"); return r.json()
         elif name == "compare_v5_v6":
             params = {}
             if args.get("score_date"): params["score_date"] = args["score_date"]
             r = await client.get(f"{BASE_URL}/api/v6/compare", params=params); return r.json()
-        elif name == "health_feeds":
-            r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
-        elif name == "env_check":
-            r = await client.get(f"{BASE_URL}/api/admin/env_check", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "health_feeds": r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
+        elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_sql":
             q = args["query"]
             try:
@@ -1208,16 +1156,13 @@ async def _call_tool(name, args):
                     return {"status": "ok", "rowcount": cur.rowcount}
             except Exception as e:
                 return {"error": str(e)}
-        elif name == "load_input_from_drive":
-            r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
-        elif name == "load_screener_from_drive":
-            r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
+        elif name == "load_input_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
+        elif name == "load_screener_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_v5_signals_csv":
             r = await client.post(f"{BASE_URL}/api/admin/load_v5_signals_csv",
                 json={"file_id": args["file_id"], "signal_type": args.get("signal_type","Alert"), "replace": args.get("replace", False)},
                 headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "load_earnings_from_screener":
-            r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "load_earnings_from_screener": r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v5_signals":
             params = {}
             if args.get("signal_type"): params["signal_type"] = args["signal_type"]
@@ -1231,34 +1176,24 @@ async def _call_tool(name, args):
                 cur.execute("SELECT ticker, ex_date, event_type FROM earnings_calendar WHERE UPPER(ticker) = %s ORDER BY id DESC LIMIT 5", (sym,))
                 rows = cur.fetchall()
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
-        elif name == "get_v5_portfolio":
-            r = await client.get(f"{BASE_URL}/api/v5/portfolio"); return r.json()
-        elif name == "github_read":
-            r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "github_list":
-            r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "github_push":
-            r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "github_delete":
-            r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_v5_portfolio": r = await client.get(f"{BASE_URL}/api/v5/portfolio"); return r.json()
+        elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "github_delete": r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
 async def mcp_endpoint(req: Request):
-    body = await req.json()
-    method = body.get("method")
-    params = body.get("params", {})
-    msg_id = body.get("id")
+    body = await req.json(); method = body.get("method"); params = body.get("params", {}); msg_id = body.get("id")
     if method == "initialize":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {"listChanged": False}},
+            "protocolVersion": "2024-11-05", "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "Scorr", "version": VERSION}}}
     if method == "tools/list":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS}}
     if method == "tools/call":
-        name = params.get("name")
-        args = params.get("arguments", {})
+        name = params.get("name"); args = params.get("arguments", {})
         try:
             result = await _call_tool(name, args)
             return {"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}}
