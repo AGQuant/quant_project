@@ -26,16 +26,18 @@ from v5_engine import (
     compute_metrics_for_symbol, load_filters, store_metrics
 )
 from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
+from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.5.0
+# Scorr / Project Quant — main.py v1.6.0
+# v1.6.0: V6 shadow engine (optimized filters, v5↔v6 paper-trade compare)
 # v1.5.0: V6 backtest optimizer (6mo top 50, parameter sweep)
 # v1.4.0: V5 engine — filter computation + AND-gate
 # v1.3.0: backfill_intraday MCP tool
 # v1.2.8: intraday_prices + cmp_prices + scheduler
 # ============================================================
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -98,7 +100,7 @@ def create_tables():
     CREATE TABLE IF NOT EXISTS cmp_prices (
         symbol TEXT PRIMARY KEY, cmp NUMERIC, updated_at TIMESTAMP DEFAULT NOW()
     );
-    """ + V5_SCHEMA_SQL + V6_BACKTEST_SCHEMA
+    """ + V5_SCHEMA_SQL + V6_BACKTEST_SCHEMA + V6_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
@@ -299,6 +301,7 @@ def health_feeds():
         ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
         ("v5_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v5_metrics"),
         ("v5_qualified", "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
+        ("v6_qualified", "SELECT MAX(score_date), COUNT(*) FROM v6_qualified"),
         ("v6_backtest_metrics", "SELECT MAX(score_date), COUNT(*) FROM v6_backtest_metrics"),
         ("v6_backtest_results", "SELECT MAX(created_at)::date, COUNT(DISTINCT run_id) FROM v6_backtest_results"),
     ]
@@ -418,6 +421,30 @@ async def v5_filter_update(req: Request, x_admin_token: Optional[str] = Header(N
         cur.execute("INSERT INTO v5_filters (signal_type, metric, min_val, max_val) VALUES (%s, %s, %s, %s) ON CONFLICT (signal_type, metric) DO UPDATE SET min_val = EXCLUDED.min_val, max_val = EXCLUDED.max_val, updated_at = NOW()", (sig, metric, mn, mx))
         conn.commit()
     return {"status": "ok", "signal_type": sig, "metric": metric, "min_val": mn, "max_val": mx}
+
+# V6 SHADOW ENGINE — backtest-optimized filters, paper-trade comparison
+@app.post("/api/v6/run")
+async def v6_run(x_admin_token: Optional[str] = Header(None), recompute: bool = False):
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return run_v6_engine(conn, recompute=recompute)
+
+@app.get("/api/v6/qualified")
+def v6_qualified_get(signal_type: Optional[str] = None, score_date: Optional[str] = None):
+    if not score_date: score_date = str(date.today())
+    if signal_type:
+        return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v6_qualified WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC", (signal_type, score_date))
+    return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v6_qualified WHERE score_date = %s ORDER BY signal_type, gvm_score DESC", (score_date,))
+
+@app.get("/api/v6/filters")
+def v6_filters_get():
+    return api_query("SELECT signal_type, metric, min_val, max_val, updated_at FROM v6_filters ORDER BY signal_type, metric")
+
+@app.get("/api/v6/compare")
+def v6_compare(score_date: Optional[str] = None):
+    target = date.fromisoformat(score_date) if score_date else date.today()
+    with get_conn() as conn:
+        return compare_v5_v6(conn, target)
 
 # V6 BACKTEST OPTIMIZER
 @app.post("/api/v6/backtest/run")
@@ -793,6 +820,14 @@ MCP_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v6_backtest_results", "description": "Get V6 backtest results. Pass run_id for full details, else returns recent runs.",
      "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
+    {"name": "run_v6_engine", "description": "Run V6 filter engine: backtest-optimized AND-gate against v6_filters. Reads v5_metrics, writes v6_qualified. Pass recompute=true to recompute metrics from raw_prices.",
+     "inputSchema": {"type": "object", "properties": {"recompute": {"type": "boolean"}}, "required": []}},
+    {"name": "get_v6_qualified", "description": "Get stocks qualified by V6 (optimized) AND-gate today.",
+     "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "score_date": {"type": "string"}}, "required": []}},
+    {"name": "get_v6_filters", "description": "Get current V6 filter thresholds (backtest-optimized).",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6 qualified stocks per signal type for a given date. Returns counts, intersection, and exclusive sets.",
+     "inputSchema": {"type": "object", "properties": {"score_date": {"type": "string"}}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "env_check", "description": "Diagnostic: which env vars are visible.",
@@ -860,6 +895,21 @@ async def _call_tool(name, args):
             if args.get("run_id"): params["run_id"] = args["run_id"]
             if args.get("signal_type"): params["signal_type"] = args["signal_type"]
             r = await client.get(f"{BASE_URL}/api/v6/backtest/results", params=params); return r.json()
+        elif name == "run_v6_engine":
+            params = {}
+            if args.get("recompute"): params["recompute"] = "true"
+            r = await client.post(f"{BASE_URL}/api/v6/run", params=params, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_v6_qualified":
+            params = {}
+            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
+            if args.get("score_date"): params["score_date"] = args["score_date"]
+            r = await client.get(f"{BASE_URL}/api/v6/qualified", params=params); return r.json()
+        elif name == "get_v6_filters":
+            r = await client.get(f"{BASE_URL}/api/v6/filters"); return r.json()
+        elif name == "compare_v5_v6":
+            params = {}
+            if args.get("score_date"): params["score_date"] = args["score_date"]
+            r = await client.get(f"{BASE_URL}/api/v6/compare", params=params); return r.json()
         elif name == "health_feeds":
             r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
         elif name == "env_check":
