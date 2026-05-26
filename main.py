@@ -29,9 +29,11 @@ from v5_engine import (
 from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 from v8_endpoints import router as v8_router
+from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.7.0
+# Scorr / Project Quant — main.py v1.8.0
+# v1.8.0: v8_futures router wired + Sell_Overbought basket live
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # v1.6.7: Fix /api/v5/metrics/all route order + add /api/v6/metrics/all alias
 # v1.6.6: v5_positions table + endpoint for V7 In Position dashboard
@@ -43,7 +45,7 @@ from v8_endpoints import router as v8_router
 # v1.6.0: V6 shadow engine
 # ============================================================
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -66,8 +68,9 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# V8 router — Quant Long-Short Basket Strategy endpoints
+# V8 routers — Quant Long-Short Basket Strategy
 app.include_router(v8_router)
+app.include_router(v8_futures_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -113,6 +116,13 @@ def create_tables():
     CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_prices(symbol, ts DESC);
     CREATE TABLE IF NOT EXISTS cmp_prices (
         symbol TEXT PRIMARY KEY, cmp NUMERIC, updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS futures_universe (
+        symbol TEXT PRIMARY KEY,
+        lot_size INTEGER,
+        segment TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        updated_at TIMESTAMP DEFAULT NOW()
     );
     """ + V5_SCHEMA_SQL + V6_BACKTEST_SCHEMA + V6_SCHEMA_SQL
     try:
@@ -344,6 +354,7 @@ def health_feeds():
         ("v5_qualified", "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
         ("v6_qualified", "SELECT MAX(score_date), COUNT(*) FROM v6_qualified"),
         ("v6_backtest_results", "SELECT MAX(created_at)::date, COUNT(DISTINCT run_id) FROM v6_backtest_results"),
+        ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -381,7 +392,6 @@ def _jsonb_rows(table: str, limit: int = 500) -> list:
     """Read JSONB rows from a table — handles both data JSONB and specific-column schemas."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
-            # Try JSONB data column first
             try:
                 cur.execute(f"SELECT data FROM {table} ORDER BY id LIMIT {limit}")
                 rows = []
@@ -393,7 +403,6 @@ def _jsonb_rows(table: str, limit: int = 500) -> list:
                         except: pass
                 return rows
             except Exception:
-                # Fall back to reading all columns
                 conn.rollback()
                 cur.execute(f"SELECT * FROM {table} ORDER BY id LIMIT {limit}")
                 cols = [d[0] for d in cur.description]
@@ -483,17 +492,14 @@ def v5_signals_get(signal_type: Optional[str] = None, cap_type: Optional[str] = 
 
 @app.get("/api/v5/positions")
 def v5_positions_get():
-    """Live open positions from V5 In Position tab — refreshed every 15 min."""
     return _jsonb_rows("v5_positions")
 
 @app.get("/api/v5/portfolio")
 def v5_portfolio_get():
-    """Screener portfolio from Live Portfolio tab."""
     return _jsonb_rows("v5_portfolio")
 
 @app.get("/api/v5/trades")
 def v5_trades_get():
-    """Closed trade history from V5 Trade Log tab."""
     return _jsonb_rows("v5_trades")
 
 @app.get("/api/v5/metrics/all")
@@ -511,7 +517,6 @@ def v5_metrics_all():
 
 @app.get("/api/v6/metrics/all")
 def v6_metrics_all():
-    """Alias for /api/v5/metrics/all — v5_metrics is the shared source for V5 and V6."""
     return v5_metrics_all()
 
 @app.get("/api/v5/metrics/{symbol}")
@@ -783,7 +788,6 @@ async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Heade
 
 @app.post("/api/admin/load_v5_from_drive")
 async def load_v5_from_drive(req: Request):
-    """Original V5 Apps Script endpoint. Routes each filename to correct Railway table."""
     body = await req.json()
     file_ids = body.get("file_ids", {})
     results = {}
@@ -1101,10 +1105,12 @@ MCP_TOOLS = [
     {"name": "github_list", "description": "List files in the repo.", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
     {"name": "github_push", "description": "Create or update a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
     {"name": "github_delete", "description": "Delete a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
-    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_market_mood", "description": "V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket (buy_reversal, buy_momentum, sell_reversal, sell_momentum).", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
+    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket (buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought).", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
     {"name": "v8_filter_config", "description": "V8: Get filter thresholds for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}}, "required": ["basket"]}},
+    {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
+    {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
+    {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals — failed breakout/exhaustion reversal. Target=S1, 71% win rate May-2026.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1195,6 +1201,9 @@ async def _call_tool(name, args):
         elif name == "v8_market_mood": r = await client.get(f"{BASE_URL}/api/v8/market_mood"); return r.json()
         elif name == "v8_qualified": r = await client.get(f"{BASE_URL}/api/v8/qualified/{args['basket']}", params={"limit": args.get("limit", 50)}); return r.json()
         elif name == "v8_filter_config": r = await client.get(f"{BASE_URL}/api/v8/filter_config/{args['basket']}"); return r.json()
+        elif name == "v8_sell_overbought": r = await client.get(f"{BASE_URL}/api/v8/sell_overbought", params={"limit": args.get("limit", 50)}); return r.json()
+        elif name == "v8_futures_list": r = await client.get(f"{BASE_URL}/api/v8/futures/list", params={"active_only": args.get("active_only", True)}); return r.json()
+        elif name == "v8_futures_upload": r = await client.post(f"{BASE_URL}/api/v8/futures/upload", json={"stocks": args["stocks"]}); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
