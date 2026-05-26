@@ -28,9 +28,11 @@ from v5_engine import (
 )
 from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
+from v8_endpoints import router as v8_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.7
+# Scorr / Project Quant — main.py v1.7.0
+# v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # v1.6.7: Fix /api/v5/metrics/all route order + add /api/v6/metrics/all alias
 # v1.6.6: v5_positions table + endpoint for V7 In Position dashboard
 # v1.6.5: GET /api/v5/signals + GET /api/v5/portfolio REST endpoints
@@ -41,7 +43,7 @@ from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 # v1.6.0: V6 shadow engine
 # ============================================================
 
-VERSION = "1.6.7"
+VERSION = "1.7.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -63,6 +65,9 @@ app.add_middleware(
     allow_origins=["*"], allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
+
+# V8 router — Quant Long-Short Basket Strategy endpoints
+app.include_router(v8_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -794,7 +799,6 @@ async def load_v5_from_drive(req: Request):
                 csv_text = await _drive_download(file_id)
                 results[filename] = await _parse_and_store_signals(csv_text, ALERTS_MAP[fn], replace=True)
             elif "in_position" in fn:
-                # V5 In Position → v5_positions (trading positions with Entry, CMP, P&L)
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
                 rows = df.to_dict(orient="records")
@@ -805,7 +809,6 @@ async def load_v5_from_drive(req: Request):
                     conn.commit()
                 results[filename] = {"status": "ok", "rows": len(rows)}
             elif "portfolio" in fn:
-                # Live Portfolio → v5_portfolio (screener portfolio)
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
                 rows = df.to_dict(orient="records")
@@ -816,7 +819,6 @@ async def load_v5_from_drive(req: Request):
                     conn.commit()
                 results[filename] = {"status": "ok", "rows": len(rows)}
             elif "trade" in fn:
-                # Trade Log → v5_trades
                 csv_text = await _drive_download(file_id)
                 df = pd.read_csv(io.StringIO(csv_text))
                 rows = df.to_dict(orient="records")
@@ -1100,6 +1102,9 @@ MCP_TOOLS = [
     {"name": "github_push", "description": "Create or update a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
     {"name": "github_delete", "description": "Delete a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
     {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_market_mood", "description": "V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket (buy_reversal, buy_momentum, sell_reversal, sell_momentum).", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
+    {"name": "v8_filter_config", "description": "V8: Get filter thresholds for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}}, "required": ["basket"]}},
 ]
 
 async def _call_tool(name, args):
@@ -1187,6 +1192,9 @@ async def _call_tool(name, args):
         elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_delete": r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "v8_market_mood": r = await client.get(f"{BASE_URL}/api/v8/market_mood"); return r.json()
+        elif name == "v8_qualified": r = await client.get(f"{BASE_URL}/api/v8/qualified/{args['basket']}", params={"limit": args.get("limit", 50)}); return r.json()
+        elif name == "v8_filter_config": r = await client.get(f"{BASE_URL}/api/v8/filter_config/{args['basket']}"); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
