@@ -1,48 +1,27 @@
 """
-yahoo_daily_update.py
-=====================
-Daily delta update — fetches last 5 days of OHLC for all symbols in raw_prices.
-Runs at 3:45 PM IST Mon-Fri via Railway scheduler (after market close).
-
-Self-healing: 5-day window catches any gaps from holidays or missed runs.
-Safe to re-run: UPSERT on (symbol, price_date) — no duplicates ever.
-
-Usage:
-    python yahoo_daily_update.py          # runs update
-    python yahoo_daily_update.py --test   # test DB connection only
+yahoo_daily_update.py — v2.0
+Chart API async update — replaces slow yf.Ticker().history()
+Fetches last 10 days OHLC for all symbols in raw_prices (~1720 stocks).
+Uses httpx async with semaphore=8. ~3 min for full universe.
+Safe to re-run: UPSERT on (symbol, price_date).
 """
 
-import sys
-import time
-import datetime
-import yfinance as yf
-import psycopg
-from psycopg.rows import dict_row
-
-# ============================================================
-# CONFIG — uses Railway internal URL when deployed on Railway
-# For local test: swap to public proxy URL
-# ============================================================
+import asyncio
 import os
-DB_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:nvKhlXtKniyClYvpVVjQeYeAypwsbCeE@kodama.proxy.rlwy.net:49570/railway?sslmode=require"
-)
+import datetime
+import psycopg
+import httpx
+import urllib.parse
+import logging
 
-LOOKBACK_DAYS = 7    # Fetch last 7 days — catches weekends + 1 holiday buffer
-RETRY_DELAY   = 5    # Seconds before retry
-BATCH_SIZE    = 50   # Symbols per batch
-SLEEP_BETWEEN = 1    # Seconds between batches
+log = logging.getLogger("yahoo_daily")
 
-# Index mapping
-INDICES = {
-    "^NSEI":    "NIFTY50",
-    "^NSEBANK": "BANKNIFTY",
-}
+DB_URL = os.environ.get("DATABASE_URL")
+LOOKBACK = "10d"
+SEMAPHORE = 8
 
 UPSERT_SQL = """
-INSERT INTO raw_prices
-    (symbol, price_date, open, high, low, close, adjusted_close, volume)
+INSERT INTO raw_prices (symbol, price_date, open, high, low, close, adjusted_close, volume)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (symbol, price_date) DO UPDATE SET
     open           = EXCLUDED.open,
@@ -53,103 +32,128 @@ ON CONFLICT (symbol, price_date) DO UPDATE SET
     volume         = EXCLUDED.volume;
 """
 
+INDICES = {
+    "NIFTY50":   "^NSEI",
+    "BANKNIFTY": "^NSEBANK",
+}
 
-def to_yahoo_ticker(db_symbol):
-    reverse_index = {v: k for k, v in INDICES.items()}
-    if db_symbol in reverse_index:
-        return reverse_index[db_symbol]
-    return db_symbol + ".NS"
+def _to_yahoo_ticker(symbol: str) -> str:
+    return INDICES.get(symbol, symbol + ".NS")
 
 
-def fetch_recent(db_symbol, retry=True):
-    """Fetch last LOOKBACK_DAYS of OHLC for one symbol."""
-    yahoo_ticker = to_yahoo_ticker(db_symbol)
-    end   = datetime.date.today() + datetime.timedelta(days=1)  # include today
-    start = datetime.date.today() - datetime.timedelta(days=LOOKBACK_DAYS)
+async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbol: str):
+    ticker = _to_yahoo_ticker(symbol)
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/"
+        f"{urllib.parse.quote(ticker)}?interval=1d&range={LOOKBACK}"
+    )
+    async with sem:
+        try:
+            r = await client.get(url)
+            r.raise_for_status()
+            data = r.json()
+            chart = data.get("chart", {}).get("result", [])
+            if not chart:
+                return symbol, []
+            result   = chart[0]
+            tss      = result.get("timestamp", [])
+            q        = result.get("indicators", {}).get("quote", [{}])[0]
+            adj_list = result.get("indicators", {}).get("adjclose", [])
+            adj_closes = adj_list[0].get("adjclose", []) if adj_list else []
 
-    try:
-        ticker = yf.Ticker(yahoo_ticker)
-        df = ticker.history(
-            start=str(start),
-            end=str(end),
-            interval="1d",
-            auto_adjust=False
-        )
+            opens   = q.get("open",   [])
+            highs   = q.get("high",   [])
+            lows    = q.get("low",    [])
+            closes  = q.get("close",  [])
+            volumes = q.get("volume", [])
 
-        if df is None or df.empty:
-            raise ValueError("Empty dataframe")
+            rows = []
+            for i, ts in enumerate(tss):
+                c = closes[i] if i < len(closes) else None
+                if c is None:
+                    continue
+                o  = opens[i]   if i < len(opens)   else None
+                h  = highs[i]   if i < len(highs)   else None
+                l  = lows[i]    if i < len(lows)    else None
+                v  = volumes[i] if i < len(volumes)  else None
+                ac = adj_closes[i] if i < len(adj_closes) else c
+                dt = datetime.datetime.utcfromtimestamp(ts).date()
+                rows.append((
+                    symbol, dt,
+                    round(float(o), 2) if o is not None else None,
+                    round(float(h), 2) if h is not None else None,
+                    round(float(l), 2) if l is not None else None,
+                    round(float(c), 2),
+                    round(float(ac), 2) if ac is not None else None,
+                    int(v) if v is not None else 0,
+                ))
+            return symbol, rows
+        except Exception as e:
+            log.warning(f"yahoo_daily {symbol}: {e}")
+            return symbol, []
+        finally:
+            await asyncio.sleep(0.05)
 
-        rows = []
-        for date, row in df.iterrows():
-            rows.append((
-                db_symbol,
-                date.date(),
-                round(float(row["Open"]),     2) if row["Open"]      == row["Open"]      else None,
-                round(float(row["High"]),     2) if row["High"]      == row["High"]      else None,
-                round(float(row["Low"]),      2) if row["Low"]       == row["Low"]       else None,
-                round(float(row["Close"]),    2) if row["Close"]     == row["Close"]     else None,
-                round(float(row["Adj Close"]),2) if row["Adj Close"] == row["Adj Close"] else None,
-                int(row["Volume"])               if row["Volume"]    == row["Volume"]    else 0,
-            ))
-        return rows
 
-    except Exception as e:
-        if retry:
-            time.sleep(RETRY_DELAY)
-            return fetch_recent(db_symbol, retry=False)
-        else:
-            return None
+async def run_async(symbols=None, lookback=None):
+    """
+    Main async entry point. If symbols is None, fetches all from raw_prices.
+    Returns dict with stats.
+    """
+    global LOOKBACK
+    if lookback:
+        LOOKBACK = lookback
+
+    if symbols is None:
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT symbol FROM raw_prices ORDER BY symbol")
+            symbols = [r[0] for r in cur.fetchall()]
+
+    if not symbols:
+        return {"updated": 0, "failed": 0, "rows": 0}
+
+    sem = asyncio.Semaphore(SEMAPHORE)
+    failed = []
+    total_rows = 0
+
+    async with httpx.AsyncClient(
+        timeout=30,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    ) as client:
+        tasks   = [_fetch_symbol(client, sem, s) for s in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+        for symbol, rows in results:
+            if not rows:
+                failed.append(symbol)
+                continue
+            cur.executemany(UPSERT_SQL, rows)
+            total_rows += len(rows)
+        conn.commit()
+
+    summary = {
+        "symbols_attempted": len(symbols),
+        "updated":           len(symbols) - len(failed),
+        "failed":            len(failed),
+        "rows_upserted":     total_rows,
+        "failed_symbols":    failed[:20],
+    }
+    log.info(f"yahoo_daily done: {summary}")
+    return summary
 
 
 def main():
-    # --test mode: just verify DB connection
+    """Sync wrapper — called by legacy code or manual CLI run."""
+    import sys
     if "--test" in sys.argv:
-        print("Testing DB connection...")
-        conn = psycopg.connect(DB_URL)
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM raw_prices;")
-            count = cur.fetchone()[0]
-        conn.close()
-        print(f"OK — raw_prices has {count:,} rows")
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM raw_prices")
+            print(f"OK — raw_prices has {cur.fetchone()[0]:,} rows")
         return
-
-    start_time = time.time()
-    run_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S IST')
-    print(f"[DAILY UPDATE] {run_date}")
-
-    conn = psycopg.connect(DB_URL)
-
-    # Pull distinct symbols from raw_prices (already loaded = our universe)
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT DISTINCT symbol FROM raw_prices ORDER BY symbol;")
-        all_symbols = [row["symbol"] for row in cur.fetchall()]
-
-    total = len(all_symbols)
-    print(f"[INFO] Updating {total} symbols — last {LOOKBACK_DAYS} days")
-
-    failed = []
-    updated_rows = 0
-
-    for i in range(0, total, BATCH_SIZE):
-        batch = all_symbols[i: i + BATCH_SIZE]
-        for db_symbol in batch:
-            rows = fetch_recent(db_symbol)
-            if rows is None:
-                failed.append(db_symbol)
-                continue
-            with conn.cursor() as cur:
-                cur.executemany(UPSERT_SQL, rows)
-            conn.commit()
-            updated_rows += len(rows)
-        time.sleep(SLEEP_BETWEEN)
-
-    elapsed = (time.time() - start_time) / 60
-    print(f"[DONE] {updated_rows:,} rows upserted | {len(failed)} failed | {elapsed:.1f} min")
-
-    if failed:
-        print(f"[FAILED] {', '.join(failed[:10])}{'...' if len(failed) > 10 else ''}")
-
-    conn.close()
+    result = asyncio.run(run_async())
+    print(f"Done: {result}")
 
 
 if __name__ == "__main__":
