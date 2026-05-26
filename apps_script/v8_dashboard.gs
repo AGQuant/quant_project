@@ -13,9 +13,11 @@
  * ║     3. Buy_Momentum           — Stock funnel breakdown           ║
  * ║     4. Sell_Reversal          — Stock funnel breakdown           ║
  * ║     5. Sell_Momentum          — Stock funnel breakdown           ║
- * ║     6. Sell_Overbought        — Failed breakout signals (NEW)    ║
- * ║     7. In_Position            — Live open trades                 ║
- * ║     8. Trade_Log              — Closed trade history             ║
+ * ║     6. Sell_Overbought        — Failed breakout signals          ║
+ * ║     7. In_Position            — Live open trades (personal)      ║
+ * ║     8. Trade_Log              — Closed trade history (personal)  ║
+ * ║                                                                  ║
+ * ║   Data source: Railway V8 endpoints + personal_journal table     ║
  * ║                                                                  ║
  * ║   Update workflow (mobile-friendly):                             ║
  * ║     1. Run "🆕 Check for Updates" from Scorr V8 menu             ║
@@ -31,7 +33,7 @@
 //   CONFIG
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.1.0';   // Bumped on every push — used by update checker
+const SCRIPT_VERSION = '1.2.0';   // V8-only state, personal_journal source
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -50,37 +52,31 @@ const SHEETS = {
 const BASKETS = ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum', 'sell_overbought'];
 
 const COLORS = {
-  // Backgrounds
-  DARK_HEADER:    '#1F2937',   // charcoal — section headers
-  SUBHEADER:      '#374151',   // lighter charcoal — sub-sections
-  ALT_ROW:        '#F9FAFB',   // very light grey — alternating
+  DARK_HEADER:    '#1F2937',
+  SUBHEADER:      '#374151',
+  ALT_ROW:        '#F9FAFB',
   CARD_BG:        '#FFFFFF',
 
-  // Accents — strategy-specific
-  BUY_REV:        '#2563EB',   // blue
-  BUY_MOM:        '#1D4ED8',   // deeper blue
-  SELL_REV:       '#EA580C',   // orange
-  SELL_MOM:       '#C2410C',   // deeper orange
-  SELL_OB:        '#9333EA',   // purple (NEW — exhaustion theme)
+  BUY_REV:        '#2563EB',
+  BUY_MOM:        '#1D4ED8',
+  SELL_REV:       '#EA580C',
+  SELL_MOM:       '#C2410C',
+  SELL_OB:        '#9333EA',
 
-  // States
-  PASS_BG:        '#DCFCE7',   // light green
-  PASS_TEXT:      '#15803D',   // dark green
-  FAIL_BG:        '#FEE2E2',   // light red
-  FAIL_TEXT:      '#B91C1C',   // dark red
+  PASS_BG:        '#DCFCE7',
+  PASS_TEXT:      '#15803D',
+  FAIL_BG:        '#FEE2E2',
+  FAIL_TEXT:      '#B91C1C',
   NEUTRAL_BG:     '#F3F4F6',
   NEUTRAL_TEXT:   '#4B5563',
 
-  // P&L
   PROFIT:         '#16A34A',
   LOSS:           '#DC2626',
   FLAT:           '#6B7280',
 
-  // Text on dark
   WHITE:          '#FFFFFF',
   MUTED_LIGHT:    '#D1D5DB',
 
-  // Borders
   BORDER_STRONG:  '#111827',
   BORDER_SOFT:    '#E5E7EB',
 };
@@ -94,7 +90,6 @@ const FONTS = {
   BIG_NUM:   { family: 'Inter',     size: 18, weight: 'bold' },
 };
 
-// Map basket-id -> display name + color
 const BASKET_META = {
   buy_reversal:    { label: 'Buy Reversal',    color: COLORS.BUY_REV,  emoji: '▲' },
   buy_momentum:    { label: 'Buy Momentum',    color: COLORS.BUY_MOM,  emoji: '▲' },
@@ -144,20 +139,19 @@ function stopTriggers() {
 }
 
 function scheduledRefresh() {
-  // Only refresh during IST market hours (9:15 - 15:30 weekdays)
   const ist = new Date(Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'));
   const day = ist.getDay();
   const hour = ist.getHours();
   const min = ist.getMinutes();
   if (day === 0 || day === 6) return;
   const minutes = hour * 60 + min;
-  if (minutes < 555 || minutes > 930) return;  // 9:15 = 555, 15:30 = 930
+  if (minutes < 555 || minutes > 930) return;
   refreshAll();
 }
 
 
 // ════════════════════════════════════════════════════════════════════
-//   UPDATE CHECKER — pulls SCRIPT_VERSION from GitHub, compares
+//   UPDATE CHECKER
 // ════════════════════════════════════════════════════════════════════
 
 function pullLatestFromGitHub() {
@@ -185,7 +179,6 @@ function pullLatestFromGitHub() {
     return;
   }
 
-  // New version available — show modal with URL + copy button
   const html = HtmlService.createHtmlOutput(
     `<!DOCTYPE html><html><head><style>
       body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 20px; margin: 0; color: #1F2937; }
@@ -223,7 +216,6 @@ function pullLatestFromGitHub() {
           navigator.clipboard.writeText(text).then(
             () => { document.getElementById('btn').innerText = '✓ Copied to clipboard'; },
             () => {
-              // Fallback for older browsers
               const r = document.createRange();
               r.selectNode(document.getElementById('url'));
               window.getSelection().removeAllRanges();
@@ -254,9 +246,10 @@ function showVersion() {
       <div class="row"><span class="label">API base</span><span class="val">${BASE_URL}</span></div>
       <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
       <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
+      <div class="row"><span class="label">Trade source</span><span class="val">personal_journal</span></div>
       <p style="margin-top: 20px; color: #6B7280; font-size: 12px;">Run <strong>🆕 Check for Updates</strong> to fetch latest version from GitHub.</p>
     </body></html>`
-  ).setWidth(380).setHeight(260);
+  ).setWidth(380).setHeight(280);
   SpreadsheetApp.getUi().showModalDialog(html, 'About');
 }
 
@@ -289,7 +282,7 @@ function refreshSellBaskets() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   API CALLS
+//   API CALLS — V8-only state
 // ════════════════════════════════════════════════════════════════════
 
 function fetchJSON(endpoint) {
@@ -314,17 +307,13 @@ function fetchMarketMood()     { return fetchJSON('/api/v8/market_mood'); }
 function fetchFilterConfig(b)  { return fetchJSON('/api/v8/filter_config/' + b); }
 function fetchQualified(b)     { return fetchJSON('/api/v8/qualified/' + b + '?limit=200'); }
 function fetchSellOverbought() { return fetchJSON('/api/v8/sell_overbought?limit=50'); }
-function fetchPositions()      { return fetchJSON('/api/v5/positions'); }
-function fetchTrades()         { return fetchJSON('/api/v5/trades'); }
-function fetchMetricsAll()     { return fetchJSON('/api/v5/metrics/all'); }
+function fetchPositions()      { return fetchJSON('/api/v8/positions?limit=100'); }    // V8 native — personal_journal
+function fetchTrades()         { return fetchJSON('/api/v8/trades?limit=200'); }       // V8 native — personal_journal
+function fetchMetricsAll()     { return fetchJSON('/api/v5/metrics/all'); }            // metrics universe — universal data, name kept
 
 
 // ════════════════════════════════════════════════════════════════════
 //   TAB: MASTER DASHBOARD
-//   Layout (top → bottom):
-//     1. Performance Summary (Open + Closed)
-//     2. Market Gate
-//     3. Filter tables for all 5 baskets
 // ════════════════════════════════════════════════════════════════════
 
 function refreshMasterDashboard() {
@@ -335,22 +324,17 @@ function refreshMasterDashboard() {
   sheet.setColumnWidth(1, 165);
 
   let row = 1;
-
-  // ── TITLE BAR ──
   row = renderTitleBar(sheet, row, 'SCORR V8 — MASTER DASHBOARD', 'Quant Long-Short Tracker');
   row++;
 
-  // ── PERFORMANCE SUMMARY ──
   row = renderSectionHeader(sheet, row, '📊  PERFORMANCE SUMMARY', COLORS.DARK_HEADER);
   row = renderPerformanceSummary(sheet, row);
   row += 2;
 
-  // ── MARKET GATE ──
   row = renderSectionHeader(sheet, row, '🚦  MARKET GATE', COLORS.DARK_HEADER);
   row = renderMarketGate(sheet, row);
   row += 2;
 
-  // ── FILTER TABLES (all 5 baskets, 2 per row) ──
   row = renderSectionHeader(sheet, row, '🎯  FILTER LOGIC (5 baskets)', COLORS.DARK_HEADER);
   row++;
   BASKETS.forEach(basket => {
@@ -358,9 +342,7 @@ function refreshMasterDashboard() {
     row += 1;
   });
 
-  // Freeze the title bar
   sheet.setFrozenRows(2);
-
   toast('✓ Dashboard refreshed');
 }
 
@@ -411,7 +393,6 @@ function renderPerformanceSummary(sheet, row) {
   const openAgg = aggregatePositions(positions);
   const closedAgg = aggregateTrades(trades);
 
-  // ── OPEN POSITIONS TABLE ──
   row = renderSubHeader(sheet, row, 'OPEN POSITIONS (Live)');
   const openHeaders = ['Strategy', 'Direction', 'Open', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L'];
   row = renderTableHeader(sheet, row, openHeaders, 8);
@@ -423,12 +404,10 @@ function renderPerformanceSummary(sheet, row) {
       strat, dir, a.count, a.pnl, fmtPct(a.accuracy), a.winning, a.losing, a.avgPnl,
     ], { pnlCols: [4, 8] });
   });
-  // Total row
   const tot = openAgg.__TOTAL || zeroAgg();
   row = renderTotalRow(sheet, row, 8, ['TOTAL', 'ALL', tot.count, tot.pnl, fmtPct(tot.accuracy), tot.winning, tot.losing, tot.avgPnl], { pnlCols: [4, 8] });
   row++;
 
-  // ── CLOSED TRADES TABLE ──
   row = renderSubHeader(sheet, row, 'CLOSED TRADES (Historical)');
   const closedHeaders = ['Strategy', 'Direction', 'Closed', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L'];
   row = renderTableHeader(sheet, row, closedHeaders, 8);
@@ -457,7 +436,6 @@ function renderMarketGate(sheet, row) {
     return row + 1;
   }
 
-  // Headers
   row = renderTableHeader(sheet, row, ['Filter', 'Live Value', 'Required', 'Pass/Fail'], 4);
 
   mood.checks.forEach(c => {
@@ -473,7 +451,6 @@ function renderMarketGate(sheet, row) {
     row++;
   });
 
-  // Gate result banner
   row++;
   const gateText = mood.fails === 0 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
   const gateBg = mood.fails === 0 ? COLORS.PASS_BG : COLORS.FAIL_BG;
@@ -503,7 +480,6 @@ function renderFilterCard(sheet, row, basket) {
   const config = fetchFilterConfig(basket);
   if (!config) return row;
 
-  // Card header
   const header = sheet.getRange(row, 1, 1, 10).merge();
   header.setValue(`${meta.emoji}  ${meta.label.toUpperCase()}   ·   Target: ${config.target || 'S1'}   ·   Win%: ${config.win_pct || '—'}`)
     .setBackground(meta.color)
@@ -514,7 +490,6 @@ function renderFilterCard(sheet, row, basket) {
   sheet.setRowHeight(row, 26);
   row++;
 
-  // Column headers — Filter / Min / Max
   row = renderTableHeader(sheet, row, ['Filter', 'Min', 'Max', 'Description'], 4);
 
   config.filters.forEach(f => {
@@ -531,8 +506,7 @@ function renderFilterCard(sheet, row, basket) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TABS: BASKET FUNNELS (one per basket)
-//   Layout: Filter funnel with successive Count + Stock columns
+//   TABS: BASKET FUNNELS
 // ════════════════════════════════════════════════════════════════════
 
 function refreshBasketFunnel(basket) {
@@ -554,7 +528,6 @@ function refreshBasketFunnel(basket) {
     return;
   }
 
-  // Title bar
   let row = 1;
   const titleRange = sheet.getRange(row, 1, 1, 14).merge();
   titleRange.setValue(`${meta.emoji}  ${meta.label.toUpperCase()} — Stock Funnel`)
@@ -571,11 +544,9 @@ function refreshBasketFunnel(basket) {
   sheet.setRowHeight(row, 20);
   row += 2;
 
-  // Filter header row (filter name + min/max)
   const filters = config.filters;
   const ncol = filters.length;
 
-  // Min row
   sheet.getRange(row, 1).setValue('Filter').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
   filters.forEach((f, i) => {
     sheet.getRange(row, 2 + i).setValue(f.metric).setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setWrap(true);
@@ -595,7 +566,6 @@ function refreshBasketFunnel(basket) {
   });
   row += 2;
 
-  // Funnel count row
   const funnelCounts = computeFunnelCounts(metricsAll, filters);
   sheet.getRange(row, 1).setValue('Count').setFontWeight('bold').setBackground(meta.color).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
   funnelCounts.forEach((c, i) => {
@@ -606,7 +576,6 @@ function refreshBasketFunnel(basket) {
   sheet.setRowHeight(row, 30);
   row++;
 
-  // Final qualified count highlight
   sheet.getRange(row, 1).setValue('QUALIFIED').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
   const qcount = qualified.count || 0;
   sheet.getRange(row, 2, 1, ncol).merge()
@@ -616,7 +585,6 @@ function refreshBasketFunnel(basket) {
   sheet.setRowHeight(row, 28);
   row += 2;
 
-  // Qualified stocks list
   sheet.getRange(row, 1).setValue('▼ QUALIFIED STOCKS').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
   sheet.getRange(row, 1, 1, ncol + 1).setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
   row++;
@@ -663,10 +631,6 @@ function refreshBasketFunnel(basket) {
 }
 
 
-/**
- * Compute funnel: cumulative count after each filter applied in order.
- * Returns array of counts, one per filter.
- */
 function computeFunnelCounts(metricsAll, filters) {
   const counts = [];
   let universe = metricsAll.slice();
@@ -686,7 +650,7 @@ function computeFunnelCounts(metricsAll, filters) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: SELL OVERBOUGHT (special — uses /sell_overbought endpoint)
+//   TAB: SELL OVERBOUGHT
 // ════════════════════════════════════════════════════════════════════
 
 function refreshSellOverbought() {
@@ -699,7 +663,6 @@ function refreshSellOverbought() {
 
   let row = 1;
 
-  // Title
   sheet.getRange(row, 1, 1, 14).merge()
     .setValue(`${meta.emoji}  SELL OVERBOUGHT — Failed Breakout / Exhaustion Reversal`)
     .setBackground(meta.color).setFontColor(COLORS.WHITE)
@@ -720,7 +683,6 @@ function refreshSellOverbought() {
   sheet.setRowHeight(row, 20);
   row++;
 
-  // Note banner
   const note = data.note || 'Market gate required — fails in recovery/bull markets';
   sheet.getRange(row, 1, 1, 14).merge()
     .setValue('ℹ ' + note)
@@ -729,7 +691,6 @@ function refreshSellOverbought() {
   sheet.setRowHeight(row, 24);
   row += 2;
 
-  // Filter summary card
   row = renderSubHeader(sheet, row, 'FILTER LOGIC');
   const filterRows = [
     ['DMA 200',         '≥ 10%',    'Extended above 200-day MA'],
@@ -749,7 +710,6 @@ function refreshSellOverbought() {
   });
   row += 2;
 
-  // Signals table
   row = renderSubHeader(sheet, row, `LIVE SIGNALS (${data.count || 0} qualified)`);
   const headers = ['Symbol', 'Entry', 'Target (S1)', 'Stop', 'Tgt %', 'DMA200', 'wi52', 'ma9_21', 'Vol Ratio', 'RSI M', 'Sector Wk'];
   row = renderTableHeader(sheet, row, headers, headers.length);
@@ -797,7 +757,7 @@ function refreshSellOverbought() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: IN POSITION
+//   TAB: IN POSITION — pulls from personal_journal via /api/v8/positions
 // ════════════════════════════════════════════════════════════════════
 
 function refreshInPosition() {
@@ -810,15 +770,13 @@ function refreshInPosition() {
 
   let row = 1;
 
-  // Title
   sheet.getRange(row, 1, 1, 10).merge()
-    .setValue('📍  V5 IN POSITION — LIVE OPEN TRADES')
+    .setValue('📍  IN POSITION — LIVE OPEN TRADES')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
 
-  // Gate strip
   const gateText = mood
     ? `Gate: ${mood.fails === 0 ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}`
     : `Refreshed: ${nowIST()}`;
@@ -829,7 +787,6 @@ function refreshInPosition() {
   sheet.setRowHeight(row, 22);
   row += 2;
 
-  // Group positions by strategy
   const grouped = groupByStrategy(positions);
 
   ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
@@ -837,7 +794,6 @@ function refreshInPosition() {
     row += 1;
   });
 
-  // Overall Summary
   row = renderSectionHeader(sheet, row, '📊  OVERALL OPEN SUMMARY', COLORS.DARK_HEADER);
   const long = positions.filter(p => isLongTrade(p));
   const short = positions.filter(p => !isLongTrade(p));
@@ -878,7 +834,6 @@ function refreshInPosition() {
 function renderStrategyPositionSection(sheet, row, strategy, trades) {
   const meta = strategyMeta(strategy);
 
-  // Section header
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(`${meta.emoji}  ${strategy.toUpperCase()}`)
     .setBackground(meta.color).setFontColor(COLORS.WHITE)
@@ -886,7 +841,6 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
   sheet.setRowHeight(row, 26);
   row++;
 
-  // Summary stats
   const stats = computePositionStats(trades);
   const statHeaders = ['Open Trades', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L/Trade'];
   statHeaders.forEach((h, i) => {
@@ -918,7 +872,6 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
   sheet.setRowHeight(row, 24);
   row++;
 
-  // Trade rows
   const tradeHeaders = ['Entry Time', 'Stock', 'Entry', 'CMP', 'Qty', 'SL', 'Target', 'Unrealised P&L', 'Holding'];
   row = renderTableHeader(sheet, row, tradeHeaders, 9);
 
@@ -961,7 +914,7 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: TRADE LOG (CLOSED)
+//   TAB: TRADE LOG — pulls from personal_journal via /api/v8/trades
 // ════════════════════════════════════════════════════════════════════
 
 function refreshTradeLog() {
@@ -973,7 +926,7 @@ function refreshTradeLog() {
 
   let row = 1;
   sheet.getRange(row, 1, 1, 10).merge()
-    .setValue('📒  V5 TRADE LOG — CLOSED TRADES')
+    .setValue('📒  TRADE LOG — CLOSED TRADES')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
@@ -993,7 +946,6 @@ function refreshTradeLog() {
     row += 1;
   });
 
-  // Overall summary
   row = renderSectionHeader(sheet, row, '📊  OVERALL CLOSED SUMMARY', COLORS.DARK_HEADER);
   const closedStats = computeClosedStats(trades);
   const summary = [
@@ -1108,7 +1060,7 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   BUILD ALL TABS (first-run setup)
+//   BUILD ALL TABS
 // ════════════════════════════════════════════════════════════════════
 
 function buildAllTabs() {
@@ -1186,16 +1138,15 @@ function groupByStrategy(rows) {
 }
 
 function inferStrategy(row) {
-  // Prefer explicit field; otherwise infer from Direction + signal_type / type
-  const explicit = row.Strategy || row.strategy || row.signal_type;
+  const explicit = row.Strategy || row.strategy || row.signal_type || row.v8_basket;
   if (explicit) {
     const s = String(explicit).toLowerCase();
     if (s.includes('buy') && s.includes('rev')) return 'Buy Reversal';
     if (s.includes('buy') && s.includes('mom')) return 'Buy Momentum';
     if (s.includes('sell') && s.includes('rev')) return 'Sell Reversal';
     if (s.includes('sell') && s.includes('mom')) return 'Sell Momentum';
+    if (s.includes('overbought')) return 'Sell Reversal';
   }
-  // Fallback by direction
   return isLongTrade(row) ? 'Buy Reversal' : 'Sell Reversal';
 }
 
@@ -1203,7 +1154,6 @@ function isLongTrade(row) {
   const d = String(row.Direction || row.direction || row.Type || row.type || '').toUpperCase();
   if (d === 'LONG' || d === 'BUY') return true;
   if (d === 'SHORT' || d === 'SELL') return false;
-  // Fallback by P&L sign convention if direction missing
   return true;
 }
 
@@ -1353,7 +1303,6 @@ function renderTotalRow(sheet, row, ncol, vals, opts) {
       .setFontSize(11);
     if (opts.pnlCols && opts.pnlCols.includes(i + 1)) {
       const raw = parsePnL(v);
-      // Keep dark bg but tint text
       cell.setFontColor(raw >= 0 ? '#86EFAC' : '#FCA5A5');
     }
   });
