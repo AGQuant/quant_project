@@ -2,18 +2,16 @@
 V8 endpoints — Quant Long-Short Basket Strategy
 Display source for V8 Final CLS V Google Sheet.
 
-5 endpoints:
+Endpoints:
   GET /api/v8/market_mood            — ADR + Nifty D/W/M + auto Buy/Sell slot allocation
   GET /api/v8/qualified/{basket}     — Stocks passing filters for a basket
   GET /api/v8/filter_config/{basket} — Min/Max thresholds per basket
   GET /api/v8/adr                    — Quick ADR-only refresh
   GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal signals
+  GET /api/v8/positions              — Open trades from personal_journal (V8 native)
+  GET /api/v8/trades                 — Closed trades from personal_journal (V8 native)
 
 5 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought
-Sell_Overbought: dma200≥10, wi52≥80, ma9_vs_ma21≥3%, vol_ratio≤0.8, r1d<0, rsi_month≥60
-Target = S1 (pivot support 1), SL = entry + (entry - S1) = 1:1
-Backtest May 2026: 71.4% win rate (15 signals, 10 wins, 4 losses)
-Market gate handles April (recovery market — all sell strategies fail correctly).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -29,9 +27,6 @@ def _conn():
 
 
 # ── Filter configs ────────────────────────────────────────────────────────────
-# Format: metric -> [min, max]  (None = no bound)
-# Sell_Overbought uses v5_metrics columns PLUS computed ma9_vs_ma21 & vol_ratio
-# which are NOT in v5_metrics — handled separately in the /sell_overbought endpoint.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -72,7 +67,7 @@ FILTER_CONFIG = {
         "sector_week":  [-12.0, -1.5],
         "sector_day":   [-3.0,  1.0],
         "month_index":  [0.0,   50.0],
-        "range_3d":     [None,  -1.0],   # ≤ -1 locked Config B
+        "range_3d":     [None,  -1.0],
     },
     "sell_momentum": {
         "dma_200":      [-50.0, 0.0],
@@ -90,18 +85,14 @@ FILTER_CONFIG = {
         "range_3d":     [-10.0, -1.0],
         "week_index_52":[None,  20.0],
     },
-    # Sell Overbought — computed live from raw_prices + v5_metrics
-    # Config stored in v5_filters table; endpoint runs its own SQL
     "sell_overbought": {
         "dma_200":      [10.0, None],
         "week_index_52":[80.0, None],
         "rsi_month":    [60.0, None],
         "range_1d":     [None, 0.0],
-        # ma9_vs_ma21 >= 3% and vol_ratio <= 0.8 computed in endpoint
     },
 }
 
-# Human-readable descriptions for display
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "S1", "win_pct": "~65%", "signals_per_day": "~2"},
     "buy_momentum":    {"side": "BUY",  "target": "S1", "win_pct": "~65%", "signals_per_day": "~2"},
@@ -120,27 +111,27 @@ def _pivot_s1_s2(prev_high, prev_low, prev_close):
     return pp, s1, s2
 
 
+def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
+    """Convert basket key to human label."""
+    if not basket:
+        return ''
+    mapping = {
+        'buy_reversal':    'Buy Reversal',
+        'buy_momentum':    'Buy Momentum',
+        'sell_reversal':   'Sell Reversal',
+        'sell_momentum':   'Sell Momentum',
+        'sell_overbought': 'Sell Overbought',
+    }
+    return mapping.get(basket.lower(), basket)
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
-    """
-    Market Mood gate — 4 conditions:
-      ADR (futures advance/decline ratio) >= 1
-      Nifty Day return >= 0
-      Nifty Week return >= 0
-      Nifty Month return >= 0
-
-    Slot allocation by # of fails (out of 4):
-      0 fails -> Buy 10 / Sell 5
-      1 fail  -> Buy 8  / Sell 7
-      2 fails -> Buy 7  / Sell 8
-      3+ fails -> Buy 5 / Sell 10
-    Total = 15 always.
-    """
+    """Market Mood gate — ADR + Nifty D/W/M. Slot allocation by # of fails."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            # ADR from intraday (today) or v5_metrics fallback
             cur.execute("""
                 WITH today_change AS (
                     SELECT i.symbol,
@@ -166,7 +157,6 @@ def market_mood():
             r = cur.fetchone()
             advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
 
-            # Fallback to v5_metrics prev_day_change if no intraday
             if (advances + declines) == 0:
                 cur.execute("""
                     SELECT
@@ -182,7 +172,6 @@ def market_mood():
             adr = round(advances / declines, 3) if declines > 0 else (999.0 if advances > 0 else 0.0)
             adr_pass = adr >= 1.0
 
-            # Nifty returns from raw_prices
             cur.execute("""
                 SELECT price_date, close
                 FROM raw_prices
@@ -302,20 +291,7 @@ def qualified(basket: str, limit: int = 50):
 
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
-    """
-    Sell Overbought — Failed breakout / exhaustion reversal.
-    Computes ma9_vs_ma21 and vol_ratio live from raw_prices.
-    Target = S1 (pivot support 1), SL = entry + (entry - S1).
-    Backtest May-2026: 71.4% win rate.
-
-    Filters:
-      dma_200       >= 10%       (extended above 200DMA)
-      week_index_52 >= 80        (near 52-week high)
-      ma9_vs_ma21   >= 3%        (short-term momentum stretched)
-      vol_ratio     <= 0.8       (volume drying — exhaustion)
-      range_1d      < 0          (today red — reversal starting)
-      rsi_month     >= 60        (RSI elevated)
-    """
+    """Failed breakout / exhaustion reversal — computed live."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -344,10 +320,8 @@ def sell_overbought(limit: int = 50):
                            pw.prev_high, pw.prev_low, pw.prev_close,
                            ROUND(((pw.ma9 - pw.ma21) / NULLIF(pw.ma21, 0) * 100)::numeric, 2)  AS ma9_vs_ma21,
                            ROUND((pw.volume / NULLIF(pw.vol_avg10, 0))::numeric, 2)             AS vol_ratio,
-                           -- Pivot S1
                            ROUND((((pw.prev_high + pw.prev_low + pw.prev_close) / 3)
                                - (pw.prev_high - (pw.prev_high + pw.prev_low + pw.prev_close) / 3))::numeric, 2) AS s1,
-                           -- Pivot S2
                            ROUND((((pw.prev_high + pw.prev_low + pw.prev_close) / 3)
                                - 2 * (pw.prev_high - (pw.prev_high + pw.prev_low + pw.prev_close) / 3))::numeric, 2) AS s2
                     FROM price_window pw
@@ -421,3 +395,99 @@ def adr_only():
             return {"adr": adr, "advances": adv, "declines": dec, "unchanged": unc, "pass": adr >= 1.0}
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  PERSONAL JOURNAL — V8 native open + closed trades
+#  Replaces the legacy v5_positions / v5_trades dependency in V8 dashboard.
+# ════════════════════════════════════════════════════════════════════════════
+
+@router.get("/positions")
+def v8_positions(limit: int = 100):
+    """
+    Open trades = personal_journal rows where exit_time IS NULL.
+    Joins to cmp_prices for live CMP; computes unrealised P&L.
+    Returns same field shape that the V8 dashboard expects.
+    """
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    pj.id,
+                    pj.trade_date,
+                    pj.entry_time,
+                    pj.symbol,
+                    pj.direction,
+                    pj.entry_price,
+                    pj.qty,
+                    pj.sl,
+                    pj.target,
+                    pj.v8_basket,
+                    pj.v8_signal_match,
+                    pj.setup_quality,
+                    pj.rule_score_total,
+                    pj.notes,
+                    COALESCE(cp.cmp, pj.entry_price) AS cmp,
+                    CASE
+                        WHEN UPPER(pj.direction) = 'LONG'  THEN ROUND(((COALESCE(cp.cmp, pj.entry_price) - pj.entry_price) * pj.qty)::numeric, 2)
+                        WHEN UPPER(pj.direction) = 'SHORT' THEN ROUND(((pj.entry_price - COALESCE(cp.cmp, pj.entry_price)) * pj.qty)::numeric, 2)
+                        ELSE 0
+                    END AS unrealised_pnl
+                FROM personal_journal pj
+                LEFT JOIN cmp_prices cp ON cp.symbol = pj.symbol
+                WHERE pj.exit_time IS NULL
+                ORDER BY pj.entry_time DESC NULLS LAST
+                LIMIT %s
+            """, (min(max(limit, 1), 500),))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # Add strategy label for dashboard grouping
+        for r in rows:
+            r['strategy'] = _normalize_basket_to_strategy(r.get('v8_basket'))
+        return rows
+    except Exception as e:
+        raise HTTPException(500, f"v8_positions failed: {e}")
+
+
+@router.get("/trades")
+def v8_trades(limit: int = 200):
+    """
+    Closed trades = personal_journal rows where exit_time IS NOT NULL.
+    """
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    pj.id,
+                    pj.trade_date,
+                    pj.entry_time,
+                    pj.exit_time,
+                    pj.symbol,
+                    pj.direction,
+                    pj.entry_price AS entry,
+                    pj.exit_price  AS exit,
+                    pj.qty,
+                    pj.sl,
+                    pj.target,
+                    pj.pnl,
+                    pj.result,
+                    pj.holding_days,
+                    pj.v8_basket,
+                    pj.v8_signal_match,
+                    pj.setup_quality,
+                    pj.rule_score_total,
+                    pj.rule_violations,
+                    pj.lesson,
+                    pj.notes
+                FROM personal_journal pj
+                WHERE pj.exit_time IS NOT NULL
+                ORDER BY pj.exit_time DESC
+                LIMIT %s
+            """, (min(max(limit, 1), 1000),))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            r['strategy'] = _normalize_basket_to_strategy(r.get('v8_basket'))
+        return rows
+    except Exception as e:
+        raise HTTPException(500, f"v8_trades failed: {e}")
