@@ -1,8 +1,8 @@
-# main_patched.py - v1.6.8 hotfix
-# Three independent schedulers for live data feeds via Yahoo chart API:
-# - Futures (290 stocks): 1-min cadence, parallel fetch with semaphore=8
-# - Equity (~1,400 non-futures): 10-min cadence, sequential
-# - EOD raw_prices: 15:45 IST window, chart API daily interval (replaces broken yfinance.download)
+# main_patched.py - v1.6.9 hotfix
+# EMERGENCY: Reduce Yahoo load to escape IP block.
+# - Futures (290 stocks): 1-min cadence, sem=5 (was 8)
+# - Equity (~1,400 non-futures): DISABLED via EQUITY_ENABLED flag (INFIN takes over)
+# - EOD raw_prices: chart API daily interval at 15:45 IST
 #
 # Activated by Procfile: `web: uvicorn main_patched:app --host 0.0.0.0 --port $PORT`
 import asyncio
@@ -12,7 +12,11 @@ from typing import Optional, List
 import httpx
 import main
 
-VERSION_HOTFIX = "1.6.8"
+VERSION_HOTFIX = "1.6.9"
+
+# === FEATURE FLAGS ===
+EQUITY_ENABLED = False    # Disabled - INFIN replaces Yahoo equity feed this evening
+FUTURES_SEM = 5           # Reduced from 8 to lower Yahoo burst pressure
 
 # === Disable original buggy scheduler ===
 async def _scheduler_noop():
@@ -26,10 +30,12 @@ main._scheduler = _scheduler_noop
 # ========== FUTURES: 1-MIN CADENCE ==========
 _futures_failures = 0
 _futures_backoff_until = None
+_futures_last_tick: Optional[str] = None
+_futures_last_total = 0
 
 async def _fetch_futures_intraday_parallel():
-    """Parallel fetch via chart API with concurrency=8. 290 stocks in ~15s."""
-    global _futures_failures, _futures_backoff_until
+    """Parallel fetch via chart API with concurrency=FUTURES_SEM."""
+    global _futures_failures, _futures_backoff_until, _futures_last_tick, _futures_last_total
 
     if _futures_backoff_until and main._ist_now() < _futures_backoff_until:
         return
@@ -38,7 +44,7 @@ async def _fetch_futures_intraday_parallel():
     if not futures:
         return
 
-    sem = asyncio.Semaphore(8)
+    sem = asyncio.Semaphore(FUTURES_SEM)
 
     async def fetch_one(sym):
         async with sem:
@@ -54,6 +60,8 @@ async def _fetch_futures_intraday_parallel():
     results = await asyncio.gather(*[fetch_one(s) for s in futures])
     fail_count = sum(1 for r in results if r[0] == 'fail')
     total_candles = sum(r[1] for r in results)
+    _futures_last_total = total_candles
+    _futures_last_tick = str(main._ist_now())
 
     if fail_count > len(futures) // 2:
         _futures_failures += 1
@@ -67,7 +75,7 @@ async def _fetch_futures_intraday_parallel():
 
 
 async def _scheduler_futures_1min():
-    main.log.info(f"v{VERSION_HOTFIX}: Futures 1-min scheduler started")
+    main.log.info(f"v{VERSION_HOTFIX}: Futures 1-min scheduler started (sem={FUTURES_SEM})")
     while True:
         try:
             if main._is_market_hours():
@@ -77,9 +85,9 @@ async def _scheduler_futures_1min():
         await asyncio.sleep(60)
 
 
-# ========== EQUITY (NON-FUTURES): 10-MIN CADENCE ==========
+# ========== EQUITY (NON-FUTURES): DISABLED via flag ==========
 async def _fetch_equity_cmp_chart_api():
-    """Sequential chart API for non-futures, writes to cmp_prices. ~5 min per cycle."""
+    """Sequential chart API for non-futures, writes to cmp_prices."""
     futures_set = set(main._get_futures_symbols())
     all_symbols = main._get_all_gvm_symbols()
     non_futures = [s for s in all_symbols if s not in futures_set]
@@ -105,6 +113,10 @@ async def _fetch_equity_cmp_chart_api():
 
 
 async def _scheduler_equity_10min():
+    if not EQUITY_ENABLED:
+        main.log.info(f"v{VERSION_HOTFIX}: Equity scheduler DISABLED (EQUITY_ENABLED=False). INFIN takes over.")
+        while True:
+            await asyncio.sleep(86400)
     main.log.info(f"v{VERSION_HOTFIX}: Equity 10-min scheduler started")
     while True:
         try:
@@ -119,7 +131,7 @@ async def _scheduler_equity_10min():
 _raw_prices_done_today: Optional[date] = None
 
 async def _fetch_daily_yahoo(symbol: str, range_str: str = "10d") -> List[dict]:
-    """Fetch daily OHLC via chart API interval=1d. Returns list of dicts with price_date."""
+    """Fetch daily OHLC via chart API interval=1d."""
     ticker = main._yahoo_ticker(symbol)
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=1d&range={range_str}"
     try:
@@ -182,8 +194,8 @@ def _upsert_raw_prices(candles):
         return 0
 
 
-async def _task_update_raw_prices_v168():
-    """EOD raw_prices via chart API. Replaces broken yfinance.download in yahoo_daily_update.py."""
+async def _task_update_raw_prices_v169():
+    """EOD raw_prices via chart API."""
     global _raw_prices_done_today
     today = main._ist_now().date()
     if _raw_prices_done_today == today:
@@ -211,40 +223,44 @@ async def _scheduler_eod():
     while True:
         try:
             if main._is_eod_window():
-                await _task_update_raw_prices_v168()
+                await _task_update_raw_prices_v169()
         except Exception as e:
             main.log.error(f"v{VERSION_HOTFIX} EOD scheduler error: {e}")
         await asyncio.sleep(300)
 
 
-# === STARTUP: launch all three schedulers ===
+# === STARTUP: launch schedulers ===
 @main.app.on_event("startup")
-async def startup_v168():
+async def startup_v169():
     asyncio.create_task(_scheduler_futures_1min())
-    asyncio.create_task(_scheduler_equity_10min())
+    asyncio.create_task(_scheduler_equity_10min())  # internally checks EQUITY_ENABLED
     asyncio.create_task(_scheduler_eod())
-    main.log.info(f"v{VERSION_HOTFIX} hotfix active: 3 schedulers (futures 1min | equity 10min | EOD)")
+    main.log.info(f"v{VERSION_HOTFIX} hotfix active: futures 1min sem={FUTURES_SEM} | equity DISABLED | EOD on")
 
 
 # === HEALTH ENDPOINTS ===
-@main.app.get("/api/v168/health")
-def v168_health():
+@main.app.get("/api/v169/health")
+def v169_health():
     return {
         "version": VERSION_HOTFIX,
+        "equity_enabled": EQUITY_ENABLED,
+        "futures_semaphore": FUTURES_SEM,
         "futures_failures": _futures_failures,
         "futures_backoff_until": str(_futures_backoff_until) if _futures_backoff_until else None,
+        "futures_last_tick": _futures_last_tick,
+        "futures_last_total_candles": _futures_last_total,
         "raw_prices_done_today": str(_raw_prices_done_today) if _raw_prices_done_today else None,
         "is_market_hours": main._is_market_hours(),
         "is_eod_window": main._is_eod_window(),
     }
 
 
-@main.app.post("/api/v168/trigger_eod")
-async def v168_trigger_eod():
-    """Manual EOD raw_prices trigger - useful for backfilling stale data."""
+@main.app.post("/api/v169/trigger_eod")
+async def v169_trigger_eod():
+    """Manual EOD raw_prices trigger."""
     global _raw_prices_done_today
     _raw_prices_done_today = None
-    asyncio.create_task(_task_update_raw_prices_v168())
+    asyncio.create_task(_task_update_raw_prices_v169())
     return {"status": "ok", "message": "EOD raw_prices task queued"}
 
 
