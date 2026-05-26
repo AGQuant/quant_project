@@ -30,7 +30,8 @@ from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
 from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.6.6
+# Scorr / Project Quant — main.py v1.6.7
+# v1.6.7: Fix /api/v5/metrics/all route order + add /api/v6/metrics/all alias
 # v1.6.6: v5_positions table + endpoint for V7 In Position dashboard
 # v1.6.5: GET /api/v5/signals + GET /api/v5/portfolio REST endpoints
 # v1.6.4: Restore /api/admin/load_v5_from_drive
@@ -40,7 +41,7 @@ from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 # v1.6.0: V6 shadow engine
 # ============================================================
 
-VERSION = "1.6.6"
+VERSION = "1.6.7"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -490,13 +491,6 @@ def v5_trades_get():
     """Closed trade history from V5 Trade Log tab."""
     return _jsonb_rows("v5_trades")
 
-@app.get("/api/v5/metrics/{symbol}")
-def v5_metrics_single(symbol: str, score_date: Optional[str] = None):
-    if not score_date: score_date = str(date.today())
-    r = api_query("SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
-    if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
-    return r
-
 @app.get("/api/v5/metrics/all")
 def v5_metrics_all():
     return api_query("""
@@ -509,6 +503,18 @@ def v5_metrics_all():
         WHERE score_date = (SELECT MAX(score_date) FROM v5_metrics)
         ORDER BY symbol
     """)
+
+@app.get("/api/v6/metrics/all")
+def v6_metrics_all():
+    """Alias for /api/v5/metrics/all — v5_metrics is the shared source for V5 and V6."""
+    return v5_metrics_all()
+
+@app.get("/api/v5/metrics/{symbol}")
+def v5_metrics_single(symbol: str, score_date: Optional[str] = None):
+    if not score_date: score_date = str(date.today())
+    r = api_query("SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
+    if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
+    return r
 
 @app.get("/api/v5/live_metrics")
 def v5_live_metrics():
