@@ -32,7 +32,8 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.8.0
+# Scorr / Project Quant — main.py v1.9.0
+# v1.9.0: CMP fetcher → chart API (fix broken yf.download) + daily earnings scheduler
 # v1.8.0: v8_futures router wired + Sell_Overbought basket live
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # v1.6.7: Fix /api/v5/metrics/all route order + add /api/v6/metrics/all alias
@@ -45,7 +46,7 @@ from v8_futures import router as v8_futures_router
 # v1.6.0: V6 shadow engine
 # ============================================================
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -170,36 +171,28 @@ def _yahoo_ticker(symbol: str) -> str:
     return f"{symbol}.NS"
 
 async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
+    """Fetch CMP via Yahoo chart API — sequential one-at-a-time (yf.download batch broken)."""
     results = {}
-    batch_size = 150
-
-    def _yf_batch(batch: List[str]) -> Dict[str, float]:
-        try:
-            tickers = [f"{s}.NS" for s in batch]
-            data = yf.download(tickers, period="2d", progress=False, auto_adjust=True, threads=False)
-            if data is None or data.empty: return {}
-            close = data["Close"] if "Close" in data.columns else None
-            if close is None: return {}
-            last = close.iloc[-1]
-            out = {}
-            if isinstance(last, pd.Series):
-                for ticker, price in last.items():
-                    if not pd.isna(price):
-                        sym = str(ticker).replace(".NS", "").strip()
-                        out[sym] = float(price)
-            elif len(batch) == 1 and not pd.isna(last):
-                out[batch[0]] = float(last)
-            return out
-        except Exception as e:
-            log.warning(f"CMP yfinance batch error: {e}")
-            return {}
-
-    loop = asyncio.get_event_loop()
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i + batch_size]
-        res = await loop.run_in_executor(None, _yf_batch, batch)
-        results.update(res)
-        await asyncio.sleep(1.5)
+    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        for symbol in symbols:
+            url = (
+                f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                f"{urllib.parse.quote(_yahoo_ticker(symbol))}?interval=1d&range=2d"
+            )
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+                chart = data.get("chart", {}).get("result", [])
+                if chart:
+                    closes = chart[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
+                    closes = [x for x in closes if x is not None]
+                    if closes:
+                        results[symbol] = float(closes[-1])
+            except Exception as e:
+                log.warning(f"CMP chart API {symbol}: {e}")
+            await asyncio.sleep(0.1)
+    log.info(f"CMP fetched: {len(results)}/{len(symbols)} symbols")
     return results
 
 async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict]:
@@ -262,6 +255,7 @@ def _purge_intraday_old():
 
 _intraday_fetched_today: Optional[date] = None
 _raw_prices_updated_today: Optional[date] = None
+_earnings_loaded_today: Optional[date] = None
 
 async def _task_refresh_cmp():
     futures_set = set(_get_futures_symbols())
@@ -301,10 +295,31 @@ async def _task_update_raw_prices():
     except Exception as e:
         log.error(f"raw_prices EOD update failed: {e}")
 
+async def _task_load_earnings_daily():
+    """Daily at 9:00–9:05 AM IST: refresh earnings_calendar from Screener.in."""
+    global _earnings_loaded_today
+    today = _ist_now().date()
+    if _earnings_loaded_today == today:
+        return
+    try:
+        log.info("Earnings: loading from Screener.in")
+        async with httpx.AsyncClient(timeout=120) as client:
+            headers = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+            r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers=headers)
+            data = r.json()
+            log.info(f"Earnings daily load: {data}")
+            _earnings_loaded_today = today
+    except Exception as e:
+        log.error(f"_task_load_earnings_daily failed: {e}")
+
 async def _scheduler():
     log.info("Scheduler started")
     while True:
         try:
+            now = _ist_now()
+            # 9:00–9:05 AM IST — refresh earnings calendar from Screener
+            if now.weekday() < 5 and now.hour == 9 and now.minute < 5:
+                await _task_load_earnings_daily()
             if _is_market_hours(): await _task_refresh_cmp()
             if _is_eod_window():
                 await _task_fetch_intraday()
@@ -1108,9 +1123,9 @@ MCP_TOOLS = [
     {"name": "v8_market_mood", "description": "V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket (buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought).", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
     {"name": "v8_filter_config", "description": "V8: Get filter thresholds for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}}, "required": ["basket"]}},
+    {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals — failed breakout/exhaustion reversal. Target=S1, 71% win rate May-2026.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
-    {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals — failed breakout/exhaustion reversal. Target=S1, 71% win rate May-2026.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
