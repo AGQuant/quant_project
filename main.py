@@ -32,21 +32,14 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.9.0
-# v1.9.0: CMP fetcher → chart API (fix broken yf.download) + daily earnings scheduler
+# Scorr / Project Quant — main.py v1.9.1
+# v1.9.1: run_yahoo_daily fire-and-forget background + async raw_prices update
+# v1.9.0: CMP fetcher → chart API + daily earnings scheduler
 # v1.8.0: v8_futures router wired + Sell_Overbought basket live
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
-# v1.6.7: Fix /api/v5/metrics/all route order + add /api/v6/metrics/all alias
-# v1.6.6: v5_positions table + endpoint for V7 In Position dashboard
-# v1.6.5: GET /api/v5/signals + GET /api/v5/portfolio REST endpoints
-# v1.6.4: Restore /api/admin/load_v5_from_drive
-# v1.6.3: load_v5_signals_csv
-# v1.6.2: live_metrics + metrics/all
-# v1.6.1: cmp_prices yfinance fix, raw_prices EOD
-# v1.6.0: V6 shadow engine
 # ============================================================
 
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -69,7 +62,6 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# V8 routers — Quant Long-Short Basket Strategy
 app.include_router(v8_router)
 app.include_router(v8_futures_router)
 
@@ -147,11 +139,15 @@ def _is_market_hours() -> bool:
 def _is_eod_window() -> bool:
     now = _ist_now()
     if now.weekday() >= 5: return False
-    return now.replace(hour=15, minute=45, second=0, microsecond=0) <= now <= now.replace(hour=16, minute=0, second=0, microsecond=0)
+    return now.replace(hour=15, minute=45, second=0, microsecond=0) <= now <= now.replace(hour=16, minute=30, second=0, microsecond=0)
 
 def _get_futures_symbols() -> List[str]:
     try:
         with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE ORDER BY symbol")
+            rows = cur.fetchall()
+            if rows:
+                return [r[0] for r in rows]
             cur.execute("SELECT DISTINCT symbol FROM v5_signals ORDER BY symbol")
             return [r[0] for r in cur.fetchall()]
     except Exception as e:
@@ -168,7 +164,8 @@ def _get_all_gvm_symbols() -> List[str]:
         return []
 
 def _yahoo_ticker(symbol: str) -> str:
-    return f"{symbol}.NS"
+    indices = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
+    return indices.get(symbol, f"{symbol}.NS")
 
 async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
     """Fetch CMP via Yahoo chart API — sequential one-at-a-time (yf.download batch broken)."""
@@ -195,7 +192,7 @@ async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
     log.info(f"CMP fetched: {len(results)}/{len(symbols)} symbols")
     return results
 
-async def _fetch_intraday_yahoo(symbol: str, range_str: str = "1d") -> List[dict]:
+async def _fetch_intraday_yahoo(symbol: str, range_str: str = "7d") -> List[dict]:
     ticker = _yahoo_ticker(symbol)
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=5m&range={range_str}"
     try:
@@ -245,7 +242,7 @@ def _insert_intraday(candles):
         log.error(f"_insert_intraday failed: {e}")
 
 def _purge_intraday_old():
-    cutoff = _ist_now() - timedelta(days=15)
+    cutoff = _ist_now() - timedelta(days=7)
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s", (cutoff,))
@@ -256,6 +253,7 @@ def _purge_intraday_old():
 _intraday_fetched_today: Optional[date] = None
 _raw_prices_updated_today: Optional[date] = None
 _earnings_loaded_today: Optional[date] = None
+_yahoo_daily_running: bool = False
 
 async def _task_refresh_cmp():
     futures_set = set(_get_futures_symbols())
@@ -281,26 +279,35 @@ async def _task_fetch_intraday():
     _purge_intraday_old()
     _intraday_fetched_today = today
 
+async def _bg_yahoo_daily(symbols=None, lookback=None):
+    """Background task — fire-and-forget, won't block scheduler or MCP."""
+    global _raw_prices_updated_today, _yahoo_daily_running
+    if _yahoo_daily_running:
+        log.info("yahoo_daily already running, skip")
+        return
+    _yahoo_daily_running = True
+    try:
+        import yahoo_daily_update as ydu
+        result = await ydu.run_async(symbols=symbols, lookback=lookback)
+        _raw_prices_updated_today = _ist_now().date()
+        log.info(f"yahoo_daily background done: {result}")
+    except Exception as e:
+        log.error(f"yahoo_daily background failed: {e}")
+    finally:
+        _yahoo_daily_running = False
+
 async def _task_update_raw_prices():
     global _raw_prices_updated_today
     today = _ist_now().date()
     if _raw_prices_updated_today == today: return
-    log.info("EOD: Starting raw_prices daily update")
-    loop = asyncio.get_event_loop()
-    try:
-        import yahoo_daily_update as ydu
-        await loop.run_in_executor(None, ydu.main)
-        _raw_prices_updated_today = today
-        log.info("EOD: raw_prices update complete")
-    except Exception as e:
-        log.error(f"raw_prices EOD update failed: {e}")
+    log.info("EOD: Launching raw_prices background update")
+    asyncio.create_task(_bg_yahoo_daily())
 
 async def _task_load_earnings_daily():
     """Daily at 9:00–9:05 AM IST: refresh earnings_calendar from Screener.in."""
     global _earnings_loaded_today
     today = _ist_now().date()
-    if _earnings_loaded_today == today:
-        return
+    if _earnings_loaded_today == today: return
     try:
         log.info("Earnings: loading from Screener.in")
         async with httpx.AsyncClient(timeout=120) as client:
@@ -317,7 +324,6 @@ async def _scheduler():
     while True:
         try:
             now = _ist_now()
-            # 9:00–9:05 AM IST — refresh earnings calendar from Screener
             if now.weekday() < 5 and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
             if _is_market_hours(): await _task_refresh_cmp()
@@ -404,7 +410,6 @@ def api_query(sql, params=None, single=False):
         return {"error": str(e)}
 
 def _jsonb_rows(table: str, limit: int = 500) -> list:
-    """Read JSONB rows from a table — handles both data JSONB and specific-column schemas."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             try:
@@ -459,7 +464,7 @@ def get_momentum(symbol: str):
 
 @app.get("/api/intraday/{symbol}")
 def get_intraday(symbol: str, days: int = 1):
-    days = min(max(days, 1), 15)
+    days = min(max(days, 1), 7)
     cutoff = _ist_now() - timedelta(days=days)
     return api_query("SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices WHERE symbol = %s AND ts >= %s ORDER BY ts ASC", (symbol.upper(), cutoff))
 
@@ -473,7 +478,6 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at FROM cmp_prices ORDER BY symbol")
 
-# V5 ENGINE
 @app.post("/api/v5/run")
 async def v5_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -582,7 +586,6 @@ async def v5_filter_update(req: Request, x_admin_token: Optional[str] = Header(N
         conn.commit()
     return {"status": "ok", "signal_type": sig, "metric": metric, "min_val": mn, "max_val": mx}
 
-# V6 SHADOW ENGINE
 @app.post("/api/v6/run")
 async def v6_run(x_admin_token: Optional[str] = Header(None), recompute: bool = False):
     _check_admin(x_admin_token)
@@ -621,7 +624,6 @@ def v6_backtest_results(run_id: Optional[str] = None, signal_type: Optional[str]
         return api_query("SELECT signal_type, variant_label, num_signals, win_rate, avg_return, composite_score, filter_config FROM v6_backtest_results WHERE run_id = %s ORDER BY signal_type, composite_score DESC", (run_id,))
     return api_query("SELECT run_id, MAX(created_at) as latest, COUNT(*) as rows FROM v6_backtest_results GROUP BY run_id ORDER BY latest DESC LIMIT 10")
 
-# ADMIN — DATA FEEDS
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -629,7 +631,7 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     if not futures: return {"status": "warn", "message": "No futures symbols"}
     total_candles, failed = 0, []
     for sym in futures:
-        candles = await _fetch_intraday_yahoo(sym, range_str="15d")
+        candles = await _fetch_intraday_yahoo(sym, range_str="7d")
         if candles:
             _insert_intraday(candles)
             total_candles += len(candles)
@@ -670,17 +672,12 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
+    """Fire-and-forget: launches background task, returns immediately."""
     _check_admin(x_admin_token)
-    global _raw_prices_updated_today
-    _raw_prices_updated_today = None
-    loop = asyncio.get_event_loop()
-    try:
-        import yahoo_daily_update as ydu
-        await loop.run_in_executor(None, ydu.main)
-        _raw_prices_updated_today = _ist_now().date()
-        return {"status": "ok", "message": "raw_prices updated"}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    if _yahoo_daily_running:
+        return {"status": "already_running", "message": "yahoo_daily already in progress"}
+    asyncio.create_task(_bg_yahoo_daily())
+    return {"status": "started", "message": "raw_prices update running in background (~3 min). Check raw_prices MAX(price_date) to confirm."}
 
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -765,17 +762,11 @@ async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: boo
                      alert_types, event_date, event_type, verdict_date)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """, (
-                    signal_type,
-                    _ss(row.get(_gc("timestamp", "time"))),
-                    sym,
-                    _sf(row.get(_gc("finkhoz", "rating"))),
-                    _sf(row.get(_gc("record price", "record_price"))),
-                    _ss(row.get(_gc("type", "cap"))),
-                    _sf(row.get(_gc("current price", "current_price"))),
-                    _sf(row.get(_gc("return"))),
-                    _ss(row.get(_gc("hit alert", "hit_alert"))),
-                    _ss(row.get(_gc("analyst verdict", "verdict"))),
-                    _si(row.get(_gc("alert count", "count"))),
+                    signal_type, _ss(row.get(_gc("timestamp", "time"))), sym,
+                    _sf(row.get(_gc("finkhoz", "rating"))), _sf(row.get(_gc("record price", "record_price"))),
+                    _ss(row.get(_gc("type", "cap"))), _sf(row.get(_gc("current price", "current_price"))),
+                    _sf(row.get(_gc("return"))), _ss(row.get(_gc("hit alert", "hit_alert"))),
+                    _ss(row.get(_gc("analyst verdict", "verdict"))), _si(row.get(_gc("alert count", "count"))),
                     _ss(row.get(_gc("alert type", "alert_type", "alert_types"))),
                     _sd(row.get(_gc("^date$", "event_date", "date"))),
                     _ss(row.get(_gc("event type", "event_type"))),
@@ -792,9 +783,7 @@ async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: boo
 async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     body = await req.json()
-    file_id = body.get("file_id")
-    signal_type = body.get("signal_type", "Alert")
-    replace = body.get("replace", False)
+    file_id = body.get("file_id"); signal_type = body.get("signal_type", "Alert"); replace = body.get("replace", False)
     if not file_id: raise HTTPException(400, "file_id required")
     csv_text = await _drive_download(file_id)
     result = await _parse_and_store_signals(csv_text, signal_type, replace)
@@ -806,11 +795,7 @@ async def load_v5_from_drive(req: Request):
     body = await req.json()
     file_ids = body.get("file_ids", {})
     results = {}
-    ALERTS_MAP = {
-        "v5_alerts_large.csv": "Alert_Large",
-        "v5_alerts_mid.csv":   "Alert_Mid",
-        "v5_alerts_small.csv": "Alert_Small",
-    }
+    ALERTS_MAP = {"v5_alerts_large.csv": "Alert_Large", "v5_alerts_mid.csv": "Alert_Mid", "v5_alerts_small.csv": "Alert_Small"}
     for filename, file_id in file_ids.items():
         fn = filename.lower().strip()
         try:
@@ -851,11 +836,9 @@ async def load_v5_from_drive(req: Request):
                 results[filename] = {"status": "skipped"}
         except Exception as e:
             results[filename] = {"status": "error", "error": str(e)[:100]}
-            log.warning(f"load_v5_from_drive {filename}: {e}")
     loaded  = sum(1 for r in results.values() if r.get("status") == "ok")
     skipped = sum(1 for r in results.values() if r.get("status") == "skipped")
     errors  = sum(1 for r in results.values() if r.get("status") == "error")
-    log.info(f"load_v5_from_drive: {loaded} loaded, {skipped} skipped, {errors} errors")
     return {"status": "ok", "files": len(file_ids), "loaded": loaded, "skipped": skipped, "errors": errors, "results": results}
 
 SCREENER_BASE = "https://www.screener.in"
@@ -1092,8 +1075,8 @@ MCP_TOOLS = [
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "backfill_intraday", "description": "Fetch 15 days of 5-min OHLC for all 290 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "backfill_intraday", "description": "Fetch 7 days of 5-min OHLC for all 210 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background, returns immediately).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v5_engine", "description": "Run V5 filter engine.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
     {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -1121,9 +1104,9 @@ MCP_TOOLS = [
     {"name": "github_push", "description": "Create or update a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
     {"name": "github_delete", "description": "Delete a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
     {"name": "v8_market_mood", "description": "V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket (buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought).", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
+    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
     {"name": "v8_filter_config", "description": "V8: Get filter thresholds for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}}, "required": ["basket"]}},
-    {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals — failed breakout/exhaustion reversal. Target=S1, 71% win rate May-2026.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
+    {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
 ]
