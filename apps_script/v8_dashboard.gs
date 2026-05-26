@@ -17,8 +17,11 @@
  * ║     7. In_Position            — Live open trades                 ║
  * ║     8. Trade_Log              — Closed trade history             ║
  * ║                                                                  ║
- * ║   Maintained from chat via GitHub auto-deploy.                   ║
- * ║   Last edit: paste from raw GitHub URL into Apps Script editor.  ║
+ * ║   Update workflow (mobile-friendly):                             ║
+ * ║     1. Run "🆕 Check for Updates" from Scorr V8 menu             ║
+ * ║     2. If new version, popup shows "Copy URL" button             ║
+ * ║     3. Open Apps Script editor → Ctrl+A → Ctrl+V → Ctrl+S        ║
+ * ║     4. Reload sheet                                              ║
  * ║                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
@@ -27,6 +30,9 @@
 // ════════════════════════════════════════════════════════════════════
 //   CONFIG
 // ════════════════════════════════════════════════════════════════════
+
+const SCRIPT_VERSION = '1.1.0';   // Bumped on every push — used by update checker
+const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
 
@@ -49,14 +55,14 @@ const COLORS = {
   SUBHEADER:      '#374151',   // lighter charcoal — sub-sections
   ALT_ROW:        '#F9FAFB',   // very light grey — alternating
   CARD_BG:        '#FFFFFF',
-  
+
   // Accents — strategy-specific
   BUY_REV:        '#2563EB',   // blue
   BUY_MOM:        '#1D4ED8',   // deeper blue
   SELL_REV:       '#EA580C',   // orange
   SELL_MOM:       '#C2410C',   // deeper orange
   SELL_OB:        '#9333EA',   // purple (NEW — exhaustion theme)
-  
+
   // States
   PASS_BG:        '#DCFCE7',   // light green
   PASS_TEXT:      '#15803D',   // dark green
@@ -64,16 +70,16 @@ const COLORS = {
   FAIL_TEXT:      '#B91C1C',   // dark red
   NEUTRAL_BG:     '#F3F4F6',
   NEUTRAL_TEXT:   '#4B5563',
-  
+
   // P&L
   PROFIT:         '#16A34A',
   LOSS:           '#DC2626',
   FLAT:           '#6B7280',
-  
+
   // Text on dark
   WHITE:          '#FFFFFF',
   MUTED_LIGHT:    '#D1D5DB',
-  
+
   // Borders
   BORDER_STRONG:  '#111827',
   BORDER_SOFT:    '#E5E7EB',
@@ -114,9 +120,11 @@ function onOpen() {
     .addItem('📍 Refresh In Position',   'refreshInPosition')
     .addItem('📒 Refresh Trade Log',     'refreshTradeLog')
     .addSeparator()
+    .addItem('🆕 Check for Updates',     'pullLatestFromGitHub')
     .addItem('🏗️  Build All Tabs (first run)', 'buildAllTabs')
     .addItem('⏰ Setup Auto-Refresh (5 min)',  'setupTriggers')
     .addItem('🛑 Stop Auto-Refresh',           'stopTriggers')
+    .addItem('ℹ️  About / Version',            'showVersion')
     .addToUi();
 }
 
@@ -145,6 +153,111 @@ function scheduledRefresh() {
   const minutes = hour * 60 + min;
   if (minutes < 555 || minutes > 930) return;  // 9:15 = 555, 15:30 = 930
   refreshAll();
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//   UPDATE CHECKER — pulls SCRIPT_VERSION from GitHub, compares
+// ════════════════════════════════════════════════════════════════════
+
+function pullLatestFromGitHub() {
+  let remoteCode, remoteVersion;
+  try {
+    const response = UrlFetchApp.fetch(SCRIPT_RAW_URL, { muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) {
+      SpreadsheetApp.getUi().alert('❌ GitHub fetch failed: HTTP ' + response.getResponseCode());
+      return;
+    }
+    remoteCode = response.getContentText();
+    const match = remoteCode.match(/const\s+SCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/);
+    remoteVersion = match ? match[1] : 'unknown';
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('❌ Could not reach GitHub:\n' + e);
+    return;
+  }
+
+  if (remoteVersion === SCRIPT_VERSION) {
+    SpreadsheetApp.getUi().alert(
+      '✅ Up to date',
+      `You're on the latest version.\n\nCurrent: ${SCRIPT_VERSION}\nRemote: ${remoteVersion}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  // New version available — show modal with URL + copy button
+  const html = HtmlService.createHtmlOutput(
+    `<!DOCTYPE html><html><head><style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 20px; margin: 0; color: #1F2937; }
+      h2 { margin-top: 0; color: #2563EB; }
+      .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #E5E7EB; }
+      .label { color: #6B7280; }
+      .val { font-family: 'Roboto Mono', monospace; font-weight: bold; }
+      .new { color: #16A34A; }
+      .url-box { background: #F3F4F6; padding: 10px; border-radius: 6px; font-family: 'Roboto Mono', monospace; font-size: 11px; word-break: break-all; margin: 12px 0; user-select: all; }
+      button { background: #2563EB; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; }
+      button:hover { background: #1D4ED8; }
+      ol { padding-left: 20px; font-size: 13px; line-height: 1.6; color: #374151; }
+      .steps { background: #FEF3C7; padding: 12px; border-radius: 6px; margin-top: 16px; }
+    </style></head><body>
+      <h2>🆕 New version available</h2>
+      <div class="row"><span class="label">Installed</span><span class="val">${SCRIPT_VERSION}</span></div>
+      <div class="row"><span class="label">Latest</span><span class="val new">${remoteVersion}</span></div>
+
+      <p style="margin-top: 16px; margin-bottom: 4px;"><strong>Raw script URL:</strong></p>
+      <div class="url-box" id="url">${SCRIPT_RAW_URL}</div>
+      <button onclick="copyUrl()" id="btn">📋 Copy URL</button>
+
+      <div class="steps">
+        <strong>To install:</strong>
+        <ol>
+          <li>URL copied — open in new tab → Ctrl+A → Ctrl+C</li>
+          <li>Apps Script editor → Ctrl+A → Ctrl+V</li>
+          <li>Save (Ctrl+S) → reload this sheet</li>
+        </ol>
+      </div>
+
+      <script>
+        function copyUrl() {
+          const text = ${JSON.stringify(SCRIPT_RAW_URL)};
+          navigator.clipboard.writeText(text).then(
+            () => { document.getElementById('btn').innerText = '✓ Copied to clipboard'; },
+            () => {
+              // Fallback for older browsers
+              const r = document.createRange();
+              r.selectNode(document.getElementById('url'));
+              window.getSelection().removeAllRanges();
+              window.getSelection().addRange(r);
+              document.execCommand('copy');
+              document.getElementById('btn').innerText = '✓ Copied (fallback)';
+            }
+          );
+        }
+      </script>
+    </body></html>`
+  ).setWidth(480).setHeight(420);
+
+  SpreadsheetApp.getUi().showModalDialog(html, 'Scorr V8 Update Available');
+}
+
+function showVersion() {
+  const html = HtmlService.createHtmlOutput(
+    `<!DOCTYPE html><html><head><style>
+      body { font-family: -apple-system, sans-serif; padding: 20px; color: #1F2937; }
+      h2 { color: #9333EA; margin-top: 0; }
+      .row { padding: 6px 0; }
+      .label { color: #6B7280; display: inline-block; width: 120px; }
+      .val { font-family: 'Roboto Mono', monospace; font-weight: bold; }
+    </style></head><body>
+      <h2>🟣 Scorr V8</h2>
+      <div class="row"><span class="label">Version</span><span class="val">${SCRIPT_VERSION}</span></div>
+      <div class="row"><span class="label">API base</span><span class="val">${BASE_URL}</span></div>
+      <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
+      <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
+      <p style="margin-top: 20px; color: #6B7280; font-size: 12px;">Run <strong>🆕 Check for Updates</strong> to fetch latest version from GitHub.</p>
+    </body></html>`
+  ).setWidth(380).setHeight(260);
+  SpreadsheetApp.getUi().showModalDialog(html, 'About');
 }
 
 
@@ -220,23 +333,23 @@ function refreshMasterDashboard() {
   sheet.setHiddenGridlines(true);
   sheet.setColumnWidths(1, 10, 105);
   sheet.setColumnWidth(1, 165);
-  
+
   let row = 1;
-  
+
   // ── TITLE BAR ──
   row = renderTitleBar(sheet, row, 'SCORR V8 — MASTER DASHBOARD', 'Quant Long-Short Tracker');
   row++;
-  
+
   // ── PERFORMANCE SUMMARY ──
   row = renderSectionHeader(sheet, row, '📊  PERFORMANCE SUMMARY', COLORS.DARK_HEADER);
   row = renderPerformanceSummary(sheet, row);
   row += 2;
-  
+
   // ── MARKET GATE ──
   row = renderSectionHeader(sheet, row, '🚦  MARKET GATE', COLORS.DARK_HEADER);
   row = renderMarketGate(sheet, row);
   row += 2;
-  
+
   // ── FILTER TABLES (all 5 baskets, 2 per row) ──
   row = renderSectionHeader(sheet, row, '🎯  FILTER LOGIC (5 baskets)', COLORS.DARK_HEADER);
   row++;
@@ -244,10 +357,10 @@ function refreshMasterDashboard() {
     row = renderFilterCard(sheet, row, basket);
     row += 1;
   });
-  
+
   // Freeze the title bar
   sheet.setFrozenRows(2);
-  
+
   toast('✓ Dashboard refreshed');
 }
 
@@ -263,8 +376,8 @@ function renderTitleBar(sheet, row, title, subtitle) {
     .setHorizontalAlignment('left');
   sheet.setRowHeight(row, 38);
   row++;
-  
-  const stamp = `${subtitle}   ·   Last refresh: ${nowIST()}`;
+
+  const stamp = `${subtitle}   ·   v${SCRIPT_VERSION}   ·   Last refresh: ${nowIST()}`;
   const sub = sheet.getRange(row, 1, 1, 10).merge();
   sub.setValue(stamp)
     .setBackground(COLORS.SUBHEADER)
@@ -294,15 +407,15 @@ function renderSectionHeader(sheet, row, label, bg) {
 function renderPerformanceSummary(sheet, row) {
   const positions = fetchPositions() || [];
   const trades = fetchTrades() || [];
-  
+
   const openAgg = aggregatePositions(positions);
   const closedAgg = aggregateTrades(trades);
-  
+
   // ── OPEN POSITIONS TABLE ──
   row = renderSubHeader(sheet, row, 'OPEN POSITIONS (Live)');
   const openHeaders = ['Strategy', 'Direction', 'Open', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L'];
   row = renderTableHeader(sheet, row, openHeaders, 8);
-  
+
   ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
     const a = openAgg[strat] || zeroAgg();
     const dir = strat.startsWith('Buy') ? 'LONG' : 'SHORT';
@@ -314,12 +427,12 @@ function renderPerformanceSummary(sheet, row) {
   const tot = openAgg.__TOTAL || zeroAgg();
   row = renderTotalRow(sheet, row, 8, ['TOTAL', 'ALL', tot.count, tot.pnl, fmtPct(tot.accuracy), tot.winning, tot.losing, tot.avgPnl], { pnlCols: [4, 8] });
   row++;
-  
+
   // ── CLOSED TRADES TABLE ──
   row = renderSubHeader(sheet, row, 'CLOSED TRADES (Historical)');
   const closedHeaders = ['Strategy', 'Direction', 'Closed', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L'];
   row = renderTableHeader(sheet, row, closedHeaders, 8);
-  
+
   ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
     const a = closedAgg[strat] || zeroAgg();
     const dir = strat.startsWith('Buy') ? 'LONG' : 'SHORT';
@@ -329,7 +442,7 @@ function renderPerformanceSummary(sheet, row) {
   });
   const totC = closedAgg.__TOTAL || zeroAgg();
   row = renderTotalRow(sheet, row, 8, ['TOTAL', 'ALL', totC.count, totC.pnl, fmtPct(totC.accuracy), totC.targetHit, totC.slGap, totC.avgPnl], { pnlCols: [4, 8] });
-  
+
   return row;
 }
 
@@ -343,15 +456,15 @@ function renderMarketGate(sheet, row) {
       .setFontColor(COLORS.FAIL_TEXT);
     return row + 1;
   }
-  
+
   // Headers
   row = renderTableHeader(sheet, row, ['Filter', 'Live Value', 'Required', 'Pass/Fail'], 4);
-  
+
   mood.checks.forEach(c => {
     const status = c.pass ? '✅ PASS' : '❌ FAIL';
     const bg = c.pass ? COLORS.PASS_BG : COLORS.FAIL_BG;
     const fg = c.pass ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
-    
+
     sheet.getRange(row, 1).setValue(c.filter).setFontWeight('bold').setBackground(COLORS.CARD_BG);
     sheet.getRange(row, 2).setValue(c.value).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('right').setBackground(COLORS.CARD_BG);
     sheet.getRange(row, 3).setValue(c.required).setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center').setBackground(COLORS.CARD_BG);
@@ -359,13 +472,13 @@ function renderMarketGate(sheet, row) {
     sheet.getRange(row, 1, 1, 4).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
     row++;
   });
-  
+
   // Gate result banner
   row++;
   const gateText = mood.fails === 0 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
   const gateBg = mood.fails === 0 ? COLORS.PASS_BG : COLORS.FAIL_BG;
   const gateFg = mood.fails === 0 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
-  
+
   sheet.getRange(row, 1, 1, 2).merge()
     .setValue(gateText)
     .setBackground(gateBg).setFontColor(gateFg)
@@ -379,7 +492,7 @@ function renderMarketGate(sheet, row) {
   sheet.getRange(row, 8).setValue('Sell:').setFontWeight('bold').setHorizontalAlignment('right');
   sheet.getRange(row, 9).setValue(mood.sell_slots).setFontWeight('bold').setBackground(COLORS.SELL_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
   sheet.getRange(row, 10).setValue(`/15`).setFontColor(COLORS.NEUTRAL_TEXT).setFontStyle('italic');
-  
+
   sheet.setRowHeight(row, 32);
   return row + 1;
 }
@@ -389,7 +502,7 @@ function renderFilterCard(sheet, row, basket) {
   const meta = BASKET_META[basket];
   const config = fetchFilterConfig(basket);
   if (!config) return row;
-  
+
   // Card header
   const header = sheet.getRange(row, 1, 1, 10).merge();
   header.setValue(`${meta.emoji}  ${meta.label.toUpperCase()}   ·   Target: ${config.target || 'S1'}   ·   Win%: ${config.win_pct || '—'}`)
@@ -400,10 +513,10 @@ function renderFilterCard(sheet, row, basket) {
     .setHorizontalAlignment('left');
   sheet.setRowHeight(row, 26);
   row++;
-  
+
   // Column headers — Filter / Min / Max
   row = renderTableHeader(sheet, row, ['Filter', 'Min', 'Max', 'Description'], 4);
-  
+
   config.filters.forEach(f => {
     sheet.getRange(row, 1).setValue(f.metric).setFontWeight('bold').setBackground(COLORS.CARD_BG);
     sheet.getRange(row, 2).setValue(f.min_display).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center').setBackground(COLORS.CARD_BG);
@@ -412,7 +525,7 @@ function renderFilterCard(sheet, row, basket) {
     sheet.getRange(row, 1, 1, 4).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
     row++;
   });
-  
+
   return row;
 }
 
@@ -430,17 +543,17 @@ function refreshBasketFunnel(basket) {
   const sheet = getOrCreate(sheetName);
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
-  
+
   const meta = BASKET_META[basket];
   const config = fetchFilterConfig(basket);
   const qualified = fetchQualified(basket);
   const metricsAll = fetchMetricsAll() || [];
-  
+
   if (!config || !qualified) {
     sheet.getRange(1, 1).setValue('⚠ API unreachable');
     return;
   }
-  
+
   // Title bar
   let row = 1;
   const titleRange = sheet.getRange(row, 1, 1, 14).merge();
@@ -450,18 +563,18 @@ function refreshBasketFunnel(basket) {
     .setHorizontalAlignment('left');
   sheet.setRowHeight(row, 34);
   row++;
-  
+
   const stamp = sheet.getRange(row, 1, 1, 14).merge();
   stamp.setValue(`Universe: 290 F&O · Target: ${config.target || 'S1'} · Last refresh: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row += 2;
-  
+
   // Filter header row (filter name + min/max)
   const filters = config.filters;
   const ncol = filters.length;
-  
+
   // Min row
   sheet.getRange(row, 1).setValue('Filter').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
   filters.forEach((f, i) => {
@@ -469,19 +582,19 @@ function refreshBasketFunnel(basket) {
   });
   sheet.setRowHeight(row, 36);
   row++;
-  
+
   sheet.getRange(row, 1).setValue('Min').setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
   filters.forEach((f, i) => {
     sheet.getRange(row, 2 + i).setValue(f.min_display).setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
   });
   row++;
-  
+
   sheet.getRange(row, 1).setValue('Max').setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
   filters.forEach((f, i) => {
     sheet.getRange(row, 2 + i).setValue(f.max_display).setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
   });
   row += 2;
-  
+
   // Funnel count row
   const funnelCounts = computeFunnelCounts(metricsAll, filters);
   sheet.getRange(row, 1).setValue('Count').setFontWeight('bold').setBackground(meta.color).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
@@ -492,7 +605,7 @@ function refreshBasketFunnel(basket) {
   });
   sheet.setRowHeight(row, 30);
   row++;
-  
+
   // Final qualified count highlight
   sheet.getRange(row, 1).setValue('QUALIFIED').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
   const qcount = qualified.count || 0;
@@ -502,15 +615,15 @@ function refreshBasketFunnel(basket) {
     .setHorizontalAlignment('center').setFontSize(12);
   sheet.setRowHeight(row, 28);
   row += 2;
-  
+
   // Qualified stocks list
   sheet.getRange(row, 1).setValue('▼ QUALIFIED STOCKS').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
   sheet.getRange(row, 1, 1, ncol + 1).setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
   row++;
-  
+
   const stockCols = ['Symbol', 'GVM', ...filters.slice(0, Math.min(filters.length, ncol-1)).map(f => f.metric)];
   row = renderTableHeader(sheet, row, stockCols.slice(0, 8), 8);
-  
+
   const stocks = qualified.stocks || [];
   if (stocks.length === 0) {
     sheet.getRange(row, 1, 1, 8).merge()
@@ -541,11 +654,11 @@ function refreshBasketFunnel(basket) {
       row++;
     });
   }
-  
+
   sheet.setColumnWidth(1, 140);
   sheet.setColumnWidths(2, ncol, 95);
   sheet.setFrozenRows(3);
-  
+
   toast(`✓ ${meta.label} refreshed`);
 }
 
@@ -557,7 +670,7 @@ function refreshBasketFunnel(basket) {
 function computeFunnelCounts(metricsAll, filters) {
   const counts = [];
   let universe = metricsAll.slice();
-  
+
   filters.forEach(f => {
     universe = universe.filter(stock => {
       const v = stock[f.metric];
@@ -580,12 +693,12 @@ function refreshSellOverbought() {
   const sheet = getOrCreate(SHEETS.SO);
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
-  
+
   const data = fetchSellOverbought();
   const meta = BASKET_META.sell_overbought;
-  
+
   let row = 1;
-  
+
   // Title
   sheet.getRange(row, 1, 1, 14).merge()
     .setValue(`${meta.emoji}  SELL OVERBOUGHT — Failed Breakout / Exhaustion Reversal`)
@@ -593,12 +706,12 @@ function refreshSellOverbought() {
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
-  
+
   if (!data) {
     sheet.getRange(row, 1).setValue('⚠ API unreachable');
     return;
   }
-  
+
   const subtitle = `Target: ${data.target || 'S1'} · SL: ${data.sl || '1:1'} · Backtest May-26: ${data.win_pct_may2026 || '71.4%'} · Refreshed: ${nowIST()}`;
   sheet.getRange(row, 1, 1, 14).merge()
     .setValue(subtitle)
@@ -606,7 +719,7 @@ function refreshSellOverbought() {
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row++;
-  
+
   // Note banner
   const note = data.note || 'Market gate required — fails in recovery/bull markets';
   sheet.getRange(row, 1, 1, 14).merge()
@@ -615,7 +728,7 @@ function refreshSellOverbought() {
     .setFontStyle('italic').setFontSize(10);
   sheet.setRowHeight(row, 24);
   row += 2;
-  
+
   // Filter summary card
   row = renderSubHeader(sheet, row, 'FILTER LOGIC');
   const filterRows = [
@@ -635,12 +748,12 @@ function refreshSellOverbought() {
     row++;
   });
   row += 2;
-  
+
   // Signals table
   row = renderSubHeader(sheet, row, `LIVE SIGNALS (${data.count || 0} qualified)`);
   const headers = ['Symbol', 'Entry', 'Target (S1)', 'Stop', 'Tgt %', 'DMA200', 'wi52', 'ma9_21', 'Vol Ratio', 'RSI M', 'Sector Wk'];
   row = renderTableHeader(sheet, row, headers, headers.length);
-  
+
   const stocks = data.stocks || [];
   if (stocks.length === 0) {
     sheet.getRange(row, 1, 1, headers.length).merge()
@@ -674,11 +787,11 @@ function refreshSellOverbought() {
       row++;
     });
   }
-  
+
   sheet.setColumnWidth(1, 140);
   sheet.setColumnWidths(2, headers.length - 1, 100);
   sheet.setFrozenRows(2);
-  
+
   toast('✓ Sell Overbought refreshed');
 }
 
@@ -691,12 +804,12 @@ function refreshInPosition() {
   const sheet = getOrCreate(SHEETS.POS);
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
-  
+
   const positions = fetchPositions() || [];
   const mood = fetchMarketMood();
-  
+
   let row = 1;
-  
+
   // Title
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue('📍  V5 IN POSITION — LIVE OPEN TRADES')
@@ -704,7 +817,7 @@ function refreshInPosition() {
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
-  
+
   // Gate strip
   const gateText = mood
     ? `Gate: ${mood.fails === 0 ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}`
@@ -715,22 +828,22 @@ function refreshInPosition() {
     .setFontSize(10);
   sheet.setRowHeight(row, 22);
   row += 2;
-  
+
   // Group positions by strategy
   const grouped = groupByStrategy(positions);
-  
+
   ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
     row = renderStrategyPositionSection(sheet, row, strat, grouped[strat] || []);
     row += 1;
   });
-  
+
   // Overall Summary
   row = renderSectionHeader(sheet, row, '📊  OVERALL OPEN SUMMARY', COLORS.DARK_HEADER);
   const long = positions.filter(p => isLongTrade(p));
   const short = positions.filter(p => !isLongTrade(p));
   const longPnl = sumPnl(long);
   const shortPnl = sumPnl(short);
-  
+
   const summary = [
     ['Total Open',  positions.length,  'Long Open',  long.length,   'Short Open',   short.length],
     ['Total P&L',   longPnl + shortPnl, 'Long P&L',   longPnl,       'Short P&L',    shortPnl],
@@ -753,18 +866,18 @@ function refreshInPosition() {
     }
     row++;
   });
-  
+
   sheet.setColumnWidth(1, 130);
   sheet.setColumnWidths(2, 9, 110);
   sheet.setFrozenRows(2);
-  
+
   toast('✓ In Position refreshed');
 }
 
 
 function renderStrategyPositionSection(sheet, row, strategy, trades) {
   const meta = strategyMeta(strategy);
-  
+
   // Section header
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(`${meta.emoji}  ${strategy.toUpperCase()}`)
@@ -772,7 +885,7 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
     .setFontSize(11).setFontWeight('bold');
   sheet.setRowHeight(row, 26);
   row++;
-  
+
   // Summary stats
   const stats = computePositionStats(trades);
   const statHeaders = ['Open Trades', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L/Trade'];
@@ -783,7 +896,7 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
       .setHorizontalAlignment('center');
   });
   row++;
-  
+
   const statVals = [
     stats.count,
     fmtPnL(stats.totalPnl),
@@ -804,11 +917,11 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
   });
   sheet.setRowHeight(row, 24);
   row++;
-  
+
   // Trade rows
   const tradeHeaders = ['Entry Time', 'Stock', 'Entry', 'CMP', 'Qty', 'SL', 'Target', 'Unrealised P&L', 'Holding'];
   row = renderTableHeader(sheet, row, tradeHeaders, 9);
-  
+
   if (trades.length === 0) {
     sheet.getRange(row, 1, 1, 9).merge()
       .setValue('No open positions')
@@ -842,7 +955,7 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
       row++;
     });
   }
-  
+
   return row;
 }
 
@@ -855,9 +968,9 @@ function refreshTradeLog() {
   const sheet = getOrCreate(SHEETS.LOG);
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
-  
+
   const trades = fetchTrades() || [];
-  
+
   let row = 1;
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue('📒  V5 TRADE LOG — CLOSED TRADES')
@@ -865,21 +978,21 @@ function refreshTradeLog() {
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
-  
+
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(`Last refresh: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row += 2;
-  
+
   const grouped = groupByStrategy(trades);
-  
+
   ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
     row = renderStrategyTradeSection(sheet, row, strat, grouped[strat] || []);
     row += 1;
   });
-  
+
   // Overall summary
   row = renderSectionHeader(sheet, row, '📊  OVERALL CLOSED SUMMARY', COLORS.DARK_HEADER);
   const closedStats = computeClosedStats(trades);
@@ -900,25 +1013,25 @@ function refreshTradeLog() {
     }
     row++;
   });
-  
+
   sheet.setColumnWidth(1, 130);
   sheet.setColumnWidths(2, 9, 110);
   sheet.setFrozenRows(2);
-  
+
   toast('✓ Trade Log refreshed');
 }
 
 
 function renderStrategyTradeSection(sheet, row, strategy, trades) {
   const meta = strategyMeta(strategy);
-  
+
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(`${meta.emoji}  ${strategy.toUpperCase()}`)
     .setBackground(meta.color).setFontColor(COLORS.WHITE)
     .setFontSize(11).setFontWeight('bold');
   sheet.setRowHeight(row, 26);
   row++;
-  
+
   const stats = computeClosedStatsForGroup(trades);
   const statHeaders = ['Closed Trades', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L/Trade'];
   statHeaders.forEach((h, i) => {
@@ -928,7 +1041,7 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
       .setHorizontalAlignment('center');
   });
   row++;
-  
+
   const statVals = [
     stats.count,
     fmtPnL(stats.pnl),
@@ -947,10 +1060,10 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
   });
   sheet.setRowHeight(row, 24);
   row++;
-  
+
   const tradeHeaders = ['Entry Time', 'Exit Time', 'Stock', 'Entry', 'Exit', 'P&L', 'Holding', 'Result'];
   row = renderTableHeader(sheet, row, tradeHeaders, 8);
-  
+
   if (trades.length === 0) {
     sheet.getRange(row, 1, 1, 8).merge()
       .setValue('No closed trades for this strategy')
