@@ -4,14 +4,15 @@ Display source for V8 Final CLS V Google Sheet.
 
 Endpoints:
   GET /api/v8/market_mood            — ADR + Nifty D/W/M + auto Buy/Sell slot allocation
-  GET /api/v8/qualified/{basket}     — Stocks passing filters for a basket
+  GET /api/v8/qualified/{basket}     — Stocks passing filters for a basket (blackout excluded)
   GET /api/v8/filter_config/{basket} — Min/Max thresholds per basket
   GET /api/v8/adr                    — Quick ADR-only refresh
-  GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal signals
+  GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal signals (blackout excluded)
   GET /api/v8/positions              — Open trades from personal_journal (V8 native)
   GET /api/v8/trades                 — Closed trades from personal_journal (V8 native)
 
 5 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought
+Blackout: stocks with ex_date = today or tomorrow are excluded from all signal endpoints.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -27,6 +28,9 @@ def _conn():
 
 
 # ── Filter configs ────────────────────────────────────────────────────────────
+# Format: metric -> [min, max]  (None = no bound)
+# Sell_Overbought uses v5_metrics columns PLUS computed ma9_vs_ma21 & vol_ratio
+# which are NOT in v5_metrics — handled separately in the /sell_overbought endpoint.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -100,6 +104,14 @@ BASKET_META = {
     "sell_momentum":   {"side": "SELL", "target": "S2", "win_pct": "83%",  "signals_per_day": "~1.5"},
     "sell_overbought": {"side": "SELL", "target": "S1", "win_pct": "71%",  "signals_per_day": "~3"},
 }
+
+# Blackout subquery — excludes stocks with results today or tomorrow
+_BLACKOUT_SQL = """
+    symbol NOT IN (
+        SELECT UPPER(ticker) FROM earnings_calendar
+        WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+    )
+"""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -251,7 +263,10 @@ def qualified(basket: str, limit: int = 50):
         raise HTTPException(404, f"Unknown basket: {basket}")
 
     config = FILTER_CONFIG[basket]
-    where_clauses = ["score_date = (SELECT MAX(score_date) FROM v5_metrics)"]
+    where_clauses = [
+        "score_date = (SELECT MAX(score_date) FROM v5_metrics)",
+        _BLACKOUT_SQL,   # exclude earnings-day stocks
+    ]
     params = []
 
     for metric, bounds in config.items():
@@ -291,7 +306,7 @@ def qualified(basket: str, limit: int = 50):
 
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
-    """Failed breakout / exhaustion reversal — computed live."""
+    """Failed breakout / exhaustion reversal — computed live. Blackout stocks excluded."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -344,6 +359,10 @@ def sell_overbought(limit: int = 50):
                       AND vm.range_1d     <  0
                       AND vm.rsi_month    >= 60
                       AND l.s1            <  l.entry
+                      AND l.symbol NOT IN (
+                          SELECT UPPER(ticker) FROM earnings_calendar
+                          WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                      )
                 )
                 SELECT
                     symbol,
@@ -397,10 +416,10 @@ def adr_only():
         raise HTTPException(500, f"adr failed: {e}")
 
 
-# ════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #  PERSONAL JOURNAL — V8 native open + closed trades
 #  Replaces the legacy v5_positions / v5_trades dependency in V8 dashboard.
-# ════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/positions")
 def v8_positions(limit: int = 100):
