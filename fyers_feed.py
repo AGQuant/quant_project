@@ -5,7 +5,9 @@ Primary: Fyers API
   - Futures (208):      1-min OHLCV -> intraday_prices
   - Equity (~1507):     5-min OHLCV -> intraday_prices
   - Indices (NIFTY, BANKNIFTY, INDIAVIX): LTP every 1-min -> cmp_prices
-Fallback: Yahoo Finance (every 15 min, 5-min)
+Fallback: Yahoo Finance (every 15 min, 5-min) - CMP only, no intraday storage
+
+Retention: 7 days rolling.
 
 Usage:
   py -3.11 fyers_feed.py --auth-code <code>
@@ -26,8 +28,7 @@ IST             = pytz.timezone('Asia/Kolkata')
 FUTURES_INTERVAL    = 1
 EQUITY_INTERVAL     = 5
 INDEX_INTERVAL      = 1
-YAHOO_FALLBACK_MINS = 15
-RETENTION_DAYS      = 15
+RETENTION_DAYS      = 7
 WORKERS             = 10
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
@@ -105,7 +106,7 @@ def delete_old_records(conn):
         cur.execute("DELETE FROM intraday_prices WHERE ts < %s", (cutoff,))
         n = cur.rowcount
     conn.commit()
-    log.info(f"Deleted {n} old records")
+    log.info(f"Deleted {n} old records (>{RETENTION_DAYS} days)")
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -125,7 +126,7 @@ def fetch_one(token, sym, resolution, timeframe):
         'symbol':      fyers_eq_symbol(sym),
         'resolution':  resolution,
         'date_format': '1',
-        'range_from':  (now - timedelta(days=15)).strftime('%Y-%m-%d'),
+        'range_from':  (now - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d'),
         'range_to':    now.strftime('%Y-%m-%d'),
         'cont_flag':   '1',
     }, headers=hdr(token), timeout=5)
@@ -162,27 +163,6 @@ def fetch_batch(token, symbols, resolution, timeframe, conn):
         upsert_candles(conn, all_rows)
     log.info(f"  {timeframe} complete ({total} symbols, {errors} errors)")
 
-def fetch_yahoo_fallback(symbols, conn):
-    try:
-        import yfinance as yf
-    except ImportError:
-        return
-    rows = []
-    for sym in symbols:
-        try:
-            df = yf.Ticker(f"{sym}.NS").history(period='15d', interval='5m')
-            if df.empty: continue
-            for ts, row in df.iterrows():
-                rows.append((sym, ts.to_pydatetime().replace(tzinfo=None),
-                             float(row['Open']), float(row['High']),
-                             float(row['Low']), float(row['Close']),
-                             int(row['Volume']), '5m', 'yahoo'))
-            time.sleep(0.05)
-        except: pass
-    if rows:
-        upsert_candles(conn, rows)
-        log.info(f"Yahoo: {len(rows)} candles stored")
-
 def is_market_open():
     now = datetime.now(IST)
     if now.weekday() >= 5: return False
@@ -193,8 +173,7 @@ def run(auth_code):
     token = get_fyers_token(auth_code)
     conn  = get_db()
     futures, equity = get_universe(conn)
-    last_futures = last_equity = last_yahoo = last_index = last_cleanup = None
-    fyers_ok = True
+    last_futures = last_equity = last_index = last_cleanup = None
     log.info("Feed running. Ctrl+C to stop.")
 
     while True:
@@ -207,25 +186,21 @@ def run(auth_code):
         if last_index is None or (now - last_index).seconds >= INDEX_INTERVAL * 60:
             update_index_ltp(conn, token); last_index = now
 
-        if fyers_ok and (last_futures is None or (now - last_futures).seconds >= FUTURES_INTERVAL * 60):
+        if last_futures is None or (now - last_futures).seconds >= FUTURES_INTERVAL * 60:
             try:
                 log.info(f"Futures 1-min ({len(futures)} symbols)")
                 fetch_batch(token, futures, '1', '1m', conn)
                 last_futures = now
             except Exception as e:
-                log.error(f"Futures failed: {e}"); fyers_ok = False
+                log.error(f"Futures failed: {e}")
 
-        if fyers_ok and (last_equity is None or (now - last_equity).seconds >= EQUITY_INTERVAL * 60):
+        if last_equity is None or (now - last_equity).seconds >= EQUITY_INTERVAL * 60:
             try:
                 log.info(f"Equity 5-min ({len(equity)} symbols)")
                 fetch_batch(token, equity, '5', '5m', conn)
                 last_equity = now
             except Exception as e:
-                log.error(f"Equity failed: {e}"); fyers_ok = False
-
-        if not fyers_ok and (last_yahoo is None or (now - last_yahoo).seconds >= YAHOO_FALLBACK_MINS * 60):
-            fetch_yahoo_fallback(futures + equity, conn)
-            last_yahoo = now; fyers_ok = True
+                log.error(f"Equity failed: {e}")
 
         time.sleep(30)
 
