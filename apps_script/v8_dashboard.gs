@@ -33,7 +33,7 @@
 //   CONFIG
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.2.0';   // V8-only state, personal_journal source
+const SCRIPT_VERSION = '1.2.1';   // fix: gate OPEN/CLOSED logic (fails<3), V5 title → V8
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -307,9 +307,9 @@ function fetchMarketMood()     { return fetchJSON('/api/v8/market_mood'); }
 function fetchFilterConfig(b)  { return fetchJSON('/api/v8/filter_config/' + b); }
 function fetchQualified(b)     { return fetchJSON('/api/v8/qualified/' + b + '?limit=200'); }
 function fetchSellOverbought() { return fetchJSON('/api/v8/sell_overbought?limit=50'); }
-function fetchPositions()      { return fetchJSON('/api/v8/positions?limit=100'); }    // V8 native — personal_journal
-function fetchTrades()         { return fetchJSON('/api/v8/trades?limit=200'); }       // V8 native — personal_journal
-function fetchMetricsAll()     { return fetchJSON('/api/v5/metrics/all'); }            // metrics universe — universal data, name kept
+function fetchPositions()      { return fetchJSON('/api/v8/positions?limit=100'); }
+function fetchTrades()         { return fetchJSON('/api/v8/trades?limit=200'); }
+function fetchMetricsAll()     { return fetchJSON('/api/v5/metrics/all'); }
 
 
 // ════════════════════════════════════════════════════════════════════
@@ -452,9 +452,10 @@ function renderMarketGate(sheet, row) {
   });
 
   row++;
-  const gateText = mood.fails === 0 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
-  const gateBg = mood.fails === 0 ? COLORS.PASS_BG : COLORS.FAIL_BG;
-  const gateFg = mood.fails === 0 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
+  // FIX: gate is OPEN unless 3+ fails (Bearish). 0=Strong Bullish, 1=Bullish, 2=Neutral all trade.
+  const gateText = mood.fails < 3 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
+  const gateBg   = mood.fails < 3 ? COLORS.PASS_BG : COLORS.FAIL_BG;
+  const gateFg   = mood.fails < 3 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
 
   sheet.getRange(row, 1, 1, 2).merge()
     .setValue(gateText)
@@ -770,20 +771,24 @@ function refreshInPosition() {
 
   let row = 1;
 
+  // FIX: title was "V5 IN POSITION" from old script — now correctly V8
   sheet.getRange(row, 1, 1, 10).merge()
-    .setValue('📍  IN POSITION — LIVE OPEN TRADES')
+    .setValue('📍  V8 IN POSITION — LIVE OPEN TRADES')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
 
+  // FIX: gate OPEN for fails < 3 (0=Strong Bullish, 1=Bullish, 2=Neutral all trade; 3+=Bearish=CLOSED)
+  const gateOpen = mood && mood.fails < 3;
   const gateText = mood
-    ? `Gate: ${mood.fails === 0 ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}`
+    ? `Gate: ${gateOpen ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Mood: ${mood.mood}   |   Refreshed: ${nowIST()}`
     : `Refreshed: ${nowIST()}`;
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(gateText)
-    .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
-    .setFontSize(10);
+    .setBackground(gateOpen ? COLORS.PASS_BG : COLORS.FAIL_BG)
+    .setFontColor(gateOpen ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT)
+    .setFontSize(10).setFontWeight('bold');
   sheet.setRowHeight(row, 22);
   row += 2;
 
@@ -815,9 +820,6 @@ function refreshInPosition() {
           ? '₹' + Math.round(srow[i]).toLocaleString('en-IN')
           : srow[i];
         cell.setValue(val).setFontFamily(FONTS.MONO.family).setFontWeight('bold').setHorizontalAlignment('center');
-        if (typeof srow[i] === 'number' && (i === 3 || i === 5) && srow[1] !== positions.length) {
-          cell.setFontColor(srow[i] >= 0 ? COLORS.PROFIT : COLORS.LOSS);
-        }
       }
     }
     row++;
