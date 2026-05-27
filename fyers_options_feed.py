@@ -7,7 +7,7 @@ Monthly expiry, ATM +/- 10 strikes.
 NIFTY strike interval:     50 pts  -> ATM +/- 500
 BANKNIFTY strike interval: 100 pts -> ATM +/- 1000
 
-Stores to Railway table: options_prices
+Retention: 7 days rolling.
 
 Usage:
   py -3.11 fyers_options_feed.py --auth-code <code>
@@ -25,7 +25,7 @@ QUOTES_URL      = 'https://api-t1.fyers.in/data/quotes'
 DATABASE_URL    = os.environ.get('DATABASE_URL')
 IST             = pytz.timezone('Asia/Kolkata')
 FETCH_INTERVAL  = 1
-RETENTION_DAYS  = 15
+RETENTION_DAYS  = 7
 WORKERS         = 10
 ATM_RANGE       = 10
 MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
@@ -86,7 +86,7 @@ def delete_old(conn):
         cur.execute("DELETE FROM options_prices WHERE ts < %s", (cutoff,))
         n = cur.rowcount
     conn.commit()
-    log.info(f"Deleted {n} old option records")
+    log.info(f"Deleted {n} old option records (>{RETENTION_DAYS} days)")
 
 def get_ltp(token, fyers_sym):
     r = requests.get(QUOTES_URL, params={'symbols': fyers_sym}, headers=hdr(token), timeout=5)
@@ -96,17 +96,14 @@ def get_ltp(token, fyers_sym):
     raise Exception(f"LTP failed: {d}")
 
 def get_monthly_expiry():
-    """Returns active monthly expiry e.g. '26JUN'. Rolls to next month after last Thursday."""
     now = datetime.now(IST)
     year2 = str(now.year)[2:]
-
     def last_thursday(year, month):
         last_day = calendar.monthrange(year, month)[1]
         d = datetime(year, month, last_day)
         while d.weekday() != 3:
             d -= timedelta(days=1)
         return d
-
     exp = last_thursday(now.year, now.month)
     if now.date() > exp.date():
         if now.month == 12:
@@ -128,7 +125,7 @@ def fetch_one_option(token, sym, strike, ot, expiry, underlying):
     now = datetime.now(IST)
     r = requests.get(HISTORY_URL, params={
         'symbol': sym, 'resolution': '1', 'date_format': '1',
-        'range_from': (now - timedelta(days=15)).strftime('%Y-%m-%d'),
+        'range_from': (now - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d'),
         'range_to':   now.strftime('%Y-%m-%d'),
         'cont_flag': '1', 'oi_flag': '1',
     }, headers=hdr(token), timeout=5)
@@ -171,8 +168,7 @@ def run(auth_code):
     conn  = get_db()
     setup_table(conn)
     last_fetch = last_cleanup = None
-    expiry = get_monthly_expiry()
-    log.info(f"Options feed running. Active expiry: {expiry}")
+    log.info(f"Options feed running. Active expiry: {get_monthly_expiry()}")
 
     while True:
         now = datetime.now(IST)
