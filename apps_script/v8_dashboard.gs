@@ -16,12 +16,6 @@
  * ║                                                                  ║
  * ║   Data source: Railway V8 endpoints + personal_journal table     ║
  * ║                                                                  ║
- * ║   Update workflow (mobile-friendly):                             ║
- * ║     1. Run "🆕 Check for Updates" from Scorr V8 menu             ║
- * ║     2. If new version, popup shows "Copy URL" button             ║
- * ║     3. Open Apps Script editor → Ctrl+A → Ctrl+V → Ctrl+S        ║
- * ║     4. Reload sheet                                              ║
- * ║                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
@@ -30,7 +24,7 @@
 //   CONFIG
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.2.2';   // Today's Signals on Master Dashboard
+const SCRIPT_VERSION = '1.2.3';   // Gate shows slots used vs available
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -392,7 +386,6 @@ function refreshMasterDashboard() {
 // ════════════════════════════════════════════════════════════════════
 
 function renderTodaysSignals(sheet, row) {
-  // Fetch all 5 baskets in parallel (Apps Script is sequential but fast enough)
   const allBasketData = {};
   let totalSignals = 0;
 
@@ -404,7 +397,6 @@ function renderTodaysSignals(sheet, row) {
     totalSignals += (data && data.count) ? data.count : 0;
   });
 
-  // Total signal count banner
   const bannerBg = totalSignals > 0 ? '#EFF6FF' : COLORS.NEUTRAL_BG;
   const bannerFg = totalSignals > 0 ? '#1E40AF' : COLORS.NEUTRAL_TEXT;
   sheet.getRange(row, 1, 1, 8).merge()
@@ -415,17 +407,14 @@ function renderTodaysSignals(sheet, row) {
   sheet.setRowHeight(row, 24);
   row++;
 
-  // Column headers (shared across all baskets)
   row = renderTableHeader(sheet, row, SIGNAL_COLS, SIGNAL_COLS.length);
 
-  // Render each basket's stocks
   BASKETS.forEach(basket => {
     const meta = BASKET_META[basket];
     const data = allBasketData[basket];
     const stocks = (data && (data.stocks || [])) || [];
     const count = (data && data.count) ? data.count : 0;
 
-    // Basket sub-header row
     sheet.getRange(row, 1, 1, SIGNAL_COLS.length).merge()
       .setValue(`${meta.emoji}  ${meta.label.toUpperCase()}   ·   ${count} stock${count !== 1 ? 's' : ''}`)
       .setBackground(meta.color).setFontColor(COLORS.WHITE)
@@ -554,6 +543,10 @@ function renderPerformanceSummary(sheet, row) {
 }
 
 
+// ════════════════════════════════════════════════════════════════════
+//   MARKET GATE — with slot tracking (used vs available)
+// ════════════════════════════════════════════════════════════════════
+
 function renderMarketGate(sheet, row) {
   const mood = fetchMarketMood();
   if (!mood) {
@@ -564,6 +557,21 @@ function renderMarketGate(sheet, row) {
     return row + 1;
   }
 
+  // Count open buy/sell positions from positions API
+  const positions = fetchPositions() || [];
+  const buyOpen  = positions.filter(p => isLongTrade(p)).length;
+  const sellOpen = positions.filter(p => !isLongTrade(p)).length;
+
+  const buySlots  = mood.buy_slots  || 0;
+  const sellSlots = mood.sell_slots || 0;
+
+  const buyRemaining  = Math.max(0, buySlots  - buyOpen);
+  const sellRemaining = Math.max(0, sellSlots - sellOpen);
+
+  const buyGateOpen  = buyRemaining  > 0;
+  const sellGateOpen = sellRemaining > 0;
+
+  // Filter checks table
   row = renderTableHeader(sheet, row, ['Filter', 'Live Value', 'Required', 'Pass/Fail'], 4);
 
   mood.checks.forEach(c => {
@@ -580,26 +588,58 @@ function renderMarketGate(sheet, row) {
   });
 
   row++;
-  const gateText = mood.fails === 0 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
-  const gateBg = mood.fails === 0 ? COLORS.PASS_BG : COLORS.FAIL_BG;
-  const gateFg = mood.fails === 0 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
+
+  // Mood + total slots row
+  sheet.getRange(row, 1).setValue('Mood').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 2).setValue(mood.mood).setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange(row, 3).setValue('Fails').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 4).setValue(mood.fails).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
+  sheet.getRange(row, 5).setValue('Total Slots').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 6).setValue('15').setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
+  sheet.setRowHeight(row, 24);
+  row++;
+
+  // BUY GATE row
+  const buyBg = buyGateOpen ? COLORS.PASS_BG : COLORS.FAIL_BG;
+  const buyFg = buyGateOpen ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
+  const buyLabel = buyGateOpen ? '✅ BUY GATE OPEN' : '🔒 BUY GATE CLOSED';
 
   sheet.getRange(row, 1, 1, 2).merge()
-    .setValue(gateText)
-    .setBackground(gateBg).setFontColor(gateFg)
-    .setFontSize(14).setFontWeight('bold')
-    .setHorizontalAlignment('center');
-  sheet.getRange(row, 3).setValue(`${mood.fails} filters failing`).setFontStyle('italic').setHorizontalAlignment('center');
-  sheet.getRange(row, 4).setValue('Mood:').setFontWeight('bold').setHorizontalAlignment('right');
-  sheet.getRange(row, 5).setValue(mood.mood).setFontWeight('bold').setHorizontalAlignment('left');
-  sheet.getRange(row, 6).setValue('Buy:').setFontWeight('bold').setHorizontalAlignment('right');
-  sheet.getRange(row, 7).setValue(mood.buy_slots).setFontWeight('bold').setBackground(COLORS.BUY_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
-  sheet.getRange(row, 8).setValue('Sell:').setFontWeight('bold').setHorizontalAlignment('right');
-  sheet.getRange(row, 9).setValue(mood.sell_slots).setFontWeight('bold').setBackground(COLORS.SELL_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
-  sheet.getRange(row, 10).setValue(`/15`).setFontColor(COLORS.NEUTRAL_TEXT).setFontStyle('italic');
+    .setValue(buyLabel)
+    .setBackground(buyBg).setFontColor(buyFg)
+    .setFontSize(12).setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange(row, 3).setValue('Used').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 4).setValue(buyOpen)
+    .setFontFamily(FONTS.MONO.family).setFontSize(13).setFontWeight('bold')
+    .setHorizontalAlignment('center').setBackground(COLORS.BUY_REV).setFontColor(COLORS.WHITE);
+  sheet.getRange(row, 5).setValue('Available').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 6).setValue(`${buyRemaining} / ${buySlots}`)
+    .setFontFamily(FONTS.MONO.family).setFontSize(13).setFontWeight('bold')
+    .setHorizontalAlignment('center').setBackground(buyBg).setFontColor(buyFg);
+  sheet.setRowHeight(row, 30);
+  row++;
 
-  sheet.setRowHeight(row, 32);
-  return row + 1;
+  // SELL GATE row
+  const sellBg = sellGateOpen ? COLORS.PASS_BG : COLORS.FAIL_BG;
+  const sellFg = sellGateOpen ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
+  const sellLabel = sellGateOpen ? '✅ SELL GATE OPEN' : '🔒 SELL GATE CLOSED';
+
+  sheet.getRange(row, 1, 1, 2).merge()
+    .setValue(sellLabel)
+    .setBackground(sellBg).setFontColor(sellFg)
+    .setFontSize(12).setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange(row, 3).setValue('Used').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 4).setValue(sellOpen)
+    .setFontFamily(FONTS.MONO.family).setFontSize(13).setFontWeight('bold')
+    .setHorizontalAlignment('center').setBackground(COLORS.SELL_REV).setFontColor(COLORS.WHITE);
+  sheet.getRange(row, 5).setValue('Available').setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
+  sheet.getRange(row, 6).setValue(`${sellRemaining} / ${sellSlots}`)
+    .setFontFamily(FONTS.MONO.family).setFontSize(13).setFontWeight('bold')
+    .setHorizontalAlignment('center').setBackground(sellBg).setFontColor(sellFg);
+  sheet.setRowHeight(row, 30);
+  row++;
+
+  return row;
 }
 
 
