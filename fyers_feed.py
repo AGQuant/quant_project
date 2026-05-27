@@ -18,7 +18,7 @@ import os
 import time
 import logging
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytz
 import psycopg2
 import requests
@@ -26,6 +26,7 @@ import requests
 FYERS_CLIENT_ID = '1A4STS8ZGD-100'
 FYERS_SECRET    = 'YXTIR2MN9V'
 HISTORY_URL     = 'https://api-t1.fyers.in/data/history'
+QUOTES_URL      = 'https://api-t1.fyers.in/data/quotes'
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 IST = pytz.timezone('Asia/Kolkata')
@@ -34,7 +35,10 @@ FUTURES_INTERVAL    = 1
 EQUITY_INTERVAL     = 5
 YAHOO_FALLBACK_MINS = 15
 RETENTION_DAYS      = 15
-WORKERS             = 10  # parallel fetches
+WORKERS             = 10
+
+# Skip index symbols — no OHLCV history available
+SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 
 SYMBOL_MAP = {
     'NIFTY':      'NSE:NIFTY50-INDEX',
@@ -101,12 +105,14 @@ def get_universe(conn):
         cur.execute("SELECT DISTINCT symbol FROM cmp_prices")
         all_stocks = {r[0] for r in cur.fetchall()}
     equity = all_stocks - futures
-    log.info(f"Universe: {len(futures)} futures, {len(equity)} equity")
-    return sorted(futures), sorted(equity)
+    # Filter out index symbols
+    futures_clean = sorted(futures - SKIP_SYMBOLS)
+    equity_clean  = sorted(equity - SKIP_SYMBOLS)
+    log.info(f"Universe: {len(futures_clean)} futures, {len(equity_clean)} equity (indices skipped)")
+    return futures_clean, equity_clean
 
 
 def fetch_one(token: str, sym: str, resolution: str, timeframe: str) -> list:
-    """Fetch candles for one symbol. Returns list of row tuples."""
     now = datetime.now(IST)
     range_from = (now - timedelta(days=15)).strftime('%Y-%m-%d')
     range_to   = now.strftime('%Y-%m-%d')
@@ -134,8 +140,9 @@ def fetch_one(token: str, sym: str, resolution: str, timeframe: str) -> list:
 
 def fetch_batch(token: str, symbols: list, resolution: str, timeframe: str, conn) -> int:
     all_rows = []
-    errors = 0
-    done = 0
+    errors   = 0
+    done     = 0
+    total    = len(symbols)
 
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         futures = {ex.submit(fetch_one, token, sym, resolution, timeframe): sym for sym in symbols}
@@ -146,15 +153,21 @@ def fetch_batch(token: str, symbols: list, resolution: str, timeframe: str, conn
                 all_rows.extend(rows)
                 done += 1
                 if done % 50 == 0:
-                    log.info(f"  {done}/{len(symbols)} done")
+                    log.info(f"  {done}/{total} done ({len(all_rows)} candles so far)")
+                    # Flush every 50 symbols to avoid data loss on crash
+                    if all_rows:
+                        upsert_candles(conn, all_rows)
+                        all_rows = []
             except Exception as e:
                 errors += 1
                 log.warning(f"  {sym}: {e}")
 
+    # Final flush
     if all_rows:
         upsert_candles(conn, all_rows)
-    log.info(f"  ✅ {timeframe} upserted {len(all_rows)} candles ({errors} errors)")
-    return len(all_rows)
+
+    log.info(f"  ✅ {timeframe} batch complete ({total} symbols, {errors} errors)")
+    return total
 
 
 def fetch_yahoo_fallback(symbols: list, conn) -> int:
