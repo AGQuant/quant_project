@@ -1,7 +1,8 @@
-# main_patched.py - v1.6.10 hotfix
-# v1.6.10: GC fix (strong task refs) + futures cadence 1min -> 5min (reduce Yahoo load)
-#          + restored main._scheduler (CMP refresh + earnings + EOD) -- previous noop patch removed
-# v1.6.9:  Reduce Yahoo load to escape IP block. Futures sem=5 (was 8). Equity DISABLED (INFIN takes over).
+# main_patched.py - v1.6.11
+# v1.6.11: Disable Yahoo 5-min intraday feed. Fyers local scripts take over.
+#          EOD raw_prices + CMP refresh remain active on Railway.
+# v1.6.10: GC fix (strong task refs) + futures cadence 1min -> 5min
+# v1.6.9:  Reduce Yahoo load. Futures sem=5. Equity DISABLED.
 #
 # Activated by Procfile: `web: uvicorn main_patched:app --host 0.0.0.0 --port $PORT`
 import asyncio
@@ -11,135 +12,41 @@ from typing import Optional, List
 import httpx
 import main
 
-VERSION_HOTFIX = "1.6.10"
+VERSION_HOTFIX = "1.6.11"
 
-# === Save reference to main's original _scheduler BEFORE patching ===
-# main.py's startup() does `asyncio.create_task(_scheduler())` without holding a ref,
-# which causes asyncio GC to silently kill the task. We replace main._scheduler with
-# a no-op so main.startup() creates a harmless throwaway task, then launch the REAL
-# main scheduler ourselves below with a strong ref in _BG_TASKS.
 _real_main_scheduler = main._scheduler
 
 async def _main_scheduler_disabled():
-    main.log.info(f"v{VERSION_HOTFIX}: main.py original startup() task replaced. Real scheduler launched by main_patched with strong ref.")
-    return  # exit immediately; main.startup's throwaway task can now be GC'd safely
+    main.log.info(f"v{VERSION_HOTFIX}: main.py original startup() task replaced.")
+    return
 
 main._scheduler = _main_scheduler_disabled
 
 # === FEATURE FLAGS ===
-EQUITY_ENABLED = False    # Disabled - INFIN replaces Yahoo equity feed this evening
-FUTURES_SEM = 5           # Yahoo burst pressure control
-FUTURES_CADENCE_SEC = 300 # 5-min cadence (was 60s in v1.6.9). Reduces Yahoo load.
+INTRADAY_ENABLED = False  # Disabled — Fyers local scripts handle intraday now
+EQUITY_ENABLED   = False  # Disabled
+FUTURES_SEM      = 5
+FUTURES_CADENCE_SEC = 300
 
-# === Strong refs to background tasks (prevents asyncio GC death) ===
 _BG_TASKS: set = set()
 
-
-# ========== FUTURES: 5-MIN CADENCE ==========
-_futures_failures = 0
-_futures_backoff_until = None
-_futures_last_tick: Optional[str] = None
-_futures_last_total = 0
-
-async def _fetch_futures_intraday_parallel():
-    """Parallel fetch via chart API with concurrency=FUTURES_SEM."""
-    global _futures_failures, _futures_backoff_until, _futures_last_tick, _futures_last_total
-
-    if _futures_backoff_until and main._ist_now() < _futures_backoff_until:
-        return
-
-    futures = main._get_futures_symbols()
-    if not futures:
-        return
-
-    sem = asyncio.Semaphore(FUTURES_SEM)
-
-    async def fetch_one(sym):
-        async with sem:
-            try:
-                candles = await main._fetch_intraday_yahoo(sym, range_str="1d")
-                if candles:
-                    main._insert_intraday(candles)
-                    return ('ok', len(candles))
-            except Exception as e:
-                main.log.warning(f"v{VERSION_HOTFIX} futures {sym}: {e}")
-            return ('fail', 0)
-
-    results = await asyncio.gather(*[fetch_one(s) for s in futures])
-    fail_count = sum(1 for r in results if r[0] == 'fail')
-    total_candles = sum(r[1] for r in results)
-    _futures_last_total = total_candles
-    _futures_last_tick = str(main._ist_now())
-
-    if fail_count > len(futures) // 2:
-        _futures_failures += 1
-        backoff = min(60 * (2 ** _futures_failures), 600)
-        _futures_backoff_until = main._ist_now() + timedelta(seconds=backoff)
-        main.log.error(f"v{VERSION_HOTFIX} futures: {fail_count}/{len(futures)} failed, backoff {backoff}s")
-    else:
-        _futures_failures = 0
-        _futures_backoff_until = None
-        main.log.info(f"v{VERSION_HOTFIX} futures tick: {total_candles} candles, {fail_count}/{len(futures)} failed")
-
-
+# ========== FUTURES INTRADAY: DISABLED ==========
 async def _scheduler_futures_5min():
-    main.log.info(f"v{VERSION_HOTFIX}: Futures 5-min scheduler started (sem={FUTURES_SEM}, cadence={FUTURES_CADENCE_SEC}s)")
-    while True:
-        try:
-            if main._is_market_hours():
-                await _fetch_futures_intraday_parallel()
-        except Exception as e:
-            main.log.error(f"v{VERSION_HOTFIX} futures scheduler error: {e}")
-        await asyncio.sleep(FUTURES_CADENCE_SEC)
-
-
-# ========== EQUITY (NON-FUTURES): DISABLED via flag ==========
-async def _fetch_equity_cmp_chart_api():
-    """Sequential chart API for non-futures, writes to cmp_prices."""
-    futures_set = set(main._get_futures_symbols())
-    all_symbols = main._get_all_gvm_symbols()
-    non_futures = [s for s in all_symbols if s not in futures_set]
-    if not non_futures:
-        return
-
-    cmp_map = {}
-    failed = 0
-    for sym in non_futures:
-        try:
-            candles = await main._fetch_intraday_yahoo(sym, range_str="1d")
-            if candles:
-                cmp_map[sym] = float(candles[-1]["close"])
-            else:
-                failed += 1
-        except Exception as e:
-            failed += 1
-            main.log.warning(f"v{VERSION_HOTFIX} equity {sym}: {e}")
-        await asyncio.sleep(0.2)
-
-    main._upsert_cmp(cmp_map)
-    main.log.info(f"v{VERSION_HOTFIX} equity CMP: {len(cmp_map)}/{len(non_futures)} updated, {failed} failed")
-
-
-async def _scheduler_equity_10min():
-    if not EQUITY_ENABLED:
-        main.log.info(f"v{VERSION_HOTFIX}: Equity scheduler DISABLED (EQUITY_ENABLED=False). main._scheduler handles CMP.")
+    if not INTRADAY_ENABLED:
+        main.log.info(f"v{VERSION_HOTFIX}: Futures intraday DISABLED (Fyers local script active).")
         while True:
             await asyncio.sleep(86400)
-    main.log.info(f"v{VERSION_HOTFIX}: Equity 10-min scheduler started")
+
+# ========== EQUITY: DISABLED ==========
+async def _scheduler_equity_10min():
+    main.log.info(f"v{VERSION_HOTFIX}: Equity scheduler DISABLED.")
     while True:
-        try:
-            if main._is_market_hours():
-                await _fetch_equity_cmp_chart_api()
-        except Exception as e:
-            main.log.error(f"v{VERSION_HOTFIX} equity scheduler error: {e}")
-        await asyncio.sleep(600)
+        await asyncio.sleep(86400)
 
-
-# ========== EOD: DAILY raw_prices via CHART API ==========
+# ========== EOD: DAILY raw_prices via CHART API — ACTIVE ==========
 _raw_prices_done_today: Optional[date] = None
 
 async def _fetch_daily_yahoo(symbol: str, range_str: str = "10d") -> List[dict]:
-    """Fetch daily OHLC via chart API interval=1d."""
     ticker = main._yahoo_ticker(symbol)
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=1d&range={range_str}"
     try:
@@ -203,15 +110,12 @@ def _upsert_raw_prices(candles):
 
 
 async def _task_update_raw_prices_v169():
-    """EOD raw_prices via chart API."""
     global _raw_prices_done_today
     today = main._ist_now().date()
     if _raw_prices_done_today == today:
         return
-
     main.log.info(f"v{VERSION_HOTFIX} EOD raw_prices: starting")
     all_symbols = main._get_all_gvm_symbols()
-
     total_inserted = 0
     failed = 0
     for sym in all_symbols:
@@ -221,9 +125,8 @@ async def _task_update_raw_prices_v169():
         else:
             failed += 1
         await asyncio.sleep(0.25)
-
     _raw_prices_done_today = today
-    main.log.info(f"v{VERSION_HOTFIX} EOD raw_prices: {total_inserted} rows, {failed}/{len(all_symbols)} symbols failed")
+    main.log.info(f"v{VERSION_HOTFIX} EOD raw_prices: {total_inserted} rows, {failed}/{len(all_symbols)} failed")
 
 
 async def _scheduler_eod():
@@ -237,52 +140,41 @@ async def _scheduler_eod():
         await asyncio.sleep(300)
 
 
-# === STARTUP: launch schedulers with STRONG REFERENCES ===
+# === STARTUP ===
 @main.app.on_event("startup")
 async def startup_v169():
-    # Hold strong refs to prevent asyncio GC from killing background tasks.
-    # Python docs: "The event loop only keeps weak references to tasks.
-    # Save a strong reference to the result, or the task can disappear mid-execution."
     schedulers = [
-        ("main_scheduler", _real_main_scheduler),   # CMP refresh + earnings + EOD (main.py logic)
-        ("futures_5min", _scheduler_futures_5min),  # Futures intraday every 5 min
-        ("equity_10min", _scheduler_equity_10min),  # Disabled via flag, sleeps
-        ("eod_raw_prices", _scheduler_eod),         # EOD raw_prices chart API
+        ("main_scheduler",  _real_main_scheduler),   # CMP refresh + earnings (main.py)
+        ("futures_5min",    _scheduler_futures_5min), # DISABLED
+        ("equity_10min",    _scheduler_equity_10min), # DISABLED
+        ("eod_raw_prices",  _scheduler_eod),          # ACTIVE — EOD OHLCV
     ]
     for name, coro_fn in schedulers:
         t = asyncio.create_task(coro_fn(), name=name)
         _BG_TASKS.add(t)
         t.add_done_callback(_BG_TASKS.discard)
     main.log.info(
-        f"v{VERSION_HOTFIX} hotfix active: futures {FUTURES_CADENCE_SEC}s sem={FUTURES_SEM} "
-        f"| equity DISABLED | EOD on | bg_tasks_held={len(_BG_TASKS)} "
-        f"| schedulers={[n for n,_ in schedulers]}"
+        f"v{VERSION_HOTFIX}: intraday=DISABLED | equity=DISABLED | EOD=ACTIVE | CMP=ACTIVE | bg_tasks={len(_BG_TASKS)}"
     )
 
 
-# === HEALTH ENDPOINTS ===
+# === HEALTH ===
 @main.app.get("/api/v169/health")
 def v169_health():
     return {
         "version": VERSION_HOTFIX,
+        "intraday_enabled": INTRADAY_ENABLED,
         "equity_enabled": EQUITY_ENABLED,
-        "futures_semaphore": FUTURES_SEM,
-        "futures_cadence_sec": FUTURES_CADENCE_SEC,
-        "futures_failures": _futures_failures,
-        "futures_backoff_until": str(_futures_backoff_until) if _futures_backoff_until else None,
-        "futures_last_tick": _futures_last_tick,
-        "futures_last_total_candles": _futures_last_total,
         "raw_prices_done_today": str(_raw_prices_done_today) if _raw_prices_done_today else None,
         "is_market_hours": main._is_market_hours(),
         "is_eod_window": main._is_eod_window(),
         "bg_tasks_held": len(_BG_TASKS),
-        "bg_tasks": [{"name": t.get_name(), "done": t.done(), "cancelled": t.cancelled()} for t in _BG_TASKS],
+        "bg_tasks": [{"name": t.get_name(), "done": t.done()} for t in _BG_TASKS],
     }
 
 
 @main.app.post("/api/v169/trigger_eod")
 async def v169_trigger_eod():
-    """Manual EOD raw_prices trigger."""
     global _raw_prices_done_today
     _raw_prices_done_today = None
     t = asyncio.create_task(_task_update_raw_prices_v169(), name="manual_eod")
@@ -291,5 +183,4 @@ async def v169_trigger_eod():
     return {"status": "ok", "message": "EOD raw_prices task queued"}
 
 
-# Re-export app for uvicorn
 app = main.app
