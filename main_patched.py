@@ -13,6 +13,19 @@ import main
 
 VERSION_HOTFIX = "1.6.10"
 
+# === Save reference to main's original _scheduler BEFORE patching ===
+# main.py's startup() does `asyncio.create_task(_scheduler())` without holding a ref,
+# which causes asyncio GC to silently kill the task. We replace main._scheduler with
+# a no-op so main.startup() creates a harmless throwaway task, then launch the REAL
+# main scheduler ourselves below with a strong ref in _BG_TASKS.
+_real_main_scheduler = main._scheduler
+
+async def _main_scheduler_disabled():
+    main.log.info(f"v{VERSION_HOTFIX}: main.py original startup() task replaced. Real scheduler launched by main_patched with strong ref.")
+    return  # exit immediately; main.startup's throwaway task can now be GC'd safely
+
+main._scheduler = _main_scheduler_disabled
+
 # === FEATURE FLAGS ===
 EQUITY_ENABLED = False    # Disabled - INFIN replaces Yahoo equity feed this evening
 FUTURES_SEM = 5           # Yahoo burst pressure control
@@ -230,13 +243,20 @@ async def startup_v169():
     # Hold strong refs to prevent asyncio GC from killing background tasks.
     # Python docs: "The event loop only keeps weak references to tasks.
     # Save a strong reference to the result, or the task can disappear mid-execution."
-    for coro_fn in (_scheduler_futures_5min, _scheduler_equity_10min, _scheduler_eod):
-        t = asyncio.create_task(coro_fn(), name=coro_fn.__name__)
+    schedulers = [
+        ("main_scheduler", _real_main_scheduler),   # CMP refresh + earnings + EOD (main.py logic)
+        ("futures_5min", _scheduler_futures_5min),  # Futures intraday every 5 min
+        ("equity_10min", _scheduler_equity_10min),  # Disabled via flag, sleeps
+        ("eod_raw_prices", _scheduler_eod),         # EOD raw_prices chart API
+    ]
+    for name, coro_fn in schedulers:
+        t = asyncio.create_task(coro_fn(), name=name)
         _BG_TASKS.add(t)
         t.add_done_callback(_BG_TASKS.discard)
     main.log.info(
         f"v{VERSION_HOTFIX} hotfix active: futures {FUTURES_CADENCE_SEC}s sem={FUTURES_SEM} "
-        f"| equity DISABLED | EOD on | bg_tasks_held={len(_BG_TASKS)}"
+        f"| equity DISABLED | EOD on | bg_tasks_held={len(_BG_TASKS)} "
+        f"| schedulers={[n for n,_ in schedulers]}"
     )
 
 
