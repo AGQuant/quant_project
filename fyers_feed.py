@@ -34,16 +34,22 @@ EQUITY_INTERVAL     = 5
 YAHOO_FALLBACK_MINS = 15
 RETENTION_DAYS      = 15
 
-INDEX_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
+# Fyers symbol overrides for indices
+SYMBOL_MAP = {
+    'NIFTY':      'NSE:NIFTY50-INDEX',
+    'BANKNIFTY':  'NSE:NIFTYBANK-INDEX',
+    'FINNIFTY':   'NSE:FINNIFTY-INDEX',
+    'MIDCPNIFTY': 'NSE:MIDCPNIFTY-INDEX',
+    'SENSEX':     'BSE:SENSEX-INDEX',
+    'BANKEX':     'BSE:BANKEX-INDEX',
+}
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('fyers_feed')
 
 
 def fyers_symbol(sym: str) -> str:
-    if sym in INDEX_SYMBOLS:
-        return f'NSE:{sym}'
-    return f'NSE:{sym}-EQ'
+    return SYMBOL_MAP.get(sym, f'NSE:{sym}-EQ')
 
 
 def get_fyers_token(auth_code: str) -> str:
@@ -115,8 +121,8 @@ def fetch_fyers_history(token: str, sym: str, resolution: str) -> list:
         timeout=10
     )
     d = r.json()
-    if d.get('s') != 'ok' and 'candles' not in d:
-        log.warning(f"  {sym}: {d.get('message', str(d)[:60])}")
+    if 'candles' not in d:
+        log.warning(f"  {sym}: {d.get('message', str(d)[:80])}")
         return []
     return d.get('candles', [])
 
@@ -145,7 +151,7 @@ def fetch_yahoo_fallback(symbols: list, conn) -> int:
     try:
         import yfinance as yf
     except ImportError:
-        log.error("yfinance not installed — pip install yfinance")
+        log.error("yfinance not installed")
         return 0
 
     rows = []
@@ -193,7 +199,6 @@ def run(auth_code: str):
     while True:
         now = datetime.now(IST)
 
-        # Daily cleanup at 16:00
         if now.hour == 16 and now.minute == 0 and last_cleanup != now.date():
             delete_old_records(conn)
             last_cleanup = now.date()
@@ -202,7 +207,6 @@ def run(auth_code: str):
             time.sleep(60)
             continue
 
-        # Futures 1-min
         if fyers_ok and (last_futures is None or (now - last_futures).seconds >= FUTURES_INTERVAL * 60):
             try:
                 log.info(f"📈 Futures 1-min ({len(futures)} symbols)")
@@ -212,7 +216,6 @@ def run(auth_code: str):
                 log.error(f"Futures failed: {e}")
                 fyers_ok = False
 
-        # Equity 5-min
         if fyers_ok and (last_equity is None or (now - last_equity).seconds >= EQUITY_INTERVAL * 60):
             try:
                 log.info(f"📊 Equity 5-min ({len(equity)} symbols)")
@@ -222,7 +225,6 @@ def run(auth_code: str):
                 log.error(f"Equity failed: {e}")
                 fyers_ok = False
 
-        # Yahoo fallback
         if not fyers_ok and (last_yahoo is None or (now - last_yahoo).seconds >= YAHOO_FALLBACK_MINS * 60):
             fetch_yahoo_fallback(futures + equity, conn)
             last_yahoo = now
@@ -238,7 +240,7 @@ if __name__ == '__main__':
 
     auth_code = args.auth_code
     if not auth_code:
-        print(f"\nOpen in browser:\nhttps://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n")
+        print(f"\nOpen:\nhttps://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n")
         auth_code = input("Paste auth_code: ").strip()
 
     run(auth_code)
