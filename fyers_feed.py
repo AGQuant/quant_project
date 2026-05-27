@@ -18,11 +18,10 @@ import os
 import time
 import logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import pytz
 import psycopg2
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 FYERS_CLIENT_ID = '1A4STS8ZGD-100'
 FYERS_SECRET    = 'YXTIR2MN9V'
@@ -35,6 +34,7 @@ FUTURES_INTERVAL    = 1
 EQUITY_INTERVAL     = 5
 YAHOO_FALLBACK_MINS = 15
 RETENTION_DAYS      = 15
+WORKERS             = 10  # parallel fetches
 
 SYMBOL_MAP = {
     'NIFTY':      'NSE:NIFTY50-INDEX',
@@ -49,22 +49,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 log = logging.getLogger('fyers_feed')
 
 
-def make_session():
-    s = requests.Session()
-    s.mount('https://', HTTPAdapter(max_retries=Retry(total=1, backoff_factor=0.1)))
-    return s
-
-
-SESSION = make_session()
-
-
 def fyers_symbol(sym: str) -> str:
     return SYMBOL_MAP.get(sym, f'NSE:{sym}-EQ')
 
 
 def get_fyers_token(auth_code: str) -> str:
     h = hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
-    r = SESSION.post(
+    r = requests.post(
         'https://api-t1.fyers.in/api/v3/validate-authcode',
         json={'grant_type': 'authorization_code', 'appIdHash': h, 'code': auth_code},
         timeout=10
@@ -114,11 +105,12 @@ def get_universe(conn):
     return sorted(futures), sorted(equity)
 
 
-def fetch_fyers_history(token: str, sym: str, resolution: str) -> list:
+def fetch_one(token: str, sym: str, resolution: str, timeframe: str) -> list:
+    """Fetch candles for one symbol. Returns list of row tuples."""
     now = datetime.now(IST)
     range_from = (now - timedelta(days=15)).strftime('%Y-%m-%d')
     range_to   = now.strftime('%Y-%m-%d')
-    r = SESSION.get(HISTORY_URL,
+    r = requests.get(HISTORY_URL,
         params={
             'symbol':      fyers_symbol(sym),
             'resolution':  resolution,
@@ -128,43 +120,48 @@ def fetch_fyers_history(token: str, sym: str, resolution: str) -> list:
             'cont_flag':   '1',
         },
         headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
-        timeout=(3, 5)  # connect=3s, read=5s
+        timeout=5
     )
     d = r.json()
     if 'candles' not in d:
-        log.warning(f"  {sym}: {d.get('message', str(d)[:60])}")
         return []
-    return d.get('candles', [])
+    rows = []
+    for c in d['candles']:
+        ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
+        rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
+    return rows
 
 
 def fetch_batch(token: str, symbols: list, resolution: str, timeframe: str, conn) -> int:
-    rows = []
+    all_rows = []
     errors = 0
-    total = len(symbols)
-    for i, sym in enumerate(symbols):
-        if i % 50 == 0:
-            log.info(f"  Progress: {i}/{total}")
-        try:
-            candles = fetch_fyers_history(token, sym, resolution)
-            for c in candles:
-                ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
-                rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
-            time.sleep(0.05)
-        except Exception as e:
-            errors += 1
-            log.warning(f"  Error {sym}: {e}")
+    done = 0
 
-    if rows:
-        upsert_candles(conn, rows)
-    log.info(f"  ✅ {timeframe} upserted {len(rows)} candles ({errors} errors)")
-    return len(rows)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futures = {ex.submit(fetch_one, token, sym, resolution, timeframe): sym for sym in symbols}
+        for future in as_completed(futures, timeout=300):
+            sym = futures[future]
+            try:
+                rows = future.result(timeout=6)
+                all_rows.extend(rows)
+                done += 1
+                if done % 50 == 0:
+                    log.info(f"  {done}/{len(symbols)} done")
+            except Exception as e:
+                errors += 1
+                log.warning(f"  {sym}: {e}")
+
+    if all_rows:
+        upsert_candles(conn, all_rows)
+    log.info(f"  ✅ {timeframe} upserted {len(all_rows)} candles ({errors} errors)")
+    return len(all_rows)
 
 
 def fetch_yahoo_fallback(symbols: list, conn) -> int:
     try:
         import yfinance as yf
     except ImportError:
-        log.error("yfinance not installed")
+        log.error("pip install yfinance")
         return 0
 
     rows = []
