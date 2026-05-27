@@ -33,7 +33,7 @@
 //   CONFIG
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.2.1';   // fix: gate OPEN/CLOSED logic (fails<3), V5 title → V8
+const SCRIPT_VERSION = '1.2.1';   // clean rebuild function added
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -106,16 +106,18 @@ const BASKET_META = {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('🟣 Scorr V8')
-    .addItem('🔄 Refresh All',           'refreshAll')
+    .addItem('🔄 Refresh All',              'refreshAll')
     .addSeparator()
-    .addItem('📊 Refresh Dashboard',     'refreshMasterDashboard')
-    .addItem('🔺 Refresh Buy Baskets',   'refreshBuyBaskets')
-    .addItem('🔻 Refresh Sell Baskets',  'refreshSellBaskets')
+    .addItem('📊 Refresh Dashboard',        'refreshMasterDashboard')
+    .addItem('🔺 Refresh Buy Baskets',      'refreshBuyBaskets')
+    .addItem('🔻 Refresh Sell Baskets',     'refreshSellBaskets')
     .addItem('⚠️  Refresh Sell Overbought', 'refreshSellOverbought')
-    .addItem('📍 Refresh In Position',   'refreshInPosition')
-    .addItem('📒 Refresh Trade Log',     'refreshTradeLog')
+    .addItem('📍 Refresh In Position',      'refreshInPosition')
+    .addItem('📒 Refresh Trade Log',        'refreshTradeLog')
     .addSeparator()
-    .addItem('🆕 Check for Updates',     'pullLatestFromGitHub')
+    .addItem('🧹 Clean Rebuild (delete + rebuild + refresh)', 'cleanRebuild')
+    .addSeparator()
+    .addItem('🆕 Check for Updates',        'pullLatestFromGitHub')
     .addItem('🏗️  Build All Tabs (first run)', 'buildAllTabs')
     .addItem('⏰ Setup Auto-Refresh (5 min)',  'setupTriggers')
     .addItem('🛑 Stop Auto-Refresh',           'stopTriggers')
@@ -147,6 +149,53 @@ function scheduledRefresh() {
   const minutes = hour * 60 + min;
   if (minutes < 555 || minutes > 930) return;
   refreshAll();
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//   CLEAN REBUILD — one-click delete all + rebuild + refresh
+// ════════════════════════════════════════════════════════════════════
+
+function cleanRebuild() {
+  const ui = SpreadsheetApp.getUi();
+  const confirm = ui.alert(
+    '🧹 Clean Rebuild',
+    'This will DELETE all 8 Scorr tabs and rebuild them fresh from Railway.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  toast('Step 1/3 — Deleting old tabs…');
+
+  // Create a temp tab so Sheets doesn't complain about deleting the last sheet
+  let tempSheet = ss.getSheetByName('__temp__');
+  if (!tempSheet) tempSheet = ss.insertSheet('__temp__');
+
+  // Delete all V8 tabs
+  Object.values(SHEETS).forEach(name => {
+    const s = ss.getSheetByName(name);
+    if (s) ss.deleteSheet(s);
+  });
+
+  toast('Step 2/3 — Rebuilding tabs…');
+
+  // Recreate all 8 tabs
+  Object.values(SHEETS).forEach(name => ss.insertSheet(name));
+
+  // Remove temp
+  const tmp = ss.getSheetByName('__temp__');
+  if (tmp) ss.deleteSheet(tmp);
+
+  toast('Step 3/3 — Refreshing data from Railway…');
+
+  // Full refresh
+  refreshAll();
+
+  // Restart auto-refresh trigger
+  setupTriggers();
+
+  ss.toast('✅ Clean rebuild complete — auto-refresh restarted', 'Scorr V8', 5);
 }
 
 
@@ -416,7 +465,7 @@ function renderPerformanceSummary(sheet, row) {
     const a = closedAgg[strat] || zeroAgg();
     const dir = strat.startsWith('Buy') ? 'LONG' : 'SHORT';
     row = renderDataRow(sheet, row, 8, [
-      strat, dir, a.count, a.pnl, fmtPct(a.accuracy), a.targetHit, a.slGap, a.avgPnl,
+      strat, dir, a.count, a.pnl, fmtPct(a.accuracy), a.winning, a.losing, a.avgPnl,
     ], { pnlCols: [4, 8] });
   });
   const totC = closedAgg.__TOTAL || zeroAgg();
@@ -452,10 +501,9 @@ function renderMarketGate(sheet, row) {
   });
 
   row++;
-  // FIX: gate is OPEN unless 3+ fails (Bearish). 0=Strong Bullish, 1=Bullish, 2=Neutral all trade.
-  const gateText = mood.fails < 3 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
-  const gateBg   = mood.fails < 3 ? COLORS.PASS_BG : COLORS.FAIL_BG;
-  const gateFg   = mood.fails < 3 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
+  const gateText = mood.fails === 0 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
+  const gateBg = mood.fails === 0 ? COLORS.PASS_BG : COLORS.FAIL_BG;
+  const gateFg = mood.fails === 0 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
 
   sheet.getRange(row, 1, 1, 2).merge()
     .setValue(gateText)
@@ -758,7 +806,7 @@ function refreshSellOverbought() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: IN POSITION — pulls from personal_journal via /api/v8/positions
+//   TAB: IN POSITION
 // ════════════════════════════════════════════════════════════════════
 
 function refreshInPosition() {
@@ -771,24 +819,20 @@ function refreshInPosition() {
 
   let row = 1;
 
-  // FIX: title was "V5 IN POSITION" from old script — now correctly V8
   sheet.getRange(row, 1, 1, 10).merge()
-    .setValue('📍  V8 IN POSITION — LIVE OPEN TRADES')
+    .setValue('📍  IN POSITION — LIVE OPEN TRADES')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
 
-  // FIX: gate OPEN for fails < 3 (0=Strong Bullish, 1=Bullish, 2=Neutral all trade; 3+=Bearish=CLOSED)
-  const gateOpen = mood && mood.fails < 3;
   const gateText = mood
-    ? `Gate: ${gateOpen ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Mood: ${mood.mood}   |   Refreshed: ${nowIST()}`
+    ? `Gate: ${mood.fails === 0 ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}`
     : `Refreshed: ${nowIST()}`;
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(gateText)
-    .setBackground(gateOpen ? COLORS.PASS_BG : COLORS.FAIL_BG)
-    .setFontColor(gateOpen ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT)
-    .setFontSize(10).setFontWeight('bold');
+    .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
+    .setFontSize(10);
   sheet.setRowHeight(row, 22);
   row += 2;
 
@@ -812,7 +856,7 @@ function refreshInPosition() {
   summary.forEach(srow => {
     for (let i = 0; i < srow.length; i++) {
       const isLabel = i % 2 === 0;
-      const cell = sheet.getRange(row, 1 + i * 1);
+      const cell = sheet.getRange(row, 1 + i);
       if (isLabel) {
         cell.setValue(srow[i]).setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setHorizontalAlignment('right');
       } else {
@@ -916,7 +960,7 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: TRADE LOG — pulls from personal_journal via /api/v8/trades
+//   TAB: TRADE LOG
 // ════════════════════════════════════════════════════════════════════
 
 function refreshTradeLog() {
