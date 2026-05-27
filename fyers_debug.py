@@ -14,18 +14,25 @@ print("Token OK")
 
 IST = pytz.timezone('Asia/Kolkata')
 now = datetime.now(IST)
-range_from = (now - timedelta(days=2)).strftime('%Y-%m-%d')
-range_to   = now.strftime('%Y-%m-%d')
 
-r2 = requests.get('https://api-t1.fyers.in/data/history',
-    params={
-        'symbol': 'NSE:RELIANCE-EQ',
-        'resolution': '5',
-        'date_format': '1',
-        'range_from': range_from,
-        'range_to': range_to,
-        'cont_flag': '1',
-    },
-    headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=10)
-print(f"Status: {r2.status_code}")
-print(f"Raw: {r2.text[:500]}")
+# Test 3 symbols quickly
+for sym in ['360ONE', 'ABB', 'ABCAPITAL']:
+    fyers_sym = f'NSE:{sym}-EQ'
+    print(f"Testing {fyers_sym}...")
+    try:
+        r2 = requests.get('https://api-t1.fyers.in/data/history',
+            params={
+                'symbol': fyers_sym,
+                'resolution': '1',
+                'date_format': '1',
+                'range_from': (now - timedelta(days=1)).strftime('%Y-%m-%d'),
+                'range_to': now.strftime('%Y-%m-%d'),
+                'cont_flag': '1',
+            },
+            headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
+            timeout=5)
+        d = r2.json()
+        candles = d.get('candles', [])
+        print(f"  {sym}: {len(candles)} candles | {r2.status_code}")
+    except Exception as e:
+        print(f"  {sym}: ERROR {e}")
