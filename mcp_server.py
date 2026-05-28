@@ -1,5 +1,5 @@
 # ============================================
-# MCP SERVER — Project Quant
+# MCP SERVER - Project Quant
 # Claude connects here to fetch live GVM data
 # Deployed on Railway alongside FastAPI
 # ============================================
@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 BASE_URL = "https://quantproject-production.up.railway.app"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-mcp = FastMCP("Scorr — Project Quant")
+mcp = FastMCP("Scorr - Project Quant")
 
 @mcp.tool()
 async def get_gvm(symbol: str) -> dict:
@@ -93,7 +93,7 @@ async def run_sql(query: str, params: list = None) -> dict:
         with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
             with conn.cursor() as cur:
                 cur.execute(query, params or [])
-                # DDL (ALTER, CREATE) — no rows returned
+                # DDL (ALTER, CREATE) - no rows returned
                 if cur.description is None:
                     conn.commit()
                     return {"status": "ok", "message": "Query executed successfully."}
@@ -106,6 +106,22 @@ async def run_sql(query: str, params: list = None) -> dict:
                 }
     except Exception as e:
         return {"error": str(e)}
+
+@mcp.tool()
+async def v8_generate_overviews(tier: str = "all") -> dict:
+    """
+    Trigger auto-generation of input_raw overview + key_takeaway for all stocks
+    using Claude API + web search. Runs as a background task on Railway.
+    tier options: 'top500' (quarterly), 'longtail' (yearly), 'all' (full universe).
+    Returns immediately with status=queued; generation runs server-side (~3-5 hrs for full universe).
+    """
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"{BASE_URL}/api/v8/overviews/run",
+            params={"tier": tier, "dry_run": False},
+            timeout=15
+        )
+        return r.json()
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
