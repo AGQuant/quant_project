@@ -32,14 +32,15 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.9.1
+# Scorr / Project Quant — main.py v1.9.2
+# v1.9.2: get_top_gainers endpoint — EOD gainers + GVM context
 # v1.9.1: run_yahoo_daily fire-and-forget background + async raw_prices update
 # v1.9.0: CMP fetcher → chart API + daily earnings scheduler
 # v1.8.0: v8_futures router wired + Sell_Overbought basket live
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # ============================================================
 
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -451,6 +452,87 @@ def get_sector(sector: str):
 @app.get("/api/filter")
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
+
+# ─────────────────────────────────────────────────────────────
+# v1.9.2: Top Gainers — EOD day% from raw_prices + GVM context
+# ─────────────────────────────────────────────────────────────
+@app.get("/api/market/top_gainers")
+def get_top_gainers(
+    price_date: Optional[str] = None,
+    n: int = 20,
+    min_gvm: Optional[float] = None,
+    min_day_pct: Optional[float] = None,
+    universe: str = "all",
+    min_volume: Optional[int] = None,
+):
+    """
+    Top gainers by day% (open→close) from raw_prices,
+    joined with GVM scores for fundamental context.
+
+    Params:
+      price_date  — YYYY-MM-DD (default: latest date in raw_prices)
+      n           — number of results (default 20, max 100)
+      min_gvm     — filter by minimum GVM score (e.g. 7.0 for Buy+)
+      min_day_pct — filter by minimum day gain % (e.g. 2.0)
+      universe    — "all" (everything in raw_prices) |
+                    "gvm_only" (only stocks in gvm_scores)
+      min_volume  — filter by minimum volume (e.g. 100000)
+    """
+    n = min(max(n, 1), 100)
+
+    if not price_date:
+        row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
+        price_date = row["latest"] if row else str(date.today())
+
+    conds = ["r.price_date = %s", "r.open > 0", "r.close > 0"]
+    vals = [price_date]
+
+    if min_volume:
+        conds.append("r.volume >= %s")
+        vals.append(min_volume)
+
+    if universe == "gvm_only":
+        conds.append("g.symbol IS NOT NULL")
+
+    if min_gvm is not None:
+        conds.append("g.gvm_score >= %s")
+        vals.append(min_gvm)
+
+    having = ""
+    if min_day_pct is not None:
+        having = f"HAVING ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) >= {float(min_day_pct)}"
+
+    where = " AND ".join(conds)
+    join_type = "INNER" if universe == "gvm_only" else "LEFT"
+
+    sql = f"""
+        SELECT
+            r.symbol,
+            COALESCE(g.company_name, r.symbol)        AS company_name,
+            COALESCE(g.segment, 'Unknown')             AS segment,
+            ROUND(r.close::numeric, 2)                 AS close,
+            ROUND(r.open::numeric,  2)                 AS open,
+            ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) AS day_pct,
+            r.volume,
+            ROUND(g.gvm_score::numeric, 2)             AS gvm_score,
+            ROUND(g.g_score::numeric,   2)             AS g_score,
+            ROUND(g.v_score::numeric,   2)             AS v_score,
+            ROUND(g.m_score::numeric,   2)             AS m_score,
+            g.verdict,
+            r.price_date::text                         AS price_date
+        FROM raw_prices r
+        {join_type} JOIN gvm_scores g ON r.symbol = g.symbol
+        WHERE {where}
+        GROUP BY r.symbol, g.company_name, g.segment,
+                 r.close, r.open, r.volume,
+                 g.gvm_score, g.g_score, g.v_score, g.m_score,
+                 g.verdict, r.price_date
+        {having}
+        ORDER BY day_pct DESC
+        LIMIT %s
+    """
+    vals.append(n)
+    return api_query(sql, vals)
 
 @app.get("/api/sectors")
 def get_sectors():
@@ -1109,6 +1191,7 @@ MCP_TOOLS = [
     {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
+    {"name": "get_top_gainers", "description": "Top gainers by day% (open→close) from EOD data, joined with GVM scores. Use for: 'kal ke top gainers', 'strong closing stocks', 'short-term momentum picks with GVM filter'. Set universe='gvm_only' + min_gvm=7.0 for quality-filtered gainers.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string", "description": "YYYY-MM-DD. Default: latest available date."}, "n": {"type": "integer", "description": "Number of results (default 20, max 100)."}, "min_gvm": {"type": "number", "description": "Minimum GVM score filter (e.g. 7.0 for Buy+)."}, "min_day_pct": {"type": "number", "description": "Minimum day gain % filter (e.g. 2.0)."}, "universe": {"type": "string", "description": "'all' (default) or 'gvm_only' (Scorr universe only)."}, "min_volume": {"type": "integer", "description": "Minimum volume filter (e.g. 100000)."}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1202,6 +1285,16 @@ async def _call_tool(name, args):
         elif name == "v8_sell_overbought": r = await client.get(f"{BASE_URL}/api/v8/sell_overbought", params={"limit": args.get("limit", 50)}); return r.json()
         elif name == "v8_futures_list": r = await client.get(f"{BASE_URL}/api/v8/futures/list", params={"active_only": args.get("active_only", True)}); return r.json()
         elif name == "v8_futures_upload": r = await client.post(f"{BASE_URL}/api/v8/futures/upload", json={"stocks": args["stocks"]}); return r.json()
+        elif name == "get_top_gainers":
+            params = {}
+            if args.get("price_date"):  params["price_date"]  = args["price_date"]
+            if args.get("n"):           params["n"]           = args["n"]
+            if args.get("min_gvm") is not None:     params["min_gvm"]     = args["min_gvm"]
+            if args.get("min_day_pct") is not None: params["min_day_pct"] = args["min_day_pct"]
+            if args.get("universe"):    params["universe"]    = args["universe"]
+            if args.get("min_volume"):  params["min_volume"]  = args["min_volume"]
+            r = await client.get(f"{BASE_URL}/api/market/top_gainers", params=params)
+            return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
