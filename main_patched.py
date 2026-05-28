@@ -1,4 +1,6 @@
-# main_patched.py - v1.6.11
+# main_patched.py - v1.7.0
+# v1.7.0:  Wire overview_generator (input_raw overview + key_takeaway auto-gen).
+#          Adds 3 endpoints (/api/v8/overviews/*) + quarterly/yearly scheduler.
 # v1.6.11: Disable Yahoo 5-min intraday feed. Fyers local scripts take over.
 #          EOD raw_prices + CMP refresh remain active on Railway.
 # v1.6.10: GC fix (strong task refs) + futures cadence 1min -> 5min
@@ -11,8 +13,9 @@ from datetime import datetime, timedelta, date
 from typing import Optional, List
 import httpx
 import main
+import overview_generator
 
-VERSION_HOTFIX = "1.6.11"
+VERSION_HOTFIX = "1.7.0"
 
 _real_main_scheduler = main._scheduler
 
@@ -23,7 +26,7 @@ async def _main_scheduler_disabled():
 main._scheduler = _main_scheduler_disabled
 
 # === FEATURE FLAGS ===
-INTRADAY_ENABLED = False  # Disabled — Fyers local scripts handle intraday now
+INTRADAY_ENABLED = False  # Disabled - Fyers local scripts handle intraday now
 EQUITY_ENABLED   = False  # Disabled
 FUTURES_SEM      = 5
 FUTURES_CADENCE_SEC = 300
@@ -43,7 +46,7 @@ async def _scheduler_equity_10min():
     while True:
         await asyncio.sleep(86400)
 
-# ========== EOD: DAILY raw_prices via CHART API — ACTIVE ==========
+# ========== EOD: DAILY raw_prices via CHART API - ACTIVE ==========
 _raw_prices_done_today: Optional[date] = None
 
 async def _fetch_daily_yahoo(symbol: str, range_str: str = "10d") -> List[dict]:
@@ -144,17 +147,19 @@ async def _scheduler_eod():
 @main.app.on_event("startup")
 async def startup_v169():
     schedulers = [
-        ("main_scheduler",  _real_main_scheduler),   # CMP refresh + earnings (main.py)
-        ("futures_5min",    _scheduler_futures_5min), # DISABLED
-        ("equity_10min",    _scheduler_equity_10min), # DISABLED
-        ("eod_raw_prices",  _scheduler_eod),          # ACTIVE — EOD OHLCV
+        ("main_scheduler",  _real_main_scheduler),          # CMP refresh + earnings (main.py)
+        ("futures_5min",    _scheduler_futures_5min),        # DISABLED
+        ("equity_10min",    _scheduler_equity_10min),        # DISABLED
+        ("eod_raw_prices",  _scheduler_eod),                 # ACTIVE - EOD OHLCV
+        ("overview_gen",    overview_generator.scheduler_overviews),  # quarterly/yearly overviews
     ]
     for name, coro_fn in schedulers:
         t = asyncio.create_task(coro_fn(), name=name)
         _BG_TASKS.add(t)
         t.add_done_callback(_BG_TASKS.discard)
     main.log.info(
-        f"v{VERSION_HOTFIX}: intraday=DISABLED | equity=DISABLED | EOD=ACTIVE | CMP=ACTIVE | bg_tasks={len(_BG_TASKS)}"
+        f"v{VERSION_HOTFIX}: intraday=DISABLED | equity=DISABLED | EOD=ACTIVE | CMP=ACTIVE | "
+        f"overview_gen=ACTIVE | bg_tasks={len(_BG_TASKS)}"
     )
 
 
@@ -181,6 +186,10 @@ async def v169_trigger_eod():
     _BG_TASKS.add(t)
     t.add_done_callback(_BG_TASKS.discard)
     return {"status": "ok", "message": "EOD raw_prices task queued"}
+
+
+# === OVERVIEW GENERATOR ROUTES (registered at import; scheduler started above) ===
+overview_generator.register_routes(main.app)
 
 
 app = main.app
