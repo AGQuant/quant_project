@@ -22,40 +22,25 @@ import numpy as np
 import yfinance as yf
 from bs4 import BeautifulSoup
 
-from v5_engine import (
-    V5_SCHEMA_SQL, seed_default_filters, run_v5_engine,
-    compute_metrics_for_symbol, load_filters, store_metrics
+from v8_engine import (
+    V8_SCHEMA_SQL, run_v8_engine,
+    compute_metrics_for_symbol, store_metrics
 )
-from v6_backtest import V6_BACKTEST_SCHEMA, run_full_optimization
-from v6_engine import V6_SCHEMA_SQL, run_v6_engine, compare_v5_v6
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.9.6
-# v1.9.6: Yahoo CMP fallback now covers the ENTIRE tradeable universe
-#         (futures + non-futures). For a futures-universe stock, Yahoo returns the
-#         EQUITY / UNDERLYING spot (SBIN.NS) — the SAME price basis Fyers tracks
-#         (Fyers subscribes NSE:<SYM>-EQ at 1-min, never the futures contract).
-#         No futures-contract price is fetched anywhere in the system.
-# v1.9.5: CMP FALLBACK IS MANUAL. Fyers WebSocket worker is the SOLE CMP source
-#         in normal operation. Yahoo CMP only runs when app_config
-#         'yahoo_cmp_fallback' = on (default OFF). Toggle via
-#         POST /api/admin/cmp_fallback?state=on|off, the set_cmp_fallback MCP tool,
-#         or SQL: UPDATE app_config SET value='on' WHERE key='yahoo_cmp_fallback'.
-# v1.9.4: (superseded) Yahoo CMP auto gap-filler by freshness.
-# v1.9.3: INTRADAY OWNERSHIP -> Fyers WebSocket worker (fyers_feed.py).
-#         - Yahoo 5-min intraday scheduler RETIRED. raw_prices EOD sweep at 21:00 IST.
-#         - get_intraday endpoint + intraday_prices table UNCHANGED.
-#         - backfill_intraday / fetch_intraday_now kept as MANUAL Yahoo fallback.
-# v1.9.2: get_top_gainers endpoint — EOD gainers + GVM context
-# v1.9.1: run_yahoo_daily fire-and-forget background + async raw_prices update
-# v1.9.0: CMP fetcher → chart API + daily earnings scheduler
-# v1.8.0: v8_futures router wired + Sell_Overbought basket live
-# v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
+# Scorr / Project Quant — main.py v2.0.0
+# v2.0.0: FULL V5/V6 REMOVAL. V8-native everywhere.
+#         - v5_engine -> v8_engine (run_v8_engine, V8_SCHEMA_SQL)
+#         - tables: v5_metrics->v8_metrics, v5_signals->v8_universe
+#         - all /api/v5/* and /api/v6/* endpoints DELETED
+#         - all v5_/v6_ MCP tools removed; /api/v8/run added
+#         - legacy v5 strategy tables (signals/trades/portfolio/etc) no longer created
+# v1.9.6: Yahoo CMP fallback covers entire universe (kept).
 # ============================================================
 
-VERSION = "1.9.6"
+VERSION = "2.0.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -88,30 +73,6 @@ def create_tables():
     sql = """
     CREATE TABLE IF NOT EXISTS input_raw (id SERIAL PRIMARY KEY, data JSONB);
     CREATE TABLE IF NOT EXISTS screener_raw (id SERIAL PRIMARY KEY, data JSONB);
-    CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, data JSONB);
-    CREATE TABLE IF NOT EXISTS signals (id SERIAL PRIMARY KEY, data JSONB);
-    CREATE TABLE IF NOT EXISTS v5_signals (
-        id SERIAL PRIMARY KEY, signal_type TEXT, timestamp TEXT, symbol TEXT,
-        finkhoz_rating NUMERIC, record_price NUMERIC, cap_type TEXT,
-        current_price NUMERIC, return_pct NUMERIC, hit_alert TEXT,
-        analyst_verdict TEXT, alert_count INT, alert_types TEXT,
-        event_date DATE, event_type TEXT, verdict_date DATE,
-        loaded_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS v5_futures_open (
-        id SERIAL PRIMARY KEY, symbol TEXT, open_date TEXT, type TEXT,
-        qty NUMERIC, entry_price NUMERIC, current_price NUMERIC,
-        net_pl_pct NUMERIC, profit_per_lot NUMERIC, value NUMERIC,
-        remarks TEXT, status TEXT, loaded_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS v5_trades (id SERIAL PRIMARY KEY, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS v5_portfolio (id SERIAL PRIMARY KEY, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS v5_positions (
-        id SERIAL PRIMARY KEY,
-        data JSONB NOT NULL,
-        exported_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS v5_baskets (id SERIAL PRIMARY KEY, basket_name TEXT, data JSONB, loaded_at TIMESTAMP DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS earnings_calendar (
         id SERIAL PRIMARY KEY, company_name TEXT, ticker TEXT,
         ex_date DATE, record_date DATE, event_type TEXT,
@@ -138,14 +99,12 @@ def create_tables():
     );
     INSERT INTO app_config (key, value) VALUES ('yahoo_cmp_fallback', 'off')
         ON CONFLICT (key) DO NOTHING;
-    """ + V5_SCHEMA_SQL + V6_BACKTEST_SCHEMA + V6_SCHEMA_SQL
+    """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready")
-        with get_conn() as conn:
-            seed_default_filters(conn)
+        log.info("Tables ready (v2.0.0 — V8-native)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -169,7 +128,7 @@ def _get_futures_symbols() -> List[str]:
             rows = cur.fetchall()
             if rows:
                 return [r[0] for r in rows]
-            cur.execute("SELECT DISTINCT symbol FROM v5_signals ORDER BY symbol")
+            cur.execute("SELECT DISTINCT symbol FROM v8_universe ORDER BY symbol")
             return [r[0] for r in cur.fetchall()]
     except Exception as e:
         log.error(f"_get_futures_symbols failed: {e}")
@@ -185,9 +144,6 @@ def _get_all_gvm_symbols() -> List[str]:
         return []
 
 def _get_full_cmp_universe() -> List[str]:
-    """Every symbol CMP should cover = GVM universe UNION active futures.
-    Used by the Yahoo fallback so a Fyers outage refreshes futures-universe
-    stocks too (Yahoo .NS = the equity/underlying spot, same basis Fyers tracks)."""
     return sorted(set(_get_all_gvm_symbols()) | set(_get_futures_symbols()))
 
 def _get_config(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -208,9 +164,6 @@ def _yahoo_ticker(symbol: str) -> str:
     return indices.get(symbol, f"{symbol}.NS")
 
 async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
-    """Fetch CMP via Yahoo chart API — sequential one-at-a-time (yf.download batch broken).
-    Always the equity/underlying spot ({SYM}.NS); for futures-universe stocks this is
-    the cash underlying, the same basis Fyers tracks. No futures contract is queried."""
     results = {}
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
         for symbol in symbols:
@@ -235,8 +188,6 @@ async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
     return results
 
 async def _fetch_intraday_yahoo(symbol: str, range_str: str = "7d") -> List[dict]:
-    """Yahoo 5-min intraday. RETIRED from scheduler v1.9.3 — Fyers WebSocket owns
-    live intraday. Kept only for the manual /api/admin/backfill_intraday fallback."""
     ticker = _yahoo_ticker(symbol)
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=5m&range={range_str}"
     try:
@@ -265,7 +216,6 @@ async def _fetch_intraday_yahoo(symbol: str, range_str: str = "7d") -> List[dict
         return []
 
 def _upsert_cmp(cmp_map):
-    """Yahoo CMP upsert. Tags source='yahoo' (only runs when the fallback flag is ON)."""
     if not cmp_map: return
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -301,41 +251,15 @@ _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
 
 async def _task_refresh_cmp():
-    """Yahoo CMP FALLBACK (v1.9.6) — MANUAL, OFF by default.
-    Fyers WebSocket worker is the sole CMP source in normal operation. This only
-    runs when app_config 'yahoo_cmp_fallback' = on (flip it when Fyers is down).
-    When ON, fetches CMP for the ENTIRE universe (futures + non-futures) each
-    market-hours cycle. Futures-universe stocks get the Yahoo equity/underlying
-    spot (.NS) — same basis Fyers tracks via -EQ, never the futures contract."""
     if not _yahoo_cmp_fallback_on():
         return
     symbols = _get_full_cmp_universe()
     if not symbols: return
-    log.info(f"Yahoo CMP fallback ON — fetching ALL {len(symbols)} symbols (futures + non-futures)")
+    log.info(f"Yahoo CMP fallback ON — fetching ALL {len(symbols)} symbols")
     cmp_map = await _fetch_cmp_yahoo(symbols)
     _upsert_cmp(cmp_map)
 
-async def _task_fetch_intraday():
-    """RETIRED v1.9.3 — Fyers WebSocket worker owns live intraday.
-    Left callable for the manual /api/admin/fetch_intraday_now fallback only.
-    No longer invoked by the scheduler."""
-    global _intraday_fetched_today
-    today = _ist_now().date()
-    if _intraday_fetched_today == today: return
-    futures = _get_futures_symbols()
-    if not futures: return
-    total = 0
-    for sym in futures:
-        candles = await _fetch_intraday_yahoo(sym, range_str="1d")
-        if candles:
-            _insert_intraday(candles)
-            total += len(candles)
-        await asyncio.sleep(0.2)
-    _purge_intraday_old()
-    _intraday_fetched_today = today
-
 async def _bg_yahoo_daily(symbols=None, lookback=None):
-    """Background task — fire-and-forget, won't block scheduler or MCP."""
     global _raw_prices_updated_today, _yahoo_daily_running
     if _yahoo_daily_running:
         log.info("yahoo_daily already running, skip")
@@ -359,7 +283,6 @@ async def _task_update_raw_prices():
     asyncio.create_task(_bg_yahoo_daily())
 
 async def _task_load_earnings_daily():
-    """Daily at 9:00–9:05 AM IST: refresh earnings_calendar from Screener.in."""
     global _earnings_loaded_today
     today = _ist_now().date()
     if _earnings_loaded_today == today: return
@@ -375,21 +298,16 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v1.9.6 — Fyers sole CMP+intraday, Yahoo CMP manual fallback covers ALL symbols, raw_prices 21:00 IST)")
+    log.info("Scheduler started (v2.0.0 — V8-native, Fyers sole CMP+intraday, Yahoo CMP manual fallback, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
-            # 9:00–9:05 IST — earnings calendar refresh
             if now.weekday() < 5 and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
-            # Market hours — Yahoo CMP ONLY if fallback flag is ON (default off; Fyers is primary)
             if _is_market_hours():
                 await _task_refresh_cmp()
-            # 21:00–21:05 IST — raw_prices EOD sweep (moved off startup + EOD window)
             if now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
-            # NOTE: _task_fetch_intraday() intentionally NOT called.
-            # Fyers WebSocket worker (fyers_feed.py) owns live intraday_prices.
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -419,9 +337,6 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/cmp_fallback")
 def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
-    """Toggle the Yahoo CMP fallback. state=on activates Yahoo CMP for the ENTIRE
-    universe (use when Fyers is down); state=off (default) leaves Fyers as the sole
-    CMP source. Also flippable via SQL: UPDATE app_config SET value='on' WHERE key='yahoo_cmp_fallback'."""
     _check_admin(x_admin_token)
     val = "on" if str(state).lower() in ("on", "true", "1", "yes") else "off"
     with get_conn() as conn, conn.cursor() as cur:
@@ -431,7 +346,6 @@ def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/admin/cmp_fallback")
 def get_cmp_fallback():
-    """Current state of the Yahoo CMP fallback flag."""
     return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
 
 @app.get("/api/health/feeds")
@@ -447,11 +361,8 @@ def health_feeds():
         ("earnings_calendar", "SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
         ("intraday_prices", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
         ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
-        ("v5_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v5_metrics"),
-        ("v5_positions", "SELECT MAX(exported_at)::date, COUNT(*) FROM v5_positions"),
-        ("v5_qualified", "SELECT MAX(score_date), COUNT(*) FROM v5_qualified"),
-        ("v6_qualified", "SELECT MAX(score_date), COUNT(*) FROM v6_qualified"),
-        ("v6_backtest_results", "SELECT MAX(created_at)::date, COUNT(DISTINCT run_id) FROM v6_backtest_results"),
+        ("v8_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
+        ("v8_universe", "SELECT NULL, COUNT(*) FROM v8_universe"),
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
     ]
     try:
@@ -486,28 +397,6 @@ def api_query(sql, params=None, single=False):
         log.error(f"api_query error: {e}")
         return {"error": str(e)}
 
-def _jsonb_rows(table: str, limit: int = 500) -> list:
-    try:
-        with get_conn() as conn, conn.cursor() as cur:
-            try:
-                cur.execute(f"SELECT data FROM {table} ORDER BY id LIMIT {limit}")
-                rows = []
-                for r in cur.fetchall():
-                    item = r[0]
-                    if isinstance(item, dict): rows.append(item)
-                    elif isinstance(item, str):
-                        try: rows.append(json.loads(item))
-                        except: pass
-                return rows
-            except Exception:
-                conn.rollback()
-                cur.execute(f"SELECT * FROM {table} ORDER BY id LIMIT {limit}")
-                cols = [d[0] for d in cur.description]
-                return [dict(zip(cols, r)) for r in cur.fetchall()]
-    except Exception as e:
-        log.error(f"_jsonb_rows {table}: {e}")
-        return []
-
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
     r = api_query("SELECT symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap FROM gvm_scores WHERE symbol = %s", (symbol.upper(),), single=True)
@@ -529,9 +418,6 @@ def get_sector(sector: str):
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
 
-# ────────────────────────────────────────────────────────────────────────────
-# v1.9.2: Top Gainers — EOD day% from raw_prices + GVM context
-# ────────────────────────────────────────────────────────────────────────────
 @app.get("/api/market/top_gainers")
 def get_top_gainers(
     price_date: Optional[str] = None,
@@ -541,37 +427,23 @@ def get_top_gainers(
     universe: str = "all",
     min_volume: Optional[int] = None,
 ):
-    """
-    Top gainers by day% (open→close) from raw_prices,
-    joined with GVM scores for fundamental context.
-    """
     n = min(max(n, 1), 100)
-
     if not price_date:
         row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
         price_date = row["latest"] if row else str(date.today())
-
     conds = ["r.price_date = %s", "r.open > 0", "r.close > 0"]
     vals = [price_date]
-
     if min_volume:
-        conds.append("r.volume >= %s")
-        vals.append(min_volume)
-
+        conds.append("r.volume >= %s"); vals.append(min_volume)
     if universe == "gvm_only":
         conds.append("g.symbol IS NOT NULL")
-
     if min_gvm is not None:
-        conds.append("g.gvm_score >= %s")
-        vals.append(min_gvm)
-
+        conds.append("g.gvm_score >= %s"); vals.append(min_gvm)
     having = ""
     if min_day_pct is not None:
         having = f"HAVING ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) >= {float(min_day_pct)}"
-
     where = " AND ".join(conds)
     join_type = "INNER" if universe == "gvm_only" else "LEFT"
-
     sql = f"""
         SELECT
             r.symbol,
@@ -627,75 +499,38 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices ORDER BY symbol")
 
-@app.post("/api/v5/run")
-async def v5_run(x_admin_token: Optional[str] = Header(None)):
+# ── V8 engine run ──────────────────────────────────────────────────────────────
+@app.post("/api/v8/run")
+async def v8_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     with get_conn() as conn:
-        results = run_v5_engine(conn)
+        results = run_v8_engine(conn)
     return results
 
-@app.get("/api/v5/qualified")
-def v5_qualified(signal_type: Optional[str] = None, score_date: Optional[str] = None):
-    if not score_date: score_date = str(date.today())
-    if signal_type:
-        return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC", (signal_type, score_date))
-    return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v5_qualified WHERE score_date = %s ORDER BY signal_type, gvm_score DESC", (score_date,))
-
-@app.get("/api/v5/signals")
-def v5_signals_get(signal_type: Optional[str] = None, cap_type: Optional[str] = None,
-                   verdict: Optional[str] = None, limit: int = 200):
-    limit = min(max(limit, 1), 500)
-    conds, vals = [], []
-    if signal_type: conds.append("signal_type = %s"); vals.append(signal_type)
-    if cap_type: conds.append("cap_type = %s"); vals.append(cap_type)
-    if verdict: conds.append("analyst_verdict = %s"); vals.append(verdict)
-    where = " AND ".join(conds) if conds else "1=1"
-    return api_query(
-        f"SELECT signal_type, symbol, cap_type, analyst_verdict, finkhoz_rating, "
-        f"record_price, current_price, return_pct, hit_alert, alert_types, "
-        f"event_date, event_type, loaded_at "
-        f"FROM v5_signals WHERE {where} ORDER BY loaded_at DESC, id DESC LIMIT {limit}",
-        vals
-    )
-
-@app.get("/api/v5/positions")
-def v5_positions_get():
-    return _jsonb_rows("v5_positions")
-
-@app.get("/api/v5/portfolio")
-def v5_portfolio_get():
-    return _jsonb_rows("v5_portfolio")
-
-@app.get("/api/v5/trades")
-def v5_trades_get():
-    return _jsonb_rows("v5_trades")
-
-@app.get("/api/v5/metrics/all")
-def v5_metrics_all():
+@app.get("/api/v8/metrics/all")
+def v8_metrics_all():
     return api_query("""
         SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
                rsi_month, rsi_weekly, daily_rsi,
                month_return, week_return, year_return, prev_day_change,
                sector_day, sector_week, month_index, week_index_52,
                range_1d, range_3d, upper_bb, lower_bb
-        FROM v5_metrics
-        WHERE score_date = (SELECT MAX(score_date) FROM v5_metrics)
+        FROM v8_metrics
+        WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
         ORDER BY symbol
     """)
 
-@app.get("/api/v6/metrics/all")
-def v6_metrics_all():
-    return v5_metrics_all()
-
-@app.get("/api/v5/metrics/{symbol}")
-def v5_metrics_single(symbol: str, score_date: Optional[str] = None):
+@app.get("/api/v8/metrics/{symbol}")
+def v8_metrics_single(symbol: str, score_date: Optional[str] = None):
     if not score_date: score_date = str(date.today())
-    r = api_query("SELECT * FROM v5_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
-    if not r: raise HTTPException(404, f"No metrics for {symbol} on {score_date}")
+    r = api_query("SELECT * FROM v8_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
+    if not r:
+        r = api_query("SELECT * FROM v8_metrics WHERE symbol = %s ORDER BY score_date DESC LIMIT 1", (symbol.upper(),), single=True)
+    if not r: raise HTTPException(404, f"No metrics for {symbol}")
     return r
 
-@app.get("/api/v5/live_metrics")
-def v5_live_metrics():
+@app.get("/api/v8/live_metrics")
+def v8_live_metrics():
     return api_query("""
         SELECT s.symbol,
             lc.close AS cmp,
@@ -703,7 +538,7 @@ def v5_live_metrics():
             CASE WHEN fc.open > 0 THEN ROUND(((lc.close / fc.open - 1) * 100)::numeric, 2) END AS day_pct,
             hc.close AS hour_ago_close,
             CASE WHEN hc.close > 0 THEN ROUND(((lc.close / hc.close - 1) * 100)::numeric, 2) END AS hourly_pct
-        FROM (SELECT DISTINCT symbol FROM v5_signals) s
+        FROM (SELECT DISTINCT symbol FROM v8_universe) s
         JOIN LATERAL (
             SELECT close FROM intraday_prices WHERE symbol = s.symbol
             AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
@@ -719,63 +554,8 @@ def v5_live_metrics():
         ORDER BY s.symbol
     """)
 
-@app.get("/api/v5/filters")
-def v5_filters():
-    return api_query("SELECT signal_type, metric, min_val, max_val, updated_at FROM v5_filters ORDER BY signal_type, metric")
-
-@app.post("/api/v5/filter/update")
-async def v5_filter_update(req: Request, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    body = await req.json()
-    sig = body.get("signal_type"); metric = body.get("metric")
-    mn = body.get("min_val"); mx = body.get("max_val")
-    if not sig or not metric: raise HTTPException(400, "signal_type and metric required")
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("INSERT INTO v5_filters (signal_type, metric, min_val, max_val) VALUES (%s, %s, %s, %s) ON CONFLICT (signal_type, metric) DO UPDATE SET min_val = EXCLUDED.min_val, max_val = EXCLUDED.max_val, updated_at = NOW()", (sig, metric, mn, mx))
-        conn.commit()
-    return {"status": "ok", "signal_type": sig, "metric": metric, "min_val": mn, "max_val": mx}
-
-@app.post("/api/v6/run")
-async def v6_run(x_admin_token: Optional[str] = Header(None), recompute: bool = False):
-    _check_admin(x_admin_token)
-    with get_conn() as conn:
-        return run_v6_engine(conn, recompute=recompute)
-
-@app.get("/api/v6/qualified")
-def v6_qualified_get(signal_type: Optional[str] = None, score_date: Optional[str] = None):
-    if not score_date: score_date = str(date.today())
-    if signal_type:
-        return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v6_qualified WHERE signal_type = %s AND score_date = %s ORDER BY gvm_score DESC", (signal_type, score_date))
-    return api_query("SELECT symbol, signal_type, gvm_score, cmp, metrics, qualified_at FROM v6_qualified WHERE score_date = %s ORDER BY signal_type, gvm_score DESC", (score_date,))
-
-@app.get("/api/v6/filters")
-def v6_filters_get():
-    return api_query("SELECT signal_type, metric, min_val, max_val, updated_at FROM v6_filters ORDER BY signal_type, metric")
-
-@app.get("/api/v6/compare")
-def v6_compare(score_date: Optional[str] = None):
-    target = date.fromisoformat(score_date) if score_date else date.today()
-    with get_conn() as conn:
-        return compare_v5_v6(conn, target)
-
-@app.post("/api/v6/backtest/run")
-async def v6_backtest_run(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    with get_conn() as conn:
-        results = run_full_optimization(conn)
-    return results
-
-@app.get("/api/v6/backtest/results")
-def v6_backtest_results(run_id: Optional[str] = None, signal_type: Optional[str] = None):
-    if run_id and signal_type:
-        return api_query("SELECT * FROM v6_backtest_results WHERE run_id = %s AND signal_type = %s ORDER BY composite_score DESC", (run_id, signal_type))
-    if run_id:
-        return api_query("SELECT signal_type, variant_label, num_signals, win_rate, avg_return, composite_score, filter_config FROM v6_backtest_results WHERE run_id = %s ORDER BY signal_type, composite_score DESC", (run_id,))
-    return api_query("SELECT run_id, MAX(created_at) as latest, COUNT(*) as rows FROM v6_backtest_results GROUP BY run_id ORDER BY latest DESC LIMIT 10")
-
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
-    """MANUAL Yahoo 5-min fallback only (not scheduled). Fyers worker owns live intraday."""
     _check_admin(x_admin_token)
     futures = _get_futures_symbols()
     if not futures: return {"status": "warn", "message": "No futures symbols"}
@@ -791,29 +571,8 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _purge_intraday_old()
     return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "failed_symbols": failed[:20], "total_candles": total_candles}
 
-@app.post("/api/admin/fetch_intraday_now")
-async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
-    """MANUAL Yahoo 5-min fallback only (not scheduled). Fyers worker owns live intraday."""
-    _check_admin(x_admin_token)
-    global _intraday_fetched_today
-    _intraday_fetched_today = None
-    futures = _get_futures_symbols()
-    if not futures: return {"status": "warn", "message": "No futures symbols"}
-    total = 0
-    for sym in futures:
-        candles = await _fetch_intraday_yahoo(sym, range_str="1d")
-        if candles:
-            _insert_intraday(candles)
-            total += len(candles)
-        await asyncio.sleep(0.2)
-    _purge_intraday_old()
-    _intraday_fetched_today = _ist_now().date()
-    return {"status": "ok", "symbols": len(futures), "candles": total}
-
 @app.post("/api/admin/refresh_cmp_now")
 async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
-    """MANUAL one-shot Yahoo CMP fetch for the ENTIRE universe (futures + non-futures),
-    ignoring the fallback flag. Futures-universe stocks get the equity/underlying spot."""
     _check_admin(x_admin_token)
     symbols = _get_full_cmp_universe()
     if not symbols: return {"status": "warn", "message": "No symbols"}
@@ -823,12 +582,11 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
-    """Fire-and-forget: launches background task, returns immediately."""
     _check_admin(x_admin_token)
     if _yahoo_daily_running:
         return {"status": "already_running", "message": "yahoo_daily already in progress"}
     asyncio.create_task(_bg_yahoo_daily())
-    return {"status": "started", "message": "raw_prices update running in background (~3 min). Check raw_prices MAX(price_date) to confirm."}
+    return {"status": "started", "message": "raw_prices update running in background (~3 min)."}
 
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -864,133 +622,6 @@ async def load_screener(req: Request):
             cur.execute("INSERT INTO screener_raw (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
         conn.commit()
     return {"status": "ok", "rows": len(rows)}
-
-async def _parse_and_store_signals(csv_text: str, signal_type: str, replace: bool = True) -> dict:
-    try:
-        df = pd.read_csv(io.StringIO(csv_text))
-    except Exception as e:
-        return {"status": "error", "error": f"CSV parse failed: {e}"}
-    df.columns = [str(c).strip() for c in df.columns]
-    sym_col = next((c for c in df.columns if "symbol" in c.lower()), None)
-    if not sym_col: return {"status": "error", "error": "No Symbol column found"}
-    df = df[df[sym_col].notna() & (df[sym_col].astype(str).str.strip().str.len() > 0)]
-    if df.empty: return {"status": "warn", "rows": 0}
-    def _sf(v):
-        try: return float(v) if pd.notna(v) else None
-        except: return None
-    def _si(v):
-        try: return int(float(v)) if pd.notna(v) else None
-        except: return None
-    def _ss(v):
-        s = str(v).strip() if pd.notna(v) else None
-        return None if not s or s.lower() in ("nan", "none") else s
-    def _sd(v):
-        try:
-            s = str(v).strip()
-            if not s or s.lower() in ("nan", "none", ""): return None
-            s = re.sub(r"\([^)]+\)", "", s).strip()
-            dt = pd.to_datetime(s, errors="coerce")
-            return dt.date() if pd.notna(dt) else None
-        except: return None
-    def _gc(*names):
-        for n in names:
-            match = next((c for c in df.columns if n.lower() in c.lower()), None)
-            if match: return match
-        return None
-    inserted, skipped = 0, 0
-    with get_conn() as conn, conn.cursor() as cur:
-        if replace:
-            cur.execute("DELETE FROM v5_signals WHERE signal_type = %s", (signal_type,))
-            conn.commit()
-        for _, row in df.iterrows():
-            sym = _ss(row.get(sym_col))
-            if not sym: continue
-            try:
-                cur.execute("""
-                    INSERT INTO v5_signals
-                    (signal_type, timestamp, symbol, finkhoz_rating, record_price, cap_type,
-                     current_price, return_pct, hit_alert, analyst_verdict, alert_count,
-                     alert_types, event_date, event_type, verdict_date)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (
-                    signal_type, _ss(row.get(_gc("timestamp", "time"))), sym,
-                    _sf(row.get(_gc("finkhoz", "rating"))), _sf(row.get(_gc("record price", "record_price"))),
-                    _ss(row.get(_gc("type", "cap"))), _sf(row.get(_gc("current price", "current_price"))),
-                    _sf(row.get(_gc("return"))), _ss(row.get(_gc("hit alert", "hit_alert"))),
-                    _ss(row.get(_gc("analyst verdict", "verdict"))), _si(row.get(_gc("alert count", "count"))),
-                    _ss(row.get(_gc("alert type", "alert_type", "alert_types"))),
-                    _sd(row.get(_gc("^date$", "event_date", "date"))),
-                    _ss(row.get(_gc("event type", "event_type"))),
-                    _sd(row.get(_gc("verdict_date", "date of verdict"))),
-                ))
-                inserted += 1
-            except Exception as e:
-                skipped += 1
-                log.warning(f"v5_signals row skip ({sym}): {e}")
-        conn.commit()
-    return {"status": "ok", "signal_type": signal_type, "rows_read": len(df), "rows_inserted": inserted, "rows_skipped": skipped}
-
-@app.post("/api/admin/load_v5_signals_csv")
-async def load_v5_signals_csv(req: Request, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    body = await req.json()
-    file_id = body.get("file_id"); signal_type = body.get("signal_type", "Alert"); replace = body.get("replace", False)
-    if not file_id: raise HTTPException(400, "file_id required")
-    csv_text = await _drive_download(file_id)
-    result = await _parse_and_store_signals(csv_text, signal_type, replace)
-    result["file_id"] = file_id
-    return result
-
-@app.post("/api/admin/load_v5_from_drive")
-async def load_v5_from_drive(req: Request):
-    body = await req.json()
-    file_ids = body.get("file_ids", {})
-    results = {}
-    ALERTS_MAP = {"v5_alerts_large.csv": "Alert_Large", "v5_alerts_mid.csv": "Alert_Mid", "v5_alerts_small.csv": "Alert_Small"}
-    for filename, file_id in file_ids.items():
-        fn = filename.lower().strip()
-        try:
-            if fn in ALERTS_MAP:
-                csv_text = await _drive_download(file_id)
-                results[filename] = await _parse_and_store_signals(csv_text, ALERTS_MAP[fn], replace=True)
-            elif "in_position" in fn:
-                csv_text = await _drive_download(file_id)
-                df = pd.read_csv(io.StringIO(csv_text))
-                rows = df.to_dict(orient="records")
-                with get_conn() as conn, conn.cursor() as cur:
-                    cur.execute("DELETE FROM v5_positions")
-                    for row in rows:
-                        cur.execute("INSERT INTO v5_positions (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
-                    conn.commit()
-                results[filename] = {"status": "ok", "rows": len(rows)}
-            elif "portfolio" in fn:
-                csv_text = await _drive_download(file_id)
-                df = pd.read_csv(io.StringIO(csv_text))
-                rows = df.to_dict(orient="records")
-                with get_conn() as conn, conn.cursor() as cur:
-                    cur.execute("DELETE FROM v5_portfolio")
-                    for row in rows:
-                        cur.execute("INSERT INTO v5_portfolio (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
-                    conn.commit()
-                results[filename] = {"status": "ok", "rows": len(rows)}
-            elif "trade" in fn:
-                csv_text = await _drive_download(file_id)
-                df = pd.read_csv(io.StringIO(csv_text))
-                rows = df.to_dict(orient="records")
-                with get_conn() as conn, conn.cursor() as cur:
-                    cur.execute("DELETE FROM v5_trades")
-                    for row in rows:
-                        cur.execute("INSERT INTO v5_trades (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
-                    conn.commit()
-                results[filename] = {"status": "ok", "rows": len(rows)}
-            else:
-                results[filename] = {"status": "skipped"}
-        except Exception as e:
-            results[filename] = {"status": "error", "error": str(e)[:100]}
-    loaded  = sum(1 for r in results.values() if r.get("status") == "ok")
-    skipped = sum(1 for r in results.values() if r.get("status") == "skipped")
-    errors  = sum(1 for r in results.values() if r.get("status") == "error")
-    return {"status": "ok", "files": len(file_ids), "loaded": loaded, "skipped": skipped, "errors": errors, "results": results}
 
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
@@ -1224,33 +855,22 @@ MCP_TOOLS = [
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers: 1-min futures-universe equity underlying, 15-min other equity).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers 1-min futures).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures (Fyers worker normally owns this).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background, returns immediately).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off (covers ALL symbols when ON). Turn ON when the Fyers worker is down; OFF (default) keeps Fyers as the sole CMP source.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string", "description": "on or off"}}, "required": ["state"]}},
-    {"name": "run_v5_engine", "description": "Run V5 filter engine.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
-    {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_v5_metrics_all", "description": "Get all 19 static metrics for all 290 stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_live_metrics", "description": "Get real-time CMP, day%, and hourly gain for all 290 futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_filters", "description": "Get current V5 filter thresholds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v6_backtest", "description": "Run V6 backtest optimizer.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v6_backtest_results", "description": "Get V6 backtest results.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "signal_type": {"type": "string"}}, "required": []}},
-    {"name": "run_v6_engine", "description": "Run V6 filter engine.", "inputSchema": {"type": "object", "properties": {"recompute": {"type": "boolean"}}, "required": []}},
-    {"name": "get_v6_qualified", "description": "Get stocks qualified by V6 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "score_date": {"type": "string"}}, "required": []}},
-    {"name": "get_v6_filters", "description": "Get current V6 filter thresholds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "compare_v5_v6", "description": "Paper-trade comparison: V5 vs V6.", "inputSchema": {"type": "object", "properties": {"score_date": {"type": "string"}}, "required": []}},
+    {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
+    {"name": "run_v8_engine", "description": "Run the V8 signal engine — compute today's metrics for the universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_v8_metrics_all", "description": "Get all metrics for the full universe (latest date).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_v8_live_metrics", "description": "Get real-time CMP, day%, hourly gain for the universe.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "health_feeds", "description": "Status dashboard for all data feeds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "env_check", "description": "Diagnostic: which env vars are visible.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "load_input_from_drive", "description": "Reload input_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_screener_from_drive", "description": "Reload screener_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_v5_signals_csv", "description": "Load v5_signals from a single Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}, "signal_type": {"type": "string"}, "replace": {"type": "boolean"}}, "required": ["file_id"]}},
     {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_v5_signals", "description": "Query V5 signals.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}, "cap_type": {"type": "string"}, "verdict": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
     {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_v5_portfolio", "description": "Get screener portfolio holdings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "github_read", "description": "Read any file from the GitHub repo.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
     {"name": "github_list", "description": "List files in the repo.", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": []}},
     {"name": "github_push", "description": "Create or update a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
@@ -1261,7 +881,7 @@ MCP_TOOLS = [
     {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
-    {"name": "get_top_gainers", "description": "Top gainers by day% (open→close) from EOD data, joined with GVM scores. Use for: 'kal ke top gainers', 'strong closing stocks', 'short-term momentum picks with GVM filter'. Set universe='gvm_only' + min_gvm=7.0 for quality-filtered gainers.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string", "description": "YYYY-MM-DD. Default: latest available date."}, "n": {"type": "integer", "description": "Number of results (default 20, max 100)."}, "min_gvm": {"type": "number", "description": "Minimum GVM score filter (e.g. 7.0 for Buy+)."}, "min_day_pct": {"type": "number", "description": "Minimum day gain % filter (e.g. 2.0)."}, "universe": {"type": "string", "description": "'all' (default) or 'gvm_only' (Scorr universe only)."}, "min_volume": {"type": "integer", "description": "Minimum volume filter (e.g. 100000)."}}, "required": []}},
+    {"name": "get_top_gainers", "description": "Top gainers by day% from EOD data, joined with GVM scores.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string"}, "n": {"type": "integer"}, "min_gvm": {"type": "number"}, "min_day_pct": {"type": "number"}, "universe": {"type": "string"}, "min_volume": {"type": "integer"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1280,35 +900,10 @@ async def _call_tool(name, args):
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_v5_engine": r = await client.post(f"{BASE_URL}/api/v5/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "get_v5_qualified":
-            params = {}
-            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
-            r = await client.get(f"{BASE_URL}/api/v5/qualified", params=params); return r.json()
-        elif name == "get_v5_metrics": r = await client.get(f"{BASE_URL}/api/v5/metrics/{args['symbol']}"); return r.json()
-        elif name == "get_v5_metrics_all": r = await client.get(f"{BASE_URL}/api/v5/metrics/all"); return r.json()
-        elif name == "get_v5_live_metrics": r = await client.get(f"{BASE_URL}/api/v5/live_metrics"); return r.json()
-        elif name == "get_v5_filters": r = await client.get(f"{BASE_URL}/api/v5/filters"); return r.json()
-        elif name == "run_v6_backtest": r = await client.post(f"{BASE_URL}/api/v6/backtest/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "get_v6_backtest_results":
-            params = {}
-            if args.get("run_id"): params["run_id"] = args["run_id"]
-            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
-            r = await client.get(f"{BASE_URL}/api/v6/backtest/results", params=params); return r.json()
-        elif name == "run_v6_engine":
-            params = {}
-            if args.get("recompute"): params["recompute"] = "true"
-            r = await client.post(f"{BASE_URL}/api/v6/run", params=params, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "get_v6_qualified":
-            params = {}
-            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
-            if args.get("score_date"): params["score_date"] = args["score_date"]
-            r = await client.get(f"{BASE_URL}/api/v6/qualified", params=params); return r.json()
-        elif name == "get_v6_filters": r = await client.get(f"{BASE_URL}/api/v6/filters"); return r.json()
-        elif name == "compare_v5_v6":
-            params = {}
-            if args.get("score_date"): params["score_date"] = args["score_date"]
-            r = await client.get(f"{BASE_URL}/api/v6/compare", params=params); return r.json()
+        elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
+        elif name == "get_v8_metrics_all": r = await client.get(f"{BASE_URL}/api/v8/metrics/all"); return r.json()
+        elif name == "get_v8_live_metrics": r = await client.get(f"{BASE_URL}/api/v8/live_metrics"); return r.json()
         elif name == "health_feeds": r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
         elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_sql":
@@ -1327,25 +922,13 @@ async def _call_tool(name, args):
                 return {"error": str(e)}
         elif name == "load_input_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_screener_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
-        elif name == "load_v5_signals_csv":
-            r = await client.post(f"{BASE_URL}/api/admin/load_v5_signals_csv",
-                json={"file_id": args["file_id"], "signal_type": args.get("signal_type","Alert"), "replace": args.get("replace", False)},
-                headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "load_earnings_from_screener": r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "get_v5_signals":
-            params = {}
-            if args.get("signal_type"): params["signal_type"] = args["signal_type"]
-            if args.get("cap_type"): params["cap_type"] = args["cap_type"]
-            if args.get("verdict"): params["verdict"] = args["verdict"]
-            if args.get("limit"): params["limit"] = args["limit"]
-            r = await client.get(f"{BASE_URL}/api/v5/signals", params=params); return r.json()
         elif name == "check_blackout":
             sym = args["symbol"].upper()
             with get_conn() as conn, conn.cursor() as cur:
                 cur.execute("SELECT ticker, ex_date, event_type FROM earnings_calendar WHERE UPPER(ticker) = %s ORDER BY id DESC LIMIT 5", (sym,))
                 rows = cur.fetchall()
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
-        elif name == "get_v5_portfolio": r = await client.get(f"{BASE_URL}/api/v5/portfolio"); return r.json()
         elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
