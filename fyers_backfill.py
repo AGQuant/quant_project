@@ -32,7 +32,8 @@ RETENTION_DAYS = 7
 WORKERS        = 10
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
-SPECIAL_SYMBOLS = {'M&M': 'NSE:M%26M-EQ'}
+# Literal & — requests URL-encodes it for REST; the symbol-master expects NSE:M&M-EQ.
+SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('fyers_backfill')
