@@ -20,17 +20,20 @@ automatically covers the whole universe.
 Indices (NIFTY/BANKNIFTY/INDIAVIX) LTP -> cmp_prices.
 Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
 
-TOKEN MODEL (Fyers v3):
-  access_token  - 1 day,  auto-refreshed daily 08:45 IST
-  refresh_token - 15 days, used + PIN to mint access; no renewal endpoint
-                  -> one manual auth-code bootstrap every ~15 days.
+TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
+  Refresh-token flow is DISABLED (SEBI: continuous refresh sessions banned).
+  -> ONE 2FA auth-code bootstrap per TRADING DAY.
+  access_token  - valid the whole trading day, survives restarts.
   Stored in Railway table fyers_tokens (id=1).
-  A stale --auth-code in the start command is harmless: bootstrap fails, we
-  fall back to the stored refresh token.
+
+  Boot logic:
+    1. --auth-code given  -> bootstrap (mint + store today's token).
+    2. else stored access_token created TODAY -> reuse it (restart-safe).
+    3. else -> exit cleanly with login URL (no crash loop; wait for morning code).
 
 USAGE:
-  Normal/worker:  python fyers_feed.py
-  Bootstrap:      python fyers_feed.py --auth-code <code>
+  Daily bootstrap: python fyers_feed.py --auth-code <code>
+  Restart (same day, no code needed): python fyers_feed.py
 """
 
 import argparse, hashlib, os, time, logging, threading
@@ -43,12 +46,10 @@ FYERS_PIN       = os.environ.get('FYERS_PIN',       '2580')
 DATABASE_URL    = os.environ.get('DATABASE_URL')
 
 AUTHCODE_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode'
-REFRESH_URL  = 'https://api-t1.fyers.in/api/v3/validate-refresh-token'
 QUOTES_URL   = 'https://api-t1.fyers.in/data/quotes'
 IST          = pytz.timezone('Asia/Kolkata')
 
-RETENTION_DAYS     = 7
-REFRESH_VALID_DAYS = 15
+RETENTION_DAYS = 7
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 # Literal & — the Fyers symbol-master (WS validation) expects NSE:M&M-EQ, and
@@ -98,36 +99,29 @@ def bootstrap_from_authcode(conn, auth_code):
     d = r.json()
     if d.get('code') != 200: raise Exception(f"Auth-code exchange failed: {d}")
     save_tokens(conn, access=d['access_token'], refresh=d.get('refresh_token'), new_refresh=True)
-    log.info("Bootstrap OK - access + refresh stored")
-    return d['access_token']
-
-def refresh_access_token(conn, refresh_token):
-    r = requests.post(REFRESH_URL, json={'grant_type':'refresh_token','appIdHash':app_id_hash(),
-        'refresh_token':refresh_token,'pin':FYERS_PIN}, timeout=10)
-    d = r.json()
-    if d.get('s') == 'error' or 'access_token' not in d: raise Exception(f"Refresh failed: {d}")
-    save_tokens(conn, access=d['access_token'], new_refresh=False)
-    log.info("Access token refreshed")
+    log.info("Bootstrap OK - access token stored (valid for today)")
     return d['access_token']
 
 def get_valid_token(conn, auth_code=None):
-    # If an auth_code is supplied, try to bootstrap. But auth codes are single-use,
-    # so a stale code left in the start command would otherwise crash every restart.
-    # On failure, fall back to the stored refresh token instead of dying.
+    # SEBI Apr-2026: refresh-token flow is DISABLED. One 2FA auth-code per
+    # trading day. Token is valid all day and survives restarts.
+    #   1. --auth-code given -> bootstrap (mint + store today's token).
+    #   2. else stored access_token created TODAY -> reuse it (restart-safe).
+    #   3. else -> exit cleanly with login URL (no crash loop).
     if auth_code:
         try:
             return bootstrap_from_authcode(conn, auth_code)
         except Exception as e:
-            log.warning(f"Auth-code bootstrap failed ({e}); falling back to stored refresh token")
+            log.warning(f"Auth-code bootstrap failed ({e}); trying stored same-day token")
     row = load_tokens(conn)
-    if row and row[1]:
-        refresh_token, refresh_created = row[1], row[3]
-        age = (datetime.now(IST).replace(tzinfo=None) - refresh_created).days if refresh_created else 999
-        if age < REFRESH_VALID_DAYS:
-            return refresh_access_token(conn, refresh_token)
-        log.warning(f"refresh_token {age}d old (>= {REFRESH_VALID_DAYS}) - manual bootstrap needed")
+    if row and row[0] and row[2]:
+        access_token, access_created = row[0], row[2]
+        if access_created.date() == datetime.now(IST).replace(tzinfo=None).date():
+            log.info("Reusing stored same-day access token (restart-safe)")
+            return access_token
+        log.warning("Stored access token is from a previous day - new 2FA needed")
     raise SystemExit(
-        "\nNO VALID REFRESH TOKEN. One-time bootstrap:\n"
+        "\nNO VALID TOKEN FOR TODAY (SEBI: daily 2FA, no refresh).\n"
         f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
         "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
         "  2. python fyers_feed.py --auth-code <code>\n")
@@ -313,18 +307,12 @@ def run(auth_code=None):
     )
 
     # ---- Layer 2: live websocket (blocking, auto-reconnect) ----
-    # Periodic flush + CMP + index LTP + daily token refresh on a side thread.
+    # Periodic flush + CMP + index LTP on a side thread.
+    # NOTE: No daily token refresh here. SEBI (Apr-2026) disabled the
+    # refresh endpoint -> token is bootstrapped once per trading day via
+    # --auth-code. A new day requires a fresh 2FA bootstrap (manual restart).
     def housekeeping():
-        last_token_day = None
         while True:
-            now = datetime.now(IST)
-            if now.hour == 8 and now.minute >= 45 and last_token_day != now.date():
-                try:
-                    row = load_tokens(conn)
-                    if row and row[1]: refresh_access_token(conn, row[1])
-                    last_token_day = now.date()
-                except Exception as e:
-                    log.error(f"Daily refresh: {e}")
             if is_market_open():
                 update_index_ltp(conn, token)
                 agg.flush_all()   # flush partial bars every cycle (safety)
