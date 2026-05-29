@@ -14,14 +14,18 @@ day-valid access token, and stores it in Railway table fyers_tokens (id=1).
   4. token            -> auth_code
   5. validate-authcode(appIdHash + auth_code) -> final access_token -> DB
 
+*** ACCOUNT-BLOCK SAFETY ***
+Fyers blocks the account after ~5 failed TOTP attempts. A crashing worker that
+restarts fast can burn all 5 in seconds. To prevent that:
+  - CIRCUIT BREAKER: every attempt stamps fyers_tokens.last_attempt. A new
+    auto-login is REFUSED if the last attempt was < ATTEMPT_COOLDOWN secs ago.
+    This survives container restarts (state is in the DB, not memory).
+  - So even if Railway restart-loops the worker, only ONE TOTP attempt fires
+    per cooldown window — the account can never be hammered to a block.
+
 All secrets come from ENV VARS (safe for the public repo):
-  FYERS_FY_ID         e.g. XA32319   (your login/client ID)
-  FYERS_CLIENT_ID     e.g. 1A4STS8ZGD-100  (app id)
-  FYERS_SECRET        app secret
-  FYERS_PIN           4-digit PIN
-  FYERS_TOTP_SECRET   TOTP key from myaccount.fyers.in/ManageAccount
-  FYERS_REDIRECT_URI  default http://127.0.0.1
-  DATABASE_URL
+  FYERS_FY_ID, FYERS_CLIENT_ID, FYERS_SECRET, FYERS_PIN, FYERS_TOTP_SECRET,
+  FYERS_REDIRECT_URI (default http://127.0.0.1), DATABASE_URL
 
 USAGE:
   Standalone:  python fyers_autologin.py
@@ -29,7 +33,7 @@ USAGE:
 """
 
 import os, time, base64, hashlib, logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 import requests, pyotp, pytz, psycopg2
 
@@ -39,9 +43,13 @@ FY_ID         = os.environ.get('FYERS_FY_ID', 'XA32319')
 CLIENT_ID     = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
 SECRET        = os.environ.get('FYERS_SECRET', '')
 PIN           = os.environ.get('FYERS_PIN', '')
-TOTP_SECRET   = os.environ.get('FYERS_TOTP_SECRET', '')
+TOTP_SECRET   = (os.environ.get('FYERS_TOTP_SECRET', '') or '').strip().replace(' ', '')
 REDIRECT_URI  = os.environ.get('FYERS_REDIRECT_URI', 'http://127.0.0.1')
 DATABASE_URL  = os.environ.get('DATABASE_URL')
+
+# Refuse another auto-login attempt within this many seconds of the last one.
+# Protects the Fyers account from a restart loop burning all 5 TOTP tries.
+ATTEMPT_COOLDOWN = 90
 
 # Vagator (login) + API v3 endpoints
 BASE_VAGATOR = 'https://api-t2.fyers.in/vagator/v2'
@@ -63,6 +71,37 @@ def _app_id_hash():
     return hashlib.sha256(f'{CLIENT_ID}:{SECRET}'.encode()).hexdigest()
 
 
+# ---------------------------------------------------------------- circuit breaker
+
+def _ensure_attempt_col(conn):
+    """Make sure fyers_tokens has a last_attempt column (idempotent)."""
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE fyers_tokens ADD COLUMN IF NOT EXISTS last_attempt timestamp")
+    conn.commit()
+
+def _too_soon(conn):
+    """True if an auto-login was attempted within ATTEMPT_COOLDOWN seconds."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT last_attempt FROM fyers_tokens WHERE id=1")
+        r = cur.fetchone()
+    if not r or not r[0]:
+        return False
+    age = (datetime.now(IST).replace(tzinfo=None) - r[0]).total_seconds()
+    return age < ATTEMPT_COOLDOWN
+
+def _stamp_attempt(conn):
+    now = datetime.now(IST).replace(tzinfo=None)
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM fyers_tokens WHERE id=1")
+        if cur.fetchone():
+            cur.execute("UPDATE fyers_tokens SET last_attempt=%s WHERE id=1", (now,))
+        else:
+            cur.execute("INSERT INTO fyers_tokens (id,last_attempt) VALUES (1,%s)", (now,))
+    conn.commit()
+
+
+# ---------------------------------------------------------------- 2FA chain
+
 def get_auth_code():
     """Run the headless TOTP 2FA chain and return a fresh auth_code."""
     if not (TOTP_SECRET and PIN and SECRET):
@@ -74,9 +113,11 @@ def get_auth_code():
         raise Exception(f"send_login_otp failed: {r}")
     req_key = r['request_key']
 
-    # 2. verify_otp (avoid a TOTP rollover at the 30s boundary)
-    if datetime.now().second % 30 > 27:
-        time.sleep(4)
+    # 2. verify_otp — generate the code at a CLEAN window start so it can't
+    #    roll over mid-request. Wait until we're early in a 30s slot.
+    sec = datetime.now().second % 30
+    if sec > 25 or sec < 1:
+        time.sleep(31 - sec if sec > 25 else 1)
     otp = pyotp.TOTP(TOTP_SECRET).now()
     r = requests.post(URL_VERIFY_OTP, json={'request_key': req_key, 'otp': otp}, timeout=10).json()
     if 'request_key' not in r:
@@ -139,11 +180,21 @@ def save_token(conn, access, refresh):
 
 
 def auto_login(conn=None):
-    """Full headless login -> store token -> return access token."""
+    """Full headless login -> store token -> return access token.
+
+    Circuit-breaker protected: refuses to attempt if another attempt happened
+    within ATTEMPT_COOLDOWN seconds (prevents account block from restart loops).
+    """
     own = conn is None
     if own:
         conn = psycopg2.connect(DATABASE_URL)
     try:
+        _ensure_attempt_col(conn)
+        if _too_soon(conn):
+            raise SystemExit(
+                f"Auto-login SKIPPED — another attempt < {ATTEMPT_COOLDOWN}s ago "
+                "(account-block protection). Wait, then retry.")
+        _stamp_attempt(conn)   # record BEFORE trying, so a crash still counts
         auth_code = get_auth_code()
         access, refresh = exchange_auth_code(auth_code)
         save_token(conn, access, refresh)
