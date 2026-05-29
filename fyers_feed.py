@@ -49,7 +49,9 @@ RETENTION_DAYS     = 7
 REFRESH_VALID_DAYS = 15
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
-SPECIAL_SYMBOLS = {'M&M': 'NSE:M%26M-EQ'}
+# Literal & — the Fyers symbol-master (WS validation) expects NSE:M&M-EQ, and
+# requests URL-encodes it correctly for REST. %26 fails both paths.
+SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 INDEX_LTP_SYMBOLS = {
     'NIFTY':     'NSE:NIFTY50-INDEX',
     'BANKNIFTY': 'NSE:NIFTYBANK-INDEX',
@@ -135,8 +137,8 @@ def get_universe(conn):
 
 def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
 def from_fyers_symbol(fsym):
-    # 'NSE:SBIN-EQ' -> 'SBIN' ; handle M&M
-    if fsym == 'NSE:M%26M-EQ': return 'M&M'
+    # 'NSE:SBIN-EQ' -> 'SBIN' ; handle M&M (NSE:M&M-EQ -> M&M)
+    if fsym == 'NSE:M&M-EQ': return 'M&M'
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
