@@ -3,9 +3,13 @@ Fyers Backfill + Gap Healer - Scorr V8
 ========================================
 Fills intraday_prices history from the Fyers HISTORY REST API.
 
+FUTURES-ONLY (29-May-2026): Fyers streams the ~208 futures universe in 1-min
+bars via WebSocket (well under the ~200 subscription cap). The 1508 equity
+stocks are NOT fetched here anymore — their prices come from Yahoo (EOD) and,
+later, a free BSE 5-min delayed feed.
+
 Two jobs:
-  1. backfill_7day()  - one-time on worker boot: pulls 7 days of
-                        1-min futures + 15-min equity.
+  1. backfill_7day()  - one-time on worker boot: pulls 7 days of 1-min futures.
   2. heal_gap(symbol, timeframe) - on WebSocket reconnect: pulls only
                         the slice from the newest stored candle -> now,
                         so a dropped socket never leaves a hole.
@@ -18,8 +22,8 @@ non-JSON body). We keep parallelism modest (WORKERS) and retry empties with
 backoff so coverage stays high without spamming warnings.
 
 Shared by fyers_feed.py (imported). Can also be run standalone:
-  python fyers_backfill.py            -> full 7-day backfill
-  python fyers_backfill.py --heal     -> heal gaps for all symbols
+  python fyers_backfill.py            -> full 7-day futures backfill
+  python fyers_backfill.py --heal     -> heal gaps for futures
 """
 
 import argparse, os, time, logging
@@ -50,6 +54,8 @@ def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
 
 
 def get_universe(conn):
+    """Returns (futures, equity). Equity is still computed for callers that
+    want it, but Fyers backfill/stream uses FUTURES ONLY now."""
     with conn.cursor() as cur:
         cur.execute("SELECT symbol FROM futures_universe")
         futures = {r[0] for r in cur.fetchall()}
@@ -131,18 +137,19 @@ def _batch(token, symbols, resolution, timeframe, date_from, date_to, conn):
 
 
 def backfill_7day(token, conn=None):
-    """One-time full 7-day backfill. 1m futures + 15m equity."""
+    """One-time full 7-day backfill. FUTURES ONLY (1m)."""
     own = conn is None
     if own: conn = get_db()
     futures, equity = get_universe(conn)
     now = datetime.now(IST)
     date_from = (now - timedelta(days=RETENTION_DAYS)).date()
     date_to   = now.date()
-    log.info(f"Backfill {date_from} -> {date_to}: {len(futures)} futures (1m), {len(equity)} equity (15m)")
+    log.info(f"Backfill {date_from} -> {date_to}: {len(futures)} futures (1m) [equity dropped]")
     _batch(token, futures, '1',  '1m',  date_from, date_to, conn)
-    _batch(token, equity,  '15', '15m', date_from, date_to, conn)
+    # Equity 15m backfill REMOVED — Fyers streams futures only.
+    # Equity prices: Yahoo (EOD) / BSE 5-min delayed (future).
     if own: conn.close()
-    log.info("7-day backfill complete.")
+    log.info("7-day futures backfill complete.")
 
 
 def newest_ts(conn, symbol, timeframe):
@@ -182,8 +189,7 @@ if __name__ == '__main__':
     token = fyers_feed.get_valid_token(conn, args.auth_code)
     if args.heal:
         fut, eq = get_universe(conn)
-        heal_gap(token, conn, fut, '1', '1m')
-        heal_gap(token, conn, eq, '15', '15m')
+        heal_gap(token, conn, fut, '1', '1m')   # futures only
     else:
         backfill_7day(token, conn)
     conn.close()
