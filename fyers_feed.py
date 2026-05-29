@@ -25,6 +25,8 @@ TOKEN MODEL (Fyers v3):
   refresh_token - 15 days, used + PIN to mint access; no renewal endpoint
                   -> one manual auth-code bootstrap every ~15 days.
   Stored in Railway table fyers_tokens (id=1).
+  A stale --auth-code in the start command is harmless: bootstrap fails, we
+  fall back to the stored refresh token.
 
 USAGE:
   Normal/worker:  python fyers_feed.py
@@ -109,8 +111,14 @@ def refresh_access_token(conn, refresh_token):
     return d['access_token']
 
 def get_valid_token(conn, auth_code=None):
+    # If an auth_code is supplied, try to bootstrap. But auth codes are single-use,
+    # so a stale code left in the start command would otherwise crash every restart.
+    # On failure, fall back to the stored refresh token instead of dying.
     if auth_code:
-        return bootstrap_from_authcode(conn, auth_code)
+        try:
+            return bootstrap_from_authcode(conn, auth_code)
+        except Exception as e:
+            log.warning(f"Auth-code bootstrap failed ({e}); falling back to stored refresh token")
     row = load_tokens(conn)
     if row and row[1]:
         refresh_token, refresh_created = row[1], row[3]
