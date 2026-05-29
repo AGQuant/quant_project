@@ -3,19 +3,25 @@ Fyers Live Feed - Scorr V8
 ============================
 Standalone Railway WORKER (not in FastAPI). The live intraday source.
 
+FUTURES-ONLY (29-May-2026): streams the ~208 futures universe in 1-min bars
+via WebSocket (well under Fyers' ~200 subscription cap). The 1508 equity
+stocks are NOT streamed — their prices come from Yahoo (EOD) and, later, a
+free BSE 5-min delayed feed.
+
 Architecture (3 layers, no rate-limit risk):
-  1. BACKFILL  - on boot, one-time 7-day history via REST (fyers_backfill).
-  2. LIVE      - persistent WebSocket. Ticks aggregated locally into
-                 1-min (futures) and 15-min (equity) bars -> intraday_prices.
-                 Every tick's LTP also -> cmp_prices (source='fyers'), making
-                 Fyers the PRIMARY real-time CMP. Near-zero REST calls.
+  1. BACKFILL  - on boot, one-time 7-day 1-min futures history (fyers_backfill).
+  2. LIVE      - persistent WebSocket. Futures ticks aggregated locally into
+                 1-min bars -> intraday_prices. Every tick's LTP also ->
+                 cmp_prices (source='fyers'), making Fyers the PRIMARY
+                 real-time CMP for futures. Near-zero REST calls.
   3. GAP HEAL  - on every WS (re)connect, patch the slice from the newest
                  stored candle -> now, so a drop never leaves a hole.
 
-CMP ownership: Fyers primary (real-time, every ~30s flush). Yahoo (main.py)
-is fallback only - it fills symbols Fyers didn't update (stale > 3 min or not
-subscribed). If the Fyers worker is down, all symbols go stale and Yahoo
-automatically covers the whole universe.
+CMP ownership: Fyers primary for futures (real-time, every ~30s flush).
+Yahoo (main.py) covers everything else and acts as fallback - it fills
+symbols Fyers didn't update (stale > 3 min or not subscribed). If the Fyers
+worker is down, all symbols go stale and Yahoo automatically covers the
+whole universe.
 
 Indices (NIFTY/BANKNIFTY/INDIAVIX) LTP -> cmp_prices.
 Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
@@ -151,6 +157,7 @@ class BarAggregator:
     Accumulates ticks into OHLCV bars per (symbol, timeframe) and flushes
     completed bars to intraday_prices. Also tracks latest LTP per symbol and
     flushes it to cmp_prices (source='fyers') - Fyers is the PRIMARY CMP feed.
+    Futures-only: every streamed symbol is a future -> 1-min bars.
     """
     def __init__(self, conn, futures_set):
         self.conn = conn
@@ -166,7 +173,9 @@ class BarAggregator:
 
     def on_tick(self, sym, ltp, vol, ts=None):
         ts = ts or datetime.now(IST).replace(tzinfo=None)
-        tf, mins = ('1m', 1) if sym in self.futures else ('15m', 15)
+        # Futures-only stream: all symbols are 1-min. (Fallback to 1m if
+        # an unexpected symbol arrives.)
+        tf, mins = ('1m', 1)
         bkt = self._bucket(ts, mins)
         key = (sym, tf)
         with self.lock:
@@ -262,17 +271,18 @@ def run(auth_code=None):
     token = get_valid_token(conn, auth_code)
     futures, equity = get_universe(conn)
     futures_set = set(futures)
-    log.info(f"Universe: {len(futures)} futures (1m), {len(equity)} equity (15m)")
+    log.info(f"Universe: {len(futures)} futures (1m streamed) | {len(equity)} equity (NOT streamed - Yahoo/BSE)")
 
-    # ---- Layer 1: one-time backfill on boot ----
-    log.info("Boot backfill (7-day)...")
+    # ---- Layer 1: one-time backfill on boot (FUTURES ONLY) ----
+    log.info("Boot backfill (7-day, futures only)...")
     try:
         fyers_backfill.backfill_7day(token, conn)
     except Exception as e:
         log.error(f"Boot backfill failed (continuing to live): {e}")
 
     agg = BarAggregator(conn, futures_set)
-    all_fyers_syms = [fyers_eq_symbol(s) for s in (futures + equity)]
+    # FUTURES ONLY on the websocket -> stays under Fyers ~200 subscription cap.
+    futures_fyers_syms = [fyers_eq_symbol(s) for s in futures]
     access = f"{FYERS_CLIENT_ID}:{token}"
 
     def on_message(msg):
@@ -286,14 +296,13 @@ def run(auth_code=None):
             log.warning(f"on_message: {e}")
 
     def on_connect():
-        # ---- Layer 3: gap heal on every (re)connect ----
-        log.info("WS connected - healing gaps then subscribing")
+        # ---- Layer 3: gap heal on every (re)connect (FUTURES ONLY) ----
+        log.info("WS connected - healing futures gaps then subscribing")
         try:
             fyers_backfill.heal_gap(token, conn, futures, '1', '1m')
-            fyers_backfill.heal_gap(token, conn, equity, '15', '15m')
         except Exception as e:
             log.error(f"Gap heal failed: {e}")
-        fyers_ws.subscribe(symbols=all_fyers_syms, data_type="SymbolUpdate")
+        fyers_ws.subscribe(symbols=futures_fyers_syms, data_type="SymbolUpdate")
         fyers_ws.keep_running()
 
     def on_error(msg):  log.error(f"WS error: {msg}")
@@ -320,7 +329,7 @@ def run(auth_code=None):
             time.sleep(30)
 
     threading.Thread(target=housekeeping, daemon=True).start()
-    log.info("Connecting WebSocket (live)...")
+    log.info("Connecting WebSocket (live, futures only)...")
     fyers_ws.connect()
 
 if __name__ == '__main__':
