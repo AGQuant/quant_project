@@ -7,9 +7,15 @@ Architecture (3 layers, no rate-limit risk):
   1. BACKFILL  - on boot, one-time 7-day history via REST (fyers_backfill).
   2. LIVE      - persistent WebSocket. Ticks aggregated locally into
                  1-min (futures) and 15-min (equity) bars -> intraday_prices.
-                 Near-zero REST calls -> never hits the 100k/day limit.
+                 Every tick's LTP also -> cmp_prices (source='fyers'), making
+                 Fyers the PRIMARY real-time CMP. Near-zero REST calls.
   3. GAP HEAL  - on every WS (re)connect, patch the slice from the newest
                  stored candle -> now, so a drop never leaves a hole.
+
+CMP ownership: Fyers primary (real-time, every ~30s flush). Yahoo (main.py)
+is fallback only - it fills symbols Fyers didn't update (stale > 3 min or not
+subscribed). If the Fyers worker is down, all symbols go stale and Yahoo
+automatically covers the whole universe.
 
 Indices (NIFTY/BANKNIFTY/INDIAVIX) LTP -> cmp_prices.
 Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
@@ -139,12 +145,14 @@ def from_fyers_symbol(fsym):
 class BarAggregator:
     """
     Accumulates ticks into OHLCV bars per (symbol, timeframe) and flushes
-    completed bars to intraday_prices. Thread-safe-ish (single writer thread).
+    completed bars to intraday_prices. Also tracks latest LTP per symbol and
+    flushes it to cmp_prices (source='fyers') - Fyers is the PRIMARY CMP feed.
     """
     def __init__(self, conn, futures_set):
         self.conn = conn
         self.futures = futures_set       # set of raw symbols using 1-min
         self.bars = {}                   # (sym, tf) -> dict bar
+        self.last_ltp = {}               # sym -> latest ltp (for cmp_prices, primary)
         self.lock = threading.Lock()
 
     def _bucket(self, ts, minutes):
@@ -158,6 +166,7 @@ class BarAggregator:
         bkt = self._bucket(ts, mins)
         key = (sym, tf)
         with self.lock:
+            self.last_ltp[sym] = ltp     # newest price for CMP
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
@@ -190,6 +199,25 @@ class BarAggregator:
             for key, bar in list(self.bars.items()):
                 self._flush(key, bar)
 
+    def flush_cmp(self):
+        """Write latest LTP per symbol to cmp_prices as PRIMARY (source='fyers')."""
+        with self.lock:
+            rows = [(s, p) for s, p in self.last_ltp.items() if p]
+        if not rows:
+            return
+        try:
+            with self.conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO cmp_prices (symbol, cmp, updated_at, source)
+                    VALUES (%s, %s, NOW(), 'fyers')
+                    ON CONFLICT (symbol) DO UPDATE SET
+                        cmp=EXCLUDED.cmp, updated_at=NOW(), source='fyers'
+                """, rows)
+            self.conn.commit()
+            log.info(f"CMP (fyers) flushed: {len(rows)} symbols")
+        except Exception as e:
+            log.warning(f"flush_cmp: {e}")
+
 
 # ---------------------------------------------------------------- index LTP
 
@@ -207,8 +235,8 @@ def update_index_ltp(conn, token):
                 if fsym == item['n']: rows.append((name, lp))
         if rows:
             with conn.cursor() as cur:
-                cur.executemany("""INSERT INTO cmp_prices (symbol,cmp,updated_at) VALUES (%s,%s,NOW())
-                    ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, updated_at=NOW()""", rows)
+                cur.executemany("""INSERT INTO cmp_prices (symbol,cmp,updated_at,source) VALUES (%s,%s,NOW(),'fyers')
+                    ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, updated_at=NOW(), source='fyers'""", rows)
             conn.commit()
     except Exception as e:
         log.warning(f"Index LTP: {e}")
@@ -275,7 +303,7 @@ def run(auth_code=None):
     )
 
     # ---- Layer 2: live websocket (blocking, auto-reconnect) ----
-    # Periodic flush + index LTP + daily token refresh on a side thread.
+    # Periodic flush + CMP + index LTP + daily token refresh on a side thread.
     def housekeeping():
         last_token_day = None
         while True:
@@ -290,6 +318,7 @@ def run(auth_code=None):
             if is_market_open():
                 update_index_ltp(conn, token)
                 agg.flush_all()   # flush partial bars every cycle (safety)
+                agg.flush_cmp()   # PRIMARY CMP - latest LTP per symbol -> cmp_prices
             time.sleep(30)
 
     threading.Thread(target=housekeeping, daemon=True).start()
