@@ -32,7 +32,14 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.9.2
+# Scorr / Project Quant — main.py v1.9.3
+# v1.9.3: INTRADAY OWNERSHIP -> Fyers WebSocket worker (fyers_feed.py).
+#         - Yahoo 5-min intraday scheduler RETIRED (was _task_fetch_intraday).
+#         - raw_prices EOD sweep MOVED to 21:00 IST scheduler (was 15:45 EOD window;
+#           startup-blocking risk gone, runs once nightly).
+#         - get_intraday endpoint + intraday_prices table UNCHANGED (Fyers writes them).
+#         - backfill_intraday / fetch_intraday_now endpoints kept as MANUAL Yahoo
+#           fallback only (not scheduled). CMP + raw_prices + earnings unchanged.
 # v1.9.2: get_top_gainers endpoint — EOD gainers + GVM context
 # v1.9.1: run_yahoo_daily fire-and-forget background + async raw_prices update
 # v1.9.0: CMP fetcher → chart API + daily earnings scheduler
@@ -40,7 +47,7 @@ from v8_futures import router as v8_futures_router
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # ============================================================
 
-VERSION = "1.9.2"
+VERSION = "1.9.3"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -194,6 +201,8 @@ async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
     return results
 
 async def _fetch_intraday_yahoo(symbol: str, range_str: str = "7d") -> List[dict]:
+    """Yahoo 5-min intraday. RETIRED from scheduler v1.9.3 — Fyers WebSocket owns
+    live intraday. Kept only for the manual /api/admin/backfill_intraday fallback."""
     ticker = _yahoo_ticker(symbol)
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=5m&range={range_str}"
     try:
@@ -265,6 +274,9 @@ async def _task_refresh_cmp():
     _upsert_cmp(cmp_map)
 
 async def _task_fetch_intraday():
+    """RETIRED v1.9.3 — Fyers WebSocket worker owns live intraday.
+    Left callable for the manual /api/admin/fetch_intraday_now fallback only.
+    No longer invoked by the scheduler."""
     global _intraday_fetched_today
     today = _ist_now().date()
     if _intraday_fetched_today == today: return
@@ -301,7 +313,7 @@ async def _task_update_raw_prices():
     global _raw_prices_updated_today
     today = _ist_now().date()
     if _raw_prices_updated_today == today: return
-    log.info("EOD: Launching raw_prices background update")
+    log.info("21:00 IST: Launching raw_prices background update")
     asyncio.create_task(_bg_yahoo_daily())
 
 async def _task_load_earnings_daily():
@@ -321,16 +333,21 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started")
+    log.info("Scheduler started (v1.9.3 — Yahoo intraday retired, raw_prices at 21:00 IST)")
     while True:
         try:
             now = _ist_now()
+            # 9:00–9:05 IST — earnings calendar refresh
             if now.weekday() < 5 and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
-            if _is_market_hours(): await _task_refresh_cmp()
-            if _is_eod_window():
-                await _task_fetch_intraday()
+            # Market hours — CMP refresh for non-futures (Yahoo chart API)
+            if _is_market_hours():
+                await _task_refresh_cmp()
+            # 21:00–21:05 IST — raw_prices EOD sweep (moved off startup + EOD window)
+            if now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
+            # NOTE: _task_fetch_intraday() intentionally NOT called.
+            # Fyers WebSocket worker (fyers_feed.py) owns live intraday_prices.
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -453,9 +470,9 @@ def get_sector(sector: str):
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
 
-# ─────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 # v1.9.2: Top Gainers — EOD day% from raw_prices + GVM context
-# ─────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
 @app.get("/api/market/top_gainers")
 def get_top_gainers(
     price_date: Optional[str] = None,
@@ -468,15 +485,6 @@ def get_top_gainers(
     """
     Top gainers by day% (open→close) from raw_prices,
     joined with GVM scores for fundamental context.
-
-    Params:
-      price_date  — YYYY-MM-DD (default: latest date in raw_prices)
-      n           — number of results (default 20, max 100)
-      min_gvm     — filter by minimum GVM score (e.g. 7.0 for Buy+)
-      min_day_pct — filter by minimum day gain % (e.g. 2.0)
-      universe    — "all" (everything in raw_prices) |
-                    "gvm_only" (only stocks in gvm_scores)
-      min_volume  — filter by minimum volume (e.g. 100000)
     """
     n = min(max(n, 1), 100)
 
@@ -708,6 +716,7 @@ def v6_backtest_results(run_id: Optional[str] = None, signal_type: Optional[str]
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
+    """MANUAL Yahoo 5-min fallback only (not scheduled). Fyers worker owns live intraday."""
     _check_admin(x_admin_token)
     futures = _get_futures_symbols()
     if not futures: return {"status": "warn", "message": "No futures symbols"}
@@ -725,6 +734,7 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/fetch_intraday_now")
 async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
+    """MANUAL Yahoo 5-min fallback only (not scheduled). Fyers worker owns live intraday."""
     _check_admin(x_admin_token)
     global _intraday_fetched_today
     _intraday_fetched_today = None
@@ -1155,9 +1165,9 @@ MCP_TOOLS = [
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Get 5-min OHLC candles for a futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers: 1-min futures, 15-min equity).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "backfill_intraday", "description": "Fetch 7 days of 5-min OHLC for all 210 futures stocks.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures (Fyers worker normally owns this).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background, returns immediately).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v5_engine", "description": "Run V5 filter engine.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
