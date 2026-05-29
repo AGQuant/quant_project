@@ -28,18 +28,18 @@ Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
 
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
   Refresh-token flow is DISABLED (SEBI: continuous refresh sessions banned).
-  -> ONE 2FA auth-code bootstrap per TRADING DAY.
+  -> ONE 2FA login per TRADING DAY, done HEADLESS via TOTP (fyers_autologin).
   access_token  - valid the whole trading day, survives restarts.
   Stored in Railway table fyers_tokens (id=1).
 
-  Boot logic:
+  Boot logic (get_valid_token):
     1. --auth-code given  -> bootstrap (mint + store today's token).
     2. else stored access_token created TODAY -> reuse it (restart-safe).
-    3. else -> exit cleanly with login URL (no crash loop; wait for morning code).
+    3. else -> AUTO-LOGIN via TOTP (headless) -> store + return. Zero-touch.
 
 USAGE:
-  Daily bootstrap: python fyers_feed.py --auth-code <code>
-  Restart (same day, no code needed): python fyers_feed.py
+  Normal (zero-touch): python fyers_feed.py
+  Manual override:     python fyers_feed.py --auth-code <code>
 """
 
 import argparse, hashlib, os, time, logging, threading
@@ -109,11 +109,11 @@ def bootstrap_from_authcode(conn, auth_code):
     return d['access_token']
 
 def get_valid_token(conn, auth_code=None):
-    # SEBI Apr-2026: refresh-token flow is DISABLED. One 2FA auth-code per
+    # SEBI Apr-2026: refresh-token flow is DISABLED. One 2FA login per
     # trading day. Token is valid all day and survives restarts.
     #   1. --auth-code given -> bootstrap (mint + store today's token).
     #   2. else stored access_token created TODAY -> reuse it (restart-safe).
-    #   3. else -> exit cleanly with login URL (no crash loop).
+    #   3. else -> AUTO-LOGIN via TOTP (headless), store + return token.
     if auth_code:
         try:
             return bootstrap_from_authcode(conn, auth_code)
@@ -125,12 +125,20 @@ def get_valid_token(conn, auth_code=None):
         if access_created.date() == datetime.now(IST).replace(tzinfo=None).date():
             log.info("Reusing stored same-day access token (restart-safe)")
             return access_token
-        log.warning("Stored access token is from a previous day - new 2FA needed")
-    raise SystemExit(
-        "\nNO VALID TOKEN FOR TODAY (SEBI: daily 2FA, no refresh).\n"
-        f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
-        "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
-        "  2. python fyers_feed.py --auth-code <code>\n")
+        log.warning("Stored access token is from a previous day - auto-login needed")
+    # No valid same-day token -> headless TOTP auto-login (zero-touch).
+    try:
+        import fyers_autologin
+        log.info("No valid token - running TOTP auto-login...")
+        return fyers_autologin.auto_login(conn)
+    except Exception as e:
+        raise SystemExit(
+            f"\nAUTO-LOGIN FAILED ({e}).\n"
+            "Check env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
+            "Manual fallback:\n"
+            f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
+            "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
+            "  2. python fyers_feed.py --auth-code <code>\n")
 
 
 # ---------------------------------------------------------------- universe
@@ -318,8 +326,8 @@ def run(auth_code=None):
     # ---- Layer 2: live websocket (blocking, auto-reconnect) ----
     # Periodic flush + CMP + index LTP on a side thread.
     # NOTE: No daily token refresh here. SEBI (Apr-2026) disabled the
-    # refresh endpoint -> token is bootstrapped once per trading day via
-    # --auth-code. A new day requires a fresh 2FA bootstrap (manual restart).
+    # refresh endpoint -> token is obtained once per trading day via headless
+    # TOTP auto-login (fyers_autologin) on boot.
     def housekeeping():
         while True:
             if is_market_open():
