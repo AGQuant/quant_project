@@ -20,6 +20,9 @@ Usage (module):
     candles = yahoo_ondemand.fetch_intraday('TATAPOWER', days=15, interval='5m')
     # -> [{'ts','open','high','low','close','volume'}, ...]  oldest -> newest
 
+    # DB-first (futures) else live Yahoo (non-futures), no store:
+    res = yahoo_ondemand.get_intraday_smart('TATAPOWER', days=15, interval='5m')
+
 Usage (CLI):
     python yahoo_ondemand.py TATAPOWER --days 15 --interval 5m
 """
@@ -120,6 +123,61 @@ def fetch_intraday(symbol, days=15, interval='5m', exchange='NS'):
     out = [row for row in out
            if datetime.strptime(row['ts'], '%Y-%m-%d %H:%M:%S') >= cutoff]
     return out
+
+
+def _db_intraday(symbol, days):
+    """Stored Fyers intraday (futures, 1-min) for a symbol, or [] if none stored."""
+    try:
+        import os, psycopg2
+        dburl = os.environ.get('DATABASE_URL')
+        if not dburl:
+            return []
+        db_days = min(max(int(days), 1), 7)
+        cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=db_days)
+        with psycopg2.connect(dburl) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT symbol, ts, open, high, low, close, volume "
+                "FROM intraday_prices WHERE symbol=%s AND ts >= %s ORDER BY ts ASC",
+                (symbol.upper(), cutoff))
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
+def get_intraday_smart(symbol, days=15, interval='5m', exchange='NS'):
+    """Intraday for ANY stock: DB-first, then live Yahoo (no store).
+
+    - Futures (rows in intraday_prices): return stored Fyers 1-min candles.
+    - Non-futures (nothing stored): fetch `days` of `interval` candles LIVE
+      from the Yahoo chart API for that single symbol. Nothing is written to DB.
+
+    Returns dict: {symbol, source, interval, count, candles, note?}.
+    """
+    sym = symbol.upper()
+    rows = _db_intraday(sym, days)
+    if rows:
+        for r in rows:
+            ts = r.get('ts')
+            r['ts'] = ts.strftime('%Y-%m-%d %H:%M:%S') if hasattr(ts, 'strftime') else str(ts)
+            r['source'] = 'fyers'
+            for k in ('open', 'high', 'low', 'close'):
+                if r.get(k) is not None:
+                    r[k] = round(float(r[k]), 2)
+            r['volume'] = int(r['volume']) if r.get('volume') is not None else 0
+        return {'symbol': sym, 'source': 'fyers_db', 'interval': '1m',
+                'count': len(rows), 'candles': rows}
+    try:
+        candles = fetch_intraday(sym, days=days, interval=interval, exchange=exchange)
+    except Exception as e:
+        return {'symbol': sym, 'source': 'yahoo_live', 'interval': interval,
+                'count': 0, 'candles': [], 'error': str(e)}
+    for c in candles:
+        c['symbol'] = sym
+        c['source'] = 'yahoo'
+    return {'symbol': sym, 'source': 'yahoo_live', 'interval': interval,
+            'count': len(candles), 'candles': candles,
+            'note': 'non-futures: fetched live from Yahoo, not stored'}
 
 
 if __name__ == '__main__':
