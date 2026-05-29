@@ -13,6 +13,10 @@ Two jobs:
 History API limits (verified): up to 100 days/request for intraday
 resolutions, so a 7-day pull is a single call per symbol.
 
+Rate limiting: Fyers throttles bursts of history calls (returns an empty /
+non-JSON body). We keep parallelism modest (WORKERS) and retry empties with
+backoff so coverage stays high without spamming warnings.
+
 Shared by fyers_feed.py (imported). Can also be run standalone:
   python fyers_backfill.py            -> full 7-day backfill
   python fyers_backfill.py --heal     -> heal gaps for all symbols
@@ -29,7 +33,8 @@ HISTORY_URL     = 'https://api-t1.fyers.in/data/history'
 IST             = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS = 7
-WORKERS        = 10
+WORKERS        = 5          # modest parallelism - Fyers throttles bursts
+HISTORY_RETRIES = 2         # retries on empty/throttled responses
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 # Literal & — requests URL-encodes it for REST; the symbol-master expects NSE:M&M-EQ.
@@ -67,45 +72,61 @@ def upsert_candles(conn, rows):
     conn.commit()
 
 
-def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
-    """One history call. date_from/date_to are date objects."""
-    r = requests.get(HISTORY_URL, params={
+def fetch_history(token, sym, resolution, timeframe, date_from, date_to, retries=HISTORY_RETRIES):
+    """One history call with light retry/backoff.
+
+    Returns [] gracefully on an empty/throttled/non-JSON response (no exception),
+    so the backfill never spams warnings. Retries recover symbols that Fyers
+    rate-limited on the first burst.
+    """
+    params = {
         'symbol':      fyers_eq_symbol(sym),
         'resolution':  resolution,
         'date_format': '1',
         'range_from':  date_from.strftime('%Y-%m-%d'),
         'range_to':    date_to.strftime('%Y-%m-%d'),
         'cont_flag':   '1',
-    }, headers=hdr(token), timeout=8)
-    d = r.json()
-    if 'candles' not in d:
-        return []
-    rows = []
-    for c in d['candles']:
-        ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
-        rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
-    return rows
+    }
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(HISTORY_URL, params=params, headers=hdr(token), timeout=10)
+            d = r.json()
+        except Exception:
+            d = {}
+        candles = d.get('candles') if isinstance(d, dict) else None
+        if candles:
+            rows = []
+            for c in candles:
+                ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
+                rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
+            return rows
+        if attempt < retries:
+            time.sleep(0.5 + 0.4 * attempt)   # backoff on empty/throttle
+    return []
 
 
 def _batch(token, symbols, resolution, timeframe, date_from, date_to, conn):
-    total, errors, done = 0, 0, 0
+    total, empty, done = 0, 0, 0
     buf = []
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         fmap = {ex.submit(fetch_history, token, s, resolution, timeframe, date_from, date_to): s
                 for s in symbols}
-        for fut in as_completed(fmap, timeout=600):
+        for fut in as_completed(fmap, timeout=1200):
             sym = fmap[fut]
             try:
-                rows = fut.result(timeout=10)
-                buf.extend(rows); total += len(rows); done += 1
+                rows = fut.result(timeout=30)
+                if rows:
+                    buf.extend(rows); total += len(rows)
+                else:
+                    empty += 1
+                done += 1
                 if done % 50 == 0:
-                    log.info(f"  {done}/{len(symbols)}")
+                    log.info(f"  {done}/{len(symbols)} ({total} candles, {empty} empty)")
                     upsert_candles(conn, buf); buf = []
-            except Exception as e:
-                errors += 1
-                log.warning(f"  {sym}: {e}")
+            except Exception:
+                empty += 1; done += 1
     upsert_candles(conn, buf)
-    log.info(f"  {timeframe} backfill done: {total} candles, {errors} errors")
+    log.info(f"  {timeframe} backfill done: {total} candles, {empty} empty/skipped of {len(symbols)}")
     return total
 
 
@@ -142,12 +163,9 @@ def heal_gap(token, conn, symbols, resolution, timeframe):
     for sym in symbols:
         last = newest_ts(conn, sym, timeframe)
         date_from = last.date() if last else (now - timedelta(days=RETENTION_DAYS)).date()
-        try:
-            rows = fetch_history(token, sym, resolution, timeframe, date_from, now.date())
-            if rows:
-                upsert_candles(conn, rows); healed += len(rows)
-        except Exception as e:
-            log.warning(f"  heal {sym}: {e}")
+        rows = fetch_history(token, sym, resolution, timeframe, date_from, now.date())
+        if rows:
+            upsert_candles(conn, rows); healed += len(rows)
         time.sleep(0.05)
     log.info(f"Gap heal {timeframe}: {healed} candles patched across {len(symbols)} symbols")
     return healed
