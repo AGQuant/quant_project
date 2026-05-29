@@ -140,6 +140,50 @@ async def _scheduler_eod():
         await asyncio.sleep(300)
 
 
+# ============================================================
+# ON-DEMAND INTRADAY for NON-FUTURES (Yahoo, no DB writes)
+# ------------------------------------------------------------
+# Futures intraday lives in `intraday_prices` (Fyers, 1-min, 7d).
+# For a 5-min / intraday read on a NON-FUTURES stock we pull just
+# that one symbol LIVE from Yahoo (5-min available up to ~60d) and
+# DO NOT store it. The existing `get_intraday` MCP tool is upgraded
+# to be DB-first (futures) then live-Yahoo (non-futures, ephemeral).
+# Implemented as a monkeypatch so the large main.py stays untouched.
+# ============================================================
+import yahoo_ondemand
+
+_orig_call_tool = main._call_tool
+
+async def _call_tool_with_ondemand(name, args):
+    if name == "get_intraday":
+        sym = (args.get("symbol") or "").upper()
+        try:
+            days = int(args.get("days") or 15)
+        except (TypeError, ValueError):
+            days = 15
+        interval = (args.get("interval") or "5m").lower()
+        # Off-load the blocking Yahoo/DB call so the event loop stays free.
+        return await asyncio.to_thread(
+            yahoo_ondemand.get_intraday_smart, sym, days, interval
+        )
+    return await _orig_call_tool(name, args)
+
+main._call_tool = _call_tool_with_ondemand
+
+# Upgrade the get_intraday tool schema/description so the smart behaviour
+# (DB-first + live Yahoo) and the new `interval` / larger `days` are discoverable.
+for _t in main.MCP_TOOLS:
+    if _t.get("name") == "get_intraday":
+        _t["description"] = (
+            "Intraday OHLC for ANY stock. Futures -> stored Fyers 1-min (DB, last 7d). "
+            "Non-futures -> fetched LIVE from Yahoo and NOT stored (5-min default, up to ~60d). "
+            "Params: symbol, days (default 15), interval (1m/5m/15m/30m/60m/1d)."
+        )
+        _t["inputSchema"]["properties"]["days"] = {"type": "integer"}
+        _t["inputSchema"]["properties"]["interval"] = {"type": "string"}
+        break
+
+
 # === STARTUP ===
 @main.app.on_event("startup")
 async def startup_v169():
@@ -154,7 +198,8 @@ async def startup_v169():
         _BG_TASKS.add(t)
         t.add_done_callback(_BG_TASKS.discard)
     main.log.info(
-        f"v{VERSION_HOTFIX}: intraday=DISABLED | equity=DISABLED | EOD=ACTIVE | CMP=ACTIVE | bg_tasks={len(_BG_TASKS)}"
+        f"v{VERSION_HOTFIX}: intraday=DISABLED | equity=DISABLED | EOD=ACTIVE | CMP=ACTIVE | "
+        f"get_intraday=DB-first+Yahoo-ondemand | bg_tasks={len(_BG_TASKS)}"
     )
 
 
@@ -181,6 +226,14 @@ async def v169_trigger_eod():
     _BG_TASKS.add(t)
     t.add_done_callback(_BG_TASKS.discard)
     return {"status": "ok", "message": "EOD raw_prices task queued"}
+
+
+# On-demand intraday for a single non-future, no DB writes (HTTP convenience).
+@main.app.get("/api/intraday_ondemand/{symbol}")
+async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m"):
+    return await asyncio.to_thread(
+        yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval
+    )
 
 
 app = main.app
