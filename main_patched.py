@@ -1,6 +1,8 @@
 # main_patched.py - v1.6.11
 # v1.6.11: Disable Yahoo 5-min intraday feed. Fyers local scripts take over.
 #          EOD raw_prices + CMP refresh remain active on Railway.
+# v1.6.11b: re-assert get_intraday DB-first + Yahoo on-demand (force redeploy
+#           after a concurrent scheduler commit left the live process stale).
 # v1.6.10: GC fix (strong task refs) + futures cadence 1min -> 5min
 # v1.6.9:  Reduce Yahoo load. Futures sem=5. Equity DISABLED.
 #
