@@ -30,7 +30,9 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.0.0
+# Scorr / Project Quant — main.py v2.0.1
+# v2.0.1: Auto-run V8 engine daily 15:45 IST (post-close) so v8_metrics
+#         never goes stale. Strong ref kept in scheduler loop.
 # v2.0.0: FULL V5/V6 REMOVAL. V8-native everywhere.
 #         - v5_engine -> v8_engine (run_v8_engine, V8_SCHEMA_SQL)
 #         - tables: v5_metrics->v8_metrics, v5_signals->v8_universe
@@ -40,7 +42,7 @@ from v8_futures import router as v8_futures_router
 # v1.9.6: Yahoo CMP fallback covers entire universe (kept).
 # ============================================================
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -104,7 +106,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.0.0 — V8-native)")
+        log.info("Tables ready (v2.0.1 — V8-native)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -249,6 +251,8 @@ _intraday_fetched_today: Optional[date] = None
 _raw_prices_updated_today: Optional[date] = None
 _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
+_v8_engine_ran_today: Optional[date] = None
+_v8_engine_running: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -282,6 +286,33 @@ async def _task_update_raw_prices():
     log.info("21:00 IST: Launching raw_prices background update")
     asyncio.create_task(_bg_yahoo_daily())
 
+def _bg_run_v8_engine():
+    """Blocking engine run — called inside a thread from the scheduler."""
+    global _v8_engine_ran_today, _v8_engine_running
+    if _v8_engine_running:
+        log.info("v8_engine already running, skip")
+        return
+    _v8_engine_running = True
+    try:
+        with get_conn() as conn:
+            results = run_v8_engine(conn)
+        _v8_engine_ran_today = _ist_now().date()
+        log.info(f"V8 engine auto-run done: {results.get('symbols_processed')} symbols")
+    except Exception as e:
+        log.error(f"V8 engine auto-run failed: {e}")
+    finally:
+        _v8_engine_running = False
+
+async def _task_run_v8_engine():
+    """Run the V8 engine once per trading day at ~15:45 IST (post-close)."""
+    global _v8_engine_ran_today
+    today = _ist_now().date()
+    if _v8_engine_ran_today == today:
+        return
+    log.info("15:45 IST: Launching V8 engine auto-run")
+    # run_v8_engine is sync/blocking — offload to a thread so the loop isn't blocked
+    asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
+
 async def _task_load_earnings_daily():
     global _earnings_loaded_today
     today = _ist_now().date()
@@ -298,7 +329,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.0.0 — V8-native, Fyers sole CMP+intraday, Yahoo CMP manual fallback, raw_prices 21:00 IST)")
+    log.info("Scheduler started (v2.0.1 — V8-native, engine auto-run 15:45 IST, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
@@ -306,6 +337,9 @@ async def _scheduler():
                 await _task_load_earnings_daily()
             if _is_market_hours():
                 await _task_refresh_cmp()
+            # V8 engine auto-run: weekdays, 15:45–15:55 IST (after market close)
+            if now.weekday() < 5 and now.hour == 15 and 45 <= now.minute < 55:
+                await _task_run_v8_engine()
             if now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
         except Exception as e:
