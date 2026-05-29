@@ -32,14 +32,17 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.9.5
-# v1.9.5: CMP FALLBACK IS NOW MANUAL (not automatic).
-#         Fyers WebSocket worker is the SOLE CMP source in normal operation.
-#         Yahoo CMP only runs when the app_config flag 'yahoo_cmp_fallback' is
-#         turned ON (default OFF). Toggle via POST /api/admin/cmp_fallback?state=on|off
+# Scorr / Project Quant — main.py v1.9.6
+# v1.9.6: Yahoo CMP fallback now covers the ENTIRE tradeable universe
+#         (futures + non-futures). For a futures-universe stock, Yahoo returns the
+#         EQUITY / UNDERLYING spot (SBIN.NS) — the SAME price basis Fyers tracks
+#         (Fyers subscribes NSE:<SYM>-EQ at 1-min, never the futures contract).
+#         No futures-contract price is fetched anywhere in the system.
+# v1.9.5: CMP FALLBACK IS MANUAL. Fyers WebSocket worker is the SOLE CMP source
+#         in normal operation. Yahoo CMP only runs when app_config
+#         'yahoo_cmp_fallback' = on (default OFF). Toggle via
+#         POST /api/admin/cmp_fallback?state=on|off, the set_cmp_fallback MCP tool,
 #         or SQL: UPDATE app_config SET value='on' WHERE key='yahoo_cmp_fallback'.
-#         When ON, Yahoo fetches CMP for ALL non-futures each market-hours cycle.
-#         No automatic stale-based gap-fill anymore (removed CMP_STALE_MINUTES logic).
 # v1.9.4: (superseded) Yahoo CMP auto gap-filler by freshness.
 # v1.9.3: INTRADAY OWNERSHIP -> Fyers WebSocket worker (fyers_feed.py).
 #         - Yahoo 5-min intraday scheduler RETIRED. raw_prices EOD sweep at 21:00 IST.
@@ -52,7 +55,7 @@ from v8_futures import router as v8_futures_router
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # ============================================================
 
-VERSION = "1.9.5"
+VERSION = "1.9.6"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -181,6 +184,12 @@ def _get_all_gvm_symbols() -> List[str]:
         log.error(f"_get_all_gvm_symbols failed: {e}")
         return []
 
+def _get_full_cmp_universe() -> List[str]:
+    """Every symbol CMP should cover = GVM universe UNION active futures.
+    Used by the Yahoo fallback so a Fyers outage refreshes futures-universe
+    stocks too (Yahoo .NS = the equity/underlying spot, same basis Fyers tracks)."""
+    return sorted(set(_get_all_gvm_symbols()) | set(_get_futures_symbols()))
+
 def _get_config(key: str, default: Optional[str] = None) -> Optional[str]:
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -199,7 +208,9 @@ def _yahoo_ticker(symbol: str) -> str:
     return indices.get(symbol, f"{symbol}.NS")
 
 async def _fetch_cmp_yahoo(symbols: List[str]) -> Dict[str, float]:
-    """Fetch CMP via Yahoo chart API — sequential one-at-a-time (yf.download batch broken)."""
+    """Fetch CMP via Yahoo chart API — sequential one-at-a-time (yf.download batch broken).
+    Always the equity/underlying spot ({SYM}.NS); for futures-universe stocks this is
+    the cash underlying, the same basis Fyers tracks. No futures contract is queried."""
     results = {}
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
         for symbol in symbols:
@@ -290,18 +301,18 @@ _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
 
 async def _task_refresh_cmp():
-    """Yahoo CMP FALLBACK (v1.9.5) — MANUAL, OFF by default.
+    """Yahoo CMP FALLBACK (v1.9.6) — MANUAL, OFF by default.
     Fyers WebSocket worker is the sole CMP source in normal operation. This only
     runs when app_config 'yahoo_cmp_fallback' = on (flip it when Fyers is down).
-    When ON, fetches CMP for ALL non-futures from Yahoo each market-hours cycle."""
+    When ON, fetches CMP for the ENTIRE universe (futures + non-futures) each
+    market-hours cycle. Futures-universe stocks get the Yahoo equity/underlying
+    spot (.NS) — same basis Fyers tracks via -EQ, never the futures contract."""
     if not _yahoo_cmp_fallback_on():
         return
-    futures_set = set(_get_futures_symbols())
-    all_symbols = _get_all_gvm_symbols()
-    non_futures = [s for s in all_symbols if s not in futures_set]
-    if not non_futures: return
-    log.info(f"Yahoo CMP fallback ON — fetching {len(non_futures)} non-futures")
-    cmp_map = await _fetch_cmp_yahoo(non_futures)
+    symbols = _get_full_cmp_universe()
+    if not symbols: return
+    log.info(f"Yahoo CMP fallback ON — fetching ALL {len(symbols)} symbols (futures + non-futures)")
+    cmp_map = await _fetch_cmp_yahoo(symbols)
     _upsert_cmp(cmp_map)
 
 async def _task_fetch_intraday():
@@ -364,7 +375,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v1.9.5 — Fyers sole CMP+intraday, Yahoo CMP manual fallback, raw_prices 21:00 IST)")
+    log.info("Scheduler started (v1.9.6 — Fyers sole CMP+intraday, Yahoo CMP manual fallback covers ALL symbols, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
@@ -408,9 +419,9 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/cmp_fallback")
 def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
-    """Toggle the Yahoo CMP fallback. state=on activates Yahoo CMP (use when Fyers
-    is down); state=off (default) leaves Fyers as the sole CMP source.
-    Also flippable via SQL: UPDATE app_config SET value='on' WHERE key='yahoo_cmp_fallback'."""
+    """Toggle the Yahoo CMP fallback. state=on activates Yahoo CMP for the ENTIRE
+    universe (use when Fyers is down); state=off (default) leaves Fyers as the sole
+    CMP source. Also flippable via SQL: UPDATE app_config SET value='on' WHERE key='yahoo_cmp_fallback'."""
     _check_admin(x_admin_token)
     val = "on" if str(state).lower() in ("on", "true", "1", "yes") else "off"
     with get_conn() as conn, conn.cursor() as cur:
@@ -801,16 +812,14 @@ async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/refresh_cmp_now")
 async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
-    """MANUAL one-shot Yahoo CMP fetch for ALL non-futures (ignores the fallback flag).
-    Use for an immediate full Yahoo refresh without leaving the fallback on."""
+    """MANUAL one-shot Yahoo CMP fetch for the ENTIRE universe (futures + non-futures),
+    ignoring the fallback flag. Futures-universe stocks get the equity/underlying spot."""
     _check_admin(x_admin_token)
-    futures_set = set(_get_futures_symbols())
-    all_symbols = _get_all_gvm_symbols()
-    non_futures = [s for s in all_symbols if s not in futures_set]
-    if not non_futures: return {"status": "warn", "message": "No non-futures symbols"}
-    cmp_map = await _fetch_cmp_yahoo(non_futures)
+    symbols = _get_full_cmp_universe()
+    if not symbols: return {"status": "warn", "message": "No symbols"}
+    cmp_map = await _fetch_cmp_yahoo(symbols)
     _upsert_cmp(cmp_map)
-    return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(non_futures)}
+    return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(symbols)}
 
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
@@ -1215,11 +1224,11 @@ MCP_TOOLS = [
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers: 1-min futures, 15-min equity).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers: 1-min futures-universe equity underlying, 15-min other equity).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures (Fyers worker normally owns this).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background, returns immediately).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off. Turn ON when the Fyers worker is down; OFF (default) keeps Fyers as the sole CMP source.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string", "description": "on or off"}}, "required": ["state"]}},
+    {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off (covers ALL symbols when ON). Turn ON when the Fyers worker is down; OFF (default) keeps Fyers as the sole CMP source.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string", "description": "on or off"}}, "required": ["state"]}},
     {"name": "run_v5_engine", "description": "Run V5 filter engine.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v5_qualified", "description": "Get stocks qualified by V5 AND-gate today.", "inputSchema": {"type": "object", "properties": {"signal_type": {"type": "string"}}, "required": []}},
     {"name": "get_v5_metrics", "description": "Get computed V5 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
