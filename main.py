@@ -32,14 +32,18 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 
 # ============================================================
-# Scorr / Project Quant — main.py v1.9.3
+# Scorr / Project Quant — main.py v1.9.4
+# v1.9.4: CMP OWNERSHIP -> Fyers WebSocket worker is PRIMARY (real-time).
+#         Yahoo _task_refresh_cmp is now a GAP-FILLER: it only fetches
+#         non-futures symbols whose cmp_prices row is stale (updated_at older
+#         than CMP_STALE_MINUTES) or missing. Fyers-fresh symbols are skipped.
+#         If the Fyers worker is down, all rows go stale and Yahoo automatically
+#         covers the whole universe -> seamless fallback, no extra code path.
 # v1.9.3: INTRADAY OWNERSHIP -> Fyers WebSocket worker (fyers_feed.py).
 #         - Yahoo 5-min intraday scheduler RETIRED (was _task_fetch_intraday).
-#         - raw_prices EOD sweep MOVED to 21:00 IST scheduler (was 15:45 EOD window;
-#           startup-blocking risk gone, runs once nightly).
-#         - get_intraday endpoint + intraday_prices table UNCHANGED (Fyers writes them).
-#         - backfill_intraday / fetch_intraday_now endpoints kept as MANUAL Yahoo
-#           fallback only (not scheduled). CMP + raw_prices + earnings unchanged.
+#         - raw_prices EOD sweep MOVED to 21:00 IST scheduler.
+#         - get_intraday endpoint + intraday_prices table UNCHANGED.
+#         - backfill_intraday / fetch_intraday_now kept as MANUAL Yahoo fallback.
 # v1.9.2: get_top_gainers endpoint — EOD gainers + GVM context
 # v1.9.1: run_yahoo_daily fire-and-forget background + async raw_prices update
 # v1.9.0: CMP fetcher → chart API + daily earnings scheduler
@@ -47,7 +51,11 @@ from v8_futures import router as v8_futures_router
 # v1.7.0: V8 endpoints wired — Market Mood + 4 baskets + ADR
 # ============================================================
 
-VERSION = "1.9.3"
+VERSION = "1.9.4"
+
+# Yahoo CMP gap-filler: a cmp_prices row fresher than this is considered
+# "covered by Fyers" and skipped by the Yahoo fallback fetch.
+CMP_STALE_MINUTES = 3
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -171,6 +179,22 @@ def _get_all_gvm_symbols() -> List[str]:
         log.error(f"_get_all_gvm_symbols failed: {e}")
         return []
 
+def _get_fyers_fresh_symbols(stale_minutes: int = CMP_STALE_MINUTES) -> set:
+    """Symbols whose cmp_prices row was filled by Fyers within stale_minutes.
+    These are 'covered' and the Yahoo gap-filler skips them. If the Fyers worker
+    is down, no rows stay fresh -> this set is empty -> Yahoo fetches everything."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT symbol FROM cmp_prices "
+                "WHERE source = 'fyers' AND updated_at >= NOW() - (%s || ' minutes')::interval",
+                (stale_minutes,)
+            )
+            return {r[0] for r in cur.fetchall()}
+    except Exception as e:
+        log.error(f"_get_fyers_fresh_symbols failed: {e}")
+        return set()
+
 def _yahoo_ticker(symbol: str) -> str:
     indices = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
     return indices.get(symbol, f"{symbol}.NS")
@@ -231,13 +255,15 @@ async def _fetch_intraday_yahoo(symbol: str, range_str: str = "7d") -> List[dict
         return []
 
 def _upsert_cmp(cmp_map):
+    """Yahoo gap-filler upsert. Tags source='yahoo' so the next cycle can tell
+    Yahoo-filled rows from Fyers-filled ones."""
     if not cmp_map: return
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for sym, price in cmp_map.items():
-                cur.execute("INSERT INTO cmp_prices (symbol, cmp, updated_at) VALUES (%s, %s, NOW()) ON CONFLICT (symbol) DO UPDATE SET cmp = EXCLUDED.cmp, updated_at = NOW()", (sym, price))
+                cur.execute("INSERT INTO cmp_prices (symbol, cmp, updated_at, source) VALUES (%s, %s, NOW(), 'yahoo') ON CONFLICT (symbol) DO UPDATE SET cmp = EXCLUDED.cmp, updated_at = NOW(), source = 'yahoo'", (sym, price))
             conn.commit()
-        log.info(f"CMP upserted: {len(cmp_map)} symbols")
+        log.info(f"CMP upserted (yahoo gap-fill): {len(cmp_map)} symbols")
     except Exception as e:
         log.error(f"_upsert_cmp failed: {e}")
 
@@ -266,11 +292,22 @@ _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
 
 async def _task_refresh_cmp():
+    """Yahoo CMP GAP-FILLER (v1.9.4). Fyers WebSocket worker is primary and writes
+    real-time CMP (source='fyers'). Here we Yahoo-fetch ONLY non-futures symbols that
+    Fyers did NOT cover recently — i.e. stale (> CMP_STALE_MINUTES), missing, or last
+    written by Yahoo. If the Fyers worker is down, nothing stays fresh, so this fetches
+    the whole non-futures universe = automatic full fallback."""
     futures_set = set(_get_futures_symbols())
     all_symbols = _get_all_gvm_symbols()
     non_futures = [s for s in all_symbols if s not in futures_set]
     if not non_futures: return
-    cmp_map = await _fetch_cmp_yahoo(non_futures)
+    fyers_fresh = _get_fyers_fresh_symbols()
+    to_fetch = [s for s in non_futures if s not in fyers_fresh]
+    if not to_fetch:
+        log.info(f"CMP gap-fill: all {len(non_futures)} non-futures fresh from Fyers, Yahoo skipped")
+        return
+    log.info(f"CMP gap-fill: {len(to_fetch)}/{len(non_futures)} non-futures need Yahoo (Fyers covered {len(non_futures) - len(to_fetch)})")
+    cmp_map = await _fetch_cmp_yahoo(to_fetch)
     _upsert_cmp(cmp_map)
 
 async def _task_fetch_intraday():
@@ -333,14 +370,14 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v1.9.3 — Yahoo intraday retired, raw_prices at 21:00 IST)")
+    log.info("Scheduler started (v1.9.4 — Fyers primary CMP+intraday, Yahoo gap-filler, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
             # 9:00–9:05 IST — earnings calendar refresh
             if now.weekday() < 5 and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
-            # Market hours — CMP refresh for non-futures (Yahoo chart API)
+            # Market hours — CMP gap-fill for non-futures Fyers didn't cover (Yahoo)
             if _is_market_hours():
                 await _task_refresh_cmp()
             # 21:00–21:05 IST — raw_prices EOD sweep (moved off startup + EOD window)
@@ -560,13 +597,13 @@ def get_intraday(symbol: str, days: int = 1):
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
-    r = api_query("SELECT symbol, cmp, updated_at FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
+    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} CMP not found")
     return r
 
 @app.get("/api/cmp")
 def get_all_cmp():
-    return api_query("SELECT symbol, cmp, updated_at FROM cmp_prices ORDER BY symbol")
+    return api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices ORDER BY symbol")
 
 @app.post("/api/v5/run")
 async def v5_run(x_admin_token: Optional[str] = Header(None)):
@@ -753,6 +790,8 @@ async def fetch_intraday_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/refresh_cmp_now")
 async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
+    """MANUAL full Yahoo CMP fetch for ALL non-futures (ignores Fyers freshness).
+    Use to force a complete Yahoo refresh; the scheduler normally gap-fills only."""
     _check_admin(x_admin_token)
     futures_set = set(_get_futures_symbols())
     all_symbols = _get_all_gvm_symbols()
@@ -1166,7 +1205,7 @@ MCP_TOOLS = [
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers: 1-min futures, 15-min equity).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
-    {"name": "get_cmp", "description": "Get latest CMP for a non-futures stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures (Fyers worker normally owns this).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background, returns immediately).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v5_engine", "description": "Run V5 filter engine.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
