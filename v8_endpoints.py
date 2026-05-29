@@ -13,6 +13,8 @@ Endpoints:
 
 5 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought
 Blackout: stocks with ex_date = today or tomorrow are excluded from all signal endpoints.
+
+Data source: v8_metrics (computed by v8_engine), v8_universe (futures universe).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -27,10 +29,10 @@ def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
-# ── Filter configs ────────────────────────────────────────────────────────────
+# ── Filter configs ───────────────────────────────────────────────────────────
 # Format: metric -> [min, max]  (None = no bound)
-# Sell_Overbought uses v5_metrics columns PLUS computed ma9_vs_ma21 & vol_ratio
-# which are NOT in v5_metrics — handled separately in the /sell_overbought endpoint.
+# Sell_Overbought uses v8_metrics columns PLUS computed ma9_vs_ma21 & vol_ratio
+# which are NOT in v8_metrics — handled separately in the /sell_overbought endpoint.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -124,7 +126,6 @@ def _pivot_s1_s2(prev_high, prev_low, prev_close):
 
 
 def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
-    """Convert basket key to human label."""
     if not basket:
         return ''
     mapping = {
@@ -137,7 +138,7 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
     return mapping.get(basket.lower(), basket)
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints ───────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -148,7 +149,7 @@ def market_mood():
                 WITH today_change AS (
                     SELECT i.symbol,
                            (lc.close - fc.open) / NULLIF(fc.open, 0) * 100 AS day_pct
-                    FROM (SELECT DISTINCT symbol FROM v5_signals) i
+                    FROM (SELECT DISTINCT symbol FROM v8_universe) i
                     JOIN LATERAL (
                         SELECT close FROM intraday_prices
                         WHERE symbol = i.symbol AND ts::date = CURRENT_DATE
@@ -175,8 +176,8 @@ def market_mood():
                         COUNT(*) FILTER (WHERE prev_day_change > 0) AS adv,
                         COUNT(*) FILTER (WHERE prev_day_change < 0) AS dec,
                         COUNT(*) FILTER (WHERE prev_day_change = 0) AS unc
-                    FROM v5_metrics
-                    WHERE score_date = (SELECT MAX(score_date) FROM v5_metrics)
+                    FROM v8_metrics
+                    WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
                 """)
                 r = cur.fetchone()
                 advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
@@ -264,7 +265,7 @@ def qualified(basket: str, limit: int = 50):
 
     config = FILTER_CONFIG[basket]
     where_clauses = [
-        "score_date = (SELECT MAX(score_date) FROM v5_metrics)",
+        "score_date = (SELECT MAX(score_date) FROM v8_metrics)",
         _BLACKOUT_SQL,   # exclude earnings-day stocks
     ]
     params = []
@@ -286,7 +287,7 @@ def qualified(basket: str, limit: int = 50):
             week_return, month_return, year_return,
             sector_day, sector_week, month_index,
             range_1d, range_3d, week_index_52
-        FROM v5_metrics
+        FROM v8_metrics
         WHERE {where_sql}
         ORDER BY gvm_score DESC NULLS LAST
         LIMIT %s
@@ -349,9 +350,9 @@ def sell_overbought(limit: int = 50):
                            vm.dma_200, vm.week_index_52, vm.rsi_month, vm.daily_rsi,
                            vm.range_1d, vm.gvm_score, vm.sector_week
                     FROM latest l
-                    JOIN v5_metrics vm
+                    JOIN v8_metrics vm
                       ON vm.symbol = l.symbol
-                     AND vm.score_date = (SELECT MAX(score_date) FROM v5_metrics)
+                     AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
                     WHERE vm.dma_200      >= 10
                       AND vm.week_index_52 >= 80
                       AND l.ma9_vs_ma21   >= 3
@@ -405,8 +406,8 @@ def adr_only():
                     COUNT(*) FILTER (WHERE prev_day_change > 0) AS adv,
                     COUNT(*) FILTER (WHERE prev_day_change < 0) AS dec,
                     COUNT(*) FILTER (WHERE prev_day_change = 0) AS unc
-                FROM v5_metrics
-                WHERE score_date = (SELECT MAX(score_date) FROM v5_metrics)
+                FROM v8_metrics
+                WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
             """)
             r = cur.fetchone()
             adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
@@ -416,36 +417,21 @@ def adr_only():
         raise HTTPException(500, f"adr failed: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 #  PERSONAL JOURNAL — V8 native open + closed trades
-#  Replaces the legacy v5_positions / v5_trades dependency in V8 dashboard.
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/positions")
 def v8_positions(limit: int = 100):
-    """
-    Open trades = personal_journal rows where exit_time IS NULL.
-    Joins to cmp_prices for live CMP; computes unrealised P&L.
-    Returns same field shape that the V8 dashboard expects.
-    """
+    """Open trades = personal_journal rows where exit_time IS NULL."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    pj.id,
-                    pj.trade_date,
-                    pj.entry_time,
-                    pj.symbol,
-                    pj.direction,
-                    pj.entry_price,
-                    pj.qty,
-                    pj.sl,
-                    pj.target,
-                    pj.v8_basket,
-                    pj.v8_signal_match,
-                    pj.setup_quality,
-                    pj.rule_score_total,
-                    pj.notes,
+                    pj.id, pj.trade_date, pj.entry_time, pj.symbol, pj.direction,
+                    pj.entry_price, pj.qty, pj.sl, pj.target,
+                    pj.v8_basket, pj.v8_signal_match, pj.setup_quality,
+                    pj.rule_score_total, pj.notes,
                     COALESCE(cp.cmp, pj.entry_price) AS cmp,
                     CASE
                         WHEN UPPER(pj.direction) = 'LONG'  THEN ROUND(((COALESCE(cp.cmp, pj.entry_price) - pj.entry_price) * pj.qty)::numeric, 2)
@@ -460,7 +446,6 @@ def v8_positions(limit: int = 100):
             """, (min(max(limit, 1), 500),))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        # Add strategy label for dashboard grouping
         for r in rows:
             r['strategy'] = _normalize_basket_to_strategy(r.get('v8_basket'))
         return rows
@@ -470,34 +455,16 @@ def v8_positions(limit: int = 100):
 
 @router.get("/trades")
 def v8_trades(limit: int = 200):
-    """
-    Closed trades = personal_journal rows where exit_time IS NOT NULL.
-    """
+    """Closed trades = personal_journal rows where exit_time IS NOT NULL."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    pj.id,
-                    pj.trade_date,
-                    pj.entry_time,
-                    pj.exit_time,
-                    pj.symbol,
-                    pj.direction,
-                    pj.entry_price AS entry,
-                    pj.exit_price  AS exit,
-                    pj.qty,
-                    pj.sl,
-                    pj.target,
-                    pj.pnl,
-                    pj.result,
-                    pj.holding_days,
-                    pj.v8_basket,
-                    pj.v8_signal_match,
-                    pj.setup_quality,
-                    pj.rule_score_total,
-                    pj.rule_violations,
-                    pj.lesson,
-                    pj.notes
+                    pj.id, pj.trade_date, pj.entry_time, pj.exit_time, pj.symbol, pj.direction,
+                    pj.entry_price AS entry, pj.exit_price AS exit, pj.qty, pj.sl, pj.target,
+                    pj.pnl, pj.result, pj.holding_days,
+                    pj.v8_basket, pj.v8_signal_match, pj.setup_quality,
+                    pj.rule_score_total, pj.rule_violations, pj.lesson, pj.notes
                 FROM personal_journal pj
                 WHERE pj.exit_time IS NOT NULL
                 ORDER BY pj.exit_time DESC
