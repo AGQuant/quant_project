@@ -30,10 +30,17 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
+from gvm_nightly import router as gvm_nightly_router
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.1.4
+# Scorr / Project Quant — main.py v2.2.0
+# v2.2.0: GVM nightly recompute wired (gvm_nightly.py).
+#         - POST /api/admin/load_screener_json (clean-replace screener_raw from upload)
+#         - POST /api/gvm/recompute (score all -> gvm_history append + gvm_scores latest)
+#         - GET  /api/gvm/history/{symbol} (GVM trend series)
+#         - intraday_prices DDL synced to live (timeframe, source, UNIQUE(symbol,ts,timeframe))
+#           so a from-scratch rebuild stays compatible with the Fyers feed.
 # v2.1.4: LIVE 1-MIN ENGINE wired in (v8_live.py).
 #         - v8_history_cache built ~09:00 IST pre-open (heavy 400-day read, 1x/day)
 #         - run_live_tick every 1 min during market hours (holiday-aware):
@@ -48,7 +55,7 @@ import yahoo_ondemand
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.1.4"
+VERSION = "2.2.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -73,6 +80,7 @@ app.add_middleware(
 
 app.include_router(v8_router)
 app.include_router(v8_futures_router)
+app.include_router(gvm_nightly_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -89,9 +97,12 @@ def create_tables():
     CREATE TABLE IF NOT EXISTS intraday_prices (
         id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, ts TIMESTAMP NOT NULL,
         open NUMERIC, high NUMERIC, low NUMERIC, close NUMERIC, volume BIGINT,
-        UNIQUE(symbol, ts)
+        timeframe TEXT DEFAULT '1m', source TEXT DEFAULT 'fyers',
+        UNIQUE(symbol, ts, timeframe)
     );
     CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_prices(symbol, ts DESC);
+    ALTER TABLE intraday_prices ADD COLUMN IF NOT EXISTS timeframe TEXT DEFAULT '1m';
+    ALTER TABLE intraday_prices ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'fyers';
     CREATE TABLE IF NOT EXISTS cmp_prices (
         symbol TEXT PRIMARY KEY, cmp NUMERIC, updated_at TIMESTAMP DEFAULT NOW()
     );
@@ -113,12 +124,20 @@ def create_tables():
         vol_avg10 NUMERIC, hi_252 NUMERIC, lo_252 NUMERIC, hi_21 NUMERIC, lo_21 NUMERIC,
         gvm_score NUMERIC, prev_day_change NUMERIC, built_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS gvm_history (
+        id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, score_date DATE NOT NULL,
+        g_score NUMERIC, v_score NUMERIC, m_score NUMERIC, gvm_score NUMERIC,
+        verdict TEXT, segment TEXT, created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(symbol, score_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_gvm_history_symbol_date ON gvm_history(symbol, score_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_gvm_history_date ON gvm_history(score_date DESC);
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.1.4 — V8-native + live cache)")
+        log.info("Tables ready (v2.2.0 — V8-native + live cache + gvm_history)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -245,7 +264,7 @@ def _insert_intraday(candles):
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for c in candles:
-                cur.execute("INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume) VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s) ON CONFLICT (symbol, ts) DO NOTHING", c)
+                cur.execute("INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume) VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s) ON CONFLICT (symbol, ts, timeframe) DO NOTHING", c)
             conn.commit()
     except Exception as e:
         log.error(f"_insert_intraday failed: {e}")
@@ -383,7 +402,7 @@ async def _task_load_earnings_daily():
 
 async def _scheduler():
     """Coarse loop (5-min) for daily tasks + a tight 1-min loop for live ticks."""
-    log.info("Scheduler started (v2.1.4 — live 1-min engine, NSE-holiday aware)")
+    log.info("Scheduler started (v2.2.0 — live 1-min engine, NSE-holiday aware)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -470,7 +489,7 @@ def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
 def get_cmp_fallback():
     return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
 
-# ── V8 LIVE engine: cache build + 1-min tick ────────────────────────────────────
+# ── V8 LIVE engine: cache build + 1-min tick ────────────────────────────────────────────────
 @app.post("/api/v8/build_cache")
 def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -488,6 +507,7 @@ def health_feeds():
     out = []
     queries = [
         ("gvm_scores", "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
+        ("gvm_history", "SELECT MAX(score_date), COUNT(DISTINCT score_date) FROM gvm_history"),
         ("raw_prices", "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
         ("screener_raw", "SELECT NULL, COUNT(*) FROM screener_raw"),
         ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
@@ -992,6 +1012,8 @@ MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status. Single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache (fixed 400-day history per future). Run pre-open or to refresh. Heavy, ~1x/day.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute the 19 price-driven metrics from cache + latest intraday bar, upsert today's v8_metrics. Light.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "gvm_recompute", "description": "GVM: recompute all stocks from input_raw + screener_raw. Appends a dated snapshot to gvm_history (trend) and replaces gvm_scores (latest). Run after a screener upload.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "gvm_history", "description": "GVM: get the GVM score trend series for a stock (date, g/v/m/gvm, verdict).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
@@ -1032,6 +1054,8 @@ async def _call_tool(name, args):
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days", 180)}); return r.json()
         elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
             params = {}
