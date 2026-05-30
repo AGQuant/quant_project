@@ -14,6 +14,7 @@
  * ║     7. In_Position            — Live open trades (personal)      ║
  * ║     8. Trade_Log              — Closed trade history (personal)  ║
  * ║     9. Raw_Data               — All 208 futures x 21 metrics     ║
+ * ║    10. Filter_Scan            — Per-stock pass count, 5 baskets  ║
  * ║                                                                  ║
  * ║   Data source: Railway V8 endpoints + personal_journal table     ║
  * ║                                                                  ║
@@ -25,7 +26,7 @@
 //   CONFIG
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.2.5';   // Raw_Data tab (/api/v8/raw), inferStrategy prefers server strategy + Manual/Untagged bucket, 290->208 label
+const SCRIPT_VERSION = '1.3.0';   // + Filter_Scan tab: per-stock pass count + names passed across all 5 baskets
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -40,6 +41,7 @@ const SHEETS = {
   POS:     'In_Position',
   LOG:     'Trade_Log',
   RAW:     'Raw_Data',
+  SCAN:    'Filter_Scan',
 };
 
 const BASKETS = ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum', 'sell_overbought'];
@@ -127,6 +129,7 @@ function onOpen() {
     .addItem('📍 Refresh In Position',      'refreshInPosition')
     .addItem('📒 Refresh Trade Log',        'refreshTradeLog')
     .addItem('🗃️ Refresh Raw Data',         'refreshRawData')
+    .addItem('🔎 Refresh Filter Scan',      'refreshFilterScan')
     .addSeparator()
     .addItem('🧹 Clean Rebuild (delete + rebuild + refresh)', 'cleanRebuild')
     .addSeparator()
@@ -316,6 +319,7 @@ function refreshAll() {
   refreshInPosition();
   refreshTradeLog();
   refreshRawData();
+  refreshFilterScan();
   toast('✓ All tabs refreshed');
 }
 
@@ -1266,12 +1270,201 @@ function refreshRawData() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//   TAB: FILTER SCAN — per-stock pass count + names passed, across all 5 baskets
+//   Layout (11 cols): Symbol | BR cnt | BR passed | BM cnt | BM passed |
+//                     SR cnt | SR passed | SM cnt | SM passed | SO cnt | SO passed
+//   Source: /api/v8/raw (whole universe) evaluated against each basket's live filter_config.
+//   Pass logic is IDENTICAL to computeFunnelCounts — single source of truth, never disagrees
+//   with the funnel tabs. A fully-qualified cell (cnt == total) turns green.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Short labels for filter metrics so the "names passed" cell stays compact.
+const SCAN_FILTER_ABBR = {
+  gvm_score: 'GVM', year_return: 'YrRet', dma_200: 'DMA200', dma_50: 'DMA50',
+  dma_20: 'DMA20', rsi_month: 'RSIm', rsi_weekly: 'RSIw', daily_rsi: 'RSId',
+  month_return: 'MthRet', week_return: 'WkRet', sector_week: 'SecWk', sector_day: 'SecDay',
+  month_index: 'MthIdx', week_index_52: 'wi52', range_1d: 'Rng1D', range_3d: 'Rng3D',
+  ma9_vs_ma21: 'ma9_21', vol_ratio: 'VolR',
+};
+
+// Does a single metric value pass one filter? Mirrors computeFunnelCounts exactly.
+function scanPassesFilter(value, f) {
+  if (value === null || value === undefined || value === '') return false;
+  const v = Number(value);
+  if (isNaN(v)) return false;
+  if (f.min !== null && f.min !== undefined && v < f.min) return false;
+  if (f.max !== null && f.max !== undefined && v > f.max) return false;
+  return true;
+}
+
+// For one stock against one basket's filters: returns {passed:[names], count, total}.
+function scanStockAgainstBasket(stock, filters) {
+  const passed = [];
+  filters.forEach(f => {
+    if (scanPassesFilter(stock[f.metric], f)) {
+      passed.push(SCAN_FILTER_ABBR[f.metric] || f.metric);
+    }
+  });
+  return { passed: passed, count: passed.length, total: filters.length };
+}
+
+function refreshFilterScan() {
+  const sheet = getOrCreate(SHEETS.SCAN);
+  sheet.clear().clearConditionalFormatRules();
+  sheet.setHiddenGridlines(true);
+
+  // Pull universe once, all 5 basket configs once.
+  const data = fetchRawData();
+  const configs = {};
+  let configOk = true;
+  BASKETS.forEach(b => {
+    const c = fetchFilterConfig(b);
+    if (!c || !c.filters) configOk = false;
+    configs[b] = c;
+  });
+
+  let row = 1;
+  const NCOL = 11;
+
+  sheet.getRange(row, 1, 1, NCOL).merge()
+    .setValue('🔎  FILTER SCAN — Per-Stock Pass Count Across 5 Baskets')
+    .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
+    .setFontSize(15).setFontWeight('bold');
+  sheet.setRowHeight(row, 34);
+  row++;
+
+  if (!data || !data.stocks || !configOk) {
+    sheet.getRange(row, 1, 1, NCOL).merge()
+      .setValue('⚠ API unreachable — /api/v8/raw or a filter_config returned no data')
+      .setBackground(COLORS.FAIL_BG).setFontColor(COLORS.FAIL_TEXT);
+    return;
+  }
+
+  const stocks = data.stocks || [];
+  const scoreDate = data.score_date || '—';
+  sheet.getRange(row, 1, 1, NCOL).merge()
+    .setValue(`${stocks.length} stocks · Score date: ${scoreDate} · Count = passed/total · Green = full qualify · Refreshed: ${nowIST()}`)
+    .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
+    .setFontSize(9).setFontStyle('italic');
+  sheet.setRowHeight(row, 20);
+  row += 2;
+
+  // Two-row header: basket band over (Count | Filters Passed) sub-headers.
+  const bandRow = row;
+  sheet.getRange(bandRow, 1).setValue('Symbol')
+    .setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sheet.getRange(bandRow, 1, 2, 1).merge();
+
+  BASKETS.forEach((b, i) => {
+    const meta = BASKET_META[b];
+    const startCol = 2 + i * 2;
+    sheet.getRange(bandRow, startCol, 1, 2).merge()
+      .setValue(`${meta.emoji}  ${meta.label}`)
+      .setBackground(meta.color).setFontColor(COLORS.WHITE)
+      .setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  });
+  sheet.setRowHeight(bandRow, 24);
+  row++;
+
+  const subRow = row;
+  BASKETS.forEach((b, i) => {
+    const startCol = 2 + i * 2;
+    sheet.getRange(subRow, startCol).setValue('Cnt')
+      .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
+      .setFontSize(9).setHorizontalAlignment('center');
+    sheet.getRange(subRow, startCol + 1).setValue('Filters Passed')
+      .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
+      .setFontSize(9).setHorizontalAlignment('left');
+  });
+  sheet.setRowHeight(subRow, 20);
+  const headerBottom = subRow;
+  row++;
+
+  // Build a row per stock: [symbol, brCnt, brPassed, ... soCnt, soPassed]
+  const matrix = [];
+
+  stocks.forEach((s) => {
+    const line = [s.symbol];
+    let bestRatio = 0;
+    BASKETS.forEach((b) => {
+      const res = scanStockAgainstBasket(s, configs[b].filters);
+      line.push(`${res.count}/${res.total}`);
+      line.push(res.passed.join(', '));
+      const ratio = res.total > 0 ? res.count / res.total : 0;
+      if (ratio > bestRatio) bestRatio = ratio;
+    });
+    line.push(bestRatio);   // hidden sort key in a temp 12th slot
+    matrix.push(line);
+  });
+
+  // Sort by best near-miss ratio descending — strongest setups float to top.
+  matrix.sort((a, b) => b[NCOL] - a[NCOL]);
+  matrix.forEach(line => line.pop());   // drop the sort key
+
+  if (matrix.length === 0) {
+    sheet.getRange(row, 1, 1, NCOL).merge()
+      .setValue('No stocks in universe for the latest score date')
+      .setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT)
+      .setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
+    row++;
+  } else {
+    const dataRange = sheet.getRange(row, 1, matrix.length, NCOL);
+    dataRange.setValues(matrix);
+    dataRange.setFontFamily(FONTS.MONO.family).setFontSize(9).setVerticalAlignment('middle');
+
+    // Symbol column bold + count columns centered + passed columns left.
+    sheet.getRange(row, 1, matrix.length, 1)
+      .setFontFamily(FONTS.HEADER.family).setFontWeight('bold').setHorizontalAlignment('left');
+    BASKETS.forEach((b, i) => {
+      const cntCol = 2 + i * 2;
+      sheet.getRange(row, cntCol, matrix.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
+      sheet.getRange(row, cntCol + 1, matrix.length, 1).setHorizontalAlignment('left').setFontColor(COLORS.NEUTRAL_TEXT);
+    });
+
+    // Alternating row backgrounds + borders.
+    for (let r = 0; r < matrix.length; r++) {
+      const bg = (r % 2 === 0) ? COLORS.CARD_BG : COLORS.ALT_ROW;
+      sheet.getRange(row + r, 1, 1, NCOL).setBackground(bg)
+        .setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
+    }
+
+    // Highlight full-qualify count cells (passed == total) green, post-sort.
+    for (let r = 0; r < matrix.length; r++) {
+      BASKETS.forEach((b, i) => {
+        const cntCol = 2 + i * 2;
+        const cellVal = matrix[r][cntCol - 1];   // e.g. "12/12"
+        const parts = String(cellVal).split('/');
+        if (parts.length === 2 && parts[0] === parts[1] && Number(parts[1]) > 0) {
+          sheet.getRange(row + r, cntCol)
+            .setBackground(COLORS.PASS_BG).setFontColor(COLORS.PASS_TEXT).setFontWeight('bold');
+        }
+      });
+    }
+
+    row += matrix.length;
+  }
+
+  sheet.setColumnWidth(1, 120);
+  BASKETS.forEach((b, i) => {
+    const cntCol = 2 + i * 2;
+    sheet.setColumnWidth(cntCol, 48);
+    sheet.setColumnWidth(cntCol + 1, 230);
+  });
+  sheet.setFrozenRows(headerBottom);
+  sheet.setFrozenColumns(1);
+  toast('✓ Filter Scan refreshed');
+}
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   BUILD ALL TABS
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function buildAllTabs() {
   Object.values(SHEETS).forEach(name => getOrCreate(name));
-  toast('All 9 tabs created. Run "Refresh All" next.');
+  toast('All 10 tabs created. Run "Refresh All" next.');
 }
 
 
