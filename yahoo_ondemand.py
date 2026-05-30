@@ -13,6 +13,14 @@ serves 5-min candles for up to ~60 days, so a 15-day 5-min pattern is
 available. Nothing is written to Postgres - the caller analyses the returned
 list and discards it, so the futures-only DB stays clean.
 
+source override
+---------------
+get_intraday_smart(..., source='yahoo') forces a LIVE Yahoo pull and SKIPS the
+DB entirely, even for futures names. Use this to manually pull Yahoo data for a
+futures stock (e.g. RELIANCE) when you suspect the Fyers feed is down - comparing
+it against what Fyers should be showing tells you if Fyers has an issue. No silent
+auto-fallback by design: the manual step is itself the Fyers health check.
+
 Reliable path: ONE symbol per request (Yahoo batch mode is flaky).
 
 Usage (module):
@@ -22,6 +30,9 @@ Usage (module):
 
     # DB-first (futures) else live Yahoo (non-futures), no store:
     res = yahoo_ondemand.get_intraday_smart('TATAPOWER', days=15, interval='5m')
+
+    # Force live Yahoo even for a futures stock (Fyers-down check):
+    res = yahoo_ondemand.get_intraday_smart('RELIANCE', days=2, interval='5m', source='yahoo')
 
 Usage (CLI):
     python yahoo_ondemand.py TATAPOWER --days 15 --interval 5m
@@ -145,16 +156,35 @@ def _db_intraday(symbol, days):
         return []
 
 
-def get_intraday_smart(symbol, days=15, interval='5m', exchange='NS'):
+def get_intraday_smart(symbol, days=15, interval='5m', exchange='NS', source='auto'):
     """Intraday for ANY stock: DB-first, then live Yahoo (no store).
 
-    - Futures (rows in intraday_prices): return stored Fyers 1-min candles.
-    - Non-futures (nothing stored): fetch `days` of `interval` candles LIVE
-      from the Yahoo chart API for that single symbol. Nothing is written to DB.
+    - source='auto' (default):
+        Futures (rows in intraday_prices) -> stored Fyers 1-min candles.
+        Non-futures (nothing stored)      -> live Yahoo `interval` candles, no store.
+    - source='yahoo':
+        Force a LIVE Yahoo pull, SKIP the DB entirely, even for futures names.
+        Use to manually check a futures stock when Fyers is suspected down.
 
     Returns dict: {symbol, source, interval, count, candles, note?}.
     """
     sym = symbol.upper()
+    src = (source or 'auto').lower()
+
+    # Forced live Yahoo (Fyers-down manual check) — skip DB.
+    if src == 'yahoo':
+        try:
+            candles = fetch_intraday(sym, days=days, interval=interval, exchange=exchange)
+        except Exception as e:
+            return {'symbol': sym, 'source': 'yahoo_live_forced', 'interval': interval,
+                    'count': 0, 'candles': [], 'error': str(e)}
+        for c in candles:
+            c['symbol'] = sym
+            c['source'] = 'yahoo'
+        return {'symbol': sym, 'source': 'yahoo_live_forced', 'interval': interval,
+                'count': len(candles), 'candles': candles,
+                'note': 'FORCED live Yahoo (DB skipped). Compare vs expected Fyers to gauge feed health.'}
+
     rows = _db_intraday(sym, days)
     if rows:
         for r in rows:
