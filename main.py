@@ -31,7 +31,10 @@ from v8_futures import router as v8_futures_router
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.1.1
+# Scorr / Project Quant — main.py v2.1.2
+# v2.1.2: add /api/now + server_now MCP tool — authoritative India time
+#         (Asia/Kolkata, UTC+5:30) + NSE market-open status. Single source
+#         of truth for date/day/time reasoning (no UTC guessing).
 # v2.1.1: get_intraday gains `source` param. source='yahoo' forces a LIVE
 #         Yahoo pull and SKIPS the DB, even for futures names — manual
 #         Fyers-down check (no silent auto-fallback by design). Default
@@ -54,7 +57,7 @@ import yahoo_ondemand
 # v1.9.6: Yahoo CMP fallback covers entire universe (kept).
 # ============================================================
 
-VERSION = "2.1.1"
+VERSION = "2.1.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -118,7 +121,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.1.1 — V8-native)")
+        log.info("Tables ready (v2.1.2 — V8-native)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -341,7 +344,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.1.1 — V8-native, engine auto-run 15:45 IST, raw_prices 21:00 IST)")
+    log.info("Scheduler started (v2.1.2 — V8-native, engine auto-run 15:45 IST, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
@@ -371,6 +374,19 @@ def root():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": VERSION}
+
+@app.get("/api/now")
+def server_now():
+    """Authoritative India time (Asia/Kolkata, UTC+5:30) + NSE market status."""
+    n = _ist_now()
+    return {
+        "india_time": n.strftime("%Y-%m-%d %H:%M:%S"),
+        "timezone": "Asia/Kolkata (UTC+5:30)",
+        "day": n.strftime("%A"),
+        "weekday": n.weekday(),
+        "is_weekend": n.weekday() >= 5,
+        "market_open": _is_market_hours(),
+    }
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -553,7 +569,7 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices ORDER BY symbol")
 
-# ── V8 engine run ───────────────────────────────────────────────────────────────────────────────
+# ── V8 engine run ───────────────────────────────────────────────────────────────────────────────────────────────────────
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -568,7 +584,7 @@ def v8_metrics_all():
                rsi_month, rsi_weekly, daily_rsi,
                month_return, week_return, year_return, prev_day_change,
                sector_day, sector_week, month_index, week_index_52,
-               range_1d, range_3d, upper_bb, lower_bb
+               range_1d, range_3d, upper_bb, lower_bb, ma9_vs_ma21, vol_ratio
         FROM v8_metrics
         WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
         ORDER BY symbol
@@ -592,7 +608,7 @@ def v8_live_metrics():
             CASE WHEN fc.open > 0 THEN ROUND(((lc.close / fc.open - 1) * 100)::numeric, 2) END AS day_pct,
             hc.close AS hour_ago_close,
             CASE WHEN hc.close > 0 THEN ROUND(((lc.close / hc.close - 1) * 100)::numeric, 2) END AS hourly_pct
-        FROM (SELECT DISTINCT symbol FROM v8_universe) s
+        FROM (SELECT symbol FROM futures_universe WHERE is_active = TRUE) s
         JOIN LATERAL (
             SELECT close FROM intraday_prices WHERE symbol = s.symbol
             AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
@@ -903,6 +919,7 @@ async def oauth_token(req: Request):
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
 MCP_TOOLS = [
+    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE market-open status. Use this as the single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
@@ -940,7 +957,8 @@ MCP_TOOLS = [
 
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
-        if name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
+        if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
+        elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
             params = {}
             if args.get("verdict"): params["verdict"] = args["verdict"]
