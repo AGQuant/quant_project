@@ -30,11 +30,16 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
-from gvm_nightly import router as gvm_nightly_router, recompute_gvm
+from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.3.0
+# Scorr / Project Quant — main.py v2.3.1
+# v2.3.1: load_screener_from_drive now writes the WIDE screener_raw schema
+#         via the shared gvm_nightly._sql_clean_replace_screener (rename ->
+#         drop null/dup nse_code -> numeric coerce -> clean-replace). Makes
+#         Drive -> load -> gvm_recompute a one-call weekly path. No more
+#         raw-JSONB mismatch with the GVM engine.
 # v2.3.0: GVM daily-recompute automation + screener-load MCP tool.
 #         - MCP tools: load_screener_json (weekly upload), run_momentum, gvm_recompute
 #         - 21:15 IST daily: recompute_gvm() -> refresh momentum (raw_prices) +
@@ -48,7 +53,7 @@ import yahoo_ondemand
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -130,7 +135,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.3.0 — V8-native + live cache + gvm_history)")
+        log.info("Tables ready (v2.3.1 — V8-native + live cache + gvm_history)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -422,7 +427,7 @@ async def _task_load_earnings_daily():
 
 async def _scheduler():
     """Coarse loop (5-min) for daily tasks + a tight 1-min loop for live ticks."""
-    log.info("Scheduler started (v2.3.0 — live 1-min engine, daily GVM recompute, NSE-holiday aware)")
+    log.info("Scheduler started (v2.3.1 — live 1-min engine, daily GVM recompute, NSE-holiday aware)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -806,13 +811,11 @@ async def load_screener(req: Request):
     if not file_id: raise HTTPException(400, "file_id required")
     csv_text = await _drive_download(file_id)
     df = pd.read_csv(io.StringIO(csv_text))
-    rows = df.to_dict(orient="records")
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM screener_raw")
-        for row in rows:
-            cur.execute("INSERT INTO screener_raw (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
-        conn.commit()
-    return {"status": "ok", "rows": len(rows)}
+    # v2.3.1: write the WIDE screener_raw schema via the shared cleaner used by
+    # load_screener_json (rename raw Screener headers -> drop null/dup nse_code ->
+    # numeric coerce -> clean-replace). Single source of truth with gvm_nightly.
+    n = _sql_clean_replace_screener(df.to_dict(orient="records"))
+    return {"status": "ok", "action": "clean_replace_wide", "rows_loaded": n}
 
 SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
@@ -1066,7 +1069,7 @@ MCP_TOOLS = [
     {"name": "env_check", "description": "Diagnostic: which env vars are visible.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "load_input_from_drive", "description": "Reload input_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_screener_from_drive", "description": "Reload screener_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "load_screener_from_drive", "description": "Reload screener_raw (WIDE schema, weekly fundamentals) from a Drive CSV — clean-replace via the same path as load_screener_json. Pass file_id.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "github_read", "description": "Read any file from the GitHub repo.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
