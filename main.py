@@ -30,32 +30,25 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
-from gvm_nightly import router as gvm_nightly_router
+from gvm_nightly import router as gvm_nightly_router, recompute_gvm
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.2.0
-# v2.2.0: GVM nightly recompute wired (gvm_nightly.py).
-#         - POST /api/admin/load_screener_json (clean-replace screener_raw from upload)
-#         - POST /api/gvm/recompute (score all -> gvm_history append + gvm_scores latest)
-#         - GET  /api/gvm/history/{symbol} (GVM trend series)
-#         - intraday_prices DDL synced to live (timeframe, source, UNIQUE(symbol,ts,timeframe))
-#           so a from-scratch rebuild stays compatible with the Fyers feed.
-# v2.1.4: LIVE 1-MIN ENGINE wired in (v8_live.py).
-#         - v8_history_cache built ~09:00 IST pre-open (heavy 400-day read, 1x/day)
-#         - run_live_tick every 1 min during market hours (holiday-aware):
-#           19 price-driven metrics recompute live; rsi_month/rsi_weekly frozen
-#           at EOD value; gvm_score/prev_day_change static. ~210 reads+writes/min.
-#         - endpoints: /api/v8/build_cache, /api/v8/run_live
-#         - MCP tools: v8_build_cache, v8_run_live
-# v2.1.3: NSE holiday calendar wired in (nse_holidays.py).
-# v2.1.2: /api/now + server_now MCP tool (authoritative India time).
-# v2.1.1: get_intraday gains `source` param (force live Yahoo).
-# v2.1.0: get_intraday smart for ANY stock (futures DB / non-futures Yahoo).
+# Scorr / Project Quant — main.py v2.3.0
+# v2.3.0: GVM daily-recompute automation + screener-load MCP tool.
+#         - MCP tools: load_screener_json (weekly upload), run_momentum, gvm_recompute
+#         - 21:15 IST daily: recompute_gvm() -> refresh momentum (raw_prices) +
+#           G/V from screener -> append gvm_history + replace gvm_scores.
+#         - Realises the weekly-fundamentals + daily-momentum GVM TREND.
+# v2.2.0: GVM nightly recompute wired (gvm_nightly.py); intraday_prices DDL synced.
+# v2.1.4: LIVE 1-MIN ENGINE (v8_live.py).
+# v2.1.3: NSE holiday calendar wired (nse_holidays.py).
+# v2.1.2: /api/now + server_now MCP tool.
+# v2.1.0: get_intraday smart for ANY stock.
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -137,7 +130,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.2.0 — V8-native + live cache + gvm_history)")
+        log.info("Tables ready (v2.3.0 — V8-native + live cache + gvm_history)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -287,6 +280,8 @@ _v8_engine_running: bool = False
 _cache_built_today: Optional[date] = None
 _cache_building: bool = False
 _live_tick_running: bool = False
+_gvm_recompute_ran_today: Optional[date] = None
+_gvm_recompute_running: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -368,6 +363,31 @@ async def _task_build_cache():
     log.info("09:00 IST: Building v8_history_cache (pre-open)")
     asyncio.create_task(asyncio.to_thread(_bg_build_cache))
 
+def _bg_recompute_gvm():
+    """Daily: refresh momentum from raw_prices + recompute GVM -> gvm_history + gvm_scores."""
+    global _gvm_recompute_ran_today, _gvm_recompute_running
+    if _gvm_recompute_running:
+        log.info("gvm recompute already running, skip")
+        return
+    _gvm_recompute_running = True
+    try:
+        res = recompute_gvm(refresh_momentum=True)
+        _gvm_recompute_ran_today = _ist_now().date()
+        log.info(f"GVM daily recompute done: scored={res.get('scored')} momentum={res.get('momentum')}")
+    except Exception as e:
+        log.error(f"GVM daily recompute failed: {e}")
+    finally:
+        _gvm_recompute_running = False
+
+async def _task_recompute_gvm_daily():
+    """21:15 IST: after raw_prices update (21:00), refresh momentum + GVM snapshot."""
+    global _gvm_recompute_ran_today
+    today = _ist_now().date()
+    if _gvm_recompute_ran_today == today:
+        return
+    log.info("21:15 IST: Launching daily GVM recompute (momentum + history snapshot)")
+    asyncio.create_task(asyncio.to_thread(_bg_recompute_gvm))
+
 def _bg_live_tick():
     global _live_tick_running
     if _live_tick_running:
@@ -402,7 +422,7 @@ async def _task_load_earnings_daily():
 
 async def _scheduler():
     """Coarse loop (5-min) for daily tasks + a tight 1-min loop for live ticks."""
-    log.info("Scheduler started (v2.2.0 — live 1-min engine, NSE-holiday aware)")
+    log.info("Scheduler started (v2.3.0 — live 1-min engine, daily GVM recompute, NSE-holiday aware)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -419,6 +439,10 @@ async def _scheduler():
                 await _task_run_v8_engine()
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
+            # Daily GVM recompute at 21:15 IST (after raw_prices update). Runs every day
+            # (momentum needs daily refresh even on non-trading days when prices updated).
+            if now.hour == 21 and 15 <= now.minute < 25:
+                await _task_recompute_gvm_daily()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -501,6 +525,13 @@ def v8_run_live(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     with get_conn() as conn:
         return run_live_tick(conn)
+
+# ── Momentum daily engine (standalone trigger) ──────────────────────────────────────────────
+@app.post("/api/momentum/run")
+def momentum_run(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    import momentum_daily
+    return momentum_daily.compute_momentum()
 
 @app.get("/api/health/feeds")
 def health_feeds():
@@ -634,7 +665,7 @@ def get_sectors():
 
 @app.get("/api/momentum/{symbol}")
 def get_momentum(symbol: str):
-    r = api_query("SELECT * FROM momentum_scores WHERE symbol = %s", (symbol.upper(),), single=True)
+    r = api_query("SELECT * FROM momentum_scores WHERE symbol = %s ORDER BY score_date DESC LIMIT 1", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} momentum not found")
     return r
 
@@ -1012,14 +1043,16 @@ MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status. Single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache (fixed 400-day history per future). Run pre-open or to refresh. Heavy, ~1x/day.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute the 19 price-driven metrics from cache + latest intraday bar, upsert today's v8_metrics. Light.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "gvm_recompute", "description": "GVM: recompute all stocks from input_raw + screener_raw. Appends a dated snapshot to gvm_history (trend) and replaces gvm_scores (latest). Run after a screener upload.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "load_screener_json", "description": "GVM: clean-replace screener_raw from uploaded raw Screener rows (weekly fundamentals). Pass {rows:[...]} where each row uses raw Screener headers. Returns rows_loaded.", "inputSchema": {"type": "object", "properties": {"rows": {"type": "array", "items": {"type": "object"}}}, "required": ["rows"]}},
+    {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices into momentum_scores (dated). Price-driven half of GVM.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "gvm_recompute", "description": "GVM: full recompute. Refreshes daily momentum (raw_prices) + G/V from screener -> appends gvm_history (trend) + replaces gvm_scores (latest). Run after a screener upload, or daily.", "inputSchema": {"type": "object", "properties": {"refresh_momentum": {"type": "boolean"}}, "required": []}},
     {"name": "gvm_history", "description": "GVM: get the GVM score trend series for a stock (date, g/v/m/gvm, verdict).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_momentum", "description": "Get momentum scores for a stock (latest).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_intraday", "description": "Intraday OHLC for ANY stock. Futures -> stored Fyers 1-min (DB, last 7d). Non-futures -> fetched LIVE from Yahoo and NOT stored (5-min default, up to ~60d). Set source='yahoo' to FORCE live Yahoo even for a futures stock. Params: symbol, days (default 15), interval (1m/5m/15m/30m/60m/1d), source (auto/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1054,7 +1087,9 @@ async def _call_tool(name, args):
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "load_screener_json": r = await client.post(f"{BASE_URL}/api/admin/load_screener_json", json={"rows": args["rows"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum", True)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days", 180)}); return r.json()
         elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
