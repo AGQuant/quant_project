@@ -29,32 +29,26 @@ from v8_engine import (
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from nse_holidays import is_trading_day, is_nse_holiday
+from v8_live import build_history_cache, run_live_tick
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.1.3
-# v2.1.3: NSE holiday calendar wired in (nse_holidays.py). _is_market_hours,
-#         _is_eod_window, and the scheduler now skip notified NSE holidays
-#         (not just weekends). /api/now returns is_holiday + is_trading_day.
-# v2.1.2: add /api/now + server_now MCP tool — authoritative India time
-#         (Asia/Kolkata, UTC+5:30) + NSE market-open status.
-# v2.1.1: get_intraday gains `source` param. source='yahoo' forces a LIVE
-#         Yahoo pull and SKIPS the DB, even for futures names — manual
-#         Fyers-down check (no silent auto-fallback by design). Default
-#         source='auto' = DB-first (futures -> Fyers) unchanged.
-# v2.1.0: get_intraday MCP tool is now smart for ANY stock:
-#         - futures  -> stored Fyers 1-min candles (intraday_prices, DB)
-#         - non-futures -> fetched LIVE from Yahoo (5-min default, up to ~60d)
-#           and NOT stored. Backed by yahoo_ondemand.get_intraday_smart.
-#         New `interval` param (1m/5m/15m/30m/60m/1d). Wired directly into
-#         main.py (the entrypoint Railway runs).
-# v2.0.1: Auto-run V8 engine daily 15:45 IST (post-close) so v8_metrics
-#         never goes stale. Strong ref kept in scheduler loop.
-# v2.0.0: FULL V5/V6 REMOVAL. V8-native everywhere.
-# v1.9.6: Yahoo CMP fallback covers entire universe (kept).
+# Scorr / Project Quant — main.py v2.1.4
+# v2.1.4: LIVE 1-MIN ENGINE wired in (v8_live.py).
+#         - v8_history_cache built ~09:00 IST pre-open (heavy 400-day read, 1x/day)
+#         - run_live_tick every 1 min during market hours (holiday-aware):
+#           19 price-driven metrics recompute live; rsi_month/rsi_weekly frozen
+#           at EOD value; gvm_score/prev_day_change static. ~210 reads+writes/min.
+#         - endpoints: /api/v8/build_cache, /api/v8/run_live
+#         - MCP tools: v8_build_cache, v8_run_live
+# v2.1.3: NSE holiday calendar wired in (nse_holidays.py).
+# v2.1.2: /api/now + server_now MCP tool (authoritative India time).
+# v2.1.1: get_intraday gains `source` param (force live Yahoo).
+# v2.1.0: get_intraday smart for ANY stock (futures DB / non-futures Yahoo).
+# v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.1.3"
+VERSION = "2.1.4"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -113,12 +107,18 @@ def create_tables():
     );
     INSERT INTO app_config (key, value) VALUES ('yahoo_cmp_fallback', 'off')
         ON CONFLICT (key) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS v8_history_cache (
+        symbol TEXT PRIMARY KEY, cache_date DATE NOT NULL,
+        closes JSONB, highs JSONB, lows JSONB, volumes JSONB, segment TEXT,
+        vol_avg10 NUMERIC, hi_252 NUMERIC, lo_252 NUMERIC, hi_21 NUMERIC, lo_21 NUMERIC,
+        gvm_score NUMERIC, prev_day_change NUMERIC, built_at TIMESTAMP DEFAULT NOW()
+    );
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.1.3 — V8-native)")
+        log.info("Tables ready (v2.1.4 — V8-native + live cache)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -265,6 +265,9 @@ _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
 _v8_engine_ran_today: Optional[date] = None
 _v8_engine_running: bool = False
+_cache_built_today: Optional[date] = None
+_cache_building: bool = False
+_live_tick_running: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -299,7 +302,6 @@ async def _task_update_raw_prices():
     asyncio.create_task(_bg_yahoo_daily())
 
 def _bg_run_v8_engine():
-    """Blocking engine run — called inside a thread from the scheduler."""
     global _v8_engine_ran_today, _v8_engine_running
     if _v8_engine_running:
         log.info("v8_engine already running, skip")
@@ -316,13 +318,53 @@ def _bg_run_v8_engine():
         _v8_engine_running = False
 
 async def _task_run_v8_engine():
-    """Run the V8 engine once per trading day at ~15:45 IST (post-close)."""
     global _v8_engine_ran_today
     today = _ist_now().date()
     if _v8_engine_ran_today == today:
         return
     log.info("15:45 IST: Launching V8 engine auto-run")
     asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
+
+def _bg_build_cache():
+    global _cache_built_today, _cache_building
+    if _cache_building:
+        log.info("cache build already running, skip")
+        return
+    _cache_building = True
+    try:
+        with get_conn() as conn:
+            res = build_history_cache(conn)
+        _cache_built_today = _ist_now().date()
+        log.info(f"v8_history_cache built: {res.get('built')}/{res.get('total')}")
+    except Exception as e:
+        log.error(f"cache build failed: {e}")
+    finally:
+        _cache_building = False
+
+async def _task_build_cache():
+    global _cache_built_today
+    today = _ist_now().date()
+    if _cache_built_today == today:
+        return
+    log.info("09:00 IST: Building v8_history_cache (pre-open)")
+    asyncio.create_task(asyncio.to_thread(_bg_build_cache))
+
+def _bg_live_tick():
+    global _live_tick_running
+    if _live_tick_running:
+        return  # previous tick still running, skip this minute
+    _live_tick_running = True
+    try:
+        with get_conn() as conn:
+            run_live_tick(conn)
+    except Exception as e:
+        log.error(f"live tick failed: {e}")
+    finally:
+        _live_tick_running = False
+
+async def _task_live_tick():
+    """Every minute during market hours — recompute 19 live metrics."""
+    asyncio.create_task(asyncio.to_thread(_bg_live_tick))
 
 async def _task_load_earnings_daily():
     global _earnings_loaded_today
@@ -340,29 +382,46 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.1.3 — V8-native, NSE-holiday aware, engine 15:45 IST, raw_prices 21:00 IST)")
+    """Coarse loop (5-min) for daily tasks + a tight 1-min loop for live ticks."""
+    log.info("Scheduler started (v2.1.4 — live 1-min engine, NSE-holiday aware)")
+    asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now()
             trading_day = is_trading_day(now.date())
             if trading_day and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
+            # Build history cache pre-open (~09:00–09:10 IST, trading days)
+            if trading_day and now.hour == 9 and now.minute < 10:
+                await _task_build_cache()
             if _is_market_hours():
                 await _task_refresh_cmp()
-            # V8 engine auto-run: trading days only, 15:45–15:55 IST (after close)
             if trading_day and now.hour == 15 and 45 <= now.minute < 55:
                 await _task_run_v8_engine()
-            # raw_prices EOD refresh: trading days only, ~21:00 IST
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
 
+async def _live_loop():
+    """Tight 1-min loop. Fires run_live_tick only during market hours (holiday-aware)."""
+    log.info("Live 1-min loop started")
+    while True:
+        try:
+            if _is_market_hours():
+                await _task_live_tick()
+        except Exception as e:
+            log.error(f"live loop error: {e}")
+        await asyncio.sleep(60)
+
+_BG_TASKS: set = set()
+
 @app.on_event("startup")
 async def startup():
     create_tables()
-    asyncio.create_task(_scheduler())
+    t = asyncio.create_task(_scheduler())
+    _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
 @app.get("/")
@@ -411,6 +470,19 @@ def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
 def get_cmp_fallback():
     return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
 
+# ── V8 LIVE engine: cache build + 1-min tick ────────────────────────────────────
+@app.post("/api/v8/build_cache")
+def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return build_history_cache(conn)
+
+@app.post("/api/v8/run_live")
+def v8_run_live(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return run_live_tick(conn)
+
 @app.get("/api/health/feeds")
 def health_feeds():
     out = []
@@ -425,7 +497,7 @@ def health_feeds():
         ("intraday_prices", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
         ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
         ("v8_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
-        ("v8_universe", "SELECT NULL, COUNT(*) FROM v8_universe"),
+        ("v8_history_cache", "SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache"),
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
     ]
     try:
@@ -552,8 +624,6 @@ def get_intraday(symbol: str, days: int = 1):
     cutoff = _ist_now() - timedelta(days=days)
     return api_query("SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices WHERE symbol = %s AND ts >= %s ORDER BY ts ASC", (symbol.upper(), cutoff))
 
-# Smart intraday for ANY stock: futures -> stored Fyers (DB); non-futures -> live Yahoo (no store).
-# source='yahoo' forces a live Yahoo pull, skipping the DB even for futures (Fyers-down check).
 @app.get("/api/intraday_ondemand/{symbol}")
 async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", source: str = "auto"):
     return await asyncio.to_thread(
@@ -570,7 +640,6 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices ORDER BY symbol")
 
-# ── V8 engine run ───────────────────────────────────────────────────────────────────────────────────────────────────────
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -920,19 +989,21 @@ async def oauth_token(req: Request):
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
 MCP_TOOLS = [
-    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status. Use this as the single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status. Single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache (fixed 400-day history per future). Run pre-open or to refresh. Heavy, ~1x/day.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute the 19 price-driven metrics from cache + latest intraday bar, upsert today's v8_metrics. Light.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Intraday OHLC for ANY stock. Futures -> stored Fyers 1-min (DB, last 7d). Non-futures -> fetched LIVE from Yahoo and NOT stored (5-min default, up to ~60d). Set source='yahoo' to FORCE live Yahoo even for a futures stock (manual Fyers-down check). Params: symbol, days (default 15), interval (1m/5m/15m/30m/60m/1d), source (auto/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Intraday OHLC for ANY stock. Futures -> stored Fyers 1-min (DB, last 7d). Non-futures -> fetched LIVE from Yahoo and NOT stored (5-min default, up to ~60d). Set source='yahoo' to FORCE live Yahoo even for a futures stock. Params: symbol, days (default 15), interval (1m/5m/15m/30m/60m/1d), source (auto/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
-    {"name": "run_v8_engine", "description": "Run the V8 signal engine — compute today's metrics for the universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v8_engine", "description": "Run the V8 EOD signal engine — compute today's metrics for the futures universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_v8_metrics_all", "description": "Get all metrics for the full universe (latest date).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v8_live_metrics", "description": "Get real-time CMP, day%, hourly gain for the universe.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -959,6 +1030,8 @@ MCP_TOOLS = [
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
+        elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
             params = {}
