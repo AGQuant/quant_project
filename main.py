@@ -28,9 +28,17 @@ from v8_engine import (
 )
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
+import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.0.1
+# Scorr / Project Quant — main.py v2.1.0
+# v2.1.0: get_intraday MCP tool is now smart for ANY stock:
+#         - futures  -> stored Fyers 1-min candles (intraday_prices, DB)
+#         - non-futures -> fetched LIVE from Yahoo (5-min default, up to ~60d)
+#           and NOT stored. Backed by yahoo_ondemand.get_intraday_smart.
+#         New `interval` param (1m/5m/15m/30m/60m/1d). Wired directly into
+#         main.py (the entrypoint Railway runs) — the old main_patched.py
+#         monkeypatch never loaded because the start cmd points at main:app.
 # v2.0.1: Auto-run V8 engine daily 15:45 IST (post-close) so v8_metrics
 #         never goes stale. Strong ref kept in scheduler loop.
 # v2.0.0: FULL V5/V6 REMOVAL. V8-native everywhere.
@@ -42,7 +50,7 @@ from v8_futures import router as v8_futures_router
 # v1.9.6: Yahoo CMP fallback covers entire universe (kept).
 # ============================================================
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -106,7 +114,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.0.1 — V8-native)")
+        log.info("Tables ready (v2.1.0 — V8-native)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -329,7 +337,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.0.1 — V8-native, engine auto-run 15:45 IST, raw_prices 21:00 IST)")
+    log.info("Scheduler started (v2.1.0 — V8-native, engine auto-run 15:45 IST, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
@@ -523,6 +531,13 @@ def get_intraday(symbol: str, days: int = 1):
     cutoff = _ist_now() - timedelta(days=days)
     return api_query("SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices WHERE symbol = %s AND ts >= %s ORDER BY ts ASC", (symbol.upper(), cutoff))
 
+# Smart intraday for ANY stock: futures -> stored Fyers (DB); non-futures -> live Yahoo (no store).
+@app.get("/api/intraday_ondemand/{symbol}")
+async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m"):
+    return await asyncio.to_thread(
+        yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval
+    )
+
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
     r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
@@ -533,7 +548,7 @@ def get_cmp(symbol: str):
 def get_all_cmp():
     return api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices ORDER BY symbol")
 
-# ── V8 engine run ──────────────────────────────────────────────────────────────
+# ── V8 engine run ───────────────────────────────────────────────────────────────────────────────
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -889,7 +904,7 @@ MCP_TOOLS = [
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Get intraday OHLC candles for a stock (Fyers 1-min futures).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Intraday OHLC for ANY stock. Futures -> stored Fyers 1-min (DB, last 7d). Non-futures -> fetched LIVE from Yahoo and NOT stored (5-min default, up to ~60d). Params: symbol, days (default 15), interval (1m/5m/15m/30m/60m/1d).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -929,7 +944,15 @@ async def _call_tool(name, args):
         elif name == "get_filter": r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)}); return r.json()
         elif name == "get_sector_rating": r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
         elif name == "get_momentum": r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
-        elif name == "get_intraday": r = await client.get(f"{BASE_URL}/api/intraday/{args['symbol']}", params={"days": args.get("days", 1)}); return r.json()
+        elif name == "get_intraday":
+            # Smart: futures -> stored Fyers 1-min (DB); non-futures -> live Yahoo (no store).
+            sym = (args.get("symbol") or "").upper()
+            try:
+                days = int(args.get("days") or 15)
+            except (TypeError, ValueError):
+                days = 15
+            interval = (args.get("interval") or "5m").lower()
+            return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, sym, days, interval)
         elif name == "get_cmp": r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
