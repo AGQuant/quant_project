@@ -1,10 +1,8 @@
 """
 V8 Signal Engine — Scorr
 =========================
-Computes ~19 metrics per stock from raw_prices + intraday_prices + gvm_scores,
+Computes ~21 metrics per stock from raw_prices + intraday_prices + gvm_scores,
 then runs the V8 AND-gate baskets.
-
-This is the engine that powers all V8 signals. (Formerly mis-named "v5_engine".)
 
 Tables:
   v8_universe  — the tradeable futures universe (290 stocks) + signal context
@@ -54,6 +52,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     month_index NUMERIC, week_index_52 NUMERIC,
     range_1d NUMERIC, range_3d NUMERIC,
     upper_bb NUMERIC, lower_bb NUMERIC,
+    ma9_vs_ma21 NUMERIC, vol_ratio NUMERIC,
     computed_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(symbol, score_date)
 );
@@ -109,6 +108,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         "month_index": None, "week_index_52": None, "range_1d": None,
         "dma_20": None, "range_3d": None, "prev_day_change": None,
         "daily_rsi": None, "upper_bb": None, "lower_bb": None,
+        "ma9_vs_ma21": None, "vol_ratio": None,
     }
 
     with conn.cursor() as cur:
@@ -122,7 +122,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
 
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT price_date, close, high, low FROM raw_prices
+            SELECT price_date, close, high, low, volume FROM raw_prices
             WHERE symbol = %s AND price_date <= %s
             ORDER BY price_date DESC LIMIT 400
         """, (symbol, target_date))
@@ -130,8 +130,9 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if not rows:
         return out
 
-    df = pd.DataFrame(rows, columns=["date", "close", "high", "low"])
+    df = pd.DataFrame(rows, columns=["date", "close", "high", "low", "volume"])
     df["close"] = pd.to_numeric(df["close"]); df["high"] = pd.to_numeric(df["high"]); df["low"] = pd.to_numeric(df["low"])
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
     if len(df) < 5:
         return out
@@ -149,6 +150,17 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if len(df) >= 2:
         prev1, prev2 = float(df["close"].iloc[-1]), float(df["close"].iloc[-2])
         if prev2 > 0: out["prev_day_change"] = (prev1 / prev2 - 1) * 100
+
+    # ma9_vs_ma21 & vol_ratio — matches v8_endpoints sell_overbought formula
+    if len(df) >= 21:
+        ma9  = float(df["close"].tail(9).mean())
+        ma21 = float(df["close"].tail(21).mean())
+        if ma21: out["ma9_vs_ma21"] = round((ma9 - ma21) / ma21 * 100, 2)
+    if len(df) >= 10:
+        vol_avg10 = float(df["volume"].tail(10).mean())
+        vol_now   = float(df["volume"].iloc[-1])
+        if vol_avg10 and not pd.isna(vol_avg10) and not pd.isna(vol_now):
+            out["vol_ratio"] = round(vol_now / vol_avg10, 2)
 
     df_indexed = df.set_index(pd.to_datetime(df["date"]))
     out["rsi_month"]  = _wilder_rsi(df_indexed["close"].resample("M").last().dropna(), RSI_MONTH_PERIOD)
@@ -219,13 +231,15 @@ def store_metrics(conn, m: Dict):
              rsi_month, rsi_weekly, daily_rsi,
              month_return, week_return, year_return, prev_day_change,
              sector_day, sector_week, month_index, week_index_52,
-             range_1d, range_3d, upper_bb, lower_bb)
+             range_1d, range_3d, upper_bb, lower_bb,
+             ma9_vs_ma21, vol_ratio)
             VALUES
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
              %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
              %(month_return)s, %(week_return)s, %(year_return)s, %(prev_day_change)s,
              %(sector_day)s, %(sector_week)s, %(month_index)s, %(week_index_52)s,
-             %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s)
+             %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s,
+             %(ma9_vs_ma21)s, %(vol_ratio)s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
                 gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
                 rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
@@ -234,7 +248,8 @@ def store_metrics(conn, m: Dict):
                 sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
                 range_1d=EXCLUDED.range_1d, range_3d=EXCLUDED.range_3d,
-                upper_bb=EXCLUDED.upper_bb, lower_bb=EXCLUDED.lower_bb
+                upper_bb=EXCLUDED.upper_bb, lower_bb=EXCLUDED.lower_bb,
+                ma9_vs_ma21=EXCLUDED.ma9_vs_ma21, vol_ratio=EXCLUDED.vol_ratio
         """, m)
         conn.commit()
 
