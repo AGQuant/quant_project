@@ -7,6 +7,7 @@ Endpoints:
   GET /api/v8/qualified/{basket}     — Stocks passing filters for a basket (blackout excluded)
   GET /api/v8/filter_config/{basket} — Min/Max thresholds per basket
   GET /api/v8/adr                    — Quick ADR-only refresh
+  GET /api/v8/raw                    — All active futures x 21 metrics (raw data tab)
   GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal signals (blackout excluded)
   GET /api/v8/positions              — Open trades from personal_journal (V8 native)
   GET /api/v8/trades                 — Closed trades from personal_journal (V8 native)
@@ -29,10 +30,10 @@ def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
-# ── Filter configs ───────────────────────────────────────────────────────────
+# ── Filter configs ─────────────────────────────────────────────────────────────
 # Format: metric -> [min, max]  (None = no bound)
-# Sell_Overbought uses v8_metrics columns PLUS computed ma9_vs_ma21 & vol_ratio
-# which are NOT in v8_metrics — handled separately in the /sell_overbought endpoint.
+# Sell_Overbought uses v8_metrics columns PLUS ma9_vs_ma21 & vol_ratio
+# (now stored in v8_metrics; sell_overbought still recomputes live for safety).
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -303,6 +304,40 @@ def qualified(basket: str, limit: int = 50):
         return {"basket": basket, "count": len(rows), "stocks": rows, **meta}
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
+
+
+@router.get("/raw")
+def raw_metrics(limit: int = 250):
+    """All active-futures rows from v8_metrics — 21 metric columns, GVM-sorted. Raw data tab source."""
+    sql = """
+        SELECT m.symbol, m.score_date, m.gvm_score,
+               m.dma_20, m.dma_50, m.dma_200,
+               m.rsi_month, m.rsi_weekly, m.daily_rsi,
+               m.month_return, m.week_return, m.year_return,
+               m.sector_day, m.sector_week, m.month_index, m.week_index_52,
+               m.range_1d, m.range_3d, m.prev_day_change,
+               m.upper_bb, m.lower_bb,
+               m.ma9_vs_ma21, m.vol_ratio
+        FROM v8_metrics m
+        JOIN futures_universe f ON f.symbol = m.symbol AND f.is_active = TRUE
+        WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+        ORDER BY m.gvm_score DESC NULLS LAST
+        LIMIT %s
+    """
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, (min(max(limit, 1), 300),))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        score_date = rows[0]["score_date"] if rows else None
+        return {
+            "count":      len(rows),
+            "score_date": str(score_date) if score_date else None,
+            "columns":    cols,
+            "stocks":     rows,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"raw_metrics failed: {e}")
 
 
 @router.get("/sell_overbought")
