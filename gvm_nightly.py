@@ -2,18 +2,22 @@
 GVM Nightly Recompute - Scorr
 ===============================
 Self-contained FastAPI router. Server-side GVM recompute driven entirely by
-the LIVE DB tables (no CSV on disk). Reuses gvm_engine.py's 21-param scoring
-untouched.
+the LIVE DB tables (no CSV on disk).
 
-Workflow (event-driven, on screener upload):
-  1. POST /api/admin/load_screener_json  {rows:[...]}  -> clean-replace screener_raw
-  2. POST /api/gvm/recompute                            -> score all -> write:
+GVM = G + V + M, where:
+  G (Growth)  + V (Value)  -> from screener_raw  (weekly upload; fundamentals)
+  M (Momentum)             -> from momentum_scores (DAILY; price-driven)
+
+This split is the core of the GVM TREND:
+  - Fundamentals (G,V) step-change only when a new screener CSV is uploaded.
+  - Momentum (M) recomputes daily from raw_prices via momentum_daily.py.
+  - Combined daily snapshot -> gvm_history -> the trend line.
+
+Workflow:
+  1. POST /api/admin/load_screener_json  {rows:[...]}  -> clean-replace screener_raw (weekly)
+  2. POST /api/gvm/recompute                            -> refresh momentum (daily) + score all:
          - gvm_history  (APPEND one dated row per stock; the trend table)
-         - gvm_scores   (UPSERT latest snapshot; canonical read table)
-
-Data sources (both already wide, normalized, joined on nse_code):
-  - input_raw      : nse_code, company_name, market_cap, gvm_segment, fy27_growth
-  - screener_raw   : nse_code, price, pe, roce, all 21-param inputs
+         - gvm_scores   (REPLACE latest snapshot; canonical read table)
 
 gvm_scores canonical schema:
   symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score,
@@ -31,7 +35,8 @@ import pandas as pd
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Header
 
-from gvm_engine import api_gvm_score
+from gvm_engine import api_g_score, api_v_score
+import momentum_daily
 
 log = logging.getLogger("scorr.gvm_nightly")
 
@@ -55,8 +60,6 @@ def _check_admin(token):
 
 # ============================================================
 # SCREENER COLUMN MAPPING (raw Screener header -> live screener_raw col)
-# Mirrors screener_loader.SCREENER_COLUMNS so an uploaded raw export maps
-# straight onto the live wide schema.
 # ============================================================
 SCREENER_COLUMNS = {
     "Current Price": "price", "Sales growth 5Years": "sales_growth_5y",
@@ -75,7 +78,6 @@ SCREENER_COLUMNS = {
     "Industry Group": "industry_group",
 }
 
-# Live screener_raw columns (order matters for INSERT). Excludes id, loaded_at.
 SCREENER_LIVE_COLS = [
     "company_name", "BSE Code", "nse_code", "ISIN Code", "industry_group", "Industry",
     "price", "market_cap", "pe", "historical_pe", "segment_pe", "Price to book value",
@@ -102,16 +104,17 @@ BFSI_SEGMENTS = {
     "Holding Companies",
 }
 
+# G + V peer params only (M now comes from momentum_scores).
 PEER_PARAMS = [
     "sales_growth_5y", "sales_growth_3y", "profit_growth_5y", "profit_growth_3y",
     "qoq_sales_growth", "qoq_profit_growth", "opm", "opm_expansion", "fixed_asset_growth",
     "inst_holding_abs", "inst_holding_change", "roce", "interest_coverage",
-    "dividend_yield", "potential_upside", "return_1y", "return_3y", "return_52w_vs_index",
+    "dividend_yield", "potential_upside",
 ]
 
 
 # ============================================================
-# LABELS + VERDICT + PUNCHLINE (from gvm_analytics.py)
+# LABELS + VERDICT + PUNCHLINE
 # ============================================================
 def _label_growth(s):
     return "Excellent" if s >= 8 else "Healthy" if s >= 6.5 else "Average" if s >= 5 else "Weak"
@@ -146,7 +149,6 @@ def _punchline(verd, g_lbl, v_lbl, m_lbl, gvm_lbl):
 # LOAD: clean-replace screener_raw from uploaded rows (raw headers)
 # ============================================================
 def _sql_clean_replace_screener(rows: List[dict]) -> int:
-    """rows are dicts keyed by RAW Screener headers. Rename, clean, replace."""
     df = pd.DataFrame(rows)
     df = df.rename(columns={"NSE Code": "nse_code", "Name": "company_name"})
     df = df.rename(columns=SCREENER_COLUMNS)
@@ -155,7 +157,6 @@ def _sql_clean_replace_screener(rows: List[dict]) -> int:
     df = df[~df["nse_code"].isin(["", "nan"])].copy()
     df = df.drop_duplicates(subset="nse_code", keep="first").reset_index(drop=True)
 
-    # numeric coercion for non-text cols present
     for c in df.columns:
         if c not in SCREENER_TEXT_COLS:
             df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -185,23 +186,30 @@ def _sql_clean_replace_screener(rows: List[dict]) -> int:
 
 
 # ============================================================
-# RECOMPUTE: read DB -> score -> write gvm_history + gvm_scores
+# RECOMPUTE: read DB -> score G+V (screener) + M (momentum_scores) -> write tables
 # ============================================================
-def _load_merged_df() -> pd.DataFrame:
+def _load_merged_df(target_date: date) -> pd.DataFrame:
     with _conn() as conn:
         inp = pd.read_sql_query(
             "SELECT nse_code, company_name, market_cap, gvm_segment, fy27_growth FROM input_raw", conn
         )
         scr = pd.read_sql_query("SELECT * FROM screener_raw", conn)
+        # latest momentum on/before target date
+        mom = pd.read_sql_query(
+            "SELECT DISTINCT ON (symbol) symbol, m_score FROM momentum_scores "
+            "WHERE score_date <= %s ORDER BY symbol, score_date DESC",
+            conn, params=(target_date,),
+        )
 
     for d in (inp, scr):
         d["nse_code"] = d["nse_code"].astype(str).str.strip()
+    mom["symbol"] = mom["symbol"].astype(str).str.strip()
 
-    # input_raw is master for segment + fy27; screener_raw is fundamentals.
     df = inp.merge(scr, on="nse_code", how="inner", suffixes=("", "_scr"))
+    df = df.merge(mom.rename(columns={"symbol": "nse_code", "m_score": "m_score_daily"}),
+                  on="nse_code", how="left")
     df["gvm_segment"] = df["gvm_segment"].astype(str).str.strip().replace({"nan": "Unknown", "": "Unknown"})
 
-    # derived inputs the engine expects
     if "opm_latest_q" in df and "opm_prev_year_q" in df:
         df["opm_expansion"] = (df["opm_latest_q"] - df["opm_prev_year_q"]) * 100
     else:
@@ -252,6 +260,7 @@ def _peer_averages(df: pd.DataFrame) -> Dict:
 
 
 def _stock_dict(row, peer_avgs):
+    """G + V inputs only (M comes from momentum_scores separately)."""
     seg = row.get("gvm_segment", "Unknown")
     peers = peer_avgs.get(seg, {})
 
@@ -288,27 +297,43 @@ def _stock_dict(row, peer_avgs):
         "dividend_yield": v("dividend_yield"), "peer_dividend_yield": p("dividend_yield"),
         "pe": v("pe"), "historical_pe": v("historical_pe"), "segment_pe": v("segment_pe"),
         "potential_upside": v("potential_upside"), "peer_potential_upside": p("potential_upside"),
-        "return_1y": v("return_1y"), "peer_return_1y": p("return_1y"),
-        "return_3y": v("return_3y"), "peer_return_3y": p("return_3y"),
-        "dma_50": v("dma_50"), "dma_200": v("dma_200"),
-        "return_52w_vs_index": v("return_52w_vs_index"), "peer_return_52w_vs_index": p("return_52w_vs_index"),
     }
 
 
-def recompute_gvm(target_date: Optional[date] = None) -> Dict:
+def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = True) -> Dict:
     target_date = target_date or date.today()
-    df = _load_merged_df()
+
+    # 1. Refresh daily momentum from raw_prices (price-driven M).
+    mom_result = {"status": "skipped"}
+    if refresh_momentum:
+        try:
+            mom_result = momentum_daily.compute_momentum(target_date)
+        except Exception as e:
+            log.error(f"momentum refresh failed: {e}")
+            mom_result = {"status": "error", "message": str(e)}
+
+    # 2. Merge fundamentals (screener) + daily momentum.
+    df = _load_merged_df(target_date)
     if df.empty:
-        return {"status": "warn", "message": "merge empty - check input_raw / screener_raw", "scored": 0}
+        return {"status": "warn", "message": "merge empty - check input_raw / screener_raw", "scored": 0,
+                "momentum": mom_result}
 
     peer_avgs = _peer_averages(df)
-    history_rows, latest_rows, errors = [], [], 0
+    history_rows, latest_rows, errors, m_missing = [], [], 0, 0
 
     for _, row in df.iterrows():
         try:
             sd = _stock_dict(row, peer_avgs)
-            r = api_gvm_score(sd)
-            g, vv, m, total = r["G_score"], r["V_score"], r["M_score"], r["GVM_score"]
+            g = api_g_score(sd)["score"]
+            vv = api_v_score(sd)["score"]
+            # M from daily momentum_scores; neutral 5.0 fallback if missing.
+            m_raw = row.get("m_score_daily")
+            if m_raw is None or (isinstance(m_raw, float) and pd.isna(m_raw)):
+                m = 5.0
+                m_missing += 1
+            else:
+                m = round(float(m_raw), 2)
+            total = round((g + vv + m) / 3, 2)
             verd = _verdict(total)
             punch = _punchline(verd, _label_growth(g), _label_value(vv),
                                _label_momentum(m), _label_gvm(total))
@@ -327,7 +352,6 @@ def recompute_gvm(target_date: Optional[date] = None) -> Dict:
             log.warning(f"GVM score {row.get('nse_code','?')}: {e}")
 
     with _conn() as conn, conn.cursor() as cur:
-        # APPEND to gvm_history (re-runnable same day via unique upsert)
         cur.executemany("""
             INSERT INTO gvm_history (symbol, score_date, g_score, v_score, m_score, gvm_score, verdict, segment)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
@@ -335,7 +359,6 @@ def recompute_gvm(target_date: Optional[date] = None) -> Dict:
                 g_score=EXCLUDED.g_score, v_score=EXCLUDED.v_score, m_score=EXCLUDED.m_score,
                 gvm_score=EXCLUDED.gvm_score, verdict=EXCLUDED.verdict, segment=EXCLUDED.segment
         """, history_rows)
-        # REPLACE latest snapshot in gvm_scores
         cur.execute("DELETE FROM gvm_scores")
         cur.executemany("""
             INSERT INTO gvm_scores
@@ -346,7 +369,8 @@ def recompute_gvm(target_date: Optional[date] = None) -> Dict:
 
     return {
         "status": "ok", "score_date": str(target_date),
-        "scored": len(history_rows), "errors": errors,
+        "scored": len(history_rows), "errors": errors, "m_missing": m_missing,
+        "momentum": mom_result,
         "history_table": "gvm_history (appended)", "latest_table": "gvm_scores (replaced)",
     }
 
@@ -366,9 +390,9 @@ async def load_screener_json(req: Request, x_admin_token: Optional[str] = Header
 
 
 @router.post("/api/gvm/recompute")
-def gvm_recompute(x_admin_token: Optional[str] = Header(None)):
+def gvm_recompute(refresh_momentum: bool = True, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    return recompute_gvm()
+    return recompute_gvm(refresh_momentum=refresh_momentum)
 
 
 @router.get("/api/gvm/history/{symbol}")
