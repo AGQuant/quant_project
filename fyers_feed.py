@@ -26,6 +26,13 @@ whole universe.
 Indices (NIFTY/BANKNIFTY/INDIAVIX) LTP -> cmp_prices.
 Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
 
+MARKET-CLOSE GUARD (30-May-2026): bars bucketed at/after 15:30 IST are never
+persisted. Post-close stray ticks were re-stamping a frozen 15:30 bar that
+flush_all() re-wrote every 30s (ON CONFLICT), creating ghost rows
+(15:30-16:55, frozen price, cumulative volume). _flush now drops any bar
+>= 15:30, and is_market_open() halts housekeeping at 15:29. Last saved bar
+of the day = 15:29.
+
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
   Refresh-token flow is DISABLED (SEBI: continuous refresh sessions banned).
   -> ONE 2FA login per TRADING DAY, done HEADLESS via TOTP (fyers_autologin).
@@ -43,7 +50,7 @@ USAGE:
 """
 
 import argparse, hashlib, os, time, logging, threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 import pytz, psycopg2, requests
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
@@ -56,6 +63,9 @@ QUOTES_URL   = 'https://api-t1.fyers.in/data/quotes'
 IST          = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS = 7
+
+# Market-close guard: no intraday bar at/after this IST time is persisted.
+MARKET_CLOSE = dt_time(15, 30)
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 # Literal & — the Fyers symbol-master (WS validation) expects NSE:M&M-EQ, and
@@ -202,6 +212,15 @@ class BarAggregator:
 
     def _flush(self, key, bar):
         sym, _ = key
+        # MARKET-CLOSE GUARD: never persist a bar bucketed at/after 15:30 IST.
+        # Stray post-close ticks were creating frozen ghost rows (15:30-16:55)
+        # that flush_all() re-wrote every 30s via ON CONFLICT. Drop them here
+        # at the source so the last saved bar of the day is 15:29.
+        try:
+            if bar['ts'].time() >= MARKET_CLOSE:
+                return
+        except Exception:
+            pass
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
@@ -269,7 +288,9 @@ def is_market_open():
     now = datetime.now(IST)
     if now.weekday() >= 5: return False
     mins = now.hour * 60 + now.minute
-    return (9*60+15) <= mins <= (15*60+30)
+    # Halt at 15:29 (not 15:30): the final saved bar is the 15:29 bucket, and
+    # housekeeping must not keep flushing partial bars into the close minute.
+    return (9*60+15) <= mins <= (15*60+29)
 
 def run(auth_code=None):
     import fyers_backfill
