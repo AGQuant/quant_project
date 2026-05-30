@@ -13,6 +13,7 @@
  * ║     6. Sell_Overbought        — Failed breakout signals          ║
  * ║     7. In_Position            — Live open trades (personal)      ║
  * ║     8. Trade_Log              — Closed trade history (personal)  ║
+ * ║     9. Raw_Data               — All 208 futures x 21 metrics     ║
  * ║                                                                  ║
  * ║   Data source: Railway V8 endpoints + personal_journal table     ║
  * ║                                                                  ║
@@ -20,11 +21,11 @@
  */
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   CONFIG
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.2.4';   // fetchMetricsAll -> /api/v8/metrics/all (V5 fully removed)
+const SCRIPT_VERSION = '1.2.5';   // Raw_Data tab (/api/v8/raw), inferStrategy prefers server strategy + Manual/Untagged bucket, 290->208 label
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -38,9 +39,14 @@ const SHEETS = {
   SO:      'Sell_Overbought',
   POS:     'In_Position',
   LOG:     'Trade_Log',
+  RAW:     'Raw_Data',
 };
 
 const BASKETS = ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum', 'sell_overbought'];
+
+// Strategy display order used across In Position / Trade Log / Performance.
+// 'Manual/Untagged' captures any personal trade with no v8_basket tag — visible, never force-fit.
+const STRATEGY_ORDER = ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum', 'Manual/Untagged'];
 
 const COLORS = {
   DARK_HEADER:    '#1F2937',
@@ -53,6 +59,7 @@ const COLORS = {
   SELL_REV:       '#EA580C',
   SELL_MOM:       '#C2410C',
   SELL_OB:        '#9333EA',
+  MANUAL:         '#6B7280',
 
   PASS_BG:        '#DCFCE7',
   PASS_TEXT:      '#15803D',
@@ -91,10 +98,22 @@ const BASKET_META = {
 
 const SIGNAL_COLS = ['Symbol', 'GVM', 'DMA200 %', 'DMA50 %', 'RSI Month', 'RSI Week', 'Mth Ret %', 'Wk Ret %'];
 
+// Raw_Data tab columns — mirror /api/v8/raw field order (21 metrics + symbol).
+const RAW_COLS = [
+  'Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D',
+  'Mth Ret', 'Wk Ret', 'Yr Ret', 'Sec Day', 'Sec Wk', 'Mth Idx', 'wi52',
+  'Rng 1D', 'Rng 3D', 'Prev Chg', 'Upper BB', 'Lower BB', 'ma9_21', 'Vol Ratio',
+];
+const RAW_FIELDS = [
+  'symbol', 'gvm_score', 'dma_20', 'dma_50', 'dma_200', 'rsi_month', 'rsi_weekly', 'daily_rsi',
+  'month_return', 'week_return', 'year_return', 'sector_day', 'sector_week', 'month_index', 'week_index_52',
+  'range_1d', 'range_3d', 'prev_day_change', 'upper_bb', 'lower_bb', 'ma9_vs_ma21', 'vol_ratio',
+];
 
-// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   MENU + TRIGGERS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -107,6 +126,7 @@ function onOpen() {
     .addItem('⚠️  Refresh Sell Overbought', 'refreshSellOverbought')
     .addItem('📍 Refresh In Position',      'refreshInPosition')
     .addItem('📒 Refresh Trade Log',        'refreshTradeLog')
+    .addItem('🗃️ Refresh Raw Data',         'refreshRawData')
     .addSeparator()
     .addItem('🧹 Clean Rebuild (delete + rebuild + refresh)', 'cleanRebuild')
     .addSeparator()
@@ -145,15 +165,15 @@ function scheduledRefresh() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   CLEAN REBUILD
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function cleanRebuild() {
   const ui = SpreadsheetApp.getUi();
   const confirm = ui.alert(
     '🧹 Clean Rebuild',
-    'This will DELETE all 8 Scorr tabs and rebuild them fresh from Railway.\n\nContinue?',
+    'This will DELETE all 9 Scorr tabs and rebuild them fresh from Railway.\n\nContinue?',
     ui.ButtonSet.YES_NO
   );
   if (confirm !== ui.Button.YES) return;
@@ -183,9 +203,9 @@ function cleanRebuild() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   UPDATE CHECKER
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function pullLatestFromGitHub() {
   let remoteCode, remoteVersion;
@@ -284,9 +304,9 @@ function showVersion() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   MAIN REFRESH ENTRY POINTS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshAll() {
   toast('Refreshing all tabs…');
@@ -295,6 +315,7 @@ function refreshAll() {
   refreshSellOverbought();
   refreshInPosition();
   refreshTradeLog();
+  refreshRawData();
   toast('✓ All tabs refreshed');
 }
 
@@ -311,9 +332,9 @@ function refreshSellBaskets() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   API CALLS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function fetchJSON(endpoint) {
   try {
@@ -340,11 +361,12 @@ function fetchSellOverbought() { return fetchJSON('/api/v8/sell_overbought?limit
 function fetchPositions()      { return fetchJSON('/api/v8/positions?limit=100'); }
 function fetchTrades()         { return fetchJSON('/api/v8/trades?limit=200'); }
 function fetchMetricsAll()     { return fetchJSON('/api/v8/metrics/all'); }
+function fetchRawData()        { return fetchJSON('/api/v8/raw?limit=250'); }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TAB: MASTER DASHBOARD
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshMasterDashboard() {
   const sheet = getOrCreate(SHEETS.DASH);
@@ -381,9 +403,9 @@ function refreshMasterDashboard() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TODAY'S SIGNALS — consolidated across all 5 baskets
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function renderTodaysSignals(sheet, row) {
   const allBasketData = {};
@@ -514,9 +536,11 @@ function renderPerformanceSummary(sheet, row) {
   const openHeaders = ['Strategy', 'Direction', 'Open', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L'];
   row = renderTableHeader(sheet, row, openHeaders, 8);
 
-  ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
-    const a = openAgg[strat] || zeroAgg();
-    const dir = strat.startsWith('Buy') ? 'LONG' : 'SHORT';
+  STRATEGY_ORDER.forEach(strat => {
+    const a = openAgg[strat];
+    if (!a) return;  // skip empty Manual/Untagged unless present
+    if (strat === 'Manual/Untagged' && a.count === 0) return;
+    const dir = strat.startsWith('Buy') ? 'LONG' : (strat.startsWith('Sell') ? 'SHORT' : 'MIXED');
     row = renderDataRow(sheet, row, 8, [
       strat, dir, a.count, a.pnl, fmtPct(a.accuracy), a.winning, a.losing, a.avgPnl,
     ], { pnlCols: [4, 8] });
@@ -529,11 +553,13 @@ function renderPerformanceSummary(sheet, row) {
   const closedHeaders = ['Strategy', 'Direction', 'Closed', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L'];
   row = renderTableHeader(sheet, row, closedHeaders, 8);
 
-  ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
-    const a = closedAgg[strat] || zeroAgg();
-    const dir = strat.startsWith('Buy') ? 'LONG' : 'SHORT';
+  STRATEGY_ORDER.forEach(strat => {
+    const a = closedAgg[strat];
+    if (!a) return;
+    if (strat === 'Manual/Untagged' && a.count === 0) return;
+    const dir = strat.startsWith('Buy') ? 'LONG' : (strat.startsWith('Sell') ? 'SHORT' : 'MIXED');
     row = renderDataRow(sheet, row, 8, [
-      strat, dir, a.count, a.pnl, fmtPct(a.accuracy), a.winning, a.losing, a.avgPnl,
+      strat, dir, a.count, a.pnl, fmtPct(a.accuracy), a.targetHit, a.slGap, a.avgPnl,
     ], { pnlCols: [4, 8] });
   });
   const totC = closedAgg.__TOTAL || zeroAgg();
@@ -543,9 +569,9 @@ function renderPerformanceSummary(sheet, row) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   MARKET GATE — with slot tracking (used vs available)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function renderMarketGate(sheet, row) {
   const mood = fetchMarketMood();
@@ -673,9 +699,9 @@ function renderFilterCard(sheet, row, basket) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TABS: BASKET FUNNELS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshBasketFunnel(basket) {
   const sheetName = {
@@ -706,7 +732,7 @@ function refreshBasketFunnel(basket) {
   row++;
 
   const stamp = sheet.getRange(row, 1, 1, 14).merge();
-  stamp.setValue(`Universe: 290 F&O · Target: ${config.target || 'S1'} · Last refresh: ${nowIST()}`)
+  stamp.setValue(`Universe: 208 F&O · Target: ${config.target || 'S1'} · Last refresh: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
@@ -815,9 +841,9 @@ function computeFunnelCounts(metricsAll, filters) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TAB: SELL OVERBOUGHT
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshSellOverbought() {
   const sheet = getOrCreate(SHEETS.SO);
@@ -913,9 +939,9 @@ function refreshSellOverbought() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TAB: IN POSITION
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshInPosition() {
   const sheet = getOrCreate(SHEETS.POS);
@@ -944,8 +970,10 @@ function refreshInPosition() {
   row += 2;
 
   const grouped = groupByStrategy(positions);
-  ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
-    row = renderStrategyPositionSection(sheet, row, strat, grouped[strat] || []);
+  STRATEGY_ORDER.forEach(strat => {
+    const list = grouped[strat] || [];
+    if (strat === 'Manual/Untagged' && list.length === 0) return;
+    row = renderStrategyPositionSection(sheet, row, strat, list);
     row += 1;
   });
 
@@ -1028,9 +1056,9 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TAB: TRADE LOG
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshTradeLog() {
   const sheet = getOrCreate(SHEETS.LOG);
@@ -1055,8 +1083,10 @@ function refreshTradeLog() {
   row += 2;
 
   const grouped = groupByStrategy(trades);
-  ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum'].forEach(strat => {
-    row = renderStrategyTradeSection(sheet, row, strat, grouped[strat] || []);
+  STRATEGY_ORDER.forEach(strat => {
+    const list = grouped[strat] || [];
+    if (strat === 'Manual/Untagged' && list.length === 0) return;
+    row = renderStrategyTradeSection(sheet, row, strat, list);
     row += 1;
   });
 
@@ -1144,19 +1174,110 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//   BUILD ALL TABS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//   TAB: RAW DATA — all active futures x 21 metrics (source: /api/v8/raw)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
-function buildAllTabs() {
-  Object.values(SHEETS).forEach(name => getOrCreate(name));
-  toast('All 8 tabs created. Run "Refresh All" next.');
+function refreshRawData() {
+  const sheet = getOrCreate(SHEETS.RAW);
+  sheet.clear().clearConditionalFormatRules();
+  sheet.setHiddenGridlines(true);
+
+  const data = fetchRawData();
+
+  let row = 1;
+  const ncol = RAW_COLS.length;
+
+  sheet.getRange(row, 1, 1, ncol).merge()
+    .setValue('🗃️  RAW DATA — All Active Futures × 21 Metrics')
+    .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
+    .setFontSize(15).setFontWeight('bold');
+  sheet.setRowHeight(row, 34);
+  row++;
+
+  if (!data || !data.stocks) {
+    sheet.getRange(row, 1).setValue('⚠ API unreachable — /api/v8/raw returned no data');
+    return;
+  }
+
+  const scoreDate = data.score_date || '—';
+  sheet.getRange(row, 1, 1, ncol).merge()
+    .setValue(`${data.count || 0} stocks · Score date: ${scoreDate} · GVM-sorted · Refreshed: ${nowIST()}`)
+    .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
+    .setFontSize(9).setFontStyle('italic');
+  sheet.setRowHeight(row, 20);
+  row += 2;
+
+  // Header row
+  RAW_COLS.forEach((h, i) => {
+    sheet.getRange(row, 1 + i).setValue(h)
+      .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG)
+      .setFontSize(9).setFontColor(COLORS.NEUTRAL_TEXT)
+      .setHorizontalAlignment('center').setWrap(true)
+      .setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
+  });
+  sheet.setRowHeight(row, 30);
+  const headerRow = row;
+  row++;
+
+  const stocks = data.stocks || [];
+  if (stocks.length === 0) {
+    sheet.getRange(row, 1, 1, ncol).merge()
+      .setValue('No metrics rows for the latest score date')
+      .setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT)
+      .setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
+    row++;
+  } else {
+    // Bulk-build a 2D array for speed (one setValues call instead of per-cell).
+    const matrix = stocks.map(s => RAW_FIELDS.map((f, i) => {
+      const v = s[f];
+      if (f === 'symbol') return v;
+      if (f === 'gvm_score') return fmtNum(v, 2);
+      if (f === 'rsi_month' || f === 'rsi_weekly' || f === 'daily_rsi' ||
+          f === 'month_index' || f === 'week_index_52') return fmtNum(v, 1);
+      if (f === 'vol_ratio') return fmtNum(v, 2);
+      return fmtNum(v, 2);
+    }));
+
+    const dataRange = sheet.getRange(row, 1, matrix.length, ncol);
+    dataRange.setValues(matrix);
+    dataRange.setFontFamily(FONTS.MONO.family).setFontSize(9);
+
+    // Symbol column styling + alternating row backgrounds
+    sheet.getRange(row, 1, matrix.length, 1)
+      .setFontFamily(FONTS.HEADER.family).setFontWeight('bold')
+      .setHorizontalAlignment('left');
+    sheet.getRange(row, 2, matrix.length, ncol - 1).setHorizontalAlignment('right');
+
+    for (let r = 0; r < matrix.length; r++) {
+      const bg = (r % 2 === 0) ? COLORS.CARD_BG : COLORS.ALT_ROW;
+      sheet.getRange(row + r, 1, 1, ncol).setBackground(bg)
+        .setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
+    }
+    row += matrix.length;
+  }
+
+  sheet.setColumnWidth(1, 130);
+  sheet.setColumnWidths(2, ncol - 1, 78);
+  sheet.setFrozenRows(headerRow);
+  sheet.setFrozenColumns(1);
+  toast('✓ Raw Data refreshed');
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+//   BUILD ALL TABS
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+function buildAllTabs() {
+  Object.values(SHEETS).forEach(name => getOrCreate(name));
+  toast('All 9 tabs created. Run "Refresh All" next.');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   HELPERS — AGGREGATIONS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function aggregatePositions(positions) {
   const out = { __TOTAL: zeroAgg() };
@@ -1204,13 +1325,26 @@ function zeroAgg() {
 }
 
 function groupByStrategy(rows) {
-  const out = { 'Buy Reversal': [], 'Buy Momentum': [], 'Sell Reversal': [], 'Sell Momentum': [] };
-  rows.forEach(r => { const s = inferStrategy(r); if (out[s]) out[s].push(r); });
+  const out = { 'Buy Reversal': [], 'Buy Momentum': [], 'Sell Reversal': [], 'Sell Momentum': [], 'Manual/Untagged': [] };
+  rows.forEach(r => { const s = inferStrategy(r); if (out[s]) out[s].push(r); else out['Manual/Untagged'].push(r); });
   return out;
 }
 
+// Strategy resolution order:
+//   1. Server-provided `strategy` (mapped from v8_basket by the API) — authoritative.
+//   2. Any explicit basket/signal_type field on the row.
+//   3. Otherwise -> 'Manual/Untagged'. NO force-fit to Buy/Sell Reversal.
 function inferStrategy(row) {
-  const explicit = row.Strategy || row.strategy || row.signal_type || row.v8_basket;
+  const server = row.strategy || row.Strategy;
+  if (server) {
+    const s = String(server).toLowerCase();
+    if (s.includes('buy') && s.includes('rev')) return 'Buy Reversal';
+    if (s.includes('buy') && s.includes('mom')) return 'Buy Momentum';
+    if (s.includes('sell') && s.includes('rev')) return 'Sell Reversal';
+    if (s.includes('sell') && s.includes('mom')) return 'Sell Momentum';
+    if (s.includes('overbought')) return 'Sell Reversal';
+  }
+  const explicit = row.signal_type || row.v8_basket;
   if (explicit) {
     const s = String(explicit).toLowerCase();
     if (s.includes('buy') && s.includes('rev')) return 'Buy Reversal';
@@ -1219,7 +1353,8 @@ function inferStrategy(row) {
     if (s.includes('sell') && s.includes('mom')) return 'Sell Momentum';
     if (s.includes('overbought')) return 'Sell Reversal';
   }
-  return isLongTrade(row) ? 'Buy Reversal' : 'Sell Reversal';
+  // No reliable tag — surface as Manual/Untagged instead of silently mislabelling.
+  return 'Manual/Untagged';
 }
 
 function isLongTrade(row) {
@@ -1302,13 +1437,14 @@ function strategyMeta(strategy) {
   if (strategy === 'Buy Momentum')  return { color: COLORS.BUY_MOM,  emoji: '▲' };
   if (strategy === 'Sell Reversal') return { color: COLORS.SELL_REV, emoji: '▼' };
   if (strategy === 'Sell Momentum') return { color: COLORS.SELL_MOM, emoji: '▼' };
+  if (strategy === 'Manual/Untagged') return { color: COLORS.MANUAL, emoji: '◆' };
   return { color: COLORS.DARK_HEADER, emoji: '•' };
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   HELPERS — UI / FORMATTING
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 function getOrCreate(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
