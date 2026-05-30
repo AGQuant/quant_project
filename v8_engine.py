@@ -4,8 +4,10 @@ V8 Signal Engine — Scorr
 Computes ~21 metrics per stock from raw_prices + intraday_prices + gvm_scores,
 then runs the V8 AND-gate baskets.
 
+Universe = futures_universe (is_active = TRUE) — the live Fyers F&O list.
+v8_universe is DEPRECATED and no longer read.
+
 Tables:
-  v8_universe  — the tradeable futures universe (290 stocks) + signal context
   v8_metrics   — daily computed indicator values per stock
   v8_qualified — stocks passing each basket's AND-gate
 
@@ -255,17 +257,14 @@ def store_metrics(conn, m: Dict):
 
 
 def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> Dict:
-    """Compute metrics for the universe. Universe = v8_universe, fallback futures_universe."""
+    """Compute metrics for the live futures universe (futures_universe, is_active=TRUE)."""
     target_date = target_date or date.today()
     if symbols is None:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT symbol FROM v8_universe ORDER BY symbol")
+            cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE ORDER BY symbol")
             symbols = [r[0] for r in cur.fetchall()]
-            if not symbols:
-                cur.execute("SELECT symbol FROM futures_universe WHERE is_active=TRUE ORDER BY symbol")
-                symbols = [r[0] for r in cur.fetchall()]
 
-    results = {"date": str(target_date), "symbols_processed": 0, "errors": []}
+    results = {"date": str(target_date), "universe": "futures_universe", "symbols_processed": 0, "errors": []}
     for sym in symbols:
         try:
             m = compute_metrics_for_symbol(conn, sym, target_date)
@@ -274,5 +273,5 @@ def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
         except Exception as e:
             results["errors"].append(f"{sym}: {str(e)[:80]}")
             log.warning(f"V8 engine error on {sym}: {e}")
-    log.info(f"V8 engine done: {results['symbols_processed']} symbols")
+    log.info(f"V8 engine done: {results['symbols_processed']} symbols (futures_universe)")
     return results
