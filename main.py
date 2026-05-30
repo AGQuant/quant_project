@@ -28,13 +28,16 @@ from v8_engine import (
 )
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
+from nse_holidays import is_trading_day, is_nse_holiday
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.1.2
+# Scorr / Project Quant — main.py v2.1.3
+# v2.1.3: NSE holiday calendar wired in (nse_holidays.py). _is_market_hours,
+#         _is_eod_window, and the scheduler now skip notified NSE holidays
+#         (not just weekends). /api/now returns is_holiday + is_trading_day.
 # v2.1.2: add /api/now + server_now MCP tool — authoritative India time
-#         (Asia/Kolkata, UTC+5:30) + NSE market-open status. Single source
-#         of truth for date/day/time reasoning (no UTC guessing).
+#         (Asia/Kolkata, UTC+5:30) + NSE market-open status.
 # v2.1.1: get_intraday gains `source` param. source='yahoo' forces a LIVE
 #         Yahoo pull and SKIPS the DB, even for futures names — manual
 #         Fyers-down check (no silent auto-fallback by design). Default
@@ -44,20 +47,14 @@ import yahoo_ondemand
 #         - non-futures -> fetched LIVE from Yahoo (5-min default, up to ~60d)
 #           and NOT stored. Backed by yahoo_ondemand.get_intraday_smart.
 #         New `interval` param (1m/5m/15m/30m/60m/1d). Wired directly into
-#         main.py (the entrypoint Railway runs) — the old main_patched.py
-#         monkeypatch never loaded because the start cmd points at main:app.
+#         main.py (the entrypoint Railway runs).
 # v2.0.1: Auto-run V8 engine daily 15:45 IST (post-close) so v8_metrics
 #         never goes stale. Strong ref kept in scheduler loop.
 # v2.0.0: FULL V5/V6 REMOVAL. V8-native everywhere.
-#         - v5_engine -> v8_engine (run_v8_engine, V8_SCHEMA_SQL)
-#         - tables: v5_metrics->v8_metrics, v5_signals->v8_universe
-#         - all /api/v5/* and /api/v6/* endpoints DELETED
-#         - all v5_/v6_ MCP tools removed; /api/v8/run added
-#         - legacy v5 strategy tables (signals/trades/portfolio/etc) no longer created
 # v1.9.6: Yahoo CMP fallback covers entire universe (kept).
 # ============================================================
 
-VERSION = "2.1.2"
+VERSION = "2.1.3"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -121,7 +118,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.1.2 — V8-native)")
+        log.info("Tables ready (v2.1.3 — V8-native)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -130,12 +127,12 @@ def _ist_now() -> datetime:
 
 def _is_market_hours() -> bool:
     now = _ist_now()
-    if now.weekday() >= 5: return False
+    if not is_trading_day(now.date()): return False
     return now.replace(hour=9, minute=15, second=0, microsecond=0) <= now <= now.replace(hour=15, minute=30, second=0, microsecond=0)
 
 def _is_eod_window() -> bool:
     now = _ist_now()
-    if now.weekday() >= 5: return False
+    if not is_trading_day(now.date()): return False
     return now.replace(hour=15, minute=45, second=0, microsecond=0) <= now <= now.replace(hour=16, minute=30, second=0, microsecond=0)
 
 def _get_futures_symbols() -> List[str]:
@@ -325,7 +322,6 @@ async def _task_run_v8_engine():
     if _v8_engine_ran_today == today:
         return
     log.info("15:45 IST: Launching V8 engine auto-run")
-    # run_v8_engine is sync/blocking — offload to a thread so the loop isn't blocked
     asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
 
 async def _task_load_earnings_daily():
@@ -344,18 +340,20 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.1.2 — V8-native, engine auto-run 15:45 IST, raw_prices 21:00 IST)")
+    log.info("Scheduler started (v2.1.3 — V8-native, NSE-holiday aware, engine 15:45 IST, raw_prices 21:00 IST)")
     while True:
         try:
             now = _ist_now()
-            if now.weekday() < 5 and now.hour == 9 and now.minute < 5:
+            trading_day = is_trading_day(now.date())
+            if trading_day and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
             if _is_market_hours():
                 await _task_refresh_cmp()
-            # V8 engine auto-run: weekdays, 15:45–15:55 IST (after market close)
-            if now.weekday() < 5 and now.hour == 15 and 45 <= now.minute < 55:
+            # V8 engine auto-run: trading days only, 15:45–15:55 IST (after close)
+            if trading_day and now.hour == 15 and 45 <= now.minute < 55:
                 await _task_run_v8_engine()
-            if now.hour == 21 and now.minute < 5:
+            # raw_prices EOD refresh: trading days only, ~21:00 IST
+            if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
@@ -379,12 +377,15 @@ def health():
 def server_now():
     """Authoritative India time (Asia/Kolkata, UTC+5:30) + NSE market status."""
     n = _ist_now()
+    d = n.date()
     return {
         "india_time": n.strftime("%Y-%m-%d %H:%M:%S"),
         "timezone": "Asia/Kolkata (UTC+5:30)",
         "day": n.strftime("%A"),
         "weekday": n.weekday(),
         "is_weekend": n.weekday() >= 5,
+        "is_holiday": is_nse_holiday(d),
+        "is_trading_day": is_trading_day(d),
         "market_open": _is_market_hours(),
     }
 
@@ -919,7 +920,7 @@ async def oauth_token(req: Request):
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
 MCP_TOOLS = [
-    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE market-open status. Use this as the single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status. Use this as the single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
@@ -968,8 +969,6 @@ async def _call_tool(name, args):
         elif name == "get_sector_rating": r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
         elif name == "get_momentum": r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
         elif name == "get_intraday":
-            # Smart: futures -> stored Fyers 1-min (DB); non-futures -> live Yahoo (no store).
-            # source='yahoo' forces live Yahoo, skipping the DB even for futures (Fyers-down check).
             sym = (args.get("symbol") or "").upper()
             try:
                 days = int(args.get("days") or 15)
