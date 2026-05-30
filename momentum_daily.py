@@ -1,30 +1,38 @@
 """
 Momentum Daily Engine - Scorr
 ==============================
-Recomputes the 5 momentum (M) parameters DAILY from raw_prices (fresh OHLC),
+Recomputes the 7 momentum (M) parameters DAILY from raw_prices (fresh OHLC),
 writes a dated row per stock into momentum_scores. This is the price-driven
 half of GVM that moves every day; G+V ride the weekly screener upload.
 
-Verified formula (reproduced from the live 21-May momentum_scores baseline):
-  dma_50, dma_200        -> ABSOLUTE  (DMA dev thresholds)
-  ret_52w_vs_index       -> ABSOLUTE  (return thresholds)
-  ret_1y                 -> ABSOLUTE  (return thresholds)
-  ret_3y                 -> RELATIVE  ((absolute + peer_relative)/2), peer=gvm_segment
-  m_score = mean of the 5 ratings
+Formula (v2 - 7 params):
+  ret_1y    -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
+  ret_3y    -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
+  ret_1m    -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment  [NEW]
+  dma_50    -> ABSOLUTE (DMA dev thresholds)
+  dma_200   -> ABSOLUTE (DMA dev thresholds)
+  ret_52w_vs_index -> ABSOLUTE (return thresholds)
+  rsi_month -> ABSOLUTE (6-period RSI on monthly candles)            [NEW]
+  m_score = mean of the 7 ratings; missing params fall back to 5.0 (neutral).
+  m_missing_count records how many of the 7 fell to fallback.
 
 Thresholds:
-  RETURN absolute:  <0 ->2.5 | 0-5 ->5 | 5-15 ->7.5 | >=15 ->10
-  DMA absolute:     <0 ->2.5 | 0-3 ->5 | 3-10 ->7.5 | >=10 ->10
+  RETURN absolute (1Y/3Y):  <0 ->2.5 | 0-5 ->5 | 5-15 ->7.5 | >=15 ->10
+  RETURN absolute (1M):     <0 ->2.5 | 0-3 ->5 | 3-8 ->7.5 | >=8 ->10
+  DMA absolute:             <0 ->2.5 | 0-3 ->5 | 3-10 ->7.5 | >=10 ->10
+  RSI_month absolute:       <50->2.5 | 50-60->5 | 60-70->7.5 | >=70->10
+  Relative (ratio vs peer trimmed-mean): >125 ->10 | >100 ->7.5 | >75 ->5 | else 2.5
 
 Lookbacks (calendar days, nearest prior trading bar):
-  1Y = 365d, 3Y = 1095d. Uses adjusted_close.
+  1M = 30d, 1Y = 365d, 3Y = 1095d. Uses adjusted_close.
   ret_52w_vs_index = stock_1y_return - NIFTY50_1y_return.
+  rsi_month: monthly close series (last close per calendar month), Wilder 6-period.
 """
 
 import os
 import logging
 from datetime import date
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 
 import psycopg
 import pandas as pd
@@ -34,33 +42,57 @@ log = logging.getLogger("scorr.momentum_daily")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 INDEX_SYMBOL = "NIFTY50"
+RSI_MONTHLY_PERIOD = 6  # 6-period RSI on monthly candles
 
 
 def _conn():
     return psycopg.connect(DATABASE_URL)
 
 
-# ---------- scoring primitives (verified against live baseline) ----------
+# ---------- scoring primitives ----------
 def score_return_absolute(v):
+    """Absolute return bands for 1Y / 3Y / 52w-vs-index."""
     if v is None or (isinstance(v, float) and np.isnan(v)):
-        return 5.0
+        return None
     if v < 0: return 2.5
     if v < 5: return 5.0
     if v < 15: return 7.5
     return 10.0
 
 
+def score_ret1m_absolute(v):
+    """Absolute return bands for 1M (smaller horizon, own cutoffs)."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return None
+    if v < 0: return 2.5
+    if v < 3: return 5.0
+    if v < 8: return 7.5
+    return 10.0
+
+
 def score_dma_absolute(dev):
     if dev is None or (isinstance(dev, float) and np.isnan(dev)):
-        return 5.0
+        return None
     if dev < 0: return 2.5
     if dev < 3: return 5.0
     if dev < 10: return 7.5
     return 10.0
 
 
+def score_rsi_month_absolute(rsi):
+    """6-period monthly RSI bands."""
+    if rsi is None or (isinstance(rsi, float) and np.isnan(rsi)):
+        return None
+    if rsi < 50: return 2.5
+    if rsi < 60: return 5.0
+    if rsi < 70: return 7.5
+    return 10.0
+
+
 def score_relative(stock_val, peer_avg):
     """Peer-relative half, mirrors gvm_engine.score_relative."""
+    if stock_val is None or (isinstance(stock_val, float) and np.isnan(stock_val)):
+        return None
     if peer_avg is None or peer_avg == 0 or (isinstance(peer_avg, float) and np.isnan(peer_avg)):
         return 5.0
     s, p = float(stock_val), float(peer_avg)
@@ -76,11 +108,12 @@ def score_relative(stock_val, peer_avg):
     return 2.5
 
 
-def score_ret3y_relative(stock_val, peer_avg):
-    """ret_3y = (absolute + relative) / 2."""
-    if stock_val is None or (isinstance(stock_val, float) and np.isnan(stock_val)):
-        return 5.0
-    return round((score_return_absolute(stock_val) + score_relative(stock_val, peer_avg)) / 2, 2)
+def score_two_factor(abs_rating, rel_rating):
+    """Average the absolute and relative halves. Each may be None (missing)."""
+    parts = [x for x in (abs_rating, rel_rating) if x is not None]
+    if not parts:
+        return None
+    return round(sum(parts) / len(parts), 2)
 
 
 # ---------- price-series math ----------
@@ -91,7 +124,6 @@ def _load_prices() -> pd.DataFrame:
             conn,
         )
     df["price_date"] = pd.to_datetime(df["price_date"])
-    # prefer adjusted_close; fall back to close
     df["px"] = df["adjusted_close"].where(df["adjusted_close"].notna(), df["close"])
     return df
 
@@ -111,12 +143,35 @@ def _price_on_or_before(g: pd.DataFrame, target_ts) -> Optional[float]:
     return float(sub.iloc[-1]["px"])
 
 
+def _monthly_rsi(g: pd.DataFrame, target_ts, period: int = RSI_MONTHLY_PERIOD) -> Optional[float]:
+    """6-period Wilder RSI on monthly closes (last bar of each calendar month)."""
+    sub = g[g["price_date"] <= target_ts]
+    if sub.empty:
+        return None
+    monthly = (
+        sub.set_index("price_date")["px"]
+        .resample("ME").last()
+        .dropna()
+    )
+    if len(monthly) < period + 1:   # need >= period+1 monthly closes
+        return None
+    delta = monthly.diff().dropna()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean().iloc[-1]
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean().iloc[-1]
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return float(100 - (100 / (1 + rs)))
+
+
 def _compute_raw_params(prices: pd.DataFrame, target_date: date) -> pd.DataFrame:
     target_ts = pd.Timestamp(target_date)
+    d1m = target_ts - pd.Timedelta(days=30)
     d1y = target_ts - pd.Timedelta(days=365)
     d3y = target_ts - pd.Timedelta(days=1095)
 
-    # index 1y return
     idx_g = prices[prices["symbol"] == INDEX_SYMBOL]
     idx_now = _price_on_or_before(idx_g, target_ts)
     idx_1y = _price_on_or_before(idx_g, d1y)
@@ -138,29 +193,35 @@ def _compute_raw_params(prices: pd.DataFrame, target_date: date) -> pd.DataFrame
         dma50 = ((px_now / sma50 - 1) * 100) if sma50 else None
         dma200 = ((px_now / sma200 - 1) * 100) if sma200 else None
 
+        p1m = _price_on_or_before(g, d1m)
         p1y = _price_on_or_before(g, d1y)
         p3y = _price_on_or_before(g, d3y)
+        ret1m = ((px_now / p1m - 1) * 100) if p1m else None
         ret1y = ((px_now / p1y - 1) * 100) if p1y else None
         ret3y = ((px_now / p3y - 1) * 100) if p3y else None
         ret52w_idx = (ret1y - idx_1y_ret) if (ret1y is not None and idx_1y_ret is not None) else None
+        rsi_m = _monthly_rsi(g, target_ts)
 
         rows.append({
             "symbol": sym, "latest_price": round(px_now, 2),
+            "ret_1m": round(ret1m, 2) if ret1m is not None else None,
             "ret_1y": round(ret1y, 2) if ret1y is not None else None,
             "ret_3y": round(ret3y, 2) if ret3y is not None else None,
             "dma_50": round(dma50, 2) if dma50 is not None else None,
             "dma_200": round(dma200, 2) if dma200 is not None else None,
             "ret_52w_vs_index": round(ret52w_idx, 2) if ret52w_idx is not None else None,
+            "rsi_month": round(rsi_m, 2) if rsi_m is not None else None,
         })
     return pd.DataFrame(rows)
 
 
-def _peer_ret3y(df: pd.DataFrame, seg_map: Dict[str, str]) -> Dict[str, float]:
+def _peer_trimmed_mean(df: pd.DataFrame, col: str, seg_map: Dict[str, str]) -> Dict[str, float]:
+    """Trimmed-mean (10-90 pctile, min 3) of `col` per gvm_segment."""
     df = df.copy()
     df["seg"] = df["symbol"].map(lambda s: seg_map.get(s, "Unknown"))
     out = {}
     for seg, grp in df.groupby("seg"):
-        vals = pd.to_numeric(grp["ret_3y"], errors="coerce").dropna()
+        vals = pd.to_numeric(grp[col], errors="coerce").dropna()
         if len(vals) >= 3:
             lo, hi = vals.quantile(0.10), vals.quantile(0.90)
             t = vals[(vals >= lo) & (vals <= hi)]
@@ -183,35 +244,59 @@ def compute_momentum(target_date: Optional[date] = None) -> Dict:
     if raw.empty:
         return {"status": "warn", "message": "no params computed", "scored": 0}
 
-    peer3y = _peer_ret3y(raw, seg_map)
+    peer1m = _peer_trimmed_mean(raw, "ret_1m", seg_map)
+    peer1y = _peer_trimmed_mean(raw, "ret_1y", seg_map)
+    peer3y = _peer_trimmed_mean(raw, "ret_3y", seg_map)
 
+    FB = 5.0  # neutral fallback
     out_rows = []
     for _, r in raw.iterrows():
         seg = seg_map.get(r["symbol"], "Unknown")
-        r1y_rt = score_return_absolute(r["ret_1y"])
-        r3y_rt = score_ret3y_relative(r["ret_3y"], peer3y.get(seg))
-        d50_rt = score_dma_absolute(r["dma_50"])
-        d200_rt = score_dma_absolute(r["dma_200"])
-        r52_rt = score_return_absolute(r["ret_52w_vs_index"])
-        m_score = round((r1y_rt + r3y_rt + d50_rt + d200_rt + r52_rt) / 5, 2)
+
+        # 2-factor params (absolute + relative)
+        r1m = score_two_factor(score_ret1m_absolute(r["ret_1m"]),
+                                score_relative(r["ret_1m"], peer1m.get(seg)))
+        r1y = score_two_factor(score_return_absolute(r["ret_1y"]),
+                               score_relative(r["ret_1y"], peer1y.get(seg)))
+        r3y = score_two_factor(score_return_absolute(r["ret_3y"]),
+                               score_relative(r["ret_3y"], peer3y.get(seg)))
+        # absolute-only params
+        d50 = score_dma_absolute(r["dma_50"])
+        d200 = score_dma_absolute(r["dma_200"])
+        r52 = score_return_absolute(r["ret_52w_vs_index"])
+        rsi = score_rsi_month_absolute(r["rsi_month"])
+
+        ratings = [r1m, r1y, r3y, d50, d200, r52, rsi]
+        missing = sum(1 for x in ratings if x is None)
+        filled = [x if x is not None else FB for x in ratings]
+        m_score = round(sum(filled) / 7, 2)
+
         out_rows.append((
             r["symbol"], target_date, r["latest_price"],
-            r["ret_1y"], r["ret_3y"], r["dma_50"], r["dma_200"], r["ret_52w_vs_index"],
-            r1y_rt, r3y_rt, d50_rt, d200_rt, r52_rt, m_score,
+            r["ret_1m"], r["ret_1y"], r["ret_3y"], r["dma_50"], r["dma_200"],
+            r["ret_52w_vs_index"], r["rsi_month"],
+            filled[0], filled[1], filled[2], filled[3], filled[4], filled[5], filled[6],
+            m_score, missing,
         ))
 
     with _conn() as conn, conn.cursor() as cur:
         cur.executemany("""
             INSERT INTO momentum_scores
-              (symbol, score_date, latest_price, ret_1y, ret_3y, dma_50, dma_200, ret_52w_vs_index,
-               ret_1y_rating, ret_3y_rating, dma_50_rating, dma_200_rating, ret_52w_idx_rating, m_score)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+              (symbol, score_date, latest_price,
+               ret_1m, ret_1y, ret_3y, dma_50, dma_200, ret_52w_vs_index, rsi_month,
+               ret_1m_rating, ret_1y_rating, ret_3y_rating, dma_50_rating, dma_200_rating,
+               ret_52w_idx_rating, rsi_month_rating, m_score, m_missing_count)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
-              latest_price=EXCLUDED.latest_price, ret_1y=EXCLUDED.ret_1y, ret_3y=EXCLUDED.ret_3y,
-              dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, ret_52w_vs_index=EXCLUDED.ret_52w_vs_index,
-              ret_1y_rating=EXCLUDED.ret_1y_rating, ret_3y_rating=EXCLUDED.ret_3y_rating,
-              dma_50_rating=EXCLUDED.dma_50_rating, dma_200_rating=EXCLUDED.dma_200_rating,
-              ret_52w_idx_rating=EXCLUDED.ret_52w_idx_rating, m_score=EXCLUDED.m_score
+              latest_price=EXCLUDED.latest_price,
+              ret_1m=EXCLUDED.ret_1m, ret_1y=EXCLUDED.ret_1y, ret_3y=EXCLUDED.ret_3y,
+              dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200,
+              ret_52w_vs_index=EXCLUDED.ret_52w_vs_index, rsi_month=EXCLUDED.rsi_month,
+              ret_1m_rating=EXCLUDED.ret_1m_rating, ret_1y_rating=EXCLUDED.ret_1y_rating,
+              ret_3y_rating=EXCLUDED.ret_3y_rating, dma_50_rating=EXCLUDED.dma_50_rating,
+              dma_200_rating=EXCLUDED.dma_200_rating, ret_52w_idx_rating=EXCLUDED.ret_52w_idx_rating,
+              rsi_month_rating=EXCLUDED.rsi_month_rating,
+              m_score=EXCLUDED.m_score, m_missing_count=EXCLUDED.m_missing_count
         """, out_rows)
         conn.commit()
 
