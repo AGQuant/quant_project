@@ -1,2 +1,2 @@
-web: uvicorn main_patched:app --host 0.0.0.0 --port $PORT
+web: uvicorn main:app --host 0.0.0.0 --port $PORT
 feed: python fyers_feed.py
