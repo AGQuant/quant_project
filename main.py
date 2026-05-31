@@ -36,7 +36,13 @@ import yahoo_index_backfill
 import v8_paper
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.4.1
+# Scorr / Project Quant — main.py v2.4.2
+# v2.4.2: create_tables() moved OFF the @app.on_event startup path — now runs in a
+#         background task (asyncio.to_thread) so a held DB lock (e.g. a zombie
+#         idle-in-transaction session blocking the DDL ALTER) can NEVER block
+#         application startup. Fixes the 31-May restart loop where startup hung at
+#         "Waiting for application startup" while CREATE TABLE waited on a lock.
+#         App now serves immediately; tables build a beat later (all CREATE IF NOT EXISTS).
 # v2.4.1: + /api/v8/run_for_date + run_v8_for_date MCP tool — backfill v8_metrics
 #         for a PAST date (engine target_date) for historical-sim groundwork.
 # v2.4.0: V8 PAPER ENGINE wired (v8_paper.py). Nightly rolling-5 pivots at 22:05,
@@ -64,7 +70,7 @@ import v8_paper
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -528,7 +534,18 @@ _BG_TASKS: set = set()
 
 @app.on_event("startup")
 async def startup():
-    create_tables()
+    # v2.4.2: create_tables() moved OFF the boot path — runs in a background task so a
+    # held DB lock (e.g. zombie idle-in-transaction blocking the DDL) can NEVER block
+    # startup -> no restart loop. App serves immediately; tables build a beat later
+    # (all statements are CREATE/ALTER ... IF NOT EXISTS, so order/timing is safe).
+    async def _init_tables():
+        try:
+            await asyncio.to_thread(create_tables)
+        except Exception as e:
+            log.error(f"create_tables (bg) failed: {e}")
+    t0 = asyncio.create_task(_init_tables())
+    _BG_TASKS.add(t0); t0.add_done_callback(_BG_TASKS.discard)
+
     t = asyncio.create_task(_scheduler())
     _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
