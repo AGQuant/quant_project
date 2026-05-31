@@ -34,7 +34,9 @@ from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_
 import yahoo_ondemand
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.3.1
+# Scorr / Project Quant — main.py v2.3.2
+# v2.3.2: GVM daily recompute moved 21:15 -> 22:00 IST to clear the slower Yahoo
+#         raw_prices run (yahoo_daily v2.1 retry-pass fetcher, ~15-30min from 21:00).
 # v2.3.1: load_screener_from_drive now writes the WIDE screener_raw schema
 #         via the shared gvm_nightly._sql_clean_replace_screener (rename ->
 #         drop null/dup nse_code -> numeric coerce -> clean-replace). Makes
@@ -53,7 +55,7 @@ import yahoo_ondemand
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -135,7 +137,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.3.1 — V8-native + live cache + gvm_history)")
+        log.info("Tables ready (v2.3.2 — V8-native + live cache + gvm_history)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -385,12 +387,12 @@ def _bg_recompute_gvm():
         _gvm_recompute_running = False
 
 async def _task_recompute_gvm_daily():
-    """21:15 IST: after raw_prices update (21:00), refresh momentum + GVM snapshot."""
+    """22:00 IST: after the slower raw_prices update (21:00), refresh momentum + GVM snapshot."""
     global _gvm_recompute_ran_today
     today = _ist_now().date()
     if _gvm_recompute_ran_today == today:
         return
-    log.info("21:15 IST: Launching daily GVM recompute (momentum + history snapshot)")
+    log.info("22:00 IST: Launching daily GVM recompute (momentum + history snapshot)")
     asyncio.create_task(asyncio.to_thread(_bg_recompute_gvm))
 
 def _bg_live_tick():
@@ -427,7 +429,7 @@ async def _task_load_earnings_daily():
 
 async def _scheduler():
     """Coarse loop (5-min) for daily tasks + a tight 1-min loop for live ticks."""
-    log.info("Scheduler started (v2.3.1 — live 1-min engine, daily GVM recompute, NSE-holiday aware)")
+    log.info("Scheduler started (v2.3.2 — live 1-min engine, daily GVM recompute 22:00, NSE-holiday aware)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -444,9 +446,11 @@ async def _scheduler():
                 await _task_run_v8_engine()
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
-            # Daily GVM recompute at 21:15 IST (after raw_prices update). Runs every day
-            # (momentum needs daily refresh even on non-trading days when prices updated).
-            if now.hour == 21 and 15 <= now.minute < 25:
+            # Daily GVM recompute at 22:00 IST. Pushed from 21:15 -> 22:00 to clear the
+            # slower Yahoo raw_prices run (v2.1 fetcher ~15-30min, starts 21:00) so momentum
+            # reads a fully-updated raw_prices. Runs every day (momentum needs daily refresh
+            # even on non-trading days when prices updated).
+            if now.hour == 22 and now.minute < 10:
                 await _task_recompute_gvm_daily()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
@@ -518,7 +522,7 @@ def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
 def get_cmp_fallback():
     return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
 
-# ── V8 LIVE engine: cache build + 1-min tick ────────────────────────────────────────────────
+# ── V8 LIVE engine: cache build + 1-min tick ───────────────────────────────────────────────────────
 @app.post("/api/v8/build_cache")
 def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -531,7 +535,7 @@ def v8_run_live(x_admin_token: Optional[str] = Header(None)):
     with get_conn() as conn:
         return run_live_tick(conn)
 
-# ── Momentum daily engine (standalone trigger) ──────────────────────────────────────────────
+# ── Momentum daily engine (standalone trigger) ───────────────────────────────────────────────────────
 @app.post("/api/momentum/run")
 def momentum_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -782,7 +786,7 @@ async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
     if _yahoo_daily_running:
         return {"status": "already_running", "message": "yahoo_daily already in progress"}
     asyncio.create_task(_bg_yahoo_daily())
-    return {"status": "started", "message": "raw_prices update running in background (~3 min)."}
+    return {"status": "started", "message": "raw_prices update running in background (v2.1 retry fetcher, ~15-30 min)."}
 
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
