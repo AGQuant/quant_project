@@ -33,9 +33,13 @@ from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 import yahoo_ondemand
 import yahoo_index_backfill
+import v8_paper
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.3.3
+# Scorr / Project Quant — main.py v2.4.0
+# v2.4.0: V8 PAPER ENGINE wired (v8_paper.py). Nightly rolling-5 pivots at 22:05,
+#         1-min paper_tick in live loop (gate slots from market_mood),
+#         endpoints + MCP tools: paper_compute_pivots, paper_tick, paper_status, paper_pivots.
 # v2.3.3: + /api/admin/backfill_indices + backfill_indices MCP tool — Yahoo
 #         NIFTY50/BANKNIFTY 1-min into intraday_prices (interim until Fyers index sub).
 # v2.3.2: GVM daily recompute moved 21:15 -> 22:00 IST to clear the slower Yahoo
@@ -58,7 +62,7 @@ import yahoo_index_backfill
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.3.3"
+VERSION = "2.4.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -292,6 +296,8 @@ _cache_building: bool = False
 _live_tick_running: bool = False
 _gvm_recompute_ran_today: Optional[date] = None
 _gvm_recompute_running: bool = False
+_paper_tick_running: bool = False
+_paper_pivots_built: Optional[date] = None
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -398,6 +404,48 @@ async def _task_recompute_gvm_daily():
     log.info("22:00 IST: Launching daily GVM recompute (momentum + history snapshot)")
     asyncio.create_task(asyncio.to_thread(_bg_recompute_gvm))
 
+def _bg_paper_tick():
+    """1-min: fetch gate slots from market_mood, run paper_tick (entries/exits/rebalance)."""
+    global _paper_tick_running
+    if _paper_tick_running:
+        return
+    _paper_tick_running = True
+    try:
+        buy_slots = sell_slots = None
+        try:
+            with httpx.Client(timeout=30) as c:
+                mood = c.get(f"{BASE_URL}/api/v8/market_mood").json()
+                buy_slots, sell_slots = mood.get("buy_slots"), mood.get("sell_slots")
+        except Exception as e:
+            log.warning(f"paper mood fetch failed, uncapped: {e}")
+        with get_conn() as conn:
+            res = v8_paper.paper_tick(conn, buy_slots=buy_slots, sell_slots=sell_slots)
+        if res.get("entries") or res.get("exits") or res.get("gate_exits"):
+            log.info(f"paper_tick: {len(res.get('entries',[]))}E {len(res.get('exits',[]))}X "
+                     f"{len(res.get('gate_exits',[]))}G qual={res.get('qualified')}")
+    except Exception as e:
+        log.error(f"paper_tick failed: {e}")
+    finally:
+        _paper_tick_running = False
+
+def _bg_build_paper_pivots():
+    global _paper_pivots_built
+    try:
+        with get_conn() as conn:
+            res = v8_paper.compute_pivots(conn)
+        _paper_pivots_built = _ist_now().date()
+        log.info(f"paper pivots built: {res.get('built')}/{res.get('total')} for {res.get('pivot_date')}")
+    except Exception as e:
+        log.error(f"paper pivots build failed: {e}")
+
+async def _task_build_paper_pivots():
+    global _paper_pivots_built
+    today = _ist_now().date()
+    if _paper_pivots_built == today:
+        return
+    log.info("22:05 IST: Building rolling-5 paper pivots")
+    asyncio.create_task(asyncio.to_thread(_bg_build_paper_pivots))
+
 def _bg_live_tick():
     global _live_tick_running
     if _live_tick_running:
@@ -455,6 +503,9 @@ async def _scheduler():
             # even on non-trading days when prices updated).
             if now.hour == 22 and now.minute < 10:
                 await _task_recompute_gvm_daily()
+            # Rolling-5 paper pivots at 22:05 (after GVM/momentum refresh)
+            if now.hour == 22 and 5 <= now.minute < 15:
+                await _task_build_paper_pivots()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -466,6 +517,7 @@ async def _live_loop():
         try:
             if _is_market_hours():
                 await _task_live_tick()
+                asyncio.create_task(asyncio.to_thread(_bg_paper_tick))
         except Exception as e:
             log.error(f"live loop error: {e}")
         await asyncio.sleep(60)
@@ -796,6 +848,39 @@ def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(No
     _check_admin(x_admin_token)
     return yahoo_index_backfill.backfill_indices(days=days)
 
+@app.post("/api/paper/compute_pivots")
+def paper_compute_pivots(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return v8_paper.compute_pivots(conn)
+
+@app.post("/api/paper/tick")
+def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    buy_slots = sell_slots = None
+    try:
+        with httpx.Client(timeout=30) as c:
+            mood = c.get(f"{BASE_URL}/api/v8/market_mood").json()
+            buy_slots, sell_slots = mood.get("buy_slots"), mood.get("sell_slots")
+    except Exception:
+        pass
+    with get_conn() as conn:
+        return v8_paper.paper_tick(conn, buy_slots=buy_slots, sell_slots=sell_slots)
+
+@app.get("/api/paper/status")
+def paper_status():
+    return {
+        "open_positions": api_query("SELECT symbol, side, basket, entry_price, entry_ts, target, stop_loss, qty, pivot_date FROM v8_paper_positions WHERE status='OPEN' ORDER BY entry_ts DESC"),
+        "recent_trades": api_query("SELECT symbol, side, basket, entry_price, exit_price, pnl, return_pct, result, entry_ts, exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
+        "missed": api_query("SELECT miss_date, symbol, side, basket, expected_entry, reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
+        "summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, COUNT(*) FILTER (WHERE result='GATE_EXIT') AS gate_exits, COUNT(*) FILTER (WHERE result LIKE 'GAP%%') AS gap_exits, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True),
+    }
+
+@app.get("/api/paper/pivots")
+def paper_pivots(limit: int = 250):
+    return api_query("SELECT symbol, pp, r1, s1, r2, s2, base_high, base_low, base_close, base_days, window_start, window_end, pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
+
+
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
@@ -1073,6 +1158,10 @@ MCP_TOOLS = [
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "backfill_indices", "description": "Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices from Yahoo (interim index source for the market-mood gate). Param days (default 7).", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
+    {"name": "paper_compute_pivots", "description": "PAPER: compute rolling-5-day pivots for all futures (nightly job / on demand).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "paper_tick", "description": "PAPER: run one paper-engine tick — filters-first qualified set + fresh PP cross entries + target/SL/gap/gate exits.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "paper_status", "description": "PAPER: open positions + recent closed trades + missed signals + win/loss/PnL summary.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "paper_pivots", "description": "PAPER: latest rolling-5 pivot levels (PP/R1/S1/R2/S2) per stock.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
     {"name": "run_v8_engine", "description": "Run the V8 EOD signal engine — compute today's metrics for the futures universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -1129,6 +1218,10 @@ async def _call_tool(name, args):
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days", 7)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "paper_compute_pivots": r = await client.post(f"{BASE_URL}/api/paper/compute_pivots", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "paper_tick": r = await client.post(f"{BASE_URL}/api/paper/tick", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "paper_status": r = await client.get(f"{BASE_URL}/api/paper/status"); return r.json()
+        elif name == "paper_pivots": r = await client.get(f"{BASE_URL}/api/paper/pivots", params={"limit": args.get("limit", 250)}); return r.json()
         elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
