@@ -36,7 +36,9 @@ import yahoo_index_backfill
 import v8_paper
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.4.0
+# Scorr / Project Quant — main.py v2.4.1
+# v2.4.1: + /api/v8/run_for_date + run_v8_for_date MCP tool — backfill v8_metrics
+#         for a PAST date (engine target_date) for historical-sim groundwork.
 # v2.4.0: V8 PAPER ENGINE wired (v8_paper.py). Nightly rolling-5 pivots at 22:05,
 #         1-min paper_tick in live loop (gate slots from market_mood),
 #         endpoints + MCP tools: paper_compute_pivots, paper_tick, paper_status, paper_pivots.
@@ -62,7 +64,7 @@ import v8_paper
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -762,6 +764,17 @@ async def v8_run(x_admin_token: Optional[str] = Header(None)):
         results = run_v8_engine(conn)
     return results
 
+@app.post("/api/v8/run_for_date")
+def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None)):
+    """Backfill v8_metrics for a PAST date (sim groundwork). Reuses the real
+    engine with target_date so DMA/RSI/returns are computed as-of that day.
+    NOTE: sector_day/week + range_1d still read latest-day data (known sim caveat)."""
+    _check_admin(x_admin_token)
+    from datetime import date as _date
+    d = _date.fromisoformat(target_date)
+    with get_conn() as conn:
+        return run_v8_engine(conn, target_date=d)
+
 @app.get("/api/v8/metrics/all")
 def v8_metrics_all():
     return api_query("""
@@ -1164,6 +1177,7 @@ MCP_TOOLS = [
     {"name": "paper_pivots", "description": "PAPER: latest rolling-5 pivot levels (PP/R1/S1/R2/S2) per stock.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
     {"name": "run_v8_engine", "description": "Run the V8 EOD signal engine — compute today's metrics for the futures universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v8_for_date", "description": "Backfill v8_metrics for a PAST date (YYYY-MM-DD) - sim groundwork. Reuses engine as-of that date.", "inputSchema": {"type": "object", "properties": {"target_date": {"type": "string"}}, "required": ["target_date"]}},
     {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_v8_metrics_all", "description": "Get all metrics for the full universe (latest date).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v8_live_metrics", "description": "Get real-time CMP, day%, hourly gain for the universe.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1224,6 +1238,7 @@ async def _call_tool(name, args):
         elif name == "paper_pivots": r = await client.get(f"{BASE_URL}/api/paper/pivots", params={"limit": args.get("limit", 250)}); return r.json()
         elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "run_v8_for_date": r = await client.post(f"{BASE_URL}/api/v8/run_for_date", params={"target_date": args["target_date"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
         elif name == "get_v8_metrics_all": r = await client.get(f"{BASE_URL}/api/v8/metrics/all"); return r.json()
         elif name == "get_v8_live_metrics": r = await client.get(f"{BASE_URL}/api/v8/live_metrics"); return r.json()
