@@ -1,9 +1,18 @@
 """
-yahoo_daily_update.py — v2.0
+yahoo_daily_update.py — v2.1
 Chart API async update — replaces slow yf.Ticker().history()
 Fetches last 10 days OHLC for all symbols in raw_prices (~1720 stocks).
-Uses httpx async with semaphore=8. ~3 min for full universe.
-Safe to re-run: UPSERT on (symbol, price_date).
+
+v2.1: GENTLER on Yahoo + RETRY PASS.
+  - SEMAPHORE 8 -> 3, per-request sleep 0.05 -> 0.4 to stay under Yahoo's
+    rate-limit threshold (8-wide caused deterministic partial days, e.g.
+    28-May-2026 landed 693/1717).
+  - After the first pass, any symbol that returned empty (timeout / 429 /
+    empty chart) is RE-FETCHED in a second pass at an even slower rate
+    (sem=2, sleep 0.8). Two-pass run ~15-30 min for full universe.
+  - UPSERT on (symbol, price_date) — safe to re-run, self-heals trailing-10d holes.
+
+Tunables via run_async(sem=, sleep=, retry=): override defaults per call.
 """
 
 import asyncio
@@ -18,7 +27,13 @@ log = logging.getLogger("yahoo_daily")
 
 DB_URL = os.environ.get("DATABASE_URL")
 LOOKBACK = "10d"
-SEMAPHORE = 8
+
+# Gentler defaults (v2.1). Override per call via run_async kwargs.
+SEMAPHORE_DEFAULT = 3
+SLEEP_DEFAULT = 0.4
+RETRY_SEMAPHORE = 2
+RETRY_SLEEP = 0.8
+MAX_RETRY_PASSES = 2
 
 UPSERT_SQL = """
 INSERT INTO raw_prices (symbol, price_date, open, high, low, close, adjusted_close, volume)
@@ -41,7 +56,7 @@ def _to_yahoo_ticker(symbol: str) -> str:
     return INDICES.get(symbol, symbol + ".NS")
 
 
-async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbol: str):
+async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbol: str, sleep_s: float):
     ticker = _to_yahoo_ticker(symbol)
     url = (
         f"https://query1.finance.yahoo.com/v8/finance/chart/"
@@ -92,17 +107,55 @@ async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbo
             log.warning(f"yahoo_daily {symbol}: {e}")
             return symbol, []
         finally:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(sleep_s)
 
 
-async def run_async(symbols=None, lookback=None):
+async def _run_pass(symbols, sem_size: int, sleep_s: float):
+    """One fetch pass over `symbols`. Returns (results_dict, failed_list, rows_count)."""
+    sem = asyncio.Semaphore(sem_size)
+    async with httpx.AsyncClient(
+        timeout=30,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        limits=httpx.Limits(max_connections=sem_size * 2, max_keepalive_connections=sem_size),
+    ) as client:
+        tasks   = [_fetch_symbol(client, sem, s, sleep_s) for s in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    got = {}
+    failed = []
+    for symbol, rows in results:
+        if rows:
+            got[symbol] = rows
+        else:
+            failed.append(symbol)
+    return got, failed
+
+
+def _commit_rows(results_map):
+    """UPSERT all rows from a {symbol: rows} map. Returns total rows written."""
+    total = 0
+    if not results_map:
+        return 0
+    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+        for symbol, rows in results_map.items():
+            cur.executemany(UPSERT_SQL, rows)
+            total += len(rows)
+        conn.commit()
+    return total
+
+
+async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=None):
     """
     Main async entry point. If symbols is None, fetches all from raw_prices.
-    Returns dict with stats.
+    Two-pass (or more) with retry on failures. Returns dict with stats.
     """
     global LOOKBACK
     if lookback:
         LOOKBACK = lookback
+
+    sem_size  = sem   if sem   is not None else SEMAPHORE_DEFAULT
+    sleep_s   = sleep if sleep is not None else SLEEP_DEFAULT
+    retries   = retry if retry is not None else MAX_RETRY_PASSES
 
     if symbols is None:
         with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
@@ -112,32 +165,33 @@ async def run_async(symbols=None, lookback=None):
     if not symbols:
         return {"updated": 0, "failed": 0, "rows": 0}
 
-    sem = asyncio.Semaphore(SEMAPHORE)
-    failed = []
+    total_attempted = len(symbols)
     total_rows = 0
+    pass_log = []
 
-    async with httpx.AsyncClient(
-        timeout=30,
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-    ) as client:
-        tasks   = [_fetch_symbol(client, sem, s) for s in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+    # Pass 1 — gentle main pass
+    got, failed = await _run_pass(symbols, sem_size, sleep_s)
+    total_rows += _commit_rows(got)
+    pass_log.append({"pass": 1, "ok": len(got), "failed": len(failed), "sem": sem_size, "sleep": sleep_s})
 
-    with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
-        for symbol, rows in results:
-            if not rows:
-                failed.append(symbol)
-                continue
-            cur.executemany(UPSERT_SQL, rows)
-            total_rows += len(rows)
-        conn.commit()
+    # Retry passes — only the failures, even slower each time
+    pass_num = 1
+    while failed and pass_num <= retries:
+        pass_num += 1
+        # back off harder on later passes
+        r_sem = max(1, RETRY_SEMAPHORE - (pass_num - 2))
+        r_sleep = RETRY_SLEEP + 0.4 * (pass_num - 2)
+        log.info(f"yahoo_daily retry pass {pass_num}: {len(failed)} symbols (sem={r_sem}, sleep={r_sleep})")
+        got_r, failed = await _run_pass(failed, r_sem, r_sleep)
+        total_rows += _commit_rows(got_r)
+        pass_log.append({"pass": pass_num, "ok": len(got_r), "failed": len(failed), "sem": r_sem, "sleep": r_sleep})
 
     summary = {
-        "symbols_attempted": len(symbols),
-        "updated":           len(symbols) - len(failed),
+        "symbols_attempted": total_attempted,
+        "updated":           total_attempted - len(failed),
         "failed":            len(failed),
         "rows_upserted":     total_rows,
+        "passes":            pass_log,
         "failed_symbols":    failed[:20],
     }
     log.info(f"yahoo_daily done: {summary}")
