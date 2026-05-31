@@ -1421,14 +1421,14 @@ function refreshRawData() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 //   TAB: FILTER SCAN — per-stock pass count + names passed, across all 5 baskets
 //   Layout (11 cols): Symbol | BR cnt | BR passed | BM cnt | BM passed |
 //                     SR cnt | SR passed | SM cnt | SM passed | SO cnt | SO passed
 //   Source: /api/v8/raw (whole universe) evaluated against each basket's live filter_config.
 //   Pass logic is IDENTICAL to computeFunnelCounts — single source of truth, never disagrees
 //   with the funnel tabs. A fully-qualified cell (cnt == total) turns green.
-// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 // Short labels for filter metrics so the "names passed" cell stays compact.
 const SCAN_FILTER_ABBR = {
