@@ -23,7 +23,11 @@ symbols Fyers didn't update (stale > 3 min or not subscribed). If the Fyers
 worker is down, all symbols go stale and Yahoo automatically covers the
 whole universe.
 
-Indices (NIFTY/BANKNIFTY/INDIAVIX) LTP -> cmp_prices.
+Indices (NIFTY50/BANKNIFTY/INDIAVIX): polled spot LTP every 30s -> cmp_prices,
+AND aggregated into 1-min OHLC -> intraday_prices (via the shared
+BarAggregator). Stored under clean symbols NIFTY50/BANKNIFTY/INDIAVIX, matching
+raw_prices.NIFTY50 used by the EOD market-mood gate. Poll-driven (not WS) to
+stay under the ~200 WS subscription cap.
 Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
 
 MARKET-CLOSE GUARD (30-May-2026): bars bucketed at/after 15:30 IST are never
@@ -72,7 +76,7 @@ SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKE
 # requests URL-encodes it correctly for REST. %26 fails both paths.
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 INDEX_LTP_SYMBOLS = {
-    'NIFTY':     'NSE:NIFTY50-INDEX',
+    'NIFTY50':   'NSE:NIFTY50-INDEX',
     'BANKNIFTY': 'NSE:NIFTYBANK-INDEX',
     'INDIAVIX':  'NSE:INDIAVIX-INDEX',
 }
@@ -261,7 +265,14 @@ class BarAggregator:
 
 # ---------------------------------------------------------------- index LTP
 
-def update_index_ltp(conn, token):
+def update_index_ltp(conn, token, agg=None):
+    """Poll index spot LTP (NIFTY50/BANKNIFTY/INDIAVIX) every cycle.
+    Writes cmp_prices, and (if agg given) feeds the SAME BarAggregator so the
+    polled prices aggregate into 1-min OHLC -> intraday_prices, exactly like
+    futures. This is what the market-mood Nifty D/W/M gate reads. A 30s poll
+    gives ~2 samples/min — coarse but sufficient for the regime gate. Stored
+    under clean symbols NIFTY50 / BANKNIFTY / INDIAVIX (NOT the -INDEX strings),
+    matching raw_prices.NIFTY50 that the EOD gate already uses."""
     try:
         r = requests.get(QUOTES_URL, params={'symbols': ','.join(INDEX_LTP_SYMBOLS.values())},
                          headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=5)
@@ -272,7 +283,11 @@ def update_index_ltp(conn, token):
             lp = item['v'].get('lp', 0)
             if not lp: continue
             for name, fsym in INDEX_LTP_SYMBOLS.items():
-                if fsym == item['n']: rows.append((name, lp))
+                if fsym == item['n']:
+                    rows.append((name, lp))
+                    if agg is not None:
+                        # feed into 1-min OHLC bars -> intraday_prices (same path as futures)
+                        agg.on_tick(name, float(lp), 0)
         if rows:
             with conn.cursor() as cur:
                 cur.executemany("""INSERT INTO cmp_prices (symbol,cmp,updated_at,source) VALUES (%s,%s,NOW(),'fyers')
@@ -352,7 +367,7 @@ def run(auth_code=None):
     def housekeeping():
         while True:
             if is_market_open():
-                update_index_ltp(conn, token)
+                update_index_ltp(conn, token, agg)
                 agg.flush_all()   # flush partial bars every cycle (safety)
                 agg.flush_cmp()   # PRIMARY CMP - latest LTP per symbol -> cmp_prices
             time.sleep(30)
