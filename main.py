@@ -37,12 +37,12 @@ import v8_paper
 
 # ============================================================
 # Scorr / Project Quant — main.py v2.4.2
-# v2.4.2: create_tables() moved OFF the @app.on_event startup path — now runs in a
-#         background task (asyncio.to_thread) so a held DB lock (e.g. a zombie
-#         idle-in-transaction session blocking the DDL ALTER) can NEVER block
-#         application startup. Fixes the 31-May restart loop where startup hung at
-#         "Waiting for application startup" while CREATE TABLE waited on a lock.
-#         App now serves immediately; tables build a beat later (all CREATE IF NOT EXISTS).
+# v2.4.2: BOOT FIX — create_tables() moved OFF the @app.on_event startup path
+#         into a background task (asyncio.to_thread). A held DB lock (e.g. a
+#         zombie idle-in-transaction session) can no longer block startup, so
+#         the app always reaches "Application startup complete" and Railway's
+#         restart-on-failure loop cannot recur. Tables are CREATE IF NOT EXISTS,
+#         so building them a beat after boot is functionally identical.
 # v2.4.1: + /api/v8/run_for_date + run_v8_for_date MCP tool — backfill v8_metrics
 #         for a PAST date (engine target_date) for historical-sim groundwork.
 # v2.4.0: V8 PAPER ENGINE wired (v8_paper.py). Nightly rolling-5 pivots at 22:05,
@@ -534,10 +534,11 @@ _BG_TASKS: set = set()
 
 @app.on_event("startup")
 async def startup():
-    # v2.4.2: create_tables() moved OFF the boot path — runs in a background task so a
-    # held DB lock (e.g. zombie idle-in-transaction blocking the DDL) can NEVER block
-    # startup -> no restart loop. App serves immediately; tables build a beat later
-    # (all statements are CREATE/ALTER ... IF NOT EXISTS, so order/timing is safe).
+    # v2.4.2: create_tables() moved OFF the boot path. It runs in a background
+    # thread so a held DB lock (e.g. a zombie idle-in-transaction session) can
+    # never block startup -> the app always reaches "Application startup complete"
+    # and Railway's restart-on-failure loop cannot recur. Tables are
+    # CREATE IF NOT EXISTS, so building them a beat after boot is harmless.
     async def _init_tables():
         try:
             await asyncio.to_thread(create_tables)
