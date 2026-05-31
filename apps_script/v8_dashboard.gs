@@ -11,22 +11,22 @@
  * ║     4. Sell_Reversal          — Stock funnel breakdown           ║
  * ║     5. Sell_Momentum          — Stock funnel breakdown           ║
  * ║     6. Sell_Overbought        — Failed breakout signals          ║
- * ║     7. In_Position            — Live open trades (personal)      ║
- * ║     8. Trade_Log              — Closed trade history (personal)  ║
- * ║     9. Raw_Data               — All 208 futures x 21 metrics     ║
+ * ║     7. In_Position            — PAPER open positions (live CMP)  ║
+ * ║     8. Trade_Log              — PAPER closed trades + scorecard  ║
+ * ║     9. Raw_Data               — CMP + pivots + 21 metrics        ║
  * ║    10. Filter_Scan            — Per-stock pass count, 5 baskets  ║
  * ║                                                                  ║
- * ║   Data source: Railway V8 endpoints + personal_journal table     ║
+ * ║   Data source: Railway V8 + PAPER engine endpoints               ║
  * ║                                                                  ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 //   CONFIG
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.3.0';   // + Filter_Scan tab: per-stock pass count + names passed across all 5 baskets
+const SCRIPT_VERSION = '1.4.0';   // In_Position + Trade_Log -> PAPER engine; Raw_Data + CMP & pivots
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -47,7 +47,7 @@ const SHEETS = {
 const BASKETS = ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum', 'sell_overbought'];
 
 // Strategy display order used across In Position / Trade Log / Performance.
-// 'Manual/Untagged' captures any personal trade with no v8_basket tag — visible, never force-fit.
+// 'Manual/Untagged' captures any trade with no recognised basket tag — visible, never force-fit.
 const STRATEGY_ORDER = ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum', 'Manual/Untagged'];
 
 const COLORS = {
@@ -100,12 +100,17 @@ const BASKET_META = {
 
 const SIGNAL_COLS = ['Symbol', 'GVM', 'DMA200 %', 'DMA50 %', 'RSI Month', 'RSI Week', 'Mth Ret %', 'Wk Ret %'];
 
-// Raw_Data tab columns — mirror /api/v8/raw field order (21 metrics + symbol).
+// Raw_Data tab columns — v1.4.0: Symbol | CMP | PP | R1 | S1 | R2 | S2 | then 21 metrics.
+// CMP from /api/v8/live_metrics (1 call, whole universe). Pivots from /api/paper/pivots
+// (joined by symbol). Metrics from /api/v8/raw (the primary GVM-sorted universe call).
 const RAW_COLS = [
-  'Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D',
+  'Symbol', 'CMP', 'PP', 'R1', 'S1', 'R2', 'S2',
+  'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D',
   'Mth Ret', 'Wk Ret', 'Yr Ret', 'Sec Day', 'Sec Wk', 'Mth Idx', 'wi52',
   'Rng 1D', 'Rng 3D', 'Prev Chg', 'Upper BB', 'Lower BB', 'ma9_21', 'Vol Ratio',
 ];
+// Metric field names from /api/v8/raw (the 21 metrics + symbol). CMP + pivots are merged
+// in separately by symbol, so they are NOT in this list.
 const RAW_FIELDS = [
   'symbol', 'gvm_score', 'dma_20', 'dma_50', 'dma_200', 'rsi_month', 'rsi_weekly', 'daily_rsi',
   'month_return', 'week_return', 'year_return', 'sector_day', 'sector_week', 'month_index', 'week_index_52',
@@ -176,7 +181,7 @@ function cleanRebuild() {
   const ui = SpreadsheetApp.getUi();
   const confirm = ui.alert(
     '🧹 Clean Rebuild',
-    'This will DELETE all 9 Scorr tabs and rebuild them fresh from Railway.\n\nContinue?',
+    'This will DELETE all 10 Scorr tabs and rebuild them fresh from Railway.\n\nContinue?',
     ui.ButtonSet.YES_NO
   );
   if (confirm !== ui.Button.YES) return;
@@ -299,7 +304,7 @@ function showVersion() {
       <div class="row"><span class="label">API base</span><span class="val">${BASE_URL}</span></div>
       <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
       <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
-      <div class="row"><span class="label">Trade source</span><span class="val">personal_journal</span></div>
+      <div class="row"><span class="label">Trade source</span><span class="val">paper_engine</span></div>
       <p style="margin-top: 20px; color: #6B7280; font-size: 12px;">Run <strong>🆕 Check for Updates</strong> to fetch latest version from GitHub.</p>
     </body></html>`
   ).setWidth(380).setHeight(280);
@@ -943,50 +948,121 @@ function refreshSellOverbought() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
-//   TAB: IN POSITION
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//   PAPER-ENGINE FETCHERS (v1.4.0)
+//   In_Position + Trade_Log now read the PAPER engine, not personal_journal.
+//   /api/paper/status returns { open_positions:[...], recent_trades:[...], missed:[...], summary:{} }
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+function fetchPaperStatus()  { return fetchJSON('/api/paper/status'); }
+function fetchPaperPivots()  { return fetchJSON('/api/paper/pivots?limit=250'); }
+function fetchLiveMetrics()  { return fetchJSON('/api/v8/live_metrics'); }
+
+// Per-symbol CMP — used only for the handful of open paper positions (scales with
+// position count, never the 208 universe). Returns a number or null.
+function fetchCmp(symbol) {
+  const r = fetchJSON('/api/cmp/' + encodeURIComponent(symbol));
+  if (r && r.cmp !== undefined && r.cmp !== null) return Number(r.cmp);
+  return null;
+}
+
+// Map a paper basket string to the canonical strategy label used for grouping.
+function paperStrategy(basket) {
+  const s = String(basket || '').toLowerCase();
+  if (s.includes('buy') && s.includes('rev'))  return 'Buy Reversal';
+  if (s.includes('buy') && s.includes('mom'))  return 'Buy Momentum';
+  if (s.includes('sell') && s.includes('rev')) return 'Sell Reversal';
+  if (s.includes('sell') && s.includes('mom')) return 'Sell Momentum';
+  if (s.includes('overbought'))                return 'Sell Reversal';
+  return 'Manual/Untagged';
+}
+
+function paperIsLong(side) {
+  const d = String(side || '').toUpperCase();
+  return !(d === 'SELL' || d === 'SHORT');
+}
+
+// Group an array of paper rows (positions or trades) by strategy label.
+function groupPaperByStrategy(rows) {
+  const out = { 'Buy Reversal': [], 'Buy Momentum': [], 'Sell Reversal': [], 'Sell Momentum': [], 'Manual/Untagged': [] };
+  rows.forEach(r => {
+    const strat = paperStrategy(r.basket);
+    (out[strat] || out['Manual/Untagged']).push(r);
+  });
+  return out;
+}
+
+// Holding label in days from entry_ts (open) or entry_ts->exit_ts (closed).
+function paperHolding(entryTs, exitTs) {
+  if (!entryTs) return '—';
+  try {
+    const a = new Date(entryTs);
+    const b = exitTs ? new Date(exitTs) : new Date();
+    const days = Math.floor((b - a) / 86400000);
+    if (days <= 0) return 'Intraday';
+    if (days === 1) return '1 Day';
+    return days + ' Days';
+  } catch (e) { return '—'; }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//   TAB: IN POSITION  (v1.4.0 — PAPER open positions, live CMP, unrealised P&L)
+//   Source: /api/paper/status open_positions. Fields: symbol, side, basket, entry_price,
+//   entry_ts, target, stop_loss, qty, pivot_date. CMP fetched per-symbol (few rows).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshInPosition() {
   const sheet = getOrCreate(SHEETS.POS);
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
 
-  const positions = fetchPositions() || [];
+  const status = fetchPaperStatus();
+  const positions = (status && status.open_positions) ? status.open_positions : [];
   const mood = fetchMarketMood();
 
+  // Live CMP per open symbol (deduped) — scales with positions, not universe.
+  const cmpMap = {};
+  const uniqueSyms = {};
+  positions.forEach(p => { if (p.symbol) uniqueSyms[p.symbol] = true; });
+  Object.keys(uniqueSyms).forEach(sym => { cmpMap[sym] = fetchCmp(sym); });
+
   let row = 1;
-  sheet.getRange(row, 1, 1, 10).merge()
-    .setValue('📍  IN POSITION — LIVE OPEN TRADES')
+  sheet.getRange(row, 1, 1, 11).merge()
+    .setValue('📍  IN POSITION — PAPER ENGINE (Live Open Positions)')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
   row++;
 
   const gateText = mood
-    ? `Gate: ${mood.fails === 0 ? '✅ OPEN' : '❌ CLOSED'}   |   Buy: ${mood.buy_slots}   |   Sell: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}`
+    ? `Gate: ${mood.fails === 0 ? '✅ OPEN' : '❌ CLOSED'}   |   Buy slots: ${mood.buy_slots}   |   Sell slots: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}`
     : `Refreshed: ${nowIST()}`;
-  sheet.getRange(row, 1, 1, 10).merge()
+  sheet.getRange(row, 1, 1, 11).merge()
     .setValue(gateText)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(10);
   sheet.setRowHeight(row, 22);
   row += 2;
 
-  const grouped = groupByStrategy(positions);
+  const grouped = groupPaperByStrategy(positions);
   STRATEGY_ORDER.forEach(strat => {
     const list = grouped[strat] || [];
     if (strat === 'Manual/Untagged' && list.length === 0) return;
-    row = renderStrategyPositionSection(sheet, row, strat, list);
+    row = renderPaperPositionSection(sheet, row, strat, list, cmpMap);
     row += 1;
   });
 
+  // Overall summary
   row = renderSectionHeader(sheet, row, '📊  OVERALL OPEN SUMMARY', COLORS.DARK_HEADER);
-  const long = positions.filter(p => isLongTrade(p));
-  const short = positions.filter(p => !isLongTrade(p));
+  const longs  = positions.filter(p => paperIsLong(p.side));
+  const shorts = positions.filter(p => !paperIsLong(p.side));
+  const totPnl   = sumPaperUnrealised(positions, cmpMap);
+  const longPnl  = sumPaperUnrealised(longs, cmpMap);
+  const shortPnl = sumPaperUnrealised(shorts, cmpMap);
   const summary = [
-    ['Total Open', positions.length, 'Long Open', long.length, 'Short Open', short.length],
-    ['Total P&L', fmtPnL(sumPnl(positions)), 'Long P&L', fmtPnL(sumPnl(long)), 'Short P&L', fmtPnL(sumPnl(short))],
+    ['Total Open', positions.length, 'Long Open', longs.length, 'Short Open', shorts.length],
+    ['Total P&L', fmtPnL(totPnl), 'Long P&L', fmtPnL(longPnl), 'Short P&L', fmtPnL(shortPnl)],
   ];
   summary.forEach(srow => {
     for (let i = 0; i < srow.length; i++) {
@@ -999,49 +1075,73 @@ function refreshInPosition() {
   });
 
   sheet.setColumnWidth(1, 130);
-  sheet.setColumnWidths(2, 9, 110);
+  sheet.setColumnWidths(2, 10, 105);
   sheet.setFrozenRows(2);
-  toast('✓ In Position refreshed');
+  toast('✓ In Position (paper) refreshed');
 }
 
+function paperUnrealised(p, cmpMap) {
+  const entry = Number(p.entry_price || 0);
+  const qty   = Number(p.qty || 0);
+  const cmp   = cmpMap && cmpMap[p.symbol] != null ? Number(cmpMap[p.symbol]) : null;
+  if (cmp === null || !entry || !qty) return null;
+  return paperIsLong(p.side) ? (cmp - entry) * qty : (entry - cmp) * qty;
+}
 
-function renderStrategyPositionSection(sheet, row, strategy, trades) {
+function sumPaperUnrealised(arr, cmpMap) {
+  return arr.reduce((s, p) => {
+    const v = paperUnrealised(p, cmpMap);
+    return s + (v === null ? 0 : v);
+  }, 0);
+}
+
+function renderPaperPositionSection(sheet, row, strategy, positions, cmpMap) {
   const meta = strategyMeta(strategy);
-  sheet.getRange(row, 1, 1, 10).merge()
+  sheet.getRange(row, 1, 1, 11).merge()
     .setValue(`${meta.emoji}  ${strategy.toUpperCase()}`)
     .setBackground(meta.color).setFontColor(COLORS.WHITE)
     .setFontSize(11).setFontWeight('bold');
   sheet.setRowHeight(row, 26);
   row++;
 
-  const stats = computePositionStats(trades);
-  ['Open Trades', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L/Trade'].forEach((h, i) => {
+  // Section stats
+  let winning = 0, losing = 0, totPnl = 0, priced = 0;
+  positions.forEach(p => {
+    const v = paperUnrealised(p, cmpMap);
+    if (v !== null) { totPnl += v; priced++; if (v > 0) winning++; else if (v < 0) losing++; }
+  });
+  const accuracy = (winning + losing) > 0 ? (winning / (winning + losing)) * 100 : 0;
+  const avgPnl = priced > 0 ? totPnl / priced : 0;
+
+  ['Open', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L/Trade'].forEach((h, i) => {
     sheet.getRange(row, 1 + i).setValue(h).setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontSize(9).setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center');
   });
   row++;
-
-  [stats.count, fmtPnL(stats.totalPnl), fmtPct(stats.accuracy), stats.winning, stats.losing, fmtPnL(stats.avgPnl)].forEach((v, i) => {
+  [positions.length, fmtPnL(totPnl), fmtPct(accuracy), winning, losing, fmtPnL(avgPnl)].forEach((v, i) => {
     const cell = sheet.getRange(row, 1 + i);
     cell.setValue(v).setFontFamily(FONTS.MONO.family).setFontWeight('bold').setHorizontalAlignment('center').setFontSize(11);
-    if (i === 1) cell.setFontColor(stats.totalPnl >= 0 ? COLORS.PROFIT : COLORS.LOSS);
-    if (i === 5) cell.setFontColor(stats.avgPnl >= 0 ? COLORS.PROFIT : COLORS.LOSS);
+    if (i === 1) cell.setFontColor(totPnl >= 0 ? COLORS.PROFIT : COLORS.LOSS);
+    if (i === 5) cell.setFontColor(avgPnl >= 0 ? COLORS.PROFIT : COLORS.LOSS);
   });
   sheet.setRowHeight(row, 24);
   row++;
 
-  row = renderTableHeader(sheet, row, ['Entry Time', 'Stock', 'Entry', 'CMP', 'Qty', 'SL', 'Target', 'Unrealised P&L', 'Holding'], 9);
+  const headers = ['Entry Time', 'Symbol', 'Side', 'Entry', 'CMP', 'Qty', 'SL', 'Target', 'Unrealised P&L', 'Holding', 'Pivot Date'];
+  row = renderTableHeader(sheet, row, headers, headers.length);
 
-  if (trades.length === 0) {
-    sheet.getRange(row, 1, 1, 9).merge().setValue('No open positions').setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
+  if (positions.length === 0) {
+    sheet.getRange(row, 1, 1, headers.length).merge().setValue('No open paper positions').setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
     row++;
   } else {
-    trades.forEach(t => {
-      const pnl = computeUnrealisedPnl(t);
+    positions.forEach(p => {
+      const pnl = paperUnrealised(p, cmpMap);
+      const cmp = cmpMap && cmpMap[p.symbol] != null ? cmpMap[p.symbol] : null;
       const vals = [
-        fmtDate(t.entry_time), t.stock || t.symbol,
-        fmtNum(t.entry_price, 2), fmtNum(t.cmp, 2), t.qty,
-        fmtNum(t.sl, 2), fmtNum(t.target, 2), fmtPnL(pnl),
-        computeHolding(t.entry_time),
+        fmtDate(p.entry_ts), p.symbol, (paperIsLong(p.side) ? 'LONG' : 'SHORT'),
+        fmtNum(p.entry_price, 2), (cmp === null ? '—' : fmtNum(cmp, 2)), p.qty,
+        fmtNum(p.stop_loss, 2), fmtNum(p.target, 2),
+        (pnl === null ? '—' : fmtPnL(pnl)),
+        paperHolding(p.entry_ts), (p.pivot_date || '—'),
       ];
       vals.forEach((v, i) => {
         const cell = sheet.getRange(row, 1 + i);
@@ -1050,9 +1150,9 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
           .setFontWeight(i === 1 ? 'bold' : 'normal')
           .setHorizontalAlignment(i === 1 ? 'left' : 'right')
           .setBackground(row % 2 === 0 ? COLORS.ALT_ROW : COLORS.CARD_BG);
-        if (i === 7) cell.setFontColor(pnl >= 0 ? COLORS.PROFIT : COLORS.LOSS).setFontWeight('bold');
+        if (i === 8 && pnl !== null) cell.setFontColor(pnl >= 0 ? COLORS.PROFIT : COLORS.LOSS).setFontWeight('bold');
       });
-      sheet.getRange(row, 1, 1, 9).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
+      sheet.getRange(row, 1, 1, headers.length).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
       row++;
     });
   }
@@ -1060,20 +1160,25 @@ function renderStrategyPositionSection(sheet, row, strategy, trades) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
-//   TAB: TRADE LOG
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//   TAB: TRADE LOG  (v1.4.0 — PAPER closed trades + scorecard)
+//   Source: /api/paper/status recent_trades + summary. Trade fields: symbol, side, basket,
+//   entry_price, exit_price, pnl, return_pct, result, entry_ts, exit_ts.
+//   Summary: trades, wins, losses, gate_exits, gap_exits, total_pnl, avg_ret.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshTradeLog() {
   const sheet = getOrCreate(SHEETS.LOG);
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
 
-  const trades = fetchTrades() || [];
-  let row = 1;
+  const status = fetchPaperStatus();
+  const trades  = (status && status.recent_trades) ? status.recent_trades : [];
+  const summary = (status && status.summary) ? status.summary : {};
 
+  let row = 1;
   sheet.getRange(row, 1, 1, 10).merge()
-    .setValue('📒  TRADE LOG — CLOSED TRADES')
+    .setValue('📒  TRADE LOG — PAPER ENGINE (Closed Trades)')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
@@ -1086,20 +1191,29 @@ function refreshTradeLog() {
   sheet.setRowHeight(row, 20);
   row += 2;
 
-  const grouped = groupByStrategy(trades);
+  const grouped = groupPaperByStrategy(trades);
   STRATEGY_ORDER.forEach(strat => {
     const list = grouped[strat] || [];
     if (strat === 'Manual/Untagged' && list.length === 0) return;
-    row = renderStrategyTradeSection(sheet, row, strat, list);
+    row = renderPaperTradeSection(sheet, row, strat, list);
     row += 1;
   });
 
-  row = renderSectionHeader(sheet, row, '📊  OVERALL CLOSED SUMMARY', COLORS.DARK_HEADER);
-  const s = computeClosedStats(trades);
+  // Overall scorecard from server summary (authoritative)
+  row = renderSectionHeader(sheet, row, '📊  OVERALL PAPER SCORECARD', COLORS.DARK_HEADER);
+  const trN   = summary.trades   != null ? summary.trades   : trades.length;
+  const wins  = summary.wins     != null ? summary.wins     : 0;
+  const los   = summary.losses   != null ? summary.losses   : 0;
+  const gate  = summary.gate_exits != null ? summary.gate_exits : 0;
+  const gap   = summary.gap_exits  != null ? summary.gap_exits  : 0;
+  const tot   = summary.total_pnl  != null ? summary.total_pnl  : 0;
+  const avgR  = summary.avg_ret    != null ? summary.avg_ret    : 0;
+  const acc   = trN > 0 ? (wins / trN) * 100 : 0;
   [
-    ['Total Closed', s.count, 'Overall Accuracy', fmtPct(s.accuracy)],
-    ['Total Booked', fmtPnL(s.pnl), 'Target Hit', s.targetHit],
-    ['SL Hit', s.slHit, 'Gate Exit', s.gateExit],
+    ['Total Closed', trN, 'Accuracy', fmtPct(acc)],
+    ['Wins', wins, 'Losses', los],
+    ['Gate Exits', gate, 'Gap Exits', gap],
+    ['Total P&L', fmtPnL(tot), 'Avg Return', fmtPct(avgR)],
   ].forEach(srow => {
     for (let i = 0; i < srow.length; i++) {
       const cell = sheet.getRange(row, 1 + i);
@@ -1113,11 +1227,10 @@ function refreshTradeLog() {
   sheet.setColumnWidth(1, 130);
   sheet.setColumnWidths(2, 9, 110);
   sheet.setFrozenRows(2);
-  toast('✓ Trade Log refreshed');
+  toast('✓ Trade Log (paper) refreshed');
 }
 
-
-function renderStrategyTradeSection(sheet, row, strategy, trades) {
+function renderPaperTradeSection(sheet, row, strategy, trades) {
   const meta = strategyMeta(strategy);
   sheet.getRange(row, 1, 1, 10).merge()
     .setValue(`${meta.emoji}  ${strategy.toUpperCase()}`)
@@ -1126,34 +1239,42 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
   sheet.setRowHeight(row, 26);
   row++;
 
-  const stats = computeClosedStatsForGroup(trades);
-  ['Closed Trades', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L/Trade'].forEach((h, i) => {
+  // Group stats
+  let pnlSum = 0, targetHit = 0, slGap = 0;
+  trades.forEach(t => {
+    pnlSum += Number(t.pnl || 0);
+    String(t.result || '').toLowerCase().includes('target') ? targetHit++ : slGap++;
+  });
+  const acc = trades.length > 0 ? (targetHit / trades.length) * 100 : 0;
+  const avg = trades.length > 0 ? pnlSum / trades.length : 0;
+
+  ['Closed', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L/Trade'].forEach((h, i) => {
     sheet.getRange(row, 1 + i).setValue(h).setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontSize(9).setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center');
   });
   row++;
-
-  [stats.count, fmtPnL(stats.pnl), fmtPct(stats.accuracy), stats.targetHit, stats.slGap, fmtPnL(stats.avgPnl)].forEach((v, i) => {
+  [trades.length, fmtPnL(pnlSum), fmtPct(acc), targetHit, slGap, fmtPnL(avg)].forEach((v, i) => {
     const cell = sheet.getRange(row, 1 + i);
     cell.setValue(v).setFontFamily(FONTS.MONO.family).setFontWeight('bold').setHorizontalAlignment('center').setFontSize(11);
-    if (i === 1) cell.setFontColor(stats.pnl >= 0 ? COLORS.PROFIT : COLORS.LOSS);
-    if (i === 5) cell.setFontColor(stats.avgPnl >= 0 ? COLORS.PROFIT : COLORS.LOSS);
+    if (i === 1) cell.setFontColor(pnlSum >= 0 ? COLORS.PROFIT : COLORS.LOSS);
+    if (i === 5) cell.setFontColor(avg >= 0 ? COLORS.PROFIT : COLORS.LOSS);
   });
   sheet.setRowHeight(row, 24);
   row++;
 
-  row = renderTableHeader(sheet, row, ['Entry Time', 'Exit Time', 'Stock', 'Entry', 'Exit', 'P&L', 'Holding', 'Result'], 8);
+  const headers = ['Entry Time', 'Exit Time', 'Symbol', 'Side', 'Entry', 'Exit', 'P&L', 'Return %', 'Holding', 'Result'];
+  row = renderTableHeader(sheet, row, headers, headers.length);
 
   if (trades.length === 0) {
-    sheet.getRange(row, 1, 1, 8).merge().setValue('No closed trades for this strategy').setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
+    sheet.getRange(row, 1, 1, headers.length).merge().setValue('No closed paper trades for this strategy').setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
     row++;
   } else {
     trades.forEach(t => {
-      const pnl = computeClosedPnl(t);
-      const result = t.Result || t.result || 'Unknown';
+      const pnl = Number(t.pnl || 0);
+      const result = t.result || 'Unknown';
       const vals = [
-        fmtDate(t.entry_time), fmtDate(t.exit_time), t.stock || t.symbol,
-        fmtNum(t.entry, 2), fmtNum(t.exit, 2), fmtPnL(pnl),
-        computeHolding(t.entry_time, t.exit_time), result,
+        fmtDate(t.entry_ts), fmtDate(t.exit_ts), t.symbol, (paperIsLong(t.side) ? 'LONG' : 'SHORT'),
+        fmtNum(t.entry_price, 2), fmtNum(t.exit_price, 2), fmtPnL(pnl), fmtPct(t.return_pct),
+        paperHolding(t.entry_ts, t.exit_ts), result,
       ];
       vals.forEach((v, i) => {
         const cell = sheet.getRange(row, 1 + i);
@@ -1162,15 +1283,15 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
           .setFontWeight(i === 2 ? 'bold' : 'normal')
           .setHorizontalAlignment(i === 2 ? 'left' : 'right')
           .setBackground(row % 2 === 0 ? COLORS.ALT_ROW : COLORS.CARD_BG);
-        if (i === 5) cell.setFontColor(pnl >= 0 ? COLORS.PROFIT : COLORS.LOSS).setFontWeight('bold');
-        if (i === 7) {
-          const isWin = result.toLowerCase().includes('target');
+        if (i === 6) cell.setFontColor(pnl >= 0 ? COLORS.PROFIT : COLORS.LOSS).setFontWeight('bold');
+        if (i === 9) {
+          const isWin = String(result).toLowerCase().includes('target');
           cell.setFontColor(isWin ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT)
             .setBackground(isWin ? COLORS.PASS_BG : COLORS.FAIL_BG)
             .setFontWeight('bold').setHorizontalAlignment('center');
         }
       });
-      sheet.getRange(row, 1, 1, 8).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
+      sheet.getRange(row, 1, 1, headers.length).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
       row++;
     });
   }
@@ -1178,9 +1299,14 @@ function renderStrategyTradeSection(sheet, row, strategy, trades) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
-//   TAB: RAW DATA — all active futures x 21 metrics (source: /api/v8/raw)
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//   TAB: RAW DATA  (v1.4.0 — Symbol | CMP | PP | R1 | S1 | R2 | S2 | then 21 metrics)
+//   3-source merge by symbol:
+//     /api/v8/raw           -> 21 metrics (primary, GVM-sorted universe)
+//     /api/v8/live_metrics  -> CMP for whole universe in ONE call (cmp field)
+//     /api/paper/pivots     -> PP/R1/S1/R2/S2 per symbol
+//   CMP/pivots blank pre-open or on a non-trading day — fills once Fyers feeds. Not a bug.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 function refreshRawData() {
   const sheet = getOrCreate(SHEETS.RAW);
@@ -1193,7 +1319,7 @@ function refreshRawData() {
   const ncol = RAW_COLS.length;
 
   sheet.getRange(row, 1, 1, ncol).merge()
-    .setValue('🗃️  RAW DATA — All Active Futures × 21 Metrics')
+    .setValue('🗃️  RAW DATA — CMP + Pivots + 21 Metrics (all active futures)')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
@@ -1204,9 +1330,23 @@ function refreshRawData() {
     return;
   }
 
+  // Build CMP lookup (1 call, whole universe) and pivot lookup (1 call), keyed by symbol.
+  const cmpMap = {};
+  const live = fetchLiveMetrics();
+  if (Array.isArray(live)) {
+    live.forEach(r => { if (r && r.symbol) cmpMap[r.symbol] = r.cmp; });
+  }
+  const pivMap = {};
+  const piv = fetchPaperPivots();
+  if (Array.isArray(piv)) {
+    piv.forEach(p => { if (p && p.symbol) pivMap[p.symbol] = p; });
+  }
+
   const scoreDate = data.score_date || '—';
+  const cmpCount = Object.keys(cmpMap).length;
+  const pivCount = Object.keys(pivMap).length;
   sheet.getRange(row, 1, 1, ncol).merge()
-    .setValue(`${data.count || 0} stocks · Score date: ${scoreDate} · GVM-sorted · Refreshed: ${nowIST()}`)
+    .setValue(`${data.count || 0} stocks · Score date: ${scoreDate} · CMP: ${cmpCount} · Pivots: ${pivCount} · GVM-sorted · Refreshed: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
@@ -1232,22 +1372,32 @@ function refreshRawData() {
       .setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
     row++;
   } else {
-    // Bulk-build a 2D array for speed (one setValues call instead of per-cell).
-    const matrix = stocks.map(s => RAW_FIELDS.map((f, i) => {
-      const v = s[f];
-      if (f === 'symbol') return v;
-      if (f === 'gvm_score') return fmtNum(v, 2);
-      if (f === 'rsi_month' || f === 'rsi_weekly' || f === 'daily_rsi' ||
-          f === 'month_index' || f === 'week_index_52') return fmtNum(v, 1);
-      if (f === 'vol_ratio') return fmtNum(v, 2);
-      return fmtNum(v, 2);
-    }));
+    // Bulk-build a 2D array: [symbol, CMP, PP, R1, S1, R2, S2, ...21 metrics]
+    const matrix = stocks.map(s => {
+      const sym = s.symbol;
+      const cmp = cmpMap[sym];
+      const pv  = pivMap[sym] || {};
+      const head = [
+        sym,
+        (cmp === undefined || cmp === null) ? '—' : fmtNum(cmp, 2),
+        fmtNum(pv.pp, 2), fmtNum(pv.r1, 2), fmtNum(pv.s1, 2), fmtNum(pv.r2, 2), fmtNum(pv.s2, 2),
+      ];
+      // 21 metrics, skipping the leading 'symbol' field in RAW_FIELDS (already placed).
+      const metrics = RAW_FIELDS.slice(1).map(f => {
+        const v = s[f];
+        if (f === 'gvm_score') return fmtNum(v, 2);
+        if (f === 'rsi_month' || f === 'rsi_weekly' || f === 'daily_rsi' ||
+            f === 'month_index' || f === 'week_index_52') return fmtNum(v, 1);
+        return fmtNum(v, 2);
+      });
+      return head.concat(metrics);
+    });
 
     const dataRange = sheet.getRange(row, 1, matrix.length, ncol);
     dataRange.setValues(matrix);
     dataRange.setFontFamily(FONTS.MONO.family).setFontSize(9);
 
-    // Symbol column styling + alternating row backgrounds
+    // Symbol column bold-left; everything else right-aligned.
     sheet.getRange(row, 1, matrix.length, 1)
       .setFontFamily(FONTS.HEADER.family).setFontWeight('bold')
       .setHorizontalAlignment('left');
@@ -1262,21 +1412,23 @@ function refreshRawData() {
   }
 
   sheet.setColumnWidth(1, 130);
-  sheet.setColumnWidths(2, ncol - 1, 78);
+  sheet.setColumnWidth(2, 82);                 // CMP
+  sheet.setColumnWidths(3, 5, 78);             // PP R1 S1 R2 S2
+  sheet.setColumnWidths(8, ncol - 7, 74);      // 21 metrics
   sheet.setFrozenRows(headerRow);
-  sheet.setFrozenColumns(1);
+  sheet.setFrozenColumns(2);                   // freeze Symbol + CMP
   toast('✓ Raw Data refreshed');
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 //   TAB: FILTER SCAN — per-stock pass count + names passed, across all 5 baskets
 //   Layout (11 cols): Symbol | BR cnt | BR passed | BM cnt | BM passed |
 //                     SR cnt | SR passed | SM cnt | SM passed | SO cnt | SO passed
 //   Source: /api/v8/raw (whole universe) evaluated against each basket's live filter_config.
 //   Pass logic is IDENTICAL to computeFunnelCounts — single source of truth, never disagrees
 //   with the funnel tabs. A fully-qualified cell (cnt == total) turns green.
-// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 // Short labels for filter metrics so the "names passed" cell stays compact.
 const SCAN_FILTER_ABBR = {
