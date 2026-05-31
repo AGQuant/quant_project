@@ -32,9 +32,12 @@ from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 import yahoo_ondemand
+import yahoo_index_backfill
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.3.2
+# Scorr / Project Quant — main.py v2.3.3
+# v2.3.3: + /api/admin/backfill_indices + backfill_indices MCP tool — Yahoo
+#         NIFTY50/BANKNIFTY 1-min into intraday_prices (interim until Fyers index sub).
 # v2.3.2: GVM daily recompute moved 21:15 -> 22:00 IST to clear the slower Yahoo
 #         raw_prices run (yahoo_daily v2.1 retry-pass fetcher, ~15-30min from 21:00).
 # v2.3.1: load_screener_from_drive now writes the WIDE screener_raw schema
@@ -55,7 +58,7 @@ import yahoo_ondemand
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.3.2"
+VERSION = "2.3.3"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -788,6 +791,11 @@ async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
     asyncio.create_task(_bg_yahoo_daily())
     return {"status": "started", "message": "raw_prices update running in background (v2.1 retry fetcher, ~15-30 min)."}
 
+@app.post("/api/admin/backfill_indices")
+def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    return yahoo_index_backfill.backfill_indices(days=days)
+
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
@@ -1064,6 +1072,7 @@ MCP_TOOLS = [
     {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "backfill_indices", "description": "Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices from Yahoo (interim index source for the market-mood gate). Param days (default 7).", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
     {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
     {"name": "run_v8_engine", "description": "Run the V8 EOD signal engine — compute today's metrics for the futures universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -1119,6 +1128,7 @@ async def _call_tool(name, args):
         elif name == "get_cmp": r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days", 7)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
