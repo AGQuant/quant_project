@@ -3,12 +3,15 @@ Fyers Live Feed - Scorr V8
 ============================
 Standalone Railway WORKER (not in FastAPI). The live intraday source.
 
-FUTURES-ONLY (29-May-2026): streams the ~208 futures universe in 1-min bars
-via WebSocket (well under Fyers' ~200 subscription cap). The 1508 equity
-stocks are NOT streamed — their prices come from Yahoo (EOD) and, later, a
-free BSE 5-min delayed feed.
+FUTURES-ONLY WebSocket (streaming):
+  ~208 futures universe in 1-min bars via WebSocket (under Fyers ~200 cap).
 
-Architecture (3 layers, no rate-limit risk):
+OPTION CHAIN (REST poll, 5-min):
+  NIFTY + BANKNIFTY current-month expiry, ATM±10 strikes, CE+PE.
+  Polled via REST /data/quotes every 5 min -> option_chain table (7-day retention).
+  Uses the same access token. No extra auth needed.
+
+Architecture (3 layers for futures + 1 for options):
   1. BACKFILL  - on boot, one-time 7-day 1-min futures history (fyers_backfill).
   2. LIVE      - persistent WebSocket. Futures ticks aggregated locally into
                  1-min bars -> intraday_prices. Every tick's LTP also ->
@@ -16,31 +19,13 @@ Architecture (3 layers, no rate-limit risk):
                  real-time CMP for futures. Near-zero REST calls.
   3. GAP HEAL  - on every WS (re)connect, patch the slice from the newest
                  stored candle -> now, so a drop never leaves a hole.
-
-CMP ownership: Fyers primary for futures (real-time, every ~30s flush).
-Yahoo (main.py) covers everything else and acts as fallback - it fills
-symbols Fyers didn't update (stale > 3 min or not subscribed). If the Fyers
-worker is down, all symbols go stale and Yahoo automatically covers the
-whole universe.
-
-Indices (NIFTY50/BANKNIFTY/INDIAVIX): polled spot LTP every 30s -> cmp_prices,
-AND aggregated into 1-min OHLC -> intraday_prices (via the shared
-BarAggregator). Stored under clean symbols NIFTY50/BANKNIFTY/INDIAVIX, matching
-raw_prices.NIFTY50 used by the EOD market-mood gate. Poll-driven (not WS) to
-stay under the ~200 WS subscription cap.
-Yahoo is NOT used here (EOD raw_prices handled separately by main.py 21:00).
-
-MARKET-CLOSE GUARD (30-May-2026): bars bucketed at/after 15:30 IST are never
-persisted. Post-close stray ticks were re-stamping a frozen 15:30 bar that
-flush_all() re-wrote every 30s (ON CONFLICT), creating ghost rows
-(15:30-16:55, frozen price, cumulative volume). _flush now drops any bar
->= 15:30, and is_market_open() halts housekeeping at 15:29. Last saved bar
-of the day = 15:29.
+  4. OPTION CHAIN - REST poll every 5 min. ATM recomputed each cycle from
+                 latest cmp_prices. 84 symbols (2 indices × 21 strikes × CE+PE)
+                 split into 2 batches of 50 to stay within REST limits.
 
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
-  Refresh-token flow is DISABLED (SEBI: continuous refresh sessions banned).
-  -> ONE 2FA login per TRADING DAY, done HEADLESS via TOTP (fyers_autologin).
-  access_token  - valid the whole trading day, survives restarts.
+  Refresh-token flow is DISABLED. ONE 2FA login per TRADING DAY.
+  access_token valid the whole trading day, survives restarts.
   Stored in Railway table fyers_tokens (id=1).
 
   Boot logic (get_valid_token):
@@ -53,8 +38,8 @@ USAGE:
   Manual override:     python fyers_feed.py --auth-code <code>
 """
 
-import argparse, hashlib, os, time, logging, threading
-from datetime import datetime, timedelta, time as dt_time
+import argparse, calendar, hashlib, os, time, logging, threading
+from datetime import datetime, timedelta, time as dt_time, date
 import pytz, psycopg2, requests
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
@@ -72,8 +57,6 @@ RETENTION_DAYS = 7
 MARKET_CLOSE = dt_time(15, 30)
 
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
-# Literal & — the Fyers symbol-master (WS validation) expects NSE:M&M-EQ, and
-# requests URL-encodes it correctly for REST. %26 fails both paths.
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 INDEX_LTP_SYMBOLS = {
     'NIFTY50':   'NSE:NIFTY50-INDEX',
@@ -81,11 +64,40 @@ INDEX_LTP_SYMBOLS = {
     'INDIAVIX':  'NSE:INDIAVIX-INDEX',
 }
 
+# ── Option chain config ────────────────────────────────────────────────────────
+OPTION_RETENTION_DAYS = 7
+OPTION_POLL_MINS      = 5      # poll every 5 min via REST
+N_STRIKES             = 10     # ATM ± 10 strikes each side
+NIFTY_STEP            = 50
+BNIFTY_STEP           = 100
+OPTION_MONTHS         = ['JAN','FEB','MAR','APR','MAY','JUN',
+                          'JUL','AUG','SEP','OCT','NOV','DEC']
+
+OPTION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS option_chain (
+    id          SERIAL PRIMARY KEY,
+    symbol      TEXT    NOT NULL,
+    underlying  TEXT    NOT NULL,
+    strike      NUMERIC NOT NULL,
+    option_type TEXT    NOT NULL,
+    expiry      DATE    NOT NULL,
+    ltp         NUMERIC,
+    oi          BIGINT,
+    volume      BIGINT,
+    bid         NUMERIC,
+    ask         NUMERIC,
+    ts          TIMESTAMP NOT NULL,
+    UNIQUE (symbol, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_option_chain_ts         ON option_chain(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_option_chain_underlying ON option_chain(underlying, ts DESC);
+"""
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('fyers_feed')
 
 
-# ---------------------------------------------------------------- DB / token
+# ──────────────────────────────────────────────── DB / token
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -123,11 +135,6 @@ def bootstrap_from_authcode(conn, auth_code):
     return d['access_token']
 
 def get_valid_token(conn, auth_code=None):
-    # SEBI Apr-2026: refresh-token flow is DISABLED. One 2FA login per
-    # trading day. Token is valid all day and survives restarts.
-    #   1. --auth-code given -> bootstrap (mint + store today's token).
-    #   2. else stored access_token created TODAY -> reuse it (restart-safe).
-    #   3. else -> AUTO-LOGIN via TOTP (headless), store + return token.
     if auth_code:
         try:
             return bootstrap_from_authcode(conn, auth_code)
@@ -140,7 +147,6 @@ def get_valid_token(conn, auth_code=None):
             log.info("Reusing stored same-day access token (restart-safe)")
             return access_token
         log.warning("Stored access token is from a previous day - auto-login needed")
-    # No valid same-day token -> headless TOTP auto-login (zero-touch).
     try:
         import fyers_autologin
         log.info("No valid token - running TOTP auto-login...")
@@ -155,7 +161,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ---------------------------------------------------------------- universe
+# ──────────────────────────────────────────────── universe
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -167,25 +173,18 @@ def get_universe(conn):
 
 def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
 def from_fyers_symbol(fsym):
-    # 'NSE:SBIN-EQ' -> 'SBIN' ; handle M&M (NSE:M&M-EQ -> M&M)
     if fsym == 'NSE:M&M-EQ': return 'M&M'
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ---------------------------------------------------------------- bar aggregator
+# ──────────────────────────────────────────────── bar aggregator
 
 class BarAggregator:
-    """
-    Accumulates ticks into OHLCV bars per (symbol, timeframe) and flushes
-    completed bars to intraday_prices. Also tracks latest LTP per symbol and
-    flushes it to cmp_prices (source='fyers') - Fyers is the PRIMARY CMP feed.
-    Futures-only: every streamed symbol is a future -> 1-min bars.
-    """
     def __init__(self, conn, futures_set):
         self.conn = conn
-        self.futures = futures_set       # set of raw symbols using 1-min
-        self.bars = {}                   # (sym, tf) -> dict bar
-        self.last_ltp = {}               # sym -> latest ltp (for cmp_prices, primary)
+        self.futures = futures_set
+        self.bars = {}
+        self.last_ltp = {}
         self.lock = threading.Lock()
 
     def _bucket(self, ts, minutes):
@@ -195,17 +194,15 @@ class BarAggregator:
 
     def on_tick(self, sym, ltp, vol, ts=None):
         ts = ts or datetime.now(IST).replace(tzinfo=None)
-        # Futures-only stream: all symbols are 1-min. (Fallback to 1m if
-        # an unexpected symbol arrives.)
         tf, mins = ('1m', 1)
         bkt = self._bucket(ts, mins)
         key = (sym, tf)
         with self.lock:
-            self.last_ltp[sym] = ltp     # newest price for CMP
+            self.last_ltp[sym] = ltp
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
-                    self._flush(key, bar)        # previous bar complete
+                    self._flush(key, bar)
                 self.bars[key] = {'ts': bkt, 'o': ltp, 'h': ltp, 'l': ltp,
                                   'c': ltp, 'v': vol or 0, 'tf': tf}
             else:
@@ -216,10 +213,6 @@ class BarAggregator:
 
     def _flush(self, key, bar):
         sym, _ = key
-        # MARKET-CLOSE GUARD: never persist a bar bucketed at/after 15:30 IST.
-        # Stray post-close ticks were creating frozen ghost rows (15:30-16:55)
-        # that flush_all() re-wrote every 30s via ON CONFLICT. Drop them here
-        # at the source so the last saved bar of the day is 15:29.
         try:
             if bar['ts'].time() >= MARKET_CLOSE:
                 return
@@ -244,7 +237,6 @@ class BarAggregator:
                 self._flush(key, bar)
 
     def flush_cmp(self):
-        """Write latest LTP per symbol to cmp_prices as PRIMARY (source='fyers')."""
         with self.lock:
             rows = [(s, p) for s, p in self.last_ltp.items() if p]
         if not rows:
@@ -263,16 +255,9 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ---------------------------------------------------------------- index LTP
+# ──────────────────────────────────────────────── index LTP
 
 def update_index_ltp(conn, token, agg=None):
-    """Poll index spot LTP (NIFTY50/BANKNIFTY/INDIAVIX) every cycle.
-    Writes cmp_prices, and (if agg given) feeds the SAME BarAggregator so the
-    polled prices aggregate into 1-min OHLC -> intraday_prices, exactly like
-    futures. This is what the market-mood Nifty D/W/M gate reads. A 30s poll
-    gives ~2 samples/min — coarse but sufficient for the regime gate. Stored
-    under clean symbols NIFTY50 / BANKNIFTY / INDIAVIX (NOT the -INDEX strings),
-    matching raw_prices.NIFTY50 that the EOD gate already uses."""
     try:
         r = requests.get(QUOTES_URL, params={'symbols': ','.join(INDEX_LTP_SYMBOLS.values())},
                          headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=5)
@@ -286,7 +271,6 @@ def update_index_ltp(conn, token, agg=None):
                 if fsym == item['n']:
                     rows.append((name, lp))
                     if agg is not None:
-                        # feed into 1-min OHLC bars -> intraday_prices (same path as futures)
                         agg.on_tick(name, float(lp), 0)
         if rows:
             with conn.cursor() as cur:
@@ -297,15 +281,160 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ---------------------------------------------------------------- main run
+# ──────────────────────────────────────────────── option chain helpers
+
+def ensure_option_schema(conn):
+    with conn.cursor() as cur:
+        cur.execute(OPTION_SCHEMA_SQL)
+    conn.commit()
+    log.info("option_chain schema ready")
+
+def get_monthly_expiry():
+    """Last Thursday of current (or next) month."""
+    today = datetime.now(IST).date()
+    year, month = today.year, today.month
+
+    def last_thursday(y, m):
+        last_day = calendar.monthrange(y, m)[1]
+        d = date(y, m, last_day)
+        while d.weekday() != 3:   # 3 = Thursday
+            d -= timedelta(days=1)
+        return d
+
+    exp = last_thursday(year, month)
+    if today > exp:
+        month = month + 1 if month < 12 else 1
+        year  = year if month > 1 else year + 1
+        exp   = last_thursday(year, month)
+    return exp
+
+def get_atm(conn, underlying):
+    """Round current CMP to nearest strike interval."""
+    step    = NIFTY_STEP if underlying == 'NIFTY' else BNIFTY_STEP
+    cmp_sym = 'NIFTY50'  if underlying == 'NIFTY' else 'BANKNIFTY'
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol = %s", (cmp_sym,))
+            r = cur.fetchone()
+        if not r: return None
+        return int(round(float(r[0]) / step) * step)
+    except Exception as e:
+        log.warning(f"get_atm {underlying}: {e}")
+        return None
+
+def build_option_symbols(conn, expiry):
+    """
+    Returns list of tuples: (fyers_symbol, underlying, strike, option_type, expiry)
+    NIFTY + BANKNIFTY, ATM±N_STRIKES strikes, CE + PE.
+    """
+    exp_str = f"{str(expiry.year)[2:]}{OPTION_MONTHS[expiry.month - 1]}"
+    symbols = []
+    for underlying, step in [('NIFTY', NIFTY_STEP), ('BANKNIFTY', BNIFTY_STEP)]:
+        atm = get_atm(conn, underlying)
+        if atm is None:
+            log.warning(f"ATM unavailable for {underlying} — skipping option chain")
+            continue
+        for i in range(-N_STRIKES, N_STRIKES + 1):
+            strike = int(atm + i * step)
+            for otype in ('CE', 'PE'):
+                fsym = f"NSE:{underlying}{exp_str}{strike}{otype}"
+                symbols.append((fsym, underlying, strike, otype, expiry))
+    log.info(f"option symbols: {len(symbols)} ({exp_str} expiry, ATM±{N_STRIKES})")
+    return symbols
+
+def _chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+def poll_option_chain(conn, token, expiry):
+    """REST poll for all option symbols → option_chain table (5-min bucket)."""
+    sym_meta = build_option_symbols(conn, expiry)
+    if not sym_meta:
+        return
+
+    fyers_syms = [s[0] for s in sym_meta]
+    meta_map   = {s[0]: s for s in sym_meta}
+
+    # 5-min bucket timestamp
+    now = datetime.now(IST).replace(tzinfo=None)
+    bkt = now.replace(second=0, microsecond=0)
+    bkt = bkt - timedelta(minutes=bkt.minute % OPTION_POLL_MINS)
+
+    rows = []
+    for batch in _chunks(fyers_syms, 50):    # Fyers REST: max ~50/call
+        try:
+            r = requests.get(
+                QUOTES_URL,
+                params={'symbols': ','.join(batch)},
+                headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
+                timeout=10,
+            )
+            d = r.json()
+            if d.get('s') != 'ok':
+                log.warning(f"option poll batch: {d.get('message','')}")
+                continue
+            for item in d.get('d', []):
+                fsym = item.get('n', '')
+                if fsym not in meta_map:
+                    continue
+                _, underlying, strike, otype, exp = meta_map[fsym]
+                v   = item.get('v', {})
+                ltp = v.get('lp') or v.get('ltp')
+                oi  = v.get('oi') or v.get('open_interest')
+                vol = v.get('vol_traded_today') or v.get('volume')
+                bid = v.get('bid_price') or v.get('bp')
+                ask = v.get('ask_price') or v.get('ap')
+                if ltp is None:
+                    continue
+                rows.append((fsym, underlying, strike, otype, exp,
+                              ltp, oi, vol, bid, ask, bkt))
+        except Exception as e:
+            log.warning(f"option poll batch error: {e}")
+
+    if not rows:
+        log.info("option_chain: 0 rows (no LTP data returned)")
+        return
+
+    try:
+        with conn.cursor() as cur:
+            cur.executemany("""
+                INSERT INTO option_chain
+                  (symbol, underlying, strike, option_type, expiry,
+                   ltp, oi, volume, bid, ask, ts)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (symbol, ts) DO UPDATE SET
+                  ltp=EXCLUDED.ltp, oi=EXCLUDED.oi, volume=EXCLUDED.volume,
+                  bid=EXCLUDED.bid, ask=EXCLUDED.ask
+            """, rows)
+        conn.commit()
+        log.info(f"option_chain: {len(rows)} rows stored at {bkt}")
+    except Exception as e:
+        log.warning(f"option_chain store: {e}")
+
+def cleanup_option_chain(conn):
+    """Delete option_chain rows older than OPTION_RETENTION_DAYS."""
+    cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=OPTION_RETENTION_DAYS)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM option_chain WHERE ts < %s", (cutoff,))
+            deleted = cur.rowcount
+        conn.commit()
+        if deleted:
+            log.info(f"option_chain cleanup: {deleted} rows deleted (>{OPTION_RETENTION_DAYS}d)")
+    except Exception as e:
+        log.warning(f"option_chain cleanup: {e}")
+
+
+# ──────────────────────────────────────────────── market helpers
 
 def is_market_open():
     now = datetime.now(IST)
     if now.weekday() >= 5: return False
     mins = now.hour * 60 + now.minute
-    # Halt at 15:29 (not 15:30): the final saved bar is the 15:29 bucket, and
-    # housekeeping must not keep flushing partial bars into the close minute.
     return (9*60+15) <= mins <= (15*60+29)
+
+
+# ──────────────────────────────────────────────── main run
 
 def run(auth_code=None):
     import fyers_backfill
@@ -315,17 +444,19 @@ def run(auth_code=None):
     token = get_valid_token(conn, auth_code)
     futures, equity = get_universe(conn)
     futures_set = set(futures)
-    log.info(f"Universe: {len(futures)} futures (1m streamed) | {len(equity)} equity (NOT streamed - Yahoo/BSE)")
+    log.info(f"Universe: {len(futures)} futures (1m WS) | option chain: NIFTY+BNIFTY ATM±{N_STRIKES} REST 5-min")
 
-    # ---- Layer 1: one-time backfill on boot (FUTURES ONLY) ----
+    # Option chain schema
+    ensure_option_schema(conn)
+
+    # ---- Layer 1: boot backfill (futures only) ----
     log.info("Boot backfill (7-day, futures only)...")
     try:
         fyers_backfill.backfill_7day(token, conn)
     except Exception as e:
-        log.error(f"Boot backfill failed (continuing to live): {e}")
+        log.error(f"Boot backfill failed (continuing): {e}")
 
     agg = BarAggregator(conn, futures_set)
-    # FUTURES ONLY on the websocket -> stays under Fyers ~200 subscription cap.
     futures_fyers_syms = [fyers_eq_symbol(s) for s in futures]
     access = f"{FYERS_CLIENT_ID}:{token}"
 
@@ -340,7 +471,6 @@ def run(auth_code=None):
             log.warning(f"on_message: {e}")
 
     def on_connect():
-        # ---- Layer 3: gap heal on every (re)connect (FUTURES ONLY) ----
         log.info("WS connected - healing futures gaps then subscribing")
         try:
             fyers_backfill.heal_gap(token, conn, futures, '1', '1m')
@@ -359,17 +489,35 @@ def run(auth_code=None):
         on_error=on_error, on_message=on_message,
     )
 
-    # ---- Layer 2: live websocket (blocking, auto-reconnect) ----
-    # Periodic flush + CMP + index LTP on a side thread.
-    # NOTE: No daily token refresh here. SEBI (Apr-2026) disabled the
-    # refresh endpoint -> token is obtained once per trading day via headless
-    # TOTP auto-login (fyers_autologin) on boot.
+    # ---- Housekeeping thread ----
     def housekeeping():
+        last_option_poll = None
+        last_cleanup_day = None
+
         while True:
             if is_market_open():
+                # Futures: index LTP + bar flush + CMP (every 30s)
                 update_index_ltp(conn, token, agg)
-                agg.flush_all()   # flush partial bars every cycle (safety)
-                agg.flush_cmp()   # PRIMARY CMP - latest LTP per symbol -> cmp_prices
+                agg.flush_all()
+                agg.flush_cmp()
+
+                # Option chain: REST poll every 5 min
+                now_dt = datetime.now(IST).replace(tzinfo=None)
+                if (last_option_poll is None or
+                        (now_dt - last_option_poll).total_seconds() >= OPTION_POLL_MINS * 60):
+                    expiry = get_monthly_expiry()
+                    try:
+                        poll_option_chain(conn, token, expiry)
+                    except Exception as e:
+                        log.warning(f"option_chain poll failed: {e}")
+                    last_option_poll = now_dt
+
+            # Daily cleanup (once per calendar day, any time)
+            today = datetime.now(IST).date()
+            if last_cleanup_day != today:
+                cleanup_option_chain(conn)
+                last_cleanup_day = today
+
             time.sleep(30)
 
     threading.Thread(target=housekeeping, daemon=True).start()
