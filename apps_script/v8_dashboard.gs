@@ -22,11 +22,11 @@
  */
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   CONFIG
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.6.0';   // v1.6.0 — basket funnels: TC drop% row + stock matrix by stage (V4-style)
+const SCRIPT_VERSION = '1.7.0';   // v1.7.0 — Sell Overbought is now a first-class strategy (own section + correct grouping)
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -46,7 +46,7 @@ const SHEETS = {
 
 const BASKETS = ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum', 'sell_overbought'];
 
-const STRATEGY_ORDER = ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum', 'Manual/Untagged'];
+const STRATEGY_ORDER = ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum', 'Sell Overbought', 'Manual/Untagged'];
 
 const COLORS = {
   DARK_HEADER:    '#1F2937',
@@ -107,9 +107,9 @@ const RAW_FIELDS = [
 ];
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   MENU + TRIGGERS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -157,9 +157,9 @@ function scheduledRefresh() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   CLEAN REBUILD
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function cleanRebuild() {
   const ui = SpreadsheetApp.getUi();
@@ -180,9 +180,9 @@ function cleanRebuild() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   UPDATE CHECKER
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function pullLatestFromGitHub() {
   let remoteCode, remoteVersion;
@@ -250,9 +250,9 @@ function showVersion() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   MAIN REFRESH ENTRY POINTS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshAll() {
   toast('Refreshing all tabs…');
@@ -270,9 +270,9 @@ function refreshBuyBaskets()  { toast('Refreshing buy baskets…');  ['buy_rever
 function refreshSellBaskets() { toast('Refreshing sell baskets…'); ['sell_reversal','sell_momentum'].forEach(refreshBasketFunnel); toast('✓ Sell baskets refreshed'); }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   API CALLS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function fetchJSON(endpoint) {
   try {
@@ -293,9 +293,9 @@ function fetchMetricsAll()     { return fetchJSON('/api/v8/metrics/all'); }
 function fetchRawData()        { return fetchJSON('/api/v8/raw?limit=250'); }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TAB: MASTER DASHBOARD
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshMasterDashboard() {
   const sheet = getOrCreate(SHEETS.DASH);
@@ -329,9 +329,9 @@ function refreshMasterDashboard() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TODAY'S SIGNALS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function renderTodaysSignals(sheet, row) {
   const allBasketData = {};
@@ -395,9 +395,9 @@ function renderSectionHeader(sheet, row, label, bg) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   PERFORMANCE SUMMARY  (v1.5.0 — reads PAPER engine)
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function renderPerformanceSummary(sheet, row) {
   const paperStatus = fetchPaperStatus() || {};
@@ -437,9 +437,9 @@ function renderPerformanceSummary(sheet, row) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   MARKET GATE  (v1.5.0 — slot tracking reads PAPER positions)
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function renderMarketGate(sheet, row) {
   const mood = fetchMarketMood();
@@ -521,9 +521,9 @@ function renderFilterCard(sheet, row, basket) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TABS: BASKET FUNNELS  (v1.6.0 — TC drop% row + stock matrix by stage)
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshBasketFunnel(basket) {
   const sheetName = {buy_reversal:SHEETS.BR,buy_momentum:SHEETS.BM,sell_reversal:SHEETS.SR,sell_momentum:SHEETS.SM}[basket];
@@ -667,9 +667,9 @@ function computeFunnelCounts(metricsAll, filters) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TAB: SELL OVERBOUGHT
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshSellOverbought() {
   const sheet = getOrCreate(SHEETS.SO);
@@ -717,9 +717,9 @@ function refreshSellOverbought() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   PAPER-ENGINE FETCHERS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function fetchPaperStatus()  { return fetchJSON('/api/paper/status'); }
 function fetchPaperPivots()  { return fetchJSON('/api/paper/pivots?limit=250'); }
@@ -728,18 +728,18 @@ function fetchCmp(symbol)    { const r = fetchJSON('/api/cmp/' + encodeURICompon
 
 function paperStrategy(basket) {
   const s = String(basket||'').toLowerCase();
+  if (s.includes('overbought'))                return 'Sell Overbought';
   if (s.includes('buy') && s.includes('rev'))  return 'Buy Reversal';
   if (s.includes('buy') && s.includes('mom'))  return 'Buy Momentum';
   if (s.includes('sell') && s.includes('rev')) return 'Sell Reversal';
   if (s.includes('sell') && s.includes('mom')) return 'Sell Momentum';
-  if (s.includes('overbought'))                return 'Sell Reversal';
   return 'Manual/Untagged';
 }
 
 function paperIsLong(side) { const d = String(side||'').toUpperCase(); return !(d==='SELL'||d==='SHORT'); }
 
 function groupPaperByStrategy(rows) {
-  const out = {'Buy Reversal':[],'Buy Momentum':[],'Sell Reversal':[],'Sell Momentum':[],'Manual/Untagged':[]};
+  const out = {'Buy Reversal':[],'Buy Momentum':[],'Sell Reversal':[],'Sell Momentum':[],'Sell Overbought':[],'Manual/Untagged':[]};
   rows.forEach(r => { const strat = paperStrategy(r.basket); (out[strat]||out['Manual/Untagged']).push(r); });
   return out;
 }
@@ -754,9 +754,9 @@ function paperHolding(entryTs, exitTs) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TAB: IN POSITION
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshInPosition() {
   const sheet = getOrCreate(SHEETS.POS);
@@ -855,9 +855,9 @@ function renderPaperPositionSection(sheet, row, strategy, positions, cmpMap) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TAB: TRADE LOG
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshTradeLog() {
   const sheet = getOrCreate(SHEETS.LOG);
@@ -942,9 +942,9 @@ function renderPaperTradeSection(sheet, row, strategy, trades) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TAB: RAW DATA
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function refreshRawData() {
   const sheet = getOrCreate(SHEETS.RAW);
@@ -999,9 +999,9 @@ function refreshRawData() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   TAB: FILTER SCAN
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 const SCAN_FILTER_ABBR = {
   gvm_score:'GVM',year_return:'YrRet',dma_200:'DMA200',dma_50:'DMA50',dma_20:'DMA20',
@@ -1102,16 +1102,16 @@ function refreshFilterScan() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   BUILD ALL TABS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function buildAllTabs() { Object.values(SHEETS).forEach(name=>getOrCreate(name)); toast('All 10 tabs created. Run "Refresh All" next.'); }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   HELPERS — AGGREGATIONS
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function aggregatePositions(positions) {
   const out = {__TOTAL:zeroAgg()};
@@ -1152,7 +1152,7 @@ function aggregateTrades(trades) {
 function zeroAgg() { return {count:0,pnl:0,winning:0,losing:0,targetHit:0,slGap:0,accuracy:0,avgPnl:0}; }
 
 function groupByStrategy(rows) {
-  const out={'Buy Reversal':[],'Buy Momentum':[],'Sell Reversal':[],'Sell Momentum':[],'Manual/Untagged':[]};
+  const out={'Buy Reversal':[],'Buy Momentum':[],'Sell Reversal':[],'Sell Momentum':[],'Sell Overbought':[],'Manual/Untagged':[]};
   rows.forEach(r => { const s=inferStrategy(r); if(out[s]) out[s].push(r); else out['Manual/Untagged'].push(r); });
   return out;
 }
@@ -1166,7 +1166,7 @@ function inferStrategy(row) {
     if(s.includes('buy')&&s.includes('mom')) return 'Buy Momentum';
     if(s.includes('sell')&&s.includes('rev')) return 'Sell Reversal';
     if(s.includes('sell')&&s.includes('mom')) return 'Sell Momentum';
-    if(s.includes('overbought')) return 'Sell Reversal';
+    if(s.includes('overbought')) return 'Sell Overbought';
   }
   const explicit=row.signal_type||row.v8_basket;
   if (explicit) {
@@ -1175,7 +1175,7 @@ function inferStrategy(row) {
     if(s.includes('buy')&&s.includes('mom')) return 'Buy Momentum';
     if(s.includes('sell')&&s.includes('rev')) return 'Sell Reversal';
     if(s.includes('sell')&&s.includes('mom')) return 'Sell Momentum';
-    if(s.includes('overbought')) return 'Sell Reversal';
+    if(s.includes('overbought')) return 'Sell Overbought';
   }
   return 'Manual/Untagged';
 }
@@ -1239,14 +1239,15 @@ function strategyMeta(strategy) {
   if(strategy==='Buy Momentum')   return {color:COLORS.BUY_MOM, emoji:'▲'};
   if(strategy==='Sell Reversal')  return {color:COLORS.SELL_REV,emoji:'▼'};
   if(strategy==='Sell Momentum')  return {color:COLORS.SELL_MOM,emoji:'▼'};
+  if(strategy==='Sell Overbought')return {color:COLORS.SELL_OB, emoji:'⚠'};
   if(strategy==='Manual/Untagged')return {color:COLORS.MANUAL,  emoji:'◆'};
   return {color:COLORS.DARK_HEADER,emoji:'•'};
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 //   HELPERS — UI / FORMATTING
-// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
 
 function getOrCreate(name) { const ss=SpreadsheetApp.getActiveSpreadsheet();let sheet=ss.getSheetByName(name);if(!sheet) sheet=ss.insertSheet(name);return sheet; }
 
@@ -1292,6 +1293,6 @@ function nowIST() { return Utilities.formatDate(new Date(),'Asia/Kolkata','d-MMM
 function toast(msg) { SpreadsheetApp.getActiveSpreadsheet().toast(msg,'Scorr V8',3); }
 
 function humanLogic(metric) {
-  const map={'gvm_score':'Quality gate','year_return':'Long-term trend','dma_200':'vs 200-day MA','dma_50':'vs 50-day MA','dma_20':'vs 20-day MA','rsi_month':'Monthly RSI','rsi_weekly':'Weekly RSI','daily_rsi':'Daily RSI','month_return':'Monthly return','week_return':'Weekly return','sector_week':'Sector week trend','sector_day':'Sector today','month_index':'Market breadth','week_index_52':'52-week position','range_1d':"Today's candle",'range_3d':'3-day move','ma9_vs_ma21':'Short-term stretch','vol_ratio':'Volume drying'};
+  const map={'gvm_score':'Quality gate','year_return':'Long-term trend','dma_200':'vs 200-day MA','dma_50':'vs 50-day MA','dma_20':'vs 20-day MA','rsi_month':'Monthly RSI','rsi_weekly':'Weekly RSI','daily_rsi':'Daily RSI','month_return':'Monthly return','week_return':'Weekly return','sector_week':'Sector week trend','sector_day':'Sector today','month_index':'Market breadth','week_index_52':'52-week position','range_1d':"Today's candle",'range_3d':'3-day move','prev_day_change':'Prev-day change','upper_bb':'Upper Bollinger','lower_bb':'Lower Bollinger','ma9_vs_ma21':'Short-term stretch','vol_ratio':'Volume drying'};
   return map[metric]||metric;
 }
