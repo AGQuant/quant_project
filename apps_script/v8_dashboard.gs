@@ -26,7 +26,7 @@
 //   CONFIG
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.5.0';   // Master_Dashboard Performance + Gate -> PAPER engine (Option B fix)
+const SCRIPT_VERSION = '1.5.1';   // inferStrategy reads basket field — paper positions now grouped correctly
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -396,11 +396,10 @@ function renderSectionHeader(sheet, row, label, bg) {
 
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-//   PERFORMANCE SUMMARY  (v1.5.0 — reads PAPER engine, not personal_journal)
+//   PERFORMANCE SUMMARY  (v1.5.0 — reads PAPER engine)
 // ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 function renderPerformanceSummary(sheet, row) {
-  // v1.5.0 — read from PAPER engine (was personal_journal /api/v8/positions+trades, always empty)
   const paperStatus = fetchPaperStatus() || {};
   const positions = (paperStatus.open_positions) || [];
   const trades    = (paperStatus.recent_trades)  || [];
@@ -449,7 +448,6 @@ function renderMarketGate(sheet, row) {
     return row + 1;
   }
 
-  // v1.5.0 — slot tracking reads PAPER engine (was personal_journal, always 0)
   const paperSt   = fetchPaperStatus() || {};
   const positions  = (paperSt.open_positions) || [];
   const buyOpen    = positions.filter(p => isLongTrade(p)).length;
@@ -1088,7 +1086,8 @@ function groupByStrategy(rows) {
 }
 
 function inferStrategy(row) {
-  const server=row.strategy||row.Strategy;
+  // v1.5.1: also checks row.basket so paper engine positions/trades are grouped correctly
+  const server=row.strategy||row.Strategy||row.basket;
   if (server) {
     const s=String(server).toLowerCase();
     if(s.includes('buy')&&s.includes('rev')) return 'Buy Reversal';
