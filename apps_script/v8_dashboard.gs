@@ -26,7 +26,7 @@
 //   CONFIG
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION = '1.7.0';   // v1.7.0 — Sell Overbought is now a first-class strategy (own section + correct grouping)
+const SCRIPT_VERSION = '1.7.1';   // v1.7.1 — open-position stats relabeled (% Green/In Profit/In Loss); In_Position caption clarifies positions vs live signals
 const SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard.gs';
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
@@ -348,6 +348,12 @@ function renderTodaysSignals(sheet, row) {
     .setValue(`${totalSignals} total signal${totalSignals !== 1 ? 's' : ''} today across 5 baskets   ·   Refreshed: ${nowIST()}`)
     .setBackground(bannerBg).setFontColor(bannerFg).setFontSize(10).setFontWeight('bold').setHorizontalAlignment('center');
   sheet.setRowHeight(row, 24); row++;
+
+  sheet.getRange(row, 1, 1, 8).merge()
+    .setValue('ℹ Live qualifiers right now — NOT the same as open positions (engine entries are sticky; see In_Position tab)')
+    .setBackground('#FEF3C7').setFontColor('#92400E').setFontStyle('italic').setFontSize(9).setHorizontalAlignment('center');
+  sheet.setRowHeight(row, 20); row++;
+
   row = renderTableHeader(sheet, row, SIGNAL_COLS, SIGNAL_COLS.length);
 
   BASKETS.forEach(basket => {
@@ -407,8 +413,8 @@ function renderPerformanceSummary(sheet, row) {
   const openAgg   = aggregatePositions(positions);
   const closedAgg = aggregateTrades(trades);
 
-  row = renderSubHeader(sheet, row, 'OPEN POSITIONS (Live)');
-  const openHeaders = ['Strategy','Direction','Open','Unrealised P&L','Accuracy','Winning','Losing','Avg P&L'];
+  row = renderSubHeader(sheet, row, 'OPEN POSITIONS (Live — floating P&L, not closed)');
+  const openHeaders = ['Strategy','Direction','Open','Unrealised P&L','% Green','In Profit','In Loss','Avg P&L'];
   row = renderTableHeader(sheet, row, openHeaders, 8);
   STRATEGY_ORDER.forEach(strat => {
     const a = openAgg[strat];
@@ -421,7 +427,7 @@ function renderPerformanceSummary(sheet, row) {
   row = renderTotalRow(sheet, row, 8, ['TOTAL','ALL',tot.count,tot.pnl,fmtPct(tot.accuracy),tot.winning,tot.losing,tot.avgPnl], {pnlCols:[4,8]});
   row++;
 
-  row = renderSubHeader(sheet, row, 'CLOSED TRADES (Historical)');
+  row = renderSubHeader(sheet, row, 'CLOSED TRADES (Historical — booked outcomes)');
   const closedHeaders = ['Strategy','Direction','Closed','Booked P&L','Accuracy','Target Hit','SL/Gate/Gap','Avg P&L'];
   row = renderTableHeader(sheet, row, closedHeaders, 8);
   STRATEGY_ORDER.forEach(strat => {
@@ -775,7 +781,9 @@ function refreshInPosition() {
   sheet.setRowHeight(row, 34); row++;
   const gateText = mood ? `Gate: ${mood.fails===0?'✅ OPEN':'❌ CLOSED'}   |   Buy slots: ${mood.buy_slots}   |   Sell slots: ${mood.sell_slots}   |   Max: 15   |   Refreshed: ${nowIST()}` : `Refreshed: ${nowIST()}`;
   sheet.getRange(row,1,1,11).merge().setValue(gateText).setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT).setFontSize(10);
-  sheet.setRowHeight(row, 22); row += 2;
+  sheet.setRowHeight(row, 22); row++;
+  sheet.getRange(row,1,1,11).merge().setValue('ℹ What the engine ACTUALLY entered (sticky until exit) — won\'t match Today\'s Signals on the dashboard, which are live qualifiers. % Green = share of open trades currently in profit, NOT a closed-trade win rate.').setBackground('#FEF3C7').setFontColor('#92400E').setFontStyle('italic').setFontSize(9);
+  sheet.setRowHeight(row, 28); row += 2;
 
   const grouped = groupPaperByStrategy(positions);
   STRATEGY_ORDER.forEach(strat => {
@@ -823,7 +831,7 @@ function renderPaperPositionSection(sheet, row, strategy, positions, cmpMap) {
   const accuracy = (winning+losing)>0?(winning/(winning+losing))*100:0;
   const avgPnl = priced>0?totPnl/priced:0;
 
-  ['Open','Unrealised P&L','Accuracy','Winning','Losing','Avg P&L/Trade'].forEach((h,i) => {
+  ['Open','Unrealised P&L','% Green','In Profit','In Loss','Avg P&L/Trade'].forEach((h,i) => {
     sheet.getRange(row,1+i).setValue(h).setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontSize(9).setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center');
   }); row++;
   [positions.length,fmtPnL(totPnl),fmtPct(accuracy),winning,losing,fmtPnL(avgPnl)].forEach((v,i) => {
