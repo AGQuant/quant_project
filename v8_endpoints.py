@@ -85,7 +85,7 @@ FILTER_CONFIG = {
         "daily_rsi":    [None,  40.0],
         "month_return": [-30.0, 0.0],
         "week_return":  [-8.0,  0.0],
-        "sector_week":  [-10.0, -1.6],
+        "sector_week":  [-10.0, -1.0],   # relaxed from -1.6 → -1.0 (01-Jun-2026)
         "sector_day":   [-3.0,  1.0],
         "month_index":  [0.0,   35.0],
         "range_1d":     [-3.0,  0.0],
@@ -117,7 +117,7 @@ _BLACKOUT_SQL = """
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _pivot_s1_s2(prev_high, prev_low, prev_close):
     pp = (prev_high + prev_low + prev_close) / 3
@@ -139,7 +139,7 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
     return mapping.get(basket.lower(), basket)
 
 
-# ── Endpoints ───────────────────────────────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -267,7 +267,7 @@ def qualified(basket: str, limit: int = 50):
     config = FILTER_CONFIG[basket]
     where_clauses = [
         "score_date = (SELECT MAX(score_date) FROM v8_metrics)",
-        _BLACKOUT_SQL,   # exclude earnings-day stocks
+        _BLACKOUT_SQL,
     ]
     params = []
 
@@ -452,9 +452,9 @@ def adr_only():
         raise HTTPException(500, f"adr failed: {e}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 #  PERSONAL JOURNAL — V8 native open + closed trades
-# ═══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════
 
 @router.get("/positions")
 def v8_positions(limit: int = 100):
