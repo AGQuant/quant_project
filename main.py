@@ -39,23 +39,20 @@ import v8_signal_writer
 import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.7.2
-# v2.7.2: CLEANUP — dropped 9 dead endpoints + 3 MCP tools:
-#   DROPPED: /api/v8/adr (inside market_mood), /api/v8/raw (debug),
-#     /api/sector/{sector} (use /api/sectors), /api/momentum/{symbol} (inside gvm),
-#     GET /api/cmp (bulk, nobody reads 1500 rows),
-#     POST /api/admin/refresh_cmp_now (CMP fallback is off permanently),
-#     POST /api/admin/load_screener_json (replaced by load_screener_from_drive),
-#     GET+POST /api/admin/cmp_fallback (dead feature).
-#   DROPPED MCP: get_momentum, load_screener_json, set_cmp_fallback.
-#   TOTAL: 61 → 52 endpoints, 57 → 54 MCP tools.
+# Scorr / Project Quant — main.py v2.7.3
+# v2.7.3: SYSTEM HEALTH REPORT CARD
+#   - GET /api/health/report — full system report card (6 sections, grade A-F)
+#   - MCP tool: health_report — single command full picture
+#   - Sections: Infrastructure, Data Feeds, Scheduler, V8 Engine,
+#     Quant Baskets, GVM Universe
+# v2.7.2: CLEANUP — dropped 9 dead endpoints + 3 MCP tools.
 # v2.7.1: ALL 4 QUANT BASKETS LIVE + nifty500_universe + nifty500_benchmark.
 # v2.7.0: QUANT BASKET EOD checker wired.
 # v2.6.0: COMPUTE-ON-WRITE architecture (v8_signal_writer).
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.7.2"
+VERSION = "2.7.3"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -207,7 +204,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.7.2)")
+        log.info("Tables ready (v2.7.3)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -608,7 +605,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.7.2)")
+    log.info("Scheduler started (v2.7.3)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -638,7 +635,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.7.2)")
+    log.info("Live loop started (v2.7.3)")
     tick_count = 0
     while True:
         try:
@@ -691,6 +688,274 @@ def server_now():
         "is_trading_day": is_trading_day(d),
         "market_open": _is_market_hours(),
     }
+
+# ── System Health Report Card ─────────────────────────────────────────────────
+def _grade(score: float) -> str:
+    """Convert 0-100 score to letter grade."""
+    if score >= 95: return "A+"
+    if score >= 90: return "A"
+    if score >= 80: return "B"
+    if score >= 70: return "C"
+    if score >= 60: return "D"
+    return "F"
+
+def _check(val, label: str, ok_if, warn_if=None) -> dict:
+    """Single check helper. Returns status ok/warn/fail."""
+    if ok_if(val):
+        status = "ok"
+    elif warn_if and warn_if(val):
+        status = "warn"
+    else:
+        status = "fail"
+    return {"check": label, "value": val, "status": status}
+
+def build_health_report() -> dict:
+    now = _ist_now()
+    today = now.date()
+    report = {
+        "generated_at": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "version": VERSION,
+        "is_trading_day": is_trading_day(today),
+        "market_open": _is_market_hours(),
+        "sections": {},
+        "overall_grade": "A",
+        "issues": [],
+        "warnings": [],
+    }
+
+    checks_passed = 0
+    checks_total = 0
+
+    def add_check(section, check):
+        nonlocal checks_passed, checks_total
+        report["sections"][section]["checks"].append(check)
+        checks_total += 1
+        if check["status"] == "ok":
+            checks_passed += 1
+        elif check["status"] == "warn":
+            checks_passed += 0.5
+            report["warnings"].append(f"[{section}] {check['check']}: {check['value']}")
+        else:
+            report["issues"].append(f"[{section}] {check['check']}: {check['value']}")
+
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+
+            # ── SECTION 1: Infrastructure ──────────────────────────────────
+            report["sections"]["infrastructure"] = {"checks": [], "grade": "A"}
+
+            cur.execute("SELECT pg_size_pretty(pg_database_size(current_database())), pg_database_size(current_database())")
+            db_size_pretty, db_size_bytes = cur.fetchone()
+            add_check("infrastructure", _check(db_size_pretty, "DB size", lambda v: True))
+
+            cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'")
+            table_count = cur.fetchone()[0]
+            add_check("infrastructure", _check(table_count, "Tables in DB", lambda v: v >= 40))
+
+            cur.execute("SELECT setting FROM pg_settings WHERE name='archive_mode'")
+            archive_mode = cur.fetchone()[0]
+            add_check("infrastructure", _check(
+                f"archive_mode={archive_mode}, no offsite backup",
+                "Backup status",
+                lambda v: False,
+                lambda v: False
+            ))
+
+            # ── SECTION 2: Data Feeds ──────────────────────────────────────
+            report["sections"]["data_feeds"] = {"checks": [], "grade": "A"}
+
+            feed_checks = [
+                ("raw_prices",      "SELECT MAX(price_date) FROM raw_prices",             1, "EOD price data"),
+                ("gvm_scores",      "SELECT MAX(score_date) FROM gvm_scores",             1, "GVM scores"),
+                ("sector_ratings",  "SELECT MAX(score_date) FROM sector_ratings",         1, "Sector ratings"),
+                ("momentum_scores", "SELECT MAX(score_date) FROM momentum_scores",        1, "Momentum scores"),
+                ("v8_metrics",      "SELECT MAX(score_date) FROM v8_metrics",             1, "V8 metrics"),
+                ("v8_qualified",    "SELECT MAX(signal_date) FROM v8_qualified",          1, "V8 signals"),
+                ("v8_history_cache","SELECT MAX(cache_date) FROM v8_history_cache",       1, "V8 cache"),
+                ("global_indices",  "SELECT MAX(quote_date) FROM global_indices",         2, "Global indices"),
+                ("earnings_calendar","SELECT MAX(loaded_at)::date FROM earnings_calendar",3, "Earnings calendar"),
+            ]
+            for tbl, q, max_days_old, label in feed_checks:
+                try:
+                    cur.execute(q)
+                    latest = cur.fetchone()[0]
+                    if latest:
+                        days_old = (today - latest).days
+                        add_check("data_feeds", _check(
+                            f"{latest} ({days_old}d ago)",
+                            label,
+                            lambda v, m=max_days_old, d=days_old: d <= m,
+                            lambda v, m=max_days_old, d=days_old: d <= m*3
+                        ))
+                    else:
+                        add_check("data_feeds", {"check": label, "value": "NO DATA", "status": "fail"})
+                except Exception as e:
+                    add_check("data_feeds", {"check": label, "value": str(e), "status": "fail"})
+
+            # ── SECTION 3: Scheduler Jobs ──────────────────────────────────
+            report["sections"]["scheduler"] = {"checks": [], "grade": "A"}
+
+            sched_checks = [
+                ("GVM recompute (22:00 IST)",    "SELECT MAX(score_date) FROM gvm_scores",      1),
+                ("Raw prices (21:00 IST)",        "SELECT MAX(price_date) FROM raw_prices",       1),
+                ("V8 engine (15:45 IST)",         "SELECT MAX(score_date) FROM v8_metrics",       1),
+                ("V8 cache (09:00 IST)",          "SELECT MAX(cache_date) FROM v8_history_cache", 1),
+                ("Global indices (07:00 IST)",    "SELECT MAX(quote_date) FROM global_indices",   2),
+                ("QB EOD checker (21:05 IST)",    "SELECT MAX(rebalance_date) FROM quant_rebalance_log", 999),
+            ]
+            for label, q, max_days in sched_checks:
+                try:
+                    cur.execute(q)
+                    latest = cur.fetchone()[0]
+                    if latest:
+                        days_old = (today - latest).days
+                        status = "ok" if days_old <= max_days else ("warn" if days_old <= max_days*3 else "fail")
+                        val = f"{latest} ({days_old}d ago)"
+                        if status != "ok":
+                            if status == "warn": report["warnings"].append(f"[scheduler] {label}: {val}")
+                            else: report["issues"].append(f"[scheduler] {label}: {val}")
+                        report["sections"]["scheduler"]["checks"].append({"check": label, "value": val, "status": status})
+                        checks_total += 1
+                        checks_passed += 1 if status == "ok" else (0.5 if status == "warn" else 0)
+                    else:
+                        val = "never run" if label != "QB EOD checker (21:05 IST)" else "pending first run"
+                        status = "warn" if "pending" in val else "fail"
+                        report["sections"]["scheduler"]["checks"].append({"check": label, "value": val, "status": status})
+                        checks_total += 1
+                        if status == "warn": checks_passed += 0.5; report["warnings"].append(f"[scheduler] {label}: {val}")
+                        else: report["issues"].append(f"[scheduler] {label}: {val}")
+                except Exception as e:
+                    report["sections"]["scheduler"]["checks"].append({"check": label, "value": str(e), "status": "fail"})
+                    checks_total += 1
+                    report["issues"].append(f"[scheduler] {label}: {e}")
+
+            # ── SECTION 4: V8 Engine ───────────────────────────────────────
+            report["sections"]["v8_engine"] = {"checks": [], "grade": "A"}
+
+            cur.execute("SELECT COUNT(DISTINCT basket) FROM v8_qualified WHERE signal_date=(SELECT MAX(signal_date) FROM v8_qualified)")
+            active_baskets = cur.fetchone()[0]
+            add_check("v8_engine", _check(f"{active_baskets}/5 baskets with signals", "Active signal baskets", lambda v: active_baskets >= 3, lambda v: active_baskets >= 1))
+
+            cur.execute("SELECT COUNT(*) FROM v8_qualified WHERE signal_date=(SELECT MAX(signal_date) FROM v8_qualified)")
+            signal_count = cur.fetchone()[0]
+            add_check("v8_engine", _check(f"{signal_count} signals today", "Total V8 signals", lambda v: signal_count >= 10, lambda v: signal_count >= 1))
+
+            cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
+            paper_open = cur.fetchone()[0]
+            add_check("v8_engine", _check(f"{paper_open} open", "Paper positions", lambda v: True))
+
+            cur.execute("SELECT COUNT(*) FILTER (WHERE result='TARGET'), COUNT(*) FROM v8_paper_trades")
+            wins, total_trades = cur.fetchone()
+            win_rate = round(wins/total_trades*100, 1) if total_trades else 0
+            add_check("v8_engine", _check(
+                f"{wins}W/{total_trades}T ({win_rate}%)",
+                "Paper win rate",
+                lambda v: win_rate >= 60 or total_trades < 5,
+                lambda v: win_rate >= 40 or total_trades < 5
+            ))
+
+            cur.execute("SELECT COUNT(*) FROM futures_universe WHERE is_active=TRUE")
+            futures_count = cur.fetchone()[0]
+            add_check("v8_engine", _check(f"{futures_count} symbols", "Futures universe", lambda v: futures_count >= 200, lambda v: futures_count >= 100))
+
+            # ── SECTION 5: Quant Baskets ───────────────────────────────────
+            report["sections"]["quant_baskets"] = {"checks": [], "grade": "A"}
+
+            cur.execute("""
+                SELECT basket_name, COUNT(*) FILTER (WHERE status='open') AS open,
+                       COUNT(*) FILTER (WHERE status LIKE 'exited%') AS exited,
+                       MAX(updated_at)::date AS last_updated
+                FROM quant_paper_positions
+                GROUP BY basket_name ORDER BY basket_name
+            """)
+            baskets = cur.fetchall()
+            add_check("quant_baskets", _check(f"{len(baskets)}/4 baskets", "Active baskets", lambda v: len(baskets) == 4, lambda v: len(baskets) >= 2))
+
+            total_positions = sum(b[1] for b in baskets)
+            add_check("quant_baskets", _check(f"{total_positions} open positions", "Total QB positions", lambda v: total_positions == 67, lambda v: total_positions >= 50))
+
+            for bname, open_pos, exited, last_upd in baskets:
+                days_stale = (today - last_upd).days if last_upd else 999
+                add_check("quant_baskets", _check(
+                    f"{open_pos} open, {exited} exited, updated {last_upd}",
+                    f"Basket: {bname}",
+                    lambda v, d=days_stale: d <= 1,
+                    lambda v, d=days_stale: d <= 3
+                ))
+
+            try:
+                cur.execute("SELECT index_level, benchmark_return_pct, constituents_priced FROM nifty500_benchmark_live")
+                bm = cur.fetchone()
+                if bm:
+                    add_check("quant_baskets", _check(
+                        f"index={bm[0]}, return={bm[1]}%, constituents={bm[2]}",
+                        "Nifty500 benchmark",
+                        lambda v: bm[2] >= 400,
+                        lambda v: bm[2] >= 200
+                    ))
+            except Exception:
+                add_check("quant_baskets", {"check": "Nifty500 benchmark", "value": "view missing", "status": "warn"})
+
+            # ── SECTION 6: GVM Universe ────────────────────────────────────
+            report["sections"]["gvm_universe"] = {"checks": [], "grade": "A"}
+
+            cur.execute("SELECT COUNT(*), ROUND(AVG(gvm_score)::numeric,2) FROM gvm_scores")
+            gvm_count, gvm_avg = cur.fetchone()
+            add_check("gvm_universe", _check(f"{gvm_count} stocks scored", "GVM universe size", lambda v: gvm_count >= 1500, lambda v: gvm_count >= 1000))
+            add_check("gvm_universe", _check(f"avg GVM = {gvm_avg}", "Average GVM score", lambda v: True))
+
+            cur.execute("""
+                SELECT
+                  COUNT(*) FILTER (WHERE verdict='Strong Buy') AS sb,
+                  COUNT(*) FILTER (WHERE verdict='Buy') AS b,
+                  COUNT(*) FILTER (WHERE verdict='Accumulate') AS acc,
+                  COUNT(*) FILTER (WHERE verdict='Wait & Watch') AS ww,
+                  COUNT(*) FILTER (WHERE verdict='Avoid') AS av
+                FROM gvm_scores
+            """)
+            sb, b, acc, ww, av = cur.fetchone()
+            add_check("gvm_universe", _check(
+                f"StrongBuy={sb} Buy={b} Accum={acc} Wait={ww} Avoid={av}",
+                "GVM distribution",
+                lambda v: True
+            ))
+
+            cur.execute("SELECT COUNT(DISTINCT segment) FROM sector_ratings WHERE score_date=(SELECT MAX(score_date) FROM sector_ratings)")
+            sector_count = cur.fetchone()[0]
+            add_check("gvm_universe", _check(f"{sector_count} segments rated", "Sector ratings", lambda v: sector_count >= 100, lambda v: sector_count >= 50))
+
+            cur.execute("SELECT COUNT(DISTINCT score_date) FROM gvm_history")
+            history_days = cur.fetchone()[0]
+            add_check("gvm_universe", _check(f"{history_days} daily snapshots", "GVM trend history", lambda v: True))
+
+    except Exception as e:
+        report["issues"].append(f"[system] DB connection or query failed: {e}")
+        log.error(f"health_report failed: {e}")
+
+    # ── Compute section grades ────────────────────────────────────────────────
+    for sec_name, sec in report["sections"].items():
+        sec_checks = sec.get("checks", [])
+        if not sec_checks:
+            sec["grade"] = "N/A"
+            continue
+        sec_score = sum(1 if c["status"] == "ok" else (0.5 if c["status"] == "warn") else 0 for c in sec_checks)
+        sec["grade"] = _grade(sec_score / len(sec_checks) * 100)
+
+    # ── Overall score + grade ─────────────────────────────────────────────────
+    overall_score = round(checks_passed / checks_total * 100, 1) if checks_total else 0
+    report["overall_grade"] = _grade(overall_score)
+    report["overall_score"] = overall_score
+    report["checks_passed"] = int(checks_passed)
+    report["checks_total"] = checks_total
+    report["issues_count"] = len(report["issues"])
+    report["warnings_count"] = len(report["warnings"])
+
+    return report
+
+@app.get("/api/health/report")
+def health_report():
+    """Full system health report card — 6 sections, letter grades, issues list."""
+    return build_health_report()
 
 # ── Quant Basket endpoints ────────────────────────────────────────────────────
 
@@ -1320,6 +1585,7 @@ async def oauth_token(req: Request):
 # ── MCP Tools ─────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "health_report", "description": "Full Scorr system health report card — 6 sections (Infrastructure, Data Feeds, Scheduler, V8 Engine, Quant Baskets, GVM Universe), letter grades A+ to F, issues list, overall score. Use at session start or anytime to get a full system picture.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1368,7 +1634,6 @@ MCP_TOOLS = [
     {"name": "get_global_intraday", "description": "Gold/Silver 5-min intraday bars (7-day rolling).", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["name"]}},
     {"name": "fetch_global_intraday", "description": "Manually trigger Gold/Silver 5-min intraday fetch.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute 19 price-driven metrics from cache + latest intraday bar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    # Quant Basket tools
     {"name": "qb_eod_check", "description": "Quant Basket: run EOD stop-loss check + P&L mark for a basket.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
     {"name": "qb_positions", "description": "Quant Basket: get open positions with P&L, stop prices, vs-Nifty.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "status": {"type": "string"}}, "required": []}},
     {"name": "qb_summary", "description": "Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
@@ -1380,6 +1645,7 @@ async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
         h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
+        elif name == "health_report": r = await client.get(f"{BASE_URL}/api/health/report"); return r.json()
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
