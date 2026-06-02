@@ -35,23 +35,27 @@ import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
 import global_indices
-import v8_signal_writer   # compute-on-write: 5-min live signal engine
-import qb_eod_checker     # Quant Basket: EOD stop-loss checker + daily P&L mark
+import v8_signal_writer
+import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.7.1
-# v2.7.1: ALL 3 QUANT BASKETS LIVE (large_cap, mid_cap, small_cap).
-#   - quant_basket_registry table: per-basket cadence (monthly/quarterly),
-#     weight band, next_rebalance date, max_stocks, capital.
-#   - New endpoint: GET /api/qb/registry — basket metadata.
-#   - New MCP tool: qb_registry.
-#   - qb_eod_checker: robust regex Nifty-entry parser (handles all note formats).
-# v2.7.0: QUANT BASKET EOD checker wired (21:05 IST, all baskets w/ open positions).
+# Scorr / Project Quant — main.py v2.7.2
+# v2.7.2: CLEANUP — dropped 9 dead endpoints + 3 MCP tools:
+#   DROPPED: /api/v8/adr (inside market_mood), /api/v8/raw (debug),
+#     /api/sector/{sector} (use /api/sectors), /api/momentum/{symbol} (inside gvm),
+#     GET /api/cmp (bulk, nobody reads 1500 rows),
+#     POST /api/admin/refresh_cmp_now (CMP fallback is off permanently),
+#     POST /api/admin/load_screener_json (replaced by load_screener_from_drive),
+#     GET+POST /api/admin/cmp_fallback (dead feature).
+#   DROPPED MCP: get_momentum, load_screener_json, set_cmp_fallback.
+#   TOTAL: 61 → 52 endpoints, 57 → 54 MCP tools.
+# v2.7.1: ALL 4 QUANT BASKETS LIVE + nifty500_universe + nifty500_benchmark.
+# v2.7.0: QUANT BASKET EOD checker wired.
 # v2.6.0: COMPUTE-ON-WRITE architecture (v8_signal_writer).
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.7.1"
+VERSION = "2.7.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -128,8 +132,6 @@ def create_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_gvm_history_symbol_date ON gvm_history(symbol, score_date DESC);
     CREATE INDEX IF NOT EXISTS idx_gvm_history_date ON gvm_history(score_date DESC);
-
-    -- Quant Basket tables
     CREATE TABLE IF NOT EXISTS quant_basket_config (
         id SERIAL PRIMARY KEY,
         basket_name TEXT NOT NULL UNIQUE,
@@ -205,7 +207,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.7.1 — Quant Basket 3 baskets live + registry)")
+        log.info("Tables ready (v2.7.2)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -323,7 +325,7 @@ def _upsert_cmp(cmp_map):
             for sym, price in cmp_map.items():
                 cur.execute("INSERT INTO cmp_prices (symbol, cmp, updated_at, source) VALUES (%s, %s, NOW(), 'yahoo') ON CONFLICT (symbol) DO UPDATE SET cmp = EXCLUDED.cmp, updated_at = NOW(), source = 'yahoo'", (sym, price))
             conn.commit()
-        log.info(f"CMP upserted (yahoo fallback): {len(cmp_map)} symbols")
+        log.info(f"CMP upserted: {len(cmp_map)} symbols")
     except Exception as e:
         log.error(f"_upsert_cmp failed: {e}")
 
@@ -363,31 +365,27 @@ _paper_pivots_built: Optional[date] = None
 _global_fetched_today: Optional[date] = None
 _global_fetching: bool = False
 _global_intraday_fetching: bool = False
-_qb_eod_ran_today: Optional[date] = None   # Quant Basket EOD checker guard
+_qb_eod_ran_today: Optional[date] = None
 _qb_eod_running: bool = False
 
 async def _task_refresh_cmp():
-    if not _yahoo_cmp_fallback_on():
-        return
+    if not _yahoo_cmp_fallback_on(): return
     symbols = _get_full_cmp_universe()
     if not symbols: return
-    log.info(f"Yahoo CMP fallback ON — fetching ALL {len(symbols)} symbols")
     cmp_map = await _fetch_cmp_yahoo(symbols)
     _upsert_cmp(cmp_map)
 
 async def _bg_yahoo_daily(symbols=None, lookback=None):
     global _raw_prices_updated_today, _yahoo_daily_running
-    if _yahoo_daily_running:
-        log.info("yahoo_daily already running, skip")
-        return
+    if _yahoo_daily_running: return
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
         result = await ydu.run_async(symbols=symbols, lookback=lookback)
         _raw_prices_updated_today = _ist_now().date()
-        log.info(f"yahoo_daily background done: {result}")
+        log.info(f"yahoo_daily done: {result}")
     except Exception as e:
-        log.error(f"yahoo_daily background failed: {e}")
+        log.error(f"yahoo_daily failed: {e}")
     finally:
         _yahoo_daily_running = False
 
@@ -395,22 +393,20 @@ async def _task_update_raw_prices():
     global _raw_prices_updated_today
     today = _ist_now().date()
     if _raw_prices_updated_today == today: return
-    log.info("21:00 IST: Launching raw_prices background update")
+    log.info("21:00 IST: Launching raw_prices update")
     asyncio.create_task(_bg_yahoo_daily())
 
 def _bg_run_v8_engine():
     global _v8_engine_ran_today, _v8_engine_running
-    if _v8_engine_running:
-        log.info("v8_engine already running, skip")
-        return
+    if _v8_engine_running: return
     _v8_engine_running = True
     try:
         with get_conn() as conn:
             results = run_v8_engine(conn)
         _v8_engine_ran_today = _ist_now().date()
-        log.info(f"V8 engine auto-run done: {results.get('symbols_processed')} symbols")
+        log.info(f"V8 engine done: {results.get('symbols_processed')} symbols")
     except Exception as e:
-        log.error(f"V8 engine auto-run failed: {e}")
+        log.error(f"V8 engine failed: {e}")
     finally:
         _v8_engine_running = False
 
@@ -418,14 +414,12 @@ async def _task_run_v8_engine():
     global _v8_engine_ran_today
     today = _ist_now().date()
     if _v8_engine_ran_today == today: return
-    log.info("15:45 IST: Launching V8 engine auto-run")
+    log.info("15:45 IST: V8 engine auto-run")
     asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
 
 def _bg_build_cache():
     global _cache_built_today, _cache_building
-    if _cache_building:
-        log.info("cache build already running, skip")
-        return
+    if _cache_building: return
     _cache_building = True
     try:
         with get_conn() as conn:
@@ -446,16 +440,14 @@ async def _task_build_cache():
 
 def _bg_recompute_gvm():
     global _gvm_recompute_ran_today, _gvm_recompute_running
-    if _gvm_recompute_running:
-        log.info("gvm recompute already running, skip")
-        return
+    if _gvm_recompute_running: return
     _gvm_recompute_running = True
     try:
         res = recompute_gvm(refresh_momentum=True)
         _gvm_recompute_ran_today = _ist_now().date()
-        log.info(f"GVM daily recompute done: scored={res.get('scored')}")
+        log.info(f"GVM recompute done: scored={res.get('scored')}")
     except Exception as e:
-        log.error(f"GVM daily recompute failed: {e}")
+        log.error(f"GVM recompute failed: {e}")
     finally:
         _gvm_recompute_running = False
 
@@ -463,7 +455,7 @@ async def _task_recompute_gvm_daily():
     global _gvm_recompute_ran_today
     today = _ist_now().date()
     if _gvm_recompute_ran_today == today: return
-    log.info("22:00 IST: Launching daily GVM recompute")
+    log.info("22:00 IST: GVM daily recompute")
     asyncio.create_task(asyncio.to_thread(_bg_recompute_gvm))
 
 def _bg_paper_tick():
@@ -506,21 +498,17 @@ async def _task_build_paper_pivots():
 
 def _bg_fetch_global():
     global _global_fetched_today, _global_fetching
-    if _global_fetching:
-        log.info("global fetch already running, skip")
-        return
+    if _global_fetching: return
     _global_fetching = True
     try:
         with global_indices.get_conn_from_env() as conn:
             res = asyncio.run(global_indices.fetch_global_indices(conn))
-            try:
-                pruned = global_indices.prune_global_indices(conn, years=5)
-            except Exception as e:
-                pruned = 0
+            try: global_indices.prune_global_indices(conn, years=5)
+            except: pass
         _global_fetched_today = _ist_now().date()
-        log.info(f"global_indices fetch done: {res.get('stored')}/{res.get('total')}")
+        log.info(f"global_indices done: {res.get('stored')}/{res.get('total')}")
     except Exception as e:
-        log.error(f"global_indices fetch failed: {e}")
+        log.error(f"global_indices failed: {e}")
     finally:
         _global_fetching = False
 
@@ -538,13 +526,11 @@ def _bg_fetch_global_intraday():
     try:
         with global_indices.get_conn_from_env() as conn:
             res = asyncio.run(global_indices.fetch_global_intraday(conn))
-            try:
-                global_indices.prune_global_intraday(conn, days=7)
-            except Exception as e:
-                log.warning(f"global_intraday prune failed: {e}")
+            try: global_indices.prune_global_intraday(conn, days=7)
+            except Exception as e: log.warning(f"global_intraday prune failed: {e}")
         log.info(f"global_intraday done: {res.get('stored')} bars")
     except Exception as e:
-        log.error(f"global_intraday fetch failed: {e}")
+        log.error(f"global_intraday failed: {e}")
     finally:
         _global_intraday_fetching = False
 
@@ -556,8 +542,7 @@ def _bg_live_tick():
     if _live_tick_running: return
     _live_tick_running = True
     try:
-        with get_conn() as conn:
-            run_live_tick(conn)
+        with get_conn() as conn: run_live_tick(conn)
     except Exception as e:
         log.error(f"live tick failed: {e}")
     finally:
@@ -581,34 +566,21 @@ def _bg_signal_writer():
 
 # ── Quant Basket EOD Checker ─────────────────────────────────────────────────
 def _bg_qb_eod_checker():
-    """
-    Runs at 21:05 IST (5 min after raw_prices update starts).
-    Marks all open quant_paper_positions to EOD close.
-    Checks Hard Stop 1 (down 20%) + Hard Stop 2 (vs Nifty <= -5%).
-    Logs to quant_rebalance_log. Covers ALL baskets with open positions.
-    """
     global _qb_eod_ran_today, _qb_eod_running
-    if _qb_eod_running:
-        log.info("qb_eod already running, skip")
-        return
+    if _qb_eod_running: return
     _qb_eod_running = True
     try:
         with get_conn() as conn:
-            baskets_with_open = []
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT DISTINCT basket_name FROM quant_paper_positions WHERE status='open'"
-                )
-                baskets_with_open = [r[0] for r in cur.fetchall()]
-
-            for basket in baskets_with_open:
+                cur.execute("SELECT DISTINCT basket_name FROM quant_paper_positions WHERE status='open'")
+                baskets = [r[0] for r in cur.fetchall()]
+            for basket in baskets:
                 res = qb_eod_checker.run_eod_checker(conn, basket_name=basket)
                 log.info(
                     f"qb_eod {basket}: marked={res.get('positions_marked')} "
                     f"HS1={res.get('hard_stop_1_exits')} HS2={res.get('hard_stop_2_exits')} "
                     f"unrealised={res.get('total_unrealised_pnl')} realised={res.get('total_realised_pnl')}"
                 )
-
         _qb_eod_ran_today = _ist_now().date()
     except Exception as e:
         log.error(f"qb_eod_checker failed: {e}")
@@ -619,7 +591,7 @@ async def _task_qb_eod_checker():
     global _qb_eod_ran_today
     today = _ist_now().date()
     if _qb_eod_ran_today == today: return
-    log.info("21:05 IST: Quant Basket EOD stop-loss check + P&L mark (all baskets)")
+    log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
 async def _task_load_earnings_daily():
@@ -627,7 +599,6 @@ async def _task_load_earnings_daily():
     today = _ist_now().date()
     if _earnings_loaded_today == today: return
     try:
-        log.info("Earnings: loading from Screener.in")
         async with httpx.AsyncClient(timeout=120) as client:
             headers = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
             r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers=headers)
@@ -637,7 +608,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.7.1 — QB EOD checker at 21:05 IST, all 3 baskets)")
+    log.info("Scheduler started (v2.7.2)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -656,7 +627,6 @@ async def _scheduler():
                 await _task_run_v8_engine()
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
-            # QB EOD checker: 21:05 IST (5 min after raw_prices update, trading days)
             if trading_day and now.hour == 21 and 5 <= now.minute < 15:
                 await _task_qb_eod_checker()
             if now.hour == 22 and now.minute < 10:
@@ -668,7 +638,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.7.1)")
+    log.info("Live loop started (v2.7.2)")
     tick_count = 0
     while True:
         try:
@@ -722,18 +692,16 @@ def server_now():
         "market_open": _is_market_hours(),
     }
 
-# ── Quant Basket API endpoints ────────────────────────────────────────────────
+# ── Quant Basket endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/qb/eod_check")
 def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
-    """Manual trigger for the QB EOD stop-loss checker + P&L mark."""
     _check_admin(x_admin_token)
     with get_conn() as conn:
         return qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)
 
 @app.post("/api/qb/eod_check_all")
 def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
-    """Run EOD checker for ALL baskets with open positions."""
     _check_admin(x_admin_token)
     out = []
     with get_conn() as conn:
@@ -746,13 +714,11 @@ def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/qb/positions")
 def qb_positions(basket_name: str = "large_cap", status: str = "open"):
-    """Open positions with current P&L, stop-loss prices, vs-Nifty."""
     return api_query("""
         SELECT symbol, entry_price, entry_date, qty,
                ROUND(qty*entry_price,2) AS cost_basis,
                current_price, current_value,
-               ROUND(pnl,2) AS pnl,
-               ROUND(pnl_pct,2) AS pnl_pct,
+               ROUND(pnl,2) AS pnl, ROUND(pnl_pct,2) AS pnl_pct,
                stop_loss_price,
                gvm_at_entry AS gvm, g_at_entry AS g, v_at_entry AS v, m_at_entry AS m,
                status, exit_price, exit_date, updated_at
@@ -763,7 +729,6 @@ def qb_positions(basket_name: str = "large_cap", status: str = "open"):
 
 @app.get("/api/qb/summary")
 def qb_summary(basket_name: str = "large_cap"):
-    """Portfolio summary: total value, unrealised P&L, realised P&L, positions."""
     open_pos   = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(current_value),2) AS mkt_value, ROUND(SUM(pnl),2) AS unreal_pnl FROM quant_paper_positions WHERE basket_name=%s AND status='open'", (basket_name,), single=True)
     closed_pos = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(pnl),2) AS real_pnl FROM quant_paper_positions WHERE basket_name=%s AND status LIKE 'exited%%'", (basket_name,), single=True)
     return {
@@ -778,23 +743,20 @@ def qb_summary(basket_name: str = "large_cap"):
 
 @app.get("/api/qb/rebalance_log")
 def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
-    """Rebalance + EOD check history."""
     return api_query("""
         SELECT rebalance_date, stocks_in, stocks_out, stocks_held,
                total_portfolio_value, actions, computed_at
         FROM quant_rebalance_log
-        WHERE basket_name=%s
-        ORDER BY computed_at DESC LIMIT %s
+        WHERE basket_name=%s ORDER BY computed_at DESC LIMIT %s
     """, (basket_name, limit))
 
 @app.get("/api/qb/registry")
 def qb_registry(basket_name: Optional[str] = None):
-    """Basket registry: cadence, weight band, next rebalance, max stocks, capital."""
     if basket_name:
         return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
     return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
 
-# ── All other existing endpoints below (unchanged) ───────────────────────────
+# ── Admin + data endpoints ────────────────────────────────────────────────────
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -805,36 +767,20 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
     return {"version": VERSION, "all_keys_count": len(keys),
             "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting}}
 
-@app.post("/api/admin/cmp_fallback")
-def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    val = "on" if str(state).lower() in ("on", "true", "1", "yes") else "off"
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("INSERT INTO app_config (key, value, updated_at) VALUES ('yahoo_cmp_fallback', %s, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()", (val,))
-        conn.commit()
-    return {"status": "ok", "yahoo_cmp_fallback": val}
-
-@app.get("/api/admin/cmp_fallback")
-def get_cmp_fallback():
-    return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
-
 @app.post("/api/v8/build_cache")
 def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    with get_conn() as conn:
-        return build_history_cache(conn)
+    with get_conn() as conn: return build_history_cache(conn)
 
 @app.post("/api/v8/run_live")
 def v8_run_live(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    with get_conn() as conn:
-        return run_live_tick(conn)
+    with get_conn() as conn: return run_live_tick(conn)
 
 @app.post("/api/v8/run_signal_writer")
 def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    with get_conn() as conn:
-        return v8_signal_writer.run_live_signal_writer(conn)
+    with get_conn() as conn: return v8_signal_writer.run_live_signal_writer(conn)
 
 @app.post("/api/momentum/run")
 def momentum_run(x_admin_token: Optional[str] = Header(None)):
@@ -880,7 +826,7 @@ def health_feeds():
                         try:
                             days_old = (date.today() - r[0]).days
                             freshness = "ok" if days_old < 7 else "stale"
-                        except Exception: pass
+                        except: pass
                     out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
                 except Exception as e:
                     out.append({"source": name, "error": str(e)})
@@ -901,6 +847,8 @@ def api_query(sql, params=None, single=False):
         log.error(f"api_query error: {e}")
         return {"error": str(e)}
 
+# ── GVM endpoints ─────────────────────────────────────────────────────────────
+
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
     r = api_query("SELECT symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap FROM gvm_scores WHERE symbol = %s", (symbol.upper(),), single=True)
@@ -914,13 +862,13 @@ def get_top(n: int, verdict: Optional[str] = None):
         return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict = %s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
 
-@app.get("/api/sector/{sector}")
-def get_sector(sector: str):
-    return api_query("SELECT symbol, company_name, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE LOWER(segment) = LOWER(%s) ORDER BY gvm_score DESC", (sector,))
-
 @app.get("/api/filter")
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
+
+@app.get("/api/sectors")
+def get_sectors():
+    return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
 
 @app.get("/api/market/top_gainers")
 def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional[float]=None,
@@ -958,14 +906,12 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     vals.append(n)
     return api_query(sql, vals)
 
-@app.get("/api/sectors")
-def get_sectors():
-    return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
+# ── Data endpoints ────────────────────────────────────────────────────────────
 
-@app.get("/api/momentum/{symbol}")
-def get_momentum(symbol: str):
-    r = api_query("SELECT * FROM momentum_scores WHERE symbol = %s ORDER BY score_date DESC LIMIT 1", (symbol.upper(),), single=True)
-    if not r: raise HTTPException(404, f"{symbol} momentum not found")
+@app.get("/api/cmp/{symbol}")
+def get_cmp(symbol: str):
+    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
+    if not r: raise HTTPException(404, f"{symbol} CMP not found")
     return r
 
 @app.get("/api/intraday/{symbol}")
@@ -978,29 +924,41 @@ def get_intraday(symbol: str, days: int = 1):
 async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", source: str = "auto"):
     return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source)
 
-@app.get("/api/cmp/{symbol}")
-def get_cmp(symbol: str):
-    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
-    if not r: raise HTTPException(404, f"{symbol} CMP not found")
-    return r
+@app.get("/api/global")
+def get_global():
+    return api_query("""
+        SELECT g.symbol, g.name, g.category, g.price, g.prev_close, g.chg_pct,
+               g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
+        FROM global_indices g
+        JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
+          ON g.symbol = m.symbol AND g.quote_date = m.md
+        ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2
+                 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
+    """)
 
-@app.get("/api/cmp")
-def get_all_cmp():
-    return api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices ORDER BY symbol")
+@app.get("/api/global/history/{name}")
+def get_global_history(name: str, days: int = 1825):
+    cutoff = (_ist_now().date() - timedelta(days=days))
+    return api_query("SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text FROM global_indices WHERE LOWER(name) = LOWER(%s) AND quote_date >= %s ORDER BY quote_date ASC", (name, cutoff))
+
+@app.get("/api/global/intraday/{name}")
+def get_global_intraday(name: str, days: int = 7):
+    cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
+    return api_query("SELECT symbol, name, ts, open, high, low, close, volume FROM global_intraday WHERE UPPER(name) = UPPER(%s) AND ts >= %s ORDER BY ts ASC", (name, cutoff))
+
+# ── V8 endpoints ──────────────────────────────────────────────────────────────
 
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    with get_conn() as conn:
-        return run_v8_engine(conn)
+    with get_conn() as conn: return run_v8_engine(conn)
 
 @app.post("/api/v8/run_for_date")
 def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     from datetime import date as _date
     d = _date.fromisoformat(target_date)
-    with get_conn() as conn:
-        return run_v8_engine(conn, target_date=d)
+    with get_conn() as conn: return run_v8_engine(conn, target_date=d)
 
 @app.get("/api/v8/metrics/all")
 def v8_metrics_all():
@@ -1039,6 +997,8 @@ def v8_live_metrics():
         ORDER BY s.symbol
     """)
 
+# ── Admin data operations ─────────────────────────────────────────────────────
+
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -1055,20 +1015,10 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _purge_intraday_old()
     return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "total_candles": total_candles}
 
-@app.post("/api/admin/refresh_cmp_now")
-async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    symbols = _get_full_cmp_universe()
-    if not symbols: return {"status": "warn", "message": "No symbols"}
-    cmp_map = await _fetch_cmp_yahoo(symbols)
-    _upsert_cmp(cmp_map)
-    return {"status": "ok", "symbols_fetched": len(cmp_map)}
-
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    if _yahoo_daily_running:
-        return {"status": "already_running"}
+    if _yahoo_daily_running: return {"status": "already_running"}
     asyncio.create_task(_bg_yahoo_daily())
     return {"status": "started"}
 
@@ -1080,8 +1030,7 @@ def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(No
 @app.post("/api/paper/compute_pivots")
 def paper_compute_pivots(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    with get_conn() as conn:
-        return v8_paper.compute_pivots(conn)
+    with get_conn() as conn: return v8_paper.compute_pivots(conn)
 
 @app.post("/api/paper/tick")
 def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
@@ -1107,28 +1056,6 @@ def paper_status():
 @app.get("/api/paper/pivots")
 def paper_pivots(limit: int = 250):
     return api_query("SELECT symbol, pp, r1, s1, r2, s2, pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
-
-@app.get("/api/global")
-def get_global():
-    return api_query("""
-        SELECT g.symbol, g.name, g.category, g.price, g.prev_close, g.chg_pct,
-               g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
-        FROM global_indices g
-        JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
-          ON g.symbol = m.symbol AND g.quote_date = m.md
-        ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2
-                 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
-    """)
-
-@app.get("/api/global/history/{name}")
-def get_global_history(name: str, days: int = 1825):
-    cutoff = (_ist_now().date() - timedelta(days=days))
-    return api_query("SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text FROM global_indices WHERE LOWER(name) = LOWER(%s) AND quote_date >= %s ORDER BY quote_date ASC", (name, cutoff))
-
-@app.get("/api/global/intraday/{name}")
-def get_global_intraday(name: str, days: int = 7):
-    cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
-    return api_query("SELECT symbol, name, ts, open, high, low, close, volume FROM global_intraday WHERE UPPER(name) = UPPER(%s) AND ts >= %s ORDER BY ts ASC", (name, cutoff))
 
 @app.post("/api/admin/fetch_global")
 async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
@@ -1390,11 +1317,11 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
+# ── MCP Tools ─────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "load_screener_json", "description": "GVM: clean-replace screener_raw from uploaded raw Screener rows.", "inputSchema": {"type": "object", "properties": {"rows": {"type": "array", "items": {"type": "object"}}}, "required": ["rows"]}},
     {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "gvm_recompute", "description": "GVM: full recompute. Refreshes daily momentum + G/V from screener -> gvm_history + gvm_scores.", "inputSchema": {"type": "object", "properties": {"refresh_momentum": {"type": "boolean"}}, "required": []}},
     {"name": "gvm_history", "description": "GVM: get the GVM score trend series for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
@@ -1403,7 +1330,6 @@ MCP_TOOLS = [
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_momentum", "description": "Get momentum scores for a stock (latest).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_intraday", "description": "Intraday OHLC for ANY stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1413,7 +1339,6 @@ MCP_TOOLS = [
     {"name": "paper_tick", "description": "PAPER: run one paper-engine tick.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "paper_status", "description": "PAPER: open positions + recent closed trades + summary.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "paper_pivots", "description": "PAPER: latest rolling-5 pivot levels per stock.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
-    {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
     {"name": "run_v8_engine", "description": "Run the V8 EOD engine — compute metrics + write signals to DB.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_v8_for_date", "description": "Backfill v8_metrics for a PAST date (YYYY-MM-DD).", "inputSchema": {"type": "object", "properties": {"target_date": {"type": "string"}}, "required": ["target_date"]}},
     {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
@@ -1444,11 +1369,11 @@ MCP_TOOLS = [
     {"name": "fetch_global_intraday", "description": "Manually trigger Gold/Silver 5-min intraday fetch.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute 19 price-driven metrics from cache + latest intraday bar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     # Quant Basket tools
-    {"name": "qb_eod_check", "description": "Quant Basket: run EOD stop-loss check + P&L mark for a basket. Checks 20% hard stop + vs-Nifty -5% stop.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
+    {"name": "qb_eod_check", "description": "Quant Basket: run EOD stop-loss check + P&L mark for a basket.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
     {"name": "qb_positions", "description": "Quant Basket: get open positions with P&L, stop prices, vs-Nifty.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "status": {"type": "string"}}, "required": []}},
     {"name": "qb_summary", "description": "Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
     {"name": "qb_rebalance_log", "description": "Quant Basket: rebalance + EOD check history.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
-    {"name": "qb_registry", "description": "Quant Basket: registry of all baskets — cadence (monthly/quarterly), weight band, next rebalance, max stocks, capital.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
+    {"name": "qb_registry", "description": "Quant Basket: registry of all baskets — cadence, weight band, next rebalance, max stocks, capital.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1457,7 +1382,6 @@ async def _call_tool(name, args):
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
-        elif name == "load_screener_json": r = await client.post(f"{BASE_URL}/api/admin/load_screener_json", json={"rows": args["rows"]}, headers=h); return r.json()
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
         elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum", True)}, headers=h); return r.json()
         elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days", 180)}); return r.json()
@@ -1466,10 +1390,9 @@ async def _call_tool(name, args):
             params = {}
             if args.get("verdict"): params["verdict"] = args["verdict"]
             r = await client.get(f"{BASE_URL}/api/gvm/top/{args['n']}", params=params); return r.json()
-        elif name == "get_sector": r = await client.get(f"{BASE_URL}/api/sector/{args['sector']}"); return r.json()
+        elif name == "get_sector": r = await client.get(f"{BASE_URL}/api/sectors", params={"segment": args["sector"]}); return r.json()
         elif name == "get_filter": r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)}); return r.json()
         elif name == "get_sector_rating": r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
-        elif name == "get_momentum": r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
         elif name == "get_intraday":
             sym = (args.get("symbol") or "").upper()
             try: days = int(args.get("days") or 15)
@@ -1485,7 +1408,6 @@ async def _call_tool(name, args):
         elif name == "paper_tick": r = await client.post(f"{BASE_URL}/api/paper/tick", headers=h); return r.json()
         elif name == "paper_status": r = await client.get(f"{BASE_URL}/api/paper/status"); return r.json()
         elif name == "paper_pivots": r = await client.get(f"{BASE_URL}/api/paper/pivots", params={"limit": args.get("limit", 250)}); return r.json()
-        elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers=h); return r.json()
         elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers=h); return r.json()
         elif name == "run_v8_for_date": r = await client.post(f"{BASE_URL}/api/v8/run_for_date", params={"target_date": args["target_date"]}, headers=h); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
@@ -1536,22 +1458,17 @@ async def _call_tool(name, args):
             for k in ("price_date", "n", "min_gvm", "min_day_pct", "universe", "min_volume"):
                 if args.get(k) is not None: params[k] = args[k]
             r = await client.get(f"{BASE_URL}/api/market/top_gainers", params=params); return r.json()
-        # Quant Basket MCP tools
         elif name == "qb_eod_check":
-            r = await client.post(f"{BASE_URL}/api/qb/eod_check",
-                params={"basket_name": args.get("basket_name", "large_cap")}, headers=h)
+            r = await client.post(f"{BASE_URL}/api/qb/eod_check", params={"basket_name": args.get("basket_name", "large_cap")}, headers=h)
             return r.json()
         elif name == "qb_positions":
-            r = await client.get(f"{BASE_URL}/api/qb/positions",
-                params={"basket_name": args.get("basket_name", "large_cap"), "status": args.get("status", "open")})
+            r = await client.get(f"{BASE_URL}/api/qb/positions", params={"basket_name": args.get("basket_name", "large_cap"), "status": args.get("status", "open")})
             return r.json()
         elif name == "qb_summary":
-            r = await client.get(f"{BASE_URL}/api/qb/summary",
-                params={"basket_name": args.get("basket_name", "large_cap")})
+            r = await client.get(f"{BASE_URL}/api/qb/summary", params={"basket_name": args.get("basket_name", "large_cap")})
             return r.json()
         elif name == "qb_rebalance_log":
-            r = await client.get(f"{BASE_URL}/api/qb/rebalance_log",
-                params={"basket_name": args.get("basket_name", "large_cap"), "limit": args.get("limit", 30)})
+            r = await client.get(f"{BASE_URL}/api/qb/rebalance_log", params={"basket_name": args.get("basket_name", "large_cap"), "limit": args.get("limit", 30)})
             return r.json()
         elif name == "qb_registry":
             params = {}
