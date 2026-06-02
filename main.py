@@ -37,7 +37,13 @@ import v8_paper
 import global_indices
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.5.1
+# Scorr / Project Quant — main.py v2.5.2
+# v2.5.2: Gold/Silver 5-min intraday — global_intraday table (separate from
+#         intraday_prices so global commodities never leak into a futures scan).
+#         Polled every 5 min, 24h (ungated), 7-day rolling retention. Yahoo 5m
+#         chart, self-healing UPSERT. + /api/global/intraday/{name} +
+#         /api/admin/fetch_global_intraday + fetch_global_intraday/get_global_intraday
+#         MCP tools. Logic in global_indices.py; main.py = thin wiring.
 # v2.5.1: GLOBAL history — global_indices now a rolling 5yr DAILY store (like
 #         equity raw_prices). + backfill_global_indices (clean-replace 5yr daily
 #         close history, incl. Silver SI=F) via /api/admin/backfill_global +
@@ -81,7 +87,7 @@ import global_indices
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.5.1"
+VERSION = "2.5.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -319,6 +325,7 @@ _paper_tick_running: bool = False
 _paper_pivots_built: Optional[date] = None
 _global_fetched_today: Optional[date] = None
 _global_fetching: bool = False
+_global_intraday_fetching: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -499,6 +506,30 @@ async def _task_fetch_global():
     log.info("07:00 IST: Fetching global indices scorecard")
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
 
+def _bg_fetch_global_intraday():
+    """Fetch Gold/Silver 5-min bars (Yahoo, 7d window) -> global_intraday + 7d prune."""
+    global _global_intraday_fetching
+    if _global_intraday_fetching:
+        return
+    _global_intraday_fetching = True
+    try:
+        with global_indices.get_conn_from_env() as conn:
+            res = asyncio.run(global_indices.fetch_global_intraday(conn))
+            try:
+                global_indices.prune_global_intraday(conn, days=7)
+            except Exception as e:
+                log.warning(f"global_intraday prune failed: {e}")
+        log.info(f"global_intraday done: {res.get('stored')} bars ({res.get('errors')} err)")
+    except Exception as e:
+        log.error(f"global_intraday fetch failed: {e}")
+    finally:
+        _global_intraday_fetching = False
+
+async def _task_fetch_global_intraday():
+    """Every 5 min, 24h (ungated): refresh Gold/Silver 5-min bars. COMEX trades
+    ~24h, so this is NOT gated to NSE hours."""
+    asyncio.create_task(asyncio.to_thread(_bg_fetch_global_intraday))
+
 def _bg_live_tick():
     global _live_tick_running
     if _live_tick_running:
@@ -543,6 +574,9 @@ async def _scheduler():
             # move on our holidays/weekends too; digest needs fresh overnight data)
             if now.hour == 7 and now.minute < 5:
                 await _task_fetch_global()
+            # Gold/Silver 5-min intraday — every loop iteration (~5 min), 24h, ungated
+            # (COMEX trades nearly 24h; capture overnight moves)
+            await _task_fetch_global_intraday()
             if trading_day and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
             # Build history cache pre-open (~09:00–09:10 IST, trading days)
@@ -684,6 +718,7 @@ def health_feeds():
         ("v8_history_cache", "SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache"),
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
         ("global_indices", "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
+        ("global_intraday", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM global_intraday"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -985,6 +1020,17 @@ def get_global_history(name: str, days: int = 1825):
         ORDER BY quote_date ASC
     """, (name, cutoff))
 
+@app.get("/api/global/intraday/{name}")
+def get_global_intraday(name: str, days: int = 7):
+    """Gold/Silver 5-min bars, last `days` (default 7). name = GOLD or SILVER."""
+    cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
+    return api_query("""
+        SELECT symbol, name, ts, open, high, low, close, volume
+        FROM global_intraday
+        WHERE UPPER(name) = UPPER(%s) AND ts >= %s
+        ORDER BY ts ASC
+    """, (name, cutoff))
+
 @app.post("/api/admin/fetch_global")
 async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -997,6 +1043,14 @@ async def backfill_global_now(years: int = 5, clean: bool = True, x_admin_token:
     _check_admin(x_admin_token)
     with global_indices.get_conn_from_env() as conn:
         return await global_indices.backfill_global_indices(conn, years=years, clean=clean)
+
+@app.post("/api/admin/fetch_global_intraday")
+async def fetch_global_intraday_now(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with global_indices.get_conn_from_env() as conn:
+        res = await global_indices.fetch_global_intraday(conn)
+        global_indices.prune_global_intraday(conn, days=7)
+        return res
 
 
 async def _drive_download(file_id):
@@ -1307,6 +1361,8 @@ MCP_TOOLS = [
     {"name": "get_global", "description": "Daily Digest: latest global scorecard — world indices (Dow/S&P/Nasdaq/Nikkei/FTSE/DAX/Shanghai), US VIX, commodities (Brent/WTI/Gold/Silver), currency (USDINR/DXY) with price, prev close, chg%. Fed daily 07:00 IST from Yahoo.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "fetch_global", "description": "Daily Digest: manually trigger a live fetch of the global scorecard (Yahoo chart API loop) into global_indices. Returns stored/errors/total.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "backfill_global", "description": "One-time: clean-replace backfill of N years (default 5) of DAILY global history (indices/commodities incl. Silver/currency) into global_indices, mirroring the equity 5yr EOD store. Erases existing rows then inserts fresh daily close+chg% series. Params: years (default 5), clean (default true).", "inputSchema": {"type": "object", "properties": {"years": {"type": "integer"}, "clean": {"type": "boolean"}}, "required": []}},
+    {"name": "get_global_intraday", "description": "Gold/Silver 5-min intraday bars (7-day rolling). name = GOLD or SILVER, days default 7.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["name"]}},
+    {"name": "fetch_global_intraday", "description": "Manually trigger a Gold/Silver 5-min intraday fetch (Yahoo 7d window) into global_intraday + 7d prune. Auto-runs every 5 min anyway.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1388,6 +1444,8 @@ async def _call_tool(name, args):
         elif name == "get_global": r = await client.get(f"{BASE_URL}/api/global"); return r.json()
         elif name == "fetch_global": r = await client.post(f"{BASE_URL}/api/admin/fetch_global", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "backfill_global": r = await client.post(f"{BASE_URL}/api/admin/backfill_global", params={"years": args.get("years", 5), "clean": args.get("clean", True)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "get_global_intraday": r = await client.get(f"{BASE_URL}/api/global/intraday/{args['name']}", params={"days": args.get("days", 7)}); return r.json()
+        elif name == "fetch_global_intraday": r = await client.post(f"{BASE_URL}/api/admin/fetch_global_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_top_gainers":
             params = {}
             if args.get("price_date"):  params["price_date"]  = args["price_date"]
