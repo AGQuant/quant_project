@@ -14,14 +14,11 @@ This split is the core of the GVM TREND:
   - Combined daily snapshot -> gvm_history -> the trend line.
 
 Workflow:
-  1. POST /api/admin/load_screener_json  {rows:[...]}  -> clean-replace screener_raw (weekly)
-  2. POST /api/gvm/recompute                            -> refresh momentum (daily) + score all:
+  1. POST /api/admin/load_screener_from_drive  {file_id}  -> clean-replace screener_raw (weekly)
+  2. POST /api/gvm/recompute                              -> refresh momentum (daily) + score all:
          - gvm_history  (APPEND one dated row per stock; the trend table)
          - gvm_scores   (REPLACE latest snapshot; canonical read table)
-
-gvm_scores canonical schema:
-  symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score,
-  verdict, punchline, market_cap, score_date
+         - sector_ratings (REPLACE; mcap-weighted segment GVM — wired daily)
 """
 
 import os
@@ -183,6 +180,105 @@ def _sql_clean_replace_screener(rows: List[dict]) -> int:
         cur.executemany(f"INSERT INTO screener_raw ({colnames}) VALUES ({placeholders})", batch)
         conn.commit()
     return len(batch)
+
+
+# ============================================================
+# SECTOR RATINGS: mcap-weighted GVM per segment
+# Runs after every gvm_scores update. Replaces sector_ratings table.
+# ============================================================
+def compute_sector_ratings(target_date: date) -> Dict:
+    """
+    Compute mcap-weighted GVM rating per segment from latest gvm_scores.
+    Writes/replaces sector_ratings table.
+    Returns: {segments, rows_written, date}
+    """
+    try:
+        with _conn() as conn:
+            df = pd.read_sql_query("""
+                SELECT symbol, company_name, segment,
+                       g_score, v_score, m_score, gvm_score, market_cap
+                FROM gvm_scores
+                WHERE gvm_score IS NOT NULL
+            """, conn)
+
+        if df.empty:
+            return {"status": "warn", "message": "gvm_scores empty", "segments": 0}
+
+        # mcap: use 1 as fallback if null (equal weight for mcap-unknown stocks)
+        df["market_cap"] = pd.to_numeric(df["market_cap"], errors="coerce").fillna(1)
+        df["gvm_score"]  = pd.to_numeric(df["gvm_score"],  errors="coerce")
+        df["g_score"]    = pd.to_numeric(df["g_score"],    errors="coerce")
+        df["v_score"]    = pd.to_numeric(df["v_score"],    errors="coerce")
+        df["m_score"]    = pd.to_numeric(df["m_score"],    errors="coerce")
+        df = df.dropna(subset=["gvm_score"])
+
+        rows = []
+        for seg, grp in df.groupby("segment"):
+            if seg in ("Unknown", "", None):
+                continue
+            total_mcap = grp["market_cap"].sum()
+            if total_mcap <= 0:
+                total_mcap = len(grp)  # fallback: equal weight
+
+            def wt_avg(col):
+                return round(float((grp[col] * grp["market_cap"]).sum() / total_mcap), 3)
+
+            def simple_avg(col):
+                return round(float(grp[col].mean()), 3)
+
+            mcap_gvm = wt_avg("gvm_score")
+            top_row = grp.nlargest(1, "gvm_score").iloc[0]
+
+            rows.append((
+                seg,
+                int(len(grp)),
+                mcap_gvm,
+                wt_avg("g_score"),
+                wt_avg("v_score"),
+                wt_avg("m_score"),
+                simple_avg("gvm_score"),
+                round(float(total_mcap), 2),
+                str(top_row["symbol"]),
+                round(float(top_row["gvm_score"]), 2),
+                _verdict(mcap_gvm),
+                target_date,
+            ))
+
+        # Ensure table exists with correct schema
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sector_ratings (
+                    id SERIAL PRIMARY KEY,
+                    segment TEXT NOT NULL,
+                    stocks_count INTEGER,
+                    mcap_weighted_gvm NUMERIC,
+                    weighted_g NUMERIC,
+                    weighted_v NUMERIC,
+                    weighted_m NUMERIC,
+                    simple_avg_gvm NUMERIC,
+                    total_mcap NUMERIC,
+                    top_stock TEXT,
+                    top_stock_gvm NUMERIC,
+                    verdict TEXT,
+                    score_date DATE,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            cur.execute("DELETE FROM sector_ratings")
+            cur.executemany("""
+                INSERT INTO sector_ratings
+                    (segment, stocks_count, mcap_weighted_gvm, weighted_g, weighted_v, weighted_m,
+                     simple_avg_gvm, total_mcap, top_stock, top_stock_gvm, verdict, score_date)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """, rows)
+            conn.commit()
+
+        log.info(f"sector_ratings: {len(rows)} segments written for {target_date}")
+        return {"status": "ok", "segments": len(rows), "date": str(target_date)}
+
+    except Exception as e:
+        log.error(f"compute_sector_ratings failed: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 # ============================================================
@@ -367,10 +463,14 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
         """, latest_rows)
         conn.commit()
 
+    # 3. Recompute sector_ratings from the fresh gvm_scores — always runs after stock scoring.
+    sector_result = compute_sector_ratings(target_date)
+
     return {
         "status": "ok", "score_date": str(target_date),
         "scored": len(history_rows), "errors": errors, "m_missing": m_missing,
         "momentum": mom_result,
+        "sector_ratings": sector_result,
         "history_table": "gvm_history (appended)", "latest_table": "gvm_scores (replaced)",
     }
 
