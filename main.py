@@ -35,59 +35,31 @@ import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
 import global_indices
+import v8_signal_writer   # compute-on-write: 5-min live signal engine
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.5.2
-# v2.5.2: Gold/Silver 5-min intraday — global_intraday table (separate from
-#         intraday_prices so global commodities never leak into a futures scan).
-#         Polled every 5 min, 24h (ungated), 7-day rolling retention. Yahoo 5m
-#         chart, self-healing UPSERT. + /api/global/intraday/{name} +
-#         /api/admin/fetch_global_intraday + fetch_global_intraday/get_global_intraday
-#         MCP tools. Logic in global_indices.py; main.py = thin wiring.
-# v2.5.1: GLOBAL history — global_indices now a rolling 5yr DAILY store (like
-#         equity raw_prices). + backfill_global_indices (clean-replace 5yr daily
-#         close history, incl. Silver SI=F) via /api/admin/backfill_global +
-#         backfill_global MCP tool. + daily 5yr retention prune wired into the
-#         07:00 IST fetch. Logic in global_indices.py; main.py = thin wiring.
-# v2.5.0: DAILY DIGEST gap #1 — global_indices wired. Daily 07:00 IST scheduler
-#         fetches global indices/commodities/currency (Yahoo chart API loop, the
-#         reliable path) into global_indices. + /api/global (read) +
-#         /api/admin/fetch_global (manual trigger) + get_global MCP tool.
-#         Logic lives in global_indices.py; main.py change is thin wiring only.
-# v2.4.2: BOOT FIX — create_tables() moved OFF the @app.on_event startup path
-#         into a background task (asyncio.to_thread). A held DB lock (e.g. a
-#         zombie idle-in-transaction session) can no longer block startup, so
-#         the app always reaches "Application startup complete" and Railway's
-#         restart-on-failure loop cannot recur. Tables are CREATE IF NOT EXISTS,
-#         so building them a beat after boot is functionally identical.
-# v2.4.1: + /api/v8/run_for_date + run_v8_for_date MCP tool — backfill v8_metrics
-#         for a PAST date (engine target_date) for historical-sim groundwork.
-# v2.4.0: V8 PAPER ENGINE wired (v8_paper.py). Nightly rolling-5 pivots at 22:05,
-#         1-min paper_tick in live loop (gate slots from market_mood),
-#         endpoints + MCP tools: paper_compute_pivots, paper_tick, paper_status, paper_pivots.
-# v2.3.3: + /api/admin/backfill_indices + backfill_indices MCP tool — Yahoo
-#         NIFTY50/BANKNIFTY 1-min into intraday_prices (interim until Fyers index sub).
-# v2.3.2: GVM daily recompute moved 21:15 -> 22:00 IST to clear the slower Yahoo
-#         raw_prices run (yahoo_daily v2.1 retry-pass fetcher, ~15-30min from 21:00).
-# v2.3.1: load_screener_from_drive now writes the WIDE screener_raw schema
-#         via the shared gvm_nightly._sql_clean_replace_screener (rename ->
-#         drop null/dup nse_code -> numeric coerce -> clean-replace). Makes
-#         Drive -> load -> gvm_recompute a one-call weekly path. No more
-#         raw-JSONB mismatch with the GVM engine.
-# v2.3.0: GVM daily-recompute automation + screener-load MCP tool.
-#         - MCP tools: load_screener_json (weekly upload), run_momentum, gvm_recompute
-#         - 21:15 IST daily: recompute_gvm() -> refresh momentum (raw_prices) +
-#           G/V from screener -> append gvm_history + replace gvm_scores.
-#         - Realises the weekly-fundamentals + daily-momentum GVM TREND.
-# v2.2.0: GVM nightly recompute wired (gvm_nightly.py); intraday_prices DDL synced.
-# v2.1.4: LIVE 1-MIN ENGINE (v8_live.py).
-# v2.1.3: NSE holiday calendar wired (nse_holidays.py).
-# v2.1.2: /api/now + server_now MCP tool.
-# v2.1.0: get_intraday smart for ANY stock.
-# v2.0.x: FULL V5/V6 REMOVAL. V8-native.
+# Scorr / Project Quant — main.py v2.6.0
+# v2.6.0: COMPUTE-ON-WRITE architecture.
+#   - v8_signal_writer.py: lightweight 5-min job during market hours.
+#     Reads v8_metrics (EOD, slow) + cmp_prices (live CMP via Fyers).
+#     Computes live day_pct = (cmp/prev_close-1)*100 (pure DB join, no API).
+#     Applies FILTER_CONFIG → writes v8_qualified (today's live signals).
+#     Zero compute on API read path — /api/v8/qualified/{basket} = pure SELECT.
+#   - v8_engine.py: after EOD compute, also writes v8_signal_history (archive)
+#     + v8_funnel_counts (step counts for Sheet funnel display).
+#   - v8_endpoints.py: qualified/{basket} now reads v8_qualified directly.
+#     New endpoint: /api/v8/funnel/{basket} → waterfall counts (Sheet funnel restored).
+#   - fyers_feed.py: 208 futures → CMP only (no 1-min bars). NIFTY/BANKNIFTY/INDIAVIX
+#     keep 1-min bars. Lean DB, same WS coverage.
+# v2.5.2: Gold/Silver 5-min intraday — global_intraday table.
+# v2.5.1: global_indices rolling 5yr daily store + Silver.
+# v2.5.0: global_indices wired (Daily Digest gap #1).
+# v2.4.2: create_tables() off startup path (boot fix).
+# v2.4.1: /api/v8/run_for_date + backfill support.
+# v2.4.0: V8 paper engine wired.
 # ============================================================
 
-VERSION = "2.5.2"
+VERSION = "2.6.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -164,12 +136,12 @@ def create_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_gvm_history_symbol_date ON gvm_history(symbol, score_date DESC);
     CREATE INDEX IF NOT EXISTS idx_gvm_history_date ON gvm_history(score_date DESC);
-    """ + V8_SCHEMA_SQL
+    """ + V8_SCHEMA_SQL  # includes v8_qualified, v8_signal_history, v8_funnel_counts
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.3.2 — V8-native + live cache + gvm_history)")
+        log.info("Tables ready (v2.6.0 — compute-on-write signal tables)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -319,6 +291,7 @@ _v8_engine_running: bool = False
 _cache_built_today: Optional[date] = None
 _cache_building: bool = False
 _live_tick_running: bool = False
+_signal_writer_running: bool = False   # 5-min signal writer guard
 _gvm_recompute_ran_today: Optional[date] = None
 _gvm_recompute_running: bool = False
 _paper_tick_running: bool = False
@@ -369,7 +342,7 @@ def _bg_run_v8_engine():
         with get_conn() as conn:
             results = run_v8_engine(conn)
         _v8_engine_ran_today = _ist_now().date()
-        log.info(f"V8 engine auto-run done: {results.get('symbols_processed')} symbols")
+        log.info(f"V8 engine auto-run done: {results.get('symbols_processed')} symbols, signals written")
     except Exception as e:
         log.error(f"V8 engine auto-run failed: {e}")
     finally:
@@ -380,7 +353,7 @@ async def _task_run_v8_engine():
     today = _ist_now().date()
     if _v8_engine_ran_today == today:
         return
-    log.info("15:45 IST: Launching V8 engine auto-run")
+    log.info("15:45 IST: Launching V8 engine auto-run (metrics + signals)")
     asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
 
 def _bg_build_cache():
@@ -408,7 +381,6 @@ async def _task_build_cache():
     asyncio.create_task(asyncio.to_thread(_bg_build_cache))
 
 def _bg_recompute_gvm():
-    """Daily: refresh momentum from raw_prices + recompute GVM -> gvm_history + gvm_scores."""
     global _gvm_recompute_ran_today, _gvm_recompute_running
     if _gvm_recompute_running:
         log.info("gvm recompute already running, skip")
@@ -424,16 +396,14 @@ def _bg_recompute_gvm():
         _gvm_recompute_running = False
 
 async def _task_recompute_gvm_daily():
-    """22:00 IST: after the slower raw_prices update (21:00), refresh momentum + GVM snapshot."""
     global _gvm_recompute_ran_today
     today = _ist_now().date()
     if _gvm_recompute_ran_today == today:
         return
-    log.info("22:00 IST: Launching daily GVM recompute (momentum + history snapshot)")
+    log.info("22:00 IST: Launching daily GVM recompute")
     asyncio.create_task(asyncio.to_thread(_bg_recompute_gvm))
 
 def _bg_paper_tick():
-    """1-min: fetch gate slots from market_mood, run paper_tick (entries/exits/rebalance)."""
     global _paper_tick_running
     if _paper_tick_running:
         return
@@ -475,7 +445,6 @@ async def _task_build_paper_pivots():
     asyncio.create_task(asyncio.to_thread(_bg_build_paper_pivots))
 
 def _bg_fetch_global():
-    """Fetch global indices/commodities/currency via Yahoo chart API loop -> global_indices."""
     global _global_fetched_today, _global_fetching
     if _global_fetching:
         log.info("global fetch already running, skip")
@@ -497,8 +466,6 @@ def _bg_fetch_global():
         _global_fetching = False
 
 async def _task_fetch_global():
-    """07:00 IST daily: refresh global scorecard before pre-open digest. Every day
-    (US/global markets trade on our non-trading days too)."""
     global _global_fetched_today
     today = _ist_now().date()
     if _global_fetched_today == today:
@@ -507,7 +474,6 @@ async def _task_fetch_global():
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
 
 def _bg_fetch_global_intraday():
-    """Fetch Gold/Silver 5-min bars (Yahoo, 7d window) -> global_intraday + 7d prune."""
     global _global_intraday_fetching
     if _global_intraday_fetching:
         return
@@ -526,14 +492,12 @@ def _bg_fetch_global_intraday():
         _global_intraday_fetching = False
 
 async def _task_fetch_global_intraday():
-    """Every 5 min, 24h (ungated): refresh Gold/Silver 5-min bars. COMEX trades
-    ~24h, so this is NOT gated to NSE hours."""
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global_intraday))
 
 def _bg_live_tick():
     global _live_tick_running
     if _live_tick_running:
-        return  # previous tick still running, skip this minute
+        return
     _live_tick_running = True
     try:
         with get_conn() as conn:
@@ -544,8 +508,29 @@ def _bg_live_tick():
         _live_tick_running = False
 
 async def _task_live_tick():
-    """Every minute during market hours — recompute 19 live metrics."""
     asyncio.create_task(asyncio.to_thread(_bg_live_tick))
+
+def _bg_signal_writer():
+    """
+    5-min live signal writer — compute-on-write.
+    Reads v8_metrics (EOD slow metrics) + cmp_prices (live CMP from Fyers).
+    Computes live day_pct via pure DB join. Applies FILTER_CONFIG.
+    Writes v8_qualified. Zero external calls. Sub-second.
+    """
+    global _signal_writer_running
+    if _signal_writer_running:
+        return
+    _signal_writer_running = True
+    try:
+        with get_conn() as conn:
+            res = v8_signal_writer.run_live_signal_writer(conn)
+        counts = res.get('qualified', {})
+        total  = res.get('total', 0)
+        log.info(f"signal_writer: {total} signals — {counts}")
+    except Exception as e:
+        log.error(f"signal_writer failed: {e}")
+    finally:
+        _signal_writer_running = False
 
 async def _task_load_earnings_daily():
     global _earnings_loaded_today
@@ -563,23 +548,18 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    """Coarse loop (5-min) for daily tasks + a tight 1-min loop for live ticks."""
-    log.info("Scheduler started (v2.3.2 — live 1-min engine, daily GVM recompute 22:00, NSE-holiday aware)")
+    """Coarse loop (5-min) for daily tasks + tight 1-min loop for live ticks + signal writer."""
+    log.info("Scheduler started (v2.6.0 — compute-on-write signal writer, 5-min live signals)")
     asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now()
             trading_day = is_trading_day(now.date())
-            # Global scorecard fetch at 07:00 IST (every day — global markets
-            # move on our holidays/weekends too; digest needs fresh overnight data)
             if now.hour == 7 and now.minute < 5:
                 await _task_fetch_global()
-            # Gold/Silver 5-min intraday — every loop iteration (~5 min), 24h, ungated
-            # (COMEX trades nearly 24h; capture overnight moves)
             await _task_fetch_global_intraday()
             if trading_day and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
-            # Build history cache pre-open (~09:00–09:10 IST, trading days)
             if trading_day and now.hour == 9 and now.minute < 10:
                 await _task_build_cache()
             if _is_market_hours():
@@ -588,13 +568,8 @@ async def _scheduler():
                 await _task_run_v8_engine()
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
-            # Daily GVM recompute at 22:00 IST. Pushed from 21:15 -> 22:00 to clear the
-            # slower Yahoo raw_prices run (v2.1 fetcher ~15-30min, starts 21:00) so momentum
-            # reads a fully-updated raw_prices. Runs every day (momentum needs daily refresh
-            # even on non-trading days when prices updated).
             if now.hour == 22 and now.minute < 10:
                 await _task_recompute_gvm_daily()
-            # Rolling-5 paper pivots at 22:05 (after GVM/momentum refresh)
             if now.hour == 22 and 5 <= now.minute < 15:
                 await _task_build_paper_pivots()
         except Exception as e:
@@ -602,13 +577,25 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    """Tight 1-min loop. Fires run_live_tick only during market hours (holiday-aware)."""
-    log.info("Live 1-min loop started")
+    """
+    Tight 1-min loop during market hours.
+    - run_live_tick: recomputes 19 live metrics from intraday (indices).
+    - _bg_signal_writer: writes v8_qualified from CMP + v8_metrics (every 5th tick = ~5-min).
+    - _bg_paper_tick: paper engine entries/exits.
+    """
+    log.info("Live loop started (v2.6.0 — signal writer every 5-min)")
+    tick_count = 0
     while True:
         try:
             if _is_market_hours():
                 await _task_live_tick()
                 asyncio.create_task(asyncio.to_thread(_bg_paper_tick))
+                # Signal writer: every 5 ticks (~5-min cadence, matches CMP flush from Fyers)
+                tick_count += 1
+                if tick_count % 5 == 0:
+                    asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
+            else:
+                tick_count = 0
         except Exception as e:
             log.error(f"live loop error: {e}")
         await asyncio.sleep(60)
@@ -617,11 +604,6 @@ _BG_TASKS: set = set()
 
 @app.on_event("startup")
 async def startup():
-    # v2.4.2: create_tables() moved OFF the boot path. It runs in a background
-    # thread so a held DB lock (e.g. a zombie idle-in-transaction session) can
-    # never block startup -> the app always reaches "Application startup complete"
-    # and Railway's restart-on-failure loop cannot recur. Tables are
-    # CREATE IF NOT EXISTS, so building them a beat after boot is harmless.
     async def _init_tables():
         try:
             await asyncio.to_thread(create_tables)
@@ -680,7 +662,7 @@ def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
 def get_cmp_fallback():
     return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
 
-# ── V8 LIVE engine: cache build + 1-min tick ───────────────────────────────────────────────────────
+# ── V8 LIVE engine ────────────────────────────────────────────────────────────
 @app.post("/api/v8/build_cache")
 def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -693,7 +675,14 @@ def v8_run_live(x_admin_token: Optional[str] = Header(None)):
     with get_conn() as conn:
         return run_live_tick(conn)
 
-# ── Momentum daily engine (standalone trigger) ───────────────────────────────────────────────────────
+@app.post("/api/v8/run_signal_writer")
+def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
+    """Manual trigger for the 5-min live signal writer."""
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return v8_signal_writer.run_live_signal_writer(conn)
+
+# ── Momentum ──────────────────────────────────────────────────────────────────
 @app.post("/api/momentum/run")
 def momentum_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -715,6 +704,9 @@ def health_feeds():
         ("intraday_prices", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
         ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
         ("v8_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
+        ("v8_qualified", "SELECT MAX(signal_date), COUNT(*) FROM v8_qualified"),
+        ("v8_signal_history", "SELECT MAX(signal_date), COUNT(*) FROM v8_signal_history"),
+        ("v8_funnel_counts", "SELECT MAX(score_date), COUNT(*) FROM v8_funnel_counts"),
         ("v8_history_cache", "SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache"),
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
         ("global_indices", "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
@@ -723,18 +715,21 @@ def health_feeds():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for name, q in queries:
-                cur.execute(q)
-                r = cur.fetchone()
-                latest = str(r[0]) if r[0] else None
-                count = r[1] or 0
-                days_old = None
-                freshness = "n/a"
-                if latest and r[0]:
-                    try:
-                        days_old = (date.today() - r[0]).days
-                        freshness = "ok" if days_old < 7 else "stale"
-                    except Exception: pass
-                out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
+                try:
+                    cur.execute(q)
+                    r = cur.fetchone()
+                    latest = str(r[0]) if r[0] else None
+                    count = r[1] or 0
+                    days_old = None
+                    freshness = "n/a"
+                    if latest and r[0]:
+                        try:
+                            days_old = (date.today() - r[0]).days
+                            freshness = "ok" if days_old < 7 else "stale"
+                        except Exception: pass
+                    out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
+                except Exception as e:
+                    out.append({"source": name, "error": str(e)})
     except Exception as e:
         return {"error": str(e)}
     return {"checked_at": str(date.today()), "feeds": out}
@@ -869,9 +864,6 @@ async def v8_run(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/v8/run_for_date")
 def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None)):
-    """Backfill v8_metrics for a PAST date (sim groundwork). Reuses the real
-    engine with target_date so DMA/RSI/returns are computed as-of that day.
-    NOTE: sector_day/week + range_1d still read latest-day data (known sim caveat)."""
     _check_admin(x_admin_token)
     from datetime import date as _date
     d = _date.fromisoformat(target_date)
@@ -957,7 +949,7 @@ async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
     if _yahoo_daily_running:
         return {"status": "already_running", "message": "yahoo_daily already in progress"}
     asyncio.create_task(_bg_yahoo_daily())
-    return {"status": "started", "message": "raw_prices update running in background (v2.1 retry fetcher, ~15-30 min)."}
+    return {"status": "started", "message": "raw_prices update running in background."}
 
 @app.post("/api/admin/backfill_indices")
 def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(None)):
@@ -998,7 +990,6 @@ def paper_pivots(limit: int = 250):
 
 @app.get("/api/global")
 def get_global():
-    """Latest global scorecard — indices, commodities, currency (most recent quote_date per symbol)."""
     return api_query("""
         SELECT g.symbol, g.name, g.category, g.price, g.prev_close, g.chg_pct,
                g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
@@ -1011,7 +1002,6 @@ def get_global():
 
 @app.get("/api/global/history/{name}")
 def get_global_history(name: str, days: int = 1825):
-    """Daily history for one global series by name (e.g. Dow, Gold, Silver, USDINR)."""
     cutoff = (_ist_now().date() - timedelta(days=days))
     return api_query("""
         SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text AS quote_date
@@ -1022,7 +1012,6 @@ def get_global_history(name: str, days: int = 1825):
 
 @app.get("/api/global/intraday/{name}")
 def get_global_intraday(name: str, days: int = 7):
-    """Gold/Silver 5-min bars, last `days` (default 7). name = GOLD or SILVER."""
     cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
     return api_query("""
         SELECT symbol, name, ts, open, high, low, close, volume
@@ -1039,7 +1028,6 @@ async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/admin/backfill_global")
 async def backfill_global_now(years: int = 5, clean: bool = True, x_admin_token: Optional[str] = Header(None)):
-    """One-time clean-replace backfill of `years` daily global history (incl. Silver)."""
     _check_admin(x_admin_token)
     with global_indices.get_conn_from_env() as conn:
         return await global_indices.backfill_global_indices(conn, years=years, clean=clean)
@@ -1080,9 +1068,6 @@ async def load_screener(req: Request):
     if not file_id: raise HTTPException(400, "file_id required")
     csv_text = await _drive_download(file_id)
     df = pd.read_csv(io.StringIO(csv_text))
-    # v2.3.1: write the WIDE screener_raw schema via the shared cleaner used by
-    # load_screener_json (rename raw Screener headers -> drop null/dup nse_code ->
-    # numeric coerce -> clean-replace). Single source of truth with gvm_nightly.
     n = _sql_clean_replace_screener(df.to_dict(orient="records"))
     return {"status": "ok", "action": "clean_replace_wide", "rows_loaded": n}
 
@@ -1312,39 +1297,39 @@ async def oauth_token(req: Request):
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
 MCP_TOOLS = [
-    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status. Single source of truth for any date/day/time reasoning.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache (fixed 400-day history per future). Run pre-open or to refresh. Heavy, ~1x/day.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute the 19 price-driven metrics from cache + latest intraday bar, upsert today's v8_metrics. Light.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "load_screener_json", "description": "GVM: clean-replace screener_raw from uploaded raw Screener rows (weekly fundamentals). Pass {rows:[...]} where each row uses raw Screener headers. Returns rows_loaded.", "inputSchema": {"type": "object", "properties": {"rows": {"type": "array", "items": {"type": "object"}}}, "required": ["rows"]}},
-    {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices into momentum_scores (dated). Price-driven half of GVM.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "gvm_recompute", "description": "GVM: full recompute. Refreshes daily momentum (raw_prices) + G/V from screener -> appends gvm_history (trend) + replaces gvm_scores (latest). Run after a screener upload, or daily.", "inputSchema": {"type": "object", "properties": {"refresh_momentum": {"type": "boolean"}}, "required": []}},
-    {"name": "gvm_history", "description": "GVM: get the GVM score trend series for a stock (date, g/v/m/gvm, verdict).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
+    {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache. Run pre-open or to refresh. Heavy, ~1x/day.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute 19 price-driven metrics from cache + latest intraday bar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "load_screener_json", "description": "GVM: clean-replace screener_raw from uploaded raw Screener rows.", "inputSchema": {"type": "object", "properties": {"rows": {"type": "array", "items": {"type": "object"}}}, "required": ["rows"]}},
+    {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "gvm_recompute", "description": "GVM: full recompute. Refreshes daily momentum + G/V from screener -> gvm_history + gvm_scores.", "inputSchema": {"type": "object", "properties": {"refresh_momentum": {"type": "boolean"}}, "required": []}},
+    {"name": "gvm_history", "description": "GVM: get the GVM score trend series for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
     {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
     {"name": "get_sector_rating", "description": "Get sector-level mcap-weighted GVM ratings.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_momentum", "description": "Get momentum scores for a stock (latest).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_intraday", "description": "Intraday OHLC for ANY stock. Futures -> stored Fyers 1-min (DB, last 7d). Non-futures -> fetched LIVE from Yahoo and NOT stored (5-min default, up to ~60d). Set source='yahoo' to FORCE live Yahoo even for a futures stock. Params: symbol, days (default 15), interval (1m/5m/15m/30m/60m/1d), source (auto/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
-    {"name": "get_cmp", "description": "Get latest CMP for a stock (source field shows fyers/yahoo).", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_intraday", "description": "Intraday OHLC for ANY stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_cmp", "description": "Get latest CMP for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "backfill_indices", "description": "Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices from Yahoo (interim index source for the market-mood gate). Param days (default 7).", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
-    {"name": "paper_compute_pivots", "description": "PAPER: compute rolling-5-day pivots for all futures (nightly job / on demand).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "paper_tick", "description": "PAPER: run one paper-engine tick — filters-first qualified set + fresh PP cross entries + target/SL/gap/gate exits.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "paper_status", "description": "PAPER: open positions + recent closed trades + missed signals + win/loss/PnL summary.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "paper_pivots", "description": "PAPER: latest rolling-5 pivot levels (PP/R1/S1/R2/S2) per stock.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
+    {"name": "backfill_indices", "description": "Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
+    {"name": "paper_compute_pivots", "description": "PAPER: compute rolling-5-day pivots for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "paper_tick", "description": "PAPER: run one paper-engine tick.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "paper_status", "description": "PAPER: open positions + recent closed trades + summary.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "paper_pivots", "description": "PAPER: latest rolling-5 pivot levels per stock.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "set_cmp_fallback", "description": "Toggle Yahoo CMP fallback on/off.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}}, "required": ["state"]}},
-    {"name": "run_v8_engine", "description": "Run the V8 EOD signal engine — compute today's metrics for the futures universe into v8_metrics.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "run_v8_for_date", "description": "Backfill v8_metrics for a PAST date (YYYY-MM-DD) - sim groundwork. Reuses engine as-of that date.", "inputSchema": {"type": "object", "properties": {"target_date": {"type": "string"}}, "required": ["target_date"]}},
+    {"name": "run_v8_engine", "description": "Run the V8 EOD engine — compute metrics + write signals to DB.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "run_v8_for_date", "description": "Backfill v8_metrics for a PAST date (YYYY-MM-DD).", "inputSchema": {"type": "object", "properties": {"target_date": {"type": "string"}}, "required": ["target_date"]}},
     {"name": "get_v8_metrics", "description": "Get computed V8 metrics for one stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_v8_metrics_all", "description": "Get all metrics for the full universe (latest date).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_v8_live_metrics", "description": "Get real-time CMP, day%, hourly gain for the universe.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "health_feeds", "description": "Status dashboard for all data feeds.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "health_feeds", "description": "Status dashboard for all data feeds including v8_qualified + v8_signal_history.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "env_check", "description": "Diagnostic: which env vars are visible.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_sql", "description": "Run any SQL query on Railway PostgreSQL.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "load_input_from_drive", "description": "Reload input_raw from Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
-    {"name": "load_screener_from_drive", "description": "Reload screener_raw (WIDE schema, weekly fundamentals) from a Drive CSV — clean-replace via the same path as load_screener_json. Pass file_id.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
+    {"name": "load_screener_from_drive", "description": "Reload screener_raw (WIDE schema) from a Drive CSV.", "inputSchema": {"type": "object", "properties": {"file_id": {"type": "string"}}, "required": ["file_id"]}},
     {"name": "load_earnings_from_screener", "description": "Scrape Screener.in and refresh earnings_calendar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "check_blackout", "description": "Check if a symbol is in earnings blackout.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "github_read", "description": "Read any file from the GitHub repo.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}}, "required": ["filepath"]}},
@@ -1352,17 +1337,17 @@ MCP_TOOLS = [
     {"name": "github_push", "description": "Create or update a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "new_content": {"type": "string"}, "commit_message": {"type": "string"}, "create_if_missing": {"type": "boolean"}}, "required": ["filepath", "new_content", "commit_message"]}},
     {"name": "github_delete", "description": "Delete a file.", "inputSchema": {"type": "object", "properties": {"filepath": {"type": "string"}, "commit_message": {"type": "string"}}, "required": ["filepath"]}},
     {"name": "v8_market_mood", "description": "V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
+    {"name": "v8_qualified", "description": "V8: Get qualified stocks for a basket (pure read from v8_qualified).", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["basket"]}},
     {"name": "v8_filter_config", "description": "V8: Get filter thresholds for a basket.", "inputSchema": {"type": "object", "properties": {"basket": {"type": "string"}}, "required": ["basket"]}},
     {"name": "v8_sell_overbought", "description": "V8: Get Sell Overbought signals.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}, "required": []}},
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
     {"name": "get_top_gainers", "description": "Top gainers by day% from EOD data, joined with GVM scores.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string"}, "n": {"type": "integer"}, "min_gvm": {"type": "number"}, "min_day_pct": {"type": "number"}, "universe": {"type": "string"}, "min_volume": {"type": "integer"}}, "required": []}},
-    {"name": "get_global", "description": "Daily Digest: latest global scorecard — world indices (Dow/S&P/Nasdaq/Nikkei/FTSE/DAX/Shanghai), US VIX, commodities (Brent/WTI/Gold/Silver), currency (USDINR/DXY) with price, prev close, chg%. Fed daily 07:00 IST from Yahoo.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "fetch_global", "description": "Daily Digest: manually trigger a live fetch of the global scorecard (Yahoo chart API loop) into global_indices. Returns stored/errors/total.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "backfill_global", "description": "One-time: clean-replace backfill of N years (default 5) of DAILY global history (indices/commodities incl. Silver/currency) into global_indices, mirroring the equity 5yr EOD store. Erases existing rows then inserts fresh daily close+chg% series. Params: years (default 5), clean (default true).", "inputSchema": {"type": "object", "properties": {"years": {"type": "integer"}, "clean": {"type": "boolean"}}, "required": []}},
-    {"name": "get_global_intraday", "description": "Gold/Silver 5-min intraday bars (7-day rolling). name = GOLD or SILVER, days default 7.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["name"]}},
-    {"name": "fetch_global_intraday", "description": "Manually trigger a Gold/Silver 5-min intraday fetch (Yahoo 7d window) into global_intraday + 7d prune. Auto-runs every 5 min anyway.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_global", "description": "Daily Digest: latest global scorecard — indices, commodities, currency.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "fetch_global", "description": "Manually trigger global scorecard fetch into global_indices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "backfill_global", "description": "One-time backfill of N years daily global history.", "inputSchema": {"type": "object", "properties": {"years": {"type": "integer"}, "clean": {"type": "boolean"}}, "required": []}},
+    {"name": "get_global_intraday", "description": "Gold/Silver 5-min intraday bars (7-day rolling).", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["name"]}},
+    {"name": "fetch_global_intraday", "description": "Manually trigger Gold/Silver 5-min intraday fetch.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1385,10 +1370,8 @@ async def _call_tool(name, args):
         elif name == "get_momentum": r = await client.get(f"{BASE_URL}/api/momentum/{args['symbol']}"); return r.json()
         elif name == "get_intraday":
             sym = (args.get("symbol") or "").upper()
-            try:
-                days = int(args.get("days") or 15)
-            except (TypeError, ValueError):
-                days = 15
+            try: days = int(args.get("days") or 15)
+            except (TypeError, ValueError): days = 15
             interval = (args.get("interval") or "5m").lower()
             source = (args.get("source") or "auto").lower()
             return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, sym, days, interval, "NS", source)
