@@ -63,7 +63,7 @@ INDEX_LTP_SYMBOLS = {
     'INDIAVIX':  'NSE:INDIAVIX-INDEX',
 }
 
-# ── Option chain config ────────────────────────────────────────────────────────
+# ── Option chain config ────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 OPTION_POLL_MINS      = 5      # poll every 5 min via REST
 N_STRIKES             = 10     # ATM ± 10 strikes each side
@@ -96,7 +96,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 log = logging.getLogger('fyers_feed')
 
 
-# ──────────────────────────────────────────────── DB / token
+# ─────────────────────────────────────────────────────────────────────── DB / token
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -160,7 +160,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ──────────────────────────────────────────────── universe
+# ─────────────────────────────────────────────────────────────────────── universe
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -176,7 +176,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ──────────────────────────────────────────────── bar aggregator
+# ─────────────────────────────────────────────────────────────────────── bar aggregator
 
 class BarAggregator:
     def __init__(self, conn, futures_set):
@@ -236,17 +236,21 @@ class BarAggregator:
                 self._flush(key, bar)
 
     def flush_cmp(self):
+        # IST stamp (matches locked IST-only rule). NOW() = Postgres server UTC
+        # on Railway, which left cmp_prices.updated_at 5:30 behind every other
+        # IST-stamped table and made freshness checks read as falsely stale.
+        _ist = datetime.now(IST).replace(tzinfo=None)
         with self.lock:
-            rows = [(s, p) for s, p in self.last_ltp.items() if p]
+            rows = [(s, p, _ist) for s, p in self.last_ltp.items() if p]
         if not rows:
             return
         try:
             with self.conn.cursor() as cur:
                 cur.executemany("""
                     INSERT INTO cmp_prices (symbol, cmp, updated_at, source)
-                    VALUES (%s, %s, NOW(), 'fyers')
+                    VALUES (%s, %s, %s, 'fyers')
                     ON CONFLICT (symbol) DO UPDATE SET
-                        cmp=EXCLUDED.cmp, updated_at=NOW(), source='fyers'
+                        cmp=EXCLUDED.cmp, updated_at=EXCLUDED.updated_at, source='fyers'
                 """, rows)
             self.conn.commit()
             log.info(f"CMP (fyers) flushed: {len(rows)} symbols")
@@ -254,7 +258,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ──────────────────────────────────────────────── index LTP
+# ─────────────────────────────────────────────────────────────────────── index LTP
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -263,24 +267,25 @@ def update_index_ltp(conn, token, agg=None):
         d = r.json()
         if d.get('s') != 'ok': return
         rows = []
+        _ist = datetime.now(IST).replace(tzinfo=None)
         for item in d.get('d', []):
             lp = item['v'].get('lp', 0)
             if not lp: continue
             for name, fsym in INDEX_LTP_SYMBOLS.items():
                 if fsym == item['n']:
-                    rows.append((name, lp))
+                    rows.append((name, lp, _ist))
                     if agg is not None:
                         agg.on_tick(name, float(lp), 0)
         if rows:
             with conn.cursor() as cur:
-                cur.executemany("""INSERT INTO cmp_prices (symbol,cmp,updated_at,source) VALUES (%s,%s,NOW(),'fyers')
-                    ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, updated_at=NOW(), source='fyers'""", rows)
+                cur.executemany("""INSERT INTO cmp_prices (symbol,cmp,updated_at,source) VALUES (%s,%s,%s,'fyers')
+                    ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, updated_at=EXCLUDED.updated_at, source='fyers'""", rows)
             conn.commit()
     except Exception as e:
         log.warning(f"Index LTP: {e}")
 
 
-# ──────────────────────────────────────────────── option chain helpers
+# ─────────────────────────────────────────────────────────────────────── option chain helpers
 
 def ensure_option_schema(conn):
     with conn.cursor() as cur:
@@ -427,7 +432,7 @@ def cleanup_option_chain(conn):
         log.warning(f"option_chain cleanup: {e}")
 
 
-# ──────────────────────────────────────────────── market helpers
+# ─────────────────────────────────────────────────────────────────────── market helpers
 
 def is_market_open():
     now = datetime.now(IST)
@@ -436,7 +441,7 @@ def is_market_open():
     return (9*60+15) <= mins <= (15*60+29)
 
 
-# ──────────────────────────────────────────────── main run
+# ─────────────────────────────────────────────────────────────────────── main run
 
 def run(auth_code=None):
     import fyers_backfill
