@@ -1,23 +1,25 @@
 """
 V8 Signal Engine — Scorr
 =========================
-Computes ~21 metrics per stock from raw_prices + intraday_prices + gvm_scores,
-then runs the V8 AND-gate baskets.
+Computes ~21 metrics per stock from raw_prices + gvm_scores,
+then writes pre-filtered signals to DB (compute-on-write architecture).
 
-Universe = futures_universe (is_active = TRUE) — the live Fyers F&O list.
-v8_universe is DEPRECATED and no longer read.
+Universe = futures_universe (is_active = TRUE)
 
-Tables:
-  v8_metrics   — daily computed indicator values per stock
-  v8_qualified — stocks passing each basket's AND-gate
+Tables written:
+  v8_metrics        — 21 EOD metrics per symbol per day
+  v8_qualified      — stocks passing each basket's filters TODAY (live read source)
+  v8_signal_history — append-only archive of every signal ever generated (backtest source)
+  v8_funnel_counts  — waterfall step counts per basket per day (Sheet funnel display)
 
 Filter thresholds are CANONICAL in v8_endpoints.py (FILTER_CONFIG dict).
-This engine computes the raw metrics; v8_endpoints applies the live thresholds.
+This engine computes raw metrics + writes signals; v8_endpoints serves pure reads.
 
 RSI periods: Month=6, Weekly=8, Daily=14 (Wilder).
 """
 
 import logging
+import json
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, List
 import pandas as pd
@@ -30,7 +32,7 @@ RSI_WEEK_PERIOD  = 8
 RSI_DAILY_PERIOD = 14
 
 # ============================================================
-# SCHEMA — V8-native
+# SCHEMA — V8-native (compute-on-write)
 # ============================================================
 V8_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS v8_universe (
@@ -60,18 +62,71 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
 );
 CREATE INDEX IF NOT EXISTS idx_v8_metrics_symbol_date ON v8_metrics(symbol, score_date DESC);
 
+-- v8_qualified: live signals for today — overwritten on every engine run.
+-- API endpoints read this directly (pure SELECT). Never compute on read.
 CREATE TABLE IF NOT EXISTS v8_qualified (
     id SERIAL PRIMARY KEY,
     symbol TEXT NOT NULL,
-    signal_type TEXT NOT NULL,
-    score_date DATE NOT NULL,
+    basket TEXT NOT NULL,
+    signal_date DATE NOT NULL,
+    signal_ts TIMESTAMP DEFAULT NOW(),
     gvm_score NUMERIC,
     cmp NUMERIC,
+    prev_day_change NUMERIC,
+    week_return NUMERIC,
+    month_return NUMERIC,
+    dma_200 NUMERIC,
+    dma_50 NUMERIC,
+    rsi_month NUMERIC,
+    rsi_weekly NUMERIC,
+    sector_week NUMERIC,
+    sector_day NUMERIC,
+    month_index NUMERIC,
+    week_index_52 NUMERIC,
+    daily_rsi NUMERIC,
+    range_3d NUMERIC,
     metrics JSONB,
-    qualified_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(symbol, signal_type, score_date)
+    source TEXT DEFAULT 'eod',
+    UNIQUE(symbol, basket, signal_date)
 );
-CREATE INDEX IF NOT EXISTS idx_v8_qual_date_type ON v8_qualified(score_date DESC, signal_type);
+CREATE INDEX IF NOT EXISTS idx_v8_qual_date_basket ON v8_qualified(signal_date DESC, basket);
+CREATE INDEX IF NOT EXISTS idx_v8_qual_basket_today ON v8_qualified(basket, signal_date DESC);
+
+-- v8_signal_history: append-only archive. Every signal ever generated.
+-- Backtest = SELECT * FROM v8_signal_history WHERE basket=x AND signal_date BETWEEN a AND b
+CREATE TABLE IF NOT EXISTS v8_signal_history (
+    id SERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    basket TEXT NOT NULL,
+    signal_date DATE NOT NULL,
+    gvm_score NUMERIC,
+    cmp NUMERIC,
+    prev_day_change NUMERIC,
+    week_return NUMERIC,
+    month_return NUMERIC,
+    dma_200 NUMERIC,
+    dma_50 NUMERIC,
+    rsi_month NUMERIC,
+    rsi_weekly NUMERIC,
+    metrics JSONB,
+    source TEXT DEFAULT 'eod',
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(symbol, basket, signal_date)
+);
+CREATE INDEX IF NOT EXISTS idx_v8_history_basket_date ON v8_signal_history(basket, signal_date DESC);
+CREATE INDEX IF NOT EXISTS idx_v8_history_date ON v8_signal_history(signal_date DESC);
+
+-- v8_funnel_counts: waterfall step counts per basket per day.
+-- Restores the funnel display in the Google Sheet.
+CREATE TABLE IF NOT EXISTS v8_funnel_counts (
+    id SERIAL PRIMARY KEY,
+    basket TEXT NOT NULL,
+    score_date DATE NOT NULL,
+    counts JSONB NOT NULL,
+    computed_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(basket, score_date)
+);
+CREATE INDEX IF NOT EXISTS idx_v8_funnel_date ON v8_funnel_counts(score_date DESC);
 """
 
 
@@ -133,7 +188,9 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         return out
 
     df = pd.DataFrame(rows, columns=["date", "close", "high", "low", "volume"])
-    df["close"] = pd.to_numeric(df["close"]); df["high"] = pd.to_numeric(df["high"]); df["low"] = pd.to_numeric(df["low"])
+    df["close"]  = pd.to_numeric(df["close"])
+    df["high"]   = pd.to_numeric(df["high"])
+    df["low"]    = pd.to_numeric(df["low"])
     df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
     if len(df) < 5:
@@ -153,7 +210,6 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         prev1, prev2 = float(df["close"].iloc[-1]), float(df["close"].iloc[-2])
         if prev2 > 0: out["prev_day_change"] = (prev1 / prev2 - 1) * 100
 
-    # ma9_vs_ma21 & vol_ratio — matches v8_endpoints sell_overbought formula
     if len(df) >= 21:
         ma9  = float(df["close"].tail(9).mean())
         ma21 = float(df["close"].tail(21).mean())
@@ -165,7 +221,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
             out["vol_ratio"] = round(vol_now / vol_avg10, 2)
 
     df_indexed = df.set_index(pd.to_datetime(df["date"]))
-    out["rsi_month"]  = _wilder_rsi(df_indexed["close"].resample("M").last().dropna(), RSI_MONTH_PERIOD)
+    out["rsi_month"]  = _wilder_rsi(df_indexed["close"].resample("ME").last().dropna(), RSI_MONTH_PERIOD)
     out["rsi_weekly"] = _wilder_rsi(df_indexed["close"].resample("W").last().dropna(), RSI_WEEK_PERIOD)
     out["daily_rsi"]  = _wilder_rsi(df["close"], RSI_DAILY_PERIOD)
 
@@ -209,19 +265,6 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
                 out["sector_week"] = float(s[0]) if s[0] is not None else None
                 out["sector_day"]  = float(s[1]) if s[1] is not None else None
 
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT MAX(high), MIN(low),
-                   (SELECT open FROM intraday_prices WHERE symbol=%s ORDER BY ts ASC LIMIT 1)
-            FROM intraday_prices
-            WHERE symbol=%s AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE symbol=%s)
-        """, (symbol, symbol, symbol))
-        ir = cur.fetchone()
-        if ir and ir[0] and ir[2]:
-            hi, lo, op = float(ir[0]), float(ir[1]), float(ir[2])
-            if op > 0:
-                out["range_1d"] = ((hi-lo)/op*100) * (1 if latest_close >= op else -1)
-
     return out
 
 
@@ -256,22 +299,180 @@ def store_metrics(conn, m: Dict):
         conn.commit()
 
 
+# ============================================================
+# SIGNAL WRITE — compute-on-write core
+# ============================================================
+
+def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source: str = 'eod'):
+    """
+    Apply FILTER_CONFIG to all_metrics, then write results to:
+      - v8_qualified      (today's live signals — full replace for this date)
+      - v8_signal_history (append-only archive — UNIQUE guard prevents duplicates)
+      - v8_funnel_counts  (waterfall step counts per basket)
+
+    Called after EOD engine run and after 5-min live tick.
+    """
+    from v8_endpoints import FILTER_CONFIG
+
+    # Fetch live CMP for all symbols (used in qualified rows)
+    cmp_map = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT symbol, cmp FROM cmp_prices")
+            for row in cur.fetchall():
+                cmp_map[row[0]] = float(row[1]) if row[1] else None
+    except Exception as e:
+        log.warning(f"write_signals: cmp fetch failed: {e}")
+
+    for basket, filters in FILTER_CONFIG.items():
+        if basket == 'sell_overbought':
+            # sell_overbought is computed live in v8_endpoints (raw_prices window)
+            # Skip here — it does not use v8_metrics as its signal source
+            continue
+
+        # ── compute funnel counts (cumulative, each filter applied in sequence) ──
+        universe = all_metrics[:]
+        funnel = {}
+        for metric, bounds in filters.items():
+            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            universe = [s for s in universe if _passes(s.get(metric), mn, mx)]
+            funnel[metric] = len(universe)
+
+        qualified_symbols = universe  # stocks surviving all filters
+
+        # ── write v8_funnel_counts ──
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (basket, score_date) DO UPDATE SET
+                        counts=EXCLUDED.counts, computed_at=NOW()
+                """, (basket, target_date, json.dumps(funnel)))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"write_signals funnel {basket}: {e}")
+
+        # ── clear today's v8_qualified for this basket then re-insert ──
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM v8_qualified WHERE basket=%s AND signal_date=%s",
+                            (basket, target_date))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"write_signals clear qualified {basket}: {e}")
+
+        # ── write v8_qualified + v8_signal_history ──
+        for s in qualified_symbols:
+            sym = s['symbol']
+            cmp = cmp_map.get(sym)
+            metrics_snap = {k: s.get(k) for k in [
+                'gvm_score','dma_50','dma_200','dma_20','rsi_month','rsi_weekly',
+                'daily_rsi','month_return','week_return','year_return','prev_day_change',
+                'sector_day','sector_week','month_index','week_index_52','range_3d',
+                'ma9_vs_ma21','vol_ratio'
+            ]}
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO v8_qualified
+                        (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
+                         prev_day_change, week_return, month_return, dma_200, dma_50,
+                         rsi_month, rsi_weekly, sector_week, sector_day, month_index,
+                         week_index_52, daily_rsi, range_3d, metrics, source)
+                        VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
+                            signal_ts=NOW(), gvm_score=EXCLUDED.gvm_score, cmp=EXCLUDED.cmp,
+                            prev_day_change=EXCLUDED.prev_day_change, metrics=EXCLUDED.metrics,
+                            source=EXCLUDED.source
+                    """, (
+                        sym, basket, target_date, s.get('gvm_score'), cmp,
+                        s.get('prev_day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
+                        s.get('sector_week'), s.get('sector_day'), s.get('month_index'),
+                        s.get('week_index_52'), s.get('daily_rsi'), s.get('range_3d'),
+                        json.dumps(metrics_snap), source
+                    ))
+                conn.commit()
+            except Exception as e:
+                log.warning(f"write_signals qualified {basket} {sym}: {e}")
+
+            # history — UNIQUE guard (symbol, basket, signal_date) prevents duplicates
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO v8_signal_history
+                        (symbol, basket, signal_date, gvm_score, cmp,
+                         prev_day_change, week_return, month_return,
+                         dma_200, dma_50, rsi_month, rsi_weekly, metrics, source)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (symbol, basket, signal_date) DO NOTHING
+                    """, (
+                        sym, basket, target_date, s.get('gvm_score'), cmp,
+                        s.get('prev_day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
+                        json.dumps(metrics_snap), source
+                    ))
+                conn.commit()
+            except Exception as e:
+                log.warning(f"write_signals history {basket} {sym}: {e}")
+
+    log.info(f"write_signals done: date={target_date} source={source}")
+
+
+def _passes(value, mn, mx) -> bool:
+    """Check a single metric value against [min, max] bounds."""
+    if value is None:
+        return False
+    v = float(value)
+    if mn is not None and v < mn:
+        return False
+    if mx is not None and v > mx:
+        return False
+    return True
+
+
+# ============================================================
+# ENGINE ENTRY POINT
+# ============================================================
+
 def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> Dict:
-    """Compute metrics for the live futures universe (futures_universe, is_active=TRUE)."""
+    """
+    EOD engine: compute 21 metrics for all futures symbols,
+    store in v8_metrics, then write pre-filtered signals to
+    v8_qualified + v8_signal_history + v8_funnel_counts.
+    """
     target_date = target_date or date.today()
     if symbols is None:
         with conn.cursor() as cur:
             cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE ORDER BY symbol")
             symbols = [r[0] for r in cur.fetchall()]
 
-    results = {"date": str(target_date), "universe": "futures_universe", "symbols_processed": 0, "errors": []}
+    results = {
+        "date": str(target_date),
+        "universe": "futures_universe",
+        "symbols_processed": 0,
+        "errors": [],
+        "signals_written": 0,
+    }
+    all_metrics = []
     for sym in symbols:
         try:
             m = compute_metrics_for_symbol(conn, sym, target_date)
             store_metrics(conn, m)
+            all_metrics.append(m)
             results["symbols_processed"] += 1
         except Exception as e:
             results["errors"].append(f"{sym}: {str(e)[:80]}")
             log.warning(f"V8 engine error on {sym}: {e}")
-    log.info(f"V8 engine done: {results['symbols_processed']} symbols (futures_universe)")
+
+    # Write pre-filtered signals to DB — compute-on-write
+    try:
+        write_signals_to_db(conn, all_metrics, target_date, source='eod')
+        results["signals_written"] = len(all_metrics)
+    except Exception as e:
+        log.error(f"write_signals_to_db failed: {e}")
+        results["errors"].append(f"write_signals: {str(e)[:120]}")
+
+    log.info(f"V8 engine done: {results['symbols_processed']} symbols, signals written to DB")
     return results
