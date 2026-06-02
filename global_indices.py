@@ -173,3 +173,96 @@ def prune_global_indices(conn, years: int = 5) -> int:
     if n:
         log.info(f"global_indices prune: {n} rows older than {cutoff} deleted")
     return n
+
+
+# ── Global intraday (Gold/Silver 5-min, 7-day rolling) ──────────────────────────
+# Separate table from intraday_prices (NSE futures) — global commodities must never
+# leak into a futures-universe scan (v8_live_metrics / paper engine).
+GLOBAL_INTRADAY_TICKERS = [
+    ("GC=F", "GOLD"),
+    ("SI=F", "SILVER"),
+]
+
+INTRADAY_DDL = """
+CREATE TABLE IF NOT EXISTS global_intraday (
+    id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, name TEXT NOT NULL,
+    ts TIMESTAMP NOT NULL,
+    open NUMERIC, high NUMERIC, low NUMERIC, close NUMERIC, volume BIGINT,
+    timeframe TEXT DEFAULT '5m', source TEXT DEFAULT 'yahoo',
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(symbol, ts, timeframe)
+);
+CREATE INDEX IF NOT EXISTS idx_global_intraday_sym_ts ON global_intraday(symbol, ts DESC);
+"""
+
+
+def ensure_intraday_table(conn):
+    with conn.cursor() as cur:
+        cur.execute(INTRADAY_DDL)
+    conn.commit()
+
+
+async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
+    """Fetch 5-min OHLCV for Gold (GC=F) + Silver (SI=F) via Yahoo chart API,
+    range default 7d (one call per symbol returns the full rolling 7-day window,
+    incl. ~24h COMEX overnight bars). UPSERT on (symbol, ts, timeframe) — idempotent
+    and self-healing (re-fetching the 7d window patches any gaps). ts stored in IST.
+    Returns {stored, errors, symbols}."""
+    ensure_intraday_table(conn)
+    total, errors = 0, 0
+    async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        for symbol, name in GLOBAL_INTRADAY_TICKERS:
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                   f"{urllib.parse.quote(symbol)}?interval=5m&range={range_str}")
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                res = r.json()["chart"]["result"][0]
+                tstamps = res.get("timestamp", []) or []
+                q = (res.get("indicators", {}).get("quote", [{}])[0]) or {}
+                opens, highs, lows, closes, vols = (q.get("open", []), q.get("high", []),
+                                                    q.get("low", []), q.get("close", []),
+                                                    q.get("volume", []))
+                rows = []
+                for i, t in enumerate(tstamps):
+                    cl = closes[i] if i < len(closes) else None
+                    if cl is None:
+                        continue
+                    dt = datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)
+                    rows.append((symbol, name, dt,
+                                 opens[i] if i < len(opens) else None,
+                                 highs[i] if i < len(highs) else None,
+                                 lows[i] if i < len(lows) else None,
+                                 cl,
+                                 vols[i] if i < len(vols) else None))
+                if rows:
+                    with conn.cursor() as cur:
+                        cur.executemany(
+                            """INSERT INTO global_intraday
+                               (symbol,name,ts,open,high,low,close,volume,timeframe,source,updated_at)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'5m','yahoo',NOW())
+                               ON CONFLICT (symbol,ts,timeframe) DO UPDATE SET
+                               open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low,
+                               close=EXCLUDED.close, volume=EXCLUDED.volume, updated_at=NOW()""",
+                            rows)
+                    conn.commit()
+                    total += len(rows)
+                    log.info(f"global_intraday {name}: {len(rows)} 5m bars")
+            except Exception as e:
+                errors += 1
+                log.warning(f"global_intraday {name}: {e}")
+            await asyncio.sleep(0.4)
+    return {"stored": total, "errors": errors, "symbols": len(GLOBAL_INTRADAY_TICKERS)}
+
+
+def prune_global_intraday(conn, days: int = 7) -> int:
+    """Rolling 7-day retention for Gold/Silver 5-min bars."""
+    ensure_intraday_table(conn)
+    cutoff = (datetime.utcnow() + timedelta(hours=5, minutes=30)) - timedelta(days=days)
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM global_intraday WHERE ts < %s", (cutoff,))
+        n = cur.rowcount
+    conn.commit()
+    if n:
+        log.info(f"global_intraday prune: {n} bars older than {days}d deleted")
+    return n
