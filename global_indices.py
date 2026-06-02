@@ -33,6 +33,7 @@ GLOBAL_TICKERS = [
     ("BZ=F", "Brent", "commodity"),
     ("CL=F", "WTI", "commodity"),
     ("GC=F", "Gold", "commodity"),
+    ("SI=F", "Silver", "commodity"),
     ("INR=X", "USDINR", "currency"),
     ("DX-Y.NYB", "DXY", "currency"),
 ]
@@ -99,3 +100,76 @@ async def fetch_global_indices(conn) -> dict:
             log.error(f"global_indices upsert failed: {e}")
     log.info(f"global_indices: {len(rows)}/{len(GLOBAL_TICKERS)} stored ({errors} errors)")
     return {"stored": len(rows), "errors": errors, "total": len(GLOBAL_TICKERS)}
+
+
+async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> dict:
+    """One-time: pull `years` of DAILY closes for every GLOBAL_TICKER from the
+    Yahoo chart API (range=Ny, interval=1d) and store one dated row per trading
+    day (price=close, prev_close=prior close, chg_pct). Mirrors the equity
+    raw_prices 5yr EOD history, but global series only need close + chg%.
+
+    clean=True does a CLEAN-REPLACE: erase ALL existing global_indices rows
+    first (removes stale seeds + partial data), then insert the fresh series.
+    Source tag = 'yahoo_backfill'. UPSERT on (symbol, quote_date) is idempotent.
+    """
+    ensure_table(conn)
+    if clean:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM global_indices")
+        conn.commit()
+        log.info("global_indices: history erased (clean-replace backfill)")
+    rng = f"{years}y"
+    total, errors = 0, 0
+    async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        for symbol, name, cat in GLOBAL_TICKERS:
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+                   f"{urllib.parse.quote(symbol)}?interval=1d&range={rng}")
+            try:
+                r = await client.get(url)
+                r.raise_for_status()
+                res = r.json()["chart"]["result"][0]
+                ts = res.get("timestamp", []) or []
+                closes = (res.get("indicators", {}).get("quote", [{}])[0].get("close", []) or [])
+                rows = []
+                prev = None
+                for i, t in enumerate(ts):
+                    cl = closes[i] if i < len(closes) else None
+                    if cl is None:
+                        continue
+                    qd = (datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)).date()
+                    chg = round((cl - prev) / prev * 100, 2) if prev else None
+                    rows.append((symbol, name, cat, cl, prev, chg, qd))
+                    prev = cl
+                if rows:
+                    with conn.cursor() as cur:
+                        for sym, nm, c, px, pv, chg, qd in rows:
+                            cur.execute(
+                                """INSERT INTO global_indices
+                                   (symbol,name,category,price,prev_close,chg_pct,quote_date,updated_at,source)
+                                   VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),'yahoo_backfill')
+                                   ON CONFLICT (symbol,quote_date) DO UPDATE SET
+                                   price=EXCLUDED.price, prev_close=EXCLUDED.prev_close,
+                                   chg_pct=EXCLUDED.chg_pct, updated_at=NOW()""",
+                                (sym, nm, c, px, pv, chg, qd))
+                    conn.commit()
+                    total += len(rows)
+                    log.info(f"backfill {name}: {len(rows)} daily rows")
+            except Exception as e:
+                errors += 1
+                log.warning(f"backfill {name}: {e}")
+            await asyncio.sleep(0.4)
+    return {"backfilled": total, "errors": errors, "tickers": len(GLOBAL_TICKERS), "years": years}
+
+
+def prune_global_indices(conn, years: int = 5) -> int:
+    """Rolling retention: delete rows older than `years`. Keeps global history
+    to ~5yr like the equity feed. Tiny table (~14 tickers x ~1250 days)."""
+    ensure_table(conn)
+    cutoff = (datetime.utcnow() + timedelta(hours=5, minutes=30)).date() - timedelta(days=365 * years)
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM global_indices WHERE quote_date < %s", (cutoff,))
+        n = cur.rowcount
+    conn.commit()
+    if n:
+        log.info(f"global_indices prune: {n} rows older than {cutoff} deleted")
+    return n
