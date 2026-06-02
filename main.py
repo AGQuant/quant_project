@@ -37,7 +37,12 @@ import v8_paper
 import global_indices
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.5.0
+# Scorr / Project Quant — main.py v2.5.1
+# v2.5.1: GLOBAL history — global_indices now a rolling 5yr DAILY store (like
+#         equity raw_prices). + backfill_global_indices (clean-replace 5yr daily
+#         close history, incl. Silver SI=F) via /api/admin/backfill_global +
+#         backfill_global MCP tool. + daily 5yr retention prune wired into the
+#         07:00 IST fetch. Logic in global_indices.py; main.py = thin wiring.
 # v2.5.0: DAILY DIGEST gap #1 — global_indices wired. Daily 07:00 IST scheduler
 #         fetches global indices/commodities/currency (Yahoo chart API loop, the
 #         reliable path) into global_indices. + /api/global (read) +
@@ -76,7 +81,7 @@ import global_indices
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -472,8 +477,13 @@ def _bg_fetch_global():
     try:
         with global_indices.get_conn_from_env() as conn:
             res = asyncio.run(global_indices.fetch_global_indices(conn))
+            try:
+                pruned = global_indices.prune_global_indices(conn, years=5)
+            except Exception as e:
+                pruned = 0
+                log.warning(f"global_indices prune failed: {e}")
         _global_fetched_today = _ist_now().date()
-        log.info(f"global_indices fetch done: {res.get('stored')}/{res.get('total')} ({res.get('errors')} err)")
+        log.info(f"global_indices fetch done: {res.get('stored')}/{res.get('total')} ({res.get('errors')} err); pruned {pruned}")
     except Exception as e:
         log.error(f"global_indices fetch failed: {e}")
     finally:
@@ -673,6 +683,7 @@ def health_feeds():
         ("v8_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
         ("v8_history_cache", "SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache"),
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
+        ("global_indices", "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -963,11 +974,29 @@ def get_global():
                  WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
     """)
 
+@app.get("/api/global/history/{name}")
+def get_global_history(name: str, days: int = 1825):
+    """Daily history for one global series by name (e.g. Dow, Gold, Silver, USDINR)."""
+    cutoff = (_ist_now().date() - timedelta(days=days))
+    return api_query("""
+        SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text AS quote_date
+        FROM global_indices
+        WHERE LOWER(name) = LOWER(%s) AND quote_date >= %s
+        ORDER BY quote_date ASC
+    """, (name, cutoff))
+
 @app.post("/api/admin/fetch_global")
 async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     with global_indices.get_conn_from_env() as conn:
         return await global_indices.fetch_global_indices(conn)
+
+@app.post("/api/admin/backfill_global")
+async def backfill_global_now(years: int = 5, clean: bool = True, x_admin_token: Optional[str] = Header(None)):
+    """One-time clean-replace backfill of `years` daily global history (incl. Silver)."""
+    _check_admin(x_admin_token)
+    with global_indices.get_conn_from_env() as conn:
+        return await global_indices.backfill_global_indices(conn, years=years, clean=clean)
 
 
 async def _drive_download(file_id):
@@ -1275,8 +1304,9 @@ MCP_TOOLS = [
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
     {"name": "get_top_gainers", "description": "Top gainers by day% from EOD data, joined with GVM scores.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string"}, "n": {"type": "integer"}, "min_gvm": {"type": "number"}, "min_day_pct": {"type": "number"}, "universe": {"type": "string"}, "min_volume": {"type": "integer"}}, "required": []}},
-    {"name": "get_global", "description": "Daily Digest: latest global scorecard — world indices (Dow/S&P/Nasdaq/Nikkei/FTSE/DAX/Shanghai), US VIX, commodities (Brent/WTI/Gold), currency (USDINR/DXY) with price, prev close, chg%. Fed daily 07:00 IST from Yahoo.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_global", "description": "Daily Digest: latest global scorecard — world indices (Dow/S&P/Nasdaq/Nikkei/FTSE/DAX/Shanghai), US VIX, commodities (Brent/WTI/Gold/Silver), currency (USDINR/DXY) with price, prev close, chg%. Fed daily 07:00 IST from Yahoo.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "fetch_global", "description": "Daily Digest: manually trigger a live fetch of the global scorecard (Yahoo chart API loop) into global_indices. Returns stored/errors/total.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "backfill_global", "description": "One-time: clean-replace backfill of N years (default 5) of DAILY global history (indices/commodities incl. Silver/currency) into global_indices, mirroring the equity 5yr EOD store. Erases existing rows then inserts fresh daily close+chg% series. Params: years (default 5), clean (default true).", "inputSchema": {"type": "object", "properties": {"years": {"type": "integer"}, "clean": {"type": "boolean"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1357,6 +1387,7 @@ async def _call_tool(name, args):
         elif name == "v8_futures_upload": r = await client.post(f"{BASE_URL}/api/v8/futures/upload", json={"stocks": args["stocks"]}); return r.json()
         elif name == "get_global": r = await client.get(f"{BASE_URL}/api/global"); return r.json()
         elif name == "fetch_global": r = await client.post(f"{BASE_URL}/api/admin/fetch_global", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "backfill_global": r = await client.post(f"{BASE_URL}/api/admin/backfill_global", params={"years": args.get("years", 5), "clean": args.get("clean", True)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_top_gainers":
             params = {}
             if args.get("price_date"):  params["price_date"]  = args["price_date"]
