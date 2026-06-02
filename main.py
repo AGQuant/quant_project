@@ -36,30 +36,23 @@ import yahoo_index_backfill
 import v8_paper
 import global_indices
 import v8_signal_writer   # compute-on-write: 5-min live signal engine
+import qb_eod_checker     # Quant Basket: EOD stop-loss checker + daily P&L mark
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.6.0
-# v2.6.0: COMPUTE-ON-WRITE architecture.
-#   - v8_signal_writer.py: lightweight 5-min job during market hours.
-#     Reads v8_metrics (EOD, slow) + cmp_prices (live CMP via Fyers).
-#     Computes live day_pct = (cmp/prev_close-1)*100 (pure DB join, no API).
-#     Applies FILTER_CONFIG → writes v8_qualified (today's live signals).
-#     Zero compute on API read path — /api/v8/qualified/{basket} = pure SELECT.
-#   - v8_engine.py: after EOD compute, also writes v8_signal_history (archive)
-#     + v8_funnel_counts (step counts for Sheet funnel display).
-#   - v8_endpoints.py: qualified/{basket} now reads v8_qualified directly.
-#     New endpoint: /api/v8/funnel/{basket} → waterfall counts (Sheet funnel restored).
-#   - fyers_feed.py: 208 futures → CMP only (no 1-min bars). NIFTY/BANKNIFTY/INDIAVIX
-#     keep 1-min bars. Lean DB, same WS coverage.
-# v2.5.2: Gold/Silver 5-min intraday — global_intraday table.
-# v2.5.1: global_indices rolling 5yr daily store + Silver.
-# v2.5.0: global_indices wired (Daily Digest gap #1).
-# v2.4.2: create_tables() off startup path (boot fix).
-# v2.4.1: /api/v8/run_for_date + backfill support.
-# v2.4.0: V8 paper engine wired.
+# Scorr / Project Quant — main.py v2.7.0
+# v2.7.0: QUANT BASKET EOD checker wired.
+#   - qb_eod_checker.py: runs at 21:05 IST (after raw_prices update).
+#     Marks all open quant_paper_positions to EOD close (unrealised P&L).
+#     Checks Hard Stop 1 (down 20% from entry) + Hard Stop 2 (vs Nifty <= -5%).
+#     Exits breached positions: status=exited_stop, realised P&L locked.
+#     Logs every run to quant_rebalance_log.
+#   - New endpoint: POST /api/qb/eod_check (manual trigger, admin).
+#   - New endpoint: GET  /api/qb/positions (open positions + P&L).
+# v2.6.0: COMPUTE-ON-WRITE architecture (v8_signal_writer).
+# v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -136,12 +129,72 @@ def create_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_gvm_history_symbol_date ON gvm_history(symbol, score_date DESC);
     CREATE INDEX IF NOT EXISTS idx_gvm_history_date ON gvm_history(score_date DESC);
-    """ + V8_SCHEMA_SQL  # includes v8_qualified, v8_signal_history, v8_funnel_counts
+
+    -- Quant Basket tables
+    CREATE TABLE IF NOT EXISTS quant_basket_config (
+        id SERIAL PRIMARY KEY,
+        basket_name TEXT NOT NULL UNIQUE,
+        cap_type TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        stage1_sector JSONB,
+        stage2_stock JSONB,
+        theme_tags JSONB,
+        notes TEXT,
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS quant_basket (
+        id SERIAL PRIMARY KEY,
+        basket_name TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        score_date DATE NOT NULL,
+        company_name TEXT, sector TEXT, cap_type TEXT,
+        gvm_score NUMERIC, technical_rating NUMERIC, sector_rating NUMERIC, cmp NUMERIC,
+        ret_1w NUMERIC, ret_1m NUMERIC, ret_1y NUMERIC,
+        dma_50 NUMERIC, dma_200 NUMERIC,
+        pe_multiplier NUMERIC, annual_upside NUMERIC, rsi_monthly NUMERIC,
+        sector_week NUMERIC, sector_month NUMERIC, sector_year NUMERIC,
+        inst_change TEXT,
+        tag_stable BOOLEAN DEFAULT FALSE, tag_multibagger BOOLEAN DEFAULT FALSE,
+        tag_momentum BOOLEAN DEFAULT FALSE, tag_dividend BOOLEAN DEFAULT FALSE,
+        verdict TEXT, metrics JSONB, qualified_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(basket_name, symbol, score_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_qb_basket_date ON quant_basket(basket_name, score_date DESC);
+    CREATE TABLE IF NOT EXISTS quant_basket_funnel (
+        id SERIAL PRIMARY KEY,
+        basket_name TEXT NOT NULL, score_date DATE NOT NULL, stage TEXT NOT NULL,
+        counts JSONB NOT NULL, computed_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(basket_name, score_date, stage)
+    );
+    CREATE TABLE IF NOT EXISTS quant_paper_positions (
+        id SERIAL PRIMARY KEY,
+        basket_name TEXT NOT NULL, symbol TEXT NOT NULL,
+        entry_price NUMERIC NOT NULL, entry_date DATE NOT NULL,
+        qty NUMERIC, allocation NUMERIC,
+        current_price NUMERIC, current_value NUMERIC,
+        pnl NUMERIC, pnl_pct NUMERIC,
+        stop_loss_price NUMERIC,
+        status TEXT DEFAULT 'open',
+        exit_price NUMERIC, exit_date DATE,
+        gvm_at_entry NUMERIC, g_at_entry NUMERIC, v_at_entry NUMERIC, m_at_entry NUMERIC,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(basket_name, symbol, entry_date)
+    );
+    CREATE TABLE IF NOT EXISTS quant_rebalance_log (
+        id SERIAL PRIMARY KEY,
+        basket_name TEXT NOT NULL, rebalance_date DATE NOT NULL,
+        stocks_in INTEGER, stocks_out INTEGER, stocks_held INTEGER,
+        liquidbees_units NUMERIC, liquidbees_value NUMERIC,
+        total_portfolio_value NUMERIC, actions JSONB,
+        computed_at TIMESTAMP DEFAULT NOW()
+    );
+    """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.6.0 — compute-on-write signal tables)")
+        log.info("Tables ready (v2.7.0 — Quant Basket tables + EOD checker)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -291,7 +344,7 @@ _v8_engine_running: bool = False
 _cache_built_today: Optional[date] = None
 _cache_building: bool = False
 _live_tick_running: bool = False
-_signal_writer_running: bool = False   # 5-min signal writer guard
+_signal_writer_running: bool = False
 _gvm_recompute_ran_today: Optional[date] = None
 _gvm_recompute_running: bool = False
 _paper_tick_running: bool = False
@@ -299,6 +352,8 @@ _paper_pivots_built: Optional[date] = None
 _global_fetched_today: Optional[date] = None
 _global_fetching: bool = False
 _global_intraday_fetching: bool = False
+_qb_eod_ran_today: Optional[date] = None   # Quant Basket EOD checker guard
+_qb_eod_running: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -342,7 +397,7 @@ def _bg_run_v8_engine():
         with get_conn() as conn:
             results = run_v8_engine(conn)
         _v8_engine_ran_today = _ist_now().date()
-        log.info(f"V8 engine auto-run done: {results.get('symbols_processed')} symbols, signals written")
+        log.info(f"V8 engine auto-run done: {results.get('symbols_processed')} symbols")
     except Exception as e:
         log.error(f"V8 engine auto-run failed: {e}")
     finally:
@@ -351,9 +406,8 @@ def _bg_run_v8_engine():
 async def _task_run_v8_engine():
     global _v8_engine_ran_today
     today = _ist_now().date()
-    if _v8_engine_ran_today == today:
-        return
-    log.info("15:45 IST: Launching V8 engine auto-run (metrics + signals)")
+    if _v8_engine_ran_today == today: return
+    log.info("15:45 IST: Launching V8 engine auto-run")
     asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
 
 def _bg_build_cache():
@@ -375,9 +429,8 @@ def _bg_build_cache():
 async def _task_build_cache():
     global _cache_built_today
     today = _ist_now().date()
-    if _cache_built_today == today:
-        return
-    log.info("09:00 IST: Building v8_history_cache (pre-open)")
+    if _cache_built_today == today: return
+    log.info("09:00 IST: Building v8_history_cache")
     asyncio.create_task(asyncio.to_thread(_bg_build_cache))
 
 def _bg_recompute_gvm():
@@ -389,7 +442,7 @@ def _bg_recompute_gvm():
     try:
         res = recompute_gvm(refresh_momentum=True)
         _gvm_recompute_ran_today = _ist_now().date()
-        log.info(f"GVM daily recompute done: scored={res.get('scored')} momentum={res.get('momentum')}")
+        log.info(f"GVM daily recompute done: scored={res.get('scored')}")
     except Exception as e:
         log.error(f"GVM daily recompute failed: {e}")
     finally:
@@ -398,15 +451,13 @@ def _bg_recompute_gvm():
 async def _task_recompute_gvm_daily():
     global _gvm_recompute_ran_today
     today = _ist_now().date()
-    if _gvm_recompute_ran_today == today:
-        return
+    if _gvm_recompute_ran_today == today: return
     log.info("22:00 IST: Launching daily GVM recompute")
     asyncio.create_task(asyncio.to_thread(_bg_recompute_gvm))
 
 def _bg_paper_tick():
     global _paper_tick_running
-    if _paper_tick_running:
-        return
+    if _paper_tick_running: return
     _paper_tick_running = True
     try:
         buy_slots = sell_slots = None
@@ -415,12 +466,11 @@ def _bg_paper_tick():
                 mood = c.get(f"{BASE_URL}/api/v8/market_mood").json()
                 buy_slots, sell_slots = mood.get("buy_slots"), mood.get("sell_slots")
         except Exception as e:
-            log.warning(f"paper mood fetch failed, uncapped: {e}")
+            log.warning(f"paper mood fetch failed: {e}")
         with get_conn() as conn:
             res = v8_paper.paper_tick(conn, buy_slots=buy_slots, sell_slots=sell_slots)
         if res.get("entries") or res.get("exits") or res.get("gate_exits"):
-            log.info(f"paper_tick: {len(res.get('entries',[]))}E {len(res.get('exits',[]))}X "
-                     f"{len(res.get('gate_exits',[]))}G qual={res.get('qualified')}")
+            log.info(f"paper_tick: {len(res.get('entries',[]))}E {len(res.get('exits',[]))}X")
     except Exception as e:
         log.error(f"paper_tick failed: {e}")
     finally:
@@ -432,15 +482,14 @@ def _bg_build_paper_pivots():
         with get_conn() as conn:
             res = v8_paper.compute_pivots(conn)
         _paper_pivots_built = _ist_now().date()
-        log.info(f"paper pivots built: {res.get('built')}/{res.get('total')} for {res.get('pivot_date')}")
+        log.info(f"paper pivots built: {res.get('built')}/{res.get('total')}")
     except Exception as e:
         log.error(f"paper pivots build failed: {e}")
 
 async def _task_build_paper_pivots():
     global _paper_pivots_built
     today = _ist_now().date()
-    if _paper_pivots_built == today:
-        return
+    if _paper_pivots_built == today: return
     log.info("22:05 IST: Building rolling-5 paper pivots")
     asyncio.create_task(asyncio.to_thread(_bg_build_paper_pivots))
 
@@ -457,9 +506,8 @@ def _bg_fetch_global():
                 pruned = global_indices.prune_global_indices(conn, years=5)
             except Exception as e:
                 pruned = 0
-                log.warning(f"global_indices prune failed: {e}")
         _global_fetched_today = _ist_now().date()
-        log.info(f"global_indices fetch done: {res.get('stored')}/{res.get('total')} ({res.get('errors')} err); pruned {pruned}")
+        log.info(f"global_indices fetch done: {res.get('stored')}/{res.get('total')}")
     except Exception as e:
         log.error(f"global_indices fetch failed: {e}")
     finally:
@@ -468,15 +516,13 @@ def _bg_fetch_global():
 async def _task_fetch_global():
     global _global_fetched_today
     today = _ist_now().date()
-    if _global_fetched_today == today:
-        return
-    log.info("07:00 IST: Fetching global indices scorecard")
+    if _global_fetched_today == today: return
+    log.info("07:00 IST: Fetching global indices")
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
 
 def _bg_fetch_global_intraday():
     global _global_intraday_fetching
-    if _global_intraday_fetching:
-        return
+    if _global_intraday_fetching: return
     _global_intraday_fetching = True
     try:
         with global_indices.get_conn_from_env() as conn:
@@ -485,7 +531,7 @@ def _bg_fetch_global_intraday():
                 global_indices.prune_global_intraday(conn, days=7)
             except Exception as e:
                 log.warning(f"global_intraday prune failed: {e}")
-        log.info(f"global_intraday done: {res.get('stored')} bars ({res.get('errors')} err)")
+        log.info(f"global_intraday done: {res.get('stored')} bars")
     except Exception as e:
         log.error(f"global_intraday fetch failed: {e}")
     finally:
@@ -496,8 +542,7 @@ async def _task_fetch_global_intraday():
 
 def _bg_live_tick():
     global _live_tick_running
-    if _live_tick_running:
-        return
+    if _live_tick_running: return
     _live_tick_running = True
     try:
         with get_conn() as conn:
@@ -511,26 +556,61 @@ async def _task_live_tick():
     asyncio.create_task(asyncio.to_thread(_bg_live_tick))
 
 def _bg_signal_writer():
-    """
-    5-min live signal writer — compute-on-write.
-    Reads v8_metrics (EOD slow metrics) + cmp_prices (live CMP from Fyers).
-    Computes live day_pct via pure DB join. Applies FILTER_CONFIG.
-    Writes v8_qualified. Zero external calls. Sub-second.
-    """
     global _signal_writer_running
-    if _signal_writer_running:
-        return
+    if _signal_writer_running: return
     _signal_writer_running = True
     try:
         with get_conn() as conn:
             res = v8_signal_writer.run_live_signal_writer(conn)
-        counts = res.get('qualified', {})
-        total  = res.get('total', 0)
-        log.info(f"signal_writer: {total} signals — {counts}")
+        log.info(f"signal_writer: {res.get('total', 0)} signals — {res.get('qualified', {})}")
     except Exception as e:
         log.error(f"signal_writer failed: {e}")
     finally:
         _signal_writer_running = False
+
+# ── Quant Basket EOD Checker ─────────────────────────────────────────────────
+def _bg_qb_eod_checker():
+    """
+    Runs at 21:05 IST (5 min after raw_prices update starts).
+    Marks all open quant_paper_positions to EOD close.
+    Checks Hard Stop 1 (down 20%) + Hard Stop 2 (vs Nifty <= -5%).
+    Logs to quant_rebalance_log.
+    """
+    global _qb_eod_ran_today, _qb_eod_running
+    if _qb_eod_running:
+        log.info("qb_eod already running, skip")
+        return
+    _qb_eod_running = True
+    try:
+        with get_conn() as conn:
+            # Run for all active baskets that have open positions
+            baskets_with_open = []
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT basket_name FROM quant_paper_positions WHERE status='open'"
+                )
+                baskets_with_open = [r[0] for r in cur.fetchall()]
+
+            for basket in baskets_with_open:
+                res = qb_eod_checker.run_eod_checker(conn, basket_name=basket)
+                log.info(
+                    f"qb_eod {basket}: marked={res.get('positions_marked')} "
+                    f"HS1={res.get('hard_stop_1_exits')} HS2={res.get('hard_stop_2_exits')} "
+                    f"unrealised={res.get('total_unrealised_pnl')} realised={res.get('total_realised_pnl')}"
+                )
+
+        _qb_eod_ran_today = _ist_now().date()
+    except Exception as e:
+        log.error(f"qb_eod_checker failed: {e}")
+    finally:
+        _qb_eod_running = False
+
+async def _task_qb_eod_checker():
+    global _qb_eod_ran_today
+    today = _ist_now().date()
+    if _qb_eod_ran_today == today: return
+    log.info("21:05 IST: Quant Basket EOD stop-loss check + P&L mark")
+    asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
 async def _task_load_earnings_daily():
     global _earnings_loaded_today
@@ -541,15 +621,13 @@ async def _task_load_earnings_daily():
         async with httpx.AsyncClient(timeout=120) as client:
             headers = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
             r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers=headers)
-            data = r.json()
-            log.info(f"Earnings daily load: {data}")
+            log.info(f"Earnings daily load: {r.json()}")
             _earnings_loaded_today = today
     except Exception as e:
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    """Coarse loop (5-min) for daily tasks + tight 1-min loop for live ticks + signal writer."""
-    log.info("Scheduler started (v2.6.0 — compute-on-write signal writer, 5-min live signals)")
+    log.info("Scheduler started (v2.7.0 — QB EOD checker at 21:05 IST)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -568,6 +646,9 @@ async def _scheduler():
                 await _task_run_v8_engine()
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
+            # QB EOD checker: 21:05 IST (5 min after raw_prices update, trading days)
+            if trading_day and now.hour == 21 and 5 <= now.minute < 15:
+                await _task_qb_eod_checker()
             if now.hour == 22 and now.minute < 10:
                 await _task_recompute_gvm_daily()
             if now.hour == 22 and 5 <= now.minute < 15:
@@ -577,20 +658,13 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    """
-    Tight 1-min loop during market hours.
-    - run_live_tick: recomputes 19 live metrics from intraday (indices).
-    - _bg_signal_writer: writes v8_qualified from CMP + v8_metrics (every 5th tick = ~5-min).
-    - _bg_paper_tick: paper engine entries/exits.
-    """
-    log.info("Live loop started (v2.6.0 — signal writer every 5-min)")
+    log.info("Live loop started (v2.7.0)")
     tick_count = 0
     while True:
         try:
             if _is_market_hours():
                 await _task_live_tick()
                 asyncio.create_task(asyncio.to_thread(_bg_paper_tick))
-                # Signal writer: every 5 ticks (~5-min cadence, matches CMP flush from Fyers)
                 tick_count += 1
                 if tick_count % 5 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
@@ -611,7 +685,6 @@ async def startup():
             log.error(f"create_tables (bg) failed: {e}")
     t0 = asyncio.create_task(_init_tables())
     _BG_TASKS.add(t0); t0.add_done_callback(_BG_TASKS.discard)
-
     t = asyncio.create_task(_scheduler())
     _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
@@ -626,7 +699,6 @@ def health():
 
 @app.get("/api/now")
 def server_now():
-    """Authoritative India time (Asia/Kolkata, UTC+5:30) + NSE market status."""
     n = _ist_now()
     d = n.date()
     return {
@@ -639,6 +711,60 @@ def server_now():
         "is_trading_day": is_trading_day(d),
         "market_open": _is_market_hours(),
     }
+
+# ── Quant Basket API endpoints ────────────────────────────────────────────────
+
+@app.post("/api/qb/eod_check")
+def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
+    """Manual trigger for the QB EOD stop-loss checker + P&L mark."""
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)
+
+@app.get("/api/qb/positions")
+def qb_positions(basket_name: str = "large_cap", status: str = "open"):
+    """Open positions with current P&L, stop-loss prices, vs-Nifty."""
+    return api_query("""
+        SELECT symbol, entry_price, entry_date, qty,
+               ROUND(qty*entry_price,2) AS cost_basis,
+               current_price, current_value,
+               ROUND(pnl,2) AS pnl,
+               ROUND(pnl_pct,2) AS pnl_pct,
+               stop_loss_price,
+               gvm_at_entry AS gvm, g_at_entry AS g, v_at_entry AS v, m_at_entry AS m,
+               status, exit_price, exit_date, updated_at
+        FROM quant_paper_positions
+        WHERE basket_name=%s AND status=%s
+        ORDER BY pnl_pct DESC NULLS LAST
+    """, (basket_name, status))
+
+@app.get("/api/qb/summary")
+def qb_summary(basket_name: str = "large_cap"):
+    """Portfolio summary: total value, unrealised P&L, realised P&L, positions."""
+    open_pos   = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(current_value),2) AS mkt_value, ROUND(SUM(pnl),2) AS unreal_pnl FROM quant_paper_positions WHERE basket_name=%s AND status='open'", (basket_name,), single=True)
+    closed_pos = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(pnl),2) AS real_pnl FROM quant_paper_positions WHERE basket_name=%s AND status LIKE 'exited%%'", (basket_name,), single=True)
+    return {
+        "basket": basket_name,
+        "open_positions":   open_pos.get("cnt", 0),
+        "market_value":     open_pos.get("mkt_value", 0),
+        "unrealised_pnl":   open_pos.get("unreal_pnl", 0),
+        "closed_positions": closed_pos.get("cnt", 0),
+        "realised_pnl":     closed_pos.get("real_pnl", 0),
+        "total_pnl":        round((open_pos.get("unreal_pnl") or 0) + (closed_pos.get("real_pnl") or 0), 2),
+    }
+
+@app.get("/api/qb/rebalance_log")
+def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
+    """Rebalance + EOD check history."""
+    return api_query("""
+        SELECT rebalance_date, stocks_in, stocks_out, stocks_held,
+               total_portfolio_value, actions, computed_at
+        FROM quant_rebalance_log
+        WHERE basket_name=%s
+        ORDER BY computed_at DESC LIMIT %s
+    """, (basket_name, limit))
+
+# ── All other existing endpoints below (unchanged) ───────────────────────────
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -662,7 +788,6 @@ def set_cmp_fallback(state: str, x_admin_token: Optional[str] = Header(None)):
 def get_cmp_fallback():
     return {"yahoo_cmp_fallback": _get_config("yahoo_cmp_fallback", "off")}
 
-# ── V8 LIVE engine ────────────────────────────────────────────────────────────
 @app.post("/api/v8/build_cache")
 def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -677,12 +802,10 @@ def v8_run_live(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/v8/run_signal_writer")
 def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
-    """Manual trigger for the 5-min live signal writer."""
     _check_admin(x_admin_token)
     with get_conn() as conn:
         return v8_signal_writer.run_live_signal_writer(conn)
 
-# ── Momentum ──────────────────────────────────────────────────────────────────
 @app.post("/api/momentum/run")
 def momentum_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -693,24 +816,25 @@ def momentum_run(x_admin_token: Optional[str] = Header(None)):
 def health_feeds():
     out = []
     queries = [
-        ("gvm_scores", "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
-        ("gvm_history", "SELECT MAX(score_date), COUNT(DISTINCT score_date) FROM gvm_history"),
-        ("raw_prices", "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
-        ("screener_raw", "SELECT NULL, COUNT(*) FROM screener_raw"),
-        ("input_raw", "SELECT NULL, COUNT(*) FROM input_raw"),
-        ("sector_ratings", "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
-        ("momentum_scores", "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
-        ("earnings_calendar", "SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
-        ("intraday_prices", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
-        ("cmp_prices", "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
-        ("v8_metrics", "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
-        ("v8_qualified", "SELECT MAX(signal_date), COUNT(*) FROM v8_qualified"),
-        ("v8_signal_history", "SELECT MAX(signal_date), COUNT(*) FROM v8_signal_history"),
+        ("gvm_scores",       "SELECT MAX(score_date), COUNT(*) FROM gvm_scores"),
+        ("gvm_history",      "SELECT MAX(score_date), COUNT(DISTINCT score_date) FROM gvm_history"),
+        ("raw_prices",       "SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices"),
+        ("screener_raw",     "SELECT NULL, COUNT(*) FROM screener_raw"),
+        ("input_raw",        "SELECT NULL, COUNT(*) FROM input_raw"),
+        ("sector_ratings",   "SELECT MAX(score_date), COUNT(*) FROM sector_ratings"),
+        ("momentum_scores",  "SELECT MAX(score_date), COUNT(*) FROM momentum_scores"),
+        ("earnings_calendar","SELECT MAX(loaded_at)::date, COUNT(*) FROM earnings_calendar"),
+        ("intraday_prices",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM intraday_prices"),
+        ("cmp_prices",       "SELECT MAX(updated_at)::date, COUNT(*) FROM cmp_prices"),
+        ("v8_metrics",       "SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
+        ("v8_qualified",     "SELECT MAX(signal_date), COUNT(*) FROM v8_qualified"),
+        ("v8_signal_history","SELECT MAX(signal_date), COUNT(*) FROM v8_signal_history"),
         ("v8_funnel_counts", "SELECT MAX(score_date), COUNT(*) FROM v8_funnel_counts"),
         ("v8_history_cache", "SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache"),
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
-        ("global_indices", "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
-        ("global_intraday", "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM global_intraday"),
+        ("global_indices",   "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
+        ("global_intraday",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM global_intraday"),
+        ("quant_positions",  "SELECT MAX(updated_at)::date, COUNT(*) FROM quant_paper_positions WHERE status='open'"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -720,8 +844,7 @@ def health_feeds():
                     r = cur.fetchone()
                     latest = str(r[0]) if r[0] else None
                     count = r[1] or 0
-                    days_old = None
-                    freshness = "n/a"
+                    days_old = None; freshness = "n/a"
                     if latest and r[0]:
                         try:
                             days_old = (date.today() - r[0]).days
@@ -769,56 +892,37 @@ def get_filter(min_gvm: float = 0, max_gvm: float = 10):
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
 
 @app.get("/api/market/top_gainers")
-def get_top_gainers(
-    price_date: Optional[str] = None,
-    n: int = 20,
-    min_gvm: Optional[float] = None,
-    min_day_pct: Optional[float] = None,
-    universe: str = "all",
-    min_volume: Optional[int] = None,
-):
+def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional[float]=None,
+                    min_day_pct: Optional[float]=None, universe: str="all", min_volume: Optional[int]=None):
     n = min(max(n, 1), 100)
     if not price_date:
         row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
         price_date = row["latest"] if row else str(date.today())
     conds = ["r.price_date = %s", "r.open > 0", "r.close > 0"]
     vals = [price_date]
-    if min_volume:
-        conds.append("r.volume >= %s"); vals.append(min_volume)
-    if universe == "gvm_only":
-        conds.append("g.symbol IS NOT NULL")
-    if min_gvm is not None:
-        conds.append("g.gvm_score >= %s"); vals.append(min_gvm)
+    if min_volume: conds.append("r.volume >= %s"); vals.append(min_volume)
+    if universe == "gvm_only": conds.append("g.symbol IS NOT NULL")
+    if min_gvm is not None: conds.append("g.gvm_score >= %s"); vals.append(min_gvm)
     having = ""
     if min_day_pct is not None:
         having = f"HAVING ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) >= {float(min_day_pct)}"
     where = " AND ".join(conds)
     join_type = "INNER" if universe == "gvm_only" else "LEFT"
     sql = f"""
-        SELECT
-            r.symbol,
-            COALESCE(g.company_name, r.symbol)        AS company_name,
-            COALESCE(g.segment, 'Unknown')             AS segment,
-            ROUND(r.close::numeric, 2)                 AS close,
-            ROUND(r.open::numeric,  2)                 AS open,
-            ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) AS day_pct,
-            r.volume,
-            ROUND(g.gvm_score::numeric, 2)             AS gvm_score,
-            ROUND(g.g_score::numeric,   2)             AS g_score,
-            ROUND(g.v_score::numeric,   2)             AS v_score,
-            ROUND(g.m_score::numeric,   2)             AS m_score,
-            g.verdict,
-            r.price_date::text                         AS price_date
+        SELECT r.symbol, COALESCE(g.company_name, r.symbol) AS company_name,
+               COALESCE(g.segment, 'Unknown') AS segment,
+               ROUND(r.close::numeric, 2) AS close, ROUND(r.open::numeric, 2) AS open,
+               ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) AS day_pct,
+               r.volume, ROUND(g.gvm_score::numeric, 2) AS gvm_score,
+               ROUND(g.g_score::numeric, 2) AS g_score, ROUND(g.v_score::numeric, 2) AS v_score,
+               ROUND(g.m_score::numeric, 2) AS m_score, g.verdict, r.price_date::text AS price_date
         FROM raw_prices r
         {join_type} JOIN gvm_scores g ON r.symbol = g.symbol
         WHERE {where}
-        GROUP BY r.symbol, g.company_name, g.segment,
-                 r.close, r.open, r.volume,
-                 g.gvm_score, g.g_score, g.v_score, g.m_score,
-                 g.verdict, r.price_date
+        GROUP BY r.symbol, g.company_name, g.segment, r.close, r.open, r.volume,
+                 g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, r.price_date
         {having}
-        ORDER BY day_pct DESC
-        LIMIT %s
+        ORDER BY day_pct DESC LIMIT %s
     """
     vals.append(n)
     return api_query(sql, vals)
@@ -841,9 +945,7 @@ def get_intraday(symbol: str, days: int = 1):
 
 @app.get("/api/intraday_ondemand/{symbol}")
 async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", source: str = "auto"):
-    return await asyncio.to_thread(
-        yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source
-    )
+    return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source)
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
@@ -859,8 +961,7 @@ def get_all_cmp():
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     with get_conn() as conn:
-        results = run_v8_engine(conn)
-    return results
+        return run_v8_engine(conn)
 
 @app.post("/api/v8/run_for_date")
 def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None)):
@@ -896,24 +997,14 @@ def v8_metrics_single(symbol: str, score_date: Optional[str] = None):
 def v8_live_metrics():
     return api_query("""
         SELECT s.symbol,
-            lc.close AS cmp,
-            fc.open AS day_open,
+            lc.close AS cmp, fc.open AS day_open,
             CASE WHEN fc.open > 0 THEN ROUND(((lc.close / fc.open - 1) * 100)::numeric, 2) END AS day_pct,
             hc.close AS hour_ago_close,
             CASE WHEN hc.close > 0 THEN ROUND(((lc.close / hc.close - 1) * 100)::numeric, 2) END AS hourly_pct
         FROM (SELECT symbol FROM futures_universe WHERE is_active = TRUE) s
-        JOIN LATERAL (
-            SELECT close FROM intraday_prices WHERE symbol = s.symbol
-            AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
-        ) lc ON true
-        JOIN LATERAL (
-            SELECT open FROM intraday_prices WHERE symbol = s.symbol
-            AND ts::date = CURRENT_DATE ORDER BY ts ASC LIMIT 1
-        ) fc ON true
-        LEFT JOIN LATERAL (
-            SELECT close FROM intraday_prices WHERE symbol = s.symbol
-            AND ts >= NOW() - INTERVAL '65 minutes' ORDER BY ts ASC LIMIT 1
-        ) hc ON true
+        JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol = s.symbol AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1) lc ON true
+        JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol = s.symbol AND ts::date = CURRENT_DATE ORDER BY ts ASC LIMIT 1) fc ON true
+        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol = s.symbol AND ts >= NOW() - INTERVAL '65 minutes' ORDER BY ts ASC LIMIT 1) hc ON true
         ORDER BY s.symbol
     """)
 
@@ -926,13 +1017,12 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     for sym in futures:
         candles = await _fetch_intraday_yahoo(sym, range_str="7d")
         if candles:
-            _insert_intraday(candles)
-            total_candles += len(candles)
+            _insert_intraday(candles); total_candles += len(candles)
         else:
             failed.append(sym)
         await asyncio.sleep(0.25)
     _purge_intraday_old()
-    return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "failed_symbols": failed[:20], "total_candles": total_candles}
+    return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "total_candles": total_candles}
 
 @app.post("/api/admin/refresh_cmp_now")
 async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
@@ -941,15 +1031,15 @@ async def refresh_cmp_now(x_admin_token: Optional[str] = Header(None)):
     if not symbols: return {"status": "warn", "message": "No symbols"}
     cmp_map = await _fetch_cmp_yahoo(symbols)
     _upsert_cmp(cmp_map)
-    return {"status": "ok", "symbols_fetched": len(cmp_map), "symbols_expected": len(symbols)}
+    return {"status": "ok", "symbols_fetched": len(cmp_map)}
 
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     if _yahoo_daily_running:
-        return {"status": "already_running", "message": "yahoo_daily already in progress"}
+        return {"status": "already_running"}
     asyncio.create_task(_bg_yahoo_daily())
-    return {"status": "started", "message": "raw_prices update running in background."}
+    return {"status": "started"}
 
 @app.post("/api/admin/backfill_indices")
 def backfill_indices_now(days: int = 7, x_admin_token: Optional[str] = Header(None)):
@@ -970,8 +1060,7 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
         with httpx.Client(timeout=30) as c:
             mood = c.get(f"{BASE_URL}/api/v8/market_mood").json()
             buy_slots, sell_slots = mood.get("buy_slots"), mood.get("sell_slots")
-    except Exception:
-        pass
+    except Exception: pass
     with get_conn() as conn:
         return v8_paper.paper_tick(conn, buy_slots=buy_slots, sell_slots=sell_slots)
 
@@ -979,14 +1068,14 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 def paper_status():
     return {
         "open_positions": api_query("SELECT symbol, side, basket, entry_price, entry_ts, target, stop_loss, qty, pivot_date FROM v8_paper_positions WHERE status='OPEN' ORDER BY entry_ts DESC"),
-        "recent_trades": api_query("SELECT symbol, side, basket, entry_price, exit_price, pnl, return_pct, result, entry_ts, exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
-        "missed": api_query("SELECT miss_date, symbol, side, basket, expected_entry, reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
-        "summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, COUNT(*) FILTER (WHERE result='GATE_EXIT') AS gate_exits, COUNT(*) FILTER (WHERE result LIKE 'GAP%%') AS gap_exits, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True),
+        "recent_trades":  api_query("SELECT symbol, side, basket, entry_price, exit_price, pnl, return_pct, result, entry_ts, exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
+        "missed":         api_query("SELECT miss_date, symbol, side, basket, expected_entry, reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
+        "summary":        api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True),
     }
 
 @app.get("/api/paper/pivots")
 def paper_pivots(limit: int = 250):
-    return api_query("SELECT symbol, pp, r1, s1, r2, s2, base_high, base_low, base_close, base_days, window_start, window_end, pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
+    return api_query("SELECT symbol, pp, r1, s1, r2, s2, pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
 
 @app.get("/api/global")
 def get_global():
@@ -1003,22 +1092,12 @@ def get_global():
 @app.get("/api/global/history/{name}")
 def get_global_history(name: str, days: int = 1825):
     cutoff = (_ist_now().date() - timedelta(days=days))
-    return api_query("""
-        SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text AS quote_date
-        FROM global_indices
-        WHERE LOWER(name) = LOWER(%s) AND quote_date >= %s
-        ORDER BY quote_date ASC
-    """, (name, cutoff))
+    return api_query("SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text FROM global_indices WHERE LOWER(name) = LOWER(%s) AND quote_date >= %s ORDER BY quote_date ASC", (name, cutoff))
 
 @app.get("/api/global/intraday/{name}")
 def get_global_intraday(name: str, days: int = 7):
     cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
-    return api_query("""
-        SELECT symbol, name, ts, open, high, low, close, volume
-        FROM global_intraday
-        WHERE UPPER(name) = UPPER(%s) AND ts >= %s
-        ORDER BY ts ASC
-    """, (name, cutoff))
+    return api_query("SELECT symbol, name, ts, open, high, low, close, volume FROM global_intraday WHERE UPPER(name) = UPPER(%s) AND ts >= %s ORDER BY ts ASC", (name, cutoff))
 
 @app.post("/api/admin/fetch_global")
 async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
@@ -1040,7 +1119,6 @@ async def fetch_global_intraday_now(x_admin_token: Optional[str] = Header(None))
         global_indices.prune_global_intraday(conn, days=7)
         return res
 
-
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
@@ -1048,12 +1126,10 @@ async def _drive_download(file_id):
 
 @app.post("/api/admin/load_input_from_drive")
 async def load_input(req: Request):
-    body = await req.json()
-    file_id = body.get("file_id")
+    body = await req.json(); file_id = body.get("file_id")
     if not file_id: raise HTTPException(400, "file_id required")
     csv_text = await _drive_download(file_id)
-    df = pd.read_csv(io.StringIO(csv_text))
-    rows = df.to_dict(orient="records")
+    df = pd.read_csv(io.StringIO(csv_text)); rows = df.to_dict(orient="records")
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM input_raw")
         for row in rows:
@@ -1063,8 +1139,7 @@ async def load_input(req: Request):
 
 @app.post("/api/admin/load_screener_from_drive")
 async def load_screener(req: Request):
-    body = await req.json()
-    file_id = body.get("file_id")
+    body = await req.json(); file_id = body.get("file_id")
     if not file_id: raise HTTPException(400, "file_id required")
     csv_text = await _drive_download(file_id)
     df = pd.read_csv(io.StringIO(csv_text))
@@ -1092,27 +1167,22 @@ def _parse_screener_date(s):
     return None
 
 async def _screener_login_session():
-    email = os.getenv("SCREENER_EMAIL", "").strip()
-    password = os.getenv("SCREENER_PASSWORD", "").strip()
+    email = os.getenv("SCREENER_EMAIL", "").strip(); password = os.getenv("SCREENER_PASSWORD", "").strip()
     if not email or not password: raise HTTPException(500, "SCREENER creds missing")
-    client = httpx.AsyncClient(follow_redirects=True, timeout=60,
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "en-US,en;q=0.9"})
+    client = httpx.AsyncClient(follow_redirects=True, timeout=60, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept-Language": "en-US,en;q=0.9"})
     r = await client.get(SCREENER_LOGIN_URL); r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
     csrf_input = soup.find("input", {"name": "csrfmiddlewaretoken"})
-    if not csrf_input:
-        await client.aclose(); raise HTTPException(500, "CSRF token not found")
+    if not csrf_input: await client.aclose(); raise HTTPException(500, "CSRF token not found")
     r = await client.post(SCREENER_LOGIN_URL, data={"csrfmiddlewaretoken": csrf_input.get("value"), "username": email, "password": password, "next": ""}, headers={"Referer": SCREENER_LOGIN_URL})
-    if "sessionid" not in client.cookies:
-        await client.aclose(); raise HTTPException(401, "Screener login failed")
+    if "sessionid" not in client.cookies: await client.aclose(); raise HTTPException(401, "Screener login failed")
     return client
 
 async def _scrape_upcoming_results(client):
     r = await client.get(SCREENER_UPCOMING_URL); r.raise_for_status()
     html = r.text
     if "/login/" in str(r.url) or "Login to your account" in html: raise HTTPException(401, "Screener session expired")
-    soup = BeautifulSoup(html, "html.parser")
-    tables = soup.find_all("table")
+    soup = BeautifulSoup(html, "html.parser"); tables = soup.find_all("table")
     if not tables: raise HTTPException(500, "No table found")
     rows_out = []; seen_tickers = set()
     for tbl in tables:
@@ -1152,14 +1222,12 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
     finally: await client.aclose()
     if not rows: return {"status": "warn", "rows_scraped": 0}
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM earnings_calendar")
-        inserted = 0
+        cur.execute("DELETE FROM earnings_calendar"); inserted = 0
         for r in rows:
             try:
                 cur.execute("INSERT INTO earnings_calendar (company_name, ticker, ex_date, record_date, event_type) VALUES (%(company_name)s, %(ticker)s, %(ex_date)s, %(record_date)s, %(event_type)s)", r)
                 inserted += 1
-            except Exception as e:
-                log.warning(f"row skip: {e}")
+            except Exception as e: log.warning(f"row skip: {e}")
         conn.commit()
     return {"status": "ok", "rows_scraped": len(rows), "rows_inserted": inserted}
 
@@ -1182,8 +1250,7 @@ async def _gh_get_file(filepath):
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.get(url, headers=_gh_headers())
         if r.status_code == 404: return {"exists": False, "content": None, "sha": None, "size": 0}
-        r.raise_for_status()
-        data = r.json()
+        r.raise_for_status(); data = r.json()
         content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
         return {"exists": True, "content": content, "sha": data["sha"], "size": data["size"]}
 
@@ -1193,8 +1260,7 @@ async def _gh_put_file(filepath, new_content, commit_message, sha=None):
     if sha: payload["sha"] = sha
     async with httpx.AsyncClient(timeout=60) as c:
         r = await c.put(url, headers=_gh_headers(), json=payload)
-        if r.status_code not in (200, 201):
-            raise HTTPException(r.status_code, f"GitHub error: {r.text[:300]}")
+        if r.status_code not in (200, 201): raise HTTPException(r.status_code, f"GitHub error: {r.text[:300]}")
         return r.json()
 
 async def _gh_delete_file(filepath, commit_message, sha):
@@ -1207,8 +1273,7 @@ async def _gh_delete_file(filepath, commit_message, sha):
 async def _gh_list_tree(path_prefix=""):
     url = f"{GITHUB_API}/repos/{GITHUB_REPO}/contents/{path_prefix}"
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(url, headers=_gh_headers()); r.raise_for_status()
-        data = r.json()
+        r = await c.get(url, headers=_gh_headers()); r.raise_for_status(); data = r.json()
         if isinstance(data, dict): data = [data]
         return [{"name": x["name"], "path": x["path"], "type": x["type"], "size": x.get("size", 0)} for x in data]
 
@@ -1229,8 +1294,7 @@ async def github_list(path: str = "", x_admin_token: Optional[str] = Header(None
 
 @app.post("/api/admin/github_push")
 async def github_push(req: Request, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    _check_deploy_guard()
+    _check_admin(x_admin_token); _check_deploy_guard()
     if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     body = await req.json()
     filepath = body.get("filepath"); new_content = body.get("new_content")
@@ -1249,8 +1313,7 @@ async def github_push(req: Request, x_admin_token: Optional[str] = Header(None))
 
 @app.post("/api/admin/github_delete")
 async def github_delete(req: Request, x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    _check_deploy_guard()
+    _check_admin(x_admin_token); _check_deploy_guard()
     if not GITHUB_REPO: raise HTTPException(500, "GITHUB_REPO not configured")
     body = await req.json()
     filepath = body.get("filepath"); commit_message = body.get("commit_message", f"chore: delete {filepath}")
@@ -1298,8 +1361,8 @@ async def oauth_token(req: Request):
 
 MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache. Run pre-open or to refresh. Heavy, ~1x/day.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute 19 price-driven metrics from cache + latest intraday bar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_run_live", "description": "V8 LIVE: run one live tick.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "load_screener_json", "description": "GVM: clean-replace screener_raw from uploaded raw Screener rows.", "inputSchema": {"type": "object", "properties": {"rows": {"type": "array", "items": {"type": "object"}}}, "required": ["rows"]}},
     {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "gvm_recompute", "description": "GVM: full recompute. Refreshes daily momentum + G/V from screener -> gvm_history + gvm_scores.", "inputSchema": {"type": "object", "properties": {"refresh_momentum": {"type": "boolean"}}, "required": []}},
@@ -1348,16 +1411,23 @@ MCP_TOOLS = [
     {"name": "backfill_global", "description": "One-time backfill of N years daily global history.", "inputSchema": {"type": "object", "properties": {"years": {"type": "integer"}, "clean": {"type": "boolean"}}, "required": []}},
     {"name": "get_global_intraday", "description": "Gold/Silver 5-min intraday bars (7-day rolling).", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["name"]}},
     {"name": "fetch_global_intraday", "description": "Manually trigger Gold/Silver 5-min intraday fetch.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "v8_run_live", "description": "V8 LIVE: run one live tick — recompute 19 price-driven metrics from cache + latest intraday bar.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    # Quant Basket tools
+    {"name": "qb_eod_check", "description": "Quant Basket: run EOD stop-loss check + P&L mark for a basket. Checks 20% hard stop + vs-Nifty -5% stop.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
+    {"name": "qb_positions", "description": "Quant Basket: get open positions with P&L, stop prices, vs-Nifty.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "status": {"type": "string"}}, "required": []}},
+    {"name": "qb_summary", "description": "Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
+    {"name": "qb_rebalance_log", "description": "Quant Basket: rebalance + EOD check history.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
     async with httpx.AsyncClient(timeout=600) as client:
+        h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
-        elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "load_screener_json": r = await client.post(f"{BASE_URL}/api/admin/load_screener_json", json={"rows": args["rows"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum", True)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
+        elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
+        elif name == "load_screener_json": r = await client.post(f"{BASE_URL}/api/admin/load_screener_json", json={"rows": args["rows"]}, headers=h); return r.json()
+        elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
+        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum", True)}, headers=h); return r.json()
         elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days", 180)}); return r.json()
         elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
@@ -1376,21 +1446,21 @@ async def _call_tool(name, args):
             source = (args.get("source") or "auto").lower()
             return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, sym, days, interval, "NS", source)
         elif name == "get_cmp": r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
-        elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days", 7)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "paper_compute_pivots": r = await client.post(f"{BASE_URL}/api/paper/compute_pivots", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "paper_tick": r = await client.post(f"{BASE_URL}/api/paper/tick", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers=h); return r.json()
+        elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers=h); return r.json()
+        elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days", 7)}, headers=h); return r.json()
+        elif name == "paper_compute_pivots": r = await client.post(f"{BASE_URL}/api/paper/compute_pivots", headers=h); return r.json()
+        elif name == "paper_tick": r = await client.post(f"{BASE_URL}/api/paper/tick", headers=h); return r.json()
         elif name == "paper_status": r = await client.get(f"{BASE_URL}/api/paper/status"); return r.json()
         elif name == "paper_pivots": r = await client.get(f"{BASE_URL}/api/paper/pivots", params={"limit": args.get("limit", 250)}); return r.json()
-        elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "run_v8_for_date": r = await client.post(f"{BASE_URL}/api/v8/run_for_date", params={"target_date": args["target_date"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "set_cmp_fallback": r = await client.post(f"{BASE_URL}/api/admin/cmp_fallback", params={"state": args.get("state", "off")}, headers=h); return r.json()
+        elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers=h); return r.json()
+        elif name == "run_v8_for_date": r = await client.post(f"{BASE_URL}/api/v8/run_for_date", params={"target_date": args["target_date"]}, headers=h); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
         elif name == "get_v8_metrics_all": r = await client.get(f"{BASE_URL}/api/v8/metrics/all"); return r.json()
         elif name == "get_v8_live_metrics": r = await client.get(f"{BASE_URL}/api/v8/live_metrics"); return r.json()
         elif name == "health_feeds": r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
-        elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers=h); return r.json()
         elif name == "run_sql":
             q = args["query"]
             try:
@@ -1407,17 +1477,17 @@ async def _call_tool(name, args):
                 return {"error": str(e)}
         elif name == "load_input_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_screener_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
-        elif name == "load_earnings_from_screener": r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "load_earnings_from_screener": r = await client.post(f"{BASE_URL}/api/admin/load_earnings_from_screener", headers=h); return r.json()
         elif name == "check_blackout":
             sym = args["symbol"].upper()
             with get_conn() as conn, conn.cursor() as cur:
                 cur.execute("SELECT ticker, ex_date, event_type FROM earnings_calendar WHERE UPPER(ticker) = %s ORDER BY id DESC LIMIT 5", (sym,))
                 rows = cur.fetchall()
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
-        elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "github_delete": r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers=h); return r.json()
+        elif name == "github_list": r = await client.get(f"{BASE_URL}/api/admin/github_list", params={"path": args.get("path", "")}, headers=h); return r.json()
+        elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers=h); return r.json()
+        elif name == "github_delete": r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers=h); return r.json()
         elif name == "v8_market_mood": r = await client.get(f"{BASE_URL}/api/v8/market_mood"); return r.json()
         elif name == "v8_qualified": r = await client.get(f"{BASE_URL}/api/v8/qualified/{args['basket']}", params={"limit": args.get("limit", 50)}); return r.json()
         elif name == "v8_filter_config": r = await client.get(f"{BASE_URL}/api/v8/filter_config/{args['basket']}"); return r.json()
@@ -1425,19 +1495,31 @@ async def _call_tool(name, args):
         elif name == "v8_futures_list": r = await client.get(f"{BASE_URL}/api/v8/futures/list", params={"active_only": args.get("active_only", True)}); return r.json()
         elif name == "v8_futures_upload": r = await client.post(f"{BASE_URL}/api/v8/futures/upload", json={"stocks": args["stocks"]}); return r.json()
         elif name == "get_global": r = await client.get(f"{BASE_URL}/api/global"); return r.json()
-        elif name == "fetch_global": r = await client.post(f"{BASE_URL}/api/admin/fetch_global", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
-        elif name == "backfill_global": r = await client.post(f"{BASE_URL}/api/admin/backfill_global", params={"years": args.get("years", 5), "clean": args.get("clean", True)}, headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "fetch_global": r = await client.post(f"{BASE_URL}/api/admin/fetch_global", headers=h); return r.json()
+        elif name == "backfill_global": r = await client.post(f"{BASE_URL}/api/admin/backfill_global", params={"years": args.get("years", 5), "clean": args.get("clean", True)}, headers=h); return r.json()
         elif name == "get_global_intraday": r = await client.get(f"{BASE_URL}/api/global/intraday/{args['name']}", params={"days": args.get("days", 7)}); return r.json()
-        elif name == "fetch_global_intraday": r = await client.post(f"{BASE_URL}/api/admin/fetch_global_intraday", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
+        elif name == "fetch_global_intraday": r = await client.post(f"{BASE_URL}/api/admin/fetch_global_intraday", headers=h); return r.json()
         elif name == "get_top_gainers":
             params = {}
-            if args.get("price_date"):  params["price_date"]  = args["price_date"]
-            if args.get("n"):           params["n"]           = args["n"]
-            if args.get("min_gvm") is not None:     params["min_gvm"]     = args["min_gvm"]
-            if args.get("min_day_pct") is not None: params["min_day_pct"] = args["min_day_pct"]
-            if args.get("universe"):    params["universe"]    = args["universe"]
-            if args.get("min_volume"):  params["min_volume"]  = args["min_volume"]
-            r = await client.get(f"{BASE_URL}/api/market/top_gainers", params=params)
+            for k in ("price_date", "n", "min_gvm", "min_day_pct", "universe", "min_volume"):
+                if args.get(k) is not None: params[k] = args[k]
+            r = await client.get(f"{BASE_URL}/api/market/top_gainers", params=params); return r.json()
+        # Quant Basket MCP tools
+        elif name == "qb_eod_check":
+            r = await client.post(f"{BASE_URL}/api/qb/eod_check",
+                params={"basket_name": args.get("basket_name", "large_cap")}, headers=h)
+            return r.json()
+        elif name == "qb_positions":
+            r = await client.get(f"{BASE_URL}/api/qb/positions",
+                params={"basket_name": args.get("basket_name", "large_cap"), "status": args.get("status", "open")})
+            return r.json()
+        elif name == "qb_summary":
+            r = await client.get(f"{BASE_URL}/api/qb/summary",
+                params={"basket_name": args.get("basket_name", "large_cap")})
+            return r.json()
+        elif name == "qb_rebalance_log":
+            r = await client.get(f"{BASE_URL}/api/qb/rebalance_log",
+                params={"basket_name": args.get("basket_name", "large_cap"), "limit": args.get("limit", 30)})
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
