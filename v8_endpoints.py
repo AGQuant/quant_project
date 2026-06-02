@@ -19,6 +19,7 @@ Data source: v8_metrics (computed by v8_engine), v8_universe (futures universe).
 
 1D gate: prev_day_change (net close-to-close %) — NOT range_1d (intraday high-low swing).
 1W gate: week_return  (net close-to-close %)    — unchanged, was already net.
+buy_momentum month_return cap: 12 -> 14 (02-Jun-2026).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -39,6 +40,7 @@ def _conn():
 #   Sells want a red day    → -cap to 0   (stock closed down)
 # 1W leg: week_return — already net, bands unchanged.
 # sell_reversal has no 1D leg — left as-is (no change).
+# buy_momentum month_return cap raised 12 → 14 (02-Jun-2026).
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -53,7 +55,7 @@ FILTER_CONFIG = {
         "sector_week":     [1.5,  5.0],
         "sector_day":      [0.0,  3.0],
         "month_index":     [50.0, 100.0],
-        "prev_day_change": [0.0,  2.4],   # was range_1d [0.5, 2.4] — net 1D c2c
+        "prev_day_change": [0.0,  2.4],
     },
     "buy_momentum": {
         "gvm_score":       [7.0,  10.0],
@@ -62,12 +64,12 @@ FILTER_CONFIG = {
         "dma_50":          [6.5,  25.0],
         "rsi_month":       [71.5, 80.0],
         "rsi_weekly":      [71.5, 80.0],
-        "month_return":    [3.0,  12.0],
+        "month_return":    [3.0,  14.0],  # raised from 12 → 14
         "week_return":     [1.0,  7.0],
         "sector_week":     [1.5,  5.0],
         "sector_day":      [0.0,  3.0],
         "month_index":     [50.0, 100.0],
-        "prev_day_change": [0.0,  3.5],   # was range_1d [1.0, 3.5] — net 1D c2c
+        "prev_day_change": [0.0,  3.5],
     },
     "sell_reversal": {
         "dma_200":         [-30.0, 2.0],
@@ -79,7 +81,7 @@ FILTER_CONFIG = {
         "sector_week":     [-12.0, -1.5],
         "sector_day":      [-3.0,  1.0],
         "month_index":     [0.0,   50.0],
-        "range_3d":        [None,  -1.0],  # no 1D leg — left as-is
+        "range_3d":        [None,  -1.0],
     },
     "sell_momentum": {
         "dma_200":         [-50.0, 0.0],
@@ -93,7 +95,7 @@ FILTER_CONFIG = {
         "sector_week":     [-10.0, -1.0],
         "sector_day":      [-3.0,  1.0],
         "month_index":     [0.0,   35.0],
-        "prev_day_change": [-3.0,  0.0],   # was range_1d [-3.0, 0] — net 1D c2c
+        "prev_day_change": [-3.0,  0.0],
         "range_3d":        [-10.0, -1.0],
         "week_index_52":   [None,  20.0],
     },
@@ -101,7 +103,7 @@ FILTER_CONFIG = {
         "dma_200":         [10.0, None],
         "week_index_52":   [80.0, None],
         "rsi_month":       [60.0, None],
-        "prev_day_change": [None, 0.0],    # was range_1d [None, 0] — net 1D c2c
+        "prev_day_change": [None, 0.0],
     },
 }
 
@@ -113,7 +115,6 @@ BASKET_META = {
     "sell_overbought": {"side": "SELL", "target": "S1", "win_pct": "71%",  "signals_per_day": "~3"},
 }
 
-# Blackout subquery — excludes stocks with results today or tomorrow
 _BLACKOUT_SQL = """
     symbol NOT IN (
         SELECT UPPER(ticker) FROM earnings_calendar
