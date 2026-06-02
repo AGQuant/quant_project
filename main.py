@@ -39,20 +39,19 @@ import v8_signal_writer   # compute-on-write: 5-min live signal engine
 import qb_eod_checker     # Quant Basket: EOD stop-loss checker + daily P&L mark
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.7.0
-# v2.7.0: QUANT BASKET EOD checker wired.
-#   - qb_eod_checker.py: runs at 21:05 IST (after raw_prices update).
-#     Marks all open quant_paper_positions to EOD close (unrealised P&L).
-#     Checks Hard Stop 1 (down 20% from entry) + Hard Stop 2 (vs Nifty <= -5%).
-#     Exits breached positions: status=exited_stop, realised P&L locked.
-#     Logs every run to quant_rebalance_log.
-#   - New endpoint: POST /api/qb/eod_check (manual trigger, admin).
-#   - New endpoint: GET  /api/qb/positions (open positions + P&L).
+# Scorr / Project Quant — main.py v2.7.1
+# v2.7.1: ALL 3 QUANT BASKETS LIVE (large_cap, mid_cap, small_cap).
+#   - quant_basket_registry table: per-basket cadence (monthly/quarterly),
+#     weight band, next_rebalance date, max_stocks, capital.
+#   - New endpoint: GET /api/qb/registry — basket metadata.
+#   - New MCP tool: qb_registry.
+#   - qb_eod_checker: robust regex Nifty-entry parser (handles all note formats).
+# v2.7.0: QUANT BASKET EOD checker wired (21:05 IST, all baskets w/ open positions).
 # v2.6.0: COMPUTE-ON-WRITE architecture (v8_signal_writer).
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.7.0"
+VERSION = "2.7.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -189,12 +188,24 @@ def create_tables():
         total_portfolio_value NUMERIC, actions JSONB,
         computed_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS quant_basket_registry (
+        basket_name TEXT PRIMARY KEY,
+        cap_type TEXT,
+        capital NUMERIC DEFAULT 500000,
+        max_stocks INTEGER DEFAULT 20,
+        rebalance_freq TEXT,
+        weight_band TEXT,
+        next_rebalance DATE,
+        is_active BOOLEAN DEFAULT TRUE,
+        notes TEXT,
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.7.0 — Quant Basket tables + EOD checker)")
+        log.info("Tables ready (v2.7.1 — Quant Basket 3 baskets live + registry)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -574,7 +585,7 @@ def _bg_qb_eod_checker():
     Runs at 21:05 IST (5 min after raw_prices update starts).
     Marks all open quant_paper_positions to EOD close.
     Checks Hard Stop 1 (down 20%) + Hard Stop 2 (vs Nifty <= -5%).
-    Logs to quant_rebalance_log.
+    Logs to quant_rebalance_log. Covers ALL baskets with open positions.
     """
     global _qb_eod_ran_today, _qb_eod_running
     if _qb_eod_running:
@@ -583,7 +594,6 @@ def _bg_qb_eod_checker():
     _qb_eod_running = True
     try:
         with get_conn() as conn:
-            # Run for all active baskets that have open positions
             baskets_with_open = []
             with conn.cursor() as cur:
                 cur.execute(
@@ -609,7 +619,7 @@ async def _task_qb_eod_checker():
     global _qb_eod_ran_today
     today = _ist_now().date()
     if _qb_eod_ran_today == today: return
-    log.info("21:05 IST: Quant Basket EOD stop-loss check + P&L mark")
+    log.info("21:05 IST: Quant Basket EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
 async def _task_load_earnings_daily():
@@ -627,7 +637,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.7.0 — QB EOD checker at 21:05 IST)")
+    log.info("Scheduler started (v2.7.1 — QB EOD checker at 21:05 IST, all 3 baskets)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -658,7 +668,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.7.0)")
+    log.info("Live loop started (v2.7.1)")
     tick_count = 0
     while True:
         try:
@@ -721,6 +731,19 @@ def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str
     with get_conn() as conn:
         return qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)
 
+@app.post("/api/qb/eod_check_all")
+def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
+    """Run EOD checker for ALL baskets with open positions."""
+    _check_admin(x_admin_token)
+    out = []
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT basket_name FROM quant_paper_positions WHERE status='open'")
+            baskets = [r[0] for r in cur.fetchall()]
+        for b in baskets:
+            out.append(qb_eod_checker.run_eod_checker(conn, basket_name=b))
+    return {"baskets_run": len(out), "results": out}
+
 @app.get("/api/qb/positions")
 def qb_positions(basket_name: str = "large_cap", status: str = "open"):
     """Open positions with current P&L, stop-loss prices, vs-Nifty."""
@@ -763,6 +786,13 @@ def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
         WHERE basket_name=%s
         ORDER BY computed_at DESC LIMIT %s
     """, (basket_name, limit))
+
+@app.get("/api/qb/registry")
+def qb_registry(basket_name: Optional[str] = None):
+    """Basket registry: cadence, weight band, next rebalance, max stocks, capital."""
+    if basket_name:
+        return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
+    return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
 
 # ── All other existing endpoints below (unchanged) ───────────────────────────
 
@@ -835,6 +865,7 @@ def health_feeds():
         ("global_indices",   "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
         ("global_intraday",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM global_intraday"),
         ("quant_positions",  "SELECT MAX(updated_at)::date, COUNT(*) FROM quant_paper_positions WHERE status='open'"),
+        ("quant_registry",   "SELECT MAX(updated_at)::date, COUNT(*) FROM quant_basket_registry WHERE is_active=TRUE"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -1417,6 +1448,7 @@ MCP_TOOLS = [
     {"name": "qb_positions", "description": "Quant Basket: get open positions with P&L, stop prices, vs-Nifty.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "status": {"type": "string"}}, "required": []}},
     {"name": "qb_summary", "description": "Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
     {"name": "qb_rebalance_log", "description": "Quant Basket: rebalance + EOD check history.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
+    {"name": "qb_registry", "description": "Quant Basket: registry of all baskets — cadence (monthly/quarterly), weight band, next rebalance, max stocks, capital.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1520,6 +1552,11 @@ async def _call_tool(name, args):
         elif name == "qb_rebalance_log":
             r = await client.get(f"{BASE_URL}/api/qb/rebalance_log",
                 params={"basket_name": args.get("basket_name", "large_cap"), "limit": args.get("limit", 30)})
+            return r.json()
+        elif name == "qb_registry":
+            params = {}
+            if args.get("basket_name"): params["basket_name"] = args["basket_name"]
+            r = await client.get(f"{BASE_URL}/api/qb/registry", params=params)
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
