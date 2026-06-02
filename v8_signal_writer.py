@@ -24,12 +24,15 @@ Called from main.py _live_loop alongside run_live_tick.
 
 import logging
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from typing import Dict, List, Optional
 import psycopg
 import os
 
 log = logging.getLogger("scorr.signal_writer")
+
+# Locked rule: all dates/times reasoned in IST (Asia/Kolkata, UTC+5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _safe_float(v) -> Optional[float]:
@@ -57,7 +60,7 @@ def run_live_signal_writer(conn) -> Dict:
     """
     from v8_endpoints import FILTER_CONFIG
 
-    today = datetime.utcnow().date()  # score_date key — matches v8_metrics
+    today = datetime.now(IST).date()  # score_date key — matches v8_metrics (IST)
 
     # ── Step 1: Load latest EOD metrics for all symbols ──
     try:
