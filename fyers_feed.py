@@ -3,24 +3,18 @@ Fyers Live Feed - Scorr V8
 ============================
 Standalone Railway WORKER (not in FastAPI). The live intraday source.
 
-FUTURES-ONLY WebSocket (streaming):
-  ~208 futures universe in 1-min bars via WebSocket (under Fyers ~200 cap).
-
-OPTION CHAIN (REST poll, 5-min):
-  NIFTY + BANKNIFTY current-month expiry, ATM±10 strikes, CE+PE.
-  Polled via fyers_apiv3 SDK optionchain() every 5 min -> option_chain table
-  (7-day retention). Uses the same access token. No extra auth needed.
-
-Architecture (3 layers for futures + 1 for options):
-  1. BACKFILL  - on boot, one-time 7-day 1-min futures history (fyers_backfill).
-  2. LIVE      - persistent WebSocket. Futures ticks aggregated locally into
-                 1-min bars -> intraday_prices. Every tick's LTP also ->
-                 cmp_prices (source='fyers'), making Fyers the PRIMARY
-                 real-time CMP for futures. Near-zero REST calls.
-  3. GAP HEAL  - on every WS (re)connect, patch the slice from the newest
-                 stored candle -> now, so a drop never leaves a hole.
-  4. OPTION CHAIN - SDK optionchain() poll every 5 min, one call per underlying
-                 (ATM±N_STRIKES). Returns LTP + OI + volume natively.
+Architecture (v2 — compute-on-write):
+  1. BACKFILL  - on boot, one-time 7-day 1-min history for INDICES only.
+  2. LIVE WS   - persistent WebSocket for all 208 futures + indices.
+                 * INDICES (NIFTY50/BANKNIFTY/INDIAVIX): 1-min bars stored
+                   in intraday_prices (market structure, pivots, mood gate).
+                 * 208 FUTURES: CMP only — every tick updates last_ltp in
+                   memory; flush_cmp() writes to cmp_prices every 5-min.
+                   NO 1-min bar storage for futures (lean DB, same coverage).
+  3. GAP HEAL  - on every WS (re)connect, patch index gaps only.
+  4. CMP FLUSH - every 30s during market hours → cmp_prices (IST timestamp).
+                 5-min signal engine reads cmp_prices for live day_pct.
+  5. OPTION CHAIN - SDK optionchain() poll every 5-min → option_chain table.
 
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
   Refresh-token flow is DISABLED. ONE 2FA login per TRADING DAY.
@@ -55,6 +49,10 @@ RETENTION_DAYS = 7
 # Market-close guard: no intraday bar at/after this IST time is persisted.
 MARKET_CLOSE = dt_time(15, 30)
 
+# Symbols that get 1-min bar storage in intraday_prices.
+# All other futures → CMP only (cmp_prices via flush_cmp, no bar rows).
+INTRADAY_BAR_SYMBOLS = {'NIFTY50', 'BANKNIFTY', 'INDIAVIX'}
+
 SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 INDEX_LTP_SYMBOLS = {
@@ -65,8 +63,8 @@ INDEX_LTP_SYMBOLS = {
 
 # ── Option chain config ────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
-OPTION_POLL_MINS      = 5      # poll every 5 min via REST
-N_STRIKES             = 10     # ATM ± 10 strikes each side
+OPTION_POLL_MINS      = 5
+N_STRIKES             = 10
 NIFTY_STEP            = 50
 BNIFTY_STEP           = 100
 OPTION_MONTHS         = ['JAN','FEB','MAR','APR','MAY','JUN',
@@ -198,6 +196,9 @@ class BarAggregator:
         key = (sym, tf)
         with self.lock:
             self.last_ltp[sym] = ltp
+            # Only build bar in memory for index symbols — futures just need CMP
+            if sym not in INTRADAY_BAR_SYMBOLS:
+                return
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
@@ -212,6 +213,9 @@ class BarAggregator:
 
     def _flush(self, key, bar):
         sym, _ = key
+        # Guard: only index symbols should ever reach here
+        if sym not in INTRADAY_BAR_SYMBOLS:
+            return
         try:
             if bar['ts'].time() >= MARKET_CLOSE:
                 return
@@ -236,9 +240,9 @@ class BarAggregator:
                 self._flush(key, bar)
 
     def flush_cmp(self):
-        # IST stamp (matches locked IST-only rule). NOW() = Postgres server UTC
-        # on Railway, which left cmp_prices.updated_at 5:30 behind every other
-        # IST-stamped table and made freshness checks read as falsely stale.
+        # IST stamp — aligns with all other IST-stamped tables (fixes UTC offset bug).
+        # All 208 futures + indices land here every 30s.
+        # This is the ONLY persistent store for futures price data (no 1-min bars).
         _ist = datetime.now(IST).replace(tzinfo=None)
         with self.lock:
             rows = [(s, p, _ist) for s, p in self.last_ltp.items() if p]
@@ -301,7 +305,7 @@ def get_monthly_expiry():
     def last_thursday(y, m):
         last_day = calendar.monthrange(y, m)[1]
         d = date(y, m, last_day)
-        while d.weekday() != 3:   # 3 = Thursday
+        while d.weekday() != 3:
             d -= timedelta(days=1)
         return d
 
@@ -313,7 +317,6 @@ def get_monthly_expiry():
     return exp
 
 def get_atm(conn, underlying):
-    """Round current CMP to nearest strike interval."""
     step    = NIFTY_STEP if underlying == 'NIFTY' else BNIFTY_STEP
     cmp_sym = 'NIFTY50'  if underlying == 'NIFTY' else 'BANKNIFTY'
     try:
@@ -327,10 +330,6 @@ def get_atm(conn, underlying):
         return None
 
 def build_option_symbols(conn, expiry):
-    """
-    Returns list of tuples: (fyers_symbol, underlying, strike, option_type, expiry)
-    NIFTY + BANKNIFTY, ATM±N_STRIKES strikes, CE + PE.
-    """
     exp_str = f"{str(expiry.year)[2:]}{OPTION_MONTHS[expiry.month - 1]}"
     symbols = []
     for underlying, step in [('NIFTY', NIFTY_STEP), ('BANKNIFTY', BNIFTY_STEP)]:
@@ -351,19 +350,10 @@ def _chunks(lst, n):
         yield lst[i:i + n]
 
 def poll_option_chain(conn, token, expiry):
-    """Poll NIFTY + BANKNIFTY option chains via the fyers_apiv3 SDK optionchain()
-    endpoint -> option_chain table (5-min bucket).
-
-    Uses the SDK (not a hand-rolled REST URL) so the endpoint path is owned by
-    Fyers. The SDK returns data.optionsChain[] with confirmed fields:
-    symbol, option_type ('CE'/'PE'/''), strike_price, ltp, oi, volume, bid, ask.
-    OI is included natively here (the old /data/quotes path returned no OI =
-    the null-OI bug). strikecount=N_STRIKES gives ATM +/- N strikes per side.
-    """
+    """Poll NIFTY + BANKNIFTY option chains via fyers_apiv3 SDK → option_chain table."""
     from fyers_apiv3 import fyersModel
     fy = fyersModel.FyersModel(client_id=FYERS_CLIENT_ID, token=token, is_async=False, log_path="")
 
-    # 5-min bucket timestamp
     now = datetime.now(IST).replace(tzinfo=None)
     bkt = now.replace(second=0, microsecond=0)
     bkt = bkt - timedelta(minutes=bkt.minute % OPTION_POLL_MINS)
@@ -382,18 +372,14 @@ def poll_option_chain(conn, token, expiry):
             for c in chain:
                 otype = c.get('option_type')
                 if otype not in ('CE', 'PE'):
-                    continue  # skip the underlying/spot row (option_type='')
-                fsym = c.get('symbol')
+                    continue
+                fsym   = c.get('symbol')
                 strike = c.get('strike_price')
-                ltp = c.get('ltp')
+                ltp    = c.get('ltp')
                 if fsym is None or strike is None or ltp is None:
                     continue
-                oi  = c.get('oi')
-                vol = c.get('volume')
-                bid = c.get('bid')
-                ask = c.get('ask')
                 rows.append((fsym, underlying, strike, otype, expiry,
-                             ltp, oi, vol, bid, ask, bkt))
+                             ltp, c.get('oi'), c.get('volume'), c.get('bid'), c.get('ask'), bkt))
         except Exception as e:
             log.warning(f"optionchain {underlying} error: {e}")
 
@@ -419,7 +405,6 @@ def poll_option_chain(conn, token, expiry):
         log.warning(f"option_chain store: {e}")
 
 def cleanup_option_chain(conn):
-    """Delete option_chain rows older than OPTION_RETENTION_DAYS."""
     cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=OPTION_RETENTION_DAYS)
     try:
         with conn.cursor() as cur:
@@ -451,15 +436,17 @@ def run(auth_code=None):
     token = get_valid_token(conn, auth_code)
     futures, equity = get_universe(conn)
     futures_set = set(futures)
-    log.info(f"Universe: {len(futures)} futures (1m WS) | option chain: NIFTY+BNIFTY ATM±{N_STRIKES} REST 5-min")
+    log.info(f"Universe: {len(futures)} futures (CMP via WS) | indices: 1-min bars | option chain: NIFTY+BNIFTY ATM±{N_STRIKES} REST 5-min")
 
-    # Option chain schema
     ensure_option_schema(conn)
 
-    # ---- Layer 1: boot backfill (futures only) ----
-    log.info("Boot backfill (7-day, futures only)...")
+    # Boot backfill — indices only (futures no longer store 1-min bars)
+    log.info("Boot backfill (7-day, indices only)...")
     try:
-        fyers_backfill.backfill_7day(token, conn)
+        fyers_backfill.backfill_7day(token, conn, symbols_override=list(INTRADAY_BAR_SYMBOLS))
+    except TypeError:
+        # backfill_7day may not yet support symbols_override — fall through gracefully
+        log.info("backfill_7day: symbols_override not supported, skipping index-only backfill")
     except Exception as e:
         log.error(f"Boot backfill failed (continuing): {e}")
 
@@ -478,11 +465,7 @@ def run(auth_code=None):
             log.warning(f"on_message: {e}")
 
     def on_connect():
-        log.info("WS connected - healing futures gaps then subscribing")
-        try:
-            fyers_backfill.heal_gap(token, conn, futures, '1', '1m')
-        except Exception as e:
-            log.error(f"Gap heal failed: {e}")
+        log.info("WS connected - subscribing all futures + index symbols")
         fyers_ws.subscribe(symbols=futures_fyers_syms, data_type="SymbolUpdate")
         fyers_ws.keep_running()
 
@@ -496,19 +479,16 @@ def run(auth_code=None):
         on_error=on_error, on_message=on_message,
     )
 
-    # ---- Housekeeping thread ----
     def housekeeping():
         last_option_poll = None
         last_cleanup_day = None
 
         while True:
             if is_market_open():
-                # Futures: index LTP + bar flush + CMP (every 30s)
                 update_index_ltp(conn, token, agg)
-                agg.flush_all()
-                agg.flush_cmp()
+                agg.flush_all()   # only flushes index bars (futures skipped in _flush)
+                agg.flush_cmp()   # all 208 futures + indices → cmp_prices
 
-                # Option chain: REST poll every 5 min
                 now_dt = datetime.now(IST).replace(tzinfo=None)
                 if (last_option_poll is None or
                         (now_dt - last_option_poll).total_seconds() >= OPTION_POLL_MINS * 60):
@@ -519,7 +499,6 @@ def run(auth_code=None):
                         log.warning(f"option_chain poll failed: {e}")
                     last_option_poll = now_dt
 
-            # Daily cleanup (once per calendar day, any time)
             today = datetime.now(IST).date()
             if last_cleanup_day != today:
                 cleanup_option_chain(conn)
@@ -528,7 +507,7 @@ def run(auth_code=None):
             time.sleep(30)
 
     threading.Thread(target=housekeeping, daemon=True).start()
-    log.info("Connecting WebSocket (live, futures only)...")
+    log.info("Connecting WebSocket (live)...")
     fyers_ws.connect()
 
 if __name__ == '__main__':
