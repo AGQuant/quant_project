@@ -34,9 +34,15 @@ from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
+import global_indices
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.4.2
+# Scorr / Project Quant — main.py v2.5.0
+# v2.5.0: DAILY DIGEST gap #1 — global_indices wired. Daily 07:00 IST scheduler
+#         fetches global indices/commodities/currency (Yahoo chart API loop, the
+#         reliable path) into global_indices. + /api/global (read) +
+#         /api/admin/fetch_global (manual trigger) + get_global MCP tool.
+#         Logic lives in global_indices.py; main.py change is thin wiring only.
 # v2.4.2: BOOT FIX — create_tables() moved OFF the @app.on_event startup path
 #         into a background task (asyncio.to_thread). A held DB lock (e.g. a
 #         zombie idle-in-transaction session) can no longer block startup, so
@@ -70,7 +76,7 @@ import v8_paper
 # v2.0.x: FULL V5/V6 REMOVAL. V8-native.
 # ============================================================
 
-VERSION = "2.4.2"
+VERSION = "2.5.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -306,6 +312,8 @@ _gvm_recompute_ran_today: Optional[date] = None
 _gvm_recompute_running: bool = False
 _paper_tick_running: bool = False
 _paper_pivots_built: Optional[date] = None
+_global_fetched_today: Optional[date] = None
+_global_fetching: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -454,6 +462,33 @@ async def _task_build_paper_pivots():
     log.info("22:05 IST: Building rolling-5 paper pivots")
     asyncio.create_task(asyncio.to_thread(_bg_build_paper_pivots))
 
+def _bg_fetch_global():
+    """Fetch global indices/commodities/currency via Yahoo chart API loop -> global_indices."""
+    global _global_fetched_today, _global_fetching
+    if _global_fetching:
+        log.info("global fetch already running, skip")
+        return
+    _global_fetching = True
+    try:
+        with global_indices.get_conn_from_env() as conn:
+            res = asyncio.run(global_indices.fetch_global_indices(conn))
+        _global_fetched_today = _ist_now().date()
+        log.info(f"global_indices fetch done: {res.get('stored')}/{res.get('total')} ({res.get('errors')} err)")
+    except Exception as e:
+        log.error(f"global_indices fetch failed: {e}")
+    finally:
+        _global_fetching = False
+
+async def _task_fetch_global():
+    """07:00 IST daily: refresh global scorecard before pre-open digest. Every day
+    (US/global markets trade on our non-trading days too)."""
+    global _global_fetched_today
+    today = _ist_now().date()
+    if _global_fetched_today == today:
+        return
+    log.info("07:00 IST: Fetching global indices scorecard")
+    asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
+
 def _bg_live_tick():
     global _live_tick_running
     if _live_tick_running:
@@ -494,6 +529,10 @@ async def _scheduler():
         try:
             now = _ist_now()
             trading_day = is_trading_day(now.date())
+            # Global scorecard fetch at 07:00 IST (every day — global markets
+            # move on our holidays/weekends too; digest needs fresh overnight data)
+            if now.hour == 7 and now.minute < 5:
+                await _task_fetch_global()
             if trading_day and now.hour == 9 and now.minute < 5:
                 await _task_load_earnings_daily()
             # Build history cache pre-open (~09:00–09:10 IST, trading days)
@@ -911,6 +950,25 @@ def paper_status():
 def paper_pivots(limit: int = 250):
     return api_query("SELECT symbol, pp, r1, s1, r2, s2, base_high, base_low, base_close, base_days, window_start, window_end, pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
 
+@app.get("/api/global")
+def get_global():
+    """Latest global scorecard — indices, commodities, currency (most recent quote_date per symbol)."""
+    return api_query("""
+        SELECT g.symbol, g.name, g.category, g.price, g.prev_close, g.chg_pct,
+               g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
+        FROM global_indices g
+        JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
+          ON g.symbol = m.symbol AND g.quote_date = m.md
+        ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2
+                 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
+    """)
+
+@app.post("/api/admin/fetch_global")
+async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with global_indices.get_conn_from_env() as conn:
+        return await global_indices.fetch_global_indices(conn)
+
 
 async def _drive_download(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -1217,6 +1275,8 @@ MCP_TOOLS = [
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
     {"name": "get_top_gainers", "description": "Top gainers by day% from EOD data, joined with GVM scores.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string"}, "n": {"type": "integer"}, "min_gvm": {"type": "number"}, "min_day_pct": {"type": "number"}, "universe": {"type": "string"}, "min_volume": {"type": "integer"}}, "required": []}},
+    {"name": "get_global", "description": "Daily Digest: latest global scorecard — world indices (Dow/S&P/Nasdaq/Nikkei/FTSE/DAX/Shanghai), US VIX, commodities (Brent/WTI/Gold), currency (USDINR/DXY) with price, prev close, chg%. Fed daily 07:00 IST from Yahoo.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "fetch_global", "description": "Daily Digest: manually trigger a live fetch of the global scorecard (Yahoo chart API loop) into global_indices. Returns stored/errors/total.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1295,6 +1355,8 @@ async def _call_tool(name, args):
         elif name == "v8_sell_overbought": r = await client.get(f"{BASE_URL}/api/v8/sell_overbought", params={"limit": args.get("limit", 50)}); return r.json()
         elif name == "v8_futures_list": r = await client.get(f"{BASE_URL}/api/v8/futures/list", params={"active_only": args.get("active_only", True)}); return r.json()
         elif name == "v8_futures_upload": r = await client.post(f"{BASE_URL}/api/v8/futures/upload", json={"stocks": args["stocks"]}); return r.json()
+        elif name == "get_global": r = await client.get(f"{BASE_URL}/api/global"); return r.json()
+        elif name == "fetch_global": r = await client.post(f"{BASE_URL}/api/admin/fetch_global", headers={"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}); return r.json()
         elif name == "get_top_gainers":
             params = {}
             if args.get("price_date"):  params["price_date"]  = args["price_date"]
