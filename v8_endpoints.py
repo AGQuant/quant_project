@@ -4,22 +4,24 @@ Display source for V8 Final CLS V Google Sheet.
 
 Endpoints:
   GET /api/v8/market_mood            — ADR + Nifty D/W/M + auto Buy/Sell slot allocation
-  GET /api/v8/qualified/{basket}     — Stocks passing filters for a basket (blackout excluded)
+  GET /api/v8/qualified/{basket}     — Pure read from v8_qualified (compute-on-write)
   GET /api/v8/filter_config/{basket} — Min/Max thresholds per basket
+  GET /api/v8/funnel/{basket}        — Waterfall step counts from v8_funnel_counts
   GET /api/v8/adr                    — Quick ADR-only refresh
   GET /api/v8/raw                    — All active futures x 21 metrics (raw data tab)
-  GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal signals (blackout excluded)
+  GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal (live compute)
   GET /api/v8/positions              — Open trades from personal_journal (V8 native)
   GET /api/v8/trades                 — Closed trades from personal_journal (V8 native)
 
-5 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum, sell_overbought
-Blackout: stocks with ex_date = today or tomorrow are excluded from all signal endpoints.
+Architecture: compute-on-write.
+  - v8_signal_writer.py writes v8_qualified every 5-min during market hours
+  - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
+  - This file = pure reads only. Zero compute on the read path.
+  - Fallback: if v8_qualified empty for today, falls back to live compute (safe during boot)
 
-Data source: v8_metrics (computed by v8_engine), v8_universe (futures universe).
-
-1D gate: prev_day_change (net close-to-close %) — NOT range_1d (intraday high-low swing).
-1W gate: week_return  (net close-to-close %)    — unchanged, was already net.
-buy_momentum month_return cap: 12 -> 14 (02-Jun-2026).
+1D gate: prev_day_change (net close-to-close %) — NOT range_1d.
+1W gate: week_return (net close-to-close %).
+buy_momentum month_return cap: 14 (raised from 12, 02-Jun-2026).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -35,12 +37,8 @@ def _conn():
 
 
 # ── Filter configs ─────────────────────────────────────────────────────────────
-# 1D leg: prev_day_change (net close-to-close %) replaces range_1d everywhere.
-#   Buys  want a green day  → 0   to cap  (stock closed up)
-#   Sells want a red day    → -cap to 0   (stock closed down)
-# 1W leg: week_return — already net, bands unchanged.
-# sell_reversal has no 1D leg — left as-is (no change).
-# buy_momentum month_return cap raised 12 → 14 (02-Jun-2026).
+# Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
+# This file never filters at read time — only reads pre-computed v8_qualified.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -64,7 +62,7 @@ FILTER_CONFIG = {
         "dma_50":          [6.5,  25.0],
         "rsi_month":       [71.5, 80.0],
         "rsi_weekly":      [71.5, 80.0],
-        "month_return":    [3.0,  14.0],  # raised from 12 → 14
+        "month_return":    [3.0,  14.0],
         "week_return":     [1.0,  7.0],
         "sector_week":     [1.5,  5.0],
         "sector_day":      [0.0,  3.0],
@@ -143,6 +141,44 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
         'sell_overbought': 'Sell Overbought',
     }
     return mapping.get(basket.lower(), basket)
+
+
+def _live_qualified_fallback(basket: str, limit: int):
+    """
+    Fallback: compute qualified stocks live from v8_metrics.
+    Used only when v8_qualified is empty for today (e.g. first boot before engine runs).
+    """
+    config = FILTER_CONFIG[basket]
+    where_clauses = [
+        "score_date = (SELECT MAX(score_date) FROM v8_metrics)",
+        _BLACKOUT_SQL,
+    ]
+    params = []
+    for metric, bounds in config.items():
+        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+        if mn is not None:
+            where_clauses.append(f"{metric} >= %s")
+            params.append(mn)
+        if mx is not None:
+            where_clauses.append(f"{metric} <= %s")
+            params.append(mx)
+    where_sql = " AND ".join(where_clauses)
+    sql = f"""
+        SELECT symbol, gvm_score,
+               dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
+               week_return, month_return, year_return,
+               sector_day, sector_week, month_index,
+               prev_day_change, range_3d, week_index_52
+        FROM v8_metrics
+        WHERE {where_sql}
+        ORDER BY gvm_score DESC NULLS LAST
+        LIMIT %s
+    """
+    params.append(min(max(limit, 1), 200))
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -264,64 +300,132 @@ def filter_config(basket: str):
 
 @router.get("/qualified/{basket}")
 def qualified(basket: str, limit: int = 50):
+    """
+    Pure read from v8_qualified (compute-on-write).
+    v8_signal_writer writes this table every 5-min during market hours.
+    v8_engine writes it at EOD.
+    Falls back to live compute from v8_metrics if table is empty for today.
+    """
     basket = basket.lower()
     if basket == "sell_overbought":
         return sell_overbought(limit=limit)
     if basket not in FILTER_CONFIG:
         raise HTTPException(404, f"Unknown basket: {basket}")
 
-    config = FILTER_CONFIG[basket]
-    where_clauses = [
-        "score_date = (SELECT MAX(score_date) FROM v8_metrics)",
-        _BLACKOUT_SQL,
-    ]
-    params = []
-
-    for metric, bounds in config.items():
-        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-        if mn is not None:
-            where_clauses.append(f"{metric} >= %s")
-            params.append(mn)
-        if mx is not None:
-            where_clauses.append(f"{metric} <= %s")
-            params.append(mx)
-
-    where_sql = " AND ".join(where_clauses)
-    sql = f"""
-        SELECT
-            symbol, gvm_score,
-            dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-            week_return, month_return, year_return,
-            sector_day, sector_week, month_index,
-            prev_day_change, range_3d, week_index_52
-        FROM v8_metrics
-        WHERE {where_sql}
-        ORDER BY gvm_score DESC NULLS LAST
-        LIMIT %s
-    """
-    params.append(min(max(limit, 1), 200))
-
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute(sql, params)
+            # Try pre-computed table first
+            cur.execute("""
+                SELECT
+                    symbol, gvm_score, cmp,
+                    dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
+                    week_return, month_return,
+                    sector_day, sector_week, month_index,
+                    prev_day_change, range_3d, week_index_52,
+                    source, signal_ts
+                FROM v8_qualified
+                WHERE basket = %s
+                  AND signal_date = CURRENT_DATE
+                  AND symbol NOT IN (
+                      SELECT UPPER(ticker) FROM earnings_calendar
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                  )
+                ORDER BY gvm_score DESC NULLS LAST
+                LIMIT %s
+            """, (basket, min(max(limit, 1), 200)))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        # Fallback: if empty (e.g. engine hasn't run yet today), compute live
+        if not rows:
+            rows = _live_qualified_fallback(basket, limit)
+            source_note = 'live_fallback'
+        else:
+            source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
+
         meta = BASKET_META.get(basket, {})
-        return {"basket": basket, "count": len(rows), "stocks": rows, **meta}
+        return {
+            "basket": basket,
+            "count": len(rows),
+            "stocks": rows,
+            "source": source_note,
+            **meta
+        }
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
 
+@router.get("/funnel/{basket}")
+def funnel_counts(basket: str):
+    """
+    Waterfall step counts for a basket — how many stocks survive each filter.
+    Written by v8_engine at EOD. Restores the funnel display in the Google Sheet.
+    Falls back to live compute if not yet available for today.
+    """
+    basket = basket.lower()
+    if basket not in FILTER_CONFIG:
+        raise HTTPException(404, f"Unknown basket: {basket}")
+
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT counts FROM v8_funnel_counts
+                WHERE basket = %s AND score_date = CURRENT_DATE
+                ORDER BY computed_at DESC LIMIT 1
+            """, (basket,))
+            row = cur.fetchone()
+
+        if row:
+            counts = row[0] if isinstance(row[0], dict) else {}
+            return {"basket": basket, "score_date": str(date.today()),
+                    "counts": counts, "source": "precomputed"}
+
+        # Fallback: compute live from v8_metrics
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
+                       rsi_month, rsi_weekly, daily_rsi,
+                       month_return, week_return, year_return, prev_day_change,
+                       sector_day, sector_week, month_index, week_index_52,
+                       range_3d, ma9_vs_ma21, vol_ratio
+                FROM v8_metrics
+                WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+            """)
+            cols = [d[0] for d in cur.description]
+            all_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        filters  = FILTER_CONFIG[basket]
+        universe = all_rows[:]
+        counts   = {}
+        for metric, bounds in filters.items():
+            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            universe = [s for s in universe if _passes_filter(s.get(metric), mn, mx)]
+            counts[metric] = len(universe)
+
+        return {"basket": basket, "score_date": str(date.today()),
+                "counts": counts, "source": "live_fallback"}
+    except Exception as e:
+        raise HTTPException(500, f"funnel failed: {e}")
+
+
+def _passes_filter(value, mn, mx) -> bool:
+    if value is None: return False
+    v = float(value)
+    if mn is not None and v < mn: return False
+    if mx is not None and v > mx: return False
+    return True
+
+
 @router.get("/raw")
 def raw_metrics(limit: int = 250):
-    """All active-futures rows from v8_metrics — 21 metric columns, GVM-sorted. Raw data tab source."""
+    """All active-futures rows from v8_metrics — GVM-sorted. Raw data tab source."""
     sql = """
         SELECT m.symbol, m.score_date, m.gvm_score,
                m.dma_20, m.dma_50, m.dma_200,
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
                m.sector_day, m.sector_week, m.month_index, m.week_index_52,
-               m.prev_day_change, m.range_3d, m.prev_day_change,
+               m.prev_day_change, m.range_3d,
                m.upper_bb, m.lower_bb,
                m.ma9_vs_ma21, m.vol_ratio
         FROM v8_metrics m
@@ -348,7 +452,7 @@ def raw_metrics(limit: int = 250):
 
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
-    """Failed breakout / exhaustion reversal — computed live. Blackout stocks excluded."""
+    """Failed breakout / exhaustion reversal — computed live from raw_prices."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
