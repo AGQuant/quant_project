@@ -8,8 +8,8 @@ FUTURES-ONLY WebSocket (streaming):
 
 OPTION CHAIN (REST poll, 5-min):
   NIFTY + BANKNIFTY current-month expiry, ATM±10 strikes, CE+PE.
-  Polled via REST /data/quotes every 5 min -> option_chain table (7-day retention).
-  Uses the same access token. No extra auth needed.
+  Polled via fyers_apiv3 SDK optionchain() every 5 min -> option_chain table
+  (7-day retention). Uses the same access token. No extra auth needed.
 
 Architecture (3 layers for futures + 1 for options):
   1. BACKFILL  - on boot, one-time 7-day 1-min futures history (fyers_backfill).
@@ -19,9 +19,8 @@ Architecture (3 layers for futures + 1 for options):
                  real-time CMP for futures. Near-zero REST calls.
   3. GAP HEAL  - on every WS (re)connect, patch the slice from the newest
                  stored candle -> now, so a drop never leaves a hole.
-  4. OPTION CHAIN - REST poll every 5 min. ATM recomputed each cycle from
-                 latest cmp_prices. 84 symbols (2 indices × 21 strikes × CE+PE)
-                 split into 2 batches of 50 to stay within REST limits.
+  4. OPTION CHAIN - SDK optionchain() poll every 5 min, one call per underlying
+                 (ATM±N_STRIKES). Returns LTP + OI + volume natively.
 
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
   Refresh-token flow is DISABLED. ONE 2FA login per TRADING DAY.
@@ -347,13 +346,17 @@ def _chunks(lst, n):
         yield lst[i:i + n]
 
 def poll_option_chain(conn, token, expiry):
-    """REST poll for all option symbols → option_chain table (5-min bucket)."""
-    sym_meta = build_option_symbols(conn, expiry)
-    if not sym_meta:
-        return
+    """Poll NIFTY + BANKNIFTY option chains via the fyers_apiv3 SDK optionchain()
+    endpoint -> option_chain table (5-min bucket).
 
-    fyers_syms = [s[0] for s in sym_meta]
-    meta_map   = {s[0]: s for s in sym_meta}
+    Uses the SDK (not a hand-rolled REST URL) so the endpoint path is owned by
+    Fyers. The SDK returns data.optionsChain[] with confirmed fields:
+    symbol, option_type ('CE'/'PE'/''), strike_price, ltp, oi, volume, bid, ask.
+    OI is included natively here (the old /data/quotes path returned no OI =
+    the null-OI bug). strikecount=N_STRIKES gives ATM +/- N strikes per side.
+    """
+    from fyers_apiv3 import fyersModel
+    fy = fyersModel.FyersModel(client_id=FYERS_CLIENT_ID, token=token, is_async=False, log_path="")
 
     # 5-min bucket timestamp
     now = datetime.now(IST).replace(tzinfo=None)
@@ -361,38 +364,36 @@ def poll_option_chain(conn, token, expiry):
     bkt = bkt - timedelta(minutes=bkt.minute % OPTION_POLL_MINS)
 
     rows = []
-    for batch in _chunks(fyers_syms, 50):    # Fyers REST: max ~50/call
+    for underlying, index_sym in (('NIFTY', 'NSE:NIFTY50-INDEX'),
+                                  ('BANKNIFTY', 'NSE:NIFTYBANK-INDEX')):
         try:
-            r = requests.get(
-                QUOTES_URL,
-                params={'symbols': ','.join(batch)},
-                headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
-                timeout=10,
-            )
-            d = r.json()
-            if d.get('s') != 'ok':
-                log.warning(f"option poll batch: {d.get('message','')}")
+            resp = fy.optionchain(data={"symbol": index_sym,
+                                        "strikecount": N_STRIKES,
+                                        "timestamp": ""})
+            if not isinstance(resp, dict) or resp.get('s') != 'ok':
+                log.warning(f"optionchain {underlying}: {resp.get('message', resp) if isinstance(resp, dict) else resp}")
                 continue
-            for item in d.get('d', []):
-                fsym = item.get('n', '')
-                if fsym not in meta_map:
+            chain = (resp.get('data') or {}).get('optionsChain') or []
+            for c in chain:
+                otype = c.get('option_type')
+                if otype not in ('CE', 'PE'):
+                    continue  # skip the underlying/spot row (option_type='')
+                fsym = c.get('symbol')
+                strike = c.get('strike_price')
+                ltp = c.get('ltp')
+                if fsym is None or strike is None or ltp is None:
                     continue
-                _, underlying, strike, otype, exp = meta_map[fsym]
-                v   = item.get('v', {})
-                ltp = v.get('lp') or v.get('ltp')
-                oi  = v.get('oi') or v.get('open_interest')
-                vol = v.get('vol_traded_today') or v.get('volume')
-                bid = v.get('bid_price') or v.get('bp')
-                ask = v.get('ask_price') or v.get('ap')
-                if ltp is None:
-                    continue
-                rows.append((fsym, underlying, strike, otype, exp,
-                              ltp, oi, vol, bid, ask, bkt))
+                oi  = c.get('oi')
+                vol = c.get('volume')
+                bid = c.get('bid')
+                ask = c.get('ask')
+                rows.append((fsym, underlying, strike, otype, expiry,
+                             ltp, oi, vol, bid, ask, bkt))
         except Exception as e:
-            log.warning(f"option poll batch error: {e}")
+            log.warning(f"optionchain {underlying} error: {e}")
 
     if not rows:
-        log.info("option_chain: 0 rows (no LTP data returned)")
+        log.info("option_chain: 0 rows (no chain data returned)")
         return
 
     try:
@@ -407,7 +408,8 @@ def poll_option_chain(conn, token, expiry):
                   bid=EXCLUDED.bid, ask=EXCLUDED.ask
             """, rows)
         conn.commit()
-        log.info(f"option_chain: {len(rows)} rows stored at {bkt}")
+        oi_n = sum(1 for r in rows if r[6] is not None)
+        log.info(f"option_chain: {len(rows)} rows stored at {bkt} ({oi_n} with OI)")
     except Exception as e:
         log.warning(f"option_chain store: {e}")
 
