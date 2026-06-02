@@ -16,6 +16,9 @@ Endpoints:
 Blackout: stocks with ex_date = today or tomorrow are excluded from all signal endpoints.
 
 Data source: v8_metrics (computed by v8_engine), v8_universe (futures universe).
+
+1D gate: prev_day_change (net close-to-close %) — NOT range_1d (intraday high-low swing).
+1W gate: week_return  (net close-to-close %)    — unchanged, was already net.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -31,72 +34,74 @@ def _conn():
 
 
 # ── Filter configs ─────────────────────────────────────────────────────────────
-# Format: metric -> [min, max]  (None = no bound)
-# Sell_Overbought uses v8_metrics columns PLUS ma9_vs_ma21 & vol_ratio
-# (now stored in v8_metrics; sell_overbought still recomputes live for safety).
+# 1D leg: prev_day_change (net close-to-close %) replaces range_1d everywhere.
+#   Buys  want a green day  → 0   to cap  (stock closed up)
+#   Sells want a red day    → -cap to 0   (stock closed down)
+# 1W leg: week_return — already net, bands unchanged.
+# sell_reversal has no 1D leg — left as-is (no change).
 
 FILTER_CONFIG = {
     "buy_reversal": {
-        "gvm_score":    [7.0,  10.0],
-        "year_return":  [-1.5, None],
-        "dma_200":      [1.5,  20.0],
-        "dma_50":       [1.5,  8.0],
-        "rsi_month":    [58.5, 75.0],
-        "rsi_weekly":   [50.0, 67.5],
-        "month_return": [0.0,  7.2],
-        "week_return":  [1.5,  3.0],
-        "sector_week":  [1.5,  5.0],
-        "sector_day":   [0.0,  3.0],
-        "month_index":  [50.0, 100.0],
-        "range_1d":     [0.5,  2.4],
+        "gvm_score":       [7.0,  10.0],
+        "year_return":     [-1.5, None],
+        "dma_200":         [1.5,  20.0],
+        "dma_50":          [1.5,  8.0],
+        "rsi_month":       [58.5, 75.0],
+        "rsi_weekly":      [50.0, 67.5],
+        "month_return":    [0.0,  7.2],
+        "week_return":     [1.5,  3.0],
+        "sector_week":     [1.5,  5.0],
+        "sector_day":      [0.0,  3.0],
+        "month_index":     [50.0, 100.0],
+        "prev_day_change": [0.0,  2.4],   # was range_1d [0.5, 2.4] — net 1D c2c
     },
     "buy_momentum": {
-        "gvm_score":    [7.0,  10.0],
-        "year_return":  [0.0,  None],
-        "dma_200":      [7.0,  50.0],
-        "dma_50":       [6.5,  25.0],
-        "rsi_month":    [71.5, 80.0],
-        "rsi_weekly":   [71.5, 80.0],
-        "month_return": [3.0,  12.0],
-        "week_return":  [1.0,  7.0],
-        "sector_week":  [1.5,  5.0],
-        "sector_day":   [0.0,  3.0],
-        "month_index":  [50.0, 100.0],
-        "range_1d":     [1.0,  3.5],
+        "gvm_score":       [7.0,  10.0],
+        "year_return":     [0.0,  None],
+        "dma_200":         [7.0,  50.0],
+        "dma_50":          [6.5,  25.0],
+        "rsi_month":       [71.5, 80.0],
+        "rsi_weekly":      [71.5, 80.0],
+        "month_return":    [3.0,  12.0],
+        "week_return":     [1.0,  7.0],
+        "sector_week":     [1.5,  5.0],
+        "sector_day":      [0.0,  3.0],
+        "month_index":     [50.0, 100.0],
+        "prev_day_change": [0.0,  3.5],   # was range_1d [1.0, 3.5] — net 1D c2c
     },
     "sell_reversal": {
-        "dma_200":      [-30.0, 2.0],
-        "dma_50":       [-20.0, 2.0],
-        "rsi_month":    [20.0,  60.0],
-        "rsi_weekly":   [10.0,  45.0],
-        "month_return": [-20.0, 2.0],
-        "week_return":  [-6.0,  3.0],
-        "sector_week":  [-12.0, -1.5],
-        "sector_day":   [-3.0,  1.0],
-        "month_index":  [0.0,   50.0],
-        "range_3d":     [None,  -1.0],
+        "dma_200":         [-30.0, 2.0],
+        "dma_50":          [-20.0, 2.0],
+        "rsi_month":       [20.0,  60.0],
+        "rsi_weekly":      [10.0,  45.0],
+        "month_return":    [-20.0, 2.0],
+        "week_return":     [-6.0,  3.0],
+        "sector_week":     [-12.0, -1.5],
+        "sector_day":      [-3.0,  1.0],
+        "month_index":     [0.0,   50.0],
+        "range_3d":        [None,  -1.0],  # no 1D leg — left as-is
     },
     "sell_momentum": {
-        "dma_200":      [-50.0, 0.0],
-        "dma_50":       [-30.0, 0.0],
-        "dma_20":       [None,  -2.0],
-        "rsi_month":    [10.0,  45.0],
-        "rsi_weekly":   [5.0,   60.0],
-        "daily_rsi":    [None,  40.0],
-        "month_return": [-30.0, 0.0],
-        "week_return":  [-8.0,  0.0],
-        "sector_week":  [-10.0, -1.0],   # relaxed from -1.6 → -1.0 (01-Jun-2026)
-        "sector_day":   [-3.0,  1.0],
-        "month_index":  [0.0,   35.0],
-        "range_1d":     [-3.0,  0.0],
-        "range_3d":     [-10.0, -1.0],
-        "week_index_52":[None,  20.0],
+        "dma_200":         [-50.0, 0.0],
+        "dma_50":          [-30.0, 0.0],
+        "dma_20":          [None,  -2.0],
+        "rsi_month":       [10.0,  45.0],
+        "rsi_weekly":      [5.0,   60.0],
+        "daily_rsi":       [None,  40.0],
+        "month_return":    [-30.0, 0.0],
+        "week_return":     [-8.0,  0.0],
+        "sector_week":     [-10.0, -1.0],
+        "sector_day":      [-3.0,  1.0],
+        "month_index":     [0.0,   35.0],
+        "prev_day_change": [-3.0,  0.0],   # was range_1d [-3.0, 0] — net 1D c2c
+        "range_3d":        [-10.0, -1.0],
+        "week_index_52":   [None,  20.0],
     },
     "sell_overbought": {
-        "dma_200":      [10.0, None],
-        "week_index_52":[80.0, None],
-        "rsi_month":    [60.0, None],
-        "range_1d":     [None, 0.0],
+        "dma_200":         [10.0, None],
+        "week_index_52":   [80.0, None],
+        "rsi_month":       [60.0, None],
+        "prev_day_change": [None, 0.0],    # was range_1d [None, 0] — net 1D c2c
     },
 }
 
@@ -287,7 +292,7 @@ def qualified(basket: str, limit: int = 50):
             dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
             week_return, month_return, year_return,
             sector_day, sector_week, month_index,
-            range_1d, range_3d, week_index_52
+            prev_day_change, range_3d, week_index_52
         FROM v8_metrics
         WHERE {where_sql}
         ORDER BY gvm_score DESC NULLS LAST
@@ -315,7 +320,7 @@ def raw_metrics(limit: int = 250):
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
                m.sector_day, m.sector_week, m.month_index, m.week_index_52,
-               m.range_1d, m.range_3d, m.prev_day_change,
+               m.prev_day_change, m.range_3d, m.prev_day_change,
                m.upper_bb, m.lower_bb,
                m.ma9_vs_ma21, m.vol_ratio
         FROM v8_metrics m
@@ -383,18 +388,18 @@ def sell_overbought(limit: int = 50):
                 filtered AS (
                     SELECT l.*,
                            vm.dma_200, vm.week_index_52, vm.rsi_month, vm.daily_rsi,
-                           vm.range_1d, vm.gvm_score, vm.sector_week
+                           vm.prev_day_change, vm.gvm_score, vm.sector_week
                     FROM latest l
                     JOIN v8_metrics vm
                       ON vm.symbol = l.symbol
                      AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-                    WHERE vm.dma_200      >= 10
-                      AND vm.week_index_52 >= 80
-                      AND l.ma9_vs_ma21   >= 3
-                      AND l.vol_ratio     <= 0.8
-                      AND vm.range_1d     <  0
-                      AND vm.rsi_month    >= 60
-                      AND l.s1            <  l.entry
+                    WHERE vm.dma_200        >= 10
+                      AND vm.week_index_52  >= 80
+                      AND l.ma9_vs_ma21     >= 3
+                      AND l.vol_ratio       <= 0.8
+                      AND vm.prev_day_change < 0
+                      AND vm.rsi_month      >= 60
+                      AND l.s1              <  l.entry
                       AND l.symbol NOT IN (
                           SELECT UPPER(ticker) FROM earnings_calendar
                           WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
@@ -408,7 +413,7 @@ def sell_overbought(limit: int = 50):
                     ROUND(((entry - s1) / NULLIF(entry, 0) * 100)::numeric, 2) AS tgt_pct,
                     dma_200, week_index_52,
                     ma9_vs_ma21, vol_ratio,
-                    range_1d,
+                    prev_day_change,
                     ROUND(rsi_month::numeric, 1)    AS rsi_month,
                     ROUND(daily_rsi::numeric, 1)    AS daily_rsi,
                     ROUND(gvm_score::numeric, 2)    AS gvm_score,
@@ -452,9 +457,9 @@ def adr_only():
         raise HTTPException(500, f"adr failed: {e}")
 
 
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════════
 #  PERSONAL JOURNAL — V8 native open + closed trades
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════════
 
 @router.get("/positions")
 def v8_positions(limit: int = 100):
