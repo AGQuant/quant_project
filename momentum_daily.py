@@ -1,32 +1,35 @@
 """
 Momentum Daily Engine - Scorr
 ==============================
-Recomputes the 7 momentum (M) parameters DAILY from raw_prices (fresh OHLC),
+Recomputes the 8 momentum (M) parameters DAILY from raw_prices (fresh OHLC),
 writes a dated row per stock into momentum_scores. This is the price-driven
 half of GVM that moves every day; G+V ride the weekly screener upload.
 
-Formula (v2 - 7 params):
-  ret_1y    -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
-  ret_3y    -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
-  ret_1m    -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment  [NEW]
-  dma_50    -> ABSOLUTE (DMA dev thresholds)
-  dma_200   -> ABSOLUTE (DMA dev thresholds)
+Formula (v3 - 8 params):
+  ret_1y       -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
+  ret_3y       -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
+  ret_1m       -> 2-FACTOR (absolute + peer_relative)/2   peer=gvm_segment
+  dma_50       -> ABSOLUTE (DMA dev thresholds)
+  dma_200      -> ABSOLUTE (DMA dev thresholds)
   ret_52w_vs_index -> ABSOLUTE (return thresholds)
-  rsi_month -> ABSOLUTE (6-period RSI on monthly candles)            [NEW]
-  m_score = mean of the 7 ratings; missing params fall back to 5.0 (neutral).
-  m_missing_count records how many of the 7 fell to fallback.
+  rsi_month    -> ABSOLUTE (6-period RSI on monthly candles)
+  vol_trend    -> ABSOLUTE (20d avg vol / 60d avg vol ratio)    [NEW v3]
+  m_score = mean of the 8 ratings; missing params fall back to 5.0 (neutral).
+  m_missing_count records how many of the 8 fell to fallback.
 
 Thresholds:
-  RETURN absolute (1Y/3Y):  <0 ->2.5 | 0-5 ->5 | 5-15 ->7.5 | >=15 ->10
-  RETURN absolute (1M):     <0 ->2.5 | 0-3 ->5 | 3-8 ->7.5 | >=8 ->10
-  DMA absolute:             <0 ->2.5 | 0-3 ->5 | 3-10 ->7.5 | >=10 ->10
-  RSI_month absolute:       <50->2.5 | 50-60->5 | 60-70->7.5 | >=70->10
+  RETURN absolute (1Y/3Y/52w):  <0 ->2.5 | 0-5 ->5 | 5-15 ->7.5 | >=15 ->10
+  RETURN absolute (1M):         <0 ->2.5 | 0-3 ->5 | 3-8 ->7.5 | >=8 ->10
+  DMA absolute:                 <0 ->2.5 | 0-3 ->5 | 3-10 ->7.5 | >=10 ->10
+  RSI_month absolute:           <50->2.5 | 50-60->5 | 60-70->7.5 | >=70->10
+  Vol trend (20d/60d ratio):    <0.8->2.5 | 0.8-1.0->5 | 1.0-1.2->7.5 | >=1.2->10
   Relative (ratio vs peer trimmed-mean): >125 ->10 | >100 ->7.5 | >75 ->5 | else 2.5
 
 Lookbacks (calendar days, nearest prior trading bar):
   1M = 30d, 1Y = 365d, 3Y = 1095d. Uses adjusted_close.
   ret_52w_vs_index = stock_1y_return - NIFTY50_1y_return.
   rsi_month: monthly close series (last close per calendar month), Wilder 6-period.
+  vol_trend: mean(volume last 20 bars) / mean(volume last 60 bars). Requires >= 60 bars.
 """
 
 import os
@@ -89,6 +92,18 @@ def score_rsi_month_absolute(rsi):
     return 10.0
 
 
+def score_vol_trend(ratio):
+    """Volume trend: 20d avg / 60d avg. Confirms or denies price momentum.
+    <0.8 = volume drying up (weak). >=1.2 = strong surge (confirming).
+    """
+    if ratio is None or (isinstance(ratio, float) and np.isnan(ratio)):
+        return None
+    if ratio < 0.8:  return 2.5
+    if ratio < 1.0:  return 5.0
+    if ratio < 1.2:  return 7.5
+    return 10.0
+
+
 def score_relative(stock_val, peer_avg):
     """Peer-relative half, mirrors gvm_engine.score_relative."""
     if stock_val is None or (isinstance(stock_val, float) and np.isnan(stock_val)):
@@ -120,11 +135,12 @@ def score_two_factor(abs_rating, rel_rating):
 def _load_prices() -> pd.DataFrame:
     with _conn() as conn:
         df = pd.read_sql_query(
-            "SELECT symbol, price_date, close, adjusted_close FROM raw_prices ORDER BY symbol, price_date",
+            "SELECT symbol, price_date, close, adjusted_close, volume FROM raw_prices ORDER BY symbol, price_date",
             conn,
         )
     df["price_date"] = pd.to_datetime(df["price_date"])
     df["px"] = df["adjusted_close"].where(df["adjusted_close"].notna(), df["close"])
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
     return df
 
 
@@ -153,7 +169,7 @@ def _monthly_rsi(g: pd.DataFrame, target_ts, period: int = RSI_MONTHLY_PERIOD) -
         .resample("ME").last()
         .dropna()
     )
-    if len(monthly) < period + 1:   # need >= period+1 monthly closes
+    if len(monthly) < period + 1:
         return None
     delta = monthly.diff().dropna()
     gain = delta.clip(lower=0)
@@ -166,6 +182,19 @@ def _monthly_rsi(g: pd.DataFrame, target_ts, period: int = RSI_MONTHLY_PERIOD) -
     return float(100 - (100 / (1 + rs)))
 
 
+def _vol_trend(g: pd.DataFrame, target_ts) -> Optional[float]:
+    """Volume trend: mean(last 20 bars) / mean(last 60 bars).
+    Requires >= 60 bars with valid volume. Returns the ratio."""
+    sub = g[g["price_date"] <= target_ts]["volume"].dropna()
+    if len(sub) < 60:
+        return None
+    avg20 = float(sub.iloc[-20:].mean())
+    avg60 = float(sub.iloc[-60:].mean())
+    if avg60 == 0:
+        return None
+    return round(avg20 / avg60, 4)
+
+
 def _compute_raw_params(prices: pd.DataFrame, target_date: date) -> pd.DataFrame:
     target_ts = pd.Timestamp(target_date)
     d1m = target_ts - pd.Timedelta(days=30)
@@ -174,7 +203,7 @@ def _compute_raw_params(prices: pd.DataFrame, target_date: date) -> pd.DataFrame
 
     idx_g = prices[prices["symbol"] == INDEX_SYMBOL]
     idx_now = _price_on_or_before(idx_g, target_ts)
-    idx_1y = _price_on_or_before(idx_g, d1y)
+    idx_1y  = _price_on_or_before(idx_g, d1y)
     idx_1y_ret = ((idx_now / idx_1y - 1) * 100) if (idx_now and idx_1y) else None
 
     rows = []
@@ -188,29 +217,31 @@ def _compute_raw_params(prices: pd.DataFrame, target_date: date) -> pd.DataFrame
         px_now = float(cur.iloc[-1]["px"])
         closes = cur["px"].values
 
-        sma50 = float(np.mean(closes[-50:])) if len(closes) >= 50 else None
+        sma50  = float(np.mean(closes[-50:]))  if len(closes) >= 50  else None
         sma200 = float(np.mean(closes[-200:])) if len(closes) >= 200 else None
-        dma50 = ((px_now / sma50 - 1) * 100) if sma50 else None
+        dma50  = ((px_now / sma50  - 1) * 100) if sma50  else None
         dma200 = ((px_now / sma200 - 1) * 100) if sma200 else None
 
         p1m = _price_on_or_before(g, d1m)
         p1y = _price_on_or_before(g, d1y)
         p3y = _price_on_or_before(g, d3y)
-        ret1m = ((px_now / p1m - 1) * 100) if p1m else None
-        ret1y = ((px_now / p1y - 1) * 100) if p1y else None
-        ret3y = ((px_now / p3y - 1) * 100) if p3y else None
+        ret1m  = ((px_now / p1m - 1) * 100) if p1m else None
+        ret1y  = ((px_now / p1y - 1) * 100) if p1y else None
+        ret3y  = ((px_now / p3y - 1) * 100) if p3y else None
         ret52w_idx = (ret1y - idx_1y_ret) if (ret1y is not None and idx_1y_ret is not None) else None
-        rsi_m = _monthly_rsi(g, target_ts)
+        rsi_m  = _monthly_rsi(g, target_ts)
+        vol_tr = _vol_trend(g, target_ts)
 
         rows.append({
             "symbol": sym, "latest_price": round(px_now, 2),
-            "ret_1m": round(ret1m, 2) if ret1m is not None else None,
-            "ret_1y": round(ret1y, 2) if ret1y is not None else None,
-            "ret_3y": round(ret3y, 2) if ret3y is not None else None,
-            "dma_50": round(dma50, 2) if dma50 is not None else None,
+            "ret_1m":  round(ret1m,  2) if ret1m  is not None else None,
+            "ret_1y":  round(ret1y,  2) if ret1y  is not None else None,
+            "ret_3y":  round(ret3y,  2) if ret3y  is not None else None,
+            "dma_50":  round(dma50,  2) if dma50  is not None else None,
             "dma_200": round(dma200, 2) if dma200 is not None else None,
             "ret_52w_vs_index": round(ret52w_idx, 2) if ret52w_idx is not None else None,
-            "rsi_month": round(rsi_m, 2) if rsi_m is not None else None,
+            "rsi_month":  round(rsi_m,  2) if rsi_m  is not None else None,
+            "vol_trend":  round(vol_tr,  4) if vol_tr  is not None else None,
         })
     return pd.DataFrame(rows)
 
@@ -255,49 +286,65 @@ def compute_momentum(target_date: Optional[date] = None) -> Dict:
 
         # 2-factor params (absolute + relative)
         r1m = score_two_factor(score_ret1m_absolute(r["ret_1m"]),
-                                score_relative(r["ret_1m"], peer1m.get(seg)))
+                               score_relative(r["ret_1m"], peer1m.get(seg)))
         r1y = score_two_factor(score_return_absolute(r["ret_1y"]),
                                score_relative(r["ret_1y"], peer1y.get(seg)))
         r3y = score_two_factor(score_return_absolute(r["ret_3y"]),
                                score_relative(r["ret_3y"], peer3y.get(seg)))
         # absolute-only params
-        d50 = score_dma_absolute(r["dma_50"])
+        d50  = score_dma_absolute(r["dma_50"])
         d200 = score_dma_absolute(r["dma_200"])
-        r52 = score_return_absolute(r["ret_52w_vs_index"])
-        rsi = score_rsi_month_absolute(r["rsi_month"])
+        r52  = score_return_absolute(r["ret_52w_vs_index"])
+        rsi  = score_rsi_month_absolute(r["rsi_month"])
+        vt   = score_vol_trend(r.get("vol_trend"))
 
-        ratings = [r1m, r1y, r3y, d50, d200, r52, rsi]
+        ratings = [r1m, r1y, r3y, d50, d200, r52, rsi, vt]
         missing = sum(1 for x in ratings if x is None)
-        filled = [x if x is not None else FB for x in ratings]
-        m_score = round(sum(filled) / 7, 2)
+        filled  = [x if x is not None else FB for x in ratings]
+        m_score = round(sum(filled) / 8, 2)
 
         out_rows.append((
             r["symbol"], target_date, r["latest_price"],
             r["ret_1m"], r["ret_1y"], r["ret_3y"], r["dma_50"], r["dma_200"],
-            r["ret_52w_vs_index"], r["rsi_month"],
-            filled[0], filled[1], filled[2], filled[3], filled[4], filled[5], filled[6],
+            r["ret_52w_vs_index"], r["rsi_month"], r.get("vol_trend"),
+            filled[0], filled[1], filled[2], filled[3], filled[4],
+            filled[5], filled[6], filled[7],
             m_score, missing,
         ))
+
+    # Ensure new columns exist (safe migration)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            ALTER TABLE momentum_scores
+            ADD COLUMN IF NOT EXISTS vol_trend NUMERIC,
+            ADD COLUMN IF NOT EXISTS vol_trend_rating NUMERIC
+        """)
+        conn.commit()
 
     with _conn() as conn, conn.cursor() as cur:
         cur.executemany("""
             INSERT INTO momentum_scores
               (symbol, score_date, latest_price,
-               ret_1m, ret_1y, ret_3y, dma_50, dma_200, ret_52w_vs_index, rsi_month,
+               ret_1m, ret_1y, ret_3y, dma_50, dma_200,
+               ret_52w_vs_index, rsi_month, vol_trend,
                ret_1m_rating, ret_1y_rating, ret_3y_rating, dma_50_rating, dma_200_rating,
-               ret_52w_idx_rating, rsi_month_rating, m_score, m_missing_count)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               ret_52w_idx_rating, rsi_month_rating, vol_trend_rating,
+               m_score, m_missing_count)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
               latest_price=EXCLUDED.latest_price,
               ret_1m=EXCLUDED.ret_1m, ret_1y=EXCLUDED.ret_1y, ret_3y=EXCLUDED.ret_3y,
               dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200,
               ret_52w_vs_index=EXCLUDED.ret_52w_vs_index, rsi_month=EXCLUDED.rsi_month,
+              vol_trend=EXCLUDED.vol_trend,
               ret_1m_rating=EXCLUDED.ret_1m_rating, ret_1y_rating=EXCLUDED.ret_1y_rating,
               ret_3y_rating=EXCLUDED.ret_3y_rating, dma_50_rating=EXCLUDED.dma_50_rating,
-              dma_200_rating=EXCLUDED.dma_200_rating, ret_52w_idx_rating=EXCLUDED.ret_52w_idx_rating,
+              dma_200_rating=EXCLUDED.dma_200_rating,
+              ret_52w_idx_rating=EXCLUDED.ret_52w_idx_rating,
               rsi_month_rating=EXCLUDED.rsi_month_rating,
+              vol_trend_rating=EXCLUDED.vol_trend_rating,
               m_score=EXCLUDED.m_score, m_missing_count=EXCLUDED.m_missing_count
         """, out_rows)
         conn.commit()
 
-    return {"status": "ok", "score_date": str(target_date), "scored": len(out_rows)}
+    return {"status": "ok", "score_date": str(target_date), "scored": len(out_rows), "params": 8}
