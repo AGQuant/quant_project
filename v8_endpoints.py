@@ -7,7 +7,7 @@ Endpoints:
   GET /api/v8/qualified/{basket}     — Pure read from v8_qualified (compute-on-write)
   GET /api/v8/filter_config/{basket} — Min/Max thresholds per basket
   GET /api/v8/funnel/{basket}        — Waterfall step counts from v8_funnel_counts
-  GET /api/v8/adr                    — Quick ADR-only refresh
+  GET /api/v8/adr                    — Quick ADR-only read from adr_daily
   GET /api/v8/raw                    — All active futures x 21 metrics (raw data tab)
   GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal (live compute)
   GET /api/v8/positions              — Open trades from personal_journal (V8 native)
@@ -16,12 +16,14 @@ Endpoints:
 Architecture: compute-on-write.
   - v8_signal_writer.py writes v8_qualified every 5-min during market hours
   - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
+  - daily_metrics writes adr_daily + pcr_daily at 15:50 IST (after V8 engine)
   - This file = pure reads only. Zero compute on the read path.
-  - Fallback: if v8_qualified empty for today, falls back to live compute (safe during boot)
+  - ADR fallback: reads from adr_daily (latest row) — NOT v8_metrics.prev_day_change
 
 1D gate: prev_day_change (net close-to-close %) — NOT range_1d.
 1W gate: week_return (net close-to-close %).
 buy_momentum month_return cap: 14 (raised from 12, 02-Jun-2026).
+ADR fix: compute from raw_prices → adr_daily (v2.8.0, 03-Jun-2026).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -36,7 +38,7 @@ def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
-# ── Filter configs ─────────────────────────────────────────────────────────────
+# ── Filter configs ────────────────────────────────────────────────────────────
 # Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
 # This file never filters at read time — only reads pre-computed v8_qualified.
 
@@ -121,7 +123,7 @@ _BLACKOUT_SQL = """
 """
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _pivot_s1_s2(prev_high, prev_low, prev_close):
     pp = (prev_high + prev_low + prev_close) / 3
@@ -181,13 +183,18 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
-    """Market Mood gate — ADR + Nifty D/W/M. Slot allocation by # of fails."""
+    """Market Mood gate — ADR + Nifty D/W/M. Slot allocation by # of fails.
+    ADR: reads from adr_daily (compute-on-write at 15:50 IST).
+    Pre-market fallback: latest row from adr_daily (yesterday's EOD).
+    Intraday: computes live from intraday_prices when market is open.
+    """
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # ── ADR: live intraday first ──────────────────────────────────────
             cur.execute("""
                 WITH today_change AS (
                     SELECT i.symbol,
@@ -213,21 +220,22 @@ def market_mood():
             r = cur.fetchone()
             advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
 
+            # ── ADR fallback: read from adr_daily (pre-computed, correct) ────
             if (advances + declines) == 0:
                 cur.execute("""
-                    SELECT
-                        COUNT(*) FILTER (WHERE prev_day_change > 0) AS adv,
-                        COUNT(*) FILTER (WHERE prev_day_change < 0) AS dec,
-                        COUNT(*) FILTER (WHERE prev_day_change = 0) AS unc
-                    FROM v8_metrics
-                    WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                    SELECT advances, declines, unchanged
+                    FROM adr_daily
+                    ORDER BY price_date DESC
+                    LIMIT 1
                 """)
                 r = cur.fetchone()
-                advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
+                if r:
+                    advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
 
             adr = round(advances / declines, 3) if declines > 0 else (999.0 if advances > 0 else 0.0)
             adr_pass = adr >= 1.0
 
+            # ── Nifty D/W/M ──────────────────────────────────────────────────
             cur.execute("""
                 SELECT price_date, close
                 FROM raw_prices
@@ -314,7 +322,6 @@ def qualified(basket: str, limit: int = 50):
 
     try:
         with _conn() as conn, conn.cursor() as cur:
-            # Try pre-computed table first
             cur.execute("""
                 SELECT
                     symbol, gvm_score, cmp,
@@ -336,7 +343,6 @@ def qualified(basket: str, limit: int = 50):
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-        # Fallback: if empty (e.g. engine hasn't run yet today), compute live
         if not rows:
             rows = _live_qualified_fallback(basket, limit)
             source_note = 'live_fallback'
@@ -380,7 +386,6 @@ def funnel_counts(basket: str):
             return {"basket": basket, "score_date": str(date.today()),
                     "counts": counts, "source": "precomputed"}
 
-        # Fallback: compute live from v8_metrics
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
@@ -544,27 +549,36 @@ def sell_overbought(limit: int = 50):
 
 @router.get("/adr")
 def adr_only():
+    """Quick ADR read — from adr_daily table (compute-on-write at 15:50 IST)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT
-                    COUNT(*) FILTER (WHERE prev_day_change > 0) AS adv,
-                    COUNT(*) FILTER (WHERE prev_day_change < 0) AS dec,
-                    COUNT(*) FILTER (WHERE prev_day_change = 0) AS unc
-                FROM v8_metrics
-                WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                SELECT price_date, advances, declines, unchanged, adr
+                FROM adr_daily
+                ORDER BY price_date DESC
+                LIMIT 1
             """)
             r = cur.fetchone()
-            adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
-            adr = round(adv / dec, 3) if dec > 0 else (999.0 if adv > 0 else 0.0)
-            return {"adr": adr, "advances": adv, "declines": dec, "unchanged": unc, "pass": adr >= 1.0}
+        if not r:
+            return {"adr": 0.0, "advances": 0, "declines": 0, "unchanged": 0,
+                    "pass": False, "note": "adr_daily empty — run V8 engine or wait for 15:50 IST compute"}
+        price_date, adv, dec, unc, adr_val = r
+        adr = float(adr_val) if adr_val else 0.0
+        return {
+            "price_date": str(price_date),
+            "adr": adr,
+            "advances": adv,
+            "declines": dec,
+            "unchanged": unc,
+            "pass": adr >= 1.0,
+        }
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #  PERSONAL JOURNAL — V8 native open + closed trades
-# ══════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/positions")
 def v8_positions(limit: int = 100):
