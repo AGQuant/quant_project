@@ -23,14 +23,8 @@ TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
 
   Boot logic (get_valid_token):
     1. --auth-code given  -> bootstrap (mint + store today's token).
-    2. else stored token EXISTS + passes live Fyers validation -> reuse.
+    2. else stored access_token created TODAY AND verified live -> reuse it.
     3. else -> AUTO-LOGIN via TOTP (headless) -> store + return. Zero-touch.
-
-  Key fix (03-Jun-2026): previously reused token based on date alone.
-  Fyers expires tokens at daily rollover (~00:00-06:00 IST) regardless of
-  creation date, so a "same-day" token can still be dead. Now we do a
-  cheap live quotes call to verify before reusing. On any rejection we
-  fall through to auto_login() immediately — zero manual steps needed.
 
 USAGE:
   Normal (zero-touch): python fyers_feed.py
@@ -67,7 +61,7 @@ INDEX_LTP_SYMBOLS = {
     'INDIAVIX':  'NSE:INDIAVIX-INDEX',
 }
 
-# ── Option chain config ───────────────────────────────────────────────────────
+# ── Option chain config ──────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 OPTION_POLL_MINS      = 5
 N_STRIKES             = 10
@@ -100,7 +94,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 log = logging.getLogger('fyers_feed')
 
 
-# ───────────────────────────────────────────────────────────────────── DB / token
+# ─────────────────────────────────────────────────────────────────────── DB / token
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -138,71 +132,59 @@ def bootstrap_from_authcode(conn, auth_code):
     return d['access_token']
 
 def _token_is_live(token):
-    """Quick live check: hit Fyers quotes with one symbol.
-    Returns True if Fyers accepts the token, False on any auth rejection.
-    This is the key fix — date-only check was insufficient because Fyers
-    expires tokens at the daily rollover regardless of creation timestamp.
-    """
+    """Quick live check — one symbol quotes call. Returns True if Fyers accepts the token."""
     try:
-        r = requests.get(
-            QUOTES_URL,
-            params={'symbols': 'NSE:NIFTY50-INDEX'},
-            headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
-            timeout=5,
-        )
+        r = requests.get(QUOTES_URL,
+                         params={'symbols': 'NSE:NIFTY50-INDEX'},
+                         headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
+                         timeout=8)
         d = r.json()
-        # s='ok' means token accepted; any error code means expired/invalid
-        if d.get('s') == 'ok':
-            return True
-        code = d.get('code', 0)
-        log.warning(f"Token live-check failed: code={code} msg={d.get('message', '')}")
-        return False
+        # s=='ok' means accepted; any error code (incl -99 expired) means dead
+        return d.get('s') == 'ok'
     except Exception as e:
-        log.warning(f"Token live-check error: {e}")
+        log.warning(f"Token liveness check failed: {e}")
         return False
 
 def get_valid_token(conn, auth_code=None):
-    # 1. Manual auth-code override (e.g. first-time setup or emergency)
+    # 1. Manual auth-code override (CLI bootstrap)
     if auth_code:
         try:
             return bootstrap_from_authcode(conn, auth_code)
         except Exception as e:
-            log.warning(f"Auth-code bootstrap failed ({e}); trying stored token")
+            log.warning(f"Auth-code bootstrap failed ({e}); falling through to stored/auto-login")
 
-    # 2. Try stored token — but VERIFY it live before reusing.
-    #    Previously we only checked the creation date, which is wrong:
-    #    Fyers can expire a token minted today if it crosses the daily rollover.
+    # 2. Try stored same-day token — but VERIFY it's actually alive with Fyers
     row = load_tokens(conn)
-    if row and row[0]:
-        access_token = row[0]
-        access_created = row[2]
-        date_ok = (access_created is not None and
-                   access_created.date() == datetime.now(IST).replace(tzinfo=None).date())
-        if date_ok:
+    if row and row[0] and row[2]:
+        access_token, access_created = row[0], row[2]
+        today = datetime.now(IST).replace(tzinfo=None).date()
+        if access_created.date() == today:
+            log.info("Stored same-day token found — verifying with Fyers...")
             if _token_is_live(access_token):
-                log.info("Reusing stored same-day access token (live-verified)")
+                log.info("Token verified live — reusing (restart-safe)")
                 return access_token
-            else:
-                log.warning("Stored same-day token REJECTED by Fyers — running auto-login")
+            log.warning("Stored same-day token REJECTED by Fyers (expired at rollover) — re-authing")
         else:
-            log.warning("Stored token is from a previous day — running auto-login")
+            log.warning(f"Stored token is from {access_created.date()} (previous day) — re-authing")
 
-    # 3. Auto-login via TOTP (headless) — needs env vars on Railway
+    # 3. Auto-login via TOTP (headless) — zero-touch on Railway
     try:
         import fyers_autologin
-        log.info("Running TOTP auto-login (zero-touch)...")
-        return fyers_autologin.auto_login(conn)
+        log.info("Running TOTP auto-login (headless)...")
+        token = fyers_autologin.auto_login(conn)
+        log.info("TOTP auto-login SUCCESS — fresh token stored")
+        return token
     except Exception as e:
         raise SystemExit(
             f"\nAUTO-LOGIN FAILED ({e}).\n"
-            "Check Railway env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
+            "Check env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
             "Manual fallback:\n"
             f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
             "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ───────────────────────────────────────────────────────────────────── universe
+# ─────────────────────────────────────────────────────────────────────── universe
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -218,7 +200,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ───────────────────────────────────────────────────────────────────── bar aggregator
+# ─────────────────────────────────────────────────────────────────────── bar aggregator
 
 class BarAggregator:
     def __init__(self, conn, futures_set):
@@ -284,9 +266,6 @@ class BarAggregator:
                 self._flush(key, bar)
 
     def flush_cmp(self):
-        # IST stamp — aligns with all other IST-stamped tables (fixes UTC offset bug).
-        # All 208 futures + indices land here every 30s.
-        # This is the ONLY persistent store for futures price data (no 1-min bars).
         _ist = datetime.now(IST).replace(tzinfo=None)
         with self.lock:
             rows = [(s, p, _ist) for s, p in self.last_ltp.items() if p]
@@ -306,7 +285,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ───────────────────────────────────────────────────────────────────── index LTP
+# ─────────────────────────────────────────────────────────────────────── index LTP
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -333,7 +312,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ───────────────────────────────────────────────────────────────── option chain helpers
+# ─────────────────────────────────────────────────────────────────────── option chain helpers
 
 def ensure_option_schema(conn):
     with conn.cursor() as cur:
@@ -461,7 +440,7 @@ def cleanup_option_chain(conn):
         log.warning(f"option_chain cleanup: {e}")
 
 
-# ───────────────────────────────────────────────────────────────────── market helpers
+# ─────────────────────────────────────────────────────────────────────── market helpers
 
 def is_market_open():
     now = datetime.now(IST)
@@ -470,7 +449,7 @@ def is_market_open():
     return (9*60+15) <= mins <= (15*60+29)
 
 
-# ───────────────────────────────────────────────────────────────────── main run
+# ─────────────────────────────────────────────────────────────────────── main run
 
 def run(auth_code=None):
     import fyers_backfill
@@ -489,7 +468,6 @@ def run(auth_code=None):
     try:
         fyers_backfill.backfill_7day(token, conn, symbols_override=list(INTRADAY_BAR_SYMBOLS))
     except TypeError:
-        # backfill_7day may not yet support symbols_override — fall through gracefully
         log.info("backfill_7day: symbols_override not supported, skipping index-only backfill")
     except Exception as e:
         log.error(f"Boot backfill failed (continuing): {e}")
@@ -530,8 +508,8 @@ def run(auth_code=None):
         while True:
             if is_market_open():
                 update_index_ltp(conn, token, agg)
-                agg.flush_all()   # only flushes index bars (futures skipped in _flush)
-                agg.flush_cmp()   # all 208 futures + indices → cmp_prices
+                agg.flush_all()
+                agg.flush_cmp()
 
                 now_dt = datetime.now(IST).replace(tzinfo=None)
                 if (last_option_poll is None or
