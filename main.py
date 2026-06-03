@@ -39,15 +39,17 @@ import v8_signal_writer
 import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.8.0
+# Scorr / Project Quant — main.py v2.9.0
+# v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
+#   Section 1: global indices (global_indices DB).
+#   Section 2: NIFTY + BANKNIFTY close/chg/high/low + ADR (raw_prices + adr_daily).
+#   Section 3: Support levels S1/S2 from rolling-5d OHLC.
+#   Section 4: Pivot points PP/R1/R2/S1/S2 rolling-5d average.
+#   Section 5: PCR 5-day rolling (pcr_daily).
+#   New MCP tool: digest_daily.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
-#   adr_daily: ADR from raw_prices (futures universe) at 15:50 IST.
-#   pcr_daily: PCR from option_chain EOD snapshot at 15:50 IST.
-#   New endpoints: GET /api/daily/adr, GET /api/daily/pcr.
-#   New MCP tools: daily_adr, daily_pcr.
-#   Bug fix: market_mood ADR fallback now reads adr_daily, not stale v8_metrics.
-# v2.7.4: fix syntax error in build_health_report() — ternary expression.
-# v2.7.3: SYSTEM HEALTH REPORT CARD — GET /api/health/report + health_report MCP tool
+# v2.7.4: fix syntax error in build_health_report().
+# v2.7.3: SYSTEM HEALTH REPORT CARD.
 # v2.7.2: CLEANUP — dropped 9 dead endpoints + 3 MCP tools.
 # v2.7.1: ALL 4 QUANT BASKETS LIVE + nifty500_universe + nifty500_benchmark.
 # v2.7.0: QUANT BASKET EOD checker wired.
@@ -55,7 +57,7 @@ import qb_eod_checker
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.8.0"
+VERSION = "2.9.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -226,7 +228,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.8.0)")
+        log.info("Tables ready (v2.9.0)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -617,9 +619,6 @@ async def _task_qb_eod_checker():
 
 # ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ───────────────────
 def _compute_and_store_adr(conn) -> dict:
-    """Compute ADR from raw_prices (futures universe) → store in adr_daily.
-    Architecture: compute in DB via SQL, store result. API reads stored copy.
-    """
     with conn.cursor() as cur:
         cur.execute("""
             WITH latest_date AS (SELECT MAX(price_date) AS pd FROM raw_prices),
@@ -665,9 +664,6 @@ def _compute_and_store_adr(conn) -> dict:
 
 
 def _compute_and_store_pcr(conn) -> dict:
-    """Compute PCR from option_chain EOD snapshot → store in pcr_daily.
-    Architecture: compute in DB via SQL, store result. API reads stored copy.
-    """
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO pcr_daily (price_date, underlying, put_oi, call_oi, pcr)
@@ -736,7 +732,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.8.0)")
+    log.info("Scheduler started (v2.9.0)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -768,7 +764,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.8.0)")
+    log.info("Live loop started (v2.9.0)")
     tick_count = 0
     while True:
         try:
@@ -1054,12 +1050,153 @@ def health_report():
     """Full system health report card — 6 sections, letter grades, issues list."""
     return build_health_report()
 
-# ── Daily Digest endpoints (compute-on-write) ─────────────────────────────────
+# ── Daily Digest — sections 1-5 server-side ──────────────────────────────────
+
+def _build_digest_daily() -> dict:
+    """
+    Bakes digest sections 1-5 from DB. Pure deterministic — no AI, no web.
+    Section 1: Global indices (global_indices table, latest quote_date).
+    Section 2: NIFTY50 + BANKNIFTY OHLC + chg% + ADR (raw_prices + adr_daily).
+    Section 3: Support levels S1/S2 — rolling-5d average OHLC floor pivot.
+    Section 4: Pivot points PP/R1/R2/S1/S2 — rolling-5d average.
+    Section 5: PCR 5-day rolling (pcr_daily).
+    """
+    now = _ist_now()
+    result: Dict[str, Any] = {
+        "generated_at": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "version": VERSION,
+        "sections": {}
+    }
+
+    def _r(v, d=2):
+        try: return round(float(v), d) if v is not None else None
+        except: return None
+
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+
+            # ── Section 1: Global indices ─────────────────────────────────
+            cur.execute("""
+                SELECT g.name, g.category, g.price, g.prev_close, g.chg_pct, g.quote_date::text
+                FROM global_indices g
+                JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
+                  ON g.symbol = m.symbol AND g.quote_date = m.md
+                ORDER BY CASE g.category
+                    WHEN 'index' THEN 1 WHEN 'volatility' THEN 2
+                    WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
+            """)
+            cols = [d[0] for d in cur.description]
+            global_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            result["sections"]["1_global_indices"] = {
+                "label": "Global Indices",
+                "quote_date": global_rows[0]["quote_date"] if global_rows else None,
+                "data": global_rows
+            }
+
+            # ── Section 2: Domestic indices + ADR ────────────────────────
+            domestic = {}
+            for sym in ("NIFTY50", "BANKNIFTY"):
+                cur.execute("""
+                    WITH d AS (
+                        SELECT price_date, open, high, low, close,
+                               ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
+                        FROM raw_prices WHERE symbol = %s
+                    )
+                    SELECT a.price_date::text, a.open, a.high, a.low, a.close,
+                           ROUND(((a.close - b.close) / NULLIF(b.close,0) * 100)::numeric, 2) AS chg_pct
+                    FROM d a JOIN d b ON b.rn = 2 WHERE a.rn = 1
+                """, (sym,))
+                r = cur.fetchone()
+                if r:
+                    domestic[sym] = {
+                        "price_date": r[0], "open": _r(r[1]), "high": _r(r[2]),
+                        "low": _r(r[3]), "close": _r(r[4]), "chg_pct": _r(r[5])
+                    }
+
+            cur.execute("SELECT price_date::text, advances, declines, unchanged, adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+            adr_row = cur.fetchone()
+            adr = {"price_date": adr_row[0], "advances": adr_row[1], "declines": adr_row[2],
+                   "unchanged": adr_row[3], "adr": _r(adr_row[4])} if adr_row else None
+
+            result["sections"]["2_domestic_indices"] = {
+                "label": "Domestic Indices + ADR",
+                "NIFTY50": domestic.get("NIFTY50"),
+                "BANKNIFTY": domestic.get("BANKNIFTY"),
+                "adr": adr
+            }
+
+            # ── Sections 3 & 4: Rolling-5d pivots for NIFTY50 + BANKNIFTY ─
+            pivots = {}
+            for sym in ("NIFTY50", "BANKNIFTY"):
+                cur.execute("""
+                    SELECT AVG(high), AVG(low), AVG(close)
+                    FROM (
+                        SELECT high, low, close
+                        FROM raw_prices WHERE symbol = %s
+                        ORDER BY price_date DESC LIMIT 5
+                    ) sub
+                """, (sym,))
+                r = cur.fetchone()
+                if r and r[0] is not None:
+                    h, l, c = float(r[0]), float(r[1]), float(r[2])
+                    pp  = _r((h + l + c) / 3)
+                    r1  = _r(2 * pp - l)
+                    r2  = _r(pp + (h - l))
+                    s1  = _r(2 * pp - h)
+                    s2  = _r(pp - (h - l))
+                    pivots[sym] = {"pp": pp, "r1": r1, "r2": r2, "s1": s1, "s2": s2}
+
+            result["sections"]["3_support_levels"] = {
+                "label": "Support Levels (rolling-5d)",
+                "NIFTY50":   {"s1": pivots.get("NIFTY50",  {}).get("s1"), "s2": pivots.get("NIFTY50",  {}).get("s2")},
+                "BANKNIFTY": {"s1": pivots.get("BANKNIFTY", {}).get("s1"), "s2": pivots.get("BANKNIFTY", {}).get("s2")},
+            }
+            result["sections"]["4_pivot_points"] = {
+                "label": "Pivot Points (rolling-5d average)",
+                "NIFTY50":   pivots.get("NIFTY50"),
+                "BANKNIFTY": pivots.get("BANKNIFTY"),
+            }
+
+            # ── Section 5: PCR 5-day rolling ─────────────────────────────
+            pcr_out = {}
+            for und in ("NIFTY", "BANKNIFTY"):
+                cur.execute("""
+                    SELECT price_date::text, put_oi, call_oi, pcr
+                    FROM pcr_daily WHERE underlying = %s
+                    ORDER BY price_date DESC LIMIT 5
+                """, (und,))
+                cols2 = [d[0] for d in cur.description]
+                pcr_out[und] = [dict(zip(cols2, row)) for row in cur.fetchall()]
+
+            result["sections"]["5_pcr_trend"] = {
+                "label": "PCR Trend (5-day rolling)",
+                "NIFTY": pcr_out.get("NIFTY", []),
+                "BANKNIFTY": pcr_out.get("BANKNIFTY", []),
+            }
+
+    except Exception as e:
+        log.error(f"_build_digest_daily failed: {e}")
+        result["error"] = str(e)
+
+    return result
+
+
+@app.get("/api/digest/daily")
+def digest_daily():
+    """
+    Daily Digest sections 1-5 — fully server-side baked from DB.
+    Section 1: Global indices. Section 2: Domestic NIFTY/BNF + ADR.
+    Section 3: Support S1/S2. Section 4: Pivot PP/R1/R2/S1/S2 (rolling-5d).
+    Section 5: PCR 5-day rolling.
+    AI layer (sections 6-10: news + trading plan) added by Claude on top.
+    """
+    return _build_digest_daily()
+
+# ── Daily Digest sub-endpoints ────────────────────────────────────────────────
 
 @app.get("/api/daily/adr")
 def daily_adr(days: int = 5):
-    """ADR trend — last N days from adr_daily (compute-on-write at 15:50 IST).
-    Source: raw_prices close-to-close for futures universe. NOT v8_metrics."""
+    """ADR trend — last N days from adr_daily (compute-on-write at 15:50 IST)."""
     days = min(max(days, 1), 30)
     rows = api_query("""
         SELECT price_date::text, advances, declines, unchanged, adr,
@@ -1072,8 +1209,7 @@ def daily_adr(days: int = 5):
 
 @app.get("/api/daily/pcr")
 def daily_pcr(underlying: str = "NIFTY", days: int = 5):
-    """PCR trend — last N days from pcr_daily (compute-on-write at 15:50 IST).
-    underlying: NIFTY or BANKNIFTY. Builds up over time as options feed collects data."""
+    """PCR trend — last N days from pcr_daily. underlying: NIFTY or BANKNIFTY."""
     underlying = underlying.upper()
     days = min(max(days, 1), 30)
     rows = api_query("""
@@ -1095,7 +1231,7 @@ def compute_daily_metrics_now(x_admin_token: Optional[str] = Header(None)):
         pcr = _compute_and_store_pcr(conn)
     return {"adr": adr, "pcr": pcr}
 
-# ── Quant Basket endpoints ─────────────────────────────────────────────────────
+# ── Quant Basket endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/qb/eod_check")
 def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
@@ -1159,7 +1295,7 @@ def qb_registry(basket_name: Optional[str] = None):
         return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
     return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
 
-# ── Admin + data endpoints ─────────────────────────────────────────────────────
+# ── Admin + data endpoints ────────────────────────────────────────────────────
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1311,7 +1447,7 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     vals.append(n)
     return api_query(sql, vals)
 
-# ── Data endpoints ─────────────────────────────────────────────────────────────
+# ── Data endpoints ────────────────────────────────────────────────────────────
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
@@ -1402,7 +1538,7 @@ def v8_live_metrics():
         ORDER BY s.symbol
     """)
 
-# ── Admin data operations ──────────────────────────────────────────────────────
+# ── Admin data operations ─────────────────────────────────────────────────────
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
@@ -1726,6 +1862,7 @@ async def oauth_token(req: Request):
 MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "health_report", "description": "Full Scorr system health report card — 6 sections (Infrastructure, Data Feeds, Scheduler, V8 Engine, Quant Baskets, GVM Universe), letter grades A+ to F, issues list, overall score.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "digest_daily", "description": "Daily Digest sections 1-5 baked from DB: global indices, domestic NIFTY/BNF+ADR, support S1/S2, pivot PP/R1/R2/S1/S2 (rolling-5d), PCR 5-day rolling. AI adds sections 6-10 on top.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_build_cache", "description": "V8 LIVE: build v8_history_cache.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "v8_run_live", "description": "V8 LIVE: run one live tick.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1789,6 +1926,7 @@ async def _call_tool(name, args):
         h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "health_report": r = await client.get(f"{BASE_URL}/api/health/report"); return r.json()
+        elif name == "digest_daily": r = await client.get(f"{BASE_URL}/api/digest/daily"); return r.json()
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
