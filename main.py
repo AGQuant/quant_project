@@ -39,16 +39,12 @@ import v8_signal_writer
 import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.1
+# Scorr / Project Quant — main.py v2.9.2
+# v2.9.2: QB intraday price mark — Yahoo 15-min live P&L for all 53 open QB
+#   positions across all 4 baskets. Price-only, no stop exits intraday.
+#   _bg_qb_intraday_mark fires every 15 ticks (15 min) in _live_loop.
 # v2.9.1: Yahoo Morning Gap Healer — /api/admin/heal_intraday + MCP heal_intraday.
-#   Fills TODAY 1-min gaps for all active futures from Yahoo. Fill-only.
 # v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
-#   Section 1: global indices (global_indices DB).
-#   Section 2: NIFTY + BANKNIFTY close/chg/high/low + ADR (raw_prices + adr_daily).
-#   Section 3: Support levels S1/S2 from rolling-5d OHLC.
-#   Section 4: Pivot points PP/R1/R2/S1/S2 rolling-5d average.
-#   Section 5: PCR 5-day rolling (pcr_daily).
-#   New MCP tool: digest_daily.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # v2.7.4: fix syntax error in build_health_report().
 # v2.7.3: SYSTEM HEALTH REPORT CARD.
@@ -59,7 +55,7 @@ import qb_eod_checker
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.9.1"
+VERSION = "2.9.2"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -230,7 +226,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.9.1)")
+        log.info("Tables ready (v2.9.2)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -390,6 +386,7 @@ _global_fetching: bool = False
 _global_intraday_fetching: bool = False
 _qb_eod_ran_today: Optional[date] = None
 _qb_eod_running: bool = False
+_qb_intraday_mark_running: bool = False
 _daily_metrics_ran_today: Optional[date] = None
 _daily_metrics_running: bool = False
 
@@ -589,6 +586,21 @@ def _bg_signal_writer():
     finally:
         _signal_writer_running = False
 
+# ── QB Intraday Price Mark (Yahoo, every 15 min during market hours) ──────────────────────────────────────────────────────────────────────────────
+def _bg_qb_intraday_mark():
+    global _qb_intraday_mark_running
+    if _qb_intraday_mark_running: return
+    _qb_intraday_mark_running = True
+    try:
+        with get_conn() as conn:
+            res = qb_eod_checker.qb_intraday_mark(conn)
+        log.info(f"qb_intraday_mark: {res.get('marked')}/{res.get('symbols')} marked, "
+                 f"skipped={res.get('skipped')} errors={len(res.get('errors', []))}")
+    except Exception as e:
+        log.error(f"qb_intraday_mark failed: {e}")
+    finally:
+        _qb_intraday_mark_running = False
+
 # ── Quant Basket EOD Checker ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _bg_qb_eod_checker():
     global _qb_eod_ran_today, _qb_eod_running
@@ -619,7 +631,7 @@ async def _task_qb_eod_checker():
     log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
-# ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ───────────────────────────────────────────────────────────────────────────────────────────
+# ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ────────────────────────────────────────────────────────────────────────────────────────
 def _compute_and_store_adr(conn) -> dict:
     with conn.cursor() as cur:
         cur.execute("""
@@ -734,7 +746,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.1)")
+    log.info("Scheduler started (v2.9.2)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -766,7 +778,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.1)")
+    log.info("Live loop started (v2.9.2)")
     tick_count = 0
     while True:
         try:
@@ -776,6 +788,9 @@ async def _live_loop():
                 tick_count += 1
                 if tick_count % 5 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
+                # QB intraday mark every 15 ticks (15 min) — Yahoo 15-min cadence
+                if tick_count % 15 == 0:
+                    asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
             else:
                 tick_count = 0
         except Exception as e:
@@ -1077,7 +1092,6 @@ def _build_digest_daily() -> dict:
     try:
         with get_conn() as conn, conn.cursor() as cur:
 
-            # ── Section 1: Global indices ─────────────────────────────────────────────────────────────────────────────────────────────────────────
             cur.execute("""
                 SELECT g.name, g.category, g.price, g.prev_close, g.chg_pct, g.quote_date::text
                 FROM global_indices g
@@ -1095,7 +1109,6 @@ def _build_digest_daily() -> dict:
                 "data": global_rows
             }
 
-            # ── Section 2: Domestic indices + ADR ────────────────────────────────────────────────────────────────────────────────────────────────
             domestic = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("""
@@ -1127,7 +1140,6 @@ def _build_digest_daily() -> dict:
                 "adr": adr
             }
 
-            # ── Sections 3 & 4: Rolling-5d pivots for NIFTY50 + BANKNIFTY ──
             pivots = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("""
@@ -1159,7 +1171,6 @@ def _build_digest_daily() -> dict:
                 "BANKNIFTY": pivots.get("BANKNIFTY"),
             }
 
-            # ── Section 5: PCR 5-day rolling ─────────────────────────────────────────────────────────────────────────────────────────────────────
             pcr_out = {}
             for und in ("NIFTY", "BANKNIFTY"):
                 cur.execute("""
@@ -1187,9 +1198,6 @@ def _build_digest_daily() -> dict:
 def digest_daily():
     """
     Daily Digest sections 1-5 — fully server-side baked from DB.
-    Section 1: Global indices. Section 2: Domestic NIFTY/BNF + ADR.
-    Section 3: Support S1/S2. Section 4: Pivot PP/R1/R2/S1/S2 (rolling-5d).
-    Section 5: PCR 5-day rolling.
     AI layer (sections 6-10: news + trading plan) added by Claude on top.
     """
     return _build_digest_daily()
@@ -1198,35 +1206,27 @@ def digest_daily():
 
 @app.get("/api/daily/adr")
 def daily_adr(days: int = 5):
-    """ADR trend — last N days from adr_daily (compute-on-write at 15:50 IST)."""
     days = min(max(days, 1), 30)
     rows = api_query("""
         SELECT price_date::text, advances, declines, unchanged, adr,
                CASE WHEN adr >= 1.0 THEN TRUE ELSE FALSE END AS pass
-        FROM adr_daily
-        ORDER BY price_date DESC
-        LIMIT %s
+        FROM adr_daily ORDER BY price_date DESC LIMIT %s
     """, (days,))
     return {"days": len(rows) if isinstance(rows, list) else 0, "data": rows if isinstance(rows, list) else []}
 
 @app.get("/api/daily/pcr")
 def daily_pcr(underlying: str = "NIFTY", days: int = 5):
-    """PCR trend — last N days from pcr_daily. underlying: NIFTY or BANKNIFTY."""
     underlying = underlying.upper()
     days = min(max(days, 1), 30)
     rows = api_query("""
         SELECT price_date::text, underlying, put_oi, call_oi, pcr
-        FROM pcr_daily
-        WHERE underlying = %s
-        ORDER BY price_date DESC
-        LIMIT %s
+        FROM pcr_daily WHERE underlying = %s ORDER BY price_date DESC LIMIT %s
     """, (underlying, days))
     return {"underlying": underlying, "days": len(rows) if isinstance(rows, list) else 0,
             "data": rows if isinstance(rows, list) else []}
 
 @app.post("/api/daily/compute_metrics")
 def compute_daily_metrics_now(x_admin_token: Optional[str] = Header(None)):
-    """Manually trigger ADR + PCR compute and store. Normally runs at 15:50 IST."""
     _check_admin(x_admin_token)
     with get_conn() as conn:
         adr = _compute_and_store_adr(conn)
@@ -1252,6 +1252,13 @@ def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
         for b in baskets:
             out.append(qb_eod_checker.run_eod_checker(conn, basket_name=b))
     return {"baskets_run": len(out), "results": out}
+
+@app.post("/api/qb/mark_intraday")
+async def qb_mark_intraday_now(x_admin_token: Optional[str] = Header(None)):
+    """Manually trigger QB intraday price mark via Yahoo. Normally auto-runs every 15 min."""
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        return qb_eod_checker.qb_intraday_mark(conn)
 
 @app.get("/api/qb/positions")
 def qb_positions(basket_name: str = "large_cap", status: str = "open"):
@@ -1559,15 +1566,10 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "total_candles": total_candles}
 
 # ── Yahoo Morning Gap Healer ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-# Fills TODAY's missing 1-min bars for the futures universe from the Yahoo
-# chart API (no token). Fill-only (DO NOTHING) — Fyers bars never overwritten.
-# Gap-aware per symbol; 15-min Yahoo lag buffer; slow & safe loop.
 _LAG_MINUTES = 15
 _HEAL_SLEEP = 0.8
 
 def _yahoo_1m_today(symbol: str):
-    """Today's 1-min candles for ONE symbol from Yahoo. Returns list of
-    (ts_naive_ist, o,h,l,c,v) oldest->newest, skipping null/zero-volume bars."""
     ticker = _yahoo_ticker(symbol)
     now = int(time.time())
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
@@ -1606,7 +1608,6 @@ def _yahoo_1m_today(symbol: str):
 
 
 def _heal_morning_gaps(symbols=None):
-    """Fill today's missing 1-min bars for active futures from Yahoo. Fill-only."""
     now = _ist_now()
     today = now.date()
     open_dt = now.replace(hour=9, minute=15, second=0, microsecond=0)
@@ -1614,8 +1615,7 @@ def _heal_morning_gaps(symbols=None):
     heal_until = now - timedelta(minutes=_LAG_MINUTES)
     if heal_until > close_dt: heal_until = close_dt
     if heal_until <= open_dt:
-        return {"status": "noop", "reason": "before ~09:30 IST (nothing healable yet)",
-                "today": str(today)}
+        return {"status": "noop", "reason": "before ~09:30 IST (nothing healable yet)", "today": str(today)}
 
     syms = symbols if symbols else _get_futures_symbols()
     syms = [s for s in syms if s not in ("NIFTY","BANKNIFTY","NIFTY50","FINNIFTY","MIDCPNIFTY","SENSEX","BANKEX")]
