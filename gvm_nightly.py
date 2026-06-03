@@ -19,6 +19,12 @@ Workflow:
          - gvm_history  (APPEND one dated row per stock; the trend table)
          - gvm_scores   (REPLACE latest snapshot; canonical read table)
          - sector_ratings (REPLACE; mcap-weighted segment GVM — wired daily)
+
+Verdict framework (Arpit):
+  >= 8.0  -> Strong Buy
+  7.0-8.0 -> Buy
+  6.0-7.0 -> Watch
+  < 6.0   -> Exit
 """
 
 import os
@@ -112,6 +118,11 @@ PEER_PARAMS = [
 
 # ============================================================
 # LABELS + VERDICT + PUNCHLINE
+# Verdict framework (Arpit):
+#   >= 8.0  -> Strong Buy
+#   7.0-8.0 -> Buy
+#   6.0-7.0 -> Watch
+#   < 6.0   -> Exit
 # ============================================================
 def _label_growth(s):
     return "Excellent" if s >= 8 else "Healthy" if s >= 6.5 else "Average" if s >= 5 else "Weak"
@@ -123,20 +134,17 @@ def _label_momentum(s):
     return "Strong" if s >= 8 else "Positive" if s >= 6 else "Neutral" if s >= 4 else "Weak"
 
 def _label_gvm(s):
-    return ("Excellent" if s >= 8 else "Good" if s >= 7 else "Average" if s >= 6
-            else "Below Average" if s >= 5 else "Poor")
+    return ("Excellent" if s >= 8 else "Good" if s >= 7 else "Average" if s >= 6 else "Poor")
 
 def _verdict(s):
-    return ("Strong Buy" if s >= 8 else "Buy" if s >= 7 else "Accumulate" if s >= 6
-            else "Wait & Watch" if s >= 5 else "Avoid")
+    return ("Strong Buy" if s >= 8 else "Buy" if s >= 7 else "Watch" if s >= 6 else "Exit")
 
 def _punchline(verd, g_lbl, v_lbl, m_lbl, gvm_lbl):
     action = {
         "Strong Buy": "It is highly recommended to Buy",
-        "Buy": "It is recommended to Buy",
-        "Accumulate": "It is advisable to Accumulate",
-        "Wait & Watch": "It is advisable to Wait & Watch",
-        "Avoid": "It is advisable to Avoid",
+        "Buy":        "It is recommended to Buy",
+        "Watch":      "It is advisable to Watch and Accumulate on dips",
+        "Exit":       "It is advisable to Exit or Avoid",
     }[verd]
     return (f"{action} for medium to long term perspective, considering its "
             f"{g_lbl} Growth, {v_lbl} Valuation, {m_lbl} Momentum & {gvm_lbl} overall GVM Rating.")
