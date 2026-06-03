@@ -23,14 +23,23 @@ Tables touched:
   quant_paper_positions  — updates current_price, current_value, pnl, pnl_pct, status
   quant_rebalance_log    — appends one row per run
 
+Also provides:
+  qb_intraday_mark(conn) — intraday price-only mark via Yahoo chart API.
+    Runs every 15 min during market hours. Updates current_price/value/pnl/pnl_pct
+    for ALL open QB positions across ALL baskets. No stop exits — EOD only.
+
 Timezone: always IST (Asia/Kolkata, UTC+5:30). Never UTC.
 """
 
 import logging
 import json
 import re
+import time
+import urllib.parse
 from datetime import datetime, date, timezone, timedelta
 from typing import Dict, List, Optional
+
+import requests
 
 log = logging.getLogger("scorr.qb_eod")
 
@@ -42,6 +51,9 @@ REL_STOP_PCT   = -5.0    # stock underperforms Nifty by 5% from entry date
 # Robust: pull the first decimal number after "Nifty entry=" regardless of
 # surrounding separators (comma, pipe, trailing period, spaces).
 _NIFTY_ENTRY_RE = re.compile(r"Nifty\s*entry\s*=\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
+
+_YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+_YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
 
 
 def _safe_float(v) -> Optional[float]:
@@ -74,6 +86,145 @@ def _parse_nifty_entry(notes: str) -> Optional[float]:
     return None
 
 
+def _yahoo_ticker_eq(symbol: str) -> str:
+    """NSE equity ticker for Yahoo. Handles special chars (& -> %26)."""
+    indices = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
+    if symbol in indices:
+        return indices[symbol]
+    # URL-encode the symbol then append .NS
+    # e.g. GVT&D -> GVT%26D.NS, BAJAJ-AUTO -> BAJAJ-AUTO.NS
+    return urllib.parse.quote(symbol, safe="") + ".NS"
+
+
+def _fetch_yahoo_ltp(symbol: str) -> Optional[float]:
+    """Fetch latest traded price for one equity symbol from Yahoo chart API.
+    Returns float or None on any failure. One retry on empty result."""
+    ticker = _yahoo_ticker_eq(symbol)
+    url = _YAHOO_CHART.format(sym=ticker)
+    params = {"interval": "1m", "range": "1d"}
+    for attempt in range(2):
+        try:
+            r = requests.get(url, params=params,
+                             headers={"User-Agent": _YAHOO_UA}, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            chart = (data.get("chart") or {}).get("result") or []
+            if not chart:
+                if attempt == 0:
+                    time.sleep(0.4)
+                    continue
+                return None
+            res = chart[0]
+            # Prefer regularMarketPrice meta field — always present, no null bars
+            meta = res.get("meta") or {}
+            price = meta.get("regularMarketPrice")
+            if price:
+                return float(price)
+            # Fallback: last non-null close in quote array
+            closes = ((res.get("indicators") or {})
+                      .get("quote", [{}])[0]
+                      .get("close") or [])
+            closes = [c for c in closes if c is not None]
+            return float(closes[-1]) if closes else None
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(0.4)
+                continue
+            log.warning(f"qb_intraday: yahoo LTP failed {symbol}: {e}")
+            return None
+    return None
+
+
+def qb_intraday_mark(conn) -> Dict:
+    """
+    Intraday price-only mark for ALL open QB positions across ALL baskets.
+    Fetches latest price from Yahoo chart API (1-min, 1d range).
+    Updates current_price, current_value, pnl, pnl_pct, updated_at.
+    NO stop-loss exits — those are EOD-only.
+    Runs every 15 min during market hours from main.py _live_loop.
+    """
+    now = datetime.now(IST)
+
+    # Load all open positions across all baskets in one query
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, symbol, entry_price, qty
+                FROM quant_paper_positions
+                WHERE status = 'open'
+                ORDER BY symbol
+            """)
+            cols = [d[0] for d in cur.description]
+            positions = [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as e:
+        log.error(f"qb_intraday: positions fetch failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+    if not positions:
+        return {"status": "ok", "marked": 0, "msg": "no open positions"}
+
+    # Deduplicate symbols — fetch price once, apply to all baskets
+    symbols = list(dict.fromkeys(p["symbol"] for p in positions))
+
+    # Fetch Yahoo LTP for each symbol — one at a time (Yahoo rule)
+    prices: Dict[str, Optional[float]] = {}
+    for sym in symbols:
+        prices[sym] = _fetch_yahoo_ltp(sym)
+        time.sleep(0.3)   # gentle rate — 53 symbols ~16s total
+
+    # Mark positions
+    marked, skipped, errors = 0, 0, []
+    for pos in positions:
+        sym         = pos["symbol"]
+        entry_price = _safe_float(pos["entry_price"])
+        qty         = _safe_float(pos["qty"])
+        ltp         = prices.get(sym)
+
+        if ltp is None:
+            skipped += 1
+            continue
+
+        pnl       = (ltp - entry_price) * qty if entry_price and qty else None
+        curr_val  = ltp * qty if qty else None
+        pnl_pct   = _pct_change(ltp, entry_price)
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE quant_paper_positions SET
+                        current_price = %s,
+                        current_value = %s,
+                        pnl           = %s,
+                        pnl_pct       = %s,
+                        updated_at    = NOW()
+                    WHERE id = %s
+                """, (
+                    round(ltp, 2),
+                    round(curr_val, 2) if curr_val is not None else None,
+                    round(pnl, 2)     if pnl      is not None else None,
+                    round(pnl_pct, 4) if pnl_pct  is not None else None,
+                    pos["id"]
+                ))
+            conn.commit()
+            marked += 1
+        except Exception as e:
+            conn.rollback()
+            errors.append(f"{sym}: {str(e)[:60]}")
+            log.warning(f"qb_intraday: update failed {sym}: {e}")
+
+    result = {
+        "status":       "ok",
+        "run_at":       now.strftime("%H:%M IST"),
+        "symbols":      len(symbols),
+        "marked":       marked,
+        "skipped":      skipped,
+        "errors":       errors[:10],
+    }
+    log.info(f"qb_intraday_mark: {marked}/{len(positions)} marked, "
+             f"{skipped} skipped, {len(errors)} errors")
+    return result
+
+
 def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     """
     Main entry point. Run once at EOD after raw_prices updated.
@@ -91,7 +242,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         "errors": []
     }
 
-    # ── Step 1: Get today's Nifty close ──────────────────────────────────────
+    # ── Step 1: Get today's Nifty close ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     nifty_today = None
     try:
         with conn.cursor() as cur:
@@ -108,7 +259,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     if nifty_today is None:
         log.warning(f"qb_eod: no Nifty close for {NIFTY_SYMBOL} — Hard Stop 2 (vs Nifty) will be skipped this run")
 
-    # ── Step 2: Load all open positions ──────────────────────────────────────
+    # ── Step 2: Load all open positions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -129,7 +280,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         log.info(f"qb_eod: no open positions for {basket_name}")
         return summary
 
-    # ── Step 3: Process each position ────────────────────────────────────────
+    # ── Step 3: Process each position ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     actions = []
     for pos in positions:
         sym          = pos["symbol"]
@@ -165,7 +316,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         pnl        = (eod_close - entry_price) * qty if qty else None
         curr_value = eod_close * qty if qty else None
 
-        # ── Hard Stop checks ──────────────────────────────────────────────
+        # ── Hard Stop checks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
         hs1_breach = stock_ret is not None and stock_ret <= HARD_STOP_PCT
         hs2_breach = vs_nifty  is not None and vs_nifty  <= REL_STOP_PCT
 
@@ -179,7 +330,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
 
         new_status = "exited_stop" if exit_reason else "open"
 
-        # ── Update position ───────────────────────────────────────────────
+        # ── Update position ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
         try:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -229,7 +380,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     summary["total_unrealised_pnl"] = round(summary["total_unrealised_pnl"], 2)
     summary["total_realised_pnl"]   = round(summary["total_realised_pnl"], 2)
 
-    # ── Step 4: Log to quant_rebalance_log ───────────────────────────────────
+    # ── Step 4: Log to quant_rebalance_log ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     try:
         with conn.cursor() as cur:
             cur.execute("""
