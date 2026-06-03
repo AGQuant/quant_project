@@ -39,11 +39,14 @@ import v8_signal_writer
 import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.7.4
-# v2.7.4: fix syntax error in build_health_report() — ternary
-#   expression on line 941 was missing closing paren before else.
-#   (0.5 if c["status"] == "warn") else 0  →  (0.5 if c["status"] == "warn" else 0)
-#   This caused a SyntaxError on Python 3.13 crashing the app at startup.
+# Scorr / Project Quant — main.py v2.8.0
+# v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
+#   adr_daily: ADR from raw_prices (futures universe) at 15:50 IST.
+#   pcr_daily: PCR from option_chain EOD snapshot at 15:50 IST.
+#   New endpoints: GET /api/daily/adr, GET /api/daily/pcr.
+#   New MCP tools: daily_adr, daily_pcr.
+#   Bug fix: market_mood ADR fallback now reads adr_daily, not stale v8_metrics.
+# v2.7.4: fix syntax error in build_health_report() — ternary expression.
 # v2.7.3: SYSTEM HEALTH REPORT CARD — GET /api/health/report + health_report MCP tool
 # v2.7.2: CLEANUP — dropped 9 dead endpoints + 3 MCP tools.
 # v2.7.1: ALL 4 QUANT BASKETS LIVE + nifty500_universe + nifty500_benchmark.
@@ -52,7 +55,7 @@ import qb_eod_checker
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.7.4"
+VERSION = "2.8.0"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -199,12 +202,31 @@ def create_tables():
         notes TEXT,
         updated_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS adr_daily (
+        id SERIAL PRIMARY KEY,
+        price_date DATE NOT NULL UNIQUE,
+        advances INTEGER DEFAULT 0,
+        declines INTEGER DEFAULT 0,
+        unchanged INTEGER DEFAULT 0,
+        adr NUMERIC(6,3),
+        computed_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS pcr_daily (
+        id SERIAL PRIMARY KEY,
+        price_date DATE NOT NULL,
+        underlying TEXT NOT NULL,
+        put_oi BIGINT DEFAULT 0,
+        call_oi BIGINT DEFAULT 0,
+        pcr NUMERIC(6,3),
+        computed_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(price_date, underlying)
+    );
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.7.4)")
+        log.info("Tables ready (v2.8.0)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -364,6 +386,8 @@ _global_fetching: bool = False
 _global_intraday_fetching: bool = False
 _qb_eod_ran_today: Optional[date] = None
 _qb_eod_running: bool = False
+_daily_metrics_ran_today: Optional[date] = None
+_daily_metrics_running: bool = False
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on(): return
@@ -591,6 +615,113 @@ async def _task_qb_eod_checker():
     log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
+# ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ───────────────────
+def _compute_and_store_adr(conn) -> dict:
+    """Compute ADR from raw_prices (futures universe) → store in adr_daily.
+    Architecture: compute in DB via SQL, store result. API reads stored copy.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH latest_date AS (SELECT MAX(price_date) AS pd FROM raw_prices),
+            latest AS (
+                SELECT r.symbol, r.close
+                FROM raw_prices r
+                JOIN futures_universe fu ON r.symbol = fu.symbol AND fu.is_active = TRUE
+                WHERE r.price_date = (SELECT pd FROM latest_date)
+            ),
+            prev AS (
+                SELECT DISTINCT ON (r.symbol) r.symbol, r.close AS prev_close
+                FROM raw_prices r
+                JOIN futures_universe fu ON r.symbol = fu.symbol AND fu.is_active = TRUE
+                WHERE r.price_date < (SELECT pd FROM latest_date)
+                ORDER BY r.symbol, r.price_date DESC
+            ),
+            agg AS (
+                SELECT
+                    (SELECT pd FROM latest_date) AS price_date,
+                    COUNT(*) FILTER (WHERE l.close > p.prev_close) AS advances,
+                    COUNT(*) FILTER (WHERE l.close < p.prev_close) AS declines,
+                    COUNT(*) FILTER (WHERE l.close = p.prev_close) AS unchanged
+                FROM latest l JOIN prev p ON l.symbol = p.symbol
+            )
+            INSERT INTO adr_daily (price_date, advances, declines, unchanged, adr)
+            SELECT price_date, advances, declines, unchanged,
+                   ROUND(advances::numeric / NULLIF(declines, 0), 3)
+            FROM agg
+            ON CONFLICT (price_date) DO UPDATE SET
+                advances    = EXCLUDED.advances,
+                declines    = EXCLUDED.declines,
+                unchanged   = EXCLUDED.unchanged,
+                adr         = EXCLUDED.adr,
+                computed_at = NOW()
+            RETURNING price_date, advances, declines, unchanged, adr
+        """)
+        row = cur.fetchone()
+        conn.commit()
+        if row:
+            return {"price_date": str(row[0]), "advances": row[1], "declines": row[2],
+                    "unchanged": row[3], "adr": float(row[4] or 0)}
+        return {"status": "no_data"}
+
+
+def _compute_and_store_pcr(conn) -> dict:
+    """Compute PCR from option_chain EOD snapshot → store in pcr_daily.
+    Architecture: compute in DB via SQL, store result. API reads stored copy.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO pcr_daily (price_date, underlying, put_oi, call_oi, pcr)
+            SELECT
+                DATE(ts) AS price_date,
+                underlying,
+                SUM(CASE WHEN option_type = 'PE' THEN oi ELSE 0 END) AS put_oi,
+                SUM(CASE WHEN option_type = 'CE' THEN oi ELSE 0 END) AS call_oi,
+                ROUND(
+                    SUM(CASE WHEN option_type = 'PE' THEN oi ELSE 0 END)::numeric /
+                    NULLIF(SUM(CASE WHEN option_type = 'CE' THEN oi ELSE 0 END), 0),
+                3)
+            FROM option_chain
+            WHERE ts IN (
+                SELECT MAX(ts2) FROM option_chain oc2
+                WHERE DATE(oc2.ts) = DATE(option_chain.ts)
+                GROUP BY DATE(oc2.ts)
+            )
+            AND DATE(ts) = (SELECT MAX(DATE(ts)) FROM option_chain)
+            GROUP BY DATE(ts), underlying
+            ON CONFLICT (price_date, underlying) DO UPDATE SET
+                put_oi      = EXCLUDED.put_oi,
+                call_oi     = EXCLUDED.call_oi,
+                pcr         = EXCLUDED.pcr,
+                computed_at = NOW()
+        """)
+        rowcount = cur.rowcount
+        conn.commit()
+        return {"status": "ok", "rows": rowcount}
+
+
+def _bg_compute_daily_metrics():
+    global _daily_metrics_ran_today, _daily_metrics_running
+    if _daily_metrics_running: return
+    _daily_metrics_running = True
+    try:
+        with get_conn() as conn:
+            adr = _compute_and_store_adr(conn)
+            pcr = _compute_and_store_pcr(conn)
+        _daily_metrics_ran_today = _ist_now().date()
+        log.info(f"daily_metrics: ADR={adr.get('adr')} ADV={adr.get('advances')} DEC={adr.get('declines')} PCR_rows={pcr.get('rows')}")
+    except Exception as e:
+        log.error(f"daily_metrics failed: {e}")
+    finally:
+        _daily_metrics_running = False
+
+
+async def _task_compute_daily_metrics():
+    global _daily_metrics_ran_today
+    today = _ist_now().date()
+    if _daily_metrics_ran_today == today: return
+    log.info("15:50 IST: Computing daily ADR + PCR → adr_daily, pcr_daily")
+    asyncio.create_task(asyncio.to_thread(_bg_compute_daily_metrics))
+
 async def _task_load_earnings_daily():
     global _earnings_loaded_today
     today = _ist_now().date()
@@ -605,7 +736,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.7.4)")
+    log.info("Scheduler started (v2.8.0)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -622,6 +753,8 @@ async def _scheduler():
                 await _task_refresh_cmp()
             if trading_day and now.hour == 15 and 45 <= now.minute < 55:
                 await _task_run_v8_engine()
+            if trading_day and now.hour == 15 and 50 <= now.minute < 60:
+                await _task_compute_daily_metrics()
             if trading_day and now.hour == 21 and now.minute < 5:
                 await _task_update_raw_prices()
             if trading_day and now.hour == 21 and 5 <= now.minute < 15:
@@ -635,7 +768,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.7.4)")
+    log.info("Live loop started (v2.8.0)")
     tick_count = 0
     while True:
         try:
@@ -763,6 +896,8 @@ def build_health_report() -> dict:
                 ("v8_history_cache", "SELECT MAX(cache_date) FROM v8_history_cache",        1, "V8 cache"),
                 ("global_indices",   "SELECT MAX(quote_date) FROM global_indices",          2, "Global indices"),
                 ("earnings_calendar","SELECT MAX(loaded_at)::date FROM earnings_calendar",  3, "Earnings calendar"),
+                ("adr_daily",        "SELECT MAX(price_date) FROM adr_daily",               1, "ADR daily"),
+                ("pcr_daily",        "SELECT MAX(price_date) FROM pcr_daily",               1, "PCR daily"),
             ]
             for tbl, q, max_days_old, label in feed_checks:
                 try:
@@ -785,6 +920,7 @@ def build_health_report() -> dict:
                 ("GVM recompute (22:00 IST)",   "SELECT MAX(score_date) FROM gvm_scores",               1),
                 ("Raw prices (21:00 IST)",       "SELECT MAX(price_date) FROM raw_prices",               1),
                 ("V8 engine (15:45 IST)",        "SELECT MAX(score_date) FROM v8_metrics",               1),
+                ("ADR+PCR (15:50 IST)",          "SELECT MAX(price_date) FROM adr_daily",                1),
                 ("V8 cache (09:00 IST)",         "SELECT MAX(cache_date) FROM v8_history_cache",         1),
                 ("Global indices (07:00 IST)",   "SELECT MAX(quote_date) FROM global_indices",           2),
                 ("QB EOD checker (21:05 IST)",   "SELECT MAX(rebalance_date) FROM quant_rebalance_log",999),
@@ -896,7 +1032,6 @@ def build_health_report() -> dict:
         report["issues"].append(f"[system] DB connection or query failed: {e}")
         log.error(f"health_report failed: {e}")
 
-    # ── Section grades — FIX: correct ternary syntax ──────────────────────────
     for sec_name, sec in report["sections"].items():
         sec_checks = sec.get("checks", [])
         if not sec_checks:
@@ -919,7 +1054,48 @@ def health_report():
     """Full system health report card — 6 sections, letter grades, issues list."""
     return build_health_report()
 
-# ── Quant Basket endpoints ────────────────────────────────────────────────────
+# ── Daily Digest endpoints (compute-on-write) ─────────────────────────────────
+
+@app.get("/api/daily/adr")
+def daily_adr(days: int = 5):
+    """ADR trend — last N days from adr_daily (compute-on-write at 15:50 IST).
+    Source: raw_prices close-to-close for futures universe. NOT v8_metrics."""
+    days = min(max(days, 1), 30)
+    rows = api_query("""
+        SELECT price_date::text, advances, declines, unchanged, adr,
+               CASE WHEN adr >= 1.0 THEN TRUE ELSE FALSE END AS pass
+        FROM adr_daily
+        ORDER BY price_date DESC
+        LIMIT %s
+    """, (days,))
+    return {"days": len(rows) if isinstance(rows, list) else 0, "data": rows if isinstance(rows, list) else []}
+
+@app.get("/api/daily/pcr")
+def daily_pcr(underlying: str = "NIFTY", days: int = 5):
+    """PCR trend — last N days from pcr_daily (compute-on-write at 15:50 IST).
+    underlying: NIFTY or BANKNIFTY. Builds up over time as options feed collects data."""
+    underlying = underlying.upper()
+    days = min(max(days, 1), 30)
+    rows = api_query("""
+        SELECT price_date::text, underlying, put_oi, call_oi, pcr
+        FROM pcr_daily
+        WHERE underlying = %s
+        ORDER BY price_date DESC
+        LIMIT %s
+    """, (underlying, days))
+    return {"underlying": underlying, "days": len(rows) if isinstance(rows, list) else 0,
+            "data": rows if isinstance(rows, list) else []}
+
+@app.post("/api/daily/compute_metrics")
+def compute_daily_metrics_now(x_admin_token: Optional[str] = Header(None)):
+    """Manually trigger ADR + PCR compute and store. Normally runs at 15:50 IST."""
+    _check_admin(x_admin_token)
+    with get_conn() as conn:
+        adr = _compute_and_store_adr(conn)
+        pcr = _compute_and_store_pcr(conn)
+    return {"adr": adr, "pcr": pcr}
+
+# ── Quant Basket endpoints ─────────────────────────────────────────────────────
 
 @app.post("/api/qb/eod_check")
 def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
@@ -983,7 +1159,7 @@ def qb_registry(basket_name: Optional[str] = None):
         return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
     return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
 
-# ── Admin + data endpoints ────────────────────────────────────────────────────
+# ── Admin + data endpoints ─────────────────────────────────────────────────────
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1037,6 +1213,8 @@ def health_feeds():
         ("futures_universe", "SELECT MAX(updated_at)::date, COUNT(*) FROM futures_universe WHERE is_active=TRUE"),
         ("global_indices",   "SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
         ("global_intraday",  "SELECT MAX(ts)::date, COUNT(DISTINCT symbol) FROM global_intraday"),
+        ("adr_daily",        "SELECT MAX(price_date), COUNT(*) FROM adr_daily"),
+        ("pcr_daily",        "SELECT MAX(price_date), COUNT(*) FROM pcr_daily"),
         ("quant_positions",  "SELECT MAX(updated_at)::date, COUNT(*) FROM quant_paper_positions WHERE status='open'"),
         ("quant_registry",   "SELECT MAX(updated_at)::date, COUNT(*) FROM quant_basket_registry WHERE is_active=TRUE"),
     ]
@@ -1133,7 +1311,7 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     vals.append(n)
     return api_query(sql, vals)
 
-# ── Data endpoints ────────────────────────────────────────────────────────────
+# ── Data endpoints ─────────────────────────────────────────────────────────────
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
@@ -1224,7 +1402,7 @@ def v8_live_metrics():
         ORDER BY s.symbol
     """)
 
-# ── Admin data operations ─────────────────────────────────────────────────────
+# ── Admin data operations ──────────────────────────────────────────────────────
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
@@ -1590,7 +1768,7 @@ MCP_TOOLS = [
     {"name": "v8_futures_list", "description": "V8: List active futures universe stocks.", "inputSchema": {"type": "object", "properties": {"active_only": {"type": "boolean"}}, "required": []}},
     {"name": "v8_futures_upload", "description": "V8: Replace futures universe with new stock list.", "inputSchema": {"type": "object", "properties": {"stocks": {"type": "array", "items": {"type": "string"}}}, "required": ["stocks"]}},
     {"name": "get_top_gainers", "description": "Top gainers by day% from EOD data, joined with GVM scores.", "inputSchema": {"type": "object", "properties": {"price_date": {"type": "string"}, "n": {"type": "integer"}, "min_gvm": {"type": "number"}, "min_day_pct": {"type": "number"}, "universe": {"type": "string"}, "min_volume": {"type": "integer"}}, "required": []}},
-    {"name": "get_global", "description": "Daily Digest: latest global scorecard — indices, commodities, currency.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "get_global", "description": "Daily Digest section 1: latest global scorecard — indices, commodities, currency.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "fetch_global", "description": "Manually trigger global scorecard fetch into global_indices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "backfill_global", "description": "One-time backfill of N years daily global history.", "inputSchema": {"type": "object", "properties": {"years": {"type": "integer"}, "clean": {"type": "boolean"}}, "required": []}},
     {"name": "get_global_intraday", "description": "Gold/Silver 5-min intraday bars (7-day rolling).", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "days": {"type": "integer"}}, "required": ["name"]}},
@@ -1601,6 +1779,9 @@ MCP_TOOLS = [
     {"name": "qb_summary", "description": "Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
     {"name": "qb_rebalance_log", "description": "Quant Basket: rebalance + EOD check history.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
     {"name": "qb_registry", "description": "Quant Basket: registry of all baskets — cadence, weight band, next rebalance, max stocks, capital.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
+    {"name": "daily_adr", "description": "Daily Digest section 3 (support/breadth): ADR trend last N days from adr_daily (compute-on-write 15:50 IST). Source: raw_prices close-to-close, futures universe.", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
+    {"name": "daily_pcr", "description": "Daily Digest section 5 (PCR trend): Put/Call Ratio last N days from pcr_daily (compute-on-write 15:50 IST). underlying: NIFTY or BANKNIFTY.", "inputSchema": {"type": "object", "properties": {"underlying": {"type": "string"}, "days": {"type": "integer"}}, "required": []}},
+    {"name": "compute_daily_metrics", "description": "Manually trigger ADR + PCR compute-and-store. Normally runs at 15:50 IST automatically.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -1702,6 +1883,15 @@ async def _call_tool(name, args):
             params = {}
             if args.get("basket_name"): params["basket_name"] = args["basket_name"]
             r = await client.get(f"{BASE_URL}/api/qb/registry", params=params)
+            return r.json()
+        elif name == "daily_adr":
+            r = await client.get(f"{BASE_URL}/api/daily/adr", params={"days": args.get("days", 5)})
+            return r.json()
+        elif name == "daily_pcr":
+            r = await client.get(f"{BASE_URL}/api/daily/pcr", params={"underlying": args.get("underlying", "NIFTY"), "days": args.get("days", 5)})
+            return r.json()
+        elif name == "compute_daily_metrics":
+            r = await client.post(f"{BASE_URL}/api/daily/compute_metrics", headers=h)
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
