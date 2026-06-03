@@ -39,7 +39,8 @@ import v8_signal_writer
 import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.2
+# Scorr / Project Quant — main.py v2.9.3
+# v2.9.3: get_gvm joins input_raw — returns overview + key_takeaway.
 # v2.9.2: QB intraday price mark — Yahoo 15-min live P&L for all 53 open QB
 #   positions across all 4 baskets. Price-only, no stop exits intraday.
 #   _bg_qb_intraday_mark fires every 15 ticks (15 min) in _live_loop.
@@ -47,15 +48,9 @@ import qb_eod_checker
 # v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # v2.7.4: fix syntax error in build_health_report().
-# v2.7.3: SYSTEM HEALTH REPORT CARD.
-# v2.7.2: CLEANUP — dropped 9 dead endpoints + 3 MCP tools.
-# v2.7.1: ALL 4 QUANT BASKETS LIVE + nifty500_universe + nifty500_benchmark.
-# v2.7.0: QUANT BASKET EOD checker wired.
-# v2.6.0: COMPUTE-ON-WRITE architecture (v8_signal_writer).
-# v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.9.2"
+VERSION = "2.9.3"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -226,7 +221,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.9.2)")
+        log.info("Tables ready (v2.9.3)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -586,7 +581,6 @@ def _bg_signal_writer():
     finally:
         _signal_writer_running = False
 
-# ── QB Intraday Price Mark (Yahoo, every 15 min during market hours) ──────────────────────────────────────────────────────────────────────────────
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
     if _qb_intraday_mark_running: return
@@ -601,7 +595,6 @@ def _bg_qb_intraday_mark():
     finally:
         _qb_intraday_mark_running = False
 
-# ── Quant Basket EOD Checker ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _bg_qb_eod_checker():
     global _qb_eod_ran_today, _qb_eod_running
     if _qb_eod_running: return
@@ -631,7 +624,6 @@ async def _task_qb_eod_checker():
     log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
-# ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ────────────────────────────────────────────────────────────────────────────────────────
 def _compute_and_store_adr(conn) -> dict:
     with conn.cursor() as cur:
         cur.execute("""
@@ -746,7 +738,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.2)")
+    log.info("Scheduler started (v2.9.3)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -778,7 +770,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.2)")
+    log.info("Live loop started (v2.9.3)")
     tick_count = 0
     while True:
         try:
@@ -788,7 +780,6 @@ async def _live_loop():
                 tick_count += 1
                 if tick_count % 5 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
-                # QB intraday mark every 15 ticks (15 min) — Yahoo 15-min cadence
                 if tick_count % 15 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
             else:
@@ -835,7 +826,6 @@ def server_now():
         "market_open": _is_market_hours(),
     }
 
-# ── System Health Report Card ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _grade(score: float) -> str:
     if score >= 95: return "A+"
     if score >= 90: return "A"
@@ -1067,17 +1057,7 @@ def health_report():
     """Full system health report card — 6 sections, letter grades, issues list."""
     return build_health_report()
 
-# ── Daily Digest — sections 1-5 server-side ──────────────────────────────────────────────────────────────────────────────────────────────────────
-
 def _build_digest_daily() -> dict:
-    """
-    Bakes digest sections 1-5 from DB. Pure deterministic — no AI, no web.
-    Section 1: Global indices (global_indices table, latest quote_date).
-    Section 2: NIFTY50 + BANKNIFTY OHLC + chg% + ADR (raw_prices + adr_daily).
-    Section 3: Support levels S1/S2 — rolling-5d average OHLC floor pivot.
-    Section 4: Pivot points PP/R1/R2/S1/S2 — rolling-5d average.
-    Section 5: PCR 5-day rolling (pcr_daily).
-    """
     now = _ist_now()
     result: Dict[str, Any] = {
         "generated_at": now.strftime("%Y-%m-%d %H:%M:%S IST"),
@@ -1091,7 +1071,6 @@ def _build_digest_daily() -> dict:
 
     try:
         with get_conn() as conn, conn.cursor() as cur:
-
             cur.execute("""
                 SELECT g.name, g.category, g.price, g.prev_close, g.chg_pct, g.quote_date::text
                 FROM global_indices g
@@ -1196,13 +1175,7 @@ def _build_digest_daily() -> dict:
 
 @app.get("/api/digest/daily")
 def digest_daily():
-    """
-    Daily Digest sections 1-5 — fully server-side baked from DB.
-    AI layer (sections 6-10: news + trading plan) added by Claude on top.
-    """
     return _build_digest_daily()
-
-# ── Daily Digest sub-endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/daily/adr")
 def daily_adr(days: int = 5):
@@ -1233,8 +1206,6 @@ def compute_daily_metrics_now(x_admin_token: Optional[str] = Header(None)):
         pcr = _compute_and_store_pcr(conn)
     return {"adr": adr, "pcr": pcr}
 
-# ── Quant Basket endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
 @app.post("/api/qb/eod_check")
 def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -1255,7 +1226,6 @@ def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
 
 @app.post("/api/qb/mark_intraday")
 async def qb_mark_intraday_now(x_admin_token: Optional[str] = Header(None)):
-    """Manually trigger QB intraday price mark via Yahoo. Normally auto-runs every 15 min."""
     _check_admin(x_admin_token)
     with get_conn() as conn:
         return qb_eod_checker.qb_intraday_mark(conn)
@@ -1303,8 +1273,6 @@ def qb_registry(basket_name: Optional[str] = None):
     if basket_name:
         return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
     return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
-
-# ── Admin + data endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1397,11 +1365,20 @@ def api_query(sql, params=None, single=False):
         log.error(f"api_query error: {e}")
         return {"error": str(e)}
 
-# ── GVM endpoints ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── GVM endpoints ─────────────────────────────────────────────────────────────
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
-    r = api_query("SELECT symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap FROM gvm_scores WHERE symbol = %s", (symbol.upper(),), single=True)
+    # v2.9.3: joins input_raw to return overview + key_takeaway
+    r = api_query("""
+        SELECT g.symbol, g.company_name, g.segment, g.price,
+               g.g_score, g.v_score, g.m_score, g.gvm_score,
+               g.verdict, g.punchline, g.market_cap,
+               i.overview, i.key_takeaway
+        FROM gvm_scores g
+        LEFT JOIN input_raw i ON i.nse_code = g.symbol
+        WHERE g.symbol = %s
+    """, (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} not found")
     return r
 
@@ -1456,8 +1433,6 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     vals.append(n)
     return api_query(sql, vals)
 
-# ── Data endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
     r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
@@ -1495,8 +1470,6 @@ def get_global_history(name: str, days: int = 1825):
 def get_global_intraday(name: str, days: int = 7):
     cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
     return api_query("SELECT symbol, name, ts, open, high, low, close, volume FROM global_intraday WHERE UPPER(name) = UPPER(%s) AND ts >= %s ORDER BY ts ASC", (name, cutoff))
-
-# ── V8 endpoints ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
@@ -1547,8 +1520,6 @@ def v8_live_metrics():
         ORDER BY s.symbol
     """)
 
-# ── Admin data operations ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
@@ -1565,7 +1536,6 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _purge_intraday_old()
     return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "total_candles": total_candles}
 
-# ── Yahoo Morning Gap Healer ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _LAG_MINUTES = 15
 _HEAL_SLEEP = 0.8
 
@@ -1677,7 +1647,6 @@ def _heal_morning_gaps(symbols=None):
 
 @app.post("/api/admin/heal_intraday")
 async def heal_intraday(x_admin_token: Optional[str] = Header(None)):
-    """Fill TODAY's morning 1-min gap for all active futures from Yahoo (fill-only)."""
     _check_admin(x_admin_token)
     return await asyncio.to_thread(_heal_morning_gaps)
 
@@ -1984,7 +1953,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
-# ── MCP Tools ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── MCP Tools ─────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "health_report", "description": "Full Scorr system health report card — 6 sections (Infrastructure, Data Feeds, Scheduler, V8 Engine, Quant Baskets, GVM Universe), letter grades A+ to F, issues list, overall score.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1994,7 +1963,7 @@ MCP_TOOLS = [
     {"name": "run_momentum", "description": "GVM: recompute daily momentum (M) for all stocks from raw_prices.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "gvm_recompute", "description": "GVM: full recompute. Refreshes daily momentum + G/V from screener -> gvm_history + gvm_scores.", "inputSchema": {"type": "object", "properties": {"refresh_momentum": {"type": "boolean"}}, "required": []}},
     {"name": "gvm_history", "description": "GVM: get the GVM score trend series for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}}, "required": ["symbol"]}},
-    {"name": "get_gvm", "description": "Fetch full GVM score for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
+    {"name": "get_gvm", "description": "Fetch full GVM score for a stock — includes overview and key_takeaway from input_raw.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_top_stocks", "description": "Get top N stocks by GVM.", "inputSchema": {"type": "object", "properties": {"n": {"type": "integer"}, "verdict": {"type": "string"}}, "required": ["n"]}},
     {"name": "get_sector", "description": "Get all stocks in a sector ordered by GVM.", "inputSchema": {"type": "object", "properties": {"sector": {"type": "string"}}, "required": ["sector"]}},
     {"name": "get_filter", "description": "Filter stocks by GVM range.", "inputSchema": {"type": "object", "properties": {"min_gvm": {"type": "number"}, "max_gvm": {"type": "number"}}, "required": []}},
@@ -2002,7 +1971,7 @@ MCP_TOOLS = [
     {"name": "get_intraday", "description": "Intraday OHLC for ANY stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "heal_intraday", "description": "Fill TODAY's morning 1-min gap in intraday_prices for all active futures from Yahoo (no token). Fill-only: never overwrites Fyers bars. Gap-aware per symbol, 15-min Yahoo lag buffer. Use when the Fyers websocket started late / dropped and left a morning hole.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "heal_intraday", "description": "Fill TODAY's morning 1-min gap in intraday_prices for all active futures from Yahoo (no token). Fill-only: never overwrites Fyers bars.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "backfill_indices", "description": "Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
     {"name": "paper_compute_pivots", "description": "PAPER: compute rolling-5-day pivots for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -2043,7 +2012,7 @@ MCP_TOOLS = [
     {"name": "qb_summary", "description": "Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
     {"name": "qb_rebalance_log", "description": "Quant Basket: rebalance + EOD check history.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}, "limit": {"type": "integer"}}, "required": []}},
     {"name": "qb_registry", "description": "Quant Basket: registry of all baskets — cadence, weight band, next rebalance, max stocks, capital.", "inputSchema": {"type": "object", "properties": {"basket_name": {"type": "string"}}, "required": []}},
-    {"name": "daily_adr", "description": "Daily Digest section 3 (support/breadth): ADR trend last N days from adr_daily (compute-on-write 15:50 IST). Source: raw_prices close-to-close, futures universe.", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
+    {"name": "daily_adr", "description": "Daily Digest section 3 (support/breadth): ADR trend last N days from adr_daily (compute-on-write 15:50 IST).", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
     {"name": "daily_pcr", "description": "Daily Digest section 5 (PCR trend): Put/Call Ratio last N days from pcr_daily (compute-on-write 15:50 IST). underlying: NIFTY or BANKNIFTY.", "inputSchema": {"type": "object", "properties": {"underlying": {"type": "string"}, "days": {"type": "integer"}}, "required": []}},
     {"name": "compute_daily_metrics", "description": "Manually trigger ADR + PCR compute-and-store. Normally runs at 15:50 IST automatically.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
