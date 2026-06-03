@@ -37,20 +37,26 @@ import v8_paper
 import global_indices
 import v8_signal_writer
 import qb_eod_checker
+import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.3
+# Scorr / Project Quant — main.py v2.9.4
+# v2.9.4: AI takeaway/overview refresh engine.
+#   - refresh_takeaways.py: Claude-powered generator.
+#   - POST /api/admin/refresh_takeaways?tier=top500|mid (background)
+#   - POST /api/admin/refresh_overviews (background)
+#   - GET  /api/admin/refresh_status
+#   - Scheduler: quarterly takeaway check at 06:00 IST on 1st of month.
+#   - MCP: refresh_takeaways + refresh_status tools.
 # v2.9.3: get_gvm joins input_raw — returns overview + key_takeaway.
-# v2.9.2: QB intraday price mark — Yahoo 15-min live P&L for all 53 open QB
-#   positions across all 4 baskets. Price-only, no stop exits intraday.
-#   _bg_qb_intraday_mark fires every 15 ticks (15 min) in _live_loop.
-# v2.9.1: Yahoo Morning Gap Healer — /api/admin/heal_intraday + MCP heal_intraday.
+# v2.9.2: QB intraday price mark — Yahoo 15-min live P&L.
+# v2.9.1: Yahoo Morning Gap Healer.
 # v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # v2.7.4: fix syntax error in build_health_report().
 # ============================================================
 
-VERSION = "2.9.3"
+VERSION = "2.9.4"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -221,7 +227,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.9.3)")
+        log.info("Tables ready (v2.9.4)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -384,6 +390,8 @@ _qb_eod_running: bool = False
 _qb_intraday_mark_running: bool = False
 _daily_metrics_ran_today: Optional[date] = None
 _daily_metrics_running: bool = False
+_takeaway_refresh_running: bool = False
+_takeaway_refresh_ran_month: Optional[int] = None
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on(): return
@@ -624,6 +632,35 @@ async def _task_qb_eod_checker():
     log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
+# ── AI Takeaway Refresh scheduler ────────────────────────────────────────────
+def _bg_refresh_takeaways_top500():
+    """Background runner for quarterly top-500 takeaway refresh."""
+    global _takeaway_refresh_running, _takeaway_refresh_ran_month
+    if _takeaway_refresh_running: return
+    _takeaway_refresh_running = True
+    try:
+        result = asyncio.run(rt.refresh_takeaways(tier="top500", force=False))
+        _takeaway_refresh_ran_month = _ist_now().month
+        log.info(f"takeaway_refresh top500: success={result.get('success')} failed={result.get('failed')}")
+    except Exception as e:
+        log.error(f"takeaway_refresh top500 failed: {e}")
+    finally:
+        _takeaway_refresh_running = False
+
+async def _task_refresh_takeaways():
+    """
+    Runs on 1st of each quarter month (Jan, Apr, Jul, Oct) at 06:00 IST.
+    Quarterly months for top-500 takeaway = Mar/Jun/Sep/Dec end-of-quarter.
+    We trigger on the 1st of the following month to ensure results are out.
+    """
+    global _takeaway_refresh_ran_month
+    now = _ist_now()
+    # Trigger months: Jan(1), Apr(4), Jul(7), Oct(10) — day 1, hour 6
+    if now.month in (1, 4, 7, 10) and now.day == 1 and now.hour == 6 and now.minute < 5:
+        if _takeaway_refresh_ran_month == now.month: return
+        log.info(f"06:00 IST {now.strftime('%d-%b')}: Quarterly takeaway refresh — top 500")
+        asyncio.create_task(asyncio.to_thread(_bg_refresh_takeaways_top500))
+
 def _compute_and_store_adr(conn) -> dict:
     with conn.cursor() as cur:
         cur.execute("""
@@ -738,12 +775,14 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.3)")
+    log.info("Scheduler started (v2.9.4)")
     asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now()
             trading_day = is_trading_day(now.date())
+            if now.hour == 6 and now.minute < 5:
+                await _task_refresh_takeaways()
             if now.hour == 7 and now.minute < 5:
                 await _task_fetch_global()
             await _task_fetch_global_intraday()
@@ -770,7 +809,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.3)")
+    log.info("Live loop started (v2.9.4)")
     tick_count = 0
     while True:
         try:
@@ -1279,7 +1318,8 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     keys = sorted(os.environ.keys())
     interesting = ["SCREENER_EMAIL", "SCREENER_PASSWORD", "GITHUB_TOKEN", "GITHUB_REPO",
-                   "ADMIN_TOKEN", "DATABASE_URL", "DEPLOY_GUARD", "RAILWAY_PUBLIC_DOMAIN"]
+                   "ADMIN_TOKEN", "DATABASE_URL", "DEPLOY_GUARD", "RAILWAY_PUBLIC_DOMAIN",
+                   "ANTHROPIC_API_KEY"]
     return {"version": VERSION, "all_keys_count": len(keys),
             "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k, ""))} for k in interesting}}
 
@@ -1369,7 +1409,6 @@ def api_query(sql, params=None, single=False):
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
-    # v2.9.3: joins input_raw to return overview + key_takeaway
     r = api_query("""
         SELECT g.symbol, g.company_name, g.segment, g.price,
                g.g_score, g.v_score, g.m_score, g.gvm_score,
@@ -1432,6 +1471,55 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     """
     vals.append(n)
     return api_query(sql, vals)
+
+# ── AI Content Refresh endpoints ──────────────────────────────────────────────
+
+@app.post("/api/admin/refresh_takeaways")
+async def admin_refresh_takeaways(
+    tier: str = "top500",
+    force: bool = False,
+    limit: Optional[int] = None,
+    x_admin_token: Optional[str] = Header(None)
+):
+    """
+    AI-generate key_takeaway for input_raw.
+    tier: 'top500' (quarterly, mcap_rank<=500) or 'mid' (annual, 501-1700).
+    force=true skips due-date check. limit=N for testing.
+    Runs in background — returns immediately with job info.
+    """
+    _check_admin(x_admin_token)
+    if _takeaway_refresh_running:
+        return {"status": "already_running", "message": "Takeaway refresh already in progress"}
+    asyncio.create_task(rt.refresh_takeaways(tier=tier, force=force, limit=limit))
+    return {
+        "status": "started",
+        "tier": tier,
+        "force": force,
+        "limit": limit,
+        "message": f"AI takeaway refresh started for {tier}. Check refresh_status for progress.",
+    }
+
+@app.post("/api/admin/refresh_overviews")
+async def admin_refresh_overviews(
+    force: bool = False,
+    limit: Optional[int] = None,
+    x_admin_token: Optional[str] = Header(None)
+):
+    """AI-generate overview for all companies in input_raw. Annual run."""
+    _check_admin(x_admin_token)
+    asyncio.create_task(rt.refresh_overviews(force=force, limit=limit))
+    return {
+        "status": "started",
+        "force": force,
+        "limit": limit,
+        "message": "AI overview refresh started for all companies. Annual cadence.",
+    }
+
+@app.get("/api/admin/refresh_status")
+def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
+    """Shows current refresh status, last run dates, next due dates for all 4 schedules."""
+    _check_admin(x_admin_token)
+    return rt.get_refresh_status()
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
@@ -2015,6 +2103,8 @@ MCP_TOOLS = [
     {"name": "daily_adr", "description": "Daily Digest section 3 (support/breadth): ADR trend last N days from adr_daily (compute-on-write 15:50 IST).", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
     {"name": "daily_pcr", "description": "Daily Digest section 5 (PCR trend): Put/Call Ratio last N days from pcr_daily (compute-on-write 15:50 IST). underlying: NIFTY or BANKNIFTY.", "inputSchema": {"type": "object", "properties": {"underlying": {"type": "string"}, "days": {"type": "integer"}}, "required": []}},
     {"name": "compute_daily_metrics", "description": "Manually trigger ADR + PCR compute-and-store. Normally runs at 15:50 IST automatically.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "refresh_takeaways", "description": "AI-generate key_takeaway for input_raw companies. tier='top500' (quarterly) or 'mid' (501-1700, annual). force=true ignores due-date. limit=N for testing.", "inputSchema": {"type": "object", "properties": {"tier": {"type": "string"}, "force": {"type": "boolean"}, "limit": {"type": "integer"}}, "required": []}},
+    {"name": "refresh_status", "description": "Show AI content refresh status — last run dates, next due dates for all 4 schedules (takeaway top500, takeaway 501-1700, overview all, revenue est).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
 ]
 
 async def _call_tool(name, args):
@@ -2127,6 +2217,14 @@ async def _call_tool(name, args):
             return r.json()
         elif name == "compute_daily_metrics":
             r = await client.post(f"{BASE_URL}/api/daily/compute_metrics", headers=h)
+            return r.json()
+        elif name == "refresh_takeaways":
+            r = await client.post(f"{BASE_URL}/api/admin/refresh_takeaways",
+                params={"tier": args.get("tier", "top500"), "force": args.get("force", False), "limit": args.get("limit")},
+                headers=h)
+            return r.json()
+        elif name == "refresh_status":
+            r = await client.get(f"{BASE_URL}/api/admin/refresh_status", headers=h)
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
