@@ -39,7 +39,9 @@ import v8_signal_writer
 import qb_eod_checker
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.0
+# Scorr / Project Quant — main.py v2.9.1
+# v2.9.1: Yahoo Morning Gap Healer — /api/admin/heal_intraday + MCP heal_intraday.
+#   Fills TODAY 1-min gaps for all active futures from Yahoo. Fill-only.
 # v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
 #   Section 1: global indices (global_indices DB).
 #   Section 2: NIFTY + BANKNIFTY close/chg/high/low + ADR (raw_prices + adr_daily).
@@ -57,7 +59,7 @@ import qb_eod_checker
 # v2.5.x: global_indices, Gold/Silver intraday.
 # ============================================================
 
-VERSION = "2.9.0"
+VERSION = "2.9.1"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -228,7 +230,7 @@ def create_tables():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql)
             conn.commit()
-        log.info("Tables ready (v2.9.0)")
+        log.info("Tables ready (v2.9.1)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -587,7 +589,7 @@ def _bg_signal_writer():
     finally:
         _signal_writer_running = False
 
-# ── Quant Basket EOD Checker ─────────────────────────────────────────────────
+# ── Quant Basket EOD Checker ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _bg_qb_eod_checker():
     global _qb_eod_ran_today, _qb_eod_running
     if _qb_eod_running: return
@@ -617,7 +619,7 @@ async def _task_qb_eod_checker():
     log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
-# ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ───────────────────
+# ── Daily Metrics: ADR + PCR compute-on-write (15:50 IST) ───────────────────────────────────────────────────────────────────────────────────────────
 def _compute_and_store_adr(conn) -> dict:
     with conn.cursor() as cur:
         cur.execute("""
@@ -732,7 +734,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.0)")
+    log.info("Scheduler started (v2.9.1)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -764,7 +766,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.0)")
+    log.info("Live loop started (v2.9.1)")
     tick_count = 0
     while True:
         try:
@@ -818,7 +820,7 @@ def server_now():
         "market_open": _is_market_hours(),
     }
 
-# ── System Health Report Card ─────────────────────────────────────────────────
+# ── System Health Report Card ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _grade(score: float) -> str:
     if score >= 95: return "A+"
     if score >= 90: return "A"
@@ -1050,7 +1052,7 @@ def health_report():
     """Full system health report card — 6 sections, letter grades, issues list."""
     return build_health_report()
 
-# ── Daily Digest — sections 1-5 server-side ──────────────────────────────────
+# ── Daily Digest — sections 1-5 server-side ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _build_digest_daily() -> dict:
     """
@@ -1075,7 +1077,7 @@ def _build_digest_daily() -> dict:
     try:
         with get_conn() as conn, conn.cursor() as cur:
 
-            # ── Section 1: Global indices ─────────────────────────────────
+            # ── Section 1: Global indices ─────────────────────────────────────────────────────────────────────────────────────────────────────────
             cur.execute("""
                 SELECT g.name, g.category, g.price, g.prev_close, g.chg_pct, g.quote_date::text
                 FROM global_indices g
@@ -1093,7 +1095,7 @@ def _build_digest_daily() -> dict:
                 "data": global_rows
             }
 
-            # ── Section 2: Domestic indices + ADR ────────────────────────
+            # ── Section 2: Domestic indices + ADR ────────────────────────────────────────────────────────────────────────────────────────────────
             domestic = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("""
@@ -1125,7 +1127,7 @@ def _build_digest_daily() -> dict:
                 "adr": adr
             }
 
-            # ── Sections 3 & 4: Rolling-5d pivots for NIFTY50 + BANKNIFTY ─
+            # ── Sections 3 & 4: Rolling-5d pivots for NIFTY50 + BANKNIFTY ──
             pivots = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("""
@@ -1157,7 +1159,7 @@ def _build_digest_daily() -> dict:
                 "BANKNIFTY": pivots.get("BANKNIFTY"),
             }
 
-            # ── Section 5: PCR 5-day rolling ─────────────────────────────
+            # ── Section 5: PCR 5-day rolling ─────────────────────────────────────────────────────────────────────────────────────────────────────
             pcr_out = {}
             for und in ("NIFTY", "BANKNIFTY"):
                 cur.execute("""
@@ -1192,7 +1194,7 @@ def digest_daily():
     """
     return _build_digest_daily()
 
-# ── Daily Digest sub-endpoints ────────────────────────────────────────────────
+# ── Daily Digest sub-endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/daily/adr")
 def daily_adr(days: int = 5):
@@ -1231,7 +1233,7 @@ def compute_daily_metrics_now(x_admin_token: Optional[str] = Header(None)):
         pcr = _compute_and_store_pcr(conn)
     return {"adr": adr, "pcr": pcr}
 
-# ── Quant Basket endpoints ────────────────────────────────────────────────────
+# ── Quant Basket endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/qb/eod_check")
 def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
@@ -1295,7 +1297,7 @@ def qb_registry(basket_name: Optional[str] = None):
         return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
     return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
 
-# ── Admin + data endpoints ────────────────────────────────────────────────────
+# ── Admin + data endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1388,7 +1390,7 @@ def api_query(sql, params=None, single=False):
         log.error(f"api_query error: {e}")
         return {"error": str(e)}
 
-# ── GVM endpoints ─────────────────────────────────────────────────────────────
+# ── GVM endpoints ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
@@ -1447,7 +1449,7 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     vals.append(n)
     return api_query(sql, vals)
 
-# ── Data endpoints ────────────────────────────────────────────────────────────
+# ── Data endpoints ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
@@ -1487,7 +1489,7 @@ def get_global_intraday(name: str, days: int = 7):
     cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
     return api_query("SELECT symbol, name, ts, open, high, low, close, volume FROM global_intraday WHERE UPPER(name) = UPPER(%s) AND ts >= %s ORDER BY ts ASC", (name, cutoff))
 
-# ── V8 endpoints ──────────────────────────────────────────────────────────────
+# ── V8 endpoints ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
@@ -1538,7 +1540,7 @@ def v8_live_metrics():
         ORDER BY s.symbol
     """)
 
-# ── Admin data operations ─────────────────────────────────────────────────────
+# ── Admin data operations ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
@@ -1555,6 +1557,130 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
         await asyncio.sleep(0.25)
     _purge_intraday_old()
     return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "total_candles": total_candles}
+
+# ── Yahoo Morning Gap Healer ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# Fills TODAY's missing 1-min bars for the futures universe from the Yahoo
+# chart API (no token). Fill-only (DO NOTHING) — Fyers bars never overwritten.
+# Gap-aware per symbol; 15-min Yahoo lag buffer; slow & safe loop.
+_LAG_MINUTES = 15
+_HEAL_SLEEP = 0.8
+
+def _yahoo_1m_today(symbol: str):
+    """Today's 1-min candles for ONE symbol from Yahoo. Returns list of
+    (ts_naive_ist, o,h,l,c,v) oldest->newest, skipping null/zero-volume bars."""
+    ticker = _yahoo_ticker(symbol)
+    now = int(time.time())
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote(ticker)}?interval=1m"
+           f"&period1={now - 2*86400}&period2={now + 3600}")
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as c:
+                r = c.get(url); r.raise_for_status(); data = r.json()
+            chart = (data.get("chart") or {}).get("result") or []
+            if not chart:
+                if attempt < 2: time.sleep(0.5 + 0.5*attempt); continue
+                return []
+            res = chart[0]
+            ts = res.get("timestamp") or []
+            q = (res.get("indicators") or {}).get("quote", [{}])[0]
+            o, h, l, c_, v = (q.get(k) or [] for k in ("open","high","low","close","volume"))
+            out = []
+            for i in range(len(ts)):
+                op = o[i] if i < len(o) else None
+                hi = h[i] if i < len(h) else None
+                lo = l[i] if i < len(l) else None
+                cl = c_[i] if i < len(c_) else None
+                vol = v[i] if i < len(v) else None
+                if op is None or hi is None or lo is None or cl is None or not vol:
+                    continue
+                dt = datetime.utcfromtimestamp(ts[i]) + timedelta(hours=5, minutes=30)
+                out.append((dt, round(float(op),2), round(float(hi),2),
+                            round(float(lo),2), round(float(cl),2), int(vol)))
+            return out
+        except Exception as e:
+            if attempt < 2: time.sleep(0.5 + 0.5*attempt); continue
+            log.warning(f"yahoo_1m_today {symbol}: {e}")
+            return []
+    return []
+
+
+def _heal_morning_gaps(symbols=None):
+    """Fill today's missing 1-min bars for active futures from Yahoo. Fill-only."""
+    now = _ist_now()
+    today = now.date()
+    open_dt = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    close_dt = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    heal_until = now - timedelta(minutes=_LAG_MINUTES)
+    if heal_until > close_dt: heal_until = close_dt
+    if heal_until <= open_dt:
+        return {"status": "noop", "reason": "before ~09:30 IST (nothing healable yet)",
+                "today": str(today)}
+
+    syms = symbols if symbols else _get_futures_symbols()
+    syms = [s for s in syms if s not in ("NIFTY","BANKNIFTY","NIFTY50","FINNIFTY","MIDCPNIFTY","SENSEX","BANKEX")]
+
+    healed, skipped, empties, errors, inserted = 0, 0, 0, [], 0
+    for sym in syms:
+        try:
+            row = api_query(
+                "SELECT MIN(ts) AS mn, COUNT(*) AS cnt FROM intraday_prices "
+                "WHERE symbol=%s AND ts::date=%s AND timeframe='1m'",
+                (sym, today), single=True)
+            earliest = row.get("mn") if isinstance(row, dict) else None
+            cnt = row.get("cnt", 0) if isinstance(row, dict) else 0
+
+            if cnt == 0:
+                gap_from = open_dt.replace(tzinfo=None)
+            elif earliest is not None and earliest > open_dt.replace(tzinfo=None) + timedelta(minutes=1):
+                gap_from = open_dt.replace(tzinfo=None)
+            else:
+                skipped += 1
+                continue
+
+            candles = _yahoo_1m_today(sym)
+            if not candles:
+                empties += 1
+                time.sleep(_HEAL_SLEEP)
+                continue
+
+            hu = heal_until.replace(tzinfo=None)
+            rows = []
+            for (ts, op, hi, lo, cl, vol) in candles:
+                if ts.date() != today: continue
+                if ts < gap_from or ts > hu: continue
+                if earliest is not None and ts >= earliest: continue
+                rows.append((sym, ts, op, hi, lo, cl, vol, "1m", "yahoo"))
+
+            if rows:
+                with get_conn() as conn, conn.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO intraday_prices "
+                        "(symbol, ts, open, high, low, close, volume, timeframe, source) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                        "ON CONFLICT (symbol, ts, timeframe) DO NOTHING", rows)
+                    conn.commit()
+                inserted += len(rows); healed += 1
+            else:
+                skipped += 1
+            time.sleep(_HEAL_SLEEP)
+        except Exception as e:
+            errors.append(f"{sym}: {str(e)[:60]}")
+            log.warning(f"heal {sym}: {e}")
+
+    return {"status": "ok", "today": str(today),
+            "window": f"{open_dt.strftime('%H:%M')}-{heal_until.strftime('%H:%M')} IST",
+            "symbols_checked": len(syms), "symbols_healed": healed,
+            "bars_inserted": inserted, "skipped_complete": skipped,
+            "empty_from_yahoo": empties, "errors": errors[:10]}
+
+
+@app.post("/api/admin/heal_intraday")
+async def heal_intraday(x_admin_token: Optional[str] = Header(None)):
+    """Fill TODAY's morning 1-min gap for all active futures from Yahoo (fill-only)."""
+    _check_admin(x_admin_token)
+    return await asyncio.to_thread(_heal_morning_gaps)
+
 
 @app.post("/api/admin/run_yahoo_daily")
 async def run_yahoo_daily_now(x_admin_token: Optional[str] = Header(None)):
@@ -1858,7 +1984,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id": info["client_id"], "created": time.time()}
     return {"access_token": token, "token_type": "Bearer", "expires_in": 31536000, "scope": "read write"}
 
-# ── MCP Tools ─────────────────────────────────────────────────────────────────
+# ── MCP Tools ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name": "server_now", "description": "Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "health_report", "description": "Full Scorr system health report card — 6 sections (Infrastructure, Data Feeds, Scheduler, V8 Engine, Quant Baskets, GVM Universe), letter grades A+ to F, issues list, overall score.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1876,6 +2002,7 @@ MCP_TOOLS = [
     {"name": "get_intraday", "description": "Intraday OHLC for ANY stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}, "days": {"type": "integer"}, "interval": {"type": "string"}, "source": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_cmp", "description": "Get latest CMP for a stock.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "backfill_intraday", "description": "MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "heal_intraday", "description": "Fill TODAY's morning 1-min gap in intraday_prices for all active futures from Yahoo (no token). Fill-only: never overwrites Fyers bars. Gap-aware per symbol, 15-min Yahoo lag buffer. Use when the Fyers websocket started late / dropped and left a morning hole.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "run_yahoo_daily", "description": "Trigger Yahoo daily OHLC update for raw_prices (background).", "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "backfill_indices", "description": "Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.", "inputSchema": {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []}},
     {"name": "paper_compute_pivots", "description": "PAPER: compute rolling-5-day pivots for all futures.", "inputSchema": {"type": "object", "properties": {}, "required": []}},
@@ -1949,6 +2076,7 @@ async def _call_tool(name, args):
             return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, sym, days, interval, "NS", source)
         elif name == "get_cmp": r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers=h); return r.json()
+        elif name == "heal_intraday": r = await client.post(f"{BASE_URL}/api/admin/heal_intraday", headers=h); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers=h); return r.json()
         elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days", 7)}, headers=h); return r.json()
         elif name == "paper_compute_pivots": r = await client.post(f"{BASE_URL}/api/paper/compute_pivots", headers=h); return r.json()
