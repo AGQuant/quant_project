@@ -7,13 +7,13 @@ All 208 futures: 1-min bars, 7-day rolling.
 
 Two jobs:
   1. backfill_7day()  - one-time on worker boot: pulls 7 days of 1-min bars
-                        for all futures SEQUENTIALLY with 0.5s sleep to avoid
-                        Fyers rate limits. ~208 symbols x 0.5s = ~2 min.
+                        for all futures SEQUENTIALLY with 5s sleep to avoid
+                        Fyers rate limits. ~208 symbols x 5s = ~17 min.
   2. heal_gap()       - on WebSocket reconnect: pulls only the slice from
                         newest stored candle -> now per symbol.
 
 History API limits: up to 100 days/request for intraday resolutions.
-Rate limiting: sequential + 0.5s sleep = reliable full coverage.
+Rate limiting: sequential + 5s sleep = reliable full coverage.
 
 Shared by fyers_feed.py (imported). Can also be run standalone:
   python fyers_backfill.py            -> full 7-day futures backfill
@@ -31,7 +31,7 @@ IST             = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS  = 7
 HISTORY_RETRIES = 2
-SLEEP_BETWEEN   = 0.5  # seconds between symbol calls — avoids rate limit
+SLEEP_BETWEEN   = 5  # seconds between symbol calls — avoids rate limit
 
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
@@ -88,12 +88,12 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
                 rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
             return rows
         if attempt < HISTORY_RETRIES:
-            time.sleep(0.5 + 0.4 * attempt)
+            time.sleep(1 + attempt)
     return []
 
 
 def backfill_7day(token, conn=None):
-    """Sequential 7-day backfill for all futures. ~2 min. Called on worker boot."""
+    """Sequential 7-day backfill for all futures. ~17 min. Called on worker boot."""
     own = conn is None
     if own: conn = get_db()
 
@@ -102,7 +102,7 @@ def backfill_7day(token, conn=None):
     date_to   = now.date()
     symbols   = get_universe(conn)
 
-    log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures, 1m, sequential")
+    log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures, 1m, sequential 5s sleep")
 
     total, empty = 0, 0
     for i, sym in enumerate(symbols, 1):
