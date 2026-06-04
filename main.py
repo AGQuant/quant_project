@@ -29,6 +29,7 @@ from v8_engine import (
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
+from gvm_market_endpoints import router as gvm_market_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -41,23 +42,19 @@ import qb_eod_checker
 import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.9
-# v2.9.9: REFACTOR file 1/5 — QB endpoints extracted to qb_endpoints.py
-#   (own router, included below). Inline /api/qb/* definitions removed.
-#   MCP qb_* handlers unchanged (call over HTTP). + ADR 999 fix in v8_endpoints.
-# v2.9.8: POST /api/admin/content_update — manual content writer for
-#   overview / key_takeaway / result_analysis. Single symbol, always overwrite.
-#   Validates field name + mcap_rank gate (501+ blocked for takeaway/result_analysis).
-#   MCP tool: content_update.
-# v2.9.7: get_gvm returns cap_category (large/mid/small/micro) + instrument_type.
-#   Cap bands: large=1-100, mid=101-250, small=251-1000, micro=1001+
-# v2.9.6: get_gvm returns instrument_type + mcap_rank.
-# v2.9.5: Reminder-only refresh scheduler — NO Anthropic API key required.
-# v2.9.3: get_gvm joins input_raw — returns overview + key_takeaway.
+# Scorr / Project Quant — main.py v2.9.10
+# v2.9.10: REFACTOR file 2/5 — GVM + market read endpoints extracted to
+#   gvm_market_endpoints.py (own router). Included AFTER gvm_nightly_router so
+#   /api/gvm/recompute + /api/gvm/history/{symbol} match before /api/gvm/{symbol}.
+#   Inline defs removed. MCP handlers unchanged (call over HTTP).
+# v2.9.9: REFACTOR file 1/5 — QB endpoints extracted to qb_endpoints.py.
+#   + ADR 999 fix in v8_endpoints (intraday path removed, reads adr_daily).
+# v2.9.8: POST /api/admin/content_update — manual content writer.
+# v2.9.7: get_gvm returns cap_category + instrument_type.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.9"
+VERSION = "2.9.10"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -84,6 +81,7 @@ app.include_router(v8_router)
 app.include_router(v8_futures_router)
 app.include_router(qb_router)
 app.include_router(gvm_nightly_router)
+app.include_router(gvm_market_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -192,7 +190,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.9)")
+        log.info("Tables ready (v2.9.10)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -636,7 +634,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.9)")
+    log.info("Scheduler started (v2.9.10)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -657,7 +655,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.9)")
+    log.info("Live loop started (v2.9.10)")
     tick_count = 0
     while True:
         try:
@@ -970,6 +968,7 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
         raise HTTPException(500, str(e))
 
 # QB endpoints moved to qb_endpoints.py (refactor file 1/5). Router included above.
+# GVM + market read endpoints moved to gvm_market_endpoints.py (refactor file 2/5). Router included above.
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1036,99 +1035,6 @@ def api_query(sql, params=None, single=False):
             return [dict(zip(cols, r)) for r in cur.fetchall()]
     except Exception as e:
         log.error(f"api_query error: {e}"); return {"error": str(e)}
-
-# ── GVM endpoints ───────────────────────────────────────────────────────────────
-
-@app.get("/api/gvm/{symbol}")
-def get_gvm(symbol: str):
-    # v2.9.7: full company map — cap_category + instrument_type + mcap_rank + overview + takeaway
-    r = api_query("""
-        SELECT g.symbol, g.company_name, g.segment, g.price,
-               g.g_score, g.v_score, g.m_score, g.gvm_score,
-               g.verdict, g.punchline, g.market_cap,
-               i.overview, i.key_takeaway,
-               i.instrument_type, i.cap_category, i.mcap_rank
-        FROM gvm_scores g
-        LEFT JOIN input_raw i ON i.nse_code = g.symbol
-        WHERE g.symbol = %s
-    """, (symbol.upper(),), single=True)
-    if not r: raise HTTPException(404, f"{symbol} not found")
-    return r
-
-@app.get("/api/gvm/top/{n}")
-def get_top(n: int, verdict: Optional[str] = None):
-    n = min(max(n, 1), 100)
-    if verdict: return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict=%s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
-    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
-
-@app.get("/api/filter")
-def get_filter(min_gvm: float = 0, max_gvm: float = 10):
-    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score>=%s AND gvm_score<=%s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
-
-@app.get("/api/sectors")
-def get_sectors():
-    return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
-
-@app.get("/api/market/top_gainers")
-def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional[float]=None,
-                    min_day_pct: Optional[float]=None, universe: str="all", min_volume: Optional[int]=None):
-    n = min(max(n, 1), 100)
-    if not price_date:
-        row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
-        price_date = row["latest"] if row else str(date.today())
-    conds = ["r.price_date=%s","r.open>0","r.close>0"]; vals = [price_date]
-    if min_volume: conds.append("r.volume>=%s"); vals.append(min_volume)
-    if universe == "gvm_only": conds.append("g.symbol IS NOT NULL")
-    if min_gvm is not None: conds.append("g.gvm_score>=%s"); vals.append(min_gvm)
-    having = f"HAVING ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2)>={float(min_day_pct)}" if min_day_pct is not None else ""
-    join_type = "INNER" if universe == "gvm_only" else "LEFT"
-    sql = f"""
-        SELECT r.symbol, COALESCE(g.company_name,r.symbol) AS company_name, COALESCE(g.segment,'Unknown') AS segment,
-               ROUND(r.close::numeric,2) AS close, ROUND(r.open::numeric,2) AS open,
-               ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2) AS day_pct,
-               r.volume, ROUND(g.gvm_score::numeric,2) AS gvm_score,
-               ROUND(g.g_score::numeric,2) AS g_score, ROUND(g.v_score::numeric,2) AS v_score,
-               ROUND(g.m_score::numeric,2) AS m_score, g.verdict, r.price_date::text AS price_date
-        FROM raw_prices r {join_type} JOIN gvm_scores g ON r.symbol=g.symbol
-        WHERE {" AND ".join(conds)}
-        GROUP BY r.symbol,g.company_name,g.segment,r.close,r.open,r.volume,g.gvm_score,g.g_score,g.v_score,g.m_score,g.verdict,r.price_date
-        {having} ORDER BY day_pct DESC LIMIT %s
-    """; vals.append(n); return api_query(sql, vals)
-
-@app.get("/api/cmp/{symbol}")
-def get_cmp(symbol: str):
-    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol=%s", (symbol.upper(),), single=True)
-    if not r: raise HTTPException(404, f"{symbol} CMP not found"); return r
-
-@app.get("/api/intraday/{symbol}")
-def get_intraday(symbol: str, days: int = 1):
-    days = min(max(days, 1), 7); cutoff = _ist_now() - timedelta(days=days)
-    return api_query("SELECT symbol,ts,open,high,low,close,volume FROM intraday_prices WHERE symbol=%s AND ts>=%s ORDER BY ts ASC", (symbol.upper(), cutoff))
-
-@app.get("/api/intraday_ondemand/{symbol}")
-async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", source: str = "auto"):
-    return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source)
-
-@app.get("/api/global")
-def get_global():
-    return api_query("""
-        SELECT g.symbol, g.name, g.category, g.price, g.prev_close, g.chg_pct,
-               g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
-        FROM global_indices g
-        JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
-          ON g.symbol=m.symbol AND g.quote_date=m.md
-        ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
-    """)
-
-@app.get("/api/global/history/{name}")
-def get_global_history(name: str, days: int = 1825):
-    cutoff = (_ist_now().date() - timedelta(days=days))
-    return api_query("SELECT name,symbol,category,price,prev_close,chg_pct,quote_date::text FROM global_indices WHERE LOWER(name)=LOWER(%s) AND quote_date>=%s ORDER BY quote_date ASC", (name, cutoff))
-
-@app.get("/api/global/intraday/{name}")
-def get_global_intraday(name: str, days: int = 7):
-    cutoff = _ist_now() - timedelta(days=min(max(days,1),7))
-    return api_query("SELECT symbol,name,ts,open,high,low,close,volume FROM global_intraday WHERE UPPER(name)=UPPER(%s) AND ts>=%s ORDER BY ts ASC", (name, cutoff))
 
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
