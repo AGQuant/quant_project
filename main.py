@@ -40,22 +40,17 @@ import qb_eod_checker
 import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.5
+# Scorr / Project Quant — main.py v2.9.6
+# v2.9.6: get_gvm now returns instrument_type + mcap_rank from input_raw.
 # v2.9.5: Reminder-only refresh scheduler — NO Anthropic API key required.
-#   - 06:00 IST daily: check_and_flag_due_refreshes() → sets app_config flags
-#   - Daily digest surfaces flag: "Takeaway refresh due — say 'run refresh'"
-#   - Claude generates in-session on manual trigger. Zero API cost.
-#   - GET /api/admin/refresh_status — shows all 4 schedule statuses
-# v2.9.4: AI takeaway endpoints (removed — API key required, replaced by v2.9.5)
 # v2.9.3: get_gvm joins input_raw — returns overview + key_takeaway.
 # v2.9.2: QB intraday price mark — Yahoo 15-min live P&L.
 # v2.9.1: Yahoo Morning Gap Healer.
 # v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
-# v2.7.4: fix syntax error in build_health_report().
 # ============================================================
 
-VERSION = "2.9.5"
+VERSION = "2.9.6"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -189,7 +184,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.5)")
+        log.info("Tables ready (v2.9.6)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -533,12 +528,6 @@ async def _task_qb_eod_checker():
 
 # ── Content refresh reminder scheduler (NO API KEY — flags only) ──────────────
 def _bg_check_refresh_due():
-    """
-    Runs daily at 06:00 IST. Checks if takeaway/overview refresh is due.
-    Sets app_config flags. Logs reminder to session_log.
-    NO AI generation. NO Anthropic API call. Zero cost.
-    Claude generates in-session when Arpit triggers manually.
-    """
     global _refresh_check_ran_today
     try:
         result = rt.check_and_flag_due_refreshes()
@@ -643,15 +632,13 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.5)")
+    log.info("Scheduler started (v2.9.6)")
     asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now(); trading_day = is_trading_day(now.date())
-            # 06:00 IST — content refresh due-date check (reminder only, no API calls)
             if now.hour == 6 and now.minute < 5:
                 await _task_check_refresh_due()
-            # 07:00 IST — global indices
             if now.hour == 7 and now.minute < 5:
                 await _task_fetch_global()
             await _task_fetch_global_intraday()
@@ -678,7 +665,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.5)")
+    log.info("Live loop started (v2.9.6)")
     tick_count = 0
     while True:
         try:
@@ -867,23 +854,18 @@ def _build_digest_daily() -> dict:
             result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR",
                 "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr}
 
-            # ── Content refresh alert (surfaces in digest) ──
             t_due = _get_config("takeaway_refresh_due", "false")
             ov_due = _get_config("overview_refresh_due", "false")
             if t_due == "true" or ov_due == "true":
                 tier = _get_config("takeaway_refresh_tier", "")
                 result["refresh_alert"] = {
-                    "takeaway_due": t_due == "true",
-                    "overview_due": ov_due == "true",
-                    "tier": tier,
+                    "takeaway_due": t_due == "true", "overview_due": ov_due == "true", "tier": tier,
                     "action": f"Say 'run {'takeaway' if t_due=='true' else 'overview'} refresh{' top500' if tier=='top500' else ''}' in Claude chat",
                 }
 
             pivots = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
-                cur.execute("""
-                    SELECT AVG(high), AVG(low), AVG(close) FROM (SELECT high, low, close FROM raw_prices WHERE symbol = %s ORDER BY price_date DESC LIMIT 5) sub
-                """, (sym,))
+                cur.execute("SELECT AVG(high), AVG(low), AVG(close) FROM (SELECT high, low, close FROM raw_prices WHERE symbol = %s ORDER BY price_date DESC LIMIT 5) sub", (sym,))
                 r = cur.fetchone()
                 if r and r[0] is not None:
                     h, l, c = float(r[0]), float(r[1]), float(r[2]); pp = _r((h+l+c)/3)
@@ -926,12 +908,10 @@ def compute_daily_metrics_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/admin/refresh_status")
 def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
-    """Content refresh status — last run dates, next due dates, current flags. No API key needed."""
     _check_admin(x_admin_token); return rt.get_refresh_status()
 
 @app.post("/api/admin/mark_refresh_complete")
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
-    """Called after Claude finishes in-session takeaway/overview generation. Clears due flag."""
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
 @app.post("/api/qb/eod_check")
@@ -1054,11 +1034,13 @@ def api_query(sql, params=None, single=False):
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
+    # v2.9.6: added instrument_type + mcap_rank from input_raw
     r = api_query("""
         SELECT g.symbol, g.company_name, g.segment, g.price,
                g.g_score, g.v_score, g.m_score, g.gvm_score,
                g.verdict, g.punchline, g.market_cap,
-               i.overview, i.key_takeaway
+               i.overview, i.key_takeaway,
+               i.instrument_type, i.mcap_rank
         FROM gvm_scores g
         LEFT JOIN input_raw i ON i.nse_code = g.symbol
         WHERE g.symbol = %s
@@ -1547,13 +1529,13 @@ async def oauth_token(req: Request):
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB: global indices, domestic NIFTY/BNF+ADR, support S1/S2, pivot PP/R1/R2/S1/S2 (rolling-5d), PCR 5-day rolling. Includes refresh_alert if takeaway/overview refresh is due.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB. Includes refresh_alert if takeaway/overview refresh is due.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_build_cache","description":"V8 LIVE: build v8_history_cache.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_run_live","description":"V8 LIVE: run one live tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_momentum","description":"GVM: recompute daily momentum (M) for all stocks from raw_prices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
-    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview and key_takeaway from input_raw.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview, key_takeaway, instrument_type (futures/cash), mcap_rank.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_top_stocks","description":"Get top N stocks by GVM.","inputSchema":{"type":"object","properties":{"n":{"type":"integer"},"verdict":{"type":"string"}},"required":["n"]}},
     {"name":"get_sector","description":"Get all stocks in a sector ordered by GVM.","inputSchema":{"type":"object","properties":{"sector":{"type":"string"}},"required":["sector"]}},
     {"name":"get_filter","description":"Filter stocks by GVM range.","inputSchema":{"type":"object","properties":{"min_gvm":{"type":"number"},"max_gvm":{"type":"number"}},"required":[]}},
@@ -1591,7 +1573,7 @@ MCP_TOOLS = [
     {"name":"v8_futures_list","description":"V8: List active futures universe stocks.","inputSchema":{"type":"object","properties":{"active_only":{"type":"boolean"}},"required":[]}},
     {"name":"v8_futures_upload","description":"V8: Replace futures universe with new stock list.","inputSchema":{"type":"object","properties":{"stocks":{"type":"array","items":{"type":"string"}}},"required":["stocks"]}},
     {"name":"get_top_gainers","description":"Top gainers by day% from EOD data, joined with GVM scores.","inputSchema":{"type":"object","properties":{"price_date":{"type":"string"},"n":{"type":"integer"},"min_gvm":{"type":"number"},"min_day_pct":{"type":"number"},"universe":{"type":"string"},"min_volume":{"type":"integer"}},"required":[]}},
-    {"name":"get_global","description":"Daily Digest section 1: latest global scorecard — indices, commodities, currency.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"get_global","description":"Latest global scorecard — indices, commodities, currency.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"fetch_global","description":"Manually trigger global scorecard fetch into global_indices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"backfill_global","description":"One-time backfill of N years daily global history.","inputSchema":{"type":"object","properties":{"years":{"type":"integer"},"clean":{"type":"boolean"}},"required":[]}},
     {"name":"get_global_intraday","description":"Gold/Silver 5-min intraday bars (7-day rolling).","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"days":{"type":"integer"}},"required":["name"]}},
@@ -1604,7 +1586,7 @@ MCP_TOOLS = [
     {"name":"daily_adr","description":"ADR trend last N days from adr_daily.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily. underlying: NIFTY or BANKNIFTY.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_daily_metrics","description":"Manually trigger ADR + PCR compute-and-store.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"refresh_status","description":"Show AI content refresh status — last run dates, next due dates, due flags for all 4 schedules. No API key needed.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"refresh_status","description":"Show AI content refresh status — last run dates, next due dates, due flags. No API key needed.","inputSchema":{"type":"object","properties":{},"required":[]}},
 ]
 
 async def _call_tool(name, args):
