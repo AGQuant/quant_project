@@ -13,6 +13,10 @@ The earnings job calls main's HTTP endpoint /api/admin/load_earnings_from_screen
 
 ADR/PCR compute (_compute_and_store_adr/_pcr) live HERE now and are ALSO imported
 back by main.py so the manual endpoint /api/daily/compute_metrics keeps working.
+
+04-Jun-2026 fix: PCR subquery referenced invalid column `ts2` (table alias oc2) —
+corrected to `MAX(oc2.ts)`. Bug pre-existed in original main.py; only surfaced on
+the manual compute_daily_metrics endpoint (returned 500 -> non-JSON).
 """
 
 import os
@@ -186,7 +190,7 @@ def _compute_and_store_pcr(conn) -> dict:
                 ROUND(SUM(CASE WHEN option_type = 'PE' THEN oi ELSE 0 END)::numeric /
                     NULLIF(SUM(CASE WHEN option_type = 'CE' THEN oi ELSE 0 END), 0), 3)
             FROM option_chain
-            WHERE ts IN (SELECT MAX(ts2) FROM option_chain oc2 WHERE DATE(oc2.ts) = DATE(option_chain.ts) GROUP BY DATE(oc2.ts))
+            WHERE ts IN (SELECT MAX(oc2.ts) FROM option_chain oc2 WHERE DATE(oc2.ts) = DATE(option_chain.ts) GROUP BY DATE(oc2.ts))
             AND DATE(ts) = (SELECT MAX(DATE(ts)) FROM option_chain)
             GROUP BY DATE(ts), underlying
             ON CONFLICT (price_date, underlying) DO UPDATE SET
