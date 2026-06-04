@@ -1,35 +1,34 @@
 """
-GVM + Market read endpoints — pure SELECT reads.
+GVM + Market read endpoints — self-contained router.
 
-Extracted from main.py (refactor file 2/5, 04-Jun-2026) to keep pushes small.
-Self-contained: own _conn, own api_query, own _ist_now. Imports yahoo_ondemand
-directly. Imports nothing from main.py to avoid circular imports.
+Extracted from main.py (refactor file 2/5, 04-Jun-2026). Read-only data endpoints.
+Self-contained: own _conn, api_query, _ist_now. Imports nothing from main.py.
 
 Endpoints:
-  GET /api/gvm/{symbol}              — full GVM + input_raw map for one stock
-  GET /api/gvm/top/{n}               — top N by GVM (optional verdict filter)
-  GET /api/filter                    — stocks within a GVM range
-  GET /api/sectors                   — sector mcap-weighted GVM ratings
-  GET /api/market/top_gainers        — top gainers by day%, joined with GVM
-  GET /api/cmp/{symbol}              — latest CMP for a stock
-  GET /api/intraday/{symbol}         — intraday OHLC from intraday_prices
-  GET /api/intraday_ondemand/{symbol}— smart on-demand intraday (Yahoo)
-  GET /api/global                    — latest global scorecard
-  GET /api/global/history/{name}     — global series history
-  GET /api/global/intraday/{name}    — Gold/Silver 5-min intraday
+  GET /api/gvm/{symbol}            — full GVM + input_raw overview/takeaway
+  GET /api/gvm/top/{n}             — top N by GVM (optional verdict filter)
+  GET /api/filter                  — stocks in a GVM range
+  GET /api/sectors                 — sector mcap-weighted ratings
+  GET /api/market/top_gainers      — top gainers by day%, joined with GVM
+  GET /api/cmp/{symbol}            — latest CMP
+  GET /api/intraday/{symbol}       — intraday OHLC from DB
+  GET /api/intraday_ondemand/{symbol} — on-demand Yahoo intraday
+  GET /api/global                  — latest global scorecard
+  GET /api/global/history/{name}   — global index daily history
+  GET /api/global/intraday/{name}  — global 5-min intraday
 
-NOTE: /api/gvm/recompute and /api/gvm/history/{symbol} are NOT here — they live
-in gvm_nightly router (gvm_nightly.py). Keep that router included in main.py.
-
-MCP tool handlers for these stay in main.py and call over HTTP — unchanged.
+NOTE: /api/gvm/{symbol} and /api/gvm/top/{n} live here, but /api/gvm/recompute
+and /api/gvm/history/{symbol} remain in gvm_nightly.py (gvm_nightly_router).
+Path ordering: this router is included AFTER gvm_nightly_router in main.py so the
+static /recompute + /history routes are matched before the /{symbol} catch-all.
 """
 
 from fastapi import APIRouter, HTTPException
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
-import asyncio
 import os
+import asyncio
 
 import yahoo_ondemand
 
@@ -57,19 +56,11 @@ def api_query(sql, params=None, single=False):
         return {"error": str(e)}
 
 
-# ── GVM endpoints ─────────────────────────────────────────────────────────────
-
-@router.get("/api/gvm/top/{n}")
-def get_top(n: int, verdict: Optional[str] = None):
-    n = min(max(n, 1), 100)
-    if verdict:
-        return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict=%s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
-    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
-
+# ── GVM ───────────────────────────────────────────────────────────────────────
 
 @router.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
-    # v2.9.7: full company map — cap_category + instrument_type + mcap_rank + overview + takeaway
+    # full company map — cap_category + instrument_type + mcap_rank + overview + takeaway
     r = api_query("""
         SELECT g.symbol, g.company_name, g.segment, g.price,
                g.g_score, g.v_score, g.m_score, g.gvm_score,
@@ -85,6 +76,14 @@ def get_gvm(symbol: str):
     return r
 
 
+@router.get("/api/gvm/top/{n}")
+def get_top(n: int, verdict: Optional[str] = None):
+    n = min(max(n, 1), 100)
+    if verdict:
+        return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict=%s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
+    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
+
+
 @router.get("/api/filter")
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score>=%s AND gvm_score<=%s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
@@ -95,6 +94,8 @@ def get_sectors():
     return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
 
 
+# ── Market ─────────────────────────────────────────────────────────────────────
+
 @router.get("/api/market/top_gainers")
 def get_top_gainers(price_date: Optional[str] = None, n: int = 20, min_gvm: Optional[float] = None,
                     min_day_pct: Optional[float] = None, universe: str = "all", min_volume: Optional[int] = None):
@@ -102,10 +103,14 @@ def get_top_gainers(price_date: Optional[str] = None, n: int = 20, min_gvm: Opti
     if not price_date:
         row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
         price_date = row["latest"] if row else str(date.today())
-    conds = ["r.price_date=%s", "r.open>0", "r.close>0"]; vals = [price_date]
-    if min_volume: conds.append("r.volume>=%s"); vals.append(min_volume)
-    if universe == "gvm_only": conds.append("g.symbol IS NOT NULL")
-    if min_gvm is not None: conds.append("g.gvm_score>=%s"); vals.append(min_gvm)
+    conds = ["r.price_date=%s", "r.open>0", "r.close>0"]
+    vals = [price_date]
+    if min_volume:
+        conds.append("r.volume>=%s"); vals.append(min_volume)
+    if universe == "gvm_only":
+        conds.append("g.symbol IS NOT NULL")
+    if min_gvm is not None:
+        conds.append("g.gvm_score>=%s"); vals.append(min_gvm)
     having = f"HAVING ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2)>={float(min_day_pct)}" if min_day_pct is not None else ""
     join_type = "INNER" if universe == "gvm_only" else "LEFT"
     sql = f"""
@@ -134,7 +139,8 @@ def get_cmp(symbol: str):
 
 @router.get("/api/intraday/{symbol}")
 def get_intraday(symbol: str, days: int = 1):
-    days = min(max(days, 1), 7); cutoff = _ist_now() - timedelta(days=days)
+    days = min(max(days, 1), 7)
+    cutoff = _ist_now() - timedelta(days=days)
     return api_query("SELECT symbol,ts,open,high,low,close,volume FROM intraday_prices WHERE symbol=%s AND ts>=%s ORDER BY ts ASC", (symbol.upper(), cutoff))
 
 
@@ -143,7 +149,7 @@ async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", s
     return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source)
 
 
-# ── Global indices endpoints ──────────────────────────────────────────────────
+# ── Global ─────────────────────────────────────────────────────────────────────
 
 @router.get("/api/global")
 def get_global():
