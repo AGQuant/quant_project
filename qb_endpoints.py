@@ -1,0 +1,114 @@
+"""
+Quant Basket (QB) endpoints — EQUITY buy-and-hold baskets.
+
+Extracted from main.py (refactor file 1/5, 04-Jun-2026) to keep pushes small.
+Self-contained: own _conn, own api_query, own _check_admin. Imports nothing
+from main.py to avoid circular imports.
+
+Endpoints (all /api/qb/*):
+  POST /api/qb/eod_check        — run EOD stop-loss + P&L mark for one basket
+  POST /api/qb/eod_check_all    — run EOD check for every basket with open positions
+  POST /api/qb/mark_intraday    — intraday P&L mark
+  GET  /api/qb/positions        — open/closed positions with P&L
+  GET  /api/qb/summary          — basket summary (market value, unreal/real P&L)
+  GET  /api/qb/rebalance_log    — rebalance + EOD check history
+  GET  /api/qb/registry         — basket registry
+
+MCP tool handlers for qb_* remain in main.py and call these over HTTP — unchanged.
+"""
+
+from fastapi import APIRouter, HTTPException, Header
+from typing import Optional
+import psycopg
+import os
+
+import qb_eod_checker
+
+router = APIRouter(prefix="/api/qb", tags=["quant_basket"])
+
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+
+def _conn():
+    return psycopg.connect(os.getenv("DATABASE_URL"))
+
+
+def _check_admin(token):
+    if not ADMIN_TOKEN:
+        return True
+    if token != ADMIN_TOKEN:
+        raise HTTPException(403, "Invalid admin token")
+    return True
+
+
+def api_query(sql, params=None, single=False):
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            cols = [d[0] for d in cur.description] if cur.description else []
+            if single:
+                r = cur.fetchone()
+                return dict(zip(cols, r)) if r else None
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/eod_check")
+def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with _conn() as conn:
+        return qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)
+
+
+@router.post("/eod_check_all")
+def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    out = []
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT basket_name FROM quant_paper_positions WHERE status='open'")
+            baskets = [r[0] for r in cur.fetchall()]
+        for b in baskets:
+            out.append(qb_eod_checker.run_eod_checker(conn, basket_name=b))
+    return {"baskets_run": len(out), "results": out}
+
+
+@router.post("/mark_intraday")
+async def qb_mark_intraday_now(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    with _conn() as conn:
+        return qb_eod_checker.qb_intraday_mark(conn)
+
+
+@router.get("/positions")
+def qb_positions(basket_name: str = "large_cap", status: str = "open"):
+    return api_query("""
+        SELECT symbol, entry_price, entry_date, qty, ROUND(qty*entry_price,2) AS cost_basis,
+               current_price, current_value, ROUND(pnl,2) AS pnl, ROUND(pnl_pct,2) AS pnl_pct,
+               stop_loss_price, gvm_at_entry AS gvm, g_at_entry AS g, v_at_entry AS v, m_at_entry AS m,
+               status, exit_price, exit_date, updated_at
+        FROM quant_paper_positions WHERE basket_name=%s AND status=%s ORDER BY pnl_pct DESC NULLS LAST
+    """, (basket_name, status))
+
+
+@router.get("/summary")
+def qb_summary(basket_name: str = "large_cap"):
+    open_pos = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(current_value),2) AS mkt_value, ROUND(SUM(pnl),2) AS unreal_pnl FROM quant_paper_positions WHERE basket_name=%s AND status='open'", (basket_name,), single=True)
+    closed_pos = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(pnl),2) AS real_pnl FROM quant_paper_positions WHERE basket_name=%s AND status LIKE 'exited%%'", (basket_name,), single=True)
+    return {"basket": basket_name, "open_positions": open_pos.get("cnt", 0), "market_value": open_pos.get("mkt_value", 0),
+            "unrealised_pnl": open_pos.get("unreal_pnl", 0), "closed_positions": closed_pos.get("cnt", 0),
+            "realised_pnl": closed_pos.get("real_pnl", 0),
+            "total_pnl": round((open_pos.get("unreal_pnl") or 0) + (closed_pos.get("real_pnl") or 0), 2)}
+
+
+@router.get("/rebalance_log")
+def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
+    return api_query("SELECT rebalance_date, stocks_in, stocks_out, stocks_held, total_portfolio_value, actions, computed_at FROM quant_rebalance_log WHERE basket_name=%s ORDER BY computed_at DESC LIMIT %s", (basket_name, limit))
+
+
+@router.get("/registry")
+def qb_registry(basket_name: Optional[str] = None):
+    if basket_name:
+        return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
+    return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
