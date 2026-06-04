@@ -18,12 +18,16 @@ Architecture: compute-on-write.
   - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
   - daily_metrics writes adr_daily + pcr_daily at 15:50 IST (after V8 engine)
   - This file = pure reads only. Zero compute on the read path.
-  - ADR fallback: reads from adr_daily (latest row) — NOT v8_metrics.prev_day_change
+  - ADR: reads from adr_daily (latest row) — intraday path REMOVED (v2.9.9).
+    Root cause: intraday_prices only has NIFTY/BANKNIFTY 1-min bars, NOT 208 futures.
+    The LATERAL join returned 1 row → advances=1, declines=0 → ADR=999.
+    Fix: adr_daily is always the source. Neutral fallback = 1.0 (not 999) if table empty.
 
 1D gate: prev_day_change (net close-to-close %) — NOT range_1d.
 1W gate: week_return (net close-to-close %).
 buy_momentum month_return cap: 14 (raised from 12, 02-Jun-2026).
 ADR fix: compute from raw_prices → adr_daily (v2.8.0, 03-Jun-2026).
+ADR 999 bug fixed: intraday path removed (v2.9.9, 04-Jun-2026).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -188,54 +192,38 @@ def _live_qualified_fallback(basket: str, limit: int):
 @router.get("/market_mood")
 def market_mood():
     """Market Mood gate — ADR + Nifty D/W/M. Slot allocation by # of fails.
-    ADR: reads from adr_daily (compute-on-write at 15:50 IST).
-    Pre-market fallback: latest row from adr_daily (yesterday's EOD).
-    Intraday: computes live from intraday_prices when market is open.
+
+    ADR source: adr_daily table only (compute-on-write at 15:50 IST).
+    The broken intraday path (v8_universe JOIN intraday_prices) has been removed.
+    Root cause of ADR=999 bug: intraday_prices only stores NIFTY/BANKNIFTY 1-min
+    bars — NOT 208 futures. The LATERAL join returned 1 symbol → advances=1,
+    declines=0 → divide-by-zero guard returned 999.
+    Fix (v2.9.9): always read adr_daily. Neutral fallback = 1.0 if table empty.
     """
     try:
         with _conn() as conn, conn.cursor() as cur:
-            # ── ADR: live intraday first ──────────────────────────────────────
+
+            # ── ADR: read from adr_daily (correct, compute-on-write) ──────────
             cur.execute("""
-                WITH today_change AS (
-                    SELECT i.symbol,
-                           (lc.close - fc.open) / NULLIF(fc.open, 0) * 100 AS day_pct
-                    FROM (SELECT DISTINCT symbol FROM v8_universe) i
-                    JOIN LATERAL (
-                        SELECT close FROM intraday_prices
-                        WHERE symbol = i.symbol AND ts::date = CURRENT_DATE
-                        ORDER BY ts DESC LIMIT 1
-                    ) lc ON true
-                    JOIN LATERAL (
-                        SELECT open FROM intraday_prices
-                        WHERE symbol = i.symbol AND ts::date = CURRENT_DATE
-                        ORDER BY ts ASC LIMIT 1
-                    ) fc ON true
-                )
-                SELECT
-                    COUNT(*) FILTER (WHERE day_pct > 0) AS advances,
-                    COUNT(*) FILTER (WHERE day_pct < 0) AS declines,
-                    COUNT(*) FILTER (WHERE day_pct = 0) AS unchanged
-                FROM today_change
+                SELECT advances, declines, unchanged, adr, price_date
+                FROM adr_daily
+                ORDER BY price_date DESC
+                LIMIT 1
             """)
             r = cur.fetchone()
-            advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
+            if r:
+                advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
+                adr        = round(float(r[3]), 3) if r[3] is not None else 1.0
+                adr_date   = str(r[4])
+            else:
+                # Table empty (pre-first-run). Neutral fallback — don't penalise gate.
+                advances, declines, unchanged = 0, 0, 0
+                adr      = 1.0
+                adr_date = "no_data"
 
-            # ── ADR fallback: read from adr_daily (pre-computed, correct) ────
-            if (advances + declines) == 0:
-                cur.execute("""
-                    SELECT advances, declines, unchanged
-                    FROM adr_daily
-                    ORDER BY price_date DESC
-                    LIMIT 1
-                """)
-                r = cur.fetchone()
-                if r:
-                    advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
-
-            adr = round(advances / declines, 3) if declines > 0 else (999.0 if advances > 0 else 0.0)
             adr_pass = adr >= 1.0
 
-            # ── Nifty D/W/M ──────────────────────────────────────────────────
+            # ── Nifty D/W/M ───────────────────────────────────────────────────
             cur.execute("""
                 SELECT price_date, close
                 FROM raw_prices
@@ -280,7 +268,13 @@ def market_mood():
                 "buy_slots":   buy_slots,
                 "sell_slots":  sell_slots,
                 "total_slots": 15,
-                "adr_detail":  {"advances": advances, "declines": declines, "unchanged": unchanged},
+                "adr_detail":  {
+                    "advances":  advances,
+                    "declines":  declines,
+                    "unchanged": unchanged,
+                    "adr_date":  adr_date,
+                    "source":    "adr_daily",
+                },
             }
     except Exception as e:
         raise HTTPException(500, f"market_mood failed: {e}")
