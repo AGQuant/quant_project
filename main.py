@@ -28,6 +28,7 @@ from v8_engine import (
 )
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
+from qb_endpoints import router as qb_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -40,7 +41,10 @@ import qb_eod_checker
 import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.8
+# Scorr / Project Quant — main.py v2.9.9
+# v2.9.9: REFACTOR file 1/5 — QB endpoints extracted to qb_endpoints.py
+#   (own router, included below). Inline /api/qb/* definitions removed.
+#   MCP qb_* handlers unchanged (call over HTTP). + ADR 999 fix in v8_endpoints.
 # v2.9.8: POST /api/admin/content_update — manual content writer for
 #   overview / key_takeaway / result_analysis. Single symbol, always overwrite.
 #   Validates field name + mcap_rank gate (501+ blocked for takeaway/result_analysis).
@@ -53,7 +57,7 @@ import refresh_takeaways as rt
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.8"
+VERSION = "2.9.9"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -78,6 +82,7 @@ app.add_middleware(
 
 app.include_router(v8_router)
 app.include_router(v8_futures_router)
+app.include_router(qb_router)
 app.include_router(gvm_nightly_router)
 
 def get_conn():
@@ -187,7 +192,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.8)")
+        log.info("Tables ready (v2.9.9)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -306,7 +311,7 @@ def _purge_intraday_old():
     except Exception as e:
         log.error(f"_purge_intraday_old failed: {e}")
 
-# ── State flags ───────────────────────────────────────────────────────────────
+# ── State flags ────────────────────────────────────────────────────────────────
 _raw_prices_updated_today: Optional[date] = None
 _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
@@ -330,7 +335,7 @@ _daily_metrics_ran_today: Optional[date] = None
 _daily_metrics_running: bool = False
 _refresh_check_ran_today: Optional[date] = None
 
-# ── Background tasks ──────────────────────────────────────────────────────────
+# ── Background tasks ─────────────────────────────────────────────────────────────
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on(): return
     symbols = _get_full_cmp_universe()
@@ -631,7 +636,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.8)")
+    log.info("Scheduler started (v2.9.9)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -652,7 +657,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.8)")
+    log.info("Live loop started (v2.9.9)")
     tick_count = 0
     while True:
         try:
@@ -885,7 +890,7 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
-# ── Content Update Endpoint (v2.9.8) ─────────────────────────────────────────
+# ── Content Update Endpoint (v2.9.8) ──────────────────────────────────────────────
 _ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
 _TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
 _FIELD_TO_TS_COL = {
@@ -923,7 +928,6 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
 
     try:
         with get_conn() as conn, conn.cursor() as cur:
-            # Look up the row by nse_code
             cur.execute(
                 "SELECT id, mcap_rank, company_name FROM input_raw WHERE nse_code = %s",
                 (symbol,)
@@ -934,7 +938,6 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
 
             row_id, mcap_rank, company_name = row[0], row[1], row[2]
 
-            # Gate: key_takeaway + result_analysis only for top 500
             if field in _TOP500_ONLY_FIELDS:
                 rank = mcap_rank if mcap_rank is not None else 9999
                 if rank > 500:
@@ -944,7 +947,6 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
                         f"Use 'overview' instead — it covers all 1700+."
                     )
 
-            # Write
             cur.execute(
                 f"UPDATE input_raw SET {field} = %s, {ts_col} = NOW() WHERE id = %s",
                 (content, row_id)
@@ -967,53 +969,7 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
         log.error(f"content_update failed for {symbol}: {e}")
         raise HTTPException(500, str(e))
 
-@app.post("/api/qb/eod_check")
-def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    with get_conn() as conn: return qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)
-
-@app.post("/api/qb/eod_check_all")
-def qb_eod_check_all(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token); out = []
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT basket_name FROM quant_paper_positions WHERE status='open'")
-            baskets = [r[0] for r in cur.fetchall()]
-        for b in baskets: out.append(qb_eod_checker.run_eod_checker(conn, basket_name=b))
-    return {"baskets_run": len(out), "results": out}
-
-@app.post("/api/qb/mark_intraday")
-async def qb_mark_intraday_now(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    with get_conn() as conn: return qb_eod_checker.qb_intraday_mark(conn)
-
-@app.get("/api/qb/positions")
-def qb_positions(basket_name: str = "large_cap", status: str = "open"):
-    return api_query("""
-        SELECT symbol, entry_price, entry_date, qty, ROUND(qty*entry_price,2) AS cost_basis,
-               current_price, current_value, ROUND(pnl,2) AS pnl, ROUND(pnl_pct,2) AS pnl_pct,
-               stop_loss_price, gvm_at_entry AS gvm, g_at_entry AS g, v_at_entry AS v, m_at_entry AS m,
-               status, exit_price, exit_date, updated_at
-        FROM quant_paper_positions WHERE basket_name=%s AND status=%s ORDER BY pnl_pct DESC NULLS LAST
-    """, (basket_name, status))
-
-@app.get("/api/qb/summary")
-def qb_summary(basket_name: str = "large_cap"):
-    open_pos = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(current_value),2) AS mkt_value, ROUND(SUM(pnl),2) AS unreal_pnl FROM quant_paper_positions WHERE basket_name=%s AND status='open'", (basket_name,), single=True)
-    closed_pos = api_query("SELECT COUNT(*) AS cnt, ROUND(SUM(pnl),2) AS real_pnl FROM quant_paper_positions WHERE basket_name=%s AND status LIKE 'exited%%'", (basket_name,), single=True)
-    return {"basket": basket_name, "open_positions": open_pos.get("cnt",0), "market_value": open_pos.get("mkt_value",0),
-            "unrealised_pnl": open_pos.get("unreal_pnl",0), "closed_positions": closed_pos.get("cnt",0),
-            "realised_pnl": closed_pos.get("real_pnl",0),
-            "total_pnl": round((open_pos.get("unreal_pnl") or 0)+(closed_pos.get("real_pnl") or 0), 2)}
-
-@app.get("/api/qb/rebalance_log")
-def qb_rebalance_log(basket_name: str = "large_cap", limit: int = 30):
-    return api_query("SELECT rebalance_date, stocks_in, stocks_out, stocks_held, total_portfolio_value, actions, computed_at FROM quant_rebalance_log WHERE basket_name=%s ORDER BY computed_at DESC LIMIT %s", (basket_name, limit))
-
-@app.get("/api/qb/registry")
-def qb_registry(basket_name: Optional[str] = None):
-    if basket_name: return api_query("SELECT * FROM quant_basket_registry WHERE basket_name=%s", (basket_name,), single=True)
-    return api_query("SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
+# QB endpoints moved to qb_endpoints.py (refactor file 1/5). Router included above.
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1081,7 +1037,7 @@ def api_query(sql, params=None, single=False):
     except Exception as e:
         log.error(f"api_query error: {e}"); return {"error": str(e)}
 
-# ── GVM endpoints ─────────────────────────────────────────────────────────────
+# ── GVM endpoints ───────────────────────────────────────────────────────────────
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
@@ -1576,7 +1532,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id":info["client_id"],"created":time.time()}
     return {"access_token":token,"token_type":"Bearer","expires_in":31536000,"scope":"read write"}
 
-# ── MCP Tools ─────────────────────────────────────────────────────────────────
+# ── MCP Tools ───────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
