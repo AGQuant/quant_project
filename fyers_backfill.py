@@ -3,23 +3,17 @@ Fyers Backfill + Gap Healer - Scorr V8
 ========================================
 Fills intraday_prices history from the Fyers HISTORY REST API.
 
-FUTURES-ONLY (29-May-2026): Fyers streams the ~208 futures universe in 1-min
-bars via WebSocket (well under the ~200 subscription cap). The 1508 equity
-stocks are NOT fetched here anymore — their prices come from Yahoo (EOD) and,
-later, a free BSE 5-min delayed feed.
+All 208 futures: 1-min bars, 7-day rolling.
 
 Two jobs:
-  1. backfill_7day()  - one-time on worker boot: pulls 7 days of 1-min futures.
-  2. heal_gap(symbol, timeframe) - on WebSocket reconnect: pulls only
-                        the slice from the newest stored candle -> now,
-                        so a dropped socket never leaves a hole.
+  1. backfill_7day()  - one-time on worker boot: pulls 7 days of 1-min bars
+                        for all futures SEQUENTIALLY with 0.5s sleep to avoid
+                        Fyers rate limits. ~208 symbols x 0.5s = ~2 min.
+  2. heal_gap()       - on WebSocket reconnect: pulls only the slice from
+                        newest stored candle -> now per symbol.
 
-History API limits (verified): up to 100 days/request for intraday
-resolutions, so a 7-day pull is a single call per symbol.
-
-Rate limiting: Fyers throttles bursts of history calls (returns an empty /
-non-JSON body). We keep parallelism modest (WORKERS) and retry empties with
-backoff so coverage stays high without spamming warnings.
+History API limits: up to 100 days/request for intraday resolutions.
+Rate limiting: sequential + 0.5s sleep = reliable full coverage.
 
 Shared by fyers_feed.py (imported). Can also be run standalone:
   python fyers_backfill.py            -> full 7-day futures backfill
@@ -28,7 +22,6 @@ Shared by fyers_feed.py (imported). Can also be run standalone:
 
 import argparse, os, time, logging
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import pytz, psycopg2, requests
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
@@ -37,8 +30,8 @@ HISTORY_URL     = 'https://api-t1.fyers.in/data/history'
 IST             = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS  = 7
-WORKERS         = 5
 HISTORY_RETRIES = 2
+SLEEP_BETWEEN   = 0.5  # seconds between symbol calls — avoids rate limit
 
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
@@ -54,12 +47,9 @@ def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
 
 def get_universe(conn):
     with conn.cursor() as cur:
-        cur.execute("SELECT symbol FROM futures_universe")
+        cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE")
         futures = {r[0] for r in cur.fetchall()}
-        cur.execute("SELECT DISTINCT symbol FROM cmp_prices")
-        all_stocks = {r[0] for r in cur.fetchall()}
-    equity = all_stocks - futures
-    return sorted(futures - SKIP_SYMBOLS), sorted(equity - SKIP_SYMBOLS)
+    return sorted(futures - SKIP_SYMBOLS)
 
 
 def upsert_candles(conn, rows):
@@ -75,7 +65,7 @@ def upsert_candles(conn, rows):
     conn.commit()
 
 
-def fetch_history(token, sym, resolution, timeframe, date_from, date_to, retries=HISTORY_RETRIES):
+def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
     params = {
         'symbol':      fyers_eq_symbol(sym),
         'resolution':  resolution,
@@ -84,7 +74,7 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to, retries
         'range_to':    date_to.strftime('%Y-%m-%d'),
         'cont_flag':   '1',
     }
-    for attempt in range(retries + 1):
+    for attempt in range(HISTORY_RETRIES + 1):
         try:
             r = requests.get(HISTORY_URL, params=params, headers=hdr(token), timeout=10)
             d = r.json()
@@ -97,58 +87,37 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to, retries
                 ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
                 rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
             return rows
-        if attempt < retries:
+        if attempt < HISTORY_RETRIES:
             time.sleep(0.5 + 0.4 * attempt)
     return []
 
 
-def _batch(token, symbols, resolution, timeframe, date_from, date_to, conn):
-    total, empty, done = 0, 0, 0
-    buf = []
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        fmap = {ex.submit(fetch_history, token, s, resolution, timeframe, date_from, date_to): s
-                for s in symbols}
-        for fut in as_completed(fmap, timeout=1200):
-            sym = fmap[fut]
-            try:
-                rows = fut.result(timeout=30)
-                if rows:
-                    buf.extend(rows); total += len(rows)
-                else:
-                    empty += 1
-                done += 1
-                if done % 50 == 0:
-                    log.info(f"  {done}/{len(symbols)} ({total} candles, {empty} empty)")
-                    upsert_candles(conn, buf); buf = []
-            except Exception:
-                empty += 1; done += 1
-    upsert_candles(conn, buf)
-    log.info(f"  {timeframe} backfill done: {total} candles, {empty} empty/skipped of {len(symbols)}")
-    return total
-
-
-def backfill_7day(token, conn=None, symbols_override=None):
-    """One-time full 7-day backfill.
-    symbols_override: if provided, backfill only those symbols (e.g. index-only boot).
-    Otherwise defaults to full futures universe.
-    """
+def backfill_7day(token, conn=None):
+    """Sequential 7-day backfill for all futures. ~2 min. Called on worker boot."""
     own = conn is None
     if own: conn = get_db()
+
     now       = datetime.now(IST)
     date_from = (now - timedelta(days=RETENTION_DAYS)).date()
     date_to   = now.date()
+    symbols   = get_universe(conn)
 
-    if symbols_override is not None:
-        symbols = [s for s in symbols_override if s not in SKIP_SYMBOLS]
-        log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} symbols (override) 1m")
-    else:
-        futures, _ = get_universe(conn)
-        symbols = futures
-        log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures (1m) [equity dropped]")
+    log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures, 1m, sequential")
 
-    _batch(token, symbols, '1', '1m', date_from, date_to, conn)
+    total, empty = 0, 0
+    for i, sym in enumerate(symbols, 1):
+        rows = fetch_history(token, sym, '1', '1m', date_from, date_to)
+        if rows:
+            upsert_candles(conn, rows)
+            total += len(rows)
+        else:
+            empty += 1
+        if i % 20 == 0:
+            log.info(f"  {i}/{len(symbols)} — {total} candles, {empty} empty")
+        time.sleep(SLEEP_BETWEEN)
+
+    log.info(f"Backfill complete: {total} candles, {empty} empty/skipped of {len(symbols)}")
     if own: conn.close()
-    log.info("7-day backfill complete.")
 
 
 def newest_ts(conn, symbol, timeframe):
@@ -159,18 +128,19 @@ def newest_ts(conn, symbol, timeframe):
     return r[0] if r and r[0] else None
 
 
-def heal_gap(token, conn, symbols, resolution, timeframe):
+def heal_gap(token, conn, symbols):
     """On reconnect: pull only from newest stored candle -> now per symbol."""
     now    = datetime.now(IST)
     healed = 0
     for sym in symbols:
-        last      = newest_ts(conn, sym, timeframe)
+        last      = newest_ts(conn, sym, '1m')
         date_from = last.date() if last else (now - timedelta(days=RETENTION_DAYS)).date()
-        rows      = fetch_history(token, sym, resolution, timeframe, date_from, now.date())
+        rows      = fetch_history(token, sym, '1', '1m', date_from, now.date())
         if rows:
-            upsert_candles(conn, rows); healed += len(rows)
-        time.sleep(0.05)
-    log.info(f"Gap heal {timeframe}: {healed} candles patched across {len(symbols)} symbols")
+            upsert_candles(conn, rows)
+            healed += len(rows)
+        time.sleep(SLEEP_BETWEEN)
+    log.info(f"Gap heal: {healed} candles patched across {len(symbols)} symbols")
     return healed
 
 
@@ -183,9 +153,9 @@ if __name__ == '__main__':
 
     conn  = get_db()
     token = fyers_feed.get_valid_token(conn, args.auth_code)
+    symbols = get_universe(conn)
     if args.heal:
-        fut, _ = get_universe(conn)
-        heal_gap(token, conn, fut, '1', '1m')
+        heal_gap(token, conn, symbols)
     else:
         backfill_7day(token, conn)
     conn.close()
