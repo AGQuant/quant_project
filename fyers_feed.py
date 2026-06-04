@@ -3,18 +3,15 @@ Fyers Live Feed - Scorr V8
 ============================
 Standalone Railway WORKER (not in FastAPI). The live intraday source.
 
-Architecture (v2 — compute-on-write):
-  1. BACKFILL  - on boot, one-time 7-day 1-min history for INDICES only.
+Architecture (v3 — all-futures 1-min bars):
+  1. BACKFILL  - on boot, one-time 7-day 1-min history for ALL 211 symbols.
   2. LIVE WS   - persistent WebSocket for all 208 futures + indices.
-                 * INDICES (NIFTY50/BANKNIFTY/INDIAVIX): 1-min bars stored
-                   in intraday_prices (market structure, pivots, mood gate).
-                 * 208 FUTURES: CMP only — every tick updates last_ltp in
-                   memory; flush_cmp() writes to cmp_prices every 5-min.
-                   NO 1-min bar storage for futures (lean DB, same coverage).
-  3. GAP HEAL  - on every WS (re)connect, patch index gaps only.
+                 * ALL 211 symbols: 1-min bars stored in intraday_prices.
+                 * flush_cmp() also writes latest LTP to cmp_prices every 30s.
+  3. GAP HEAL  - on every WS (re)connect, patch gaps for all symbols.
   4. CMP FLUSH - every 30s during market hours → cmp_prices (IST timestamp).
-                 5-min signal engine reads cmp_prices for live day_pct.
   5. OPTION CHAIN - SDK optionchain() poll every 5-min → option_chain table.
+  6. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
 
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
   Refresh-token flow is DISABLED. ONE 2FA login per TRADING DAY.
@@ -49,19 +46,17 @@ RETENTION_DAYS = 7
 # Market-close guard: no intraday bar at/after this IST time is persisted.
 MARKET_CLOSE = dt_time(15, 30)
 
-# Symbols that get 1-min bar storage in intraday_prices.
-# All other futures → CMP only (cmp_prices via flush_cmp, no bar rows).
-INTRADAY_BAR_SYMBOLS = {'NIFTY50', 'BANKNIFTY', 'INDIAVIX'}
-
-SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
-SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
+# Index symbols — stored in intraday_prices AND cmp_prices
 INDEX_LTP_SYMBOLS = {
     'NIFTY50':   'NSE:NIFTY50-INDEX',
     'BANKNIFTY': 'NSE:NIFTYBANK-INDEX',
     'INDIAVIX':  'NSE:INDIAVIX-INDEX',
 }
 
-# ── Option chain config ──────────────────────────────────────────────────────
+SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
+SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
+
+# ── Option chain config ───────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 OPTION_POLL_MINS      = 5
 N_STRIKES             = 10
@@ -132,28 +127,24 @@ def bootstrap_from_authcode(conn, auth_code):
     return d['access_token']
 
 def _token_is_live(token):
-    """Quick live check — one symbol quotes call. Returns True if Fyers accepts the token."""
     try:
         r = requests.get(QUOTES_URL,
                          params={'symbols': 'NSE:NIFTY50-INDEX'},
                          headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'},
                          timeout=8)
         d = r.json()
-        # s=='ok' means accepted; any error code (incl -99 expired) means dead
         return d.get('s') == 'ok'
     except Exception as e:
         log.warning(f"Token liveness check failed: {e}")
         return False
 
 def get_valid_token(conn, auth_code=None):
-    # 1. Manual auth-code override (CLI bootstrap)
     if auth_code:
         try:
             return bootstrap_from_authcode(conn, auth_code)
         except Exception as e:
             log.warning(f"Auth-code bootstrap failed ({e}); falling through to stored/auto-login")
 
-    # 2. Try stored same-day token — but VERIFY it's actually alive with Fyers
     row = load_tokens(conn)
     if row and row[0] and row[2]:
         access_token, access_created = row[0], row[2]
@@ -163,11 +154,10 @@ def get_valid_token(conn, auth_code=None):
             if _token_is_live(access_token):
                 log.info("Token verified live — reusing (restart-safe)")
                 return access_token
-            log.warning("Stored same-day token REJECTED by Fyers (expired at rollover) — re-authing")
+            log.warning("Stored same-day token REJECTED by Fyers — re-authing")
         else:
             log.warning(f"Stored token is from {access_created.date()} (previous day) — re-authing")
 
-    # 3. Auto-login via TOTP (headless) — zero-touch on Railway
     try:
         import fyers_autologin
         log.info("Running TOTP auto-login (headless)...")
@@ -188,7 +178,7 @@ def get_valid_token(conn, auth_code=None):
 
 def get_universe(conn):
     with conn.cursor() as cur:
-        cur.execute("SELECT symbol FROM futures_universe")
+        cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE")
         futures = {r[0] for r in cur.fetchall()}
         cur.execute("SELECT DISTINCT symbol FROM cmp_prices")
         alls = {r[0] for r in cur.fetchall()}
@@ -203,34 +193,29 @@ def from_fyers_symbol(fsym):
 # ─────────────────────────────────────────────────────────────────────── bar aggregator
 
 class BarAggregator:
-    def __init__(self, conn, futures_set):
+    def __init__(self, conn):
         self.conn = conn
-        self.futures = futures_set
         self.bars = {}
         self.last_ltp = {}
         self.lock = threading.Lock()
 
-    def _bucket(self, ts, minutes):
+    def _bucket(self, ts, minutes=1):
         floored = ts.replace(second=0, microsecond=0)
         floored = floored - timedelta(minutes=floored.minute % minutes)
         return floored
 
     def on_tick(self, sym, ltp, vol, ts=None):
         ts = ts or datetime.now(IST).replace(tzinfo=None)
-        tf, mins = ('1m', 1)
-        bkt = self._bucket(ts, mins)
-        key = (sym, tf)
+        bkt = self._bucket(ts, 1)
+        key = (sym, '1m')
         with self.lock:
             self.last_ltp[sym] = ltp
-            # Only build bar in memory for index symbols — futures just need CMP
-            if sym not in INTRADAY_BAR_SYMBOLS:
-                return
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
                     self._flush(key, bar)
                 self.bars[key] = {'ts': bkt, 'o': ltp, 'h': ltp, 'l': ltp,
-                                  'c': ltp, 'v': vol or 0, 'tf': tf}
+                                  'c': ltp, 'v': vol or 0}
             else:
                 bar['h'] = max(bar['h'], ltp)
                 bar['l'] = min(bar['l'], ltp)
@@ -239,9 +224,6 @@ class BarAggregator:
 
     def _flush(self, key, bar):
         sym, _ = key
-        # Guard: only index symbols should ever reach here
-        if sym not in INTRADAY_BAR_SYMBOLS:
-            return
         try:
             if bar['ts'].time() >= MARKET_CLOSE:
                 return
@@ -251,11 +233,11 @@ class BarAggregator:
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'fyers')
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'1m','fyers')
                     ON CONFLICT (symbol,ts,timeframe) DO UPDATE SET
                         open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
                         close=EXCLUDED.close,volume=EXCLUDED.volume,source='fyers'
-                """, (sym, bar['ts'], bar['o'], bar['h'], bar['l'], bar['c'], int(bar['v']), bar['tf']))
+                """, (sym, bar['ts'], bar['o'], bar['h'], bar['l'], bar['c'], int(bar['v'])))
             self.conn.commit()
         except Exception as e:
             log.warning(f"flush {sym}: {e}")
@@ -312,6 +294,21 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
+# ─────────────────────────────────────────────────────────────────────── purge
+
+def purge_old_bars(conn):
+    cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND source = 'fyers'", (cutoff,))
+            deleted = cur.rowcount
+        conn.commit()
+        if deleted:
+            log.info(f"Purged {deleted} fyers bars older than {RETENTION_DAYS} days")
+    except Exception as e:
+        log.warning(f"purge_old_bars: {e}")
+
+
 # ─────────────────────────────────────────────────────────────────────── option chain helpers
 
 def ensure_option_schema(conn):
@@ -321,12 +318,12 @@ def ensure_option_schema(conn):
     log.info("option_chain schema ready")
 
 def get_monthly_expiry():
-    """Last Thursday of current (or next) month."""
+    import calendar as cal
     today = datetime.now(IST).date()
     year, month = today.year, today.month
 
     def last_thursday(y, m):
-        last_day = calendar.monthrange(y, m)[1]
+        last_day = cal.monthrange(y, m)[1]
         d = date(y, m, last_day)
         while d.weekday() != 3:
             d -= timedelta(days=1)
@@ -352,28 +349,7 @@ def get_atm(conn, underlying):
         log.warning(f"get_atm {underlying}: {e}")
         return None
 
-def build_option_symbols(conn, expiry):
-    exp_str = f"{str(expiry.year)[2:]}{OPTION_MONTHS[expiry.month - 1]}"
-    symbols = []
-    for underlying, step in [('NIFTY', NIFTY_STEP), ('BANKNIFTY', BNIFTY_STEP)]:
-        atm = get_atm(conn, underlying)
-        if atm is None:
-            log.warning(f"ATM unavailable for {underlying} — skipping option chain")
-            continue
-        for i in range(-N_STRIKES, N_STRIKES + 1):
-            strike = int(atm + i * step)
-            for otype in ('CE', 'PE'):
-                fsym = f"NSE:{underlying}{exp_str}{strike}{otype}"
-                symbols.append((fsym, underlying, strike, otype, expiry))
-    log.info(f"option symbols: {len(symbols)} ({exp_str} expiry, ATM±{N_STRIKES})")
-    return symbols
-
-def _chunks(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
-
 def poll_option_chain(conn, token, expiry):
-    """Poll NIFTY + BANKNIFTY option chains via fyers_apiv3 SDK → option_chain table."""
     from fyers_apiv3 import fyersModel
     fy = fyersModel.FyersModel(client_id=FYERS_CLIENT_ID, token=token, is_async=False, log_path="")
 
@@ -394,20 +370,18 @@ def poll_option_chain(conn, token, expiry):
             chain = (resp.get('data') or {}).get('optionsChain') or []
             for c in chain:
                 otype = c.get('option_type')
-                if otype not in ('CE', 'PE'):
-                    continue
+                if otype not in ('CE', 'PE'): continue
                 fsym   = c.get('symbol')
                 strike = c.get('strike_price')
                 ltp    = c.get('ltp')
-                if fsym is None or strike is None or ltp is None:
-                    continue
+                if fsym is None or strike is None or ltp is None: continue
                 rows.append((fsym, underlying, strike, otype, expiry,
                              ltp, c.get('oi'), c.get('volume'), c.get('bid'), c.get('ask'), bkt))
         except Exception as e:
             log.warning(f"optionchain {underlying} error: {e}")
 
     if not rows:
-        log.info("option_chain: 0 rows (no chain data returned)")
+        log.info("option_chain: 0 rows")
         return
 
     try:
@@ -422,8 +396,7 @@ def poll_option_chain(conn, token, expiry):
                   bid=EXCLUDED.bid, ask=EXCLUDED.ask
             """, rows)
         conn.commit()
-        oi_n = sum(1 for r in rows if r[6] is not None)
-        log.info(f"option_chain: {len(rows)} rows stored at {bkt} ({oi_n} with OI)")
+        log.info(f"option_chain: {len(rows)} rows stored at {bkt}")
     except Exception as e:
         log.warning(f"option_chain store: {e}")
 
@@ -435,7 +408,7 @@ def cleanup_option_chain(conn):
             deleted = cur.rowcount
         conn.commit()
         if deleted:
-            log.info(f"option_chain cleanup: {deleted} rows deleted (>{OPTION_RETENTION_DAYS}d)")
+            log.info(f"option_chain cleanup: {deleted} rows deleted")
     except Exception as e:
         log.warning(f"option_chain cleanup: {e}")
 
@@ -458,21 +431,18 @@ def run(auth_code=None):
     conn  = get_db()
     token = get_valid_token(conn, auth_code)
     futures, equity = get_universe(conn)
-    futures_set = set(futures)
-    log.info(f"Universe: {len(futures)} futures (CMP via WS) | indices: 1-min bars | option chain: NIFTY+BNIFTY ATM±{N_STRIKES} REST 5-min")
+    log.info(f"Universe: {len(futures)} futures — all get 1-min bars (7-day rolling)")
 
     ensure_option_schema(conn)
 
-    # Boot backfill — indices only (futures no longer store 1-min bars)
-    log.info("Boot backfill (7-day, indices only)...")
+    # Boot backfill — all futures + indices
+    log.info("Boot backfill (7-day, all symbols)...")
     try:
-        fyers_backfill.backfill_7day(token, conn, symbols_override=list(INTRADAY_BAR_SYMBOLS))
-    except TypeError:
-        log.info("backfill_7day: symbols_override not supported, skipping index-only backfill")
+        fyers_backfill.backfill_7day(token, conn)
     except Exception as e:
         log.error(f"Boot backfill failed (continuing): {e}")
 
-    agg = BarAggregator(conn, futures_set)
+    agg = BarAggregator(conn)
     futures_fyers_syms = [fyers_eq_symbol(s) for s in futures]
     access = f"{FYERS_CLIENT_ID}:{token}"
 
@@ -504,6 +474,7 @@ def run(auth_code=None):
     def housekeeping():
         last_option_poll = None
         last_cleanup_day = None
+        last_purge_day   = None
 
         while True:
             if is_market_open():
@@ -525,6 +496,10 @@ def run(auth_code=None):
             if last_cleanup_day != today:
                 cleanup_option_chain(conn)
                 last_cleanup_day = today
+
+            if last_purge_day != today:
+                purge_old_bars(conn)
+                last_purge_day = today
 
             time.sleep(30)
 
