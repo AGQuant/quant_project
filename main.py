@@ -40,17 +40,16 @@ import qb_eod_checker
 import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.6
-# v2.9.6: get_gvm now returns instrument_type + mcap_rank from input_raw.
+# Scorr / Project Quant — main.py v2.9.7
+# v2.9.7: get_gvm returns cap_category (large/mid/small/micro) + instrument_type.
+#   Cap bands: large=1-100, mid=101-250, small=251-1000, micro=1001+
+# v2.9.6: get_gvm returns instrument_type + mcap_rank.
 # v2.9.5: Reminder-only refresh scheduler — NO Anthropic API key required.
 # v2.9.3: get_gvm joins input_raw — returns overview + key_takeaway.
-# v2.9.2: QB intraday price mark — Yahoo 15-min live P&L.
-# v2.9.1: Yahoo Morning Gap Healer.
-# v2.9.0: /api/digest/daily — sections 1-5 server-side baked.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.6"
+VERSION = "2.9.7"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -184,7 +183,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.6)")
+        log.info("Tables ready (v2.9.7)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -526,18 +525,14 @@ async def _task_qb_eod_checker():
     log.info("21:05 IST: QB EOD stop-loss check + P&L mark (all baskets)")
     asyncio.create_task(asyncio.to_thread(_bg_qb_eod_checker))
 
-# ── Content refresh reminder scheduler (NO API KEY — flags only) ──────────────
 def _bg_check_refresh_due():
     global _refresh_check_ran_today
     try:
         result = rt.check_and_flag_due_refreshes()
         _refresh_check_ran_today = _ist_now().date()
-        if result.get("flagged"):
-            log.info(f"Refresh due: {result['flagged']}")
-        else:
-            log.info("Refresh check: nothing due today")
-    except Exception as e:
-        log.error(f"refresh check failed: {e}")
+        if result.get("flagged"): log.info(f"Refresh due: {result['flagged']}")
+        else: log.info("Refresh check: nothing due today")
+    except Exception as e: log.error(f"refresh check failed: {e}")
 
 async def _task_check_refresh_due():
     global _refresh_check_ran_today
@@ -632,40 +627,28 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.6)")
+    log.info("Scheduler started (v2.9.7)")
     asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now(); trading_day = is_trading_day(now.date())
-            if now.hour == 6 and now.minute < 5:
-                await _task_check_refresh_due()
-            if now.hour == 7 and now.minute < 5:
-                await _task_fetch_global()
+            if now.hour == 6 and now.minute < 5: await _task_check_refresh_due()
+            if now.hour == 7 and now.minute < 5: await _task_fetch_global()
             await _task_fetch_global_intraday()
-            if trading_day and now.hour == 9 and now.minute < 5:
-                await _task_load_earnings_daily()
-            if trading_day and now.hour == 9 and now.minute < 10:
-                await _task_build_cache()
-            if _is_market_hours():
-                await _task_refresh_cmp()
-            if trading_day and now.hour == 15 and 45 <= now.minute < 55:
-                await _task_run_v8_engine()
-            if trading_day and now.hour == 15 and 50 <= now.minute < 60:
-                await _task_compute_daily_metrics()
-            if trading_day and now.hour == 21 and now.minute < 5:
-                await _task_update_raw_prices()
-            if trading_day and now.hour == 21 and 5 <= now.minute < 15:
-                await _task_qb_eod_checker()
-            if now.hour == 22 and now.minute < 10:
-                await _task_recompute_gvm_daily()
-            if now.hour == 22 and 5 <= now.minute < 15:
-                await _task_build_paper_pivots()
-        except Exception as e:
-            log.error(f"Scheduler error: {e}")
+            if trading_day and now.hour == 9 and now.minute < 5: await _task_load_earnings_daily()
+            if trading_day and now.hour == 9 and now.minute < 10: await _task_build_cache()
+            if _is_market_hours(): await _task_refresh_cmp()
+            if trading_day and now.hour == 15 and 45 <= now.minute < 55: await _task_run_v8_engine()
+            if trading_day and now.hour == 15 and 50 <= now.minute < 60: await _task_compute_daily_metrics()
+            if trading_day and now.hour == 21 and now.minute < 5: await _task_update_raw_prices()
+            if trading_day and now.hour == 21 and 5 <= now.minute < 15: await _task_qb_eod_checker()
+            if now.hour == 22 and now.minute < 10: await _task_recompute_gvm_daily()
+            if now.hour == 22 and 5 <= now.minute < 15: await _task_build_paper_pivots()
+        except Exception as e: log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.6)")
+    log.info("Live loop started (v2.9.7)")
     tick_count = 0
     while True:
         try:
@@ -673,12 +656,9 @@ async def _live_loop():
                 await _task_live_tick()
                 asyncio.create_task(asyncio.to_thread(_bg_paper_tick))
                 tick_count += 1
-                if tick_count % 5 == 0:
-                    asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
-                if tick_count % 15 == 0:
-                    asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
-            else:
-                tick_count = 0
+                if tick_count % 5 == 0: asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
+                if tick_count % 15 == 0: asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
+            else: tick_count = 0
         except Exception as e: log.error(f"live loop error: {e}")
         await asyncio.sleep(60)
 
@@ -716,7 +696,7 @@ def _grade(score: float) -> str:
     if score >= 60: return "D"
     return "F"
 
-def _check(val, label: str, ok_if, warn_if=None) -> dict:
+def _check(val, label, ok_if, warn_if=None):
     status = "ok" if ok_if(val) else ("warn" if warn_if and warn_if(val) else "fail")
     return {"check": label, "value": val, "status": status}
 
@@ -763,18 +743,12 @@ def build_health_report() -> dict:
                 except Exception as e: add_check("data_feeds", {"check": label, "value": str(e), "status": "fail"})
 
             report["sections"]["content_refresh"] = {"checks": [], "grade": "A"}
-            add_check("content_refresh", _check(
-                _get_config("takeaway_refresh_due", "false"),
-                "Takeaway refresh due", lambda v: v == "false", lambda v: True))
-            add_check("content_refresh", _check(
-                _get_config("overview_refresh_due", "false"),
-                "Overview refresh due", lambda v: v == "false", lambda v: True))
+            add_check("content_refresh", _check(_get_config("takeaway_refresh_due","false"), "Takeaway refresh due", lambda v: v=="false", lambda v: True))
+            add_check("content_refresh", _check(_get_config("overview_refresh_due","false"), "Overview refresh due", lambda v: v=="false", lambda v: True))
             cur.execute("SELECT MIN(last_takeaway_updated), COUNT(*) FROM input_raw WHERE mcap_rank <= 500")
             r = cur.fetchone(); oldest = r[0]; count = r[1]
             days_since = (today - oldest).days if oldest else 999
-            add_check("content_refresh", _check(
-                f"oldest={oldest} ({days_since}d ago), count={count}",
-                "Takeaway top500 freshness",
+            add_check("content_refresh", _check(f"oldest={oldest} ({days_since}d ago), count={count}", "Takeaway top500 freshness",
                 lambda v: days_since <= 90, lambda v: days_since <= 120))
 
             report["sections"]["v8_engine"] = {"checks": [], "grade": "A"}
@@ -829,21 +803,18 @@ def _build_digest_daily() -> dict:
                 FROM global_indices g
                 JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
                   ON g.symbol = m.symbol AND g.quote_date = m.md
-                ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2
-                    WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
+                ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
             """)
             cols = [d[0] for d in cur.description]
             global_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            result["sections"]["1_global_indices"] = {"label": "Global Indices",
-                "quote_date": global_rows[0]["quote_date"] if global_rows else None, "data": global_rows}
+            result["sections"]["1_global_indices"] = {"label": "Global Indices", "quote_date": global_rows[0]["quote_date"] if global_rows else None, "data": global_rows}
 
             domestic = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("""
                     WITH d AS (SELECT price_date, open, high, low, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn FROM raw_prices WHERE symbol = %s)
-                    SELECT a.price_date::text, a.open, a.high, a.low, a.close,
-                           ROUND(((a.close - b.close) / NULLIF(b.close,0) * 100)::numeric, 2)
-                    FROM d a JOIN d b ON b.rn = 2 WHERE a.rn = 1
+                    SELECT a.price_date::text, a.open, a.high, a.low, a.close, ROUND(((a.close-b.close)/NULLIF(b.close,0)*100)::numeric,2)
+                    FROM d a JOIN d b ON b.rn=2 WHERE a.rn=1
                 """, (sym,))
                 r = cur.fetchone()
                 if r: domestic[sym] = {"price_date": r[0], "open": _r(r[1]), "high": _r(r[2]), "low": _r(r[3]), "close": _r(r[4]), "chg_pct": _r(r[5])}
@@ -851,21 +822,17 @@ def _build_digest_daily() -> dict:
             cur.execute("SELECT price_date::text, advances, declines, unchanged, adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
             adr_row = cur.fetchone()
             adr = {"price_date": adr_row[0], "advances": adr_row[1], "declines": adr_row[2], "unchanged": adr_row[3], "adr": _r(adr_row[4])} if adr_row else None
-            result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR",
-                "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr}
+            result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr}
 
-            t_due = _get_config("takeaway_refresh_due", "false")
-            ov_due = _get_config("overview_refresh_due", "false")
+            t_due = _get_config("takeaway_refresh_due", "false"); ov_due = _get_config("overview_refresh_due", "false")
             if t_due == "true" or ov_due == "true":
                 tier = _get_config("takeaway_refresh_tier", "")
-                result["refresh_alert"] = {
-                    "takeaway_due": t_due == "true", "overview_due": ov_due == "true", "tier": tier,
-                    "action": f"Say 'run {'takeaway' if t_due=='true' else 'overview'} refresh{' top500' if tier=='top500' else ''}' in Claude chat",
-                }
+                result["refresh_alert"] = {"takeaway_due": t_due=="true", "overview_due": ov_due=="true", "tier": tier,
+                    "action": f"Say 'run {'takeaway' if t_due=='true' else 'overview'} refresh{' top500' if tier=='top500' else ''}' in Claude chat"}
 
             pivots = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
-                cur.execute("SELECT AVG(high), AVG(low), AVG(close) FROM (SELECT high, low, close FROM raw_prices WHERE symbol = %s ORDER BY price_date DESC LIMIT 5) sub", (sym,))
+                cur.execute("SELECT AVG(high), AVG(low), AVG(close) FROM (SELECT high,low,close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 5) sub", (sym,))
                 r = cur.fetchone()
                 if r and r[0] is not None:
                     h, l, c = float(r[0]), float(r[1]), float(r[2]); pp = _r((h+l+c)/3)
@@ -878,7 +845,7 @@ def _build_digest_daily() -> dict:
 
             pcr_out = {}
             for und in ("NIFTY", "BANKNIFTY"):
-                cur.execute("SELECT price_date::text, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying = %s ORDER BY price_date DESC LIMIT 5", (und,))
+                cur.execute("SELECT price_date::text, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying=%s ORDER BY price_date DESC LIMIT 5", (und,))
                 cols2 = [d[0] for d in cur.description]; pcr_out[und] = [dict(zip(cols2, row)) for row in cur.fetchall()]
             result["sections"]["5_pcr_trend"] = {"label": "PCR Trend (5-day rolling)", "NIFTY": pcr_out.get("NIFTY",[]), "BANKNIFTY": pcr_out.get("BANKNIFTY",[])}
 
@@ -892,13 +859,13 @@ def digest_daily(): return _build_digest_daily()
 @app.get("/api/daily/adr")
 def daily_adr(days: int = 5):
     days = min(max(days, 1), 30)
-    rows = api_query("SELECT price_date::text, advances, declines, unchanged, adr, CASE WHEN adr >= 1.0 THEN TRUE ELSE FALSE END AS pass FROM adr_daily ORDER BY price_date DESC LIMIT %s", (days,))
+    rows = api_query("SELECT price_date::text, advances, declines, unchanged, adr, CASE WHEN adr>=1.0 THEN TRUE ELSE FALSE END AS pass FROM adr_daily ORDER BY price_date DESC LIMIT %s", (days,))
     return {"days": len(rows) if isinstance(rows, list) else 0, "data": rows if isinstance(rows, list) else []}
 
 @app.get("/api/daily/pcr")
 def daily_pcr(underlying: str = "NIFTY", days: int = 5):
     underlying = underlying.upper(); days = min(max(days, 1), 30)
-    rows = api_query("SELECT price_date::text, underlying, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying = %s ORDER BY price_date DESC LIMIT %s", (underlying, days))
+    rows = api_query("SELECT price_date::text, underlying, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying=%s ORDER BY price_date DESC LIMIT %s", (underlying, days))
     return {"underlying": underlying, "days": len(rows) if isinstance(rows, list) else 0, "data": rows if isinstance(rows, list) else []}
 
 @app.post("/api/daily/compute_metrics")
@@ -964,11 +931,9 @@ def qb_registry(basket_name: Optional[str] = None):
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    keys = sorted(os.environ.keys())
+    _check_admin(x_admin_token); keys = sorted(os.environ.keys())
     interesting = ["SCREENER_EMAIL","SCREENER_PASSWORD","GITHUB_TOKEN","GITHUB_REPO","ADMIN_TOKEN","DATABASE_URL","DEPLOY_GUARD","RAILWAY_PUBLIC_DOMAIN"]
-    return {"version": VERSION, "all_keys_count": len(keys),
-            "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k,""))} for k in interesting}}
+    return {"version": VERSION, "all_keys_count": len(keys), "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k,""))} for k in interesting}}
 
 @app.post("/api/v8/build_cache")
 def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
@@ -1034,13 +999,13 @@ def api_query(sql, params=None, single=False):
 
 @app.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
-    # v2.9.6: added instrument_type + mcap_rank from input_raw
+    # v2.9.7: full company map — cap_category + instrument_type + mcap_rank + overview + takeaway
     r = api_query("""
         SELECT g.symbol, g.company_name, g.segment, g.price,
                g.g_score, g.v_score, g.m_score, g.gvm_score,
                g.verdict, g.punchline, g.market_cap,
                i.overview, i.key_takeaway,
-               i.instrument_type, i.mcap_rank
+               i.instrument_type, i.cap_category, i.mcap_rank
         FROM gvm_scores g
         LEFT JOIN input_raw i ON i.nse_code = g.symbol
         WHERE g.symbol = %s
@@ -1051,12 +1016,12 @@ def get_gvm(symbol: str):
 @app.get("/api/gvm/top/{n}")
 def get_top(n: int, verdict: Optional[str] = None):
     n = min(max(n, 1), 100)
-    if verdict: return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict = %s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
+    if verdict: return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict=%s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
     return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
 
 @app.get("/api/filter")
 def get_filter(min_gvm: float = 0, max_gvm: float = 10):
-    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score >= %s AND gvm_score <= %s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
+    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score>=%s AND gvm_score<=%s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
 
 @app.get("/api/sectors")
 def get_sectors():
@@ -1069,34 +1034,34 @@ def get_top_gainers(price_date: Optional[str]=None, n: int=20, min_gvm: Optional
     if not price_date:
         row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
         price_date = row["latest"] if row else str(date.today())
-    conds = ["r.price_date = %s", "r.open > 0", "r.close > 0"]; vals = [price_date]
-    if min_volume: conds.append("r.volume >= %s"); vals.append(min_volume)
+    conds = ["r.price_date=%s","r.open>0","r.close>0"]; vals = [price_date]
+    if min_volume: conds.append("r.volume>=%s"); vals.append(min_volume)
     if universe == "gvm_only": conds.append("g.symbol IS NOT NULL")
-    if min_gvm is not None: conds.append("g.gvm_score >= %s"); vals.append(min_gvm)
-    having = f"HAVING ROUND(((r.close / NULLIF(r.open, 0) - 1) * 100)::numeric, 2) >= {float(min_day_pct)}" if min_day_pct is not None else ""
+    if min_gvm is not None: conds.append("g.gvm_score>=%s"); vals.append(min_gvm)
+    having = f"HAVING ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2)>={float(min_day_pct)}" if min_day_pct is not None else ""
     join_type = "INNER" if universe == "gvm_only" else "LEFT"
     sql = f"""
-        SELECT r.symbol, COALESCE(g.company_name, r.symbol) AS company_name, COALESCE(g.segment,'Unknown') AS segment,
+        SELECT r.symbol, COALESCE(g.company_name,r.symbol) AS company_name, COALESCE(g.segment,'Unknown') AS segment,
                ROUND(r.close::numeric,2) AS close, ROUND(r.open::numeric,2) AS open,
                ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2) AS day_pct,
                r.volume, ROUND(g.gvm_score::numeric,2) AS gvm_score,
                ROUND(g.g_score::numeric,2) AS g_score, ROUND(g.v_score::numeric,2) AS v_score,
                ROUND(g.m_score::numeric,2) AS m_score, g.verdict, r.price_date::text AS price_date
-        FROM raw_prices r {join_type} JOIN gvm_scores g ON r.symbol = g.symbol
+        FROM raw_prices r {join_type} JOIN gvm_scores g ON r.symbol=g.symbol
         WHERE {" AND ".join(conds)}
-        GROUP BY r.symbol, g.company_name, g.segment, r.close, r.open, r.volume, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, r.price_date
+        GROUP BY r.symbol,g.company_name,g.segment,r.close,r.open,r.volume,g.gvm_score,g.g_score,g.v_score,g.m_score,g.verdict,r.price_date
         {having} ORDER BY day_pct DESC LIMIT %s
     """; vals.append(n); return api_query(sql, vals)
 
 @app.get("/api/cmp/{symbol}")
 def get_cmp(symbol: str):
-    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol = %s", (symbol.upper(),), single=True)
+    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol=%s", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"{symbol} CMP not found"); return r
 
 @app.get("/api/intraday/{symbol}")
 def get_intraday(symbol: str, days: int = 1):
     days = min(max(days, 1), 7); cutoff = _ist_now() - timedelta(days=days)
-    return api_query("SELECT symbol, ts, open, high, low, close, volume FROM intraday_prices WHERE symbol = %s AND ts >= %s ORDER BY ts ASC", (symbol.upper(), cutoff))
+    return api_query("SELECT symbol,ts,open,high,low,close,volume FROM intraday_prices WHERE symbol=%s AND ts>=%s ORDER BY ts ASC", (symbol.upper(), cutoff))
 
 @app.get("/api/intraday_ondemand/{symbol}")
 async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", source: str = "auto"):
@@ -1109,19 +1074,19 @@ def get_global():
                g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
         FROM global_indices g
         JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
-          ON g.symbol = m.symbol AND g.quote_date = m.md
+          ON g.symbol=m.symbol AND g.quote_date=m.md
         ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
     """)
 
 @app.get("/api/global/history/{name}")
 def get_global_history(name: str, days: int = 1825):
     cutoff = (_ist_now().date() - timedelta(days=days))
-    return api_query("SELECT name, symbol, category, price, prev_close, chg_pct, quote_date::text FROM global_indices WHERE LOWER(name) = LOWER(%s) AND quote_date >= %s ORDER BY quote_date ASC", (name, cutoff))
+    return api_query("SELECT name,symbol,category,price,prev_close,chg_pct,quote_date::text FROM global_indices WHERE LOWER(name)=LOWER(%s) AND quote_date>=%s ORDER BY quote_date ASC", (name, cutoff))
 
 @app.get("/api/global/intraday/{name}")
 def get_global_intraday(name: str, days: int = 7):
-    cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
-    return api_query("SELECT symbol, name, ts, open, high, low, close, volume FROM global_intraday WHERE UPPER(name) = UPPER(%s) AND ts >= %s ORDER BY ts ASC", (name, cutoff))
+    cutoff = _ist_now() - timedelta(days=min(max(days,1),7))
+    return api_query("SELECT symbol,name,ts,open,high,low,close,volume FROM global_intraday WHERE UPPER(name)=UPPER(%s) AND ts>=%s ORDER BY ts ASC", (name, cutoff))
 
 @app.post("/api/v8/run")
 async def v8_run(x_admin_token: Optional[str] = Header(None)):
@@ -1140,14 +1105,14 @@ def v8_metrics_all():
         SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20, rsi_month, rsi_weekly, daily_rsi,
                month_return, week_return, year_return, prev_day_change, sector_day, sector_week,
                month_index, week_index_52, range_1d, range_3d, upper_bb, lower_bb, ma9_vs_ma21, vol_ratio
-        FROM v8_metrics WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics) ORDER BY symbol
+        FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics) ORDER BY symbol
     """)
 
 @app.get("/api/v8/metrics/{symbol}")
 def v8_metrics_single(symbol: str, score_date: Optional[str] = None):
     if not score_date: score_date = str(date.today())
-    r = api_query("SELECT * FROM v8_metrics WHERE symbol = %s AND score_date = %s", (symbol.upper(), score_date), single=True)
-    if not r: r = api_query("SELECT * FROM v8_metrics WHERE symbol = %s ORDER BY score_date DESC LIMIT 1", (symbol.upper(),), single=True)
+    r = api_query("SELECT * FROM v8_metrics WHERE symbol=%s AND score_date=%s", (symbol.upper(), score_date), single=True)
+    if not r: r = api_query("SELECT * FROM v8_metrics WHERE symbol=%s ORDER BY score_date DESC LIMIT 1", (symbol.upper(),), single=True)
     if not r: raise HTTPException(404, f"No metrics for {symbol}")
     return r
 
@@ -1155,20 +1120,20 @@ def v8_metrics_single(symbol: str, score_date: Optional[str] = None):
 def v8_live_metrics():
     return api_query("""
         SELECT s.symbol, lc.close AS cmp, fc.open AS day_open,
-            CASE WHEN fc.open > 0 THEN ROUND(((lc.close/fc.open-1)*100)::numeric,2) END AS day_pct,
+            CASE WHEN fc.open>0 THEN ROUND(((lc.close/fc.open-1)*100)::numeric,2) END AS day_pct,
             hc.close AS hour_ago_close,
-            CASE WHEN hc.close > 0 THEN ROUND(((lc.close/hc.close-1)*100)::numeric,2) END AS hourly_pct
+            CASE WHEN hc.close>0 THEN ROUND(((lc.close/hc.close-1)*100)::numeric,2) END AS hourly_pct
         FROM (SELECT symbol FROM futures_universe WHERE is_active=TRUE) s
         JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1) lc ON true
         JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=CURRENT_DATE ORDER BY ts ASC LIMIT 1) fc ON true
-        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts >= NOW()-INTERVAL '65 minutes' ORDER BY ts ASC LIMIT 1) hc ON true
+        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts>=NOW()-INTERVAL '65 minutes' ORDER BY ts ASC LIMIT 1) hc ON true
         ORDER BY s.symbol
     """)
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); futures = _get_futures_symbols()
-    if not futures: return {"status": "warn", "message": "No futures symbols"}
+    if not futures: return {"status":"warn","message":"No futures symbols"}
     total_candles, failed = 0, []
     for sym in futures:
         candles = await _fetch_intraday_yahoo(sym, range_str="7d")
@@ -1176,7 +1141,7 @@ async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):
         else: failed.append(sym)
         await asyncio.sleep(0.25)
     _purge_intraday_old()
-    return {"status": "ok", "symbols_attempted": len(futures), "symbols_failed": len(failed), "total_candles": total_candles}
+    return {"status":"ok","symbols_attempted":len(futures),"symbols_failed":len(failed),"total_candles":total_candles}
 
 _LAG_MINUTES = 15; _HEAL_SLEEP = 0.8
 
@@ -1185,7 +1150,7 @@ def _yahoo_1m_today(symbol: str):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(ticker)}?interval=1m&period1={now-2*86400}&period2={now+3600}"
     for attempt in range(3):
         try:
-            with httpx.Client(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as c:
+            with httpx.Client(timeout=15, headers={"User-Agent":"Mozilla/5.0"}) as c:
                 r = c.get(url); r.raise_for_status(); data = r.json()
             chart = (data.get("chart") or {}).get("result") or []
             if not chart:
@@ -1193,14 +1158,14 @@ def _yahoo_1m_today(symbol: str):
                 return []
             res = chart[0]; ts = res.get("timestamp") or []
             q = (res.get("indicators") or {}).get("quote",[{}])[0]
-            o, h, l, c_, v = (q.get(k) or [] for k in ("open","high","low","close","volume"))
+            o,h,l,c_,v = (q.get(k) or [] for k in ("open","high","low","close","volume"))
             out = []
             for i in range(len(ts)):
                 op=o[i] if i<len(o) else None; hi=h[i] if i<len(h) else None
                 lo=l[i] if i<len(l) else None; cl=c_[i] if i<len(c_) else None; vol=v[i] if i<len(v) else None
                 if op is None or hi is None or lo is None or cl is None or not vol: continue
                 dt = datetime.utcfromtimestamp(ts[i]) + timedelta(hours=5,minutes=30)
-                out.append((dt, round(float(op),2), round(float(hi),2), round(float(lo),2), round(float(cl),2), int(vol)))
+                out.append((dt,round(float(op),2),round(float(hi),2),round(float(lo),2),round(float(cl),2),int(vol)))
             return out
         except Exception as e:
             if attempt < 2: time.sleep(0.5+0.5*attempt); continue
@@ -1215,27 +1180,27 @@ def _heal_morning_gaps(symbols=None):
     if heal_until <= open_dt: return {"status":"noop","reason":"before ~09:30 IST","today":str(today)}
     syms = symbols if symbols else _get_futures_symbols()
     syms = [s for s in syms if s not in ("NIFTY","BANKNIFTY","NIFTY50","FINNIFTY","MIDCPNIFTY","SENSEX","BANKEX")]
-    healed, skipped, empties, errors, inserted = 0, 0, 0, [], 0
+    healed,skipped,empties,errors,inserted = 0,0,0,[],0
     for sym in syms:
         try:
             row = api_query("SELECT MIN(ts) AS mn, COUNT(*) AS cnt FROM intraday_prices WHERE symbol=%s AND ts::date=%s AND timeframe='1m'", (sym,today), single=True)
             earliest = row.get("mn") if isinstance(row,dict) else None; cnt = row.get("cnt",0) if isinstance(row,dict) else 0
-            if cnt == 0: gap_from = open_dt.replace(tzinfo=None)
-            elif earliest is not None and earliest > open_dt.replace(tzinfo=None)+timedelta(minutes=1): gap_from = open_dt.replace(tzinfo=None)
-            else: skipped += 1; continue
+            if cnt==0: gap_from = open_dt.replace(tzinfo=None)
+            elif earliest is not None and earliest>open_dt.replace(tzinfo=None)+timedelta(minutes=1): gap_from = open_dt.replace(tzinfo=None)
+            else: skipped+=1; continue
             candles = _yahoo_1m_today(sym)
-            if not candles: empties += 1; time.sleep(_HEAL_SLEEP); continue
+            if not candles: empties+=1; time.sleep(_HEAL_SLEEP); continue
             hu = heal_until.replace(tzinfo=None); rows = []
-            for (ts, op, hi, lo, cl, vol) in candles:
-                if ts.date() != today or ts < gap_from or ts > hu: continue
-                if earliest is not None and ts >= earliest: continue
-                rows.append((sym, ts, op, hi, lo, cl, vol, "1m", "yahoo"))
+            for (ts,op,hi,lo,cl,vol) in candles:
+                if ts.date()!=today or ts<gap_from or ts>hu: continue
+                if earliest is not None and ts>=earliest: continue
+                rows.append((sym,ts,op,hi,lo,cl,vol,"1m","yahoo"))
             if rows:
                 with get_conn() as conn, conn.cursor() as cur:
                     cur.executemany("INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol,ts,timeframe) DO NOTHING", rows)
                     conn.commit()
-                inserted += len(rows); healed += 1
-            else: skipped += 1
+                inserted+=len(rows); healed+=1
+            else: skipped+=1
             time.sleep(_HEAL_SLEEP)
         except Exception as e: errors.append(f"{sym}: {str(e)[:60]}"); log.warning(f"heal {sym}: {e}")
     return {"status":"ok","today":str(today),"window":f"{open_dt.strftime('%H:%M')}-{heal_until.strftime('%H:%M')} IST",
@@ -1266,20 +1231,20 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
     try:
         with httpx.Client(timeout=30) as c:
             mood = c.get(f"{BASE_URL}/api/v8/market_mood").json()
-            buy_slots, sell_slots = mood.get("buy_slots"), mood.get("sell_slots")
+            buy_slots,sell_slots = mood.get("buy_slots"),mood.get("sell_slots")
     except Exception: pass
     with get_conn() as conn: return v8_paper.paper_tick(conn, buy_slots=buy_slots, sell_slots=sell_slots)
 
 @app.get("/api/paper/status")
 def paper_status():
-    return {"open_positions": api_query("SELECT symbol, side, basket, entry_price, entry_ts, target, stop_loss, qty, pivot_date FROM v8_paper_positions WHERE status='OPEN' ORDER BY entry_ts DESC"),
-            "recent_trades": api_query("SELECT symbol, side, basket, entry_price, exit_price, pnl, return_pct, result, entry_ts, exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
-            "missed": api_query("SELECT miss_date, symbol, side, basket, expected_entry, reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
+    return {"open_positions": api_query("SELECT symbol,side,basket,entry_price,entry_ts,target,stop_loss,qty,pivot_date FROM v8_paper_positions WHERE status='OPEN' ORDER BY entry_ts DESC"),
+            "recent_trades": api_query("SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
+            "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
             "summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True)}
 
 @app.get("/api/paper/pivots")
 def paper_pivots(limit: int = 250):
-    return api_query("SELECT symbol, pp, r1, s1, r2, s2, pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
+    return api_query("SELECT symbol,pp,r1,s1,r2,s2,pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
 
 @app.post("/api/admin/fetch_global")
 async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
@@ -1527,7 +1492,7 @@ async def oauth_token(req: Request):
 
 # ── MCP Tools ─────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
-    {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30): date, time, day-of-week, weekend flag, NSE holiday flag, is_trading_day, market-open status.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB. Includes refresh_alert if takeaway/overview refresh is due.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_build_cache","description":"V8 LIVE: build v8_history_cache.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -1535,7 +1500,7 @@ MCP_TOOLS = [
     {"name":"run_momentum","description":"GVM: recompute daily momentum (M) for all stocks from raw_prices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
-    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview, key_takeaway, instrument_type (futures/cash), mcap_rank.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview, key_takeaway, instrument_type (futures/cash), cap_category (large/mid/small/micro), mcap_rank.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_top_stocks","description":"Get top N stocks by GVM.","inputSchema":{"type":"object","properties":{"n":{"type":"integer"},"verdict":{"type":"string"}},"required":["n"]}},
     {"name":"get_sector","description":"Get all stocks in a sector ordered by GVM.","inputSchema":{"type":"object","properties":{"sector":{"type":"string"}},"required":["sector"]}},
     {"name":"get_filter","description":"Filter stocks by GVM range.","inputSchema":{"type":"object","properties":{"min_gvm":{"type":"number"},"max_gvm":{"type":"number"}},"required":[]}},
@@ -1598,15 +1563,15 @@ async def _call_tool(name, args):
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
-        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum", True)}, headers=h); return r.json()
-        elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days", 180)}); return r.json()
+        elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum",True)}, headers=h); return r.json()
+        elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days",180)}); return r.json()
         elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
         elif name == "get_top_stocks":
             params = {}
             if args.get("verdict"): params["verdict"] = args["verdict"]
             r = await client.get(f"{BASE_URL}/api/gvm/top/{args['n']}", params=params); return r.json()
         elif name == "get_sector": r = await client.get(f"{BASE_URL}/api/sectors", params={"segment": args["sector"]}); return r.json()
-        elif name == "get_filter": r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm", 0), "max_gvm": args.get("max_gvm", 10)}); return r.json()
+        elif name == "get_filter": r = await client.get(f"{BASE_URL}/api/filter", params={"min_gvm": args.get("min_gvm",0), "max_gvm": args.get("max_gvm",10)}); return r.json()
         elif name == "get_sector_rating": r = await client.get(f"{BASE_URL}/api/sectors"); return r.json()
         elif name == "get_intraday":
             sym = (args.get("symbol") or "").upper()
@@ -1618,11 +1583,11 @@ async def _call_tool(name, args):
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers=h); return r.json()
         elif name == "heal_intraday": r = await client.post(f"{BASE_URL}/api/admin/heal_intraday", headers=h); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers=h); return r.json()
-        elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days", 7)}, headers=h); return r.json()
+        elif name == "backfill_indices": r = await client.post(f"{BASE_URL}/api/admin/backfill_indices", params={"days": args.get("days",7)}, headers=h); return r.json()
         elif name == "paper_compute_pivots": r = await client.post(f"{BASE_URL}/api/paper/compute_pivots", headers=h); return r.json()
         elif name == "paper_tick": r = await client.post(f"{BASE_URL}/api/paper/tick", headers=h); return r.json()
         elif name == "paper_status": r = await client.get(f"{BASE_URL}/api/paper/status"); return r.json()
-        elif name == "paper_pivots": r = await client.get(f"{BASE_URL}/api/paper/pivots", params={"limit": args.get("limit", 250)}); return r.json()
+        elif name == "paper_pivots": r = await client.get(f"{BASE_URL}/api/paper/pivots", params={"limit": args.get("limit",250)}); return r.json()
         elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers=h); return r.json()
         elif name == "run_v8_for_date": r = await client.post(f"{BASE_URL}/api/v8/run_for_date", params={"target_date": args["target_date"]}, headers=h); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
@@ -1636,9 +1601,9 @@ async def _call_tool(name, args):
                 with get_conn() as conn, conn.cursor() as cur:
                     cur.execute(q)
                     if cur.description:
-                        cols = [d[0] for d in cur.description]; rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                        cols = [d[0] for d in cur.description]; rows = [dict(zip(cols,r)) for r in cur.fetchall()]
                         conn.commit(); return {"rows": rows, "count": len(rows)}
-                    conn.commit(); return {"status": "ok", "rowcount": cur.rowcount}
+                    conn.commit(); return {"status":"ok","rowcount":cur.rowcount}
             except Exception as e: return {"error": str(e)}
         elif name == "load_input_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_input_from_drive", json={"file_id": args["file_id"]}); return r.json()
         elif name == "load_screener_from_drive": r = await client.post(f"{BASE_URL}/api/admin/load_screener_from_drive", json={"file_id": args["file_id"]}); return r.json()
@@ -1646,7 +1611,7 @@ async def _call_tool(name, args):
         elif name == "check_blackout":
             sym = args["symbol"].upper()
             with get_conn() as conn, conn.cursor() as cur:
-                cur.execute("SELECT ticker, ex_date, event_type FROM earnings_calendar WHERE UPPER(ticker) = %s ORDER BY id DESC LIMIT 5", (sym,))
+                cur.execute("SELECT ticker,ex_date,event_type FROM earnings_calendar WHERE UPPER(ticker)=%s ORDER BY id DESC LIMIT 5", (sym,))
                 rows = cur.fetchall()
             return {"symbol": sym, "events": [{"ex_date": str(r[1]), "event_type": r[2]} for r in rows]}
         elif name == "github_read": r = await client.get(f"{BASE_URL}/api/admin/github_read", params={"filepath": args["filepath"]}, headers=h); return r.json()
@@ -1654,15 +1619,15 @@ async def _call_tool(name, args):
         elif name == "github_push": r = await client.post(f"{BASE_URL}/api/admin/github_push", json=args, headers=h); return r.json()
         elif name == "github_delete": r = await client.post(f"{BASE_URL}/api/admin/github_delete", json=args, headers=h); return r.json()
         elif name == "v8_market_mood": r = await client.get(f"{BASE_URL}/api/v8/market_mood"); return r.json()
-        elif name == "v8_qualified": r = await client.get(f"{BASE_URL}/api/v8/qualified/{args['basket']}", params={"limit": args.get("limit", 50)}); return r.json()
+        elif name == "v8_qualified": r = await client.get(f"{BASE_URL}/api/v8/qualified/{args['basket']}", params={"limit": args.get("limit",50)}); return r.json()
         elif name == "v8_filter_config": r = await client.get(f"{BASE_URL}/api/v8/filter_config/{args['basket']}"); return r.json()
-        elif name == "v8_sell_overbought": r = await client.get(f"{BASE_URL}/api/v8/sell_overbought", params={"limit": args.get("limit", 50)}); return r.json()
-        elif name == "v8_futures_list": r = await client.get(f"{BASE_URL}/api/v8/futures/list", params={"active_only": args.get("active_only", True)}); return r.json()
+        elif name == "v8_sell_overbought": r = await client.get(f"{BASE_URL}/api/v8/sell_overbought", params={"limit": args.get("limit",50)}); return r.json()
+        elif name == "v8_futures_list": r = await client.get(f"{BASE_URL}/api/v8/futures/list", params={"active_only": args.get("active_only",True)}); return r.json()
         elif name == "v8_futures_upload": r = await client.post(f"{BASE_URL}/api/v8/futures/upload", json={"stocks": args["stocks"]}); return r.json()
         elif name == "get_global": r = await client.get(f"{BASE_URL}/api/global"); return r.json()
         elif name == "fetch_global": r = await client.post(f"{BASE_URL}/api/admin/fetch_global", headers=h); return r.json()
-        elif name == "backfill_global": r = await client.post(f"{BASE_URL}/api/admin/backfill_global", params={"years": args.get("years", 5), "clean": args.get("clean", True)}, headers=h); return r.json()
-        elif name == "get_global_intraday": r = await client.get(f"{BASE_URL}/api/global/intraday/{args['name']}", params={"days": args.get("days", 7)}); return r.json()
+        elif name == "backfill_global": r = await client.post(f"{BASE_URL}/api/admin/backfill_global", params={"years": args.get("years",5), "clean": args.get("clean",True)}, headers=h); return r.json()
+        elif name == "get_global_intraday": r = await client.get(f"{BASE_URL}/api/global/intraday/{args['name']}", params={"days": args.get("days",7)}); return r.json()
         elif name == "fetch_global_intraday": r = await client.post(f"{BASE_URL}/api/admin/fetch_global_intraday", headers=h); return r.json()
         elif name == "get_top_gainers":
             params = {}
@@ -1682,7 +1647,7 @@ async def _call_tool(name, args):
             if args.get("basket_name"): params["basket_name"] = args["basket_name"]
             r = await client.get(f"{BASE_URL}/api/qb/registry", params=params); return r.json()
         elif name == "daily_adr":
-            r = await client.get(f"{BASE_URL}/api/daily/adr", params={"days": args.get("days", 5)}); return r.json()
+            r = await client.get(f"{BASE_URL}/api/daily/adr", params={"days": args.get("days",5)}); return r.json()
         elif name == "daily_pcr":
             r = await client.get(f"{BASE_URL}/api/daily/pcr", params={"underlying": args.get("underlying","NIFTY"), "days": args.get("days",5)}); return r.json()
         elif name == "compute_daily_metrics":
