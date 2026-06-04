@@ -40,7 +40,11 @@ import qb_eod_checker
 import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.7
+# Scorr / Project Quant — main.py v2.9.8
+# v2.9.8: POST /api/admin/content_update — manual content writer for
+#   overview / key_takeaway / result_analysis. Single symbol, always overwrite.
+#   Validates field name + mcap_rank gate (501+ blocked for takeaway/result_analysis).
+#   MCP tool: content_update.
 # v2.9.7: get_gvm returns cap_category (large/mid/small/micro) + instrument_type.
 #   Cap bands: large=1-100, mid=101-250, small=251-1000, micro=1001+
 # v2.9.6: get_gvm returns instrument_type + mcap_rank.
@@ -49,7 +53,7 @@ import refresh_takeaways as rt
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.7"
+VERSION = "2.9.8"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -183,7 +187,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.7)")
+        log.info("Tables ready (v2.9.8)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -627,7 +631,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.7)")
+    log.info("Scheduler started (v2.9.8)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -648,7 +652,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.7)")
+    log.info("Live loop started (v2.9.8)")
     tick_count = 0
     while True:
         try:
@@ -880,6 +884,88 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 @app.post("/api/admin/mark_refresh_complete")
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
+
+# ── Content Update Endpoint (v2.9.8) ─────────────────────────────────────────
+_ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
+_TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
+_FIELD_TO_TS_COL = {
+    "overview": "last_overview_updated",
+    "key_takeaway": "last_takeaway_updated",
+    "result_analysis": "last_result_analysis_updated",
+}
+
+@app.post("/api/admin/content_update")
+def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
+    """
+    Manual content writer for input_raw.
+    Body: { "symbol": "RELIANCE", "field": "overview|key_takeaway|result_analysis", "content": "..." }
+    Rules:
+      - field must be one of the 3 allowed values
+      - key_takeaway + result_analysis blocked for mcap_rank > 500
+      - always overwrites existing content
+      - updates the corresponding last_*_updated timestamp
+    """
+    _check_admin(x_admin_token)
+
+    symbol = (req_body.get("symbol") or "").strip().upper()
+    field = (req_body.get("field") or "").strip().lower()
+    content = req_body.get("content", "")
+
+    if not symbol:
+        raise HTTPException(400, "symbol is required")
+    if field not in _ALLOWED_CONTENT_FIELDS:
+        raise HTTPException(400, f"field must be one of: {sorted(_ALLOWED_CONTENT_FIELDS)}")
+    if content is None or str(content).strip() == "":
+        raise HTTPException(400, "content cannot be empty")
+
+    content = str(content).strip()
+    ts_col = _FIELD_TO_TS_COL[field]
+
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            # Look up the row by nse_code
+            cur.execute(
+                "SELECT id, mcap_rank, company_name FROM input_raw WHERE nse_code = %s",
+                (symbol,)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"{symbol} not found in input_raw")
+
+            row_id, mcap_rank, company_name = row[0], row[1], row[2]
+
+            # Gate: key_takeaway + result_analysis only for top 500
+            if field in _TOP500_ONLY_FIELDS:
+                rank = mcap_rank if mcap_rank is not None else 9999
+                if rank > 500:
+                    raise HTTPException(400,
+                        f"{symbol} has mcap_rank={rank} (>500). "
+                        f"'{field}' is only allowed for mcap_rank <= 500. "
+                        f"Use 'overview' instead — it covers all 1700+."
+                    )
+
+            # Write
+            cur.execute(
+                f"UPDATE input_raw SET {field} = %s, {ts_col} = NOW() WHERE id = %s",
+                (content, row_id)
+            )
+            conn.commit()
+
+        return {
+            "status": "ok",
+            "symbol": symbol,
+            "company_name": company_name,
+            "field": field,
+            "chars_written": len(content),
+            "timestamp_col_updated": ts_col,
+            "mcap_rank": mcap_rank,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"content_update failed for {symbol}: {e}")
+        raise HTTPException(500, str(e))
 
 @app.post("/api/qb/eod_check")
 def qb_eod_check_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
@@ -1552,6 +1638,7 @@ MCP_TOOLS = [
     {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily. underlying: NIFTY or BANKNIFTY.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_daily_metrics","description":"Manually trigger ADR + PCR compute-and-store.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"refresh_status","description":"Show AI content refresh status — last run dates, next due dates, due flags. No API key needed.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"content_update","description":"Manual content writer for input_raw. Updates overview, key_takeaway, or result_analysis for a single symbol. key_takeaway and result_analysis are blocked for mcap_rank > 500. Always overwrites.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"field":{"type":"string","enum":["overview","key_takeaway","result_analysis"]},"content":{"type":"string"}},"required":["symbol","field","content"]}},
 ]
 
 async def _call_tool(name, args):
@@ -1654,6 +1741,11 @@ async def _call_tool(name, args):
             r = await client.post(f"{BASE_URL}/api/daily/compute_metrics", headers=h); return r.json()
         elif name == "refresh_status":
             r = await client.get(f"{BASE_URL}/api/admin/refresh_status", headers=h); return r.json()
+        elif name == "content_update":
+            r = await client.post(f"{BASE_URL}/api/admin/content_update",
+                json={"symbol": args["symbol"], "field": args["field"], "content": args["content"]},
+                headers=h)
+            return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
