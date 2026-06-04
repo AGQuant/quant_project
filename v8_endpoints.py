@@ -18,16 +18,11 @@ Architecture: compute-on-write.
   - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
   - daily_metrics writes adr_daily + pcr_daily at 15:50 IST (after V8 engine)
   - This file = pure reads only. Zero compute on the read path.
-  - ADR: reads from adr_daily (latest row) — intraday path REMOVED (v2.9.9).
-    Root cause: intraday_prices only has NIFTY/BANKNIFTY 1-min bars, NOT 208 futures.
-    The LATERAL join returned 1 row → advances=1, declines=0 → ADR=999.
-    Fix: adr_daily is always the source. Neutral fallback = 1.0 (not 999) if table empty.
 
-1D gate: prev_day_change (net close-to-close %) — NOT range_1d.
-1W gate: week_return (net close-to-close %).
-buy_momentum month_return cap: 14 (raised from 12, 02-Jun-2026).
-ADR fix: compute from raw_prices → adr_daily (v2.8.0, 03-Jun-2026).
-ADR 999 bug fixed: intraday path removed (v2.9.9, 04-Jun-2026).
+sector_day + sector_week REMOVED from all basket filters (05-Jun-2026):
+  Only 208 futures in universe — sector averages from 1-2 stocks per segment
+  are meaningless. All remaining filters are fully live-computable from
+  Fyers 1-min bars via v8_live.py.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -42,9 +37,9 @@ def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
-# ── Filter configs ────────────────────────────────────────────────────────────
+# ── Filter configs ─────────────────────────────────────────────────────────────
 # Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
-# This file never filters at read time — only reads pre-computed v8_qualified.
+# sector_day + sector_week removed 05-Jun-2026 — not meaningful for 208-stock universe.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -56,8 +51,6 @@ FILTER_CONFIG = {
         "rsi_weekly":      [50.0, 67.5],
         "month_return":    [0.0,  7.2],
         "week_return":     [1.5,  3.0],
-        "sector_week":     [1.5,  5.0],
-        "sector_day":      [0.0,  3.0],
         "month_index":     [50.0, 100.0],
         "prev_day_change": [0.0,  2.4],
     },
@@ -70,8 +63,6 @@ FILTER_CONFIG = {
         "rsi_weekly":      [71.5, 80.0],
         "month_return":    [3.0,  14.0],
         "week_return":     [1.0,  7.0],
-        "sector_week":     [1.5,  5.0],
-        "sector_day":      [0.0,  3.0],
         "month_index":     [50.0, 100.0],
         "prev_day_change": [0.0,  3.5],
     },
@@ -82,8 +73,6 @@ FILTER_CONFIG = {
         "rsi_weekly":      [10.0,  45.0],
         "month_return":    [-20.0, 2.0],
         "week_return":     [-6.0,  3.0],
-        "sector_week":     [-12.0, -1.5],
-        "sector_day":      [-3.0,  1.0],
         "month_index":     [0.0,   50.0],
         "range_3d":        [None,  -1.0],
     },
@@ -96,8 +85,6 @@ FILTER_CONFIG = {
         "daily_rsi":       [None,  40.0],
         "month_return":    [-30.0, 0.0],
         "week_return":     [-8.0,  0.0],
-        "sector_week":     [-10.0, -1.0],
-        "sector_day":      [-3.0,  1.0],
         "month_index":     [0.0,   35.0],
         "prev_day_change": [-3.0,  0.0],
         "range_3d":        [-10.0, -1.0],
@@ -150,10 +137,6 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
 
 
 def _live_qualified_fallback(basket: str, limit: int):
-    """
-    Fallback: compute qualified stocks live from v8_metrics.
-    Used only when v8_qualified is empty for today (e.g. first boot before engine runs).
-    """
     config = FILTER_CONFIG[basket]
     where_clauses = [
         "score_date = (SELECT MAX(score_date) FROM v8_metrics)",
@@ -173,8 +156,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               sector_day, sector_week, month_index,
-               prev_day_change, range_3d, week_index_52
+               month_index, prev_day_change, range_3d, week_index_52
         FROM v8_metrics
         WHERE {where_sql}
         ORDER BY gvm_score DESC NULLS LAST
@@ -187,23 +169,12 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
-    """Market Mood gate — ADR + Nifty D/W/M. Slot allocation by # of fails.
-
-    ADR source: adr_daily table only (compute-on-write at 15:50 IST).
-    The broken intraday path (v8_universe JOIN intraday_prices) has been removed.
-    Root cause of ADR=999 bug: intraday_prices only stores NIFTY/BANKNIFTY 1-min
-    bars — NOT 208 futures. The LATERAL join returned 1 symbol → advances=1,
-    declines=0 → divide-by-zero guard returned 999.
-    Fix (v2.9.9): always read adr_daily. Neutral fallback = 1.0 if table empty.
-    """
     try:
         with _conn() as conn, conn.cursor() as cur:
-
-            # ── ADR: read from adr_daily (correct, compute-on-write) ──────────
             cur.execute("""
                 SELECT advances, declines, unchanged, adr, price_date
                 FROM adr_daily
@@ -216,14 +187,12 @@ def market_mood():
                 adr        = round(float(r[3]), 3) if r[3] is not None else 1.0
                 adr_date   = str(r[4])
             else:
-                # Table empty (pre-first-run). Neutral fallback — don't penalise gate.
                 advances, declines, unchanged = 0, 0, 0
                 adr      = 1.0
                 adr_date = "no_data"
 
             adr_pass = adr >= 1.0
 
-            # ── Nifty D/W/M ───────────────────────────────────────────────────
             cur.execute("""
                 SELECT price_date, close
                 FROM raw_prices
@@ -302,12 +271,6 @@ def filter_config(basket: str):
 
 @router.get("/qualified/{basket}")
 def qualified(basket: str, limit: int = 50):
-    """
-    Pure read from v8_qualified (compute-on-write).
-    v8_signal_writer writes this table every 5-min during market hours.
-    v8_engine writes it at EOD.
-    Falls back to live compute from v8_metrics if table is empty for today.
-    """
     basket = basket.lower()
     if basket == "sell_overbought":
         return sell_overbought(limit=limit)
@@ -321,8 +284,7 @@ def qualified(basket: str, limit: int = 50):
                     symbol, gvm_score, cmp,
                     dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                     week_return, month_return,
-                    sector_day, sector_week, month_index,
-                    prev_day_change, range_3d, week_index_52,
+                    month_index, prev_day_change, range_3d, week_index_52,
                     source, signal_ts
                 FROM v8_qualified
                 WHERE basket = %s
@@ -357,11 +319,6 @@ def qualified(basket: str, limit: int = 50):
 
 @router.get("/funnel/{basket}")
 def funnel_counts(basket: str):
-    """
-    Waterfall step counts for a basket — how many stocks survive each filter.
-    Written by v8_engine at EOD. Restores the funnel display in the Google Sheet.
-    Falls back to live compute if not yet available for today.
-    """
     basket = basket.lower()
     if basket not in FILTER_CONFIG:
         raise HTTPException(404, f"Unknown basket: {basket}")
@@ -385,8 +342,7 @@ def funnel_counts(basket: str):
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
                        rsi_month, rsi_weekly, daily_rsi,
                        month_return, week_return, year_return, prev_day_change,
-                       sector_day, sector_week, month_index, week_index_52,
-                       range_3d, ma9_vs_ma21, vol_ratio
+                       month_index, week_index_52, range_3d, ma9_vs_ma21, vol_ratio
                 FROM v8_metrics
                 WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
             """)
@@ -417,13 +373,12 @@ def _passes_filter(value, mn, mx) -> bool:
 
 @router.get("/raw")
 def raw_metrics(limit: int = 250):
-    """All active-futures rows from v8_metrics — GVM-sorted. Raw data tab source."""
     sql = """
         SELECT m.symbol, m.score_date, m.gvm_score,
                m.dma_20, m.dma_50, m.dma_200,
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
-               m.sector_day, m.sector_week, m.month_index, m.week_index_52,
+               m.month_index, m.week_index_52,
                m.prev_day_change, m.range_3d,
                m.upper_bb, m.lower_bb,
                m.ma9_vs_ma21, m.vol_ratio
@@ -451,7 +406,6 @@ def raw_metrics(limit: int = 250):
 
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
-    """Failed breakout / exhaustion reversal — computed live from raw_prices."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -492,7 +446,7 @@ def sell_overbought(limit: int = 50):
                 filtered AS (
                     SELECT l.*,
                            vm.dma_200, vm.week_index_52, vm.rsi_month, vm.daily_rsi,
-                           vm.prev_day_change, vm.gvm_score, vm.sector_week
+                           vm.prev_day_change, vm.gvm_score
                     FROM latest l
                     JOIN v8_metrics vm
                       ON vm.symbol = l.symbol
@@ -520,8 +474,7 @@ def sell_overbought(limit: int = 50):
                     prev_day_change,
                     ROUND(rsi_month::numeric, 1)    AS rsi_month,
                     ROUND(daily_rsi::numeric, 1)    AS daily_rsi,
-                    ROUND(gvm_score::numeric, 2)    AS gvm_score,
-                    ROUND(sector_week::numeric, 2)  AS sector_week
+                    ROUND(gvm_score::numeric, 2)    AS gvm_score
                 FROM filtered
                 ORDER BY dma_200 DESC NULLS LAST
                 LIMIT %s
@@ -543,7 +496,6 @@ def sell_overbought(limit: int = 50):
 
 @router.get("/adr")
 def adr_only():
-    """Quick ADR read — from adr_daily table (compute-on-write at 15:50 IST)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -555,16 +507,13 @@ def adr_only():
             r = cur.fetchone()
         if not r:
             return {"adr": 0.0, "advances": 0, "declines": 0, "unchanged": 0,
-                    "pass": False, "note": "adr_daily empty — run V8 engine or wait for 15:50 IST compute"}
+                    "pass": False, "note": "adr_daily empty"}
         price_date, adv, dec, unc, adr_val = r
         adr = float(adr_val) if adr_val else 0.0
         return {
             "price_date": str(price_date),
-            "adr": adr,
-            "advances": adv,
-            "declines": dec,
-            "unchanged": unc,
-            "pass": adr >= 1.0,
+            "adr": adr, "advances": adv, "declines": dec,
+            "unchanged": unc, "pass": adr >= 1.0,
         }
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
@@ -576,7 +525,6 @@ def adr_only():
 
 @router.get("/positions")
 def v8_positions(limit: int = 100):
-    """Open trades = personal_journal rows where exit_time IS NULL."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -608,7 +556,6 @@ def v8_positions(limit: int = 100):
 
 @router.get("/trades")
 def v8_trades(limit: int = 200):
-    """Closed trades = personal_journal rows where exit_time IS NOT NULL."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
