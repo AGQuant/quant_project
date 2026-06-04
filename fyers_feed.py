@@ -8,7 +8,8 @@ Architecture (v3 — all-futures 1-min bars):
   2. LIVE WS   - persistent WebSocket for all 208 futures + indices.
                  * ALL 211 symbols: 1-min bars stored in intraday_prices.
                  * flush_cmp() also writes latest LTP to cmp_prices every 30s.
-  3. GAP HEAL  - on every WS (re)connect, patch gaps for all symbols.
+  3. HEAL GAP  - daily at 18:00 IST: checks all symbols, fills only missing
+                 bars since last stored candle. No-op if WS data is complete.
   4. CMP FLUSH - every 30s during market hours → cmp_prices (IST timestamp).
   5. OPTION CHAIN - SDK optionchain() poll every 5-min → option_chain table.
   6. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
@@ -42,18 +43,15 @@ QUOTES_URL   = 'https://api-t1.fyers.in/data/quotes'
 IST          = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS = 7
+MARKET_CLOSE   = dt_time(15, 30)
 
-# Market-close guard: no intraday bar at/after this IST time is persisted.
-MARKET_CLOSE = dt_time(15, 30)
-
-# Index symbols — stored in intraday_prices AND cmp_prices
 INDEX_LTP_SYMBOLS = {
     'NIFTY50':   'NSE:NIFTY50-INDEX',
     'BANKNIFTY': 'NSE:NIFTYBANK-INDEX',
     'INDIAVIX':  'NSE:INDIAVIX-INDEX',
 }
 
-SKIP_SYMBOLS = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
+SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
 # ── Option chain config ───────────────────────────────────────────────────────
@@ -180,9 +178,7 @@ def get_universe(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE")
         futures = {r[0] for r in cur.fetchall()}
-        cur.execute("SELECT DISTINCT symbol FROM cmp_prices")
-        alls = {r[0] for r in cur.fetchall()}
-    return sorted(futures - SKIP_SYMBOLS), sorted((alls - futures) - SKIP_SYMBOLS)
+    return sorted(futures - SKIP_SYMBOLS)
 
 def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
 def from_fyers_symbol(fsym):
@@ -309,7 +305,7 @@ def purge_old_bars(conn):
         log.warning(f"purge_old_bars: {e}")
 
 
-# ─────────────────────────────────────────────────────────────────────── option chain helpers
+# ─────────────────────────────────────────────────────────────────────── option chain
 
 def ensure_option_schema(conn):
     with conn.cursor() as cur:
@@ -352,44 +348,32 @@ def get_atm(conn, underlying):
 def poll_option_chain(conn, token, expiry):
     from fyers_apiv3 import fyersModel
     fy = fyersModel.FyersModel(client_id=FYERS_CLIENT_ID, token=token, is_async=False, log_path="")
-
     now = datetime.now(IST).replace(tzinfo=None)
     bkt = now.replace(second=0, microsecond=0)
     bkt = bkt - timedelta(minutes=bkt.minute % OPTION_POLL_MINS)
-
     rows = []
     for underlying, index_sym in (('NIFTY', 'NSE:NIFTY50-INDEX'),
                                   ('BANKNIFTY', 'NSE:NIFTYBANK-INDEX')):
         try:
-            resp = fy.optionchain(data={"symbol": index_sym,
-                                        "strikecount": N_STRIKES,
-                                        "timestamp": ""})
+            resp = fy.optionchain(data={"symbol": index_sym, "strikecount": N_STRIKES, "timestamp": ""})
             if not isinstance(resp, dict) or resp.get('s') != 'ok':
-                log.warning(f"optionchain {underlying}: {resp.get('message', resp) if isinstance(resp, dict) else resp}")
+                log.warning(f"optionchain {underlying}: {resp}")
                 continue
             chain = (resp.get('data') or {}).get('optionsChain') or []
             for c in chain:
                 otype = c.get('option_type')
                 if otype not in ('CE', 'PE'): continue
-                fsym   = c.get('symbol')
-                strike = c.get('strike_price')
-                ltp    = c.get('ltp')
+                fsym = c.get('symbol'); strike = c.get('strike_price'); ltp = c.get('ltp')
                 if fsym is None or strike is None or ltp is None: continue
                 rows.append((fsym, underlying, strike, otype, expiry,
                              ltp, c.get('oi'), c.get('volume'), c.get('bid'), c.get('ask'), bkt))
         except Exception as e:
             log.warning(f"optionchain {underlying} error: {e}")
-
-    if not rows:
-        log.info("option_chain: 0 rows")
-        return
-
+    if not rows: return
     try:
         with conn.cursor() as cur:
             cur.executemany("""
-                INSERT INTO option_chain
-                  (symbol, underlying, strike, option_type, expiry,
-                   ltp, oi, volume, bid, ask, ts)
+                INSERT INTO option_chain (symbol, underlying, strike, option_type, expiry, ltp, oi, volume, bid, ask, ts)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (symbol, ts) DO UPDATE SET
                   ltp=EXCLUDED.ltp, oi=EXCLUDED.oi, volume=EXCLUDED.volume,
@@ -430,20 +414,20 @@ def run(auth_code=None):
 
     conn  = get_db()
     token = get_valid_token(conn, auth_code)
-    futures, equity = get_universe(conn)
-    log.info(f"Universe: {len(futures)} futures — all get 1-min bars (7-day rolling)")
+    symbols = get_universe(conn)
+    log.info(f"Universe: {len(symbols)} futures — all get 1-min bars (7-day rolling)")
 
     ensure_option_schema(conn)
 
-    # Boot backfill — all futures + indices
-    log.info("Boot backfill (7-day, all symbols)...")
+    # Boot backfill — all futures, sequential, 5s sleep
+    log.info("Boot backfill (7-day, all symbols, sequential)...")
     try:
         fyers_backfill.backfill_7day(token, conn)
     except Exception as e:
         log.error(f"Boot backfill failed (continuing): {e}")
 
     agg = BarAggregator(conn)
-    futures_fyers_syms = [fyers_eq_symbol(s) for s in futures]
+    futures_fyers_syms = [fyers_eq_symbol(s) for s in symbols]
     access = f"{FYERS_CLIENT_ID}:{token}"
 
     def on_message(msg):
@@ -472,17 +456,21 @@ def run(auth_code=None):
     )
 
     def housekeeping():
-        last_option_poll = None
-        last_cleanup_day = None
-        last_purge_day   = None
+        last_option_poll  = None
+        last_cleanup_day  = None
+        last_purge_day    = None
+        last_heal_day     = None
 
         while True:
+            now    = datetime.now(IST)
+            today  = now.date()
+
             if is_market_open():
                 update_index_ltp(conn, token, agg)
                 agg.flush_all()
                 agg.flush_cmp()
 
-                now_dt = datetime.now(IST).replace(tzinfo=None)
+                now_dt = now.replace(tzinfo=None)
                 if (last_option_poll is None or
                         (now_dt - last_option_poll).total_seconds() >= OPTION_POLL_MINS * 60):
                     expiry = get_monthly_expiry()
@@ -492,7 +480,17 @@ def run(auth_code=None):
                         log.warning(f"option_chain poll failed: {e}")
                     last_option_poll = now_dt
 
-            today = datetime.now(IST).date()
+            # Daily 18:00 IST — heal gaps for all symbols (no-op if WS data complete)
+            if now.hour == 18 and now.minute < 1 and last_heal_day != today:
+                log.info("18:00 IST: Running daily heal_gap for all futures")
+                try:
+                    import fyers_backfill
+                    fyers_backfill.heal_gap(token, conn, symbols)
+                    last_heal_day = today
+                except Exception as e:
+                    log.error(f"Daily heal_gap failed: {e}")
+
+            # Daily cleanup
             if last_cleanup_day != today:
                 cleanup_option_chain(conn)
                 last_cleanup_day = today
