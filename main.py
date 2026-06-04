@@ -30,6 +30,7 @@ from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
 from gvm_market_endpoints import router as gvm_market_router
+from admin_data import router as admin_data_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -42,19 +43,19 @@ import qb_eod_checker
 import refresh_takeaways as rt
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.10
-# v2.9.10: REFACTOR file 2/5 — GVM + market read endpoints extracted to
-#   gvm_market_endpoints.py (own router). Included AFTER gvm_nightly_router so
-#   /api/gvm/recompute + /api/gvm/history/{symbol} match before /api/gvm/{symbol}.
-#   Inline defs removed. MCP handlers unchanged (call over HTTP).
-# v2.9.9: REFACTOR file 1/5 — QB endpoints extracted to qb_endpoints.py.
-#   + ADR 999 fix in v8_endpoints (intraday path removed, reads adr_daily).
+# Scorr / Project Quant — main.py v2.9.11
+# v2.9.11: REFACTOR file 3/5 — Screener earnings scraper + Drive CSV loaders
+#   extracted to admin_data.py (own router). HTTP-only endpoints; scheduler's
+#   earnings job still calls /api/admin/load_earnings_from_screener over HTTP.
+#   GitHub helpers + ADR/PCR compute kept in main.py (deploy lifeline / scheduler
+#   direct-call path) — they move in file 5 with the scheduler.
+# v2.9.10: REFACTOR file 2/5 — GVM + market read endpoints to gvm_market_endpoints.py.
+# v2.9.9: REFACTOR file 1/5 — QB endpoints to qb_endpoints.py. + ADR 999 fix.
 # v2.9.8: POST /api/admin/content_update — manual content writer.
-# v2.9.7: get_gvm returns cap_category + instrument_type.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.10"
+VERSION = "2.9.11"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -82,6 +83,7 @@ app.include_router(v8_futures_router)
 app.include_router(qb_router)
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_market_router)
+app.include_router(admin_data_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -190,7 +192,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.10)")
+        log.info("Tables ready (v2.9.11)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -634,7 +636,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 async def _scheduler():
-    log.info("Scheduler started (v2.9.10)")
+    log.info("Scheduler started (v2.9.11)")
     asyncio.create_task(_live_loop())
     while True:
         try:
@@ -655,7 +657,7 @@ async def _scheduler():
         await asyncio.sleep(300)
 
 async def _live_loop():
-    log.info("Live loop started (v2.9.10)")
+    log.info("Live loop started (v2.9.11)")
     tick_count = 0
     while True:
         try:
@@ -967,8 +969,9 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
         log.error(f"content_update failed for {symbol}: {e}")
         raise HTTPException(500, str(e))
 
-# QB endpoints moved to qb_endpoints.py (refactor file 1/5). Router included above.
-# GVM + market read endpoints moved to gvm_market_endpoints.py (refactor file 2/5). Router included above.
+# ── Refactor notes ─────────────────────────────────────────────────────────────
+# QB endpoints -> qb_endpoints.py (file 1). GVM+market reads -> gvm_market_endpoints.py (file 2).
+# Screener earnings + Drive loaders -> admin_data.py (file 3). Routers included above.
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -1209,108 +1212,6 @@ async def fetch_global_intraday_now(x_admin_token: Optional[str] = Header(None))
     _check_admin(x_admin_token)
     with global_indices.get_conn_from_env() as conn:
         res = await global_indices.fetch_global_intraday(conn); global_indices.prune_global_intraday(conn, days=7); return res
-
-async def _drive_download(file_id):
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
-        r = await c.get(url); r.raise_for_status(); return r.text
-
-@app.post("/api/admin/load_input_from_drive")
-async def load_input(req: Request):
-    body = await req.json(); file_id = body.get("file_id")
-    if not file_id: raise HTTPException(400, "file_id required")
-    csv_text = await _drive_download(file_id); df = pd.read_csv(io.StringIO(csv_text)); rows = df.to_dict(orient="records")
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM input_raw")
-        for row in rows: cur.execute("INSERT INTO input_raw (data) VALUES (%s::jsonb)", (json.dumps(row, default=str),))
-        conn.commit()
-    return {"status":"ok","rows":len(rows)}
-
-@app.post("/api/admin/load_screener_from_drive")
-async def load_screener(req: Request):
-    body = await req.json(); file_id = body.get("file_id")
-    if not file_id: raise HTTPException(400, "file_id required")
-    csv_text = await _drive_download(file_id); df = pd.read_csv(io.StringIO(csv_text))
-    n = _sql_clean_replace_screener(df.to_dict(orient="records"))
-    return {"status":"ok","action":"clean_replace_wide","rows_loaded":n}
-
-SCREENER_BASE = "https://www.screener.in"
-SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
-SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
-
-def _parse_screener_date(s):
-    if not s: return None
-    s = str(s).strip()
-    if not s or s.lower() in ("nan","none","-","n/a"): return None
-    for fmt in ["%d %b %Y","%d %B %Y","%d-%b-%Y","%d-%B-%Y","%d/%m/%Y","%d-%m-%Y","%Y-%m-%d","%d %b","%d %B"]:
-        try:
-            dt = datetime.strptime(s, fmt)
-            if dt.year == 1900:
-                dt = dt.replace(year=date.today().year)
-                if dt.date() < date.today()-timedelta(days=30): dt = dt.replace(year=date.today().year+1)
-            return dt.date()
-        except ValueError: continue
-    return None
-
-async def _screener_login_session():
-    email = os.getenv("SCREENER_EMAIL","").strip(); password = os.getenv("SCREENER_PASSWORD","").strip()
-    if not email or not password: raise HTTPException(500, "SCREENER creds missing")
-    client = httpx.AsyncClient(follow_redirects=True, timeout=60, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36","Accept-Language":"en-US,en;q=0.9"})
-    r = await client.get(SCREENER_LOGIN_URL); r.raise_for_status()
-    soup = BeautifulSoup(r.text,"html.parser"); csrf_input = soup.find("input",{"name":"csrfmiddlewaretoken"})
-    if not csrf_input: await client.aclose(); raise HTTPException(500,"CSRF token not found")
-    r = await client.post(SCREENER_LOGIN_URL, data={"csrfmiddlewaretoken":csrf_input.get("value"),"username":email,"password":password,"next":""}, headers={"Referer":SCREENER_LOGIN_URL})
-    if "sessionid" not in client.cookies: await client.aclose(); raise HTTPException(401,"Screener login failed")
-    return client
-
-async def _scrape_upcoming_results(client):
-    r = await client.get(SCREENER_UPCOMING_URL); r.raise_for_status(); html = r.text
-    if "/login/" in str(r.url) or "Login to your account" in html: raise HTTPException(401,"Screener session expired")
-    soup = BeautifulSoup(html,"html.parser"); tables = soup.find_all("table")
-    if not tables: raise HTTPException(500,"No table found")
-    rows_out = []; seen_tickers = set()
-    for tbl in tables:
-        try: dfs = pd.read_html(io.StringIO(str(tbl)))
-        except Exception: continue
-        for df in dfs:
-            if df.empty or len(df.columns)<2: continue
-            cols_lower = {str(c).strip().lower():c for c in df.columns}
-            name_col = date_col = event_col = None
-            for key, orig in cols_lower.items():
-                if name_col is None and ("name" in key or "company" in key): name_col = orig
-                if date_col is None and ("date" in key or "result" in key): date_col = orig
-                if event_col is None and ("type" in key or "purpose" in key): event_col = orig
-            if name_col is None or date_col is None: continue
-            ticker_map = {}
-            for tr in tbl.find_all("tr"):
-                a = tr.find("a", href=re.compile(r"/company/[^/]+/"))
-                if a:
-                    m = re.search(r"/company/([^/]+)/", a.get("href",""))
-                    if m: ticker_map[a.get_text(strip=True)] = m.group(1)
-            for _, row in df.iterrows():
-                name = str(row[name_col]).strip()
-                if not name or name.lower() in ("nan","name","company"): continue
-                ticker = ticker_map.get(name,"") or re.sub(r"[^A-Z0-9&]","",name.upper())[:20]
-                if ticker in seen_tickers: continue
-                seen_tickers.add(ticker)
-                ex_date = _parse_screener_date(str(row[date_col]))
-                event_type = str(row[event_col]).strip() if event_col else "Quarterly Result"
-                rows_out.append({"company_name":name,"ticker":ticker,"ex_date":ex_date,"record_date":None,"event_type":event_type})
-    return rows_out
-
-@app.post("/api/admin/load_earnings_from_screener")
-async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token); client = await _screener_login_session()
-    try: rows = await _scrape_upcoming_results(client)
-    finally: await client.aclose()
-    if not rows: return {"status":"warn","rows_scraped":0}
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM earnings_calendar"); inserted = 0
-        for r in rows:
-            try: cur.execute("INSERT INTO earnings_calendar (company_name,ticker,ex_date,record_date,event_type) VALUES (%(company_name)s,%(ticker)s,%(ex_date)s,%(record_date)s,%(event_type)s)",r); inserted+=1
-            except Exception as e: log.warning(f"row skip: {e}")
-        conn.commit()
-    return {"status":"ok","rows_scraped":len(rows),"rows_inserted":inserted}
 
 GITHUB_API = "https://api.github.com"
 
