@@ -1,0 +1,169 @@
+"""
+GVM + Market read endpoints — pure SELECT reads.
+
+Extracted from main.py (refactor file 2/5, 04-Jun-2026) to keep pushes small.
+Self-contained: own _conn, own api_query, own _ist_now. Imports yahoo_ondemand
+directly. Imports nothing from main.py to avoid circular imports.
+
+Endpoints:
+  GET /api/gvm/{symbol}              — full GVM + input_raw map for one stock
+  GET /api/gvm/top/{n}               — top N by GVM (optional verdict filter)
+  GET /api/filter                    — stocks within a GVM range
+  GET /api/sectors                   — sector mcap-weighted GVM ratings
+  GET /api/market/top_gainers        — top gainers by day%, joined with GVM
+  GET /api/cmp/{symbol}              — latest CMP for a stock
+  GET /api/intraday/{symbol}         — intraday OHLC from intraday_prices
+  GET /api/intraday_ondemand/{symbol}— smart on-demand intraday (Yahoo)
+  GET /api/global                    — latest global scorecard
+  GET /api/global/history/{name}     — global series history
+  GET /api/global/intraday/{name}    — Gold/Silver 5-min intraday
+
+NOTE: /api/gvm/recompute and /api/gvm/history/{symbol} are NOT here — they live
+in gvm_nightly router (gvm_nightly.py). Keep that router included in main.py.
+
+MCP tool handlers for these stay in main.py and call over HTTP — unchanged.
+"""
+
+from fastapi import APIRouter, HTTPException
+from datetime import datetime, date, timedelta
+from typing import Optional
+import psycopg
+import asyncio
+import os
+
+import yahoo_ondemand
+
+router = APIRouter(tags=["gvm_market"])
+
+
+def _conn():
+    return psycopg.connect(os.getenv("DATABASE_URL"))
+
+
+def _ist_now() -> datetime:
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
+def api_query(sql, params=None, single=False):
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            cols = [d[0] for d in cur.description] if cur.description else []
+            if single:
+                r = cur.fetchone()
+                return dict(zip(cols, r)) if r else None
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── GVM endpoints ─────────────────────────────────────────────────────────────
+
+@router.get("/api/gvm/top/{n}")
+def get_top(n: int, verdict: Optional[str] = None):
+    n = min(max(n, 1), 100)
+    if verdict:
+        return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE verdict=%s ORDER BY gvm_score DESC LIMIT %s", (verdict, n))
+    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores ORDER BY gvm_score DESC LIMIT %s", (n,))
+
+
+@router.get("/api/gvm/{symbol}")
+def get_gvm(symbol: str):
+    # v2.9.7: full company map — cap_category + instrument_type + mcap_rank + overview + takeaway
+    r = api_query("""
+        SELECT g.symbol, g.company_name, g.segment, g.price,
+               g.g_score, g.v_score, g.m_score, g.gvm_score,
+               g.verdict, g.punchline, g.market_cap,
+               i.overview, i.key_takeaway,
+               i.instrument_type, i.cap_category, i.mcap_rank
+        FROM gvm_scores g
+        LEFT JOIN input_raw i ON i.nse_code = g.symbol
+        WHERE g.symbol = %s
+    """, (symbol.upper(),), single=True)
+    if not r:
+        raise HTTPException(404, f"{symbol} not found")
+    return r
+
+
+@router.get("/api/filter")
+def get_filter(min_gvm: float = 0, max_gvm: float = 10):
+    return api_query("SELECT symbol, company_name, segment, g_score, v_score, m_score, gvm_score, verdict, market_cap FROM gvm_scores WHERE gvm_score>=%s AND gvm_score<=%s ORDER BY gvm_score DESC", (min_gvm, max_gvm))
+
+
+@router.get("/api/sectors")
+def get_sectors():
+    return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
+
+
+@router.get("/api/market/top_gainers")
+def get_top_gainers(price_date: Optional[str] = None, n: int = 20, min_gvm: Optional[float] = None,
+                    min_day_pct: Optional[float] = None, universe: str = "all", min_volume: Optional[int] = None):
+    n = min(max(n, 1), 100)
+    if not price_date:
+        row = api_query("SELECT MAX(price_date)::text AS latest FROM raw_prices", single=True)
+        price_date = row["latest"] if row else str(date.today())
+    conds = ["r.price_date=%s", "r.open>0", "r.close>0"]; vals = [price_date]
+    if min_volume: conds.append("r.volume>=%s"); vals.append(min_volume)
+    if universe == "gvm_only": conds.append("g.symbol IS NOT NULL")
+    if min_gvm is not None: conds.append("g.gvm_score>=%s"); vals.append(min_gvm)
+    having = f"HAVING ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2)>={float(min_day_pct)}" if min_day_pct is not None else ""
+    join_type = "INNER" if universe == "gvm_only" else "LEFT"
+    sql = f"""
+        SELECT r.symbol, COALESCE(g.company_name,r.symbol) AS company_name, COALESCE(g.segment,'Unknown') AS segment,
+               ROUND(r.close::numeric,2) AS close, ROUND(r.open::numeric,2) AS open,
+               ROUND(((r.close/NULLIF(r.open,0)-1)*100)::numeric,2) AS day_pct,
+               r.volume, ROUND(g.gvm_score::numeric,2) AS gvm_score,
+               ROUND(g.g_score::numeric,2) AS g_score, ROUND(g.v_score::numeric,2) AS v_score,
+               ROUND(g.m_score::numeric,2) AS m_score, g.verdict, r.price_date::text AS price_date
+        FROM raw_prices r {join_type} JOIN gvm_scores g ON r.symbol=g.symbol
+        WHERE {" AND ".join(conds)}
+        GROUP BY r.symbol,g.company_name,g.segment,r.close,r.open,r.volume,g.gvm_score,g.g_score,g.v_score,g.m_score,g.verdict,r.price_date
+        {having} ORDER BY day_pct DESC LIMIT %s
+    """
+    vals.append(n)
+    return api_query(sql, vals)
+
+
+@router.get("/api/cmp/{symbol}")
+def get_cmp(symbol: str):
+    r = api_query("SELECT symbol, cmp, updated_at, source FROM cmp_prices WHERE symbol=%s", (symbol.upper(),), single=True)
+    if not r:
+        raise HTTPException(404, f"{symbol} CMP not found")
+    return r
+
+
+@router.get("/api/intraday/{symbol}")
+def get_intraday(symbol: str, days: int = 1):
+    days = min(max(days, 1), 7); cutoff = _ist_now() - timedelta(days=days)
+    return api_query("SELECT symbol,ts,open,high,low,close,volume FROM intraday_prices WHERE symbol=%s AND ts>=%s ORDER BY ts ASC", (symbol.upper(), cutoff))
+
+
+@router.get("/api/intraday_ondemand/{symbol}")
+async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", source: str = "auto"):
+    return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source)
+
+
+# ── Global indices endpoints ──────────────────────────────────────────────────
+
+@router.get("/api/global")
+def get_global():
+    return api_query("""
+        SELECT g.symbol, g.name, g.category, g.price, g.prev_close, g.chg_pct,
+               g.quote_date::text AS quote_date, g.source, g.updated_at::text AS updated_at
+        FROM global_indices g
+        JOIN (SELECT symbol, MAX(quote_date) AS md FROM global_indices GROUP BY symbol) m
+          ON g.symbol=m.symbol AND g.quote_date=m.md
+        ORDER BY CASE g.category WHEN 'index' THEN 1 WHEN 'volatility' THEN 2 WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4 ELSE 5 END, g.name
+    """)
+
+
+@router.get("/api/global/history/{name}")
+def get_global_history(name: str, days: int = 1825):
+    cutoff = (_ist_now().date() - timedelta(days=days))
+    return api_query("SELECT name,symbol,category,price,prev_close,chg_pct,quote_date::text FROM global_indices WHERE LOWER(name)=LOWER(%s) AND quote_date>=%s ORDER BY quote_date ASC", (name, cutoff))
+
+
+@router.get("/api/global/intraday/{name}")
+def get_global_intraday(name: str, days: int = 7):
+    cutoff = _ist_now() - timedelta(days=min(max(days, 1), 7))
+    return api_query("SELECT symbol,name,ts,open,high,low,close,volume FROM global_intraday WHERE UPPER(name)=UPPER(%s) AND ts>=%s ORDER BY ts ASC", (name, cutoff))
