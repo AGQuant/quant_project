@@ -19,7 +19,7 @@
  * ║     9. Raw_Data               — All metrics, GVM-sorted          ║
  * ║    10. Filter_Scan            — Filter config all 5 baskets      ║
  * ║                                                                  ║
- * ║   1D gate: prev_day_change (net c2c%) — NOT range_1d            ║
+ * ║   2D gate: day_change (2-day net c2c%) — NOT range_1d          ║
  * ║   1W gate: week_return (net c2c%)                                ║
  * ║   Basket funnels: V4-style waterfall — counts + per-stage stocks ║
  * ║   All calc in Railway DB. GS = pure display.                     ║
@@ -31,7 +31,7 @@
 //   VERSION
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION  = '1.9.0';
+const SCRIPT_VERSION  = '1.9.1';
 const SCRIPT_RAW_URL_CORE = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_core.gs';
 const SCRIPT_RAW_URL_TABS = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_tabs.gs';
 
@@ -257,7 +257,7 @@ function showVersion() {
       <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
       <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
       <div class="row"><span class="label">Trade source</span><span class="val">paper_status (server PnL)</span></div>
-      <div class="row"><span class="label">1D gate</span><span class="val">prev_day_change (net c2c%)</span></div>
+      <div class="row"><span class="label">2D gate</span><span class="val">day_change (2-day net c2c%)</span></div>
       <div class="row"><span class="label">Funnel style</span><span class="val">V4 waterfall (per-stage)</span></div>
       <p style="margin-top:16px;color:#6B7280;font-size:12px;">Split: core.gs + tabs.gs · All calc in DB</p>
     </body></html>`
@@ -271,22 +271,31 @@ function showVersion() {
 // ════════════════════════════════════════════════════════════════════
 
 function fetchJSON(endpoint) {
-  try {
-    const response = UrlFetchApp.fetch(BASE_URL + endpoint, {
-      muteHttpExceptions: true,
-      headers: { 'Accept': 'application/json' },
-    });
-    const code = response.getResponseCode();
-    if (code !== 200) {
-      Logger.log(`API ${endpoint} returned ${code}: ${response.getContentText().slice(0, 200)}`);
-      return null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = UrlFetchApp.fetch(BASE_URL + endpoint, {
+        muteHttpExceptions: true,
+        headers: { 'Accept': 'application/json' },
+      });
+      const code = response.getResponseCode();
+      if (code === 200) return JSON.parse(response.getContentText());
+      Logger.log(`API ${endpoint} returned ${code} (attempt ${attempt}): ${response.getContentText().slice(0, 200)}`);
+    } catch (e) {
+      Logger.log(`fetchJSON ${endpoint} failed (attempt ${attempt}): ${e}`);
     }
-    return JSON.parse(response.getContentText());
-  } catch (e) {
-    Logger.log(`fetchJSON ${endpoint} failed: ${e}`);
-    return null;
+    if (attempt === 1) Utilities.sleep(600);
   }
+  return null;
 }
+
+// Module-level cache so refreshAll fetches the 250-row raw set ONCE,
+// not once per basket (the cause of intermittent 'API unreachable' on Buy_Momentum).
+var _RAW_CACHE = null;
+function getRawMetricsCached() {
+  if (_RAW_CACHE === null) _RAW_CACHE = fetchRawMetrics();
+  return _RAW_CACHE;
+}
+function clearRawCache() { _RAW_CACHE = null; }
 
 function fetchMarketMood()     { return fetchJSON('/api/v8/market_mood'); }
 function fetchFilterConfig(b)  { return fetchJSON('/api/v8/filter_config/' + b); }
@@ -303,8 +312,10 @@ function fetchRawMetrics()     { return fetchJSON('/api/v8/raw?limit=250'); }
 
 function refreshAll() {
   toast('Refreshing all tabs…');
+  clearRawCache();
   refreshMasterDashboard();
-  ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum'].forEach(refreshBasketFunnel);
+  const _raw = getRawMetricsCached();
+  ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
   refreshSellOverbought();
   refreshInPosition();
   refreshTradeLog();
@@ -315,13 +326,17 @@ function refreshAll() {
 
 function refreshBuyBaskets() {
   toast('Refreshing buy baskets…');
-  ['buy_reversal', 'buy_momentum'].forEach(refreshBasketFunnel);
+  clearRawCache();
+  const _raw = getRawMetricsCached();
+  ['buy_reversal', 'buy_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
   toast('✓ Buy baskets refreshed');
 }
 
 function refreshSellBaskets() {
   toast('Refreshing sell baskets…');
-  ['sell_reversal', 'sell_momentum'].forEach(refreshBasketFunnel);
+  clearRawCache();
+  const _raw = getRawMetricsCached();
+  ['sell_reversal', 'sell_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
   toast('✓ Sell baskets refreshed');
 }
 
@@ -398,7 +413,7 @@ function humanLogic(metric) {
     'daily_rsi':       'Daily RSI',
     'month_return':    'Monthly return (c2c)',
     'week_return':     'Weekly return (c2c)',
-    'prev_day_change': '1-Day net return (c2c)',
+    'day_change':      '2-Day net change (c2c)',
     'sector_week':     'Sector week trend',
     'sector_day':      'Sector today',
     'month_index':     'Market breadth',
