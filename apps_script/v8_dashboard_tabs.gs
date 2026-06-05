@@ -172,7 +172,7 @@ function renderFilterCard(sheet, row, basket) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TABS: BASKET FUNNELS
+//   TABS: BASKET FUNNELS — V4 WATERFALL STYLE
 // ════════════════════════════════════════════════════════════════════
 
 function refreshBasketFunnel(basket) {
@@ -184,100 +184,162 @@ function refreshBasketFunnel(basket) {
   sheet.clear().clearConditionalFormatRules();
   sheet.setHiddenGridlines(true);
 
-  const meta      = BASKET_META[basket];
-  const config    = fetchFilterConfig(basket);
-  const qualified = fetchQualified(basket);
+  const meta    = BASKET_META[basket];
+  const config  = fetchFilterConfig(basket);
+  const rawData = fetchRawMetrics();
+  const funnel  = fetchFunnelCounts(basket);
 
-  if (!config || !qualified) {
+  if (!config || !rawData) {
     sheet.getRange(1, 1).setValue('⚠ API unreachable');
     return;
   }
 
+  const filters   = config.filters;
+  const ncol      = Math.min(filters.length, 12);
+  const allStocks = rawData.stocks || [];
+
+  // ── compute cumulative stage lists ──────────────────────────────
+  // stage[i] = stocks passing filters 0..i cumulatively
+  const stages = [];
+  let survivors = allStocks.slice();
+  filters.slice(0, ncol).forEach(f => {
+    survivors = survivors.filter(s => {
+      const v = s[f.metric];
+      if (v === null || v === undefined || v === '') return false;
+      if (f.min !== null && f.min !== undefined && Number(v) < Number(f.min)) return false;
+      if (f.max !== null && f.max !== undefined && Number(v) > Number(f.max)) return false;
+      return true;
+    });
+    stages.push(survivors.map(s => s.symbol));
+  });
+
+  // ── title bar ───────────────────────────────────────────────────
   let row = 1;
-  sheet.getRange(row, 1, 1, 14).merge()
-    .setValue(`${meta.emoji}  ${meta.label.toUpperCase()} — Stock Funnel`)
+  const totalCols = 1 + ncol;
+  sheet.getRange(row, 1, 1, totalCols).merge()
+    .setValue(`${meta.emoji}  ${meta.label.toUpperCase()} — Funnel Waterfall`)
     .setBackground(meta.color).setFontColor(COLORS.WHITE)
     .setFontSize(15).setFontWeight('bold').setHorizontalAlignment('left');
   sheet.setRowHeight(row, 34);
   row++;
 
-  sheet.getRange(row, 1, 1, 14).merge()
-    .setValue(`Universe: 210 F&O · Target: ${config.target || 'S1'} · Win%: ${config.win_pct || '—'} · Refreshed: ${nowIST()}`)
+  sheet.getRange(row, 1, 1, totalCols).merge()
+    .setValue(`Universe: ${allStocks.length} F&O · Target: ${config.target || 'S1'} · Win%: ${config.win_pct || '—'} · Refreshed: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
-  row += 2;
+  row++;
 
-  const filters = config.filters;
-  const ncol    = Math.min(filters.length, 12);
-
-  sheet.getRange(row, 1).setValue('Filter').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE);
+  // ── Row: Filter names ───────────────────────────────────────────
+  sheet.getRange(row, 1).setValue('Filter')
+    .setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
+    .setHorizontalAlignment('center');
   filters.slice(0, ncol).forEach((f, i) => {
-    sheet.getRange(row, 2 + i).setValue(f.metric).setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setWrap(true);
+    sheet.getRange(row, 2 + i).setValue(f.metric)
+      .setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
+      .setHorizontalAlignment('center').setWrap(true);
   });
   sheet.setRowHeight(row, 36);
   row++;
 
-  sheet.getRange(row, 1).setValue('Min').setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
+  // ── Row: Min ────────────────────────────────────────────────────
+  sheet.getRange(row, 1).setValue('Min')
+    .setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
+    .setHorizontalAlignment('center');
   filters.slice(0, ncol).forEach((f, i) => {
-    sheet.getRange(row, 2 + i).setValue(f.min_display).setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
+    sheet.getRange(row, 2 + i).setValue(f.min_display || '—')
+      .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
+      .setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
   });
   row++;
 
-  sheet.getRange(row, 1).setValue('Max').setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
+  // ── Row: Max ────────────────────────────────────────────────────
+  sheet.getRange(row, 1).setValue('Max')
+    .setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
+    .setHorizontalAlignment('center');
   filters.slice(0, ncol).forEach((f, i) => {
-    sheet.getRange(row, 2 + i).setValue(f.max_display).setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
+    sheet.getRange(row, 2 + i).setValue(f.max_display || '—')
+      .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
+      .setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
   });
-  row += 2;
+  row++;
 
-  const qcount = qualified.count || 0;
-  sheet.getRange(row, 1).setValue('QUALIFIED').setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setHorizontalAlignment('right');
-  sheet.getRange(row, 2, 1, ncol).merge()
-    .setValue(`${qcount} stocks passed all filters`)
-    .setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
+  // ── Row: Counts ─────────────────────────────────────────────────
+  const funnelCounts = funnel ? funnel.counts || {} : {};
+  sheet.getRange(row, 1).setValue('Count')
+    .setFontWeight('bold').setBackground(meta.color).setFontColor(COLORS.WHITE)
     .setHorizontalAlignment('center').setFontSize(12);
-  sheet.setRowHeight(row, 28);
-  row += 2;
+  filters.slice(0, ncol).forEach((f, i) => {
+    const cnt = funnelCounts[f.metric] !== undefined ? funnelCounts[f.metric] : stages[i].length;
+    sheet.getRange(row, 2 + i).setValue(cnt)
+      .setFontWeight('bold').setBackground(meta.color).setFontColor(COLORS.WHITE)
+      .setHorizontalAlignment('center').setFontSize(13)
+      .setFontFamily(FONTS.MONO.family);
+  });
+  sheet.setRowHeight(row, 32);
+  row++;
 
-  const stockHeaders = ['Symbol', 'GVM', 'DMA200', 'DMA50', 'RSI M', 'RSI W', 'M Ret%', 'W Ret%', '1D Net%', 'Sec Wk', 'Sec Day'];
-  row = renderTableHeader(sheet, row, stockHeaders, stockHeaders.length);
+  // ── separator ───────────────────────────────────────────────────
+  sheet.getRange(row, 1, 1, totalCols).merge()
+    .setValue('▼  STOCKS PASSING EACH STAGE  (each column = cumulative filters applied left → right)')
+    .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.MUTED_LIGHT)
+    .setFontSize(9).setFontStyle('italic').setHorizontalAlignment('left');
+  sheet.setRowHeight(row, 20);
+  row++;
 
-  const stocks = qualified.stocks || [];
-  if (stocks.length === 0) {
-    sheet.getRange(row, 1, 1, stockHeaders.length).merge()
-      .setValue('No qualified stocks today')
+  // ── Stock waterfall ─────────────────────────────────────────────
+  const maxLen = stages.reduce((m, s) => Math.max(m, s.length), 0);
+
+  if (maxLen === 0) {
+    sheet.getRange(row, 1, 1, totalCols).merge()
+      .setValue('No stocks passed any filter today')
       .setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT)
       .setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
-    row++;
   } else {
-    stocks.forEach(s => {
-      const vals = [
-        s.symbol,
-        fmtNum(s.gvm_score, 2),
-        fmtNum(s.dma_200, 2),
-        fmtNum(s.dma_50, 2),
-        fmtNum(s.rsi_month, 1),
-        fmtNum(s.rsi_weekly, 1),
-        fmtNum(s.month_return, 2),
-        fmtNum(s.week_return, 2),
-        fmtNum(s.prev_day_change, 2),
-        fmtNum(s.sector_week, 2),
-        fmtNum(s.sector_day, 2),
-      ];
-      vals.forEach((v, i) => {
-        sheet.getRange(row, 1 + i).setValue(v)
-          .setFontFamily(i === 0 ? FONTS.HEADER.family : FONTS.MONO.family)
-          .setFontWeight(i === 0 ? 'bold' : 'normal')
-          .setHorizontalAlignment(i === 0 ? 'left' : 'right')
-          .setBackground(row % 2 === 0 ? COLORS.ALT_ROW : COLORS.CARD_BG);
-      });
-      sheet.getRange(row, 1, 1, stockHeaders.length).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
-      row++;
+    // sub-header row
+    sheet.getRange(row, 1).setValue('#')
+      .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
+      .setHorizontalAlignment('center').setFontSize(9);
+    stages.forEach((_, i) => {
+      sheet.getRange(row, 2 + i).setValue(`F${i + 1} (${stages[i].length})`)
+        .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
+        .setHorizontalAlignment('center').setFontSize(9);
     });
+    row++;
+
+    // stock rows
+    for (let r = 0; r < maxLen; r++) {
+      const isAlt = r % 2 === 0;
+      const rowBg = isAlt ? COLORS.ALT_ROW : COLORS.CARD_BG;
+
+      sheet.getRange(row, 1).setValue(r + 1)
+        .setFontFamily(FONTS.MONO.family).setFontColor(COLORS.NEUTRAL_TEXT)
+        .setHorizontalAlignment('center').setFontSize(9).setBackground(rowBg);
+
+      stages.forEach((stageSymbols, i) => {
+        const cell = sheet.getRange(row, 2 + i);
+        if (r < stageSymbols.length) {
+          const sym = stageSymbols[r].replace('NSE:', '').replace('-EQ', '');
+          const isFinal = (i === stages.length - 1);
+          cell.setValue(sym)
+            .setFontFamily(FONTS.HEADER.family)
+            .setFontWeight(isFinal ? 'bold' : 'normal')
+            .setFontColor(isFinal ? meta.color : COLORS.NEUTRAL_TEXT)
+            .setHorizontalAlignment('left')
+            .setBackground(rowBg);
+        } else {
+          cell.setValue('').setBackground(rowBg);
+        }
+      });
+
+      sheet.getRange(row, 1, 1, totalCols)
+        .setBorder(false, false, true, false, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
+      row++;
+    }
   }
 
-  sheet.setColumnWidth(1, 140);
-  sheet.setColumnWidths(2, ncol, 85);
+  sheet.setColumnWidth(1, 40);
+  sheet.setColumnWidths(2, ncol, 110);
   sheet.setFrozenRows(3);
   toast(`✓ ${meta.label} refreshed`);
 }
@@ -412,7 +474,7 @@ function refreshInPosition() {
   row++;
 
   sheet.getRange(row, 1, 1, 11).merge()
-    .setValue('ℹ What the engine ACTUALLY entered (sticky until exit) — won\'t match Today\'s Signals on the dashboard, which are live qualifiers. % Green = share of open trades currently in profit, NOT a closed-trade win rate.')
+    .setValue('ℹ CMP + unrealised P&L computed server-side. % Green = share of open trades in profit.')
     .setBackground('#FEF3C7').setFontColor('#92400E').setFontSize(8).setFontStyle('italic').setWrap(true);
   sheet.setRowHeight(row, 30);
   row += 2;
@@ -626,7 +688,7 @@ function refreshRawData() {
   const data = fetchRawMetrics();
   let row = 1;
 
-  sheet.getRange(row, 1, 1, 16).merge()
+  sheet.getRange(row, 1, 1, 14).merge()
     .setValue('📋  RAW DATA — All Futures Metrics (GVM-sorted)')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
@@ -637,13 +699,13 @@ function refreshRawData() {
     return;
   }
 
-  sheet.getRange(row, 1, 1, 16).merge()
+  sheet.getRange(row, 1, 1, 14).merge()
     .setValue(`Score date: ${data.score_date || '—'} · ${data.count || 0} stocks · Refreshed: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT).setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row += 2;
 
-  const headers = ['Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D', 'M Ret%', 'W Ret%', '1D Net%', 'Y Ret%', 'Sec Day', 'Sec Wk', 'Mth Idx', 'wi52'];
+  const headers = ['Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D', 'M Ret%', 'W Ret%', '1D Net%', 'Y Ret%', 'Mth Idx', 'wi52'];
   row = renderTableHeader(sheet, row, headers, headers.length);
 
   (data.stocks || []).forEach(s => {
@@ -660,8 +722,6 @@ function refreshRawData() {
       fmtNum(s.week_return, 2),
       fmtNum(s.prev_day_change, 2),
       fmtNum(s.year_return, 2),
-      fmtNum(s.sector_day, 2),
-      fmtNum(s.sector_week, 2),
       fmtNum(s.month_index, 1),
       fmtNum(s.week_index_52, 1),
     ];
