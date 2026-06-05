@@ -45,34 +45,32 @@ def _get_token() -> str:
     return token
 
 
+def _last_tuesday(y: int, m: int) -> date:
+    """Last Tuesday of month y/m — NSE expiry since Sep 2025."""
+    last_day = calendar.monthrange(y, m)[1]
+    d = date(y, m, last_day)
+    while d.weekday() != 1:   # 1 = Tuesday
+        d = d.replace(day=d.day - 1)
+    return d
+
+
 def _futures_symbol(nse_code: str) -> str:
     """
     Build current-month futures Fyers symbol.
-    e.g. SBIN -> NSE:SBIN25JUNFUT
-    Special: M&M -> NSE:M&M25JUNFUT
+    e.g. SBIN -> NSE:SBIN26JUNFUT
+    Rolls to next month after last Tuesday expiry.
     """
-    today = date.today()
-    month_str = today.strftime("%b").upper()   # JUN
-    year_str  = today.strftime("%y")           # 25
+    today  = date.today()
+    expiry = _last_tuesday(today.year, today.month)
 
-    # Check if we're past last Thursday of month — roll to next month
-    def last_thursday(y, m):
-        last_day = calendar.monthrange(y, m)[1]
-        d = date(y, m, last_day)
-        while d.weekday() != 3:
-            d = d.replace(day=d.day - 1)
-        return d
-
-    expiry = last_thursday(today.year, today.month)
     if today > expiry:
-        # Roll to next month
         if today.month == 12:
-            next_month = date(today.year + 1, 1, 1)
+            expiry = _last_tuesday(today.year + 1, 1)
         else:
-            next_month = date(today.year, today.month + 1, 1)
-        month_str = next_month.strftime("%b").upper()
-        year_str  = next_month.strftime("%y")
+            expiry = _last_tuesday(today.year, today.month + 1)
 
+    month_str = expiry.strftime("%b").upper()
+    year_str  = expiry.strftime("%y")
     return f"NSE:{nse_code}{year_str}{month_str}FUT"
 
 
@@ -100,8 +98,8 @@ def fyers_quote(symbol: str):
     Returns LTP, open, high, low, prev_close, day_change%, OI, volume.
     Used for trade card population — on-demand only, no storage.
     """
-    symbol = symbol.upper().strip()
-    token  = _get_token()
+    symbol    = symbol.upper().strip()
+    token     = _get_token()
     fyers_sym = _futures_symbol(symbol)
 
     try:
