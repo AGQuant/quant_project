@@ -5,15 +5,15 @@ Lightweight job that runs every 5-min during market hours.
 
 What it does:
   1. Reads v8_metrics (latest EOD row per symbol — slow metrics: RSI, DMA etc)
-  2. Reads cmp_prices (live Fyers CMP — fast metric: today's price)
-  3. Computes live day_pct = (cmp / prev_close - 1) * 100
-     where prev_close = latest raw_prices EOD close
-  4. Overrides prev_day_change in the metric row with the live value
+  2. Reads cmp_prices (live Fyers CMP) + raw_prices (close_2_days_ago)
+  3. Computes live day_change = (cmp / close_2_days_ago - 1) * 100
+     2-day momentum: current price vs close 2 trading days ago (05-Jun-2026)
+  4. Overrides day_change in the metric row with the live value
   5. Applies FILTER_CONFIG to all symbols
   6. Writes results to v8_qualified (today only — clears + re-inserts per basket)
 
 What it does NOT do:
-  - Does NOT recompute RSI, DMA, Bollinger, sector, or any slow metric
+  - Does NOT recompute RSI, DMA, Bollinger, or any slow metric
   - Does NOT touch v8_signal_history (EOD engine writes history, not live ticks)
   - Does NOT touch v8_funnel_counts (EOD engine writes funnel counts)
   - Does NOT make any external API calls (pure DB join)
@@ -31,7 +31,6 @@ import os
 
 log = logging.getLogger("scorr.signal_writer")
 
-# Locked rule: all dates/times reasoned in IST (Asia/Kolkata, UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -60,7 +59,7 @@ def run_live_signal_writer(conn) -> Dict:
     """
     from v8_endpoints import FILTER_CONFIG
 
-    today = datetime.now(IST).date()  # score_date key — matches v8_metrics (IST)
+    today = datetime.now(IST).date()
 
     # ── Step 1: Load latest EOD metrics for all symbols ──
     try:
@@ -73,7 +72,7 @@ def run_live_signal_writer(conn) -> Dict:
                     m.month_return, m.week_return, m.year_return,
                     m.sector_day, m.sector_week, m.month_index, m.week_index_52,
                     m.range_3d, m.ma9_vs_ma21, m.vol_ratio,
-                    m.prev_day_change AS eod_prev_day_change
+                    m.day_change AS eod_day_change
                 FROM v8_metrics m
                 WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
             """)
@@ -87,44 +86,51 @@ def run_live_signal_writer(conn) -> Dict:
         log.warning("signal_writer: no v8_metrics rows found")
         return {"qualified": {}}
 
-    # ── Step 2: Load live CMP + prev EOD close → compute live day_pct ──
+    # ── Step 2: Load CMP + close_2_days_ago → compute live day_change ──
+    # day_change = (cmp / close_2_days_ago - 1) * 100
+    # close_2_days_ago = 2nd most recent close in raw_prices (OFFSET 1)
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT
                     c.symbol,
                     c.cmp,
-                    r.close AS prev_close,
-                    ROUND(((c.cmp / NULLIF(r.close, 0) - 1) * 100)::numeric, 4) AS live_day_pct
+                    r.close AS close_2d_ago,
+                    ROUND(((c.cmp / NULLIF(r.close, 0) - 1) * 100)::numeric, 4) AS live_day_change
                 FROM cmp_prices c
                 JOIN LATERAL (
                     SELECT close FROM raw_prices
                     WHERE symbol = c.symbol
-                    ORDER BY price_date DESC LIMIT 1
+                    ORDER BY price_date DESC
+                    OFFSET 1 LIMIT 1
                 ) r ON true
             """)
             cmp_rows = cur.fetchall()
-            live_cmp = {r[0]: {'cmp': _safe_float(r[1]), 'prev_close': _safe_float(r[2]),
-                                'live_day_pct': _safe_float(r[3])} for r in cmp_rows}
+            live_cmp = {
+                r[0]: {
+                    'cmp': _safe_float(r[1]),
+                    'close_2d_ago': _safe_float(r[2]),
+                    'live_day_change': _safe_float(r[3])
+                } for r in cmp_rows
+            }
     except Exception as e:
         log.error(f"signal_writer: failed to load CMP: {e}")
         live_cmp = {}
 
-    # ── Step 3: Merge live day_pct into metrics rows ──
+    # ── Step 3: Merge live day_change into metrics rows ──
     all_metrics = []
     for m in metrics_rows:
         sym = m['symbol']
         live = live_cmp.get(sym, {})
-        # Override prev_day_change with live value if available
-        m['prev_day_change'] = live.get('live_day_pct') or m.get('eod_prev_day_change')
-        m['cmp']             = live.get('cmp')
+        m['day_change'] = live.get('live_day_change') if live.get('live_day_change') is not None else m.get('eod_day_change')
+        m['cmp'] = live.get('cmp')
         all_metrics.append(m)
 
     # ── Step 4: Apply filters + write to v8_qualified ──
     results = {'qualified': {}, 'total': 0, 'source': 'live_5min'}
     for basket, filters in FILTER_CONFIG.items():
         if basket == 'sell_overbought':
-            continue  # computed live in v8_endpoints from raw_prices window
+            continue
 
         qualified = [s for s in all_metrics if all(
             _passes(s.get(metric), bounds[0] if isinstance(bounds, list) else bounds[0],
@@ -132,7 +138,6 @@ def run_live_signal_writer(conn) -> Dict:
             for metric, bounds in filters.items()
         )]
 
-        # Clear + re-insert today's qualified for this basket
         try:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM v8_qualified WHERE basket=%s AND signal_date=%s",
@@ -145,25 +150,25 @@ def run_live_signal_writer(conn) -> Dict:
             sym = s['symbol']
             metrics_snap = {k: s.get(k) for k in [
                 'gvm_score','dma_50','dma_200','rsi_month','rsi_weekly',
-                'month_return','week_return','prev_day_change','sector_week','sector_day'
+                'month_return','week_return','day_change'
             ]}
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO v8_qualified
                         (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
-                         prev_day_change, week_return, month_return, dma_200, dma_50,
+                         day_change, week_return, month_return, dma_200, dma_50,
                          rsi_month, rsi_weekly, sector_week, sector_day, month_index,
                          week_index_52, daily_rsi, range_3d, metrics, source)
                         VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
                             signal_ts=NOW(), cmp=EXCLUDED.cmp,
-                            prev_day_change=EXCLUDED.prev_day_change,
+                            day_change=EXCLUDED.day_change,
                             metrics=EXCLUDED.metrics, source=EXCLUDED.source
                     """, (
                         sym, basket, today,
                         s.get('gvm_score'), s.get('cmp'),
-                        s.get('prev_day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('day_change'), s.get('week_return'), s.get('month_return'),
                         s.get('dma_200'), s.get('dma_50'),
                         s.get('rsi_month'), s.get('rsi_weekly'),
                         s.get('sector_week'), s.get('sector_day'),
