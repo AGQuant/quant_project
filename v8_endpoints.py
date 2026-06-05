@@ -1,6 +1,5 @@
 """
 V8 endpoints — Quant Long-Short Basket Strategy
-Display source for V8 Final CLS V Google Sheet.
 
 Endpoints:
   GET /api/v8/market_mood            — ADR + Nifty D/W/M + auto Buy/Sell slot allocation
@@ -16,14 +15,16 @@ Endpoints:
 Architecture: compute-on-write.
   - v8_signal_writer.py writes v8_qualified every 5-min during market hours
   - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
-  - daily_metrics writes adr_daily + pcr_daily at 15:50 IST (after V8 engine)
   - This file = pure reads only. Zero compute on the read path.
 
-Filters removed (all baskets):
-  sector_day + sector_week — removed 05-Jun-2026: not meaningful for 208-stock universe.
-  month_index              — removed 05-Jun-2026: RSI month already covers this signal.
+Filters removed:
+  sector_day + sector_week — 05-Jun-2026: not meaningful for 208-stock universe
+  month_index              — 05-Jun-2026: RSI month already covers this signal
 
-Active filters are fully live-computable from raw_prices + gvm_scores.
+day_change formula (05-Jun-2026):
+  EOD:  (latest_close / close_2_days_ago - 1) * 100
+  Live: (cmp / close_2_days_ago - 1) * 100
+  2-day momentum. Example: CGPOWER 932 / 906.65 = +2.79%
 """
 
 from fastapi import APIRouter, HTTPException
@@ -40,58 +41,57 @@ def _conn():
 
 # ── Filter configs ────────────────────────────────────────────────────────────
 # Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
-# Removed: sector_day, sector_week (05-Jun-2026), month_index (05-Jun-2026).
 
 FILTER_CONFIG = {
     "buy_reversal": {
-        "gvm_score":       [7.0,  10.0],
-        "year_return":     [-1.5, None],
-        "dma_200":         [1.5,  20.0],
-        "dma_50":          [1.5,  8.0],
-        "rsi_month":       [58.5, 75.0],
-        "rsi_weekly":      [50.0, 67.5],
-        "month_return":    [0.0,  7.2],
-        "week_return":     [1.5,  3.0],
-        "prev_day_change": [0.0,  2.4],
+        "gvm_score":   [7.0,  10.0],
+        "year_return": [-1.5, None],
+        "dma_200":     [1.5,  20.0],
+        "dma_50":      [1.5,  8.0],
+        "rsi_month":   [58.5, 75.0],
+        "rsi_weekly":  [50.0, 67.5],
+        "month_return":[0.0,  7.2],
+        "week_return": [1.5,  3.0],
+        "day_change":  [0.0,  2.4],
     },
     "buy_momentum": {
-        "gvm_score":       [7.0,  10.0],
-        "year_return":     [0.0,  None],
-        "dma_200":         [7.0,  50.0],
-        "dma_50":          [6.5,  25.0],
-        "rsi_month":       [71.5, 80.0],
-        "rsi_weekly":      [71.5, 80.0],
-        "month_return":    [3.0,  14.0],
-        "week_return":     [1.0,  7.0],
-        "prev_day_change": [0.0,  3.5],
+        "gvm_score":   [7.0,  10.0],
+        "year_return": [0.0,  None],
+        "dma_200":     [7.0,  50.0],
+        "dma_50":      [6.5,  25.0],
+        "rsi_month":   [71.5, 80.0],
+        "rsi_weekly":  [71.5, 80.0],
+        "month_return":[3.0,  14.0],
+        "week_return": [1.0,  7.0],
+        "day_change":  [0.0,  3.5],
     },
     "sell_reversal": {
-        "dma_200":         [-30.0, 2.0],
-        "dma_50":          [-20.0, 2.0],
-        "rsi_month":       [20.0,  60.0],
-        "rsi_weekly":      [10.0,  45.0],
-        "month_return":    [-20.0, 2.0],
-        "week_return":     [-6.0,  3.0],
-        "range_3d":        [None,  -1.0],
+        "dma_200":     [-30.0, 2.0],
+        "dma_50":      [-20.0, 2.0],
+        "rsi_month":   [20.0,  60.0],
+        "rsi_weekly":  [10.0,  45.0],
+        "month_return":[-20.0, 2.0],
+        "week_return": [-6.0,  3.0],
+        "range_3d":    [None,  -1.0],
     },
     "sell_momentum": {
-        "dma_200":         [-50.0, 0.0],
-        "dma_50":          [-30.0, 0.0],
-        "dma_20":          [None,  -2.0],
-        "rsi_month":       [10.0,  45.0],
-        "rsi_weekly":      [5.0,   60.0],
-        "daily_rsi":       [None,  40.0],
-        "month_return":    [-30.0, 0.0],
-        "week_return":     [-8.0,  0.0],
-        "prev_day_change": [-3.0,  0.0],
-        "range_3d":        [-10.0, -1.0],
-        "week_index_52":   [None,  20.0],
+        "dma_200":     [-50.0, 0.0],
+        "dma_50":      [-30.0, 0.0],
+        "dma_20":      [None,  -2.0],
+        "rsi_month":   [10.0,  45.0],
+        "rsi_weekly":  [5.0,   60.0],
+        "daily_rsi":   [None,  40.0],
+        "month_return":[-30.0, 0.0],
+        "week_return": [-8.0,  0.0],
+        "day_change":  [-3.0,  0.0],
+        "range_3d":    [-10.0, -1.0],
+        "week_index_52":[None, 20.0],
     },
     "sell_overbought": {
-        "dma_200":         [10.0, None],
-        "week_index_52":   [80.0, None],
-        "rsi_month":       [60.0, None],
-        "prev_day_change": [None, 0.0],
+        "dma_200":     [10.0, None],
+        "week_index_52":[80.0, None],
+        "rsi_month":   [60.0, None],
+        "day_change":  [None, 0.0],
     },
 }
 
@@ -153,7 +153,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               prev_day_change, range_3d, week_index_52
+               day_change, range_3d, week_index_52
         FROM v8_metrics
         WHERE {where_sql}
         ORDER BY gvm_score DESC NULLS LAST
@@ -182,28 +182,22 @@ def market_mood():
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT advances, declines, unchanged, adr, price_date
-                FROM adr_daily
-                ORDER BY price_date DESC
-                LIMIT 1
+                FROM adr_daily ORDER BY price_date DESC LIMIT 1
             """)
             r = cur.fetchone()
             if r:
                 advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
-                adr        = round(float(r[3]), 3) if r[3] is not None else 1.0
-                adr_date   = str(r[4])
+                adr      = round(float(r[3]), 3) if r[3] is not None else 1.0
+                adr_date = str(r[4])
             else:
                 advances, declines, unchanged = 0, 0, 0
-                adr      = 1.0
-                adr_date = "no_data"
+                adr = 1.0; adr_date = "no_data"
 
             adr_pass = adr >= 1.0
 
             cur.execute("""
-                SELECT price_date, close
-                FROM raw_prices
-                WHERE symbol = 'NIFTY50'
-                ORDER BY price_date DESC
-                LIMIT 30
+                SELECT price_date, close FROM raw_prices
+                WHERE symbol = 'NIFTY50' ORDER BY price_date DESC LIMIT 30
             """)
             nifty = cur.fetchall()
             if len(nifty) < 22:
@@ -235,20 +229,11 @@ def market_mood():
             else:            buy_slots, sell_slots, mood = 5,  10, "Bearish"
 
             return {
-                "checked_at":  str(date.today()),
-                "checks":      checks,
-                "fails":       fails,
-                "mood":        mood,
-                "buy_slots":   buy_slots,
-                "sell_slots":  sell_slots,
-                "total_slots": 15,
-                "adr_detail":  {
-                    "advances":  advances,
-                    "declines":  declines,
-                    "unchanged": unchanged,
-                    "adr_date":  adr_date,
-                    "source":    "adr_daily",
-                },
+                "checked_at": str(date.today()), "checks": checks,
+                "fails": fails, "mood": mood,
+                "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": 15,
+                "adr_detail": {"advances": advances, "declines": declines,
+                               "unchanged": unchanged, "adr_date": adr_date, "source": "adr_daily"},
             }
     except Exception as e:
         raise HTTPException(500, f"market_mood failed: {e}")
@@ -289,7 +274,7 @@ def qualified(basket: str, limit: int = 50):
                     symbol, gvm_score, cmp,
                     dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                     week_return, month_return,
-                    prev_day_change, range_3d, week_index_52,
+                    day_change, range_3d, week_index_52,
                     source, signal_ts
                 FROM v8_qualified
                 WHERE basket = %s
@@ -311,13 +296,7 @@ def qualified(basket: str, limit: int = 50):
             source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
 
         meta = BASKET_META.get(basket, {})
-        return {
-            "basket": basket,
-            "count": len(rows),
-            "stocks": rows,
-            "source": source_note,
-            **meta
-        }
+        return {"basket": basket, "count": len(rows), "stocks": rows, "source": source_note, **meta}
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
@@ -342,12 +321,11 @@ def funnel_counts(basket: str):
             return {"basket": basket, "score_date": str(date.today()),
                     "counts": counts, "source": "precomputed"}
 
-        # fallback: compute live from v8_metrics
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
                        rsi_month, rsi_weekly, daily_rsi,
-                       month_return, week_return, year_return, prev_day_change,
+                       month_return, week_return, year_return, day_change,
                        week_index_52, range_3d, ma9_vs_ma21, vol_ratio
                 FROM v8_metrics
                 WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
@@ -377,7 +355,7 @@ def raw_metrics(limit: int = 250):
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
                m.month_index, m.week_index_52,
-               m.prev_day_change, m.range_3d,
+               m.day_change, m.range_3d,
                m.upper_bb, m.lower_bb,
                m.ma9_vs_ma21, m.vol_ratio
         FROM v8_metrics m
@@ -392,12 +370,8 @@ def raw_metrics(limit: int = 250):
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         score_date = rows[0]["score_date"] if rows else None
-        return {
-            "count":      len(rows),
-            "score_date": str(score_date) if score_date else None,
-            "columns":    cols,
-            "stocks":     rows,
-        }
+        return {"count": len(rows), "score_date": str(score_date) if score_date else None,
+                "columns": cols, "stocks": rows}
     except Exception as e:
         raise HTTPException(500, f"raw_metrics failed: {e}")
 
@@ -437,23 +411,20 @@ def sell_overbought(limit: int = 50):
                            ROUND((((pw.prev_high + pw.prev_low + pw.prev_close) / 3)
                                - 2 * (pw.prev_high - (pw.prev_high + pw.prev_low + pw.prev_close) / 3))::numeric, 2) AS s2
                     FROM price_window pw
-                    WHERE pw.rn = 1
-                      AND pw.ma21 IS NOT NULL
-                      AND pw.volume > 0
+                    WHERE pw.rn = 1 AND pw.ma21 IS NOT NULL AND pw.volume > 0
                 ),
                 filtered AS (
                     SELECT l.*,
                            vm.dma_200, vm.week_index_52, vm.rsi_month, vm.daily_rsi,
-                           vm.prev_day_change, vm.gvm_score
+                           vm.day_change, vm.gvm_score
                     FROM latest l
-                    JOIN v8_metrics vm
-                      ON vm.symbol = l.symbol
+                    JOIN v8_metrics vm ON vm.symbol = l.symbol
                      AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
                     WHERE vm.dma_200        >= 10
                       AND vm.week_index_52  >= 80
                       AND l.ma9_vs_ma21     >= 3
                       AND l.vol_ratio       <= 0.8
-                      AND vm.prev_day_change < 0
+                      AND vm.day_change      < 0
                       AND vm.rsi_month      >= 60
                       AND l.s1              <  l.entry
                       AND l.symbol NOT IN (
@@ -461,18 +432,16 @@ def sell_overbought(limit: int = 50):
                           WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
                       )
                 )
-                SELECT
-                    symbol,
-                    ROUND(entry::numeric, 2)         AS entry,
-                    s1                               AS target,
-                    ROUND((entry + (entry - s1))::numeric, 2) AS stop,
+                SELECT symbol,
+                    ROUND(entry::numeric, 2)                          AS entry,
+                    s1                                                AS target,
+                    ROUND((entry + (entry - s1))::numeric, 2)         AS stop,
                     ROUND(((entry - s1) / NULLIF(entry, 0) * 100)::numeric, 2) AS tgt_pct,
-                    dma_200, week_index_52,
-                    ma9_vs_ma21, vol_ratio,
-                    prev_day_change,
-                    ROUND(rsi_month::numeric, 1)    AS rsi_month,
-                    ROUND(daily_rsi::numeric, 1)    AS daily_rsi,
-                    ROUND(gvm_score::numeric, 2)    AS gvm_score
+                    dma_200, week_index_52, ma9_vs_ma21, vol_ratio,
+                    day_change,
+                    ROUND(rsi_month::numeric, 1)  AS rsi_month,
+                    ROUND(daily_rsi::numeric, 1)  AS daily_rsi,
+                    ROUND(gvm_score::numeric, 2)  AS gvm_score
                 FROM filtered
                 ORDER BY dma_200 DESC NULLS LAST
                 LIMIT %s
@@ -480,13 +449,11 @@ def sell_overbought(limit: int = 50):
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         return {
-            "basket":     "sell_overbought",
-            "count":      len(rows),
-            "target":     "S1",
-            "sl":         "entry + (entry - S1) — 1:1",
+            "basket": "sell_overbought", "count": len(rows),
+            "target": "S1", "sl": "entry + (entry - S1) — 1:1",
             "win_pct_may2026": "71.4%",
-            "note":       "Market gate required — fails in recovery/bull markets",
-            "stocks":     rows,
+            "note": "Market gate required — fails in recovery/bull markets",
+            "stocks": rows,
         }
     except Exception as e:
         raise HTTPException(500, f"sell_overbought failed: {e}")
@@ -498,9 +465,7 @@ def adr_only():
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT price_date, advances, declines, unchanged, adr
-                FROM adr_daily
-                ORDER BY price_date DESC
-                LIMIT 1
+                FROM adr_daily ORDER BY price_date DESC LIMIT 1
             """)
             r = cur.fetchone()
         if not r:
@@ -508,11 +473,8 @@ def adr_only():
                     "pass": False, "note": "adr_daily empty"}
         price_date, adv, dec, unc, adr_val = r
         adr = float(adr_val) if adr_val else 0.0
-        return {
-            "price_date": str(price_date),
-            "adr": adr, "advances": adv, "declines": dec,
-            "unchanged": unc, "pass": adr >= 1.0,
-        }
+        return {"price_date": str(price_date), "adr": adr,
+                "advances": adv, "declines": dec, "unchanged": unc, "pass": adr >= 1.0}
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
 
