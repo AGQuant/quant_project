@@ -7,6 +7,7 @@ ISOLATED from real trades / personal_journal — own v8_paper_* tables.
 FUNNEL (3 layers):
   1. Basket FILTERS first  — a stock is ELIGIBLE only if it passes a V8 basket's
      bands on the latest v8_metrics (EOD). Qualified set is fixed for the day.
+     CANONICAL filters imported from v8_endpoints.FILTER_CONFIG (single source of truth).
   2. Rolling-5-day PIVOTS  — PP/R1/S1 from last 5 trading days (T-1..T-5) of
      raw_prices, recomputed nightly; window rolls daily.
   3. Fresh PP CROSS trigger — on 1-min candle close, on qualified names only.
@@ -14,7 +15,6 @@ FUNNEL (3 layers):
 ENTRY (qualified name + fresh cross + free slot + not blackout + before 15:20):
   BUY  : prev_close <= PP < this_close <= R1  -> enter @ close, target R1, SL = entry-(R1-entry)
   SHORT: prev_close >= PP > this_close >= S1  -> enter @ close, target S1, SL = entry+(entry-S1)
-  (no guard — redundant with fresh cross)
 
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
@@ -28,6 +28,8 @@ MISSED : qualified + fresh cross but blocked by slot_full|blackout|after_cutoff 
          v8_paper_missed, one row per (symbol, side, day).
 
 Price feed: intraday_prices (Fyers 1-min, NAIVE IST ts — read RAW, no TZ math).
+
+FILTER_CONFIG: imported from v8_endpoints (canonical). Do NOT duplicate here.
 """
 
 import logging
@@ -40,36 +42,6 @@ PIVOT_WINDOW   = 5
 PIVOT_MIN_DAYS = 3
 ENTRY_CUTOFF   = time(15, 20)   # no new entries at/after 15:20
 REBALANCE_TIME = time(15, 20)   # gate rebalance fires once at/after 15:20
-
-# Basket filter bands — MUST mirror v8_endpoints.FILTER_CONFIG.
-# [min, max]; None = unbounded. side used for pivot direction.
-FILTER_CONFIG = {
-    "buy_reversal": {"side": "LONG", "f": {
-        "gvm_score": [7.0, 10.0], "year_return": [-1.5, None], "dma_200": [1.5, 20.0],
-        "dma_50": [1.5, 8.0], "rsi_month": [58.5, 75.0], "rsi_weekly": [50.0, 67.5],
-        "month_return": [0.0, 7.2], "week_return": [1.5, 3.0], "sector_week": [1.5, 5.0],
-        "sector_day": [0.0, 3.0], "month_index": [50.0, 100.0], "range_1d": [0.5, 2.4]}},
-    "buy_momentum": {"side": "LONG", "f": {
-        "gvm_score": [7.0, 10.0], "year_return": [0.0, None], "dma_200": [7.0, 50.0],
-        "dma_50": [6.5, 25.0], "rsi_month": [71.5, 80.0], "rsi_weekly": [71.5, 80.0],
-        "month_return": [3.0, 12.0], "week_return": [1.0, 7.0], "sector_week": [1.5, 5.0],
-        "sector_day": [0.0, 3.0], "month_index": [50.0, 100.0], "range_1d": [1.0, 3.5]}},
-    "sell_reversal": {"side": "SHORT", "f": {
-        "dma_200": [-30.0, 2.0], "dma_50": [-20.0, 2.0], "rsi_month": [20.0, 60.0],
-        "rsi_weekly": [10.0, 45.0], "month_return": [-20.0, 2.0], "week_return": [-6.0, 3.0],
-        "sector_week": [-12.0, -1.5], "sector_day": [-3.0, 1.0], "month_index": [0.0, 50.0],
-        "range_3d": [None, -1.0]}},
-    "sell_momentum": {"side": "SHORT", "f": {
-        "dma_200": [-50.0, 0.0], "dma_50": [-30.0, 0.0], "dma_20": [None, -2.0],
-        "rsi_month": [10.0, 45.0], "rsi_weekly": [5.0, 60.0], "daily_rsi": [None, 40.0],
-        "month_return": [-30.0, 0.0], "week_return": [-8.0, 0.0], "sector_week": [-10.0, -1.6],
-        "sector_day": [-3.0, 1.0], "month_index": [0.0, 35.0], "range_1d": [-3.0, 0.0],
-        "range_3d": [-10.0, -1.0], "week_index_52": [None, 20.0]}},
-    # sell_overbought is computed live in v8_endpoints; treat as SHORT, included via its own basket
-    "sell_overbought": {"side": "SHORT", "f": {
-        "dma_200": [10.0, None], "week_index_52": [80.0, None], "rsi_month": [60.0, None],
-        "range_1d": [None, 0.0]}},
-}
 
 
 # ============================================================ SCHEMA
@@ -160,9 +132,11 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
     return {"pivot_date": str(for_date), "built": built, "total": len(symbols), "skipped": len(skipped)}
 
 
-# ============================================================ QUALIFIED SET (filters-first)
+# ============================================================ QUALIFIED SET
 def _passes(metric_row: Dict, bands: Dict) -> bool:
-    for metric, (mn, mx) in bands.items():
+    """Check a metric row against a filter band dict {metric: [min, max]}."""
+    for metric, bounds in bands.items():
+        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
         v = metric_row.get(metric)
         if v is None:
             return False
@@ -172,23 +146,33 @@ def _passes(metric_row: Dict, bands: Dict) -> bool:
     return True
 
 def qualified_set(conn) -> Dict[str, Dict]:
-    """Return {symbol: {'basket':.., 'side':..}} for stocks passing ANY basket's bands
-    on the latest v8_metrics. First basket matched wins (buy baskets checked before sell)."""
+    """
+    Return {symbol: {'basket':.., 'side':..}} for stocks passing ANY basket's
+    filters on the latest v8_metrics.
+    Uses FILTER_CONFIG from v8_endpoints (canonical single source of truth).
+    Buy baskets checked before sell; first match wins.
+    """
+    from v8_endpoints import FILTER_CONFIG, BASKET_META
+
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-                   month_return, week_return, year_return, sector_day, sector_week,
-                   month_index, week_index_52, range_1d, range_3d
+                   month_return, week_return, year_return, day_change,
+                   week_index_52, range_3d, ma9_vs_ma21, vol_ratio
             FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics)
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
     out = {}
     for m in rows:
         sym = m["symbol"]
-        for basket, cfg in FILTER_CONFIG.items():
-            if _passes(m, cfg["f"]):
-                out[sym] = {"basket": basket, "side": cfg["side"]}
+        for basket, filters in FILTER_CONFIG.items():
+            if basket == "sell_overbought":
+                continue  # computed separately via raw_prices window
+            side = BASKET_META[basket]["side"]
+            if _passes(m, filters):
+                out[sym] = {"basket": basket, "side": side}
                 break  # first basket wins
     return out
 
@@ -270,7 +254,7 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
 def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots: int = None) -> Dict:
     ensure_schema(conn)
     d = target_date or date.today()
-    now_t = datetime.now().time() if target_date is None else None  # live uses wall clock
+    now_t = datetime.now().time() if target_date is None else None
 
     # pivots for today (fallback to latest stamped)
     with conn.cursor() as cur:
@@ -286,7 +270,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     if not piv:
         return {"status":"warn","msg":"no pivots — run compute_pivots"}
 
-    qual = qualified_set(conn)   # {symbol: {basket, side}}
+    qual = qualified_set(conn)   # {symbol: {basket, side}} — uses canonical FILTER_CONFIG
     exits, entries = [], []
 
     # ---- 1) EXITS ----
@@ -296,7 +280,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
         open_rows = cur.fetchall()
     for (pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt) in open_rows:
         entry=float(entry); tgt=float(tgt); sl=float(sl); qty=int(qty)
-        # gap exit: first bar of TODAY opens beyond a level (only if entry was a prior day)
         fb_open, fb_ts = _first_bar(conn, sym, d)
         if fb_open is not None and (ets is None or ets.date() < d):
             if side=="LONG":
@@ -305,7 +288,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             else:
                 if fb_open <= tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
                 if fb_open >= sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
-        # normal close-based exit
         tl = _two_latest_closes(conn, sym, d)
         if not tl: continue
         _, cur_close, cur_ts = tl
@@ -330,7 +312,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 pos = cur.fetchall()
             excess = len(pos) - cap
             if excess <= 0: continue
-            # unrealized pnl per pos at latest close
             scored = []
             for (pid,sym,basket,entry,ets,qty,tgt,sl,pdt) in pos:
                 tl = _two_latest_closes(conn, sym, d)
@@ -339,7 +320,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 entry=float(entry); qty=int(qty)
                 upnl = (cur_close-entry)*qty if side=="LONG" else (entry-cur_close)*qty
                 scored.append((upnl,pid,sym,basket,entry,ets,qty,float(tgt),float(sl),pdt,cur_close,cur_ts))
-            # order: best profit, worst loss, 2nd best, 2nd worst ...
             best = sorted(scored, key=lambda x:-x[0])
             worst = sorted(scored, key=lambda x:x[0])
             order, bi, wi, picked = [], 0, 0, set()
@@ -401,7 +381,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 short_open+=1
                 entries.append({"symbol":sym,"side":"SHORT","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
     else:
-        # after cutoff: any fresh-cross qualified name that we skip -> log missed (after_cutoff)
         for sym, q in qual.items():
             if sym not in piv: continue
             side=q["side"]; pv=piv[sym]; pp,r1,s1=pv["pp"],pv["r1"],pv["s1"]
