@@ -5,7 +5,7 @@ Extracted from main.py (refactor file 2/5, 04-Jun-2026). Read-only data endpoint
 Self-contained: own _conn, api_query, _ist_now. Imports nothing from main.py.
 
 Endpoints:
-  GET /api/gvm/{symbol}            — full GVM + input_raw overview/takeaway
+  GET /api/gvm/{symbol}            — full GVM + input_raw overview/takeaway/result_analysis
   GET /api/gvm/top/{n}             — top N by GVM (optional verdict filter)
   GET /api/filter                  — stocks in a GVM range
   GET /api/sectors                 — sector mcap-weighted ratings
@@ -56,17 +56,20 @@ def api_query(sql, params=None, single=False):
         return {"error": str(e)}
 
 
-# ── GVM ───────────────────────────────────────────────────────────────────────
+# ── GVM ─────────────────────────────────────────────────────────────────────
 
 @router.get("/api/gvm/{symbol}")
 def get_gvm(symbol: str):
-    # full company map — cap_category + instrument_type + mcap_rank + overview + takeaway
+    # full company map — cap_category + instrument_type + mcap_rank + overview + takeaway + result_analysis
     r = api_query("""
         SELECT g.symbol, g.company_name, g.segment, g.price,
                g.g_score, g.v_score, g.m_score, g.gvm_score,
                g.verdict, g.punchline, g.market_cap,
-               i.overview, i.key_takeaway,
-               i.instrument_type, i.cap_category, i.mcap_rank
+               i.overview, i.key_takeaway, i.result_analysis,
+               i.instrument_type, i.cap_category, i.mcap_rank,
+               i.last_overview_updated::text AS last_overview_updated,
+               i.last_takeaway_updated::text AS last_takeaway_updated,
+               i.last_result_analysis_updated::text AS last_result_analysis_updated
         FROM gvm_scores g
         LEFT JOIN input_raw i ON i.nse_code = g.symbol
         WHERE g.symbol = %s
@@ -94,7 +97,7 @@ def get_sectors():
     return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
 
 
-# ── Market ─────────────────────────────────────────────────────────────────────
+# ── Market ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/market/top_gainers")
 def get_top_gainers(price_date: Optional[str] = None, n: int = 20, min_gvm: Optional[float] = None,
@@ -149,7 +152,7 @@ async def intraday_ondemand(symbol: str, days: int = 15, interval: str = "5m", s
     return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, symbol.upper(), days, interval, "NS", source)
 
 
-# ── Global ─────────────────────────────────────────────────────────────────────
+# ── Global ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/global")
 def get_global():
