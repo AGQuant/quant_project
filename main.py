@@ -46,23 +46,21 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.13
+# Scorr / Project Quant — main.py v2.9.14
+# v2.9.14: get_gvm now returns result_analysis + all 3 refresh timestamps.
+#   gvm_market_endpoints.py updated — SELECT adds i.result_analysis,
+#   i.last_overview_updated, i.last_takeaway_updated, i.last_result_analysis_updated.
+#   No other changes. Auto-deploy ~90s.
 # v2.9.13: fyers_endpoints.py wired — on-demand futures quote via Fyers API.
-#   GET /api/fyers/quote/{symbol} + MCP tool fyers_quote.
-#   Token read from fyers_tokens table (written daily by fyers_feed.py auto-login).
-#   No storage, no recurring calls — pure on-demand for trade idea format.
 # v2.9.12: REFACTOR file 4/5 — scheduler + all background tasks + ADR/PCR compute
-#   extracted to scheduler.py (self-contained). main.py calls
-#   scheduler.start_background(app, BASE_URL, ADMIN_TOKEN) in startup.
-#   ADR/PCR compute imported back for the manual /api/daily/compute_metrics endpoint.
-#   Intraday backfill/heal helpers kept in main (used by HTTP endpoints only).
+#   extracted to scheduler.py (self-contained).
 # v2.9.11: REFACTOR file 3/5 — Screener earnings + Drive loaders to admin_data.py.
 # v2.9.10: REFACTOR file 2/5 — GVM + market read endpoints to gvm_market_endpoints.py.
 # v2.9.9: REFACTOR file 1/5 — QB endpoints to qb_endpoints.py. + ADR 999 fix.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.13"
+VERSION = "2.9.14"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -200,7 +198,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.13)")
+        log.info("Tables ready (v2.9.14)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -494,7 +492,7 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
-# ── Content Update Endpoint (v2.9.8) ──────────────────────────────────────────
+# ── Content Update Endpoint ───────────────────────────────────────────────────
 _ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
 _TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
 _FIELD_TO_TS_COL = {
@@ -529,7 +527,7 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
     except HTTPException: raise
     except Exception as e: log.error(f"content_update failed for {symbol}: {e}"); raise HTTPException(500, str(e))
 
-# ── Refactor notes ─────────────────────────────────────────────────────────────
+# ── Refactor notes ────────────────────────────────────────────────────────────
 # file1 qb_endpoints.py | file2 gvm_market_endpoints.py | file3 admin_data.py
 # file4 scheduler.py | file5 fyers_endpoints.py (on-demand Fyers quote)
 
@@ -899,7 +897,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id":info["client_id"],"created":time.time()}
     return {"access_token":token,"token_type":"Bearer","expires_in":31536000,"scope":"read write"}
 
-# ── MCP Tools ──────────────────────────────────────────────────────────────────
+# ── MCP Tools ─────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -909,7 +907,7 @@ MCP_TOOLS = [
     {"name":"run_momentum","description":"GVM: recompute daily momentum (M) for all stocks from raw_prices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
-    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview, key_takeaway, instrument_type (futures/cash), cap_category (large/mid/small/micro), mcap_rank.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview, key_takeaway, result_analysis, instrument_type (futures/cash), cap_category (large/mid/small/micro), mcap_rank, and all 3 content refresh timestamps.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_top_stocks","description":"Get top N stocks by GVM.","inputSchema":{"type":"object","properties":{"n":{"type":"integer"},"verdict":{"type":"string"}},"required":["n"]}},
     {"name":"get_sector","description":"Get all stocks in a sector ordered by GVM.","inputSchema":{"type":"object","properties":{"sector":{"type":"string"}},"required":["sector"]}},
     {"name":"get_filter","description":"Filter stocks by GVM range.","inputSchema":{"type":"object","properties":{"min_gvm":{"type":"number"},"max_gvm":{"type":"number"}},"required":[]}},
