@@ -16,6 +16,11 @@ Filter thresholds are CANONICAL in v8_endpoints.py (FILTER_CONFIG dict).
 This engine computes raw metrics + writes signals; v8_endpoints serves pure reads.
 
 RSI periods: Month=6, Weekly=8, Daily=14 (Wilder).
+
+day_change formula (05-Jun-2026):
+  EOD:  (latest_close / close_2_days_ago - 1) * 100
+  Live: (cmp / close_2_days_ago - 1) * 100
+  Captures 2-day momentum. close_2_days_ago = raw_prices iloc[-3] (today not yet in EOD).
 """
 
 import logging
@@ -51,7 +56,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     dma_50 NUMERIC, dma_200 NUMERIC, dma_20 NUMERIC,
     rsi_month NUMERIC, rsi_weekly NUMERIC, daily_rsi NUMERIC,
     month_return NUMERIC, week_return NUMERIC, year_return NUMERIC,
-    prev_day_change NUMERIC,
+    day_change NUMERIC,
     sector_day NUMERIC, sector_week NUMERIC,
     month_index NUMERIC, week_index_52 NUMERIC,
     range_1d NUMERIC, range_3d NUMERIC,
@@ -72,7 +77,7 @@ CREATE TABLE IF NOT EXISTS v8_qualified (
     signal_ts TIMESTAMP DEFAULT NOW(),
     gvm_score NUMERIC,
     cmp NUMERIC,
-    prev_day_change NUMERIC,
+    day_change NUMERIC,
     week_return NUMERIC,
     month_return NUMERIC,
     dma_200 NUMERIC,
@@ -93,7 +98,6 @@ CREATE INDEX IF NOT EXISTS idx_v8_qual_date_basket ON v8_qualified(signal_date D
 CREATE INDEX IF NOT EXISTS idx_v8_qual_basket_today ON v8_qualified(basket, signal_date DESC);
 
 -- v8_signal_history: append-only archive. Every signal ever generated.
--- Backtest = SELECT * FROM v8_signal_history WHERE basket=x AND signal_date BETWEEN a AND b
 CREATE TABLE IF NOT EXISTS v8_signal_history (
     id SERIAL PRIMARY KEY,
     symbol TEXT NOT NULL,
@@ -101,7 +105,7 @@ CREATE TABLE IF NOT EXISTS v8_signal_history (
     signal_date DATE NOT NULL,
     gvm_score NUMERIC,
     cmp NUMERIC,
-    prev_day_change NUMERIC,
+    day_change NUMERIC,
     week_return NUMERIC,
     month_return NUMERIC,
     dma_200 NUMERIC,
@@ -117,7 +121,6 @@ CREATE INDEX IF NOT EXISTS idx_v8_history_basket_date ON v8_signal_history(baske
 CREATE INDEX IF NOT EXISTS idx_v8_history_date ON v8_signal_history(signal_date DESC);
 
 -- v8_funnel_counts: waterfall step counts per basket per day.
--- Restores the funnel display in the Google Sheet.
 CREATE TABLE IF NOT EXISTS v8_funnel_counts (
     id SERIAL PRIMARY KEY,
     basket TEXT NOT NULL,
@@ -163,7 +166,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         "month_return": None, "week_return": None, "year_return": None,
         "sector_day": None, "sector_week": None,
         "month_index": None, "week_index_52": None, "range_1d": None,
-        "dma_20": None, "range_3d": None, "prev_day_change": None,
+        "dma_20": None, "range_3d": None, "day_change": None,
         "daily_rsi": None, "upper_bb": None, "lower_bb": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
     }
@@ -206,9 +209,12 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if len(df) >= 21:  out["month_return"] = _safe_pct(latest_close, float(df["close"].iloc[-21]))
     if len(df) >= 5:   out["week_return"]  = _safe_pct(latest_close, float(df["close"].iloc[-5]))
 
-    if len(df) >= 2:
-        prev1, prev2 = float(df["close"].iloc[-1]), float(df["close"].iloc[-2])
-        if prev2 > 0: out["prev_day_change"] = (prev1 / prev2 - 1) * 100
+    # day_change: latest_close / close_2_days_ago — 2-day momentum (05-Jun-2026)
+    # iloc[-1] = yesterday EOD, iloc[-3] = 2 days before yesterday
+    if len(df) >= 3:
+        base = float(df["close"].iloc[-3])
+        if base > 0:
+            out["day_change"] = (latest_close / base - 1) * 100
 
     if len(df) >= 21:
         ma9  = float(df["close"].tail(9).mean())
@@ -249,22 +255,6 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
             out["upper_bb"] = (latest_close - (ma + 2*sd)) / latest_close * 100
             out["lower_bb"] = (latest_close - (ma - 2*sd)) / latest_close * 100
 
-    if segment:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT AVG(CASE WHEN t.close>0 AND w.close>0 THEN (t.close/w.close-1)*100 END),
-                       AVG(CASE WHEN t.close>0 AND d.close>0 THEN (t.close/d.close-1)*100 END)
-                FROM gvm_scores g
-                JOIN LATERAL (SELECT close FROM raw_prices WHERE symbol=g.symbol ORDER BY price_date DESC LIMIT 1) t ON true
-                JOIN LATERAL (SELECT close FROM raw_prices WHERE symbol=g.symbol ORDER BY price_date DESC OFFSET 5 LIMIT 1) w ON true
-                JOIN LATERAL (SELECT close FROM raw_prices WHERE symbol=g.symbol ORDER BY price_date DESC OFFSET 1 LIMIT 1) d ON true
-                WHERE g.segment = %s
-            """, (segment,))
-            s = cur.fetchone()
-            if s:
-                out["sector_week"] = float(s[0]) if s[0] is not None else None
-                out["sector_day"]  = float(s[1]) if s[1] is not None else None
-
     return out
 
 
@@ -274,14 +264,14 @@ def store_metrics(conn, m: Dict):
             INSERT INTO v8_metrics
             (symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
              rsi_month, rsi_weekly, daily_rsi,
-             month_return, week_return, year_return, prev_day_change,
+             month_return, week_return, year_return, day_change,
              sector_day, sector_week, month_index, week_index_52,
              range_1d, range_3d, upper_bb, lower_bb,
              ma9_vs_ma21, vol_ratio)
             VALUES
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
              %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
-             %(month_return)s, %(week_return)s, %(year_return)s, %(prev_day_change)s,
+             %(month_return)s, %(week_return)s, %(year_return)s, %(day_change)s,
              %(sector_day)s, %(sector_week)s, %(month_index)s, %(week_index_52)s,
              %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s,
              %(ma9_vs_ma21)s, %(vol_ratio)s)
@@ -289,7 +279,7 @@ def store_metrics(conn, m: Dict):
                 gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
                 rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
                 month_return=EXCLUDED.month_return, week_return=EXCLUDED.week_return,
-                year_return=EXCLUDED.year_return, prev_day_change=EXCLUDED.prev_day_change,
+                year_return=EXCLUDED.year_return, day_change=EXCLUDED.day_change,
                 sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
                 range_1d=EXCLUDED.range_1d, range_3d=EXCLUDED.range_3d,
@@ -304,17 +294,8 @@ def store_metrics(conn, m: Dict):
 # ============================================================
 
 def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source: str = 'eod'):
-    """
-    Apply FILTER_CONFIG to all_metrics, then write results to:
-      - v8_qualified      (today's live signals — full replace for this date)
-      - v8_signal_history (append-only archive — UNIQUE guard prevents duplicates)
-      - v8_funnel_counts  (waterfall step counts per basket)
-
-    Called after EOD engine run and after 5-min live tick.
-    """
     from v8_endpoints import FILTER_CONFIG
 
-    # Fetch live CMP for all symbols (used in qualified rows)
     cmp_map = {}
     try:
         with conn.cursor() as cur:
@@ -326,11 +307,8 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
 
     for basket, filters in FILTER_CONFIG.items():
         if basket == 'sell_overbought':
-            # sell_overbought is computed live in v8_endpoints (raw_prices window)
-            # Skip here — it does not use v8_metrics as its signal source
             continue
 
-        # ── compute funnel counts (cumulative, each filter applied in sequence) ──
         universe = all_metrics[:]
         funnel = {}
         for metric, bounds in filters.items():
@@ -338,9 +316,8 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             universe = [s for s in universe if _passes(s.get(metric), mn, mx)]
             funnel[metric] = len(universe)
 
-        qualified_symbols = universe  # stocks surviving all filters
+        qualified_symbols = universe
 
-        # ── write v8_funnel_counts ──
         try:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -353,7 +330,6 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
         except Exception as e:
             log.warning(f"write_signals funnel {basket}: {e}")
 
-        # ── clear today's v8_qualified for this basket then re-insert ──
         try:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM v8_qualified WHERE basket=%s AND signal_date=%s",
@@ -362,32 +338,30 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
         except Exception as e:
             log.warning(f"write_signals clear qualified {basket}: {e}")
 
-        # ── write v8_qualified + v8_signal_history ──
         for s in qualified_symbols:
             sym = s['symbol']
             cmp = cmp_map.get(sym)
             metrics_snap = {k: s.get(k) for k in [
                 'gvm_score','dma_50','dma_200','dma_20','rsi_month','rsi_weekly',
-                'daily_rsi','month_return','week_return','year_return','prev_day_change',
-                'sector_day','sector_week','month_index','week_index_52','range_3d',
-                'ma9_vs_ma21','vol_ratio'
+                'daily_rsi','month_return','week_return','year_return','day_change',
+                'week_index_52','range_3d','ma9_vs_ma21','vol_ratio'
             ]}
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO v8_qualified
                         (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
-                         prev_day_change, week_return, month_return, dma_200, dma_50,
+                         day_change, week_return, month_return, dma_200, dma_50,
                          rsi_month, rsi_weekly, sector_week, sector_day, month_index,
                          week_index_52, daily_rsi, range_3d, metrics, source)
                         VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
                             signal_ts=NOW(), gvm_score=EXCLUDED.gvm_score, cmp=EXCLUDED.cmp,
-                            prev_day_change=EXCLUDED.prev_day_change, metrics=EXCLUDED.metrics,
+                            day_change=EXCLUDED.day_change, metrics=EXCLUDED.metrics,
                             source=EXCLUDED.source
                     """, (
                         sym, basket, target_date, s.get('gvm_score'), cmp,
-                        s.get('prev_day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('day_change'), s.get('week_return'), s.get('month_return'),
                         s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
                         s.get('sector_week'), s.get('sector_day'), s.get('month_index'),
                         s.get('week_index_52'), s.get('daily_rsi'), s.get('range_3d'),
@@ -397,19 +371,18 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             except Exception as e:
                 log.warning(f"write_signals qualified {basket} {sym}: {e}")
 
-            # history — UNIQUE guard (symbol, basket, signal_date) prevents duplicates
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO v8_signal_history
                         (symbol, basket, signal_date, gvm_score, cmp,
-                         prev_day_change, week_return, month_return,
+                         day_change, week_return, month_return,
                          dma_200, dma_50, rsi_month, rsi_weekly, metrics, source)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date, s.get('gvm_score'), cmp,
-                        s.get('prev_day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('day_change'), s.get('week_return'), s.get('month_return'),
                         s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
                         json.dumps(metrics_snap), source
                     ))
@@ -421,7 +394,6 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
 
 
 def _passes(value, mn, mx) -> bool:
-    """Check a single metric value against [min, max] bounds."""
     if value is None:
         return False
     v = float(value)
@@ -437,11 +409,6 @@ def _passes(value, mn, mx) -> bool:
 # ============================================================
 
 def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> Dict:
-    """
-    EOD engine: compute 21 metrics for all futures symbols,
-    store in v8_metrics, then write pre-filtered signals to
-    v8_qualified + v8_signal_history + v8_funnel_counts.
-    """
     target_date = target_date or date.today()
     if symbols is None:
         with conn.cursor() as cur:
@@ -466,7 +433,6 @@ def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
             results["errors"].append(f"{sym}: {str(e)[:80]}")
             log.warning(f"V8 engine error on {sym}: {e}")
 
-    # Write pre-filtered signals to DB — compute-on-write
     try:
         write_signals_to_db(conn, all_metrics, target_date, source='eod')
         results["signals_written"] = len(all_metrics)
