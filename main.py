@@ -46,11 +46,12 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.14
+# Scorr / Project Quant — main.py v2.9.15
+# v2.9.15: /api/paper/status — open_positions now JOINs cmp_prices and
+#   returns cmp + unrealised_pnl computed server-side (all calc in DB,
+#   GS = pure display). LONG: (cmp-entry)*qty. SHORT: (entry-cmp)*qty.
+#   No GS changes required.
 # v2.9.14: get_gvm now returns result_analysis + all 3 refresh timestamps.
-#   gvm_market_endpoints.py updated — SELECT adds i.result_analysis,
-#   i.last_overview_updated, i.last_takeaway_updated, i.last_result_analysis_updated.
-#   No other changes. Auto-deploy ~90s.
 # v2.9.13: fyers_endpoints.py wired — on-demand futures quote via Fyers API.
 # v2.9.12: REFACTOR file 4/5 — scheduler + all background tasks + ADR/PCR compute
 #   extracted to scheduler.py (self-contained).
@@ -60,7 +61,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.14"
+VERSION = "2.9.15"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -198,7 +199,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.14)")
+        log.info("Tables ready (v2.9.15)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -492,7 +493,7 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
-# ── Content Update Endpoint ───────────────────────────────────────────────────
+# ── Content Update Endpoint ──────────────────────────────────────────────────
 _ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
 _TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
 _FIELD_TO_TS_COL = {
@@ -746,10 +747,33 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/paper/status")
 def paper_status():
-    return {"open_positions": api_query("SELECT symbol,side,basket,entry_price,entry_ts,target,stop_loss,qty,pivot_date FROM v8_paper_positions WHERE status='OPEN' ORDER BY entry_ts DESC"),
-            "recent_trades": api_query("SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
-            "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
-            "summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True)}
+    # v2.9.15: CMP + unrealised_pnl computed server-side via JOIN on cmp_prices.
+    # LONG: (cmp - entry_price) * qty. SHORT: (entry_price - cmp) * qty.
+    # GS = pure display, no calculation.
+    open_positions = api_query("""
+        SELECT
+            p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
+            p.target, p.stop_loss, p.qty, p.pivot_date,
+            COALESCE(c.cmp, p.entry_price) AS cmp,
+            ROUND(
+                CASE p.side
+                    WHEN 'LONG'  THEN (COALESCE(c.cmp, p.entry_price) - p.entry_price) * p.qty
+                    WHEN 'SHORT' THEN (p.entry_price - COALESCE(c.cmp, p.entry_price)) * p.qty
+                    ELSE 0
+                END::numeric, 2
+            ) AS unrealised_pnl,
+            c.updated_at AS cmp_updated_at
+        FROM v8_paper_positions p
+        LEFT JOIN cmp_prices c ON c.symbol = p.symbol
+        WHERE p.status = 'OPEN'
+        ORDER BY p.entry_ts DESC
+    """)
+    return {
+        "open_positions": open_positions,
+        "recent_trades": api_query("SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
+        "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
+        "summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True)
+    }
 
 @app.get("/api/paper/pivots")
 def paper_pivots(limit: int = 250):
@@ -921,7 +945,7 @@ MCP_TOOLS = [
     {"name":"backfill_indices","description":"Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"paper_compute_pivots","description":"PAPER: compute rolling-5-day pivots for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"paper_tick","description":"PAPER: run one paper-engine tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"paper_status","description":"PAPER: open positions + recent closed trades + summary.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"paper_status","description":"PAPER: open positions + recent closed trades + summary. open_positions includes cmp and unrealised_pnl computed server-side.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"paper_pivots","description":"PAPER: latest rolling-5 pivot levels per stock.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}},"required":[]}},
     {"name":"run_v8_engine","description":"Run the V8 EOD engine — compute metrics + write signals to DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_v8_for_date","description":"Backfill v8_metrics for a PAST date (YYYY-MM-DD).","inputSchema":{"type":"object","properties":{"target_date":{"type":"string"}},"required":["target_date"]}},
