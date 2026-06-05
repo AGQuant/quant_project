@@ -47,27 +47,25 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.18
+# Scorr / Project Quant — main.py v2.9.19
+# v2.9.19: fix_all_allocations MCP tool added (QB allocation
+#   fix + NIFTYBEES residual insert). REL_STOP_PCT updated to
+#   -10% for all baskets (was -5%, spec locked 05-Jun-2026).
 # v2.9.18: futures_basis table added to create_tables().
 #   fyers_feed.py v4: single WS 420+ symbols (equity + futures
 #   + options ATM±10 top-50 mcap + NIFTY/BANKNIFTY). Basis
 #   computed on every futures bar flush. last_tuesday expiry
 #   fix (was last_thursday — NSE changed Sep 2025).
-# v2.9.17: Daily Digest domestic indices now use LIVE intraday
-#   (today's Nifty/BankNifty close from intraday_prices) with EOD
-#   fallback. Fixes stale "yesterday's close" during/after market.
-#   ADR/gate live-intraday fix shipped in v8_endpoints.py same day.
-# v2.9.16: diagnosis.py wired — GET /api/diagnosis full system
-#   health check: 6 sections, traffic-light per section, issues list.
-#   MCP tool: run_diagnosis added.
-# v2.9.15: /api/paper/status — CMP + unrealised_pnl server-side JOIN.
-# v2.9.14: get_gvm returns result_analysis + all 3 refresh timestamps.
-# v2.9.13: fyers_endpoints.py wired — on-demand futures quote.
-# v2.9.12: scheduler.py refactor (file 4/5).
+# v2.9.17: Daily Digest domestic indices now use LIVE intraday.
+# v2.9.16: diagnosis.py wired.
+# v2.9.15: /api/paper/status — CMP + unrealised_pnl server-side.
+# v2.9.14: get_gvm returns result_analysis + timestamps.
+# v2.9.13: fyers_endpoints.py wired.
+# v2.9.12: scheduler.py refactor.
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.18"
+VERSION = "2.9.19"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -218,7 +216,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.18)")
+        log.info("Tables ready (v2.9.19)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -424,18 +422,12 @@ def build_health_report() -> dict:
 def health_report(): return build_health_report()
 
 def _digest_domestic_live(cur, sym):
-    """
-    Today's intraday OHLC + chg% vs prior EOD close. Falls back to raw_prices EOD
-    (close-to-close) when no intraday today. Returns dict or None.
-    """
     def _r(v, d=2):
         try: return round(float(v), d) if v is not None else None
         except: return None
-    # prior EOD close
     cur.execute("SELECT close FROM raw_prices WHERE symbol=%s AND price_date < CURRENT_DATE ORDER BY price_date DESC LIMIT 1", (sym,))
     pc = cur.fetchone()
     prev_close = float(pc[0]) if pc and pc[0] is not None else None
-    # today's intraday
     cur.execute("""
         SELECT
             (SELECT open  FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts ASC  LIMIT 1) AS o,
@@ -449,7 +441,6 @@ def _digest_domestic_live(cur, sym):
         return {"price_date": str(date.today()), "open": _r(r[0]), "high": _r(r[1]),
                 "low": _r(r[2]), "close": _r(r[3]), "prev_close": _r(prev_close),
                 "chg_pct": chg, "source": "live_intraday"}
-    # EOD fallback
     cur.execute("""
         WITH d AS (SELECT price_date, open, high, low, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn FROM raw_prices WHERE symbol = %s)
         SELECT a.price_date::text, a.open, a.high, a.low, a.close, ROUND(((a.close-b.close)/NULLIF(b.close,0)*100)::numeric,2)
@@ -487,7 +478,7 @@ def _build_digest_daily() -> dict:
             adr_row = cur.fetchone()
             adr = {"price_date": adr_row[0], "advances": adr_row[1], "declines": adr_row[2], "unchanged": adr_row[3], "adr": _r(adr_row[4])} if adr_row else None
             result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr,
-                "note": "Indices = live intraday during market hours; ADR = EOD (adr_daily). For live gate ADR see /api/v8/market_mood."}
+                "note": "Indices = live intraday during market hours; ADR = EOD (adr_daily)."}
 
             t_due = _get_config("takeaway_refresh_due", "false"); ov_due = _get_config("overview_refresh_due", "false")
             if t_due == "true" or ov_due == "true":
@@ -972,7 +963,7 @@ async def oauth_token(req: Request):
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections (data feeds, V8 engine, GVM, quant basket, scheduler, infrastructure). Traffic-light per section (green/yellow/red). Issues + warnings list. Use this for any system health check.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections. Traffic-light per section. Issues + warnings list.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_build_cache","description":"V8 LIVE: build v8_history_cache.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_run_live","description":"V8 LIVE: run one live tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -993,7 +984,7 @@ MCP_TOOLS = [
     {"name":"backfill_indices","description":"Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"paper_compute_pivots","description":"PAPER: compute rolling-5-day pivots for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"paper_tick","description":"PAPER: run one paper-engine tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"paper_status","description":"PAPER: open positions + recent closed trades + summary. cmp and unrealised_pnl computed server-side.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"paper_status","description":"PAPER: open positions + recent closed trades + summary.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"paper_pivots","description":"PAPER: latest rolling-5 pivot levels per stock.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}},"required":[]}},
     {"name":"run_v8_engine","description":"Run the V8 EOD engine — compute metrics + write signals to DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_v8_for_date","description":"Backfill v8_metrics for a PAST date (YYYY-MM-DD).","inputSchema":{"type":"object","properties":{"target_date":{"type":"string"}},"required":["target_date"]}},
@@ -1011,7 +1002,7 @@ MCP_TOOLS = [
     {"name":"github_list","description":"List files in the repo.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":[]}},
     {"name":"github_push","description":"Create or update a file.","inputSchema":{"type":"object","properties":{"filepath":{"type":"string"},"new_content":{"type":"string"},"commit_message":{"type":"string"},"create_if_missing":{"type":"boolean"}},"required":["filepath","new_content","commit_message"]}},
     {"name":"github_delete","description":"Delete a file.","inputSchema":{"type":"object","properties":{"filepath":{"type":"string"},"commit_message":{"type":"string"}},"required":["filepath"]}},
-    {"name":"v8_market_mood","description":"V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation. LIVE intraday during market hours, EOD after close.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v8_market_mood","description":"V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_qualified","description":"V8: Get qualified stocks for a basket.","inputSchema":{"type":"object","properties":{"basket":{"type":"string"},"limit":{"type":"integer"}},"required":["basket"]}},
     {"name":"v8_filter_config","description":"V8: Get filter thresholds for a basket.","inputSchema":{"type":"object","properties":{"basket":{"type":"string"}},"required":["basket"]}},
     {"name":"v8_sell_overbought","description":"V8: Get Sell Overbought signals.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}},"required":[]}},
@@ -1028,6 +1019,7 @@ MCP_TOOLS = [
     {"name":"qb_summary","description":"Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
     {"name":"qb_rebalance_log","description":"Quant Basket: rebalance + EOD check history.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"},"limit":{"type":"integer"}},"required":[]}},
     {"name":"qb_registry","description":"Quant Basket: registry of all baskets.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
+    {"name":"fix_all_allocations","description":"Quant Basket: fix allocation column + insert NIFTYBEES residual for all 4 baskets. Run after any rebalance or position entry.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"daily_adr","description":"ADR trend last N days from adr_daily.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_daily_metrics","description":"Manually trigger ADR + PCR compute-and-store.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -1129,6 +1121,8 @@ async def _call_tool(name, args):
             params = {}
             if args.get("basket_name"): params["basket_name"] = args["basket_name"]
             r = await client.get(f"{BASE_URL}/api/qb/registry", params=params); return r.json()
+        elif name == "fix_all_allocations":
+            r = await client.post(f"{BASE_URL}/api/qb/fix_all_allocations", headers=h); return r.json()
         elif name == "daily_adr":
             r = await client.get(f"{BASE_URL}/api/daily/adr", params={"days": args.get("days",5)}); return r.json()
         elif name == "daily_pcr":
