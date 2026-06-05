@@ -32,6 +32,7 @@ from qb_endpoints import router as qb_router
 from gvm_market_endpoints import router as gvm_market_router
 from admin_data import router as admin_data_router
 from fyers_endpoints import router as fyers_router
+from diagnosis import router as diagnosis_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -46,22 +47,18 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.15
-# v2.9.15: /api/paper/status — open_positions now JOINs cmp_prices and
-#   returns cmp + unrealised_pnl computed server-side (all calc in DB,
-#   GS = pure display). LONG: (cmp-entry)*qty. SHORT: (entry-cmp)*qty.
-#   No GS changes required.
-# v2.9.14: get_gvm now returns result_analysis + all 3 refresh timestamps.
-# v2.9.13: fyers_endpoints.py wired — on-demand futures quote via Fyers API.
-# v2.9.12: REFACTOR file 4/5 — scheduler + all background tasks + ADR/PCR compute
-#   extracted to scheduler.py (self-contained).
-# v2.9.11: REFACTOR file 3/5 — Screener earnings + Drive loaders to admin_data.py.
-# v2.9.10: REFACTOR file 2/5 — GVM + market read endpoints to gvm_market_endpoints.py.
-# v2.9.9: REFACTOR file 1/5 — QB endpoints to qb_endpoints.py. + ADR 999 fix.
+# Scorr / Project Quant — main.py v2.9.16
+# v2.9.16: diagnosis.py wired — GET /api/diagnosis full system
+#   health check: 6 sections, traffic-light per section, issues list.
+#   MCP tool: run_diagnosis added.
+# v2.9.15: /api/paper/status — CMP + unrealised_pnl server-side JOIN.
+# v2.9.14: get_gvm returns result_analysis + all 3 refresh timestamps.
+# v2.9.13: fyers_endpoints.py wired — on-demand futures quote.
+# v2.9.12: scheduler.py refactor (file 4/5).
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.15"
+VERSION = "2.9.16"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -91,6 +88,7 @@ app.include_router(gvm_nightly_router)
 app.include_router(gvm_market_router)
 app.include_router(admin_data_router)
 app.include_router(fyers_router)
+app.include_router(diagnosis_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -199,7 +197,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.15)")
+        log.info("Tables ready (v2.9.16)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -493,7 +491,6 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
-# ── Content Update Endpoint ──────────────────────────────────────────────────
 _ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
 _TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
 _FIELD_TO_TS_COL = {
@@ -527,10 +524,6 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
                 "chars_written": len(content), "timestamp_col_updated": ts_col, "mcap_rank": mcap_rank}
     except HTTPException: raise
     except Exception as e: log.error(f"content_update failed for {symbol}: {e}"); raise HTTPException(500, str(e))
-
-# ── Refactor notes ────────────────────────────────────────────────────────────
-# file1 qb_endpoints.py | file2 gvm_market_endpoints.py | file3 admin_data.py
-# file4 scheduler.py | file5 fyers_endpoints.py (on-demand Fyers quote)
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -613,7 +606,7 @@ def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None
 def v8_metrics_all():
     return api_query("""
         SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20, rsi_month, rsi_weekly, daily_rsi,
-               month_return, week_return, year_return, prev_day_change, sector_day, sector_week,
+               month_return, week_return, year_return, day_change,
                month_index, week_index_52, range_1d, range_3d, upper_bb, lower_bb, ma9_vs_ma21, vol_ratio
         FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics) ORDER BY symbol
     """)
@@ -747,9 +740,6 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/paper/status")
 def paper_status():
-    # v2.9.15: CMP + unrealised_pnl computed server-side via JOIN on cmp_prices.
-    # LONG: (cmp - entry_price) * qty. SHORT: (entry_price - cmp) * qty.
-    # GS = pure display, no calculation.
     open_positions = api_query("""
         SELECT
             p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
@@ -925,27 +915,28 @@ async def oauth_token(req: Request):
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB. Includes refresh_alert if takeaway/overview refresh is due.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections (data feeds, V8 engine, GVM, quant basket, scheduler, infrastructure). Traffic-light per section (green/yellow/red). Issues + warnings list. Use this for any system health check.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_build_cache","description":"V8 LIVE: build v8_history_cache.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_run_live","description":"V8 LIVE: run one live tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_momentum","description":"GVM: recompute daily momentum (M) for all stocks from raw_prices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
-    {"name":"get_gvm","description":"Fetch full GVM score for a stock — includes overview, key_takeaway, result_analysis, instrument_type (futures/cash), cap_category (large/mid/small/micro), mcap_rank, and all 3 content refresh timestamps.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"get_gvm","description":"Fetch full GVM score for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_top_stocks","description":"Get top N stocks by GVM.","inputSchema":{"type":"object","properties":{"n":{"type":"integer"},"verdict":{"type":"string"}},"required":["n"]}},
     {"name":"get_sector","description":"Get all stocks in a sector ordered by GVM.","inputSchema":{"type":"object","properties":{"sector":{"type":"string"}},"required":["sector"]}},
     {"name":"get_filter","description":"Filter stocks by GVM range.","inputSchema":{"type":"object","properties":{"min_gvm":{"type":"number"},"max_gvm":{"type":"number"}},"required":[]}},
     {"name":"get_sector_rating","description":"Get sector-level mcap-weighted GVM ratings.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"get_intraday","description":"Intraday OHLC for ANY stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"},"interval":{"type":"string"},"source":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_cmp","description":"Get latest CMP for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
-    {"name":"fyers_quote","description":"Fetch live futures quote from Fyers for a symbol — LTP, open, high, low, prev_close, day_change%, OI, volume. On-demand only, no storage. Use for trade card population. symbol = NSE code e.g. SBIN, RELIANCE.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"fyers_quote","description":"Fetch live futures quote from Fyers for a symbol.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"backfill_intraday","description":"MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"heal_intraday","description":"Fill TODAY's morning 1-min gap in intraday_prices for all active futures from Yahoo.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_yahoo_daily","description":"Trigger Yahoo daily OHLC update for raw_prices (background).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"backfill_indices","description":"Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"paper_compute_pivots","description":"PAPER: compute rolling-5-day pivots for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"paper_tick","description":"PAPER: run one paper-engine tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"paper_status","description":"PAPER: open positions + recent closed trades + summary. open_positions includes cmp and unrealised_pnl computed server-side.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"paper_status","description":"PAPER: open positions + recent closed trades + summary. cmp and unrealised_pnl computed server-side.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"paper_pivots","description":"PAPER: latest rolling-5 pivot levels per stock.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}},"required":[]}},
     {"name":"run_v8_engine","description":"Run the V8 EOD engine — compute metrics + write signals to DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_v8_for_date","description":"Backfill v8_metrics for a PAST date (YYYY-MM-DD).","inputSchema":{"type":"object","properties":{"target_date":{"type":"string"}},"required":["target_date"]}},
@@ -981,10 +972,10 @@ MCP_TOOLS = [
     {"name":"qb_rebalance_log","description":"Quant Basket: rebalance + EOD check history.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"},"limit":{"type":"integer"}},"required":[]}},
     {"name":"qb_registry","description":"Quant Basket: registry of all baskets.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
     {"name":"daily_adr","description":"ADR trend last N days from adr_daily.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
-    {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily. underlying: NIFTY or BANKNIFTY.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
+    {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_daily_metrics","description":"Manually trigger ADR + PCR compute-and-store.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"refresh_status","description":"Show AI content refresh status — last run dates, next due dates, due flags. No API key needed.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"content_update","description":"Manual content writer for input_raw. Updates overview, key_takeaway, or result_analysis for a single symbol. key_takeaway and result_analysis are blocked for mcap_rank > 500. Always overwrites.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"field":{"type":"string","enum":["overview","key_takeaway","result_analysis"]},"content":{"type":"string"}},"required":["symbol","field","content"]}},
+    {"name":"refresh_status","description":"Show AI content refresh status.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"content_update","description":"Manual content writer for input_raw.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"field":{"type":"string","enum":["overview","key_takeaway","result_analysis"]},"content":{"type":"string"}},"required":["symbol","field","content"]}},
 ]
 
 async def _call_tool(name, args):
@@ -992,6 +983,7 @@ async def _call_tool(name, args):
         h = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
         if name == "server_now": r = await client.get(f"{BASE_URL}/api/now"); return r.json()
         elif name == "health_report": r = await client.get(f"{BASE_URL}/api/health/report"); return r.json()
+        elif name == "run_diagnosis": r = await client.get(f"{BASE_URL}/api/diagnosis"); return r.json()
         elif name == "digest_daily": r = await client.get(f"{BASE_URL}/api/digest/daily"); return r.json()
         elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
         elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
