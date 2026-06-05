@@ -25,10 +25,16 @@ day_change formula (05-Jun-2026):
   EOD:  (latest_close / close_2_days_ago - 1) * 100
   Live: (cmp / close_2_days_ago - 1) * 100
   2-day momentum. Example: CGPOWER 932 / 906.65 = +2.79%
+
+Market mood — LIVE GATE (05-Jun-2026):
+  During market hours (intraday_prices has today's data) the gate computes ADR + Nifty
+  D/W/M from the LIVE Fyers feed (intraday close vs raw_prices prior closes), instead of
+  yesterday's EOD adr_daily. After close / no intraday it falls back to adr_daily + raw_prices.
+  source field = 'live_intraday' or 'eod_fallback'.
 """
 
 from fastapi import APIRouter, HTTPException
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
 import os
@@ -39,7 +45,11 @@ def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
-# ── Filter configs ────────────────────────────────────────────────────────────
+def _ist_now() -> datetime:
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
+# ── Filter configs ───────────────────────────────────────────────────────────
 # Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
 
 FILTER_CONFIG = {
@@ -174,46 +184,126 @@ def _passes_filter(value, mn, mx) -> bool:
     return True
 
 
+# ── Market breadth: live during market hours, EOD otherwise ────────────────────
+
+def _live_breadth(cur):
+    """
+    Returns (advances, declines, unchanged, adr, source, breadth_date) computed
+    from today's intraday feed vs prior raw_prices closes — but only if intraday
+    data exists for today. Otherwise returns None so the caller uses EOD.
+    """
+    cur.execute("""
+        WITH latest_intraday AS (
+            SELECT DISTINCT ON (symbol) symbol, close AS cmp
+            FROM intraday_prices
+            WHERE ts::date = CURRENT_DATE
+            ORDER BY symbol, ts DESC
+        ),
+        prev_close AS (
+            SELECT DISTINCT ON (symbol) symbol, close AS pclose
+            FROM raw_prices
+            WHERE price_date < CURRENT_DATE
+            ORDER BY symbol, price_date DESC
+        )
+        SELECT
+            COUNT(*) FILTER (WHERE li.cmp > pc.pclose) AS advances,
+            COUNT(*) FILTER (WHERE li.cmp < pc.pclose) AS declines,
+            COUNT(*) FILTER (WHERE li.cmp = pc.pclose) AS unchanged,
+            COUNT(*) AS total_matched
+        FROM latest_intraday li
+        JOIN prev_close pc ON pc.symbol = li.symbol
+    """)
+    r = cur.fetchone()
+    if not r or (r[3] or 0) < 50:
+        return None  # not enough live data — fall back to EOD
+    advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
+    adr = round(advances / declines, 3) if declines else float(advances)
+    return advances, declines, unchanged, adr, "live_intraday", str(date.today())
+
+
+def _live_nifty_dwm(cur, symbol="NIFTY50"):
+    """Nifty Day/Week/Month % using live intraday close vs prior raw_prices closes."""
+    cur.execute("""
+        SELECT close FROM intraday_prices
+        WHERE symbol = %s AND ts::date = CURRENT_DATE
+        ORDER BY ts DESC LIMIT 1
+    """, (symbol,))
+    live = cur.fetchone()
+    if not live or live[0] is None:
+        return None
+    latest = float(live[0])
+    cur.execute("""
+        SELECT close FROM raw_prices
+        WHERE symbol = %s AND price_date < CURRENT_DATE
+        ORDER BY price_date DESC LIMIT 30
+    """, (symbol,))
+    hist = cur.fetchall()
+    if len(hist) < 22:
+        return None
+    prev  = float(hist[0][0])
+    week  = float(hist[4][0]) if len(hist) > 4 else float(hist[-1][0])
+    month = float(hist[20][0]) if len(hist) > 20 else float(hist[-1][0])
+    return (
+        round((latest / prev - 1) * 100, 2),
+        round((latest / week - 1) * 100, 2),
+        round((latest / month - 1) * 100, 2),
+        latest,
+    )
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""
-                SELECT advances, declines, unchanged, adr, price_date
-                FROM adr_daily ORDER BY price_date DESC LIMIT 1
-            """)
-            r = cur.fetchone()
-            if r:
-                advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
-                adr      = round(float(r[3]), 3) if r[3] is not None else 1.0
-                adr_date = str(r[4])
+            # 1) ADR — try live intraday first, fall back to adr_daily EOD
+            live = _live_breadth(cur)
+            if live:
+                advances, declines, unchanged, adr, breadth_source, adr_date = live
             else:
-                advances, declines, unchanged = 0, 0, 0
-                adr = 1.0; adr_date = "no_data"
+                cur.execute("""
+                    SELECT advances, declines, unchanged, adr, price_date
+                    FROM adr_daily ORDER BY price_date DESC LIMIT 1
+                """)
+                r = cur.fetchone()
+                if r:
+                    advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
+                    adr      = round(float(r[3]), 3) if r[3] is not None else 1.0
+                    adr_date = str(r[4])
+                else:
+                    advances, declines, unchanged = 0, 0, 0
+                    adr = 1.0; adr_date = "no_data"
+                breadth_source = "eod_fallback"
 
             adr_pass = adr >= 1.0
 
-            cur.execute("""
-                SELECT price_date, close FROM raw_prices
-                WHERE symbol = 'NIFTY50' ORDER BY price_date DESC LIMIT 30
-            """)
-            nifty = cur.fetchall()
-            if len(nifty) < 22:
-                nifty_day = nifty_week = nifty_month = None
-                nifty_day_pass = nifty_week_pass = nifty_month_pass = False
+            # 2) Nifty D/W/M — live intraday first, fall back to raw_prices EOD
+            live_nifty = _live_nifty_dwm(cur, "NIFTY50") if live else None
+            if live_nifty:
+                nifty_day, nifty_week, nifty_month, _ = live_nifty
+                nifty_source = "live_intraday"
             else:
-                latest = float(nifty[0][1])
-                prev   = float(nifty[1][1])
-                week   = float(nifty[5][1]) if len(nifty) > 5 else float(nifty[-1][1])
-                month  = float(nifty[21][1]) if len(nifty) > 21 else float(nifty[-1][1])
-                nifty_day   = round((latest / prev - 1) * 100, 2)
-                nifty_week  = round((latest / week - 1) * 100, 2)
-                nifty_month = round((latest / month - 1) * 100, 2)
-                nifty_day_pass   = nifty_day >= 0
-                nifty_week_pass  = nifty_week >= 0
-                nifty_month_pass = nifty_month >= 0
+                cur.execute("""
+                    SELECT price_date, close FROM raw_prices
+                    WHERE symbol = 'NIFTY50' ORDER BY price_date DESC LIMIT 30
+                """)
+                nifty = cur.fetchall()
+                if len(nifty) < 22:
+                    nifty_day = nifty_week = nifty_month = None
+                else:
+                    latest = float(nifty[0][1])
+                    prev   = float(nifty[1][1])
+                    week   = float(nifty[5][1]) if len(nifty) > 5 else float(nifty[-1][1])
+                    month  = float(nifty[21][1]) if len(nifty) > 21 else float(nifty[-1][1])
+                    nifty_day   = round((latest / prev - 1) * 100, 2)
+                    nifty_week  = round((latest / week - 1) * 100, 2)
+                    nifty_month = round((latest / month - 1) * 100, 2)
+                nifty_source = "eod_fallback"
+
+            nifty_day_pass   = nifty_day   is not None and nifty_day   >= 0
+            nifty_week_pass  = nifty_week  is not None and nifty_week  >= 0
+            nifty_month_pass = nifty_month is not None and nifty_month >= 0
 
             checks = [
                 {"filter": "ADR",         "value": adr,         "required": ">= 1", "pass": adr_pass},
@@ -232,8 +322,9 @@ def market_mood():
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
                 "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": 15,
+                "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
-                               "unchanged": unchanged, "adr_date": adr_date, "source": "adr_daily"},
+                               "unchanged": unchanged, "adr_date": adr_date, "source": breadth_source},
             }
     except Exception as e:
         raise HTTPException(500, f"market_mood failed: {e}")
@@ -461,8 +552,15 @@ def sell_overbought(limit: int = 50):
 
 @router.get("/adr")
 def adr_only():
+    """Live intraday ADR during market hours, EOD adr_daily otherwise."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            live = _live_breadth(cur)
+            if live:
+                advances, declines, unchanged, adr, source, bdate = live
+                return {"price_date": bdate, "adr": adr, "advances": advances,
+                        "declines": declines, "unchanged": unchanged,
+                        "pass": adr >= 1.0, "source": source}
             cur.execute("""
                 SELECT price_date, advances, declines, unchanged, adr
                 FROM adr_daily ORDER BY price_date DESC LIMIT 1
@@ -470,13 +568,82 @@ def adr_only():
             r = cur.fetchone()
         if not r:
             return {"adr": 0.0, "advances": 0, "declines": 0, "unchanged": 0,
-                    "pass": False, "note": "adr_daily empty"}
+                    "pass": False, "note": "adr_daily empty", "source": "eod_fallback"}
         price_date, adv, dec, unc, adr_val = r
         adr = float(adr_val) if adr_val else 0.0
         return {"price_date": str(price_date), "adr": adr,
-                "advances": adv, "declines": dec, "unchanged": unc, "pass": adr >= 1.0}
+                "advances": adv, "declines": dec, "unchanged": unc,
+                "pass": adr >= 1.0, "source": "eod_fallback"}
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  LIVE DOMESTIC INDICES — for digest (intraday close vs prior EOD close)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/domestic_live")
+def domestic_live():
+    """
+    NIFTY50 + BANKNIFTY today's OHLC from intraday (live) with chg% vs prior EOD close.
+    Falls back to raw_prices EOD if no intraday today. Used by the Daily Digest so it
+    shows today's move during/after market instead of yesterday's close.
+    """
+    out = {}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            for sym in ("NIFTY50", "BANKNIFTY"):
+                # prior EOD close
+                cur.execute("""
+                    SELECT close FROM raw_prices
+                    WHERE symbol = %s AND price_date < CURRENT_DATE
+                    ORDER BY price_date DESC LIMIT 1
+                """, (sym,))
+                pc = cur.fetchone()
+                prev_close = float(pc[0]) if pc and pc[0] is not None else None
+
+                # today's intraday OHLC
+                cur.execute("""
+                    SELECT
+                        (SELECT open  FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts ASC  LIMIT 1) AS o,
+                        MAX(high) AS h, MIN(low) AS l,
+                        (SELECT close FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1) AS c
+                    FROM intraday_prices
+                    WHERE symbol=%s AND ts::date=CURRENT_DATE
+                """, (sym, sym, sym))
+                r = cur.fetchone()
+                if r and r[3] is not None and prev_close:
+                    o, h, l, c = r[0], r[1], r[2], r[3]
+                    chg = round((float(c) / prev_close - 1) * 100, 2)
+                    out[sym] = {"price_date": str(date.today()),
+                                "open": round(float(o), 2) if o is not None else None,
+                                "high": round(float(h), 2) if h is not None else None,
+                                "low":  round(float(l), 2) if l is not None else None,
+                                "close": round(float(c), 2),
+                                "prev_close": round(prev_close, 2),
+                                "chg_pct": chg, "source": "live_intraday"}
+                else:
+                    # EOD fallback
+                    cur.execute("""
+                        WITH d AS (SELECT price_date, open, high, low, close,
+                                          ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
+                                   FROM raw_prices WHERE symbol = %s)
+                        SELECT a.price_date::text, a.open, a.high, a.low, a.close,
+                               ROUND(((a.close-b.close)/NULLIF(b.close,0)*100)::numeric,2)
+                        FROM d a JOIN d b ON b.rn=2 WHERE a.rn=1
+                    """, (sym,))
+                    e = cur.fetchone()
+                    if e:
+                        out[sym] = {"price_date": e[0],
+                                    "open": round(float(e[1]), 2) if e[1] is not None else None,
+                                    "high": round(float(e[2]), 2) if e[2] is not None else None,
+                                    "low":  round(float(e[3]), 2) if e[3] is not None else None,
+                                    "close": round(float(e[4]), 2) if e[4] is not None else None,
+                                    "chg_pct": round(float(e[5]), 2) if e[5] is not None else None,
+                                    "source": "eod_fallback"}
+        return {"as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"), "indices": out}
+    except Exception as e:
+        raise HTTPException(500, f"domestic_live failed: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
