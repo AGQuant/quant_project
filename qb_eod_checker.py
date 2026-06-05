@@ -3,20 +3,25 @@ Quant Basket — EOD Stop-Loss Checker & Daily P&L Marker
 =========================================================
 Runs ONCE at EOD (after raw_prices is updated, ~21:00 IST).
 
-Covers ALL quant baskets (large_cap, mid_cap, small_cap) — basket-agnostic.
+Covers ALL quant baskets (large_cap, mid_cap, small_cap, alpha_multicap) — basket-agnostic.
 The scheduler in main.py loops every basket with open positions and calls
 this once per basket.
 
 What it does:
   1. Marks all open positions to today's EOD close (unrealised P&L)
   2. Checks Hard Stop 1: stock down >= 20% from entry price
-  3. Checks Hard Stop 2: (stock return since entry) - (Nifty return since entry) <= -5%
+  3. Checks Hard Stop 2: (stock return since entry) - (Nifty return since entry) <= -10%
   4. Exits breached positions: status=exited_stop, realised P&L locked at EOD close
   5. Logs every run to quant_rebalance_log (actions JSONB)
 
+Exit rules (spec locked 05-Jun-2026):
+  Hard Stop 1: stock down >= 20% from entry → immediate exit
+  Hard Stop 2: stock vs Nifty50 <= -10% from entry date → immediate exit (ALL baskets)
+  Filter Exit: stock not in top-20 qualified at monthly rebalance (4th of month) → exit
+
 What it does NOT do:
-  - Does NOT re-run universe filters (that is soft/quarterly rebalance, separate engine)
-  - Does NOT touch GOLDBEES position
+  - Does NOT re-run universe filters (that is monthly rebalance, separate engine)
+  - Does NOT touch NIFTYBEES position stops (cash parking, no stop)
   - Does NOT change weights or quantities
 
 Tables touched:
@@ -45,8 +50,9 @@ log = logging.getLogger("scorr.qb_eod")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 NIFTY_SYMBOL   = "NIFTY50"
+NIFTYBEES_SYMBOL = "NIFTYBEES"
 HARD_STOP_PCT  = -20.0   # stock down 20% from entry
-REL_STOP_PCT   = -5.0    # stock underperforms Nifty by 5% from entry date
+REL_STOP_PCT   = -10.0   # stock underperforms Nifty by 10% from entry date (all baskets)
 
 # Robust: pull the first decimal number after "Nifty entry=" regardless of
 # surrounding separators (comma, pipe, trailing period, spaces).
@@ -91,8 +97,6 @@ def _yahoo_ticker_eq(symbol: str) -> str:
     indices = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
     if symbol in indices:
         return indices[symbol]
-    # URL-encode the symbol then append .NS
-    # e.g. GVT&D -> GVT%26D.NS, BAJAJ-AUTO -> BAJAJ-AUTO.NS
     return urllib.parse.quote(symbol, safe="") + ".NS"
 
 
@@ -115,12 +119,10 @@ def _fetch_yahoo_ltp(symbol: str) -> Optional[float]:
                     continue
                 return None
             res = chart[0]
-            # Prefer regularMarketPrice meta field — always present, no null bars
             meta = res.get("meta") or {}
             price = meta.get("regularMarketPrice")
             if price:
                 return float(price)
-            # Fallback: last non-null close in quote array
             closes = ((res.get("indicators") or {})
                       .get("quote", [{}])[0]
                       .get("close") or [])
@@ -142,10 +144,10 @@ def qb_intraday_mark(conn) -> Dict:
     Updates current_price, current_value, pnl, pnl_pct, updated_at.
     NO stop-loss exits — those are EOD-only.
     Runs every 15 min during market hours from main.py _live_loop.
+    NIFTYBEES positions are marked but never stopped.
     """
     now = datetime.now(IST)
 
-    # Load all open positions across all baskets in one query
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -163,16 +165,13 @@ def qb_intraday_mark(conn) -> Dict:
     if not positions:
         return {"status": "ok", "marked": 0, "msg": "no open positions"}
 
-    # Deduplicate symbols — fetch price once, apply to all baskets
     symbols = list(dict.fromkeys(p["symbol"] for p in positions))
 
-    # Fetch Yahoo LTP for each symbol — one at a time (Yahoo rule)
     prices: Dict[str, Optional[float]] = {}
     for sym in symbols:
         prices[sym] = _fetch_yahoo_ltp(sym)
-        time.sleep(0.3)   # gentle rate — 53 symbols ~16s total
+        time.sleep(0.3)
 
-    # Mark positions
     marked, skipped, errors = 0, 0, []
     for pos in positions:
         sym         = pos["symbol"]
@@ -184,9 +183,9 @@ def qb_intraday_mark(conn) -> Dict:
             skipped += 1
             continue
 
-        pnl       = (ltp - entry_price) * qty if entry_price and qty else None
-        curr_val  = ltp * qty if qty else None
-        pnl_pct   = _pct_change(ltp, entry_price)
+        pnl      = (ltp - entry_price) * qty if entry_price and qty else None
+        curr_val = ltp * qty if qty else None
+        pnl_pct  = _pct_change(ltp, entry_price)
 
         try:
             with conn.cursor() as cur:
@@ -213,12 +212,12 @@ def qb_intraday_mark(conn) -> Dict:
             log.warning(f"qb_intraday: update failed {sym}: {e}")
 
     result = {
-        "status":       "ok",
-        "run_at":       now.strftime("%H:%M IST"),
-        "symbols":      len(symbols),
-        "marked":       marked,
-        "skipped":      skipped,
-        "errors":       errors[:10],
+        "status":  "ok",
+        "run_at":  now.strftime("%H:%M IST"),
+        "symbols": len(symbols),
+        "marked":  marked,
+        "skipped": skipped,
+        "errors":  errors[:10],
     }
     log.info(f"qb_intraday_mark: {marked}/{len(positions)} marked, "
              f"{skipped} skipped, {len(errors)} errors")
@@ -232,17 +231,17 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     """
     today = datetime.now(IST).date()
     summary = {
-        "basket": basket_name,
-        "run_date": str(today),
-        "positions_marked": 0,
-        "hard_stop_1_exits": [],   # down 20%
-        "hard_stop_2_exits": [],   # vs Nifty <= -5%
+        "basket":              basket_name,
+        "run_date":            str(today),
+        "positions_marked":    0,
+        "hard_stop_1_exits":   [],   # down 20%
+        "hard_stop_2_exits":   [],   # vs Nifty <= -10% (all baskets)
         "total_unrealised_pnl": 0.0,
-        "total_realised_pnl": 0.0,
-        "errors": []
+        "total_realised_pnl":  0.0,
+        "errors":              []
     }
 
-    # ── Step 1: Get today's Nifty close ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Step 1: Get today's Nifty close ──────────────────────────────────────
     nifty_today = None
     try:
         with conn.cursor() as cur:
@@ -257,9 +256,9 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         log.error(f"qb_eod: nifty fetch failed: {e}")
 
     if nifty_today is None:
-        log.warning(f"qb_eod: no Nifty close for {NIFTY_SYMBOL} — Hard Stop 2 (vs Nifty) will be skipped this run")
+        log.warning(f"qb_eod: no Nifty close — Hard Stop 2 will be skipped this run")
 
-    # ── Step 2: Load all open positions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Step 2: Load all open positions ──────────────────────────────────────
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -280,15 +279,34 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         log.info(f"qb_eod: no open positions for {basket_name}")
         return summary
 
-    # ── Step 3: Process each position ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Step 3: Process each position ────────────────────────────────────────
     actions = []
     for pos in positions:
-        sym          = pos["symbol"]
-        entry_price  = _safe_float(pos["entry_price"])
-        entry_date   = pos["entry_date"]
-        qty          = _safe_float(pos["qty"])
-        stop_price   = _safe_float(pos["stop_loss_price"])
-        nifty_entry  = _parse_nifty_entry(pos.get("notes", ""))
+        sym         = pos["symbol"]
+        entry_price = _safe_float(pos["entry_price"])
+        entry_date  = pos["entry_date"]
+        qty         = _safe_float(pos["qty"])
+        nifty_entry = _parse_nifty_entry(pos.get("notes", ""))
+
+        # NIFTYBEES = cash parking, never stopped
+        if sym == NIFTYBEES_SYMBOL:
+            eod_close = _fetch_yahoo_ltp(NIFTYBEES_SYMBOL)
+            if eod_close and qty and entry_price:
+                pnl       = round((eod_close - entry_price) * qty, 2)
+                curr_val  = round(eod_close * qty, 2)
+                pnl_pct   = _pct_change(eod_close, entry_price)
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE quant_paper_positions SET
+                            current_price=%s, current_value=%s,
+                            pnl=%s, pnl_pct=%s, updated_at=NOW()
+                        WHERE id=%s
+                    """, (eod_close, curr_val, pnl,
+                          round(pnl_pct, 4) if pnl_pct else None, pos["id"]))
+                conn.commit()
+                summary["positions_marked"] += 1
+                summary["total_unrealised_pnl"] += pnl
+            continue
 
         # Get today's EOD close
         eod_close = None
@@ -316,7 +334,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         pnl        = (eod_close - entry_price) * qty if qty else None
         curr_value = eod_close * qty if qty else None
 
-        # ── Hard Stop checks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        # ── Hard Stop checks ──────────────────────────────────────────────────
         hs1_breach = stock_ret is not None and stock_ret <= HARD_STOP_PCT
         hs2_breach = vs_nifty  is not None and vs_nifty  <= REL_STOP_PCT
 
@@ -325,12 +343,12 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
             exit_reason = f"HARD_STOP_1: stock {stock_ret:.2f}% from entry (<= -20%)"
             summary["hard_stop_1_exits"].append(sym)
         elif hs2_breach:
-            exit_reason = f"HARD_STOP_2: vs_nifty {vs_nifty:.2f}% (<= -5%)"
+            exit_reason = f"HARD_STOP_2: vs_nifty {vs_nifty:.2f}% (<= -10%)"
             summary["hard_stop_2_exits"].append(sym)
 
         new_status = "exited_stop" if exit_reason else "open"
 
-        # ── Update position ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        # ── Update position ───────────────────────────────────────────────────
         try:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -365,13 +383,13 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
             summary["total_realised_pnl"] += pnl or 0
 
         actions.append({
-            "symbol":       sym,
-            "eod_close":    eod_close,
+            "symbol":        sym,
+            "eod_close":     eod_close,
             "stock_ret_pct": round(stock_ret, 4) if stock_ret is not None else None,
-            "vs_nifty_pct": round(vs_nifty, 4)  if vs_nifty  is not None else None,
-            "pnl":          round(pnl, 2)        if pnl       is not None else None,
-            "status":       new_status,
-            "exit_reason":  exit_reason
+            "vs_nifty_pct":  round(vs_nifty, 4)  if vs_nifty  is not None else None,
+            "pnl":           round(pnl, 2)        if pnl       is not None else None,
+            "status":        new_status,
+            "exit_reason":   exit_reason
         })
 
         if exit_reason:
@@ -380,7 +398,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     summary["total_unrealised_pnl"] = round(summary["total_unrealised_pnl"], 2)
     summary["total_realised_pnl"]   = round(summary["total_realised_pnl"], 2)
 
-    # ── Step 4: Log to quant_rebalance_log ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── Step 4: Log to quant_rebalance_log ───────────────────────────────────
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -389,20 +407,18 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
                  stocks_held, total_portfolio_value, actions, computed_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             """, (
-                basket_name,
-                today,
-                0,
+                basket_name, today, 0,
                 len(summary["hard_stop_1_exits"]) + len(summary["hard_stop_2_exits"]),
                 summary["positions_marked"] - len(summary["hard_stop_1_exits"]) - len(summary["hard_stop_2_exits"]),
                 round(summary["total_unrealised_pnl"] + summary["total_realised_pnl"], 2),
                 json.dumps({
-                    "type":             "eod_stop_check",
-                    "nifty_today":      nifty_today,
-                    "unrealised_pnl":   summary["total_unrealised_pnl"],
-                    "realised_pnl":     summary["total_realised_pnl"],
-                    "hard_stop_1":      summary["hard_stop_1_exits"],
-                    "hard_stop_2":      summary["hard_stop_2_exits"],
-                    "positions":        actions
+                    "type":           "eod_stop_check",
+                    "nifty_today":    nifty_today,
+                    "unrealised_pnl": summary["total_unrealised_pnl"],
+                    "realised_pnl":   summary["total_realised_pnl"],
+                    "hard_stop_1":    summary["hard_stop_1_exits"],
+                    "hard_stop_2":    summary["hard_stop_2_exits"],
+                    "positions":      actions
                 })
             ))
         conn.commit()
