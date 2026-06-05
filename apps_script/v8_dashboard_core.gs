@@ -9,10 +9,10 @@
  * ║                                                                  ║
  * ║   Tabs:                                                          ║
  * ║     1. Master_Dashboard       — Performance + Gate + Filters     ║
- * ║     2. Buy_Reversal           — Stock funnel breakdown           ║
- * ║     3. Buy_Momentum           — Stock funnel breakdown           ║
- * ║     4. Sell_Reversal          — Stock funnel breakdown           ║
- * ║     5. Sell_Momentum          — Stock funnel breakdown           ║
+ * ║     2. Buy_Reversal           — Funnel waterfall                 ║
+ * ║     3. Buy_Momentum           — Funnel waterfall                 ║
+ * ║     4. Sell_Reversal          — Funnel waterfall                 ║
+ * ║     5. Sell_Momentum          — Funnel waterfall                 ║
  * ║     6. Sell_Overbought        — Failed breakout signals          ║
  * ║     7. In_Position            — Live open trades (paper)         ║
  * ║     8. Trade_Log              — Closed trade history (paper)     ║
@@ -21,7 +21,8 @@
  * ║                                                                  ║
  * ║   1D gate: prev_day_change (net c2c%) — NOT range_1d            ║
  * ║   1W gate: week_return (net c2c%)                                ║
- * ║                                                                  ║
+ * ║   Basket funnels: V4-style waterfall — counts + per-stage stocks ║
+ * ║   All calc in Railway DB. GS = pure display.                     ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
@@ -30,7 +31,7 @@
 //   VERSION
 // ════════════════════════════════════════════════════════════════════
 
-const SCRIPT_VERSION  = '1.8.0';
+const SCRIPT_VERSION  = '1.9.0';
 const SCRIPT_RAW_URL_CORE = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_core.gs';
 const SCRIPT_RAW_URL_TABS = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_tabs.gs';
 
@@ -255,9 +256,10 @@ function showVersion() {
       <div class="row"><span class="label">API base</span><span class="val">${BASE_URL}</span></div>
       <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
       <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
-      <div class="row"><span class="label">Trade source</span><span class="val">personal_journal</span></div>
+      <div class="row"><span class="label">Trade source</span><span class="val">paper_status (server PnL)</span></div>
       <div class="row"><span class="label">1D gate</span><span class="val">prev_day_change (net c2c%)</span></div>
-      <p style="margin-top:16px;color:#6B7280;font-size:12px;">Split: core.gs + tabs.gs (v1.8.0+)</p>
+      <div class="row"><span class="label">Funnel style</span><span class="val">V4 waterfall (per-stage)</span></div>
+      <p style="margin-top:16px;color:#6B7280;font-size:12px;">Split: core.gs + tabs.gs · All calc in DB</p>
     </body></html>`
   ).setWidth(400).setHeight(300);
   SpreadsheetApp.getUi().showModalDialog(html, 'About');
@@ -289,6 +291,7 @@ function fetchJSON(endpoint) {
 function fetchMarketMood()     { return fetchJSON('/api/v8/market_mood'); }
 function fetchFilterConfig(b)  { return fetchJSON('/api/v8/filter_config/' + b); }
 function fetchQualified(b)     { return fetchJSON('/api/v8/qualified/' + b + '?limit=200'); }
+function fetchFunnelCounts(b)  { return fetchJSON('/api/v8/funnel/' + b); }
 function fetchSellOverbought() { return fetchJSON('/api/v8/sell_overbought?limit=50'); }
 function fetchPositions()      { return fetchJSON('/api/paper/status'); }
 function fetchRawMetrics()     { return fetchJSON('/api/v8/raw?limit=250'); }
