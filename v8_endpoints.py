@@ -19,10 +19,11 @@ Architecture: compute-on-write.
   - daily_metrics writes adr_daily + pcr_daily at 15:50 IST (after V8 engine)
   - This file = pure reads only. Zero compute on the read path.
 
-sector_day + sector_week REMOVED from all basket filters (05-Jun-2026):
-  Only 208 futures in universe — sector averages from 1-2 stocks per segment
-  are meaningless. All remaining filters are fully live-computable from
-  Fyers 1-min bars via v8_live.py.
+Filters removed (all baskets):
+  sector_day + sector_week — removed 05-Jun-2026: not meaningful for 208-stock universe.
+  month_index              — removed 05-Jun-2026: RSI month already covers this signal.
+
+Active filters are fully live-computable from raw_prices + gvm_scores.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -37,9 +38,9 @@ def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
-# ── Filter configs ─────────────────────────────────────────────────────────────
+# ── Filter configs ────────────────────────────────────────────────────────────
 # Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
-# sector_day + sector_week removed 05-Jun-2026 — not meaningful for 208-stock universe.
+# Removed: sector_day, sector_week (05-Jun-2026), month_index (05-Jun-2026).
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -51,7 +52,6 @@ FILTER_CONFIG = {
         "rsi_weekly":      [50.0, 67.5],
         "month_return":    [0.0,  7.2],
         "week_return":     [1.5,  3.0],
-        "month_index":     [50.0, 100.0],
         "prev_day_change": [0.0,  2.4],
     },
     "buy_momentum": {
@@ -63,7 +63,6 @@ FILTER_CONFIG = {
         "rsi_weekly":      [71.5, 80.0],
         "month_return":    [3.0,  14.0],
         "week_return":     [1.0,  7.0],
-        "month_index":     [50.0, 100.0],
         "prev_day_change": [0.0,  3.5],
     },
     "sell_reversal": {
@@ -73,7 +72,6 @@ FILTER_CONFIG = {
         "rsi_weekly":      [10.0,  45.0],
         "month_return":    [-20.0, 2.0],
         "week_return":     [-6.0,  3.0],
-        "month_index":     [0.0,   50.0],
         "range_3d":        [None,  -1.0],
     },
     "sell_momentum": {
@@ -85,7 +83,6 @@ FILTER_CONFIG = {
         "daily_rsi":       [None,  40.0],
         "month_return":    [-30.0, 0.0],
         "week_return":     [-8.0,  0.0],
-        "month_index":     [0.0,   35.0],
         "prev_day_change": [-3.0,  0.0],
         "range_3d":        [-10.0, -1.0],
         "week_index_52":   [None,  20.0],
@@ -156,7 +153,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               month_index, prev_day_change, range_3d, week_index_52
+               prev_day_change, range_3d, week_index_52
         FROM v8_metrics
         WHERE {where_sql}
         ORDER BY gvm_score DESC NULLS LAST
@@ -169,7 +166,15 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+def _passes_filter(value, mn, mx) -> bool:
+    if value is None: return False
+    v = float(value)
+    if mn is not None and v < mn: return False
+    if mx is not None and v > mx: return False
+    return True
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -284,7 +289,7 @@ def qualified(basket: str, limit: int = 50):
                     symbol, gvm_score, cmp,
                     dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                     week_return, month_return,
-                    month_index, prev_day_change, range_3d, week_index_52,
+                    prev_day_change, range_3d, week_index_52,
                     source, signal_ts
                 FROM v8_qualified
                 WHERE basket = %s
@@ -337,12 +342,13 @@ def funnel_counts(basket: str):
             return {"basket": basket, "score_date": str(date.today()),
                     "counts": counts, "source": "precomputed"}
 
+        # fallback: compute live from v8_metrics
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
                        rsi_month, rsi_weekly, daily_rsi,
                        month_return, week_return, year_return, prev_day_change,
-                       month_index, week_index_52, range_3d, ma9_vs_ma21, vol_ratio
+                       week_index_52, range_3d, ma9_vs_ma21, vol_ratio
                 FROM v8_metrics
                 WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
             """)
@@ -361,14 +367,6 @@ def funnel_counts(basket: str):
                 "counts": counts, "source": "live_fallback"}
     except Exception as e:
         raise HTTPException(500, f"funnel failed: {e}")
-
-
-def _passes_filter(value, mn, mx) -> bool:
-    if value is None: return False
-    v = float(value)
-    if mn is not None and v < mn: return False
-    if mx is not None and v > mx: return False
-    return True
 
 
 @router.get("/raw")
