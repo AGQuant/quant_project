@@ -31,6 +31,7 @@ from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
 from gvm_market_endpoints import router as gvm_market_router
 from admin_data import router as admin_data_router
+from fyers_endpoints import router as fyers_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -45,7 +46,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.12
+# Scorr / Project Quant — main.py v2.9.13
+# v2.9.13: fyers_endpoints.py wired — on-demand futures quote via Fyers API.
+#   GET /api/fyers/quote/{symbol} + MCP tool fyers_quote.
+#   Token read from fyers_tokens table (written daily by fyers_feed.py auto-login).
+#   No storage, no recurring calls — pure on-demand for trade idea format.
 # v2.9.12: REFACTOR file 4/5 — scheduler + all background tasks + ADR/PCR compute
 #   extracted to scheduler.py (self-contained). main.py calls
 #   scheduler.start_background(app, BASE_URL, ADMIN_TOKEN) in startup.
@@ -57,7 +62,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.12"
+VERSION = "2.9.13"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -86,6 +91,7 @@ app.include_router(qb_router)
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_market_router)
 app.include_router(admin_data_router)
+app.include_router(fyers_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -194,7 +200,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.12)")
+        log.info("Tables ready (v2.9.13)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -488,7 +494,7 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
-# ── Content Update Endpoint (v2.9.8) ──────────────────────────────────────────────
+# ── Content Update Endpoint (v2.9.8) ──────────────────────────────────────────
 _ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
 _TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
 _FIELD_TO_TS_COL = {
@@ -499,77 +505,33 @@ _FIELD_TO_TS_COL = {
 
 @app.post("/api/admin/content_update")
 def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
-    """
-    Manual content writer for input_raw.
-    Body: { "symbol": "RELIANCE", "field": "overview|key_takeaway|result_analysis", "content": "..." }
-    Rules:
-      - field must be one of the 3 allowed values
-      - key_takeaway + result_analysis blocked for mcap_rank > 500
-      - always overwrites existing content
-      - updates the corresponding last_*_updated timestamp
-    """
     _check_admin(x_admin_token)
-
     symbol = (req_body.get("symbol") or "").strip().upper()
     field = (req_body.get("field") or "").strip().lower()
     content = req_body.get("content", "")
-
-    if not symbol:
-        raise HTTPException(400, "symbol is required")
-    if field not in _ALLOWED_CONTENT_FIELDS:
-        raise HTTPException(400, f"field must be one of: {sorted(_ALLOWED_CONTENT_FIELDS)}")
-    if content is None or str(content).strip() == "":
-        raise HTTPException(400, "content cannot be empty")
-
-    content = str(content).strip()
-    ts_col = _FIELD_TO_TS_COL[field]
-
+    if not symbol: raise HTTPException(400, "symbol is required")
+    if field not in _ALLOWED_CONTENT_FIELDS: raise HTTPException(400, f"field must be one of: {sorted(_ALLOWED_CONTENT_FIELDS)}")
+    if content is None or str(content).strip() == "": raise HTTPException(400, "content cannot be empty")
+    content = str(content).strip(); ts_col = _FIELD_TO_TS_COL[field]
     try:
         with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, mcap_rank, company_name FROM input_raw WHERE nse_code = %s",
-                (symbol,)
-            )
+            cur.execute("SELECT id, mcap_rank, company_name FROM input_raw WHERE nse_code = %s", (symbol,))
             row = cur.fetchone()
-            if not row:
-                raise HTTPException(404, f"{symbol} not found in input_raw")
-
+            if not row: raise HTTPException(404, f"{symbol} not found in input_raw")
             row_id, mcap_rank, company_name = row[0], row[1], row[2]
-
             if field in _TOP500_ONLY_FIELDS:
                 rank = mcap_rank if mcap_rank is not None else 9999
-                if rank > 500:
-                    raise HTTPException(400,
-                        f"{symbol} has mcap_rank={rank} (>500). "
-                        f"'{field}' is only allowed for mcap_rank <= 500. "
-                        f"Use 'overview' instead — it covers all 1700+."
-                    )
-
-            cur.execute(
-                f"UPDATE input_raw SET {field} = %s, {ts_col} = NOW() WHERE id = %s",
-                (content, row_id)
-            )
+                if rank > 500: raise HTTPException(400, f"{symbol} has mcap_rank={rank} (>500). '{field}' is only allowed for mcap_rank <= 500.")
+            cur.execute(f"UPDATE input_raw SET {field} = %s, {ts_col} = NOW() WHERE id = %s", (content, row_id))
             conn.commit()
-
-        return {
-            "status": "ok",
-            "symbol": symbol,
-            "company_name": company_name,
-            "field": field,
-            "chars_written": len(content),
-            "timestamp_col_updated": ts_col,
-            "mcap_rank": mcap_rank,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error(f"content_update failed for {symbol}: {e}")
-        raise HTTPException(500, str(e))
+        return {"status": "ok", "symbol": symbol, "company_name": company_name, "field": field,
+                "chars_written": len(content), "timestamp_col_updated": ts_col, "mcap_rank": mcap_rank}
+    except HTTPException: raise
+    except Exception as e: log.error(f"content_update failed for {symbol}: {e}"); raise HTTPException(500, str(e))
 
 # ── Refactor notes ─────────────────────────────────────────────────────────────
 # file1 qb_endpoints.py | file2 gvm_market_endpoints.py | file3 admin_data.py
-# file4 scheduler.py (scheduler + bg tasks + ADR/PCR compute). Routers/scheduler wired above.
+# file4 scheduler.py | file5 fyers_endpoints.py (on-demand Fyers quote)
 
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
@@ -937,7 +899,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id":info["client_id"],"created":time.time()}
     return {"access_token":token,"token_type":"Bearer","expires_in":31536000,"scope":"read write"}
 
-# ── MCP Tools ───────────────────────────────────────────────────────────────────
+# ── MCP Tools ──────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -954,6 +916,7 @@ MCP_TOOLS = [
     {"name":"get_sector_rating","description":"Get sector-level mcap-weighted GVM ratings.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"get_intraday","description":"Intraday OHLC for ANY stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"},"interval":{"type":"string"},"source":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_cmp","description":"Get latest CMP for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"fyers_quote","description":"Fetch live futures quote from Fyers for a symbol — LTP, open, high, low, prev_close, day_change%, OI, volume. On-demand only, no storage. Use for trade card population. symbol = NSE code e.g. SBIN, RELIANCE.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"backfill_intraday","description":"MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"heal_intraday","description":"Fill TODAY's morning 1-min gap in intraday_prices for all active futures from Yahoo.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_yahoo_daily","description":"Trigger Yahoo daily OHLC update for raw_prices (background).","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -1028,6 +991,7 @@ async def _call_tool(name, args):
             interval = (args.get("interval") or "5m").lower(); source = (args.get("source") or "auto").lower()
             return await asyncio.to_thread(yahoo_ondemand.get_intraday_smart, sym, days, interval, "NS", source)
         elif name == "get_cmp": r = await client.get(f"{BASE_URL}/api/cmp/{args['symbol']}"); return r.json()
+        elif name == "fyers_quote": r = await client.get(f"{BASE_URL}/api/fyers/quote/{args['symbol'].upper()}"); return r.json()
         elif name == "backfill_intraday": r = await client.post(f"{BASE_URL}/api/admin/backfill_intraday", headers=h); return r.json()
         elif name == "heal_intraday": r = await client.post(f"{BASE_URL}/api/admin/heal_intraday", headers=h); return r.json()
         elif name == "run_yahoo_daily": r = await client.post(f"{BASE_URL}/api/admin/run_yahoo_daily", headers=h); return r.json()
