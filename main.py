@@ -47,7 +47,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.16
+# Scorr / Project Quant — main.py v2.9.17
+# v2.9.17: Daily Digest domestic indices now use LIVE intraday
+#   (today's Nifty/BankNifty close from intraday_prices) with EOD
+#   fallback. Fixes stale "yesterday's close" during/after market.
+#   ADR/gate live-intraday fix shipped in v8_endpoints.py same day.
 # v2.9.16: diagnosis.py wired — GET /api/diagnosis full system
 #   health check: 6 sections, traffic-light per section, issues list.
 #   MCP tool: run_diagnosis added.
@@ -58,7 +62,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.16"
+VERSION = "2.9.17"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -197,7 +201,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.16)")
+        log.info("Tables ready (v2.9.17)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -401,6 +405,44 @@ def build_health_report() -> dict:
 @app.get("/api/health/report")
 def health_report(): return build_health_report()
 
+def _digest_domestic_live(cur, sym):
+    """
+    Today's intraday OHLC + chg% vs prior EOD close. Falls back to raw_prices EOD
+    (close-to-close) when no intraday today. Returns dict or None.
+    """
+    def _r(v, d=2):
+        try: return round(float(v), d) if v is not None else None
+        except: return None
+    # prior EOD close
+    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s AND price_date < CURRENT_DATE ORDER BY price_date DESC LIMIT 1", (sym,))
+    pc = cur.fetchone()
+    prev_close = float(pc[0]) if pc and pc[0] is not None else None
+    # today's intraday
+    cur.execute("""
+        SELECT
+            (SELECT open  FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts ASC  LIMIT 1) AS o,
+            MAX(high) AS h, MIN(low) AS l,
+            (SELECT close FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1) AS c
+        FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE
+    """, (sym, sym, sym))
+    r = cur.fetchone()
+    if r and r[3] is not None and prev_close:
+        chg = round((float(r[3]) / prev_close - 1) * 100, 2)
+        return {"price_date": str(date.today()), "open": _r(r[0]), "high": _r(r[1]),
+                "low": _r(r[2]), "close": _r(r[3]), "prev_close": _r(prev_close),
+                "chg_pct": chg, "source": "live_intraday"}
+    # EOD fallback
+    cur.execute("""
+        WITH d AS (SELECT price_date, open, high, low, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn FROM raw_prices WHERE symbol = %s)
+        SELECT a.price_date::text, a.open, a.high, a.low, a.close, ROUND(((a.close-b.close)/NULLIF(b.close,0)*100)::numeric,2)
+        FROM d a JOIN d b ON b.rn=2 WHERE a.rn=1
+    """, (sym,))
+    e = cur.fetchone()
+    if e:
+        return {"price_date": e[0], "open": _r(e[1]), "high": _r(e[2]), "low": _r(e[3]),
+                "close": _r(e[4]), "chg_pct": _r(e[5]), "source": "eod_fallback"}
+    return None
+
 def _build_digest_daily() -> dict:
     now = _ist_now(); result: Dict[str, Any] = {"generated_at": now.strftime("%Y-%m-%d %H:%M:%S IST"), "version": VERSION, "sections": {}}
     def _r(v, d=2):
@@ -419,20 +461,16 @@ def _build_digest_daily() -> dict:
             global_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             result["sections"]["1_global_indices"] = {"label": "Global Indices", "quote_date": global_rows[0]["quote_date"] if global_rows else None, "data": global_rows}
 
+            # Domestic — LIVE intraday today's close (chg% vs prior EOD), EOD fallback
             domestic = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
-                cur.execute("""
-                    WITH d AS (SELECT price_date, open, high, low, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn FROM raw_prices WHERE symbol = %s)
-                    SELECT a.price_date::text, a.open, a.high, a.low, a.close, ROUND(((a.close-b.close)/NULLIF(b.close,0)*100)::numeric,2)
-                    FROM d a JOIN d b ON b.rn=2 WHERE a.rn=1
-                """, (sym,))
-                r = cur.fetchone()
-                if r: domestic[sym] = {"price_date": r[0], "open": _r(r[1]), "high": _r(r[2]), "low": _r(r[3]), "close": _r(r[4]), "chg_pct": _r(r[5])}
+                domestic[sym] = _digest_domestic_live(cur, sym)
 
             cur.execute("SELECT price_date::text, advances, declines, unchanged, adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
             adr_row = cur.fetchone()
             adr = {"price_date": adr_row[0], "advances": adr_row[1], "declines": adr_row[2], "unchanged": adr_row[3], "adr": _r(adr_row[4])} if adr_row else None
-            result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr}
+            result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr,
+                "note": "Indices = live intraday during market hours; ADR = EOD (adr_daily). For live gate ADR see /api/v8/market_mood."}
 
             t_due = _get_config("takeaway_refresh_due", "false"); ov_due = _get_config("overview_refresh_due", "false")
             if t_due == "true" or ov_due == "true":
@@ -911,7 +949,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id":info["client_id"],"created":time.time()}
     return {"access_token":token,"token_type":"Bearer","expires_in":31536000,"scope":"read write"}
 
-# ── MCP Tools ─────────────────────────────────────────────────────────────────
+# ── MCP Tools ───────────────────────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -954,7 +992,7 @@ MCP_TOOLS = [
     {"name":"github_list","description":"List files in the repo.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":[]}},
     {"name":"github_push","description":"Create or update a file.","inputSchema":{"type":"object","properties":{"filepath":{"type":"string"},"new_content":{"type":"string"},"commit_message":{"type":"string"},"create_if_missing":{"type":"boolean"}},"required":["filepath","new_content","commit_message"]}},
     {"name":"github_delete","description":"Delete a file.","inputSchema":{"type":"object","properties":{"filepath":{"type":"string"},"commit_message":{"type":"string"}},"required":["filepath"]}},
-    {"name":"v8_market_mood","description":"V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v8_market_mood","description":"V8: Market Mood gate (ADR + Nifty D/W/M) + Buy/Sell slot allocation. LIVE intraday during market hours, EOD after close.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_qualified","description":"V8: Get qualified stocks for a basket.","inputSchema":{"type":"object","properties":{"basket":{"type":"string"},"limit":{"type":"integer"}},"required":["basket"]}},
     {"name":"v8_filter_config","description":"V8: Get filter thresholds for a basket.","inputSchema":{"type":"object","properties":{"basket":{"type":"string"}},"required":["basket"]}},
     {"name":"v8_sell_overbought","description":"V8: Get Sell Overbought signals.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer"}},"required":[]}},
