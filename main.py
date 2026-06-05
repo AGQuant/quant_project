@@ -47,7 +47,12 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.17
+# Scorr / Project Quant — main.py v2.9.18
+# v2.9.18: futures_basis table added to create_tables().
+#   fyers_feed.py v4: single WS 420+ symbols (equity + futures
+#   + options ATM±10 top-50 mcap + NIFTY/BANKNIFTY). Basis
+#   computed on every futures bar flush. last_tuesday expiry
+#   fix (was last_thursday — NSE changed Sep 2025).
 # v2.9.17: Daily Digest domestic indices now use LIVE intraday
 #   (today's Nifty/BankNifty close from intraday_prices) with EOD
 #   fallback. Fixes stale "yesterday's close" during/after market.
@@ -62,7 +67,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
 # ============================================================
 
-VERSION = "2.9.17"
+VERSION = "2.9.18"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -118,6 +123,7 @@ def create_tables():
     CREATE TABLE IF NOT EXISTS cmp_prices (
         symbol TEXT PRIMARY KEY, cmp NUMERIC, updated_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE cmp_prices ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'fyers';
     CREATE TABLE IF NOT EXISTS futures_universe (
         symbol TEXT PRIMARY KEY, lot_size INTEGER, segment TEXT,
         is_active BOOLEAN DEFAULT TRUE, updated_at TIMESTAMP DEFAULT NOW()
@@ -197,11 +203,22 @@ def create_tables():
         put_oi BIGINT DEFAULT 0, call_oi BIGINT DEFAULT 0, pcr NUMERIC(6,3),
         computed_at TIMESTAMP DEFAULT NOW(), UNIQUE(price_date, underlying)
     );
+    CREATE TABLE IF NOT EXISTS futures_basis (
+        id            SERIAL PRIMARY KEY,
+        symbol        TEXT      NOT NULL,
+        ts            TIMESTAMP NOT NULL,
+        spot_close    NUMERIC,
+        futures_close NUMERIC,
+        basis         NUMERIC,
+        basis_pct     NUMERIC,
+        UNIQUE(symbol, ts)
+    );
+    CREATE INDEX IF NOT EXISTS idx_futures_basis_symbol_ts ON futures_basis(symbol, ts DESC);
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.17)")
+        log.info("Tables ready (v2.9.18)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -346,6 +363,7 @@ def build_health_report() -> dict:
                 ("global_indices","SELECT MAX(quote_date) FROM global_indices",2,"Global indices"),
                 ("adr_daily","SELECT MAX(price_date) FROM adr_daily",1,"ADR daily"),
                 ("pcr_daily","SELECT MAX(price_date) FROM pcr_daily",1,"PCR daily"),
+                ("futures_basis","SELECT MAX(ts)::date FROM futures_basis",1,"Futures basis"),
             ]:
                 try:
                     cur.execute(q); latest = cur.fetchone()[0]
@@ -461,7 +479,6 @@ def _build_digest_daily() -> dict:
             global_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             result["sections"]["1_global_indices"] = {"label": "Global Indices", "quote_date": global_rows[0]["quote_date"] if global_rows else None, "data": global_rows}
 
-            # Domestic — LIVE intraday today's close (chg% vs prior EOD), EOD fallback
             domestic = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 domestic[sym] = _digest_domestic_live(cur, sym)
@@ -604,6 +621,8 @@ def health_feeds():
         ("adr_daily","SELECT MAX(price_date), COUNT(*) FROM adr_daily"),
         ("pcr_daily","SELECT MAX(price_date), COUNT(*) FROM pcr_daily"),
         ("quant_positions","SELECT MAX(updated_at)::date, COUNT(*) FROM quant_paper_positions WHERE status='open'"),
+        ("futures_basis","SELECT MAX(ts)::date, COUNT(*) FROM futures_basis"),
+        ("option_chain","SELECT MAX(ts)::date, COUNT(*) FROM option_chain"),
     ]
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -949,7 +968,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id":info["client_id"],"created":time.time()}
     return {"access_token":token,"token_type":"Bearer","expires_in":31536000,"scope":"read write"}
 
-# ── MCP Tools ───────────────────────────────────────────────────────────────────────────────────
+# ── MCP Tools ────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
