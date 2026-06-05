@@ -172,10 +172,10 @@ function renderFilterCard(sheet, row, basket) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TABS: BASKET FUNNELS — V4 WATERFALL STYLE
+//   TABS: BASKET FUNNELS — V4 WATERFALL STYLE (2 cols per filter)
 // ════════════════════════════════════════════════════════════════════
 
-function refreshBasketFunnel(basket) {
+function refreshBasketFunnel(basket, rawDataArg) {
   const sheetName = {
     buy_reversal:  SHEETS.BR, buy_momentum: SHEETS.BM,
     sell_reversal: SHEETS.SR, sell_momentum: SHEETS.SM,
@@ -186,20 +186,21 @@ function refreshBasketFunnel(basket) {
 
   const meta    = BASKET_META[basket];
   const config  = fetchFilterConfig(basket);
-  const rawData = fetchRawMetrics();
+  // Use cached raw set when called from refreshAll; fall back to a direct fetch.
+  const rawData = rawDataArg || getRawMetricsCached();
   const funnel  = fetchFunnelCounts(basket);
 
   if (!config || !rawData) {
-    sheet.getRange(1, 1).setValue('⚠ API unreachable');
+    sheet.getRange(1, 1).setValue('⚠ API unreachable — config/raw fetch returned null. Retry refresh.');
     return;
   }
 
   const filters   = config.filters;
-  const ncol      = Math.min(filters.length, 12);
+  const ncol      = Math.min(filters.length, 11);   // 11 filters max → 22 stock cols
   const allStocks = rawData.stocks || [];
 
-  // ── compute cumulative stage lists ──────────────────────────────
-  // stage[i] = stocks passing filters 0..i cumulatively
+  // ── compute cumulative stage lists (carry full stock objects, not just symbols) ──
+  // stages[i] = array of stock objects passing filters 0..i cumulatively
   const stages = [];
   let survivors = allStocks.slice();
   filters.slice(0, ncol).forEach(f => {
@@ -210,12 +211,16 @@ function refreshBasketFunnel(basket) {
       if (f.max !== null && f.max !== undefined && Number(v) > Number(f.max)) return false;
       return true;
     });
-    stages.push(survivors.map(s => s.symbol));
+    stages.push(survivors.slice());
   });
+
+  // Each filter occupies TWO columns: symbol + that filter's metric value.
+  // Layout: col 1 = row#, then per filter (sym, val) pairs.
+  const colsPerFilter = 2;
+  const totalCols = 1 + ncol * colsPerFilter;
 
   // ── title bar ───────────────────────────────────────────────────
   let row = 1;
-  const totalCols = 1 + ncol;
   sheet.getRange(row, 1, 1, totalCols).merge()
     .setValue(`${meta.emoji}  ${meta.label.toUpperCase()} — Funnel Waterfall`)
     .setBackground(meta.color).setFontColor(COLORS.WHITE)
@@ -224,54 +229,65 @@ function refreshBasketFunnel(basket) {
   row++;
 
   sheet.getRange(row, 1, 1, totalCols).merge()
-    .setValue(`Universe: ${allStocks.length} F&O · Target: ${config.target || 'S1'} · Win%: ${config.win_pct || '—'} · Refreshed: ${nowIST()}`)
+    .setValue(`Universe: ${allStocks.length} F&O · Target: ${config.target || 'S1'} · Win%: ${config.win_pct || '—'} · each filter = [Stock | Value] · Refreshed: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row++;
 
-  // ── Row: Filter names ───────────────────────────────────────────
+  // helper: first column index (1-based) for filter i
+  const symCol = i => 2 + i * colsPerFilter;   // stock symbol column
+  const valCol = i => 3 + i * colsPerFilter;   // value column
+
+  // ── Row: Filter names (merged across its 2 cols) ────────────────
   sheet.getRange(row, 1).setValue('Filter')
     .setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
     .setHorizontalAlignment('center');
   filters.slice(0, ncol).forEach((f, i) => {
-    sheet.getRange(row, 2 + i).setValue(f.metric)
+    sheet.getRange(row, symCol(i), 1, colsPerFilter).merge()
+      .setValue(f.metric)
       .setFontWeight('bold').setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE)
       .setHorizontalAlignment('center').setWrap(true);
   });
   sheet.setRowHeight(row, 36);
   row++;
 
-  // ── Row: Min ────────────────────────────────────────────────────
+  // ── Row: Min / Max (shown in the value column, label in symbol column) ──
   sheet.getRange(row, 1).setValue('Min')
     .setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
     .setHorizontalAlignment('center');
   filters.slice(0, ncol).forEach((f, i) => {
-    sheet.getRange(row, 2 + i).setValue(f.min_display || '—')
+    sheet.getRange(row, symCol(i)).setValue('min →')
+      .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
+      .setFontStyle('italic').setFontSize(8).setHorizontalAlignment('right');
+    sheet.getRange(row, valCol(i)).setValue(f.min_display === '' || f.min_display === undefined ? '—' : f.min_display)
       .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
       .setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
   });
   row++;
 
-  // ── Row: Max ────────────────────────────────────────────────────
   sheet.getRange(row, 1).setValue('Max')
     .setFontStyle('italic').setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
     .setHorizontalAlignment('center');
   filters.slice(0, ncol).forEach((f, i) => {
-    sheet.getRange(row, 2 + i).setValue(f.max_display || '—')
+    sheet.getRange(row, symCol(i)).setValue('max →')
+      .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT)
+      .setFontStyle('italic').setFontSize(8).setHorizontalAlignment('right');
+    sheet.getRange(row, valCol(i)).setValue(f.max_display === '' || f.max_display === undefined ? '—' : f.max_display)
       .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
       .setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center');
   });
   row++;
 
-  // ── Row: Counts ─────────────────────────────────────────────────
+  // ── Row: Counts (merged across each filter's 2 cols) ────────────
   const funnelCounts = funnel ? funnel.counts || {} : {};
   sheet.getRange(row, 1).setValue('Count')
     .setFontWeight('bold').setBackground(meta.color).setFontColor(COLORS.WHITE)
     .setHorizontalAlignment('center').setFontSize(12);
   filters.slice(0, ncol).forEach((f, i) => {
     const cnt = funnelCounts[f.metric] !== undefined ? funnelCounts[f.metric] : stages[i].length;
-    sheet.getRange(row, 2 + i).setValue(cnt)
+    sheet.getRange(row, symCol(i), 1, colsPerFilter).merge()
+      .setValue(cnt)
       .setFontWeight('bold').setBackground(meta.color).setFontColor(COLORS.WHITE)
       .setHorizontalAlignment('center').setFontSize(13)
       .setFontFamily(FONTS.MONO.family);
@@ -281,7 +297,7 @@ function refreshBasketFunnel(basket) {
 
   // ── separator ───────────────────────────────────────────────────
   sheet.getRange(row, 1, 1, totalCols).merge()
-    .setValue('▼  STOCKS PASSING EACH STAGE  (each column = cumulative filters applied left → right)')
+    .setValue('▼  STOCKS PASSING EACH STAGE  (cumulative left → right · each filter shows the stock + its value for that metric)')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.MUTED_LIGHT)
     .setFontSize(9).setFontStyle('italic').setHorizontalAlignment('left');
   sheet.setRowHeight(row, 20);
@@ -296,39 +312,47 @@ function refreshBasketFunnel(basket) {
       .setFontStyle('italic').setFontColor(COLORS.NEUTRAL_TEXT)
       .setHorizontalAlignment('center').setBackground(COLORS.NEUTRAL_BG);
   } else {
-    // sub-header row
+    // sub-header row: F1 (n) spanning the pair, with Stock | Value labels under it
     sheet.getRange(row, 1).setValue('#')
       .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
       .setHorizontalAlignment('center').setFontSize(9);
-    stages.forEach((_, i) => {
-      sheet.getRange(row, 2 + i).setValue(`F${i + 1} (${stages[i].length})`)
+    stages.forEach((st, i) => {
+      sheet.getRange(row, symCol(i)).setValue(`F${i + 1} (${st.length})`)
         .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
-        .setHorizontalAlignment('center').setFontSize(9);
+        .setHorizontalAlignment('left').setFontSize(9);
+      sheet.getRange(row, valCol(i)).setValue('value')
+        .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG).setFontColor(COLORS.NEUTRAL_TEXT)
+        .setHorizontalAlignment('center').setFontSize(8).setFontStyle('italic');
     });
     row++;
 
-    // stock rows
     for (let r = 0; r < maxLen; r++) {
-      const isAlt = r % 2 === 0;
-      const rowBg = isAlt ? COLORS.ALT_ROW : COLORS.CARD_BG;
+      const rowBg = (r % 2 === 0) ? COLORS.ALT_ROW : COLORS.CARD_BG;
 
       sheet.getRange(row, 1).setValue(r + 1)
         .setFontFamily(FONTS.MONO.family).setFontColor(COLORS.NEUTRAL_TEXT)
         .setHorizontalAlignment('center').setFontSize(9).setBackground(rowBg);
 
-      stages.forEach((stageSymbols, i) => {
-        const cell = sheet.getRange(row, 2 + i);
-        if (r < stageSymbols.length) {
-          const sym = stageSymbols[r].replace('NSE:', '').replace('-EQ', '');
+      stages.forEach((stageStocks, i) => {
+        const symCell = sheet.getRange(row, symCol(i));
+        const valCell = sheet.getRange(row, valCol(i));
+        const metric  = filters[i].metric;
+        if (r < stageStocks.length) {
+          const stock = stageStocks[r];
+          const sym   = String(stock.symbol).replace('NSE:', '').replace('-EQ', '');
           const isFinal = (i === stages.length - 1);
-          cell.setValue(sym)
+          symCell.setValue(sym)
             .setFontFamily(FONTS.HEADER.family)
             .setFontWeight(isFinal ? 'bold' : 'normal')
             .setFontColor(isFinal ? meta.color : COLORS.NEUTRAL_TEXT)
-            .setHorizontalAlignment('left')
-            .setBackground(rowBg);
+            .setHorizontalAlignment('left').setBackground(rowBg);
+          valCell.setValue(fmtNum(stock[metric], 2))
+            .setFontFamily(FONTS.MONO.family).setFontSize(9)
+            .setFontColor(COLORS.NEUTRAL_TEXT)
+            .setHorizontalAlignment('right').setBackground(rowBg);
         } else {
-          cell.setValue('').setBackground(rowBg);
+          symCell.setValue('').setBackground(rowBg);
+          valCell.setValue('').setBackground(rowBg);
         }
       });
 
@@ -338,9 +362,13 @@ function refreshBasketFunnel(basket) {
     }
   }
 
-  sheet.setColumnWidth(1, 40);
-  sheet.setColumnWidths(2, ncol, 110);
+  sheet.setColumnWidth(1, 36);
+  filters.slice(0, ncol).forEach((f, i) => {
+    sheet.setColumnWidth(symCol(i), 105);
+    sheet.setColumnWidth(valCol(i), 58);
+  });
   sheet.setFrozenRows(3);
+  sheet.setFrozenColumns(1);
   toast(`✓ ${meta.label} refreshed`);
 }
 
@@ -387,7 +415,7 @@ function refreshSellOverbought() {
     ['52-week index', '≥ 80',   'Near 52-week high'],
     ['MA9 vs MA21',   '≥ 3%',   'Short-term momentum stretched'],
     ['Volume ratio',  '≤ 0.8',  'Volume drying — distribution starting'],
-    ['1D net return', '< 0%',   'Closed red (prev_day_change < 0)'],
+    ['Day change',    '< 0%',   'Closed red (day_change < 0, 2-day net)'],
     ['RSI Month',     '≥ 60',   'RSI elevated'],
   ];
   row = renderTableHeader(sheet, row, ['Filter', 'Threshold', 'Logic'], 3);
@@ -401,7 +429,7 @@ function refreshSellOverbought() {
   row += 2;
 
   row = renderSubHeader(sheet, row, `LIVE SIGNALS (${data.count || 0} qualified)`);
-  const headers = ['Symbol', 'Entry', 'Target (S1)', 'Stop', 'Tgt %', 'DMA200', 'wi52', 'ma9_21', 'Vol Ratio', '1D Net%', 'RSI M'];
+  const headers = ['Symbol', 'Entry', 'Target (S1)', 'Stop', 'Tgt %', 'DMA200', 'wi52', 'ma9_21', 'Vol Ratio', '2D Chg%', 'RSI M'];
   row = renderTableHeader(sheet, row, headers, headers.length);
 
   const stocks = data.stocks || [];
@@ -422,7 +450,7 @@ function refreshSellOverbought() {
         fmtNum(s.week_index_52, 1),
         fmtPct(s.ma9_vs_ma21),
         fmtNum(s.vol_ratio, 2),
-        fmtPct(s.prev_day_change),
+        fmtPct(s.day_change),
         fmtNum(s.rsi_month, 1),
       ];
       vals.forEach((v, i) => {
@@ -705,7 +733,7 @@ function refreshRawData() {
   sheet.setRowHeight(row, 20);
   row += 2;
 
-  const headers = ['Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D', 'M Ret%', 'W Ret%', '1D Net%', 'Y Ret%', 'Mth Idx', 'wi52'];
+  const headers = ['Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D', 'M Ret%', 'W Ret%', '2D Chg%', 'Y Ret%', 'Mth Idx', 'wi52'];
   row = renderTableHeader(sheet, row, headers, headers.length);
 
   (data.stocks || []).forEach(s => {
@@ -720,7 +748,7 @@ function refreshRawData() {
       fmtNum(s.daily_rsi, 1),
       fmtNum(s.month_return, 2),
       fmtNum(s.week_return, 2),
-      fmtNum(s.prev_day_change, 2),
+      fmtNum(s.day_change, 2),
       fmtNum(s.year_return, 2),
       fmtNum(s.month_index, 1),
       fmtNum(s.week_index_52, 1),
@@ -760,7 +788,7 @@ function refreshFilterScan() {
   row++;
 
   sheet.getRange(row, 1, 1, 10).merge()
-    .setValue(`1D gate: prev_day_change (net close-to-close%) · Refreshed: ${nowIST()}`)
+    .setValue(`2D gate: day_change (2-day net close-to-close%) · Refreshed: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT).setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row += 2;
