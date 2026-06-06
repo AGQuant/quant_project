@@ -24,9 +24,9 @@ import os
 import logging
 import numpy as np
 import pandas as pd
-from datetime import date, datetime
+from datetime import date
 from itertools import combinations
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import psycopg2
 from statsmodels.tsa.stattools import coint
@@ -102,7 +102,7 @@ def load_eligible_universe(conn) -> pd.DataFrame:
 
 def load_price_series(conn, symbols: List[str]) -> pd.DataFrame:
     sql = """
-        SELECT symbol, price_date, close FROM raw_prices
+        SELECT symbol, price_date, close::float8 FROM raw_prices
         WHERE symbol = ANY(%s) AND price_date BETWEEN %s AND %s
         ORDER BY price_date ASC
     """
@@ -111,7 +111,9 @@ def load_price_series(conn, symbols: List[str]) -> pd.DataFrame:
         rows = cur.fetchall()
     df = pd.DataFrame(rows, columns=['symbol', 'price_date', 'close'])
     df['price_date'] = pd.to_datetime(df['price_date'])
-    pivot = df.pivot(index='price_date', columns='symbol', values='close').dropna(how='all')
+    df['close'] = pd.to_numeric(df['close'], errors='coerce')
+    pivot = df.pivot(index='price_date', columns='symbol', values='close')
+    pivot = pivot.astype(float).dropna(how='all')
     log.info(f"Price matrix: {pivot.shape[0]} days × {pivot.shape[1]} symbols")
     return pivot
 
@@ -128,25 +130,30 @@ def compute_cointegration(s_a: pd.Series, s_b: pd.Series) -> Tuple[float, float]
     aligned = pd.concat([s_a, s_b], axis=1).dropna()
     if len(aligned) < MIN_DAYS:
         return 1.0, 1.0
-    a_vals = aligned.iloc[:, 0].values
-    b_vals = aligned.iloc[:, 1].values
-    slope, _, _, _, _ = stats.linregress(b_vals, a_vals)
+    # Explicit float64 cast — coint fails on Decimal/object dtypes
+    a_vals = aligned.iloc[:, 0].values.astype(np.float64)
+    b_vals = aligned.iloc[:, 1].values.astype(np.float64)
+    if np.any(np.isnan(a_vals)) or np.any(np.isnan(b_vals)):
+        return 1.0, 1.0
+    result = stats.linregress(b_vals, a_vals)
+    slope  = float(result.slope)
     try:
         _, p_value, _ = coint(a_vals, b_vals)
-    except Exception:
-        return 1.0, float(slope)
-    return float(p_value), float(slope)
+    except Exception as e:
+        log.warning(f"coint failed: {e}")
+        return 1.0, slope
+    return float(p_value), slope
 
 
 def compute_spread_stats(s_a: pd.Series, s_b: pd.Series,
                          beta: float) -> Tuple[float, float, float]:
     """Returns (mean_spread, std_spread, intercept)."""
     aligned = pd.concat([s_a, s_b], axis=1).dropna()
-    a_vals  = aligned.iloc[:, 0].values
-    b_vals  = aligned.iloc[:, 1].values
-    _, intercept, _, _, _ = stats.linregress(b_vals, a_vals)
-    spread = a_vals - beta * b_vals
-    return float(np.mean(spread)), float(np.std(spread)), float(intercept)
+    a_vals  = aligned.iloc[:, 0].values.astype(np.float64)
+    b_vals  = aligned.iloc[:, 1].values.astype(np.float64)
+    result  = stats.linregress(b_vals, a_vals)
+    spread  = a_vals - beta * b_vals
+    return float(np.mean(spread)), float(np.std(spread)), float(result.intercept)
 
 
 def discover_pairs(conn) -> List[dict]:
@@ -174,8 +181,8 @@ def discover_pairs(conn) -> List[dict]:
             if len(aligned) < MIN_DAYS:
                 continue
 
-            s_a = aligned.iloc[:, 0]
-            s_b = aligned.iloc[:, 1]
+            s_a = aligned.iloc[:, 0].astype(float)
+            s_b = aligned.iloc[:, 1].astype(float)
 
             corr = compute_correlation(s_a, s_b)
             if corr < CORR_MIN:
