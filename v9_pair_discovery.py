@@ -4,20 +4,19 @@ V9 Pair Strategy — Pair Discovery
 Finds all valid pairs from the 209 futures universe using 2025 EOD data.
 
 Steps:
-  1. Load eligible universe (GVM >= 6, >= 200 trading days in 2025)
+  1. Load eligible universe (GVM >= 5.5, >= 200 trading days in 2025)
   2. Group by segment (same-segment pairs only)
-  3. For each pair: Pearson correlation >= 0.75
-  4. For passing pairs: Engle-Granger cointegration test p-value < 0.05
+  3. For each pair: Pearson correlation >= 0.70
+  4. For passing pairs: Engle-Granger cointegration test p-value < 0.10
   5. Compute OLS hedge ratio (beta)
   6. Store results in pair_universe table
 
-Output table: pair_universe
-  symbol_a, symbol_b, segment, correlation, coint_pvalue,
-  hedge_ratio, hedge_intercept, discovery_date, is_active
+Thresholds relaxed (06-Jun-2026) to widen the universe for paper-trading
+volume: GVM 6.0->5.5, corr 0.75->0.70, coint 0.05->0.10. Still statistically
+defensible — these will be re-tightened once live edge is confirmed.
 
-Usage:
-  python v9_pair_discovery.py
-  or via endpoint: POST /api/v9/discover
+Output table: pair_universe
+Usage: POST /api/v9/discover
 """
 
 import os
@@ -37,13 +36,13 @@ log = logging.getLogger('v9_discovery')
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# ── Constants (locked) ────────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────────────────
 BACKTEST_START = '2025-01-01'
 BACKTEST_END   = '2025-12-31'
-GVM_MIN        = 6.0
+GVM_MIN        = 5.5    # relaxed from 6.0 — wider universe for paper-trade volume
 MIN_DAYS       = 200
-CORR_MIN       = 0.75
-COINT_PVALUE   = 0.05
+CORR_MIN       = 0.70   # relaxed from 0.75
+COINT_PVALUE   = 0.10   # relaxed from 0.05 — still statistically valid
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS pair_universe (
@@ -130,7 +129,6 @@ def compute_cointegration(s_a: pd.Series, s_b: pd.Series) -> Tuple[float, float]
     aligned = pd.concat([s_a, s_b], axis=1).dropna()
     if len(aligned) < MIN_DAYS:
         return 1.0, 1.0
-    # Explicit float64 cast — coint fails on Decimal/object dtypes
     a_vals = aligned.iloc[:, 0].values.astype(np.float64)
     b_vals = aligned.iloc[:, 1].values.astype(np.float64)
     if np.any(np.isnan(a_vals)) or np.any(np.isnan(b_vals)):
@@ -147,7 +145,6 @@ def compute_cointegration(s_a: pd.Series, s_b: pd.Series) -> Tuple[float, float]
 
 def compute_spread_stats(s_a: pd.Series, s_b: pd.Series,
                          beta: float) -> Tuple[float, float, float]:
-    """Returns (mean_spread, std_spread, intercept)."""
     aligned = pd.concat([s_a, s_b], axis=1).dropna()
     a_vals  = aligned.iloc[:, 0].values.astype(np.float64)
     b_vals  = aligned.iloc[:, 1].values.astype(np.float64)
@@ -218,6 +215,10 @@ def discover_pairs(conn) -> List[dict]:
 
 
 def store_pairs(conn, pairs: List[dict]) -> int:
+    # Clean replace — deactivate old pairs first so relaxed run fully refreshes
+    with conn.cursor() as cur:
+        cur.execute("UPDATE pair_universe SET is_active = FALSE WHERE discovery_date = '2025-01-01'")
+    conn.commit()
     if not pairs:
         log.warning("No valid pairs to store")
         return 0
