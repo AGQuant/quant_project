@@ -2,12 +2,12 @@
 V9 Pair Strategy — Backtest Engine
 =====================================
 Runs 10 parameter combinations on valid pairs discovered by v9_pair_discovery.py.
-Uses 2025 EOD closing prices only. No look-ahead bias.
+Uses trailing-12M EOD closing prices (1-Jun-2025 to 31-May-2026). No look-ahead bias.
 Earnings blackout: skipped for backtest (will be added in live engine).
 
 Flow per combo:
   1. Load valid pairs from pair_universe table
-  2. Load 2025 price data for all symbols
+  2. Load price data for all symbols
   3. For each pair, day by day:
      a. Recompute hedge ratio (weekly or monthly)
      b. Compute spread = A - beta * B
@@ -36,8 +36,9 @@ log = logging.getLogger('v9_backtest')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # ── Locked constants ──────────────────────────────────────────────────────────
-BACKTEST_START  = '2025-01-01'
-BACKTEST_END    = '2025-12-31'
+BACKTEST_START  = '2025-06-01'   # trailing 12 months
+BACKTEST_END    = '2026-05-31'
+DISCOVERY_DATE  = '2025-06-01'   # must match v9_pair_discovery DISCOVERY_DATE
 TIME_STOP_DAYS  = 20
 REGIME_CORR_MIN = 0.60
 REGIME_WINDOW   = 20
@@ -133,9 +134,9 @@ def load_valid_pairs(conn) -> List[dict]:
             SELECT symbol_a, symbol_b, segment, hedge_ratio, hedge_intercept,
                    correlation, coint_pvalue
             FROM pair_universe
-            WHERE is_active = TRUE AND discovery_date = '2025-01-01'
+            WHERE is_active = TRUE AND discovery_date = %s
             ORDER BY segment, correlation DESC
-        """)
+        """, (DISCOVERY_DATE,))
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
@@ -143,14 +144,15 @@ def load_valid_pairs(conn) -> List[dict]:
 def load_prices(conn, symbols: List[str]) -> pd.DataFrame:
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT symbol, price_date, close FROM raw_prices
+            SELECT symbol, price_date, close::float8 FROM raw_prices
             WHERE symbol = ANY(%s) AND price_date BETWEEN %s AND %s
             ORDER BY price_date ASC
         """, (symbols, BACKTEST_START, BACKTEST_END))
         rows = cur.fetchall()
     df = pd.DataFrame(rows, columns=['symbol', 'price_date', 'close'])
     df['price_date'] = pd.to_datetime(df['price_date'])
-    return df.pivot(index='price_date', columns='symbol', values='close')
+    df['close'] = pd.to_numeric(df['close'], errors='coerce')
+    return df.pivot(index='price_date', columns='symbol', values='close').astype(float)
 
 
 def load_lot_sizes(conn, symbols: List[str]) -> Dict[str, int]:
@@ -282,14 +284,12 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
         price_a = a_prices[i]
         price_b = b_prices[i]
 
-        # Recompute hedge ratio
         if should_recompute_hedge(dates[i], last_hedge, combo['hedge_recompute']):
             lookback_a = a_prices[max(0, i - 252): i]
             lookback_b = b_prices[max(0, i - 252): i]
             beta, _    = compute_hedge_ratio(lookback_a, lookback_b)
             last_hedge = dates[i]
 
-        # Spread + Z-score
         spread = price_a - beta * price_b
         spreads.append(spread)
         if len(spreads) < window:
@@ -301,7 +301,6 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
             continue
         z = (spread - mean_s) / std_s
 
-        # Regime filter
         if i >= REGIME_WINDOW:
             recent_a    = a_prices[i - REGIME_WINDOW: i]
             recent_b    = b_prices[i - REGIME_WINDOW: i]
@@ -319,7 +318,6 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
                     position = None
                 continue
 
-        # ── Exit ─────────────────────────────────────────────────────────────
         if position is not None:
             hold        = (today - position['entry_date']).days
             direction   = position['direction']
@@ -346,7 +344,6 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
                     exit_reason, combo['id']))
                 position = None
 
-        # ── Entry ─────────────────────────────────────────────────────────────
         if position is None:
             if z <= -combo['z_entry']:
                 position = {
@@ -367,7 +364,6 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
                     'beta':          beta,
                 }
 
-    # Close at year end
     if position is not None:
         today   = dates[-1].date()
         price_a = a_prices[-1]
@@ -379,7 +375,7 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
             position, sym_a, sym_b, today, 0.0,
             price_a, price_b, lot_a, lot_b,
             pnl_a, pnl_b, total_pnl, ret_pct, hold,
-            'YEAR_END', combo['id']))
+            'PERIOD_END', combo['id']))
 
     if not trades:
         return None, []
@@ -425,6 +421,9 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
 
 def store_results(conn, metrics_list: List[dict], all_trades: List[dict]):
     with conn.cursor() as cur:
+        # Clear prior run so results stay clean for this period
+        cur.execute("DELETE FROM pair_backtest_results")
+        cur.execute("DELETE FROM pair_backtest_trades")
         for m in metrics_list:
             cur.execute("""
                 INSERT INTO pair_backtest_results
@@ -476,7 +475,7 @@ def run_backtest() -> dict:
     prices    = load_prices(conn, all_symbols)
     lot_sizes = load_lot_sizes(conn, all_symbols)
 
-    log.info(f"V9 Backtest | {len(pairs)} pairs × {len(COMBOS)} combos")
+    log.info(f"V9 Backtest | {len(pairs)} pairs × {len(COMBOS)} combos | {BACKTEST_START} to {BACKTEST_END}")
 
     all_metrics   = []
     all_trades    = []
@@ -513,6 +512,7 @@ def run_backtest() -> dict:
     best = max(combo_summary.items(), key=lambda x: x[1]['total_pnl'])
     return {
         "status":        "ok",
+        "period":        f"{BACKTEST_START} to {BACKTEST_END}",
         "pairs_tested":  len(pairs),
         "combos":        len(COMBOS),
         "total_runs":    len(all_metrics),
