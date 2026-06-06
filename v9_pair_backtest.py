@@ -5,18 +5,6 @@ Runs 10 parameter combinations on valid pairs discovered by v9_pair_discovery.py
 Uses trailing-12M EOD closing prices (1-Jun-2025 to 31-May-2026). No look-ahead bias.
 Earnings blackout: skipped for backtest (will be added in live engine).
 
-Flow per combo:
-  1. Load valid pairs from pair_universe table
-  2. Load price data for all symbols
-  3. For each pair, day by day:
-     a. Recompute hedge ratio (weekly or monthly)
-     b. Compute spread = A - beta * B
-     c. Compute rolling Z-score
-     d. Check regime filter (20-day corr >= 0.60)
-     e. Apply signal rules (entry/exit/stop/time-stop)
-  4. Compute PnL per trade (1 lot per leg, EOD close)
-  5. Store results in pair_backtest_results table
-
 Output tables: pair_backtest_results, pair_backtest_trades
 """
 
@@ -24,7 +12,7 @@ import os
 import logging
 import numpy as np
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Dict, Optional, Tuple
 from scipy import stats
 
@@ -36,12 +24,32 @@ log = logging.getLogger('v9_backtest')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # ── Locked constants ──────────────────────────────────────────────────────────
-BACKTEST_START  = '2025-06-01'   # trailing 12 months
+BACKTEST_START  = '2025-06-01'
 BACKTEST_END    = '2026-05-31'
-DISCOVERY_DATE  = '2025-06-01'   # must match v9_pair_discovery DISCOVERY_DATE
+DISCOVERY_DATE  = '2025-06-01'
 TIME_STOP_DAYS  = 20
 REGIME_CORR_MIN = 0.60
 REGIME_WINDOW   = 20
+
+
+def _f(v):
+    """Cast any numpy/Decimal scalar to native python float (None-safe)."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _i(v):
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
 
 # ── 10 Parameter Combinations ─────────────────────────────────────────────────
 COMBOS = [
@@ -138,7 +146,12 @@ def load_valid_pairs(conn) -> List[dict]:
             ORDER BY segment, correlation DESC
         """, (DISCOVERY_DATE,))
         cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
+        out = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            d['hedge_ratio'] = _f(d['hedge_ratio'])
+            out.append(d)
+        return out
 
 
 def load_prices(conn, symbols: List[str]) -> pd.DataFrame:
@@ -161,7 +174,7 @@ def load_lot_sizes(conn, symbols: List[str]) -> Dict[str, int]:
             SELECT symbol, lot_size FROM futures_universe
             WHERE symbol = ANY(%s) AND is_active = TRUE
         """, (symbols,))
-        return {r[0]: (r[1] or 1) for r in cur.fetchall()}
+        return {r[0]: int(r[1] or 1) for r in cur.fetchall()}
 
 
 def compute_hedge_ratio(s_a: np.ndarray, s_b: np.ndarray) -> Tuple[float, float]:
@@ -171,9 +184,7 @@ def compute_hedge_ratio(s_a: np.ndarray, s_b: np.ndarray) -> Tuple[float, float]
     return float(slope), float(intercept)
 
 
-def should_recompute_hedge(current_date: pd.Timestamp,
-                           last_recompute: Optional[pd.Timestamp],
-                           frequency: str) -> bool:
+def should_recompute_hedge(current_date, last_recompute, frequency: str) -> bool:
     if last_recompute is None:
         return True
     if frequency == "weekly":
@@ -201,24 +212,26 @@ def compute_profit_factor(pnls: List[float]) -> float:
     gains  = sum(p for p in pnls if p > 0)
     losses = abs(sum(p for p in pnls if p < 0))
     if losses == 0:
-        return float('inf') if gains > 0 else 0.0
-    return round(gains / losses, 4)
+        return 999.0 if gains > 0 else 0.0
+    return round(float(gains / losses), 4)
 
 
 def _calc_pnl(position: dict, exit_price_a: float, exit_price_b: float,
               lot_a: int, lot_b: int) -> Tuple[float, float, float, float]:
-    ep_a = position['entry_price_a']
-    ep_b = position['entry_price_b']
+    ep_a = float(position['entry_price_a'])
+    ep_b = float(position['entry_price_b'])
+    exit_price_a = float(exit_price_a)
+    exit_price_b = float(exit_price_b)
     if position['direction'] == 'LONG_SPREAD':
         pnl_a = (exit_price_a - ep_a) * lot_a
         pnl_b = (ep_b - exit_price_b) * lot_b
     else:
         pnl_a = (ep_a - exit_price_a) * lot_a
         pnl_b = (exit_price_b - ep_b) * lot_b
-    total_pnl = round(pnl_a + pnl_b, 2)
+    total_pnl = round(float(pnl_a + pnl_b), 2)
     notional  = ep_a * lot_a + ep_b * lot_b
-    ret_pct   = round(total_pnl / notional * 100, 4) if notional else 0.0
-    return round(pnl_a, 2), round(pnl_b, 2), total_pnl, ret_pct
+    ret_pct   = round(float(total_pnl / notional * 100), 4) if notional else 0.0
+    return round(float(pnl_a), 2), round(float(pnl_b), 2), total_pnl, ret_pct
 
 
 def _make_trade(position: dict, sym_a: str, sym_b: str,
@@ -229,25 +242,25 @@ def _make_trade(position: dict, sym_a: str, sym_b: str,
                 ret_pct: float, holding_days: int,
                 exit_reason: str, combo_id: int) -> dict:
     return {
-        'combo_id':       combo_id,
+        'combo_id':       int(combo_id),
         'symbol_a':       sym_a,
         'symbol_b':       sym_b,
         'direction':      position['direction'],
         'entry_date':     position['entry_date'],
         'exit_date':      exit_date,
-        'entry_z':        round(position['entry_z'], 4),
-        'exit_z':         round(exit_z, 4),
-        'entry_price_a':  position['entry_price_a'],
-        'entry_price_b':  position['entry_price_b'],
-        'exit_price_a':   exit_price_a,
-        'exit_price_b':   exit_price_b,
-        'lot_size_a':     lot_a,
-        'lot_size_b':     lot_b,
-        'pnl_a':          pnl_a,
-        'pnl_b':          pnl_b,
-        'total_pnl':      total_pnl,
-        'return_pct':     ret_pct,
-        'holding_days':   holding_days,
+        'entry_z':        round(_f(position['entry_z']), 4),
+        'exit_z':         round(_f(exit_z), 4),
+        'entry_price_a':  round(_f(position['entry_price_a']), 2),
+        'entry_price_b':  round(_f(position['entry_price_b']), 2),
+        'exit_price_a':   round(_f(exit_price_a), 2),
+        'exit_price_b':   round(_f(exit_price_b), 2),
+        'lot_size_a':     _i(lot_a),
+        'lot_size_b':     _i(lot_b),
+        'pnl_a':          _f(pnl_a),
+        'pnl_b':          _f(pnl_b),
+        'total_pnl':      _f(total_pnl),
+        'return_pct':     _f(ret_pct),
+        'holding_days':   _i(holding_days),
         'exit_reason':    exit_reason,
     }
 
@@ -266,23 +279,23 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
         return None, []
 
     dates    = aligned.index
-    a_prices = aligned['A'].values
-    b_prices = aligned['B'].values
+    a_prices = aligned['A'].values.astype(float)
+    b_prices = aligned['B'].values.astype(float)
     n        = len(dates)
     window   = combo['window']
-    lot_a    = lot_sizes.get(sym_a, 1)
-    lot_b    = lot_sizes.get(sym_b, 1)
+    lot_a    = int(lot_sizes.get(sym_a, 1))
+    lot_b    = int(lot_sizes.get(sym_b, 1))
 
     trades     = []
     position   = None
-    beta       = pair['hedge_ratio']
+    beta       = float(pair['hedge_ratio'])
     last_hedge = None
     spreads    = []
 
     for i in range(window, n):
         today   = dates[i].date()
-        price_a = a_prices[i]
-        price_b = b_prices[i]
+        price_a = float(a_prices[i])
+        price_b = float(b_prices[i])
 
         if should_recompute_hedge(dates[i], last_hedge, combo['hedge_recompute']):
             lookback_a = a_prices[max(0, i - 252): i]
@@ -295,8 +308,8 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
         if len(spreads) < window:
             continue
         roll   = spreads[-window:]
-        mean_s = np.mean(roll)
-        std_s  = np.std(roll)
+        mean_s = float(np.mean(roll))
+        std_s  = float(np.std(roll))
         if std_s == 0:
             continue
         z = (spread - mean_s) / std_s
@@ -366,8 +379,8 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
 
     if position is not None:
         today   = dates[-1].date()
-        price_a = a_prices[-1]
-        price_b = b_prices[-1]
+        price_a = float(a_prices[-1])
+        price_b = float(b_prices[-1])
         hold    = (today - position['entry_date']).days
         pnl_a, pnl_b, total_pnl, ret_pct = _calc_pnl(
             position, price_a, price_b, lot_a, lot_b)
@@ -391,29 +404,29 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
     cum_pnl  = list(np.cumsum(pnls))
 
     metrics = {
-        'combo_id':         combo['id'],
-        'z_entry':          combo['z_entry'],
-        'z_exit':           combo['z_exit'],
-        'z_stop':           combo['z_stop'],
-        'zscore_window':    combo['window'],
+        'combo_id':         int(combo['id']),
+        'z_entry':          float(combo['z_entry']),
+        'z_exit':           float(combo['z_exit']),
+        'z_stop':           float(combo['z_stop']),
+        'zscore_window':    int(combo['window']),
         'hedge_recompute':  combo['hedge_recompute'],
         'symbol_a':         sym_a,
         'symbol_b':         sym_b,
         'segment':          pair['segment'],
-        'total_trades':     total,
-        'win_trades':       wins,
-        'loss_trades':      max(0, total - wins - stops - tstops),
-        'stop_trades':      stops,
-        'time_stop_trades': tstops,
-        'win_rate':         round(wins / total * 100, 2),
-        'stop_rate':        round(stops / total * 100, 2),
-        'time_stop_rate':   round(tstops / total * 100, 2),
-        'total_pnl':        round(sum(pnls), 2),
+        'total_trades':     int(total),
+        'win_trades':       int(wins),
+        'loss_trades':      int(max(0, total - wins - stops - tstops)),
+        'stop_trades':      int(stops),
+        'time_stop_trades': int(tstops),
+        'win_rate':         round(float(wins / total * 100), 2),
+        'stop_rate':        round(float(stops / total * 100), 2),
+        'time_stop_rate':   round(float(tstops / total * 100), 2),
+        'total_pnl':        round(float(sum(pnls)), 2),
         'avg_return_pct':   round(float(np.mean(returns)), 4),
         'avg_holding_days': round(float(np.mean(holdings)), 1),
-        'max_drawdown':     round(compute_max_drawdown(cum_pnl), 4),
-        'sharpe_ratio':     round(compute_sharpe(returns), 4),
-        'profit_factor':    compute_profit_factor(pnls),
+        'max_drawdown':     round(float(compute_max_drawdown(cum_pnl)), 4),
+        'sharpe_ratio':     round(float(compute_sharpe(returns)), 4),
+        'profit_factor':    round(float(compute_profit_factor(pnls)), 4),
         'backtest_period':  f"{BACKTEST_START} to {BACKTEST_END}",
     }
     return metrics, trades
@@ -421,7 +434,6 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
 
 def store_results(conn, metrics_list: List[dict], all_trades: List[dict]):
     with conn.cursor() as cur:
-        # Clear prior run so results stay clean for this period
         cur.execute("DELETE FROM pair_backtest_results")
         cur.execute("DELETE FROM pair_backtest_trades")
         for m in metrics_list:
@@ -438,10 +450,6 @@ def store_results(conn, metrics_list: List[dict], all_trades: List[dict]):
                         %(time_stop_trades)s,%(win_rate)s,%(stop_rate)s,%(time_stop_rate)s,
                         %(total_pnl)s,%(avg_return_pct)s,%(avg_holding_days)s,
                         %(max_drawdown)s,%(sharpe_ratio)s,%(profit_factor)s,%(backtest_period)s)
-                ON CONFLICT (combo_id, symbol_a, symbol_b) DO UPDATE SET
-                    total_trades=EXCLUDED.total_trades,win_rate=EXCLUDED.win_rate,
-                    total_pnl=EXCLUDED.total_pnl,sharpe_ratio=EXCLUDED.sharpe_ratio,
-                    profit_factor=EXCLUDED.profit_factor,run_at=NOW()
             """, m)
         for t in all_trades:
             cur.execute("""
@@ -497,8 +505,8 @@ def run_backtest() -> dict:
 
         win_rate = round(combo_wins / combo_trades * 100, 1) if combo_trades else 0
         combo_summary[combo['id']] = {
-            'total_pnl':    round(sum(combo_pnls), 2),
-            'total_trades': combo_trades,
+            'total_pnl':    round(float(sum(combo_pnls)), 2),
+            'total_trades': int(combo_trades),
             'win_rate':     win_rate,
             'pairs_active': len(combo_pnls),
         }
