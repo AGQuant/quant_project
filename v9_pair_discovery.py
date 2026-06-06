@@ -1,19 +1,16 @@
 """
 V9 Pair Strategy — Pair Discovery
 ===================================
-Finds all valid pairs from the 209 futures universe using trailing-12M EOD data
-(1-Jun-2025 to 31-May-2026).
+Finds all valid pairs from the 209 futures universe using 18-month EOD data
+(1-Dec-2024 to 31-May-2026). Regime-robustness test window.
 
 Steps:
-  1. Load eligible universe (GVM >= 4.0, >= 200 trading days in period)
+  1. Load eligible universe (GVM >= 4.0, >= 300 trading days in period)
   2. Group by segment (same-segment pairs only)
   3. For each pair: Pearson correlation >= 0.70
   4. For passing pairs: Engle-Granger cointegration test p-value < 0.10
   5. Compute OLS hedge ratio (beta)
   6. Store results in pair_universe table
-
-Thresholds relaxed (06-Jun-2026) for paper-trading volume:
-GVM 6.0->4.0, corr 0.75->0.70, coint 0.05->0.10.
 
 Output table: pair_universe
 Usage: POST /api/v9/discover
@@ -37,11 +34,11 @@ log = logging.getLogger('v9_discovery')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-BACKTEST_START = '2025-06-01'   # trailing 12 months
+BACKTEST_START = '2024-12-01'   # 18-month regime-robustness window
 BACKTEST_END   = '2026-05-31'
-DISCOVERY_DATE = date(2025, 6, 1)   # tag for pair_universe rows (links to backtest)
-GVM_MIN        = 4.0    # relaxed from 5.5 — larger universe for trade volume
-MIN_DAYS       = 200
+DISCOVERY_DATE = date(2024, 12, 1)   # tag for pair_universe rows (links to backtest)
+GVM_MIN        = 4.0
+MIN_DAYS       = 300    # 18 months ~370 trading days; require near-full history
 CORR_MIN       = 0.70
 COINT_PVALUE   = 0.10
 
