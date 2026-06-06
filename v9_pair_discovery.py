@@ -1,19 +1,19 @@
 """
 V9 Pair Strategy — Pair Discovery
 ===================================
-Finds all valid pairs from the 209 futures universe using 2025 EOD data.
+Finds all valid pairs from the 209 futures universe using trailing-12M EOD data
+(1-Jun-2025 to 31-May-2026).
 
 Steps:
-  1. Load eligible universe (GVM >= 5.5, >= 200 trading days in 2025)
+  1. Load eligible universe (GVM >= 5.5, >= 200 trading days in period)
   2. Group by segment (same-segment pairs only)
   3. For each pair: Pearson correlation >= 0.70
   4. For passing pairs: Engle-Granger cointegration test p-value < 0.10
   5. Compute OLS hedge ratio (beta)
   6. Store results in pair_universe table
 
-Thresholds relaxed (06-Jun-2026) to widen the universe for paper-trading
-volume: GVM 6.0->5.5, corr 0.75->0.70, coint 0.05->0.10. Still statistically
-defensible — these will be re-tightened once live edge is confirmed.
+Thresholds relaxed (06-Jun-2026) for paper-trading volume:
+GVM 6.0->5.5, corr 0.75->0.70, coint 0.05->0.10.
 
 Output table: pair_universe
 Usage: POST /api/v9/discover
@@ -37,12 +37,13 @@ log = logging.getLogger('v9_discovery')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-BACKTEST_START = '2025-01-01'
-BACKTEST_END   = '2025-12-31'
-GVM_MIN        = 5.5    # relaxed from 6.0 — wider universe for paper-trade volume
+BACKTEST_START = '2025-06-01'   # trailing 12 months
+BACKTEST_END   = '2026-05-31'
+DISCOVERY_DATE = date(2025, 6, 1)   # tag for pair_universe rows (links to backtest)
+GVM_MIN        = 5.5
 MIN_DAYS       = 200
-CORR_MIN       = 0.70   # relaxed from 0.75
-COINT_PVALUE   = 0.10   # relaxed from 0.05 — still statistically valid
+CORR_MIN       = 0.70
+COINT_PVALUE   = 0.10
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS pair_universe (
@@ -203,7 +204,7 @@ def discover_pairs(conn) -> List[dict]:
                 'hedge_intercept': round(intercept, 4),
                 'mean_spread':     round(mean_spread, 4),
                 'std_spread':      round(std_spread, 4),
-                'discovery_date':  date(2025, 1, 1),
+                'discovery_date':  DISCOVERY_DATE,
             })
             log.info(f"  VALID: {sym_a}/{sym_b} | corr={corr:.3f} "
                      f"p={p_value:.4f} β={beta:.4f}")
@@ -215,9 +216,8 @@ def discover_pairs(conn) -> List[dict]:
 
 
 def store_pairs(conn, pairs: List[dict]) -> int:
-    # Clean replace — deactivate old pairs first so relaxed run fully refreshes
     with conn.cursor() as cur:
-        cur.execute("UPDATE pair_universe SET is_active = FALSE WHERE discovery_date = '2025-01-01'")
+        cur.execute("UPDATE pair_universe SET is_active = FALSE")
     conn.commit()
     if not pairs:
         log.warning("No valid pairs to store")
