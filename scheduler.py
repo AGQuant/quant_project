@@ -14,14 +14,10 @@ The earnings job calls main's HTTP endpoint /api/admin/load_earnings_from_screen
 ADR/PCR compute (_compute_and_store_adr/_pcr) live HERE now and are ALSO imported
 back by main.py so the manual endpoint /api/daily/compute_metrics keeps working.
 
-04-Jun-2026 fix: PCR subquery referenced invalid column `ts2` (table alias oc2) —
-corrected to `MAX(oc2.ts)`. Bug pre-existed in original main.py; only surfaced on
-the manual compute_daily_metrics endpoint (returned 500 -> non-JSON).
-
-06-Jun-2026 fix: Global indices fetch moved from 07:00 to 06:00 IST, runs EVERY day
-including weekends (Gold/Silver trade 24x5 — need fresh data for Daily Digest).
-Global intraday fetch throttled to every 30 min and restricted to 06:00-23:30 IST
-(was firing every 5 min loop tick with no guard).
+04-Jun-2026 fix: PCR subquery referenced invalid column `ts2` — corrected.
+06-Jun-2026 fix: Global indices fetch moved to 06:00 IST, runs every day incl weekends.
+  Global intraday: 5-min fetch, restricted to 06:00-23:30 IST (time guard added).
+  Intraday tickers expanded: Gold, Silver, WTI, Brent, Natural Gas, Bitcoin.
 """
 
 import os
@@ -145,7 +141,7 @@ def _upsert_cmp(cmp_map):
         log.error(f"_upsert_cmp failed: {e}")
 
 
-# ── ADR / PCR compute (also imported back by main.py for manual endpoint) ───
+# ── ADR / PCR compute (also imported back by main.py for manual endpoint) ────
 
 def _compute_and_store_adr(conn) -> dict:
     with conn.cursor() as cur:
@@ -398,7 +394,7 @@ def _bg_fetch_global():
 async def _task_fetch_global():
     if _global_fetched_today == _ist_now().date():
         return
-    log.info("06:00 IST: Fetching global indices (every day incl weekends — Gold/Silver 24x5)")
+    log.info("06:00 IST: Fetching global indices (every day incl weekends — Gold/Silver/BTC 24x5/7)")
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
 
 
@@ -414,7 +410,7 @@ def _bg_fetch_global_intraday():
                 global_indices.prune_global_intraday(conn, days=7)
             except Exception as e:
                 log.warning(f"global_intraday prune failed: {e}")
-        log.info(f"global_intraday done: {res.get('stored')} bars")
+        log.info(f"global_intraday done: {res.get('stored')} bars ({res.get('symbols')} symbols)")
     except Exception as e:
         log.error(f"global_intraday failed: {e}")
     finally:
@@ -422,7 +418,8 @@ def _bg_fetch_global_intraday():
 
 
 async def _task_fetch_global_intraday():
-    # Gold/Silver trade 24x5 — restrict to 06:00-23:30 IST only, throttled to 30 min
+    # 6 symbols (Gold/Silver/WTI/Brent/NG/BTC) trade 24x5 or 24x7
+    # Fetch every 5 min but restrict to 06:00-23:30 IST to avoid midnight spam
     _n = _ist_now()
     if not (6 <= _n.hour <= 23):
         return
@@ -569,12 +566,12 @@ async def _scheduler():
     while True:
         try:
             now = _ist_now(); trading_day = is_trading_day(now.date())
-            # Runs every day including weekends (refresh check + global indices)
+            # Runs every day including weekends
             if now.hour == 6 and now.minute < 5:
                 await _task_check_refresh_due()
-                await _task_fetch_global()   # daily incl weekends — Gold/Silver 24x5
-            # Global intraday every 30 min between 06:00-23:30 IST (incl weekends)
-            if now.minute % 30 < 5: await _task_fetch_global_intraday()
+                await _task_fetch_global()       # incl weekends — Gold/Silver/BTC 24x5/7
+            # Global intraday every 5 min, 06:00-23:30 IST (incl weekends)
+            await _task_fetch_global_intraday()
             if trading_day and now.hour == 9 and now.minute < 5: await _task_load_earnings_daily()
             if trading_day and now.hour == 9 and now.minute < 10: await _task_build_cache()
             if _is_market_hours(): await _task_refresh_cmp()
