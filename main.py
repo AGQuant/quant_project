@@ -35,6 +35,7 @@ from fyers_endpoints import router as fyers_router
 from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
 from nse_holidays import is_trading_day, is_nse_holiday
+# v8_live archived — superseded by v8_signal_writer v2.0.0
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 import yahoo_ondemand
@@ -48,7 +49,9 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.20
+# Scorr / Project Quant — main.py v2.9.21
+# v2.9.21: v8_live archived. Single live engine = v8_signal_writer.
+#   v8_build_cache + v8_run_live MCP tools + endpoints removed.
 # v2.9.20: V9 Pair Strategy wired — v9_endpoints router +
 #   4 MCP tools (v9_discover, v9_backtest, v9_results, v9_best_combo).
 #   Files: v9_pair_discovery.py, v9_pair_backtest.py, v9_endpoints.py
@@ -61,7 +64,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR
 # ============================================================
 
-VERSION = "2.9.20"
+VERSION = "2.9.21"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -213,7 +216,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.20)")
+        log.info("Tables ready (v2.9.21)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -572,15 +575,7 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
     interesting = ["SCREENER_EMAIL","SCREENER_PASSWORD","GITHUB_TOKEN","GITHUB_REPO","ADMIN_TOKEN","DATABASE_URL","DEPLOY_GUARD","RAILWAY_PUBLIC_DOMAIN"]
     return {"version": VERSION, "all_keys_count": len(keys), "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k,""))} for k in interesting}}
 
-@app.post("/api/v8/build_cache")
-def v8_build_cache(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    with get_conn() as conn: return build_history_cache(conn)
-
-@app.post("/api/v8/run_live")
-def v8_run_live(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token)
-    with get_conn() as conn: return run_live_tick(conn)
+# /api/v8/build_cache + /api/v8/run_live removed — v8_live archived
 
 @app.post("/api/v8/run_signal_writer")
 def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
@@ -952,8 +947,6 @@ MCP_TOOLS = [
     {"name":"health_report","description":"Full Scorr system health report card.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections, traffic-light per section.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"v8_build_cache","description":"V8 LIVE: build v8_history_cache.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"v8_run_live","description":"V8 LIVE: run one live tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_momentum","description":"GVM: recompute daily momentum (M) for all stocks from raw_prices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
@@ -978,6 +971,7 @@ MCP_TOOLS = [
     {"name":"get_v8_metrics","description":"Get computed V8 metrics for one stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_v8_metrics_all","description":"Get all metrics for the full universe (latest date).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"get_v8_live_metrics","description":"Get real-time CMP, day%, hourly gain for the universe.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v8_run_signal_writer","description":"V8: manually trigger live signal writer (19 metrics + qualified).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_feeds","description":"Status dashboard for all data feeds.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"env_check","description":"Diagnostic: which env vars are visible.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_sql","description":"Run any SQL query on Railway PostgreSQL.","inputSchema":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}},
@@ -1025,8 +1019,6 @@ async def _call_tool(name, args):
         elif name == "health_report": r = await client.get(f"{BASE_URL}/api/health/report"); return r.json()
         elif name == "run_diagnosis": r = await client.get(f"{BASE_URL}/api/diagnosis"); return r.json()
         elif name == "digest_daily": r = await client.get(f"{BASE_URL}/api/digest/daily"); return r.json()
-        elif name == "v8_build_cache": r = await client.post(f"{BASE_URL}/api/v8/build_cache", headers=h); return r.json()
-        elif name == "v8_run_live": r = await client.post(f"{BASE_URL}/api/v8/run_live", headers=h); return r.json()
         elif name == "run_momentum": r = await client.post(f"{BASE_URL}/api/momentum/run", headers=h); return r.json()
         elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum",True)}, headers=h); return r.json()
         elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days",180)}); return r.json()
@@ -1059,6 +1051,7 @@ async def _call_tool(name, args):
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
         elif name == "get_v8_metrics_all": r = await client.get(f"{BASE_URL}/api/v8/metrics/all"); return r.json()
         elif name == "get_v8_live_metrics": r = await client.get(f"{BASE_URL}/api/v8/live_metrics"); return r.json()
+        elif name == "v8_run_signal_writer": r = await client.post(f"{BASE_URL}/api/v8/run_signal_writer", headers=h); return r.json()
         elif name == "health_feeds": r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
         elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers=h); return r.json()
         elif name == "run_sql":
