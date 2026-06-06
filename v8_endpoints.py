@@ -1,39 +1,30 @@
 """
 V8 endpoints — Quant Long-Short Basket Strategy
 
-Endpoints:
-  GET /api/v8/market_mood            — ADR + Nifty D/W/M + auto Buy/Sell slot allocation
-  GET /api/v8/qualified/{basket}     — Pure read from v8_qualified (compute-on-write)
-  GET /api/v8/filter_config/{basket} — Min/Max thresholds per basket
-  GET /api/v8/funnel/{basket}        — Waterfall step counts from v8_funnel_counts
-  GET /api/v8/adr                    — Quick ADR-only read from adr_daily
-  GET /api/v8/raw                    — All active futures x 21 metrics (raw data tab)
-  GET /api/v8/sell_overbought        — Failed breakout / exhaustion reversal (live compute)
-  GET /api/v8/positions              — Open trades from personal_journal (V8 native)
-  GET /api/v8/trades                 — Closed trades from personal_journal (V8 native)
+FILTER_CONFIG reorder (06-Jun-2026):
+  Filters ordered by descending kill rate (biggest drop first) for clean waterfall.
+  Kill rates computed from 06-Jun-2026 actual funnel counts (210 universe).
 
-Architecture: compute-on-write.
-  - v8_signal_writer.py writes v8_qualified every 5-min during market hours
-  - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
-  - This file = pure reads only. Zero compute on the read path.
+  buy_reversal (11 filters):
+    gvm(164) → year_ret(2) → dma_200(20) → dma_50(14) → month_ret(5) →
+    week_ret(3) → rsi_month(1) → rsi_weekly(0) → day_change(1) →
+    sector_week → sector_month
+  buy_momentum (11 filters):
+    gvm(164) → year_ret(2) → dma_50(14) → dma_200(10) → rsi_month(9) →
+    rsi_weekly(4) → month_ret(4) → week_ret(2) → day_change(0) →
+    sector_week → sector_month
+  sell_reversal (9 filters):
+    dma_200(86) → dma_50(24) → rsi_weekly(23) → rsi_month(2) →
+    week_ret(6) → month_ret(2) → day_change → sector_week → sector_month
+  sell_momentum (12 filters):
+    dma_200(97) → dma_50(29) → dma_20(30) → rsi_month(12) → daily_rsi(14) →
+    rsi_weekly(0) → week_ret(3) → day_change(4) → month_ret(1) →
+    week_index_52(7) → sector_week → sector_month
 
-FILTER_CONFIG changes (06-Jun-2026):
-  - sector_week + sector_month added to all 4 directional baskets
-    BUY:  sector_week [0,4], sector_month [0,6]
-    SELL: sector_week [-4,0], sector_month [-6,0]
-  - sell_reversal: range_3d removed, day_change [-6,0] added
-  - sell_momentum: range_3d removed (already has day_change [-3,0])
+  sector_week/month NULL until Monday 15:45 GVM engine run.
+  NULL filter = all stocks pass (no kill).
 
-day_change formula (05-Jun-2026):
-  EOD:  (latest_close / close_2_days_ago - 1) * 100
-  Live: (cmp / close_2_days_ago - 1) * 100
-  2-day momentum. Example: CGPOWER 932 / 906.65 = +2.79%
-
-Market mood — LIVE GATE (05-Jun-2026):
-  During market hours (intraday_prices has today's data) the gate computes ADR + Nifty
-  D/W/M from the LIVE Fyers feed (intraday close vs raw_prices prior closes), instead of
-  yesterday's EOD adr_daily. After close / no intraday it falls back to adr_daily + raw_prices.
-  source field = 'live_intraday' or 'eod_fallback'.
+day_change formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -47,13 +38,12 @@ router = APIRouter(prefix="/api/v8", tags=["v8"])
 def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
 
-
 def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
 # ── Filter configs ────────────────────────────────────────────────────────────
-# Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
+# Ordered by descending kill rate for optimal funnel waterfall display.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -61,10 +51,10 @@ FILTER_CONFIG = {
         "year_return":  [-1.5, None],
         "dma_200":      [1.5,  20.0],
         "dma_50":       [1.5,  8.0],
-        "rsi_month":    [58.5, 75.0],
-        "rsi_weekly":   [50.0, 67.5],
         "month_return": [0.0,  7.2],
         "week_return":  [1.5,  3.0],
+        "rsi_month":    [58.5, 75.0],
+        "rsi_weekly":   [50.0, 67.5],
         "day_change":   [0.0,  2.4],
         "sector_week":  [0.0,  4.0],
         "sector_month": [0.0,  6.0],
@@ -72,8 +62,8 @@ FILTER_CONFIG = {
     "buy_momentum": {
         "gvm_score":    [7.0,  10.0],
         "year_return":  [0.0,  None],
-        "dma_200":      [7.0,  50.0],
         "dma_50":       [6.5,  25.0],
+        "dma_200":      [7.0,  50.0],
         "rsi_month":    [71.5, 80.0],
         "rsi_weekly":   [71.5, 80.0],
         "month_return": [3.0,  14.0],
@@ -85,10 +75,10 @@ FILTER_CONFIG = {
     "sell_reversal": {
         "dma_200":      [-30.0, 2.0],
         "dma_50":       [-20.0, 2.0],
-        "rsi_month":    [20.0,  60.0],
         "rsi_weekly":   [10.0,  45.0],
-        "month_return": [-20.0, 2.0],
+        "rsi_month":    [20.0,  60.0],
         "week_return":  [-6.0,  3.0],
+        "month_return": [-20.0, 2.0],
         "day_change":   [-6.0,  0.0],
         "sector_week":  [-4.0,  0.0],
         "sector_month": [-6.0,  0.0],
@@ -98,11 +88,11 @@ FILTER_CONFIG = {
         "dma_50":       [-30.0, 0.0],
         "dma_20":       [None,  -2.0],
         "rsi_month":    [10.0,  45.0],
-        "rsi_weekly":   [5.0,   60.0],
         "daily_rsi":    [None,  40.0],
-        "month_return": [-30.0, 0.0],
+        "rsi_weekly":   [5.0,   60.0],
         "week_return":  [-8.0,  0.0],
         "day_change":   [-3.0,  0.0],
+        "month_return": [-30.0, 0.0],
         "week_index_52":[None,  20.0],
         "sector_week":  [-4.0,  0.0],
         "sector_month": [-6.0,  0.0],
@@ -133,11 +123,12 @@ _BLACKOUT_SQL = """
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _pivot_s1_s2(prev_high, prev_low, prev_close):
-    pp = (prev_high + prev_low + prev_close) / 3
-    s1 = pp - (prev_high - pp)
-    s2 = pp - (prev_high - prev_low)
-    return pp, s1, s2
+def _passes_filter(value, mn, mx) -> bool:
+    if value is None: return False
+    v = float(value)
+    if mn is not None and v < mn: return False
+    if mx is not None and v > mx: return False
+    return True
 
 
 def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
@@ -187,15 +178,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-def _passes_filter(value, mn, mx) -> bool:
-    if value is None: return False
-    v = float(value)
-    if mn is not None and v < mn: return False
-    if mx is not None and v > mx: return False
-    return True
-
-
-# ── Market breadth: live during market hours, EOD otherwise ──────────────────
+# ── Market breadth ────────────────────────────────────────────────────────────
 
 def _live_breadth(cur):
     cur.execute("""
@@ -327,7 +310,8 @@ def market_mood():
                 "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": 15,
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
-                               "unchanged": unchanged, "adr_date": adr_date, "source": breadth_source},
+                               "unchanged": unchanged, "adr_date": adr_date,
+                               "source": breadth_source},
             }
     except Exception as e:
         raise HTTPException(500, f"market_mood failed: {e}")
@@ -391,7 +375,8 @@ def qualified(basket: str, limit: int = 50):
             source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
 
         meta = BASKET_META.get(basket, {})
-        return {"basket": basket, "count": len(rows), "stocks": rows, "source": source_note, **meta}
+        return {"basket": basket, "count": len(rows), "stocks": rows,
+                "source": source_note, **meta}
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
@@ -416,6 +401,7 @@ def funnel_counts(basket: str):
             return {"basket": basket, "score_date": str(date.today()),
                     "counts": counts, "source": "precomputed"}
 
+        # Live fallback
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
@@ -499,11 +485,11 @@ def sell_overbought(limit: int = 50):
                 ),
                 latest AS (
                     SELECT pw.symbol,
-                           pw.close   AS entry,
+                           pw.close AS entry,
                            pw.ma9, pw.ma21, pw.vol_avg10, pw.volume,
                            pw.prev_high, pw.prev_low, pw.prev_close,
-                           ROUND(((pw.ma9 - pw.ma21) / NULLIF(pw.ma21, 0) * 100)::numeric, 2)  AS ma9_vs_ma21,
-                           ROUND((pw.volume / NULLIF(pw.vol_avg10, 0))::numeric, 2)             AS vol_ratio,
+                           ROUND(((pw.ma9 - pw.ma21) / NULLIF(pw.ma21, 0) * 100)::numeric, 2) AS ma9_vs_ma21,
+                           ROUND((pw.volume / NULLIF(pw.vol_avg10, 0))::numeric, 2)            AS vol_ratio,
                            ROUND((((pw.prev_high + pw.prev_low + pw.prev_close) / 3)
                                - (pw.prev_high - (pw.prev_high + pw.prev_low + pw.prev_close) / 3))::numeric, 2) AS s1,
                            ROUND((((pw.prev_high + pw.prev_low + pw.prev_close) / 3)
@@ -512,9 +498,8 @@ def sell_overbought(limit: int = 50):
                     WHERE pw.rn = 1 AND pw.ma21 IS NOT NULL AND pw.volume > 0
                 ),
                 filtered AS (
-                    SELECT l.*,
-                           vm.dma_200, vm.week_index_52, vm.rsi_month, vm.daily_rsi,
-                           vm.day_change, vm.gvm_score
+                    SELECT l.*, vm.dma_200, vm.week_index_52, vm.rsi_month,
+                           vm.daily_rsi, vm.day_change, vm.gvm_score
                     FROM latest l
                     JOIN v8_metrics vm ON vm.symbol = l.symbol
                      AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
@@ -531,10 +516,10 @@ def sell_overbought(limit: int = 50):
                       )
                 )
                 SELECT symbol,
-                    ROUND(entry::numeric, 2)                          AS entry,
-                    s1                                                AS target,
-                    ROUND((entry + (entry - s1))::numeric, 2)         AS stop,
-                    ROUND(((entry - s1) / NULLIF(entry, 0) * 100)::numeric, 2) AS tgt_pct,
+                    ROUND(entry::numeric, 2)                                                    AS entry,
+                    s1                                                                          AS target,
+                    ROUND((entry + (entry - s1))::numeric, 2)                                  AS stop,
+                    ROUND(((entry - s1) / NULLIF(entry, 0) * 100)::numeric, 2)                 AS tgt_pct,
                     dma_200, week_index_52, ma9_vs_ma21, vol_ratio,
                     day_change,
                     ROUND(rsi_month::numeric, 1)  AS rsi_month,
@@ -573,8 +558,8 @@ def adr_only():
             """)
             r = cur.fetchone()
         if not r:
-            return {"adr": 0.0, "advances": 0, "declines": 0, "unchanged": 0,
-                    "pass": False, "note": "adr_daily empty", "source": "eod_fallback"}
+            return {"adr": 0.0, "pass": False, "note": "adr_daily empty",
+                    "source": "eod_fallback"}
         price_date, adv, dec, unc, adr_val = r
         adr = float(adr_val) if adr_val else 0.0
         return {"price_date": str(price_date), "adr": adr,
@@ -583,10 +568,6 @@ def adr_only():
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  LIVE DOMESTIC INDICES — for digest
-# ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/domestic_live")
 def domestic_live():
@@ -601,7 +582,6 @@ def domestic_live():
                 """, (sym,))
                 pc = cur.fetchone()
                 prev_close = float(pc[0]) if pc and pc[0] is not None else None
-
                 cur.execute("""
                     SELECT
                         (SELECT open  FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts ASC  LIMIT 1) AS o,
@@ -615,9 +595,9 @@ def domestic_live():
                     o, h, l, c = r[0], r[1], r[2], r[3]
                     chg = round((float(c) / prev_close - 1) * 100, 2)
                     out[sym] = {"price_date": str(date.today()),
-                                "open": round(float(o), 2) if o is not None else None,
-                                "high": round(float(h), 2) if h is not None else None,
-                                "low":  round(float(l), 2) if l is not None else None,
+                                "open": round(float(o), 2) if o else None,
+                                "high": round(float(h), 2) if h else None,
+                                "low":  round(float(l), 2) if l else None,
                                 "close": round(float(c), 2),
                                 "prev_close": round(prev_close, 2),
                                 "chg_pct": chg, "source": "live_intraday"}
@@ -633,37 +613,32 @@ def domestic_live():
                     e = cur.fetchone()
                     if e:
                         out[sym] = {"price_date": e[0],
-                                    "open": round(float(e[1]), 2) if e[1] is not None else None,
-                                    "high": round(float(e[2]), 2) if e[2] is not None else None,
-                                    "low":  round(float(e[3]), 2) if e[3] is not None else None,
-                                    "close": round(float(e[4]), 2) if e[4] is not None else None,
-                                    "chg_pct": round(float(e[5]), 2) if e[5] is not None else None,
+                                    "open": round(float(e[1]), 2) if e[1] else None,
+                                    "high": round(float(e[2]), 2) if e[2] else None,
+                                    "low":  round(float(e[3]), 2) if e[3] else None,
+                                    "close": round(float(e[4]), 2) if e[4] else None,
+                                    "chg_pct": round(float(e[5]), 2) if e[5] else None,
                                     "source": "eod_fallback"}
         return {"as_of": _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"), "indices": out}
     except Exception as e:
         raise HTTPException(500, f"domestic_live failed: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  PERSONAL JOURNAL — V8 native open + closed trades
-# ══════════════════════════════════════════════════════════════════════════════
-
 @router.get("/positions")
 def v8_positions(limit: int = 100):
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT
-                    pj.id, pj.trade_date, pj.entry_time, pj.symbol, pj.direction,
-                    pj.entry_price, pj.qty, pj.sl, pj.target,
-                    pj.v8_basket, pj.v8_signal_match, pj.setup_quality,
-                    pj.rule_score_total, pj.notes,
-                    COALESCE(cp.cmp, pj.entry_price) AS cmp,
-                    CASE
-                        WHEN UPPER(pj.direction) = 'LONG'  THEN ROUND(((COALESCE(cp.cmp, pj.entry_price) - pj.entry_price) * pj.qty)::numeric, 2)
-                        WHEN UPPER(pj.direction) = 'SHORT' THEN ROUND(((pj.entry_price - COALESCE(cp.cmp, pj.entry_price)) * pj.qty)::numeric, 2)
-                        ELSE 0
-                    END AS unrealised_pnl
+                SELECT pj.id, pj.trade_date, pj.entry_time, pj.symbol, pj.direction,
+                       pj.entry_price, pj.qty, pj.sl, pj.target,
+                       pj.v8_basket, pj.v8_signal_match, pj.setup_quality,
+                       pj.rule_score_total, pj.notes,
+                       COALESCE(cp.cmp, pj.entry_price) AS cmp,
+                       CASE
+                           WHEN UPPER(pj.direction) = 'LONG'  THEN ROUND(((COALESCE(cp.cmp, pj.entry_price) - pj.entry_price) * pj.qty)::numeric, 2)
+                           WHEN UPPER(pj.direction) = 'SHORT' THEN ROUND(((pj.entry_price - COALESCE(cp.cmp, pj.entry_price)) * pj.qty)::numeric, 2)
+                           ELSE 0
+                       END AS unrealised_pnl
                 FROM personal_journal pj
                 LEFT JOIN cmp_prices cp ON cp.symbol = pj.symbol
                 WHERE pj.exit_time IS NULL
@@ -684,12 +659,13 @@ def v8_trades(limit: int = 200):
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT
-                    pj.id, pj.trade_date, pj.entry_time, pj.exit_time, pj.symbol, pj.direction,
-                    pj.entry_price AS entry, pj.exit_price AS exit, pj.qty, pj.sl, pj.target,
-                    pj.pnl, pj.result, pj.holding_days,
-                    pj.v8_basket, pj.v8_signal_match, pj.setup_quality,
-                    pj.rule_score_total, pj.rule_violations, pj.lesson, pj.notes
+                SELECT pj.id, pj.trade_date, pj.entry_time, pj.exit_time,
+                       pj.symbol, pj.direction,
+                       pj.entry_price AS entry, pj.exit_price AS exit,
+                       pj.qty, pj.sl, pj.target,
+                       pj.pnl, pj.result, pj.holding_days,
+                       pj.v8_basket, pj.v8_signal_match, pj.setup_quality,
+                       pj.rule_score_total, pj.rule_violations, pj.lesson, pj.notes
                 FROM personal_journal pj
                 WHERE pj.exit_time IS NOT NULL
                 ORDER BY pj.exit_time DESC
