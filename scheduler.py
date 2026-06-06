@@ -17,6 +17,11 @@ back by main.py so the manual endpoint /api/daily/compute_metrics keeps working.
 04-Jun-2026 fix: PCR subquery referenced invalid column `ts2` (table alias oc2) —
 corrected to `MAX(oc2.ts)`. Bug pre-existed in original main.py; only surfaced on
 the manual compute_daily_metrics endpoint (returned 500 -> non-JSON).
+
+06-Jun-2026 fix: Global indices fetch moved from 07:00 to 06:00 IST, runs EVERY day
+including weekends (Gold/Silver trade 24x5 — need fresh data for Daily Digest).
+Global intraday fetch throttled to every 30 min and restricted to 06:00-23:30 IST
+(was firing every 5 min loop tick with no guard).
 """
 
 import os
@@ -140,7 +145,7 @@ def _upsert_cmp(cmp_map):
         log.error(f"_upsert_cmp failed: {e}")
 
 
-# ── ADR / PCR compute (also imported back by main.py for manual endpoint) ───────
+# ── ADR / PCR compute (also imported back by main.py for manual endpoint) ───
 
 def _compute_and_store_adr(conn) -> dict:
     with conn.cursor() as cur:
@@ -200,7 +205,7 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ─────────────────────────────────────────────────────────────────
+# ── State flags ───────────────────────────────────────────────────────────────
 _raw_prices_updated_today: Optional[date] = None
 _earnings_loaded_today: Optional[date] = None
 _yahoo_daily_running: bool = False
@@ -225,7 +230,7 @@ _daily_metrics_running: bool = False
 _refresh_check_ran_today: Optional[date] = None
 
 
-# ── Background tasks ─────────────────────────────────────────────────────────────
+# ── Background tasks ──────────────────────────────────────────────────────────
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
         return
@@ -393,7 +398,7 @@ def _bg_fetch_global():
 async def _task_fetch_global():
     if _global_fetched_today == _ist_now().date():
         return
-    log.info("07:00 IST: Fetching global indices")
+    log.info("06:00 IST: Fetching global indices (every day incl weekends — Gold/Silver 24x5)")
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
 
 
@@ -417,6 +422,10 @@ def _bg_fetch_global_intraday():
 
 
 async def _task_fetch_global_intraday():
+    # Gold/Silver trade 24x5 — restrict to 06:00-23:30 IST only, throttled to 30 min
+    _n = _ist_now()
+    if not (6 <= _n.hour <= 23):
+        return
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global_intraday))
 
 
@@ -553,16 +562,19 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ────────────────────────────────────────────────────────────────────────
+# ── Loops ─────────────────────────────────────────────────────────────────────
 async def _scheduler():
     log.info("Scheduler started (scheduler.py)")
     asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now(); trading_day = is_trading_day(now.date())
-            if now.hour == 6 and now.minute < 5: await _task_check_refresh_due()
-            if now.hour == 7 and now.minute < 5: await _task_fetch_global()
-            await _task_fetch_global_intraday()
+            # Runs every day including weekends (refresh check + global indices)
+            if now.hour == 6 and now.minute < 5:
+                await _task_check_refresh_due()
+                await _task_fetch_global()   # daily incl weekends — Gold/Silver 24x5
+            # Global intraday every 30 min between 06:00-23:30 IST (incl weekends)
+            if now.minute % 30 < 5: await _task_fetch_global_intraday()
             if trading_day and now.hour == 9 and now.minute < 5: await _task_load_earnings_daily()
             if trading_day and now.hour == 9 and now.minute < 10: await _task_build_cache()
             if _is_market_hours(): await _task_refresh_cmp()
