@@ -1,5 +1,8 @@
 """
-load_window.py — load 5m candles into a research table.
+load_window.py — load 5m candles into a one-time test table.
+
+These tables are SEPARATE from the live 7-day rolling intraday_prices feed.
+Nothing here touches the live system.
 
 Two modes:
   ONE WINDOW:
@@ -9,8 +12,8 @@ Two modes:
     python research/load_window.py NSE:NIFTYBANK-INDEX year
 
 Target table is chosen by symbol:
-  NSE:NIFTY50-INDEX    -> nifty_5m_research
-  NSE:NIFTYBANK-INDEX  -> banknifty_5m_research
+  NSE:NIFTY50-INDEX    -> nifty_5m_test_data
+  NSE:NIFTYBANK-INDEX  -> banknifty_5m_test_data
 """
 import os
 import sys
@@ -25,8 +28,8 @@ BATCH = 500
 WINDOW_DAYS = 100
 
 TABLE_FOR = {
-    "NSE:NIFTY50-INDEX": "nifty_5m_research",
-    "NSE:NIFTYBANK-INDEX": "banknifty_5m_research",
+    "NSE:NIFTY50-INDEX": "nifty_5m_test_data",
+    "NSE:NIFTYBANK-INDEX": "banknifty_5m_test_data",
 }
 
 
