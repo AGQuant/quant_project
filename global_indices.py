@@ -1,14 +1,25 @@
 """
-Global Indices — Scorr V8 / Daily Digest gap #1
-================================================
-Fetches daily close + prev close for global indices, commodities, currency
+Global Indices — Scorr V8 / Daily Digest
+=========================================
+Fetches daily close + prev close for global indices, commodities, currency, crypto
 via Yahoo CHART API one-at-a-time (proven reliable; batch yfinance is BROKEN).
 
 Feeds Daily Digest section: OVERNIGHT SCORECARD.
-Table: global_indices (UPSERT on symbol, quote_date).
+Table: global_indices (UPSERT on symbol, quote_date) — 5-year EOD rolling.
 
-Wired into main.py: daily 07:00 IST scheduler + /api/global + get_global MCP tool.
-Standalone:  py -3.11 -c "import asyncio,global_indices as g; print(asyncio.run(g.fetch_global_indices(g.get_conn_from_env())))"
+EOD tickers (16): Dow, S&P, Nasdaq, VIX, Nikkei, FTSE, DAX, Shanghai,
+                  Brent, WTI, Gold, Silver, Natural Gas, Bitcoin, USDINR, DXY
+
+Intraday tickers (6, 5-min, 7-day rolling):
+  Gold, Silver, WTI, Brent, Natural Gas, Bitcoin
+  (all trade 24x5 or 24x7 — need live data outside NSE hours)
+
+Wired into scheduler.py:
+  - EOD fetch: 06:00 IST daily (incl weekends — commodities/crypto trade 24x5/7)
+  - Intraday fetch: every 5 min, 06:00-23:30 IST
+
+Standalone:
+  py -3.11 -c "import asyncio,global_indices as g; print(asyncio.run(g.fetch_global_indices(g.get_conn_from_env())))"
 """
 import os
 import asyncio
@@ -21,21 +32,28 @@ import psycopg
 
 log = logging.getLogger("scorr.global_indices")
 
+# ── EOD tickers — 5yr history + daily close ───────────────────────────────────
 GLOBAL_TICKERS = [
-    ("^DJI", "Dow", "index"),
-    ("^GSPC", "S&P 500", "index"),
-    ("^IXIC", "Nasdaq", "index"),
-    ("^VIX", "US VIX", "volatility"),
-    ("^N225", "Nikkei", "index"),
-    ("^FTSE", "FTSE", "index"),
-    ("^GDAXI", "DAX", "index"),
-    ("000001.SS", "Shanghai", "index"),
-    ("BZ=F", "Brent", "commodity"),
-    ("CL=F", "WTI", "commodity"),
-    ("GC=F", "Gold", "commodity"),
-    ("SI=F", "Silver", "commodity"),
-    ("INR=X", "USDINR", "currency"),
-    ("DX-Y.NYB", "DXY", "currency"),
+    # Indices
+    ("^DJI",      "Dow",         "index"),
+    ("^GSPC",     "S&P 500",     "index"),
+    ("^IXIC",     "Nasdaq",      "index"),
+    ("^VIX",      "US VIX",      "volatility"),
+    ("^N225",     "Nikkei",      "index"),
+    ("^FTSE",     "FTSE",        "index"),
+    ("^GDAXI",    "DAX",         "index"),
+    ("000001.SS", "Shanghai",    "index"),
+    # Commodities
+    ("BZ=F",      "Brent",       "commodity"),
+    ("CL=F",      "WTI",         "commodity"),
+    ("GC=F",      "Gold",        "commodity"),
+    ("SI=F",      "Silver",      "commodity"),
+    ("NG=F",      "Natural Gas", "commodity"),
+    # Crypto
+    ("BTC-USD",   "Bitcoin",     "crypto"),
+    # Currency
+    ("INR=X",     "USDINR",      "currency"),
+    ("DX-Y.NYB",  "DXY",         "currency"),
 ]
 
 DDL = """
@@ -73,9 +91,9 @@ async def fetch_global_indices(conn) -> dict:
                 r.raise_for_status()
                 meta = r.json()["chart"]["result"][0]["meta"]
                 price = meta.get("regularMarketPrice")
-                prev = meta.get("chartPreviousClose") or meta.get("previousClose")
-                chg = round((price - prev) / prev * 100, 2) if (price and prev) else None
-                ts = meta.get("regularMarketTime")
+                prev  = meta.get("chartPreviousClose") or meta.get("previousClose")
+                chg   = round((price - prev) / prev * 100, 2) if (price and prev) else None
+                ts    = meta.get("regularMarketTime")
                 qdate = ((datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)).date()
                          if ts else (datetime.utcnow() + timedelta(hours=5, minutes=30)).date())
                 rows.append((symbol, name, cat, price, prev, chg, qdate))
@@ -106,7 +124,7 @@ async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> d
     """One-time: pull `years` of DAILY closes for every GLOBAL_TICKER from the
     Yahoo chart API (range=Ny, interval=1d) and store one dated row per trading
     day (price=close, prev_close=prior close, chg_pct). Mirrors the equity
-    raw_prices 5yr EOD history, but global series only need close + chg%.
+    raw_prices 5yr EOD history.
 
     clean=True does a CLEAN-REPLACE: erase ALL existing global_indices rows
     first (removes stale seeds + partial data), then insert the fresh series.
@@ -127,16 +145,16 @@ async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> d
             try:
                 r = await client.get(url)
                 r.raise_for_status()
-                res = r.json()["chart"]["result"][0]
-                ts = res.get("timestamp", []) or []
+                res    = r.json()["chart"]["result"][0]
+                ts     = res.get("timestamp", []) or []
                 closes = (res.get("indicators", {}).get("quote", [{}])[0].get("close", []) or [])
-                rows = []
-                prev = None
+                rows   = []
+                prev   = None
                 for i, t in enumerate(ts):
                     cl = closes[i] if i < len(closes) else None
                     if cl is None:
                         continue
-                    qd = (datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)).date()
+                    qd  = (datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)).date()
                     chg = round((cl - prev) / prev * 100, 2) if prev else None
                     rows.append((symbol, name, cat, cl, prev, chg, qd))
                     prev = cl
@@ -162,8 +180,7 @@ async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> d
 
 
 def prune_global_indices(conn, years: int = 5) -> int:
-    """Rolling retention: delete rows older than `years`. Keeps global history
-    to ~5yr like the equity feed. Tiny table (~14 tickers x ~1250 days)."""
+    """Rolling retention: delete rows older than `years`."""
     ensure_table(conn)
     cutoff = (datetime.utcnow() + timedelta(hours=5, minutes=30)).date() - timedelta(days=365 * years)
     with conn.cursor() as cur:
@@ -175,12 +192,16 @@ def prune_global_indices(conn, years: int = 5) -> int:
     return n
 
 
-# ── Global intraday (Gold/Silver 5-min, 7-day rolling) ──────────────────────────
-# Separate table from intraday_prices (NSE futures) — global commodities must never
-# leak into a futures-universe scan (v8_live_metrics / paper engine).
+# ── Global intraday (5-min, 7-day rolling) ────────────────────────────────────
+# Commodities + Crypto that trade outside NSE hours (24x5 or 24x7).
+# Separate table — never leaks into NSE futures universe scans.
 GLOBAL_INTRADAY_TICKERS = [
-    ("GC=F", "GOLD"),
-    ("SI=F", "SILVER"),
+    ("GC=F",    "GOLD"),
+    ("SI=F",    "SILVER"),
+    ("CL=F",    "WTI"),
+    ("BZ=F",    "BRENT"),
+    ("NG=F",    "NATURAL_GAS"),
+    ("BTC-USD", "BITCOIN"),
 ]
 
 INTRADAY_DDL = """
@@ -203,11 +224,9 @@ def ensure_intraday_table(conn):
 
 
 async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
-    """Fetch 5-min OHLCV for Gold (GC=F) + Silver (SI=F) via Yahoo chart API,
-    range default 7d (one call per symbol returns the full rolling 7-day window,
-    incl. ~24h COMEX overnight bars). UPSERT on (symbol, ts, timeframe) — idempotent
-    and self-healing (re-fetching the 7d window patches any gaps). ts stored in IST.
-    Returns {stored, errors, symbols}."""
+    """Fetch 5-min OHLCV for Gold, Silver, WTI, Brent, Natural Gas, Bitcoin
+    via Yahoo chart API. UPSERT on (symbol, ts, timeframe) — idempotent + self-healing.
+    ts stored in IST. 7-day rolling window. Returns {stored, errors, symbols}."""
     ensure_intraday_table(conn)
     total, errors = 0, 0
     async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
@@ -217,24 +236,28 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
             try:
                 r = await client.get(url)
                 r.raise_for_status()
-                res = r.json()["chart"]["result"][0]
+                res    = r.json()["chart"]["result"][0]
                 tstamps = res.get("timestamp", []) or []
                 q = (res.get("indicators", {}).get("quote", [{}])[0]) or {}
-                opens, highs, lows, closes, vols = (q.get("open", []), q.get("high", []),
-                                                    q.get("low", []), q.get("close", []),
-                                                    q.get("volume", []))
+                opens  = q.get("open",   [])
+                highs  = q.get("high",   [])
+                lows   = q.get("low",    [])
+                closes = q.get("close",  [])
+                vols   = q.get("volume", [])
                 rows = []
                 for i, t in enumerate(tstamps):
                     cl = closes[i] if i < len(closes) else None
                     if cl is None:
                         continue
                     dt = datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)
-                    rows.append((symbol, name, dt,
-                                 opens[i] if i < len(opens) else None,
-                                 highs[i] if i < len(highs) else None,
-                                 lows[i] if i < len(lows) else None,
-                                 cl,
-                                 vols[i] if i < len(vols) else None))
+                    rows.append((
+                        symbol, name, dt,
+                        opens[i]  if i < len(opens)  else None,
+                        highs[i]  if i < len(highs)  else None,
+                        lows[i]   if i < len(lows)   else None,
+                        cl,
+                        int(vols[i]) if (i < len(vols) and vols[i]) else None,
+                    ))
                 if rows:
                     with conn.cursor() as cur:
                         cur.executemany(
@@ -256,7 +279,7 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
 
 
 def prune_global_intraday(conn, days: int = 7) -> int:
-    """Rolling 7-day retention for Gold/Silver 5-min bars."""
+    """Rolling 7-day retention for commodity/crypto 5-min bars."""
     ensure_intraday_table(conn)
     cutoff = (datetime.utcnow() + timedelta(hours=5, minutes=30)) - timedelta(days=days)
     with conn.cursor() as cur:
