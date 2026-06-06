@@ -33,6 +33,7 @@ from gvm_market_endpoints import router as gvm_market_router
 from admin_data import router as admin_data_router
 from fyers_endpoints import router as fyers_router
 from diagnosis import router as diagnosis_router
+from v9_endpoints import router as v9_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
@@ -47,25 +48,20 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.19
-# v2.9.19: fix_all_allocations MCP tool added (QB allocation
-#   fix + NIFTYBEES residual insert). REL_STOP_PCT updated to
-#   -10% for all baskets (was -5%, spec locked 05-Jun-2026).
-# v2.9.18: futures_basis table added to create_tables().
-#   fyers_feed.py v4: single WS 420+ symbols (equity + futures
-#   + options ATM±10 top-50 mcap + NIFTY/BANKNIFTY). Basis
-#   computed on every futures bar flush. last_tuesday expiry
-#   fix (was last_thursday — NSE changed Sep 2025).
-# v2.9.17: Daily Digest domestic indices now use LIVE intraday.
+# Scorr / Project Quant — main.py v2.9.20
+# v2.9.20: V9 Pair Strategy wired — v9_endpoints router +
+#   4 MCP tools (v9_discover, v9_backtest, v9_results, v9_best_combo).
+#   Files: v9_pair_discovery.py, v9_pair_backtest.py, v9_endpoints.py
+#   178 raw pairs, 122 eligible stocks, 10 parameter combos.
+# v2.9.19: fix_all_allocations MCP tool. REL_STOP_PCT -10%.
+# v2.9.18: futures_basis table. fyers_feed v4 single WS 420+ symbols.
+# v2.9.17: Daily Digest live intraday domestic indices.
 # v2.9.16: diagnosis.py wired.
-# v2.9.15: /api/paper/status — CMP + unrealised_pnl server-side.
-# v2.9.14: get_gvm returns result_analysis + timestamps.
-# v2.9.13: fyers_endpoints.py wired.
-# v2.9.12: scheduler.py refactor.
-# v2.8.0: COMPUTE-ON-WRITE ADR + PCR (03-Jun-2026)
+# v2.9.15: paper/status CMP server-side.
+# v2.8.0: COMPUTE-ON-WRITE ADR + PCR
 # ============================================================
 
-VERSION = "2.9.19"
+VERSION = "2.9.20"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -96,6 +92,7 @@ app.include_router(gvm_market_router)
 app.include_router(admin_data_router)
 app.include_router(fyers_router)
 app.include_router(diagnosis_router)
+app.include_router(v9_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -216,7 +213,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.19)")
+        log.info("Tables ready (v2.9.20)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -477,14 +474,12 @@ def _build_digest_daily() -> dict:
             cur.execute("SELECT price_date::text, advances, declines, unchanged, adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
             adr_row = cur.fetchone()
             adr = {"price_date": adr_row[0], "advances": adr_row[1], "declines": adr_row[2], "unchanged": adr_row[3], "adr": _r(adr_row[4])} if adr_row else None
-            result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr,
-                "note": "Indices = live intraday during market hours; ADR = EOD (adr_daily)."}
+            result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr}
 
             t_due = _get_config("takeaway_refresh_due", "false"); ov_due = _get_config("overview_refresh_due", "false")
             if t_due == "true" or ov_due == "true":
                 tier = _get_config("takeaway_refresh_tier", "")
-                result["refresh_alert"] = {"takeaway_due": t_due=="true", "overview_due": ov_due=="true", "tier": tier,
-                    "action": f"Say 'run {'takeaway' if t_due=='true' else 'overview'} refresh{' top500' if tier=='top500' else ''}' in Claude chat"}
+                result["refresh_alert"] = {"takeaway_due": t_due=="true", "overview_due": ov_due=="true", "tier": tier}
 
             pivots = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
@@ -563,7 +558,7 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
             row_id, mcap_rank, company_name = row[0], row[1], row[2]
             if field in _TOP500_ONLY_FIELDS:
                 rank = mcap_rank if mcap_rank is not None else 9999
-                if rank > 500: raise HTTPException(400, f"{symbol} has mcap_rank={rank} (>500). '{field}' is only allowed for mcap_rank <= 500.")
+                if rank > 500: raise HTTPException(400, f"{symbol} has mcap_rank={rank} (>500).")
             cur.execute(f"UPDATE input_raw SET {field} = %s, {ts_col} = NOW() WHERE id = %s", (content, row_id))
             conn.commit()
         return {"status": "ok", "symbol": symbol, "company_name": company_name, "field": field,
@@ -789,22 +784,14 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 @app.get("/api/paper/status")
 def paper_status():
     open_positions = api_query("""
-        SELECT
-            p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
+        SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
             p.target, p.stop_loss, p.qty, p.pivot_date,
             COALESCE(c.cmp, p.entry_price) AS cmp,
-            ROUND(
-                CASE p.side
-                    WHEN 'LONG'  THEN (COALESCE(c.cmp, p.entry_price) - p.entry_price) * p.qty
-                    WHEN 'SHORT' THEN (p.entry_price - COALESCE(c.cmp, p.entry_price)) * p.qty
-                    ELSE 0
-                END::numeric, 2
-            ) AS unrealised_pnl,
+            ROUND(CASE p.side WHEN 'LONG' THEN (COALESCE(c.cmp, p.entry_price) - p.entry_price) * p.qty
+                WHEN 'SHORT' THEN (p.entry_price - COALESCE(c.cmp, p.entry_price)) * p.qty ELSE 0 END::numeric, 2) AS unrealised_pnl,
             c.updated_at AS cmp_updated_at
-        FROM v8_paper_positions p
-        LEFT JOIN cmp_prices c ON c.symbol = p.symbol
-        WHERE p.status = 'OPEN'
-        ORDER BY p.entry_ts DESC
+        FROM v8_paper_positions p LEFT JOIN cmp_prices c ON c.symbol = p.symbol
+        WHERE p.status = 'OPEN' ORDER BY p.entry_ts DESC
     """)
     return {
         "open_positions": open_positions,
@@ -962,8 +949,8 @@ async def oauth_token(req: Request):
 # ── MCP Tools ────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"health_report","description":"Full Scorr system health report card — sections with grades, content refresh status, issues list.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections. Traffic-light per section. Issues + warnings list.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"health_report","description":"Full Scorr system health report card.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"run_diagnosis","description":"Full system diagnosis — 6 sections, traffic-light per section.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"digest_daily","description":"Daily Digest sections 1-5 baked from DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_build_cache","description":"V8 LIVE: build v8_history_cache.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_run_live","description":"V8 LIVE: run one live tick.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -979,7 +966,7 @@ MCP_TOOLS = [
     {"name":"get_cmp","description":"Get latest CMP for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"fyers_quote","description":"Fetch live futures quote from Fyers for a symbol.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"backfill_intraday","description":"MANUAL Yahoo fallback: fetch 7 days of 5-min OHLC for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"heal_intraday","description":"Fill TODAY's morning 1-min gap in intraday_prices for all active futures from Yahoo.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"heal_intraday","description":"Fill TODAY's morning 1-min gap in intraday_prices from Yahoo.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_yahoo_daily","description":"Trigger Yahoo daily OHLC update for raw_prices (background).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"backfill_indices","description":"Backfill NIFTY50 + BANKNIFTY 1-min OHLC into intraday_prices.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"paper_compute_pivots","description":"PAPER: compute rolling-5-day pivots for all futures.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -1012,19 +999,23 @@ MCP_TOOLS = [
     {"name":"get_global","description":"Latest global scorecard — indices, commodities, currency.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"fetch_global","description":"Manually trigger global scorecard fetch into global_indices.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"backfill_global","description":"One-time backfill of N years daily global history.","inputSchema":{"type":"object","properties":{"years":{"type":"integer"},"clean":{"type":"boolean"}},"required":[]}},
-    {"name":"get_global_intraday","description":"Gold/Silver 5-min intraday bars (7-day rolling).","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"days":{"type":"integer"}},"required":["name"]}},
-    {"name":"fetch_global_intraday","description":"Manually trigger Gold/Silver 5-min intraday fetch.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"get_global_intraday","description":"Commodity/crypto 5-min intraday bars (7-day rolling).","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"days":{"type":"integer"}},"required":["name"]}},
+    {"name":"fetch_global_intraday","description":"Manually trigger commodity/crypto 5-min intraday fetch.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"qb_eod_check","description":"Quant Basket: run EOD stop-loss check + P&L mark for a basket.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
     {"name":"qb_positions","description":"Quant Basket: get open positions with P&L, stop prices.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"},"status":{"type":"string"}},"required":[]}},
     {"name":"qb_summary","description":"Quant Basket: portfolio summary — market value, unrealised P&L, realised P&L.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
     {"name":"qb_rebalance_log","description":"Quant Basket: rebalance + EOD check history.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"},"limit":{"type":"integer"}},"required":[]}},
     {"name":"qb_registry","description":"Quant Basket: registry of all baskets.","inputSchema":{"type":"object","properties":{"basket_name":{"type":"string"}},"required":[]}},
-    {"name":"fix_all_allocations","description":"Quant Basket: fix allocation column + insert NIFTYBEES residual for all 4 baskets. Run after any rebalance or position entry.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"fix_all_allocations","description":"Quant Basket: fix allocation column + insert NIFTYBEES residual for all 4 baskets.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"daily_adr","description":"ADR trend last N days from adr_daily.","inputSchema":{"type":"object","properties":{"days":{"type":"integer"}},"required":[]}},
     {"name":"daily_pcr","description":"PCR trend last N days from pcr_daily.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_daily_metrics","description":"Manually trigger ADR + PCR compute-and-store.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"refresh_status","description":"Show AI content refresh status.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"content_update","description":"Manual content writer for input_raw.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"field":{"type":"string","enum":["overview","key_takeaway","result_analysis"]},"content":{"type":"string"}},"required":["symbol","field","content"]}},
+    {"name":"v9_discover","description":"V9 Pair Strategy: run pair discovery — find valid pairs from 209 futures (GVM>=6, same segment, corr>=0.75, cointegrated).","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v9_backtest","description":"V9 Pair Strategy: run full backtest — 10 parameter combos on all valid pairs, 2025 EOD data.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v9_results","description":"V9 Pair Strategy: get backtest results summary — all combos ranked by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v9_best_combo","description":"V9 Pair Strategy: get best parameter combo by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -1133,9 +1124,16 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/admin/refresh_status", headers=h); return r.json()
         elif name == "content_update":
             r = await client.post(f"{BASE_URL}/api/admin/content_update",
-                json={"symbol": args["symbol"], "field": args["field"], "content": args["content"]},
-                headers=h)
+                json={"symbol": args["symbol"], "field": args["field"], "content": args["content"]}, headers=h)
             return r.json()
+        elif name == "v9_discover":
+            r = await client.post(f"{BASE_URL}/api/v9/discover", headers=h); return r.json()
+        elif name == "v9_backtest":
+            r = await client.post(f"{BASE_URL}/api/v9/backtest", headers=h); return r.json()
+        elif name == "v9_results":
+            r = await client.get(f"{BASE_URL}/api/v9/results"); return r.json()
+        elif name == "v9_best_combo":
+            r = await client.get(f"{BASE_URL}/api/v9/best_combo"); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
