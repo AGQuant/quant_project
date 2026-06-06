@@ -2,13 +2,12 @@
 V9 Pair Strategy — Backtest Engine
 =====================================
 Runs parameter combinations on valid pairs discovered by v9_pair_discovery.py.
-Uses trailing-12M EOD closing prices (1-Jun-2025 to 31-May-2026). No look-ahead bias.
+Uses 18-month EOD closing prices (1-Dec-2024 to 31-May-2026). No look-ahead bias.
 Earnings blackout: skipped for backtest (will be added in live engine).
 
 Combos 1-10: original swing set (20-day time stop).
 Combos 11-15: fast-reversion set — high Z-entry, short window, 7-day time stop.
-Combos 16-17: combo 12 base with extended time stop (10d, 12d) to convert
-  time-stop coin-flips into clean Z-exit winners. Target: hold ~6d, win >=70%.
+Combos 16-17: combo 12 base with extended time stop (10d, 12d).
 
 Each combo may carry its own "time_stop" key; falls back to TIME_STOP_DEFAULT (20).
 
@@ -31,9 +30,9 @@ log = logging.getLogger('v9_backtest')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # ── Locked constants ──────────────────────────────────────────────────────────
-BACKTEST_START    = '2025-06-01'
+BACKTEST_START    = '2024-12-01'
 BACKTEST_END      = '2026-05-31'
-DISCOVERY_DATE    = '2025-06-01'
+DISCOVERY_DATE    = '2024-12-01'
 TIME_STOP_DEFAULT = 20
 REGIME_CORR_MIN   = 0.60
 REGIME_WINDOW     = 20
@@ -58,9 +57,6 @@ def _i(v):
 
 
 # ── Parameter Combinations ────────────────────────────────────────────────────
-# Combos 1-10: swing set (20-day time stop, default)
-# Combos 11-15: fast-reversion set (7-day time stop, high entry, short window)
-# Combos 16-17: combo 12 base with longer time stop (10d, 12d)
 COMBOS = [
     {"id": 1,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly",  "time_stop": 20},
     {"id": 2,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 90, "hedge_recompute": "weekly",  "time_stop": 20},
@@ -72,13 +68,11 @@ COMBOS = [
     {"id": 8,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "monthly", "time_stop": 20},
     {"id": 9,  "z_entry": 1.5, "z_exit": 0.5, "z_stop": 3.0, "window": 90, "hedge_recompute": "monthly", "time_stop": 20},
     {"id": 10, "z_entry": 2.5, "z_exit": 0.3, "z_stop": 4.0, "window": 90, "hedge_recompute": "weekly",  "time_stop": 20},
-    # ── Fast-reversion set: target hold <=7d, win >=70% ──
     {"id": 11, "z_entry": 3.0, "z_exit": 1.0, "z_stop": 4.0, "window": 20, "hedge_recompute": "weekly",  "time_stop": 7},
     {"id": 12, "z_entry": 2.5, "z_exit": 1.0, "z_stop": 4.0, "window": 15, "hedge_recompute": "weekly",  "time_stop": 7},
     {"id": 13, "z_entry": 3.0, "z_exit": 1.5, "z_stop": 4.5, "window": 20, "hedge_recompute": "weekly",  "time_stop": 7},
     {"id": 14, "z_entry": 2.5, "z_exit": 1.0, "z_stop": 4.0, "window": 10, "hedge_recompute": "weekly",  "time_stop": 7},
     {"id": 15, "z_entry": 3.5, "z_exit": 1.5, "z_stop": 5.0, "window": 15, "hedge_recompute": "weekly",  "time_stop": 7},
-    # ── Combo 12 with extended time stop (Fix A) ──
     {"id": 16, "z_entry": 2.5, "z_exit": 1.0, "z_stop": 4.0, "window": 15, "hedge_recompute": "weekly",  "time_stop": 10},
     {"id": 17, "z_entry": 2.5, "z_exit": 1.0, "z_stop": 4.0, "window": 15, "hedge_recompute": "weekly",  "time_stop": 12},
 ]
