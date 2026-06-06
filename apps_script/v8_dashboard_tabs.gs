@@ -52,11 +52,6 @@ function renderTitleBar(sheet, row, title, subtitle) {
   return row + 1;
 }
 
-
-// ════════════════════════════════════════════════════════════════════
-//   PERFORMANCE SUMMARY — FIX: Sell Overbought 5th row, TOTAL reconciles
-// ════════════════════════════════════════════════════════════════════
-
 function renderPerformanceSummary(sheet, row) {
   const posData   = fetchPositions() || {};
   const positions = posData.open_positions || [];
@@ -64,7 +59,6 @@ function renderPerformanceSummary(sheet, row) {
   const openAgg   = aggregatePositions(positions);
   const closedAgg = aggregateTrades(trades);
 
-  // ── OPEN ──
   row = renderSubHeader(sheet, row, 'OPEN POSITIONS (Live)');
   row = renderTableHeader(sheet, row, ['Strategy', 'Direction', 'Open', 'Unrealised P&L', 'Accuracy', 'Winning', 'Losing', 'Avg P&L'], 8);
 
@@ -87,7 +81,6 @@ function renderPerformanceSummary(sheet, row) {
     { pnlCols: [4, 8] });
   row++;
 
-  // ── CLOSED ──
   row = renderSubHeader(sheet, row, 'CLOSED TRADES (Historical)');
   row = renderTableHeader(sheet, row, ['Strategy', 'Direction', 'Closed', 'Booked P&L', 'Accuracy', 'Target Hit', 'SL/Gate/Gap', 'Avg P&L'], 8);
 
@@ -112,11 +105,6 @@ function renderPerformanceSummary(sheet, row) {
   return row;
 }
 
-
-// ════════════════════════════════════════════════════════════════════
-//   MARKET GATE — FIX: Total / Filled / Available slot bar
-// ════════════════════════════════════════════════════════════════════
-
 function renderMarketGate(sheet, row) {
   const mood = fetchMarketMood();
   if (!mood) {
@@ -126,7 +114,6 @@ function renderMarketGate(sheet, row) {
     return row + 1;
   }
 
-  // Filter checks
   row = renderTableHeader(sheet, row, ['Filter', 'Live Value', 'Required', 'Pass/Fail'], 4);
   mood.checks.forEach(c => {
     const status = c.pass ? '✅ PASS' : '❌ FAIL';
@@ -139,10 +126,8 @@ function renderMarketGate(sheet, row) {
     sheet.getRange(row, 1, 1, 4).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
     row++;
   });
-
   row++;
 
-  // Gate status
   const gateText = mood.fails === 0 ? '✅ GATE OPEN' : '❌ GATE CLOSED';
   const gateBg   = mood.fails === 0 ? COLORS.PASS_BG : COLORS.FAIL_BG;
   const gateFg   = mood.fails === 0 ? COLORS.PASS_TEXT : COLORS.FAIL_TEXT;
@@ -152,7 +137,6 @@ function renderMarketGate(sheet, row) {
   sheet.setRowHeight(row, 28);
   row += 2;
 
-  // Slot grid: Total / Filled / Available
   const posData   = fetchPositions() || {};
   const openPos   = posData.open_positions || [];
   const longOpen  = openPos.filter(p => (p.side || '').toUpperCase() === 'LONG').length;
@@ -170,7 +154,6 @@ function renderMarketGate(sheet, row) {
   sheet.setRowHeight(row, 24);
   row++;
 
-  // BUY row
   sheet.getRange(row, 1).setValue('▲ BUY').setFontWeight('bold').setBackground(COLORS.BUY_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(11);
   sheet.getRange(row, 2).setValue(buyTotal).setFontWeight('bold').setBackground(COLORS.BUY_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
   sheet.getRange(row, 3).setValue(longOpen).setFontWeight('bold').setBackground(COLORS.FILLED_BG).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
@@ -178,7 +161,6 @@ function renderMarketGate(sheet, row) {
   sheet.setRowHeight(row, 30);
   row++;
 
-  // SELL row
   sheet.getRange(row, 1).setValue('▼ SELL').setFontWeight('bold').setBackground(COLORS.SELL_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(11);
   sheet.getRange(row, 2).setValue(sellTotal).setFontWeight('bold').setBackground(COLORS.SELL_REV).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
   sheet.getRange(row, 3).setValue(shortOpen).setFontWeight('bold').setBackground(COLORS.FILLED_BG).setFontColor(COLORS.WHITE).setHorizontalAlignment('center').setFontSize(14);
@@ -188,7 +170,6 @@ function renderMarketGate(sheet, row) {
 
   return row;
 }
-
 
 function renderFilterCard(sheet, row, basket) {
   const meta   = BASKET_META[basket];
@@ -215,7 +196,7 @@ function renderFilterCard(sheet, row, basket) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TABS: BASKET FUNNELS — V4 WATERFALL
+//   TABS: BASKET FUNNELS
 // ════════════════════════════════════════════════════════════════════
 
 function refreshBasketFunnel(basket, rawDataArg) {
@@ -238,7 +219,7 @@ function refreshBasketFunnel(basket, rawDataArg) {
   }
 
   const filters      = config.filters;
-  const ncol         = Math.min(filters.length, 11);
+  const ncol         = Math.min(filters.length, 13);
   const allStocks    = rawData.stocks || [];
   const colsPerFilter = 2;
   const totalCols    = 1 + ncol * colsPerFilter;
@@ -356,7 +337,7 @@ function refreshBasketFunnel(basket, rawDataArg) {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: SELL OVERBOUGHT — FIX: filters live from filter_config
+//   TAB: SELL OVERBOUGHT
 // ════════════════════════════════════════════════════════════════════
 
 function refreshSellOverbought() {
@@ -404,10 +385,8 @@ function refreshSellOverbought() {
   } else {
     [['dma_200','≥ 10%','—','Extended above 200-day MA'],
      ['week_index_52','≥ 80','—','Near 52-week high'],
-     ['ma9_vs_ma21','≥ 3%','—','Short-term momentum stretched'],
-     ['vol_ratio','—','≤ 0.8','Volume drying — distribution starting'],
-     ['day_change','—','< 0','Previous close red (2-day net %)'],
      ['rsi_month','≥ 60','—','RSI elevated'],
+     ['day_change','—','< 0','Previous close red (2-day net %)'],
     ].forEach(f => {
       sheet.getRange(row, 1).setValue(f[0]).setFontWeight('bold').setBackground(COLORS.CARD_BG);
       sheet.getRange(row, 2).setValue(f[1]).setFontFamily(FONTS.MONO.family).setHorizontalAlignment('center').setBackground(COLORS.CARD_BG);
@@ -661,7 +640,7 @@ function refreshTradeLog() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   TAB: RAW DATA — 2D Chg% = day_change
+//   TAB: RAW DATA — 21 cols: + sector_week, sector_month, PP, R1, R2, S1, S2
 // ════════════════════════════════════════════════════════════════════
 
 function refreshRawData() {
@@ -671,7 +650,7 @@ function refreshRawData() {
 
   const data = fetchRawMetrics();
   let row = 1;
-  sheet.getRange(row, 1, 1, 14).merge()
+  sheet.getRange(row, 1, 1, 21).merge()
     .setValue('📋  RAW DATA — All Futures Metrics (GVM-sorted)')
     .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setFontSize(15).setFontWeight('bold');
   sheet.setRowHeight(row, 34);
@@ -679,27 +658,51 @@ function refreshRawData() {
 
   if (!data) { sheet.getRange(row, 1).setValue('⚠ API unreachable'); return; }
 
-  sheet.getRange(row, 1, 1, 14).merge()
+  sheet.getRange(row, 1, 1, 21).merge()
     .setValue(`Score date: ${data.score_date || '—'} · ${data.count || 0} stocks · Refreshed: ${nowIST()}`)
     .setBackground(COLORS.SUBHEADER).setFontColor(COLORS.MUTED_LIGHT).setFontSize(9).setFontStyle('italic');
   sheet.setRowHeight(row, 20);
   row += 2;
 
-  const headers = ['Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200', 'RSI M', 'RSI W', 'RSI D', 'M Ret%', 'W Ret%', '2D Chg%', 'Y Ret%', 'Mth Idx', 'wi52'];
+  const headers = [
+    'Symbol', 'GVM', 'DMA20', 'DMA50', 'DMA200',
+    'RSI M', 'RSI W', 'RSI D',
+    'M Ret%', 'W Ret%', '2D Chg%', 'Y Ret%',
+    'Mth Idx', 'wi52',
+    'Sec W%', 'Sec M%',
+    'PP', 'R1', 'R2', 'S1', 'S2',
+  ];
   row = renderTableHeader(sheet, row, headers, headers.length);
 
   (data.stocks || []).forEach(s => {
     const vals = [
-      s.symbol, fmtNum(s.gvm_score, 2), fmtNum(s.dma_20, 2), fmtNum(s.dma_50, 2), fmtNum(s.dma_200, 2),
-      fmtNum(s.rsi_month, 1), fmtNum(s.rsi_weekly, 1), fmtNum(s.daily_rsi, 1),
-      fmtNum(s.month_return, 2), fmtNum(s.week_return, 2),
+      s.symbol,
+      fmtNum(s.gvm_score, 2),
+      fmtNum(s.dma_20, 2),
+      fmtNum(s.dma_50, 2),
+      fmtNum(s.dma_200, 2),
+      fmtNum(s.rsi_month, 1),
+      fmtNum(s.rsi_weekly, 1),
+      fmtNum(s.daily_rsi, 1),
+      fmtNum(s.month_return, 2),
+      fmtNum(s.week_return, 2),
       fmtNum(s.day_change, 2),
-      fmtNum(s.year_return, 2), fmtNum(s.month_index, 1), fmtNum(s.week_index_52, 1),
+      fmtNum(s.year_return, 2),
+      fmtNum(s.month_index, 1),
+      fmtNum(s.week_index_52, 1),
+      fmtNum(s.sector_week, 2),
+      fmtNum(s.sector_month, 2),
+      fmtNum(s.pp, 2),
+      fmtNum(s.r1, 2),
+      fmtNum(s.r2, 2),
+      fmtNum(s.s1, 2),
+      fmtNum(s.s2, 2),
     ];
     vals.forEach((v, i) => {
       sheet.getRange(row, 1 + i).setValue(v)
         .setFontFamily(i === 0 ? FONTS.HEADER.family : FONTS.MONO.family)
-        .setFontWeight(i === 0 ? 'bold' : 'normal').setHorizontalAlignment(i === 0 ? 'left' : 'right')
+        .setFontWeight(i === 0 ? 'bold' : 'normal')
+        .setHorizontalAlignment(i === 0 ? 'left' : 'right')
         .setBackground(row % 2 === 0 ? COLORS.ALT_ROW : COLORS.CARD_BG);
     });
     sheet.getRange(row, 1, 1, headers.length).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
@@ -707,7 +710,7 @@ function refreshRawData() {
   });
 
   sheet.setColumnWidth(1, 130);
-  sheet.setColumnWidths(2, headers.length - 1, 75);
+  sheet.setColumnWidths(2, headers.length - 1, 72);
   sheet.setFrozenRows(5);
   toast('✓ Raw Data refreshed');
 }
