@@ -17,9 +17,12 @@ Architecture: compute-on-write.
   - v8_engine.py writes v8_qualified + v8_signal_history + v8_funnel_counts at EOD
   - This file = pure reads only. Zero compute on the read path.
 
-Filters removed:
-  sector_day + sector_week — 05-Jun-2026: not meaningful for 208-stock universe
-  month_index              — 05-Jun-2026: RSI month already covers this signal
+FILTER_CONFIG changes (06-Jun-2026):
+  - sector_week + sector_month added to all 4 directional baskets
+    BUY:  sector_week [0,4], sector_month [0,6]
+    SELL: sector_week [-4,0], sector_month [-6,0]
+  - sell_reversal: range_3d removed, day_change [-6,0] added
+  - sell_momentum: range_3d removed (already has day_change [-3,0])
 
 day_change formula (05-Jun-2026):
   EOD:  (latest_close / close_2_days_ago - 1) * 100
@@ -49,59 +52,66 @@ def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
-# ── Filter configs ───────────────────────────────────────────────────────────
+# ── Filter configs ────────────────────────────────────────────────────────────
 # Canonical source of truth. Used by v8_engine + v8_signal_writer to write signals.
 
 FILTER_CONFIG = {
     "buy_reversal": {
-        "gvm_score":   [7.0,  10.0],
-        "year_return": [-1.5, None],
-        "dma_200":     [1.5,  20.0],
-        "dma_50":      [1.5,  8.0],
-        "rsi_month":   [58.5, 75.0],
-        "rsi_weekly":  [50.0, 67.5],
-        "month_return":[0.0,  7.2],
-        "week_return": [1.5,  3.0],
-        "day_change":  [0.0,  2.4],
+        "gvm_score":    [7.0,  10.0],
+        "year_return":  [-1.5, None],
+        "dma_200":      [1.5,  20.0],
+        "dma_50":       [1.5,  8.0],
+        "rsi_month":    [58.5, 75.0],
+        "rsi_weekly":   [50.0, 67.5],
+        "month_return": [0.0,  7.2],
+        "week_return":  [1.5,  3.0],
+        "day_change":   [0.0,  2.4],
+        "sector_week":  [0.0,  4.0],
+        "sector_month": [0.0,  6.0],
     },
     "buy_momentum": {
-        "gvm_score":   [7.0,  10.0],
-        "year_return": [0.0,  None],
-        "dma_200":     [7.0,  50.0],
-        "dma_50":      [6.5,  25.0],
-        "rsi_month":   [71.5, 80.0],
-        "rsi_weekly":  [71.5, 80.0],
-        "month_return":[3.0,  14.0],
-        "week_return": [1.0,  7.0],
-        "day_change":  [0.0,  3.5],
+        "gvm_score":    [7.0,  10.0],
+        "year_return":  [0.0,  None],
+        "dma_200":      [7.0,  50.0],
+        "dma_50":       [6.5,  25.0],
+        "rsi_month":    [71.5, 80.0],
+        "rsi_weekly":   [71.5, 80.0],
+        "month_return": [3.0,  14.0],
+        "week_return":  [1.0,  7.0],
+        "day_change":   [0.0,  3.5],
+        "sector_week":  [0.0,  4.0],
+        "sector_month": [0.0,  6.0],
     },
     "sell_reversal": {
-        "dma_200":     [-30.0, 2.0],
-        "dma_50":      [-20.0, 2.0],
-        "rsi_month":   [20.0,  60.0],
-        "rsi_weekly":  [10.0,  45.0],
-        "month_return":[-20.0, 2.0],
-        "week_return": [-6.0,  3.0],
-        "range_3d":    [None,  -1.0],
+        "dma_200":      [-30.0, 2.0],
+        "dma_50":       [-20.0, 2.0],
+        "rsi_month":    [20.0,  60.0],
+        "rsi_weekly":   [10.0,  45.0],
+        "month_return": [-20.0, 2.0],
+        "week_return":  [-6.0,  3.0],
+        "day_change":   [-6.0,  0.0],
+        "sector_week":  [-4.0,  0.0],
+        "sector_month": [-6.0,  0.0],
     },
     "sell_momentum": {
-        "dma_200":     [-50.0, 0.0],
-        "dma_50":      [-30.0, 0.0],
-        "dma_20":      [None,  -2.0],
-        "rsi_month":   [10.0,  45.0],
-        "rsi_weekly":  [5.0,   60.0],
-        "daily_rsi":   [None,  40.0],
-        "month_return":[-30.0, 0.0],
-        "week_return": [-8.0,  0.0],
-        "day_change":  [-3.0,  0.0],
-        "range_3d":    [-10.0, -1.0],
-        "week_index_52":[None, 20.0],
+        "dma_200":      [-50.0, 0.0],
+        "dma_50":       [-30.0, 0.0],
+        "dma_20":       [None,  -2.0],
+        "rsi_month":    [10.0,  45.0],
+        "rsi_weekly":   [5.0,   60.0],
+        "daily_rsi":    [None,  40.0],
+        "month_return": [-30.0, 0.0],
+        "week_return":  [-8.0,  0.0],
+        "day_change":   [-3.0,  0.0],
+        "week_index_52":[None,  20.0],
+        "sector_week":  [-4.0,  0.0],
+        "sector_month": [-6.0,  0.0],
     },
     "sell_overbought": {
-        "dma_200":     [10.0, None],
+        "dma_200":      [10.0, None],
         "week_index_52":[80.0, None],
-        "rsi_month":   [60.0, None],
-        "day_change":  [None, 0.0],
+        "rsi_month":    [60.0, None],
+        "day_change":   [None, 0.0],
     },
 }
 
@@ -163,7 +173,8 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               day_change, range_3d, week_index_52
+               day_change, week_index_52,
+               sector_week, sector_month
         FROM v8_metrics
         WHERE {where_sql}
         ORDER BY gvm_score DESC NULLS LAST
@@ -184,14 +195,9 @@ def _passes_filter(value, mn, mx) -> bool:
     return True
 
 
-# ── Market breadth: live during market hours, EOD otherwise ────────────────────
+# ── Market breadth: live during market hours, EOD otherwise ──────────────────
 
 def _live_breadth(cur):
-    """
-    Returns (advances, declines, unchanged, adr, source, breadth_date) computed
-    from today's intraday feed vs prior raw_prices closes — but only if intraday
-    data exists for today. Otherwise returns None so the caller uses EOD.
-    """
     cur.execute("""
         WITH latest_intraday AS (
             SELECT DISTINCT ON (symbol) symbol, close AS cmp
@@ -215,14 +221,13 @@ def _live_breadth(cur):
     """)
     r = cur.fetchone()
     if not r or (r[3] or 0) < 50:
-        return None  # not enough live data — fall back to EOD
+        return None
     advances, declines, unchanged = r[0] or 0, r[1] or 0, r[2] or 0
     adr = round(advances / declines, 3) if declines else float(advances)
     return advances, declines, unchanged, adr, "live_intraday", str(date.today())
 
 
 def _live_nifty_dwm(cur, symbol="NIFTY50"):
-    """Nifty Day/Week/Month % using live intraday close vs prior raw_prices closes."""
     cur.execute("""
         SELECT close FROM intraday_prices
         WHERE symbol = %s AND ts::date = CURRENT_DATE
@@ -257,7 +262,6 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
 def market_mood():
     try:
         with _conn() as conn, conn.cursor() as cur:
-            # 1) ADR — try live intraday first, fall back to adr_daily EOD
             live = _live_breadth(cur)
             if live:
                 advances, declines, unchanged, adr, breadth_source, adr_date = live
@@ -278,7 +282,6 @@ def market_mood():
 
             adr_pass = adr >= 1.0
 
-            # 2) Nifty D/W/M — live intraday first, fall back to raw_prices EOD
             live_nifty = _live_nifty_dwm(cur, "NIFTY50") if live else None
             if live_nifty:
                 nifty_day, nifty_week, nifty_month, _ = live_nifty
@@ -365,7 +368,8 @@ def qualified(basket: str, limit: int = 50):
                     symbol, gvm_score, cmp,
                     dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                     week_return, month_return,
-                    day_change, range_3d, week_index_52,
+                    day_change, week_index_52,
+                    sector_week, sector_month,
                     source, signal_ts
                 FROM v8_qualified
                 WHERE basket = %s
@@ -417,7 +421,8 @@ def funnel_counts(basket: str):
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
                        rsi_month, rsi_weekly, daily_rsi,
                        month_return, week_return, year_return, day_change,
-                       week_index_52, range_3d, ma9_vs_ma21, vol_ratio
+                       week_index_52, ma9_vs_ma21, vol_ratio,
+                       sector_week, sector_month
                 FROM v8_metrics
                 WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
             """)
@@ -446,11 +451,13 @@ def raw_metrics(limit: int = 250):
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
                m.month_index, m.week_index_52,
-               m.day_change, m.range_3d,
-               m.upper_bb, m.lower_bb,
-               m.ma9_vs_ma21, m.vol_ratio
+               m.day_change,
+               m.sector_week, m.sector_month,
+               p.pp, p.r1, p.r2, p.s1, p.s2
         FROM v8_metrics m
         JOIN futures_universe f ON f.symbol = m.symbol AND f.is_active = TRUE
+        LEFT JOIN v8_paper_pivots p ON p.symbol = m.symbol
+            AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
         WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
         ORDER BY m.gvm_score DESC NULLS LAST
         LIMIT %s
@@ -552,7 +559,6 @@ def sell_overbought(limit: int = 50):
 
 @router.get("/adr")
 def adr_only():
-    """Live intraday ADR during market hours, EOD adr_daily otherwise."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             live = _live_breadth(cur)
@@ -579,21 +585,15 @@ def adr_only():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LIVE DOMESTIC INDICES — for digest (intraday close vs prior EOD close)
+#  LIVE DOMESTIC INDICES — for digest
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/domestic_live")
 def domestic_live():
-    """
-    NIFTY50 + BANKNIFTY today's OHLC from intraday (live) with chg% vs prior EOD close.
-    Falls back to raw_prices EOD if no intraday today. Used by the Daily Digest so it
-    shows today's move during/after market instead of yesterday's close.
-    """
     out = {}
     try:
         with _conn() as conn, conn.cursor() as cur:
             for sym in ("NIFTY50", "BANKNIFTY"):
-                # prior EOD close
                 cur.execute("""
                     SELECT close FROM raw_prices
                     WHERE symbol = %s AND price_date < CURRENT_DATE
@@ -602,7 +602,6 @@ def domestic_live():
                 pc = cur.fetchone()
                 prev_close = float(pc[0]) if pc and pc[0] is not None else None
 
-                # today's intraday OHLC
                 cur.execute("""
                     SELECT
                         (SELECT open  FROM intraday_prices WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts ASC  LIMIT 1) AS o,
@@ -623,7 +622,6 @@ def domestic_live():
                                 "prev_close": round(prev_close, 2),
                                 "chg_pct": chg, "source": "live_intraday"}
                 else:
-                    # EOD fallback
                     cur.execute("""
                         WITH d AS (SELECT price_date, open, high, low, close,
                                           ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
