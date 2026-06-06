@@ -1,9 +1,15 @@
 """
 V9 Pair Strategy — Backtest Engine
 =====================================
-Runs 10 parameter combinations on valid pairs discovered by v9_pair_discovery.py.
+Runs parameter combinations on valid pairs discovered by v9_pair_discovery.py.
 Uses trailing-12M EOD closing prices (1-Jun-2025 to 31-May-2026). No look-ahead bias.
 Earnings blackout: skipped for backtest (will be added in live engine).
+
+Combos 1-10: original swing set (20-day time stop).
+Combos 11-15: fast-reversion set — high Z-entry, short window, 7-day time stop,
+  earlier Z-exit. Target: avg hold <= 7 days, win rate >= 70%.
+
+Each combo may carry its own "time_stop" key; falls back to TIME_STOP_DEFAULT (20).
 
 Output tables: pair_backtest_results, pair_backtest_trades
 """
@@ -24,16 +30,15 @@ log = logging.getLogger('v9_backtest')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # ── Locked constants ──────────────────────────────────────────────────────────
-BACKTEST_START  = '2025-06-01'
-BACKTEST_END    = '2026-05-31'
-DISCOVERY_DATE  = '2025-06-01'
-TIME_STOP_DAYS  = 20
-REGIME_CORR_MIN = 0.60
-REGIME_WINDOW   = 20
+BACKTEST_START    = '2025-06-01'
+BACKTEST_END      = '2026-05-31'
+DISCOVERY_DATE    = '2025-06-01'
+TIME_STOP_DEFAULT = 20
+REGIME_CORR_MIN   = 0.60
+REGIME_WINDOW     = 20
 
 
 def _f(v):
-    """Cast any numpy/Decimal scalar to native python float (None-safe)."""
     if v is None:
         return None
     try:
@@ -51,18 +56,26 @@ def _i(v):
         return None
 
 
-# ── 10 Parameter Combinations ─────────────────────────────────────────────────
+# ── Parameter Combinations ────────────────────────────────────────────────────
+# Combos 1-10: swing set (20-day time stop, default)
+# Combos 11-15: fast-reversion set (7-day time stop, high entry, short window)
 COMBOS = [
-    {"id": 1,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly"},
-    {"id": 2,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 90, "hedge_recompute": "weekly"},
-    {"id": 3,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 30, "hedge_recompute": "weekly"},
-    {"id": 4,  "z_entry": 1.5, "z_exit": 0.5, "z_stop": 3.0, "window": 60, "hedge_recompute": "weekly"},
-    {"id": 5,  "z_entry": 1.5, "z_exit": 0.3, "z_stop": 3.0, "window": 60, "hedge_recompute": "weekly"},
-    {"id": 6,  "z_entry": 2.5, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly"},
-    {"id": 7,  "z_entry": 2.0, "z_exit": 0.0, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly"},
-    {"id": 8,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "monthly"},
-    {"id": 9,  "z_entry": 1.5, "z_exit": 0.5, "z_stop": 3.0, "window": 90, "hedge_recompute": "monthly"},
-    {"id": 10, "z_entry": 2.5, "z_exit": 0.3, "z_stop": 4.0, "window": 90, "hedge_recompute": "weekly"},
+    {"id": 1,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 2,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 90, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 3,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 30, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 4,  "z_entry": 1.5, "z_exit": 0.5, "z_stop": 3.0, "window": 60, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 5,  "z_entry": 1.5, "z_exit": 0.3, "z_stop": 3.0, "window": 60, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 6,  "z_entry": 2.5, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 7,  "z_entry": 2.0, "z_exit": 0.0, "z_stop": 3.5, "window": 60, "hedge_recompute": "weekly",  "time_stop": 20},
+    {"id": 8,  "z_entry": 2.0, "z_exit": 0.5, "z_stop": 3.5, "window": 60, "hedge_recompute": "monthly", "time_stop": 20},
+    {"id": 9,  "z_entry": 1.5, "z_exit": 0.5, "z_stop": 3.0, "window": 90, "hedge_recompute": "monthly", "time_stop": 20},
+    {"id": 10, "z_entry": 2.5, "z_exit": 0.3, "z_stop": 4.0, "window": 90, "hedge_recompute": "weekly",  "time_stop": 20},
+    # ── Fast-reversion set: target hold <=7d, win >=70% ──
+    {"id": 11, "z_entry": 3.0, "z_exit": 1.0, "z_stop": 4.0, "window": 20, "hedge_recompute": "weekly",  "time_stop": 7},
+    {"id": 12, "z_entry": 2.5, "z_exit": 1.0, "z_stop": 4.0, "window": 15, "hedge_recompute": "weekly",  "time_stop": 7},
+    {"id": 13, "z_entry": 3.0, "z_exit": 1.5, "z_stop": 4.5, "window": 20, "hedge_recompute": "weekly",  "time_stop": 7},
+    {"id": 14, "z_entry": 2.5, "z_exit": 1.0, "z_stop": 4.0, "window": 10, "hedge_recompute": "weekly",  "time_stop": 7},
+    {"id": 15, "z_entry": 3.5, "z_exit": 1.5, "z_stop": 5.0, "window": 15, "hedge_recompute": "weekly",  "time_stop": 7},
 ]
 
 SCHEMA_SQL = """
@@ -91,10 +104,14 @@ CREATE TABLE IF NOT EXISTS pair_backtest_results (
     max_drawdown     NUMERIC(8,4),
     sharpe_ratio     NUMERIC(8,4),
     profit_factor    NUMERIC(8,4),
+    worst_trade      NUMERIC(12,2),
+    max_dd_rupees    NUMERIC(12,2),
     backtest_period  TEXT,
     run_at           TIMESTAMP DEFAULT NOW(),
     UNIQUE(combo_id, symbol_a, symbol_b)
 );
+ALTER TABLE pair_backtest_results ADD COLUMN IF NOT EXISTS worst_trade NUMERIC(12,2);
+ALTER TABLE pair_backtest_results ADD COLUMN IF NOT EXISTS max_dd_rupees NUMERIC(12,2);
 CREATE INDEX IF NOT EXISTS idx_pbt_combo   ON pair_backtest_results(combo_id);
 CREATE INDEX IF NOT EXISTS idx_pbt_segment ON pair_backtest_results(segment);
 
@@ -208,6 +225,14 @@ def compute_max_drawdown(cumulative_pnl: List[float]) -> float:
     return float(dd.min())
 
 
+def compute_max_dd_rupees(cumulative_pnl: List[float]) -> float:
+    if not cumulative_pnl:
+        return 0.0
+    arr  = np.array(cumulative_pnl)
+    peak = np.maximum.accumulate(arr)
+    return float((arr - peak).min())
+
+
 def compute_profit_factor(pnls: List[float]) -> float:
     gains  = sum(p for p in pnls if p > 0)
     losses = abs(sum(p for p in pnls if p < 0))
@@ -278,13 +303,14 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
     if len(aligned) < combo['window'] + 20:
         return None, []
 
-    dates    = aligned.index
-    a_prices = aligned['A'].values.astype(float)
-    b_prices = aligned['B'].values.astype(float)
-    n        = len(dates)
-    window   = combo['window']
-    lot_a    = int(lot_sizes.get(sym_a, 1))
-    lot_b    = int(lot_sizes.get(sym_b, 1))
+    dates     = aligned.index
+    a_prices  = aligned['A'].values.astype(float)
+    b_prices  = aligned['B'].values.astype(float)
+    n         = len(dates)
+    window    = combo['window']
+    time_stop = combo.get('time_stop', TIME_STOP_DEFAULT)
+    lot_a     = int(lot_sizes.get(sym_a, 1))
+    lot_b     = int(lot_sizes.get(sym_b, 1))
 
     trades     = []
     position   = None
@@ -344,7 +370,7 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
                 exit_reason = 'Z_EXIT'
             elif direction == 'SHORT_SPREAD' and z <= combo['z_exit']:
                 exit_reason = 'Z_EXIT'
-            elif hold >= TIME_STOP_DAYS:
+            elif hold >= time_stop:
                 exit_reason = 'TIME_STOP'
 
             if exit_reason:
@@ -427,6 +453,8 @@ def backtest_pair(prices: pd.DataFrame, lot_sizes: Dict[str, int],
         'max_drawdown':     round(float(compute_max_drawdown(cum_pnl)), 4),
         'sharpe_ratio':     round(float(compute_sharpe(returns)), 4),
         'profit_factor':    round(float(compute_profit_factor(pnls)), 4),
+        'worst_trade':      round(float(min(pnls)), 2),
+        'max_dd_rupees':    round(float(compute_max_dd_rupees(cum_pnl)), 2),
         'backtest_period':  f"{BACKTEST_START} to {BACKTEST_END}",
     }
     return metrics, trades
@@ -443,13 +471,14 @@ def store_results(conn, metrics_list: List[dict], all_trades: List[dict]):
                  symbol_a,symbol_b,segment,total_trades,win_trades,loss_trades,
                  stop_trades,time_stop_trades,win_rate,stop_rate,time_stop_rate,
                  total_pnl,avg_return_pct,avg_holding_days,max_drawdown,
-                 sharpe_ratio,profit_factor,backtest_period)
+                 sharpe_ratio,profit_factor,worst_trade,max_dd_rupees,backtest_period)
                 VALUES (%(combo_id)s,%(z_entry)s,%(z_exit)s,%(z_stop)s,%(zscore_window)s,
                         %(hedge_recompute)s,%(symbol_a)s,%(symbol_b)s,%(segment)s,
                         %(total_trades)s,%(win_trades)s,%(loss_trades)s,%(stop_trades)s,
                         %(time_stop_trades)s,%(win_rate)s,%(stop_rate)s,%(time_stop_rate)s,
                         %(total_pnl)s,%(avg_return_pct)s,%(avg_holding_days)s,
-                        %(max_drawdown)s,%(sharpe_ratio)s,%(profit_factor)s,%(backtest_period)s)
+                        %(max_drawdown)s,%(sharpe_ratio)s,%(profit_factor)s,
+                        %(worst_trade)s,%(max_dd_rupees)s,%(backtest_period)s)
             """, m)
         for t in all_trades:
             cur.execute("""
@@ -493,6 +522,7 @@ def run_backtest() -> dict:
         combo_pnls   = []
         combo_trades = 0
         combo_wins   = 0
+        combo_holds  = []
 
         for pair in pairs:
             metrics, trades = backtest_pair(prices, lot_sizes, pair, combo)
@@ -502,16 +532,19 @@ def run_backtest() -> dict:
                 combo_pnls.append(metrics['total_pnl'])
                 combo_trades += metrics['total_trades']
                 combo_wins   += metrics['win_trades']
+                combo_holds.extend([t['holding_days'] for t in trades])
 
         win_rate = round(combo_wins / combo_trades * 100, 1) if combo_trades else 0
+        avg_hold = round(float(np.mean(combo_holds)), 1) if combo_holds else 0
         combo_summary[combo['id']] = {
             'total_pnl':    round(float(sum(combo_pnls)), 2),
             'total_trades': int(combo_trades),
             'win_rate':     win_rate,
+            'avg_hold':     avg_hold,
             'pairs_active': len(combo_pnls),
         }
         log.info(f"Combo {combo['id']}: pairs={len(combo_pnls)} "
-                 f"trades={combo_trades} win%={win_rate} "
+                 f"trades={combo_trades} win%={win_rate} hold={avg_hold}d "
                  f"pnl=₹{sum(combo_pnls):,.0f}")
 
     store_results(conn, all_metrics, all_trades)
