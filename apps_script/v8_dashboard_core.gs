@@ -4,15 +4,17 @@
  * ║   Part 1 of 2  →  v8_dashboard_core.gs                          ║
  * ║   Companion  →  v8_dashboard_tabs.gs                            ║
  * ║                                                                  ║
- * ║   Changelog v2.0.0:                                              ║
- * ║     - Closed TOTAL: adds Sell Overbought 5th row (reconciles)    ║
- * ║     - Market Gate: Total/Filled/Available slot bar               ║
- * ║     - Sell Overbought filters: live from filter_config           ║
- * ║     - sector_month added to humanLogic map                       ║
+ * ║   Changelog v2.1.0:                                              ║
+ * ║     - refreshAll: sell funnels moved last (timeout fix)          ║
+ * ║     - New menu item: Refresh Sell Funnels                        ║
+ * ║     - Raw Data: 21 cols + sector_week/month + pivots PP/R1/R2/S1/S2 ║
+ * ║     - FILTER_CONFIG: sector_week/month in all 4 baskets          ║
+ * ║     - sell_reversal: range_3d → day_change                       ║
+ * ║     - sell_momentum: range_3d removed                            ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
-const SCRIPT_VERSION      = '2.0.0';
+const SCRIPT_VERSION      = '2.1.0';
 const SCRIPT_RAW_URL_CORE = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_core.gs';
 const SCRIPT_RAW_URL_TABS = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_tabs.gs';
 
@@ -90,6 +92,7 @@ function onOpen() {
     .addItem('📊 Refresh Dashboard',        'refreshMasterDashboard')
     .addItem('🔺 Refresh Buy Baskets',      'refreshBuyBaskets')
     .addItem('🔻 Refresh Sell Baskets',     'refreshSellBaskets')
+    .addItem('🔻 Refresh Sell Funnels',     'refreshSellFunnels')
     .addItem('⚠️  Refresh Sell Overbought', 'refreshSellOverbought')
     .addItem('📍 Refresh In Position',      'refreshInPosition')
     .addItem('📒 Refresh Trade Log',        'refreshTradeLog')
@@ -215,7 +218,7 @@ function showVersion() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   API CALLS — fetchJSON with 1 retry
+//   API CALLS
 // ════════════════════════════════════════════════════════════════════
 
 function fetchJSON(endpoint) {
@@ -236,7 +239,6 @@ function fetchJSON(endpoint) {
   return null;
 }
 
-// Module-level cache — raw fetched once per refreshAll, not per basket
 var _RAW_CACHE = null;
 function getRawMetricsCached() {
   if (_RAW_CACHE === null) _RAW_CACHE = fetchRawMetrics();
@@ -254,20 +256,27 @@ function fetchRawMetrics()     { return fetchJSON('/api/v8/raw?limit=250'); }
 
 
 // ════════════════════════════════════════════════════════════════════
-//   MAIN REFRESH ENTRY POINTS
+//   REFRESH ENTRY POINTS
+//   refreshAll timeout fix: sell funnels (heaviest) run LAST
+//   Apps Script hard limit = 6 min. Sell Momentum has 13 filters.
+//   Order: Dashboard → SO → Pos → Log → Raw → Scan → Buy funnels → Sell funnels
 // ════════════════════════════════════════════════════════════════════
 
 function refreshAll() {
   toast('Refreshing all tabs…');
   clearRawCache();
+  // Fast tabs first
   refreshMasterDashboard();
-  const _raw = getRawMetricsCached();
-  ['buy_reversal', 'buy_momentum', 'sell_reversal', 'sell_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
   refreshSellOverbought();
   refreshInPosition();
   refreshTradeLog();
   refreshRawData();
   refreshFilterScan();
+  // Buy funnels (lighter — 9 filters each)
+  const _raw = getRawMetricsCached();
+  ['buy_reversal', 'buy_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
+  // Sell funnels last (heaviest — 9-13 filters each)
+  ['sell_reversal', 'sell_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
   toast('✓ All tabs refreshed');
 }
 
@@ -287,6 +296,16 @@ function refreshSellBaskets() {
   toast('✓ Sell baskets refreshed');
 }
 
+// Dedicated sell funnel refresh — use when refreshAll times out on sell tabs
+function refreshSellFunnels() {
+  toast('Refreshing sell funnels…');
+  clearRawCache();
+  const _raw = getRawMetricsCached();
+  refreshBasketFunnel('sell_reversal', _raw);
+  refreshBasketFunnel('sell_momentum', _raw);
+  toast('✓ Sell funnels refreshed');
+}
+
 function buildAllTabs() {
   Object.values(SHEETS).forEach(name => getOrCreate(name));
   toast('All 10 tabs created. Run "Refresh All" next.');
@@ -294,7 +313,7 @@ function buildAllTabs() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   SHARED HELPERS — UI
+//   SHARED HELPERS
 // ════════════════════════════════════════════════════════════════════
 
 function getOrCreate(name) {
@@ -496,7 +515,6 @@ function aggregateTrades(trades) {
   return out;
 }
 
-// TOTAL row = sum of displayed rows (never diverges from breakup)
 function sumAggRows(aggs) {
   const t = { count: 0, pnl: 0, winning: 0, losing: 0 };
   aggs.forEach(a => {
