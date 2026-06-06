@@ -4,41 +4,17 @@
  * ║   Part 1 of 2  →  v8_dashboard_core.gs                          ║
  * ║   Companion  →  v8_dashboard_tabs.gs                            ║
  * ║                                                                  ║
- * ║   Pulls live from Railway:                                       ║
- * ║   quantproject-production.up.railway.app                         ║
- * ║                                                                  ║
- * ║   Tabs:                                                          ║
- * ║     1. Master_Dashboard       — Performance + Gate + Filters     ║
- * ║     2. Buy_Reversal           — Funnel waterfall                 ║
- * ║     3. Buy_Momentum           — Funnel waterfall                 ║
- * ║     4. Sell_Reversal          — Funnel waterfall                 ║
- * ║     5. Sell_Momentum          — Funnel waterfall                 ║
- * ║     6. Sell_Overbought        — Failed breakout signals          ║
- * ║     7. In_Position            — Live open trades (paper)         ║
- * ║     8. Trade_Log              — Closed trade history (paper)     ║
- * ║     9. Raw_Data               — All metrics, GVM-sorted          ║
- * ║    10. Filter_Scan            — Filter config all 5 baskets      ║
- * ║                                                                  ║
- * ║   2D gate: day_change (2-day net c2c%) — NOT range_1d          ║
- * ║   1W gate: week_return (net c2c%)                                ║
- * ║   Basket funnels: V4-style waterfall — counts + per-stage stocks ║
- * ║   All calc in Railway DB. GS = pure display.                     ║
+ * ║   Changelog v2.0.0:                                              ║
+ * ║     - Closed TOTAL: adds Sell Overbought 5th row (reconciles)    ║
+ * ║     - Market Gate: Total/Filled/Available slot bar               ║
+ * ║     - Sell Overbought filters: live from filter_config           ║
+ * ║     - sector_month added to humanLogic map                       ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
-
-// ════════════════════════════════════════════════════════════════════
-//   VERSION
-// ════════════════════════════════════════════════════════════════════
-
-const SCRIPT_VERSION  = '1.9.1';
+const SCRIPT_VERSION      = '2.0.0';
 const SCRIPT_RAW_URL_CORE = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_core.gs';
 const SCRIPT_RAW_URL_TABS = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_tabs.gs';
-
-
-// ════════════════════════════════════════════════════════════════════
-//   CONFIG
-// ════════════════════════════════════════════════════════════════════
 
 const BASE_URL = 'https://quantproject-production.up.railway.app';
 
@@ -62,38 +38,35 @@ const COLORS = {
   SUBHEADER:      '#374151',
   ALT_ROW:        '#F9FAFB',
   CARD_BG:        '#FFFFFF',
-
   BUY_REV:        '#2563EB',
   BUY_MOM:        '#1D4ED8',
   SELL_REV:       '#EA580C',
   SELL_MOM:       '#C2410C',
   SELL_OB:        '#9333EA',
-
   PASS_BG:        '#DCFCE7',
   PASS_TEXT:      '#15803D',
   FAIL_BG:        '#FEE2E2',
   FAIL_TEXT:      '#B91C1C',
   NEUTRAL_BG:     '#F3F4F6',
   NEUTRAL_TEXT:   '#4B5563',
-
   PROFIT:         '#16A34A',
   LOSS:           '#DC2626',
   FLAT:           '#6B7280',
-
   WHITE:          '#FFFFFF',
   MUTED_LIGHT:    '#D1D5DB',
-
   BORDER_STRONG:  '#111827',
   BORDER_SOFT:    '#E5E7EB',
+  AVAIL_BG:       '#166534',
+  FILLED_BG:      '#7C3AED',
 };
 
 const FONTS = {
-  TITLE:     { family: 'Inter',       size: 14, weight: 'bold' },
-  SUBTITLE:  { family: 'Inter',       size: 11, weight: 'bold' },
-  HEADER:    { family: 'Inter',       size: 10, weight: 'bold' },
-  BODY:      { family: 'Inter',       size: 10, weight: 'normal' },
-  MONO:      { family: 'Roboto Mono', size: 10, weight: 'normal' },
-  BIG_NUM:   { family: 'Inter',       size: 18, weight: 'bold' },
+  TITLE:    { family: 'Inter',       size: 14, weight: 'bold' },
+  SUBTITLE: { family: 'Inter',       size: 11, weight: 'bold' },
+  HEADER:   { family: 'Inter',       size: 10, weight: 'bold' },
+  BODY:     { family: 'Inter',       size: 10, weight: 'normal' },
+  MONO:     { family: 'Roboto Mono', size: 10, weight: 'normal' },
+  BIG_NUM:  { family: 'Inter',       size: 18, weight: 'bold' },
 };
 
 const BASKET_META = {
@@ -124,19 +97,16 @@ function onOpen() {
     .addItem('🔍 Refresh Filter Scan',      'refreshFilterScan')
     .addSeparator()
     .addItem('🆕 Check for Updates',        'pullLatestFromGitHub')
-    .addItem('🏗️  Build All Tabs (first run)', 'buildAllTabs')
-    .addItem('⏰ Setup Auto-Refresh (5 min)',  'setupTriggers')
-    .addItem('🛑 Stop Auto-Refresh',           'stopTriggers')
-    .addItem('ℹ️  About / Version',            'showVersion')
+    .addItem('🏗️  Build All Tabs',          'buildAllTabs')
+    .addItem('⏰ Setup Auto-Refresh (5 min)', 'setupTriggers')
+    .addItem('🛑 Stop Auto-Refresh',         'stopTriggers')
+    .addItem('ℹ️  About / Version',          'showVersion')
     .addToUi();
 }
 
 function setupTriggers() {
   stopTriggers();
-  ScriptApp.newTrigger('scheduledRefresh')
-    .timeBased()
-    .everyMinutes(5)
-    .create();
+  ScriptApp.newTrigger('scheduledRefresh').timeBased().everyMinutes(5).create();
   SpreadsheetApp.getActiveSpreadsheet().toast('Auto-refresh enabled — every 5 min', 'Scorr V8', 4);
 }
 
@@ -147,12 +117,10 @@ function stopTriggers() {
 }
 
 function scheduledRefresh() {
-  const ist = new Date(Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'));
-  const day  = ist.getDay();
-  const hour = ist.getHours();
-  const min  = ist.getMinutes();
+  const ist     = new Date(Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss'));
+  const day     = ist.getDay();
+  const minutes = ist.getHours() * 60 + ist.getMinutes();
   if (day === 0 || day === 6) return;
-  const minutes = hour * 60 + min;
   if (minutes < 555 || minutes > 930) return;
   refreshAll();
 }
@@ -170,8 +138,7 @@ function pullLatestFromGitHub() {
       SpreadsheetApp.getUi().alert('❌ GitHub fetch failed: HTTP ' + response.getResponseCode());
       return;
     }
-    const remoteCode = response.getContentText();
-    const match = remoteCode.match(/const\s+SCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/);
+    const match = response.getContentText().match(/const\s+SCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/);
     remoteVersion = match ? match[1] : 'unknown';
   } catch (e) {
     SpreadsheetApp.getUi().alert('❌ Could not reach GitHub:\n' + e);
@@ -179,29 +146,21 @@ function pullLatestFromGitHub() {
   }
 
   if (remoteVersion === SCRIPT_VERSION) {
-    SpreadsheetApp.getUi().alert(
-      '✅ Up to date',
+    SpreadsheetApp.getUi().alert('✅ Up to date',
       `You're on the latest version.\n\nCurrent: ${SCRIPT_VERSION}\nRemote: ${remoteVersion}`,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+      SpreadsheetApp.getUi().ButtonSet.OK);
     return;
   }
 
   const html = HtmlService.createHtmlOutput(
     `<!DOCTYPE html><html><head><style>
-      body { font-family: -apple-system, sans-serif; padding: 20px; color: #1F2937; }
-      h2 { margin-top: 0; color: #2563EB; }
-      .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #E5E7EB; }
-      .label { color: #6B7280; }
-      .val { font-family: 'Roboto Mono', monospace; font-weight: bold; }
-      .new { color: #16A34A; }
-      .url-box { background: #F3F4F6; padding: 10px; border-radius: 6px; font-family: monospace;
-                 font-size: 11px; word-break: break-all; margin: 8px 0; user-select: all; }
-      button { background: #2563EB; color: white; border: none; padding: 10px 20px;
-               border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer;
-               width: 100%; margin-top: 6px; }
-      .steps { background: #FEF3C7; padding: 12px; border-radius: 6px; margin-top: 12px; }
-      ol { padding-left: 18px; font-size: 12px; line-height: 1.7; color: #374151; }
+      body{font-family:-apple-system,sans-serif;padding:20px;color:#1F2937;}
+      h2{margin-top:0;color:#2563EB;} .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #E5E7EB;}
+      .label{color:#6B7280;} .val{font-family:'Roboto Mono',monospace;font-weight:bold;} .new{color:#16A34A;}
+      .url-box{background:#F3F4F6;padding:10px;border-radius:6px;font-family:monospace;font-size:11px;word-break:break-all;margin:8px 0;user-select:all;}
+      button{background:#2563EB;color:white;border:none;padding:10px 20px;border-radius:6px;font-size:13px;font-weight:bold;cursor:pointer;width:100%;margin-top:6px;}
+      .steps{background:#FEF3C7;padding:12px;border-radius:6px;margin-top:12px;}
+      ol{padding-left:18px;font-size:12px;line-height:1.7;color:#374151;}
     </style></head><body>
       <h2>🆕 New version available</h2>
       <div class="row"><span class="label">Installed</span><span class="val">${SCRIPT_VERSION}</span></div>
@@ -212,51 +171,40 @@ function pullLatestFromGitHub() {
       <p style="margin:12px 0 4px"><strong>Tabs script:</strong></p>
       <div class="url-box" id="u2">${SCRIPT_RAW_URL_TABS}</div>
       <button onclick="copy('u2','b2')" id="b2">📋 Copy Tabs URL</button>
-      <div class="steps">
-        <strong>To install both files:</strong>
-        <ol>
-          <li>Apps Script editor → open/create <code>v8_dashboard_core.gs</code> → paste Core</li>
-          <li>Open/create <code>v8_dashboard_tabs.gs</code> → paste Tabs</li>
-          <li>Save (Ctrl+S) → reload sheet</li>
-        </ol>
-      </div>
+      <div class="steps"><strong>To install:</strong><ol>
+        <li>Apps Script editor → open <code>v8_dashboard_core.gs</code> → paste Core</li>
+        <li>Open <code>v8_dashboard_tabs.gs</code> → paste Tabs</li>
+        <li>Save (Ctrl+S) → reload sheet</li>
+      </ol></div>
       <script>
-        function copy(id, btn) {
-          const text = document.getElementById(id).innerText;
+        function copy(id,btn){
+          const text=document.getElementById(id).innerText;
           navigator.clipboard.writeText(text).then(
-            () => { document.getElementById(btn).innerText = '✓ Copied'; },
-            () => {
-              const r = document.createRange();
-              r.selectNode(document.getElementById(id));
-              window.getSelection().removeAllRanges();
-              window.getSelection().addRange(r);
-              document.execCommand('copy');
-              document.getElementById(btn).innerText = '✓ Copied (fallback)';
-            }
+            ()=>{document.getElementById(btn).innerText='✓ Copied';},
+            ()=>{const r=document.createRange();r.selectNode(document.getElementById(id));
+              window.getSelection().removeAllRanges();window.getSelection().addRange(r);
+              document.execCommand('copy');document.getElementById(btn).innerText='✓ Copied (fallback)';}
           );
         }
       </script>
     </body></html>`
   ).setWidth(500).setHeight(500);
-
   SpreadsheetApp.getUi().showModalDialog(html, 'Scorr V8 Update Available');
 }
 
 function showVersion() {
   const html = HtmlService.createHtmlOutput(
     `<!DOCTYPE html><html><head><style>
-      body { font-family: -apple-system, sans-serif; padding: 20px; color: #1F2937; }
-      h2 { color: #9333EA; margin-top: 0; }
-      .row { padding: 6px 0; }
-      .label { color: #6B7280; display: inline-block; width: 130px; }
-      .val { font-family: 'Roboto Mono', monospace; font-weight: bold; }
+      body{font-family:-apple-system,sans-serif;padding:20px;color:#1F2937;}
+      h2{color:#9333EA;margin-top:0;} .row{padding:6px 0;}
+      .label{color:#6B7280;display:inline-block;width:130px;}
+      .val{font-family:'Roboto Mono',monospace;font-weight:bold;}
     </style></head><body>
       <h2>🟣 Scorr V8</h2>
       <div class="row"><span class="label">Version</span><span class="val">${SCRIPT_VERSION}</span></div>
       <div class="row"><span class="label">API base</span><span class="val">${BASE_URL}</span></div>
       <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
       <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
-      <div class="row"><span class="label">Trade source</span><span class="val">paper_status (server PnL)</span></div>
       <div class="row"><span class="label">2D gate</span><span class="val">day_change (2-day net c2c%)</span></div>
       <div class="row"><span class="label">Funnel style</span><span class="val">V4 waterfall (per-stage)</span></div>
       <p style="margin-top:16px;color:#6B7280;font-size:12px;">Split: core.gs + tabs.gs · All calc in DB</p>
@@ -267,7 +215,7 @@ function showVersion() {
 
 
 // ════════════════════════════════════════════════════════════════════
-//   API CALLS
+//   API CALLS — fetchJSON with 1 retry
 // ════════════════════════════════════════════════════════════════════
 
 function fetchJSON(endpoint) {
@@ -279,7 +227,7 @@ function fetchJSON(endpoint) {
       });
       const code = response.getResponseCode();
       if (code === 200) return JSON.parse(response.getContentText());
-      Logger.log(`API ${endpoint} returned ${code} (attempt ${attempt}): ${response.getContentText().slice(0, 200)}`);
+      Logger.log(`API ${endpoint} returned ${code} (attempt ${attempt})`);
     } catch (e) {
       Logger.log(`fetchJSON ${endpoint} failed (attempt ${attempt}): ${e}`);
     }
@@ -288,8 +236,7 @@ function fetchJSON(endpoint) {
   return null;
 }
 
-// Module-level cache so refreshAll fetches the 250-row raw set ONCE,
-// not once per basket (the cause of intermittent 'API unreachable' on Buy_Momentum).
+// Module-level cache — raw fetched once per refreshAll, not per basket
 var _RAW_CACHE = null;
 function getRawMetricsCached() {
   if (_RAW_CACHE === null) _RAW_CACHE = fetchRawMetrics();
@@ -381,23 +328,20 @@ function fmtPnL(v) {
   if (v === null || v === undefined || v === '' || isNaN(Number(v))) return '₹0';
   const n = Number(v);
   const sign = n >= 0 ? '' : '-';
-  const abs = Math.abs(Math.round(n));
-  return sign + '₹' + abs.toLocaleString('en-IN');
+  return sign + '₹' + Math.abs(Math.round(n)).toLocaleString('en-IN');
 }
 
 function parsePnL(s) {
   if (typeof s === 'number') return s;
   if (!s) return 0;
-  const cleaned = String(s).replace(/[₹,]/g, '').replace(/[^\d.\-]/g, '');
-  const n = Number(cleaned);
+  const n = Number(String(s).replace(/[₹,]/g, '').replace(/[^\d.\-]/g, ''));
   return isNaN(n) ? 0 : n;
 }
 
 function fmtDate(d) {
   if (!d) return '—';
   try {
-    const date = new Date(d);
-    return Utilities.formatDate(date, 'Asia/Kolkata', 'd MMM HH:mm');
+    return Utilities.formatDate(new Date(d), 'Asia/Kolkata', 'd MMM HH:mm');
   } catch (e) { return d; }
 }
 
@@ -408,14 +352,15 @@ function humanLogic(metric) {
     'dma_200':         'vs 200-day MA',
     'dma_50':          'vs 50-day MA',
     'dma_20':          'vs 20-day MA',
-    'rsi_month':       'Monthly RSI',
-    'rsi_weekly':      'Weekly RSI',
-    'daily_rsi':       'Daily RSI',
+    'rsi_month':       'Monthly RSI (EOD-frozen)',
+    'rsi_weekly':      'Weekly RSI (EOD-frozen)',
+    'daily_rsi':       'Daily RSI (live)',
     'month_return':    'Monthly return (c2c)',
     'week_return':     'Weekly return (c2c)',
     'day_change':      '2-Day net change (c2c)',
-    'sector_week':     'Sector week trend',
-    'sector_day':      'Sector today',
+    'sector_week':     'Sector week avg return (EOD-frozen)',
+    'sector_month':    'Sector month avg return (EOD-frozen)',
+    'sector_day':      'Sector today (live)',
     'month_index':     'Market breadth',
     'week_index_52':   '52-week position',
     'range_1d':        'Intraday H-L range',
@@ -427,26 +372,17 @@ function humanLogic(metric) {
 }
 
 function renderSectionHeader(sheet, row, label, bg) {
-  const range = sheet.getRange(row, 1, 1, 10).merge();
-  range.setValue(label)
-    .setBackground(bg)
-    .setFontColor(COLORS.WHITE)
-    .setFontSize(11)
-    .setFontWeight('bold')
-    .setVerticalAlignment('middle')
-    .setHorizontalAlignment('left');
+  sheet.getRange(row, 1, 1, 10).merge()
+    .setValue(label).setBackground(bg).setFontColor(COLORS.WHITE)
+    .setFontSize(11).setFontWeight('bold').setVerticalAlignment('middle').setHorizontalAlignment('left');
   sheet.setRowHeight(row, 28);
   return row + 1;
 }
 
 function renderSubHeader(sheet, row, label) {
-  const range = sheet.getRange(row, 1, 1, 10).merge();
-  range.setValue(label)
-    .setBackground(COLORS.SUBHEADER)
-    .setFontColor(COLORS.WHITE)
-    .setFontSize(10)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('left');
+  sheet.getRange(row, 1, 1, 10).merge()
+    .setValue(label).setBackground(COLORS.SUBHEADER).setFontColor(COLORS.WHITE)
+    .setFontSize(10).setFontWeight('bold').setHorizontalAlignment('left');
   sheet.setRowHeight(row, 24);
   return row + 1;
 }
@@ -454,11 +390,8 @@ function renderSubHeader(sheet, row, label) {
 function renderTableHeader(sheet, row, headers, ncol) {
   headers.forEach((h, i) => {
     sheet.getRange(row, 1 + i).setValue(h)
-      .setFontWeight('bold')
-      .setBackground(COLORS.NEUTRAL_BG)
-      .setFontSize(10)
-      .setFontColor(COLORS.NEUTRAL_TEXT)
-      .setHorizontalAlignment('center')
+      .setFontWeight('bold').setBackground(COLORS.NEUTRAL_BG)
+      .setFontSize(10).setFontColor(COLORS.NEUTRAL_TEXT).setHorizontalAlignment('center')
       .setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
   });
   return row + 1;
@@ -474,8 +407,7 @@ function renderDataRow(sheet, row, ncol, vals, opts) {
       .setHorizontalAlignment(i === 0 ? 'left' : 'center')
       .setBackground(row % 2 === 0 ? COLORS.ALT_ROW : COLORS.CARD_BG);
     if (opts.pnlCols && opts.pnlCols.includes(i + 1)) {
-      const raw = parsePnL(v);
-      cell.setFontColor(raw >= 0 ? COLORS.PROFIT : COLORS.LOSS).setFontWeight('bold');
+      cell.setFontColor(parsePnL(v) >= 0 ? COLORS.PROFIT : COLORS.LOSS).setFontWeight('bold');
     }
   });
   sheet.getRange(row, 1, 1, ncol).setBorder(true, true, true, true, false, false, COLORS.BORDER_SOFT, SpreadsheetApp.BorderStyle.SOLID);
@@ -488,16 +420,121 @@ function renderTotalRow(sheet, row, ncol, vals, opts) {
     const cell = sheet.getRange(row, 1 + i);
     cell.setValue(v)
       .setFontFamily(i === 0 ? FONTS.HEADER.family : FONTS.MONO.family)
-      .setFontWeight('bold')
-      .setHorizontalAlignment(i === 0 ? 'left' : 'center')
-      .setBackground(COLORS.DARK_HEADER)
-      .setFontColor(COLORS.WHITE)
-      .setFontSize(11);
+      .setFontWeight('bold').setHorizontalAlignment(i === 0 ? 'left' : 'center')
+      .setBackground(COLORS.DARK_HEADER).setFontColor(COLORS.WHITE).setFontSize(11);
     if (opts.pnlCols && opts.pnlCols.includes(i + 1)) {
-      const raw = parsePnL(v);
-      cell.setFontColor(raw >= 0 ? '#86EFAC' : '#FCA5A5');
+      cell.setFontColor(parsePnL(v) >= 0 ? '#86EFAC' : '#FCA5A5');
     }
   });
   sheet.setRowHeight(row, 28);
   return row + 1;
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//   AGGREGATION HELPERS
+// ════════════════════════════════════════════════════════════════════
+
+const ALL_STRATS = ['Buy Reversal', 'Buy Momentum', 'Sell Reversal', 'Sell Momentum', 'Sell Overbought'];
+
+function zeroAgg() {
+  return { count: 0, pnl: 0, winning: 0, losing: 0, targetHit: 0, slGap: 0, accuracy: 0, avgPnl: 0 };
+}
+
+function normalizeBasket(basket) {
+  const s = String(basket).toLowerCase();
+  if (s.includes('buy')  && s.includes('rev')) return 'Buy Reversal';
+  if (s.includes('buy')  && s.includes('mom')) return 'Buy Momentum';
+  if (s.includes('sell') && s.includes('rev')) return 'Sell Reversal';
+  if (s.includes('sell') && s.includes('mom')) return 'Sell Momentum';
+  if (s.includes('over') || s.includes('ob'))  return 'Sell Overbought';
+  return basket || 'Unknown';
+}
+
+function aggregatePositions(positions) {
+  const out = {};
+  ALL_STRATS.forEach(s => { out[s] = zeroAgg(); });
+  positions.forEach(p => {
+    const strat = normalizeBasket(p.basket || p.v8_basket || '');
+    if (!out[strat]) out[strat] = zeroAgg();
+    const pnl = Number(p.unrealised_pnl || 0);
+    out[strat].count++;
+    out[strat].pnl += pnl;
+    if (pnl > 0) out[strat].winning++;
+    else if (pnl < 0) out[strat].losing++;
+  });
+  Object.keys(out).forEach(k => {
+    const a = out[k];
+    a.accuracy = (a.winning + a.losing) > 0 ? (a.winning / (a.winning + a.losing)) * 100 : 0;
+    a.avgPnl   = a.count > 0 ? a.pnl / a.count : 0;
+    a.pnl      = fmtPnL(a.pnl);
+    a.avgPnl   = fmtPnL(a.avgPnl);
+  });
+  return out;
+}
+
+function aggregateTrades(trades) {
+  const out = {};
+  ALL_STRATS.forEach(s => { out[s] = zeroAgg(); });
+  trades.forEach(t => {
+    const strat  = normalizeBasket(t.basket || '');
+    if (!out[strat]) out[strat] = zeroAgg();
+    const pnl    = Number(t.pnl || 0);
+    const result = (t.result || '').toUpperCase();
+    out[strat].count++;
+    out[strat].pnl += pnl;
+    if (result === 'TARGET') out[strat].targetHit++;
+    else out[strat].slGap++;
+  });
+  Object.keys(out).forEach(k => {
+    const a    = out[k];
+    a.accuracy = a.count > 0 ? (a.targetHit / a.count) * 100 : 0;
+    a.avgPnl   = a.count > 0 ? a.pnl / a.count : 0;
+    a.pnl      = fmtPnL(a.pnl);
+    a.avgPnl   = fmtPnL(a.avgPnl);
+  });
+  return out;
+}
+
+// TOTAL row = sum of displayed rows (never diverges from breakup)
+function sumAggRows(aggs) {
+  const t = { count: 0, pnl: 0, winning: 0, losing: 0 };
+  aggs.forEach(a => {
+    t.count   += a.count;
+    t.pnl     += parsePnL(a.pnl);
+    t.winning += a.winning;
+    t.losing  += a.losing;
+  });
+  t.accuracy = (t.winning + t.losing) > 0 ? (t.winning / (t.winning + t.losing)) * 100 : 0;
+  t.avgPnl   = t.count > 0 ? t.pnl / t.count : 0;
+  t.pnl      = fmtPnL(t.pnl);
+  t.avgPnl   = fmtPnL(t.avgPnl);
+  return t;
+}
+
+function sumClosedAggRows(aggs) {
+  const t = { count: 0, pnl: 0, targetHit: 0, slGap: 0 };
+  aggs.forEach(a => {
+    t.count     += a.count;
+    t.pnl       += parsePnL(a.pnl);
+    t.targetHit += a.targetHit || 0;
+    t.slGap     += a.slGap    || 0;
+  });
+  t.accuracy = t.count > 0 ? (t.targetHit / t.count) * 100 : 0;
+  t.avgPnl   = t.count > 0 ? t.pnl / t.count : 0;
+  t.pnl      = fmtPnL(t.pnl);
+  t.avgPnl   = fmtPnL(t.avgPnl);
+  return t;
+}
+
+function computeHolding(entryTime, exitTime) {
+  if (!entryTime) return '—';
+  try {
+    const entry = new Date(entryTime);
+    const exit  = exitTime ? new Date(exitTime) : new Date();
+    const days  = Math.floor((exit - entry) / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'Intraday';
+    if (days === 1) return '1 Day';
+    return days + ' Days';
+  } catch (e) { return '—'; }
 }
