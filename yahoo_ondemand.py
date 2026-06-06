@@ -55,9 +55,19 @@ UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 # Yahoo intraday history caps (approx, in days): 1m ~ 7d, 5m/15m/30m ~ 60d.
 MAX_DAYS = {'1m': 7, '2m': 60, '5m': 60, '15m': 60, '30m': 60, '60m': 730, '1d': 3650}
 
-# Symbols whose Yahoo ticker differs from the raw NSE symbol (rare). The
-# default rule simply appends '.NS' (e.g. SBIN -> SBIN.NS, M&M -> M&M.NS).
-YSYM_OVERRIDE = {}
+# Symbols whose Yahoo ticker differs from the raw NSE symbol. The default rule
+# simply appends '.NS' (e.g. SBIN -> SBIN.NS). Indices need a leading '^' and
+# NO '.NS' suffix, so they are mapped explicitly here.
+YSYM_OVERRIDE = {
+    'NIFTY50': '^NSEI',
+    'NIFTY': '^NSEI',
+    '^NSEI': '^NSEI',
+    'BANKNIFTY': '^NSEBANK',
+    'NIFTYBANK': '^NSEBANK',
+    '^NSEBANK': '^NSEBANK',
+    'FINNIFTY': 'NIFTY_FIN_SERVICE.NS',
+    'INDIAVIX': '^INDIAVIX',
+}
 
 
 def yahoo_symbol(symbol, exchange='NS'):
