@@ -21,6 +21,10 @@ day_change formula (05-Jun-2026):
   EOD:  (latest_close / close_2_days_ago - 1) * 100
   Live: (cmp / close_2_days_ago - 1) * 100
   Captures 2-day momentum. close_2_days_ago = raw_prices iloc[-3] (today not yet in EOD).
+
+sector_week  = avg week_return  of peers in same segment (EOD, frozen at 15:45)
+sector_month = avg month_return of peers in same segment (EOD, frozen at 15:45)
+sector_day   = live avg day_change of peers — computed by v8_signal_writer every 5-min
 """
 
 import logging
@@ -57,7 +61,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     rsi_month NUMERIC, rsi_weekly NUMERIC, daily_rsi NUMERIC,
     month_return NUMERIC, week_return NUMERIC, year_return NUMERIC,
     day_change NUMERIC,
-    sector_day NUMERIC, sector_week NUMERIC,
+    sector_day NUMERIC, sector_week NUMERIC, sector_month NUMERIC,
     month_index NUMERIC, week_index_52 NUMERIC,
     range_1d NUMERIC, range_3d NUMERIC,
     upper_bb NUMERIC, lower_bb NUMERIC,
@@ -65,6 +69,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     computed_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(symbol, score_date)
 );
+ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS sector_month NUMERIC;
 CREATE INDEX IF NOT EXISTS idx_v8_metrics_symbol_date ON v8_metrics(symbol, score_date DESC);
 
 -- v8_qualified: live signals for today — overwritten on every engine run.
@@ -164,7 +169,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         "gvm_score": None, "dma_50": None, "dma_200": None,
         "rsi_month": None, "rsi_weekly": None,
         "month_return": None, "week_return": None, "year_return": None,
-        "sector_day": None, "sector_week": None,
+        "sector_day": None, "sector_week": None, "sector_month": None,
         "month_index": None, "week_index_52": None, "range_1d": None,
         "dma_20": None, "range_3d": None, "day_change": None,
         "daily_rsi": None, "upper_bb": None, "lower_bb": None,
@@ -179,6 +184,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
             segment = row[1]
         else:
             segment = None
+    out["_segment"] = segment   # used by sector pass in run_v8_engine
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -209,8 +215,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if len(df) >= 21:  out["month_return"] = _safe_pct(latest_close, float(df["close"].iloc[-21]))
     if len(df) >= 5:   out["week_return"]  = _safe_pct(latest_close, float(df["close"].iloc[-5]))
 
-    # day_change: latest_close / close_2_days_ago — 2-day momentum (05-Jun-2026)
-    # iloc[-1] = yesterday EOD, iloc[-3] = 2 days before yesterday
+    # day_change: 2-day momentum
     if len(df) >= 3:
         base = float(df["close"].iloc[-3])
         if base > 0:
@@ -265,14 +270,16 @@ def store_metrics(conn, m: Dict):
             (symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
              rsi_month, rsi_weekly, daily_rsi,
              month_return, week_return, year_return, day_change,
-             sector_day, sector_week, month_index, week_index_52,
+             sector_day, sector_week, sector_month,
+             month_index, week_index_52,
              range_1d, range_3d, upper_bb, lower_bb,
              ma9_vs_ma21, vol_ratio)
             VALUES
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
              %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
              %(month_return)s, %(week_return)s, %(year_return)s, %(day_change)s,
-             %(sector_day)s, %(sector_week)s, %(month_index)s, %(week_index_52)s,
+             %(sector_day)s, %(sector_week)s, %(sector_month)s,
+             %(month_index)s, %(week_index_52)s,
              %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s,
              %(ma9_vs_ma21)s, %(vol_ratio)s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
@@ -281,6 +288,7 @@ def store_metrics(conn, m: Dict):
                 month_return=EXCLUDED.month_return, week_return=EXCLUDED.week_return,
                 year_return=EXCLUDED.year_return, day_change=EXCLUDED.day_change,
                 sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
+                sector_month=EXCLUDED.sector_month,
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
                 range_1d=EXCLUDED.range_1d, range_3d=EXCLUDED.range_3d,
                 upper_bb=EXCLUDED.upper_bb, lower_bb=EXCLUDED.lower_bb,
@@ -344,7 +352,8 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             metrics_snap = {k: s.get(k) for k in [
                 'gvm_score','dma_50','dma_200','dma_20','rsi_month','rsi_weekly',
                 'daily_rsi','month_return','week_return','year_return','day_change',
-                'week_index_52','range_3d','ma9_vs_ma21','vol_ratio'
+                'week_index_52','range_3d','ma9_vs_ma21','vol_ratio',
+                'sector_week','sector_month',
             ]}
             try:
                 with conn.cursor() as cur:
@@ -422,17 +431,51 @@ def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
         "errors": [],
         "signals_written": 0,
     }
+
+    # Pass 1: compute per-symbol metrics
     all_metrics = []
     for sym in symbols:
         try:
             m = compute_metrics_for_symbol(conn, sym, target_date)
-            store_metrics(conn, m)
             all_metrics.append(m)
             results["symbols_processed"] += 1
         except Exception as e:
             results["errors"].append(f"{sym}: {str(e)[:80]}")
             log.warning(f"V8 engine error on {sym}: {e}")
 
+    # Pass 2: sector_week + sector_month — EOD peer avg by segment
+    # sector_week  = avg week_return  of peers in same segment
+    # sector_month = avg month_return of peers in same segment
+    from collections import defaultdict
+    seg_week:  dict = defaultdict(list)
+    seg_month: dict = defaultdict(list)
+    for m in all_metrics:
+        seg = m.get("_segment")
+        if not seg:
+            continue
+        wk = m.get("week_return")
+        mo = m.get("month_return")
+        if wk  is not None: seg_week[seg].append(wk)
+        if mo  is not None: seg_month[seg].append(mo)
+
+    seg_week_avg  = {seg: float(np.mean(v)) for seg, v in seg_week.items()  if v}
+    seg_month_avg = {seg: float(np.mean(v)) for seg, v in seg_month.items() if v}
+
+    for m in all_metrics:
+        seg = m.get("_segment")
+        m["sector_week"]  = seg_week_avg.get(seg)
+        m["sector_month"] = seg_month_avg.get(seg)
+        m["sector_day"]   = None   # set live by v8_signal_writer every 5-min
+
+    # Pass 3: store all metrics (with sector values)
+    for m in all_metrics:
+        try:
+            store_metrics(conn, m)
+        except Exception as e:
+            results["errors"].append(f"{m.get('symbol','?')}: store {str(e)[:80]}")
+            log.warning(f"store_metrics error {m.get('symbol')}: {e}")
+
+    # Pass 4: write signals
     try:
         write_signals_to_db(conn, all_metrics, target_date, source='eod')
         results["signals_written"] = len(all_metrics)
