@@ -3,9 +3,8 @@ Scheduler + background tasks — extracted from main.py (refactor file 4/5, 04-J
 
 Self-contained: own _conn, _ist_now, own copies of the data-feed helpers the
 scheduled jobs call in-process (Yahoo CMP/intraday, heal gaps, ADR/PCR compute).
-Imports engine modules directly (same as main.py): v8_engine, v8_live, v8_paper,
-v8_signal_writer, global_indices, qb_eod_checker, gvm_nightly, refresh_takeaways,
-nse_holidays.
+Imports engine modules directly (same as main.py): v8_engine, v8_signal_writer,
+v8_paper, global_indices, qb_eod_checker, gvm_nightly, refresh_takeaways, nse_holidays.
 
 main.py calls start_background(app, base_url, admin_token) inside its startup event.
 The earnings job calls main's HTTP endpoint /api/admin/load_earnings_from_screener
@@ -14,10 +13,14 @@ The earnings job calls main's HTTP endpoint /api/admin/load_earnings_from_screen
 ADR/PCR compute (_compute_and_store_adr/_pcr) live HERE now and are ALSO imported
 back by main.py so the manual endpoint /api/daily/compute_metrics keeps working.
 
+Single live engine: v8_signal_writer.run_live_signal_writer() every 5-min.
+v8_live.py archived — v8_history_cache no longer built or used.
+
 04-Jun-2026 fix: PCR subquery referenced invalid column `ts2` — corrected.
 06-Jun-2026 fix: Global indices fetch moved to 06:00 IST, runs every day incl weekends.
   Global intraday: 5-min fetch, restricted to 06:00-23:30 IST (time guard added).
   Intraday tickers expanded: Gold, Silver, WTI, Brent, Natural Gas, Bitcoin.
+06-Jun-2026: v8_live removed. Single engine = v8_signal_writer (5-min, 19 metrics live).
 """
 
 import os
@@ -33,7 +36,6 @@ import psycopg
 
 from nse_holidays import is_trading_day
 from v8_engine import run_v8_engine
-from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import recompute_gvm
 import v8_paper
 import global_indices
@@ -44,7 +46,7 @@ import refresh_takeaways as rt
 log = logging.getLogger("scorr.scheduler")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+ADMIN_TOKEN  = os.getenv("ADMIN_TOKEN", "")
 
 # Set by start_background()
 _BASE_URL = "https://quantproject-production.up.railway.app"
@@ -201,32 +203,30 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ───────────────────────────────────────────────────────────────
-_raw_prices_updated_today: Optional[date] = None
-_earnings_loaded_today: Optional[date] = None
-_yahoo_daily_running: bool = False
-_v8_engine_ran_today: Optional[date] = None
-_v8_engine_running: bool = False
-_cache_built_today: Optional[date] = None
-_cache_building: bool = False
-_live_tick_running: bool = False
-_signal_writer_running: bool = False
-_gvm_recompute_ran_today: Optional[date] = None
-_gvm_recompute_running: bool = False
-_paper_tick_running: bool = False
-_paper_pivots_built: Optional[date] = None
-_global_fetched_today: Optional[date] = None
-_global_fetching: bool = False
-_global_intraday_fetching: bool = False
-_qb_eod_ran_today: Optional[date] = None
-_qb_eod_running: bool = False
-_qb_intraday_mark_running: bool = False
-_daily_metrics_ran_today: Optional[date] = None
-_daily_metrics_running: bool = False
-_refresh_check_ran_today: Optional[date] = None
+# ── State flags ────────────────────────────────────────────────────────────────
+_raw_prices_updated_today:  Optional[date] = None
+_earnings_loaded_today:     Optional[date] = None
+_yahoo_daily_running:       bool           = False
+_v8_engine_ran_today:       Optional[date] = None
+_v8_engine_running:         bool           = False
+_signal_writer_running:     bool           = False
+_gvm_recompute_ran_today:   Optional[date] = None
+_gvm_recompute_running:     bool           = False
+_paper_tick_running:        bool           = False
+_paper_pivots_built:        Optional[date] = None
+_global_fetched_today:      Optional[date] = None
+_global_fetching:           bool           = False
+_global_intraday_fetching:  bool           = False
+_qb_eod_ran_today:          Optional[date] = None
+_qb_eod_running:            bool           = False
+_qb_intraday_mark_running:  bool           = False
+_daily_metrics_ran_today:   Optional[date] = None
+_daily_metrics_running:     bool           = False
+_refresh_check_ran_today:   Optional[date] = None
 
 
-# ── Background tasks ──────────────────────────────────────────────────────────
+# ── Background tasks ───────────────────────────────────────────────────────────
+
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
         return
@@ -283,29 +283,6 @@ async def _task_run_v8_engine():
         return
     log.info("15:45 IST: V8 engine auto-run")
     asyncio.create_task(asyncio.to_thread(_bg_run_v8_engine))
-
-
-def _bg_build_cache():
-    global _cache_built_today, _cache_building
-    if _cache_building:
-        return
-    _cache_building = True
-    try:
-        with _conn() as conn:
-            res = build_history_cache(conn)
-        _cache_built_today = _ist_now().date()
-        log.info(f"v8_history_cache built: {res.get('built')}/{res.get('total')}")
-    except Exception as e:
-        log.error(f"cache build failed: {e}")
-    finally:
-        _cache_building = False
-
-
-async def _task_build_cache():
-    if _cache_built_today == _ist_now().date():
-        return
-    log.info("09:00 IST: Building v8_history_cache")
-    asyncio.create_task(asyncio.to_thread(_bg_build_cache))
 
 
 def _bg_recompute_gvm():
@@ -418,30 +395,10 @@ def _bg_fetch_global_intraday():
 
 
 async def _task_fetch_global_intraday():
-    # 6 symbols (Gold/Silver/WTI/Brent/NG/BTC) trade 24x5 or 24x7
-    # Fetch every 5 min but restrict to 06:00-23:30 IST to avoid midnight spam
     _n = _ist_now()
     if not (6 <= _n.hour <= 23):
         return
     asyncio.create_task(asyncio.to_thread(_bg_fetch_global_intraday))
-
-
-def _bg_live_tick():
-    global _live_tick_running
-    if _live_tick_running:
-        return
-    _live_tick_running = True
-    try:
-        with _conn() as conn:
-            run_live_tick(conn)
-    except Exception as e:
-        log.error(f"live tick failed: {e}")
-    finally:
-        _live_tick_running = False
-
-
-async def _task_live_tick():
-    asyncio.create_task(asyncio.to_thread(_bg_live_tick))
 
 
 def _bg_signal_writer():
@@ -452,7 +409,7 @@ def _bg_signal_writer():
     try:
         with _conn() as conn:
             res = v8_signal_writer.run_live_signal_writer(conn)
-        log.info(f"signal_writer: {res.get('total', 0)} signals — {res.get('qualified', {})}")
+        log.info(f"signal_writer: updated={res.get('updated',0)} no_bar={res.get('no_bar',0)} source={res.get('source','?')}")
     except Exception as e:
         log.error(f"signal_writer failed: {e}")
     finally:
@@ -559,7 +516,8 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ─────────────────────────────────────────────────────────────────────
+# ── Loops ──────────────────────────────────────────────────────────────────────
+
 async def _scheduler():
     log.info("Scheduler started (scheduler.py)")
     asyncio.create_task(_live_loop())
@@ -569,34 +527,40 @@ async def _scheduler():
             # Runs every day including weekends
             if now.hour == 6 and now.minute < 5:
                 await _task_check_refresh_due()
-                await _task_fetch_global()       # incl weekends — Gold/Silver/BTC 24x5/7
+                await _task_fetch_global()
             # Global intraday every 5 min, 06:00-23:30 IST (incl weekends)
             await _task_fetch_global_intraday()
-            if trading_day and now.hour == 9 and now.minute < 5: await _task_load_earnings_daily()
-            if trading_day and now.hour == 9 and now.minute < 10: await _task_build_cache()
-            if _is_market_hours(): await _task_refresh_cmp()
+            if trading_day and now.hour == 9 and now.minute < 5:   await _task_load_earnings_daily()
+            if _is_market_hours():                                   await _task_refresh_cmp()
             if trading_day and now.hour == 15 and 45 <= now.minute < 55: await _task_run_v8_engine()
             if trading_day and now.hour == 15 and 50 <= now.minute < 60: await _task_compute_daily_metrics()
-            if trading_day and now.hour == 21 and now.minute < 5: await _task_update_raw_prices()
+            if trading_day and now.hour == 21 and now.minute < 5:   await _task_update_raw_prices()
             if trading_day and now.hour == 21 and 5 <= now.minute < 15: await _task_qb_eod_checker()
-            if now.hour == 22 and now.minute < 10: await _task_recompute_gvm_daily()
-            if now.hour == 22 and 5 <= now.minute < 15: await _task_build_paper_pivots()
+            if now.hour == 22 and now.minute < 10:                  await _task_recompute_gvm_daily()
+            if now.hour == 22 and 5 <= now.minute < 15:             await _task_build_paper_pivots()
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
 
 
 async def _live_loop():
-    log.info("Live loop started (scheduler.py)")
+    """
+    1-min heartbeat during market hours.
+    - Every tick: paper_tick
+    - Every 5 ticks (5-min): signal_writer (single live engine — 19 metrics + qualified)
+    - Every 15 ticks (15-min): qb_intraday_mark
+    """
+    log.info("Live loop started — single engine: v8_signal_writer every 5-min")
     tick_count = 0
     while True:
         try:
             if _is_market_hours():
-                await _task_live_tick()
                 asyncio.create_task(asyncio.to_thread(_bg_paper_tick))
                 tick_count += 1
-                if tick_count % 5 == 0: asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
-                if tick_count % 15 == 0: asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
+                if tick_count % 5 == 0:
+                    asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
+                if tick_count % 15 == 0:
+                    asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
             else:
                 tick_count = 0
         except Exception as e:
