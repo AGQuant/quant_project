@@ -4,17 +4,16 @@
  * ║   Part 1 of 2  →  v8_dashboard_core.gs                          ║
  * ║   Companion  →  v8_dashboard_tabs.gs                            ║
  * ║                                                                  ║
+ * ║   Changelog v2.1.1:                                              ║
+ * ║     - ncol cap 11→13 (shows all filters incl sector_week/month)  ║
  * ║   Changelog v2.1.0:                                              ║
- * ║     - refreshAll: sell funnels moved last (timeout fix)          ║
- * ║     - New menu item: Refresh Sell Funnels                        ║
- * ║     - Raw Data: 21 cols + sector_week/month + pivots PP/R1/R2/S1/S2 ║
- * ║     - FILTER_CONFIG: sector_week/month in all 4 baskets          ║
- * ║     - sell_reversal: range_3d → day_change                       ║
- * ║     - sell_momentum: range_3d removed                            ║
+ * ║     - refreshAll timeout fix (sell funnels last)                 ║
+ * ║     - refreshSellFunnels dedicated menu item                     ║
+ * ║     - Raw Data 21 cols + sector_week/month + pivots              ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
 
-const SCRIPT_VERSION      = '2.1.0';
+const SCRIPT_VERSION      = '2.1.1';
 const SCRIPT_RAW_URL_CORE = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_core.gs';
 const SCRIPT_RAW_URL_TABS = 'https://raw.githubusercontent.com/AGQuant/quant_project/main/apps_script/v8_dashboard_tabs.gs';
 
@@ -78,6 +77,11 @@ const BASKET_META = {
   sell_momentum:   { label: 'Sell Momentum',   color: COLORS.SELL_MOM, emoji: '▼' },
   sell_overbought: { label: 'Sell Overbought', color: COLORS.SELL_OB,  emoji: '⚠' },
 };
+
+// Max filter columns in funnel waterfall.
+// sell_momentum now has 12 filters + sector = 12 total.
+// Set to 13 to always show all filters including sector_week/month.
+const FUNNEL_MAX_COLS = 13;
 
 
 // ════════════════════════════════════════════════════════════════════
@@ -208,8 +212,8 @@ function showVersion() {
       <div class="row"><span class="label">API base</span><span class="val">${BASE_URL}</span></div>
       <div class="row"><span class="label">Tabs</span><span class="val">${Object.keys(SHEETS).length}</span></div>
       <div class="row"><span class="label">Baskets</span><span class="val">${BASKETS.length}</span></div>
+      <div class="row"><span class="label">Funnel max cols</span><span class="val">${FUNNEL_MAX_COLS}</span></div>
       <div class="row"><span class="label">2D gate</span><span class="val">day_change (2-day net c2c%)</span></div>
-      <div class="row"><span class="label">Funnel style</span><span class="val">V4 waterfall (per-stage)</span></div>
       <p style="margin-top:16px;color:#6B7280;font-size:12px;">Split: core.gs + tabs.gs · All calc in DB</p>
     </body></html>`
   ).setWidth(400).setHeight(300);
@@ -257,25 +261,19 @@ function fetchRawMetrics()     { return fetchJSON('/api/v8/raw?limit=250'); }
 
 // ════════════════════════════════════════════════════════════════════
 //   REFRESH ENTRY POINTS
-//   refreshAll timeout fix: sell funnels (heaviest) run LAST
-//   Apps Script hard limit = 6 min. Sell Momentum has 13 filters.
-//   Order: Dashboard → SO → Pos → Log → Raw → Scan → Buy funnels → Sell funnels
 // ════════════════════════════════════════════════════════════════════
 
 function refreshAll() {
   toast('Refreshing all tabs…');
   clearRawCache();
-  // Fast tabs first
   refreshMasterDashboard();
   refreshSellOverbought();
   refreshInPosition();
   refreshTradeLog();
   refreshRawData();
   refreshFilterScan();
-  // Buy funnels (lighter — 9 filters each)
   const _raw = getRawMetricsCached();
   ['buy_reversal', 'buy_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
-  // Sell funnels last (heaviest — 9-13 filters each)
   ['sell_reversal', 'sell_momentum'].forEach(b => refreshBasketFunnel(b, _raw));
   toast('✓ All tabs refreshed');
 }
@@ -296,7 +294,6 @@ function refreshSellBaskets() {
   toast('✓ Sell baskets refreshed');
 }
 
-// Dedicated sell funnel refresh — use when refreshAll times out on sell tabs
 function refreshSellFunnels() {
   toast('Refreshing sell funnels…');
   clearRawCache();
