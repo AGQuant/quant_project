@@ -7,8 +7,10 @@ but NOT modified. Signals are advisory only (RA-compliant, no execution).
 ARCHITECTURE:
   1m WS feed (intraday_prices, 7d rolling, untouched)
      -> every 5 min: resample CLOSED 1m bars -> append closed 5m bar
-        into nifty_5m_test_data (historical 1yr base + growing live)
-     -> V10 reads nifty_5m_test_data, resamples 5m -> 10m (+30m gate)
+        into the per-index test table (historical 1yr base + growing live):
+          NIFTY50   -> nifty_5m_test_data
+          BANKNIFTY -> banknifty_5m_test_data
+     -> V10 reads the table, resamples 5m -> 10m (+30m gate)
      -> signal on last CLOSED 10m bar -> Telegram alert on BUY/SELL
 
 LOCKED STRATEGY SPEC (backtested 1yr NIFTY, after Rs1000/trade futures cost):
@@ -21,6 +23,10 @@ LOCKED STRATEGY SPEC (backtested 1yr NIFTY, after Rs1000/trade futures cost):
   - Backtest    : +5936 pts (~Rs4.45L/lot/yr), 49.3% win, PF 1.88,
                   150 trades/yr, 10/13 months positive
   - Sizing      : ~Rs5L capital per lot (max DD ~ -Rs85k)
+
+NOTE: BANKNIFTY 5m is appended/kept current here, but its STRATEGY (params,
+SL/target) is NOT yet locked — pending its own backtest. current_signal()
+still computes NIFTY only until BANKNIFTY params are finalised.
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -31,7 +37,7 @@ import psycopg2
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# ---- LOCKED PARAMETERS ----
+# ---- LOCKED PARAMETERS (NIFTY) ----
 TF_MAIN   = "10min"
 TF_GATE   = "30min"
 ST_PERIOD = 150
@@ -42,6 +48,12 @@ SL_PTS    = 100
 TGT_PTS   = 200
 TABLE     = "nifty_5m_test_data"
 FEED_SYMBOL = "NIFTY50"   # as stored in intraday_prices (source='fyers')
+
+# ---- Feeds to append every 5 min (feed_symbol -> test table) ----
+APPEND_FEEDS = {
+    "NIFTY50":   "nifty_5m_test_data",
+    "BANKNIFTY": "banknifty_5m_test_data",
+}
 
 
 # ---------- indicators ----------
@@ -82,42 +94,53 @@ def _resample(df, rule):
 
 
 # ---------- 1m -> 5m appender (live) ----------
-def build_and_append_5m():
-    """Resample CLOSED 1m bars from intraday_prices into 5m and append to
-    nifty_5m_test_data. Only bars whose full 5-min window has elapsed are written
-    (no partial/forming bar). Idempotent via PK on ts."""
-    conn = psycopg2.connect(os.environ["DATABASE_URL"])
-    cur = conn.cursor()
-    # pull last ~2 days of 1m to cover any gap, resample, append closed bars only
+def _append_one(cur, feed_symbol, table):
+    """Resample CLOSED 1m bars for one feed symbol into 5m and append to its table.
+    Only fully-closed 5m bars are written (no forming bar). Idempotent via PK on ts."""
     df = pd.read_sql(
         "SELECT ts, open, high, low, close FROM intraday_prices "
         "WHERE symbol=%s AND source='fyers' AND timeframe='1m' "
-        "AND ts >= NOW() - INTERVAL '2 days' ORDER BY ts", conn, params=(FEED_SYMBOL,))
+        "AND ts >= NOW() - INTERVAL '2 days' ORDER BY ts",
+        cur.connection, params=(feed_symbol,))
     if df.empty:
-        cur.close(); conn.close()
-        return {"status": "no_1m_data"}
+        return {"feed": feed_symbol, "status": "no_1m_data", "appended": 0}
     df["ts"] = pd.to_datetime(df["ts"])
     g5 = _resample(df, "5min")
-    # drop the still-forming current 5m bar: keep only bars that have fully closed
     now = pd.Timestamp(datetime.now(IST).replace(tzinfo=None))
     g5 = g5[g5["ts"] + pd.Timedelta(minutes=5) <= now]
     rows = [(r.ts.to_pydatetime(), float(r.open), float(r.high), float(r.low), float(r.close), 0)
             for r in g5.itertuples()]
     if rows:
         cur.executemany(
-            f"INSERT INTO {TABLE} (ts,open,high,low,close,volume) VALUES (%s,%s,%s,%s,%s,%s) "
+            f"INSERT INTO {table} (ts,open,high,low,close,volume) VALUES (%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT (ts) DO NOTHING", rows)
-        conn.commit()
-    cur.execute(f"SELECT COUNT(*), MAX(ts) FROM {TABLE}")
+    cur.execute(f"SELECT COUNT(*), MAX(ts) FROM {table}")
     cnt, mx = cur.fetchone()
-    cur.close(); conn.close()
-    return {"status": "ok", "appended_candidates": len(rows), "table_rows": cnt, "latest": str(mx)}
+    return {"feed": feed_symbol, "table": table, "status": "ok",
+            "candidates": len(rows), "table_rows": cnt, "latest": str(mx)}
+
+
+def build_and_append_5m():
+    """Append closed 5m bars for ALL configured feeds (NIFTY + BANKNIFTY)."""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    cur = conn.cursor()
+    results = []
+    try:
+        for feed_symbol, table in APPEND_FEEDS.items():
+            try:
+                results.append(_append_one(cur, feed_symbol, table))
+            except Exception as e:
+                results.append({"feed": feed_symbol, "status": "error", "error": str(e)})
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+    return {"status": "ok", "feeds": results}
 
 
 # ---------- data load ----------
-def _load_5m():
+def _load_5m(table=TABLE):
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
-    df = pd.read_sql(f"SELECT ts, open, high, low, close FROM {TABLE} ORDER BY ts", conn)
+    df = pd.read_sql(f"SELECT ts, open, high, low, close FROM {table} ORDER BY ts", conn)
     conn.close()
     df["ts"] = pd.to_datetime(df["ts"])
     if getattr(df["ts"].dt, "tz", None) is not None:
@@ -133,8 +156,8 @@ def _zone_series(df5):
 
 
 def current_signal():
-    """Latest actionable signal as of the most recent CLOSED 10m bar."""
-    df5 = _load_5m()
+    """Latest actionable signal (NIFTY) as of the most recent CLOSED 10m bar."""
+    df5 = _load_5m(TABLE)
     g10 = _resample(df5, TF_MAIN)
     if len(g10) < ST_PERIOD + 5:
         return {"status": "insufficient_data", "bars": len(g10)}
@@ -179,7 +202,8 @@ def telegram_alert(msg):
 
 
 def tick():
-    """Full 5-min cycle: append latest 5m bar, compute signal, alert if BUY/SELL."""
+    """Full 5-min cycle: append latest 5m bar (NIFTY + BANKNIFTY), compute NIFTY
+    signal, alert if BUY/SELL. BANKNIFTY signal will be added once its params lock."""
     appended = build_and_append_5m()
     sig = current_signal()
     sig["append"] = appended
