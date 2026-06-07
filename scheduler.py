@@ -21,6 +21,9 @@ v8_live.py archived — v8_history_cache no longer built or used.
   Global intraday: 5-min fetch, restricted to 06:00-23:30 IST (time guard added).
   Intraday tickers expanded: Gold, Silver, WTI, Brent, Natural Gas, Bitcoin.
 06-Jun-2026: v8_live removed. Single engine = v8_signal_writer (5-min, 19 metrics live).
+07-Jun-2026: V10 ST+EMA wired — every 5-min during market hours, appends 5m bar from
+  live 1m feed into nifty_5m_test_data, computes signal, Telegram alert on BUY/SELL.
+  Isolated/advisory; does not touch V8 or the 1m feed writes.
 """
 
 import os
@@ -42,6 +45,7 @@ import global_indices
 import v8_signal_writer
 import qb_eod_checker
 import refresh_takeaways as rt
+import v10_st_ema
 
 log = logging.getLogger("scorr.scheduler")
 
@@ -203,7 +207,7 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ────────────────────────────────────────────────────────────────
+# ── State flags ───────────────────────────────────────────────────────────────
 _raw_prices_updated_today:  Optional[date] = None
 _earnings_loaded_today:     Optional[date] = None
 _yahoo_daily_running:       bool           = False
@@ -223,6 +227,7 @@ _qb_intraday_mark_running:  bool           = False
 _daily_metrics_ran_today:   Optional[date] = None
 _daily_metrics_running:     bool           = False
 _refresh_check_ran_today:   Optional[date] = None
+_v10_running:               bool           = False
 
 
 # ── Background tasks ───────────────────────────────────────────────────────────
@@ -416,6 +421,23 @@ def _bg_signal_writer():
         _signal_writer_running = False
 
 
+def _bg_v10_tick():
+    """V10 ST+EMA: append closed 5m bar from live 1m feed, compute signal, alert on BUY/SELL.
+    Isolated/advisory; reads intraday_prices (1m) + nifty_5m_test_data only."""
+    global _v10_running
+    if _v10_running:
+        return
+    _v10_running = True
+    try:
+        res = v10_st_ema.tick()
+        if res.get("signal") in ("BUY", "SELL"):
+            log.info(f"V10 SIGNAL: {res['signal']} NIFTY @ {res.get('price')} | alert={res.get('alert')}")
+    except Exception as e:
+        log.error(f"v10_tick failed: {e}")
+    finally:
+        _v10_running = False
+
+
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
     if _qb_intraday_mark_running:
@@ -516,7 +538,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ──────────────────────────────────────────────────────────────────────
+# ── Loops ────────────────────────────────────────────────────────────────────
 
 async def _scheduler():
     log.info("Scheduler started (scheduler.py)")
@@ -548,9 +570,10 @@ async def _live_loop():
     1-min heartbeat during market hours.
     - Every tick: paper_tick
     - Every 5 ticks (5-min): signal_writer (single live engine — 19 metrics + qualified)
+                              + V10 ST+EMA tick (append 5m bar, signal, alert)
     - Every 15 ticks (15-min): qb_intraday_mark
     """
-    log.info("Live loop started — single engine: v8_signal_writer every 5-min")
+    log.info("Live loop started — engines: v8_signal_writer + V10 ST+EMA every 5-min")
     tick_count = 0
     while True:
         try:
@@ -559,6 +582,7 @@ async def _live_loop():
                 tick_count += 1
                 if tick_count % 5 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
+                    asyncio.create_task(asyncio.to_thread(_bg_v10_tick))
                 if tick_count % 15 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
             else:
