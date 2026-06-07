@@ -58,7 +58,7 @@ INDEX_LTP_SYMBOLS = {
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
-# ── Option chain config ───────────────────────────────────────────────────────
+# ── Option chain config ──────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS futures_basis (
     futures_close NUMERIC,
     basis         NUMERIC,
     basis_pct     NUMERIC,
+    oi            BIGINT,
+    oi_prev       BIGINT,
+    oi_chg        BIGINT,
     UNIQUE(symbol, ts)
 );
 CREATE INDEX IF NOT EXISTS idx_futures_basis_symbol_ts ON futures_basis(symbol, ts DESC);
@@ -170,7 +173,7 @@ def auto_step(cmp: float) -> int:
     return 200
 
 
-# ── DB / token ────────────────────────────────────────────────────────────────
+# ── DB / token ─────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
     with conn.cursor() as cur:
@@ -251,7 +254,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ── universe ──────────────────────────────────────────────────────────────────
+# ── universe ─────────────────────────────────────────────────────────────────────
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -290,7 +293,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ─────────────────────────────────────────────────────
+# ── option symbol manager ──────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
@@ -390,7 +393,7 @@ class OptionSymbolManager:
             return self.sym_map.get(fsym)
 
 
-# ── bar aggregator ────────────────────────────────────────────────────────────
+# ── bar aggregator ───────────────────────────────────────────────────────────────
 
 class BarAggregator:
     def __init__(self, conn):
@@ -402,7 +405,7 @@ class BarAggregator:
     def _bucket(self, ts):
         return ts.replace(second=0, microsecond=0)
 
-    def on_tick(self, sym, ltp, vol, ts=None, source='fyers_eq'):
+    def on_tick(self, sym, ltp, vol, ts=None, source='fyers_eq', oi=None):
         ts  = ts or datetime.now(IST).replace(tzinfo=None)
         bkt = self._bucket(ts)
         key = (sym, source)
@@ -413,12 +416,13 @@ class BarAggregator:
                 if bar is not None:
                     self._flush(key, bar)
                 self.bars[key] = {'ts': bkt, 'o': ltp, 'h': ltp, 'l': ltp,
-                                  'c': ltp, 'v': vol or 0, 'source': source}
+                                  'c': ltp, 'v': vol or 0, 'oi': oi, 'source': source}
             else:
                 bar['h'] = max(bar['h'], ltp)
                 bar['l'] = min(bar['l'], ltp)
                 bar['c'] = ltp
                 if vol: bar['v'] = vol
+                if oi is not None: bar['oi'] = oi
 
     def _flush(self, key, bar):
         sym, source = key
@@ -439,30 +443,42 @@ class BarAggregator:
                       int(bar['v']), source))
             self.conn.commit()
             if source == 'fyers_fut':
-                self._compute_basis(sym, bar['ts'], bar['c'])
+                self._compute_basis(sym, bar['ts'], bar['c'], bar.get('oi'))
         except Exception as e:
             log.warning(f"flush {sym} ({source}): {e}")
 
-    def _compute_basis(self, sym, ts, fut_close):
-        """On futures bar flush: look up matching equity bar and store basis."""
+    def _compute_basis(self, sym, ts, fut_close, oi=None):
+        """On futures bar flush: store basis + OI + OI change vs prior bar."""
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT close FROM intraday_prices
                     WHERE symbol=%s AND ts=%s AND source='fyers_eq' LIMIT 1
                 """, (sym, ts))
-                row = cur.fetchone()
-                if not row: return
-                spot      = float(row[0])
-                basis     = round(fut_close - spot, 4)
+                row       = cur.fetchone()
+                spot      = float(row[0]) if row else None
+                basis     = round(fut_close - spot, 4) if spot is not None else None
                 basis_pct = round((fut_close - spot) / spot * 100, 4) if spot else None
+                # prior bar OI for this symbol (most recent non-null before this ts)
+                oi_prev = None
+                if oi is not None:
+                    cur.execute("""
+                        SELECT oi FROM futures_basis
+                        WHERE symbol=%s AND oi IS NOT NULL AND ts < %s
+                        ORDER BY ts DESC LIMIT 1
+                    """, (sym, ts))
+                    pr = cur.fetchone()
+                    oi_prev = int(pr[0]) if pr and pr[0] is not None else None
+                oi_chg = (int(oi) - oi_prev) if (oi is not None and oi_prev is not None) else None
                 cur.execute("""
-                    INSERT INTO futures_basis (symbol, ts, spot_close, futures_close, basis, basis_pct)
-                    VALUES (%s,%s,%s,%s,%s,%s)
+                    INSERT INTO futures_basis (symbol, ts, spot_close, futures_close, basis, basis_pct, oi, oi_prev, oi_chg)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (symbol, ts) DO UPDATE SET
                         spot_close=EXCLUDED.spot_close, futures_close=EXCLUDED.futures_close,
-                        basis=EXCLUDED.basis, basis_pct=EXCLUDED.basis_pct
-                """, (sym, ts, spot, fut_close, basis, basis_pct))
+                        basis=EXCLUDED.basis, basis_pct=EXCLUDED.basis_pct,
+                        oi=EXCLUDED.oi, oi_prev=EXCLUDED.oi_prev, oi_chg=EXCLUDED.oi_chg
+                """, (sym, ts, spot, fut_close, basis, basis_pct,
+                      int(oi) if oi is not None else None, oi_prev, oi_chg))
             self.conn.commit()
         except Exception as e:
             log.warning(f"_compute_basis {sym}: {e}")
@@ -491,7 +507,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ──────────────────────────────────────────────────────────
+# ── option bar store ───────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 1-min option ticks into option_chain."""
@@ -547,7 +563,7 @@ class OptionBarStore:
                 self._flush(fsym, bar)
 
 
-# ── index LTP ─────────────────────────────────────────────────────────────────
+# ── index LTP ───────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -574,7 +590,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ─────────────────────────────────────────────────────────────────────
+# ── purge ───────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
@@ -596,12 +612,14 @@ def ensure_schemas(conn):
     with conn.cursor() as cur:
         cur.execute(OPTION_SCHEMA_SQL)
         cur.execute(FUTURES_BASIS_SCHEMA_SQL)
+        cur.execute("ALTER TABLE futures_basis ADD COLUMN IF NOT EXISTS oi BIGINT, "
+                    "ADD COLUMN IF NOT EXISTS oi_prev BIGINT, ADD COLUMN IF NOT EXISTS oi_chg BIGINT")
         cur.execute("ALTER TABLE cmp_prices ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'fyers'")
     conn.commit()
     log.info("Schemas ready (option_chain, futures_basis)")
 
 
-# ── main run ──────────────────────────────────────────────────────────────────
+# ── main run ───────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
@@ -649,7 +667,8 @@ def run(auth_code=None):
             if fsym in equity_set:
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
             elif fsym in futures_set:
-                agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_fut')
+                agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol),
+                            source='fyers_fut', oi=msg.get('oi') or msg.get('open_int'))
             else:
                 opt_store.on_tick(fsym, float(ltp),
                                   oi=msg.get('oi') or msg.get('open_int'),
