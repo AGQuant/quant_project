@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Response
 
 import yahoo_ondemand
 
-# ── MCP dispatch layer ──────────────────────────────────────────────
+# ── MCP dispatch layer ───────────────────────────────────────────────────────
 # Extracted from main.py (File 5/5 split, piece B). Self-contained:
 # reads env vars directly, owns its get_conn, imports yahoo_ondemand.
 # NO import from main.py -> no circular import.
@@ -95,6 +95,8 @@ MCP_TOOLS = [
     {"name":"v9_best_combo","description":"V9 Pair Strategy: get best parameter combo by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v10_signal","description":"V10 ST+EMA: current NIFTY directional signal (ST 150/3 10m + EMA 3/10 30m gate, SL100/T200).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v10_tick","description":"V10 ST+EMA: run one 5-min cycle — append 5m bar, compute signal, Telegram alert on BUY/SELL.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"pcr_intraday","description":"5-min intraday PCR trend (ATM\u00b15 + total) for NIFTY/BANKNIFTY from pcr_intraday.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
+    {"name":"compute_pcr_intraday","description":"Compute/self-heal 5-min PCR into pcr_intraday (ts optional = single bar, else heal all missing).","inputSchema":{"type":"object","properties":{"ts":{"type":"string"}},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -216,6 +218,11 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/v10/signal"); return r.json()
         elif name == "v10_tick":
             r = await client.post(f"{BASE_URL}/api/v10/tick", headers=h); return r.json()
+        elif name == "pcr_intraday":
+            r = await client.get(f"{BASE_URL}/api/pcr/intraday", params={"underlying": args.get("underlying","NIFTY"), "days": args.get("days",2)}); return r.json()
+        elif name == "compute_pcr_intraday":
+            params = {"ts": args["ts"]} if args.get("ts") else {}
+            r = await client.post(f"{BASE_URL}/api/pcr/intraday/compute", params=params, headers=h); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @router.post("/mcp")
