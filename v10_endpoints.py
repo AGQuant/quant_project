@@ -1,7 +1,7 @@
 """
-v10_endpoints.py — V10 ST+EMA strategy routes (Scorr platform).
+v10_endpoints.py — V10 ST+EMA intraday strategy routes (Scorr platform).
 Mounted in main.py via: app.include_router(v10_router)
-Isolated from V8 / live feed. Signals are advisory only.
+Isolated from V8 / live feed writes. Signals are advisory only.
 """
 import os
 from typing import Optional
@@ -19,21 +19,23 @@ def _check_admin(token: Optional[str]):
 
 @router.get("/signal")
 def v10_signal():
-    """Latest actionable signal from live Fyers 10m data."""
+    """Current signal from the latest CLOSED 10m bar (reads nifty_5m_test_data)."""
     import v10_st_ema
-    return v10_st_ema.current_signal(live=True)
+    return v10_st_ema.current_signal()
 
 
-@router.post("/run_alert")
-def v10_run_alert(x_admin_token: Optional[str] = Header(None)):
-    """Compute signal and fire Telegram alert if BUY/SELL."""
+@router.post("/append")
+def v10_append(x_admin_token: Optional[str] = Header(None)):
+    """Build + append the latest closed 5m bar from the live 1m feed."""
     _check_admin(x_admin_token)
     import v10_st_ema
-    return v10_st_ema.run_and_alert()
+    return v10_st_ema.build_and_append_5m()
 
 
-@router.get("/backtest")
-def v10_backtest():
-    """Signal computed on static history (validation, no live fetch)."""
+@router.post("/tick")
+def v10_tick(x_admin_token: Optional[str] = Header(None)):
+    """Full 5-min cycle: append 5m bar, compute signal, Telegram alert if BUY/SELL.
+    This is the route the scheduler hits every 5 minutes during market hours."""
+    _check_admin(x_admin_token)
     import v10_st_ema
-    return v10_st_ema.current_signal(live=False)
+    return v10_st_ema.tick()
