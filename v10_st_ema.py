@@ -1,29 +1,31 @@
 """
 V10 ST+EMA — NIFTY/BANKNIFTY directional intraday paper engine (Scorr module)
 =============================================================================
-ISOLATED from V8 / paper engine. Reads the live 1m WS feed (intraday_prices)
-but does NOT modify it. Advisory + paper only (no real execution).
+ISOLATED from V8 / paper engine. Reads live 1m WS feed + option_chain; does NOT
+modify them. Paper + advisory only.
 
-PIPELINE (every 5 min during market hours, via scheduler tick):
-  1m WS feed -> resample CLOSED 1m -> append closed 5m bar into:
+PIPELINE (every 5 min, market hours, via scheduler tick):
+  1m WS feed -> resample CLOSED 1m -> append closed 5m bar:
       NIFTY50   -> nifty_5m_test_data
       BANKNIFTY -> banknifty_5m_test_data
-  -> compute signal on last CLOSED 10m bar (+30m gate)
-  -> paper engine: open on signal, close on SL/target/opposite-flip
-  -> P&L = points * lot_size   (NIFTY lot 65, BANKNIFTY lot 30)
-  -> Telegram alert on a new BUY/SELL
+  -> signal on last CLOSED 10m bar (+30m gate)
+  -> TWO-LEG paper engine, both legs open/close together:
+       FUT leg : P&L = points * lot           (NIFTY lot 65, BANKNIFTY lot 30)
+       OPT leg : write ATM monthly option from option_chain
+                 BUY signal  -> write PUT (PE) ; SELL signal -> write CALL (CE)
+                 P&L = (entry_ltp - exit_ltp) * lot   (writing: premium decay = gain)
+  -> close on SL/target (close-based on underlying) OR opposite-flip
+  -> Telegram alert on new entry
 
-LOCKED PARAMS (both indices use same structure pending BNF re-backtest Thu):
-  ST 150/3 on 10m + EMA 3/10 gate on 30m, SL 100 / Target 200 (close-based).
-  NIFTY backtest: +5936 pts (~Rs4.45L/lot/yr), 49.3% win, PF 1.88, 150 trades.
-  BANKNIFTY params NOT yet optimised — running same as NIFTY for now (paper).
+PARAMS: ST 150/3 (10m) + EMA 3/10 gate (30m), SL 100 / Target 200 (close-based).
+  NIFTY backtest (FUT): +5936 pts (~Rs4.45L/lot/yr), 49.3% win, PF 1.88, 150 trades.
+  BANKNIFTY params NOT yet optimised (running NIFTY params on paper until Thu).
 
-Tables:
-  v10_positions : one OPEN row per symbol (UNIQUE symbol,status)
-  v10_trades    : closed trade log with points + pnl
+Option data: option_chain table (NIFTY+BANKNIFTY index options only, ~3-4d rolling,
+  monthly expiry). ATM = strike nearest to underlying at signal time.
 """
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 
 import numpy as np
 import pandas as pd
@@ -31,7 +33,6 @@ import psycopg2
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# ---- Shared strategy params ----
 TF_MAIN   = "10min"
 TF_GATE   = "30min"
 ST_PERIOD = 150
@@ -41,14 +42,13 @@ EMA_SLOW  = 10
 SL_PTS    = 100
 TGT_PTS   = 200
 
-# NIFTY-only constants kept for backward compat (current_signal)
 TABLE       = "nifty_5m_test_data"
 FEED_SYMBOL = "NIFTY50"
 
-# ---- Per-index config: feed_symbol -> (table, lot_size) ----
+# feed_symbol -> (5m table, lot, option_chain underlying tag)
 INDEX_CFG = {
-    "NIFTY50":   {"table": "nifty_5m_test_data",     "lot": 65},
-    "BANKNIFTY": {"table": "banknifty_5m_test_data", "lot": 30},
+    "NIFTY50":   {"table": "nifty_5m_test_data",     "lot": 65, "oc": "NIFTY"},
+    "BANKNIFTY": {"table": "banknifty_5m_test_data", "lot": 30, "oc": "BANKNIFTY"},
 }
 
 
@@ -129,7 +129,7 @@ def build_and_append_5m():
     return {"status": "ok", "feeds": results}
 
 
-# ---------- data + signal core (table-agnostic) ----------
+# ---------- signal core ----------
 def _load_5m(table):
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     df = pd.read_sql(f"SELECT ts, open, high, low, close FROM {table} ORDER BY ts", conn)
@@ -147,7 +147,6 @@ def _zone_series(df5):
 
 
 def _signal_for(table):
-    """Return dict with last-closed-10m signal state for a given table."""
     df5 = _load_5m(table)
     g10 = _resample(df5, TF_MAIN)
     if len(g10) < ST_PERIOD + 5:
@@ -166,7 +165,6 @@ def _signal_for(table):
 
 
 def current_signal():
-    """NIFTY signal (backward-compatible shape)."""
     s = _signal_for(TABLE)
     if s.get("status") != "ok":
         return s
@@ -181,68 +179,125 @@ def current_signal():
     }
 
 
-# ---------- paper engine ----------
-def _paper_step(cur, feed_symbol, table, lot):
-    """Open/close paper position for one index based on current signal + price.
-    Close-based SL/target on the latest 10m close; opposite-flip also closes."""
+# ---------- option chain lookup ----------
+def _atm_option(cur, oc_underlying, opt_type, underlying_px):
+    """Nearest-strike (ATM) monthly option's latest ltp for the given side.
+    Returns (strike, expiry, ltp) or (None,None,None) if no data."""
+    cur.execute(
+        "SELECT strike, expiry, ltp FROM option_chain "
+        "WHERE underlying=%s AND option_type=%s "
+        "AND expiry = (SELECT MIN(expiry) FROM option_chain WHERE underlying=%s AND expiry >= CURRENT_DATE) "
+        "AND ts = (SELECT MAX(ts) FROM option_chain WHERE underlying=%s) "
+        "ORDER BY ABS(strike - %s) ASC LIMIT 1",
+        (oc_underlying, opt_type, oc_underlying, oc_underlying, underlying_px))
+    r = cur.fetchone()
+    if not r:
+        return (None, None, None)
+    return (float(r[0]), r[1], float(r[2]) if r[2] is not None else None)
+
+
+def _opt_ltp(cur, oc_underlying, opt_type, strike, expiry):
+    cur.execute(
+        "SELECT ltp FROM option_chain WHERE underlying=%s AND option_type=%s AND strike=%s AND expiry=%s "
+        "ORDER BY ts DESC LIMIT 1", (oc_underlying, opt_type, strike, expiry))
+    r = cur.fetchone()
+    return float(r[0]) if r and r[0] is not None else None
+
+
+# ---------- paper engine (two-leg) ----------
+def _close_leg(cur, pid, reason, exit_px_or_ltp):
+    """Move an open position row into v10_trades with computed P&L, then delete it."""
+    cur.execute("SELECT symbol, side, entry_price, lot_size, leg, opt_strike, opt_type FROM v10_positions WHERE id=%s", (pid,))
+    sym, side, entry, lot, leg, ostrike, otype = cur.fetchone()
+    if leg == "FUT":
+        pts = (exit_px_or_ltp - entry) if side == "BUY" else (entry - exit_px_or_ltp)
+        pnl = pts * lot
+    else:  # OPT — writing: gain when premium falls
+        pts = entry - exit_px_or_ltp        # premium collected - premium paid to close
+        pnl = pts * lot
+    cur.execute(
+        "INSERT INTO v10_trades (symbol,side,entry_price,entry_ts,exit_price,exit_ts,exit_reason,"
+        "points,lot_size,pnl,leg,opt_strike,opt_type) "
+        "SELECT symbol,side,entry_price,entry_ts,%s,NOW(),%s,%s,%s,%s,leg,opt_strike,opt_type "
+        "FROM v10_positions WHERE id=%s",
+        (round(exit_px_or_ltp, 2), reason, round(pts, 2), lot, round(pnl, 2), pid))
+    cur.execute("DELETE FROM v10_positions WHERE id=%s", (pid,))
+    return {"leg": leg, "reason": reason, "points": round(pts, 2), "pnl": round(pnl, 2)}
+
+
+def _paper_step(cur, feed_symbol, table, lot, oc):
     s = _signal_for(table)
     if s.get("status") != "ok":
         return {"feed": feed_symbol, "status": s.get("status", "err")}
     px = s["price"]; sig = s["signal"]; events = []
 
-    # fetch open position (if any)
-    cur.execute("SELECT id, side, entry_price, stop, target FROM v10_positions "
-                "WHERE symbol=%s AND status='OPEN'", (feed_symbol,))
-    pos = cur.fetchone()
+    cur.execute("SELECT id, side, leg, entry_price, stop, target, opt_strike, opt_type, opt_expiry "
+                "FROM v10_positions WHERE symbol=%s AND status='OPEN'", (feed_symbol,))
+    legs = cur.fetchall()
 
-    def _close(pid, side, entry, reason, exit_px):
-        pts = (exit_px - entry) if side == "BUY" else (entry - exit_px)
-        pnl = pts * lot
-        cur.execute("INSERT INTO v10_trades (symbol,side,entry_price,entry_ts,exit_price,exit_ts,"
-                    "exit_reason,points,lot_size,pnl) SELECT symbol,side,entry_price,entry_ts,%s,NOW(),"
-                    "%s,%s,%s,%s FROM v10_positions WHERE id=%s",
-                    (exit_px, reason, round(pts, 2), lot, round(pnl, 2), pid))
-        cur.execute("DELETE FROM v10_positions WHERE id=%s", (pid,))
-        events.append({"action": "CLOSE", "reason": reason, "points": round(pts, 2), "pnl": round(pnl, 2)})
-
-    if pos:
-        pid, side, entry, stop, target = pos
-        # check close-based SL/target on latest close
-        hit = None
+    # decide exit: SL/target on underlying close, or opposite-flip
+    def _exit_reason(side):
         if side == "BUY":
-            if px <= stop: hit = "SL"
-            elif px >= target: hit = "TARGET"
-        else:  # SELL
-            if px >= stop: hit = "SL"
-            elif px <= target: hit = "TARGET"
-        # opposite signal flip also closes
-        if not hit and sig in ("BUY", "SELL") and sig != side:
-            hit = "FLIP"
-        if hit:
-            _close(pid, side, entry, hit, px)
-            pos = None  # now flat; may re-enter below on flip
+            if px <= (px*0+ (entry_fut - SL_PTS)) : pass
+        return None
 
-    # open new position if flat and signal present
-    if not pos and sig in ("BUY", "SELL"):
-        stop = px - SL_PTS if sig == "BUY" else px + SL_PTS
-        target = px + TGT_PTS if sig == "BUY" else px - TGT_PTS
-        cur.execute("INSERT INTO v10_positions (symbol,side,entry_price,entry_ts,stop,target,lot_size,status) "
-                    "VALUES (%s,%s,%s,NOW(),%s,%s,%s,'OPEN') ON CONFLICT (symbol,status) DO NOTHING",
-                    (feed_symbol, sig, px, round(stop, 1), round(target, 1), lot))
-        events.append({"action": "OPEN", "side": sig, "entry": round(px, 1),
-                       "stop": round(stop, 1), "target": round(target, 1)})
+    # Determine if we should close (based on FUT leg semantics; both legs close together)
+    fut = next((x for x in legs if x[2] == "FUT"), None)
+    hit = None
+    if fut:
+        _, fside, _, fentry, fstop, ftarget, _, _, _ = fut
+        if fside == "BUY":
+            if px <= fstop: hit = "SL"
+            elif px >= ftarget: hit = "TARGET"
+        else:
+            if px >= fstop: hit = "SL"
+            elif px <= ftarget: hit = "TARGET"
+        if not hit and sig in ("BUY", "SELL") and sig != fside:
+            hit = "FLIP"
+
+    if legs and hit:
+        for row in legs:
+            pid, side, leg, entry, stop, target, ostrike, otype, oexp = row
+            if leg == "FUT":
+                ev = _close_leg(cur, pid, hit, px)
+            else:
+                ltp = _opt_ltp(cur, oc, otype, ostrike, oexp)
+                ev = _close_leg(cur, pid, hit, ltp if ltp is not None else entry)
+            events.append({"action": "CLOSE", **ev})
+        legs = []
+
+    # open both legs if flat and signal present
+    if not legs and sig in ("BUY", "SELL"):
+        fstop = px - SL_PTS if sig == "BUY" else px + SL_PTS
+        ftarget = px + TGT_PTS if sig == "BUY" else px - TGT_PTS
+        # FUT leg
+        cur.execute("INSERT INTO v10_positions (symbol,side,entry_price,entry_ts,stop,target,lot_size,status,leg) "
+                    "VALUES (%s,%s,%s,NOW(),%s,%s,%s,'OPEN','FUT') ON CONFLICT (symbol,leg,status) DO NOTHING",
+                    (feed_symbol, sig, px, round(fstop, 1), round(ftarget, 1), lot))
+        events.append({"action": "OPEN", "leg": "FUT", "side": sig, "entry": round(px, 1),
+                       "stop": round(fstop, 1), "target": round(ftarget, 1)})
+        # OPT leg: BUY->write PE, SELL->write CE
+        otype = "PE" if sig == "BUY" else "CE"
+        strike, expiry, prem = _atm_option(cur, oc, otype, px)
+        if strike is not None and prem is not None:
+            cur.execute("INSERT INTO v10_positions (symbol,side,entry_price,entry_ts,stop,target,lot_size,status,leg,opt_strike,opt_type,opt_expiry) "
+                        "VALUES (%s,%s,%s,NOW(),NULL,NULL,%s,'OPEN','OPT',%s,%s,%s) ON CONFLICT (symbol,leg,status) DO NOTHING",
+                        (feed_symbol, sig, prem, lot, strike, otype, expiry))
+            events.append({"action": "OPEN", "leg": "OPT", "write": otype, "strike": strike,
+                           "expiry": str(expiry), "premium": prem})
+        else:
+            events.append({"action": "OPT_SKIP", "reason": "no option_chain data for ATM"})
 
     return {"feed": feed_symbol, "price": round(px, 1), "signal": sig, "events": events}
 
 
 def paper_run():
-    """Run paper engine for all indices. Returns events for alerting."""
     conn = psycopg2.connect(os.environ["DATABASE_URL"]); cur = conn.cursor()
     out = []
     try:
         for feed_symbol, cfg in INDEX_CFG.items():
             try:
-                out.append(_paper_step(cur, feed_symbol, cfg["table"], cfg["lot"]))
+                out.append(_paper_step(cur, feed_symbol, cfg["table"], cfg["lot"], cfg["oc"]))
             except Exception as e:
                 out.append({"feed": feed_symbol, "status": "error", "error": str(e)})
         conn.commit()
@@ -251,19 +306,20 @@ def paper_run():
     return out
 
 
-# ---------- read helpers for dashboard ----------
+# ---------- dashboard reads ----------
 def get_open_positions():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
-    df = pd.read_sql("SELECT symbol, side, entry_price, entry_ts, stop, target, lot_size "
-                     "FROM v10_positions WHERE status='OPEN' ORDER BY entry_ts DESC", conn)
+    df = pd.read_sql("SELECT symbol, leg, side, entry_price, entry_ts, stop, target, lot_size, "
+                     "opt_strike, opt_type, opt_expiry FROM v10_positions WHERE status='OPEN' "
+                     "ORDER BY symbol, leg", conn)
     conn.close()
     return df.to_dict("records")
 
 
 def get_closed_trades(limit=200):
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
-    df = pd.read_sql("SELECT symbol, side, entry_price, entry_ts, exit_price, exit_ts, "
-                     "exit_reason, points, lot_size, pnl FROM v10_trades "
+    df = pd.read_sql("SELECT symbol, leg, side, entry_price, entry_ts, exit_price, exit_ts, "
+                     "exit_reason, points, lot_size, pnl, opt_strike, opt_type FROM v10_trades "
                      "ORDER BY exit_ts DESC LIMIT %s", conn, params=(limit,))
     conn.close()
     return df.to_dict("records")
@@ -271,14 +327,18 @@ def get_closed_trades(limit=200):
 
 def get_summary():
     conn = psycopg2.connect(os.environ["DATABASE_URL"]); cur = conn.cursor()
-    cur.execute("SELECT COUNT(*), COUNT(*) FILTER (WHERE pnl>0), "
-                "COALESCE(ROUND(SUM(pnl)::numeric,2),0), COALESCE(ROUND(SUM(points)::numeric,2),0) FROM v10_trades")
-    n, wins, pnl, pts = cur.fetchone()
+    cur.execute("SELECT leg, COUNT(*), COUNT(*) FILTER (WHERE pnl>0), "
+                "COALESCE(ROUND(SUM(pnl)::numeric,2),0) FROM v10_trades GROUP BY leg")
+    by_leg = {r[0]: {"trades": r[1], "wins": r[2], "pnl": float(r[3])} for r in cur.fetchall()}
     cur.close(); conn.close()
-    return {"closed_trades": n, "wins": wins, "win_rate": round(wins/n*100, 1) if n else 0,
-            "total_points": float(pts or 0), "total_pnl": float(pnl or 0),
-            "spec": f"ST{ST_PERIOD}/{ST_MULT} 10m + EMA{EMA_FAST}/{EMA_SLOW} 30m gate, SL{SL_PTS}/T{TGT_PTS}",
-            "lots": {"NIFTY50": INDEX_CFG["NIFTY50"]["lot"], "BANKNIFTY": INDEX_CFG["BANKNIFTY"]["lot"]}}
+    return {
+        "spec": f"ST{ST_PERIOD}/{ST_MULT} 10m + EMA{EMA_FAST}/{EMA_SLOW} 30m gate, SL{SL_PTS}/T{TGT_PTS}",
+        "lots": {"NIFTY50": INDEX_CFG["NIFTY50"]["lot"], "BANKNIFTY": INDEX_CFG["BANKNIFTY"]["lot"]},
+        "live_paper": by_leg,
+        "backtest_nifty_fut": {"points": 5936, "annual_rs_per_lot": 445000, "win_rate": 49.3,
+                               "profit_factor": 1.88, "trades": 150, "max_dd_pts": -1138,
+                               "note": "1yr NIFTY, after Rs1000/trade (harshest cost)"},
+    }
 
 
 def telegram_alert(msg):
@@ -296,17 +356,17 @@ def telegram_alert(msg):
 
 
 def tick():
-    """Full 5-min cycle: append 5m bars (both indices), run paper engine, alert new entries."""
     appended = build_and_append_5m()
     paper = paper_run()
     alerts = []
     for p in paper:
-        for ev in p.get("events", []):
-            if ev.get("action") == "OPEN":
-                msg = (f"V10 {ev['side']} {p['feed']} @ {ev['entry']}\n"
-                       f"Stop {ev['stop']} | Target {ev['target']}\n"
-                       f"ST{ST_PERIOD}/{ST_MULT} 10m + EMA{EMA_FAST}/{EMA_SLOW} 30m gate")
-                alerts.append(telegram_alert(msg))
+        opens = [e for e in p.get("events", []) if e.get("action") == "OPEN" and e.get("leg") == "FUT"]
+        for ev in opens:
+            optev = next((e for e in p["events"] if e.get("action") == "OPEN" and e.get("leg") == "OPT"), None)
+            optline = (f"\nWrite {optev['write']} {optev['strike']} @ {optev['premium']}" if optev else "")
+            msg = (f"V10 {ev['side']} {p['feed']} @ {ev['entry']}\n"
+                   f"Stop {ev['stop']} | Target {ev['target']}{optline}")
+            alerts.append(telegram_alert(msg))
     return {"append": appended, "paper": paper, "alerts": alerts}
 
 
