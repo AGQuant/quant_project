@@ -1,11 +1,18 @@
 """
-V10 ST+EMA — NIFTY directional signal engine (Scorr platform module)
-=====================================================================
-ISOLATED. Does not touch fyers_feed, intraday_prices, V8, or paper engine.
-Computes a long/short/flat signal for NIFTY on demand and (optionally) alerts.
+V10 ST+EMA — NIFTY directional intraday signal engine (Scorr platform module)
+=============================================================================
+ISOLATED from V8 / paper engine. The live 1m WS feed (intraday_prices) is read
+but NOT modified. Signals are advisory only (RA-compliant, no execution).
+
+ARCHITECTURE:
+  1m WS feed (intraday_prices, 7d rolling, untouched)
+     -> every 5 min: resample CLOSED 1m bars -> append closed 5m bar
+        into nifty_5m_test_data (historical 1yr base + growing live)
+     -> V10 reads nifty_5m_test_data, resamples 5m -> 10m (+30m gate)
+     -> signal on last CLOSED 10m bar -> Telegram alert on BUY/SELL
 
 LOCKED STRATEGY SPEC (backtested 1yr NIFTY, after Rs1000/trade futures cost):
-  - Timeframe   : 10-minute candles (resampled from 5m)
+  - Timeframe   : 10-minute candles (resampled from stored 5m)
   - Supertrend  : ATR period 150, multiplier 3.0   (trigger)
   - Gate        : EMA 3 vs EMA 10 on 30-minute candles (regime filter)
                   EMA3 > EMA10 -> BUY zone ; EMA3 < EMA10 -> SELL zone
@@ -13,14 +20,7 @@ LOCKED STRATEGY SPEC (backtested 1yr NIFTY, after Rs1000/trade futures cost):
   - Exit        : SL 100 / Target 200 (close-based) OR opposite ST flip
   - Backtest    : +5936 pts (~Rs4.45L/lot/yr), 49.3% win, PF 1.88,
                   150 trades/yr, 10/13 months positive
-  - Sizing note : intended for ~Rs5L capital per lot (max DD ~ -Rs85k)
-
-Data:
-  - LIVE signal      : pulls recent 5m from Fyers (yahoo_ondemand-style), resamples to 10m
-  - BACKTEST/validate: reads nifty_5m_test_data (static 1yr history)
-
-This module ONLY produces signals. Execution is manual/advisory — consistent
-with Scorr's RA-compliant, no-fund-management product stance.
+  - Sizing      : ~Rs5L capital per lot (max DD ~ -Rs85k)
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -28,10 +28,8 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import psycopg2
-import requests
 
 IST = timezone(timedelta(hours=5, minutes=30))
-CLIENT_ID = os.environ.get("FYERS_CLIENT_ID", "1A4STS8ZGD-100")
 
 # ---- LOCKED PARAMETERS ----
 TF_MAIN   = "10min"
@@ -42,7 +40,8 @@ EMA_FAST  = 3
 EMA_SLOW  = 10
 SL_PTS    = 100
 TGT_PTS   = 200
-SYMBOL    = "NSE:NIFTY50-INDEX"
+TABLE     = "nifty_5m_test_data"
+FEED_SYMBOL = "NIFTY50"   # as stored in intraday_prices (source='fyers')
 
 
 # ---------- indicators ----------
@@ -75,40 +74,54 @@ def _ema(arr, span):
     return out
 
 
-# ---------- data ----------
-def _resample(df5, rule):
-    return (df5.set_index("ts")
+def _resample(df, rule):
+    return (df.set_index("ts")
             .resample(rule)
             .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
             .dropna().reset_index())
 
 
-def _fetch_live_5m(days=3):
-    """Pull recent 5m from Fyers (token in fyers_tokens id=1). No DB writes."""
-    conn = psycopg2.connect(os.environ["DATABASE_URL"]); cur = conn.cursor()
-    cur.execute("SELECT access_token FROM fyers_tokens WHERE id=1")
-    tok = cur.fetchone()[0]; cur.close(); conn.close()
-    end = datetime.now(IST).date()
-    start = end - timedelta(days=days)
-    r = requests.get("https://api-t1.fyers.in/data/history",
-                     params={"symbol": SYMBOL, "resolution": "5", "date_format": "1",
-                             "range_from": start.isoformat(), "range_to": end.isoformat(),
-                             "cont_flag": "1"},
-                     headers={"Authorization": f"{CLIENT_ID}:{tok}"}, timeout=30)
-    r.raise_for_status()
-    cs = r.json().get("candles", [])
-    df = pd.DataFrame([(datetime.fromtimestamp(x[0], IST).replace(tzinfo=None),
-                        x[1], x[2], x[3], x[4]) for x in cs],
-                      columns=["ts", "open", "high", "low", "close"])
-    return df
-
-
-def _load_hist_5m():
-    """Static 1yr history for backtest/validation."""
+# ---------- 1m -> 5m appender (live) ----------
+def build_and_append_5m():
+    """Resample CLOSED 1m bars from intraday_prices into 5m and append to
+    nifty_5m_test_data. Only bars whose full 5-min window has elapsed are written
+    (no partial/forming bar). Idempotent via PK on ts."""
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
-    df = pd.read_sql("SELECT ts, open, high, low, close FROM nifty_5m_test_data ORDER BY ts", conn)
+    cur = conn.cursor()
+    # pull last ~2 days of 1m to cover any gap, resample, append closed bars only
+    df = pd.read_sql(
+        "SELECT ts, open, high, low, close FROM intraday_prices "
+        "WHERE symbol=%s AND source='fyers' AND timeframe='1m' "
+        "AND ts >= NOW() - INTERVAL '2 days' ORDER BY ts", conn, params=(FEED_SYMBOL,))
+    if df.empty:
+        cur.close(); conn.close()
+        return {"status": "no_1m_data"}
+    df["ts"] = pd.to_datetime(df["ts"])
+    g5 = _resample(df, "5min")
+    # drop the still-forming current 5m bar: keep only bars that have fully closed
+    now = pd.Timestamp(datetime.now(IST).replace(tzinfo=None))
+    g5 = g5[g5["ts"] + pd.Timedelta(minutes=5) <= now]
+    rows = [(r.ts.to_pydatetime(), float(r.open), float(r.high), float(r.low), float(r.close), 0)
+            for r in g5.itertuples()]
+    if rows:
+        cur.executemany(
+            f"INSERT INTO {TABLE} (ts,open,high,low,close,volume) VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (ts) DO NOTHING", rows)
+        conn.commit()
+    cur.execute(f"SELECT COUNT(*), MAX(ts) FROM {TABLE}")
+    cnt, mx = cur.fetchone()
+    cur.close(); conn.close()
+    return {"status": "ok", "appended_candidates": len(rows), "table_rows": cnt, "latest": str(mx)}
+
+
+# ---------- data load ----------
+def _load_5m():
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    df = pd.read_sql(f"SELECT ts, open, high, low, close FROM {TABLE} ORDER BY ts", conn)
     conn.close()
-    df["ts"] = pd.to_datetime(df["ts"]).dt.tz_localize(None)
+    df["ts"] = pd.to_datetime(df["ts"])
+    if getattr(df["ts"].dt, "tz", None) is not None:
+        df["ts"] = df["ts"].dt.tz_localize(None)
     return df
 
 
@@ -116,13 +129,12 @@ def _load_hist_5m():
 def _zone_series(df5):
     g = _resample(df5, TF_GATE)
     ef, es = _ema(g["close"].values, EMA_FAST), _ema(g["close"].values, EMA_SLOW)
-    z = pd.Series(np.where(ef > es, 1, -1), index=g["ts"])
-    return z
+    return pd.Series(np.where(ef > es, 1, -1), index=g["ts"])
 
 
-def current_signal(live=True):
-    """Return the latest actionable signal as of the most recent CLOSED 10m bar."""
-    df5 = _fetch_live_5m() if live else _load_hist_5m()
+def current_signal():
+    """Latest actionable signal as of the most recent CLOSED 10m bar."""
+    df5 = _load_5m()
     g10 = _resample(df5, TF_MAIN)
     if len(g10) < ST_PERIOD + 5:
         return {"status": "insufficient_data", "bars": len(g10)}
@@ -133,9 +145,8 @@ def current_signal(live=True):
     last = len(g10) - 1
     flipped = st[last] != st[last-1]
     direction = int(st[last])
-    in_zone = (direction == zone[last])
     signal = "FLAT"
-    if flipped and in_zone:
+    if flipped and direction == zone[last]:
         signal = "BUY" if direction == 1 else "SELL"
 
     px = float(c[last])
@@ -154,6 +165,7 @@ def current_signal(live=True):
 
 
 def telegram_alert(msg):
+    import requests
     tok = os.environ.get("V10_TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
     chat = os.environ.get("V10_TELEGRAM_CHAT_ID") or os.environ.get("CHAT_ID")
     if not tok or not chat:
@@ -166,10 +178,13 @@ def telegram_alert(msg):
         return {"sent": False, "reason": str(e)}
 
 
-def run_and_alert():
-    sig = current_signal(live=True)
+def tick():
+    """Full 5-min cycle: append latest 5m bar, compute signal, alert if BUY/SELL."""
+    appended = build_and_append_5m()
+    sig = current_signal()
+    sig["append"] = appended
     if sig.get("signal") in ("BUY", "SELL"):
-        msg = (f"V10 ST+EMA SIGNAL: {sig['signal']} NIFTY @ {sig['price']}\n"
+        msg = (f"V10 ST+EMA: {sig['signal']} NIFTY @ {sig['price']}\n"
                f"Stop {sig['stop']} | Target {sig['target']}\n"
                f"As of {sig['as_of']} | {sig['spec']}")
         sig["alert"] = telegram_alert(msg)
@@ -178,4 +193,4 @@ def run_and_alert():
 
 if __name__ == "__main__":
     import json
-    print(json.dumps(current_signal(live=False), indent=2, default=str))
+    print(json.dumps(current_signal(), indent=2, default=str))
