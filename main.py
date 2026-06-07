@@ -34,6 +34,7 @@ from admin_data import router as admin_data_router
 from fyers_endpoints import router as fyers_router
 from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
+from v10_endpoints import router as v10_router
 from nse_holidays import is_trading_day, is_nse_holiday
 # v8_live archived — superseded by v8_signal_writer v2.0.0
 from v8_live import build_history_cache, run_live_tick
@@ -49,7 +50,10 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.21
+# Scorr / Project Quant — main.py v2.9.22
+# v2.9.22: V10 ST+EMA wired — v10_endpoints router. Intraday NIFTY
+#   directional signal (ST 150/3 on 10m + EMA 3/10 30m gate, SL100/T200).
+#   Files: v10_st_ema.py, v10_endpoints.py. Scheduler runs tick every 5-min.
 # v2.9.21: v8_live archived. Single live engine = v8_signal_writer.
 #   v8_build_cache + v8_run_live MCP tools + endpoints removed.
 # v2.9.20: V9 Pair Strategy wired — v9_endpoints router +
@@ -64,7 +68,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR
 # ============================================================
 
-VERSION = "2.9.21"
+VERSION = "2.9.22"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -96,6 +100,7 @@ app.include_router(admin_data_router)
 app.include_router(fyers_router)
 app.include_router(diagnosis_router)
 app.include_router(v9_router)
+app.include_router(v10_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -216,7 +221,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.21)")
+        log.info("Tables ready (v2.9.22)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -1010,6 +1015,8 @@ MCP_TOOLS = [
     {"name":"v9_backtest","description":"V9 Pair Strategy: run full backtest — 10 parameter combos on all valid pairs, 2025 EOD data.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v9_results","description":"V9 Pair Strategy: get backtest results summary — all combos ranked by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v9_best_combo","description":"V9 Pair Strategy: get best parameter combo by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v10_signal","description":"V10 ST+EMA: current NIFTY directional signal (ST 150/3 10m + EMA 3/10 30m gate, SL100/T200).","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"v10_tick","description":"V10 ST+EMA: run one 5-min cycle — append 5m bar, compute signal, Telegram alert on BUY/SELL.","inputSchema":{"type":"object","properties":{},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -1127,6 +1134,10 @@ async def _call_tool(name, args):
             r = await client.get(f"{BASE_URL}/api/v9/results"); return r.json()
         elif name == "v9_best_combo":
             r = await client.get(f"{BASE_URL}/api/v9/best_combo"); return r.json()
+        elif name == "v10_signal":
+            r = await client.get(f"{BASE_URL}/api/v10/signal"); return r.json()
+        elif name == "v10_tick":
+            r = await client.post(f"{BASE_URL}/api/v10/tick", headers=h); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @app.post("/mcp")
