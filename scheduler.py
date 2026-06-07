@@ -24,6 +24,8 @@ v8_live.py archived — v8_history_cache no longer built or used.
 07-Jun-2026: V10 ST+EMA wired — every 5-min during market hours, appends 5m bar from
   live 1m feed into nifty_5m_test_data, computes signal, Telegram alert on BUY/SELL.
   Isolated/advisory; does not touch V8 or the 1m feed writes.
+07-Jun-2026: pcr_intraday wired — every 5-min during market hours, rolls option_chain
+  into pcr_intraday (ATM±5 + total PCR per bar). Self-healing. Isolated/advisory.
 """
 
 import os
@@ -46,6 +48,7 @@ import v8_signal_writer
 import qb_eod_checker
 import refresh_takeaways as rt
 import v10_st_ema
+import pcr_intraday
 
 log = logging.getLogger("scorr.scheduler")
 
@@ -207,7 +210,7 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ───────────────────────────────────────────────────────────────
+# ── State flags ─────────────────────────────────────────────────────────────────
 _raw_prices_updated_today:  Optional[date] = None
 _earnings_loaded_today:     Optional[date] = None
 _yahoo_daily_running:       bool           = False
@@ -228,9 +231,10 @@ _daily_metrics_ran_today:   Optional[date] = None
 _daily_metrics_running:     bool           = False
 _refresh_check_ran_today:   Optional[date] = None
 _v10_running:               bool           = False
+_pcr_intraday_running:      bool           = False
 
 
-# ── Background tasks ───────────────────────────────────────────────────────────
+# ── Background tasks ────────────────────────────────────────────────────────────
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -438,6 +442,23 @@ def _bg_v10_tick():
         _v10_running = False
 
 
+def _bg_pcr_intraday():
+    """5-min intraday PCR rollup (ATM±5 + total) from option_chain into pcr_intraday.
+    Self-heals any missed bars. Isolated/advisory; reads option_chain + intraday_prices."""
+    global _pcr_intraday_running
+    if _pcr_intraday_running:
+        return
+    _pcr_intraday_running = True
+    try:
+        with _conn() as conn:
+            res = pcr_intraday.compute_pcr_intraday(conn=conn)
+        log.info(f"pcr_intraday: {res.get('computed', res.get('bars'))}")
+    except Exception as e:
+        log.error(f"pcr_intraday failed: {e}")
+    finally:
+        _pcr_intraday_running = False
+
+
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
     if _qb_intraday_mark_running:
@@ -538,7 +559,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ────────────────────────────────────────────────────────────────────
+# ── Loops ───────────────────────────────────────────────────────────────────────
 
 async def _scheduler():
     log.info("Scheduler started (scheduler.py)")
@@ -571,6 +592,7 @@ async def _live_loop():
     - Every tick: paper_tick
     - Every 5 ticks (5-min): signal_writer (single live engine — 19 metrics + qualified)
                               + V10 ST+EMA tick (append 5m bar, signal, alert)
+                              + pcr_intraday (5-min PCR rollup, self-healing)
     - Every 15 ticks (15-min): qb_intraday_mark
     """
     log.info("Live loop started — engines: v8_signal_writer + V10 ST+EMA every 5-min")
@@ -583,6 +605,7 @@ async def _live_loop():
                 if tick_count % 5 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
                     asyncio.create_task(asyncio.to_thread(_bg_v10_tick))
+                    asyncio.create_task(asyncio.to_thread(_bg_pcr_intraday))
                 if tick_count % 15 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
             else:
