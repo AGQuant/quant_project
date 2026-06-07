@@ -36,8 +36,6 @@ from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from nse_holidays import is_trading_day, is_nse_holiday
-# v8_live archived — superseded by v8_signal_writer v2.0.0
-from v8_live import build_history_cache, run_live_tick
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 import yahoo_ondemand
 import yahoo_index_backfill
@@ -946,7 +944,7 @@ async def oauth_token(req: Request):
     _oauth_tokens[token] = {"client_id":info["client_id"],"created":time.time()}
     return {"access_token":token,"token_type":"Bearer","expires_in":31536000,"scope":"read write"}
 
-# ── MCP Tools ────────────────────────────────────────────────────────────────
+# ── MCP Tools ──────────────────────────────────────────────────────────────────────────────────────────
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"health_report","description":"Full Scorr system health report card.","inputSchema":{"type":"object","properties":{},"required":[]}},
