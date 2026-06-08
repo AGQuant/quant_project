@@ -420,7 +420,7 @@ function preFreezeBanner(){
   const weekday = dow>=1 && dow<=5;
   // EOD metrics (gvm, rsi_month, rsi_weekly, sector_week, sector_month) freeze at 15:45 IST
   if(weekday && mins < 945){
-    return `<div class="err" style="color:var(--amber);border-color:var(--amber)">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) &amp; sector metrics are not yet computed today — they auto-fail, so survivor counts are understated and the funnel collapses early. Numbers fill in after the 15:45 EOD freeze.</div>`;
+    return `<div class="err" style="color:var(--amber);border-color:var(--amber);margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) &amp; sector metrics are not yet computed today — they auto-fail, so survivor counts are understated and the funnel collapses early. Numbers fill in after the 15:45 EOD freeze.</div>`;
   }
   return '';
 }
@@ -433,7 +433,6 @@ async function loadFF(){
   try{ fd=await getJSON(EP.funnelDetail(ffBasket)); }catch(e){}
   try{ pc=await getJSON(EP.passCount(ffBasket)); }catch(e){}
   let html=`<div class="subnav">${nav}</div>`;
-  html+=preFreezeBanner();
   // View 1: sequential funnel, filters low->high survivors (kill order = restrictive first)
   if(fd && fd.stages){
     const stages=[...fd.stages].sort((a,b)=>a.survivors-b.survivors);
@@ -457,6 +456,7 @@ async function loadFF(){
       <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
       <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`,"No stocks");
   } else { html+=`<div class="err">⚠ stock_passcount not available for ${ffBasket}</div>`; }
+  html+=preFreezeBanner();
   el.innerHTML=html;
 }
 
