@@ -42,6 +42,7 @@ from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_
 from mcp_dispatch import router as mcp_router
 from anthropic_endpoints import router as anthropic_router
 from scorr_endpoints import router as scorr_router
+from scorr_chat_endpoint import router as scorr_chat_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -53,7 +54,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.26
+# Scorr / Project Quant — main.py v2.9.27
+# v2.9.27: Scorr CHAT endpoint wired — scorr_chat_endpoint router.
+#   POST /api/scorr/chat (free-form chat + MCP server attached server-side,
+#   full tool access, key stays in Railway env). GET /api/scorr/chat/health.
+#   Zero-terminal cockpit backend. Sonnet 4.6 default, hard cap 4096 tokens.
 # v2.9.26: Scorr query endpoints wired — scorr_endpoints router.
 #   POST /api/scorr/query (native cache-first, Anthropic API fallback)
 #   GET /api/scorr/health. Cost: $2-3/month vs $100 Max plan.
@@ -80,7 +85,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 #   178 raw pairs, 122 eligible stocks, 10 parameter combos.
 # ============================================================
 
-VERSION = "2.9.26"
+VERSION = "2.9.27"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -118,6 +123,7 @@ app.include_router(v8_replay_router)
 app.include_router(mcp_router)
 app.include_router(anthropic_router)
 app.include_router(scorr_router)
+app.include_router(scorr_chat_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
