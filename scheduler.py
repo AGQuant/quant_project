@@ -26,6 +26,14 @@ v8_live.py archived — v8_history_cache no longer built or used.
   Isolated/advisory; does not touch V8 or the 1m feed writes.
 07-Jun-2026: pcr_intraday wired — every 5-min during market hours, rolls option_chain
   into pcr_intraday (ATM±5 + total PCR per bar). Self-healing. Isolated/advisory.
+08-Jun-2026 RELIABILITY: _live_loop is now self-healing (per-tick try/except — a single
+  failed tick never kills the loop). Heartbeats written to app_config:
+    sched_live_loop_hb  — every live-loop iteration (proves loop alive)
+    sched_writer_hb     — every successful signal_writer run (proves writer firing)
+    sched_loop_hb       — every 5-min scheduler iteration
+  _scheduler SUPERVISES _live_loop: if the task ever dies/completes, it is relaunched.
+  Root cause fixed: previously a redeploy or unhandled error could silently kill the
+  live loop, stopping all 5-min writes for the rest of the session with no recovery.
 """
 
 import os
@@ -107,6 +115,26 @@ def _get_config(key: str, default: Optional[str] = None) -> Optional[str]:
             r = cur.fetchone(); return r[0] if r else default
     except Exception as e:
         log.error(f"_get_config {key} failed: {e}"); return default
+
+
+def _set_heartbeat(key: str, value: Optional[str] = None):
+    """
+    Write a liveness heartbeat to app_config (upsert). value defaults to the
+    current IST timestamp. Used to prove the live loop + writer are alive so the
+    dashboard / supervisor can detect a stall and alarm on staleness.
+    """
+    if value is None:
+        value = _ist_now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO app_config (key, value, updated_at) VALUES (%s, %s, NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+                (key, value),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning(f"_set_heartbeat {key} failed: {e}")
 
 
 def _yahoo_cmp_fallback_on() -> bool:
@@ -210,7 +238,7 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ─────────────────────────────────────────────────────────────────
+# ── State flags ─────────────────────────────────────────────────────────────
 _raw_prices_updated_today:  Optional[date] = None
 _earnings_loaded_today:     Optional[date] = None
 _yahoo_daily_running:       bool           = False
@@ -233,8 +261,11 @@ _refresh_check_ran_today:   Optional[date] = None
 _v10_running:               bool           = False
 _pcr_intraday_running:      bool           = False
 
+# Supervisor handle for the live loop task (relaunched if it ever dies)
+_live_loop_task: Optional[asyncio.Task] = None
 
-# ── Background tasks ────────────────────────────────────────────────────────────
+
+# ── Background tasks ──────────────────────────────────────────────────────────
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -419,6 +450,10 @@ def _bg_signal_writer():
         with _conn() as conn:
             res = v8_signal_writer.run_live_signal_writer(conn)
         log.info(f"signal_writer: updated={res.get('updated',0)} no_bar={res.get('no_bar',0)} source={res.get('source','?')}")
+        # Heartbeat: prove the writer actually fired (dashboard staleness alarm reads this)
+        _set_heartbeat("sched_writer_hb")
+        _set_heartbeat("sched_writer_last_result",
+                       f"updated={res.get('updated',0)} source={res.get('source','?')}")
     except Exception as e:
         log.error(f"signal_writer failed: {e}")
     finally:
@@ -559,14 +594,30 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ───────────────────────────────────────────────────────────────────────
+# ── Loops ─────────────────────────────────────────────────────────────────────
 
 async def _scheduler():
+    global _live_loop_task
     log.info("Scheduler started (scheduler.py)")
-    asyncio.create_task(_live_loop())
+    _live_loop_task = asyncio.create_task(_live_loop())
     while True:
         try:
             now = _ist_now(); trading_day = is_trading_day(now.date())
+
+            # SUPERVISOR: if the live loop task ever died/completed, relaunch it.
+            # This is the recovery path for the 08-Jun stall (loop silently dead
+            # after a redeploy/error → all 5-min writes stop with no self-heal).
+            if _live_loop_task is None or _live_loop_task.done():
+                if _live_loop_task is not None:
+                    exc = None
+                    try:
+                        exc = _live_loop_task.exception()
+                    except Exception:
+                        pass
+                    log.error(f"live_loop task was dead (exc={exc!r}) — relaunching")
+                _live_loop_task = asyncio.create_task(_live_loop())
+                _set_heartbeat("sched_live_loop_relaunched")
+
             # Runs every day including weekends
             if now.hour == 6 and now.minute < 5:
                 await _task_check_refresh_due()
@@ -581,6 +632,8 @@ async def _scheduler():
             if trading_day and now.hour == 21 and 5 <= now.minute < 15: await _task_qb_eod_checker()
             if now.hour == 22 and now.minute < 10:                  await _task_recompute_gvm_daily()
             if now.hour == 22 and 5 <= now.minute < 15:             await _task_build_paper_pivots()
+
+            _set_heartbeat("sched_loop_hb")
         except Exception as e:
             log.error(f"Scheduler error: {e}")
         await asyncio.sleep(300)
@@ -594,24 +647,33 @@ async def _live_loop():
                               + V10 ST+EMA tick (append 5m bar, signal, alert)
                               + pcr_intraday (5-min PCR rollup, self-healing)
     - Every 15 ticks (15-min): qb_intraday_mark
+
+    08-Jun-2026 SELF-HEALING: each tick's work is wrapped so any failure is logged
+    and the loop CONTINUES. tick_count is derived from wall-clock IST minutes (not a
+    fragile in-memory counter) so a 5-min boundary is hit deterministically even if a
+    prior tick was skipped. A liveness heartbeat is written every iteration.
     """
-    log.info("Live loop started — engines: v8_signal_writer + V10 ST+EMA every 5-min")
-    tick_count = 0
+    log.info("Live loop started — engines: v8_signal_writer + V10 ST+EMA every 5-min (self-healing)")
     while True:
         try:
+            now = _ist_now()
             if _is_market_hours():
+                minute = now.minute
+                # paper_tick every minute
                 asyncio.create_task(asyncio.to_thread(_bg_paper_tick))
-                tick_count += 1
-                if tick_count % 5 == 0:
+                # 5-min boundary by wall clock (deterministic, survives skipped ticks)
+                if minute % 5 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
                     asyncio.create_task(asyncio.to_thread(_bg_v10_tick))
                     asyncio.create_task(asyncio.to_thread(_bg_pcr_intraday))
-                if tick_count % 15 == 0:
+                # 15-min boundary by wall clock
+                if minute % 15 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
-            else:
-                tick_count = 0
+            # Always heartbeat the loop itself so a stall is detectable
+            _set_heartbeat("sched_live_loop_hb")
         except Exception as e:
-            log.error(f"live loop error: {e}")
+            # NEVER let an exception kill the loop — log and continue next tick.
+            log.error(f"live loop error (continuing): {e}")
         await asyncio.sleep(60)
 
 
@@ -626,5 +688,6 @@ def start_background(app, base_url: str, admin_token: str = ""):
         ADMIN_TOKEN = admin_token
     t = asyncio.create_task(_scheduler())
     _BG_TASKS.add(t); t.add_done_callback(_BG_TASKS.discard)
+    _set_heartbeat("sched_started")
     log.info("scheduler.start_background: scheduler task launched")
     return t
