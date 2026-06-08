@@ -19,10 +19,6 @@ log = logging.getLogger("scorr.anthropic")
 router = APIRouter(prefix="/api/anthropic", tags=["anthropic"])
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-if not ANTHROPIC_API_KEY:
-    log.warning("⚠ ANTHROPIC_API_KEY not set in env vars")
 
 
 def get_db_conn():
@@ -61,7 +57,8 @@ async def anthropic_chat(request: MessageRequest, x_admin_token: Optional[str] =
     
     Query params: prompt, model, max_tokens, system
     """
-    if not ANTHROPIC_API_KEY:
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
     
     try:
@@ -69,7 +66,7 @@ async def anthropic_chat(request: MessageRequest, x_admin_token: Optional[str] =
         messages = [{"role": "user", "content": request.prompt}]
         
         # Call Anthropic
-        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = Anthropic(api_key=api_key)
         response = client.messages.create(
             model=request.model,
             max_tokens=request.max_tokens,
@@ -190,7 +187,8 @@ async def get_usage(x_admin_token: Optional[str] = Header(None)):
 @router.get("/health")
 async def health_check():
     """GET /api/anthropic/health — Check if API is configured."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
     return {
-        "status": "ok" if ANTHROPIC_API_KEY else "not_configured",
-        "api_key_present": bool(ANTHROPIC_API_KEY)
+        "status": "ok" if api_key else "not_configured",
+        "api_key_present": bool(api_key)
     }
