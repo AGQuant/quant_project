@@ -3,19 +3,24 @@ Fyers Live Feed - Scorr V8
 ============================
 Standalone Railway WORKER (not in FastAPI). The live intraday source.
 
-Architecture (v4 — equity + futures + options on single WS):
-  1. BACKFILL  - on boot, one-time 7-day 1-min history for ALL equity symbols.
+Architecture (v5 — 5-MIN SYSTEM, equity + futures + options on single WS):
+  1. BACKFILL  - on boot, one-time 7-day history for ALL equity symbols (skip-if-fresh, async).
   2. LIVE WS   - single persistent WebSocket, up to 5000 symbols (Fyers v3 limit).
-                 * 211 equity  (NSE:SYMBOL-EQ)   → source='fyers_eq', timeframe='1m'
-                 * 209 futures (NSE:SYMBOLMNTHFUT) → source='fyers_fut', timeframe='1m'
+                 * 211 equity  (NSE:SYMBOL-EQ)   → source='fyers_eq', timeframe='5m'
+                 * 209 futures (NSE:SYMBOLMNTHFUT) → source='fyers_fut', timeframe='5m'
                  * ~1040 options (top-50 mcap + NIFTY + BANKNIFTY, ATM±10 CE+PE)
-                   → stored in option_chain table, 1-min bars
-  3. HEAL GAP  - daily at 18:00 IST: checks equity symbols, fills missing bars.
-  4. CMP FLUSH - every 30s during market hours → cmp_prices (IST timestamp).
-  5. ATM ROLL  - every 15 min during market hours: recheck ATM per option symbol,
+                   → stored in option_chain table, 5-min bars
+  3. OI POLL   - futures OI via quotes REST every OI_POLL_MINS (WS does NOT carry OI).
+  4. HEAL GAP  - daily at 18:00 IST: checks equity symbols, fills missing bars.
+  5. CMP FLUSH - every 30s during market hours → cmp_prices (IST timestamp).
+  6. ATM ROLL  - every 15 min during market hours: recheck ATM per option symbol,
                  re-subscribe if drifted ±2 strikes.
-  6. MONTHLY ROLL - on expiry day (last Tuesday): rebuild futures + option symbol lists.
-  7. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
+  7. MONTHLY ROLL - on expiry day (last Tuesday): rebuild futures + option symbol lists.
+  8. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
+
+5-MIN SYSTEM (canonical spec session_log id=167):
+  All rolling intraday feeds store at 5-min granularity. NOT a flash/1-min system.
+  1-min is deprecated as default (future on-demand only — flip BAR_MINUTES).
 
 TOKEN MODEL (Fyers v3, SEBI framework from 01-Apr-2026):
   Refresh-token flow is DISABLED. ONE 2FA login per TRADING DAY.
@@ -63,6 +68,8 @@ OPTION_RETENTION_DAYS = 7
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
 N_STRIKES             = 10     # ATM ± 10
+BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
+OI_POLL_MINS          = 5      # poll futures OI via quotes REST every N min (WS has no OI)
 
 NIFTY_STEP   = 50
 BNIFTY_STEP  = 100
@@ -117,8 +124,6 @@ CREATE INDEX IF NOT EXISTS idx_futures_basis_symbol_ts ON futures_basis(symbol, 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('fyers_feed')
 
-# ── TEMP DEBUG: one-shot OI key capture (remove after diagnosing) ──
-_DBG_SEEN = {'fut': False, 'opt': False}
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────
@@ -425,10 +430,12 @@ class BarAggregator:
         self.conn     = conn
         self.bars     = {}
         self.last_ltp = {}
+        self.last_oi  = {}   # symbol -> latest OI from quotes REST poll (futures)
         self.lock     = threading.Lock()
 
     def _bucket(self, ts):
-        return ts.replace(second=0, microsecond=0)
+        # 5-min bucket: round down to nearest 5-min boundary
+        return ts.replace(minute=ts.minute - ts.minute % BAR_MINUTES, second=0, microsecond=0)
 
     def on_tick(self, sym, ltp, vol, ts=None, source='fyers_eq', oi=None):
         ts  = ts or datetime.now(IST).replace(tzinfo=None)
@@ -460,7 +467,7 @@ class BarAggregator:
             with self.conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,'1m',%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'5m',%s)
                     ON CONFLICT (symbol,ts,timeframe) DO UPDATE SET
                         open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
                         close=EXCLUDED.close,volume=EXCLUDED.volume,source=EXCLUDED.source
@@ -535,7 +542,7 @@ class BarAggregator:
 # ── option bar store ─────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
-    """Stores 1-min option ticks into option_chain."""
+    """Stores 5-min option ticks into option_chain."""
     def __init__(self, conn, opt_mgr: OptionSymbolManager):
         self.conn    = conn
         self.opt_mgr = opt_mgr
@@ -543,7 +550,8 @@ class OptionBarStore:
         self.lock    = threading.Lock()
 
     def _bucket(self, ts):
-        return ts.replace(second=0, microsecond=0)
+        # 5-min bucket
+        return ts.replace(minute=ts.minute - ts.minute % BAR_MINUTES, second=0, microsecond=0)
 
     def on_tick(self, fsym, ltp, oi=None, vol=None, bid=None, ask=None, ts=None):
         ts  = ts or datetime.now(IST).replace(tzinfo=None)
@@ -644,6 +652,40 @@ def ensure_schemas(conn):
     log.info("Schemas ready (option_chain, futures_basis)")
 
 
+# ── futures OI poll (quotes REST) ────────────────────────────────────────────────
+
+def poll_futures_oi(token, fut_syms, agg):
+    """
+    Fyers SymbolUpdate WS does NOT carry OI. Poll OI for futures via quotes REST API
+    (/data/quotes returns v.oi) and stash latest per NSE symbol into agg.last_oi.
+    The next futures bar flush picks it up and writes futures_basis.oi.
+    Batched <=50 symbols/call. Called every OI_POLL_MINS from housekeeping.
+    """
+    BATCH = 50
+    headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
+    got = 0
+    for i in range(0, len(fut_syms), BATCH):
+        chunk = fut_syms[i:i + BATCH]
+        try:
+            r = requests.get(QUOTES_URL, params={'symbols': ','.join(chunk)},
+                             headers=headers, timeout=8)
+            d = r.json()
+            if d.get('s') != 'ok':
+                continue
+            for item in d.get('d', []):
+                v   = item.get('v', {})
+                oi  = v.get('oi')
+                if oi is None:
+                    continue
+                nse = from_fyers_symbol(item.get('n', ''))
+                with agg.lock:
+                    agg.last_oi[nse] = int(oi)
+                got += 1
+        except Exception as e:
+            log.warning(f"poll_futures_oi chunk {i}: {e}")
+    log.info(f"OI poll: {got} futures OI updated")
+
+
 # ── main run ─────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
@@ -663,7 +705,7 @@ def run(auth_code=None):
         try:
             with conn.cursor() as c:
                 c.execute("SELECT COUNT(DISTINCT symbol) FROM intraday_prices "
-                          "WHERE ts::date = CURRENT_DATE AND timeframe='1m'")
+                          "WHERE ts::date = CURRENT_DATE AND timeframe='5m'")
                 n = c.fetchone()[0] or 0
             return n >= 150   # most of universe already has today's bars
         except Exception:
@@ -711,17 +753,12 @@ def run(auth_code=None):
             if fsym in equity_set:
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
             elif fsym in futures_set:
-                if not _DBG_SEEN['fut']:
-                    log.info(f"DBG_FUT_KEYS {fsym} keys={sorted(msg.keys())} full={msg}")
-                    _DBG_SEEN['fut'] = True
-                agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol),
-                            source='fyers_fut', oi=msg.get('oi') or msg.get('open_int'))
+                # OI not in WS — sourced from quotes REST poll (agg.last_oi)
+                nse = from_fyers_symbol(fsym)
+                agg.on_tick(nse, float(ltp), float(vol),
+                            source='fyers_fut', oi=agg.last_oi.get(nse))
             else:
-                if not _DBG_SEEN['opt']:
-                    log.info(f"DBG_OPT_KEYS {fsym} keys={sorted(msg.keys())} full={msg}")
-                    _DBG_SEEN['opt'] = True
                 opt_store.on_tick(fsym, float(ltp),
-                                  oi=msg.get('oi') or msg.get('open_int'),
                                   vol=float(vol),
                                   bid=msg.get('bid'), ask=msg.get('ask'))
         except Exception as e:
@@ -747,6 +784,7 @@ def run(auth_code=None):
         last_purge_day  = None
         last_heal_day   = None
         last_roll_check = None
+        last_oi_poll    = None
 
         while True:
             now    = datetime.now(IST)
@@ -759,6 +797,15 @@ def run(auth_code=None):
                 agg.flush_all()
                 agg.flush_cmp()
                 opt_store.flush_all()
+
+                # Futures OI poll every OI_POLL_MINS (WS has no OI)
+                if (last_oi_poll is None or
+                        (now_dt - last_oi_poll).total_seconds() >= OI_POLL_MINS * 60):
+                    try:
+                        poll_futures_oi(token, futures_fyers_syms, agg)
+                    except Exception as e:
+                        log.warning(f"OI poll failed: {e}")
+                    last_oi_poll = now_dt
 
                 # ATM drift check every ATM_CHECK_MINS
                 if (last_atm_check is None or
