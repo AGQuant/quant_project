@@ -1,0 +1,451 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V8 Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+
+  :root{
+    --bg:#070b14; --bg2:#0b1220; --panel:#0e1626; --panel2:#111c30;
+    --line:#1c2940; --line2:#27374f;
+    --txt:#dbe4f0; --mut:#7e90ac; --dim:#566080;
+    --grn:#27d796; --grn-d:#0f3b2c;
+    --red:#ff5e6c; --red-d:#3a1620;
+    --blu:#3d8bff; --cyan:#28c8d8; --amber:#f5b53d;
+    --shadow:0 10px 40px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:
+    radial-gradient(1200px 600px at 80% -10%, #11203a55, transparent),
+    radial-gradient(900px 500px at -10% 20%, #0c2a3855, transparent),
+    var(--bg);
+    color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 60px}
+
+  /* Header */
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:14px 0 18px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
+  .logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .clock{font-family:'Space Mono';font-size:12px;color:var(--mut)}
+  .clock b{color:var(--txt)}
+  .btn{font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+    background:var(--panel2);color:var(--txt);border:1px solid var(--line2);
+    padding:8px 14px;border-radius:8px;transition:.15s}
+  .btn:hover{border-color:var(--blu);color:#fff}
+  .btn.on{background:var(--grn-d);border-color:var(--grn);color:var(--grn)}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}
+
+  /* Mood banner */
+  .mood{margin:18px 0;border:1px solid var(--line);border-radius:14px;
+    background:linear-gradient(135deg,var(--panel),var(--bg2));padding:16px 18px;
+    display:flex;align-items:center;gap:22px;flex-wrap:wrap;box-shadow:var(--shadow)}
+  .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
+  .mood .pill{font-size:11px;font-weight:700;padding:5px 12px;border-radius:30px;
+    text-transform:uppercase;letter-spacing:1px}
+  .moodChecks{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
+  .chk{font-size:11px;font-family:'Space Mono';padding:6px 10px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--bg2)}
+  .chk.pass{color:var(--grn);border-color:var(--grn-d)}
+  .chk.fail{color:var(--red);border-color:var(--red-d)}
+  .slots{display:flex;gap:14px;font-size:12px;color:var(--mut)}
+  .slots b{font-size:18px;font-family:'Space Mono'}
+  .slots .buy b{color:var(--grn)} .slots .sell b{color:var(--red)}
+
+  /* Tabs */
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 16px;
+    border-bottom:1px solid var(--line);padding-bottom:0}
+  .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;
+    padding:9px 13px;border-radius:8px 8px 0 0;border:1px solid transparent;
+    border-bottom:none;position:relative;top:1px;transition:.15s}
+  .tab:hover{color:var(--txt)}
+  .tab.active{color:#fff;background:var(--panel);border-color:var(--line);
+    box-shadow:0 -2px 0 var(--blu) inset}
+
+  /* Panels */
+  .panel{display:none;animation:fade .25s ease}
+  .panel.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);
+    text-transform:uppercase;margin:4px 0 12px;display:flex;gap:10px;align-items:center}
+  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);
+    border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+
+  /* Tables */
+  .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
+    text-align:right;padding:10px 12px;border-bottom:1px solid var(--line2);
+    white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer}
+  th:first-child,td:first-child{text-align:left}
+  th:hover{color:var(--txt)}
+  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);
+    white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#16223a}
+  .sym{font-family:'Sora';font-weight:600;color:#fff}
+  .pos{color:var(--grn)} .neg{color:var(--red)}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;
+    font-family:'Sora';letter-spacing:.5px}
+  .b-long{background:var(--grn-d);color:var(--grn)}
+  .b-short{background:var(--red-d);color:var(--red)}
+  .b-tgt{background:var(--grn-d);color:var(--grn)}
+  .b-sl{background:var(--red-d);color:var(--red)}
+  .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
+  .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';
+    border:1px dashed var(--amber);border-radius:10px;background:#2a200a;margin-bottom:10px}
+
+  /* Cards row */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .card .v{font-size:24px;font-weight:800;font-family:'Space Mono';margin-top:6px}
+
+  .funnelGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .loading{color:var(--dim);font-size:12px;padding:20px;text-align:center;font-family:'Space Mono'}
+  .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .subnav .btn.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="logo">V8 <b>Dashboard</b></div>
+      <div class="tag">Learn More. Score More.</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="clock" id="clock">—</div>
+    <div class="toggle">
+      <button class="btn" id="autoBtn" onclick="toggleAuto()">Auto 5m: OFF</button>
+      <button class="btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
+    </div>
+  </header>
+
+  <!-- Market Mood -->
+  <div class="mood" id="mood"><div class="loading">Loading market gate…</div></div>
+
+  <!-- Tabs -->
+  <div class="tabs" id="tabs"></div>
+
+  <!-- Panels -->
+  <div id="panels"></div>
+
+  <footer>
+    <span id="apiNote">API: <span id="apiBase">—</span></span>
+    <span id="lastUpd">Last refresh: —</span>
+  </footer>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG — same-origin when served from /dashboard on Railway.
+   Endpoints verified against main.py + v8_endpoints.py.
+   ============================================================ */
+const API_BASE = "";  // same-origin; served from Railway /dashboard
+
+const EP = {
+  mood:        "/api/v8/market_mood",
+  metricsAll:  "/api/v8/metrics/all",         // bare array, full metrics
+  qualified:   b => `/api/v8/qualified/${b}`, // path param, returns {stocks:[]}
+  sellOB:      "/api/v8/sell_overbought?limit=25",
+  paper:       "/api/paper/status",
+};
+
+const BASKETS = [
+  {id:"buy_reversal",  label:"Buy Reversal"},
+  {id:"buy_momentum",  label:"Buy Momentum"},
+  {id:"sell_reversal", label:"Sell Reversal"},
+  {id:"sell_momentum", label:"Sell Momentum"},
+];
+
+/* ---- Tab definitions (10, matching the Google Sheet) ---- */
+const TABS = [
+  "Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
+  "Sell Momentum","Sell Overbought","In Position","Trade Log",
+  "Raw Data","Filter Scan"
+];
+
+let AUTO=false, autoTimer=null;
+const cache={};
+
+/* ---------- fetch helpers ---------- */
+async function getJSON(path){
+  const r = await fetch(API_BASE+path, {headers:{'Accept':'application/json'}});
+  if(!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+  return r.json();
+}
+function num(x,d=2){ if(x===null||x===undefined||isNaN(x)) return "—"; return Number(x).toFixed(d); }
+function sign(x,d=2){ if(x===null||x===undefined||isNaN(x)) return "—";
+  const v=Number(x); return (v>=0?"+":"")+v.toFixed(d); }
+function cls(x){ if(x===null||x===undefined||isNaN(x)) return ""; return Number(x)>=0?"pos":"neg"; }
+function inr(x){ if(x===null||x===undefined||isNaN(x)) return "—";
+  return "₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+function pnlCls(x){ return Number(x)>=0?"pos":"neg"; }
+
+/* ---------- IST clock ---------- */
+function tick(){
+  const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
+  const hh=String(ist.getHours()).padStart(2,'0'),
+        mm=String(ist.getMinutes()).padStart(2,'0'),
+        ss=String(ist.getSeconds()).padStart(2,'0');
+  const open = (ist.getDay()>=1&&ist.getDay()<=5) &&
+    (ist.getHours()*60+ist.getMinutes())>=555 && (ist.getHours()*60+ist.getMinutes())<=930;
+  document.getElementById('clock').innerHTML =
+    `<b>${hh}:${mm}:${ss}</b> IST &nbsp;·&nbsp; <span style="color:${open?'var(--grn)':'var(--dim)'}">NSE ${open?'OPEN':'CLOSED'}</span>`;
+}
+setInterval(tick,1000); tick();
+
+/* ---------- build tabs ---------- */
+const tabsEl=document.getElementById('tabs'), panelsEl=document.getElementById('panels');
+TABS.forEach((t,i)=>{
+  const b=document.createElement('div'); b.className='tab'+(i===0?' active':'');
+  b.textContent=t; b.onclick=()=>selectTab(i); tabsEl.appendChild(b);
+  const p=document.createElement('div'); p.className='panel'+(i===0?' active':'');
+  p.id='panel'+i; p.innerHTML='<div class="loading">…</div>'; panelsEl.appendChild(p);
+});
+function selectTab(i){
+  [...tabsEl.children].forEach((t,j)=>t.classList.toggle('active',j===i));
+  [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
+}
+
+/* ---------- renderers ---------- */
+function tbl(cols, rows, rowFn, empty="No rows"){
+  if(!rows||!rows.length) return `<div class="scroll"><div class="empty">${empty}</div></div>`;
+  return `<div class="scroll"><table><thead><tr>${
+    cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(rowFn).join('')}</tbody></table></div>`;
+}
+
+function renderMood(m){
+  const moodColors={Bearish:['var(--red-d)','var(--red)'],Neutral:['#2a2410','var(--amber)'],
+    Bullish:['#0f2b3a','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
+  const [bg,fg]=moodColors[m.mood]||['var(--panel2)','var(--txt)'];
+  const checks=(m.checks||[]).map(c=>
+    `<div class="chk ${c.pass?'pass':'fail'}">${c.filter}: ${num(c.value)} ${c.pass?'✓':'✗'}</div>`).join('');
+  document.getElementById('mood').innerHTML=`
+    <div>
+      <div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
+      <div class="big">${m.mood||'—'}
+        <span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span>
+      </div>
+    </div>
+    <div class="slots">
+      <span class="buy">Buy slots <b>${m.buy_slots}</b></span>
+      <span class="sell">Sell slots <b>${m.sell_slots}</b></span>
+    </div>
+    <div class="moodChecks">${checks}</div>`;
+}
+
+/* Master Dashboard: summary cards + open positions + top movers */
+function renderMaster(){
+  const p=cache.paper, all=cache.metricsAll||[];
+  const open=(p&&p.open_positions)||[], sum=(p&&p.summary)||{};
+  const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
+  const movers=[...all].filter(x=>x.day_change!=null)
+    .sort((a,b)=>b.day_change-a.day_change);
+  const top=movers.slice(0,5), bot=movers.slice(-5).reverse();
+  const cards=`<div class="cards">
+    <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
+    <div class="card"><div class="k">Unrealised P&L</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div></div>
+    <div class="card"><div class="k">Closed Trades</div><div class="v">${sum.trades??'—'}</div></div>
+    <div class="card"><div class="k">Win / Loss</div><div class="v">${sum.wins??'—'}/${sum.losses??'—'}</div></div>
+    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(sum.total_pnl||0)}">${inr(sum.total_pnl||0)}</div></div>
+  </div>`;
+  const moverTbl=(title,rows,col)=>`<div class="ptitle">${title}</div>`+
+    tbl(["Symbol","Day %","Month %","RSI(d)"],rows,x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
+      <td>${num(x.daily_rsi,0)}</td></tr>`);
+  return cards+
+    `<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>`+
+    posTable(open)+
+    `<div class="funnelGrid" style="margin-top:16px">
+       <div>${moverTbl("Top Gainers",top)}</div>
+       <div>${moverTbl("Top Losers",bot)}</div>
+     </div>`;
+}
+
+function posTable(open){
+  return tbl(["Symbol","Side","Basket","Entry","CMP","Target","Stop","Qty","Unreal P&L"],
+    open, x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
+      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td>${num(x.entry_price)}</td>
+      <td>${num(x.cmp)}</td>
+      <td>${num(x.target)}</td>
+      <td>${num(x.stop_loss)}</td>
+      <td>${x.qty}</td>
+      <td class="${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</td>
+    </tr>`,"No open positions");
+}
+
+/* Basket funnel panel */
+function renderFunnel(b){
+  const d=cache['q_'+b.id];
+  if(!d) return '<div class="loading">…</div>';
+  const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
+  const stocks=d.stocks||[];
+  return meta+tbl(["Symbol","Day %","DMA50","DMA200","RSI(m)","RSI(d)","52W idx","Vol×","GVM"],
+    stocks, x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+      <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+      <td>${num(x.rsi_month,0)}</td>
+      <td>${num(x.daily_rsi,0)}</td>
+      <td>${num(x.week_index_52,0)}</td>
+      <td>${num(x.vol_ratio,2)}</td>
+      <td>${num(x.gvm_score,2)}</td>
+    </tr>`,`No qualified names — gate may be closed for this side.`);
+}
+
+function renderSellOB(){
+  const d=cache.sellOB; if(!d) return '<div class="loading">…</div>';
+  return `<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`+
+    tbl(["Symbol","Entry","Target","Stop","Tgt %","RSI(m)","RSI(d)","DMA200","52W","Vol×","GVM"],
+    d.stocks||[], x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td>${num(x.entry)}</td><td>${num(x.target)}</td><td>${num(x.stop)}</td>
+      <td class="neg">${num(x.tgt_pct,2)}%</td>
+      <td>${num(x.rsi_month,0)}</td><td>${num(x.daily_rsi,0)}</td>
+      <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+      <td>${num(x.week_index_52,0)}</td><td>${num(x.vol_ratio,2)}</td>
+      <td>${num(x.gvm_score,2)}</td></tr>`,"No overbought signals");
+}
+
+function renderTradeLog(){
+  const p=cache.paper; if(!p) return '<div class="loading">…</div>';
+  const t=p.recent_trades||[], s=p.summary||{};
+  const head=`<div class="cards">
+    <div class="card"><div class="k">Trades</div><div class="v">${s.trades??'—'}</div></div>
+    <div class="card"><div class="k">Wins</div><div class="v pos">${s.wins??'—'}</div></div>
+    <div class="card"><div class="k">Losses</div><div class="v neg">${s.losses??'—'}</div></div>
+    <div class="card"><div class="k">Total P&L</div><div class="v ${pnlCls(s.total_pnl||0)}">${inr(s.total_pnl||0)}</div></div>
+    <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(s.avg_ret||0)}">${sign(s.avg_ret)}%</div></div>
+  </div>`;
+  return head+`<div class="ptitle">Recent Closed Trades</div>`+
+    tbl(["Symbol","Side","Basket","Entry","Exit","Ret %","P&L","Result"],
+    t, x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
+      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td>${num(x.entry_price)}</td><td>${num(x.exit_price)}</td>
+      <td class="${cls(x.return_pct)}">${sign(x.return_pct)}%</td>
+      <td class="${pnlCls(x.pnl)}">${inr(x.pnl)}</td>
+      <td><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></td>
+    </tr>`,"No closed trades");
+}
+
+/* Raw Data — full universe, sortable */
+let rawSort={key:'day_change',dir:-1};
+function renderRaw(){
+  const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
+  const cols=[["symbol","Symbol"],["day_change","Day %"],["week_return","Wk %"],
+    ["month_return","Mo %"],["year_return","Yr %"],["dma_50","DMA50"],["dma_200","DMA200"],
+    ["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["vol_ratio","Vol×"],["gvm_score","GVM"]];
+  const rows=[...all].sort((a,b)=>{
+    const k=rawSort.key, av=a[k], bv=b[k];
+    if(typeof av==='string') return rawSort.dir*String(av).localeCompare(String(bv));
+    return rawSort.dir*((av??-1e9)-(bv??-1e9));
+  });
+  const head=cols.map(([k,l])=>`<th onclick="rawResort('${k}')">${l}${rawSort.key===k?(rawSort.dir<0?' ▾':' ▴'):''}</th>`).join('');
+  const body=rows.map(x=>`<tr>
+    <td class="sym">${x.symbol}</td>
+    <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+    <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
+    <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
+    <td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
+    <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+    <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+    <td>${num(x.daily_rsi,0)}</td>
+    <td>${num(x.week_index_52,0)}</td>
+    <td>${num(x.vol_ratio,2)}</td>
+    <td>${num(x.gvm_score,2)}</td></tr>`).join('');
+  return `<div class="ptitle">Raw Data <span class="ct">${all.length} symbols</span></div>
+    <div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function rawResort(k){ rawSort.dir = rawSort.key===k? -rawSort.dir : -1; rawSort.key=k;
+  document.getElementById('panel8').innerHTML=renderRaw(); }
+
+/* Filter Scan — quick movers/extremes screener */
+let scanMode='gainers';
+function renderScan(){
+  const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
+  const f={
+    gainers: a=>[...a].filter(x=>x.day_change!=null).sort((p,q)=>q.day_change-p.day_change).slice(0,25),
+    losers:  a=>[...a].filter(x=>x.day_change!=null).sort((p,q)=>p.day_change-q.day_change).slice(0,25),
+    overbought: a=>[...a].filter(x=>x.daily_rsi>=70).sort((p,q)=>q.daily_rsi-p.daily_rsi),
+    oversold: a=>[...a].filter(x=>x.daily_rsi<=30).sort((p,q)=>p.daily_rsi-q.daily_rsi),
+    above200: a=>[...a].filter(x=>x.dma_200>10).sort((p,q)=>q.dma_200-p.dma_200).slice(0,30),
+  };
+  const rows=f[scanMode](all);
+  const nav=[["gainers","Top Gainers"],["losers","Top Losers"],["overbought","RSI ≥70"],
+    ["oversold","RSI ≤30"],["above200","Strong vs DMA200"]]
+    .map(([k,l])=>`<button class="btn ${scanMode===k?'on':''}" onclick="scanSet('${k}')">${l}</button>`).join('');
+  return `<div class="subnav">${nav}</div>`+
+    tbl(["Symbol","Day %","Mo %","DMA50","DMA200","RSI(d)","52W idx","Vol×"],
+    rows, x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
+      <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+      <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+      <td>${num(x.daily_rsi,0)}</td>
+      <td>${num(x.week_index_52,0)}</td>
+      <td>${num(x.vol_ratio,2)}</td></tr>`,"No matches");
+}
+function scanSet(m){ scanMode=m; document.getElementById('panel9').innerHTML=renderScan(); }
+
+/* ---------- master loader ---------- */
+function paint(){
+  document.getElementById('panel0').innerHTML=renderMaster();
+  BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
+  document.getElementById('panel5').innerHTML=renderSellOB();
+  document.getElementById('panel6').innerHTML=
+    `<div class="ptitle">In Position <span class="ct">${(cache.paper?.open_positions||[]).length}</span></div>`+
+    posTable(cache.paper?.open_positions||[]);
+  document.getElementById('panel7').innerHTML=renderTradeLog();
+  document.getElementById('panel8').innerHTML=renderRaw();
+  document.getElementById('panel9').innerHTML=renderScan();
+}
+
+async function loadAll(){
+  document.getElementById('refreshBtn').textContent='↻ …';
+  const errs=[];
+  const tasks=[
+    ['mood', ()=>getJSON(EP.mood)],
+    ['metricsAll', ()=>getJSON(EP.metricsAll)],
+    ['sellOB', ()=>getJSON(EP.sellOB)],
+    ['paper', ()=>getJSON(EP.paper)],
+    ...BASKETS.map(b=>['q_'+b.id, ()=>getJSON(EP.qualified(b.id))]),
+  ];
+  await Promise.all(tasks.map(async([k,fn])=>{
+    try{ cache[k]=await fn(); }catch(e){ errs.push(e.message); cache[k]=cache[k]||null; }
+  }));
+  if(cache.mood) renderMood(cache.mood);
+  paint();
+  if(errs.length){
+    document.getElementById('panel0').insertAdjacentHTML('afterbegin',
+      `<div class="err">⚠ ${errs.length} endpoint(s) failed:<br>${errs.join('<br>')}</div>`);
+  }
+  document.getElementById('refreshBtn').textContent='↻ Refresh';
+  document.getElementById('apiBase').textContent=API_BASE||location.origin;
+  const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
+  document.getElementById('lastUpd').textContent='Last refresh: '+ist.toTimeString().slice(0,8)+' IST';
+}
+
+function toggleAuto(){
+  AUTO=!AUTO;
+  const b=document.getElementById('autoBtn');
+  b.textContent='Auto 5m: '+(AUTO?'ON':'OFF'); b.classList.toggle('on',AUTO);
+  if(AUTO){ autoTimer=setInterval(loadAll,5*60*1000); } else { clearInterval(autoTimer); }
+}
+
+loadAll();
+</script>
