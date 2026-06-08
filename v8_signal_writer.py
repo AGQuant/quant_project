@@ -4,16 +4,15 @@ V8 Signal Writer — Single Live Engine (v2.0.0)
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
 What it does every 5-min during market hours:
-  1. Loads last-good EOD frozen metrics per symbol (GVM from gvm_scores; RSI M/W +
-     sector_week/month via DISTINCT ON from the most recent v8_metrics row that has them)
+  1. Loads latest EOD v8_metrics row per symbol (slow metrics: GVM, RSI M/W, sector_week, sector_month)
   2. Reads intraday_prices (today's bars) per symbol
   3. Recomputes all 19 live-moving metrics from intraday close spliced onto EOD history
-  4. Carries forward EOD-frozen metrics: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month
+  4. Preserves EOD-frozen metrics: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month
   5. Upserts v8_metrics (today's row) with live values
   6. Applies FILTER_CONFIG → writes v8_qualified (today only)
   7. Writes v8_funnel_counts (cumulative step counts)
 
-Frozen at EOD (never recomputed live — carried forward from last good value):
+Frozen at EOD (never recomputed live):
   - gvm_score       (weekly screener + daily M, recomputes 22:00 IST)
   - rsi_month       (monthly-resampled Wilder, recomputes 15:45 IST)
   - rsi_weekly      (weekly-resampled Wilder, recomputes 15:45 IST)
@@ -32,10 +31,16 @@ RSI periods: Month=6 (monthly bars), Weekly=8 (weekly bars), Daily=14 (Wilder).
 day_change = (cmp / close_2_days_ago - 1) * 100  [2-day momentum]
 
 08-Jun-2026 FIX: _load_eod_metrics no longer reads frozen metrics from today's own
-half-built v8_metrics row (which was NULL pre-15:45 → circular NULL → funnel collapse).
-It now pulls gvm_score from gvm_scores (authoritative) and rsi/sector from the most
-recent v8_metrics row PER SYMBOL where they are non-null (last EOD freeze carried
-forward intraday). EOD metrics are EOD by design and do not change intraday.
+half-built v8_metrics row (NULL pre-15:45 -> circular NULL -> funnel collapse). It now
+pulls gvm_score from gvm_scores (authoritative) and rsi/sector from the most recent
+v8_metrics row PER SYMBOL where they are non-null (last EOD freeze carried forward).
+
+08-Jun-2026 buy_reversal GATE-ADAPTIVE qualification (Buy Reversal ONLY):
+  Bullish gate (0-1 fails)  -> 11/11 strict
+  Sideways gate (2 fails)   -> 10/11 (any 1 filter may fail)
+  Bearish gate (3+ fails)   -> 9/11  (any 2 filters may fail)
+  day_change > 0 is MANDATORY in every tier (never one of the allowed fails).
+  Other baskets keep strict all-pass. Funnel counts still show strict waterfall.
 """
 
 import logging
@@ -413,21 +418,128 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
     conn.commit()
 
 
+# ── Market gate (for adaptive buy_reversal threshold) ─────────────────────────
+
+def _market_gate_fails(conn) -> int:
+    """
+    Count of failed market-mood checks (ADR + Nifty Day/Week/Month), mirroring
+    /api/v8/market_mood. 0-1=Bullish, 2=Neutral/Sideways, 3+=Bearish.
+    Returns fails (0-4); defaults to 0 (strict) if data insufficient.
+    """
+    try:
+        with conn.cursor() as cur:
+            # ADR: live intraday breadth, else eod fallback
+            cur.execute("""
+                WITH li AS (
+                    SELECT DISTINCT ON (symbol) symbol, close AS cmp
+                    FROM intraday_prices WHERE ts::date = CURRENT_DATE
+                    ORDER BY symbol, ts DESC
+                ),
+                pc AS (
+                    SELECT DISTINCT ON (symbol) symbol, close AS pclose
+                    FROM raw_prices WHERE price_date < CURRENT_DATE
+                    ORDER BY symbol, price_date DESC
+                )
+                SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
+                       COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
+                       COUNT(*)
+                FROM li JOIN pc ON pc.symbol = li.symbol
+            """)
+            adv, dec, tot = cur.fetchone()
+            if tot and tot >= 50:
+                adr = (adv / dec) if dec else float(adv)
+            else:
+                cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+                r = cur.fetchone()
+                adr = float(r[0]) if r and r[0] is not None else 1.0
+
+            # Nifty D/W/M from intraday live vs raw_prices history
+            cur.execute("""
+                SELECT close FROM intraday_prices
+                WHERE symbol='NIFTY50' AND ts::date=CURRENT_DATE
+                ORDER BY ts DESC LIMIT 1
+            """)
+            lv = cur.fetchone()
+            cur.execute("""
+                SELECT close FROM raw_prices
+                WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                ORDER BY price_date DESC LIMIT 30
+            """)
+            hist = [float(x[0]) for x in cur.fetchall()]
+            if lv and lv[0] is not None and len(hist) >= 22:
+                latest = float(lv[0])
+                nday   = (latest / hist[0]  - 1) * 100
+                nweek  = (latest / hist[4]  - 1) * 100
+                nmonth = (latest / hist[20] - 1) * 100
+            elif len(hist) >= 22:
+                latest = hist[0]
+                nday   = (latest / hist[1]  - 1) * 100
+                nweek  = (latest / hist[5]  - 1) * 100 if len(hist) > 5 else 0.0
+                nmonth = (latest / hist[21] - 1) * 100 if len(hist) > 21 else 0.0
+            else:
+                return 0  # insufficient data → strict
+
+            checks = [adr >= 1.0, nday >= 0, nweek >= 0, nmonth >= 0]
+            return sum(1 for c in checks if not c)
+    except Exception as e:
+        log.warning(f"_market_gate_fails: {e}")
+        return 0  # safe default → strict
+
+
+def _gate_threshold(fails: int, n_filters: int) -> int:
+    """
+    Adaptive buy_reversal threshold by market gate:
+      0-1 fails (Bullish)  → strict n_filters (all pass)
+      2 fails (Sideways)   → n_filters - 1
+      3+ fails (Bearish)   → n_filters - 2
+    """
+    if fails <= 1:
+        return n_filters
+    if fails == 2:
+        return n_filters - 1
+    return n_filters - 2
+
+
 # ── Step 8: Write v8_qualified + funnel ───────────────────────────────────────
 
 def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     from v8_endpoints import FILTER_CONFIG
 
+    gate_fails = _market_gate_fails(conn)
+
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
             continue
 
+        # Funnel counts always reflect the strict sequential waterfall (display).
         universe = all_metrics[:]
         funnel   = {}
         for metric, bounds in filters.items():
             mn, mx   = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             universe = [s for s in universe if _passes(s.get(metric), mn, mx)]
             funnel[metric] = len(universe)
+
+        # buy_reversal: gate-adaptive qualification (Bullish 11/11, Sideways 10/11,
+        # Bearish 9/11) with day_change>0 MANDATORY in every tier. Other baskets
+        # keep the strict all-pass set computed above.
+        if basket == "buy_reversal":
+            n_filters = len(filters)
+            need = _gate_threshold(gate_fails, n_filters)
+            adaptive = []
+            for s in all_metrics:
+                dc = s.get("day_change")
+                if dc is None or float(dc) <= 0:   # day_change>0 mandatory
+                    continue
+                passed = sum(
+                    1 for metric, bounds in filters.items()
+                    if _passes(s.get(metric),
+                               *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
+                )
+                if passed >= need:
+                    adaptive.append(s)
+            universe = adaptive
+            log.info(f"buy_reversal adaptive: gate_fails={gate_fails} need={need}/{n_filters} "
+                     f"day>0 mandatory → {len(universe)} qualified")
 
         try:
             with conn.cursor() as cur:
