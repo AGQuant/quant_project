@@ -17,6 +17,7 @@ ENTRY (qualified name + zone + gap condition + free slot + not blackout + before
          -> enter @ close, target R1, SL = entry-(R1-entry)
   SHORT: s1 <= this_close < pp  AND  (this_close-s1) >= 0.5*(pp-s1)
          -> enter @ close, target S1, SL = entry+(entry-S1)
+  + _traded_today guard: one entry per symbol/side/day maximum.
   No prev_close condition — captures gap-down/up names opening in the zone.
   50% remaining gap ensures minimum reward room to target.
 
@@ -44,8 +45,8 @@ log = logging.getLogger("scorr.v8paper")
 
 PIVOT_WINDOW   = 5
 PIVOT_MIN_DAYS = 3
-ENTRY_CUTOFF   = time(15, 20)   # no new entries at/after 15:20
-REBALANCE_TIME = time(15, 20)   # gate rebalance fires once at/after 15:20
+ENTRY_CUTOFF   = time(15, 20)
+REBALANCE_TIME = time(15, 20)
 
 
 # ============================================================ SCHEMA
@@ -93,7 +94,6 @@ def ensure_schema(conn):
 
 # ============================================================ PIVOTS (nightly)
 def compute_pivots(conn, for_date: date = None) -> Dict:
-    """Rolling-5-day pivots applying to for_date, from last 5 sessions strictly before it."""
     ensure_schema(conn)
     for_date = for_date or date.today()
     with conn.cursor() as cur:
@@ -104,11 +104,9 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT price_date, high, low, close FROM raw_prices
-                WHERE symbol=%s AND price_date < %s
-                ORDER BY price_date DESC LIMIT %s
+                WHERE symbol=%s AND price_date < %s ORDER BY price_date DESC LIMIT %s
             """, (sym, for_date, PIVOT_WINDOW))
-            rows = [r for r in cur.fetchall()
-                    if r[1] is not None and r[2] is not None and r[3] is not None]
+            rows = [r for r in cur.fetchall() if r[1] and r[2] and r[3]]
         if len(rows) < PIVOT_MIN_DAYS:
             skipped.append(sym); continue
         wend, wstart = rows[0][0], rows[-1][0]
@@ -116,7 +114,7 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
         bl = min(float(r[2]) for r in rows)
         bc = float(rows[0][3])
         pp = (bh + bl + bc) / 3.0
-        r1 = 2*pp - bl; s1 = 2*pp - bh; r2 = pp + (bh - bl); s2 = pp - (bh - bl)
+        r1 = 2*pp - bl; s1 = 2*pp - bh; r2 = pp + (bh-bl); s2 = pp - (bh-bl)
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO v8_paper_pivots
@@ -124,12 +122,12 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
                  base_high,base_low,base_close,base_days,built_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (symbol,pivot_date) DO UPDATE SET
-                  window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end,
-                  pp=EXCLUDED.pp, r1=EXCLUDED.r1, s1=EXCLUDED.s1, r2=EXCLUDED.r2, s2=EXCLUDED.s2,
-                  base_high=EXCLUDED.base_high, base_low=EXCLUDED.base_low,
-                  base_close=EXCLUDED.base_close, base_days=EXCLUDED.base_days, built_at=NOW()
-            """, (sym, for_date, wstart, wend, round(pp,2), round(r1,2), round(s1,2),
-                  round(r2,2), round(s2,2), bh, bl, bc, len(rows)))
+                  window_start=EXCLUDED.window_start,window_end=EXCLUDED.window_end,
+                  pp=EXCLUDED.pp,r1=EXCLUDED.r1,s1=EXCLUDED.s1,r2=EXCLUDED.r2,s2=EXCLUDED.s2,
+                  base_high=EXCLUDED.base_high,base_low=EXCLUDED.base_low,
+                  base_close=EXCLUDED.base_close,base_days=EXCLUDED.base_days,built_at=NOW()
+            """, (sym,for_date,wstart,wend,round(pp,2),round(r1,2),round(s1,2),
+                  round(r2,2),round(s2,2),bh,bl,bc,len(rows)))
             conn.commit()
         built += 1
     log.info(f"paper pivots built {built}/{len(symbols)} for {for_date}")
@@ -138,26 +136,17 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
 
 # ============================================================ QUALIFIED SET
 def _passes(metric_row: Dict, bands: Dict) -> bool:
-    """Check a metric row against a filter band dict {metric: [min, max]}."""
     for metric, bounds in bands.items():
         mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
         v = metric_row.get(metric)
-        if v is None:
-            return False
+        if v is None: return False
         v = float(v)
         if mn is not None and v < mn: return False
         if mx is not None and v > mx: return False
     return True
 
 def qualified_set(conn) -> Dict[str, Dict]:
-    """
-    Return {symbol: {'basket':.., 'side':..}} for stocks passing ANY basket's
-    filters on the latest v8_metrics.
-    Uses FILTER_CONFIG from v8_endpoints (canonical single source of truth).
-    Buy baskets checked before sell; first match wins.
-    """
     from v8_endpoints import FILTER_CONFIG, BASKET_META
-
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
@@ -167,17 +156,15 @@ def qualified_set(conn) -> Dict[str, Dict]:
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-
     out = {}
     for m in rows:
         sym = m["symbol"]
         for basket, filters in FILTER_CONFIG.items():
-            if basket == "sell_overbought":
-                continue  # computed separately via raw_prices window
+            if basket == "sell_overbought": continue
             side = BASKET_META[basket]["side"]
             if _passes(m, filters):
                 out[sym] = {"basket": basket, "side": side}
-                break  # first basket wins
+                break
     return out
 
 
@@ -191,7 +178,7 @@ def _two_latest_closes(conn, sym, d):
         """, (sym, d))
         rows = cur.fetchall()
     if len(rows) < 2: return None
-    return float(rows[1][0]), float(rows[0][0]), rows[0][1]   # prev, cur, cur_ts
+    return float(rows[1][0]), float(rows[0][0]), rows[0][1]
 
 def _first_bar(conn, sym, d):
     with conn.cursor() as cur:
@@ -213,6 +200,14 @@ def _open_counts(conn):
 def _has_open(conn, sym, side):
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND status='OPEN'", (sym, side))
+        return cur.fetchone() is not None
+
+def _traded_today(conn, sym, side, d):
+    """One entry per symbol/side/day — prevents zone re-entry after TARGET/SL."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM v8_paper_trades WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1", (sym, side, d))
+        if cur.fetchone(): return True
+        cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1", (sym, side, d))
         return cur.fetchone() is not None
 
 def _lot(conn, sym):
@@ -260,7 +255,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     d = target_date or date.today()
     now_t = datetime.now().time() if target_date is None else None
 
-    # pivots for today (fallback to latest stamped)
     with conn.cursor() as cur:
         cur.execute("SELECT symbol,pp,r1,s1 FROM v8_paper_pivots WHERE pivot_date=%s", (d,))
         piv = {r[0]:{"pp":float(r[1]),"r1":float(r[2]),"s1":float(r[3])} for r in cur.fetchall() if r[1] is not None}
@@ -274,7 +268,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     if not piv:
         return {"status":"warn","msg":"no pivots — run compute_pivots"}
 
-    qual = qualified_set(conn)   # {symbol: {basket, side}} — uses canonical FILTER_CONFIG
+    qual = qualified_set(conn)
     exits, entries = [], []
 
     # ---- 1) EXITS ----
@@ -287,11 +281,11 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
         fb_open, fb_ts = _first_bar(conn, sym, d)
         if fb_open is not None and (ets is None or ets.date() < d):
             if side=="LONG":
-                if fb_open >= tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
-                if fb_open <= sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
+                if fb_open>=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
+                if fb_open<=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
             else:
-                if fb_open <= tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
-                if fb_open >= sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
+                if fb_open<=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
+                if fb_open>=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
         tl = _two_latest_closes(conn, sym, d)
         if not tl: continue
         _, cur_close, cur_ts = tl
@@ -305,7 +299,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
         if hit:
             exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts,hit))
 
-    # ---- 2) GATE REBALANCE (once at/after 15:20) ----
+    # ---- 2) GATE REBALANCE ----
     rebalanced = []
     do_rebalance = (now_t is not None and now_t >= REBALANCE_TIME) or (target_date is not None)
     if do_rebalance and buy_slots is not None and sell_slots is not None:
@@ -324,22 +318,20 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 entry=float(entry); qty=int(qty)
                 upnl = (cur_close-entry)*qty if side=="LONG" else (entry-cur_close)*qty
                 scored.append((upnl,pid,sym,basket,entry,ets,qty,float(tgt),float(sl),pdt,cur_close,cur_ts))
-            best = sorted(scored, key=lambda x:-x[0])
-            worst = sorted(scored, key=lambda x:x[0])
-            order, bi, wi, picked = [], 0, 0, set()
-            while len(order) < excess and (bi < len(best) or wi < len(worst)):
-                if bi < len(best) and best[bi][1] not in picked:
+            best=sorted(scored,key=lambda x:-x[0]); worst=sorted(scored,key=lambda x:x[0])
+            order,bi,wi,picked=[],0,0,set()
+            while len(order)<excess and (bi<len(best) or wi<len(worst)):
+                if bi<len(best) and best[bi][1] not in picked:
                     order.append(best[bi]); picked.add(best[bi][1]); bi+=1
                     if len(order)>=excess: break
-                if wi < len(worst) and worst[wi][1] not in picked:
+                if wi<len(worst) and worst[wi][1] not in picked:
                     order.append(worst[wi]); picked.add(worst[wi][1]); wi+=1
-                else:
-                    wi+=1
+                else: wi+=1
                 if bi>=len(best) and wi>=len(worst): break
             for (upnl,pid,sym,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts) in order[:excess]:
                 rebalanced.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts,"GATE_EXIT"))
 
-    # ---- 3) ENTRIES (skip if after cutoff) ----
+    # ---- 3) ENTRIES ----
     after_cutoff = (now_t is not None and now_t >= ENTRY_CUTOFF)
     long_open, short_open = _open_counts(conn)
     if not after_cutoff:
@@ -353,6 +345,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp):
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
                 if _has_open(conn,sym,"LONG"): continue
+                if _traded_today(conn,sym,"LONG",d): continue
                 if _blackout(conn,sym):
                     _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"blackout"); continue
                 if buy_slots is not None and long_open >= buy_slots:
@@ -370,6 +363,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"): continue
+                if _traded_today(conn,sym,"SHORT",d): continue
                 if _blackout(conn,sym):
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"blackout"); continue
                 if sell_slots is not None and short_open >= sell_slots:
@@ -391,9 +385,9 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl=_two_latest_closes(conn,sym,d)
             if not tl: continue
             prev_close,cur_close,_=tl
-            if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp) and not _has_open(conn,sym,"LONG"):
+            if side=="LONG" and (pp < cur_close <= r1) and (r1-cur_close)>=0.5*(r1-pp) and not _has_open(conn,sym,"LONG") and not _traded_today(conn,sym,"LONG",d):
                 _log_missed(conn,d,sym,"LONG",q["basket"],cur_close,r1,cur_close-(r1-cur_close),"after_cutoff")
-            elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1) and not _has_open(conn,sym,"SHORT"):
+            elif side=="SHORT" and (s1<=cur_close<pp) and (cur_close-s1)>=0.5*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
                 _log_missed(conn,d,sym,"SHORT",q["basket"],cur_close,s1,cur_close+(cur_close-s1),"after_cutoff")
 
     return {"date":str(d),"qualified":len(qual),"pivots":len(piv),
