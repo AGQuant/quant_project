@@ -10,11 +10,15 @@ FUNNEL (3 layers):
      CANONICAL filters imported from v8_endpoints.FILTER_CONFIG (single source of truth).
   2. Rolling-5-day PIVOTS  — PP/R1/S1 from last 5 trading days (T-1..T-5) of
      raw_prices, recomputed nightly; window rolls daily.
-  3. Fresh PP CROSS trigger — on 1-min candle close, on qualified names only.
+  3. Zone + gap trigger — on 1-min candle close, on qualified names only.
 
-ENTRY (qualified name + fresh cross + free slot + not blackout + before 15:20):
-  BUY  : prev_close <= PP < this_close <= R1  -> enter @ close, target R1, SL = entry-(R1-entry)
-  SHORT: prev_close >= PP > this_close >= S1  -> enter @ close, target S1, SL = entry+(entry-S1)
+ENTRY (qualified name + zone + gap condition + free slot + not blackout + before 15:20):
+  BUY  : pp < this_close <= r1  AND  (r1-this_close) >= 0.5*(r1-pp)
+         -> enter @ close, target R1, SL = entry-(R1-entry)
+  SHORT: s1 <= this_close < pp  AND  (this_close-s1) >= 0.5*(pp-s1)
+         -> enter @ close, target S1, SL = entry+(entry-S1)
+  No prev_close condition — captures gap-down/up names opening in the zone.
+  50% remaining gap ensures minimum reward room to target.
 
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
@@ -24,7 +28,7 @@ EXIT (close-based, multi-day, levels frozen at entry):
 
 SIZING : 1 lot (futures_universe.lot_size, default 1).
 GATE   : market-mood buy_slots/sell_slots (sum 15) cap concurrent open per side.
-MISSED : qualified + fresh cross but blocked by slot_full|blackout|after_cutoff ->
+MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff ->
          v8_paper_missed, one row per (symbol, side, day).
 
 Price feed: intraday_prices (Fyers 1-min, NAIVE IST ts — read RAW, no TZ math).
@@ -346,7 +350,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl = _two_latest_closes(conn, sym, d)
             if not tl: continue
             prev_close, cur_close, cur_ts = tl
-            if side=="LONG" and (prev_close <= pp < cur_close <= r1):
+            if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp):
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
                 if _has_open(conn,sym,"LONG"): continue
                 if _blackout(conn,sym):
@@ -363,7 +367,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     conn.commit()
                 long_open+=1
                 entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
-            elif side=="SHORT" and (prev_close >= pp > cur_close >= s1):
+            elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"): continue
                 if _blackout(conn,sym):
@@ -387,9 +391,9 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl=_two_latest_closes(conn,sym,d)
             if not tl: continue
             prev_close,cur_close,_=tl
-            if side=="LONG" and (prev_close<=pp<cur_close<=r1) and not _has_open(conn,sym,"LONG"):
+            if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp) and not _has_open(conn,sym,"LONG"):
                 _log_missed(conn,d,sym,"LONG",q["basket"],cur_close,r1,cur_close-(r1-cur_close),"after_cutoff")
-            elif side=="SHORT" and (prev_close>=pp>cur_close>=s1) and not _has_open(conn,sym,"SHORT"):
+            elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1) and not _has_open(conn,sym,"SHORT"):
                 _log_missed(conn,d,sym,"SHORT",q["basket"],cur_close,s1,cur_close+(cur_close-s1),"after_cutoff")
 
     return {"date":str(d),"qualified":len(qual),"pivots":len(piv),
