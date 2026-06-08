@@ -97,6 +97,8 @@ MCP_TOOLS = [
     {"name":"v10_tick","description":"V10 ST+EMA: run one 5-min cycle — append 5m bar, compute signal, Telegram alert on BUY/SELL.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"pcr_intraday","description":"5-min intraday PCR trend (ATM\u00b15 + total) for NIFTY/BANKNIFTY from pcr_intraday.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_pcr_intraday","description":"Compute/self-heal 5-min PCR into pcr_intraday (ts optional = single bar, else heal all missing).","inputSchema":{"type":"object","properties":{"ts":{"type":"string"}},"required":[]}},
+    {"name":"v8_replay_run","description":"V8 PAPER REPLAY: true 5-min stepped replay from start date. wipe=true clears the paper book first (DESTRUCTIVE). Walks intraday bar-by-bar, point-in-time entries/exits.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"wipe":{"type":"boolean"}},"required":["start"]}},
+    {"name":"v8_replay_summary","description":"V8 PAPER REPLAY: current paper book stats — open positions + realized trade stats by basket.","inputSchema":{"type":"object","properties":{},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -223,6 +225,12 @@ async def _call_tool(name, args):
         elif name == "compute_pcr_intraday":
             params = {"ts": args["ts"]} if args.get("ts") else {}
             r = await client.post(f"{BASE_URL}/api/pcr/intraday/compute", params=params, headers=h); return r.json()
+        elif name == "v8_replay_run":
+            params = {"start": args["start"], "wipe": args.get("wipe", True)}
+            if args.get("end"): params["end"] = args["end"]
+            r = await client.post(f"{BASE_URL}/api/v8/replay/run", params=params, headers=h); return r.json()
+        elif name == "v8_replay_summary":
+            r = await client.get(f"{BASE_URL}/api/v8/replay/summary"); return r.json()
         return {"error": f"Unknown tool: {name}"}
 
 @router.post("/mcp")
