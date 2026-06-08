@@ -12,8 +12,10 @@ is incomplete. This module replays cleanly from a wiped book.
 
 Design
 ------
-- Universe / sides: today's qualified set (proxy), via FILTER_CONFIG on latest
-  v8_metrics. (Per user decision 08-Jun: today's qualified as proxy — faster.)
+- Universe / sides: PER-DAY qualified set, faithfully mirroring the live
+  v8_signal_writer._write_qualified (strict all-pass for buy_momentum + sells,
+  GATE-ADAPTIVE buy_reversal: Bullish 11/11, Sideways 10/11, Bearish 9/11 with
+  day_change>0 mandatory). Read from v8_metrics WHERE score_date=d each day.
 - Pivots: rolling-5-day from raw_prices, recomputed PER replay day (window rolls).
 - Stepped walk: for each trading day, step a cutoff time 09:15 → 15:30 in 5-min
   increments. At each cutoff, EXACTLY the live engine's entry/exit logic runs,
@@ -132,21 +134,42 @@ def _pivots_for(conn, d: date) -> Dict[str, dict]:
                 for r in cur.fetchall() if r[1] is not None}
 
 
-# ── qualified proxy (today's set via FILTER_CONFIG on latest v8_metrics) ─────
+# ── per-day qualified set — mirrors v8_signal_writer._write_qualified ─────────
+# Faithful to the LIVE engine (08-Jun spec id=175): strict all-pass for
+# buy_momentum + all sell baskets; GATE-ADAPTIVE for buy_reversal
+# (Bullish 11/11, Sideways 10/11, Bearish 9/11; day_change>0 mandatory every tier).
+# Computed PER replay day off that day's v8_metrics row (score_date=d), so the
+# replay qualifies exactly as the live writer would have on that date — not a
+# single static "today" proxy.
 
-def qualified_proxy(conn) -> Dict[str, dict]:
+def _passes_band(value, mn, mx) -> bool:
+    if value is None:
+        return False
+    v = float(value)
+    if mn is not None and v < mn:
+        return False
+    if mx is not None and v > mx:
+        return False
+    return True
+
+
+def _gate_threshold(fails: int, n_filters: int) -> int:
+    """Adaptive buy_reversal threshold (mirrors v8_signal_writer._gate_threshold)."""
+    if fails <= 1:
+        return n_filters          # Bullish  → strict all-pass
+    if fails == 2:
+        return n_filters - 1      # Sideways → any 1 may fail
+    return n_filters - 2          # Bearish  → any 2 may fail
+
+
+def qualified_for_day(conn, d: date, gate_fails: int) -> Dict[str, dict]:
+    """
+    Qualified set as of replay day d, mirroring v8_signal_writer._write_qualified.
+    Reads v8_metrics WHERE score_date=d (the EOD-frozen snapshot for that day),
+    applies the same per-basket rules the live engine uses, and returns the FIRST
+    matching basket per symbol (buy baskets first → LONG, then sells → SHORT).
+    """
     from v8_endpoints import FILTER_CONFIG, BASKET_META
-
-    def _passes(m, bands):
-        for metric, bounds in bands.items():
-            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            v = m.get(metric)
-            if v is None:
-                return False
-            v = float(v)
-            if mn is not None and v < mn: return False
-            if mx is not None and v > mx: return False
-        return True
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -154,22 +177,55 @@ def qualified_proxy(conn) -> Dict[str, dict]:
                    month_return, week_return, year_return, day_change,
                    week_index_52, range_3d, ma9_vs_ma21, vol_ratio,
                    sector_week, sector_month
-            FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics)
-        """)
-        cols = [d[0] for d in cur.description]
+            FROM v8_metrics WHERE score_date=%s
+        """, (d,))
+        cols = [c[0] for c in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-    out = {}
+    # Precompute the qualified symbol-set per basket (live-faithful).
+    basket_members: Dict[str, set] = {}
+    for basket, filters in FILTER_CONFIG.items():
+        if basket == "sell_overbought":
+            continue
+        members = set()
+        if basket == "buy_reversal":
+            n_filters = len(filters)
+            need = _gate_threshold(gate_fails, n_filters)
+            for m in rows:
+                dc = m.get("day_change")
+                if dc is None or float(dc) <= 0:        # day_change>0 MANDATORY
+                    continue
+                passed = sum(
+                    1 for metric, bounds in filters.items()
+                    if _passes_band(m.get(metric),
+                                    *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
+                )
+                if passed >= need:
+                    members.add(m["symbol"])
+        else:
+            for m in rows:
+                ok = all(
+                    _passes_band(m.get(metric),
+                                 *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
+                    for metric, bounds in filters.items()
+                )
+                if ok:
+                    members.add(m["symbol"])
+        basket_members[basket] = members
+
+    # First matching basket per symbol, in FILTER_CONFIG order (buys before sells).
+    out: Dict[str, dict] = {}
     for m in rows:
         sym = m["symbol"]
-        for basket, filters in FILTER_CONFIG.items():
+        for basket in FILTER_CONFIG:
             if basket == "sell_overbought":
                 continue
-            side = "LONG" if BASKET_META[basket]["side"] == "BUY" else "SHORT"
-            if _passes(m, filters):
+            if sym in basket_members[basket]:
+                side = "LONG" if BASKET_META[basket]["side"] == "BUY" else "SHORT"
                 out[sym] = {"basket": basket, "side": side}
                 break
     return out
+
 
 
 # ── per-day market gate (slots), mirrors /api/v8/market_mood thresholds ───────
@@ -433,19 +489,22 @@ def run_replay(conn, start: date, end: date = None, wipe: bool = True) -> dict:
     if wipe:
         summary["wiped"] = wipe_book(conn)
 
-    qual = qualified_proxy(conn)
-    summary["qualified_universe"] = len(qual)
-
     days = _trading_days(conn, start, end)
     summary["trading_days"] = [str(d) for d in days]
 
     steps = _step_times()
     tot_entries = tot_exits = tot_gate = 0
+    qual_sizes = []
 
     for d in days:
         build_pivots_for_day(conn, d)
         piv = _pivots_for(conn, d)
         buy_slots, sell_slots, fails = gate_slots_for_day(conn, d)
+        # Per-day qualified set, live-faithful (gate-adaptive buy_reversal etc.)
+        qual = qualified_for_day(conn, d, fails)
+        n_long  = sum(1 for q in qual.values() if q["side"] == "LONG")
+        n_short = sum(1 for q in qual.values() if q["side"] == "SHORT")
+        qual_sizes.append(len(qual))
         d_entries = d_exits = d_gate = 0
         for i, cutoff in enumerate(steps):
             res = _replay_tick(conn, d, cutoff, qual, piv,
@@ -456,9 +515,12 @@ def run_replay(conn, start: date, end: date = None, wipe: bool = True) -> dict:
         summary["days"].append({
             "date": str(d), "pivots": len(piv), "gate_fails": fails,
             "buy_slots": buy_slots, "sell_slots": sell_slots,
+            "qualified": len(qual), "qual_long": n_long, "qual_short": n_short,
             "entries": d_entries, "exits": d_exits, "gate_exits": d_gate,
         })
         tot_entries += d_entries; tot_exits += d_exits; tot_gate += d_gate
+
+    summary["qualified_universe"] = max(qual_sizes) if qual_sizes else 0
 
     # final book + realized stats
     with conn.cursor() as cur:
