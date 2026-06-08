@@ -42,7 +42,7 @@ def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
-# ── Filter configs ────────────────────────────────────────────────────────────
+# ── Filter configs ───────────────────────────────────────────────────────────
 # Ordered by descending kill rate for optimal funnel waterfall display.
 
 FILTER_CONFIG = {
@@ -178,7 +178,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Market breadth ────────────────────────────────────────────────────────────
+# ── Market breadth ──────────────────────────────────────────────────────────
 
 def _live_breadth(cur):
     cur.execute("""
@@ -427,6 +427,101 @@ def funnel_counts(basket: str):
                 "counts": counts, "source": "live_fallback"}
     except Exception as e:
         raise HTTPException(500, f"funnel failed: {e}")
+
+
+# ── Filter funnel detail + per-stock pass count ──────────────────────────────
+# Two views for all 5 baskets:
+#   /funnel_detail/{basket}  → sequential funnel, filters ordered by kill (low→high survivors)
+#   /stock_passcount/{basket} → per-stock count of filters passed (0..N), ranked high→low
+
+def _basket_universe(cur):
+    cur.execute("""
+        SELECT symbol, gvm_score, dma_20, dma_50, dma_200,
+               rsi_month, rsi_weekly, daily_rsi,
+               month_return, week_return, year_return, day_change,
+               week_index_52, ma9_vs_ma21, vol_ratio,
+               sector_week, sector_month
+        FROM v8_metrics
+        WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+    """)
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+@router.get("/funnel_detail/{basket}")
+def funnel_detail(basket: str):
+    basket = basket.lower()
+    if basket not in FILTER_CONFIG:
+        raise HTTPException(404, f"Unknown basket: {basket}. Valid: {list(FILTER_CONFIG.keys())}")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            all_rows = _basket_universe(cur)
+        total = len(all_rows)
+        filters = FILTER_CONFIG[basket]
+        stages = []
+        survivors = all_rows[:]
+        prev = total
+        for metric, bounds in filters.items():
+            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            survivors = [s for s in survivors if _passes_filter(s.get(metric), mn, mx)]
+            passed = len(survivors)
+            killed = prev - passed
+            stages.append({
+                "metric": metric,
+                "min": mn, "max": mx,
+                "survivors": passed,
+                "killed": killed,
+                "kill_pct": round(killed / prev * 100, 1) if prev else 0.0,
+            })
+            prev = passed
+        meta = BASKET_META.get(basket, {})
+        return {
+            "basket": basket, "score_date": str(date.today()),
+            "universe": total, "final": prev,
+            "filter_count": len(filters),
+            "stages": stages, **meta,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"funnel_detail failed: {e}")
+
+
+@router.get("/stock_passcount/{basket}")
+def stock_passcount(basket: str):
+    basket = basket.lower()
+    if basket not in FILTER_CONFIG:
+        raise HTTPException(404, f"Unknown basket: {basket}. Valid: {list(FILTER_CONFIG.keys())}")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            all_rows = _basket_universe(cur)
+        filters = FILTER_CONFIG[basket]
+        n_filters = len(filters)
+        out = []
+        for s in all_rows:
+            passed_list, failed_list = [], []
+            for metric, bounds in filters.items():
+                mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+                if _passes_filter(s.get(metric), mn, mx):
+                    passed_list.append(metric)
+                else:
+                    failed_list.append(metric)
+            out.append({
+                "symbol": s["symbol"],
+                "passed": len(passed_list),
+                "total": n_filters,
+                "passed_filters": passed_list,
+                "failed_filters": failed_list,
+                "gvm_score": s.get("gvm_score"),
+                "day_change": s.get("day_change"),
+            })
+        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
+        meta = BASKET_META.get(basket, {})
+        return {
+            "basket": basket, "score_date": str(date.today()),
+            "universe": len(out), "filter_count": n_filters,
+            "stocks": out, **meta,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"stock_passcount failed: {e}")
 
 
 @router.get("/raw")
