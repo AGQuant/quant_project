@@ -66,7 +66,7 @@ def _chk(label: str, value: Any, ok: bool, warn: bool = True, detail: str = '') 
             'emoji': _emoji(level), 'detail': detail}
 
 
-# ── Section builders ──────────────────────────────────────────────────────────
+# ── Section builders ───────────────────────────────────────────────────────────────────────────
 
 def _section_data_feeds(cur) -> Dict:
     checks = []
@@ -117,7 +117,7 @@ def _section_data_feeds(cur) -> Dict:
         detail=f'{gi_cnt} symbols'))
 
     # ADR
-    cur.execute("SELECT MAX(price_date), adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+    cur.execute("SELECT price_date, adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
     r = cur.fetchone()
     if r:
         adr_date, adr_val = r[0], float(r[1]) if r[1] else None
@@ -392,7 +392,7 @@ def _section_infrastructure(cur) -> Dict:
     return {'name': 'Infrastructure', 'checks': checks, 'status': _status(checks)}
 
 
-# ── Main endpoint ─────────────────────────────────────────────────────────────
+# ── Main endpoint ───────────────────────────────────────────────────────────────────────────
 
 @router.get("/diagnosis")
 def run_diagnosis():
@@ -420,6 +420,7 @@ def run_diagnosis():
                         elif c['level'] == 'yellow':
                             warnings.append(f"[{sec['name']}] {c['label']}: {c['value']}")
                 except Exception as e:
+                    conn.rollback()
                     sections.append({
                         'name': builder.__name__.replace('_section_', '').replace('_', ' ').title(),
                         'status': 'red',
