@@ -414,6 +414,16 @@ function scanSet(m){ scanMode=m; document.getElementById('panel9').innerHTML=ren
 /* ---------- Filter Funnel tab (2 views, 5 baskets) ---------- */
 let ffBasket='buy_reversal';
 function ffSet(b){ ffBasket=b; loadFF(); }
+function preFreezeBanner(){
+  const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
+  const dow=ist.getDay(), mins=ist.getHours()*60+ist.getMinutes();
+  const weekday = dow>=1 && dow<=5;
+  // EOD metrics (gvm, rsi_month, rsi_weekly, sector_week, sector_month) freeze at 15:45 IST
+  if(weekday && mins < 945){
+    return `<div class="err" style="color:var(--amber);border-color:var(--amber)">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) &amp; sector metrics are not yet computed today — they auto-fail, so survivor counts are understated and the funnel collapses early. Numbers fill in after the 15:45 EOD freeze.</div>`;
+  }
+  return '';
+}
 async function loadFF(){
   const el=document.getElementById('panel10');
   if(!el) return;
@@ -423,29 +433,30 @@ async function loadFF(){
   try{ fd=await getJSON(EP.funnelDetail(ffBasket)); }catch(e){}
   try{ pc=await getJSON(EP.passCount(ffBasket)); }catch(e){}
   let html=`<div class="subnav">${nav}</div>`;
+  html+=preFreezeBanner();
   // View 1: sequential funnel, filters low->high survivors (kill order = restrictive first)
   if(fd && fd.stages){
     const stages=[...fd.stages].sort((a,b)=>a.survivors-b.survivors);
-    html+=`<div class="ptitle">Filter Funnel \u00b7 ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} \u2192 final ${fd.final} \u00b7 ${fd.filter_count} filters</span></div>`;
+    html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
     html+=tbl(["Filter","Min","Max","Survivors","Killed","Kill %"],stages,s=>`<tr>
       <td class="sym">${s.metric.replace(/_/g,' ')}</td>
-      <td>${s.min===null?'\u2014':s.min}</td>
-      <td>${s.max===null?'\u2014':s.max}</td>
+      <td>${s.min===null?'—':s.min}</td>
+      <td>${s.max===null?'—':s.max}</td>
       <td>${s.survivors}</td>
       <td class="${s.killed>0?'neg':''}">${s.killed}</td>
       <td>${num(s.kill_pct,1)}%</td></tr>`,"No funnel data");
-  } else { html+=`<div class="err">\u26a0 funnel_detail not available for ${ffBasket}</div>`; }
+  } else { html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`; }
   // View 2: per-stock pass count, high->low
   if(pc && pc.stocks){
-    html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count \u00b7 high \u2192 low <span class="ct">${pc.universe} stocks \u00b7 max ${pc.filter_count}</span></div>`;
+    html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count · high → low <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     html+=tbl(["Symbol","Passed","of","GVM","Day %","Failed filters"],pc.stocks,x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td class="${x.passed===x.total?'pos':''}">${x.passed}</td>
       <td>${x.total}</td>
       <td>${num(x.gvm_score,2)}</td>
       <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
-      <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'\u2014'}</td></tr>`,"No stocks");
-  } else { html+=`<div class="err">\u26a0 stock_passcount not available for ${ffBasket}</div>`; }
+      <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`,"No stocks");
+  } else { html+=`<div class="err">⚠ stock_passcount not available for ${ffBasket}</div>`; }
   el.innerHTML=html;
 }
 
