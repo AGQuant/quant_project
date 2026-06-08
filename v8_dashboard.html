@@ -153,6 +153,8 @@ const EP = {
   qualified:   b => `/api/v8/qualified/${b}`, // path param, returns {stocks:[]}
   sellOB:      "/api/v8/sell_overbought?limit=25",
   paper:       "/api/paper/status",
+  funnelDetail: b => `/api/v8/funnel_detail/${b}`,
+  passCount:    b => `/api/v8/stock_passcount/${b}`,
 };
 
 const BASKETS = [
@@ -162,11 +164,17 @@ const BASKETS = [
   {id:"sell_momentum", label:"Sell Momentum"},
 ];
 
+const ALL5 = [
+  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
+  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
+  {id:"sell_overbought",label:"Sell Overbought"},
+];
+
 /* ---- Tab definitions (10, matching the Google Sheet) ---- */
 const TABS = [
   "Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
   "Sell Momentum","Sell Overbought","In Position","Trade Log",
-  "Raw Data","Filter Scan"
+  "Raw Data","Filter Scan","Filter Funnel"
 ];
 
 let AUTO=false, autoTimer=null;
@@ -402,6 +410,45 @@ function renderScan(){
 }
 function scanSet(m){ scanMode=m; document.getElementById('panel9').innerHTML=renderScan(); }
 
+
+/* ---------- Filter Funnel tab (2 views, 5 baskets) ---------- */
+let ffBasket='buy_reversal';
+function ffSet(b){ ffBasket=b; loadFF(); }
+async function loadFF(){
+  const el=document.getElementById('panel10');
+  if(!el) return;
+  const nav=ALL5.map(b=>`<button class="btn ${ffBasket===b.id?'on':''}" onclick="ffSet('${b.id}')">${b.label}</button>`).join('');
+  el.innerHTML=`<div class="subnav">${nav}</div><div class="loading">Loading funnel…</div>`;
+  let fd=null, pc=null;
+  try{ fd=await getJSON(EP.funnelDetail(ffBasket)); }catch(e){}
+  try{ pc=await getJSON(EP.passCount(ffBasket)); }catch(e){}
+  let html=`<div class="subnav">${nav}</div>`;
+  // View 1: sequential funnel, filters low->high survivors (kill order = restrictive first)
+  if(fd && fd.stages){
+    const stages=[...fd.stages].sort((a,b)=>a.survivors-b.survivors);
+    html+=`<div class="ptitle">Filter Funnel \u00b7 ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} \u2192 final ${fd.final} \u00b7 ${fd.filter_count} filters</span></div>`;
+    html+=tbl(["Filter","Min","Max","Survivors","Killed","Kill %"],stages,s=>`<tr>
+      <td class="sym">${s.metric.replace(/_/g,' ')}</td>
+      <td>${s.min===null?'\u2014':s.min}</td>
+      <td>${s.max===null?'\u2014':s.max}</td>
+      <td>${s.survivors}</td>
+      <td class="${s.killed>0?'neg':''}">${s.killed}</td>
+      <td>${num(s.kill_pct,1)}%</td></tr>`,"No funnel data");
+  } else { html+=`<div class="err">\u26a0 funnel_detail not available for ${ffBasket}</div>`; }
+  // View 2: per-stock pass count, high->low
+  if(pc && pc.stocks){
+    html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count \u00b7 high \u2192 low <span class="ct">${pc.universe} stocks \u00b7 max ${pc.filter_count}</span></div>`;
+    html+=tbl(["Symbol","Passed","of","GVM","Day %","Failed filters"],pc.stocks,x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${x.passed===x.total?'pos':''}">${x.passed}</td>
+      <td>${x.total}</td>
+      <td>${num(x.gvm_score,2)}</td>
+      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'\u2014'}</td></tr>`,"No stocks");
+  } else { html+=`<div class="err">\u26a0 stock_passcount not available for ${ffBasket}</div>`; }
+  el.innerHTML=html;
+}
+
 /* ---------- master loader ---------- */
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
@@ -413,6 +460,7 @@ function paint(){
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel8').innerHTML=renderRaw();
   document.getElementById('panel9').innerHTML=renderScan();
+  loadFF();
 }
 
 async function loadAll(){
