@@ -657,11 +657,30 @@ def run(auth_code=None):
     ensure_schemas(conn)
     log.info(f"Universe: {len(symbols)} equity + {len(symbols)} futures + options")
 
-    log.info("Boot backfill (7-day equity, sequential)...")
-    try:
-        fyers_backfill.backfill_7day(token, conn)
-    except Exception as e:
-        log.error(f"Boot backfill failed (continuing): {e}")
+    # Skip-if-fresh: only backfill when today's intraday data is missing.
+    # When fresh, skip the ~40-min sequential backfill entirely (instant restart).
+    def _intraday_fresh():
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT COUNT(DISTINCT symbol) FROM intraday_prices "
+                          "WHERE ts::date = CURRENT_DATE AND timeframe='1m'")
+                n = c.fetchone()[0] or 0
+            return n >= 150   # most of universe already has today's bars
+        except Exception:
+            return False
+
+    if _intraday_fresh():
+        log.info("Boot backfill SKIPPED — today's intraday already fresh (>=150 symbols)")
+    else:
+        # Defer backfill to a background thread so the live WS connects immediately.
+        def _deferred_backfill():
+            log.info("Deferred backfill (7-day equity, sequential, background)...")
+            try:
+                fyers_backfill.backfill_7day(token, conn)
+                log.info("Deferred backfill complete")
+            except Exception as e:
+                log.error(f"Deferred backfill failed (continuing): {e}")
+        threading.Thread(target=_deferred_backfill, daemon=True).start()
 
     expiry = current_expiry()
     log.info(f"Active expiry: {expiry}")
