@@ -24,6 +24,9 @@ FILTER_CONFIG reorder (06-Jun-2026):
   sector_week/month NULL until Monday 15:45 GVM engine run.
   NULL filter = all stocks pass (no kill).
 
+GVM gate (08-Jun-2026): buy baskets relaxed gvm_score min 7.0 -> 6.0
+  (lets in 'Watch' band 6-7). Widens buy universe ~46 -> ~123. Permanent spec change.
+
 day_change formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum.
 """
 
@@ -42,12 +45,12 @@ def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
-# ── Filter configs ───────────────────────────────────────────────────────────
+# ── Filter configs ───────────────────────────────────────────────────────────────
 # Ordered by descending kill rate for optimal funnel waterfall display.
 
 FILTER_CONFIG = {
     "buy_reversal": {
-        "gvm_score":    [7.0,  10.0],
+        "gvm_score":    [6.0,  10.0],
         "year_return":  [-1.5, None],
         "dma_200":      [1.5,  20.0],
         "dma_50":       [1.5,  8.0],
@@ -60,7 +63,7 @@ FILTER_CONFIG = {
         "sector_month": [0.0,  6.0],
     },
     "buy_momentum": {
-        "gvm_score":    [7.0,  10.0],
+        "gvm_score":    [6.0,  10.0],
         "year_return":  [0.0,  None],
         "dma_50":       [6.5,  25.0],
         "dma_200":      [7.0,  50.0],
@@ -121,7 +124,7 @@ _BLACKOUT_SQL = """
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────────
 
 def _passes_filter(value, mn, mx) -> bool:
     if value is None: return False
@@ -178,7 +181,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Market breadth ──────────────────────────────────────────────────────────
+# ── Market breadth ─────────────────────────────────────────────────────────────────
 
 def _live_breadth(cur):
     cur.execute("""
@@ -239,7 +242,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
     )
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints ───────────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -429,7 +432,7 @@ def funnel_counts(basket: str):
         raise HTTPException(500, f"funnel failed: {e}")
 
 
-# ── Filter funnel detail + per-stock pass count ──────────────────────────────
+# ── Filter funnel detail + per-stock pass count ─────────────────────────────────────
 # Two views for all 5 baskets:
 #   /funnel_detail/{basket}  → sequential funnel, filters ordered by kill (low→high survivors)
 #   /stock_passcount/{basket} → per-stock count of filters passed (0..N), ranked high→low
