@@ -41,6 +41,7 @@ from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
 from anthropic_endpoints import router as anthropic_router
+from scorr_endpoints import router as scorr_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -52,7 +53,10 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.25
+# Scorr / Project Quant — main.py v2.9.26
+# v2.9.26: Scorr query endpoints wired — scorr_endpoints router.
+#   POST /api/scorr/query (native cache-first, Anthropic API fallback)
+#   GET /api/scorr/health. Cost: $2-3/month vs $100 Max plan.
 # v2.9.25: V8 paper 5-min stepped REPLAY wired — v8_replay_endpoints router.
 #   POST /api/v8/replay/run (wipe + replay since start date, true 5-min walk),
 #   GET /api/v8/replay/summary. Files: v8_paper_replay.py, v8_replay_endpoints.py.
@@ -74,15 +78,9 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 #   4 MCP tools (v9_discover, v9_backtest, v9_results, v9_best_combo).
 #   Files: v9_pair_discovery.py, v9_pair_backtest.py, v9_endpoints.py
 #   178 raw pairs, 122 eligible stocks, 10 parameter combos.
-# v2.9.19: fix_all_allocations MCP tool. REL_STOP_PCT -10%.
-# v2.9.18: futures_basis table. fyers_feed v4 single WS 420+ symbols.
-# v2.9.17: Daily Digest live intraday domestic indices.
-# v2.9.16: diagnosis.py wired.
-# v2.9.15: paper/status CMP server-side.
-# v2.8.0: COMPUTE-ON-WRITE ADR + PCR
 # ============================================================
 
-VERSION = "2.9.25"
+VERSION = "2.9.26"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -119,6 +117,7 @@ app.include_router(pcr_router)
 app.include_router(v8_replay_router)
 app.include_router(mcp_router)
 app.include_router(anthropic_router)
+app.include_router(scorr_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -235,11 +234,38 @@ def create_tables():
         UNIQUE(symbol, ts)
     );
     CREATE INDEX IF NOT EXISTS idx_futures_basis_symbol_ts ON futures_basis(symbol, ts DESC);
+    CREATE TABLE IF NOT EXISTS gvm_cache (
+        symbol VARCHAR(10) PRIMARY KEY,
+        gvm_score DECIMAL(5, 2),
+        growth DECIMAL(5, 2),
+        value DECIMAL(5, 2),
+        momentum DECIMAL(5, 2),
+        segment VARCHAR(50),
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS peer_averages (
+        segment VARCHAR(50) PRIMARY KEY,
+        avg_gvm DECIMAL(5, 2),
+        avg_growth DECIMAL(5, 2),
+        avg_value DECIMAL(5, 2),
+        avg_momentum DECIMAL(5, 2),
+        stock_count INT,
+        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS cache_metadata (
+        key VARCHAR(50) PRIMARY KEY,
+        last_sync TIMESTAMP,
+        stock_count INT,
+        status VARCHAR(20)
+    );
+    INSERT INTO cache_metadata (key, status)
+    VALUES ('gvm_cache', 'pending_first_load')
+    ON CONFLICT (key) DO NOTHING;
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.25)")
+        log.info("Tables ready (v2.9.26)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -602,8 +628,6 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); keys = sorted(os.environ.keys())
     interesting = ["SCREENER_EMAIL","SCREENER_PASSWORD","GITHUB_TOKEN","GITHUB_REPO","ADMIN_TOKEN","DATABASE_URL","DEPLOY_GUARD","RAILWAY_PUBLIC_DOMAIN"]
     return {"version": VERSION, "all_keys_count": len(keys), "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k,""))} for k in interesting}}
-
-# /api/v8/build_cache + /api/v8/run_live removed — v8_live archived
 
 @app.post("/api/v8/run_signal_writer")
 def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
