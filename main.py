@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 import os
 import psycopg
@@ -321,6 +321,11 @@ async def startup():
 
 @app.get("/")
 def root(): return {"service": "Scorr API", "version": VERSION, "status": "live"}
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    with open("v8_dashboard.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
