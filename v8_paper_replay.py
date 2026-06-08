@@ -25,6 +25,12 @@ Design
   (mirrors /api/v8/market_mood thresholds). Falls back to 7/8 (Neutral).
 - Entry cutoff 15:20, gate rebalance once at the >=15:20 step. Same as live.
 
+Entry rule (08-Jun-2026 update):
+  LONG:  pp < cur_close <= r1  AND  (r1 - cur_close) >= 0.5 * (r1 - pp)
+  SHORT: s1 <= cur_close < pp  AND  (cur_close - s1) >= 0.5 * (pp - s1)
+  No prev_close condition — captures gap-down/up names opening in the zone.
+  50% remaining gap ensures minimum reward room to target.
+
 Writes the SAME tables as the live engine so the dashboard reads it natively:
   v8_paper_positions / v8_paper_trades / v8_paper_missed / v8_paper_pivots
 
@@ -182,7 +188,6 @@ def qualified_for_day(conn, d: date, gate_fails: int) -> Dict[str, dict]:
         cols = [c[0] for c in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-    # Precompute the qualified symbol-set per basket (live-faithful).
     basket_members: Dict[str, set] = {}
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
@@ -193,7 +198,7 @@ def qualified_for_day(conn, d: date, gate_fails: int) -> Dict[str, dict]:
             need = _gate_threshold(gate_fails, n_filters)
             for m in rows:
                 dc = m.get("day_change")
-                if dc is None or float(dc) <= 0:        # day_change>0 MANDATORY
+                if dc is None or float(dc) <= 0:
                     continue
                 passed = sum(
                     1 for metric, bounds in filters.items()
@@ -213,7 +218,6 @@ def qualified_for_day(conn, d: date, gate_fails: int) -> Dict[str, dict]:
                     members.add(m["symbol"])
         basket_members[basket] = members
 
-    # First matching basket per symbol, in FILTER_CONFIG order (buys before sells).
     out: Dict[str, dict] = {}
     for m in rows:
         sym = m["symbol"]
@@ -227,14 +231,12 @@ def qualified_for_day(conn, d: date, gate_fails: int) -> Dict[str, dict]:
     return out
 
 
-
 # ── per-day market gate (slots), mirrors /api/v8/market_mood thresholds ───────
 
 def gate_slots_for_day(conn, d: date) -> Tuple[int, int, int]:
     """Returns (buy_slots, sell_slots, fails) computed as of replay day d."""
     try:
         with conn.cursor() as cur:
-            # breadth: intraday-as-of-d last close vs prev EOD close
             cur.execute("""
                 WITH li AS (
                     SELECT DISTINCT ON (symbol) symbol, close AS cmp
@@ -357,7 +359,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
                  is_new_day: bool) -> dict:
     exits, entries, gate_exits = [], [], []
 
-    # ---- 1) EXITS (gap exits only on first step of a new day) ----
+    # ---- 1) EXITS ----
     with conn.cursor() as cur:
         cur.execute("""SELECT id,symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pivot_date
                        FROM v8_paper_positions WHERE status='OPEN'""")
@@ -387,7 +389,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
         if hit:
             exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts,hit))
 
-    # ---- 2) GATE REBALANCE (once, at first step >= 15:20) ----
+    # ---- 2) GATE REBALANCE ----
     if cutoff >= REBALANCE_TIME:
         for side, cap in (("LONG", buy_slots), ("SHORT", sell_slots)):
             with conn.cursor() as cur:
@@ -421,7 +423,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
             for (upnl,pid,sym,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts) in order[:excess]:
                 gate_exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts,"GATE_EXIT"))
 
-    # ---- 3) ENTRIES (skip after cutoff) ----
+    # ---- 3) ENTRIES ----
     if cutoff < ENTRY_CUTOFF:
         long_open, short_open = _open_counts(conn)
         for sym, q in qual.items():
@@ -433,7 +435,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
             if not tl:
                 continue
             prev_close, cur_close, cur_ts = tl
-            if side == "LONG" and (prev_close <= pp < cur_close <= r1):
+            if side == "LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp):
                 if _has_open(conn, sym, "LONG"): continue
                 if long_open >= buy_slots: continue
                 entry = cur_close; target = r1; stop = entry - (r1 - entry)
@@ -447,7 +449,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
                     conn.commit()
                 long_open += 1
                 entries.append({"symbol": sym, "side": "LONG", "basket": basket, "entry": entry})
-            elif side == "SHORT" and (prev_close >= pp > cur_close >= s1):
+            elif side == "SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1):
                 if _has_open(conn, sym, "SHORT"): continue
                 if short_open >= sell_slots: continue
                 entry = cur_close; target = s1; stop = entry + (entry - s1)
@@ -500,7 +502,6 @@ def run_replay(conn, start: date, end: date = None, wipe: bool = True) -> dict:
         build_pivots_for_day(conn, d)
         piv = _pivots_for(conn, d)
         buy_slots, sell_slots, fails = gate_slots_for_day(conn, d)
-        # Per-day qualified set, live-faithful (gate-adaptive buy_reversal etc.)
         qual = qualified_for_day(conn, d, fails)
         n_long  = sum(1 for q in qual.values() if q["side"] == "LONG")
         n_short = sum(1 for q in qual.values() if q["side"] == "SHORT")
@@ -522,7 +523,6 @@ def run_replay(conn, start: date, end: date = None, wipe: bool = True) -> dict:
 
     summary["qualified_universe"] = max(qual_sizes) if qual_sizes else 0
 
-    # final book + realized stats
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM v8_paper_positions WHERE status='OPEN'")
         open_n = cur.fetchone()[0]
