@@ -58,7 +58,7 @@ INDEX_LTP_SYMBOLS = {
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
-# ── Option chain config ──────────────────────────────────────────────────────
+# ── Option chain config ──────────────────────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
@@ -118,7 +118,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(mess
 log = logging.getLogger('fyers_feed')
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -173,7 +173,7 @@ def auto_step(cmp: float) -> int:
     return 200
 
 
-# ── DB / token ─────────────────────────────────────────────────────────────────
+# ── DB / token ─────────────────────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
     with conn.cursor() as cur:
@@ -254,7 +254,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ── universe ─────────────────────────────────────────────────────────────────────
+# ── universe ───────────────────────────────────────────────────────────────────────────────────
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -293,15 +293,16 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ──────────────────────────────────────────────────────
+# ── option symbol manager ───────────────────────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
     Manages option symbol subscriptions.
     Tracks current ATM per underlying, rebuilds on drift or monthly roll.
     """
-    def __init__(self, conn):
+    def __init__(self, conn, token=None):
         self.conn         = conn
+        self.token        = token
         self.lock         = threading.Lock()
         self.expiry       = current_expiry()
         self.atm_map      = {}   # underlying -> current ATM strike
@@ -318,13 +319,34 @@ class OptionSymbolManager:
         log.info(f"OptionSymbolManager: {len(out)} underlyings")
 
     def _get_cmp(self, cmp_sym):
+        # 1) table first (warm path)
         try:
             with self.conn.cursor() as cur:
                 cur.execute("SELECT cmp FROM cmp_prices WHERE symbol = %s", (cmp_sym,))
                 r = cur.fetchone()
-                return float(r[0]) if r else None
+                if r and r[0]:
+                    return float(r[0])
         except Exception:
+            pass
+        # 2) cold-boot fallback: pull live CMP straight from Fyers quotes API
+        #    (cmp_prices empty on a fresh boot would otherwise skip ALL options)
+        if not self.token:
             return None
+        try:
+            meta = INDEX_OPTION_UNDERLYINGS.get(cmp_sym)
+            fsym = meta['fyers_index'] if meta else fyers_eq_symbol(cmp_sym)
+            resp = requests.get(QUOTES_URL, params={'symbols': fsym},
+                                headers={'Authorization': f'{FYERS_CLIENT_ID}:{self.token}'},
+                                timeout=5)
+            d = resp.json()
+            if d.get('s') == 'ok':
+                for item in d.get('d', []):
+                    lp = item.get('v', {}).get('lp')
+                    if lp:
+                        return float(lp)
+        except Exception as e:
+            log.warning(f"_get_cmp Fyers fallback {cmp_sym}: {e}")
+        return None
 
     def build_initial(self):
         """Returns list of Fyers option symbols to subscribe."""
@@ -393,7 +415,7 @@ class OptionSymbolManager:
             return self.sym_map.get(fsym)
 
 
-# ── bar aggregator ───────────────────────────────────────────────────────────────
+# ── bar aggregator ─────────────────────────────────────────────────────────────────────────────
 
 class BarAggregator:
     def __init__(self, conn):
@@ -507,7 +529,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ───────────────────────────────────────────────────────────
+# ── option bar store ─────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 1-min option ticks into option_chain."""
@@ -563,7 +585,7 @@ class OptionBarStore:
                 self._flush(fsym, bar)
 
 
-# ── index LTP ───────────────────────────────────────────────────────────────────
+# ── index LTP ──────────────────────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -590,7 +612,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ───────────────────────────────────────────────────────────────────────
+# ── purge ──────────────────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
@@ -619,7 +641,7 @@ def ensure_schemas(conn):
     log.info("Schemas ready (option_chain, futures_basis)")
 
 
-# ── main run ───────────────────────────────────────────────────────────────────
+# ── main run ─────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
@@ -644,7 +666,7 @@ def run(auth_code=None):
     equity_fyers_syms  = [fyers_eq_symbol(s) for s in symbols]
     futures_fyers_syms = [futures_fyers_symbol(s, expiry) for s in symbols]
 
-    opt_mgr     = OptionSymbolManager(conn)
+    opt_mgr     = OptionSymbolManager(conn, token=token)
     option_syms = opt_mgr.build_initial()
 
     all_syms    = equity_fyers_syms + futures_fyers_syms + option_syms
