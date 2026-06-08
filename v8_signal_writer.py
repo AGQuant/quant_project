@@ -4,15 +4,16 @@ V8 Signal Writer — Single Live Engine (v2.0.0)
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
 What it does every 5-min during market hours:
-  1. Loads latest EOD v8_metrics row per symbol (slow metrics: GVM, RSI M/W, sector_week, sector_month)
+  1. Loads last-good EOD frozen metrics per symbol (GVM from gvm_scores; RSI M/W +
+     sector_week/month via DISTINCT ON from the most recent v8_metrics row that has them)
   2. Reads intraday_prices (today's bars) per symbol
   3. Recomputes all 19 live-moving metrics from intraday close spliced onto EOD history
-  4. Preserves EOD-frozen metrics: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month
+  4. Carries forward EOD-frozen metrics: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month
   5. Upserts v8_metrics (today's row) with live values
   6. Applies FILTER_CONFIG → writes v8_qualified (today only)
   7. Writes v8_funnel_counts (cumulative step counts)
 
-Frozen at EOD (never recomputed live):
+Frozen at EOD (never recomputed live — carried forward from last good value):
   - gvm_score       (weekly screener + daily M, recomputes 22:00 IST)
   - rsi_month       (monthly-resampled Wilder, recomputes 15:45 IST)
   - rsi_weekly      (weekly-resampled Wilder, recomputes 15:45 IST)
@@ -29,6 +30,12 @@ v8_live.py and v8_history_cache are archived — no longer used.
 
 RSI periods: Month=6 (monthly bars), Weekly=8 (weekly bars), Daily=14 (Wilder).
 day_change = (cmp / close_2_days_ago - 1) * 100  [2-day momentum]
+
+08-Jun-2026 FIX: _load_eod_metrics no longer reads frozen metrics from today's own
+half-built v8_metrics row (which was NULL pre-15:45 → circular NULL → funnel collapse).
+It now pulls gvm_score from gvm_scores (authoritative) and rsi/sector from the most
+recent v8_metrics row PER SYMBOL where they are non-null (last EOD freeze carried
+forward intraday). EOD metrics are EOD by design and do not change intraday.
 """
 
 import logging
@@ -48,7 +55,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 RSI_DAILY_PERIOD = 14
 
 
-# ── helpers ──────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _safe_float(v) -> Optional[float]:
     try:
@@ -90,27 +97,71 @@ def _passes(value, mn, mx) -> bool:
     return True
 
 
-# ── Step 1: Load EOD metrics snapshot ────────────────────────────────
+# ── Step 1: Load EOD metrics snapshot ───────────────────────────────────────
 
 def _load_eod_metrics(conn) -> Dict[str, dict]:
-    """Latest v8_metrics row per symbol — frozen slow metrics + segment from gvm_scores."""
+    """
+    Frozen slow metrics per symbol, sourced from LAST-GOOD values (not today's
+    possibly-empty row):
+      - gvm_score + segment  ← latest gvm_scores (authoritative daily source)
+      - rsi_month, rsi_weekly, sector_week, sector_month
+            ← most recent v8_metrics row PER SYMBOL where each is non-null
+              (DISTINCT ON carries yesterday's EOD freeze forward intraday).
+
+    Rationale: the 5-min writer must never read frozen metrics from today's own
+    half-built row (circular NULL). It pulls the last computed EOD value forward
+    until the 15:45 EOD engine refreshes them. gvm/rsi/sector are EOD by design
+    and do not change intraday.
+    """
+    # gvm_score + segment from authoritative gvm_scores (latest score_date)
+    gvm_map: Dict[str, dict] = {}
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT
-                m.symbol,
-                m.gvm_score, m.rsi_month, m.rsi_weekly,
-                m.sector_week, m.sector_month,
-                m.day_change AS eod_day_change,
-                g.segment
-            FROM v8_metrics m
-            LEFT JOIN gvm_scores g ON g.symbol = m.symbol
-            WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+            SELECT symbol, gvm_score, segment
+            FROM gvm_scores
+            WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        """)
+        for sym, gvm, seg in cur.fetchall():
+            gvm_map[sym] = {"gvm_score": _safe_float(gvm), "segment": seg}
+
+    # Last-good frozen metrics per symbol (latest non-null row, any date)
+    frozen_map: Dict[str, dict] = {}
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT ON (symbol)
+                symbol, rsi_month, rsi_weekly, sector_week, sector_month,
+                day_change AS eod_day_change
+            FROM v8_metrics
+            WHERE rsi_month   IS NOT NULL
+               OR rsi_weekly  IS NOT NULL
+               OR sector_week IS NOT NULL
+               OR sector_month IS NOT NULL
+            ORDER BY symbol, score_date DESC
         """)
         cols = [d[0] for d in cur.description]
-        return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            frozen_map[d["symbol"]] = d
+
+    # Merge: every symbol that has either a gvm row or a frozen row
+    out: Dict[str, dict] = {}
+    for sym in set(gvm_map) | set(frozen_map):
+        g = gvm_map.get(sym, {})
+        f = frozen_map.get(sym, {})
+        out[sym] = {
+            "symbol":        sym,
+            "gvm_score":     g.get("gvm_score"),
+            "segment":       g.get("segment"),
+            "rsi_month":     _safe_float(f.get("rsi_month")),
+            "rsi_weekly":    _safe_float(f.get("rsi_weekly")),
+            "sector_week":   _safe_float(f.get("sector_week")),
+            "sector_month":  _safe_float(f.get("sector_month")),
+            "eod_day_change": _safe_float(f.get("eod_day_change")),
+        }
+    return out
 
 
-# ── Step 2: Load EOD history per symbol (bulk) ───────────────────────
+# ── Step 2: Load EOD history per symbol (bulk) ────────────────────────────────
 
 def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
     """
@@ -155,7 +206,7 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
     return history
 
 
-# ── Step 3: Load today's intraday bars (bulk) ─────────────────────────
+# ── Step 3: Load today's intraday bars (bulk) ─────────────────────────────────
 
 def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
     """Latest intraday close + today's H/L/open/vol per symbol."""
@@ -191,7 +242,7 @@ def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
     return bars
 
 
-# ── Step 4: Load CMP ─────────────────────────────────────────────────
+# ── Step 4: Load CMP ──────────────────────────────────────────────────────────
 
 def _load_cmp(conn) -> Dict[str, float]:
     with conn.cursor() as cur:
@@ -199,7 +250,7 @@ def _load_cmp(conn) -> Dict[str, float]:
         return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
 
 
-# ── Step 5: Compute 19 live metrics ──────────────────────────────────
+# ── Step 5: Compute 19 live metrics ─────────────────────────────────────────
 
 def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
                            eod: dict) -> dict:
@@ -293,7 +344,7 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     return out
 
 
-# ── Step 6: Sector day pass ───────────────────────────────────────────
+# ── Step 6: Sector day pass ───────────────────────────────────────────────────
 
 def _add_sector_day(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
     """sector_day = avg day_change of all peers in same segment (live)."""
@@ -310,7 +361,7 @@ def _add_sector_day(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
         m["sector_day"] = seg_avg.get(seg)
 
 
-# ── Step 7: Upsert v8_metrics ─────────────────────────────────────────
+# ── Step 7: Upsert v8_metrics ─────────────────────────────────────────────────
 
 def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
     with conn.cursor() as cur:
@@ -362,7 +413,7 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
     conn.commit()
 
 
-# ── Step 8: Write v8_qualified + funnel ──────────────────────────────
+# ── Step 8: Write v8_qualified + funnel ───────────────────────────────────────
 
 def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     from v8_endpoints import FILTER_CONFIG
@@ -439,7 +490,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
 
-# ── Main entry point ──────────────────────────────────────────────────
+# ── Main entry point ──────────────────────────────────────────────────────────
 
 def run_live_signal_writer(conn) -> dict:
     """
