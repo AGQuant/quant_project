@@ -40,6 +40,7 @@ from v8_replay_endpoints import router as v8_replay_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
+from anthropic_endpoints import router as anthropic_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -117,6 +118,7 @@ app.include_router(v10_router)
 app.include_router(pcr_router)
 app.include_router(v8_replay_router)
 app.include_router(mcp_router)
+app.include_router(anthropic_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)

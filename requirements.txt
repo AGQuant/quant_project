@@ -21,3 +21,4 @@ numpy
 mcp
 httpx
 fyers-apiv3
+anthropic>=0.28.0
