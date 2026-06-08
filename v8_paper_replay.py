@@ -49,7 +49,14 @@ DAY_END        = time(15, 30)
 # ── trading-day discovery ────────────────────────────────────────────────────
 
 def _trading_days(conn, start: date, end: date) -> List[date]:
-    """Distinct dates in intraday_prices within [start, end], ascending."""
+    """
+    Distinct dates in intraday_prices within [start, end] that are ALSO valid NSE
+    trading days, ascending. Gating through is_trading_day excludes weekends and
+    holidays — intraday_prices can contain stray non-trading-day bars (feed
+    artifacts / global-symbol bleed) which must NOT be replayed (08-Jun-2026 fix:
+    Saturday 06-Jun had 211-symbol bars and contaminated the first replay run).
+    """
+    from nse_holidays import is_trading_day
     with conn.cursor() as cur:
         cur.execute("""
             SELECT DISTINCT ts::date
@@ -57,7 +64,7 @@ def _trading_days(conn, start: date, end: date) -> List[date]:
             WHERE ts::date BETWEEN %s AND %s
             ORDER BY 1
         """, (start, end))
-        return [r[0] for r in cur.fetchall()]
+        return [r[0] for r in cur.fetchall() if is_trading_day(r[0])]
 
 
 # ── wipe ─────────────────────────────────────────────────────────────────────
