@@ -117,6 +117,9 @@ CREATE INDEX IF NOT EXISTS idx_futures_basis_symbol_ts ON futures_basis(symbol, 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('fyers_feed')
 
+# ── TEMP DEBUG: one-shot OI key capture (remove after diagnosing) ──
+_DBG_SEEN = {'fut': False, 'opt': False}
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
@@ -689,9 +692,15 @@ def run(auth_code=None):
             if fsym in equity_set:
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
             elif fsym in futures_set:
+                if not _DBG_SEEN['fut']:
+                    log.info(f"DBG_FUT_KEYS {fsym} keys={sorted(msg.keys())} full={msg}")
+                    _DBG_SEEN['fut'] = True
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol),
                             source='fyers_fut', oi=msg.get('oi') or msg.get('open_int'))
             else:
+                if not _DBG_SEEN['opt']:
+                    log.info(f"DBG_OPT_KEYS {fsym} keys={sorted(msg.keys())} full={msg}")
+                    _DBG_SEEN['opt'] = True
                 opt_store.on_tick(fsym, float(ltp),
                                   oi=msg.get('oi') or msg.get('open_int'),
                                   vol=float(vol),
