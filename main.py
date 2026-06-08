@@ -36,6 +36,7 @@ from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from pcr_endpoints import router as pcr_router
+from v8_replay_endpoints import router as v8_replay_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
@@ -50,7 +51,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.24
+# Scorr / Project Quant — main.py v2.9.25
+# v2.9.25: V8 paper 5-min stepped REPLAY wired — v8_replay_endpoints router.
+#   POST /api/v8/replay/run (wipe + replay since start date, true 5-min walk),
+#   GET /api/v8/replay/summary. Files: v8_paper_replay.py, v8_replay_endpoints.py.
+#   Isolated; reuses live paper entry/exit logic with point-in-time bar reads.
 # v2.9.24: pcr_intraday wired — 5-min forward-capture PCR rollup
 #   (ATM±5 + total), DB-side self-healing from option_chain.
 #   Files: pcr_intraday.py, pcr_endpoints.py. Scheduler runs
@@ -76,7 +81,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.8.0: COMPUTE-ON-WRITE ADR + PCR
 # ============================================================
 
-VERSION = "2.9.24"
+VERSION = "2.9.25"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -110,6 +115,7 @@ app.include_router(diagnosis_router)
 app.include_router(v9_router)
 app.include_router(v10_router)
 app.include_router(pcr_router)
+app.include_router(v8_replay_router)
 app.include_router(mcp_router)
 
 def get_conn():
@@ -231,7 +237,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.24)")
+        log.info("Tables ready (v2.9.25)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
