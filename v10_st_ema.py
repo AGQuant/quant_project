@@ -1,11 +1,11 @@
 """
 V10 ST+EMA — NIFTY/BANKNIFTY directional intraday paper engine (Scorr module)
 =============================================================================
-ISOLATED from V8 / paper engine. Reads live 1m WS feed + option_chain; does NOT
+ISOLATED from V8 / paper engine. Reads live 5m feed from intraday_prices; does NOT
 modify them. Paper + advisory only.
 
 PIPELINE (every 5 min, market hours, via scheduler tick):
-  1m WS feed -> resample CLOSED 1m -> append closed 5m bar:
+  5m bars from intraday_prices (source=fyers_eq, timeframe=5m) -> append to:
       NIFTY50   -> nifty_5m_test_data
       BANKNIFTY -> banknifty_5m_test_data
   -> signal on last CLOSED 10m bar (+30m gate)
@@ -23,6 +23,9 @@ PARAMS: ST 150/3 (10m) + EMA 3/10 gate (30m), SL 100 / Target 200 (close-based).
 
 Option data: option_chain table (NIFTY+BANKNIFTY index options only, ~3-4d rolling,
   monthly expiry). ATM = strike nearest to underlying at signal time.
+
+09-Jun-2026: switched from 1m aggregation to direct 5m read (intraday_prices,
+  source=fyers_eq, timeframe=5m). Scorr is a 5-min system per spec id=167.
 """
 import os
 from datetime import datetime, timedelta, timezone, date
@@ -89,21 +92,24 @@ def _resample(df, rule):
             .dropna().reset_index())
 
 
-# ---------- 1m -> 5m appender ----------
+# ---------- 5m appender (reads intraday_prices directly, no aggregation) ----------
 def _append_one(cur, feed_symbol, table):
     df = pd.read_sql(
         "SELECT ts, open, high, low, close FROM intraday_prices "
-        "WHERE symbol=%s AND source='fyers' AND timeframe='1m' "
+        "WHERE symbol=%s AND source='fyers_eq' AND timeframe='5m' "
         "AND ts >= NOW() - INTERVAL '2 days' ORDER BY ts",
         cur.connection, params=(feed_symbol,))
     if df.empty:
-        return {"feed": feed_symbol, "status": "no_1m_data", "appended": 0}
+        return {"feed": feed_symbol, "status": "no_5m_data", "appended": 0}
     df["ts"] = pd.to_datetime(df["ts"])
-    g5 = _resample(df, "5min")
+    # strip tz if present
+    if getattr(df["ts"].dt, "tz", None) is not None:
+        df["ts"] = df["ts"].dt.tz_localize(None)
+    # only use bars that are fully closed (bar_ts + 5min <= now)
     now = pd.Timestamp(datetime.now(IST).replace(tzinfo=None))
-    g5 = g5[g5["ts"] + pd.Timedelta(minutes=5) <= now]
+    df = df[df["ts"] + pd.Timedelta(minutes=5) <= now]
     rows = [(r.ts.to_pydatetime(), float(r.open), float(r.high), float(r.low), float(r.close), 0)
-            for r in g5.itertuples()]
+            for r in df.itertuples()]
     if rows:
         cur.executemany(
             f"INSERT INTO {table} (ts,open,high,low,close,volume) VALUES (%s,%s,%s,%s,%s,%s) "
@@ -234,12 +240,6 @@ def _paper_step(cur, feed_symbol, table, lot, oc):
     cur.execute("SELECT id, side, leg, entry_price, stop, target, opt_strike, opt_type, opt_expiry "
                 "FROM v10_positions WHERE symbol=%s AND status='OPEN'", (feed_symbol,))
     legs = cur.fetchall()
-
-    # decide exit: SL/target on underlying close, or opposite-flip
-    def _exit_reason(side):
-        if side == "BUY":
-            if px <= (px*0+ (entry_fut - SL_PTS)) : pass
-        return None
 
     # Determine if we should close (based on FUT leg semantics; both legs close together)
     fut = next((x for x in legs if x[2] == "FUT"), None)
