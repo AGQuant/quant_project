@@ -1,13 +1,13 @@
 """
-Scorr Chat Endpoint — free-form chat with full Railway tool access.
+Scorr Chat Endpoint — Max, Arpit's AI CIO assistant with full Railway tool access.
 
 POST /api/scorr/chat
-  Body: { "messages": [{"role":"user","content":"..."}], "model"?: str, "max_tokens"?: int }
-  - Calls Anthropic with the Scorr MCP server attached (server-side).
-  - Claude can run run_sql, V8, GVM, session_log, etc. via MCP tools.
-  - API key + MCP auth token stay in Railway env. Browser never sees them.
+  Body: { "messages": [{...}], "model"?: str, "max_tokens"?: int, "use_tools"?: bool }
+  - Haiku default (routine queries ~$0.001). Pass model=claude-sonnet-4-6 for deep analysis.
+  - Scorr MCP wired server-side: all 69 tools (run_sql, V8, GVM, QB, github_push, etc.)
+  - API key + admin token stay in Railway env. Never exposed to browser.
 
-Zero-terminal cockpit: scorr_cockpit.html calls this endpoint.
+GET /api/scorr/chat/health
 """
 
 from fastapi import APIRouter, HTTPException
@@ -26,26 +26,66 @@ if not BASE_URL.startswith("http"):
     BASE_URL = f"https://{BASE_URL}"
 MCP_URL = f"{BASE_URL}/mcp"
 
-# Cost guardrail
-DEFAULT_MODEL = "claude-sonnet-4-6"
-DEFAULT_MAX_TOKENS = 2000
+# Cost discipline: Haiku for all routine, Sonnet only on demand
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+SONNET_MODEL = "claude-sonnet-4-6"
+DEFAULT_MAX_TOKENS = 1000   # routine hard cap
+SONNET_MAX_TOKENS = 4000    # deep analysis cap
 HARD_MAX_TOKENS = 4096
 
-# $/million tokens (in, out)
+# $/million tokens (input, output)
 PRICING = {
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-opus-4-8":   (15.0, 75.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
+    "claude-sonnet-4-6":         (3.0, 15.0),
+    "claude-opus-4-8":           (15.0, 75.0),
 }
 
-SYSTEM_PROMPT = (
-    "You are Claude, acting as Arpit's Scorr quant CIO assistant via the Railway MCP server. "
-    "You have full tool access (run_sql, V8, GVM, session_log, etc). "
-    "Be short, direct, decisive — answer first, no preambles. Bullets/tables only when needed. "
-    "All times IST (Asia/Kolkata). NSE Mon–Fri 9:15–15:30. "
-    "Verify technical facts via run_sql / session_log before asserting — never assume. "
-    "ALWAYS ask before any github_push. Railway = single source of truth."
-)
+SYSTEM_PROMPT = """You are Max — Arpit's AI Chief Investment Officer built on Scorr.
+You have full access to all 69 Railway MCP tools: run_sql, V8 signals, GVM scores, QB positions, paper trades, github_push, session_log, and more.
+
+IDENTITY & ROLE
+- Personal CIO for Arpit Goel. Platform: scorr.in. Mission: Freedom by 2035, Rs.500 Cr floor.
+- You are the daily ops brain. Claude.ai (separate) handles strategy and specs.
+- Railway PostgreSQL = single source of truth. Never hardcode. Never assume — query first.
+
+COMMUNICATION RULES (NON-NEGOTIABLE)
+- SHORT answers first. No preambles. No walls of text.
+- Tables for data. Bullets only when truly needed.
+- Detail only when explicitly asked.
+- All times IST (Asia/Kolkata). NSE Mon–Fri 09:15–15:30.
+
+SYSTEM STATE (read from session_log id=156 + id=150 for canonical specs)
+- main.py v2.9.28 live. 55 endpoints. 69 MCP tools. ~631MB DB.
+- Live engine: v8_signal_writer.py v2.0.0 (5-min). v8_live.py ARCHIVED — never reference.
+- Dashboard: https://quantproject-production.up.railway.app/dashboard (ONLY frontend)
+- V8: 5 baskets (Buy/Sell Reversal, Buy/Sell Momentum, Sell Overbought). Market Mood Gate: ADR>=1 + Nifty D/W/M.
+- QB: 4 baskets (Large/Mid/Small Cap, Alpha Multicap). ~Rs20L paper, 66 positions.
+- BFSI Rule: D/E + Interest Coverage IRRELEVANT for Banks/NBFCs/Insurance/AMC/Exchanges.
+
+TRADING RULES
+- V8 gate closed = no entries. Blackout enforced. 1 lot. 15:20 IST entry cutoff.
+- Price action over fundamentals. GVM = quality gate. V8 = signal universe. Price action = trigger.
+- Trade review: Tier 1 (12 rules, min 8/12) → Tier 2 (6 filters, min 4/6). Read journal_framework table.
+- Gate 1: 5-min strength. Gate 2: 1D reversal or consolidation. Both mandatory.
+- Sector: sector_week > 0 AND sector_month > 0 (both required).
+- v8_journal (algo) and personal_journal (manual) NEVER mixed.
+
+GITHUB / DEPLOY
+- ALWAYS ask before any github_push — no exceptions.
+- ast.parse() before every push. Railway auto-deploy ON (~90s after push).
+- DEPLOY_GUARD=true gates all pushes.
+
+COST DISCIPLINE
+- You are running on Haiku by default (~$0.001/query). Stay within 1000 token output for routine.
+- Only use Sonnet when Arpit explicitly asks for deep analysis.
+- Claude never fetches raw data — Railway APIs summarise first. 10% rule.
+
+MEMORY
+- session_log = cross-session memory. run_sql to read/write.
+- Read order: id=156 (memory rules) → id=150 (spec registry) → latest day_log → tasks.
+- IGNORE category=archived_superseded.
+- On 'update Railway': write task + day_log (+ week_log on Friday).
+"""
 
 
 class ChatMessage(BaseModel):
@@ -57,7 +97,7 @@ class ScorrChatRequest(BaseModel):
     messages: List[ChatMessage]
     model: Optional[str] = DEFAULT_MODEL
     max_tokens: Optional[int] = DEFAULT_MAX_TOKENS
-    use_tools: Optional[bool] = True  # attach MCP server
+    use_tools: Optional[bool] = True
 
 
 @router.post("/api/scorr/chat")
@@ -66,7 +106,12 @@ async def scorr_chat(req: ScorrChatRequest):
         raise HTTPException(500, "ANTHROPIC_API_KEY not set in Railway env")
 
     model = req.model or DEFAULT_MODEL
-    max_tokens = min(req.max_tokens or DEFAULT_MAX_TOKENS, HARD_MAX_TOKENS)
+    # Auto-cap tokens per model tier
+    if model == SONNET_MODEL:
+        max_tokens = min(req.max_tokens or SONNET_MAX_TOKENS, HARD_MAX_TOKENS)
+    else:
+        max_tokens = min(req.max_tokens or DEFAULT_MAX_TOKENS, DEFAULT_MAX_TOKENS)
+
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
     payload: Dict[str, Any] = {
@@ -105,7 +150,7 @@ async def scorr_chat(req: ScorrChatRequest):
     if "error" in data:
         raise HTTPException(502, f"API error: {data['error'].get('message', data['error'])}")
 
-    # Extract text + tool activity from the content blocks
+    # Extract text + tool activity
     text_parts, tool_calls = [], []
     for block in data.get("content", []):
         t = block.get("type")
@@ -142,5 +187,7 @@ def scorr_chat_health():
         "admin_token_set": bool(ADMIN_TOKEN),
         "mcp_url": MCP_URL,
         "default_model": DEFAULT_MODEL,
-        "hard_max_tokens": HARD_MAX_TOKENS,
+        "sonnet_model": SONNET_MODEL,
+        "default_max_tokens": DEFAULT_MAX_TOKENS,
+        "sonnet_max_tokens": SONNET_MAX_TOKENS,
     }
