@@ -23,7 +23,7 @@
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
 
   /* Layout */
-  .app { display: flex; flex-direction: column; height: 100vh; max-width: 960px; margin: 0 auto; }
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 1200px; margin: 0 auto; }
 
   /* Header */
   .header {
@@ -85,6 +85,16 @@
   .msg-meta { font-size: 10px; color: var(--muted); margin-top: 4px; padding: 0 2px; }
   .msg.user .msg-meta { text-align: right; }
 
+  /* Attachments display */
+  .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .attachment-badge {
+    padding: 3px 10px; border-radius: 3px; background: var(--surface2); border: 1px solid var(--border);
+    font-size: 10px; color: var(--amber); display: flex; align-items: center; gap: 4px;
+  }
+  .attachment-badge .close-btn {
+    cursor: pointer; color: var(--red); font-weight: bold;
+  }
+
   /* Tool calls badge */
   .tools-used {
     display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
@@ -114,11 +124,12 @@
     display: flex; justify-content: space-between; font-size: 10px; color: var(--muted);
   }
 
-  /* Input */
+  /* Input area */
   .input-area {
     padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface);
-    display: flex; gap: 8px; align-items: flex-end;
+    display: flex; gap: 8px; flex-direction: column;
   }
+  .input-controls { display: flex; gap: 8px; align-items: flex-end; }
   .input-wrap { flex: 1; position: relative; }
   #userInput {
     width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
@@ -128,13 +139,25 @@
   }
   #userInput:focus { border-color: var(--cyan); }
   #userInput::placeholder { color: var(--muted); }
-  .send-btn {
+  .btn {
     padding: 9px 16px; background: var(--blue); color: #fff; border: none; border-radius: 4px;
     cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 600;
     transition: opacity 0.15s; white-space: nowrap;
   }
-  .send-btn:hover { opacity: 0.85; }
-  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.secondary { background: var(--surface2); color: var(--cyan); border: 1px solid var(--border); }
+
+  /* File input */
+  #fileInput { display: none; }
+  .file-list {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; font-size: 11px;
+  }
+  .file-item {
+    padding: 4px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 3px;
+    display: flex; align-items: center; gap: 6px; color: var(--text);
+  }
+  .file-item .remove { cursor: pointer; color: var(--red); font-weight: bold; }
 
   /* Welcome */
   .welcome {
@@ -176,7 +199,7 @@
       <div class="welcome-logo">MAX</div>
       <div class="welcome-sub">Your AI Chief Investment Officer · Scorr</div>
       <div style="margin-top:12px; font-size:11px; color: var(--muted); max-width:400px; line-height:1.8;">
-        Full access to Railway DB · V8 signals · QB positions · GVM scores · GitHub push
+        Full access to Railway DB · V8 signals · QB positions · GVM scores · GitHub push · File upload · URL fetch
       </div>
     </div>
   </div>
@@ -199,23 +222,29 @@
     <span id="tokenCount">Tokens: 0 in / 0 out</span>
   </div>
 
-  <!-- Input -->
+  <!-- Input area -->
   <div class="input-area">
-    <div class="input-wrap">
-      <textarea id="userInput" placeholder="Ask Max anything — V8 signals, positions, trades, deploy..." rows="1"></textarea>
+    <div class="file-list" id="fileList"></div>
+    <div class="input-controls">
+      <input type="file" id="fileInput" multiple accept=".pdf,.csv,.json,.txt,.xlsx,.png,.jpg,.jpeg,.gif" />
+      <button class="btn secondary" onclick="document.getElementById('fileInput').click();" title="Attach file (PDF, CSV, JSON, TXT, XLSX, PNG, JPG, GIF)">📎 ATTACH</button>
+      <div class="input-wrap">
+        <textarea id="userInput" placeholder="Ask Max anything — paste URLs, upload files, analyze trades, deploy... Enter to send, Shift+Enter for newline" rows="1"></textarea>
+      </div>
+      <button class="btn" id="sendBtn" onclick="sendMessage()">SEND</button>
     </div>
-    <button class="send-btn" id="sendBtn" onclick="sendMessage()">SEND</button>
   </div>
 
 </div>
 
 <script>
-const API_BASE = '';  // same origin
+const API_BASE = '';
 let currentModel = 'claude-haiku-4-5-20251001';
 let conversationHistory = [];
 let totalCost = 0;
 let totalIn = 0;
 let totalOut = 0;
+let attachedFiles = [];
 
 function setModel(m) {
   if (m === 'haiku') {
@@ -242,7 +271,6 @@ function escapeHtml(text) {
 }
 
 function formatReply(text) {
-  // Convert markdown tables
   const lines = text.split('\n');
   let html = '';
   let inTable = false;
@@ -269,7 +297,7 @@ function renderTable(lines) {
   if (lines.length < 2) return lines.map(l => escapeHtml(l)).join('\n');
   let html = '<table>';
   lines.forEach((line, i) => {
-    if (i === 1 && /^[\s|:-]+$/.test(line)) return; // separator row
+    if (i === 1 && /^[\s|:-]+$/.test(line)) return;
     const cells = line.split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
     const tag = i === 0 ? 'th' : 'td';
     html += '<tr>' + cells.map(c => `<${tag}>${escapeHtml(c.trim())}</${tag}>`).join('') + '</tr>';
@@ -294,6 +322,12 @@ function addMessage(role, content, meta = {}) {
       `<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>`;
   }
 
+  let filesHtml = '';
+  if (meta.files && meta.files.length > 0) {
+    filesHtml = `<div class="attachments">${meta.files.map(f =>
+      `<span class="attachment-badge">📄 ${f}</span>`).join('')}</div>`;
+  }
+
   const metaText = meta.model
     ? `${meta.model.includes('haiku') ? 'haiku' : 'sonnet'} · ${meta.duration_ms}ms · $${meta.cost}`
     : '';
@@ -302,6 +336,7 @@ function addMessage(role, content, meta = {}) {
     <div class="msg-avatar">${avatar}</div>
     <div class="msg-body">
       <div class="msg-bubble">${bubbleContent}</div>
+      ${filesHtml}
       ${toolsHtml}
       ${metaText ? `<div class="msg-meta">${metaText}</div>` : ''}
     </div>`;
@@ -310,19 +345,100 @@ function addMessage(role, content, meta = {}) {
   msgs.scrollTop = msgs.scrollHeight;
 }
 
+// File handling
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  attachedFiles = [];
+  const fileList = document.getElementById('fileList');
+  fileList.innerHTML = '';
+  
+  Array.from(e.target.files).forEach(file => {
+    attachedFiles.push(file);
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    item.innerHTML = `📄 ${file.name} <span class="remove" onclick="removeFile('${file.name}')">✕</span>`;
+    fileList.appendChild(item);
+  });
+});
+
+function removeFile(name) {
+  attachedFiles = attachedFiles.filter(f => f.name !== name);
+  document.getElementById('fileInput').value = '';
+  const fileList = document.getElementById('fileList');
+  fileList.innerHTML = '';
+  attachedFiles.forEach(file => {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    item.innerHTML = `📄 ${file.name} <span class="remove" onclick="removeFile('${file.name}')">✕</span>`;
+    fileList.appendChild(item);
+  });
+}
+
 async function sendMessage() {
   const input = document.getElementById('userInput');
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && attachedFiles.length === 0) return;
+
+  let userMessage = text;
+  let fileNames = [];
+
+  // Build content array for files
+  let contentParts = [];
+  if (text) {
+    contentParts.push({ type: 'text', text: text });
+  }
+
+  // Add files to content
+  for (const file of attachedFiles) {
+    fileNames.push(file.name);
+    if (file.type.startsWith('image/')) {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = () => rej(new Error('File read failed'));
+        r.readAsDataURL(file);
+      });
+      contentParts.push({
+        type: 'image',
+        source: { type: 'base64', media_type: file.type, data: base64 }
+      });
+    } else if (file.type === 'application/pdf') {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = () => rej(new Error('File read failed'));
+        r.readAsDataURL(file);
+      });
+      contentParts.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: base64 }
+      });
+    } else {
+      const text = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(new Error('File read failed'));
+        r.readAsText(file);
+      });
+      contentParts.push({ type: 'text', text: `[File: ${file.name}]\n${text}` });
+    }
+  }
 
   input.value = '';
   input.style.height = 'auto';
   document.getElementById('sendBtn').disabled = true;
 
-  addMessage('user', text);
-  conversationHistory.push({ role: 'user', content: text });
+  // Display message with files
+  addMessage('user', userMessage, { files: fileNames });
+  conversationHistory.push({
+    role: 'user',
+    content: contentParts.length > 1 ? contentParts : userMessage
+  });
 
-  // Show typing
+  // Clear files
+  attachedFiles = [];
+  document.getElementById('fileInput').value = '';
+  document.getElementById('fileList').innerHTML = '';
+
   document.getElementById('typingWrap').style.display = 'block';
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
@@ -355,7 +471,6 @@ async function sendMessage() {
       toolCalls: data.tool_calls || [],
     });
 
-    // Update cost bar
     totalCost += data.usage?.cost_usd || 0;
     totalIn += data.usage?.input_tokens || 0;
     totalOut += data.usage?.output_tokens || 0;
