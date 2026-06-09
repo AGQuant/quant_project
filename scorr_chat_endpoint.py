@@ -6,6 +6,8 @@ POST /api/scorr/chat
   - Haiku default (routine queries ~$0.001). Pass model=claude-sonnet-4-6 for deep analysis.
   - Scorr MCP wired server-side: all 69 tools (run_sql, V8, GVM, QB, github_push, etc.)
   - API key + admin token stay in Railway env. Never exposed to browser.
+  - File upload: images (png/jpg/gif), PDFs, text files (csv/json/txt/xlsx)
+  - URL fetch: Max can read any HTTP(S) URL pasted in chat
 
 GET /api/scorr/chat/health
 """
@@ -16,6 +18,7 @@ from typing import Optional, List, Dict, Any
 import os
 import time
 import httpx
+import re
 
 router = APIRouter()
 
@@ -48,16 +51,22 @@ IDENTITY & ROLE
 - You are the daily ops brain. Claude.ai (separate) handles strategy and specs.
 - Railway PostgreSQL = single source of truth. Never hardcode. Never assume — query first.
 
+CAPABILITIES (NEW)
+- FILE UPLOAD: Analyze images (PNG/JPG/GIF), PDFs, text files (CSV/JSON/TXT/XLSX). Extract data, answer questions about contents.
+- URL FETCH: Read any HTTP(S) URL pasted in chat. Summarize, analyze, extract key data.
+- TOKEN DISCIPLINE: Default = Haiku (routine, ~$0.001/query). Sonnet only on "deep dive" / "full analysis" / "unlimited" permission.
+
 COMMUNICATION RULES (NON-NEGOTIABLE)
 - SHORT answers first. No preambles. No walls of text.
 - Tables for data. Bullets only when truly needed.
 - Detail only when explicitly asked.
 - All times IST (Asia/Kolkata). NSE Mon–Fri 09:15–15:30.
 
-SYSTEM STATE (read from session_log id=156 + id=150 for canonical specs)
+SYSTEM STATE
 - main.py v2.9.28 live. 55 endpoints. 69 MCP tools. ~631MB DB.
 - Live engine: v8_signal_writer.py v2.0.0 (5-min). v8_live.py ARCHIVED — never reference.
 - Dashboard: https://quantproject-production.up.railway.app/dashboard (ONLY frontend)
+- Max CIO: https://quantproject-production.up.railway.app/cio (this interface)
 - V8: 5 baskets (Buy/Sell Reversal, Buy/Sell Momentum, Sell Overbought). Market Mood Gate: ADR>=1 + Nifty D/W/M.
 - QB: 4 baskets (Large/Mid/Small Cap, Alpha Multicap). ~Rs20L paper, 66 positions.
 - BFSI Rule: D/E + Interest Coverage IRRELEVANT for Banks/NBFCs/Insurance/AMC/Exchanges.
@@ -75,22 +84,29 @@ GITHUB / DEPLOY
 - ast.parse() before every push. Railway auto-deploy ON (~90s after push).
 - DEPLOY_GUARD=true gates all pushes.
 
-COST DISCIPLINE
-- You are running on Haiku by default (~$0.001/query). Stay within 1000 token output for routine.
-- Only use Sonnet when Arpit explicitly asks for deep analysis.
-- Claude never fetches raw data — Railway APIs summarise first. 10% rule.
+COST DISCIPLINE (CRITICAL)
+- DEFAULT: Haiku only. Zero analysis overhead.
+- ANALYSIS (10% cap): Only when explicitly asked ("analyze", "review", "think about").
+- DEEP (100% cap): Only on permission ("deep dive" / "full analysis" / "unlimited"). Resets to 10% after.
+- Never fetch raw data — Railway APIs do that. Claude = interpretation only.
 
 MEMORY
 - session_log = cross-session memory. run_sql to read/write.
 - Read order: id=156 (memory rules) → id=150 (spec registry) → latest day_log → tasks.
 - IGNORE category=archived_superseded.
 - On 'update Railway': write task + day_log (+ week_log on Friday).
+
+FILE HANDLING
+- Images: analyze for charts, screenshots, strategy visuals
+- PDFs: extract tables, text, key data
+- CSV/JSON: parse, query, compare with DB data
+- Always ask user for permission before running expensive analysis on large files
 """
 
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Any  # Can be str or list of content blocks
 
 
 class ScorrChatRequest(BaseModel):
@@ -98,6 +114,18 @@ class ScorrChatRequest(BaseModel):
     model: Optional[str] = DEFAULT_MODEL
     max_tokens: Optional[int] = DEFAULT_MAX_TOKENS
     use_tools: Optional[bool] = True
+
+
+async def fetch_url(url: str) -> str:
+    """Fetch URL content for analysis."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(url, headers={"User-Agent": "Scorr/1.0"})
+            r.raise_for_status()
+            # Return text content (HTML will be handled by Claude's markdown parsing)
+            return r.text[:10000]  # Cap at 10k chars to avoid huge payloads
+    except Exception as e:
+        return f"Error fetching URL: {str(e)}"
 
 
 @router.post("/api/scorr/chat")
@@ -112,7 +140,35 @@ async def scorr_chat(req: ScorrChatRequest):
     else:
         max_tokens = min(req.max_tokens or DEFAULT_MAX_TOKENS, DEFAULT_MAX_TOKENS)
 
-    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    # Build messages with URL detection
+    messages = []
+    for m in req.messages:
+        msg_dict = {"role": m.role}
+        
+        # If content is a string, detect and fetch URLs
+        if isinstance(m.content, str):
+            content_text = m.content
+            # Simple URL regex
+            url_pattern = r'https?://[^\s]+'
+            urls = re.findall(url_pattern, content_text)
+            
+            if urls and m.role == "user":
+                # Fetch URLs and append content
+                fetched_content = content_text
+                for url in urls:
+                    try:
+                        url_data = await fetch_url(url)
+                        fetched_content += f"\n\n[URL Content from {url}]:\n{url_data}"
+                    except Exception as e:
+                        fetched_content += f"\n\n[Failed to fetch {url}: {str(e)}]"
+                msg_dict["content"] = fetched_content
+            else:
+                msg_dict["content"] = content_text
+        else:
+            # Content is already a list (files, etc.)
+            msg_dict["content"] = m.content
+
+        messages.append(msg_dict)
 
     payload: Dict[str, Any] = {
         "model": model,
@@ -190,4 +246,5 @@ def scorr_chat_health():
         "sonnet_model": SONNET_MODEL,
         "default_max_tokens": DEFAULT_MAX_TOKENS,
         "sonnet_max_tokens": SONNET_MAX_TOKENS,
+        "features": ["file_upload", "url_fetch", "token_discipline"],
     }
