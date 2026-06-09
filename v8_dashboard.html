@@ -141,16 +141,12 @@
 </div>
 
 <script>
-/* ============================================================
-   CONFIG — same-origin when served from /dashboard on Railway.
-   Endpoints verified against main.py + v8_endpoints.py.
-   ============================================================ */
-const API_BASE = "";  // same-origin; served from Railway /dashboard
+const API_BASE = "";
 
 const EP = {
   mood:        "/api/v8/market_mood",
-  metricsAll:  "/api/v8/metrics/all",         // bare array, full metrics
-  qualified:   b => `/api/v8/qualified/${b}`, // path param, returns {stocks:[]}
+  metricsAll:  "/api/v8/metrics/all",
+  qualified:   b => `/api/v8/qualified/${b}`,
   sellOB:      "/api/v8/sell_overbought?limit=25",
   paper:       "/api/paper/status",
   funnelDetail: b => `/api/v8/funnel_detail/${b}`,
@@ -170,7 +166,6 @@ const ALL5 = [
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 
-/* ---- Tab definitions (10, matching the Google Sheet) ---- */
 const TABS = [
   "Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
   "Sell Momentum","Sell Overbought","In Position","Trade Log",
@@ -180,7 +175,6 @@ const TABS = [
 let AUTO=false, autoTimer=null;
 const cache={};
 
-/* ---------- fetch helpers ---------- */
 async function getJSON(path){
   const r = await fetch(API_BASE+path, {headers:{'Accept':'application/json'}});
   if(!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
@@ -193,6 +187,19 @@ function cls(x){ if(x===null||x===undefined||isNaN(x)) return ""; return Number(
 function inr(x){ if(x===null||x===undefined||isNaN(x)) return "—";
   return "₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0}); }
 function pnlCls(x){ return Number(x)>=0?"pos":"neg"; }
+function fmtTs(ts){
+  if(!ts) return "—";
+  try{
+    const d = new Date(ts);
+    // convert to IST
+    const ist = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
+    const dd = String(ist.getDate()).padStart(2,'0');
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getMonth()];
+    const hh = String(ist.getHours()).padStart(2,'0');
+    const mm = String(ist.getMinutes()).padStart(2,'0');
+    return `${dd} ${mo} ${hh}:${mm}`;
+  } catch(e){ return ts; }
+}
 
 /* ---------- IST clock ---------- */
 function tick(){
@@ -248,7 +255,6 @@ function renderMood(m){
     <div class="moodChecks">${checks}</div>`;
 }
 
-/* Master Dashboard: summary cards + open positions + top movers */
 function renderMaster(){
   const p=cache.paper, all=cache.metricsAll||[];
   const open=(p&&p.open_positions)||[], sum=(p&&p.summary)||{};
@@ -263,7 +269,7 @@ function renderMaster(){
     <div class="card"><div class="k">Win / Loss</div><div class="v">${sum.wins??'—'}/${sum.losses??'—'}</div></div>
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(sum.total_pnl||0)}">${inr(sum.total_pnl||0)}</div></div>
   </div>`;
-  const moverTbl=(title,rows,col)=>`<div class="ptitle">${title}</div>`+
+  const moverTbl=(title,rows)=>`<div class="ptitle">${title}</div>`+
     tbl(["Symbol","Day %","Month %","RSI(d)"],rows,x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
@@ -279,11 +285,12 @@ function renderMaster(){
 }
 
 function posTable(open){
-  return tbl(["Symbol","Side","Basket","Entry","CMP","Target","Stop","Qty","Unreal P&L"],
+  return tbl(["Symbol","Side","Basket","Entry Time","Entry","CMP","Target","Stop","Qty","Unreal P&L"],
     open, x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
       <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
       <td>${num(x.entry_price)}</td>
       <td>${num(x.cmp)}</td>
       <td>${num(x.target)}</td>
@@ -293,7 +300,6 @@ function posTable(open){
     </tr>`,"No open positions");
 }
 
-/* Basket funnel panel */
 function renderFunnel(b){
   const d=cache['q_'+b.id];
   if(!d) return '<div class="loading">…</div>';
@@ -338,11 +344,13 @@ function renderTradeLog(){
     <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(s.avg_ret||0)}">${sign(s.avg_ret)}%</div></div>
   </div>`;
   return head+`<div class="ptitle">Recent Closed Trades</div>`+
-    tbl(["Symbol","Side","Basket","Entry","Exit","Ret %","P&L","Result"],
+    tbl(["Symbol","Side","Basket","Entry Time","Exit Time","Entry","Exit","Ret %","P&L","Result"],
     t, x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
       <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
+      <td style="color:var(--mut)">${fmtTs(x.exit_ts)}</td>
       <td>${num(x.entry_price)}</td><td>${num(x.exit_price)}</td>
       <td class="${cls(x.return_pct)}">${sign(x.return_pct)}%</td>
       <td class="${pnlCls(x.pnl)}">${inr(x.pnl)}</td>
@@ -350,7 +358,6 @@ function renderTradeLog(){
     </tr>`,"No closed trades");
 }
 
-/* Raw Data — full universe, sortable */
 let rawSort={key:'day_change',dir:-1};
 function renderRaw(){
   const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
@@ -381,7 +388,6 @@ function renderRaw(){
 function rawResort(k){ rawSort.dir = rawSort.key===k? -rawSort.dir : -1; rawSort.key=k;
   document.getElementById('panel8').innerHTML=renderRaw(); }
 
-/* Filter Scan — quick movers/extremes screener */
 let scanMode='gainers';
 function renderScan(){
   const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
@@ -410,15 +416,12 @@ function renderScan(){
 }
 function scanSet(m){ scanMode=m; document.getElementById('panel9').innerHTML=renderScan(); }
 
-
-/* ---------- Filter Funnel tab (2 views, 5 baskets) ---------- */
 let ffBasket='buy_reversal';
 function ffSet(b){ ffBasket=b; loadFF(); }
 function preFreezeBanner(){
   const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
   const dow=ist.getDay(), mins=ist.getHours()*60+ist.getMinutes();
   const weekday = dow>=1 && dow<=5;
-  // EOD metrics (gvm, rsi_month, rsi_weekly, sector_week, sector_month) freeze at 15:45 IST
   if(weekday && mins < 945){
     return `<div class="err" style="color:var(--amber);border-color:var(--amber);margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) &amp; sector metrics are not yet computed today — they auto-fail, so survivor counts are understated and the funnel collapses early. Numbers fill in after the 15:45 EOD freeze.</div>`;
   }
@@ -433,7 +436,6 @@ async function loadFF(){
   try{ fd=await getJSON(EP.funnelDetail(ffBasket)); }catch(e){}
   try{ pc=await getJSON(EP.passCount(ffBasket)); }catch(e){}
   let html=`<div class="subnav">${nav}</div>`;
-  // View 1: sequential funnel, filters low->high survivors (kill order = restrictive first)
   if(fd && fd.stages){
     const stages=[...fd.stages].sort((a,b)=>a.survivors-b.survivors);
     html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
@@ -445,7 +447,6 @@ async function loadFF(){
       <td class="${s.killed>0?'neg':''}">${s.killed}</td>
       <td>${num(s.kill_pct,1)}%</td></tr>`,"No funnel data");
   } else { html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`; }
-  // View 2: per-stock pass count, high->low
   if(pc && pc.stocks){
     html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count · high → low <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     html+=tbl(["Symbol","Passed","of","GVM","Day %","Failed filters"],pc.stocks,x=>`<tr>
@@ -460,7 +461,6 @@ async function loadFF(){
   el.innerHTML=html;
 }
 
-/* ---------- master loader ---------- */
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
