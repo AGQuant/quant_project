@@ -54,7 +54,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.27
+# Scorr / Project Quant — main.py v2.9.28
+# v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
+#   Haiku default (routine queries ~$0.001). Sonnet on-demand for deep analysis.
+#   Full system prompt with trading rules + memory blueprint in scorr_chat_endpoint.py.
+#   CIO = independent brain with all 69 Railway MCP tools.
 # v2.9.27: Scorr CHAT endpoint wired — scorr_chat_endpoint router.
 #   POST /api/scorr/chat (free-form chat + MCP server attached server-side,
 #   full tool access, key stays in Railway env). GET /api/scorr/chat/health.
@@ -85,7 +89,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 #   178 raw pairs, 122 eligible stocks, 10 parameter combos.
 # ============================================================
 
-VERSION = "2.9.27"
+VERSION = "2.9.28"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -271,7 +275,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.26)")
+        log.info("Tables ready (v2.9.28)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -365,6 +369,11 @@ def root(): return {"service": "Scorr API", "version": VERSION, "status": "live"
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     with open("v8_dashboard.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/cio", response_class=HTMLResponse)
+def cio():
+    with open("scorr_cockpit.html", "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/health")
