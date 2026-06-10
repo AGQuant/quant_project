@@ -12,6 +12,7 @@ GET /api/scorr/chat/health
 """
 
 from fastapi import APIRouter, HTTPException
+from native_router import route_native
 from pydantic import BaseModel
 from typing import Optional, List, Any
 import os, time, httpx, re
@@ -28,19 +29,17 @@ MCP_URL = f"{BASE_URL}/mcp"
 # ── Model config (Sonnet default, Haiku DEPRECATED as default) ─────
 SONNET_MODEL       = "claude-sonnet-4-6"
 HAIKU_MODEL        = "claude-haiku-4-5-20251001"
-DEFAULT_MODEL      = SONNET_MODEL          # Sonnet is now default
-DEFAULT_MAX_TOKENS = 3000                  # ~$0.045 output at Sonnet rates
+DEFAULT_MODEL      = SONNET_MODEL
+DEFAULT_MAX_TOKENS = 3000
 HARD_MAX_TOKENS    = 4096
-BUDGET_CAP_DEFAULT = 0.05                  # $0.05 hard cap per query
+BUDGET_CAP_DEFAULT = 0.05
 
-# $/million tokens (input, output)
 PRICING = {
-    HAIKU_MODEL:          (1.0,  5.0),
-    SONNET_MODEL:         (3.0, 15.0),
-    "claude-opus-4-8":    (15.0, 75.0),
+    HAIKU_MODEL:       (1.0,  5.0),
+    SONNET_MODEL:      (3.0, 15.0),
+    "claude-opus-4-8": (15.0, 75.0),
 }
 
-# Output token ceiling from budget cap
 def tokens_from_budget(budget_usd: float, model: str) -> int:
     _, out_price = PRICING.get(model, (3.0, 15.0))
     return min(int(budget_usd / (out_price / 1_000_000)), HARD_MAX_TOKENS)
@@ -94,15 +93,14 @@ MEMORY
 
 class ChatMessage(BaseModel):
     role: str
-    content: Any  # str or list of content blocks
-
+    content: Any
 
 class ScorrChatRequest(BaseModel):
     messages:       List[ChatMessage]
     model:          Optional[str]   = DEFAULT_MODEL
     max_tokens:     Optional[int]   = DEFAULT_MAX_TOKENS
     use_tools:      Optional[bool]  = True
-    claude_on:      Optional[bool]  = True    # False = native path, no API call
+    claude_on:      Optional[bool]  = True
     budget_cap_usd: Optional[float] = BUDGET_CAP_DEFAULT
 
 
@@ -119,29 +117,30 @@ async def fetch_url(url: str) -> str:
 @router.post("/api/scorr/chat")
 async def scorr_chat(req: ScorrChatRequest):
 
-    # ── Native path: Claude OFF ────────────────────────────────────
+    # ── Native path: Claude OFF — real DB query, zero tokens ──────
     if not req.claude_on:
+        t0 = time.time()
+        last_msg = req.messages[-1].content if req.messages else ""
+        query_text = last_msg if isinstance(last_msg, str) else str(last_msg)
+        reply = await route_native(query_text)
         return {
-            "reply": "⚡ Native mode — Railway data only. Toggle Claude ON for interpretation.",
+            "reply": reply,
             "tool_calls": [],
             "model": None,
             "stop_reason": "native",
             "usage": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
-            "duration_ms": 0,
+            "duration_ms": round((time.time() - t0) * 1000, 1),
         }
 
     # ── Claude ON path ─────────────────────────────────────────────
     if not ANTHROPIC_API_KEY:
         raise HTTPException(500, "ANTHROPIC_API_KEY not set in Railway env")
 
-    model = req.model or DEFAULT_MODEL
-
-    # Enforce budget ceiling
+    model         = req.model or DEFAULT_MODEL
     budget_cap    = req.budget_cap_usd or BUDGET_CAP_DEFAULT
     token_ceiling = tokens_from_budget(budget_cap, model)
     max_tokens    = min(req.max_tokens or DEFAULT_MAX_TOKENS, token_ceiling, HARD_MAX_TOKENS)
 
-    # Build messages with URL detection
     messages = []
     for m in req.messages:
         msg_dict = {"role": m.role}
@@ -160,34 +159,23 @@ async def scorr_chat(req: ScorrChatRequest):
         messages.append(msg_dict)
 
     payload = {
-        "model":      model,
-        "max_tokens": max_tokens,
-        "system":     SYSTEM_PROMPT,
-        "messages":   messages,
+        "model": model, "max_tokens": max_tokens,
+        "system": SYSTEM_PROMPT, "messages": messages,
     }
-
     headers = {
-        "x-api-key":          ANTHROPIC_API_KEY,
-        "anthropic-version":  "2023-06-01",
-        "content-type":       "application/json",
-        "anthropic-beta":     "mcp-client-2025-04-04",
+        "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+        "content-type": "application/json", "anthropic-beta": "mcp-client-2025-04-04",
     }
-
     if req.use_tools:
         payload["mcp_servers"] = [{
-            "type":                "url",
-            "url":                 MCP_URL,
-            "name":                "scorr",
+            "type": "url", "url": MCP_URL, "name": "scorr",
             "authorization_token": ADMIN_TOKEN,
         }]
 
     start = time.time()
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers, json=payload,
-            )
+            r = await client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
             data = r.json()
     except Exception as e:
         raise HTTPException(502, f"Anthropic call failed: {e}")
@@ -214,11 +202,7 @@ async def scorr_chat(req: ScorrChatRequest):
         "tool_calls":  tool_calls,
         "model":       model,
         "stop_reason": data.get("stop_reason"),
-        "usage": {
-            "input_tokens":  in_tok,
-            "output_tokens": out_tok,
-            "cost_usd":      cost,
-        },
+        "usage":       {"input_tokens": in_tok, "output_tokens": out_tok, "cost_usd": cost},
         "duration_ms": round((time.time() - start) * 1000, 1),
     }
 
@@ -233,5 +217,5 @@ def scorr_chat_health():
         "default_model":         DEFAULT_MODEL,
         "budget_cap_usd":        BUDGET_CAP_DEFAULT,
         "max_tokens_default":    DEFAULT_MAX_TOKENS,
-        "features": ["file_upload", "url_fetch", "claude_toggle", "budget_cap", "localStorage_persistence"],
+        "features": ["file_upload", "url_fetch", "claude_toggle", "budget_cap", "native_router", "localStorage_persistence"],
     }
