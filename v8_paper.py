@@ -150,7 +150,7 @@ def qualified_set(conn) -> Dict[str, Dict]:
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-                   month_return, week_return, year_return, day_change,
+                   month_return, week_return, year_return, mom_2d,
                    week_index_52, range_3d, ma9_vs_ma21, vol_ratio
             FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics)
         """)
