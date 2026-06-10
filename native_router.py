@@ -30,7 +30,6 @@ def extract_company(text: str) -> str:
 
 
 def _query_sync(query: str) -> str:
-    """Synchronous DB query — runs in thread executor."""
     q = query.lower().strip()
 
     with psycopg.connect(DATABASE_URL) as conn:
@@ -38,7 +37,6 @@ def _query_sync(query: str) -> str:
 
             # 1. Market mood — LIVE ADR from intraday_prices
             if any(k in q for k in ["market mood", "mood", "adr", "gate", "slots"]):
-                # Live ADR from latest intraday bar
                 cur.execute("""
                     SELECT
                         COUNT(CASE WHEN close > open THEN 1 END) as advances,
@@ -55,8 +53,6 @@ def _query_sync(query: str) -> str:
                                 AND source IN ('fyers_eq', 'fyers'))
                 """)
                 r = cur.fetchone()
-
-                # Fallback to adr_daily if no intraday data (outside market hours)
                 if not r or r[0] == 0:
                     cur.execute("SELECT price_date, adr, advances, declines, computed_at FROM adr_daily ORDER BY price_date DESC LIMIT 1")
                     r2 = cur.fetchone()
@@ -65,7 +61,6 @@ def _query_sync(query: str) -> str:
                                 f"ADR: {r2[1]:.2f} | Advances: {r2[2]} | Declines: {r2[3]}\n"
                                 f"Updated: {r2[4].strftime('%d-%b %H:%M IST')}")
                     return "No market mood data."
-
                 adv, dec, unch, adr, as_of = r[0], r[1], r[2], r[3], r[4]
                 adr_val = float(adr) if adr else 0
                 mood = "Bullish" if adr_val >= 2 else "Neutral" if adr_val >= 0.8 else "Bearish"
@@ -74,18 +69,21 @@ def _query_sync(query: str) -> str:
                         f"ADR: {adr_val:.2f} | {mood}\n"
                         f"Advances: {adv} | Declines: {dec} | Unchanged: {unch}")
 
-            # 2. V8 signals
-            if any(k in q for k in ["v8", "signal", "qualified"]):
+            # 2. V8 signals (no 'side' col — derive from basket name)
+            if any(k in q for k in ["v8", "signal", "qualified", "v8 dashboard"]):
                 cur.execute("""
-                    SELECT symbol, basket, side, gvm_score, cmp, signal_ts
+                    SELECT symbol, basket, gvm_score, cmp, day_change, signal_ts
                     FROM v8_qualified
                     WHERE signal_date = CURRENT_DATE
-                    ORDER BY gvm_score DESC LIMIT 10
+                    ORDER BY gvm_score DESC LIMIT 15
                 """)
                 rows = cur.fetchall()
                 if rows:
-                    data = [(r[0], r[1], r[2], f"{r[3]:.1f}", f"{r[4]:.1f}") for r in rows]
-                    return f"**V8 Qualified Today ({len(rows)})**\n{fmt_table(['Symbol','Basket','Side','GVM','CMP'], data)}"
+                    data = [(r[0], r[1],
+                             "LONG" if "buy" in r[1].lower() else "SHORT",
+                             f"{r[2]:.1f}", f"{r[3]:.1f}",
+                             f"{r[4]:+.2f}%") for r in rows]
+                    return f"**V8 Qualified Today ({len(rows)})**\n{fmt_table(['Symbol','Basket','Side','GVM','CMP','Day%'], data)}"
                 return "No V8 signals today."
 
             # 3. QB summary
@@ -100,7 +98,7 @@ def _query_sync(query: str) -> str:
                 if rows:
                     data = [(r[0], r[1], f"Rs{r[2]:,.0f}") for r in rows]
                     return f"**Open Positions by Basket**\n{fmt_table(['Basket','Count','Invested'], data)}"
-                return "No open positions."
+                return "No open QB positions."
 
             # 4. Paper positions
             if any(k in q for k in ["paper", "open position", "position", "p&l", "pnl"]):
@@ -213,14 +211,13 @@ def _query_sync(query: str) -> str:
                     return reply
 
             return ("⚡ Native — $0. Try:\n"
-                    "• 'market mood' | 'V8 signals' | 'open positions'\n"
+                    "• 'market mood' | 'V8 dashboard' | 'open positions'\n"
                     "• 'top GVM stocks' | 'health' | 'PCR'\n"
                     "• 'overview Bharat Forge' | 'GVM SBIN'\n"
                     "Or toggle Claude ON for free-text.")
 
 
 async def route_native(query: str) -> str:
-    """Async wrapper — runs sync DB query in thread executor."""
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _query_sync, query)
