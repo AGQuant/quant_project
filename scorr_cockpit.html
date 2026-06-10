@@ -106,6 +106,8 @@
   .msg-bubble th { background: var(--surface3); color: var(--text); padding: 8px 12px; text-align: left; border: 1px solid var(--border); font-weight: 600; }
   .msg-bubble td { padding: 6px 12px; border: 1px solid var(--border); }
   .msg-bubble tr:hover td { background: var(--accent-light); }
+  .pnl-pos { color: var(--green); font-weight: 600; }
+  .pnl-neg { color: var(--red); font-weight: 600; }
 
   .typing { display: none; align-items: center; gap: 6px; padding: 12px 16px; }
   .typing.show { display: flex; }
@@ -180,9 +182,7 @@
   </div>
 
   <div class="quick-bar">
-    <button class="qbtn" onclick="quickAsk('V8 dashboard')">V8 Dashboard</button>
-    <button class="qbtn" onclick="quickAsk('Show open paper positions with P&L')">Open Positions</button>
-    <button class="qbtn" onclick="quickAsk('Market mood now')">Market Mood</button>
+    <button class="qbtn" onclick="quickAsk('Virtual Dashboard V8')">Virtual Dashboard V8</button>
     <button class="qbtn" onclick="quickAsk('QB summary by basket')">QB Summary</button>
     <button class="qbtn" onclick="quickAsk('Top qualified stocks today')">Qualified Now</button>
     <button class="qbtn" onclick="quickAsk('System health check')">Health</button>
@@ -245,7 +245,7 @@ let totalOut  = 0;
 let attachedFiles = [];
 let currentController = null;  // AbortController for STOP button
 
-// ── localStorage persistence ───────────────────────────────────────
+// ── localStorage persistence ────────────────────────────────────────────────
 function saveSession() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -270,7 +270,7 @@ function loadSession() {
   } catch(e) { return false; }
 }
 
-// ── Claude toggle ──────────────────────────────────────────────────
+// ── Claude toggle ────────────────────────────────────────────────────────────
 function toggleClaude() {
   claudeOn = !claudeOn;
   applyToggleUI();
@@ -288,7 +288,7 @@ function applyToggleUI() {
   }
 }
 
-// ── STOP button ────────────────────────────────────────────────────
+// ── STOP button ──────────────────────────────────────────────────────────────
 function stopQuery() {
   if (currentController) {
     currentController.abort();
@@ -301,10 +301,21 @@ function stopQuery() {
   addMessage('assistant', '⏹ Stopped by user.', { native: true, duration_ms: 0, cost: '0.000000' });
 }
 
-// ── UI helpers ─────────────────────────────────────────────────────
+// ── UI helpers ───────────────────────────────────────────────────────────────
 function quickAsk(text) { document.getElementById('userInput').value = text; sendMessage(); }
 
 function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// Color-code a cell value: green if positive signed number, red if negative.
+// Matches values like +1,234, -560, +2.31%, -0.43% (commas, decimals, % allowed).
+function colorCell(raw) {
+  const esc = escapeHtml(raw);
+  const m = raw.match(/^([+-])[\d,]*\.?\d+%?$/);
+  if (!m) return esc;
+  if (m[1] === '+') return `<span class="pnl-pos">${esc}</span>`;
+  if (m[1] === '-') return `<span class="pnl-neg">${esc}</span>`;
+  return esc;
+}
 
 function formatReply(text) {
   const lines = text.split('\n'); let html = '', inTable = false, tableLines = [];
@@ -327,7 +338,13 @@ function renderTable(lines) {
     if (i === 1 && /^[\s|:-]+$/.test(line)) return;
     const cells = line.split('|').filter((_,idx,arr) => idx > 0 && idx < arr.length - 1);
     const tag = i === 0 ? 'th' : 'td';
-    html += '<tr>' + cells.map(c => `<${tag}>${escapeHtml(c.trim())}</${tag}>`).join('') + '</tr>';
+    html += '<tr>' + cells.map(c => {
+      const val = c.trim();
+      // header cells never colored; data cells get P&L color treatment
+      return tag === 'th'
+        ? `<th>${escapeHtml(val)}</th>`
+        : `<td>${colorCell(val)}</td>`;
+    }).join('') + '</tr>';
   });
   return html + '</table>';
 }
@@ -363,7 +380,7 @@ function restoreMessages() {
   document.getElementById('tokenCount').textContent  = `Tokens: ${totalIn} in / ${totalOut} out`;
 }
 
-// ── File handling ─────────────────────────────────────────────────
+// ── File handling ────────────────────────────────────────────────────────────
 function renderFileList() {
   const fl = document.getElementById('fileList'); fl.innerHTML = '';
   attachedFiles.forEach(file => {
@@ -384,7 +401,7 @@ function removeFile(name) {
   renderFileList();
 }
 
-// ── Clipboard image paste (Ctrl+V) ────────────────────────────────
+// ── Clipboard image paste (Ctrl+V) ───────────────────────────────────────────
 document.getElementById('userInput').addEventListener('paste', function(e) {
   const items = (e.clipboardData || window.clipboardData).items;
   if (!items) return;
@@ -400,7 +417,7 @@ document.getElementById('userInput').addEventListener('paste', function(e) {
   }
 });
 
-// ── Send ───────────────────────────────────────────────────────────
+// ── Send ─────────────────────────────────────────────────────────────────────
 async function sendMessage() {
   const input = document.getElementById('userInput');
   const text  = input.value.trim();
@@ -506,7 +523,7 @@ document.getElementById('userInput').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-// ── Boot ───────────────────────────────────────────────────────────
+// ── Boot ─────────────────────────────────────────────────────────────────────
 (async () => {
   const hasHistory = loadSession();
   applyToggleUI();
