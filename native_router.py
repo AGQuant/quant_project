@@ -2,9 +2,17 @@
 Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
 Rule updates: SHORT side GVM not applicable, sector/RSI/fib rules corrected.
+
+10-Jun-2026 additions:
+  - Virtual Dashboard V8: consolidated 6-table view (market gate, qualified,
+    paper summary, closed performance, open positions detail, top 3 signals).
+    Live CMP/P&L computed by JOIN to cmp_prices (live Fyers stored in DB).
+  - Sector ranking: "top N <sector>" parses N (fallback 10), ranks by GVM,
+    flags which have result_analysis.
 """
 
 import os
+import re
 import asyncio
 from datetime import datetime
 import psycopg
@@ -101,11 +109,276 @@ def _lookup_gvm(cur, company: str):
     return None
 
 
+# ── Sector words to strip when extracting the sector term ─────────────────────
+_SECTOR_STOPWORDS = {
+    "top", "best", "show", "me", "the", "give", "list", "fetch", "get", "stocks",
+    "stock", "results", "result", "by", "gvm", "score", "high", "highest", "in",
+    "of", "for", "with", "and", "db", "from", "rank", "ranked", "ranking", "a",
+    "an", "please", "what", "whats", "are", "is", "companies", "company", "names",
+}
+
+
+def _parse_top_n(q: str, fallback: int = 10) -> int:
+    """Parse a number from 'top 10', 'top 5', etc. Fallback if none."""
+    m = re.search(r"top\s+(\d+)", q)
+    if m:
+        n = int(m.group(1))
+        return max(1, min(n, 50))  # clamp 1..50
+    return fallback
+
+
+def _extract_sector(q: str) -> str:
+    """Strip command/filler words, leaving the sector term."""
+    cleaned = re.sub(r"top\s+\d+", "", q)  # remove 'top N'
+    words = [w.strip(".,?!") for w in cleaned.lower().split()
+             if w.strip(".,?!") not in _SECTOR_STOPWORDS]
+    return " ".join(words).strip()
+
+
+def _sector_ranking(cur, q: str) -> str:
+    """
+    'top N <sector>' → rank by GVM desc within segment ILIKE %sector%.
+    If 'result(s)' present in query, restrict to rows with result_analysis.
+    """
+    n = _parse_top_n(q, fallback=10)
+    sector = _extract_sector(q)
+    if not sector or len(sector) < 3:
+        return ("Specify a sector. E.g. 'top 10 pharma' | 'top 5 banks' | "
+                "'top auto stocks'")
+
+    want_results = "result" in q
+
+    if want_results:
+        cur.execute("""
+            SELECT g.symbol, g.company_name, g.gvm_score, g.segment,
+                   i.result_analysis IS NOT NULL AS has_result
+            FROM gvm_scores g
+            LEFT JOIN input_raw i ON g.symbol = i.nse_code
+            WHERE g.segment ILIKE %s AND i.result_analysis IS NOT NULL
+            ORDER BY g.gvm_score DESC
+            LIMIT %s
+        """, (f"%{sector}%", n))
+    else:
+        cur.execute("""
+            SELECT g.symbol, g.company_name, g.gvm_score, g.segment,
+                   i.result_analysis IS NOT NULL AS has_result
+            FROM gvm_scores g
+            LEFT JOIN input_raw i ON g.symbol = i.nse_code
+            WHERE g.segment ILIKE %s
+            ORDER BY g.gvm_score DESC
+            LIMIT %s
+        """, (f"%{sector}%", n))
+
+    rows = cur.fetchall()
+
+    # Retry with singular form if plural returned nothing (e.g. 'banks' -> 'bank')
+    if not rows and sector.endswith("s") and len(sector) > 4:
+        singular = sector[:-1]
+        base_sql = """
+            SELECT g.symbol, g.company_name, g.gvm_score, g.segment,
+                   i.result_analysis IS NOT NULL AS has_result
+            FROM gvm_scores g
+            LEFT JOIN input_raw i ON g.symbol = i.nse_code
+            WHERE g.segment ILIKE %s {extra}
+            ORDER BY g.gvm_score DESC
+            LIMIT %s
+        """
+        extra = "AND i.result_analysis IS NOT NULL" if want_results else ""
+        cur.execute(base_sql.format(extra=extra), (f"%{singular}%", n))
+        rows = cur.fetchall()
+        if rows:
+            sector = singular
+
+    if not rows:
+        return f"No stocks found for sector '{sector}'. Try a broader term."
+
+    data = [(r[0], r[1][:22], f"{r[2]:.2f}",
+             (r[3][:20] if r[3] else ""), ("✓" if r[4] else "—")) for r in rows]
+    title_extra = " with results" if want_results else ""
+    return (f"**Top {len(rows)} {sector.title()}{title_extra} — by GVM**\n"
+            f"{fmt_table(['Symbol','Company','GVM','Segment','Result'], data)}")
+
+
+# ── Virtual Dashboard V8 — consolidated 6-table view ──────────────────────────
+
+def _vd_market_gate(cur) -> str:
+    """Table 1: Market Gate — ADR breadth + gate status."""
+    # LIVE ADR from intraday; fall back to EOD adr_daily
+    cur.execute("""
+        SELECT
+            COUNT(CASE WHEN close > open THEN 1 END) as adv,
+            COUNT(CASE WHEN close < open THEN 1 END) as dec,
+            ROUND(COUNT(CASE WHEN close > open THEN 1 END)::numeric /
+                  NULLIF(COUNT(CASE WHEN close < open THEN 1 END), 0), 2) as live_adr,
+            MAX(ts) as as_of
+        FROM intraday_prices
+        WHERE ts::date = CURRENT_DATE
+          AND source IN ('fyers_eq', 'fyers')
+          AND ts = (SELECT MAX(ts) FROM intraday_prices
+                    WHERE ts::date = CURRENT_DATE AND source IN ('fyers_eq', 'fyers'))
+    """)
+    r = cur.fetchone()
+    live = bool(r and r[0] and r[2])
+    if live:
+        adv, dec, adr_val, as_of = r[0], r[1], float(r[2]), r[3]
+        tag = "LIVE"
+        time_str = as_of.strftime('%H:%M IST') if as_of else ""
+    else:
+        cur.execute("SELECT adr, advances, declines, price_date FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+        r2 = cur.fetchone()
+        if not r2:
+            return "**1. Market Gate**\nNo ADR data."
+        adr_val, adv, dec = float(r2[0]) if r2[0] else 0.0, r2[1], r2[2]
+        tag = f"EOD {r2[3]}"
+        time_str = ""
+
+    gate = "OPEN" if adr_val >= 1.0 else "CLOSED"
+    mood = "Bullish" if adr_val >= 2 else "Neutral" if adr_val >= 0.8 else "Bearish"
+    buy_slots = 5 if adr_val >= 1.0 else 0
+    sell_slots = 5 if adr_val < 1.0 else 3
+    return (f"**1. Market Gate — {tag} {time_str}**\n"
+            f"ADR: {adr_val:.2f} | Gate: {gate} | Mood: {mood}\n"
+            f"Advances: {adv} | Declines: {dec} | Buy slots: {buy_slots} | Sell slots: {sell_slots}")
+
+
+def _vd_qualified(cur) -> str:
+    """Table 2: Qualified Today — per basket, symbols if <=5."""
+    cur.execute("""
+        SELECT basket, COUNT(*),
+               string_agg(symbol, ', ' ORDER BY gvm_score DESC) as syms
+        FROM v8_qualified
+        WHERE signal_date = CURRENT_DATE
+        GROUP BY basket ORDER BY basket
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return "**2. Qualified Today**\nNo signals today."
+    data = []
+    for basket, cnt, syms in rows:
+        show = syms if cnt <= 5 else f"{cnt} stocks"
+        data.append((basket, cnt, show))
+    return f"**2. Qualified Today**\n{fmt_table(['Basket','Count','Symbols'], data)}"
+
+
+def _vd_paper_summary(cur) -> str:
+    """Table 3: Paper Positions Summary — open count + unrealised P&L per basket."""
+    cur.execute("""
+        SELECT p.basket,
+               COUNT(*) as open_cnt,
+               SUM(CASE WHEN p.side = 'LONG'  THEN (c.cmp - p.entry_price) * p.qty
+                        WHEN p.side = 'SHORT' THEN (p.entry_price - c.cmp) * p.qty
+                        ELSE 0 END) as unrealised
+        FROM v8_paper_positions p
+        LEFT JOIN cmp_prices c ON p.symbol = c.symbol
+        WHERE p.status = 'open'
+        GROUP BY p.basket ORDER BY p.basket
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return "**3. Paper Positions Summary**\nNo open positions."
+    data = [(r[0], r[1], f"{(r[2] or 0):+,.0f}") for r in rows]
+    total = sum((r[2] or 0) for r in rows)
+    out = fmt_table(['Basket', 'Open', 'Unrealised P&L'], data)
+    return f"**3. Paper Positions Summary**\n{out}\nTotal Unrealised: {total:+,.0f}"
+
+
+def _vd_closed_performance(cur) -> str:
+    """Table 4: Closed Performance — wins/accuracy/realised P&L per basket."""
+    cur.execute("""
+        SELECT basket,
+               COUNT(*) as closed,
+               COUNT(*) FILTER (WHERE result = 'TARGET') as wins,
+               SUM(pnl) as realised
+        FROM v8_paper_trades
+        GROUP BY basket ORDER BY basket
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return "**4. Closed Performance**\nNo closed trades."
+    data, tot_closed, tot_wins, tot_real = [], 0, 0, 0.0
+    for basket, closed, wins, realised in rows:
+        acc = round(wins / closed * 100, 1) if closed else 0.0
+        data.append((basket, closed, wins, f"{acc}%", f"{(realised or 0):+,.0f}"))
+        tot_closed += closed; tot_wins += wins; tot_real += (realised or 0)
+    tot_acc = round(tot_wins / tot_closed * 100, 1) if tot_closed else 0.0
+    data.append(("TOTAL", tot_closed, tot_wins, f"{tot_acc}%", f"{tot_real:+,.0f}"))
+    return f"**4. Closed Performance**\n{fmt_table(['Basket','Closed','Wins','Acc%','Realised P&L'], data)}"
+
+
+def _vd_open_detail(cur) -> str:
+    """Table 5: Open Positions Detail — live CMP/P&L, sorted P&L desc."""
+    cur.execute("""
+        SELECT p.symbol, p.side, p.basket, p.entry_price, c.cmp,
+               CASE WHEN p.side = 'LONG'  THEN (c.cmp - p.entry_price) * p.qty
+                    WHEN p.side = 'SHORT' THEN (p.entry_price - c.cmp) * p.qty
+                    ELSE 0 END as pnl,
+               p.entry_ts
+        FROM v8_paper_positions p
+        LEFT JOIN cmp_prices c ON p.symbol = c.symbol
+        WHERE p.status = 'open'
+        ORDER BY pnl DESC NULLS LAST
+        LIMIT 15
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return "**5. Open Positions Detail**\nNo open positions."
+    data = []
+    for sym, side, basket, entry, cmp, pnl, ts in rows:
+        cmp_s = f"{cmp:.1f}" if cmp is not None else "—"
+        pnl_s = f"{pnl:+,.0f}" if pnl is not None else "—"
+        t = ts.strftime('%d-%b %H:%M') if ts else ""
+        data.append((sym, side, basket, f"{entry:.1f}", cmp_s, pnl_s, t))
+    return f"**5. Open Positions Detail**\n{fmt_table(['Symbol','Side','Basket','Entry','CMP','P&L','Entry'], data)}"
+
+
+def _vd_top_signals(cur) -> str:
+    """Table 6: Top 3 Signals Now — best by GVM across all baskets today."""
+    cur.execute("""
+        SELECT symbol, basket, gvm_score, day_change, week_return
+        FROM v8_qualified
+        WHERE signal_date = CURRENT_DATE
+        ORDER BY gvm_score DESC LIMIT 3
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return "**6. Top 3 Signals Now**\nNo signals today."
+    data = [(r[0], r[1], f"{r[2]:.2f}",
+             f"{(r[3] or 0):+.2f}%", f"{(r[4] or 0):+.2f}%") for r in rows]
+    return f"**6. Top 3 Signals Now**\n{fmt_table(['Symbol','Basket','GVM','Day%','Week%'], data)}"
+
+
+def _virtual_dashboard(cur) -> str:
+    """Consolidated Virtual Dashboard V8 — all 6 tables."""
+    ts = datetime.now().strftime('%d-%b-%Y %H:%M IST')
+    parts = [
+        f"⚡ **VIRTUAL DASHBOARD V8 — {ts}**",
+        _vd_market_gate(cur),
+        _vd_qualified(cur),
+        _vd_paper_summary(cur),
+        _vd_closed_performance(cur),
+        _vd_open_detail(cur),
+        _vd_top_signals(cur),
+    ]
+    return "\n\n".join(parts)
+
+
 def _query_sync(query: str) -> str:
     q = query.lower().strip()
 
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
+
+            # 0. Virtual Dashboard V8 — consolidated view (MUST be before generic v8)
+            if "virtual dashboard" in q or "v8 dashboard" in q:
+                return _virtual_dashboard(cur)
+
+            # 0b. Sector ranking — "top N <sector>" (before market mood / top gvm)
+            if re.search(r"\btop\b", q) and not any(
+                k in q for k in ["top gvm", "top stocks", "top qualified"]
+            ):
+                sector_try = _extract_sector(q)
+                if sector_try and len(sector_try) >= 3:
+                    return _sector_ranking(cur, q)
 
             # 1. Market mood — LIVE ADR from intraday_prices
             if any(k in q for k in ["market mood", "mood", "adr", "gate", "slots"]):
@@ -277,9 +550,9 @@ def _query_sync(query: str) -> str:
                     return reply
 
             return ("⚡ Native — $0. Try:\n"
-                    "• 'market mood' | 'V8 dashboard' | 'open positions'\n"
+                    "• 'Virtual Dashboard V8' | 'market mood' | 'open positions'\n"
                     "• 'QB summary' | 'top GVM stocks' | 'health' | 'PCR'\n"
-                    "• 'overview Bharat Forge' | 'GVM SBIN'\n"
+                    "• 'top 10 pharma' | 'overview Bharat Forge' | 'GVM SBIN'\n"
                     "Or toggle Claude ON for free-text.")
 
 
