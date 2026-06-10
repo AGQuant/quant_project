@@ -1,6 +1,7 @@
 """
 Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
+Rule updates: SHORT side GVM not applicable, sector/RSI/fib rules corrected.
 """
 
 import os
@@ -69,7 +70,7 @@ def _query_sync(query: str) -> str:
                         f"ADR: {adr_val:.2f} | {mood}\n"
                         f"Advances: {adv} | Declines: {dec} | Unchanged: {unch}")
 
-            # 2. V8 signals (no 'side' col — derive from basket name)
+            # 2. V8 signals — side derived from basket name
             if any(k in q for k in ["v8", "signal", "qualified", "v8 dashboard"]):
                 cur.execute("""
                     SELECT symbol, basket, gvm_score, cmp, day_change, signal_ts
@@ -86,32 +87,44 @@ def _query_sync(query: str) -> str:
                     return f"**V8 Qualified Today ({len(rows)})**\n{fmt_table(['Symbol','Basket','Side','GVM','CMP','Day%'], data)}"
                 return "No V8 signals today."
 
-            # 3. QB summary
-            if any(k in q for k in ["qb", "quant basket", "portfolio"]):
+            # 3. QB summary — quant_paper_positions (correct table)
+            if any(k in q for k in ["qb", "quant basket", "portfolio", "qb summary"]):
                 cur.execute("""
-                    SELECT basket, COUNT(*) as pos, SUM(entry_price * qty) as invested
-                    FROM v8_paper_positions
-                    WHERE status = 'open'
-                    GROUP BY basket ORDER BY basket
+                    SELECT basket_name,
+                           COUNT(*) as positions,
+                           SUM(pnl) as total_pnl,
+                           SUM(current_value) as market_value,
+                           ROUND(AVG(pnl_pct)::numeric, 2) as avg_pnl_pct
+                    FROM quant_paper_positions
+                    WHERE status = 'active'
+                    GROUP BY basket_name
+                    ORDER BY basket_name
                 """)
                 rows = cur.fetchall()
                 if rows:
-                    data = [(r[0], r[1], f"Rs{r[2]:,.0f}") for r in rows]
-                    return f"**Open Positions by Basket**\n{fmt_table(['Basket','Count','Invested'], data)}"
-                return "No open QB positions."
+                    data = [(r[0], r[1], f"Rs{r[2]:,.0f}", f"Rs{r[3]:,.0f}", f"{r[4]}%") for r in rows]
+                    total = sum(r[2] for r in rows)
+                    return (f"**QB Summary**\n"
+                            f"{fmt_table(['Basket','Pos','PnL','Value','Avg%'], data)}\n"
+                            f"Total PnL: Rs {total:,.0f}")
+                return "No active QB positions."
 
-            # 4. Paper positions
+            # 4. Paper positions — v8_paper_positions (no pnl/current_price cols)
             if any(k in q for k in ["paper", "open position", "position", "p&l", "pnl"]):
                 cur.execute("""
-                    SELECT symbol, side, basket, entry_price, target, stop_loss, entry_ts
+                    SELECT symbol, side, basket, entry_price, target, stop_loss,
+                           qty, entry_ts
                     FROM v8_paper_positions
                     WHERE status = 'open'
                     ORDER BY entry_ts DESC LIMIT 10
                 """)
                 rows = cur.fetchall()
                 if rows:
-                    data = [(r[0], r[1], r[2], f"{r[3]:.1f}", f"{r[4]:.1f}", f"{r[5]:.1f}") for r in rows]
-                    return f"**Open Paper Positions ({len(rows)})**\n{fmt_table(['Symbol','Side','Basket','Entry','Target','SL'], data)}"
+                    data = [(r[0], r[1], r[2],
+                             f"{r[3]:.1f}", f"{r[4]:.1f}", f"{r[5]:.1f}",
+                             r[6]) for r in rows]
+                    return (f"**Open Paper Positions ({len(rows)})**\n"
+                            f"{fmt_table(['Symbol','Side','Basket','Entry','Target','SL','Qty'], data)}")
                 return "No open paper positions."
 
             # 5. Top GVM
@@ -212,7 +225,7 @@ def _query_sync(query: str) -> str:
 
             return ("⚡ Native — $0. Try:\n"
                     "• 'market mood' | 'V8 dashboard' | 'open positions'\n"
-                    "• 'top GVM stocks' | 'health' | 'PCR'\n"
+                    "• 'QB summary' | 'top GVM stocks' | 'health' | 'PCR'\n"
                     "• 'overview Bharat Forge' | 'GVM SBIN'\n"
                     "Or toggle Claude ON for free-text.")
 
