@@ -27,6 +27,7 @@ v6 (10-Jun-2026):
     fallback if master download fails.
   * INDEX/ETF LTP: added NIFTY500, GOLDBEES, SILVERBEES to the 30s quotes poll
     (cmp_prices + 5-min bars).
+  * OI POLL DEBUG: start/first-response logging + dict/list response handling.
 
 5-MIN SYSTEM (canonical spec session_log id=167):
   All rolling intraday feeds store at 5-min granularity. NOT a flash/1-min system.
@@ -769,35 +770,36 @@ _OI_POLL_LOCK = threading.Lock()
 
 def poll_futures_oi(token, fut_syms, agg):
     """
-    ROOT CAUSE (fixed 10-Jun-2026): Fyers quotes API does NOT return OI at all
-    (Fyers KB: 'OI is not available in the quotes API — use the market depth API').
-    The old implementation read v.get('oi') from /data/quotes — always None,
-    so futures_basis.oi stayed NULL forever.
-
-    FIX: poll the DEPTH API (/data/depth, 1 symbol per call) and read d[symbol]['oi'].
-    Rate-limited to ~170 req/min (Fyers data limit 200/min, 10/sec).
-    208 symbols ≈ 75s per cycle, every OI_POLL_MINS → ~16k calls/day
-    (well under the 1-lakh/day v3 limit).
-    Runs in a BACKGROUND THREAD so housekeeping flushes are never blocked.
-    Latest OI stashed in agg.last_oi → attached on next futures bar flush
-    → futures_basis.oi / oi_prev / oi_chg.
+    Fyers quotes API has NO OI (KB-confirmed) — depth API is the only source.
+    1 symbol/call, rate-limited ~170 req/min. Runs in a background thread.
+    Latest OI → agg.last_oi → attached on next futures bar flush → futures_basis.
+    Debug: logs the raw response of the FIRST symbol each cycle for diagnosis.
     """
     if not _OI_POLL_LOCK.acquire(blocking=False):
         log.info("OI poll skipped — previous cycle still running")
         return
     try:
+        log.info(f"OI poll starting: {len(fut_syms)} futures via depth API")
         headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
-        got = 0
+        got, first = 0, True
         for fsym in fut_syms:
             try:
                 r = requests.get(DEPTH_URL,
                                  params={'symbol': fsym, 'ohlcv_flag': 1},
                                  headers=headers, timeout=8)
+                if first:
+                    log.info(f"OI poll debug {fsym}: HTTP {r.status_code} body={r.text[:300]}")
+                    first = False
                 d = r.json()
                 if d.get('s') != 'ok':
                     continue
-                node = (d.get('d') or {}).get(fsym) or {}
-                oi = node.get('oi')
+                data_d = d.get('d')
+                node = {}
+                if isinstance(data_d, dict):
+                    node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
+                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
+                    node = data_d[0].get('v', data_d[0])
+                oi = node.get('oi') if isinstance(node, dict) else None
                 if oi is None:
                     continue
                 nse = from_fyers_symbol(fsym)
