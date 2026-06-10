@@ -23,11 +23,82 @@ def fmt_table(headers: list, rows: list) -> str:
 
 
 def extract_company(text: str) -> str:
-    remove = {"hi", "can", "you", "fetch", "get", "show", "me", "the",
-              "overview", "takeaway", "key", "gvm", "score", "please",
-              "and", "for", "data", "info", "details", "is", "what", "whats"}
+    remove = {
+        # question/request words
+        "hi", "can", "you", "fetch", "get", "show", "me", "the", "give", "tell",
+        "explain", "provide", "find", "search", "look", "up", "check", "pull",
+        # content type words
+        "overview", "takeaway", "key", "gvm", "score", "result", "analysis",
+        "details", "info", "information", "data", "summary", "report",
+        # filler words
+        "please", "and", "for", "on", "a", "an", "of", "in", "at", "to", "is",
+        "what", "whats", "about", "regarding", "related", "some", "any",
+    }
     words = [w.strip(".,?!") for w in text.lower().split() if w.strip(".,?!") not in remove]
     return " ".join(words).strip()
+
+
+def _lookup_company(cur, company: str):
+    """
+    Try exact phrase match first, then fall back to each word individually.
+    Returns first matching row from input_raw joined with gvm_scores.
+    """
+    # Pass 1: full phrase
+    cur.execute("""
+        SELECT i.nse_code, i.company_name, i.overview, i.key_takeaway,
+               i.result_analysis, g.gvm_score, g.verdict
+        FROM input_raw i
+        LEFT JOIN gvm_scores g ON i.nse_code = g.symbol
+        WHERE UPPER(i.nse_code) LIKE %s OR LOWER(i.company_name) LIKE %s LIMIT 1
+    """, (f"%{company.upper()}%", f"%{company.lower()}%"))
+    r = cur.fetchone()
+    if r:
+        return r
+
+    # Pass 2: try each word individually (longest first)
+    words = sorted(company.split(), key=len, reverse=True)
+    for word in words:
+        if len(word) < 3:
+            continue
+        cur.execute("""
+            SELECT i.nse_code, i.company_name, i.overview, i.key_takeaway,
+                   i.result_analysis, g.gvm_score, g.verdict
+            FROM input_raw i
+            LEFT JOIN gvm_scores g ON i.nse_code = g.symbol
+            WHERE UPPER(i.nse_code) LIKE %s OR LOWER(i.company_name) LIKE %s LIMIT 1
+        """, (f"%{word.upper()}%", f"%{word.lower()}%"))
+        r = cur.fetchone()
+        if r:
+            return r
+
+    return None
+
+
+def _lookup_gvm(cur, company: str):
+    """Same two-pass lookup but against gvm_scores."""
+    cur.execute("""
+        SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict, segment
+        FROM gvm_scores
+        WHERE UPPER(symbol) LIKE %s OR LOWER(company_name) LIKE %s LIMIT 1
+    """, (f"%{company.upper()}%", f"%{company.lower()}%"))
+    r = cur.fetchone()
+    if r:
+        return r
+
+    words = sorted(company.split(), key=len, reverse=True)
+    for word in words:
+        if len(word) < 3:
+            continue
+        cur.execute("""
+            SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict, segment
+            FROM gvm_scores
+            WHERE UPPER(symbol) LIKE %s OR LOWER(company_name) LIKE %s LIMIT 1
+        """, (f"%{word.upper()}%", f"%{word.lower()}%"))
+        r = cur.fetchone()
+        if r:
+            return r
+
+    return None
 
 
 def _query_sync(query: str) -> str:
@@ -170,34 +241,11 @@ def _query_sync(query: str) -> str:
                     return "\n".join(lines)
                 return "No PCR data."
 
-            # 8. GVM lookup
-            if any(k in q for k in ["gvm", "score"]):
-                company = extract_company(q)
-                if company:
-                    cur.execute("""
-                        SELECT symbol, company_name, gvm_score, g_score, v_score, m_score, verdict, segment
-                        FROM gvm_scores
-                        WHERE UPPER(symbol) LIKE %s OR LOWER(company_name) LIKE %s LIMIT 1
-                    """, (f"%{company.upper()}%", f"%{company.lower()}%"))
-                    r = cur.fetchone()
-                    if r:
-                        return (f"**{r[1]} ({r[0]})**\n"
-                                f"GVM: {r[2]:.2f} | G: {r[3]:.2f} | V: {r[4]:.2f} | M: {r[5]:.2f}\n"
-                                f"Verdict: {r[6]} | Segment: {r[7]}")
-                return "Specify stock. E.g. 'GVM SBIN'"
-
-            # 9. Overview / takeaway
+            # 8. Overview / takeaway — uses two-pass fuzzy lookup
             if any(k in q for k in ["overview", "takeaway", "result", "about"]):
                 company = extract_company(q)
                 if company:
-                    cur.execute("""
-                        SELECT i.nse_code, i.company_name, i.overview, i.key_takeaway,
-                               i.result_analysis, g.gvm_score, g.verdict
-                        FROM input_raw i
-                        LEFT JOIN gvm_scores g ON i.nse_code = g.symbol
-                        WHERE UPPER(i.nse_code) LIKE %s OR LOWER(i.company_name) LIKE %s LIMIT 1
-                    """, (f"%{company.upper()}%", f"%{company.lower()}%"))
-                    r = cur.fetchone()
+                    r = _lookup_company(cur, company)
                     if r:
                         parts = [f"**{r[1]} ({r[0]})**"]
                         if r[5]: parts.append(f"GVM: {r[5]:.2f} | {r[6]}")
@@ -207,20 +255,25 @@ def _query_sync(query: str) -> str:
                         return "\n".join(parts)
                 return "No content found. Toggle Claude ON for fuzzy search."
 
-            # 10. Generic stock fallback
+            # 9. GVM lookup — uses two-pass fuzzy lookup
+            if any(k in q for k in ["gvm", "score"]):
+                company = extract_company(q)
+                if company:
+                    r = _lookup_gvm(cur, company)
+                    if r:
+                        return (f"**{r[1]} ({r[0]})**\n"
+                                f"GVM: {r[2]:.2f} | G: {r[3]:.2f} | V: {r[4]:.2f} | M: {r[5]:.2f}\n"
+                                f"Verdict: {r[6]} | Segment: {r[7]}")
+                return "Specify stock. E.g. 'GVM SBIN'"
+
+            # 10. Generic stock fallback — uses two-pass fuzzy lookup
             company = extract_company(q)
             if company and len(company) >= 3:
-                cur.execute("""
-                    SELECT g.symbol, g.company_name, g.gvm_score, g.verdict, g.segment,
-                           i.key_takeaway
-                    FROM gvm_scores g
-                    LEFT JOIN input_raw i ON g.symbol = i.nse_code
-                    WHERE UPPER(g.symbol) LIKE %s OR LOWER(g.company_name) LIKE %s LIMIT 1
-                """, (f"%{company.upper()}%", f"%{company.lower()}%"))
-                r = cur.fetchone()
+                r = _lookup_company(cur, company)
                 if r:
-                    reply = f"**{r[1]} ({r[0]})**\nGVM: {r[2]:.2f} | {r[3]} | {r[4]}"
-                    if r[5]: reply += f"\n\nKey Takeaway:\n{r[5][:400]}"
+                    reply = f"**{r[1]} ({r[0]})**"
+                    if r[5]: reply += f"\nGVM: {r[5]:.2f} | {r[6]}"
+                    if r[3]: reply += f"\n\nKey Takeaway:\n{r[3][:400]}"
                     return reply
 
             return ("⚡ Native — $0. Try:\n"
