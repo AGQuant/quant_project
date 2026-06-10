@@ -4,17 +4,15 @@ Pattern matches user query → runs SQL → returns formatted card.
 Called when claude_on=False in scorr_chat_endpoint.py
 """
 
-import re
-import asyncpg
+import psycopg
 import os
 from datetime import datetime
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
-async def get_conn():
-    return await asyncpg.connect(DATABASE_URL)
-
+def get_conn():
+    return psycopg.connect(DATABASE_URL)
 
 def fmt_table(headers: list, rows: list) -> str:
     """Format rows as markdown table."""
