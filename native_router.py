@@ -21,11 +21,13 @@ import psycopg
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # ── SECTOR ALIAS MAP ──────────────────────────────────────────────────────────
-# Maps investor shorthand → DB segment keyword (used in ILIKE)
+# Maps investor shorthand → exact DB segment prefix (used in ILIKE '{val}%')
+# Use full prefix where needed to avoid substring collisions (e.g. IT vs Capital)
 
 SECTOR_ALIASES = {
-    # IT/Tech
-    "tech": "IT", "it": "IT", "software": "IT", "technology": "IT", "infotech": "IT",
+    # IT/Tech — must use 'IT - ' prefix to avoid matching 'Capital', 'Spirits' etc.
+    "tech": "IT - ", "it": "IT - ", "software": "IT - ",
+    "technology": "IT - ", "infotech": "IT - ",
     # Banks
     "bank": "Banks", "banking": "Banks", "banks": "Banks",
     "psu bank": "PSU Banks", "private bank": "Private Banks",
@@ -91,7 +93,7 @@ def resolve_sector(raw: Optional[str]) -> Optional[str]:
     for alias in sorted(SECTOR_ALIASES.keys(), key=len, reverse=True):
         if alias in rl:
             return SECTOR_ALIASES[alias]
-    return raw  # pass through for direct DB segment matches
+    return raw
 
 
 # ── GRAMMAR PARSER ────────────────────────────────────────────────────────────
@@ -143,14 +145,14 @@ METRIC_MAP = {
     "month return":     ("v", "month_return",           "v8"),
 }
 
-# VM = dual metric (v_score + m_score shown together)
 VM_ALIASES = {"vm", "vm score", "v m", "value momentum", "value and momentum"}
 
+# cap_category in DB is lowercase: large, mid, small, micro
 CAP_MAP = {
-    "large cap": "Large Cap", "largecap": "Large Cap", "large": "Large Cap",
-    "mid cap":   "Mid Cap",   "midcap":   "Mid Cap",   "mid":   "Mid Cap",
-    "small cap": "Small Cap", "smallcap": "Small Cap", "small": "Small Cap",
-    "micro cap": "Micro Cap", "microcap": "Micro Cap", "micro": "Micro Cap",
+    "large cap": "large", "largecap": "large", "large": "large",
+    "mid cap":   "mid",   "midcap":   "mid",   "mid":   "mid",
+    "small cap": "small", "smallcap": "small", "small": "small",
+    "micro cap": "micro", "microcap": "micro", "micro": "micro",
 }
 
 VERDICT_MAP = {
@@ -291,17 +293,32 @@ def _build_from(join_type: str, needs_input: bool = False) -> str:
     return base
 
 
+def _sector_condition(sector: Optional[str]) -> Optional[str]:
+    """
+    Build the segment WHERE condition.
+    Aliases ending with ' - ' or ' ' use prefix match (ILIKE 'IT - %').
+    Others use substring match (ILIKE '%Pharma%').
+    """
+    if not sector:
+        return None
+    # If alias ends with space/dash (e.g. 'IT - '), use prefix ILIKE
+    if sector.endswith(" ") or sector.endswith("- "):
+        return f"g.segment ILIKE '{sector}%'"
+    return f"g.segment ILIKE '%{sector}%'"
+
+
 def exec_rank(cur, slots: Dict) -> str:
     n, sector, cap, verdict = slots["count"], slots["sector"], slots["cap"], slots["verdict"]
     metric, threshold, vm = slots["metric"], slots["threshold"], slots["vm"]
 
-    # VM dual metric — show v_score + m_score
+    # VM dual metric
     if vm:
         needs_input = cap is not None
         from_clause = _build_from("gvm", needs_input)
         conditions = ["1=1"]
-        if sector:  conditions.append(f"g.segment ILIKE '%{sector}%'")
-        if cap:     conditions.append(f"i.cap_category ILIKE '%{cap}%'")
+        sc = _sector_condition(sector)
+        if sc: conditions.append(sc)
+        if cap: conditions.append(f"i.cap_category = '{cap}'")
         if verdict: conditions.append(f"g.verdict = '{verdict}'")
         where = " AND ".join(conditions)
         cur.execute(f"""
@@ -315,8 +332,8 @@ def exec_rank(cur, slots: Dict) -> str:
         rows = cur.fetchall()
         if not rows: return "No stocks found. Try a broader query or toggle Claude ON."
         title_parts = [f"Top {len(rows)}"]
-        if sector:  title_parts.append(sector.title())
-        if cap:     title_parts.append(cap)
+        if sector: title_parts.append(sector.strip('- ').title())
+        if cap:    title_parts.append(cap.title())
         title_parts.append("by V + M Score")
         data = [(r[0], r[1][:22], r[2][:18] if r[2] else "",
                  f"{_f(r[3]):.2f}", f"{_f(r[4]):.2f}", f"{_f(r[5]):.2f}") for r in rows]
@@ -333,9 +350,10 @@ def exec_rank(cur, slots: Dict) -> str:
     needs_input = cap is not None
     from_clause = _build_from(join_type, needs_input)
     conditions = ["1=1"]
-    if sector:    conditions.append(f"g.segment ILIKE '%{sector}%'")
-    if cap:       conditions.append(f"i.cap_category ILIKE '%{cap}%'")
-    if verdict:   conditions.append(f"g.verdict = '{verdict}'")
+    sc = _sector_condition(sector)
+    if sc: conditions.append(sc)
+    if cap: conditions.append(f"i.cap_category = '{cap}'")
+    if verdict: conditions.append(f"g.verdict = '{verdict}'")
     if threshold:
         direction, val = threshold
         op = ">=" if direction == "above" else "<="
@@ -354,8 +372,8 @@ def exec_rank(cur, slots: Dict) -> str:
 
     metric_label = col.replace('"','').replace('_',' ').title()
     title_parts = [f"Top {len(rows)}"]
-    if sector:  title_parts.append(sector.title())
-    if cap:     title_parts.append(cap)
+    if sector:  title_parts.append(sector.strip('- ').title())
+    if cap:     title_parts.append(cap.title())
     if verdict: title_parts.append(verdict)
     title_parts.append(f"by {metric_label}")
 
@@ -434,7 +452,6 @@ def exec_history(cur, slots: Dict) -> str:
 
     if not r: return f"Stock not found for '{company}'."
     symbol, name = r[0], r[1]
-
     cur.execute("""
         SELECT score_date, ROUND(gvm_score::numeric,2), ROUND(g_score::numeric,2),
                ROUND(v_score::numeric,2), ROUND(m_score::numeric,2), verdict
@@ -443,7 +460,6 @@ def exec_history(cur, slots: Dict) -> str:
     """, (symbol, months * 4))
     rows = cur.fetchall()
     if not rows: return f"No history found for {name} ({symbol})."
-
     data = [(str(r[0]), f"{_f(r[1]):.2f}", f"{_f(r[2]):.2f}",
              f"{_f(r[3]):.2f}", f"{_f(r[4]):.2f}", r[5] or "") for r in rows]
     return (f"**GVM History — {name} ({symbol})**\n"
@@ -718,7 +734,6 @@ def _query_sync(query: str) -> str:
                         f"GVM scored: {gvm_cnt:,} stocks | Intraday bars today: {intr:,}\nRailway DB: OK")
                 log("native","health"); return result
 
-            # Qualified / V8 watchlist — hardcoded, must be before grammar
             if any(k in q for k in ["qualified","watchlist","v8 watchlist","v8 signal","v8 qualified"]):
                 cur.execute("""
                     SELECT symbol,basket,gvm_score,cmp,day_change,signal_ts
@@ -729,12 +744,12 @@ def _query_sync(query: str) -> str:
                     data=[(r[0],r[1],"LONG" if "buy" in r[1].lower() else "SHORT",
                            f"{_f(r[2]):.1f}",f"{_f(r[3]):.1f}",f"{_f(r[4]):+.2f}%") for r in rows]
                     result=(f"**V8 Watchlist Today ({len(rows)} candidates)**\n"
-                            f"_{('Entry needs pivot confirmation + gate open')}_\n"
+                            f"_(Entry needs pivot confirmation + gate open)_\n"
                             f"{fmt_table(['Symbol','Basket','Side','GVM','CMP','Day%'],data)}")
                     log("native","v8_watchlist"); return result
                 log("native","v8_watchlist","","",False); return "No V8 candidates today."
 
-            # ── LAYER 1: Grammar parser+executor ─────────────────────────────
+            # ── LAYER 1: Grammar ──────────────────────────────────────────────
 
             slots = parse_query(q)
             grammar_result = execute_grammar(q)
@@ -752,7 +767,7 @@ def _query_sync(query: str) -> str:
             return ("⚡ Native — $0. Try:\n"
                     "• 'Virtual Dashboard V8' | 'market mood' | 'QB summary' | 'PCR'\n"
                     "• 'top 10 pharma gvm above 7.5' | 'tech stocks vm score'\n"
-                    "• 'midcap opm above 20' | 'smallcap promoter above 60'\n"
+                    "• 'tech largecap vm score' | 'midcap opm above 20'\n"
                     "• 'sector ratings' | 'GVM history HDFC bank'\n"
                     "• 'overview Torrent Pharma' | 'largecap roce above 15'\n"
                     "Or toggle Claude ON for free-text queries.")
