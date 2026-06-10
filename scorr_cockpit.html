@@ -228,28 +228,24 @@
 </div>
 
 <script>
-const API_BASE = '';
+const API_BASE    = '';
 const SONNET_MODEL = 'claude-sonnet-4-6';
-const MAX_TOKENS = 3000;
-const BUDGET_CAP = 0.05;
-const STORAGE_KEY = 'scorr_max_session';
+const MAX_TOKENS  = 3000;
+const BUDGET_CAP  = 0.05;
+const STORAGE_KEY = 'scorr_max_v5';  // bumped = clears stale localStorage from older versions
 
 let claudeOn = true;
 let conversationHistory = [];
 let totalCost = 0;
-let totalIn = 0;
-let totalOut = 0;
+let totalIn   = 0;
+let totalOut  = 0;
 let attachedFiles = [];
 
 // ── localStorage persistence ───────────────────────────────────────
 function saveSession() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      conversationHistory,
-      totalCost,
-      totalIn,
-      totalOut,
-      claudeOn,
+      conversationHistory, totalCost, totalIn, totalOut, claudeOn,
       savedAt: Date.now()
     }));
   } catch(e) { console.warn('localStorage save failed', e); }
@@ -260,10 +256,7 @@ function loadSession() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return false;
     const s = JSON.parse(raw);
-    if (Date.now() - s.savedAt > 86400000) {
-      localStorage.removeItem(STORAGE_KEY);
-      return false;
-    }
+    if (Date.now() - s.savedAt > 86400000) { localStorage.removeItem(STORAGE_KEY); return false; }
     conversationHistory = s.conversationHistory || [];
     totalCost = s.totalCost || 0;
     totalIn   = s.totalIn   || 0;
@@ -274,19 +267,16 @@ function loadSession() {
 }
 
 function clearSession() {
-  conversationHistory = [];
-  totalCost = totalIn = totalOut = 0;
+  conversationHistory = []; totalCost = totalIn = totalOut = 0;
   localStorage.removeItem(STORAGE_KEY);
   document.getElementById('sessionCost').textContent = 'Session cost: $0.000000';
-  document.getElementById('tokenCount').textContent = 'Tokens: 0 in / 0 out';
-  const msgs = document.getElementById('messages');
-  msgs.innerHTML = `
+  document.getElementById('tokenCount').textContent  = 'Tokens: 0 in / 0 out';
+  document.getElementById('messages').innerHTML = `
     <div class="welcome" id="welcome">
       <div class="welcome-logo">MAX</div>
       <div class="welcome-sub">Scorr Max · Your AI Chief Investment Officer</div>
-      <div class="welcome-desc">
-        Full Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch<br>
-        <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
+      <div class="welcome-desc">Full Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch<br>
+        <span style="color:var(--green);font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
       </div>
     </div>`;
 }
@@ -294,39 +284,27 @@ function clearSession() {
 // ── Claude toggle ──────────────────────────────────────────────────
 function toggleClaude() {
   claudeOn = !claudeOn;
-  const el    = document.getElementById('claudeToggle');
+  const el = document.getElementById('claudeToggle');
   const label = document.getElementById('toggleLabel');
   const cap   = document.getElementById('budgetCap');
   if (claudeOn) {
-    el.className    = 'claude-toggle on';
-    label.textContent = 'Claude ON';
-    cap.textContent   = '· Sonnet · $0.05 cap';
+    el.className = 'claude-toggle on'; label.textContent = 'Claude ON'; cap.textContent = '· Sonnet · $0.05 cap';
   } else {
-    el.className    = 'claude-toggle off';
-    label.textContent = 'Claude OFF';
-    cap.textContent   = '· Native only · $0';
+    el.className = 'claude-toggle off'; label.textContent = 'Claude OFF'; cap.textContent = '· Native only · $0';
   }
   saveSession();
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────
-function quickAsk(text) {
-  document.getElementById('userInput').value = text;
-  sendMessage();
-}
+function quickAsk(text) { document.getElementById('userInput').value = text; sendMessage(); }
 
-function escapeHtml(text) {
-  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function formatReply(text) {
-  const lines = text.split('\n');
-  let html = '', inTable = false, tableLines = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  const lines = text.split('\n'); let html = '', inTable = false, tableLines = [];
+  for (const line of lines) {
     if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-      if (!inTable) { inTable = true; tableLines = []; }
-      tableLines.push(line);
+      if (!inTable) { inTable = true; tableLines = []; } tableLines.push(line);
     } else {
       if (inTable) { html += renderTable(tableLines); inTable = false; tableLines = []; }
       html += escapeHtml(line) + '\n';
@@ -353,42 +331,27 @@ function addMessage(role, content, meta = {}) {
   const msgs = document.getElementById('messages');
   const div  = document.createElement('div');
   div.className = `msg ${role}`;
-
-  const avatar        = role === 'user' ? 'YOU' : 'MAX';
   const bubbleContent = role === 'assistant' ? formatReply(content) : escapeHtml(content);
-
-  let toolsHtml = '';
-  if (meta.toolCalls?.length > 0) {
-    toolsHtml = `<div class="tools-used">${meta.toolCalls.map(t =>
-      `<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>`;
-  }
-
-  let filesHtml = '';
-  if (meta.files?.length > 0) {
-    filesHtml = `<div class="attachments">${meta.files.map(f =>
-      `<span class="attachment-badge">📄 ${f}</span>`).join('')}</div>`;
-  }
-
-  let modeTag = '';
-  if (meta.model)       modeTag = `sonnet · ${meta.duration_ms}ms · $${meta.cost}`;
-  else if (meta.native) modeTag = `native · ${meta.duration_ms}ms · $0.000000`;
-
+  let toolsHtml = meta.toolCalls?.length > 0
+    ? `<div class="tools-used">${meta.toolCalls.map(t=>`<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>` : '';
+  let filesHtml = meta.files?.length > 0
+    ? `<div class="attachments">${meta.files.map(f=>`<span class="attachment-badge">📄 ${f}</span>`).join('')}</div>` : '';
+  let modeTag = meta.model ? `sonnet · ${meta.duration_ms}ms · $${meta.cost}`
+              : meta.native ? `native · ${meta.duration_ms}ms · $0.000000` : '';
   div.innerHTML = `
-    <div class="msg-avatar">${avatar}</div>
+    <div class="msg-avatar">${role==='user'?'YOU':'MAX'}</div>
     <div class="msg-body">
       <div class="msg-bubble">${bubbleContent}</div>
       ${filesHtml}${toolsHtml}
       ${modeTag ? `<div class="msg-meta">${modeTag}</div>` : ''}
     </div>`;
-
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
 function restoreMessages() {
   for (const msg of conversationHistory) {
-    const content = typeof msg.content === 'string' ? msg.content : '[file/image]';
-    addMessage(msg.role, content, {});
+    addMessage(msg.role, typeof msg.content === 'string' ? msg.content : '[file/image]', {});
   }
   document.getElementById('sessionCost').textContent = `Session cost: $${totalCost.toFixed(6)}`;
   document.getElementById('tokenCount').textContent  = `Tokens: ${totalIn} in / ${totalOut} out`;
@@ -397,27 +360,23 @@ function restoreMessages() {
 // ── File handling ─────────────────────────────────────────────────
 document.getElementById('fileInput').addEventListener('change', function(e) {
   attachedFiles = [];
-  const fileList = document.getElementById('fileList');
-  fileList.innerHTML = '';
+  const fl = document.getElementById('fileList'); fl.innerHTML = '';
   Array.from(e.target.files).forEach(file => {
     attachedFiles.push(file);
-    const item = document.createElement('div');
-    item.className = 'file-item';
+    const item = document.createElement('div'); item.className = 'file-item';
     item.innerHTML = `📄 ${file.name} <span class="remove" onclick="removeFile('${file.name}')">✕</span>`;
-    fileList.appendChild(item);
+    fl.appendChild(item);
   });
 });
 
 function removeFile(name) {
   attachedFiles = attachedFiles.filter(f => f.name !== name);
   document.getElementById('fileInput').value = '';
-  const fileList = document.getElementById('fileList');
-  fileList.innerHTML = '';
+  const fl = document.getElementById('fileList'); fl.innerHTML = '';
   attachedFiles.forEach(file => {
-    const item = document.createElement('div');
-    item.className = 'file-item';
+    const item = document.createElement('div'); item.className = 'file-item';
     item.innerHTML = `📄 ${file.name} <span class="remove" onclick="removeFile('${file.name}')">✕</span>`;
-    fileList.appendChild(item);
+    fl.appendChild(item);
   });
 }
 
@@ -432,54 +391,54 @@ async function sendMessage() {
 
   for (const file of attachedFiles) {
     fileNames.push(file.name);
+    const readAs = (method) => new Promise((res,rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result); r.onerror = () => rej(new Error('read failed'));
+      method === 'dataURL' ? r.readAsDataURL(file) : r.readAsText(file);
+    });
     if (file.type.startsWith('image/')) {
-      const base64 = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); });
-      contentParts.push({ type:'image', source:{ type:'base64', media_type:file.type, data:base64 } });
+      const b64 = (await readAs('dataURL')).split(',')[1];
+      contentParts.push({ type:'image', source:{ type:'base64', media_type:file.type, data:b64 } });
     } else if (file.type === 'application/pdf') {
-      const base64 = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); });
-      contentParts.push({ type:'document', source:{ type:'base64', media_type:'application/pdf', data:base64 } });
+      const b64 = (await readAs('dataURL')).split(',')[1];
+      contentParts.push({ type:'document', source:{ type:'base64', media_type:'application/pdf', data:b64 } });
     } else {
-      const txt = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(new Error('read failed')); r.readAsText(file); });
+      const txt = await readAs('text');
       contentParts.push({ type:'text', text:`[File: ${file.name}]\n${txt}` });
     }
   }
 
-  input.value = '';
-  input.style.height = 'auto';
+  input.value = ''; input.style.height = 'auto';
   document.getElementById('sendBtn').disabled = true;
 
   const userContent = contentParts.length > 1 ? contentParts : text;
   addMessage('user', text, { files: fileNames });
   conversationHistory.push({ role: 'user', content: userContent });
 
-  attachedFiles = [];
-  document.getElementById('fileInput').value = '';
+  attachedFiles = []; document.getElementById('fileInput').value = '';
   document.getElementById('fileList').innerHTML = '';
   document.getElementById('typingWrap').style.display = 'block';
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
   try {
-    const t0   = Date.now();
+    const t0 = Date.now();
     const resp = await fetch(`${API_BASE}/api/scorr/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages:       conversationHistory,
-        model:          claudeOn ? SONNET_MODEL : null,
-        use_tools:      true,
-        max_tokens:     claudeOn ? MAX_TOKENS : 0,
-        claude_on:      claudeOn,
+        messages: conversationHistory,
+        model: claudeOn ? SONNET_MODEL : null,
+        use_tools: true,
+        max_tokens: claudeOn ? MAX_TOKENS : 0,
+        claude_on: claudeOn,
         budget_cap_usd: BUDGET_CAP,
       })
     });
-
     const data = await resp.json();
     document.getElementById('typingWrap').style.display = 'none';
 
     if (!resp.ok) {
       addMessage('assistant', `Error: ${data.detail || JSON.stringify(data)}`);
-      document.getElementById('sendBtn').disabled = false;
-      return;
+      document.getElementById('sendBtn').disabled = false; return;
     }
 
     const reply    = data.reply || '(no response)';
@@ -487,11 +446,10 @@ async function sendMessage() {
     conversationHistory.push({ role: 'assistant', content: reply });
 
     addMessage('assistant', reply, {
-      model:       isNative ? null : data.model,
-      native:      isNative,
+      model: isNative ? null : data.model, native: isNative,
       duration_ms: Date.now() - t0,
-      cost:        data.usage?.cost_usd?.toFixed(6) || '0.000000',
-      toolCalls:   data.tool_calls || [],
+      cost: data.usage?.cost_usd?.toFixed(6) || '0.000000',
+      toolCalls: data.tool_calls || [],
     });
 
     if (!isNative) {
@@ -499,7 +457,6 @@ async function sendMessage() {
       totalIn   += data.usage?.input_tokens  || 0;
       totalOut  += data.usage?.output_tokens || 0;
     }
-
     document.getElementById('sessionCost').textContent = `Session cost: $${totalCost.toFixed(6)}`;
     document.getElementById('tokenCount').textContent  = `Tokens: ${totalIn} in / ${totalOut} out`;
     saveSession();
@@ -508,15 +465,12 @@ async function sendMessage() {
     document.getElementById('typingWrap').style.display = 'none';
     addMessage('assistant', `Network error: ${e.message}`);
   } finally {
-    document.getElementById('sendBtn').disabled = false;
-    input.focus();
+    document.getElementById('sendBtn').disabled = false; input.focus();
   }
 }
 
-// ── Keyboard ───────────────────────────────────────────────────────
 document.getElementById('userInput').addEventListener('input', function () {
-  this.style.height = 'auto';
-  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+  this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 });
 document.getElementById('userInput').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -525,25 +479,15 @@ document.getElementById('userInput').addEventListener('keydown', function (e) {
 // ── Boot ───────────────────────────────────────────────────────────
 (async () => {
   const hasHistory = loadSession();
-
-  const el    = document.getElementById('claudeToggle');
+  const el = document.getElementById('claudeToggle');
   const label = document.getElementById('toggleLabel');
   const cap   = document.getElementById('budgetCap');
   if (claudeOn) {
-    el.className    = 'claude-toggle on';
-    label.textContent = 'Claude ON';
-    cap.textContent   = '· Sonnet · $0.05 cap';
+    el.className = 'claude-toggle on'; label.textContent = 'Claude ON'; cap.textContent = '· Sonnet · $0.05 cap';
   } else {
-    el.className    = 'claude-toggle off';
-    label.textContent = 'Claude OFF';
-    cap.textContent   = '· Native only · $0';
+    el.className = 'claude-toggle off'; label.textContent = 'Claude OFF'; cap.textContent = '· Native only · $0';
   }
-
-  if (hasHistory) {
-    document.getElementById('welcome')?.remove();
-    restoreMessages();
-  }
-
+  if (hasHistory) { document.getElementById('welcome')?.remove(); restoreMessages(); }
   try {
     const r = await fetch('/api/scorr/chat/health');
     const d = await r.json();
