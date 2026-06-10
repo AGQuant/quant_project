@@ -17,14 +17,16 @@ This engine computes raw metrics + writes signals; v8_endpoints serves pure read
 
 RSI periods: Month=6, Weekly=8, Daily=14 (Wilder).
 
-day_change formula (05-Jun-2026):
+mom_2d formula (renamed from day_change 10-Jun-2026):
   EOD:  (latest_close / close_2_days_ago - 1) * 100
   Live: (cmp / close_2_days_ago - 1) * 100
-  Captures 2-day momentum. close_2_days_ago = raw_prices iloc[-3] (today not yet in EOD).
+  2-day momentum. close_2_days_ago = raw_prices iloc[-3] (today not yet in EOD).
+  NOTE: This is intentionally a 2-candle gap (T vs T-2), NOT a 1-day change.
+        Renamed from 'day_change' to 'mom_2d' to remove naming confusion.
 
 sector_week  = avg week_return  of peers in same segment (EOD, frozen at 15:45)
 sector_month = avg month_return of peers in same segment (EOD, frozen at 15:45)
-sector_day   = live avg day_change of peers — computed by v8_signal_writer every 5-min
+sector_day   = live avg mom_2d of peers — computed by v8_signal_writer every 5-min
 """
 
 import logging
@@ -60,7 +62,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     dma_50 NUMERIC, dma_200 NUMERIC, dma_20 NUMERIC,
     rsi_month NUMERIC, rsi_weekly NUMERIC, daily_rsi NUMERIC,
     month_return NUMERIC, week_return NUMERIC, year_return NUMERIC,
-    day_change NUMERIC,
+    mom_2d NUMERIC,
     sector_day NUMERIC, sector_week NUMERIC, sector_month NUMERIC,
     month_index NUMERIC, week_index_52 NUMERIC,
     range_1d NUMERIC, range_3d NUMERIC,
@@ -70,6 +72,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     UNIQUE(symbol, score_date)
 );
 ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS sector_month NUMERIC;
+ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS mom_2d NUMERIC;
 CREATE INDEX IF NOT EXISTS idx_v8_metrics_symbol_date ON v8_metrics(symbol, score_date DESC);
 
 -- v8_qualified: live signals for today — overwritten on every engine run.
@@ -82,7 +85,7 @@ CREATE TABLE IF NOT EXISTS v8_qualified (
     signal_ts TIMESTAMP DEFAULT NOW(),
     gvm_score NUMERIC,
     cmp NUMERIC,
-    day_change NUMERIC,
+    mom_2d NUMERIC,
     week_return NUMERIC,
     month_return NUMERIC,
     dma_200 NUMERIC,
@@ -99,6 +102,7 @@ CREATE TABLE IF NOT EXISTS v8_qualified (
     source TEXT DEFAULT 'eod',
     UNIQUE(symbol, basket, signal_date)
 );
+ALTER TABLE v8_qualified ADD COLUMN IF NOT EXISTS mom_2d NUMERIC;
 CREATE INDEX IF NOT EXISTS idx_v8_qual_date_basket ON v8_qualified(signal_date DESC, basket);
 CREATE INDEX IF NOT EXISTS idx_v8_qual_basket_today ON v8_qualified(basket, signal_date DESC);
 
@@ -110,7 +114,7 @@ CREATE TABLE IF NOT EXISTS v8_signal_history (
     signal_date DATE NOT NULL,
     gvm_score NUMERIC,
     cmp NUMERIC,
-    day_change NUMERIC,
+    mom_2d NUMERIC,
     week_return NUMERIC,
     month_return NUMERIC,
     dma_200 NUMERIC,
@@ -122,6 +126,7 @@ CREATE TABLE IF NOT EXISTS v8_signal_history (
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(symbol, basket, signal_date)
 );
+ALTER TABLE v8_signal_history ADD COLUMN IF NOT EXISTS mom_2d NUMERIC;
 CREATE INDEX IF NOT EXISTS idx_v8_history_basket_date ON v8_signal_history(basket, signal_date DESC);
 CREATE INDEX IF NOT EXISTS idx_v8_history_date ON v8_signal_history(signal_date DESC);
 
@@ -171,7 +176,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         "month_return": None, "week_return": None, "year_return": None,
         "sector_day": None, "sector_week": None, "sector_month": None,
         "month_index": None, "week_index_52": None, "range_1d": None,
-        "dma_20": None, "range_3d": None, "day_change": None,
+        "dma_20": None, "range_3d": None, "mom_2d": None,
         "daily_rsi": None, "upper_bb": None, "lower_bb": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
     }
@@ -215,11 +220,11 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if len(df) >= 21:  out["month_return"] = _safe_pct(latest_close, float(df["close"].iloc[-21]))
     if len(df) >= 5:   out["week_return"]  = _safe_pct(latest_close, float(df["close"].iloc[-5]))
 
-    # day_change: 2-day momentum
+    # mom_2d: 2-day momentum (latest close vs close 2 days ago — iloc[-3])
     if len(df) >= 3:
         base = float(df["close"].iloc[-3])
         if base > 0:
-            out["day_change"] = (latest_close / base - 1) * 100
+            out["mom_2d"] = (latest_close / base - 1) * 100
 
     if len(df) >= 21:
         ma9  = float(df["close"].tail(9).mean())
@@ -269,7 +274,7 @@ def store_metrics(conn, m: Dict):
             INSERT INTO v8_metrics
             (symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
              rsi_month, rsi_weekly, daily_rsi,
-             month_return, week_return, year_return, day_change,
+             month_return, week_return, year_return, mom_2d,
              sector_day, sector_week, sector_month,
              month_index, week_index_52,
              range_1d, range_3d, upper_bb, lower_bb,
@@ -277,7 +282,7 @@ def store_metrics(conn, m: Dict):
             VALUES
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
              %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
-             %(month_return)s, %(week_return)s, %(year_return)s, %(day_change)s,
+             %(month_return)s, %(week_return)s, %(year_return)s, %(mom_2d)s,
              %(sector_day)s, %(sector_week)s, %(sector_month)s,
              %(month_index)s, %(week_index_52)s,
              %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s,
@@ -286,7 +291,7 @@ def store_metrics(conn, m: Dict):
                 gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
                 rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
                 month_return=EXCLUDED.month_return, week_return=EXCLUDED.week_return,
-                year_return=EXCLUDED.year_return, day_change=EXCLUDED.day_change,
+                year_return=EXCLUDED.year_return, mom_2d=EXCLUDED.mom_2d,
                 sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
                 sector_month=EXCLUDED.sector_month,
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
@@ -351,7 +356,7 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             cmp = cmp_map.get(sym)
             metrics_snap = {k: s.get(k) for k in [
                 'gvm_score','dma_50','dma_200','dma_20','rsi_month','rsi_weekly',
-                'daily_rsi','month_return','week_return','year_return','day_change',
+                'daily_rsi','month_return','week_return','year_return','mom_2d',
                 'week_index_52','range_3d','ma9_vs_ma21','vol_ratio',
                 'sector_week','sector_month',
             ]}
@@ -360,17 +365,17 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
                     cur.execute("""
                         INSERT INTO v8_qualified
                         (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
-                         day_change, week_return, month_return, dma_200, dma_50,
+                         mom_2d, week_return, month_return, dma_200, dma_50,
                          rsi_month, rsi_weekly, sector_week, sector_day, month_index,
                          week_index_52, daily_rsi, range_3d, metrics, source)
                         VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
                             signal_ts=NOW(), gvm_score=EXCLUDED.gvm_score, cmp=EXCLUDED.cmp,
-                            day_change=EXCLUDED.day_change, metrics=EXCLUDED.metrics,
+                            mom_2d=EXCLUDED.mom_2d, metrics=EXCLUDED.metrics,
                             source=EXCLUDED.source
                     """, (
                         sym, basket, target_date, s.get('gvm_score'), cmp,
-                        s.get('day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('mom_2d'), s.get('week_return'), s.get('month_return'),
                         s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
                         s.get('sector_week'), s.get('sector_day'), s.get('month_index'),
                         s.get('week_index_52'), s.get('daily_rsi'), s.get('range_3d'),
@@ -385,13 +390,13 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
                     cur.execute("""
                         INSERT INTO v8_signal_history
                         (symbol, basket, signal_date, gvm_score, cmp,
-                         day_change, week_return, month_return,
+                         mom_2d, week_return, month_return,
                          dma_200, dma_50, rsi_month, rsi_weekly, metrics, source)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date, s.get('gvm_score'), cmp,
-                        s.get('day_change'), s.get('week_return'), s.get('month_return'),
+                        s.get('mom_2d'), s.get('week_return'), s.get('month_return'),
                         s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
                         json.dumps(metrics_snap), source
                     ))
