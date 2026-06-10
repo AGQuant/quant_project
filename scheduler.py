@@ -34,6 +34,14 @@ v8_live.py archived — v8_history_cache no longer built or used.
   _scheduler SUPERVISES _live_loop: if the task ever dies/completes, it is relaunched.
   Root cause fixed: previously a redeploy or unhandled error could silently kill the
   live loop, stopping all 5-min writes for the rest of the session with no recovery.
+10-Jun-2026 CANCELLATION FIX: Railway redeploy sends CancelledError to all tasks.
+  CancelledError is NOT caught by `except Exception` — it propagated through
+  `await asyncio.sleep()` and silently killed both _live_loop and _scheduler.
+  Fix 1: _live_loop sleep wrapped in try/except CancelledError → clean return so
+          supervisor immediately sees task.done() and relaunches.
+  Fix 2: _scheduler sleep wrapped in try/except CancelledError → checks and relaunches
+          _live_loop immediately on cancel rather than waiting up to 300s.
+  Fix 3: _scheduler supervisor interval reduced 300s → 60s for faster death detection.
 """
 
 import os
@@ -238,7 +246,7 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ─────────────────────────────────────────────────────────────
+# ── State flags ────────────────────────────────────────────────────────────────
 _raw_prices_updated_today:  Optional[date] = None
 _earnings_loaded_today:     Optional[date] = None
 _yahoo_daily_running:       bool           = False
@@ -265,7 +273,7 @@ _pcr_intraday_running:      bool           = False
 _live_loop_task: Optional[asyncio.Task] = None
 
 
-# ── Background tasks ──────────────────────────────────────────────────────────
+# ── Background tasks ───────────────────────────────────────────────────────────
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -594,7 +602,7 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ─────────────────────────────────────────────────────────────────────
+# ── Loops ──────────────────────────────────────────────────────────────────────
 
 async def _scheduler():
     global _live_loop_task
@@ -605,8 +613,8 @@ async def _scheduler():
             now = _ist_now(); trading_day = is_trading_day(now.date())
 
             # SUPERVISOR: if the live loop task ever died/completed, relaunch it.
-            # This is the recovery path for the 08-Jun stall (loop silently dead
-            # after a redeploy/error → all 5-min writes stop with no self-heal).
+            # 10-Jun fix: CancelledError causes _live_loop to return cleanly →
+            # task.done() is True immediately → supervisor relaunches within 60s.
             if _live_loop_task is None or _live_loop_task.done():
                 if _live_loop_task is not None:
                     exc = None
@@ -636,7 +644,16 @@ async def _scheduler():
             _set_heartbeat("sched_loop_hb")
         except Exception as e:
             log.error(f"Scheduler error: {e}")
-        await asyncio.sleep(300)
+        # 10-Jun fix: reduced 300→60s so supervisor detects _live_loop death within 60s.
+        # CancelledError wrapped so Railway redeploy doesn't kill the scheduler itself.
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            log.warning("scheduler sleep cancelled — checking live_loop before exit")
+            if _live_loop_task is None or _live_loop_task.done():
+                _live_loop_task = asyncio.create_task(_live_loop())
+                _set_heartbeat("sched_live_loop_relaunched")
+            return
 
 
 async def _live_loop():
@@ -652,6 +669,13 @@ async def _live_loop():
     and the loop CONTINUES. tick_count is derived from wall-clock IST minutes (not a
     fragile in-memory counter) so a 5-min boundary is hit deterministically even if a
     prior tick was skipped. A liveness heartbeat is written every iteration.
+
+    10-Jun-2026 CANCELLATION FIX: asyncio.CancelledError (raised by Railway on
+    redeploy) is NOT caught by `except Exception`. Previously it propagated through
+    `await asyncio.sleep(60)` and killed the while-True loop silently, stopping all
+    5-min writes for the rest of the session. Fix: wrap the sleep in
+    try/except CancelledError → clean return → supervisor sees task.done() and
+    relaunches immediately (within 60s supervisor interval).
     """
     log.info("Live loop started — engines: v8_signal_writer + V10 ST+EMA every 5-min (self-healing)")
     while True:
@@ -674,7 +698,12 @@ async def _live_loop():
         except Exception as e:
             # NEVER let an exception kill the loop — log and continue next tick.
             log.error(f"live loop error (continuing): {e}")
-        await asyncio.sleep(60)
+        # 10-Jun fix: CancelledError wrapped — clean return so supervisor relaunches.
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            log.warning("live_loop sleep cancelled — exiting cleanly for supervisor relaunch")
+            return
 
 
 _BG_TASKS: set = set()
