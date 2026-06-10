@@ -19,14 +19,15 @@ Architecture (v6 — 5-MIN SYSTEM, equity + futures + options on single WS):
   7. MONTHLY ROLL - on expiry day (last Tuesday): rebuild futures + option symbol lists.
   8. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
 
-v6 (10-Jun-2026):
-  * OPTION SYMBOL MASTER: option ladders are now built from the Fyers public
-    NSE_FO symbol master (actually-listed strikes), NOT step-guessing.
-    Fixes ~430 invalid WS subscriptions (BHARTIARTL step 5 vs NSE 20,
-    SBIN/AXISBANK 5 vs 10, stale-CMP phantom ladders). Step logic kept as
-    fallback if master download fails.
-  * INDEX/ETF LTP: added NIFTY500, GOLDBEES, SILVERBEES to the 30s quotes poll
-    (cmp_prices + 5-min bars).
+v6.1 (10-Jun-2026):
+  * CRITICAL DEADLOCK FIX: flush_all() holds agg.lock while _flush → _compute_basis
+    tried to re-acquire it for the last_oi fallback. threading.Lock is NOT
+    re-entrant → housekeeping thread froze on the first futures bar flush and
+    every WS tick then blocked on the same lock (feed frozen 13:54 IST).
+    Fix: agg.lock is now an RLock AND _compute_basis reads last_oi without
+    locking (CPython dict .get is GIL-atomic).
+  * OPTION SYMBOL MASTER: ladders from Fyers NSE_FO master (actually-listed strikes).
+  * INDEX/ETF LTP: NIFTY500, GOLDBEES, SILVERBEES in the 30s quotes poll.
   * OI POLL DEBUG: start/first-response logging + dict/list response handling.
 
 5-MIN SYSTEM (canonical spec session_log id=167):
@@ -538,7 +539,9 @@ class BarAggregator:
         self.bars     = {}
         self.last_ltp = {}
         self.last_oi  = {}   # symbol -> latest OI from depth REST poll (futures)
-        self.lock     = threading.Lock()
+        # RLock (re-entrant): flush_all holds it while _flush → _compute_basis
+        # runs; a plain Lock here deadlocked the whole feed (v6.1 fix).
+        self.lock     = threading.RLock()
 
     def _bucket(self, ts):
         # 5-min bucket: round down to nearest 5-min boundary
@@ -589,11 +592,11 @@ class BarAggregator:
     def _compute_basis(self, sym, ts, fut_close, oi=None):
         """On futures bar flush: store basis + OI + OI change vs prior bar."""
         try:
-            # If the bar carried no OI (tick arrived before first poll), fall back
-            # to the latest polled OI for this symbol.
+            # Fallback: bar carried no OI (tick pre-dated first poll) — read the
+            # latest polled value. NO LOCK here: caller may already hold agg.lock
+            # (flush_all path) and CPython dict .get is GIL-atomic anyway.
             if oi is None:
-                with self.lock:
-                    oi = self.last_oi.get(sym)
+                oi = self.last_oi.get(sym)
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT close FROM intraday_prices
@@ -659,7 +662,7 @@ class OptionBarStore:
         self.conn    = conn
         self.opt_mgr = opt_mgr
         self.bars    = {}
-        self.lock    = threading.Lock()
+        self.lock    = threading.RLock()
 
     def _bucket(self, ts):
         # 5-min bucket
@@ -803,8 +806,7 @@ def poll_futures_oi(token, fut_syms, agg):
                 if oi is None:
                     continue
                 nse = from_fyers_symbol(fsym)
-                with agg.lock:
-                    agg.last_oi[nse] = int(oi)
+                agg.last_oi[nse] = int(oi)   # GIL-atomic dict write; no lock needed
                 got += 1
             except Exception as e:
                 log.warning(f"poll_futures_oi {fsym}: {e}")
