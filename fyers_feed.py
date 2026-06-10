@@ -3,7 +3,7 @@ Fyers Live Feed - Scorr V8
 ============================
 Standalone Railway WORKER (not in FastAPI). The live intraday source.
 
-Architecture (v5 — 5-MIN SYSTEM, equity + futures + options on single WS):
+Architecture (v6 — 5-MIN SYSTEM, equity + futures + options on single WS):
   1. BACKFILL  - on boot, one-time 7-day history for ALL equity symbols (skip-if-fresh, async).
   2. LIVE WS   - single persistent WebSocket, up to 5000 symbols (Fyers v3 limit).
                  * 211 equity  (NSE:SYMBOL-EQ)   → source='fyers_eq', timeframe='5m'
@@ -18,6 +18,15 @@ Architecture (v5 — 5-MIN SYSTEM, equity + futures + options on single WS):
                  re-subscribe if drifted ±2 strikes.
   7. MONTHLY ROLL - on expiry day (last Tuesday): rebuild futures + option symbol lists.
   8. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
+
+v6 (10-Jun-2026):
+  * OPTION SYMBOL MASTER: option ladders are now built from the Fyers public
+    NSE_FO symbol master (actually-listed strikes), NOT step-guessing.
+    Fixes ~430 invalid WS subscriptions (BHARTIARTL step 5 vs NSE 20,
+    SBIN/AXISBANK 5 vs 10, stale-CMP phantom ladders). Step logic kept as
+    fallback if master download fails.
+  * INDEX/ETF LTP: added NIFTY500, GOLDBEES, SILVERBEES to the 30s quotes poll
+    (cmp_prices + 5-min bars).
 
 5-MIN SYSTEM (canonical spec session_log id=167):
   All rolling intraday feeds store at 5-min granularity. NOT a flash/1-min system.
@@ -38,7 +47,7 @@ USAGE:
   Manual override:     python fyers_feed.py --auth-code <code>
 """
 
-import argparse, calendar, hashlib, os, time, logging, threading, re
+import argparse, bisect, calendar, hashlib, os, time, logging, threading, re
 from datetime import datetime, timedelta, time as dt_time, date
 import pytz, psycopg2, requests
 
@@ -47,19 +56,23 @@ FYERS_SECRET    = os.environ.get('FYERS_SECRET',    '')
 FYERS_PIN       = os.environ.get('FYERS_PIN',       '')
 DATABASE_URL    = os.environ.get('DATABASE_URL')
 
-AUTHCODE_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode'
-QUOTES_URL   = 'https://api-t1.fyers.in/data/quotes'
-DEPTH_URL    = 'https://api-t1.fyers.in/data/depth'
-IST          = pytz.timezone('Asia/Kolkata')
+AUTHCODE_URL      = 'https://api-t1.fyers.in/api/v3/validate-authcode'
+QUOTES_URL        = 'https://api-t1.fyers.in/data/quotes'
+DEPTH_URL         = 'https://api-t1.fyers.in/data/depth'
+OPTION_MASTER_URL = 'https://public.fyers.in/sym_details/NSE_FO.csv'
+IST               = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS = 7
 MARKET_OPEN    = dt_time(9, 15)
 MARKET_CLOSE   = dt_time(15, 30)
 
 INDEX_LTP_SYMBOLS = {
-    'NIFTY50':   'NSE:NIFTY50-INDEX',
-    'BANKNIFTY': 'NSE:NIFTYBANK-INDEX',
-    'INDIAVIX':  'NSE:INDIAVIX-INDEX',
+    'NIFTY50':    'NSE:NIFTY50-INDEX',
+    'BANKNIFTY':  'NSE:NIFTYBANK-INDEX',
+    'INDIAVIX':   'NSE:INDIAVIX-INDEX',
+    'NIFTY500':   'NSE:NIFTY500-INDEX',
+    'GOLDBEES':   'NSE:GOLDBEES-EQ',
+    'SILVERBEES': 'NSE:SILVERBEES-EQ',
 }
 
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
@@ -76,7 +89,7 @@ OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
 NIFTY_STEP   = 50
 BNIFTY_STEP  = 100
-STOCK_STEPS  = {               # override steps for known stocks; fallback = auto
+STOCK_STEPS  = {               # FALLBACK only (master-driven ladder is primary)
     'RELIANCE': 20, 'TCS': 50, 'HDFCBANK': 10, 'INFY': 10, 'ICICIBANK': 10,
     'HDFC': 10, 'SBIN': 5, 'BHARTIARTL': 5, 'KOTAKBANK': 20, 'LT': 20,
     'AXISBANK': 5, 'WIPRO': 5, 'MARUTI': 100, 'BAJFINANCE': 50, 'TITAN': 20,
@@ -163,11 +176,12 @@ def futures_fyers_symbol(nse_code: str, expiry: date = None) -> str:
     return f"NSE:{nse_code}{expiry.strftime('%y')}{expiry.strftime('%b').upper()}FUT"
 
 
-def option_fyers_symbol(underlying: str, strike: int, opt_type: str, expiry: date = None) -> str:
+def option_fyers_symbol(underlying: str, strike, opt_type: str, expiry: date = None) -> str:
     """Build Fyers option symbol e.g. NSE:NIFTY26JUN24000CE"""
     if expiry is None:
         expiry = current_expiry()
-    return f"NSE:{underlying}{expiry.strftime('%y')}{expiry.strftime('%b').upper()}{strike}{opt_type}"
+    strike_str = str(int(strike)) if float(strike) == int(strike) else str(strike)
+    return f"NSE:{underlying}{expiry.strftime('%y')}{expiry.strftime('%b').upper()}{strike_str}{opt_type}"
 
 
 def atm_strike(cmp: float, step: int) -> int:
@@ -175,13 +189,76 @@ def atm_strike(cmp: float, step: int) -> int:
 
 
 def auto_step(cmp: float) -> int:
-    """Derive option strike step from CMP when not in STOCK_STEPS."""
+    """Derive option strike step from CMP when not in STOCK_STEPS (fallback only)."""
     if cmp < 100:   return 5
     if cmp < 500:   return 10
     if cmp < 1000:  return 20
     if cmp < 3000:  return 50
     if cmp < 10000: return 100
     return 200
+
+
+# ── option symbol master (Fyers NSE_FO CSV — actually-listed contracts) ───────────
+
+class OptionMaster:
+    """
+    Loads the Fyers public NSE_FO symbol master and exposes:
+      * valid_symbols  — set of every listed NSE F&O ticker
+      * atm_window()   — the actual listed strikes around CMP for an underlying/expiry
+    Built at boot + reloaded on monthly roll. If download/parse fails,
+    loaded=False and callers fall back to step-guessing (pre-v6 behaviour).
+    CSV columns (no header, community-documented):
+      8=expiry epoch, 9=symbol ticker, 13=underlying, 15=strike, 16=option type.
+    """
+    def __init__(self):
+        self.valid_symbols = set()
+        self.strikes       = {}     # (underlying, expiry_date, opt_type) -> sorted [strike]
+        self.loaded        = False
+
+    def load(self):
+        self.valid_symbols, self.strikes, self.loaded = set(), {}, False
+        try:
+            r = requests.get(OPTION_MASTER_URL, timeout=30)
+            r.raise_for_status()
+            rows = 0
+            for line in r.text.splitlines():
+                parts = line.split(',')
+                if len(parts) < 17:
+                    continue
+                ticker = parts[9].strip()
+                if not ticker.startswith('NSE:'):
+                    continue
+                self.valid_symbols.add(ticker)
+                otype = parts[16].strip().upper()
+                if otype in ('CE', 'PE'):
+                    try:
+                        strike = float(parts[15])
+                        und    = parts[13].strip().upper()
+                        exp    = datetime.fromtimestamp(int(float(parts[8])), IST).date()
+                        self.strikes.setdefault((und, exp, otype), []).append(strike)
+                    except Exception:
+                        continue
+                rows += 1
+            for k in self.strikes:
+                self.strikes[k] = sorted(set(self.strikes[k]))
+            self.loaded = rows > 1000   # sanity: a real master has thousands of rows
+            log.info(f"Option master: {rows} contracts, {len(self.strikes)} strike chains, loaded={self.loaded}")
+        except Exception as e:
+            log.warning(f"Option master load FAILED ({e}) — falling back to step-guessing")
+            self.loaded = False
+
+    def atm_window(self, underlying, expiry, opt_type, cmp, n=N_STRIKES):
+        """Up to 2n+1 ACTUAL listed strikes centered on CMP. None if chain unknown."""
+        chain = self.strikes.get((underlying.upper(), expiry, opt_type))
+        if not chain:
+            return None
+        i  = bisect.bisect_left(chain, cmp)
+        lo = max(0, i - n)
+        hi = min(len(chain), i + n + 1)
+        return chain[lo:hi]
+
+    def is_valid(self, ticker):
+        return (not self.loaded) or (ticker in self.valid_symbols)
 
 
 # ── DB / token ─────────────────────────────────────────────────────────────────────
@@ -310,10 +387,13 @@ class OptionSymbolManager:
     """
     Manages option symbol subscriptions.
     Tracks current ATM per underlying, rebuilds on drift or monthly roll.
+    v6: strike ladders come from the Fyers symbol master (actually-listed strikes);
+    step-guessing remains only as a fallback when the master fails to load.
     """
-    def __init__(self, conn, token=None):
+    def __init__(self, conn, token=None, master: 'OptionMaster' = None):
         self.conn         = conn
         self.token        = token
+        self.master       = master
         self.lock         = threading.Lock()
         self.expiry       = current_expiry()
         self.atm_map      = {}   # underlying -> current ATM strike
@@ -340,7 +420,6 @@ class OptionSymbolManager:
         except Exception:
             pass
         # 2) cold-boot fallback: pull live CMP straight from Fyers quotes API
-        #    (cmp_prices empty on a fresh boot would otherwise skip ALL options)
         if not self.token:
             return None
         try:
@@ -359,6 +438,30 @@ class OptionSymbolManager:
             log.warning(f"_get_cmp Fyers fallback {cmp_sym}: {e}")
         return None
 
+    def _ladder(self, u, cmp):
+        """
+        Returns list of (strike, opt_type) for ATM±N.
+        Primary: actual listed strikes from the symbol master.
+        Fallback: step-based generation (pre-v6).
+        """
+        pairs = []
+        if self.master and self.master.loaded:
+            ce = self.master.atm_window(u['name'], self.expiry, 'CE', cmp)
+            pe = self.master.atm_window(u['name'], self.expiry, 'PE', cmp)
+            if ce or pe:
+                for s in (ce or []): pairs.append((s, 'CE'))
+                for s in (pe or []): pairs.append((s, 'PE'))
+                return pairs
+            log.warning(f"_ladder: no master chain for {u['name']} {self.expiry} — step fallback")
+        step = u['step'] or auto_step(cmp)
+        atm  = atm_strike(cmp, step)
+        for i in range(-N_STRIKES, N_STRIKES + 1):
+            strike = atm + i * step
+            if strike <= 0: continue
+            pairs.append((strike, 'CE'))
+            pairs.append((strike, 'PE'))
+        return pairs
+
     def build_initial(self):
         """Returns list of Fyers option symbols to subscribe."""
         self._build_underlyings()
@@ -373,16 +476,15 @@ class OptionSymbolManager:
                     log.warning(f"No CMP for {u['cmp_sym']} — skipping options")
                     continue
                 step = u['step'] or auto_step(cmp)
-                atm  = atm_strike(cmp, step)
-                self.atm_map[u['name']] = atm
-                for i in range(-N_STRIKES, N_STRIKES + 1):
-                    strike = atm + i * step
-                    if strike <= 0: continue
-                    for otype in ('CE', 'PE'):
-                        fsym = option_fyers_symbol(u['name'], strike, otype, self.expiry)
-                        self.sym_map[fsym] = (u['name'], strike, otype, self.expiry)
-                        symbols.append(fsym)
-        log.info(f"OptionSymbolManager: built {len(symbols)} option symbols")
+                self.atm_map[u['name']] = atm_strike(cmp, step)
+                for strike, otype in self._ladder(u, cmp):
+                    fsym = option_fyers_symbol(u['name'], strike, otype, self.expiry)
+                    if self.master and not self.master.is_valid(fsym):
+                        continue
+                    self.sym_map[fsym] = (u['name'], strike, otype, self.expiry)
+                    symbols.append(fsym)
+        log.info(f"OptionSymbolManager: built {len(symbols)} option symbols "
+                 f"({'master' if self.master and self.master.loaded else 'step-fallback'})")
         return symbols
 
     def check_atm_drift(self):
@@ -403,13 +505,12 @@ class OptionSymbolManager:
                 for s in old_syms:
                     del self.sym_map[s]; remove.append(s)
                 self.atm_map[u['name']] = new_atm
-                for i in range(-N_STRIKES, N_STRIKES + 1):
-                    strike = new_atm + i * step
-                    if strike <= 0: continue
-                    for otype in ('CE', 'PE'):
-                        fsym = option_fyers_symbol(u['name'], strike, otype, self.expiry)
-                        self.sym_map[fsym] = (u['name'], strike, otype, self.expiry)
-                        add.append(fsym)
+                for strike, otype in self._ladder(u, cmp):
+                    fsym = option_fyers_symbol(u['name'], strike, otype, self.expiry)
+                    if self.master and not self.master.is_valid(fsym):
+                        continue
+                    self.sym_map[fsym] = (u['name'], strike, otype, self.expiry)
+                    add.append(fsym)
         return add, remove
 
     def check_monthly_roll(self):
@@ -418,6 +519,8 @@ class OptionSymbolManager:
         if new_expiry != self.expiry:
             log.info(f"Monthly roll: {self.expiry} → {new_expiry}")
             self.expiry = new_expiry
+            if self.master:
+                self.master.load()   # refresh listed contracts for the new series
             return True
         return False
 
@@ -753,7 +856,10 @@ def run(auth_code=None):
     equity_fyers_syms  = [fyers_eq_symbol(s) for s in symbols]
     futures_fyers_syms = [futures_fyers_symbol(s, expiry) for s in symbols]
 
-    opt_mgr     = OptionSymbolManager(conn, token=token)
+    master = OptionMaster()
+    master.load()
+
+    opt_mgr     = OptionSymbolManager(conn, token=token, master=master)
     option_syms = opt_mgr.build_initial()
 
     all_syms    = equity_fyers_syms + futures_fyers_syms + option_syms
