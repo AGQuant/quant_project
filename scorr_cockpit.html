@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scorr Max · CIO</title>
+<title>CIO Assistant Max</title>
 <style>
   :root {
     --bg: #fafbfc;
@@ -142,6 +142,8 @@
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn.secondary { background: var(--surface2); color: var(--accent); border: 1px solid var(--border); box-shadow: none; }
   .btn.secondary:hover { background: var(--accent-light); box-shadow: none; }
+  .btn.stop { background: var(--red); display: none; }
+  .btn.stop:hover { background: #b71c1c; }
 
   #fileInput { display: none; }
   .file-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
@@ -166,7 +168,7 @@
   <div class="header">
     <div class="header-left">
       <div class="status-dot" id="statusDot"></div>
-      <div class="logo"><span class="brand">SCORR</span> · MAX</div>
+      <div class="logo">CIO Assistant <span class="brand">MAX</span></div>
     </div>
     <div class="header-right">
       <div class="claude-toggle on" id="claudeToggle" onclick="toggleClaude()" title="Toggle Claude API interpretation">
@@ -189,9 +191,9 @@
   <div class="messages" id="messages">
     <div class="welcome" id="welcome">
       <div class="welcome-logo">MAX</div>
-      <div class="welcome-sub">Scorr Max · Your AI Chief Investment Officer</div>
+      <div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div>
       <div class="welcome-desc">
-        Full Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch<br>
+        Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br>
         <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
       </div>
     </div>
@@ -219,8 +221,9 @@
       <input type="file" id="fileInput" multiple accept=".pdf,.csv,.json,.txt,.xlsx,.png,.jpg,.jpeg,.gif" />
       <button class="btn secondary" onclick="document.getElementById('fileInput').click();" title="Attach file">📎 Attach</button>
       <div class="input-wrap">
-        <textarea id="userInput" placeholder="Ask Max anything — paste URLs, upload files, analyze trades... Enter to send" rows="1"></textarea>
+        <textarea id="userInput" placeholder="Ask Max anything — paste images (Ctrl+V), URLs, analyze trades... Enter to send" rows="1"></textarea>
       </div>
+      <button class="btn stop" id="stopBtn" onclick="stopQuery()">■ Stop</button>
       <button class="btn" id="sendBtn" onclick="sendMessage()">Send</button>
     </div>
   </div>
@@ -232,7 +235,7 @@ const API_BASE    = '';
 const SONNET_MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS  = 3000;
 const BUDGET_CAP  = 0.05;
-const STORAGE_KEY = 'scorr_max_v5';  // bumped = clears stale localStorage from older versions
+const STORAGE_KEY = 'scorr_max_v6';  // v6: CIO Assistant Max rename + paste + stop
 
 let claudeOn = true;
 let conversationHistory = [];
@@ -240,6 +243,7 @@ let totalCost = 0;
 let totalIn   = 0;
 let totalOut  = 0;
 let attachedFiles = [];
+let currentController = null;  // AbortController for STOP button
 
 // ── localStorage persistence ───────────────────────────────────────
 function saveSession() {
@@ -266,24 +270,14 @@ function loadSession() {
   } catch(e) { return false; }
 }
 
-function clearSession() {
-  conversationHistory = []; totalCost = totalIn = totalOut = 0;
-  localStorage.removeItem(STORAGE_KEY);
-  document.getElementById('sessionCost').textContent = 'Session cost: $0.000000';
-  document.getElementById('tokenCount').textContent  = 'Tokens: 0 in / 0 out';
-  document.getElementById('messages').innerHTML = `
-    <div class="welcome" id="welcome">
-      <div class="welcome-logo">MAX</div>
-      <div class="welcome-sub">Scorr Max · Your AI Chief Investment Officer</div>
-      <div class="welcome-desc">Full Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch<br>
-        <span style="color:var(--green);font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
-      </div>
-    </div>`;
-}
-
 // ── Claude toggle ──────────────────────────────────────────────────
 function toggleClaude() {
   claudeOn = !claudeOn;
+  applyToggleUI();
+  saveSession();
+}
+
+function applyToggleUI() {
   const el = document.getElementById('claudeToggle');
   const label = document.getElementById('toggleLabel');
   const cap   = document.getElementById('budgetCap');
@@ -292,7 +286,19 @@ function toggleClaude() {
   } else {
     el.className = 'claude-toggle off'; label.textContent = 'Claude OFF'; cap.textContent = '· Native only · $0';
   }
-  saveSession();
+}
+
+// ── STOP button ────────────────────────────────────────────────────
+function stopQuery() {
+  if (currentController) {
+    currentController.abort();
+    currentController = null;
+  }
+  document.getElementById('typingWrap').style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'none';
+  document.getElementById('sendBtn').style.display = '';
+  document.getElementById('sendBtn').disabled = false;
+  addMessage('assistant', '⏹ Stopped by user.', { native: true, duration_ms: 0, cost: '0.000000' });
 }
 
 // ── UI helpers ─────────────────────────────────────────────────────
@@ -358,20 +364,7 @@ function restoreMessages() {
 }
 
 // ── File handling ─────────────────────────────────────────────────
-document.getElementById('fileInput').addEventListener('change', function(e) {
-  attachedFiles = [];
-  const fl = document.getElementById('fileList'); fl.innerHTML = '';
-  Array.from(e.target.files).forEach(file => {
-    attachedFiles.push(file);
-    const item = document.createElement('div'); item.className = 'file-item';
-    item.innerHTML = `📄 ${file.name} <span class="remove" onclick="removeFile('${file.name}')">✕</span>`;
-    fl.appendChild(item);
-  });
-});
-
-function removeFile(name) {
-  attachedFiles = attachedFiles.filter(f => f.name !== name);
-  document.getElementById('fileInput').value = '';
+function renderFileList() {
   const fl = document.getElementById('fileList'); fl.innerHTML = '';
   attachedFiles.forEach(file => {
     const item = document.createElement('div'); item.className = 'file-item';
@@ -379,6 +372,33 @@ function removeFile(name) {
     fl.appendChild(item);
   });
 }
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  attachedFiles = Array.from(e.target.files);
+  renderFileList();
+});
+
+function removeFile(name) {
+  attachedFiles = attachedFiles.filter(f => f.name !== name);
+  document.getElementById('fileInput').value = '';
+  renderFileList();
+}
+
+// ── Clipboard image paste (Ctrl+V) ────────────────────────────────
+document.getElementById('userInput').addEventListener('paste', function(e) {
+  const items = (e.clipboardData || window.clipboardData).items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      const ext  = item.type.split('/')[1] || 'png';
+      const file = new File([blob], `pasted_${Date.now()}.${ext}`, { type: item.type });
+      attachedFiles.push(file);
+      renderFileList();
+    }
+  }
+});
 
 // ── Send ───────────────────────────────────────────────────────────
 async function sendMessage() {
@@ -409,10 +429,11 @@ async function sendMessage() {
   }
 
   input.value = ''; input.style.height = 'auto';
-  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('sendBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = '';
 
   const userContent = contentParts.length > 1 ? contentParts : text;
-  addMessage('user', text, { files: fileNames });
+  addMessage('user', text || '[image]', { files: fileNames });
   conversationHistory.push({ role: 'user', content: userContent });
 
   attachedFiles = []; document.getElementById('fileInput').value = '';
@@ -420,10 +441,13 @@ async function sendMessage() {
   document.getElementById('typingWrap').style.display = 'block';
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
+  currentController = new AbortController();
+
   try {
     const t0 = Date.now();
     const resp = await fetch(`${API_BASE}/api/scorr/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      signal: currentController.signal,
       body: JSON.stringify({
         messages: conversationHistory,
         model: claudeOn ? SONNET_MODEL : null,
@@ -438,7 +462,7 @@ async function sendMessage() {
 
     if (!resp.ok) {
       addMessage('assistant', `Error: ${data.detail || JSON.stringify(data)}`);
-      document.getElementById('sendBtn').disabled = false; return;
+      return;
     }
 
     const reply    = data.reply || '(no response)';
@@ -463,9 +487,15 @@ async function sendMessage() {
 
   } catch (e) {
     document.getElementById('typingWrap').style.display = 'none';
-    addMessage('assistant', `Network error: ${e.message}`);
+    if (e.name !== 'AbortError') {
+      addMessage('assistant', `Network error: ${e.message}`);
+    }
   } finally {
-    document.getElementById('sendBtn').disabled = false; input.focus();
+    currentController = null;
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('sendBtn').style.display = '';
+    document.getElementById('sendBtn').disabled = false;
+    input.focus();
   }
 }
 
@@ -479,14 +509,7 @@ document.getElementById('userInput').addEventListener('keydown', function (e) {
 // ── Boot ───────────────────────────────────────────────────────────
 (async () => {
   const hasHistory = loadSession();
-  const el = document.getElementById('claudeToggle');
-  const label = document.getElementById('toggleLabel');
-  const cap   = document.getElementById('budgetCap');
-  if (claudeOn) {
-    el.className = 'claude-toggle on'; label.textContent = 'Claude ON'; cap.textContent = '· Sonnet · $0.05 cap';
-  } else {
-    el.className = 'claude-toggle off'; label.textContent = 'Claude OFF'; cap.textContent = '· Native only · $0';
-  }
+  applyToggleUI();
   if (hasHistory) { document.getElementById('welcome')?.remove(); restoreMessages(); }
   try {
     const r = await fetch('/api/scorr/chat/health');
