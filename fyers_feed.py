@@ -10,7 +10,8 @@ Architecture (v5 — 5-MIN SYSTEM, equity + futures + options on single WS):
                  * 209 futures (NSE:SYMBOLMNTHFUT) → source='fyers_fut', timeframe='5m'
                  * ~1040 options (top-50 mcap + NIFTY + BANKNIFTY, ATM±10 CE+PE)
                    → stored in option_chain table, 5-min bars
-  3. OI POLL   - futures OI via quotes REST every OI_POLL_MINS (WS does NOT carry OI).
+  3. OI POLL   - futures OI via DEPTH REST every OI_POLL_MINS
+                 (quotes API has NO OI — Fyers KB confirmed; depth is the only source).
   4. HEAL GAP  - daily at 18:00 IST: checks equity symbols, fills missing bars.
   5. CMP FLUSH - every 30s during market hours → cmp_prices (IST timestamp).
   6. ATM ROLL  - every 15 min during market hours: recheck ATM per option symbol,
@@ -48,6 +49,7 @@ DATABASE_URL    = os.environ.get('DATABASE_URL')
 
 AUTHCODE_URL = 'https://api-t1.fyers.in/api/v3/validate-authcode'
 QUOTES_URL   = 'https://api-t1.fyers.in/data/quotes'
+DEPTH_URL    = 'https://api-t1.fyers.in/data/depth'
 IST          = pytz.timezone('Asia/Kolkata')
 
 RETENTION_DAYS = 7
@@ -63,13 +65,14 @@ INDEX_LTP_SYMBOLS = {
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
-# ── Option chain config ──────────────────────────────────────────────────────────────────────
+# ── Option chain config ────────────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
 N_STRIKES             = 10     # ATM ± 10
 BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
-OI_POLL_MINS          = 5      # poll futures OI via quotes REST every N min (WS has no OI)
+OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quotes has NO OI)
+OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
 NIFTY_STEP   = 50
 BNIFTY_STEP  = 100
@@ -126,7 +129,7 @@ log = logging.getLogger('fyers_feed')
 
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────────────────────
+# ── helpers ────────────────────────────────────────────────────────────────────────
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -181,7 +184,7 @@ def auto_step(cmp: float) -> int:
     return 200
 
 
-# ── DB / token ─────────────────────────────────────────────────────────────────────────────────
+# ── DB / token ─────────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
     with conn.cursor() as cur:
@@ -262,7 +265,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ── universe ───────────────────────────────────────────────────────────────────────────────────
+# ── universe ───────────────────────────────────────────────────────────────────────
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -301,7 +304,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ───────────────────────────────────────────────────────────────────────
+# ── option symbol manager ──────────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
@@ -423,14 +426,14 @@ class OptionSymbolManager:
             return self.sym_map.get(fsym)
 
 
-# ── bar aggregator ─────────────────────────────────────────────────────────────────────────────
+# ── bar aggregator ─────────────────────────────────────────────────────────────────
 
 class BarAggregator:
     def __init__(self, conn):
         self.conn     = conn
         self.bars     = {}
         self.last_ltp = {}
-        self.last_oi  = {}   # symbol -> latest OI from quotes REST poll (futures)
+        self.last_oi  = {}   # symbol -> latest OI from depth REST poll (futures)
         self.lock     = threading.Lock()
 
     def _bucket(self, ts):
@@ -482,6 +485,11 @@ class BarAggregator:
     def _compute_basis(self, sym, ts, fut_close, oi=None):
         """On futures bar flush: store basis + OI + OI change vs prior bar."""
         try:
+            # If the bar carried no OI (tick arrived before first poll), fall back
+            # to the latest polled OI for this symbol.
+            if oi is None:
+                with self.lock:
+                    oi = self.last_oi.get(sym)
             with self.conn.cursor() as cur:
                 cur.execute("""
                     SELECT close FROM intraday_prices
@@ -539,7 +547,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ─────────────────────────────────────────────────────────────────────────────
+# ── option bar store ───────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 5-min option ticks into option_chain."""
@@ -596,7 +604,7 @@ class OptionBarStore:
                 self._flush(fsym, bar)
 
 
-# ── index LTP ──────────────────────────────────────────────────────────────────────────────────
+# ── index LTP ──────────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -623,7 +631,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ──────────────────────────────────────────────────────────────────────────────────────
+# ── purge ──────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
@@ -652,41 +660,56 @@ def ensure_schemas(conn):
     log.info("Schemas ready (option_chain, futures_basis)")
 
 
-# ── futures OI poll (quotes REST) ────────────────────────────────────────────────
+# ── futures OI poll (DEPTH REST — quotes API has NO OI) ────────────────────────────
+
+_OI_POLL_LOCK = threading.Lock()
 
 def poll_futures_oi(token, fut_syms, agg):
     """
-    Fyers SymbolUpdate WS does NOT carry OI. Poll OI for futures via quotes REST API
-    (/data/quotes returns v.oi) and stash latest per NSE symbol into agg.last_oi.
-    The next futures bar flush picks it up and writes futures_basis.oi.
-    Batched <=50 symbols/call. Called every OI_POLL_MINS from housekeeping.
+    ROOT CAUSE (fixed 10-Jun-2026): Fyers quotes API does NOT return OI at all
+    (Fyers KB: 'OI is not available in the quotes API — use the market depth API').
+    The old implementation read v.get('oi') from /data/quotes — always None,
+    so futures_basis.oi stayed NULL forever.
+
+    FIX: poll the DEPTH API (/data/depth, 1 symbol per call) and read d[symbol]['oi'].
+    Rate-limited to ~170 req/min (Fyers data limit 200/min, 10/sec).
+    208 symbols ≈ 75s per cycle, every OI_POLL_MINS → ~16k calls/day
+    (well under the 1-lakh/day v3 limit).
+    Runs in a BACKGROUND THREAD so housekeeping flushes are never blocked.
+    Latest OI stashed in agg.last_oi → attached on next futures bar flush
+    → futures_basis.oi / oi_prev / oi_chg.
     """
-    BATCH = 50
-    headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
-    got = 0
-    for i in range(0, len(fut_syms), BATCH):
-        chunk = fut_syms[i:i + BATCH]
-        try:
-            r = requests.get(QUOTES_URL, params={'symbols': ','.join(chunk)},
-                             headers=headers, timeout=8)
-            d = r.json()
-            if d.get('s') != 'ok':
-                continue
-            for item in d.get('d', []):
-                v   = item.get('v', {})
-                oi  = v.get('oi')
+    if not _OI_POLL_LOCK.acquire(blocking=False):
+        log.info("OI poll skipped — previous cycle still running")
+        return
+    try:
+        headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
+        got = 0
+        for fsym in fut_syms:
+            try:
+                r = requests.get(DEPTH_URL,
+                                 params={'symbol': fsym, 'ohlcv_flag': 1},
+                                 headers=headers, timeout=8)
+                d = r.json()
+                if d.get('s') != 'ok':
+                    continue
+                node = (d.get('d') or {}).get(fsym) or {}
+                oi = node.get('oi')
                 if oi is None:
                     continue
-                nse = from_fyers_symbol(item.get('n', ''))
+                nse = from_fyers_symbol(fsym)
                 with agg.lock:
                     agg.last_oi[nse] = int(oi)
                 got += 1
-        except Exception as e:
-            log.warning(f"poll_futures_oi chunk {i}: {e}")
-    log.info(f"OI poll: {got} futures OI updated")
+            except Exception as e:
+                log.warning(f"poll_futures_oi {fsym}: {e}")
+            time.sleep(OI_CALL_SPACING_SEC)
+        log.info(f"OI poll (depth API): {got}/{len(fut_syms)} futures OI updated")
+    finally:
+        _OI_POLL_LOCK.release()
 
 
-# ── main run ─────────────────────────────────────────────────────────────────────────────────
+# ── main run ───────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
@@ -753,7 +776,7 @@ def run(auth_code=None):
             if fsym in equity_set:
                 agg.on_tick(from_fyers_symbol(fsym), float(ltp), float(vol), source='fyers_eq')
             elif fsym in futures_set:
-                # OI not in WS — sourced from quotes REST poll (agg.last_oi)
+                # OI not in WS — sourced from depth REST poll (agg.last_oi)
                 nse = from_fyers_symbol(fsym)
                 agg.on_tick(nse, float(ltp), float(vol),
                             source='fyers_fut', oi=agg.last_oi.get(nse))
@@ -798,13 +821,13 @@ def run(auth_code=None):
                 agg.flush_cmp()
                 opt_store.flush_all()
 
-                # Futures OI poll every OI_POLL_MINS (WS has no OI)
+                # Futures OI poll every OI_POLL_MINS via DEPTH API (quotes has NO OI).
+                # Background thread: 208 depth calls ≈ 75s — must not block flushes.
                 if (last_oi_poll is None or
                         (now_dt - last_oi_poll).total_seconds() >= OI_POLL_MINS * 60):
-                    try:
-                        poll_futures_oi(token, futures_fyers_syms, agg)
-                    except Exception as e:
-                        log.warning(f"OI poll failed: {e}")
+                    threading.Thread(target=poll_futures_oi,
+                                     args=(token, list(futures_fyers_syms), agg),
+                                     daemon=True).start()
                     last_oi_poll = now_dt
 
                 # ATM drift check every ATM_CHECK_MINS
