@@ -7,18 +7,18 @@ FILTER_CONFIG reorder (06-Jun-2026):
 
   buy_reversal (11 filters):
     gvm(164) → year_ret(2) → dma_200(20) → dma_50(14) → month_ret(5) →
-    week_ret(3) → rsi_month(1) → rsi_weekly(0) → day_change(1) →
+    week_ret(3) → rsi_month(1) → rsi_weekly(0) → mom_2d(1) →
     sector_week → sector_month
   buy_momentum (11 filters):
     gvm(164) → year_ret(2) → dma_50(14) → dma_200(10) → rsi_month(9) →
-    rsi_weekly(4) → month_ret(4) → week_ret(2) → day_change(0) →
+    rsi_weekly(4) → month_ret(4) → week_ret(2) → mom_2d(0) →
     sector_week → sector_month
   sell_reversal (9 filters):
     dma_200(86) → dma_50(24) → rsi_weekly(23) → rsi_month(2) →
-    week_ret(6) → month_ret(2) → day_change → sector_week → sector_month
+    week_ret(6) → month_ret(2) → mom_2d → sector_week → sector_month
   sell_momentum (12 filters):
     dma_200(97) → dma_50(29) → dma_20(30) → rsi_month(12) → daily_rsi(14) →
-    rsi_weekly(0) → week_ret(3) → day_change(4) → month_ret(1) →
+    rsi_weekly(0) → week_ret(3) → mom_2d(4) → month_ret(1) →
     week_index_52(7) → sector_week → sector_month
 
   sector_week/month NULL until Monday 15:45 GVM engine run.
@@ -27,7 +27,8 @@ FILTER_CONFIG reorder (06-Jun-2026):
 GVM gate (08-Jun-2026): buy baskets relaxed gvm_score min 7.0 -> 6.0
   (lets in 'Watch' band 6-7). Widens buy universe ~46 -> ~123. Permanent spec change.
 
-day_change formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum.
+mom_2d formula (renamed from day_change 10-Jun-2026):
+  (cmp / close_2_days_ago - 1) * 100 — 2-day momentum (T vs T-2, intentional 2-candle gap).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -45,7 +46,7 @@ def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
-# ── Filter configs ───────────────────────────────────────────────────────────────
+# ── Filter configs ───────────────────────────────────────────────────────────
 # Ordered by descending kill rate for optimal funnel waterfall display.
 
 FILTER_CONFIG = {
@@ -58,7 +59,7 @@ FILTER_CONFIG = {
         "week_return":  [1.5,  3.0],
         "rsi_month":    [58.5, 75.0],
         "rsi_weekly":   [50.0, 67.5],
-        "day_change":   [0.0,  2.4],
+        "mom_2d":       [0.0,  2.4],
         "sector_week":  [0.0,  4.0],
         "sector_month": [0.0,  6.0],
     },
@@ -71,7 +72,7 @@ FILTER_CONFIG = {
         "rsi_weekly":   [71.5, 80.0],
         "month_return": [3.0,  14.0],
         "week_return":  [1.0,  7.0],
-        "day_change":   [0.0,  3.5],
+        "mom_2d":       [0.0,  3.5],
         "sector_week":  [0.0,  4.0],
         "sector_month": [0.0,  6.0],
     },
@@ -82,7 +83,7 @@ FILTER_CONFIG = {
         "rsi_month":    [20.0,  60.0],
         "week_return":  [-6.0,  3.0],
         "month_return": [-20.0, 2.0],
-        "day_change":   [-6.0,  0.0],
+        "mom_2d":       [-6.0,  0.0],
         "sector_week":  [-4.0,  0.0],
         "sector_month": [-6.0,  0.0],
     },
@@ -94,7 +95,7 @@ FILTER_CONFIG = {
         "daily_rsi":    [None,  40.0],
         "rsi_weekly":   [5.0,   60.0],
         "week_return":  [-8.0,  0.0],
-        "day_change":   [-3.0,  0.0],
+        "mom_2d":       [-3.0,  0.0],
         "month_return": [-30.0, 0.0],
         "week_index_52":[None,  20.0],
         "sector_week":  [-4.0,  0.0],
@@ -104,7 +105,7 @@ FILTER_CONFIG = {
         "dma_200":      [10.0, None],
         "week_index_52":[80.0, None],
         "rsi_month":    [60.0, None],
-        "day_change":   [None, 0.0],
+        "mom_2d":       [None, 0.0],
     },
 }
 
@@ -124,7 +125,7 @@ _BLACKOUT_SQL = """
 """
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _passes_filter(value, mn, mx) -> bool:
     if value is None: return False
@@ -167,7 +168,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               day_change, week_index_52,
+               mom_2d, week_index_52,
                sector_week, sector_month
         FROM v8_metrics
         WHERE {where_sql}
@@ -181,7 +182,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Market breadth ─────────────────────────────────────────────────────────────────
+# ── Market breadth ────────────────────────────────────────────────────────────
 
 def _live_breadth(cur):
     cur.execute("""
@@ -242,7 +243,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
     )
 
 
-# ── Endpoints ───────────────────────────────────────────────────────────────────────
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -355,7 +356,7 @@ def qualified(basket: str, limit: int = 50):
                     symbol, gvm_score, cmp,
                     dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                     week_return, month_return,
-                    day_change, week_index_52,
+                    mom_2d, week_index_52,
                     sector_week, sector_month,
                     source, signal_ts
                 FROM v8_qualified
@@ -409,7 +410,7 @@ def funnel_counts(basket: str):
             cur.execute("""
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
                        rsi_month, rsi_weekly, daily_rsi,
-                       month_return, week_return, year_return, day_change,
+                       month_return, week_return, year_return, mom_2d,
                        week_index_52, ma9_vs_ma21, vol_ratio,
                        sector_week, sector_month
                 FROM v8_metrics
@@ -432,7 +433,7 @@ def funnel_counts(basket: str):
         raise HTTPException(500, f"funnel failed: {e}")
 
 
-# ── Filter funnel detail + per-stock pass count ─────────────────────────────────────
+# ── Filter funnel detail + per-stock pass count ───────────────────────────────
 # Two views for all 5 baskets:
 #   /funnel_detail/{basket}  → sequential funnel, filters ordered by kill (low→high survivors)
 #   /stock_passcount/{basket} → per-stock count of filters passed (0..N), ranked high→low
@@ -441,7 +442,7 @@ def _basket_universe(cur):
     cur.execute("""
         SELECT symbol, gvm_score, dma_20, dma_50, dma_200,
                rsi_month, rsi_weekly, daily_rsi,
-               month_return, week_return, year_return, day_change,
+               month_return, week_return, year_return, mom_2d,
                week_index_52, ma9_vs_ma21, vol_ratio,
                sector_week, sector_month
         FROM v8_metrics
@@ -514,7 +515,7 @@ def stock_passcount(basket: str):
                 "passed_filters": passed_list,
                 "failed_filters": failed_list,
                 "gvm_score": s.get("gvm_score"),
-                "day_change": s.get("day_change"),
+                "mom_2d": s.get("mom_2d"),
             })
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         meta = BASKET_META.get(basket, {})
@@ -535,7 +536,7 @@ def raw_metrics(limit: int = 250):
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
                m.month_index, m.week_index_52,
-               m.day_change,
+               m.mom_2d,
                m.sector_week, m.sector_month,
                p.pp, p.r1, p.r2, p.s1, p.s2
         FROM v8_metrics m
@@ -597,7 +598,7 @@ def sell_overbought(limit: int = 50):
                 ),
                 filtered AS (
                     SELECT l.*, vm.dma_200, vm.week_index_52, vm.rsi_month,
-                           vm.daily_rsi, vm.day_change, vm.gvm_score
+                           vm.daily_rsi, vm.mom_2d, vm.gvm_score
                     FROM latest l
                     JOIN v8_metrics vm ON vm.symbol = l.symbol
                      AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
@@ -605,7 +606,7 @@ def sell_overbought(limit: int = 50):
                       AND vm.week_index_52  >= 80
                       AND l.ma9_vs_ma21     >= 3
                       AND l.vol_ratio       <= 0.8
-                      AND vm.day_change      < 0
+                      AND vm.mom_2d          < 0
                       AND vm.rsi_month      >= 60
                       AND l.s1              <  l.entry
                       AND l.symbol NOT IN (
@@ -619,7 +620,7 @@ def sell_overbought(limit: int = 50):
                     ROUND((entry + (entry - s1))::numeric, 2)                                  AS stop,
                     ROUND(((entry - s1) / NULLIF(entry, 0) * 100)::numeric, 2)                 AS tgt_pct,
                     dma_200, week_index_52, ma9_vs_ma21, vol_ratio,
-                    day_change,
+                    mom_2d,
                     ROUND(rsi_month::numeric, 1)  AS rsi_month,
                     ROUND(daily_rsi::numeric, 1)  AS daily_rsi,
                     ROUND(gvm_score::numeric, 2)  AS gvm_score
