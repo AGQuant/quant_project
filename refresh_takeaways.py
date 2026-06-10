@@ -14,7 +14,8 @@ CONTENT STRUCTURE (locked spec 'input_raw_content_structure_v2'):
                     News stories, management reports, concall highlights,
                     investor presentations. NO quarterly results.
 
-  result_analysis — Top 500 only (mcap_rank <= 500). Quarterly (Jan/Apr/Jul/Oct).
+  result_analysis — Top 500 only (mcap_rank <= 500). Quarterly result seasons.
+                    Triggered in last week of: Aug (Q1), Nov (Q2), Feb (Q3), May (Q4).
                     Quarterly results summary — revenue, PAT, margins,
                     beats/misses, management guidance.
 
@@ -62,8 +63,40 @@ def next_annual_due(month: int = 5, day: int = 31) -> date:
     return candidate if candidate >= today else date(today.year+1, month, day)
 
 
+def next_result_season_due() -> date:
+    """
+    Next result analysis trigger: last week of Aug/Nov/Feb/May.
+    Defined as the 24th of those months (7-day window through month end).
+    """
+    today = date.today()
+    season_months = [2, 5, 8, 11]
+    candidates = []
+    for y in [today.year, today.year + 1]:
+        for m in season_months:
+            candidates.append(date(y, m, 24))
+    return next(d for d in sorted(candidates) if d >= today)
+
+
+def is_result_season() -> bool:
+    """
+    Returns True only during result analysis refresh windows:
+    last week of Aug (Q1), Nov (Q2), Feb (Q3), May (Q4).
+    Window = 24th through last day of month.
+    """
+    today = date.today()
+    if today.month not in (2, 5, 8, 11):
+        return False
+    return today.day >= 24
+
+
 def is_due(last_updated: Optional[date], cadence: str) -> bool:
-    if last_updated is None: return True
+    """
+    For 'quarterly' (takeaway + overview): use rolling day threshold.
+    For 'result_analysis': use explicit season window — DO NOT use rolling days.
+    Use is_result_season() directly for result_analysis checks.
+    """
+    if last_updated is None:
+        return True
     days = (date.today() - last_updated).days
     return days >= 85 if cadence == "quarterly" else days >= 350
 
@@ -110,13 +143,16 @@ def check_and_flag_due_refreshes() -> Dict:
     """
     Checks all 3 schedules. If due → sets app_config flag + logs reminder.
     NO AI generation. NO API calls. Just flags.
+
+    result_analysis uses season window (last week of Aug/Nov/Feb/May),
+    NOT a rolling 85-day check.
     """
     today = date.today(); flagged = []
 
     try:
         with _conn() as conn, conn.cursor() as cur:
 
-            # Schedule 1 & 2: key_takeaway + result_analysis — top 500, quarterly
+            # Schedule 1: key_takeaway — top 500, quarterly rolling
             cur.execute("SELECT MIN(last_takeaway_updated) FROM input_raw WHERE mcap_rank <= 500")
             oldest_t = cur.fetchone()[0]
             if is_due(oldest_t, "quarterly"):
@@ -126,13 +162,22 @@ def check_and_flag_due_refreshes() -> Dict:
                 _log_reminder("takeaway_top500", next_quarterly_due(), days_over)
                 flagged.append("takeaway_top500")
 
-            cur.execute("SELECT MIN(last_result_analysis_updated) FROM input_raw WHERE mcap_rank <= 500")
-            oldest_r = cur.fetchone()[0]
-            if is_due(oldest_r, "quarterly"):
-                days_over = max(0, (today - oldest_r).days - 85) if oldest_r else 999
-                _set_config("result_analysis_refresh_due", "true")
-                _log_reminder("result_analysis_top500", next_quarterly_due(), days_over)
-                flagged.append("result_analysis_top500")
+            # Schedule 2: result_analysis — top 500, season window only
+            # Only fires in last week of Aug / Nov / Feb / May
+            if is_result_season():
+                cur.execute("SELECT MIN(last_result_analysis_updated) FROM input_raw WHERE mcap_rank <= 500")
+                oldest_r = cur.fetchone()[0]
+                # Only flag if not already updated this season
+                # (i.e. last update is before the 24th of current month)
+                season_start = date(today.year, today.month, 24)
+                already_done = oldest_r and oldest_r >= season_start
+                if not already_done:
+                    _set_config("result_analysis_refresh_due", "true")
+                    _log_reminder("result_analysis_top500", next_result_season_due(), 0)
+                    flagged.append("result_analysis_top500")
+            else:
+                # Outside season window — always clear the flag
+                _set_config("result_analysis_refresh_due", "false")
 
             # Schedule 3: overview — all companies, annual
             cur.execute("SELECT MIN(last_overview_updated) FROM input_raw")
@@ -154,6 +199,8 @@ def check_and_flag_due_refreshes() -> Dict:
         "overview_refresh_due": _get_config("overview_refresh_due", "false"),
         "next_quarterly_due": str(next_quarterly_due()),
         "next_annual_due": str(next_annual_due()),
+        "next_result_season_due": str(next_result_season_due()),
+        "in_result_season": is_result_season(),
     }
 
 
@@ -207,8 +254,11 @@ def get_refresh_status() -> Dict:
                     "oldest_update": str(ra_min) if ra_min else None,
                     "days_since_oldest": days_ago(ra_min),
                     "cadence": "quarterly",
-                    "next_due": str(next_quarterly_due()),
-                    "overdue": is_due(ra_min, "quarterly"),
+                    "next_due": str(next_result_season_due()),
+                    "in_season": is_result_season(),
+                    "overdue": is_result_season() and (
+                        ra_min is None or ra_min < date(today.year, today.month, 24)
+                    ),
                     "how_to_run": "Say 'run result analysis refresh' in Claude chat",
                 },
                 "overview_all": {
