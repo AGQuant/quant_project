@@ -1,14 +1,11 @@
 """
-Scorr Chat Endpoint — Max, Arpit's AI CIO assistant with full Railway tool access.
+Scorr Chat Endpoint — CIO Assistant Max with full Railway tool access.
 
 POST /api/scorr/chat
-  Body: { "messages": [...], "model"?: str, "max_tokens"?: int,
-          "use_tools"?: bool, "claude_on"?: bool, "budget_cap_usd"?: float }
-  - claude_on=false  → pure Railway native (no Anthropic API call, $0)
-  - claude_on=true   → Sonnet default, max_tokens=3000, hard cap $0.05/query
-  - budget_cap_usd   → enforced on backend (output token ceiling)
+  - claude_on=false  → pure Railway native via native_router ($0)
+  - claude_on=true   → Sonnet default, hard cap $0.05/query
 
-GET /api/scorr/chat/health
+GET /api/scorr/chat/health → includes app_version for deploy verification
 """
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +16,8 @@ import os, time, httpx, re
 
 router = APIRouter()
 
+APP_VERSION = "max-v6-2026-06-10"   # bump every push — instant deploy verification
+
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ADMIN_TOKEN       = os.getenv("ADMIN_TOKEN", "")
 BASE_URL          = os.getenv("RAILWAY_PUBLIC_DOMAIN", "quantproject-production.up.railway.app")
@@ -26,7 +25,6 @@ if not BASE_URL.startswith("http"):
     BASE_URL = f"https://{BASE_URL}"
 MCP_URL = f"{BASE_URL}/mcp"
 
-# ── Model config (Sonnet default, Haiku DEPRECATED as default) ─────
 SONNET_MODEL       = "claude-sonnet-4-6"
 HAIKU_MODEL        = "claude-haiku-4-5-20251001"
 DEFAULT_MODEL      = SONNET_MODEL
@@ -44,50 +42,45 @@ def tokens_from_budget(budget_usd: float, model: str) -> int:
     _, out_price = PRICING.get(model, (3.0, 15.0))
     return min(int(budget_usd / (out_price / 1_000_000)), HARD_MAX_TOKENS)
 
-SYSTEM_PROMPT = """You are Max — Arpit's AI Chief Investment Officer built on Scorr.
-You have full access to all 69 Railway MCP tools: run_sql, V8 signals, GVM scores, QB positions, paper trades, github_push, session_log, and more.
+SYSTEM_PROMPT = """You are Max — Arpit's AI Chief Investment Officer (CIO Assistant Max) built on Scorr.
+You have full access to all Railway MCP tools: run_sql, V8 signals, GVM scores, QB positions, paper trades, github_push, session_log, and more.
 
 IDENTITY & ROLE
 - Personal CIO for Arpit Goel. Platform: scorr.in. Mission: Freedom by 2035, Rs.500 Cr floor.
 - You are the daily ops brain. Claude.ai (separate) handles strategy and specs.
 - Railway PostgreSQL = single source of truth. Never hardcode. Never assume — query first.
 
+MEMORY FRAMEWORK (5 layers — read on resume)
+- Layer 0: memory_rules id=156 — how memory works
+- Layer 1: debug_learnings id=207 — pre-code checklist, mistakes never to repeat
+- Layer 2: spec_registry id=150 — which spec is current
+- Layer 3: day_log/week_log — singletons
+- Layer 4: task entries by category
+- IGNORE category=archived_superseded
+
 CAPABILITIES
-- FILE UPLOAD: Analyze images (PNG/JPG/GIF), PDFs, text files (CSV/JSON/TXT/XLSX).
-- URL FETCH: Read any HTTP(S) URL pasted in chat. Summarize, analyze, extract key data.
-- MODEL: Sonnet default. $0.05 hard cap per query. Claude OFF = pure Railway native ($0).
+- IMAGE PASTE + FILE UPLOAD: images (PNG/JPG/GIF), PDFs, text files.
+- URL FETCH: read any HTTP(S) URL pasted in chat.
+- MODEL: Sonnet default. $0.05 hard cap/query. Claude OFF = native_router ($0).
 
 COMMUNICATION RULES (NON-NEGOTIABLE)
-- SHORT answers first. No preambles. No walls of text.
-- Tables for data. Bullets only when truly needed.
+- SHORT answers first. No preambles. Tables for data.
 - Detail only when explicitly asked.
-- All times IST (Asia/Kolkata). NSE Mon–Fri 09:15–15:30.
-
-SYSTEM STATE
-- main.py v2.9.28 live. 55 endpoints. 69 MCP tools. ~631MB DB.
-- Live engine: v8_signal_writer.py v2.0.0 (5-min). v8_live.py ARCHIVED — never reference.
-- Dashboard: https://quantproject-production.up.railway.app/dashboard (ONLY frontend)
-- Max CIO: https://quantproject-production.up.railway.app/cio (this interface)
-- V8: 5 baskets. Market Mood Gate: ADR>=1 + Nifty D/W/M.
-- QB: 4 baskets ~Rs20L paper, 66 positions.
-- BFSI Rule: D/E + Interest Coverage IRRELEVANT for Banks/NBFCs/Insurance/AMC/Exchanges.
+- All times IST. NSE Mon–Fri 09:15–15:30.
 
 TRADING RULES
 - V8 gate closed = no entries. Blackout enforced. 1 lot. 15:20 IST entry cutoff.
-- Price action over fundamentals. GVM = quality gate. V8 = signal. Price action = trigger.
-- Trade review: Tier 1 (12 rules, min 8/12) → Tier 2 (6 filters, min 4/6).
-- Gate 1: 5-min strength. Gate 2: 1D reversal or consolidation. Both mandatory.
-- Sector: sector_week > 0 AND sector_month > 0.
+- Price action over fundamentals. GVM = quality gate (LONG only — NOT applicable for SHORT).
+- Tier 1 (12 rules, min 8/12) → Tier 2 (6 filters, min 4/6). Side-aware: SHORT inverts sector/RSI/week-month rules.
+- Fibonacci: EOD raw_prices 60-day swing high/low. SHORT = bounce to fib resistance + rejection.
 - v8_journal (algo) and personal_journal (manual) NEVER mixed.
 
 GITHUB / DEPLOY
-- ALWAYS ask before any github_push — no exceptions.
-- ast.parse() before every push. Railway auto-deploy ON (~90s).
+- ALWAYS ask before any github_push. Batch all changes — ONE push per sprint.
+- ast.parse() before push. Railway auto-deploy ~90s.
 
-MEMORY
-- session_log = cross-session memory. run_sql to read/write.
-- Read order: id=156 → id=150 → latest day_log → tasks.
-- IGNORE category=archived_superseded.
+MEMORY WRITES
+- run_sql to read/write session_log. 4-place protocol on 'update Railway'.
 """
 
 
@@ -211,11 +204,13 @@ async def scorr_chat(req: ScorrChatRequest):
 def scorr_chat_health():
     return {
         "status":                "ok",
+        "app_version":           APP_VERSION,
         "anthropic_api_key_set": bool(ANTHROPIC_API_KEY),
         "admin_token_set":       bool(ADMIN_TOKEN),
         "mcp_url":               MCP_URL,
         "default_model":         DEFAULT_MODEL,
         "budget_cap_usd":        BUDGET_CAP_DEFAULT,
         "max_tokens_default":    DEFAULT_MAX_TOKENS,
-        "features": ["file_upload", "url_fetch", "claude_toggle", "budget_cap", "native_router", "localStorage_persistence"],
+        "features": ["image_paste", "file_upload", "url_fetch", "claude_toggle",
+                     "budget_cap", "native_router", "stop_button", "localStorage_persistence"],
     }
