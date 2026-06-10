@@ -3,10 +3,9 @@ Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
 
 ARCHITECTURE:
-  Layer 0: Hardcoded commands (virtual dashboard, health, PCR, QB)
+  Layer 0: Hardcoded commands (virtual dashboard, health, PCR, QB, mood, qualified)
   Layer 1: Grammar parser+executor (RANK/FILTER/SCREEN/LOOKUP/HISTORY/SECTOR_VIEW)
-  Layer 2: Legacy keyword handlers (backward compat)
-  Layer 3: Returns None → caller routes to Claude
+  Layer 2: Fallback hint → Claude
 
   query_log captures every query for native training analytics.
 """
@@ -21,58 +20,131 @@ import psycopg
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# ── GRAMMAR PARSER ──────────────────────────────────────────────────────────
+# ── SECTOR ALIAS MAP ──────────────────────────────────────────────────────────
+# Maps investor shorthand → DB segment keyword (used in ILIKE)
 
-# ── Metric vocabulary → (table_alias, column, join_needed) ───────────────────
-METRIC_MAP = {
-    # GVM scores
-    "gvm":           ("g", "gvm_score",     "gvm"),
-    "g score":       ("g", "g_score",        "gvm"),
-    "growth score":  ("g", "g_score",        "gvm"),
-    "v score":       ("g", "v_score",        "gvm"),
-    "value score":   ("g", "v_score",        "gvm"),
-    "m score":       ("g", "m_score",        "gvm"),
-    "momentum score":("g", "m_score",        "gvm"),
-    "growth":        ("g", "g_score",        "gvm"),
-    "value":         ("g", "v_score",        "gvm"),
-    "momentum":      ("g", "m_score",        "gvm"),
-    "market cap":    ("g", "market_cap",     "gvm"),
-    "mcap":          ("g", "market_cap",     "gvm"),
-    # Screener metrics
-    "opm":           ("s", "opm",            "screener"),
-    "margin":        ("s", "opm",            "screener"),
-    "margins":       ("s", "opm",            "screener"),
-    "roce":          ("s", "roce",           "screener"),
-    "pe":            ("s", "pe",             "screener"),
-    "p/e":           ("s", "pe",             "screener"),
-    "promoter":      ("s", "\"Promoter holding\"", "screener"),
-    "promoter holding": ("s", "\"Promoter holding\"", "screener"),
-    "fii":           ("s", "fii_change",     "screener"),
-    "fii change":    ("s", "fii_change",     "screener"),
-    "dii":           ("s", "dii_change",     "screener"),
-    "sales growth":  ("s", "sales_growth_5y","screener"),
-    "revenue growth":("s", "sales_growth_5y","screener"),
-    "profit growth": ("s", "profit_growth_5y","screener"),
-    "return 1y":     ("s", "return_1y",      "screener"),
-    "1y return":     ("s", "return_1y",      "screener"),
-    "return 3y":     ("s", "return_3y",      "screener"),
-    "3y return":     ("s", "return_3y",      "screener"),
-    "rsi":           ("s", "RSI",            "screener"),
-    "dma 50":        ("s", "dma_50",         "screener"),
-    "50 dma":        ("s", "dma_50",         "screener"),
-    "dma 200":       ("s", "dma_200",        "screener"),
-    "200 dma":       ("s", "dma_200",        "screener"),
-    "dividend":      ("s", "dividend_yield", "screener"),
-    "div yield":     ("s", "dividend_yield", "screener"),
-    "debt equity":   ("s", "\"Debt to equity\"", "screener"),
-    "d/e":           ("s", "\"Debt to equity\"", "screener"),
-    "interest coverage": ("s", "interest_coverage", "screener"),
-    "int coverage":  ("s", "interest_coverage", "screener"),
-    # V8 metrics
-    "day change":    ("v", "day_change",     "v8"),
-    "week return":   ("v", "week_return",    "v8"),
-    "month return":  ("v", "month_return",   "v8"),
+SECTOR_ALIASES = {
+    # IT/Tech
+    "tech": "IT", "it": "IT", "software": "IT", "technology": "IT", "infotech": "IT",
+    # Banks
+    "bank": "Banks", "banking": "Banks", "banks": "Banks",
+    "psu bank": "PSU Banks", "private bank": "Private Banks",
+    "small finance bank": "Small Finance Banks",
+    # Pharma
+    "pharma": "Pharma", "drug": "Pharma", "drugs": "Pharma",
+    # Auto
+    "auto": "Auto", "automobile": "Auto", "automotive": "Auto",
+    # FMCG
+    "fmcg": "FMCG", "consumer goods": "FMCG",
+    # Realty
+    "realty": "Realty", "real estate": "Realty", "property": "Realty",
+    # Power/Energy
+    "power": "Power", "energy": "Power",
+    "renewable": "Renewable Energy", "solar": "Solar",
+    # Defence
+    "defence": "Defence", "defense": "Defence",
+    # Cement
+    "cement": "Cement",
+    # Steel/Metal
+    "steel": "Steel", "metal": "Steel", "aluminium": "Aluminium", "metals": "Steel",
+    # Chemicals
+    "chemical": "Chemicals", "chemicals": "Chemicals",
+    "specialty chemical": "Specialty Chemicals", "agro chemical": "Agro Chemicals",
+    # Insurance
+    "insurance": "Insurance", "life insurance": "Life Insurance",
+    # NBFC/Finance
+    "nbfc": "NBFC", "housing finance": "Housing Finance",
+    "microfinance": "Microfinance", "msme": "MSME Finance",
+    # Infrastructure
+    "infra": "Infrastructure", "infrastructure": "Infrastructure", "epc": "EPC",
+    # Telecom
+    "telecom": "Telecom", "telco": "Telecom",
+    # Logistics
+    "logistics": "Logistics",
+    # Hospitals/Healthcare
+    "hospital": "Hospitals", "hospitals": "Hospitals",
+    "diagnostic": "Diagnostics", "diagnostics": "Diagnostics",
+    # Others
+    "oil": "Oil", "refinery": "Refineries", "mining": "Mining",
+    "fertilizer": "Fertilizers", "fertilizers": "Fertilizers",
+    "retail": "Retail", "sugar": "Sugar",
+    "textile": "Textiles", "textiles": "Textiles",
+    "media": "Entertainment", "entertainment": "Entertainment",
+    "hotel": "Hotels", "hospitality": "Hotels",
+    "jewellery": "Gems", "gems": "Gems",
+    "paint": "Paints", "paints": "Paints",
+    "tyre": "Tyres", "tyres": "Tyres",
+    "packaging": "Packaging", "paper": "Paper",
+    "exchange": "Exchanges", "broking": "Broking",
+    "shipping": "Shipping",
+    "education": "Education",
+    "restaurant": "Restaurants", "qsr": "QSR",
+    "digital": "Digital", "ecommerce": "Digital",
 }
+
+
+def resolve_sector(raw: Optional[str]) -> Optional[str]:
+    """Resolve investor shorthand to DB segment keyword via alias map."""
+    if not raw:
+        return raw
+    rl = raw.lower().strip()
+    for alias in sorted(SECTOR_ALIASES.keys(), key=len, reverse=True):
+        if alias in rl:
+            return SECTOR_ALIASES[alias]
+    return raw  # pass through for direct DB segment matches
+
+
+# ── GRAMMAR PARSER ────────────────────────────────────────────────────────────
+
+METRIC_MAP = {
+    "gvm":              ("g", "gvm_score",              "gvm"),
+    "g score":          ("g", "g_score",                "gvm"),
+    "growth score":     ("g", "g_score",                "gvm"),
+    "v score":          ("g", "v_score",                "gvm"),
+    "value score":      ("g", "v_score",                "gvm"),
+    "m score":          ("g", "m_score",                "gvm"),
+    "momentum score":   ("g", "m_score",                "gvm"),
+    "growth":           ("g", "g_score",                "gvm"),
+    "value":            ("g", "v_score",                "gvm"),
+    "momentum":         ("g", "m_score",                "gvm"),
+    "market cap":       ("g", "market_cap",             "gvm"),
+    "mcap":             ("g", "market_cap",             "gvm"),
+    "opm":              ("s", "opm",                    "screener"),
+    "margin":           ("s", "opm",                    "screener"),
+    "margins":          ("s", "opm",                    "screener"),
+    "roce":             ("s", "roce",                   "screener"),
+    "pe":               ("s", "pe",                     "screener"),
+    "p/e":              ("s", "pe",                     "screener"),
+    "promoter":         ("s", "\"Promoter holding\"",   "screener"),
+    "promoter holding": ("s", "\"Promoter holding\"",   "screener"),
+    "fii":              ("s", "fii_change",             "screener"),
+    "fii change":       ("s", "fii_change",             "screener"),
+    "dii":              ("s", "dii_change",             "screener"),
+    "sales growth":     ("s", "sales_growth_5y",        "screener"),
+    "revenue growth":   ("s", "sales_growth_5y",        "screener"),
+    "profit growth":    ("s", "profit_growth_5y",       "screener"),
+    "return 1y":        ("s", "return_1y",              "screener"),
+    "1y return":        ("s", "return_1y",              "screener"),
+    "return 3y":        ("s", "return_3y",              "screener"),
+    "3y return":        ("s", "return_3y",              "screener"),
+    "rsi":              ("s", "RSI",                    "screener"),
+    "dma 50":           ("s", "dma_50",                 "screener"),
+    "50 dma":           ("s", "dma_50",                 "screener"),
+    "dma 200":          ("s", "dma_200",                "screener"),
+    "200 dma":          ("s", "dma_200",                "screener"),
+    "dividend":         ("s", "dividend_yield",         "screener"),
+    "div yield":        ("s", "dividend_yield",         "screener"),
+    "debt equity":      ("s", "\"Debt to equity\"",     "screener"),
+    "d/e":              ("s", "\"Debt to equity\"",     "screener"),
+    "interest coverage":("s", "interest_coverage",      "screener"),
+    "int coverage":     ("s", "interest_coverage",      "screener"),
+    "day change":       ("v", "day_change",             "v8"),
+    "week return":      ("v", "week_return",            "v8"),
+    "month return":     ("v", "month_return",           "v8"),
+}
+
+# VM = dual metric (v_score + m_score shown together)
+VM_ALIASES = {"vm", "vm score", "v m", "value momentum", "value and momentum"}
 
 CAP_MAP = {
     "large cap": "Large Cap", "largecap": "Large Cap", "large": "Large Cap",
@@ -86,16 +158,18 @@ VERDICT_MAP = {
     "hold": "Hold", "avoid": "Avoid", "sell": "Sell",
 }
 
-ABOVE_WORDS = {"above","over","more","greater",">",">=","atleast","minimum","min"}
 BELOW_WORDS = {"below","under","less","fewer","<","<=","maximum","max","atmost"}
 
 
 def _parse_count(q: str, default: int = 10) -> int:
     m = re.search(r"top\s+(\d+)|(\d+)\s+stocks?", q)
     if m:
-        n = int(m.group(1) or m.group(2))
-        return max(1, min(n, 50))
+        return max(1, min(int(m.group(1) or m.group(2)), 50))
     return default
+
+
+def _is_vm(q: str) -> bool:
+    return any(alias in q for alias in VM_ALIASES)
 
 
 def _parse_metric(q: str) -> Optional[Tuple]:
@@ -112,8 +186,7 @@ def _parse_threshold(q: str) -> Optional[Tuple]:
     if not m:
         return None
     word, val = m.group(1).lower(), float(m.group(2))
-    direction = "below" if word in BELOW_WORDS else "above"
-    return (direction, val)
+    return ("below" if word in BELOW_WORDS else "above", val)
 
 
 def _parse_sector(q: str) -> Optional[str]:
@@ -126,7 +199,7 @@ def _parse_sector(q: str) -> Optional[str]:
         "scan","about","overview","profile","tell","details","info","sector",
         "segment","industry","cap","large","mid","small","micro","history",
         "trend","historical","past","last","return","returns","growth","value",
-        "momentum","change","latest","current","today","now",
+        "momentum","change","latest","current","today","now","good","high","vm",
     }
     cleaned = re.sub(r"top\s+\d+|\d+\s+stocks?", "", q)
     cleaned = re.sub(
@@ -137,7 +210,7 @@ def _parse_sector(q: str) -> Optional[str]:
     for k in METRIC_MAP:
         metric_words.update(k.split())
     words = [w.strip(".,?!") for w in cleaned.lower().split()
-             if len(w.strip(".,?!")) >= 3
+             if len(w.strip(".,?!")) >= 2
              and w.strip(".,?!") not in stopwords
              and w.strip(".,?!") not in metric_words]
     return " ".join(words).strip() if words else None
@@ -175,19 +248,21 @@ def _parse_operation(q: str) -> str:
 
 def parse_query(q: str) -> Dict[str, Any]:
     q_lower = q.lower().strip()
+    raw_sector = _parse_sector(q_lower)
     return {
         "operation": _parse_operation(q_lower),
         "count":     _parse_count(q_lower),
-        "sector":    _parse_sector(q_lower),
+        "sector":    resolve_sector(raw_sector),
         "cap":       _parse_cap(q_lower),
         "verdict":   _parse_verdict(q_lower),
         "metric":    _parse_metric(q_lower),
         "threshold": _parse_threshold(q_lower),
+        "vm":        _is_vm(q_lower),
         "raw":       q_lower,
     }
 
 
-# ── GRAMMAR EXECUTOR ────────────────────────────────────────────────────────
+# ── GRAMMAR EXECUTOR ──────────────────────────────────────────────────────────
 
 def fmt_table(headers: list, rows: list) -> str:
     if not rows:
@@ -218,8 +293,36 @@ def _build_from(join_type: str, needs_input: bool = False) -> str:
 
 def exec_rank(cur, slots: Dict) -> str:
     n, sector, cap, verdict = slots["count"], slots["sector"], slots["cap"], slots["verdict"]
-    metric, threshold = slots["metric"], slots["threshold"]
+    metric, threshold, vm = slots["metric"], slots["threshold"], slots["vm"]
 
+    # VM dual metric — show v_score + m_score
+    if vm:
+        needs_input = cap is not None
+        from_clause = _build_from("gvm", needs_input)
+        conditions = ["1=1"]
+        if sector:  conditions.append(f"g.segment ILIKE '%{sector}%'")
+        if cap:     conditions.append(f"i.cap_category ILIKE '%{cap}%'")
+        if verdict: conditions.append(f"g.verdict = '{verdict}'")
+        where = " AND ".join(conditions)
+        cur.execute(f"""
+            SELECT g.symbol, g.company_name, g.segment,
+                   ROUND(g.gvm_score::numeric,2),
+                   ROUND(g.v_score::numeric,2),
+                   ROUND(g.m_score::numeric,2)
+            {from_clause} WHERE {where}
+            ORDER BY (g.v_score + g.m_score) DESC NULLS LAST LIMIT {n}
+        """)
+        rows = cur.fetchall()
+        if not rows: return "No stocks found. Try a broader query or toggle Claude ON."
+        title_parts = [f"Top {len(rows)}"]
+        if sector:  title_parts.append(sector.title())
+        if cap:     title_parts.append(cap)
+        title_parts.append("by V + M Score")
+        data = [(r[0], r[1][:22], r[2][:18] if r[2] else "",
+                 f"{_f(r[3]):.2f}", f"{_f(r[4]):.2f}", f"{_f(r[5]):.2f}") for r in rows]
+        return f"**{' '.join(title_parts)}**\n{fmt_table(['Symbol','Company','Segment','GVM','V Score','M Score'], data)}"
+
+    # Standard single metric
     if metric:
         alias, col, join_type = metric
         order_col = f"{alias}.{col}"
@@ -229,7 +332,6 @@ def exec_rank(cur, slots: Dict) -> str:
 
     needs_input = cap is not None
     from_clause = _build_from(join_type, needs_input)
-
     conditions = ["1=1"]
     if sector:    conditions.append(f"g.segment ILIKE '%{sector}%'")
     if cap:       conditions.append(f"i.cap_category ILIKE '%{cap}%'")
@@ -240,19 +342,15 @@ def exec_rank(cur, slots: Dict) -> str:
         conditions.append(f"{order_col} {op} {val}")
 
     where = " AND ".join(conditions)
-    sql = f"""
+    cur.execute(f"""
         SELECT g.symbol, g.company_name, g.segment,
-               ROUND(g.gvm_score::numeric,2) as gvm,
+               ROUND(g.gvm_score::numeric,2),
                ROUND({order_col}::numeric,2) as metric_val
-        {from_clause}
-        WHERE {where}
-        ORDER BY {order_col} DESC NULLS LAST
-        LIMIT {n}
-    """
-    cur.execute(sql)
+        {from_clause} WHERE {where}
+        ORDER BY {order_col} DESC NULLS LAST LIMIT {n}
+    """)
     rows = cur.fetchall()
-    if not rows:
-        return "No stocks found. Try a broader query or toggle Claude ON."
+    if not rows: return "No stocks found. Try a broader query or toggle Claude ON."
 
     metric_label = col.replace('"','').replace('_',' ').title()
     title_parts = [f"Top {len(rows)}"]
@@ -286,8 +384,7 @@ def exec_lookup(cur, slots: Dict) -> str:
         return "Specify a company name. E.g. 'overview HDFC bank'"
 
     r = None
-    searches = [company] + sorted(company.split(), key=len, reverse=True)
-    for search in searches:
+    for search in [company] + sorted(company.split(), key=len, reverse=True):
         if len(search) < 2: continue
         cur.execute("""
             SELECT g.symbol, g.company_name, g.segment,
@@ -335,10 +432,9 @@ def exec_history(cur, slots: Dict) -> str:
         r = cur.fetchone()
         if r: break
 
-    if not r:
-        return f"Stock not found for '{company}'."
-
+    if not r: return f"Stock not found for '{company}'."
     symbol, name = r[0], r[1]
+
     cur.execute("""
         SELECT score_date, ROUND(gvm_score::numeric,2), ROUND(g_score::numeric,2),
                ROUND(v_score::numeric,2), ROUND(m_score::numeric,2), verdict
@@ -346,8 +442,7 @@ def exec_history(cur, slots: Dict) -> str:
         ORDER BY score_date DESC LIMIT %s
     """, (symbol, months * 4))
     rows = cur.fetchall()
-    if not rows:
-        return f"No history found for {name} ({symbol})."
+    if not rows: return f"No history found for {name} ({symbol})."
 
     data = [(str(r[0]), f"{_f(r[1]):.2f}", f"{_f(r[2]):.2f}",
              f"{_f(r[3]):.2f}", f"{_f(r[4]):.2f}", r[5] or "") for r in rows]
@@ -359,16 +454,15 @@ def exec_sector_view(cur, slots: Dict) -> str:
     n = slots["count"]
     cur.execute("""
         SELECT segment, stocks_count,
-               ROUND(mcap_weighted_gvm::numeric,2),
-               ROUND(weighted_g::numeric,2), ROUND(weighted_v::numeric,2),
-               ROUND(weighted_m::numeric,2), verdict, top_stock
+               ROUND(mcap_weighted_gvm::numeric,2), ROUND(weighted_g::numeric,2),
+               ROUND(weighted_v::numeric,2), ROUND(weighted_m::numeric,2),
+               verdict, top_stock
         FROM sector_ratings
         WHERE score_date = (SELECT MAX(score_date) FROM sector_ratings)
         ORDER BY mcap_weighted_gvm DESC LIMIT %s
     """, (n,))
     rows = cur.fetchall()
-    if not rows:
-        return "No sector ratings available."
+    if not rows: return "No sector ratings available."
     data = [(r[0][:25], r[1], f"{_f(r[2]):.2f}", f"{_f(r[3]):.2f}",
              f"{_f(r[4]):.2f}", f"{_f(r[5]):.2f}", r[6] or "", r[7] or "") for r in rows]
     return (f"**Sector Rankings (top {len(rows)} by GVM)**\n"
@@ -380,7 +474,7 @@ def execute_grammar(query: str) -> Optional[str]:
     op    = slots["operation"]
     has_signal = (
         slots["metric"] or slots["sector"] or slots["cap"] or
-        slots["verdict"] or slots["threshold"] or
+        slots["verdict"] or slots["threshold"] or slots["vm"] or
         op in ("HISTORY", "SECTOR_VIEW")
     )
     if not has_signal:
@@ -394,7 +488,7 @@ def execute_grammar(query: str) -> Optional[str]:
                 if op == "LOOKUP":      return exec_lookup(cur, slots)
                 if op == "HISTORY":     return exec_history(cur, slots)
                 if op == "SECTOR_VIEW": return exec_sector_view(cur, slots)
-                return None  # COMPARE → Claude
+                return None
     except Exception as e:
         return f"DB error: {str(e)[:150]}\nToggle Claude ON for full access."
 
@@ -457,9 +551,9 @@ def _vd_qualified(cur) -> str:
         FROM v8_qualified WHERE signal_date=CURRENT_DATE GROUP BY basket ORDER BY basket
     """)
     rows=cur.fetchall()
-    if not rows: return "**2. Qualified Today**\nNo signals today."
+    if not rows: return "**2. V8 Watchlist Today**\nNo candidates today."
     data=[(r[0],r[1],r[2] if r[1]<=5 else f"{r[1]} stocks") for r in rows]
-    return f"**2. Qualified Today**\n{fmt_table(['Basket','Count','Symbols'],data)}"
+    return f"**2. V8 Watchlist Today** _(passed filters — entry needs pivot + gate open)_\n{fmt_table(['Basket','Count','Symbols'],data)}"
 
 
 def _vd_paper_summary(cur) -> str:
@@ -520,9 +614,9 @@ def _vd_top_signals(cur) -> str:
         WHERE signal_date=CURRENT_DATE ORDER BY gvm_score DESC LIMIT 3
     """)
     rows=cur.fetchall()
-    if not rows: return "**6. Top 3 Signals Now**\nNo signals today."
+    if not rows: return "**6. Top 3 Candidates Now**\nNo candidates today."
     data=[(r[0],r[1],f"{_f(r[2]):.2f}",f"{_f(r[3]):+.2f}%",f"{_f(r[4]):+.2f}%") for r in rows]
-    return f"**6. Top 3 Signals Now**\n{fmt_table(['Symbol','Basket','GVM','Day%','Week%'],data)}"
+    return f"**6. Top 3 Candidates Now**\n{fmt_table(['Symbol','Basket','GVM','Day%','Week%'],data)}"
 
 
 def _virtual_dashboard(cur) -> str:
@@ -624,18 +718,21 @@ def _query_sync(query: str) -> str:
                         f"GVM scored: {gvm_cnt:,} stocks | Intraday bars today: {intr:,}\nRailway DB: OK")
                 log("native","health"); return result
 
-            if any(k in q for k in ["v8 signal","qualified today","qualified now","v8 qualified"]):
+            # Qualified / V8 watchlist — hardcoded, must be before grammar
+            if any(k in q for k in ["qualified","watchlist","v8 watchlist","v8 signal","v8 qualified"]):
                 cur.execute("""
                     SELECT symbol,basket,gvm_score,cmp,day_change,signal_ts
-                    FROM v8_qualified WHERE signal_date=CURRENT_DATE ORDER BY gvm_score DESC LIMIT 15
+                    FROM v8_qualified WHERE signal_date=CURRENT_DATE ORDER BY gvm_score DESC LIMIT 20
                 """)
                 rows=cur.fetchall()
                 if rows:
                     data=[(r[0],r[1],"LONG" if "buy" in r[1].lower() else "SHORT",
                            f"{_f(r[2]):.1f}",f"{_f(r[3]):.1f}",f"{_f(r[4]):+.2f}%") for r in rows]
-                    result=f"**V8 Qualified Today ({len(rows)})**\n{fmt_table(['Symbol','Basket','Side','GVM','CMP','Day%'],data)}"
-                    log("native","v8_signals"); return result
-                log("native","v8_signals","","",False); return "No V8 signals today."
+                    result=(f"**V8 Watchlist Today ({len(rows)} candidates)**\n"
+                            f"_{('Entry needs pivot confirmation + gate open')}_\n"
+                            f"{fmt_table(['Symbol','Basket','Side','GVM','CMP','Day%'],data)}")
+                    log("native","v8_watchlist"); return result
+                log("native","v8_watchlist","","",False); return "No V8 candidates today."
 
             # ── LAYER 1: Grammar parser+executor ─────────────────────────────
 
@@ -648,16 +745,16 @@ def _query_sync(query: str) -> str:
                     slots["sector"] or "", True)
                 return grammar_result
 
-            # Grammar couldn't resolve — log and surface fallback hint
             log("grammar", slots["operation"],
                 slots["metric"][1] if slots["metric"] else "",
                 slots["sector"] or "", False)
 
             return ("⚡ Native — $0. Try:\n"
                     "• 'Virtual Dashboard V8' | 'market mood' | 'QB summary' | 'PCR'\n"
-                    "• 'top 10 pharma gvm above 7.5' | 'midcap opm above 20'\n"
+                    "• 'top 10 pharma gvm above 7.5' | 'tech stocks vm score'\n"
+                    "• 'midcap opm above 20' | 'smallcap promoter above 60'\n"
                     "• 'sector ratings' | 'GVM history HDFC bank'\n"
-                    "• 'overview Torrent Pharma' | 'smallcap promoter above 60'\n"
+                    "• 'overview Torrent Pharma' | 'largecap roce above 15'\n"
                     "Or toggle Claude ON for free-text queries.")
 
 
