@@ -21,14 +21,15 @@ Frozen at EOD (never recomputed live):
 
 Live (recomputed every 5-min from intraday_prices):
   dma_20, dma_50, dma_200, daily_rsi, month_return, week_return,
-  year_return, day_change, ma9_vs_ma21, vol_ratio, week_index_52,
+  year_return, mom_2d, ma9_vs_ma21, vol_ratio, week_index_52,
   month_index, range_1d, range_3d, upper_bb, lower_bb,
-  sector_day (live peer avg day_change across segment)
+  sector_day (live peer avg mom_2d across segment)
 
 v8_live.py and v8_history_cache are archived — no longer used.
 
 RSI periods: Month=6 (monthly bars), Weekly=8 (weekly bars), Daily=14 (Wilder).
-day_change = (cmp / close_2_days_ago - 1) * 100  [2-day momentum]
+mom_2d = (cmp / close_2_days_ago - 1) * 100  [2-day momentum, T vs T-2]
+  Renamed from 'day_change' 10-Jun-2026 — it was never a 1-day change.
 
 08-Jun-2026 FIX: _load_eod_metrics no longer reads frozen metrics from today's own
 half-built v8_metrics row (NULL pre-15:45 -> circular NULL -> funnel collapse). It now
@@ -39,7 +40,7 @@ v8_metrics row PER SYMBOL where they are non-null (last EOD freeze carried forwa
   Bullish gate (0-1 fails)  -> 11/11 strict
   Sideways gate (2 fails)   -> 10/11 (any 1 filter may fail)
   Bearish gate (3+ fails)   -> 9/11  (any 2 filters may fail)
-  day_change > 0 is MANDATORY in every tier (never one of the allowed fails).
+  mom_2d > 0 is MANDATORY in every tier (never one of the allowed fails).
   Other baskets keep strict all-pass. Funnel counts still show strict waterfall.
 """
 
@@ -102,7 +103,7 @@ def _passes(value, mn, mx) -> bool:
     return True
 
 
-# ── Step 1: Load EOD metrics snapshot ───────────────────────────────────────
+# ── Step 1: Load EOD metrics snapshot ─────────────────────────────────────────
 
 def _load_eod_metrics(conn) -> Dict[str, dict]:
     """
@@ -135,7 +136,7 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
         cur.execute("""
             SELECT DISTINCT ON (symbol)
                 symbol, rsi_month, rsi_weekly, sector_week, sector_month,
-                day_change AS eod_day_change
+                mom_2d AS eod_mom_2d
             FROM v8_metrics
             WHERE rsi_month   IS NOT NULL
                OR rsi_weekly  IS NOT NULL
@@ -161,7 +162,7 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
             "rsi_weekly":    _safe_float(f.get("rsi_weekly")),
             "sector_week":   _safe_float(f.get("sector_week")),
             "sector_month":  _safe_float(f.get("sector_month")),
-            "eod_day_change": _safe_float(f.get("eod_day_change")),
+            "eod_mom_2d":    _safe_float(f.get("eod_mom_2d")),
         }
     return out
 
@@ -255,7 +256,7 @@ def _load_cmp(conn) -> Dict[str, float]:
         return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
 
 
-# ── Step 5: Compute 19 live metrics ─────────────────────────────────────────
+# ── Step 5: Compute 19 live metrics ───────────────────────────────────────────
 
 def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
                            eod: dict) -> dict:
@@ -283,7 +284,7 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         "dma_20": None, "dma_50": None, "dma_200": None,
         "daily_rsi": None,
         "month_return": None, "week_return": None, "year_return": None,
-        "day_change": None,
+        "mom_2d": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
         "week_index_52": None, "month_index": None,
         "range_1d": None, "range_3d": None,
@@ -299,11 +300,11 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     if len(c) >= 22:  out["month_return"] = _safe_pct(live, c[-22])
     if len(c) >= 6:   out["week_return"]  = _safe_pct(live, c[-6])
 
-    # day_change: use cmp if available, else live close, vs close_2_days_ago
+    # mom_2d: use cmp if available, else live close, vs close_2_days_ago (2-candle gap)
     base_2d = hist.get("close_2d_ago")
     price   = cmp if cmp else live
     if base_2d and base_2d > 0:
-        out["day_change"] = (price / base_2d - 1) * 100
+        out["mom_2d"] = (price / base_2d - 1) * 100
 
     out["daily_rsi"] = _wilder_rsi(pd.Series(c), RSI_DAILY_PERIOD)
 
@@ -352,11 +353,11 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 # ── Step 6: Sector day pass ───────────────────────────────────────────────────
 
 def _add_sector_day(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
-    """sector_day = avg day_change of all peers in same segment (live)."""
+    """sector_day = avg mom_2d of all peers in same segment (live)."""
     seg_moves: Dict[str, list] = defaultdict(list)
     for sym, m in computed.items():
         seg     = eod_metrics.get(sym, {}).get("segment")
-        day_chg = m.get("day_change")
+        day_chg = m.get("mom_2d")
         if seg and day_chg is not None:
             seg_moves[seg].append(day_chg)
 
@@ -375,7 +376,7 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
             (symbol, score_date, gvm_score,
              dma_20, dma_50, dma_200, daily_rsi,
              rsi_month, rsi_weekly,
-             month_return, week_return, year_return, day_change,
+             month_return, week_return, year_return, mom_2d,
              sector_day, sector_week, sector_month,
              month_index, week_index_52,
              range_1d, range_3d, upper_bb, lower_bb,
@@ -393,7 +394,7 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
                 month_return  = EXCLUDED.month_return,
                 week_return   = EXCLUDED.week_return,
                 year_return   = EXCLUDED.year_return,
-                day_change    = EXCLUDED.day_change,
+                mom_2d        = EXCLUDED.mom_2d,
                 sector_day    = EXCLUDED.sector_day,
                 sector_week   = EXCLUDED.sector_week,
                 sector_month  = EXCLUDED.sector_month,
@@ -409,7 +410,7 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
             sym, target_date, m.get("gvm_score"),
             m.get("dma_20"), m.get("dma_50"), m.get("dma_200"), m.get("daily_rsi"),
             m.get("rsi_month"), m.get("rsi_weekly"),
-            m.get("month_return"), m.get("week_return"), m.get("year_return"), m.get("day_change"),
+            m.get("month_return"), m.get("week_return"), m.get("year_return"), m.get("mom_2d"),
             m.get("sector_day"), m.get("sector_week"), m.get("sector_month"),
             m.get("month_index"), m.get("week_index_52"),
             m.get("range_1d"), m.get("range_3d"), m.get("upper_bb"), m.get("lower_bb"),
@@ -520,15 +521,15 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             funnel[metric] = len(universe)
 
         # buy_reversal: gate-adaptive qualification (Bullish 11/11, Sideways 10/11,
-        # Bearish 9/11) with day_change>0 MANDATORY in every tier. Other baskets
+        # Bearish 9/11) with mom_2d>0 MANDATORY in every tier. Other baskets
         # keep the strict all-pass set computed above.
         if basket == "buy_reversal":
             n_filters = len(filters)
             need = _gate_threshold(gate_fails, n_filters)
             adaptive = []
             for s in all_metrics:
-                dc = s.get("day_change")
-                if dc is None or float(dc) <= 0:   # day_change>0 mandatory
+                dc = s.get("mom_2d")
+                if dc is None or float(dc) <= 0:   # mom_2d>0 mandatory
                     continue
                 passed = sum(
                     1 for metric, bounds in filters.items()
@@ -539,7 +540,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                     adaptive.append(s)
             universe = adaptive
             log.info(f"buy_reversal adaptive: gate_fails={gate_fails} need={need}/{n_filters} "
-                     f"day>0 mandatory → {len(universe)} qualified")
+                     f"mom_2d>0 mandatory → {len(universe)} qualified")
 
         try:
             with conn.cursor() as cur:
@@ -566,7 +567,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             snap = {k: s.get(k) for k in [
                 "gvm_score", "dma_50", "dma_200", "dma_20",
                 "rsi_month", "rsi_weekly", "daily_rsi",
-                "month_return", "week_return", "year_return", "day_change",
+                "month_return", "week_return", "year_return", "mom_2d",
                 "week_index_52", "range_3d", "ma9_vs_ma21", "vol_ratio",
                 "sector_week", "sector_month", "sector_day",
             ]}
@@ -575,7 +576,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                     cur.execute("""
                         INSERT INTO v8_qualified
                         (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
-                         day_change, week_return, month_return, dma_200, dma_50,
+                         mom_2d, week_return, month_return, dma_200, dma_50,
                          rsi_month, rsi_weekly, sector_week, sector_day,
                          month_index, week_index_52, daily_rsi, range_3d,
                          metrics, source)
@@ -583,13 +584,13 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                         ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
                             signal_ts  = NOW(),
                             cmp        = EXCLUDED.cmp,
-                            day_change = EXCLUDED.day_change,
+                            mom_2d     = EXCLUDED.mom_2d,
                             metrics    = EXCLUDED.metrics,
                             source     = EXCLUDED.source
                     """, (
                         sym, basket, target_date,
                         s.get("gvm_score"), s.get("_cmp"),
-                        s.get("day_change"), s.get("week_return"), s.get("month_return"),
+                        s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
                         s.get("dma_200"), s.get("dma_50"),
                         s.get("rsi_month"), s.get("rsi_weekly"),
                         s.get("sector_week"), s.get("sector_day"),
@@ -636,9 +637,9 @@ def run_live_signal_writer(conn) -> dict:
             cmp  = cmp_map.get(sym)
             c2d  = eod_history.get(sym, {}).get("close_2d_ago")
             row  = dict(eod)
-            row["symbol"]     = sym
-            row["day_change"] = (cmp / c2d - 1) * 100 if (cmp and c2d and c2d > 0) else eod.get("eod_day_change")
-            row["_cmp"]       = cmp
+            row["symbol"]  = sym
+            row["mom_2d"]  = (cmp / c2d - 1) * 100 if (cmp and c2d and c2d > 0) else eod.get("eod_mom_2d")
+            row["_cmp"]    = cmp
             all_metrics.append(row)
         _write_qualified(conn, all_metrics, today)
         return {"source": "eod_fallback", "msg": "no intraday bars"}
