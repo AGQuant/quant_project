@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scorr · CIO</title>
+<title>Scorr Max · CIO</title>
 <style>
   :root {
     --bg: #fafbfc;
@@ -24,10 +24,8 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; line-height: 1.5; }
 
-  /* Layout */
   .app { display: flex; flex-direction: column; height: 100vh; max-width: 1280px; margin: 0 auto; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
 
-  /* Header */
   .header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 24px; border-bottom: 1px solid var(--border);
@@ -37,19 +35,22 @@
   .logo { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
   .logo .brand { font-weight: 700; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px rgba(45,141,113,0.3); }
-  .model-toggle {
-    display: flex; gap: 2px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 5px; padding: 4px;
-  }
-  .model-btn {
-    padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer;
-    font-family: var(--font); font-size: 12px; font-weight: 500; background: transparent; color: var(--text-secondary);
-    transition: all 0.2s ease;
-  }
-  .model-btn.active { background: var(--accent); color: white; box-shadow: 0 1px 3px rgba(74,74,74,0.2); }
-  .model-btn:hover:not(.active) { color: var(--accent); background: var(--accent-light); }
 
-  /* Quick actions */
+  .header-right { display: flex; align-items: center; gap: 10px; }
+
+  .claude-toggle {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 6px 12px; cursor: pointer;
+    font-size: 12px; font-weight: 500; color: var(--text-secondary);
+    transition: all 0.2s ease; user-select: none;
+  }
+  .claude-toggle.on { border-color: var(--green); background: rgba(45,141,113,0.08); color: #1e6b54; }
+  .claude-toggle.off { border-color: var(--border); color: var(--muted); }
+  .toggle-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); transition: background 0.2s; }
+  .claude-toggle.on .toggle-dot { background: var(--green); box-shadow: 0 0 4px rgba(45,141,113,0.4); }
+  .budget-cap { font-size: 10px; color: var(--muted); margin-left: 2px; }
+
   .quick-bar {
     display: flex; gap: 8px; padding: 12px 24px; border-bottom: 1px solid var(--border);
     background: var(--surface2); overflow-x: auto; flex-shrink: 0;
@@ -64,7 +65,6 @@
   }
   .qbtn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
 
-  /* Messages */
   .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
   .messages::-webkit-scrollbar { width: 6px; }
   .messages::-webkit-scrollbar-track { background: transparent; }
@@ -90,32 +90,23 @@
   .msg-meta { font-size: 11px; color: var(--muted); margin-top: 6px; padding: 0 4px; }
   .msg.user .msg-meta { text-align: right; }
 
-  /* Attachments display */
   .attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .attachment-badge {
     padding: 4px 10px; border-radius: 5px; background: var(--surface2); border: 1px solid var(--border);
     font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px;
   }
-  .attachment-badge .close-btn {
-    cursor: pointer; color: var(--red); font-weight: 600;
-  }
 
-  /* Tool calls badge */
-  .tools-used {
-    display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px;
-  }
+  .tools-used { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   .tool-badge {
     padding: 3px 9px; border-radius: 4px; background: var(--accent-light);
     border: 1px solid var(--border); font-size: 11px; color: var(--accent); font-weight: 500;
   }
 
-  /* Tables in responses */
   .msg-bubble table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; }
   .msg-bubble th { background: var(--surface3); color: var(--text); padding: 8px 12px; text-align: left; border: 1px solid var(--border); font-weight: 600; }
   .msg-bubble td { padding: 6px 12px; border: 1px solid var(--border); }
   .msg-bubble tr:hover td { background: var(--accent-light); }
 
-  /* Typing indicator */
   .typing { display: none; align-items: center; gap: 6px; padding: 12px 16px; }
   .typing.show { display: flex; }
   .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
@@ -123,13 +114,11 @@
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 
-  /* Cost bar */
   .cost-bar {
     padding: 10px 24px; background: var(--surface2); border-top: 1px solid var(--border);
     display: flex; justify-content: space-between; font-size: 11px; color: var(--muted);
   }
 
-  /* Input area */
   .input-area {
     padding: 16px 24px; border-top: 1px solid var(--border); background: var(--surface);
     display: flex; gap: 10px; flex-direction: column;
@@ -154,18 +143,14 @@
   .btn.secondary { background: var(--surface2); color: var(--accent); border: 1px solid var(--border); box-shadow: none; }
   .btn.secondary:hover { background: var(--accent-light); box-shadow: none; }
 
-  /* File input */
   #fileInput { display: none; }
-  .file-list {
-    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px;
-  }
+  .file-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
   .file-item {
     padding: 5px 10px; background: var(--accent-light); border: 1px solid var(--border); border-radius: 5px;
     display: flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 500;
   }
   .file-item .remove { cursor: pointer; color: var(--red); font-weight: 700; }
 
-  /* Welcome */
   .welcome {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     flex: 1; gap: 10px; color: var(--text-secondary); text-align: center; padding: 40px;
@@ -178,19 +163,20 @@
 <body>
 <div class="app">
 
-  <!-- Header -->
   <div class="header">
     <div class="header-left">
       <div class="status-dot" id="statusDot"></div>
-      <div class="logo"><span class="brand">SCORR</span> · CIO</div>
+      <div class="logo"><span class="brand">SCORR</span> · MAX</div>
     </div>
-    <div class="model-toggle">
-      <button class="model-btn active" id="btnHaiku" onclick="setModel('haiku')">Haiku</button>
-      <button class="model-btn" id="btnSonnet" onclick="setModel('sonnet')">Sonnet</button>
+    <div class="header-right">
+      <div class="claude-toggle on" id="claudeToggle" onclick="toggleClaude()" title="Toggle Claude API interpretation">
+        <div class="toggle-dot" id="toggleDot"></div>
+        <span id="toggleLabel">Claude ON</span>
+        <span class="budget-cap" id="budgetCap">· Sonnet · $0.05 cap</span>
+      </div>
     </div>
   </div>
 
-  <!-- Quick actions -->
   <div class="quick-bar">
     <button class="qbtn" onclick="quickAsk('V8 dashboard')">V8 Dashboard</button>
     <button class="qbtn" onclick="quickAsk('Show open paper positions with P&L')">Open Positions</button>
@@ -200,18 +186,17 @@
     <button class="qbtn" onclick="quickAsk('System health check')">Health</button>
   </div>
 
-  <!-- Messages -->
   <div class="messages" id="messages">
     <div class="welcome" id="welcome">
       <div class="welcome-logo">MAX</div>
-      <div class="welcome-sub">Your AI Chief Investment Officer</div>
+      <div class="welcome-sub">Scorr Max · Your AI Chief Investment Officer</div>
       <div class="welcome-desc">
-        Full access to Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch
+        Full Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch<br>
+        <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
       </div>
     </div>
   </div>
 
-  <!-- Typing -->
   <div style="padding: 0 24px 4px; display:none" id="typingWrap">
     <div class="msg">
       <div class="msg-avatar">MAX</div>
@@ -223,13 +208,11 @@
     </div>
   </div>
 
-  <!-- Cost bar -->
   <div class="cost-bar">
     <span id="sessionCost">Session cost: $0.000000</span>
     <span id="tokenCount">Tokens: 0 in / 0 out</span>
   </div>
 
-  <!-- Input area -->
   <div class="input-area">
     <div class="file-list" id="fileList"></div>
     <div class="input-controls">
@@ -246,53 +229,106 @@
 
 <script>
 const API_BASE = '';
-let currentModel = 'claude-haiku-4-5-20251001';
+const SONNET_MODEL = 'claude-sonnet-4-6';
+const MAX_TOKENS = 3000;
+const BUDGET_CAP = 0.05;
+const STORAGE_KEY = 'scorr_max_session';
+
+let claudeOn = true;
 let conversationHistory = [];
 let totalCost = 0;
 let totalIn = 0;
 let totalOut = 0;
 let attachedFiles = [];
 
-function setModel(m) {
-  if (m === 'haiku') {
-    currentModel = 'claude-haiku-4-5-20251001';
-    document.getElementById('btnHaiku').classList.add('active');
-    document.getElementById('btnSonnet').classList.remove('active');
-  } else {
-    currentModel = 'claude-sonnet-4-6';
-    document.getElementById('btnSonnet').classList.add('active');
-    document.getElementById('btnHaiku').classList.remove('active');
-  }
+// ── localStorage persistence ───────────────────────────────────────
+function saveSession() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      conversationHistory,
+      totalCost,
+      totalIn,
+      totalOut,
+      claudeOn,
+      savedAt: Date.now()
+    }));
+  } catch(e) { console.warn('localStorage save failed', e); }
 }
 
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (Date.now() - s.savedAt > 86400000) {
+      localStorage.removeItem(STORAGE_KEY);
+      return false;
+    }
+    conversationHistory = s.conversationHistory || [];
+    totalCost = s.totalCost || 0;
+    totalIn   = s.totalIn   || 0;
+    totalOut  = s.totalOut  || 0;
+    claudeOn  = s.claudeOn  !== undefined ? s.claudeOn : true;
+    return conversationHistory.length > 0;
+  } catch(e) { return false; }
+}
+
+function clearSession() {
+  conversationHistory = [];
+  totalCost = totalIn = totalOut = 0;
+  localStorage.removeItem(STORAGE_KEY);
+  document.getElementById('sessionCost').textContent = 'Session cost: $0.000000';
+  document.getElementById('tokenCount').textContent = 'Tokens: 0 in / 0 out';
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = `
+    <div class="welcome" id="welcome">
+      <div class="welcome-logo">MAX</div>
+      <div class="welcome-sub">Scorr Max · Your AI Chief Investment Officer</div>
+      <div class="welcome-desc">
+        Full Railway DB · V8 signals · QB positions · GVM scores · File upload · URL fetch<br>
+        <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
+      </div>
+    </div>`;
+}
+
+// ── Claude toggle ──────────────────────────────────────────────────
+function toggleClaude() {
+  claudeOn = !claudeOn;
+  const el    = document.getElementById('claudeToggle');
+  const label = document.getElementById('toggleLabel');
+  const cap   = document.getElementById('budgetCap');
+  if (claudeOn) {
+    el.className    = 'claude-toggle on';
+    label.textContent = 'Claude ON';
+    cap.textContent   = '· Sonnet · $0.05 cap';
+  } else {
+    el.className    = 'claude-toggle off';
+    label.textContent = 'Claude OFF';
+    cap.textContent   = '· Native only · $0';
+  }
+  saveSession();
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────
 function quickAsk(text) {
   document.getElementById('userInput').value = text;
   sendMessage();
 }
 
 function escapeHtml(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function formatReply(text) {
   const lines = text.split('\n');
-  let html = '';
-  let inTable = false;
-  let tableLines = [];
-
+  let html = '', inTable = false, tableLines = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
       if (!inTable) { inTable = true; tableLines = []; }
       tableLines.push(line);
     } else {
-      if (inTable) {
-        html += renderTable(tableLines);
-        inTable = false; tableLines = [];
-      }
+      if (inTable) { html += renderTable(tableLines); inTable = false; tableLines = []; }
       html += escapeHtml(line) + '\n';
     }
   }
@@ -305,7 +341,7 @@ function renderTable(lines) {
   let html = '<table>';
   lines.forEach((line, i) => {
     if (i === 1 && /^[\s|:-]+$/.test(line)) return;
-    const cells = line.split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+    const cells = line.split('|').filter((_,idx,arr) => idx > 0 && idx < arr.length - 1);
     const tag = i === 0 ? 'th' : 'td';
     html += '<tr>' + cells.map(c => `<${tag}>${escapeHtml(c.trim())}</${tag}>`).join('') + '</tr>';
   });
@@ -313,50 +349,56 @@ function renderTable(lines) {
 }
 
 function addMessage(role, content, meta = {}) {
-  const welcome = document.getElementById('welcome');
-  if (welcome) welcome.remove();
-
+  document.getElementById('welcome')?.remove();
   const msgs = document.getElementById('messages');
-  const div = document.createElement('div');
+  const div  = document.createElement('div');
   div.className = `msg ${role}`;
 
-  const avatar = role === 'user' ? 'YOU' : 'MAX';
+  const avatar        = role === 'user' ? 'YOU' : 'MAX';
   const bubbleContent = role === 'assistant' ? formatReply(content) : escapeHtml(content);
 
   let toolsHtml = '';
-  if (meta.toolCalls && meta.toolCalls.length > 0) {
+  if (meta.toolCalls?.length > 0) {
     toolsHtml = `<div class="tools-used">${meta.toolCalls.map(t =>
       `<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>`;
   }
 
   let filesHtml = '';
-  if (meta.files && meta.files.length > 0) {
+  if (meta.files?.length > 0) {
     filesHtml = `<div class="attachments">${meta.files.map(f =>
       `<span class="attachment-badge">📄 ${f}</span>`).join('')}</div>`;
   }
 
-  const metaText = meta.model
-    ? `${meta.model.includes('haiku') ? 'haiku' : 'sonnet'} · ${meta.duration_ms}ms · $${meta.cost}`
-    : '';
+  let modeTag = '';
+  if (meta.model)       modeTag = `sonnet · ${meta.duration_ms}ms · $${meta.cost}`;
+  else if (meta.native) modeTag = `native · ${meta.duration_ms}ms · $0.000000`;
 
   div.innerHTML = `
     <div class="msg-avatar">${avatar}</div>
     <div class="msg-body">
       <div class="msg-bubble">${bubbleContent}</div>
-      ${filesHtml}
-      ${toolsHtml}
-      ${metaText ? `<div class="msg-meta">${metaText}</div>` : ''}
+      ${filesHtml}${toolsHtml}
+      ${modeTag ? `<div class="msg-meta">${modeTag}</div>` : ''}
     </div>`;
 
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
+function restoreMessages() {
+  for (const msg of conversationHistory) {
+    const content = typeof msg.content === 'string' ? msg.content : '[file/image]';
+    addMessage(msg.role, content, {});
+  }
+  document.getElementById('sessionCost').textContent = `Session cost: $${totalCost.toFixed(6)}`;
+  document.getElementById('tokenCount').textContent  = `Tokens: ${totalIn} in / ${totalOut} out`;
+}
+
+// ── File handling ─────────────────────────────────────────────────
 document.getElementById('fileInput').addEventListener('change', function(e) {
   attachedFiles = [];
   const fileList = document.getElementById('fileList');
   fileList.innerHTML = '';
-  
   Array.from(e.target.files).forEach(file => {
     attachedFiles.push(file);
     const item = document.createElement('div');
@@ -379,51 +421,26 @@ function removeFile(name) {
   });
 }
 
+// ── Send ───────────────────────────────────────────────────────────
 async function sendMessage() {
   const input = document.getElementById('userInput');
-  const text = input.value.trim();
+  const text  = input.value.trim();
   if (!text && attachedFiles.length === 0) return;
 
-  let userMessage = text;
-  let fileNames = [];
-
-  let contentParts = [];
-  if (text) {
-    contentParts.push({ type: 'text', text: text });
-  }
+  let fileNames = [], contentParts = [];
+  if (text) contentParts.push({ type: 'text', text });
 
   for (const file of attachedFiles) {
     fileNames.push(file.name);
     if (file.type.startsWith('image/')) {
-      const base64 = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result.split(',')[1]);
-        r.onerror = () => rej(new Error('File read failed'));
-        r.readAsDataURL(file);
-      });
-      contentParts.push({
-        type: 'image',
-        source: { type: 'base64', media_type: file.type, data: base64 }
-      });
+      const base64 = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); });
+      contentParts.push({ type:'image', source:{ type:'base64', media_type:file.type, data:base64 } });
     } else if (file.type === 'application/pdf') {
-      const base64 = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result.split(',')[1]);
-        r.onerror = () => rej(new Error('File read failed'));
-        r.readAsDataURL(file);
-      });
-      contentParts.push({
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-      });
+      const base64 = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); });
+      contentParts.push({ type:'document', source:{ type:'base64', media_type:'application/pdf', data:base64 } });
     } else {
-      const text = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result);
-        r.onerror = () => rej(new Error('File read failed'));
-        r.readAsText(file);
-      });
-      contentParts.push({ type: 'text', text: `[File: ${file.name}]\n${text}` });
+      const txt = await new Promise((res,rej) => { const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(new Error('read failed')); r.readAsText(file); });
+      contentParts.push({ type:'text', text:`[File: ${file.name}]\n${txt}` });
     }
   }
 
@@ -431,27 +448,28 @@ async function sendMessage() {
   input.style.height = 'auto';
   document.getElementById('sendBtn').disabled = true;
 
-  addMessage('user', userMessage, { files: fileNames });
-  conversationHistory.push({
-    role: 'user',
-    content: contentParts.length > 1 ? contentParts : userMessage
-  });
+  const userContent = contentParts.length > 1 ? contentParts : text;
+  addMessage('user', text, { files: fileNames });
+  conversationHistory.push({ role: 'user', content: userContent });
 
   attachedFiles = [];
   document.getElementById('fileInput').value = '';
   document.getElementById('fileList').innerHTML = '';
-
   document.getElementById('typingWrap').style.display = 'block';
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
   try {
+    const t0   = Date.now();
     const resp = await fetch(`${API_BASE}/api/scorr/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messages: conversationHistory,
-        model: currentModel,
-        use_tools: true,
+        messages:       conversationHistory,
+        model:          claudeOn ? SONNET_MODEL : null,
+        use_tools:      true,
+        max_tokens:     claudeOn ? MAX_TOKENS : 0,
+        claude_on:      claudeOn,
+        budget_cap_usd: BUDGET_CAP,
       })
     });
 
@@ -460,24 +478,31 @@ async function sendMessage() {
 
     if (!resp.ok) {
       addMessage('assistant', `Error: ${data.detail || JSON.stringify(data)}`);
+      document.getElementById('sendBtn').disabled = false;
       return;
     }
 
-    const reply = data.reply || '(no response)';
+    const reply    = data.reply || '(no response)';
+    const isNative = !claudeOn || !data.model;
     conversationHistory.push({ role: 'assistant', content: reply });
 
     addMessage('assistant', reply, {
-      model: data.model,
-      duration_ms: data.duration_ms,
-      cost: data.usage?.cost_usd?.toFixed(6),
-      toolCalls: data.tool_calls || [],
+      model:       isNative ? null : data.model,
+      native:      isNative,
+      duration_ms: Date.now() - t0,
+      cost:        data.usage?.cost_usd?.toFixed(6) || '0.000000',
+      toolCalls:   data.tool_calls || [],
     });
 
-    totalCost += data.usage?.cost_usd || 0;
-    totalIn += data.usage?.input_tokens || 0;
-    totalOut += data.usage?.output_tokens || 0;
+    if (!isNative) {
+      totalCost += data.usage?.cost_usd   || 0;
+      totalIn   += data.usage?.input_tokens  || 0;
+      totalOut  += data.usage?.output_tokens || 0;
+    }
+
     document.getElementById('sessionCost').textContent = `Session cost: $${totalCost.toFixed(6)}`;
-    document.getElementById('tokenCount').textContent = `Tokens: ${totalIn} in / ${totalOut} out`;
+    document.getElementById('tokenCount').textContent  = `Tokens: ${totalIn} in / ${totalOut} out`;
+    saveSession();
 
   } catch (e) {
     document.getElementById('typingWrap').style.display = 'none';
@@ -488,25 +513,42 @@ async function sendMessage() {
   }
 }
 
+// ── Keyboard ───────────────────────────────────────────────────────
 document.getElementById('userInput').addEventListener('input', function () {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 });
-
 document.getElementById('userInput').addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
+// ── Boot ───────────────────────────────────────────────────────────
 (async () => {
+  const hasHistory = loadSession();
+
+  const el    = document.getElementById('claudeToggle');
+  const label = document.getElementById('toggleLabel');
+  const cap   = document.getElementById('budgetCap');
+  if (claudeOn) {
+    el.className    = 'claude-toggle on';
+    label.textContent = 'Claude ON';
+    cap.textContent   = '· Sonnet · $0.05 cap';
+  } else {
+    el.className    = 'claude-toggle off';
+    label.textContent = 'Claude OFF';
+    cap.textContent   = '· Native only · $0';
+  }
+
+  if (hasHistory) {
+    document.getElementById('welcome')?.remove();
+    restoreMessages();
+  }
+
   try {
     const r = await fetch('/api/scorr/chat/health');
     const d = await r.json();
-    const dot = document.getElementById('statusDot');
-    if (d.status === 'ok' && d.anthropic_api_key_set) {
-      dot.style.background = '#2d8d71';
-    } else {
-      dot.style.background = '#d32f2f';
-    }
+    document.getElementById('statusDot').style.background =
+      (d.status === 'ok' && d.anthropic_api_key_set) ? '#2d8d71' : '#d32f2f';
   } catch { document.getElementById('statusDot').style.background = '#d32f2f'; }
 })();
 </script>
