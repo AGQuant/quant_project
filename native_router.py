@@ -36,21 +36,45 @@ def _query_sync(query: str) -> str:
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
 
-            # 1. Market mood (adr_daily: price_date, adr, advances, declines, computed_at)
+            # 1. Market mood — LIVE ADR from intraday_prices
             if any(k in q for k in ["market mood", "mood", "adr", "gate", "slots"]):
+                # Live ADR from latest intraday bar
                 cur.execute("""
-                    SELECT price_date, adr, advances, declines, unchanged, computed_at
-                    FROM adr_daily ORDER BY price_date DESC LIMIT 1
+                    SELECT
+                        COUNT(CASE WHEN close > open THEN 1 END) as advances,
+                        COUNT(CASE WHEN close < open THEN 1 END) as declines,
+                        COUNT(CASE WHEN close = open THEN 1 END) as unchanged,
+                        ROUND(COUNT(CASE WHEN close > open THEN 1 END)::numeric /
+                              NULLIF(COUNT(CASE WHEN close < open THEN 1 END), 0), 2) as live_adr,
+                        MAX(ts) as as_of
+                    FROM intraday_prices
+                    WHERE ts::date = CURRENT_DATE
+                      AND source IN ('fyers_eq', 'fyers')
+                      AND ts = (SELECT MAX(ts) FROM intraday_prices
+                                WHERE ts::date = CURRENT_DATE
+                                AND source IN ('fyers_eq', 'fyers'))
                 """)
                 r = cur.fetchone()
-                if r:
-                    total = (r[2] or 0) + (r[3] or 0) + (r[4] or 0)
-                    return (f"**Market Mood — {r[0]}**\n"
-                            f"ADR: {r[1]:.2f} | Advances: {r[2]} | Declines: {r[3]}\n"
-                            f"Total: {total} | Updated: {r[5]}")
-                return "No market mood data."
 
-            # 2. V8 signals (v8_qualified: symbol, basket, signal_date, gvm_score, cmp)
+                # Fallback to adr_daily if no intraday data (outside market hours)
+                if not r or r[0] == 0:
+                    cur.execute("SELECT price_date, adr, advances, declines, computed_at FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+                    r2 = cur.fetchone()
+                    if r2:
+                        return (f"**Market Mood — {r2[0]} (EOD)**\n"
+                                f"ADR: {r2[1]:.2f} | Advances: {r2[2]} | Declines: {r2[3]}\n"
+                                f"Updated: {r2[4].strftime('%d-%b %H:%M IST')}")
+                    return "No market mood data."
+
+                adv, dec, unch, adr, as_of = r[0], r[1], r[2], r[3], r[4]
+                adr_val = float(adr) if adr else 0
+                mood = "Bullish" if adr_val >= 2 else "Neutral" if adr_val >= 0.8 else "Bearish"
+                time_str = as_of.strftime('%H:%M IST') if as_of else "N/A"
+                return (f"**Market Mood — {datetime.now().strftime('%d-%b')} {time_str} (LIVE)**\n"
+                        f"ADR: {adr_val:.2f} | {mood}\n"
+                        f"Advances: {adv} | Declines: {dec} | Unchanged: {unch}")
+
+            # 2. V8 signals
             if any(k in q for k in ["v8", "signal", "qualified"]):
                 cur.execute("""
                     SELECT symbol, basket, side, gvm_score, cmp, signal_ts
@@ -78,7 +102,7 @@ def _query_sync(query: str) -> str:
                     return f"**Open Positions by Basket**\n{fmt_table(['Basket','Count','Invested'], data)}"
                 return "No open positions."
 
-            # 4. Paper positions (v8_paper_positions: symbol, side, basket, entry_price, status)
+            # 4. Paper positions
             if any(k in q for k in ["paper", "open position", "position", "p&l", "pnl"]):
                 cur.execute("""
                     SELECT symbol, side, basket, entry_price, target, stop_loss, entry_ts
@@ -92,7 +116,7 @@ def _query_sync(query: str) -> str:
                     return f"**Open Paper Positions ({len(rows)})**\n{fmt_table(['Symbol','Side','Basket','Entry','Target','SL'], data)}"
                 return "No open paper positions."
 
-            # 5. Top GVM (gvm_scores: symbol, company_name, gvm_score, verdict, segment)
+            # 5. Top GVM
             if any(k in q for k in ["top gvm", "top stocks", "strong buy"]):
                 cur.execute("""
                     SELECT symbol, company_name, gvm_score, verdict, segment
@@ -121,7 +145,7 @@ def _query_sync(query: str) -> str:
                         f"Intraday bars today: {intr:,}\n"
                         f"Railway DB: OK")
 
-            # 7. PCR (pcr_daily: underlying, pcr, put_oi, call_oi, computed_at)
+            # 7. PCR
             if any(k in q for k in ["pcr", "put call"]):
                 cur.execute("""
                     SELECT underlying, pcr, put_oi, call_oi, computed_at
@@ -151,7 +175,7 @@ def _query_sync(query: str) -> str:
                                 f"Verdict: {r[6]} | Segment: {r[7]}")
                 return "Specify stock. E.g. 'GVM SBIN'"
 
-            # 9. Overview / takeaway (input_raw: nse_code, company_name, overview, key_takeaway)
+            # 9. Overview / takeaway
             if any(k in q for k in ["overview", "takeaway", "result", "about"]):
                 company = extract_company(q)
                 if company:
