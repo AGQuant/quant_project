@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>V8 Model</title>
+<title>Scorr · AI CIO</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -43,16 +43,16 @@ const C = {
   accent: "#00d4ff", gold: "#f0b429", green: "#22c55e",
   red: "#ef4444", orange: "#f97316", purple: "#a855f7",
   text: "#e2e8f0", muted: "#64748b", gridLine: "#151b2e",
+  nav: "#0b0f1c",
 };
 
 const MODELS = [
-  { id: "v8",     icon: "⇄", label: "V8 Long-Short",       color: C.accent,  live: true },
-  { id: "max",    icon: "✦", label: "Max Chat",            color: "#7c5cff", live: true },
-  { id: "gvm",    icon: "▦", label: "GVM Scoring",         color: C.gold,    live: true },
-  { id: "sector", icon: "◉", label: "Sector Intelligence", color: C.purple,  live: false },
-  { id: "qb",     icon: "⌂", label: "Quant Basket",        color: C.green,   live: false },
-  { id: "health", icon: "◷", label: "Portfolio Health",    color: C.orange,  live: false },
-  { id: "v10",    icon: "⟁", label: "Nifty Options V10",   color: "#ec4899", live: false },
+  { id: "v8",     icon: "⚡", label: "V8",      full: "V8 Long-Short",       color: C.accent,  live: true },
+  { id: "gvm",    icon: "▦", label: "GVM",     full: "GVM Scoring",         color: C.gold,    live: true },
+  { id: "max",    icon: "◉", label: "Max",     full: "Max Chat",            color: "#7c5cff", live: true },
+  { id: "sector", icon: "◉", label: "Sector",  full: "Sector Intelligence", color: C.purple,  live: false },
+  { id: "qb",     icon: "⌂", label: "QB",      full: "Quant Basket",        color: C.green,   live: false },
+  { id: "v10",    icon: "⟁", label: "V10",     full: "Nifty Options V10",   color: "#ec4899", live: false },
 ];
 
 const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -64,9 +64,9 @@ function Loader({ msg }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px", gap: 14 }}>
       <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out infinite" }} />
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out .2s infinite" }} />
-        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out .4s infinite" }} />
+        {[0,.2,.4].map(d => (
+          <div key={d} style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: `pulse 1s ease-in-out ${d}s infinite` }} />
+        ))}
       </div>
       {msg && <div style={{ fontSize: 12, color: C.muted }}>{msg}</div>}
     </div>
@@ -79,7 +79,41 @@ function Tag({ children, color = C.accent }) {
   );
 }
 
-// ── Full-screen iframe wrapper (V8 + Max) ────────────────────────────────────
+// ── Bottom Nav Bar ───────────────────────────────────────────────
+function BottomNav({ current, onPick }) {
+  return (
+    <div style={{
+      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 1000,
+      background: "rgba(11,15,28,0.97)", backdropFilter: "blur(12px)",
+      borderTop: `1px solid ${C.border}`,
+      display: "flex", height: 56,
+    }}>
+      {MODELS.map(m => {
+        const active = current === m.id;
+        return (
+          <button key={m.id}
+            onClick={() => m.live && onPick(m.id)}
+            disabled={!m.live}
+            style={{
+              flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+              justifyContent: "center", gap: 3, border: "none", background: "transparent",
+              cursor: m.live ? "pointer" : "not-allowed", opacity: m.live ? 1 : 0.35,
+              borderTop: active ? `2px solid ${m.color}` : "2px solid transparent",
+              transition: "all 0.15s",
+            }}>
+            <span style={{ fontSize: 16, color: active ? m.color : C.muted }}>{m.icon}</span>
+            <span style={{ fontSize: 9, fontWeight: active ? 700 : 400, color: active ? m.color : C.muted, letterSpacing: "0.05em" }}>
+              {m.label}
+              {!m.live && <span style={{ fontSize: 7, display: "block", color: C.muted }}>soon</span>}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Full-screen iframe wrapper ───────────────────────────────────
 function FrameModule({ src }) {
   return (
     <iframe
@@ -90,7 +124,7 @@ function FrameModule({ src }) {
   );
 }
 
-// ── GVM: search + full company report ────────────────────────────────────────
+// ── GVM Module ───────────────────────────────────────────────────
 function GvmModule() {
   const [query, setQuery] = useState("");
   const [suggest, setSuggest] = useState([]);
@@ -130,7 +164,7 @@ function GvmModule() {
   };
 
   return (
-    <div style={{ height: "100%", overflowY: "auto", padding: "24px" }}>
+    <div style={{ height: "100%", overflowY: "auto", padding: "24px 24px 80px" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
         <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "0 auto 24px" }}>
           <div style={{ display: "flex", gap: 8 }}>
@@ -141,7 +175,7 @@ function GvmModule() {
                 onChange={e => setQuery(e.target.value.toUpperCase())}
                 onFocus={() => suggest.length && setShowSug(true)}
                 onKeyDown={e => { if (e.key === "Enter" && suggest[0]) loadReport(suggest[0].symbol); }}
-                placeholder="Search any company — e.g. TCS, RELIANCE, HDFCBANK"
+                placeholder="Search company — TCS, RELIANCE, HDFCBANK…"
                 style={{ width: "100%", padding: "12px 14px 12px 38px", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 14, outline: "none" }}
               />
             </div>
@@ -170,7 +204,6 @@ function GvmModule() {
             </div>
           )}
         </div>
-
         {!symbol && !loading && <GvmEmptyState onPick={loadReport} />}
         {loading && <Loader msg={`Building ${symbol} peer-benchmark report…`} />}
         {err && <div style={{ textAlign: "center", color: C.red, padding: 24 }}>{err}</div>}
@@ -233,7 +266,7 @@ function GvmReport({ r }) {
   (r.benchmark || []).forEach(b => { (byGroup[b.group] = byGroup[b.group] || []).push(b); });
 
   return (
-    <div>
+    <div style={{ paddingBottom: 80 }}>
       <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16, display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ textAlign: "center", minWidth: 120 }}>
           <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
@@ -328,15 +361,9 @@ function GvmReport({ r }) {
         ))}
       </div>
 
-      {r.content?.overview && (
-        <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />
-      )}
-      {r.content?.key_takeaway && (
-        <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />
-      )}
-      {r.content?.result_analysis && (
-        <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />
-      )}
+      {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
+      {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
+      {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
 
       <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
@@ -361,59 +388,21 @@ function ComingSoon({ mod }) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px" }}>
       <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.4 }}>{mod.icon}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{mod.label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{mod.full}</div>
       <div style={{ marginTop: 16 }}><Tag color={mod.color}>Building in coming days</Tag></div>
-    </div>
-  );
-}
-
-// ── Compact ⋯ switcher ───────────────────────────────────────────────────────
-function Switcher({ current, onPick }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const mod = MODELS.find(m => m.id === current);
-
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
-  return (
-    <div ref={ref} style={{ position: "fixed", top: 12, right: 12, zIndex: 1000 }}>
-      <button onClick={() => setOpen(o => !o)}
-        title="Switch model"
-        style={{ display: "flex", alignItems: "center", gap: 8, height: 34, padding: "0 12px", borderRadius: 8, border: `1px solid ${mod.color}40`, background: "rgba(15,20,32,0.92)", backdropFilter: "blur(8px)", color: mod.color, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-        <span style={{ fontSize: 14 }}>{mod.icon}</span>
-        <span style={{ letterSpacing: "0.12em", color: C.muted, fontSize: 16, lineHeight: 1 }}>⋯</span>
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: 40, right: 0, minWidth: 210, background: "rgba(15,20,32,0.97)", backdropFilter: "blur(10px)", border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(0,0,0,0.6)" }}>
-          {MODELS.map(m => (
-            <button key={m.id} disabled={!m.live} onClick={() => { if (m.live) { onPick(m.id); setOpen(false); } }}
-              style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", border: "none", borderLeft: current === m.id ? `3px solid ${m.color}` : "3px solid transparent", background: current === m.id ? `${m.color}14` : "transparent", color: m.live ? (current === m.id ? m.color : C.text) : C.muted, cursor: m.live ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600, textAlign: "left", opacity: m.live ? 1 : 0.5 }}
-              onMouseEnter={e => { if (m.live && current !== m.id) e.currentTarget.style.background = C.border; }}
-              onMouseLeave={e => { if (current !== m.id) e.currentTarget.style.background = "transparent"; }}>
-              <span style={{ width: 18, textAlign: "center", color: m.color }}>{m.icon}</span>
-              <span style={{ flex: 1 }}>{m.label}</span>
-              {!m.live && <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase" }}>soon</span>}
-              {current === m.id && <span style={{ color: m.color }}>✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
 function App() {
   const [page, setPage] = useState("v8");
+  const mod = MODELS.find(m => m.id === page);
 
   let body;
-  if (page === "v8") body = <FrameModule src={`${API}/dashboard`} />;
-  else if (page === "max") body = <FrameModule src={`${API}/cio`} />;
-  else if (page === "gvm") body = <GvmModule />;
-  else body = <ComingSoon mod={MODELS.find(m => m.id === page)} />;
+  if (page === "v8")  body = <FrameModule src={`${API}/dashboard`} />;
+  else if (page === "max")  body = <FrameModule src={`${API}/cio`} />;
+  else if (page === "gvm")  body = <GvmModule />;
+  else body = <ComingSoon mod={mod} />;
 
   return (
     <div style={{ height: "100vh", width: "100vw", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif", position: "relative", overflow: "hidden" }}>
@@ -426,8 +415,11 @@ function App() {
         button { transition: all 0.15s ease; }
         input::placeholder { color: #475569; }
       `}</style>
-      <Switcher current={page} onPick={setPage} />
-      <div style={{ height: "100%", width: "100%" }}>{body}</div>
+      {/* Content area — padded bottom for nav bar */}
+      <div style={{ height: "calc(100% - 56px)", width: "100%", overflow: "hidden" }}>
+        {body}
+      </div>
+      <BottomNav current={page} onPick={setPage} />
     </div>
   );
 }
