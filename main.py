@@ -55,7 +55,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.30
+# Scorr / Project Quant — main.py v2.9.31
+# v2.9.31: /cio2 route wired — serves scorr_cio_dashboard.html.
+#   6-module CIO Dashboard: V8 Long-Short, GVM Scoring, Sector Intelligence,
+#   Quant Basket, Portfolio Health, Nifty Options V10. Live Railway MCP data.
+#   React+Babel in-browser. No build step. Self-contained HTML.
 # v2.9.30: Trade Check v3.4 wired — trade_check_v34_endpoints router.
 #   POST /api/trade-check/v34 (weighted + core-gate scoring, caller passes
 #   2 chart gates = human-in-AI-loop), POST /api/trade-check/v34/promote
@@ -70,28 +74,9 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 #   Haiku default (routine queries ~$0.001). Sonnet on-demand for deep analysis.
 #   Full system prompt with trading rules + memory blueprint in scorr_chat_endpoint.py.
 #   CIO = independent brain with all 69 Railway MCP tools.
-# v2.9.27: Scorr CHAT endpoint wired — scorr_chat_endpoint router.
-#   POST /api/scorr/chat (free-form chat + MCP server attached server-side,
-#   full tool access, key stays in Railway env). GET /api/scorr/chat/health.
-#   Zero-terminal cockpit backend. Sonnet 4.6 default, hard cap 4096 tokens.
-# v2.9.26: Scorr query endpoints wired — scorr_endpoints router.
-#   POST /api/scorr/query (native cache-first, Anthropic API fallback)
-#   GET /api/scorr/health. Cost: $2-3/month vs $100 Max plan.
-# v2.9.25: V8 paper 5-min stepped REPLAY wired — v8_replay_endpoints router.
-#   POST /api/v8/replay/run (wipe + replay since start date, true 5-min walk),
-#   GET /api/v8/replay/summary. Files: v8_paper_replay.py, v8_replay_endpoints.py.
-#   Isolated; reuses live paper entry/exit logic with point-in-time bar reads.
-# v2.9.24: pcr_intraday wired — 5-min forward-capture PCR rollup
-#   (ATM±5 + total), DB-side self-healing from option_chain.
-#   Files: pcr_intraday.py, pcr_endpoints.py. Scheduler runs
-#   compute every 5-min in _live_loop. 2 MCP tools added.
-# v2.9.23: MCP dispatch extracted to mcp_dispatch.py (File 5/5 split,
-#   piece B). MCP_TOOLS + _call_tool + /mcp endpoint now live in
-#   mcp_dispatch.py (self-contained, own get_conn). main.py wires
-#   mcp_router. github_ops.py staged (piece A) but not yet wired.
 # ============================================================
 
-VERSION = "2.9.30"
+VERSION = "2.9.31"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -278,7 +263,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.30)")
+        log.info("Tables ready (v2.9.31)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -377,6 +362,11 @@ def dashboard():
 @app.get("/cio", response_class=HTMLResponse)
 def cio():
     with open("scorr_cockpit.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/cio2", response_class=HTMLResponse)
+def cio2():
+    with open("scorr_cio_dashboard.html", "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/health")
