@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Scorr CIO Dashboard</title>
+<title>V8 Model</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -15,7 +15,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 
 const API = "https://quantproject-production.up.railway.app";
 const MCP = `${API}/mcp`;
@@ -31,6 +31,12 @@ async function mcpCall(tool, args = {}) {
   try { return JSON.parse(raw); } catch { return raw; }
 }
 
+async function apiGet(path) {
+  const r = await fetch(`${API}${path}`);
+  if (!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
+
 const C = {
   bg: "#0a0d14", card: "#0f1420", border: "#1e2540",
   accent: "#00d4ff", gold: "#f0b429", green: "#22c55e",
@@ -38,654 +44,387 @@ const C = {
   text: "#e2e8f0", muted: "#64748b", gridLine: "#151b2e",
 };
 
-const MODULES = [
-  { id: "v8",     icon: "⇄", label: "V8 Long-Short",       sub: "Futures · 5 Baskets",          color: C.accent,  desc: "Live paper engine · Mood gate · Pivots" },
-  { id: "gvm",    icon: "▦", label: "GVM Scoring",         sub: "1,762 stocks · Daily",         color: C.gold,    desc: "Growth · Value · Momentum · Peer-relative" },
-  { id: "sector", icon: "◉", label: "Sector Intelligence", sub: "129 segments · mcap-weighted", color: C.purple,  desc: "Rotation map · Top picks by sector" },
-  { id: "qb",     icon: "⌂", label: "Quant Basket",        sub: "4 Baskets · Equity",           color: C.green,   desc: "Buy-and-hold · GVM screened · Thematic" },
-  { id: "health", icon: "◷", label: "Portfolio Health",    sub: "Score card · Risk",            color: C.orange,  desc: "Winners · Losers · Quality · Valuation" },
-  { id: "v10",    icon: "⟁", label: "Nifty Options V10",   sub: "ST + EMA · Advisory",          color: "#ec4899", desc: "SuperTrend 150/3 · EMA 3/10 Gate" },
+const MODELS = [
+  { id: "v8",     icon: "⇄", label: "V8 Long-Short",       sub: "Futures · 5 Baskets",   color: C.accent,  live: true,  desc: "Live paper engine · Mood gate · Pivots" },
+  { id: "gvm",    icon: "▦", label: "GVM Scoring",         sub: "1,762 stocks · Peer-rel", color: C.gold,    live: true,  desc: "Search any company · Full peer-benchmark report" },
+  { id: "sector", icon: "◉", label: "Sector Intelligence", sub: "129 segments",          color: C.purple,  live: false, desc: "Rotation map · Coming soon" },
+  { id: "qb",     icon: "⌂", label: "Quant Basket",        sub: "4 Baskets · Equity",    color: C.green,   live: false, desc: "Buy-and-hold · Coming soon" },
+  { id: "health", icon: "◷", label: "Portfolio Health",    sub: "Score card · Risk",     color: C.orange,  live: false, desc: "Winners · Losers · Coming soon" },
+  { id: "v10",    icon: "⟁", label: "Nifty Options V10",   sub: "ST + EMA · Advisory",   color: "#ec4899", live: false, desc: "SuperTrend + EMA · Coming soon" },
 ];
 
 const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
 const pct = (n, d = 1) => n == null ? "—" : `${n > 0 ? "+" : ""}${Number(n).toFixed(d)}%`;
-const pnlColor = (n) => n > 0 ? C.green : n < 0 ? C.red : C.muted;
-const gvmColor = (g) => g >= 8 ? C.green : g >= 7 ? C.gold : g >= 6 ? C.orange : C.red;
+const gvmColor = (g) => g == null ? C.muted : g >= 8 ? C.green : g >= 7 ? C.gold : g >= 6 ? C.orange : C.red;
+const ratingColor = (r) => r == null ? C.muted : r >= 7 ? C.green : r >= 5 ? C.gold : C.red;
 const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#86efac", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
-const moodColor = (m = "") => ({ "Bullish": C.green, "Bearish": C.red, "Neutral": C.gold, "Strong Bullish": "#22ff88" }[m] || C.gold);
 
-function Loader() {
+function Loader({ msg }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "60px", gap: 12 }}>
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out infinite" }} />
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out .2s infinite" }} />
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out .4s infinite" }} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px", gap: 14 }}>
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out infinite" }} />
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out .2s infinite" }} />
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, animation: "pulse 1s ease-in-out .4s infinite" }} />
+      </div>
+      {msg && <div style={{ fontSize: 12, color: C.muted }}>{msg}</div>}
     </div>
   );
 }
 
 function Tag({ children, color = C.accent }) {
   return (
-    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color, background: color + "20", border: `1px solid ${color}40`, borderRadius: 4, padding: "2px 7px", textTransform: "uppercase" }}>
-      {children}
-    </span>
+    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color, background: color + "20", border: `1px solid ${color}40`, borderRadius: 4, padding: "2px 7px", textTransform: "uppercase" }}>{children}</span>
   );
 }
 
-function StatBox({ label, value, sub, color = C.text }) {
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 18px" }}>
-      <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>{sub}</div>}
-    </div>
-  );
-}
-
-function ScoreBar({ label, score, color }) {
-  const w = Math.max(0, Math.min(100, (score / 10) * 100));
-  const c = color || gvmColor(score);
-  return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: C.muted }}>{label}</span>
-        <span style={{ fontSize: 12, fontWeight: 700, color: c, fontFamily: "monospace" }}>{Number(score).toFixed(2)}</span>
-      </div>
-      <div style={{ height: 5, background: C.border, borderRadius: 3 }}>
-        <div style={{ height: "100%", width: `${w}%`, background: c, borderRadius: 3, transition: "width 0.6s ease" }} />
-      </div>
-    </div>
-  );
-}
-
-function SectionHeader({ title, sub, color = C.accent }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 12, borderBottom: `1px solid ${C.border}` }}>
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 700, color, letterSpacing: "0.05em" }}>{title}</div>
-        {sub && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{sub}</div>}
-      </div>
-    </div>
-  );
-}
-
-function Table({ cols, rows, emptyMsg = "No data" }) {
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr>
-            {cols.map(c => (
-              <th key={c.key} style={{ textAlign: c.align || "left", padding: "8px 10px", color: C.muted, fontWeight: 600, fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={cols.length} style={{ textAlign: "center", padding: 24, color: C.muted }}>{emptyMsg}</td></tr>
-          ) : rows.map((row, i) => (
-            <tr key={i} style={{ borderBottom: `1px solid ${C.gridLine}` }}>
-              {cols.map(c => (
-                <td key={c.key} style={{ padding: "9px 10px", color: c.color ? c.color(row) : C.text, textAlign: c.align || "left", fontFamily: c.mono ? "monospace" : "inherit", whiteSpace: "nowrap" }}>
-                  {c.render ? c.render(row) : row[c.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
+// ── V8: iframe original dashboard ────────────────────────────────────────────
 function V8Module() {
-  const [mood, setMood] = useState(null);
-  const [paper, setPaper] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("open");
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+        Original V8 dashboard — live from <span style={{ fontFamily: "monospace", color: C.accent }}>/dashboard</span>
+      </div>
+      <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${C.border}`, background: C.card }}>
+        <iframe
+          src={`${API}/dashboard`}
+          title="V8 Dashboard"
+          style={{ width: "100%", height: "calc(100vh - 200px)", minHeight: 600, border: "none", display: "block", background: "#fff" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── GVM: search + full company report ────────────────────────────────────────
+function GvmModule() {
+  const [query, setQuery] = useState("");
+  const [suggest, setSuggest] = useState([]);
+  const [showSug, setShowSug] = useState(false);
+  const [symbol, setSymbol] = useState(null);
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+  const boxRef = useRef(null);
+  const debounce = useRef(null);
+
+  // autocomplete
+  useEffect(() => {
+    if (!query || query.length < 1) { setSuggest([]); return; }
+    clearTimeout(debounce.current);
+    debounce.current = setTimeout(async () => {
+      try {
+        const d = await apiGet(`/api/gvm/search?q=${encodeURIComponent(query)}&limit=8`);
+        setSuggest(d.results || []); setShowSug(true);
+      } catch { setSuggest([]); }
+    }, 180);
+    return () => clearTimeout(debounce.current);
+  }, [query]);
 
   useEffect(() => {
-    Promise.all([mcpCall("v8_market_mood"), mcpCall("paper_status")])
-      .then(([m, p]) => { setMood(m); setPaper(p); })
-      .finally(() => setLoading(false));
+    const h = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setShowSug(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  if (loading) return <Loader />;
-
-  const trades = paper?.recent_trades || [];
-  const opens = paper?.open_positions || [];
-  const s = paper?.summary || {};
-  const winRate = s.trades ? ((s.wins / s.trades) * 100).toFixed(0) : 0;
-
-  const positionCols = [
-    { key: "symbol", label: "Symbol", color: () => C.accent },
-    { key: "side", label: "Side", render: r => <Tag color={r.side === "LONG" ? C.green : C.red}>{r.side}</Tag> },
-    { key: "basket", label: "Basket", color: () => C.muted, render: r => r.basket?.replace(/_/g, " ").toUpperCase() },
-    { key: "entry_price", label: "Entry", mono: true },
-    { key: "cmp", label: "CMP", mono: true },
-    { key: "unrealised_pnl", label: "Unreal P&L", mono: true, color: r => pnlColor(r.unrealised_pnl), render: r => `₹${fmt(r.unrealised_pnl)}` },
-    { key: "target", label: "Target", mono: true },
-    { key: "stop_loss", label: "SL", mono: true, color: () => C.red },
-  ];
-
-  const tradeCols = [
-    { key: "symbol", label: "Symbol", color: () => C.accent },
-    { key: "side", label: "Side", render: r => <Tag color={r.side === "LONG" ? C.green : C.red}>{r.side}</Tag> },
-    { key: "result", label: "Result", render: r => <Tag color={r.result?.includes("SL") ? C.red : C.green}>{r.result?.replace(/_/g, " ")}</Tag> },
-    { key: "entry_price", label: "Entry", mono: true },
-    { key: "exit_price", label: "Exit", mono: true },
-    { key: "pnl", label: "P&L", mono: true, color: r => pnlColor(r.pnl), render: r => `₹${fmt(r.pnl)}` },
-    { key: "return_pct", label: "Return", mono: true, color: r => pnlColor(r.return_pct), render: r => pct(r.return_pct) },
-    { key: "entry_ts", label: "Entry Date", color: () => C.muted, render: r => r.entry_ts?.slice(0, 10) },
-  ];
-
-  return (
-    <div>
-      <div style={{ background: `${moodColor(mood?.mood)}15`, border: `1px solid ${moodColor(mood?.mood)}40`, borderRadius: 10, padding: "16px 20px", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: moodColor(mood?.mood), boxShadow: `0 0 12px ${moodColor(mood?.mood)}` }} />
-          <span style={{ fontSize: 18, fontWeight: 800, color: moodColor(mood?.mood), letterSpacing: "0.05em" }}>{mood?.mood?.toUpperCase()}</span>
-          <span style={{ color: C.muted, fontSize: 13 }}>Market · {mood?.fails} gate fail{mood?.fails !== 1 ? "s" : ""}</span>
-        </div>
-        <div style={{ display: "flex", gap: 12 }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: C.green }}>{mood?.buy_slots}</div>
-            <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase" }}>Buy Slots</div>
-          </div>
-          <div style={{ width: 1, background: C.border }} />
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 20, fontWeight: 800, color: C.red }}>{mood?.sell_slots}</div>
-            <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase" }}>Sell Slots</div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 20 }}>
-        {mood?.checks?.map(c => (
-          <div key={c.filter} style={{ background: C.card, border: `1px solid ${c.pass ? C.green + "40" : C.red + "40"}`, borderRadius: 8, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>{c.filter}</div>
-            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "monospace", color: c.pass ? C.green : C.red }}>{Number(c.value).toFixed(2)}</div>
-            <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>need {c.required}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 20 }}>
-        <StatBox label="Open" value={opens.length} sub="positions" color={C.accent} />
-        <StatBox label="Total Trades" value={s.trades || 0} color={C.text} />
-        <StatBox label="Win Rate" value={`${winRate}%`} color={winRate >= 60 ? C.green : C.gold} />
-        <StatBox label="Net P&L" value={`₹${fmt(s.total_pnl)}`} color={pnlColor(s.total_pnl)} />
-        <StatBox label="Avg Return" value={pct(s.avg_ret)} color={pnlColor(s.avg_ret)} />
-      </div>
-
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {[["open", `Open (${opens.length})`], ["trades", `Closed (${trades.length})`]].map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: tab === id ? C.accent : C.border, color: tab === id ? "#000" : C.muted }}>
-            {lbl}
-          </button>
-        ))}
-      </div>
-
-      {tab === "open"
-        ? <Table cols={positionCols} rows={opens} emptyMsg="No open positions" />
-        : <Table cols={tradeCols} rows={trades} emptyMsg="No recent trades" />}
-    </div>
-  );
-}
-
-function GVMModule() {
-  const [stocks, setStocks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("Strong Buy");
-
-  useEffect(() => {
-    setLoading(true);
-    mcpCall("get_top_stocks", { n: 20, verdict: filter })
-      .then(d => setStocks(Array.isArray(d) ? d : []))
-      .finally(() => setLoading(false));
-  }, [filter]);
-
-  const verdicts = ["Strong Buy", "Buy", "Watch", "Exit"];
-  const verdictDist = { "Strong Buy": 52, "Buy": 281, "Watch": 546, "Exit": 883 };
-
-  const cols = [
-    { key: "rank", label: "#", color: () => C.muted },
-    { key: "symbol", label: "Symbol", color: () => C.accent },
-    { key: "company_name", label: "Company", color: () => C.text, render: r => r.company_name?.slice(0, 22) },
-    { key: "segment", label: "Segment", color: () => C.muted, render: r => r.segment?.slice(0, 22) },
-    { key: "gvm_score", label: "GVM", mono: true, color: r => gvmColor(r.gvm_score), render: r => Number(r.gvm_score).toFixed(2) },
-    { key: "g_score", label: "G", mono: true, color: r => gvmColor(r.g_score), render: r => Number(r.g_score).toFixed(2) },
-    { key: "v_score", label: "V", mono: true, color: r => gvmColor(r.v_score), render: r => Number(r.v_score).toFixed(2) },
-    { key: "m_score", label: "M", mono: true, color: r => gvmColor(r.m_score), render: r => Number(r.m_score).toFixed(2) },
-    { key: "verdict", label: "Verdict", render: r => <Tag color={verdictColor(r.verdict)}>{r.verdict}</Tag> },
-    { key: "market_cap", label: "MCap Cr", mono: true, color: () => C.muted, render: r => fmt(r.market_cap, 0) },
-  ];
-
-  return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 20 }}>
-        {verdicts.map(v => (
-          <div key={v} style={{ background: C.card, border: `1px solid ${verdictColor(v)}40`, borderRadius: 8, padding: "14px 16px", cursor: "pointer" }} onClick={() => setFilter(v)}>
-            <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{v}</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: verdictColor(v), fontFamily: "monospace" }}>{verdictDist[v]}</div>
-            <div style={{ fontSize: 10, color: C.muted }}>stocks</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 20, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ fontSize: 12, color: C.muted }}>Formula</div>
-        {["G — Growth (screener_raw)", "V — Value (PE vs peer · Upside)", "M — Momentum (price · DMA · RSI)"].map(f => (
-          <div key={f} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.gold }} />
-            <span style={{ fontSize: 12, color: C.text }}>{f}</span>
-          </div>
-        ))}
-        <div style={{ marginLeft: "auto", fontFamily: "monospace", fontSize: 13, color: C.gold }}>GVM = (G + V + M) / 3</div>
-      </div>
-
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {verdicts.map(v => (
-          <button key={v} onClick={() => setFilter(v)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: filter === v ? verdictColor(v) + "30" : C.border, color: filter === v ? verdictColor(v) : C.muted, borderLeft: filter === v ? `3px solid ${verdictColor(v)}` : "3px solid transparent" }}>
-            {v}
-          </button>
-        ))}
-      </div>
-
-      {loading ? <Loader /> : <Table cols={cols} rows={stocks.map((r, i) => ({ ...r, rank: i + 1 }))} emptyMsg="No stocks" />}
-    </div>
-  );
-}
-
-function SectorModule() {
-  const [sectors, setSectors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("all");
-
-  useEffect(() => {
-    mcpCall("get_sector_rating")
-      .then(d => setSectors(Array.isArray(d) ? d : []))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const verdicts = ["all", "Buy", "Watch", "Exit"];
-  const filtered = filter === "all" ? sectors : sectors.filter(s => s.verdict === filter);
-  const topBuy = sectors.filter(s => s.verdict === "Buy").slice(0, 3);
-  const topExit = [...sectors].filter(s => s.verdict === "Exit").reverse().slice(0, 3);
-
-  const cols = [
-    { key: "rank", label: "#", color: () => C.muted },
-    { key: "segment", label: "Segment", color: () => C.text },
-    { key: "mcap_weighted_gvm", label: "GVM (mcap)", mono: true, color: r => gvmColor(r.mcap_weighted_gvm), render: r => Number(r.mcap_weighted_gvm).toFixed(2) },
-    { key: "avg_gvm", label: "GVM (avg)", mono: true, color: r => gvmColor(r.avg_gvm), render: r => Number(r.avg_gvm).toFixed(2) },
-    { key: "stock_count", label: "Stocks", mono: true, color: () => C.muted },
-    { key: "verdict", label: "Verdict", render: r => <Tag color={verdictColor(r.verdict)}>{r.verdict}</Tag> },
-    { key: "top_stock", label: "Top Stock", color: () => C.accent },
-    { key: "top_stock_gvm", label: "Top GVM", mono: true, color: r => gvmColor(r.top_stock_gvm), render: r => Number(r.top_stock_gvm).toFixed(2) },
-  ];
-
-  if (loading) return <Loader />;
-
-  return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-        <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "16px 18px" }}>
-          <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>⬆ Top Buy Sectors</div>
-          {topBuy.map((s, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: i < 2 ? `1px solid ${C.gridLine}` : "none" }}>
-              <div>
-                <div style={{ fontSize: 12, color: C.text }}>{s.segment}</div>
-                <div style={{ fontSize: 10, color: C.muted }}>{s.stock_count} stocks · Top: {s.top_stock}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: C.green, fontFamily: "monospace" }}>{Number(s.mcap_weighted_gvm).toFixed(2)}</div>
-                <div style={{ fontSize: 10, color: C.muted }}>mcap GVM</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "16px 18px" }}>
-          <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>⬇ Weakest Sectors</div>
-          {topExit.map((s, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: i < 2 ? `1px solid ${C.gridLine}` : "none" }}>
-              <div>
-                <div style={{ fontSize: 12, color: C.text }}>{s.segment}</div>
-                <div style={{ fontSize: 10, color: C.muted }}>{s.stock_count} stocks · Top: {s.top_stock}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: C.red, fontFamily: "monospace" }}>{Number(s.mcap_weighted_gvm).toFixed(2)}</div>
-                <div style={{ fontSize: 10, color: C.muted }}>mcap GVM</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        {verdicts.map(v => {
-          const count = v === "all" ? sectors.length : sectors.filter(s => s.verdict === v).length;
-          return (
-            <button key={v} onClick={() => setFilter(v)} style={{ padding: "7px 16px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, background: filter === v ? (v === "all" ? C.accent : verdictColor(v)) + "30" : C.border, color: filter === v ? (v === "all" ? C.accent : verdictColor(v)) : C.muted }}>
-              {v === "all" ? `All (${count})` : `${v} (${count})`}
-            </button>
-          );
-        })}
-      </div>
-
-      <Table cols={cols} rows={filtered.map((r, i) => ({ ...r, rank: i + 1 }))} emptyMsg="No sectors" />
-    </div>
-  );
-}
-
-function QBModule() {
-  const [positions, setPositions] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    mcpCall("qb_positions", {})
-      .then(d => setPositions(Array.isArray(d) ? d : []))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <Loader />;
-
-  const totalCost = positions.reduce((a, p) => a + p.cost_basis, 0);
-  const totalValue = positions.reduce((a, p) => a + p.current_value, 0);
-  const totalPnl = positions.reduce((a, p) => a + p.pnl, 0);
-  const totalPnlPct = totalCost ? (totalPnl / totalCost) * 100 : 0;
-  const winners = positions.filter(p => p.pnl > 0).length;
-  const losers = positions.filter(p => p.pnl < 0).length;
-  const wlRatio = losers ? (winners / losers).toFixed(2) : "—";
-  const avgGvm = positions.length ? (positions.reduce((a, p) => a + (p.gvm || 0), 0) / positions.length).toFixed(2) : "—";
-  const atRisk = positions.filter(p => p.pnl_pct <= -8);
-
-  const cols = [
-    { key: "symbol", label: "Symbol", color: () => C.accent },
-    { key: "gvm", label: "GVM", mono: true, color: r => gvmColor(r.gvm), render: r => Number(r.gvm).toFixed(2) },
-    { key: "gvm_breakdown", label: "G/V/M", color: () => C.muted, render: r => `${r.g?.toFixed(1)}/${r.v?.toFixed(1)}/${r.m?.toFixed(1)}` },
-    { key: "entry_price", label: "Entry", mono: true },
-    { key: "current_price", label: "CMP", mono: true },
-    { key: "qty", label: "Qty", mono: true, color: () => C.muted },
-    { key: "current_value", label: "Value", mono: true, render: r => `₹${fmt(r.current_value)}` },
-    { key: "pnl", label: "P&L", mono: true, color: r => pnlColor(r.pnl), render: r => `₹${fmt(r.pnl)}` },
-    { key: "pnl_pct", label: "%", mono: true, color: r => pnlColor(r.pnl_pct), render: r => pct(r.pnl_pct) },
-    { key: "stop_loss_price", label: "SL", mono: true, color: () => C.red, render: r => fmt(r.stop_loss_price, 0) },
-  ];
-
-  return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 20 }}>
-        <StatBox label="Invested" value={`₹${fmt(totalCost / 100000, 1)}L`} color={C.muted} />
-        <StatBox label="Current" value={`₹${fmt(totalValue / 100000, 1)}L`} color={C.text} />
-        <StatBox label="Net P&L" value={`₹${fmt(totalPnl)}`} color={pnlColor(totalPnl)} />
-        <StatBox label="Return" value={pct(totalPnlPct)} color={pnlColor(totalPnlPct)} />
-        <StatBox label="W/L Ratio" value={wlRatio} sub={`${winners}W / ${losers}L`} color={parseFloat(wlRatio) >= 1 ? C.green : C.orange} />
-        <StatBox label="Avg GVM" value={avgGvm} color={gvmColor(parseFloat(avgGvm))} />
-      </div>
-
-      {atRisk.length > 0 && (
-        <div style={{ background: "#ef444410", border: `1px solid ${C.red}40`, borderRadius: 8, padding: "12px 16px", marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: C.red, fontWeight: 700, marginBottom: 6 }}>⚠ At Risk (≥ -8%): {atRisk.map(p => p.symbol).join(", ")}</div>
-          <div style={{ fontSize: 11, color: C.muted }}>Hard Stop 2 threshold approaching. Monitor EOD vs Nifty delta.</div>
-        </div>
-      )}
-
-      <SectionHeader title="Position Detail" sub={`${positions.length} open positions · Large Cap basket`} />
-      <Table cols={cols} rows={[...positions].sort((a, b) => b.pnl - a.pnl)} emptyMsg="No positions" />
-    </div>
-  );
-}
-
-function HealthModule() {
-  const [positions, setPositions] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    mcpCall("qb_positions", {})
-      .then(d => setPositions(Array.isArray(d) ? d : []))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <Loader />;
-
-  const totalCost = positions.reduce((a, p) => a + p.cost_basis, 0);
-  const totalPnl = positions.reduce((a, p) => a + p.pnl, 0);
-  const totalPnlPct = totalCost ? (totalPnl / totalCost) * 100 : 0;
-  const winners = positions.filter(p => p.pnl > 0);
-  const losers = positions.filter(p => p.pnl < 0);
-  const avgGvm = positions.length ? (positions.reduce((a, p) => a + (p.gvm || 0), 0) / positions.length) : 0;
-  const qualityScore = parseFloat((avgGvm / 10 * 10).toFixed(1));
-  const returnScore = parseFloat(Math.min(10, Math.max(0, 5 + totalPnlPct)).toFixed(1));
-  const diversScore = parseFloat(Math.min(10, positions.length / 15 * 10).toFixed(1));
-  const overallHealth = ((qualityScore + returnScore + diversScore) / 3).toFixed(1);
-  const healthLabel = parseFloat(overallHealth) >= 7 ? "Good" : parseFloat(overallHealth) >= 5 ? "Healthy" : "Needs Attention";
-  const healthColor = parseFloat(overallHealth) >= 7 ? C.green : parseFloat(overallHealth) >= 5 ? C.gold : C.red;
-  const topGainers = [...positions].sort((a, b) => b.pnl_pct - a.pnl_pct).slice(0, 4);
-  const topLosers = [...positions].sort((a, b) => a.pnl_pct - b.pnl_pct).slice(0, 4);
-
-  return (
-    <div>
-      <div style={{ background: C.card, border: `1px solid ${healthColor}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 20, display: "flex", gap: 32, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 48, fontWeight: 900, color: healthColor, fontFamily: "monospace", lineHeight: 1 }}>{overallHealth}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Overall Health</div>
-          <Tag color={healthColor}>{healthLabel}</Tag>
-        </div>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <ScoreBar label="Quality (GVM avg)" score={qualityScore} color={gvmColor(qualityScore)} />
-          <ScoreBar label="Return Performance" score={returnScore} color={pnlColor(totalPnlPct)} />
-          <ScoreBar label="Diversification" score={diversScore} color={C.accent} />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <StatBox label="Invested" value={`₹${fmt(totalCost / 100000, 1)}L`} color={C.muted} />
-          <StatBox label="P&L" value={`₹${fmt(totalPnl)}`} color={pnlColor(totalPnl)} />
-          <StatBox label="Advance" value={winners.length} color={C.green} />
-          <StatBox label="Decline" value={losers.length} color={C.red} />
-        </div>
-      </div>
-
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "14px 18px", marginBottom: 20 }}>
-        <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Portfolio Highlights</div>
-        {[
-          { ok: winners.length > losers.length, msg: `${winners.length} winners vs ${losers.length} losers — A/D ratio ${((winners.length / Math.max(1, positions.length)) * 100).toFixed(0)}%` },
-          { ok: avgGvm >= 7, msg: `Avg GVM ${avgGvm.toFixed(2)} — ${avgGvm >= 7 ? "Quality portfolio, all stocks screened GVM≥7" : "Some stocks below quality threshold"}` },
-          { ok: totalPnlPct >= 0, msg: `Portfolio return ${pct(totalPnlPct)} since entry` },
-          { ok: positions.length >= 10, msg: `${positions.length} positions — ${positions.length >= 10 ? "Well diversified" : "Concentrated portfolio"}` },
-        ].map((h, i) => (
-          <div key={i} style={{ display: "flex", gap: 10, padding: "6px 0", borderBottom: i < 3 ? `1px solid ${C.gridLine}` : "none" }}>
-            <span style={{ color: h.ok ? C.green : C.orange, fontSize: 13 }}>{h.ok ? "✓" : "⚠"}</span>
-            <span style={{ fontSize: 12, color: h.ok ? C.text : C.orange }}>{h.msg}</span>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "16px 18px" }}>
-          <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Top Gainers</div>
-          {topGainers.map((p, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: i < 3 ? `1px solid ${C.gridLine}` : "none" }}>
-              <div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{p.symbol}</span>
-                <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>GVM {p.gvm?.toFixed(1)}</span>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.green }}>{pct(p.pnl_pct)}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>₹{fmt(p.pnl)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "16px 18px" }}>
-          <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Top Losers</div>
-          {topLosers.map((p, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: i < 3 ? `1px solid ${C.gridLine}` : "none" }}>
-              <div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{p.symbol}</span>
-                <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>GVM {p.gvm?.toFixed(1)}</span>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: C.red }}>{pct(p.pnl_pct)}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>₹{fmt(p.pnl)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function V10Module() {
-  const [signal, setSignal] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    mcpCall("v10_signal").then(d => setSignal(d)).finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <Loader />;
-
-  const sigColor = signal?.signal === "BUY" ? C.green : signal?.signal === "SELL" ? C.red : C.gold;
-  const stColor = signal?.st_dir === "up" ? C.green : C.red;
-  const gateColor = signal?.gate_zone === "buy" ? C.green : C.red;
-
-  return (
-    <div>
-      <div style={{ background: `${sigColor}10`, border: `2px solid ${sigColor}50`, borderRadius: 12, padding: "28px 24px", marginBottom: 20, textAlign: "center" }}>
-        <div style={{ fontSize: 11, color: C.muted, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 8 }}>NIFTY · Active Signal</div>
-        <div style={{ fontSize: 52, fontWeight: 900, color: sigColor, letterSpacing: "0.05em", lineHeight: 1 }}>{signal?.signal}</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: C.text, fontFamily: "monospace", marginTop: 8 }}>{fmt(signal?.price, 0)}</div>
-        <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>{signal?.as_of}</div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
-        <div style={{ background: C.card, border: `1px solid ${stColor}40`, borderRadius: 8, padding: "16px" }}>
-          <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 6 }}>SuperTrend Dir</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: stColor }}>{signal?.st_dir?.toUpperCase()}</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>ST 150/3.0 · 10m bars</div>
-          {signal?.st_flip && <Tag color={C.gold}>FLIP</Tag>}
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${gateColor}40`, borderRadius: 8, padding: "16px" }}>
-          <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 6 }}>EMA Gate Zone</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: gateColor }}>{signal?.gate_zone?.toUpperCase()}</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>EMA 3/10 · 30m bars</div>
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "16px" }}>
-          <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginBottom: 6 }}>Signal</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: sigColor }}>{signal?.signal}</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Two-leg structured logic</div>
-        </div>
-      </div>
-
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "18px 20px", marginBottom: 16 }}>
-        <SectionHeader title="Engine Spec" sub="Advisory mode — large-fund live strategy later" />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {[["Instrument","NIFTY / BANKNIFTY"],["Strategy","Two-leg: Futures + ATM option write"],["SuperTrend","ST 150/3 on 10-min bars"],["EMA Gate","EMA 3/10 on 30-min bars"],["Stop Loss","SL = 100 pts"],["Target","T = 200 pts"]].map(([k,v]) => (
-            <div key={k} style={{ display: "flex", gap: 10 }}>
-              <span style={{ fontSize: 11, color: C.muted, minWidth: 100 }}>{k}</span>
-              <span style={{ fontSize: 11, color: C.text, fontFamily: "monospace" }}>{v}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ background: `${C.gold}10`, border: `1px solid ${C.gold}30`, borderRadius: 8, padding: "12px 16px" }}>
-        <div style={{ fontSize: 11, color: C.gold, fontWeight: 700 }}>⚡ Advisory Mode</div>
-        <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>V10 is paper-only advisory. No live orders. Use signals as directional guide for NIFTY/BANKNIFTY index trades.</div>
-      </div>
-    </div>
-  );
-}
-
-function HomePage({ onNavigate, summaryData }) {
-  const { mood, paper, v10 } = summaryData;
-  const moodVal = mood?.mood || "—";
-  const openPos = paper?.open_positions?.length ?? "—";
-  const totalPnl = paper?.summary?.total_pnl;
-  const v10sig = v10?.signal || "—";
-  const niftyPrice = v10?.price;
-
-  const contextData = {
-    v8:     { badge: moodVal, badgeColor: moodColor(moodVal), stat: `${openPos} open · ₹${fmt(totalPnl)} P&L` },
-    gvm:    { badge: "1,762 stocks", badgeColor: C.gold, stat: "52 Strong Buy · 281 Buy" },
-    sector: { badge: "129 segments", badgeColor: C.purple, stat: "2 Buy · 80+ Watch" },
-    qb:     { badge: "4 Baskets", badgeColor: C.green, stat: "~₹5L each · GVM screened" },
-    health: { badge: "Portfolio", badgeColor: C.orange, stat: "Scoreboard · Risk alerts" },
-    v10:    { badge: v10sig, badgeColor: v10sig === "BUY" ? C.green : v10sig === "SELL" ? C.red : C.gold, stat: niftyPrice ? `Nifty ${fmt(niftyPrice, 0)}` : "ST+EMA · Advisory" },
+  const loadReport = async (sym) => {
+    setSymbol(sym); setShowSug(false); setQuery(sym); setLoading(true); setErr(null); setReport(null);
+    try {
+      const d = await apiGet(`/api/gvm/company/${encodeURIComponent(sym)}`);
+      setReport(d);
+    } catch (e) { setErr(`Could not load ${sym}. Try another symbol.`); }
+    finally { setLoading(false); }
   };
 
   return (
     <div>
-      <div style={{ background: `linear-gradient(135deg, ${C.accent}08 0%, ${C.purple}08 100%)`, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 900, color: C.text, letterSpacing: "-0.02em" }}>SCORR <span style={{ color: C.accent }}>CIO</span></div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Learn More. Score More. · Your AI Chief Investment Officer</div>
+      {/* Search bar */}
+      <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "0 auto 24px" }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 15 }}>⌕</span>
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value.toUpperCase())}
+              onFocus={() => suggest.length && setShowSug(true)}
+              onKeyDown={e => { if (e.key === "Enter" && suggest[0]) loadReport(suggest[0].symbol); }}
+              placeholder="Search any company — e.g. TCS, RELIANCE, HDFCBANK"
+              style={{ width: "100%", padding: "12px 14px 12px 38px", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 14, outline: "none" }}
+            />
+          </div>
+          <button onClick={() => suggest[0] && loadReport(suggest[0].symbol)}
+            style={{ padding: "0 20px", borderRadius: 10, border: "none", background: C.gold, color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            Search
+          </button>
         </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: moodColor(moodVal) }}>{moodVal}</div>
-            <div style={{ fontSize: 10, color: C.muted }}>Market Mood</div>
+        {showSug && suggest.length > 0 && (
+          <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+            {suggest.map(s => (
+              <div key={s.symbol} onClick={() => loadReport(s.symbol)}
+                style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${C.gridLine}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                onMouseEnter={e => e.currentTarget.style.background = C.border}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{s.symbol}</span>
+                  <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>{s.company_name}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{s.gvm_score?.toFixed(2)}</span>
+                  <Tag color={verdictColor(s.verdict)}>{s.verdict}</Tag>
+                </div>
+              </div>
+            ))}
           </div>
-          <div style={{ width: 1, background: C.border }} />
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: pnlColor(totalPnl) }}>₹{fmt(totalPnl)}</div>
-            <div style={{ fontSize: 10, color: C.muted }}>Paper P&L</div>
+        )}
+      </div>
+
+      {!symbol && !loading && <GvmEmptyState onPick={loadReport} />}
+      {loading && <Loader msg={`Building ${symbol} peer-benchmark report…`} />}
+      {err && <div style={{ textAlign: "center", color: C.red, padding: 24 }}>{err}</div>}
+      {report && !loading && <GvmReport r={report} />}
+    </div>
+  );
+}
+
+function GvmEmptyState({ onPick }) {
+  const [top, setTop] = useState([]);
+  useEffect(() => { mcpCall("get_top_stocks", { n: 8, verdict: "Strong Buy" }).then(d => setTop(Array.isArray(d) ? d : [])); }, []);
+  return (
+    <div style={{ textAlign: "center", padding: "20px 0" }}>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>Search a company above, or start with a top-rated pick:</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 700, margin: "0 auto" }}>
+        {top.map(s => (
+          <button key={s.symbol} onClick={() => onPick(s.symbol)}
+            style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${C.gold}40`, background: C.card, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{s.symbol}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{Number(s.gvm_score).toFixed(2)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BenchRow({ b }) {
+  const compW = b.peer_avg != null && b.company != null
+    ? Math.min(100, Math.max(4, (b.rating ?? 5) * 10)) : 0;
+  return (
+    <div style={{ padding: "10px 0", borderBottom: `1px solid ${C.gridLine}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <span style={{ fontSize: 12, color: C.text }}>{b.label}</span>
+        <span style={{ fontSize: 11, color: C.muted }}>
+          Rank {b.rank ?? "—"}/{b.peer_n} · <span style={{ color: ratingColor(b.rating), fontWeight: 700 }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
+        </span>
+      </div>
+      <div style={{ position: "relative", height: 22, background: C.bg, borderRadius: 5, border: `1px solid ${C.gridLine}` }}>
+        <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${compW}%`, background: `${ratingColor(b.rating)}30`, borderRight: `2px solid ${ratingColor(b.rating)}`, borderRadius: 5, transition: "width .5s ease" }} />
+        <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>
+            {b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—"}
+          </span>
+          <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>
+            peer {b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GvmReport({ r }) {
+  const s = r.scores || {};
+  const vc = verdictColor(r.verdict);
+  const groupsOrder = ["Trackrecord", "Valuation", "Reliability", "Technicals", "Outlook"];
+  const byGroup = {};
+  (r.benchmark || []).forEach(b => { (byGroup[b.group] = byGroup[b.group] || []).push(b); });
+
+  return (
+    <div>
+      {/* Header card */}
+      <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16, display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ textAlign: "center", minWidth: 120 }}>
+          <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
+          <div style={{ fontSize: 11, color: C.muted, margin: "4px 0 6px" }}>GVM Score</div>
+          <Tag color={vc}>{r.verdict}</Tag>
+        </div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{r.company_name}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+            {r.symbol} · {r.segment} · Rank {r.segment_rank}/{r.segment_total} in segment
           </div>
-          <div style={{ width: 1, background: C.border }} />
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: v10sig === "BUY" ? C.green : v10sig === "SELL" ? C.red : C.gold }}>{v10sig}</div>
-            <div style={{ fontSize: 10, color: C.muted }}>V10 Signal</div>
+          <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+            {[["G — Growth", s.g], ["V — Value", s.v], ["M — Momentum", s.m]].map(([lbl, val]) => (
+              <div key={lbl}>
+                <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase" }}>{lbl}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: gvmColor(val), fontFamily: "monospace" }}>{val?.toFixed(2)}</div>
+              </div>
+            ))}
           </div>
-          {niftyPrice && <>
-            <div style={{ width: 1, background: C.border }} />
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 18, fontWeight: 800, color: C.text, fontFamily: "monospace" }}>{fmt(niftyPrice, 0)}</div>
-              <div style={{ fontSize: 10, color: C.muted }}>Nifty</div>
+        </div>
+        <div style={{ textAlign: "right", minWidth: 130 }}>
+          <div style={{ fontSize: 11, color: C.muted }}>CMP</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(r.price, 1)}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
+          {r.mcap_rank && <div style={{ fontSize: 11, color: C.muted }}>MCap rank #{r.mcap_rank}</div>}
+        </div>
+      </div>
+
+      {/* Punchline */}
+      {r.punchline && (
+        <div style={{ background: `${vc}10`, border: `1px solid ${vc}30`, borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
+          <div style={{ fontSize: 10, color: vc, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Expert Verdict</div>
+          <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{r.punchline}</div>
+        </div>
+      )}
+
+      {/* Group ratings */}
+      {r.group_scores && Object.keys(r.group_scores).length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(5, Object.keys(r.group_scores).length)},1fr)`, gap: 10, marginBottom: 16 }}>
+          {Object.entries(r.group_scores).map(([g, v]) => (
+            <div key={g} style={{ background: C.card, border: `1px solid ${ratingColor(v)}40`, borderRadius: 8, padding: "12px 14px", textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: ratingColor(v), fontFamily: "monospace" }}>{v.toFixed(1)}</div>
+              <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginTop: 2 }}>{g}</div>
             </div>
-          </>}
+          ))}
         </div>
+      )}
+
+      {/* Positives / Negatives */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>✓ Key Strengths</div>
+          {(r.positives || []).length ? r.positives.map((p, i) => (
+            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.positives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+              <span style={{ color: C.green, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit} <span style={{ color: C.muted }}>({p.rating.toFixed(1)})</span>
+            </div>
+          )) : <div style={{ fontSize: 12, color: C.muted }}>No standout strengths vs peers.</div>}
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>⚠ Key Weaknesses</div>
+          {(r.negatives || []).length ? r.negatives.map((p, i) => (
+            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.negatives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+              <span style={{ color: C.red, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit} <span style={{ color: C.muted }}>({p.rating.toFixed(1)})</span>
+            </div>
+          )) : <div style={{ fontSize: 12, color: C.muted }}>No major weaknesses vs peers.</div>}
+        </div>
+      </div>
+
+      {/* Peer benchmark by group */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>Peer Benchmarking</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>vs {r.peer_count} peers in {r.segment}{r.is_bfsi ? " · BFSI rule applied (D/E + Int.Cov excluded)" : ""}</div>
+          </div>
+        </div>
+        {groupsOrder.filter(g => byGroup[g]).map(g => (
+          <div key={g} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: C.accent, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>{g}</div>
+            {byGroup[g].map(b => <BenchRow key={b.key} b={b} />)}
+          </div>
+        ))}
+      </div>
+
+      {/* Segment rank ladder */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.purple, marginBottom: 4 }}>Segment Rank Ladder</div>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{r.segment} · ranked by GVM</div>
+        {(r.ladder || []).map((row, i) => (
+          <div key={row.symbol} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 6, background: row.is_self ? `${C.accent}12` : "transparent", border: row.is_self ? `1px solid ${C.accent}40` : "1px solid transparent", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: C.muted, width: 22, fontFamily: "monospace" }}>{i + 1}</span>
+            <span style={{ fontSize: 13, fontWeight: row.is_self ? 800 : 600, color: row.is_self ? C.accent : C.text, flex: 1 }}>{row.symbol}</span>
+            <span style={{ fontSize: 11, color: C.muted, flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.company_name}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: gvmColor(row.gvm), fontFamily: "monospace", width: 44, textAlign: "right" }}>{row.gvm?.toFixed(2)}</span>
+            <div style={{ width: 70, textAlign: "right" }}><Tag color={verdictColor(row.verdict)}>{row.verdict}</Tag></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Company content */}
+      {r.content?.overview && (
+        <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />
+      )}
+      {r.content?.key_takeaway && (
+        <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />
+      )}
+      {r.content?.result_analysis && (
+        <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />
+      )}
+
+      <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 4px" }}>
+        Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
+      </div>
+    </div>
+  );
+}
+
+function ContentCard({ title, color, body, updated }) {
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color }}>{title}</div>
+        {updated && <div style={{ fontSize: 10, color: C.muted }}>Updated {updated}</div>}
+      </div>
+      <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{body}</div>
+    </div>
+  );
+}
+
+// ── Placeholder for coming models ────────────────────────────────────────────
+function ComingSoon({ mod }) {
+  return (
+    <div style={{ textAlign: "center", padding: "80px 20px" }}>
+      <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.4 }}>{mod.icon}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{mod.label}</div>
+      <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>{mod.desc}</div>
+      <div style={{ marginTop: 16 }}><Tag color={mod.color}>Building in coming days</Tag></div>
+    </div>
+  );
+}
+
+// ── Home ─────────────────────────────────────────────────────────────────────
+function HomePage({ onNavigate }) {
+  return (
+    <div>
+      <div style={{ background: `linear-gradient(135deg, ${C.accent}08 0%, ${C.purple}08 100%)`, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 24 }}>
+        <div style={{ fontSize: 22, fontWeight: 900, color: C.text, letterSpacing: "-0.02em" }}>V8 <span style={{ color: C.accent }}>Model</span></div>
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Learn More. Score More. · Proprietary quant models</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
-        {MODULES.map(m => {
-          const ctx = contextData[m.id] || {};
-          return (
-            <button key={m.id} onClick={() => onNavigate(m.id)}
-              style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 20px", cursor: "pointer", textAlign: "left", transition: "all 0.2s", outline: "none", position: "relative", overflow: "hidden" }}
-              onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${m.color}60`; e.currentTarget.style.background = `${m.color}06`; }}
-              onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${C.border}`; e.currentTarget.style.background = C.card; }}>
-              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${m.color}, ${m.color}40)`, borderRadius: "12px 12px 0 0" }} />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                <div style={{ fontSize: 26, width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: m.color + "15", borderRadius: 10, border: `1px solid ${m.color}30`, color: m.color }}>{m.icon}</div>
-                {ctx.badge && <Tag color={ctx.badgeColor}>{ctx.badge}</Tag>}
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 3, letterSpacing: "-0.01em" }}>{m.label}</div>
-              <div style={{ fontSize: 11, color: m.color, marginBottom: 8 }}>{m.sub}</div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 12, lineHeight: 1.5 }}>{m.desc}</div>
-              {ctx.stat && (
-                <div style={{ fontSize: 11, color: C.text, background: m.color + "10", border: `1px solid ${m.color}20`, borderRadius: 6, padding: "5px 10px", fontFamily: "monospace" }}>{ctx.stat}</div>
-              )}
-              <div style={{ position: "absolute", bottom: 14, right: 16, color: m.color, fontSize: 16, opacity: 0.5 }}>→</div>
-            </button>
-          );
-        })}
+        {MODELS.map(m => (
+          <button key={m.id} onClick={() => onNavigate(m.id)}
+            style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 20px", cursor: "pointer", textAlign: "left", position: "relative", overflow: "hidden", opacity: m.live ? 1 : 0.78 }}
+            onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${m.color}60`; e.currentTarget.style.background = `${m.color}06`; }}
+            onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${C.border}`; e.currentTarget.style.background = C.card; }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${m.color}, ${m.color}40)` }} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+              <div style={{ fontSize: 26, width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: m.color + "15", borderRadius: 10, border: `1px solid ${m.color}30`, color: m.color }}>{m.icon}</div>
+              <Tag color={m.live ? C.green : C.muted}>{m.live ? "Live" : "Soon"}</Tag>
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 3 }}>{m.label}</div>
+            <div style={{ fontSize: 11, color: m.color, marginBottom: 8 }}>{m.sub}</div>
+            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{m.desc}</div>
+            <div style={{ position: "absolute", bottom: 14, right: 16, color: m.color, fontSize: 16, opacity: 0.5 }}>→</div>
+          </button>
+        ))}
       </div>
 
-      <div style={{ marginTop: 20, padding: "12px 16px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ marginTop: 20, padding: "12px 16px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 11, color: C.muted }}>🔴 Live · Railway PostgreSQL · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</div>
-        <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>Scorr v2.9.30 · 55 endpoints · 71 MCP tools</div>
+        <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>V8 Model · proprietary quant</div>
       </div>
     </div>
   );
 }
 
 function InnerPage({ moduleId, onBack }) {
-  const mod = MODULES.find(m => m.id === moduleId);
+  const mod = MODELS.find(m => m.id === moduleId);
   if (!mod) return null;
-  const components = { v8: V8Module, gvm: GVMModule, sector: SectorModule, qb: QBModule, health: HealthModule, v10: V10Module };
-  const Comp = components[moduleId];
+  let body;
+  if (moduleId === "v8") body = <V8Module />;
+  else if (moduleId === "gvm") body = <GvmModule />;
+  else body = <ComingSoon mod={mod} />;
 
   return (
     <div>
@@ -698,27 +437,18 @@ function InnerPage({ moduleId, onBack }) {
           <div style={{ fontSize: 11, color: C.muted }}>{mod.sub}</div>
         </div>
         <div style={{ marginLeft: "auto", fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
-          Live · {new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST
+          {new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST
         </div>
       </div>
-      <Comp />
+      {body}
     </div>
   );
 }
 
 function App() {
   const [page, setPage] = useState("home");
-  const [summaryData, setSummaryData] = useState({ mood: null, paper: null, v10: null });
-  const [summaryLoading, setSummaryLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.all([mcpCall("v8_market_mood"), mcpCall("paper_status"), mcpCall("v10_signal")])
-      .then(([mood, paper, v10]) => setSummaryData({ mood, paper, v10 }))
-      .finally(() => setSummaryLoading(false));
-  }, []);
-
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif", padding: "0 0 40px" }}>
+    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif", paddingBottom: 40 }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -726,35 +456,30 @@ function App() {
         ::-webkit-scrollbar-track { background: #0a0d14; }
         ::-webkit-scrollbar-thumb { background: #1e2540; border-radius: 3px; }
         button { transition: all 0.15s ease; }
+        input::placeholder { color: #475569; }
       `}</style>
 
       <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: "0 24px", display: "flex", alignItems: "center", gap: 16, height: 52, position: "sticky", top: 0, zIndex: 100 }}>
         <button onClick={() => setPage("home")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 28, height: 28, background: C.accent, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: "#000" }}>S</div>
-          <span style={{ fontSize: 14, fontWeight: 800, color: C.text, letterSpacing: "0.05em" }}>SCORR</span>
+          <div style={{ width: 28, height: 28, background: C.accent, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, color: "#000" }}>V8</div>
+          <span style={{ fontSize: 14, fontWeight: 800, color: C.text, letterSpacing: "0.05em" }}>V8 MODEL</span>
         </button>
         <div style={{ width: 1, height: 20, background: C.border }} />
         <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
-          {MODULES.map(m => (
+          {MODELS.map(m => (
             <button key={m.id} onClick={() => setPage(m.id)} style={{ padding: "5px 10px", borderRadius: 5, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", background: page === m.id ? m.color + "20" : "transparent", color: page === m.id ? m.color : C.muted, borderBottom: page === m.id ? `2px solid ${m.color}` : "2px solid transparent" }}>
               {m.icon} {m.label}
             </button>
           ))}
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {!summaryLoading && summaryData.mood && (
-            <div style={{ fontSize: 11, color: moodColor(summaryData.mood?.mood), fontWeight: 700 }}>● {summaryData.mood?.mood}</div>
-          )}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, boxShadow: `0 0 6px ${C.green}`, animation: "pulse 2s ease-in-out infinite" }} />
           <span style={{ fontSize: 10, color: C.muted }}>LIVE</span>
         </div>
       </div>
 
       <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px 24px 0" }}>
-        {page === "home"
-          ? summaryLoading ? <Loader /> : <HomePage onNavigate={setPage} summaryData={summaryData} />
-          : <InnerPage moduleId={page} onBack={() => setPage("home")} />
-        }
+        {page === "home" ? <HomePage onNavigate={setPage} /> : <InnerPage moduleId={page} onBack={() => setPage("home")} />}
       </div>
     </div>
   );
