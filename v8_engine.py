@@ -1,13 +1,13 @@
 """
 V8 Signal Engine — Scorr
 =========================
-Computes ~21 metrics per stock from raw_prices + gvm_scores,
+Computes ~23 metrics per stock from raw_prices + gvm_scores,
 then writes pre-filtered signals to DB (compute-on-write architecture).
 
 Universe = futures_universe (is_active = TRUE)
 
 Tables written:
-  v8_metrics        — 21 EOD metrics per symbol per day
+  v8_metrics        — EOD metrics per symbol per day
   v8_qualified      — stocks passing each basket's filters TODAY (live read source)
   v8_signal_history — append-only archive of every signal ever generated (backtest source)
   v8_funnel_counts  — waterfall step counts per basket per day (Sheet funnel display)
@@ -23,6 +23,15 @@ mom_2d formula (renamed from day_change 10-Jun-2026):
   2-day momentum. close_2_days_ago = raw_prices iloc[-3] (today not yet in EOD).
   NOTE: This is intentionally a 2-candle gap (T vs T-2), NOT a 1-day change.
         Renamed from 'day_change' to 'mom_2d' to remove naming confusion.
+
+day_1d / eod_chg (added 11-Jun-2026 — DISPLAY ONLY, never filters):
+  day_1d:  price vs T-1 close. At EOD = last close vs prior close.
+           Live (signal_writer) = live price vs yesterday's close = true intraday day change.
+  eod_chg: last COMPLETED day's 1-day change (frozen intraday).
+  Both stored in v8_metrics only. NOT in FILTER_CONFIG, NOT in v8_qualified.
+
+SEGMENT_OVERRIDES (11-Jun-2026): symbols without a gvm_scores row get
+  NIFTY50/BANKNIFTY -> 'Index', *BEES -> 'ETF'. Own bucket = no sector-average pollution.
 
 sector_week  = avg week_return  of peers in same segment (EOD, frozen at 15:45)
 sector_month = avg month_return of peers in same segment (EOD, frozen at 15:45)
@@ -41,6 +50,19 @@ log = logging.getLogger("scorr.v8")
 RSI_MONTH_PERIOD = 6
 RSI_WEEK_PERIOD  = 8
 RSI_DAILY_PERIOD = 14
+
+# Segment overrides for instruments without gvm_scores rows
+INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
+
+def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
+    """Indices -> 'Index', ETFs (*BEES) -> 'ETF' when no gvm segment exists."""
+    if segment:
+        return segment
+    if symbol in INDEX_SYMBOLS:
+        return "Index"
+    if symbol.endswith("BEES"):
+        return "ETF"
+    return segment
 
 # ============================================================
 # SCHEMA — V8-native (compute-on-write)
@@ -63,6 +85,7 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     rsi_month NUMERIC, rsi_weekly NUMERIC, daily_rsi NUMERIC,
     month_return NUMERIC, week_return NUMERIC, year_return NUMERIC,
     mom_2d NUMERIC,
+    day_1d NUMERIC, eod_chg NUMERIC,
     sector_day NUMERIC, sector_week NUMERIC, sector_month NUMERIC,
     month_index NUMERIC, week_index_52 NUMERIC,
     range_1d NUMERIC, range_3d NUMERIC,
@@ -73,6 +96,8 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
 );
 ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS sector_month NUMERIC;
 ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS mom_2d NUMERIC;
+ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS day_1d NUMERIC;
+ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS eod_chg NUMERIC;
 CREATE INDEX IF NOT EXISTS idx_v8_metrics_symbol_date ON v8_metrics(symbol, score_date DESC);
 
 -- v8_qualified: live signals for today — overwritten on every engine run.
@@ -177,6 +202,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         "sector_day": None, "sector_week": None, "sector_month": None,
         "month_index": None, "week_index_52": None, "range_1d": None,
         "dma_20": None, "range_3d": None, "mom_2d": None,
+        "day_1d": None, "eod_chg": None,
         "daily_rsi": None, "upper_bb": None, "lower_bb": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
     }
@@ -189,7 +215,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
             segment = row[1]
         else:
             segment = None
-    out["_segment"] = segment   # used by sector pass in run_v8_engine
+    out["_segment"] = _segment_override(symbol, segment)   # used by sector pass in run_v8_engine
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -225,6 +251,16 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         base = float(df["close"].iloc[-3])
         if base > 0:
             out["mom_2d"] = (latest_close / base - 1) * 100
+
+    # day_1d / eod_chg: true 1-day change (latest close vs prior close).
+    # Identical at EOD; signal_writer recomputes day_1d LIVE intraday while
+    # eod_chg stays frozen as the last completed day's change. DISPLAY ONLY.
+    if len(df) >= 2:
+        base1 = float(df["close"].iloc[-2])
+        if base1 > 0:
+            chg1 = (latest_close / base1 - 1) * 100
+            out["day_1d"]  = chg1
+            out["eod_chg"] = chg1
 
     if len(df) >= 21:
         ma9  = float(df["close"].tail(9).mean())
@@ -275,6 +311,7 @@ def store_metrics(conn, m: Dict):
             (symbol, score_date, gvm_score, dma_50, dma_200, dma_20,
              rsi_month, rsi_weekly, daily_rsi,
              month_return, week_return, year_return, mom_2d,
+             day_1d, eod_chg,
              sector_day, sector_week, sector_month,
              month_index, week_index_52,
              range_1d, range_3d, upper_bb, lower_bb,
@@ -283,6 +320,7 @@ def store_metrics(conn, m: Dict):
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
              %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
              %(month_return)s, %(week_return)s, %(year_return)s, %(mom_2d)s,
+             %(day_1d)s, %(eod_chg)s,
              %(sector_day)s, %(sector_week)s, %(sector_month)s,
              %(month_index)s, %(week_index_52)s,
              %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s,
@@ -292,6 +330,7 @@ def store_metrics(conn, m: Dict):
                 rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
                 month_return=EXCLUDED.month_return, week_return=EXCLUDED.week_return,
                 year_return=EXCLUDED.year_return, mom_2d=EXCLUDED.mom_2d,
+                day_1d=EXCLUDED.day_1d, eod_chg=EXCLUDED.eod_chg,
                 sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
                 sector_month=EXCLUDED.sector_month,
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
