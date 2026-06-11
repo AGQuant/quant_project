@@ -8,6 +8,9 @@ ARCHITECTURE:
   Layer 2: Fallback hint → Claude
 
   query_log captures every query for native training analytics.
+
+NOTE (10-Jun-2026): mom_2d = 2-day momentum (close vs T-2). Renamed from day_change.
+  Display label is "2D Mom%". Grammar metric alias "day change" maps to mom_2d.
 """
 
 import os
@@ -140,7 +143,10 @@ METRIC_MAP = {
     "d/e":              ("s", "\"Debt to equity\"",     "screener"),
     "interest coverage":("s", "interest_coverage",      "screener"),
     "int coverage":     ("s", "interest_coverage",      "screener"),
-    "day change":       ("v", "day_change",             "v8"),
+    "2d mom":           ("v", "mom_2d",                 "v8"),
+    "2d momentum":      ("v", "mom_2d",                 "v8"),
+    "mom 2d":           ("v", "mom_2d",                 "v8"),
+    "day change":       ("v", "mom_2d",                 "v8"),
     "week return":      ("v", "week_return",            "v8"),
     "month return":     ("v", "month_return",           "v8"),
 }
@@ -370,7 +376,8 @@ def exec_rank(cur, slots: Dict) -> str:
     rows = cur.fetchall()
     if not rows: return "No stocks found. Try a broader query or toggle Claude ON."
 
-    metric_label = col.replace('"','').replace('_',' ').title()
+    raw_label = col.replace('"','').replace('_',' ').title()
+    metric_label = "2D Mom%" if col == "mom_2d" else raw_label
     title_parts = [f"Top {len(rows)}"]
     if sector:  title_parts.append(sector.strip('- ').title())
     if cap:     title_parts.append(cap.title())
@@ -626,13 +633,13 @@ def _vd_open_detail(cur) -> str:
 
 def _vd_top_signals(cur) -> str:
     cur.execute("""
-        SELECT symbol,basket,gvm_score,day_change,week_return FROM v8_qualified
+        SELECT symbol,basket,gvm_score,mom_2d,week_return FROM v8_qualified
         WHERE signal_date=CURRENT_DATE ORDER BY gvm_score DESC LIMIT 3
     """)
     rows=cur.fetchall()
     if not rows: return "**6. Top 3 Candidates Now**\nNo candidates today."
     data=[(r[0],r[1],f"{_f(r[2]):.2f}",f"{_f(r[3]):+.2f}%",f"{_f(r[4]):+.2f}%") for r in rows]
-    return f"**6. Top 3 Candidates Now**\n{fmt_table(['Symbol','Basket','GVM','Day%','Week%'],data)}"
+    return f"**6. Top 3 Candidates Now**\n{fmt_table(['Symbol','Basket','GVM','2D Mom%','Week%'],data)}"
 
 
 def _virtual_dashboard(cur) -> str:
@@ -736,7 +743,7 @@ def _query_sync(query: str) -> str:
 
             if any(k in q for k in ["qualified","watchlist","v8 watchlist","v8 signal","v8 qualified"]):
                 cur.execute("""
-                    SELECT symbol,basket,gvm_score,cmp,day_change,signal_ts
+                    SELECT symbol,basket,gvm_score,cmp,mom_2d,signal_ts
                     FROM v8_qualified WHERE signal_date=CURRENT_DATE ORDER BY gvm_score DESC LIMIT 20
                 """)
                 rows=cur.fetchall()
@@ -745,7 +752,7 @@ def _query_sync(query: str) -> str:
                            f"{_f(r[2]):.1f}",f"{_f(r[3]):.1f}",f"{_f(r[4]):+.2f}%") for r in rows]
                     result=(f"**V8 Watchlist Today ({len(rows)} candidates)**\n"
                             f"_(Entry needs pivot confirmation + gate open)_\n"
-                            f"{fmt_table(['Symbol','Basket','Side','GVM','CMP','Day%'],data)}")
+                            f"{fmt_table(['Symbol','Basket','Side','GVM','CMP','2D Mom%'],data)}")
                     log("native","v8_watchlist"); return result
                 log("native","v8_watchlist","","",False); return "No V8 candidates today."
 
