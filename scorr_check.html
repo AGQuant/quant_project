@@ -42,11 +42,24 @@
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 
+  /* autocomplete wrapper */
+  .sym-wrap{position:relative}
   .sym-input{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;
     color:#fff;font-family:var(--font);font-size:18px;font-weight:700;padding:14px 16px;outline:none;
     text-transform:uppercase;letter-spacing:.5px}
   .sym-input:focus{border-color:var(--cyan)}
-  .sym-input::placeholder{color:var(--dim);font-weight:400;letter-spacing:0}
+  .sym-input::placeholder{color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none}
+  .ac-drop{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;
+    background:var(--panel2);border:1px solid var(--line2);border-radius:10px;
+    z-index:20;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .ac-drop.show{display:block}
+  .ac-item{padding:10px 14px;cursor:pointer;display:flex;align-items:baseline;gap:10px;
+    border-bottom:1px solid var(--line)}
+  .ac-item:last-child{border-bottom:none}
+  .ac-item:hover,.ac-item.sel{background:var(--line)}
+  .ac-sym{font-size:14px;font-weight:700;color:#fff;font-family:var(--mono)}
+  .ac-name{font-size:11px;color:var(--mut);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .ac-gvm{font-size:11px;color:var(--cyan);margin-left:auto;flex-shrink:0}
 
   .side-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
   .side-btn{padding:14px;border-radius:10px;border:1.5px solid var(--line2);background:var(--bg2);
@@ -102,6 +115,11 @@
   td.state{text-align:center;font-weight:700;white-space:nowrap}
   .s-pass{color:var(--grn)} .s-fail{color:var(--red)} .s-chart{color:var(--amber)}
 
+  .legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 12px;background:var(--bg2);
+    border:1px solid var(--line2);border-radius:8px;margin-top:14px;font-size:11px}
+  .legend-item{display:flex;align-items:center;gap:5px;color:var(--mut)}
+  .legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
   .loading{display:none;text-align:center;padding:28px;color:var(--cyan);font-weight:700;font-size:14px}
   .loading.show{display:block}
   .err{display:none;padding:13px 15px;border-radius:10px;background:var(--red-d);border:1px solid var(--red);
@@ -129,7 +147,11 @@
   </div>
 
   <div class="card">
-    <input id="sym" class="sym-input" placeholder="Symbol — e.g. RELIANCE" autocomplete="off" spellcheck="false">
+    <div class="sym-wrap">
+      <input id="sym" class="sym-input" placeholder="Type symbol or company name…"
+             autocomplete="off" spellcheck="false">
+      <div class="ac-drop" id="acDrop"></div>
+    </div>
 
     <div class="side-row">
       <button class="side-btn long on" id="btnLong" onclick="setSide('LONG')">▲ LONG</button>
@@ -177,18 +199,24 @@
     <table><thead><tr><th>Filter</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
       <tbody id="t2Body"></tbody></table>
 
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--grn)"></div>PASS — computed from DB, condition met</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>FAIL — computed from DB, condition not met</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>🟡 Chart/Manual — needs your chart confirmation (volume pattern, fib level, entry window, instrument DTE, OI). Set Gates above to resolve R10 + R12 + F3.</div>
+    </div>
+
     <div class="foot">Personal trade context — not a V8 algo signal · v3.3 objective subset · ⚠ Spot price, not futures.</div>
   </div>
 </div>
 
 <script>
-let side='LONG', gate1=null, gate2=null;
+let side='LONG', gate1=null, gate2=null, acSel=-1, acItems=[], acTimer=null;
 const QUICK=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
 
 function renderChips(){
   const el=document.getElementById('chips');
   QUICK.forEach(s=>{const b=document.createElement('button');b.className='chip';b.textContent=s;
-    b.onclick=()=>{document.getElementById('sym').value=s;run();};el.appendChild(b);});
+    b.onclick=()=>{document.getElementById('sym').value=s;closeAC();run();};el.appendChild(b);});
 }
 function setSide(s){side=s;
   document.getElementById('btnLong').className='side-btn long'+(s==='LONG'?' on':'');
@@ -201,10 +229,70 @@ function setGate(n,v){
     document.getElementById('g2y').classList.toggle('on',gate2===true);
     document.getElementById('g2n').classList.toggle('on',gate2===false);}}
 
+/* ── Autocomplete ── */
+async function fetchAC(q){
+  if(q.length<1){closeAC();return;}
+  try{
+    const r=await fetch(`/api/gvm/search?q=${encodeURIComponent(q)}&limit=7`);
+    if(!r.ok)return;
+    const d=await r.json();
+    acItems=(d.results||d||[]).slice(0,7);
+    renderAC();
+  }catch(e){}
+}
+function renderAC(){
+  const drop=document.getElementById('acDrop');
+  if(!acItems.length){drop.classList.remove('show');return;}
+  drop.innerHTML='';
+  acItems.forEach((it,i)=>{
+    const div=document.createElement('div');div.className='ac-item';
+    div.innerHTML=`<span class="ac-sym">${it.symbol||it.nse_code||''}</span>`+
+      `<span class="ac-name">${it.company_name||it.name||''}</span>`+
+      `<span class="ac-gvm">${it.gvm_score!=null?'GVM '+parseFloat(it.gvm_score).toFixed(1):''}</span>`;
+    div.onmousedown=e=>{e.preventDefault();pickAC(i);};
+    drop.appendChild(div);
+  });
+  acSel=-1;drop.classList.add('show');
+}
+function pickAC(i){
+  const it=acItems[i];
+  if(!it)return;
+  document.getElementById('sym').value=(it.symbol||it.nse_code||'').toUpperCase();
+  closeAC();run();
+}
+function closeAC(){document.getElementById('acDrop').classList.remove('show');acSel=-1;}
+function moveAC(dir){
+  const items=document.getElementById('acDrop').querySelectorAll('.ac-item');
+  if(!items.length)return;
+  items[acSel>=0?acSel:0].classList.remove('sel');
+  acSel=Math.max(0,Math.min(items.length-1,(acSel<0?-1:acSel)+dir));
+  items[acSel].classList.add('sel');
+}
+
+const symEl=document.getElementById('sym');
+symEl.addEventListener('input',function(){
+  clearTimeout(acTimer);
+  const v=this.value.trim();
+  acTimer=setTimeout(()=>fetchAC(v),200);
+});
+symEl.addEventListener('keydown',function(e){
+  if(e.key==='ArrowDown'){e.preventDefault();moveAC(1);}
+  else if(e.key==='ArrowUp'){e.preventDefault();moveAC(-1);}
+  else if(e.key==='Enter'){
+    e.preventDefault();
+    if(acSel>=0&&document.getElementById('acDrop').classList.contains('show')){pickAC(acSel);}
+    else{closeAC();run();}
+  }
+  else if(e.key==='Escape'){closeAC();}
+});
+document.addEventListener('click',e=>{if(!e.target.closest('.sym-wrap'))closeAC();});
+
+/* ── State cell ── */
 function stateCell(st){
   const map={pass:['s-pass','PASS'],fail:['s-fail','FAIL'],chart:['s-chart','🟡']};
   const [c,t]=map[st]||['','—'];return `<span class="${c}">${t}</span>`;}
 
+/* ── Run ── */
 async function run(){
   const sym=document.getElementById('sym').value.trim().toUpperCase();
   if(!sym)return;
@@ -240,9 +328,9 @@ function render(d){
   d.tier2.forEach(r=>{t2.insertAdjacentHTML('beforeend',
     `<tr><td class="rule">${r.rule}</td><td class="cond">${r.cond}</td><td class="val">${r.val}</td><td class="state">${stateCell(r.state)}</td></tr>`);});
   document.getElementById('result').classList.add('show');
+  document.getElementById('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-document.getElementById('sym').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();run();}});
 renderChips();
 </script>
 </body>
