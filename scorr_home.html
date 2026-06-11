@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scorr · Home</title>
+<style>
+  :root{
+    --bg:#070b14; --bg2:#0b1220; --panel:#0e1626; --panel2:#111c30;
+    --line:#1c2940; --line2:#27374f;
+    --txt:#dbe4f0; --mut:#7e90ac; --dim:#566080;
+    --grn:#27d796; --red:#ff5e6c; --blu:#3d8bff; --cyan:#28c8d8; --amber:#f5b53d;
+    --font:'Sora',system-ui,-apple-system,sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%;background:
+    radial-gradient(1200px 600px at 80% -10%, #11203a55, transparent),
+    radial-gradient(900px 500px at -10% 20%, #0c2a3855, transparent),
+    var(--bg);color:var(--txt);font-family:var(--font);font-size:14px;line-height:1.55}
+
+  .wrap{max-width:760px;margin:0 auto;padding:34px 16px 60px}
+  .brand{font-size:30px;font-weight:800;color:var(--blu);letter-spacing:.5px}
+  .tag{font-size:12px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
+  .quote{font-size:12.5px;color:var(--mut);font-style:italic;margin-top:14px;
+    padding-left:12px;border-left:2px solid var(--line2)}
+
+  .sec{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;
+    margin:30px 0 12px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:560px){.grid{grid-template-columns:1fr}}
+
+  .tile{display:block;text-decoration:none;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:16px 16px 15px;transition:.15s;position:relative;overflow:hidden}
+  .tile:hover{border-color:var(--accent,var(--blu));transform:translateY(-2px)}
+  .tile.soon{opacity:.5;pointer-events:none}
+  .tile .ic{font-size:20px;margin-bottom:9px;display:block}
+  .tile .nm{font-size:16px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px}
+  .tile .ds{font-size:11.5px;color:var(--mut);margin-top:5px;line-height:1.45}
+  .badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.5px;
+    background:var(--accent,var(--blu));color:#04121e;text-transform:uppercase}
+  .badge.soon{background:var(--line2);color:var(--mut)}
+  .badge.new{background:var(--grn);color:#04121e}
+
+  .t-v8{--accent:var(--amber)} .t-gvm{--accent:var(--cyan)} .t-check{--accent:var(--cyan)}
+  .t-max{--accent:var(--blu)} .t-ask{--accent:var(--blu)} .t-cio{--accent:var(--cyan)}
+
+  .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:34px;line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">SCORR</div>
+  <div class="tag">Learn More. Score More. · Invest like an institution.</div>
+  <div class="quote">"Claude disrupted the world. Arpit disrupted how to use Claude."</div>
+
+  <div class="sec">Live Tools</div>
+  <div class="grid">
+    <a class="tile t-v8" href="/dashboard">
+      <span class="ic">⚡</span>
+      <div class="nm">V8 Dashboard</div>
+      <div class="ds">Long-short futures signals · 5 baskets · paper engine · live metrics</div>
+    </a>
+    <a class="tile t-gvm" href="/cio2?model=gvm">
+      <span class="ic">▦</span>
+      <div class="nm">GVM</div>
+      <div class="ds">Institutional quality score · Growth + Value + Momentum · peer-benchmarked</div>
+    </a>
+    <a class="tile t-check" href="/check">
+      <span class="ic">✓</span>
+      <div class="nm">Trade Check <span class="badge new">New</span></div>
+      <div class="ds">v3.3 Tier 1 + Tier 2 · native $0 · symbol + side + 2 gates → verdict</div>
+    </a>
+    <a class="tile t-max" href="/cio">
+      <span class="ic">◉</span>
+      <div class="nm">Max</div>
+      <div class="ds">CIO assistant · full Railway tool access · reasoning + native</div>
+    </a>
+    <a class="tile t-ask" href="/ask">
+      <span class="ic">✦</span>
+      <div class="nm">Ask</div>
+      <div class="ds">Native query engine · $0 from Railway DB · GVM, screens, mood, PCR</div>
+    </a>
+    <a class="tile t-cio" href="/cio2">
+      <span class="ic">◫</span>
+      <div class="nm">CIO Shell</div>
+      <div class="ds">Multi-model dashboard · V8 embed + GVM + future models</div>
+    </a>
+  </div>
+
+  <div class="sec">Coming Soon</div>
+  <div class="grid">
+    <div class="tile soon">
+      <span class="ic">⌂</span>
+      <div class="nm">Quant Basket <span class="badge soon">Soon</span></div>
+      <div class="ds">GVM + thematic equity portfolios · buy-and-hold baskets</div>
+    </div>
+    <div class="tile soon">
+      <span class="ic">⟁</span>
+      <div class="nm">V10 ST+EMA <span class="badge soon">Soon</span></div>
+      <div class="ds">Index directional engine · NIFTY & BANKNIFTY · SuperTrend + EMA</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Scorr · Your AI Chief Investment Officer · Freedom by 2035<br>
+    Single source of truth — Railway PostgreSQL
+  </div>
+</div>
+</body>
+</html>
