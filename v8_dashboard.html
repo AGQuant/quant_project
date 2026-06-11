@@ -84,6 +84,8 @@
   .tab:hover{color:var(--txt)}
   .tab.active{color:#fff;background:var(--panel);border-color:var(--line);
     box-shadow:0 -2px 0 var(--blu) inset}
+  .tab.tab-accent{color:var(--cyan)}
+  .tab.tab-accent.active{color:#fff}
 
   .panel{display:none;animation:fade .25s ease;padding-top:16px}
   .panel.active{display:block}
@@ -314,8 +316,11 @@ const ALL5 = [
   {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
-const TABS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
+// Panel content is fixed by index 0..10. TAB_LABELS keeps each panel's title.
+const TAB_LABELS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel","Stock Check"];
+// Display order of tabs (panel indices). Stock Check (10) pinned to position 2.
+const TAB_ORDER = [0,10,1,2,3,4,5,6,7,8,9];
 
 let AUTO=true, autoTimer=null;
 const cache={};
@@ -360,14 +365,21 @@ function tick(){
 setInterval(tick,1000);tick();
 
 const tabsEl=document.getElementById('tabs'),panelsEl=document.getElementById('panels');
-TABS.forEach((t,i)=>{
-  const b=document.createElement('div');b.className='tab'+(i===0?' active':'');
-  b.textContent=t;b.onclick=()=>selectTab(i);tabsEl.appendChild(b);
+// Create panels in fixed index order 0..10 (content functions rely on panelN ids)
+TAB_LABELS.forEach((t,i)=>{
   const p=document.createElement('div');p.className='panel'+(i===0?' active':'');
   p.id='panel'+i;p.innerHTML='<div class="loading">…</div>';panelsEl.appendChild(p);
 });
+// Create tab buttons in display order (Stock Check pinned 2nd)
+TAB_ORDER.forEach((panelIdx,pos)=>{
+  const b=document.createElement('div');
+  b.className='tab'+(panelIdx===0?' active':'')+(panelIdx===10?' tab-accent':'');
+  b.textContent=TAB_LABELS[panelIdx];
+  b.onclick=()=>selectTab(panelIdx);
+  tabsEl.appendChild(b);
+});
 function selectTab(i){
-  [...tabsEl.children].forEach((t,j)=>t.classList.toggle('active',j===i));
+  [...tabsEl.children].forEach(t=>t.classList.toggle('active',t.textContent===TAB_LABELS[i]));
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
   if(i===10) initStockCheck();
 }
