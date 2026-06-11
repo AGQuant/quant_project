@@ -205,11 +205,7 @@
       </div>
     </div>
 
-    <div class="quick-bar">
-      <button class="qbtn" onclick="quickAsk('Virtual Dashboard V8')">V8 Dashboard</button>
-      <button class="qbtn" onclick="quickAsk('QB summary by basket')">QB Summary</button>
-      <button class="qbtn" onclick="quickAsk('System health check')">Health</button>
-    </div>
+    <div class="quick-bar" id="quickBar"></div>
 
     <div class="messages" id="messages">
       <div class="welcome" id="welcome">
@@ -270,6 +266,53 @@ const QUICK_FETCH = [
   { icon: '▦', label: 'GVM Top',     query: 'Top 10 stocks by GVM score' },
   { icon: '◉', label: 'Market Mood', query: 'V8 market mood gate and slot allocation' },
 ];
+
+const TABS = [
+  { icon: '⚡', label: 'V8 Dashboard',   query: 'Virtual Dashboard V8' },
+  { icon: '◉', label: 'Market Mood',    query: 'V8 market mood gate and slot allocation' },
+  { icon: '✓', label: 'Qualified Now',  query: 'qualified now' },
+  { icon: '▦', label: 'Top GVM',        query: 'Top 10 stocks by GVM score' },
+  { icon: '⬚', label: 'Sector Ratings', query: 'Sector ratings' },
+  { icon: '✚', label: 'Top Pharma',     query: 'Top 10 pharma GVM above 7.5' },
+  { icon: '⌂', label: 'QB Summary',     query: 'QB summary by basket' },
+  { icon: '◎', label: 'Trade Check',    tradeCheck: true },
+  { icon: '▤', label: 'Daily Digest',   query: 'Daily digest' },
+  { icon: '◷', label: 'Health',         query: 'System health check' },
+];
+
+function renderQuickBar() {
+  const bar = document.getElementById('quickBar'); if (!bar) return;
+  bar.innerHTML = '';
+  TABS.forEach(t => {
+    const b = document.createElement('button');
+    b.className = 'qbtn';
+    b.innerHTML = `<span style="margin-right:5px">${t.icon}</span>${t.label}`;
+    b.onclick = () => t.tradeCheck ? tradeCheckPrefill() : quickAsk(t.query);
+    bar.appendChild(b);
+  });
+}
+
+function tradeCheckPrefill() {
+  // Trade Journal Check needs Sonnet + tools — force Reasoning ON.
+  if (!claudeOn) { claudeOn = true; applyToggleUI(); lsPersist(); }
+  const tmpl = `Trade Check on SYMBOL for a LONG trade.
+Gate 1 (5-min chart strength): PASS
+Gate 2 (1-Day chart reversal/breakout): PASS
+
+Run BOTH frameworks:
+1. PRIMARY v3.3: Tier1 (11 LONG / 10 SHORT rules, min 8) + Tier2 (6 filters + F7 OI bonus, min 4/6). Show full score table + verdict.
+2. SECONDARY v3.4.1: one-line weighted score /21 (STRONG>=15, VALID>=11).
+
+Context: personal trade check only — never apply V8 basket/mood/slot rules. Use v8_metrics, gvm_scores, sector_ratings, futures_basis. Verdict to personal_journal.`;
+  const input = document.getElementById('userInput');
+  input.value = tmpl;
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+  input.focus();
+  const idx = tmpl.indexOf('SYMBOL');
+  if (idx >= 0) input.setSelectionRange(idx, idx + 6);
+  if (isMobile()) input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 
 function renderQuickFetch() {
   const grid = document.getElementById('qfGrid'); if (!grid) return;
@@ -573,7 +616,7 @@ document.getElementById('userInput').addEventListener('input',function(){this.st
 document.getElementById('userInput').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
 
 (async()=>{
-  lsLoad(); applyToggleUI(); renderQuickFetch();
+  lsLoad(); applyToggleUI(); renderQuickFetch(); renderQuickBar();
 
   const dbChats = await dbLoadChats();
   if (dbChats.length > 0) {
