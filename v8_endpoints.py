@@ -3,7 +3,6 @@ V8 endpoints — Quant Long-Short Basket Strategy
 
 FILTER_CONFIG reorder (06-Jun-2026):
   Filters ordered by descending kill rate (biggest drop first) for clean waterfall.
-  Kill rates computed from 06-Jun-2026 actual funnel counts (210 universe).
 
   buy_reversal (11 filters):
     gvm(164) → year_ret(2) → dma_200(20) → dma_50(14) → month_ret(5) →
@@ -25,14 +24,12 @@ FILTER_CONFIG reorder (06-Jun-2026):
   NULL filter = all stocks pass (no kill).
 
 GVM gate (08-Jun-2026): buy baskets relaxed gvm_score min 7.0 -> 6.0
-  (lets in 'Watch' band 6-7). Widens buy universe ~46 -> ~123. Permanent spec change.
-
 mom_2d formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum (T vs T-2).
-  Renamed from 'day_change' 10-Jun-2026 to remove naming confusion (it was never 1-day).
 day_1d (live) = price vs T-1 close. eod_chg (frozen) = T-1 vs T-2. DISPLAY ONLY.
-
-/scan (11-Jun-2026): one-call payload for dashboard Filter Scan + Master Top Sectors.
-  gainers/losers ranked by mom_2d with gate_pass; sectors show avg mom_2d + avg day_1d.
+buy_momentum RSI relaxed (11-Jun-2026): rsi_month + rsi_weekly min 71.5 -> 60.0
+/scan (11-Jun-2026): gate_score = int count of filters passed (not bool).
+/qualified (11-Jun-2026): adds day_1d, segment, pp/r1/s1, first_seen.
+/funnel_detail (11-Jun-2026): pivot stage appended (above PP + room to R1 >= 1%).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -51,7 +48,6 @@ def _ist_now() -> datetime:
 
 
 # ── Filter configs ────────────────────────────────────────────────────────────
-# Ordered by descending kill rate for optimal funnel waterfall display.
 
 FILTER_CONFIG = {
     "buy_reversal": {
@@ -72,8 +68,8 @@ FILTER_CONFIG = {
         "year_return":  [0.0,  None],
         "dma_50":       [6.5,  25.0],
         "dma_200":      [7.0,  50.0],
-        "rsi_month":    [71.5, 80.0],
-        "rsi_weekly":   [71.5, 80.0],
+        "rsi_month":    [60.0, 80.0],   # relaxed 71.5→60 (11-Jun-2026)
+        "rsi_weekly":   [60.0, 80.0],   # relaxed 71.5→60 (11-Jun-2026)
         "month_return": [3.0,  14.0],
         "week_return":  [1.0,  7.0],
         "mom_2d":       [0.0,  3.5],
@@ -151,12 +147,21 @@ def _passes_filter(value, mn, mx) -> bool:
 
 
 def _strict_pass(stock: dict, basket: str) -> bool:
-    """True if stock passes ALL filters of the basket (strict all-pass)."""
     for metric, bounds in FILTER_CONFIG[basket].items():
         mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
         if not _passes_filter(stock.get(metric), mn, mx):
             return False
     return True
+
+
+def _gate_score(stock: dict, basket: str) -> int:
+    """Count how many filters the stock passes (0..N)."""
+    count = 0
+    for metric, bounds in FILTER_CONFIG[basket].items():
+        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+        if _passes_filter(stock.get(metric), mn, mx):
+            count += 1
+    return count
 
 
 def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
@@ -192,7 +197,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               mom_2d, week_index_52, vol_ratio,
+               mom_2d, day_1d, week_index_52, vol_ratio,
                sector_week, sector_month
         FROM v8_metrics
         WHERE {where_sql}
@@ -206,7 +211,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-# ── Market breadth ────────────────────────────────────────────────────────────
+# ── Market breadth ─────────────────────────────────────────────────────────────
 
 def _live_breadth(cur):
     cur.execute("""
@@ -267,7 +272,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
     )
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -349,9 +354,8 @@ def market_mood():
 def scan(limit: int = 25):
     """
     One-call payload for dashboard Filter Scan + Master Top Sectors.
-      gainers/losers: top N by mom_2d with full column set + gate_pass
-        (gainers -> buy_reversal strict all-pass; losers -> sell_reversal).
-      sectors: per-segment avg mom_2d + avg day_1d (both, per spec) + avg week.
+    gainers/losers: gate_score = int count of buy_reversal/sell_reversal filters passed.
+    sectors: avg mom_2d + avg day_1d + avg week.
     """
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -374,7 +378,6 @@ def scan(limit: int = 25):
         for s in rows:
             s["segment"] = _seg_override(s["symbol"], s.get("segment"))
             s.pop("score_date", None)
-            # floats for JSON cleanliness
             for k, v in list(s.items()):
                 if k not in ("symbol", "segment") and v is not None:
                     try: s[k] = float(v)
@@ -386,12 +389,15 @@ def scan(limit: int = 25):
         gainers = movers[:n]
         losers  = list(reversed(movers[-n:]))
 
+        n_buy  = len(FILTER_CONFIG["buy_reversal"])
+        n_sell = len(FILTER_CONFIG["sell_reversal"])
         for s in gainers:
-            s["gate_pass"] = _strict_pass(s, "buy_reversal")
+            s["gate_score"] = _gate_score(s, "buy_reversal")
+            s["gate_total"] = n_buy
         for s in losers:
-            s["gate_pass"] = _strict_pass(s, "sell_reversal")
+            s["gate_score"] = _gate_score(s, "sell_reversal")
+            s["gate_total"] = n_sell
 
-        # Sector aggregation — avg mom_2d AND avg day_1d (both shown per spec)
         from collections import defaultdict
         seg_groups = defaultdict(list)
         for s in rows:
@@ -400,8 +406,8 @@ def scan(limit: int = 25):
 
         sectors = []
         for seg, members in seg_groups.items():
-            m2 = [x["mom_2d"]  for x in members if x.get("mom_2d")  is not None]
-            d1 = [x["day_1d"]  for x in members if x.get("day_1d")  is not None]
+            m2 = [x["mom_2d"]     for x in members if x.get("mom_2d")     is not None]
+            d1 = [x["day_1d"]     for x in members if x.get("day_1d")     is not None]
             wk = [x["week_return"] for x in members if x.get("week_return") is not None]
             if not m2:
                 continue
@@ -455,21 +461,31 @@ def qualified(basket: str, limit: int = 50):
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    symbol, gvm_score, cmp,
-                    dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-                    week_return, month_return,
-                    mom_2d, week_index_52,
-                    (metrics->>'vol_ratio')::numeric AS vol_ratio,
-                    sector_week, sector_month,
-                    source, signal_ts
-                FROM v8_qualified
-                WHERE basket = %s
-                  AND signal_date = CURRENT_DATE
-                  AND symbol NOT IN (
+                    q.symbol, q.gvm_score, q.cmp,
+                    q.dma_50, q.dma_200, q.rsi_month, q.rsi_weekly,
+                    q.week_return, q.month_return,
+                    q.mom_2d, q.week_index_52,
+                    (q.metrics->>'vol_ratio')::numeric AS vol_ratio,
+                    q.sector_week, q.sector_month,
+                    q.source, q.signal_ts,
+                    m.day_1d,
+                    g.segment,
+                    p.pp, p.r1, p.s1,
+                    MIN(q2.signal_ts) OVER (PARTITION BY q.symbol) AS first_seen
+                FROM v8_qualified q
+                LEFT JOIN v8_metrics m ON m.symbol = q.symbol
+                    AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                LEFT JOIN gvm_scores g ON g.symbol = q.symbol
+                LEFT JOIN v8_paper_pivots p ON p.symbol = q.symbol
+                    AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                JOIN v8_qualified q2 ON q2.symbol = q.symbol AND q2.basket = q.basket
+                WHERE q.basket = %s
+                  AND q.signal_date = CURRENT_DATE
+                  AND q.symbol NOT IN (
                       SELECT UPPER(ticker) FROM earnings_calendar
                       WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
                   )
-                ORDER BY gvm_score DESC NULLS LAST
+                ORDER BY q.gvm_score DESC NULLS LAST
                 LIMIT %s
             """, (basket, min(max(limit, 1), 200)))
             cols = [d[0] for d in cur.description]
@@ -480,6 +496,9 @@ def qualified(basket: str, limit: int = 50):
             source_note = 'live_fallback'
         else:
             source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
+
+        for r in rows:
+            r['segment'] = _seg_override(r['symbol'], r.get('segment'))
 
         meta = BASKET_META.get(basket, {})
         return {"basket": basket, "count": len(rows), "stocks": rows,
@@ -508,7 +527,6 @@ def funnel_counts(basket: str):
             return {"basket": basket, "score_date": str(date.today()),
                     "counts": counts, "source": "precomputed"}
 
-        # Live fallback
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
@@ -536,10 +554,7 @@ def funnel_counts(basket: str):
         raise HTTPException(500, f"funnel failed: {e}")
 
 
-# ── Filter funnel detail + per-stock pass count ───────────────────────────────
-# Two views for all 5 baskets:
-#   /funnel_detail/{basket}  → sequential funnel, filters ordered by kill (low→high survivors)
-#   /stock_passcount/{basket} → per-stock count of filters passed (0..N), ranked high→low
+# ── Filter funnel detail + per-stock pass count ────────────────────────────────
 
 def _basket_universe(cur):
     cur.execute("""
@@ -555,6 +570,16 @@ def _basket_universe(cur):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _basket_pivots(cur):
+    """Return {symbol: {pp, r1, s1}} from latest pivot date."""
+    cur.execute("""
+        SELECT symbol, pp, r1, s1 FROM v8_paper_pivots
+        WHERE pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+          AND pp IS NOT NULL AND r1 IS NOT NULL
+    """)
+    return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3])} for r in cur.fetchall()}
+
+
 @router.get("/funnel_detail/{basket}")
 def funnel_detail(basket: str):
     basket = basket.lower()
@@ -563,6 +588,8 @@ def funnel_detail(basket: str):
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
+            pivots   = _basket_pivots(cur)
+
         total = len(all_rows)
         filters = FILTER_CONFIG[basket]
         stages = []
@@ -581,11 +608,30 @@ def funnel_detail(basket: str):
                 "kill_pct": round(killed / prev * 100, 1) if prev else 0.0,
             })
             prev = passed
+
+        # Pivot filter stage: R1-PP gap >= 1% (structural pivot room gate)
+        piv_survivors = []
+        for s in survivors:
+            pv = pivots.get(s["symbol"])
+            if pv and pv["r1"] > 0:
+                gap_pct = (pv["r1"] - pv["pp"]) / pv["r1"] * 100
+                if gap_pct >= 1.0:
+                    piv_survivors.append(s)
+        piv_passed = len(piv_survivors)
+        piv_killed = prev - piv_passed
+        stages.append({
+            "metric": "pivot_room",
+            "min": "PP+1%", "max": None,
+            "survivors": piv_passed,
+            "killed": piv_killed,
+            "kill_pct": round(piv_killed / prev * 100, 1) if prev else 0.0,
+        })
+
         meta = BASKET_META.get(basket, {})
         return {
             "basket": basket, "score_date": str(date.today()),
-            "universe": total, "final": prev,
-            "filter_count": len(filters),
+            "universe": total, "final": piv_passed,
+            "filter_count": len(filters) + 1,
             "stages": stages, **meta,
         }
     except Exception as e:
