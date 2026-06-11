@@ -13,13 +13,15 @@ FUNNEL (3 layers):
   3. Zone + gap trigger — on 1-min candle close, on qualified names only.
 
 ENTRY (qualified name + zone + gap condition + free slot + not blackout + before 15:20):
-  BUY  : pp < this_close <= r1  AND  (r1-this_close) >= 0.5*(r1-pp)
+  BUY  : pp < this_close <= r1  AND  (r1-this_close) >= GAP_ROOM_FRAC*(r1-pp)
          -> enter @ close, target R1, SL = entry-(R1-entry)
-  SHORT: s1 <= this_close < pp  AND  (this_close-s1) >= 0.5*(pp-s1)
+  SHORT: s1 <= this_close < pp  AND  (this_close-s1) >= GAP_ROOM_FRAC*(pp-s1)
          -> enter @ close, target S1, SL = entry+(entry-S1)
   + _traded_today guard: one entry per symbol/side/day maximum.
   No prev_close condition — captures gap-down/up names opening in the zone.
-  50% remaining gap ensures minimum reward room to target.
+  GAP_ROOM_FRAC (0.3) = minimum remaining gap to target as a fraction of the
+  pp->r1 (or pp->s1) band. Lower = looser entry, more signals, weaker R:R on
+  marginal trades. Was 0.5; lowered to 0.3 on 11-Jun-2026 (founder decision).
 
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
@@ -47,6 +49,13 @@ PIVOT_WINDOW   = 5
 PIVOT_MIN_DAYS = 3
 ENTRY_CUTOFF   = time(15, 20)
 REBALANCE_TIME = time(15, 20)
+
+# Minimum remaining gap to target as a fraction of the pp->r1 (or pp->s1) band.
+# Entry requires the close to leave at least this much room to the target.
+# 0.5 = close must be in lower/upper half of zone (room >= distance travelled, R:R >= 1:1).
+# 0.3 = looser; close may travel up to 70% toward target. More signals, weaker R:R
+#       on marginal trades. Lowered 0.5 -> 0.3 on 11-Jun-2026 (founder decision).
+GAP_ROOM_FRAC  = 0.3
 
 
 # ============================================================ SCHEMA
@@ -342,7 +351,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl = _two_latest_closes(conn, sym, d)
             if not tl: continue
             prev_close, cur_close, cur_ts = tl
-            if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp):
+            if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= GAP_ROOM_FRAC * (r1 - pp):
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
                 if _has_open(conn,sym,"LONG"): continue
                 if _traded_today(conn,sym,"LONG",d): continue
@@ -360,7 +369,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     conn.commit()
                 long_open+=1
                 entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
-            elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1):
+            elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= GAP_ROOM_FRAC * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"): continue
                 if _traded_today(conn,sym,"SHORT",d): continue
@@ -385,9 +394,9 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl=_two_latest_closes(conn,sym,d)
             if not tl: continue
             prev_close,cur_close,_=tl
-            if side=="LONG" and (pp < cur_close <= r1) and (r1-cur_close)>=0.5*(r1-pp) and not _has_open(conn,sym,"LONG") and not _traded_today(conn,sym,"LONG",d):
+            if side=="LONG" and (pp < cur_close <= r1) and (r1-cur_close)>=GAP_ROOM_FRAC*(r1-pp) and not _has_open(conn,sym,"LONG") and not _traded_today(conn,sym,"LONG",d):
                 _log_missed(conn,d,sym,"LONG",q["basket"],cur_close,r1,cur_close-(r1-cur_close),"after_cutoff")
-            elif side=="SHORT" and (s1<=cur_close<pp) and (cur_close-s1)>=0.5*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
+            elif side=="SHORT" and (s1<=cur_close<pp) and (cur_close-s1)>=GAP_ROOM_FRAC*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
                 _log_missed(conn,d,sym,"SHORT",q["basket"],cur_close,s1,cur_close+(cur_close-s1),"after_cutoff")
 
     return {"date":str(d),"qualified":len(qual),"pivots":len(piv),
