@@ -9,11 +9,14 @@ Reconstruct what the V8 paper engine WOULD have done if run faithfully every
 5-min since a start date, walking intraday_prices bar-by-bar.
 
 Entry rule:
-  LONG:  pp < cur_close <= r1  AND  (r1 - cur_close) >= 0.5 * (r1 - pp)
-  SHORT: s1 <= cur_close < pp  AND  (cur_close - s1) >= 0.5 * (pp - s1)
+  LONG:  pp < cur_close <= r1  AND  (r1 - cur_close) >= 0.3 * (r1 - pp)
+  SHORT: s1 <= cur_close < pp  AND  (cur_close - s1) >= 0.3 * (pp - s1)
   + _traded_today guard: one entry per symbol/side/day maximum.
   No prev_close condition — captures gap-down/up names opening in the zone.
-  50% remaining gap ensures minimum reward room to target.
+  30% remaining gap ensures minimum reward room to target.
+  NOTE (11-Jun-2026): lowered 0.5 -> 0.3 to match the live engine
+  (v8_paper.py GAP_ROOM_FRAC=0.3). Kept hardcoded here to keep replay
+  self-contained; update both files together if retuned.
 """
 
 import logging
@@ -326,7 +329,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
             tl = _two_closes_upto(conn, sym, d, cutoff)
             if not tl: continue
             _, cur_close, cur_ts = tl
-            if side == "LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.5 * (r1 - pp):
+            if side == "LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= 0.3 * (r1 - pp):
                 if _has_open(conn, sym, "LONG"): continue
                 if _traded_today(conn, sym, "LONG", d): continue
                 if long_open >= buy_slots: continue
@@ -341,7 +344,7 @@ def _replay_tick(conn, d: date, cutoff: time, qual: Dict[str, dict],
                     conn.commit()
                 long_open += 1
                 entries.append({"symbol": sym, "side": "LONG", "basket": basket, "entry": entry})
-            elif side == "SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.5 * (pp - s1):
+            elif side == "SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= 0.3 * (pp - s1):
                 if _has_open(conn, sym, "SHORT"): continue
                 if _traded_today(conn, sym, "SHORT", d): continue
                 if short_open >= sell_slots: continue
