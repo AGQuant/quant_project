@@ -45,6 +45,7 @@ from anthropic_endpoints import router as anthropic_router
 from scorr_endpoints import router as scorr_router
 from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
+from check_endpoint import router as check_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -56,7 +57,12 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.33
+# Scorr / Project Quant — main.py v2.9.34
+# v2.9.34: /check route wired — serves scorr_check.html. Dedicated native
+#   v3.3 Trade Check page (own top-bar tab after GVM). POST /api/check
+#   (check_endpoint.py -> native_trade_check.compute_trade_check) is $0,
+#   no Claude, no ADMIN_TOKEN, no MCP — never hangs on the 20-40s tool path.
+#   Caller passes symbol+side+gate1+gate2; gates fold into R10/R12/F3.
 # v2.9.33: /ask route wired — serves scorr_ask.html. Native-first query
 #   page ($0 Railway DB via native_router) + small Reasoning toggle
 #   (Claude API fallback). Native v3.3 trade check added to router
@@ -77,7 +83,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.33"
+VERSION = "2.9.34"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -118,6 +124,7 @@ app.include_router(anthropic_router)
 app.include_router(scorr_router)
 app.include_router(scorr_chat_router)
 app.include_router(trade_check_v34_router)
+app.include_router(check_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -265,7 +272,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.33)")
+        log.info("Tables ready (v2.9.34)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -374,6 +381,11 @@ def cio2():
 @app.get("/ask", response_class=HTMLResponse)
 def ask():
     with open("scorr_ask.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/check", response_class=HTMLResponse)
+def check():
+    with open("scorr_check.html", "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/health")
