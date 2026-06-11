@@ -1,5 +1,5 @@
 """
-Native v3.3 Trade Check — zero-token, pure Railway DB. ENGINE v3.
+Native v3.3 Trade Check — zero-token, pure Railway DB. ENGINE v3.1 (STRICT).
 
 ALL 18 parameters auto-computed from DB:
   Tier1: R1 ADR, R2 sector, R3 peers, R4 GVM, R6 MAs, R7 volume pattern
@@ -10,11 +10,13 @@ ALL 18 parameters auto-computed from DB:
          38.2/50/61.8 within 1.5%), F4 R:R, F5 entry window (live IST),
          F6 DTE to last-Tuesday expiry >=3, F7 basis trend
 
+STRICT SCORING (per Arpit 12-Jun): only confirmed PASSes count.
+FAIL and no-data (🟡) rules both count as NOT passed — no optimistic
+credit for unknowns. Verdict thresholds: Tier1 >=8 confirmed AND
+Tier2 >=5 confirmed, else REJECT/WEAK.
+
 gate1/gate2 (bool|None) = OPTIONAL human overrides:
-  gate1 overrides R10 (your eyes on the 5-min chart beat the proxy)
-  gate2 overrides R12
-Yellow (🟡) now appears ONLY when data is genuinely missing
-(no intraday bars yet, no pivots, no basis rows).
+  gate1 overrides R10, gate2 overrides R12.
 
 Scope: v3.3 ONLY (id=143+209). Not v3.4.1.
 Tier1: LONG 11 (min 8) / SHORT 10 (min 8). Tier2: 7 (min 5).
@@ -399,20 +401,19 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             t2_pass = sum(1 for r in t2_auto if r[3])
             t2_unk = len(t2) - len(t2_auto)
 
-            # ── verdict ──
-            best_t1 = t1_pass + t1_unk
-            if best_t1 < 8:
-                verdict, vclass = f"REJECT — Tier1 max {best_t1}/{t1_total}, can't reach 8.", "reject"
-            elif t1_pass >= 8 and t2_pass >= 5:
+            # ── verdict — STRICT: only confirmed PASSes count.
+            # FAIL and no-data both count as NOT passed. No optimistic credit.
+            if t1_pass >= 8 and t2_pass >= 5:
                 if t1_pass >= 10 and t2_pass >= 6:
                     verdict, vclass = f"STRONG — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7.", "strong"
                 else:
                     verdict, vclass = f"VALID — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7. Entry allowed.", "valid"
-            elif t1_unk or t2_unk:
-                verdict, vclass = (f"CONDITIONAL — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7; "
-                                   f"{t1_unk + t2_unk} unresolved (missing data).", "conditional")
+            elif t1_pass < 8:
+                miss = f" ({t1_unk} no-data counted as not-passed)" if t1_unk else ""
+                verdict, vclass = f"REJECT — Tier1 {t1_pass}/{t1_total} confirmed, need 8{miss}.", "reject"
             else:
-                verdict, vclass = f"WEAK — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7 below threshold.", "weak"
+                miss = f" ({t2_unk} no-data counted as not-passed)" if t2_unk else ""
+                verdict, vclass = f"WEAK — Tier1 {t1_pass}/{t1_total} ok, Tier2 {t2_pass}/7 below 5{miss}.", "weak"
 
             def st(ok):
                 return "chart" if ok is None else ("pass" if ok else "fail")
@@ -425,6 +426,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_unk, "t1_total": t1_total,
                 "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk,
                 "verdict": verdict, "verdict_class": vclass,
+                "scoring": "strict — fails and no-data both count as not passed",
             }
     except Exception as e:
         return {"ok": False, "error": f"DB error: {str(e)[:160]}"}
@@ -449,24 +451,24 @@ def native_trade_check(query, gate1=None, gate2=None):
         return f"**Trade Check — v3.3**\n{d.get('error', 'error')}"
 
     def mark(r):
-        s = {"pass": "PASS", "fail": "FAIL", "chart": "🟡 no data"}[r["state"]]
+        s = {"pass": "PASS", "fail": "FAIL", "chart": "🟡 no data (not passed)"}[r["state"]]
         return s + (" (gate)" if r.get("method") == "gate" else "")
 
     out = [f"**Trade Check v3.3 — {d['company']} ({d['symbol']}) · {d['side']}**"]
     gv = f"GVM {d['gvm']:.2f} · " if d.get("gvm") is not None else ""
-    out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0 · all-auto engine v3_")
+    out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0 · strict scoring_")
     out.append("\n**TIER 1**")
     out.append("| Rule | Condition | Value | State |")
     out.append("| --- | --- | --- | --- |")
     for r in d["tier1"]:
         out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r)} |")
-    out.append(f"\n**Tier1: {d['t1_pass']}/{d['t1_total']}** · need 8")
+    out.append(f"\n**Tier1: {d['t1_pass']}/{d['t1_total']} confirmed** · need 8")
     out.append("\n**TIER 2**")
     out.append("| Filter | Condition | Value | State |")
     out.append("| --- | --- | --- | --- |")
     for r in d["tier2"]:
         out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r)} |")
-    out.append(f"\n**Tier2: {d['t2_pass']}/7** · need 5")
+    out.append(f"\n**Tier2: {d['t2_pass']}/7 confirmed** · need 5")
     out.append(f"\n---\n**Verdict: {d['verdict']}**")
     out.append("_Personal trade context — not a V8 algo signal._")
     return "\n".join(out)
