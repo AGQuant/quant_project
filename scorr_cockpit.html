@@ -33,7 +33,10 @@
   .qf-box:disabled { opacity: 0.5; cursor: not-allowed; }
   .qf-box .qf-ic { width: 16px; text-align: center; font-size: 13px; }
 
-  .chat-list-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 12px 14px 4px; }
+  .chat-list-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 4px 14px; }
+  .chat-list-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .new-chat-icon { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); font-size: 15px; line-height: 1; transition: all 0.15s ease; }
+  .new-chat-icon:hover { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
   .chat-list { flex: 1; overflow-y: auto; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 3px; }
   .chat-list::-webkit-scrollbar { width: 5px; }
   .chat-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -41,8 +44,11 @@
   .chat-item:hover { background: var(--surface3); }
   .chat-item.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
   .chat-item .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chat-item .del { opacity: 0; color: var(--muted); font-weight: 700; padding: 0 2px; flex-shrink: 0; }
-  .chat-item:hover .del { opacity: 1; }
+  .chat-item .title-input { flex: 1; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 5px; font-family: var(--font); font-size: 12.5px; color: var(--text); background: var(--surface); outline: none; min-width: 0; }
+  .chat-item .act { opacity: 0; color: var(--muted); font-weight: 700; padding: 0 2px; flex-shrink: 0; cursor: pointer; }
+  .chat-item:hover .act { opacity: 0.7; }
+  .chat-item .act:hover { opacity: 1; }
+  .chat-item .ren:hover { color: var(--accent); }
   .chat-item .del:hover { color: var(--red); }
   .sidebar-foot { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
 
@@ -151,7 +157,10 @@
       <div class="qf-grid" id="qfGrid"></div>
     </div>
 
-    <div class="chat-list-label">Chats</div>
+    <div class="chat-list-head">
+      <span class="chat-list-label">Chats</span>
+      <button class="new-chat-icon" onclick="newChat()" title="New chat">＋</button>
+    </div>
     <div class="chat-list" id="chatList"></div>
     <div class="sidebar-foot">Chats saved locally · 30 day retention</div>
   </div>
@@ -246,7 +255,7 @@ function renderQuickFetch() {
   });
 }
 
-// Multi-chat store: { chats: { id: {id,title,history,cost,tin,tout,updated} }, activeId, claudeOn }
+// Multi-chat store: { chats: { id: {id,title,history,cost,tin,tout,updated,renamed} }, activeId, claudeOn }
 let store = { chats: {}, activeId: null, claudeOn: true };
 let conversationHistory = [];
 
@@ -303,12 +312,39 @@ function renderChatList() {
     const c = store.chats[id];
     const item = document.createElement('div');
     item.className = 'chat-item' + (id === store.activeId ? ' active' : '');
-    item.innerHTML = `<span style="opacity:.6">✦</span><span class="title">${escapeHtml(c.title || 'New chat')}</span><span class="del" title="Delete">✕</span>`;
-    item.querySelector('.title').onclick = () => switchChat(id);
+    item.innerHTML = `<span style="opacity:.6">✦</span><span class="title">${escapeHtml(c.title || 'New chat')}</span><span class="act ren" title="Rename">✎</span><span class="act del" title="Delete">✕</span>`;
+    const titleEl = item.querySelector('.title');
+    titleEl.onclick = () => switchChat(id);
+    titleEl.ondblclick = (e) => { e.stopPropagation(); startRename(id, item); };
     item.querySelector('span:first-child').onclick = () => switchChat(id);
+    item.querySelector('.ren').onclick = (e) => { e.stopPropagation(); startRename(id, item); };
     item.querySelector('.del').onclick = (e) => { e.stopPropagation(); deleteChat(id); };
     list.appendChild(item);
   }
+}
+
+function startRename(id, item) {
+  const c = store.chats[id]; if (!c) return;
+  const titleEl = item.querySelector('.title'); if (!titleEl) return;
+  const input = document.createElement('input');
+  input.className = 'title-input';
+  input.value = c.title || '';
+  titleEl.replaceWith(input);
+  input.focus(); input.select();
+  const commit = (save) => {
+    if (save) {
+      const v = input.value.trim();
+      c.title = v ? (v.length > 40 ? v.slice(0,40) : v) : (c.title || 'New chat');
+      c.renamed = true;
+      persist();
+    }
+    renderChatList();
+  };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+  };
+  input.onblur = () => commit(true);
 }
 
 function loadActiveIntoView() {
@@ -488,9 +524,9 @@ async function sendMessage() {
   const userContent=contentParts.length>1?contentParts:text;
   addMessage('user',text||'[image]',{files:fileNames});
   conversationHistory.push({role:'user',content:userContent});
-  // set title from first user message
+  // set title from first user message (only if not manually renamed)
   const active = store.chats[store.activeId];
-  if (active && (active.title === 'New chat' || !active.title)) { active.title = deriveTitle(conversationHistory); renderChatList(); }
+  if (active && !active.renamed && (active.title === 'New chat' || !active.title)) { active.title = deriveTitle(conversationHistory); renderChatList(); }
   attachedFiles=[]; document.getElementById('fileInput').value=''; document.getElementById('fileList').innerHTML='';
   document.getElementById('typingWrap').style.display='block';
   document.getElementById('messages').scrollTop=document.getElementById('messages').scrollHeight;
