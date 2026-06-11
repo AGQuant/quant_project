@@ -259,8 +259,8 @@ function renderMaster(){
   const p=cache.paper, all=cache.metricsAll||[];
   const open=(p&&p.open_positions)||[], sum=(p&&p.summary)||{};
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
-  const movers=[...all].filter(x=>x.day_change!=null)
-    .sort((a,b)=>b.day_change-a.day_change);
+  const movers=[...all].filter(x=>x.mom_2d!=null)
+    .sort((a,b)=>b.mom_2d-a.mom_2d);
   const top=movers.slice(0,5), bot=movers.slice(-5).reverse();
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
@@ -270,9 +270,9 @@ function renderMaster(){
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(sum.total_pnl||0)}">${inr(sum.total_pnl||0)}</div></div>
   </div>`;
   const moverTbl=(title,rows)=>`<div class="ptitle">${title}</div>`+
-    tbl(["Symbol","Day %","Month %","RSI(d)"],rows,x=>`<tr>
+    tbl(["Symbol","2D Mom%","Month %","RSI(d)"],rows,x=>`<tr>
       <td class="sym">${x.symbol}</td>
-      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
       <td>${num(x.daily_rsi,0)}</td></tr>`);
   return cards+
@@ -305,10 +305,10 @@ function renderFunnel(b){
   if(!d) return '<div class="loading">…</div>';
   const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
   const stocks=d.stocks||[];
-  return meta+tbl(["Symbol","Day %","DMA50","DMA200","RSI(m)","RSI(d)","52W idx","Vol×","GVM"],
+  return meta+tbl(["Symbol","2D Mom%","DMA50","DMA200","RSI(m)","RSI(d)","52W idx","Vol×","GVM"],
     stocks, x=>`<tr>
       <td class="sym">${x.symbol}</td>
-      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
       <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
       <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
       <td>${num(x.rsi_month,0)}</td>
@@ -358,10 +358,10 @@ function renderTradeLog(){
     </tr>`,"No closed trades");
 }
 
-let rawSort={key:'day_change',dir:-1};
+let rawSort={key:'mom_2d',dir:-1};
 function renderRaw(){
   const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
-  const cols=[["symbol","Symbol"],["day_change","Day %"],["week_return","Wk %"],
+  const cols=[["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Wk %"],
     ["month_return","Mo %"],["year_return","Yr %"],["dma_50","DMA50"],["dma_200","DMA200"],
     ["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["vol_ratio","Vol×"],["gvm_score","GVM"]];
   const rows=[...all].sort((a,b)=>{
@@ -372,7 +372,7 @@ function renderRaw(){
   const head=cols.map(([k,l])=>`<th onclick="rawResort('${k}')">${l}${rawSort.key===k?(rawSort.dir<0?' ▾':' ▴'):''}</th>`).join('');
   const body=rows.map(x=>`<tr>
     <td class="sym">${x.symbol}</td>
-    <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+    <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
     <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
     <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
     <td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
@@ -392,8 +392,8 @@ let scanMode='gainers';
 function renderScan(){
   const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
   const f={
-    gainers: a=>[...a].filter(x=>x.day_change!=null).sort((p,q)=>q.day_change-p.day_change).slice(0,25),
-    losers:  a=>[...a].filter(x=>x.day_change!=null).sort((p,q)=>p.day_change-q.day_change).slice(0,25),
+    gainers: a=>[...a].filter(x=>x.mom_2d!=null).sort((p,q)=>q.mom_2d-p.mom_2d).slice(0,25),
+    losers:  a=>[...a].filter(x=>x.mom_2d!=null).sort((p,q)=>p.mom_2d-q.mom_2d).slice(0,25),
     overbought: a=>[...a].filter(x=>x.daily_rsi>=70).sort((p,q)=>q.daily_rsi-p.daily_rsi),
     oversold: a=>[...a].filter(x=>x.daily_rsi<=30).sort((p,q)=>p.daily_rsi-q.daily_rsi),
     above200: a=>[...a].filter(x=>x.dma_200>10).sort((p,q)=>q.dma_200-p.dma_200).slice(0,30),
@@ -403,10 +403,10 @@ function renderScan(){
     ["oversold","RSI ≤30"],["above200","Strong vs DMA200"]]
     .map(([k,l])=>`<button class="btn ${scanMode===k?'on':''}" onclick="scanSet('${k}')">${l}</button>`).join('');
   return `<div class="subnav">${nav}</div>`+
-    tbl(["Symbol","Day %","Mo %","DMA50","DMA200","RSI(d)","52W idx","Vol×"],
+    tbl(["Symbol","2D Mom%","Mo %","DMA50","DMA200","RSI(d)","52W idx","Vol×"],
     rows, x=>`<tr>
       <td class="sym">${x.symbol}</td>
-      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
       <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
       <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
@@ -449,12 +449,12 @@ async function loadFF(){
   } else { html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`; }
   if(pc && pc.stocks){
     html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count · high → low <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
-    html+=tbl(["Symbol","Passed","of","GVM","Day %","Failed filters"],pc.stocks,x=>`<tr>
+    html+=tbl(["Symbol","Passed","of","GVM","2D Mom%","Failed filters"],pc.stocks,x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td class="${x.passed===x.total?'pos':''}">${x.passed}</td>
       <td>${x.total}</td>
       <td>${num(x.gvm_score,2)}</td>
-      <td class="${cls(x.day_change)}">${sign(x.day_change)}%</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
       <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`,"No stocks");
   } else { html+=`<div class="err">⚠ stock_passcount not available for ${ffBasket}</div>`; }
   html+=preFreezeBanner();
