@@ -54,7 +54,10 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.28
+# Scorr / Project Quant — main.py v2.9.29
+# v2.9.29: Fix day_change -> mom_2d in /api/v8/metrics/all SQL (runtime fix).
+#   Adds day_1d + eod_chg to metrics/all response.
+#   Removes postgresql from nixpacks.toml (not needed with psycopg[binary]).
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 #   Haiku default (routine queries ~$0.001). Sonnet on-demand for deep analysis.
 #   Full system prompt with trading rules + memory blueprint in scorr_chat_endpoint.py.
@@ -78,18 +81,9 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 #   piece B). MCP_TOOLS + _call_tool + /mcp endpoint now live in
 #   mcp_dispatch.py (self-contained, own get_conn). main.py wires
 #   mcp_router. github_ops.py staged (piece A) but not yet wired.
-# v2.9.22: V10 ST+EMA wired — v10_endpoints router. Intraday NIFTY
-#   directional signal (ST 150/3 on 10m + EMA 3/10 30m gate, SL100/T200).
-#   Files: v10_st_ema.py, v10_endpoints.py. Scheduler runs tick every 5-min.
-# v2.9.21: v8_live archived. Single live engine = v8_signal_writer.
-#   v8_build_cache + v8_run_live MCP tools + endpoints removed.
-# v2.9.20: V9 Pair Strategy wired — v9_endpoints router +
-#   4 MCP tools (v9_discover, v9_backtest, v9_results, v9_best_combo).
-#   Files: v9_pair_discovery.py, v9_pair_backtest.py, v9_endpoints.py
-#   178 raw pairs, 122 eligible stocks, 10 parameter combos.
 # ============================================================
 
-VERSION = "2.9.28"
+VERSION = "2.9.29"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -275,7 +269,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.28)")
+        log.info("Tables ready (v2.9.29)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -711,7 +705,7 @@ def v8_run_for_date(target_date: str, x_admin_token: Optional[str] = Header(None
 def v8_metrics_all():
     return api_query("""
         SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20, rsi_month, rsi_weekly, daily_rsi,
-               month_return, week_return, year_return, day_change,
+               month_return, week_return, year_return, mom_2d, day_1d, eod_chg,
                month_index, week_index_52, range_1d, range_3d, upper_bb, lower_bb, ma9_vs_ma21, vol_ratio
         FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics) ORDER BY symbol
     """)
