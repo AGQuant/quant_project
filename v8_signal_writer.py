@@ -1,5 +1,5 @@
 """
-V8 Signal Writer — Single Live Engine (v2.1.0)
+V8 Signal Writer — Single Live Engine (v2.1.1)
 ===============================================
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
@@ -11,44 +11,12 @@ What it does every 5-min during market hours:
   5. Upserts v8_metrics (today's row) with live values
   6. Applies FILTER_CONFIG → writes v8_qualified (today only)
   7. Writes v8_funnel_counts (cumulative step counts)
+  8. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
 
-Frozen at EOD (never recomputed live):
-  - gvm_score       (weekly screener + daily M, recomputes 22:00 IST)
-  - rsi_month       (monthly-resampled Wilder, recomputes 15:45 IST)
-  - rsi_weekly      (weekly-resampled Wilder, recomputes 15:45 IST)
-  - sector_week     (peer avg 5-day return, recomputes 15:45 IST)
-  - sector_month    (peer avg 21-day return, recomputes 15:45 IST)
-  - eod_chg         (last COMPLETED day's 1-day change: T-1 vs T-2 close)
-
-Live (recomputed every 5-min from intraday_prices):
-  dma_20, dma_50, dma_200, daily_rsi, month_return, week_return,
-  year_return, mom_2d, day_1d, ma9_vs_ma21, vol_ratio, week_index_52,
-  month_index, range_1d, range_3d, upper_bb, lower_bb,
-  sector_day (live peer avg mom_2d across segment)
-
-v8_live.py and v8_history_cache are archived — no longer used.
-
-RSI periods: Month=6 (monthly bars), Weekly=8 (weekly bars), Daily=14 (Wilder).
-mom_2d = (cmp / close_2_days_ago - 1) * 100  [2-day momentum, T vs T-2]
-  Renamed from 'day_change' 10-Jun-2026 — it was never a 1-day change.
-day_1d = (cmp / close_1_day_ago - 1) * 100  [true intraday day change, T vs T-1]
-eod_chg = (close_T-1 / close_T-2 - 1) * 100 [frozen, last completed day]
-  day_1d + eod_chg added 11-Jun-2026 — DISPLAY ONLY, never used as filters.
-
-SEGMENT_OVERRIDES (11-Jun-2026): symbols without gvm_scores rows get
-  NIFTY50/BANKNIFTY -> 'Index', *BEES -> 'ETF'.
-
-08-Jun-2026 FIX: _load_eod_metrics no longer reads frozen metrics from today's own
-half-built v8_metrics row (NULL pre-15:45 -> circular NULL -> funnel collapse). It now
-pulls gvm_score from gvm_scores (authoritative) and rsi/sector from the most recent
-v8_metrics row PER SYMBOL where they are non-null (last EOD freeze carried forward).
-
-08-Jun-2026 buy_reversal GATE-ADAPTIVE qualification (Buy Reversal ONLY):
-  Bullish gate (0-1 fails)  -> 11/11 strict
-  Sideways gate (2 fails)   -> 10/11 (any 1 filter may fail)
-  Bearish gate (3+ fails)   -> 9/11  (any 2 filters may fail)
-  mom_2d > 0 is MANDATORY in every tier (never one of the allowed fails).
-  Other baskets keep strict all-pass. Funnel counts still show strict waterfall.
+adr_intraday (11-Jun-2026): Live advance/decline ratio from intraday_prices vs
+  prev raw_prices close. Written every 5-min. market_mood gate reads this first,
+  falls back to adr_daily when no live bar (off-hours/weekend).
+  Primary source per spec id=165 (locked 08-Jun-2026).
 """
 
 import logging
@@ -70,7 +38,6 @@ RSI_DAILY_PERIOD = 14
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
 
 def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
-    """Indices -> 'Index', ETFs (*BEES) -> 'ETF' when no gvm segment exists."""
     if segment:
         return segment
     if symbol in INDEX_SYMBOLS:
@@ -80,7 +47,7 @@ def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
     return segment
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _safe_float(v) -> Optional[float]:
     try:
@@ -122,26 +89,64 @@ def _passes(value, mn, mx) -> bool:
     return True
 
 
-# ── Step 1: Load EOD metrics snapshot ─────────────────────────────────────────
+# ── ADR intraday write ────────────────────────────────────────────────────────
+
+def _write_adr_intraday(conn):
+    """
+    Compute live ADR from intraday_prices vs prev raw_prices close.
+    Written every 5-min tick to adr_intraday (PRIMARY KEY = ts rounded to 5-min).
+    market_mood gate reads adr_intraday first, falls back to adr_daily.
+    Per spec id=165 (locked 08-Jun-2026).
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH li AS (
+                    SELECT DISTINCT ON (symbol) symbol, close AS cmp
+                    FROM intraday_prices WHERE ts::date = CURRENT_DATE
+                    ORDER BY symbol, ts DESC
+                ),
+                pc AS (
+                    SELECT DISTINCT ON (symbol) symbol, close AS pclose
+                    FROM raw_prices WHERE price_date < CURRENT_DATE
+                    ORDER BY symbol, price_date DESC
+                )
+                SELECT
+                    COUNT(*) FILTER (WHERE li.cmp > pc.pclose) AS advances,
+                    COUNT(*) FILTER (WHERE li.cmp < pc.pclose) AS declines,
+                    COUNT(*) FILTER (WHERE li.cmp = pc.pclose) AS unchanged,
+                    COUNT(*) AS total
+                FROM li JOIN pc ON pc.symbol = li.symbol
+            """)
+            row = cur.fetchone()
+            if not row or (row[3] or 0) < 50:
+                return
+            adv, dec, unc, tot = row[0] or 0, row[1] or 0, row[2] or 0, row[3] or 0
+            adr = round(adv / dec, 3) if dec else float(adv)
+            # Round to nearest 5-min boundary
+            now_ist = datetime.now(IST).replace(tzinfo=None)
+            ts_5m = now_ist.replace(second=0, microsecond=0)
+            ts_5m = ts_5m.replace(minute=(ts_5m.minute // 5) * 5)
+            cur.execute("""
+                INSERT INTO adr_intraday (ts, advances, declines, unchanged, adr, universe_count)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (ts) DO UPDATE SET
+                    advances       = EXCLUDED.advances,
+                    declines       = EXCLUDED.declines,
+                    unchanged      = EXCLUDED.unchanged,
+                    adr            = EXCLUDED.adr,
+                    universe_count = EXCLUDED.universe_count,
+                    computed_at    = NOW()
+            """, (ts_5m, adv, dec, unc, adr, tot))
+        conn.commit()
+        log.debug(f"adr_intraday: {adv}A/{dec}D adr={adr} universe={tot}")
+    except Exception as e:
+        log.warning(f"_write_adr_intraday: {e}")
+
+
+# ── Step 1: Load EOD metrics snapshot ────────────────────────────────────────
 
 def _load_eod_metrics(conn) -> Dict[str, dict]:
-    """
-    Frozen slow metrics per symbol, sourced from LAST-GOOD values (not today's
-    possibly-empty row):
-      - gvm_score + segment  ← latest gvm_scores (authoritative daily source)
-      - rsi_month, rsi_weekly, sector_week, sector_month
-            ← most recent v8_metrics row PER SYMBOL where they are non-null
-              (DISTINCT ON carries yesterday's EOD freeze forward intraday).
-
-    Rationale: the 5-min writer must never read frozen metrics from today's own
-    half-built row (circular NULL). It pulls the last computed EOD value forward
-    until the 15:45 EOD engine refreshes them. gvm/rsi/sector are EOD by design
-    and do not change intraday.
-
-    Segment override: symbols without gvm rows (indices, ETFs) get
-    'Index' / 'ETF' so sector_day computes within their own bucket.
-    """
-    # gvm_score + segment from authoritative gvm_scores (latest score_date)
     gvm_map: Dict[str, dict] = {}
     with conn.cursor() as cur:
         cur.execute("""
@@ -152,7 +157,6 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
         for sym, gvm, seg in cur.fetchall():
             gvm_map[sym] = {"gvm_score": _safe_float(gvm), "segment": seg}
 
-    # Last-good frozen metrics per symbol (latest non-null row, any date)
     frozen_map: Dict[str, dict] = {}
     with conn.cursor() as cur:
         cur.execute("""
@@ -171,7 +175,6 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
             d = dict(zip(cols, r))
             frozen_map[d["symbol"]] = d
 
-    # Merge: every symbol that has either a gvm row or a frozen row
     out: Dict[str, dict] = {}
     for sym in set(gvm_map) | set(frozen_map):
         g = gvm_map.get(sym, {})
@@ -189,15 +192,9 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
     return out
 
 
-# ── Step 2: Load EOD history per symbol (bulk) ────────────────────────────────
+# ── Step 2: Load EOD history per symbol (bulk) ───────────────────────────────
 
 def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
-    """
-    Last 400 raw_prices rows per symbol strictly before today.
-    Returns dict: symbol -> {closes, highs, lows, vols, vol_avg10,
-                              hi_252, lo_252, hi_21, lo_21,
-                              close_1d_ago, close_2d_ago}
-    """
     today = datetime.now(IST).date()
     with conn.cursor() as cur:
         cur.execute("""
@@ -214,7 +211,7 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
 
     history = {}
     for sym, data in by_sym.items():
-        data    = data[:400][::-1]   # cap + oldest-first
+        data    = data[:400][::-1]
         closes  = [float(r[0]) for r in data if r[0] is not None]
         highs   = [float(r[1]) for r in data if r[1] is not None]
         lows    = [float(r[2]) for r in data if r[2] is not None]
@@ -239,7 +236,6 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
 # ── Step 3: Load today's intraday bars (bulk) ─────────────────────────────────
 
 def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
-    """Latest intraday close + today's H/L/open/vol per symbol."""
     today = datetime.now(IST).date()
     with conn.cursor() as cur:
         cur.execute("""
@@ -284,10 +280,6 @@ def _load_cmp(conn) -> Dict[str, float]:
 
 def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
                            eod: dict) -> dict:
-    """
-    Splice today's live bar onto EOD history. Recompute live metrics.
-    EOD-frozen: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month, eod_chg.
-    """
     closes = hist["closes"][:]
     highs  = hist["highs"][:]
     lows   = hist["lows"][:]
@@ -298,23 +290,20 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     l = lows   + [bar["low"]  if bar.get("low")  else live]
 
     out = {
-        # EOD-frozen
         "gvm_score":    _safe_float(eod.get("gvm_score")),
         "rsi_month":    _safe_float(eod.get("rsi_month")),
         "rsi_weekly":   _safe_float(eod.get("rsi_weekly")),
         "sector_week":  _safe_float(eod.get("sector_week")),
         "sector_month": _safe_float(eod.get("sector_month")),
-        # Live-recomputed
         "dma_20": None, "dma_50": None, "dma_200": None,
         "daily_rsi": None,
         "month_return": None, "week_return": None, "year_return": None,
-        "mom_2d": None,
-        "day_1d": None, "eod_chg": None,
+        "mom_2d": None, "day_1d": None, "eod_chg": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
         "week_index_52": None, "month_index": None,
         "range_1d": None, "range_3d": None,
         "upper_bb": None, "lower_bb": None,
-        "sector_day": None,   # filled in sector pass
+        "sector_day": None,
     }
 
     if len(c) >= 20:  out["dma_20"]  = _safe_pct(live, float(np.mean(c[-20:])))
@@ -327,14 +316,10 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 
     price = cmp if cmp else live
 
-    # mom_2d: price vs close_2_days_ago (2-candle gap, T vs T-2)
     base_2d = hist.get("close_2d_ago")
     if base_2d and base_2d > 0:
         out["mom_2d"] = (price / base_2d - 1) * 100
 
-    # day_1d (LIVE): price vs yesterday's close — true intraday day change.
-    # eod_chg (FROZEN): yesterday's close vs day-before close — last completed day.
-    # DISPLAY ONLY — never used as filters.
     base_1d = hist.get("close_1d_ago")
     if base_1d and base_1d > 0:
         out["day_1d"] = (price / base_1d - 1) * 100
@@ -388,7 +373,6 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 # ── Step 6: Sector day pass ───────────────────────────────────────────────────
 
 def _add_sector_day(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
-    """sector_day = avg mom_2d of all peers in same segment (live)."""
     seg_moves: Dict[str, list] = defaultdict(list)
     for sym, m in computed.items():
         seg     = eod_metrics.get(sym, {}).get("segment")
@@ -459,42 +443,49 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
     conn.commit()
 
 
-# ── Market gate (for adaptive buy_reversal threshold) ─────────────────────────
+# ── Market gate ───────────────────────────────────────────────────────────────
 
 def _market_gate_fails(conn) -> int:
-    """
-    Count of failed market-mood checks (ADR + Nifty Day/Week/Month), mirroring
-    /api/v8/market_mood. 0-1=Bullish, 2=Neutral/Sideways, 3+=Bearish.
-    Returns fails (0-4); defaults to 0 (strict) if data insufficient.
-    """
     try:
         with conn.cursor() as cur:
-            # ADR: live intraday breadth, else eod fallback
+            # ADR: adr_intraday primary, adr_daily fallback
             cur.execute("""
-                WITH li AS (
-                    SELECT DISTINCT ON (symbol) symbol, close AS cmp
-                    FROM intraday_prices WHERE ts::date = CURRENT_DATE
-                    ORDER BY symbol, ts DESC
-                ),
-                pc AS (
-                    SELECT DISTINCT ON (symbol) symbol, close AS pclose
-                    FROM raw_prices WHERE price_date < CURRENT_DATE
-                    ORDER BY symbol, price_date DESC
-                )
-                SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
-                       COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
-                       COUNT(*)
-                FROM li JOIN pc ON pc.symbol = li.symbol
+                SELECT advances, declines, universe_count
+                FROM adr_intraday
+                WHERE ts::date = CURRENT_DATE
+                ORDER BY ts DESC LIMIT 1
             """)
-            adv, dec, tot = cur.fetchone()
-            if tot and tot >= 50:
+            row = cur.fetchone()
+            if row and (row[2] or 0) >= 50:
+                adv, dec = row[0] or 0, row[1] or 0
                 adr = (adv / dec) if dec else float(adv)
             else:
-                cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
-                r = cur.fetchone()
-                adr = float(r[0]) if r and r[0] is not None else 1.0
+                # Fallback: compute live from intraday
+                cur.execute("""
+                    WITH li AS (
+                        SELECT DISTINCT ON (symbol) symbol, close AS cmp
+                        FROM intraday_prices WHERE ts::date = CURRENT_DATE
+                        ORDER BY symbol, ts DESC
+                    ),
+                    pc AS (
+                        SELECT DISTINCT ON (symbol) symbol, close AS pclose
+                        FROM raw_prices WHERE price_date < CURRENT_DATE
+                        ORDER BY symbol, price_date DESC
+                    )
+                    SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
+                           COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
+                           COUNT(*)
+                    FROM li JOIN pc ON pc.symbol = li.symbol
+                """)
+                adv_row = cur.fetchone()
+                if adv_row and (adv_row[2] or 0) >= 50:
+                    adv, dec = adv_row[0] or 0, adv_row[1] or 0
+                    adr = (adv / dec) if dec else float(adv)
+                else:
+                    cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+                    r = cur.fetchone()
+                    adr = float(r[0]) if r and r[0] is not None else 1.0
 
-            # Nifty D/W/M from intraday live vs raw_prices history
             cur.execute("""
                 SELECT close FROM intraday_prices
                 WHERE symbol='NIFTY50' AND ts::date=CURRENT_DATE
@@ -518,22 +509,16 @@ def _market_gate_fails(conn) -> int:
                 nweek  = (latest / hist[5]  - 1) * 100 if len(hist) > 5 else 0.0
                 nmonth = (latest / hist[21] - 1) * 100 if len(hist) > 21 else 0.0
             else:
-                return 0  # insufficient data → strict
+                return 0
 
             checks = [adr >= 1.0, nday >= 0, nweek >= 0, nmonth >= 0]
             return sum(1 for c in checks if not c)
     except Exception as e:
         log.warning(f"_market_gate_fails: {e}")
-        return 0  # safe default → strict
+        return 0
 
 
 def _gate_threshold(fails: int, n_filters: int) -> int:
-    """
-    Adaptive buy_reversal threshold by market gate:
-      0-1 fails (Bullish)  → strict n_filters (all pass)
-      2 fails (Sideways)   → n_filters - 1
-      3+ fails (Bearish)   → n_filters - 2
-    """
     if fails <= 1:
         return n_filters
     if fails == 2:
@@ -552,7 +537,6 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         if basket == "sell_overbought":
             continue
 
-        # Funnel counts always reflect the strict sequential waterfall (display).
         universe = all_metrics[:]
         funnel   = {}
         for metric, bounds in filters.items():
@@ -560,16 +544,13 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             universe = [s for s in universe if _passes(s.get(metric), mn, mx)]
             funnel[metric] = len(universe)
 
-        # buy_reversal: gate-adaptive qualification (Bullish 11/11, Sideways 10/11,
-        # Bearish 9/11) with mom_2d>0 MANDATORY in every tier. Other baskets
-        # keep the strict all-pass set computed above.
         if basket == "buy_reversal":
             n_filters = len(filters)
             need = _gate_threshold(gate_fails, n_filters)
             adaptive = []
             for s in all_metrics:
                 dc = s.get("mom_2d")
-                if dc is None or float(dc) <= 0:   # mom_2d>0 mandatory
+                if dc is None or float(dc) <= 0:
                     continue
                 passed = sum(
                     1 for metric, bounds in filters.items()
@@ -646,11 +627,6 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def run_live_signal_writer(conn) -> dict:
-    """
-    Called every 5-min from scheduler._live_loop.
-    Single live engine — computes all intraday metrics + writes v8_metrics,
-    v8_qualified, v8_funnel_counts.
-    """
     today = datetime.now(IST).date()
 
     try:
@@ -710,6 +686,9 @@ def run_live_signal_writer(conn) -> dict:
         all_metrics.append(m)
 
     _write_qualified(conn, all_metrics, today)
+
+    # Write live ADR to adr_intraday (spec id=165)
+    _write_adr_intraday(conn)
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
     return {
