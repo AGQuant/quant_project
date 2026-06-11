@@ -146,9 +146,9 @@
         <div class="logo">CIO Assistant <span class="brand">MAX</span></div>
       </div>
       <div class="header-right">
-        <div class="claude-toggle on" id="claudeToggle" onclick="toggleClaude()" title="Toggle Claude API interpretation">
+        <div class="claude-toggle on" id="claudeToggle" onclick="toggleClaude()" title="Reasoning Mode — layer Claude reasoning on the data (capped). Off = data only, $0.">
           <div class="toggle-dot" id="toggleDot"></div>
-          <span id="toggleLabel">Claude ON</span>
+          <span id="toggleLabel">Reasoning ON</span>
           <span class="budget-cap" id="budgetCap">· Sonnet · $0.05 cap</span>
         </div>
       </div>
@@ -166,7 +166,7 @@
         <div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div>
         <div class="welcome-desc">
           Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br>
-          <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Multi-chat · Markdown</span>
+          <span style="color: var(--green); font-weight:500;">Reasoning Mode · Sonnet · $0.05/query cap · Multi-chat · Markdown</span>
         </div>
       </div>
     </div>
@@ -278,7 +278,7 @@ function loadActiveIntoView() {
   totalCost = c ? (c.cost || 0) : 0; totalIn = c ? (c.tin || 0) : 0; totalOut = c ? (c.tout || 0) : 0;
   const msgs = document.getElementById('messages'); msgs.innerHTML = '';
   if (conversationHistory.length === 0) {
-    msgs.innerHTML = `<div class="welcome" id="welcome"><div class="welcome-logo">MAX</div><div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div><div class="welcome-desc">Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br><span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Multi-chat · Markdown</span></div></div>`;
+    msgs.innerHTML = `<div class="welcome" id="welcome"><div class="welcome-logo">MAX</div><div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div><div class="welcome-desc">Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br><span style="color: var(--green); font-weight:500;">Reasoning Mode · Sonnet · $0.05/query cap · Multi-chat · Markdown</span></div></div>`;
   } else {
     for (const m of conversationHistory) addMessage(m.role, typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? (m.content.find(p=>p.type==='text')?.text || '[file/image]') : '[file/image]'), {});
   }
@@ -318,8 +318,8 @@ function toggleSidebar() { document.getElementById('sidebar').classList.toggle('
 function toggleClaude() { claudeOn = !claudeOn; applyToggleUI(); persist(); }
 function applyToggleUI() {
   const el = document.getElementById('claudeToggle'), label = document.getElementById('toggleLabel'), cap = document.getElementById('budgetCap');
-  if (claudeOn) { el.className = 'claude-toggle on'; label.textContent = 'Claude ON'; cap.textContent = '· Sonnet · $0.05 cap'; }
-  else { el.className = 'claude-toggle off'; label.textContent = 'Claude OFF'; cap.textContent = '· Native only · $0'; }
+  if (claudeOn) { el.className = 'claude-toggle on'; label.textContent = 'Reasoning ON'; cap.textContent = '· Sonnet · $0.05 cap'; }
+  else { el.className = 'claude-toggle off'; label.textContent = 'Reasoning OFF'; cap.textContent = '· Data only · $0'; }
 }
 function stopQuery() {
   if (currentController) { currentController.abort(); currentController = null; }
@@ -416,7 +416,7 @@ function addMessage(role, content, meta={}) {
   const bubbleContent = role==='assistant' ? `<div class="md">${formatReply(content)}</div>` : escapeHtml(content);
   let toolsHtml = meta.toolCalls?.length>0 ? `<div class="tools-used">${meta.toolCalls.map(t=>`<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>` : '';
   let filesHtml = meta.files?.length>0 ? `<div class="attachments">${meta.files.map(f=>`<span class="attachment-badge">📄 ${f}</span>`).join('')}</div>` : '';
-  let modeTag = meta.model ? `sonnet · ${meta.duration_ms}ms · $${meta.cost}` : meta.native ? `native · ${meta.duration_ms}ms · $0.000000` : '';
+  let modeTag = meta.model ? `sonnet · ${meta.duration_ms}ms · $${meta.cost}` : meta.native ? `data only · ${meta.duration_ms}ms · $0.000000` : '';
   div.innerHTML = `<div class="msg-avatar">${role==='user'?'YOU':'MAX'}</div><div class="msg-body"><div class="msg-bubble">${bubbleContent}</div>${filesHtml}${toolsHtml}${modeTag?`<div class="msg-meta">${modeTag}</div>`:''}</div>`;
   msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
 }
