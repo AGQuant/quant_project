@@ -43,6 +43,7 @@ from mcp_dispatch import router as mcp_router
 from anthropic_endpoints import router as anthropic_router
 from scorr_endpoints import router as scorr_router
 from scorr_chat_endpoint import router as scorr_chat_router
+from trade_check_v34_endpoints import router as trade_check_v34_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -54,7 +55,14 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.29
+# Scorr / Project Quant — main.py v2.9.30
+# v2.9.30: Trade Check v3.4 wired — trade_check_v34_endpoints router.
+#   POST /api/trade-check/v34 (weighted + core-gate scoring, caller passes
+#   2 chart gates = human-in-AI-loop), POST /api/trade-check/v34/promote
+#   (manual-only personal_journal write), GET /api/trade-check/v34/health.
+#   Files: trade_check_v34.py, trade_check_v34_endpoints.py. Side-by-side
+#   with v3.3 (conversational spec id=143). HARD V8 separation — module
+#   reads only v8_metrics/gvm_scores/futures_basis, never v8_paper/v8_qualified.
 # v2.9.29: Fix day_change -> mom_2d in /api/v8/metrics/all SQL (runtime fix).
 #   Adds day_1d + eod_chg to metrics/all response.
 #   Removes postgresql from nixpacks.toml (not needed with psycopg[binary]).
@@ -83,7 +91,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 #   mcp_router. github_ops.py staged (piece A) but not yet wired.
 # ============================================================
 
-VERSION = "2.9.29"
+VERSION = "2.9.30"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -122,6 +130,7 @@ app.include_router(mcp_router)
 app.include_router(anthropic_router)
 app.include_router(scorr_router)
 app.include_router(scorr_chat_router)
+app.include_router(trade_check_v34_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -269,7 +278,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.29)")
+        log.info("Tables ready (v2.9.30)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
