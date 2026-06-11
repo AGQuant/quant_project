@@ -1,5 +1,9 @@
 """
-Trade Check v3.4 — Weighted Tier-1 + Core-Gate scoring engine.
+Trade Check v3.4.1 — Weighted Tier-1 + Core-Gate scoring engine.
+UPDATE v3.4.1: 0.5 partial-pass rule for core gates.
+- Both conditions pass (1.0x) → advance, no cap
+- 1/2 pass (0.5x) → NEUTRAL, advance but weighted
+- Both fail (0.0x) → WATCH (capped)
 
 FIRST CODE implementation of Trade Check (v3.3 was conversational-only,
 spec at session_log id=143 + output format id=209).
@@ -7,9 +11,9 @@ spec at session_log id=143 + output format id=209).
 WHAT v3.4 CHANGES vs v3.3 (faithful re-weighting, NOT new rules):
   - Flat X/11 count  ->  core-gate + weighted score (fixes DIVISLAB 9/11
     outranking EICHERMOT 7/11 despite worse quality).
-  - CORE GATES (pass/fail): GVM>=7 (LONG) + week&month direction.
-    Fail a core gate => capped at WATCH regardless of weighted total.
-  - OI/price quadrant (was Tier-2 F7 sub_A in v3.3) PROMOTED into Tier-1
+  - CORE GATES (pass/fail/partial): GVM>=7 (LONG) + week&month direction.
+    Fail both => capped at WATCH. Fail one => 0.5x multiplier (neutral, advance).
+  - OI/price quadrant (was Tier-2 F7 sub_A in v3.3) PROMOTED into Tier1
     as a weighted rule. basis-delta = strength grade. null-OI => abstain
     (neutral, never false-fail).
   - Side-aware LONG (11 data+chart rules) / SHORT (10, GVM N/A).
@@ -36,8 +40,8 @@ import psycopg
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-VERSION = "v3.4"
-SPEC_PARENT = "session_log id=143 (v3.3) — v3.4 weighted re-implementation"
+VERSION = "v3.4.1"
+SPEC_PARENT = "session_log id=143 (v3.3) — v3.4 weighted re-implementation + v3.4.1 0.5 partial rule"
 
 # ─── WEIGHTS (starting values, replay-tunable — NOT locked) ──────────────
 # High = quality/trend/structure. Medium = environment. Low = confirmation.
@@ -205,7 +209,7 @@ def _score(symbol: str, side: str,
     rows: List[Dict] = []
     abstain_weight = 0
 
-    # ── CORE GATES (pass/fail; fail => cap WATCH) ───────────────────────
+    # ── CORE GATES (pass/fail/partial; 0.5 for one fail) ──────────────────
     core = []
     if side == "LONG":
         gvm_ok = _f(m["gvm_score"]) >= 7.0
@@ -218,7 +222,18 @@ def _score(symbol: str, side: str,
     else:
         dir_ok = wk < 0 and mo < 0
         core.append(("Week<0 AND Month<0", f"wk {wk:+.2f} / mo {mo:+.2f}", dir_ok))
-    core_pass = all(c[2] for c in core)
+    
+    # Core gate: 0.5 for partial pass (1 of 2 conditions)
+    core_pass_count = sum(1 for c in core if c[2])
+    if core_pass_count == len(core):
+        core_pass = True
+        core_weight_multiplier = 1.0
+    elif core_pass_count == len(core) - 1:
+        core_pass = True  # advance, but weighted
+        core_weight_multiplier = 0.5  # partial pass = neutral
+    else:
+        core_pass = False
+        core_weight_multiplier = 0.0
 
     # ── WEIGHTED RULES ──────────────────────────────────────────────────
     def add(name, cond_txt, val_txt, passed, weight, abstain=False):
@@ -296,7 +311,7 @@ def _score(symbol: str, side: str,
     eff_max = MAX_WEIGHTED - abstain_weight
     veto_hit = any(r["status"] == "VETO" for r in rows)
 
-    if not core_pass:
+    if core_weight_multiplier == 0.0:
         verdict = "WATCH"
         reason = "core gate failed — " + ", ".join(
             f"{c[0]}={c[1]}" for c in core if not c[2])
@@ -304,14 +319,14 @@ def _score(symbol: str, side: str,
         verdict = "WATCH"
         reason = "OI veto — fresh opposing buildup"
     elif earned >= STRONG_MIN:
-        verdict = "STRONG"
-        reason = f"core pass + {earned}/{eff_max} weighted"
+        verdict = "STRONG" if core_weight_multiplier == 1.0 else "VALID"
+        reason = f"core {'pass' if core_weight_multiplier == 1.0 else 'partial (0.5x)'} + {earned}/{eff_max} weighted"
     elif earned >= VALID_MIN:
-        verdict = "VALID"
-        reason = f"core pass + {earned}/{eff_max} weighted"
+        verdict = "VALID" if core_weight_multiplier == 1.0 else "WATCH"
+        reason = f"core {'pass' if core_weight_multiplier == 1.0 else 'partial (0.5x)'} + {earned}/{eff_max} weighted"
     else:
         verdict = "WATCH"
-        reason = f"core pass but only {earned}/{eff_max} weighted (<{VALID_MIN})"
+        reason = f"core {'pass but ' if core_pass else ''}only {earned}/{eff_max} weighted (<{VALID_MIN})"
 
     return {
         "version": VERSION,
@@ -320,6 +335,7 @@ def _score(symbol: str, side: str,
         "as_of": datetime.now().strftime("%d-%b-%Y %H:%M IST"),
         "core_gates": [{"gate": c[0], "value": c[1], "pass": c[2]} for c in core],
         "core_pass": core_pass,
+        "core_weight_multiplier": core_weight_multiplier,
         "rules": rows,
         "earned": earned,
         "effective_max": eff_max,
@@ -350,12 +366,16 @@ def trade_check(symbol: str, side: str = "LONG",
 def render_table(result: Dict[str, Any]) -> str:
     """Plain-text score table for chat/MCP output (v3.3 output-format style)."""
     if "error" in result:
-        return f"Trade Check v3.4 error: {result['error']}"
+        return f"Trade Check v3.4.1 error: {result['error']}"
     L = [f"**Trade Check {result['version']} — {result['symbol']} {result['side']}**",
          f"_{result['as_of']}_", ""]
     L.append("**Core Gates:**")
     for c in result["core_gates"]:
         L.append(f"  {'PASS' if c['pass'] else 'FAIL'} {c['gate']} = {c['value']}")
+    if result.get("core_weight_multiplier") is not None:
+        mult = result["core_weight_multiplier"]
+        mult_txt = "1.0 (both pass)" if mult == 1.0 else "0.5 (1 pass, 1 fail — neutral)" if mult == 0.5 else "0.0 (both fail)"
+        L.append(f"  Core multiplier: {mult_txt}")
     L.append("")
     L.append("**Weighted Rules:**")
     L.append("| Rule | Value | Wt | Earned | Status |")
