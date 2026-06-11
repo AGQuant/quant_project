@@ -22,6 +22,29 @@
   a{color:inherit}
   .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 60px}
 
+  /* ── Model nav bar ── */
+  .model-nav{
+    display:flex;align-items:center;gap:4px;
+    background:#0b1220;border-bottom:1px solid var(--line);
+    padding:0 18px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;position:sticky;top:0;z-index:100;
+  }
+  .model-nav::-webkit-scrollbar{display:none}
+  .mnav-brand{font-size:13px;font-weight:800;color:var(--blu);letter-spacing:.5px;
+    padding:10px 12px 10px 0;border-right:1px solid var(--line);margin-right:4px;white-space:nowrap}
+  .mnav-item{display:flex;flex-direction:column;align-items:center;gap:2px;
+    padding:8px 12px;cursor:pointer;border-bottom:2px solid transparent;
+    text-decoration:none;transition:.15s;white-space:nowrap;flex-shrink:0}
+  .mnav-item:hover{border-bottom-color:var(--line2)}
+  .mnav-item.active{border-bottom-color:var(--blu)}
+  .mnav-item .mi-icon{font-size:14px}
+  .mnav-item .mi-label{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+  .mnav-item.active .mi-label{color:var(--blu)}
+  .mnav-item:not(.active) .mi-label{color:var(--mut)}
+  .mnav-item.soon .mi-label{color:var(--dim)}
+  .mnav-item.soon{cursor:default;opacity:.45}
+  .mnav-soon{font-size:8px;color:var(--dim);letter-spacing:.3px}
+
   header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
     padding:14px 0 18px;border-bottom:1px solid var(--line)}
   .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
@@ -70,7 +93,6 @@
   .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);
     border:1px solid var(--line);padding:2px 8px;border-radius:20px}
 
-  /* ── Compact sector numbered cards ── */
   .sec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:4px}
   .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
     padding:10px 12px;position:relative;cursor:default}
@@ -83,7 +105,6 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
 
-  /* ── DESKTOP: horizontal sortable table ── */
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
@@ -97,7 +118,6 @@
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:#16223a}
 
-  /* ── MOBILE card rows ── */
   .mob-cards{display:none;flex-direction:column;gap:8px}
   .mob-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
   .mob-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
@@ -108,7 +128,6 @@
     background:var(--bg2);border:1px solid var(--line2);color:var(--txt)}
   .mob-pivot{margin-top:4px}
 
-  /* ── Responsive breakpoint ── */
   @media(max-width:720px){
     .scroll table{min-width:unset}
     .desktop-only{display:none!important}
@@ -153,7 +172,7 @@
   .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .subnav .btn.on{background:var(--blu);border-color:var(--blu);color:#fff}
 
-  /* ── Stock Check tab styles ── */
+  /* ── Stock Check ── */
   .sc-form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
   .sc-input-row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
   .sc-input{flex:1;min-width:160px;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;
@@ -181,7 +200,6 @@
   .sc-chip{background:var(--bg2);border:1px solid var(--line2);border-radius:16px;
     padding:5px 12px;font-size:11px;color:var(--txt);cursor:pointer;transition:.15s}
   .sc-chip:hover{border-color:var(--blu);color:#fff}
-
   .sc-verdict{border-radius:14px;padding:18px;margin-bottom:14px;text-align:center;border:2px solid}
   .sc-verdict.strong{border-color:var(--grn);background:var(--grn-d)}
   .sc-verdict.valid{border-color:var(--blu);background:#0d2040}
@@ -192,27 +210,10 @@
   .sc-verdict.watch .sc-verdict-label{color:var(--amber)}
   .sc-verdict-sub{font-size:12px;color:var(--mut);margin-top:5px}
   .sc-verdict-score{font-size:18px;font-weight:800;margin-top:8px;font-family:'Space Mono'}
-
   .sc-tier{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
   .sc-tier-header{padding:10px 14px;background:var(--panel2);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
   .sc-tier-title{font-size:12px;font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:.5px}
-  .sc-tier-score{font-family:'Space Mono';font-size:13px;font-weight:700}
-  .sc-rule-row{display:flex;gap:8px;align-items:flex-start;padding:7px 14px;border-top:1px solid var(--line);font-size:12px}
-  .sc-rule-num{font-family:'Space Mono';color:var(--dim);min-width:22px;padding-top:1px;font-size:11px}
-  .sc-rule-label{flex:1;color:var(--txt);line-height:1.4}
-  .sc-rule-val{font-family:'Space Mono';font-size:11px;color:var(--mut);min-width:60px;text-align:right}
-  .sc-rule-pass{font-size:14px;min-width:18px;text-align:center}
-  .sc-rule-pass.ok{color:var(--grn)} .sc-rule-pass.no{color:var(--red)} .sc-rule-pass.na{color:var(--dim)}
 
-  .sc-v34{background:var(--panel);border:1px solid var(--blu);border-radius:12px;padding:12px 14px;margin-top:10px}
-  .sc-v34-title{font-size:11px;color:var(--blu);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-  .sc-v34-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:11px;border-top:1px solid var(--line)}
-  .sc-v34-factor{color:var(--mut)}
-  .sc-v34-pts{font-family:'Space Mono';color:var(--txt)}
-  .sc-v34-total{margin-top:8px;padding:8px 10px;background:var(--bg2);border-radius:8px;
-    display:flex;justify-content:space-between;font-family:'Space Mono'}
-
-  /* ── Compact filter scan ── */
   .scan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
   .scan-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
   .scan-card .sk-sym{font-weight:700;font-size:12px;color:#fff;margin-bottom:5px}
@@ -220,8 +221,6 @@
   .scan-card .sk-chips{display:flex;flex-wrap:wrap;gap:4px}
   .scan-card .sk-chip{font-family:'Space Mono';font-size:10px;padding:1px 5px;
     border-radius:4px;background:var(--bg2);border:1px solid var(--line2)}
-
-  /* ── Compact funnel stages ── */
   .funnel-stages{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
   .funnel-stage{display:flex;align-items:center;gap:8px;padding:7px 12px;
     background:var(--panel);border:1px solid var(--line);border-radius:8px}
@@ -230,16 +229,41 @@
   .fs-bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
   .fs-surv{font-family:'Space Mono';font-size:11px;color:var(--grn);min-width:28px;text-align:right}
   .fs-kill{font-family:'Space Mono';font-size:11px;color:var(--red);min-width:36px;text-align:right}
-
   .pc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:7px}
   .pc-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   .pc-card .pc-sym{font-weight:700;font-size:12px;color:#fff;margin-bottom:4px}
   .pc-card .pc-score{font-family:'Space Mono';font-size:14px;font-weight:700}
   .pc-card .pc-fail{font-size:10px;color:var(--mut);margin-top:3px;line-height:1.3}
-
   footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);
     font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
 </style>
+
+<!-- ── Model Nav Bar ── -->
+<nav class="model-nav">
+  <div class="mnav-brand">SCORR</div>
+  <a class="mnav-item active" href="/dashboard">
+    <span class="mi-icon">⚡</span>
+    <span class="mi-label">V8</span>
+  </a>
+  <a class="mnav-item" href="/cio2?model=gvm">
+    <span class="mi-icon">▦</span>
+    <span class="mi-label">GVM</span>
+  </a>
+  <a class="mnav-item" href="/cio">
+    <span class="mi-icon">◉</span>
+    <span class="mi-label">Max</span>
+  </a>
+  <a class="mnav-item soon">
+    <span class="mi-icon">⌂</span>
+    <span class="mi-label">QB</span>
+    <span class="mnav-soon">soon</span>
+  </a>
+  <a class="mnav-item soon">
+    <span class="mi-icon">⟁</span>
+    <span class="mi-label">V10</span>
+    <span class="mnav-soon">soon</span>
+  </a>
+</nav>
 
 <div class="wrap">
   <header>
@@ -267,7 +291,7 @@
 
 <script>
 const API_BASE = "";
-const BROKERAGE_PER_TRADE = 500; // Rs.500 per side, Rs.1000 round trip
+const BROKERAGE_PER_TRADE = 500;
 const EP = {
   mood:         "/api/v8/market_mood",
   metricsAll:   "/api/v8/metrics/all",
@@ -348,7 +372,6 @@ function selectTab(i){
   if(i===10) initStockCheck();
 }
 
-/* ─── Sortable table engine ─── */
 const SORTREG={};
 function sortTbl(uid,cols,rows,rowFn,opts={}){
   SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows"};
@@ -372,7 +395,6 @@ function tblSort(uid,k){
   const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
 }
 
-/* ─── Pivot bar ─── */
 function pivotBar(cmp, pp, r1, s1){
   if(!pp||!r1||!s1)return'<span style="color:var(--dim);font-size:11px">—</span>';
   const lo=parseFloat(s1),mid=parseFloat(pp),hi=parseFloat(r1),c=parseFloat(cmp||0);
@@ -402,7 +424,6 @@ function pivotBar(cmp, pp, r1, s1){
   </div>`;
 }
 
-/* ─── Mood ─── */
 function renderMood(m){
   const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#2a2410','var(--amber)'],
     Bullish:['#0f2b3a','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
@@ -415,7 +436,6 @@ function renderMood(m){
     <div class="moodChecks">${checks}</div>`;
 }
 
-/* ─── Sector cards ─── */
 function sectorCards(sectors, title, label) {
   if (!sectors || !sectors.length) return `<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;color:var(--dim);font-size:12px">No data</div>`;
   const cards = sectors.map((s,i) => {
@@ -432,7 +452,6 @@ function sectorCards(sectors, title, label) {
   return `<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
 }
 
-/* ─── Master dashboard ─── */
 function renderMaster(){
   const p=cache.paper,open=(p&&p.open_positions)||[],sum=(p&&p.summary)||{};
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
@@ -453,7 +472,6 @@ function renderMaster(){
       <div class="v ${pnlCls(totalClosedPnl)}">${inr(totalClosedPnl)}</div>
       <div class="v-sub">Net ${inr(netClosed)}</div></div>
   </div>`;
-
   const openPosDesktop = sortTbl('pos',
     [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
      ["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","Stop"],["qty","Qty"],["unrealised_pnl","Unreal P&L"],["net_pnl","Net P&L"]],
@@ -466,7 +484,6 @@ function renderMaster(){
       <td>${x.qty}</td><td class="${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</td>
       <td class="${pnlCls(np)}">${inr(np)}</td></tr>`;},
     {empty:"No open positions"});
-
   const openPosMobile = `<div class="mob-cards">${open.length ? open.map(x=>{const np=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;return`
     <div class="mob-card">
       <div class="mob-card-header">
@@ -483,7 +500,6 @@ function renderMaster(){
         <span class="mob-chip" style="color:var(--dim)">${fmtTs(x.entry_ts)}</span>
       </div>
     </div>`;}).join('') : '<div class="empty">No open positions</div>'}</div>`;
-
   return cards +
     `<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of ₹${BROKERAGE_PER_TRADE}/trade brokerage (entry side)</div>` +
@@ -494,7 +510,6 @@ function renderMaster(){
      </div>`;
 }
 
-/* ─── Basket panel ─── */
 function renderFunnel(b){
   const d=cache['q_'+b.id];
   if(!d)return'<div class="loading">…</div>';
@@ -503,9 +518,7 @@ function renderFunnel(b){
   const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
   const stocks = d.stocks || [];
   if (!stocks.length) return meta + `<div class="empty">No qualified names — gate may be closed for this side.</div>`;
-
   const sorted = stocks.sort((a,bk)=>((bk.gvm_score||0)-(a.gvm_score||0)));
-
   const desktopTable = sortTbl('bk_'+b.id,
     [["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50 Δ"],
      ["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["first_seen","Since"]],
@@ -524,7 +537,6 @@ function renderFunnel(b){
       <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
     </tr>`,
     {sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
-
   const mobileCards = `<div class="mob-cards">${sorted.map(x=>`
     <div class="mob-card">
       <div class="mob-card-header">
@@ -540,38 +552,29 @@ function renderFunnel(b){
       </div>
       <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div>
     </div>`).join('')}</div>`;
-
   return meta + desktopTable + mobileCards;
 }
 
-/* ─── Sell Overbought ─── */
 function renderSellOB(){
   const d=cache.sellOB;if(!d)return'<div class="loading">…</div>';
   const stocks = d.stocks || [];
   const meta = `<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`;
   if (!stocks.length) return meta + `<div class="empty">No overbought signals</div>`;
-
   const desktopTable = sortTbl('sellob',
     [["symbol","Symbol"],["entry","Entry"],["target","Target"],["tgt_pct","Tgt%"],
      ["rsi_month","RSIm"],["dma_200","DMA200"],["gvm_score","GVM"]],
     stocks,
     x=>`<tr>
       <td class="sym">${x.symbol}</td>
-      <td>${num(x.entry)}</td>
-      <td class="neg">${num(x.target)}</td>
+      <td>${num(x.entry)}</td><td class="neg">${num(x.target)}</td>
       <td class="neg">${num(x.tgt_pct,1)}%</td>
-      <td>${num(x.rsi_month,0)}</td>
-      <td>${num(x.dma_200,0)}</td>
+      <td>${num(x.rsi_month,0)}</td><td>${num(x.dma_200,0)}</td>
       <td class="${Number(x.gvm_score)>=7?'pos':'score-mid'}">${num(x.gvm_score,1)}</td>
     </tr>`,
     {sortKey:'rsi_month',dir:-1,empty:"No overbought signals"});
-
   const mobileCards = `<div class="mob-cards">${stocks.map(x=>`
     <div class="mob-card">
-      <div class="mob-card-header">
-        <span class="mob-sym">${x.symbol}</span>
-        <span class="mob-badge b-short">SELL</span>
-      </div>
+      <div class="mob-card-header"><span class="mob-sym">${x.symbol}</span><span class="mob-badge b-short">SELL</span></div>
       <div class="mob-chips">
         <span class="mob-chip">Entry ${num(x.entry)}</span>
         <span class="mob-chip neg">Tgt ${num(x.target)} (${num(x.tgt_pct,1)}%)</span>
@@ -580,11 +583,9 @@ function renderSellOB(){
         <span class="mob-chip">GVM ${num(x.gvm_score,1)}</span>
       </div>
     </div>`).join('')}</div>`;
-
   return meta + desktopTable + mobileCards;
 }
 
-/* ─── Trade Log ─── */
 function renderTradeLog(){
   const p=cache.paper;if(!p)return'<div class="loading">…</div>';
   const t=p.recent_trades||[],s=p.summary||{};
@@ -599,7 +600,6 @@ function renderTradeLog(){
       <div class="v-sub">Net ${inr(netTotal)}</div></div>
     <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(s.avg_ret||0)}">${sign(s.avg_ret)}%</div></div>
   </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of ₹${BROKERAGE_PER_TRADE}/trade brokerage (round trip = ₹${BROKERAGE_PER_TRADE*2})</div>`;
-
   const desktopTable = `<div class="ptitle">Recent Closed Trades</div>`+
     sortTbl('tlog',
     [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
@@ -616,7 +616,6 @@ function renderTradeLog(){
       <td class="${pnlCls(np)}">${inr(np)}</td>
       <td><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></td></tr>`;},
     {sortKey:'exit_ts',dir:-1,empty:"No closed trades"});
-
   const mobileTradeCards = `<div class="mob-cards">${t.map(x=>{const np=Number(x.pnl||0)-BROKERAGE_PER_TRADE*2;return`
     <div class="mob-card">
       <div class="mob-card-header">
@@ -633,11 +632,9 @@ function renderTradeLog(){
         <span class="mob-chip" style="color:var(--dim)">${fmtTs(x.exit_ts)}</span>
       </div>
     </div>`;}).join('')}</div>`;
-
   return summaryCards + desktopTable + mobileTradeCards;
 }
 
-/* ─── Raw Data ─── */
 function renderRaw(){
   const all=cache.metricsAll;if(!all)return'<div class="loading">…</div>';
   return`<div class="ptitle">Raw Data <span class="ct">${all.length} symbols</span></div>`+
@@ -658,7 +655,6 @@ function renderRaw(){
     {sortKey:'mom_2d',dir:-1,empty:"No metrics"});
 }
 
-/* ─── Filter Scan ─── */
 let scanMode='gainers';
 function renderScan(){
   const sc=cache.scan;if(!sc)return'<div class="loading">…</div>';
@@ -699,7 +695,6 @@ function renderScan(){
 }
 function scanSet(m){scanMode=m;document.getElementById('panel8').innerHTML=renderScan();}
 
-/* ─── Filter Funnel ─── */
 let ffBasket='buy_reversal';
 function ffSet(b){ffBasket=b;loadFF();}
 function preFreezeBanner(){
@@ -716,7 +711,6 @@ async function loadFF(){
   try{fd=await getJSON(EP.funnelDetail(ffBasket));}catch(e){}
   try{pc=await getJSON(EP.passCount(ffBasket));}catch(e){}
   let html=`<div class="subnav">${nav}</div>`;
-
   if(fd&&fd.stages){
     const maxSurv = Math.max(...fd.stages.map(s=>s.survivors||0),1);
     html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
@@ -732,7 +726,6 @@ async function loadFF(){
       </div>`;
     }).join('')}</div>`;
   } else html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`;
-
   if(pc&&pc.stocks){
     html+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
@@ -749,14 +742,9 @@ async function loadFF(){
   el.innerHTML=html;
 }
 
-/* ═══════════════════════════════════════════════
-   STOCK CHECK TAB (tab index 10)
-   v3.3 PRIMARY (Tier1+Tier2) + v3.4.1 SECONDARY
-   Uses /api/scorr/chat (Max, claude_on:true)
-   Context isolation: NEVER cross-ref V8 paper
-═══════════════════════════════════════════════ */
+/* ── Stock Check ── */
 let scSide='LONG', scGate1=null, scGate2=null, scRunning=false;
-let scSuggestions=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
+const scSuggestions=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
 
 function initStockCheck(){
   const el=document.getElementById('panel10');
@@ -777,12 +765,10 @@ function renderStockCheckForm(){
       </div>
       <div id="scDropdown" style="display:none;position:relative;z-index:10;margin-top:-8px;margin-bottom:10px;
         background:var(--panel2);border:1px solid var(--line2);border-radius:8px;overflow:hidden"></div>
-
       <div class="sc-side-row">
         <button class="sc-side long ${scSide==='LONG'?'active':''}" onclick="scSetSide('LONG')">▲ LONG</button>
         <button class="sc-side short ${scSide==='SHORT'?'active':''}" onclick="scSetSide('SHORT')">▼ SHORT</button>
       </div>
-
       <div class="sc-gates">
         <div class="sc-gate">
           <div class="sc-gate-label">Gate 1 — 5-min chart<br>strength through day?</div>
@@ -799,9 +785,7 @@ function renderStockCheckForm(){
           </div>
         </div>
       </div>
-
       <button id="scRunBtn" class="sc-run" onclick="runStockCheck()">RUN TRADE CHECK →</button>
-
       <div style="margin-top:12px">
         <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Quick checks:</div>
         <div class="sc-chips">${chips}</div>
@@ -861,102 +845,60 @@ async function runStockCheck(){
   if(scRunning)return;
   scRunning=true;
   const btn=document.getElementById('scRunBtn');
-  if(btn){btn.disabled=true;btn.textContent='Fetching data…';}
-
+  if(btn){btn.disabled=true;btn.textContent='Analysing…';}
   const resEl=document.getElementById('scResult');
-  resEl.innerHTML=`<div class="loading">Fetching metrics for ${sym}…</div>`;
-
+  resEl.innerHTML=`<div class="loading">Running trade check on ${sym}…</div>`;
   try{
-    // POST to /api/scorr/chat — Max endpoint, uses Claude with v3.3 rules
     const payload={
-      message: `Run a complete Trade Check on ${sym} for a ${scSide} trade.
-Gate 1 (5-min chart strength): ${scGate1?'PASS':'FAIL'}
-Gate 2 (1-Day chart reversal/breakout): ${scGate2?'PASS':'FAIL'}
-Side: ${scSide}
-
-Please run BOTH frameworks in this exact order:
-1. PRIMARY: v3.3 Tier1 (${scSide==='LONG'?'11':'10'} rules, min 8 to advance) + Tier2 (7 filters, min 5/7)
-   - Show full rule table with Rule | Condition | Value | Pass/Fail
-   - Score: X/${scSide==='LONG'?'11':'10'} then ADVANCE or REJECT
-   - If advance: Tier2 table + score X/7
-   - ONE-LINE VERDICT in bold
-2. SECONDARY: v3.4.1 Weighted (core gates + weighted /21, STRONG>=15, VALID>=11)
-   - One-line companion only
-
-Context isolation: This is a personal trade check. Never apply V8 basket/mood/slot rules here.
-Use v8_metrics, gvm_scores, sector_ratings, futures_basis for data.`,
-      claude_on: true,
-      symbol: sym,
-      side: scSide
+      message:`Run a complete Trade Check on ${sym} for a ${scSide} trade.\nGate 1 (5-min chart strength): ${scGate1?'PASS':'FAIL'}\nGate 2 (1-Day chart reversal/breakout): ${scGate2?'PASS':'FAIL'}\nSide: ${scSide}\n\nRun BOTH frameworks:\n1. PRIMARY v3.3: Tier1 (${scSide==='LONG'?'11':'10'} rules, min 8) + Tier2 (7 filters, min 5/7). Show full table. Score + verdict.\n2. SECONDARY v3.4.1: One-line weighted score /21.\n\nContext: personal trade check only. Never apply V8 basket/mood rules. Use v8_metrics, gvm_scores, sector_ratings, futures_basis.`,
+      claude_on:true,symbol:sym,side:scSide
     };
-
-    const r=await fetch(API_BASE+EP.scorr,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
-    });
+    const r=await fetch(API_BASE+EP.scorr,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const d=await r.json();
     const text=d.response||d.message||d.answer||JSON.stringify(d);
-    resEl.innerHTML=renderScResult(text, sym, scSide);
+    resEl.innerHTML=renderScResult(text,sym,scSide);
   }catch(e){
-    resEl.innerHTML=`<div class="err">⚠ ${e.message}</div>
-      <div style="font-size:11px;color:var(--dim);padding:10px">
-        Check: Railway running? /api/scorr/chat endpoint live? Network ok?
-      </div>`;
+    resEl.innerHTML=`<div class="err">⚠ ${e.message}</div>`;
   }
-
   scRunning=false;
   if(btn){btn.disabled=false;btn.textContent='RUN TRADE CHECK →';}
 }
 
-function renderScResult(text, sym, side){
-  // Parse verdict from response text
+function renderScResult(text,sym,side){
   const isStrong=/STRONG SETUP|STRONG/i.test(text)&&!/NOT STRONG/i.test(text);
   const isValid=/CONDITIONAL|VALID|ENTER/i.test(text)&&!isStrong;
   const verdictCls=isStrong?'strong':isValid?'valid':'watch';
   const verdictLabel=isStrong?'STRONG SETUP':isValid?'VALID ENTRY':'WATCH / SKIP';
-
-  // Parse scores
   const t1Match=text.match(/(\d+)\s*\/\s*(11|10|12)\b/);
   const t2Match=text.match(/(\d+)\s*\/\s*7\b/);
   const t1Score=t1Match?t1Match[0]:'—';
   const t2Score=t2Match?t2Match[0]:'—';
-
-  // Convert markdown-ish text to readable HTML
   const formatted=text
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
     .replace(/^#{1,3}\s+(.+)$/gm,'<div style="font-size:13px;font-weight:700;color:var(--cyan);margin:12px 0 6px">$1</div>')
-    .replace(/\n\n/g,'<br><br>')
-    .replace(/\n/g,'<br>')
+    .replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>')
     .replace(/✓/g,'<span style="color:var(--grn)">✓</span>')
     .replace(/✗/g,'<span style="color:var(--red)">✗</span>')
     .replace(/PASS/g,'<span style="color:var(--grn);font-weight:700">PASS</span>')
     .replace(/FAIL/g,'<span style="color:var(--red);font-weight:700">FAIL</span>');
-
   return`
     <div class="sc-verdict ${verdictCls}">
       <div class="sc-verdict-label">${verdictLabel}</div>
       <div class="sc-verdict-sub">${sym} · ${side}</div>
-      <div class="sc-verdict-score">
-        Tier1: ${t1Score} &nbsp;|&nbsp; Tier2: ${t2Score}
-      </div>
+      <div class="sc-verdict-score">Tier1: ${t1Score} &nbsp;|&nbsp; Tier2: ${t2Score}</div>
     </div>
     <div class="sc-tier">
       <div class="sc-tier-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-        <span class="sc-tier-title">v3.3 PRIMARY + v3.4.1 SECONDARY — Full Analysis</span>
+        <span class="sc-tier-title">v3.3 + v3.4.1 Full Analysis</span>
         <span style="color:var(--mut);font-size:12px">▼</span>
       </div>
-      <div style="padding:14px 16px;font-size:12px;line-height:1.7;color:var(--txt)">
-        ${formatted}
-      </div>
+      <div style="padding:14px 16px;font-size:12px;line-height:1.7;color:var(--txt)">${formatted}</div>
     </div>
     <div style="font-size:10px;color:var(--dim);margin-top:8px;padding:8px;background:var(--panel);border-radius:8px">
-      ⚠ Analysis uses live Railway data via /api/scorr/chat (Max endpoint).
       Personal trade context only — not V8 algo signals.
     </div>`;
 }
 
-/* ─── Paint all panels ─── */
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
@@ -965,10 +907,8 @@ function paint(){
   document.getElementById('panel7').innerHTML=renderRaw();
   document.getElementById('panel8').innerHTML=renderScan();
   loadFF();
-  // panel10 = Stock Check — lazy init only on tab click
 }
 
-/* ─── Load all data ─── */
 async function loadAll(){
   document.getElementById('refreshBtn').textContent='↻ …';
   const errs=[];
