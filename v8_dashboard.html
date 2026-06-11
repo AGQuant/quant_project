@@ -94,7 +94,6 @@
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';
     border:1px dashed var(--amber);border-radius:10px;background:#2a200a;margin-bottom:10px}
   .score-hi{color:var(--grn)} .score-mid{color:var(--amber)} .score-lo{color:var(--red)}
-  .piv-cell{font-size:11px;color:var(--dim);text-align:right}
 
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
@@ -135,7 +134,6 @@
 
 <script>
 const API_BASE = "";
-
 const EP = {
   mood:         "/api/v8/market_mood",
   metricsAll:   "/api/v8/metrics/all",
@@ -146,174 +144,119 @@ const EP = {
   funnelDetail: b => `/api/v8/funnel_detail/${b}`,
   passCount:    b => `/api/v8/stock_passcount/${b}`,
 };
-
 const BASKETS = [
-  {id:"buy_reversal",  label:"Buy Reversal"},
-  {id:"buy_momentum",  label:"Buy Momentum"},
-  {id:"sell_reversal", label:"Sell Reversal"},
-  {id:"sell_momentum", label:"Sell Momentum"},
+  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
+  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
 ];
-
 const ALL5 = [
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
   {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
-
-const TABS = [
-  "Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data",
-  "Filter Scan","Filter Funnel"
-];
+const TABS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel"];
 
 let AUTO=false, autoTimer=null;
 const cache={};
 
 async function getJSON(path){
-  const r = await fetch(API_BASE+path, {headers:{'Accept':'application/json'}});
+  const r=await fetch(API_BASE+path,{headers:{'Accept':'application/json'}});
   if(!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
   return r.json();
 }
-function num(x,d=2){ if(x===null||x===undefined||isNaN(x)) return "—"; return Number(x).toFixed(d); }
-function sign(x,d=2){ if(x===null||x===undefined||isNaN(x)) return "—";
-  const v=Number(x); return (v>=0?"+":"")+v.toFixed(d); }
-function cls(x){ if(x===null||x===undefined||isNaN(x)) return ""; return Number(x)>=0?"pos":"neg"; }
-function inr(x){ if(x===null||x===undefined||isNaN(x)) return "—";
-  return "₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0}); }
-function pnlCls(x){ return Number(x)>=0?"pos":"neg"; }
+function num(x,d=2){if(x===null||x===undefined||isNaN(x))return"—";return Number(x).toFixed(d);}
+function sign(x,d=2){if(x===null||x===undefined||isNaN(x))return"—";const v=Number(x);return(v>=0?"+":"")+v.toFixed(d);}
+function cls(x){if(x===null||x===undefined||isNaN(x))return"";return Number(x)>=0?"pos":"neg";}
+function inr(x){if(x===null||x===undefined||isNaN(x))return"—";return"₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0});}
+function pnlCls(x){return Number(x)>=0?"pos":"neg";}
 
 function fmtTs(ts){
-  if(!ts) return "—";
-  try{
-    const d = new Date(ts);
-    const ist = new Date(d.getTime() + (5*60+30)*60000);
-    const dd = String(ist.getUTCDate()).padStart(2,'0');
-    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()];
-    const hh = String(ist.getUTCHours()).padStart(2,'0');
-    const mm = String(ist.getUTCMinutes()).padStart(2,'0');
-    return `${dd} ${mo} ${hh}:${mm}`;
-  } catch(e){ return ts; }
-}
+  if(!ts)return"—";
+  try{const d=new Date(ts),ist=new Date(d.getTime()+(5*60+30)*60000);
+    return String(ist.getUTCDate()).padStart(2,'0')+' '+
+      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
+      String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
+  }catch(e){return ts;}}
 
 function fmtSince(ts){
-  if(!ts) return "—";
-  try{
-    const d = new Date(ts);
-    const ist = new Date(d.getTime() + (5*60+30)*60000);
-    const dd = String(ist.getUTCDate()).padStart(2,'0');
-    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()];
-    const hh = String(ist.getUTCHours()).padStart(2,'0');
-    const mm = String(ist.getUTCMinutes()).padStart(2,'0');
-    return `${dd}/${mo} ${hh}:${mm}`;
-  } catch(e){ return "—"; }
-}
+  if(!ts)return"—";
+  try{const d=new Date(ts),ist=new Date(d.getTime()+(5*60+30)*60000);
+    return String(ist.getUTCDate()).padStart(2,'0')+'/'+
+      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
+      String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
+  }catch(e){return"—";}}
 
-function scoreClass(score, total){
-  const pct = total ? score/total : 0;
-  if(pct >= 0.8) return "score-hi";
-  if(pct >= 0.5) return "score-mid";
-  return "score-lo";
-}
+function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
 
-/* IST clock */
 function tick(){
-  const now = Date.now();
-  const ist = new Date(now + (5*60+30)*60000);
-  const hh=String(ist.getUTCHours()).padStart(2,'0'),
-        mm=String(ist.getUTCMinutes()).padStart(2,'0'),
-        ss=String(ist.getUTCSeconds()).padStart(2,'0');
-  const totalMin = ist.getUTCHours()*60 + ist.getUTCMinutes();
-  const dow = ist.getUTCDay();
-  const open = dow>=1 && dow<=5 && totalMin>=555 && totalMin<=930;
-  document.getElementById('clock').innerHTML =
-    `<b>${hh}:${mm}:${ss}</b> IST &nbsp;·&nbsp; <span style="color:${open?'var(--grn)':'var(--dim)'}">NSE ${open?'OPEN':'CLOSED'}</span>`;
+  const ist=new Date(Date.now()+(5*60+30)*60000);
+  const hh=String(ist.getUTCHours()).padStart(2,'0'),mm=String(ist.getUTCMinutes()).padStart(2,'0'),ss=String(ist.getUTCSeconds()).padStart(2,'0');
+  const mins=ist.getUTCHours()*60+ist.getUTCMinutes(),dow=ist.getUTCDay();
+  const open=dow>=1&&dow<=5&&mins>=555&&mins<=930;
+  document.getElementById('clock').innerHTML=`<b>${hh}:${mm}:${ss}</b> IST &nbsp;·&nbsp; <span style="color:${open?'var(--grn)':'var(--dim)'}">NSE ${open?'OPEN':'CLOSED'}</span>`;
 }
-setInterval(tick,1000); tick();
+setInterval(tick,1000);tick();
 
-/* Build tabs */
-const tabsEl=document.getElementById('tabs'), panelsEl=document.getElementById('panels');
+const tabsEl=document.getElementById('tabs'),panelsEl=document.getElementById('panels');
 TABS.forEach((t,i)=>{
-  const b=document.createElement('div'); b.className='tab'+(i===0?' active':'');
-  b.textContent=t; b.onclick=()=>selectTab(i); tabsEl.appendChild(b);
-  const p=document.createElement('div'); p.className='panel'+(i===0?' active':'');
-  p.id='panel'+i; p.innerHTML='<div class="loading">…</div>'; panelsEl.appendChild(p);
+  const b=document.createElement('div');b.className='tab'+(i===0?' active':'');
+  b.textContent=t;b.onclick=()=>selectTab(i);tabsEl.appendChild(b);
+  const p=document.createElement('div');p.className='panel'+(i===0?' active':'');
+  p.id='panel'+i;p.innerHTML='<div class="loading">…</div>';panelsEl.appendChild(p);
 });
 function selectTab(i){
   [...tabsEl.children].forEach((t,j)=>t.classList.toggle('active',j===i));
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
 }
 
-/* Sortable table engine */
-const SORTREG = {};
-function sortTbl(uid, cols, rows, rowFn, opts={}){
-  SORTREG[uid] = {cols, rows: rows||[], rowFn,
-    sortKey: opts.sortKey ?? null, dir: opts.dir ?? -1,
-    empty: opts.empty || "No rows"};
+const SORTREG={};
+function sortTbl(uid,cols,rows,rowFn,opts={}){
+  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows"};
   return `<div id="tw_${uid}">${drawTbl(uid)}</div>`;
 }
 function drawTbl(uid){
-  const t = SORTREG[uid];
-  if(!t || !t.rows || !t.rows.length)
-    return `<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
-  let rows = t.rows;
-  if(t.sortKey){
-    rows = [...rows].sort((a,b)=>{
-      const av=a[t.sortKey], bv=b[t.sortKey];
-      if(typeof av==='string'||typeof bv==='string')
-        return t.dir*String(av??'').localeCompare(String(bv??''));
-      return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));
-    });
-  }
-  const head = t.cols.map(([k,l])=>
-    `<th onclick="tblSort('${uid}','${k}')">${l}${t.sortKey===k?(t.dir<0?' ▾':' ▴'):''}</th>`).join('');
-  return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${
-    rows.map(t.rowFn).join('')}</tbody></table></div>`;
+  const t=SORTREG[uid];
+  if(!t||!t.rows||!t.rows.length)return`<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
+  let rows=t.rows;
+  if(t.sortKey){rows=[...rows].sort((a,b)=>{
+    const av=a[t.sortKey],bv=b[t.sortKey];
+    if(typeof av==='string'||typeof bv==='string')return t.dir*String(av??'').localeCompare(String(bv??''));
+    return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));
+  });}
+  const head=t.cols.map(([k,l])=>`<th onclick="tblSort('${uid}','${k}')">${l}${t.sortKey===k?(t.dir<0?' ▾':' ▴'):''}</th>`).join('');
+  return`<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows.map(t.rowFn).join('')}</tbody></table></div>`;
 }
 function tblSort(uid,k){
-  const t=SORTREG[uid]; if(!t) return;
-  t.dir = (t.sortKey===k) ? -t.dir : -1; t.sortKey = k;
-  const el=document.getElementById('tw_'+uid);
-  if(el) el.innerHTML = drawTbl(uid);
+  const t=SORTREG[uid];if(!t)return;
+  t.dir=(t.sortKey===k)?-t.dir:-1;t.sortKey=k;
+  const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
 }
 
-/* Renderers */
 function renderMood(m){
-  const moodColors={Bearish:['var(--red-d)','var(--red)'],Neutral:['#2a2410','var(--amber)'],
+  const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#2a2410','var(--amber)'],
     Bullish:['#0f2b3a','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
-  const [bg,fg]=moodColors[m.mood]||['var(--panel2)','var(--txt)'];
-  const checks=(m.checks||[]).map(c=>
-    `<div class="chk ${c.pass?'pass':'fail'}">${c.filter}: ${num(c.value)} ${c.pass?'✓':'✗'}</div>`).join('');
+  const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
+  const checks=(m.checks||[]).map(c=>`<div class="chk ${c.pass?'pass':'fail'}">${c.filter}: ${num(c.value)} ${c.pass?'✓':'✗'}</div>`).join('');
   document.getElementById('mood').innerHTML=`
-    <div>
-      <div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
-      <div class="big">${m.mood||'—'}
-        <span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span>
-      </div>
-    </div>
-    <div class="slots">
-      <span class="buy">Buy slots <b>${m.buy_slots}</b></span>
-      <span class="sell">Sell slots <b>${m.sell_slots}</b></span>
-    </div>
+    <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
+      <div class="big">${m.mood||'—'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div></div>
+    <div class="slots"><span class="buy">Buy slots <b>${m.buy_slots}</b></span><span class="sell">Sell slots <b>${m.sell_slots}</b></span></div>
     <div class="moodChecks">${checks}</div>`;
 }
 
-const SECTOR_COLS = [["segment","Segment"],["stocks","Stocks"],["avg_day_1d","1D Live%"],["avg_mom_2d","2D Mom%"],
-  ["avg_week","Week%"],["top_stock","Top Stock"]];
-const sectorRow = s=>`<tr>
-  <td class="sym">${s.segment}</td>
-  <td>${s.stocks}</td>
+const SECTOR_COLS=[["segment","Segment"],["stocks","Stocks"],["avg_day_1d","1D Live%"],["avg_mom_2d","2D Mom%"],["avg_week","Week%"],["top_stock","Top Stock"]];
+const sectorRow=s=>`<tr><td class="sym">${s.segment}</td><td>${s.stocks}</td>
   <td class="${cls(s.avg_day_1d)}">${sign(s.avg_day_1d)}%</td>
   <td class="${cls(s.avg_mom_2d)}">${sign(s.avg_mom_2d)}%</td>
   <td class="${cls(s.avg_week)}">${sign(s.avg_week)}%</td>
   <td class="sym">${s.top_stock||'—'}</td></tr>`;
 
 function renderMaster(){
-  const p=cache.paper;
-  const open=(p&&p.open_positions)||[], sum=(p&&p.summary)||{};
+  const p=cache.paper,open=(p&&p.open_positions)||[],sum=(p&&p.summary)||{};
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const sectors=(cache.scan&&cache.scan.sectors)||[];
-  const top8=sectors.filter(s=>s.avg_day_1d > 0).slice(0,8);
-  const bot8=sectors.filter(s=>s.avg_day_1d < 0).slice(-8).reverse();
+  const top8=sectors.filter(s=>s.avg_day_1d>0).slice(0,8);
+  const bot8=sectors.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div></div>
@@ -321,58 +264,47 @@ function renderMaster(){
     <div class="card"><div class="k">Win / Loss</div><div class="v">${sum.wins??'—'}/${sum.losses??'—'}</div></div>
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(sum.total_pnl||0)}">${inr(sum.total_pnl||0)}</div></div>
   </div>`;
-  return cards+
-    `<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>`+
-    posTable(open)+
+  return cards+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>`+
+    sortTbl('pos',
+      [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
+       ["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","Stop"],["qty","Qty"],["unrealised_pnl","Unreal P&L"]],
+      open,x=>`<tr>
+        <td class="sym">${x.symbol}</td>
+        <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
+        <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+        <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
+        <td>${num(x.entry_price)}</td><td>${num(x.cmp)}</td><td>${num(x.target)}</td><td>${num(x.stop_loss)}</td>
+        <td>${x.qty}</td><td class="${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</td></tr>`,
+      {empty:"No open positions"})+
     `<div class="funnelGrid" style="margin-top:16px">
-       <div><div class="ptitle">Top Sectors <span class="ct">1D Live% positive</span></div>${
-         sortTbl('sectop', SECTOR_COLS, top8, sectorRow, {sortKey:'avg_day_1d',dir:-1,empty:"No positive sectors"})}</div>
-       <div><div class="ptitle">Bottom Sectors <span class="ct">1D Live% negative</span></div>${
-         sortTbl('secbot', SECTOR_COLS, bot8, sectorRow, {sortKey:'avg_day_1d',dir:1,empty:"No negative sectors"})}</div>
+       <div><div class="ptitle">Top Sectors <span class="ct">1D Live% positive</span></div>${sortTbl('sectop',SECTOR_COLS,top8,sectorRow,{sortKey:'avg_day_1d',dir:-1,empty:"No positive sectors"})}</div>
+       <div><div class="ptitle">Bottom Sectors <span class="ct">1D Live% negative</span></div>${sortTbl('secbot',SECTOR_COLS,bot8,sectorRow,{sortKey:'avg_day_1d',dir:1,empty:"No negative sectors"})}</div>
      </div>`;
 }
 
-function posTable(open){
-  return sortTbl('pos',
-    [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
-     ["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","Stop"],
-     ["qty","Qty"],["unrealised_pnl","Unreal P&L"]],
-    open, x=>`<tr>
-      <td class="sym">${x.symbol}</td>
-      <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
-      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
-      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
-      <td>${num(x.entry_price)}</td>
-      <td>${num(x.cmp)}</td>
-      <td>${num(x.target)}</td>
-      <td>${num(x.stop_loss)}</td>
-      <td>${x.qty}</td>
-      <td class="${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</td>
-    </tr>`, {empty:"No open positions"});
-}
-
-// Pivot bar: S1 ──[red zone]── PP ──[green zone]── R1  with CMP ▲/▼ arrow
+// Pivot bar: CMP label above, S1─PP─R1 bar below
 function pivotBar(cmp, pp, r1, s1){
-  if(!pp || !r1 || !s1) return '<span style="color:var(--dim);font-size:11px">—</span>';
-  const lo=parseFloat(s1), mid=parseFloat(pp), hi=parseFloat(r1), c=parseFloat(cmp||0);
-  const range = hi - lo;
-  if(range <= 0) return '<span style="color:var(--dim);font-size:11px">—</span>';
-  const cmpPct = Math.min(100, Math.max(0, (c - lo) / range * 100));
-  const ppPct  = ((mid - lo) / range * 100).toFixed(1);
-  const buyW   = (100 - parseFloat(ppPct)).toFixed(1);
-  const arrowColor = c >= hi ? 'var(--grn)' : c >= mid ? 'var(--amber)' : 'var(--red)';
-  const arrow = c >= mid ? '▲' : '▼';
-  return `<div style="display:inline-block;width:160px;vertical-align:middle;padding:2px 0">
-    <div style="position:relative;height:20px">
-      <div style="position:absolute;top:10px;left:0;right:0;height:3px;background:var(--line2);border-radius:2px"></div>
-      <div style="position:absolute;top:10px;left:0;width:${ppPct}%;height:3px;background:#3a1620;border-radius:2px 0 0 2px"></div>
-      <div style="position:absolute;top:10px;left:${ppPct}%;width:${buyW}%;height:3px;background:#0f3b2c;border-radius:0 2px 2px 0"></div>
-      <div style="position:absolute;top:7px;left:0;width:2px;height:9px;background:var(--red);border-radius:1px"></div>
-      <div style="position:absolute;top:7px;left:${ppPct}%;width:2px;height:9px;background:var(--mut);border-radius:1px;transform:translateX(-50%)"></div>
-      <div style="position:absolute;top:7px;right:0;width:2px;height:9px;background:var(--grn);border-radius:1px"></div>
-      <div style="position:absolute;top:1px;left:${cmpPct.toFixed(1)}%;transform:translateX(-50%);font-size:9px;color:${arrowColor};line-height:1;font-weight:700">${arrow}</div>
+  if(!pp||!r1||!s1)return'<span style="color:var(--dim);font-size:11px">—</span>';
+  const lo=parseFloat(s1),mid=parseFloat(pp),hi=parseFloat(r1),c=parseFloat(cmp||0);
+  const range=hi-lo;
+  if(range<=0)return'<span style="color:var(--dim);font-size:11px">—</span>';
+  const cmpPct=Math.min(98,Math.max(2,(c-lo)/range*100));
+  const ppPct=((mid-lo)/range*100).toFixed(1);
+  const buyW=(100-parseFloat(ppPct)).toFixed(1);
+  const arrowColor=c>=hi?'var(--grn)':c>=mid?'var(--amber)':'var(--red)';
+  const arrow=c>=mid?'▲':'▼';
+  const cmpFmt=c>=1000?Math.round(c):c.toFixed(1);
+  return `<div style="display:inline-block;width:158px;vertical-align:middle">
+    <div style="font-family:'Space Mono';font-size:9px;color:${arrowColor};margin-left:calc(${cmpPct.toFixed(0)}% - 16px);white-space:nowrap">${arrow}${cmpFmt}</div>
+    <div style="position:relative;height:14px">
+      <div style="position:absolute;top:5px;left:0;right:0;height:3px;background:var(--line2);border-radius:2px"></div>
+      <div style="position:absolute;top:5px;left:0;width:${ppPct}%;height:3px;background:#3a1620;border-radius:2px 0 0 2px"></div>
+      <div style="position:absolute;top:5px;left:${ppPct}%;width:${buyW}%;height:3px;background:#0f3b2c;border-radius:0 2px 2px 0"></div>
+      <div style="position:absolute;top:3px;left:0;width:2px;height:7px;background:var(--red);border-radius:1px"></div>
+      <div style="position:absolute;top:3px;left:${ppPct}%;width:2px;height:7px;background:var(--mut);border-radius:1px;transform:translateX(-50%)"></div>
+      <div style="position:absolute;top:3px;right:0;width:2px;height:7px;background:var(--grn);border-radius:1px"></div>
     </div>
-    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';margin-top:0px;line-height:1.2">
+    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';line-height:1.3">
       <span style="color:var(--red)">${Math.round(lo)}</span>
       <span style="color:var(--mut)">${Math.round(mid)}</span>
       <span style="color:var(--grn)">${Math.round(hi)}</span>
@@ -380,47 +312,42 @@ function pivotBar(cmp, pp, r1, s1){
   </div>`;
 }
 
-// Unified basket tab layout — Symbol|1D Live%|Sector|2D Mom%|DMA50|DMA200|RSI(m)|RSI(w)|52W|Vol×|GVM|Since|CMP|S1─PP─R1
+// Unified basket tab layout — Symbol|1D Live%|2D Mom%|DMA50|DMA200|RSI(m)|RSI(w)|52W|Vol×|GVM|Since|CMP·S1─PP─R1
 function renderFunnel(b){
   const d=cache['q_'+b.id];
-  if(!d) return '<div class="loading">…</div>';
+  if(!d)return'<div class="loading">…</div>';
   const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
-  const cols = [
-    ["symbol","Symbol"],["day_1d","1D Live%"],["segment","Sector"],
+  const cols=[
+    ["symbol","Symbol"],["day_1d","1D Live%"],
     ["mom_2d","2D Mom%"],["dma_50","DMA50"],["dma_200","DMA200"],
     ["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W"],
     ["vol_ratio","Vol×"],["gvm_score","GVM"],
-    ["first_seen","Since"],["cmp","CMP"],["_pivot","S1 ─ PP ─ R1"]
+    ["first_seen","Since"],["_pivot","CMP · S1─PP─R1"]
   ];
-  return meta+sortTbl('q_'+b.id, cols,
-    d.stocks||[], x=>{
-      return `<tr>
-        <td class="sym">${x.symbol}</td>
-        <td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td>
-        <td class="seg">${x.segment||'—'}</td>
-        <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-        <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
-        <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-        <td>${num(x.rsi_month,0)}</td>
-        <td>${num(x.rsi_weekly,0)}</td>
-        <td>${num(x.week_index_52,0)}</td>
-        <td>${num(x.vol_ratio,2)}</td>
-        <td>${num(x.gvm_score,2)}</td>
-        <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
-        <td style="font-family:'Space Mono';font-size:12px">${num(x.cmp,2)}</td>
-        <td style="white-space:nowrap">${pivotBar(x.cmp, x.pp, x.r1, x.s1)}</td>
-      </tr>`;
-    }, {sortKey:'gvm_score', dir:-1, empty:`No qualified names — gate may be closed for this side.`});
+  return meta+sortTbl('q_'+b.id,cols,d.stocks||[],x=>`<tr>
+    <td class="sym">${x.symbol}</td>
+    <td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td>
+    <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
+    <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+    <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+    <td>${num(x.rsi_month,0)}</td>
+    <td>${num(x.rsi_weekly,0)}</td>
+    <td>${num(x.week_index_52,0)}</td>
+    <td>${num(x.vol_ratio,2)}</td>
+    <td>${num(x.gvm_score,2)}</td>
+    <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
+    <td style="white-space:nowrap">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</td>
+  </tr>`,{sortKey:'gvm_score',dir:-1,empty:`No qualified names — gate may be closed for this side.`});
 }
 
 function renderSellOB(){
-  const d=cache.sellOB; if(!d) return '<div class="loading">…</div>';
-  return `<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`+
+  const d=cache.sellOB;if(!d)return'<div class="loading">…</div>';
+  return`<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`+
     sortTbl('sob',
     [["symbol","Symbol"],["entry","Entry"],["target","Target"],["stop","Stop"],
      ["tgt_pct","Tgt %"],["rsi_month","RSI(m)"],["daily_rsi","RSI(d)"],
      ["dma_200","DMA200"],["week_index_52","52W"],["vol_ratio","Vol×"],["gvm_score","GVM"]],
-    d.stocks||[], x=>`<tr>
+    d.stocks||[],x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td>${num(x.entry)}</td><td>${num(x.target)}</td><td>${num(x.stop)}</td>
       <td class="neg">${num(x.tgt_pct,2)}%</td>
@@ -428,45 +355,43 @@ function renderSellOB(){
       <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
       <td>${num(x.week_index_52,0)}</td><td>${num(x.vol_ratio,2)}</td>
       <td>${num(x.gvm_score,2)}</td></tr>`,
-    {sortKey:'dma_200', dir:-1, empty:"No overbought signals"});
+    {sortKey:'dma_200',dir:-1,empty:"No overbought signals"});
 }
 
 function renderTradeLog(){
-  const p=cache.paper; if(!p) return '<div class="loading">…</div>';
-  const t=p.recent_trades||[], s=p.summary||{};
-  const head=`<div class="cards">
+  const p=cache.paper;if(!p)return'<div class="loading">…</div>';
+  const t=p.recent_trades||[],s=p.summary||{};
+  return`<div class="cards">
     <div class="card"><div class="k">Trades</div><div class="v">${s.trades??'—'}</div></div>
     <div class="card"><div class="k">Wins</div><div class="v pos">${s.wins??'—'}</div></div>
     <div class="card"><div class="k">Losses</div><div class="v neg">${s.losses??'—'}</div></div>
     <div class="card"><div class="k">Total P&L</div><div class="v ${pnlCls(s.total_pnl||0)}">${inr(s.total_pnl||0)}</div></div>
     <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(s.avg_ret||0)}">${sign(s.avg_ret)}%</div></div>
-  </div>`;
-  return head+`<div class="ptitle">Recent Closed Trades</div>`+
+  </div>`+`<div class="ptitle">Recent Closed Trades</div>`+
     sortTbl('tlog',
     [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
      ["exit_ts","Exit Time"],["entry_price","Entry"],["exit_price","Exit"],
      ["return_pct","Ret %"],["pnl","P&L"],["result","Result"]],
-    t, x=>`<tr>
+    t,x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
       <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
-      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
-      <td style="color:var(--mut)">${fmtTs(x.exit_ts)}</td>
+      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td><td style="color:var(--mut)">${fmtTs(x.exit_ts)}</td>
       <td>${num(x.entry_price)}</td><td>${num(x.exit_price)}</td>
       <td class="${cls(x.return_pct)}">${sign(x.return_pct)}%</td>
       <td class="${pnlCls(x.pnl)}">${inr(x.pnl)}</td>
-      <td><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></td>
-    </tr>`, {sortKey:'exit_ts', dir:-1, empty:"No closed trades"});
+      <td><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></td></tr>`,
+    {sortKey:'exit_ts',dir:-1,empty:"No closed trades"});
 }
 
 function renderRaw(){
-  const all=cache.metricsAll; if(!all) return '<div class="loading">…</div>';
-  return `<div class="ptitle">Raw Data <span class="ct">${all.length} symbols</span></div>`+
+  const all=cache.metricsAll;if(!all)return'<div class="loading">…</div>';
+  return`<div class="ptitle">Raw Data <span class="ct">${all.length} symbols</span></div>`+
     sortTbl('raw',
-    [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Wk %"],
-     ["month_return","Mo %"],["year_return","Yr %"],["dma_50","DMA50"],["dma_200","DMA200"],
+    [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Wk %"],["month_return","Mo %"],
+     ["year_return","Yr %"],["dma_50","DMA50"],["dma_200","DMA200"],
      ["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["vol_ratio","Vol×"],["gvm_score","GVM"]],
-    all, x=>`<tr>
+    all,x=>`<tr>
       <td class="sym">${x.symbol}</td>
       <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
@@ -474,101 +399,83 @@ function renderRaw(){
       <td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
       <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
       <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-      <td>${num(x.daily_rsi,0)}</td>
-      <td>${num(x.week_index_52,0)}</td>
-      <td>${num(x.vol_ratio,2)}</td>
-      <td>${num(x.gvm_score,2)}</td></tr>`,
-    {sortKey:'mom_2d', dir:-1, empty:"No metrics"});
+      <td>${num(x.daily_rsi,0)}</td><td>${num(x.week_index_52,0)}</td>
+      <td>${num(x.vol_ratio,2)}</td><td>${num(x.gvm_score,2)}</td></tr>`,
+    {sortKey:'mom_2d',dir:-1,empty:"No metrics"});
 }
 
-/* Filter Scan — numeric gate score X/N */
 let scanMode='gainers';
 function renderScan(){
-  const sc=cache.scan; if(!sc) return '<div class="loading">…</div>';
+  const sc=cache.scan;if(!sc)return'<div class="loading">…</div>';
   const nav=[["gainers","Top Gainers"],["losers","Top Losers"],["sectors","Top Sectors"]]
     .map(([k,l])=>`<button class="btn ${scanMode===k?'on':''}" onclick="scanSet('${k}')">${l}</button>`).join('');
   let body;
   if(scanMode==='sectors'){
-    body = sortTbl('scan', SECTOR_COLS, sc.sectors||[], sectorRow,
-      {sortKey:'avg_day_1d', dir:-1, empty:"No sector data"});
+    body=sortTbl('scan',SECTOR_COLS,sc.sectors||[],sectorRow,{sortKey:'avg_day_1d',dir:-1,empty:"No sector data"});
   } else {
     const rows=(scanMode==='gainers'?sc.gainers:sc.losers)||[];
-    const gateLbl = scanMode==='gainers' ? 'BuyRev Score' : 'SellRev Score';
-    body = sortTbl('scan',
+    const gateLbl=scanMode==='gainers'?'BuyRev Score':'SellRev Score';
+    body=sortTbl('scan',
       [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Week%"],
-       ["dma_50","DMA50"],["dma_200","DMA200"],["rsi_weekly","RSI Wk"],
-       ["rsi_month","RSI Mo"],["vol_ratio","Vol×"],["gate_score",gateLbl]],
-      rows, x=>{
-        const sc_val = x.gate_score ?? 0;
-        const sc_tot = x.gate_total ?? 11;
-        const sc_cls = scoreClass(sc_val, sc_tot);
-        return `<tr>
+       ["dma_50","DMA50"],["dma_200","DMA200"],["rsi_weekly","RSI Wk"],["rsi_month","RSI Mo"],["vol_ratio","Vol×"],["gate_score",gateLbl]],
+      rows,x=>{
+        const sv=x.gate_score??0,st=x.gate_total??11;
+        return`<tr>
           <td class="sym">${x.symbol}</td>
           <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
           <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
           <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
           <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-          <td>${num(x.rsi_weekly,0)}</td>
-          <td>${num(x.rsi_month,0)}</td>
-          <td>${num(x.vol_ratio,2)}</td>
-          <td class="${sc_cls}" style="font-weight:700">${sc_val}/${sc_tot}</td></tr>`;
-      },
-      {sortKey:'mom_2d', dir: scanMode==='gainers'?-1:1, empty:"No matches"});
+          <td>${num(x.rsi_weekly,0)}</td><td>${num(x.rsi_month,0)}</td><td>${num(x.vol_ratio,2)}</td>
+          <td class="${scoreClass(sv,st)}" style="font-weight:700">${sv}/${st}</td></tr>`;
+      },{sortKey:'mom_2d',dir:scanMode==='gainers'?-1:1,empty:"No matches"});
   }
-  return `<div class="subnav">${nav}</div>`+
-    `<div class="ptitle">Filter Scan · ${scanMode} <span class="ct">score_date ${sc.score_date||'—'} · universe ${sc.universe||'—'}</span></div>`+
-    body;
+  return`<div class="subnav">${nav}</div>`+
+    `<div class="ptitle">Filter Scan · ${scanMode} <span class="ct">score_date ${sc.score_date||'—'} · universe ${sc.universe||'—'}</span></div>`+body;
 }
-function scanSet(m){ scanMode=m; document.getElementById('panel8').innerHTML=renderScan(); }
+function scanSet(m){scanMode=m;document.getElementById('panel8').innerHTML=renderScan();}
 
-/* Filter Funnel */
 let ffBasket='buy_reversal';
-function ffSet(b){ ffBasket=b; loadFF(); }
+function ffSet(b){ffBasket=b;loadFF();}
 function preFreezeBanner(){
-  const now = Date.now();
-  const ist = new Date(now + (5*60+30)*60000);
-  const dow=ist.getUTCDay(), mins=ist.getUTCHours()*60+ist.getUTCMinutes();
-  if(dow>=1 && dow<=5 && mins < 945){
-    return `<div class="err" style="margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate.</div>`;
-  }
-  return '';
+  const ist=new Date(Date.now()+(5*60+30)*60000);
+  const dow=ist.getUTCDay(),mins=ist.getUTCHours()*60+ist.getUTCMinutes();
+  if(dow>=1&&dow<=5&&mins<945)
+    return`<div class="err" style="margin-top:18px">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate.</div>`;
+  return'';
 }
 async function loadFF(){
-  const el=document.getElementById('panel9');
-  if(!el) return;
+  const el=document.getElementById('panel9');if(!el)return;
   const nav=ALL5.map(b=>`<button class="btn ${ffBasket===b.id?'on':''}" onclick="ffSet('${b.id}')">${b.label}</button>`).join('');
   el.innerHTML=`<div class="subnav">${nav}</div><div class="loading">Loading funnel…</div>`;
-  let fd=null, pc=null;
-  try{ fd=await getJSON(EP.funnelDetail(ffBasket)); }catch(e){}
-  try{ pc=await getJSON(EP.passCount(ffBasket)); }catch(e){}
+  let fd=null,pc=null;
+  try{fd=await getJSON(EP.funnelDetail(ffBasket));}catch(e){}
+  try{pc=await getJSON(EP.passCount(ffBasket));}catch(e){}
   let html=`<div class="subnav">${nav}</div>`;
-  if(fd && fd.stages){
+  if(fd&&fd.stages){
     html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
     html+=sortTbl('ffs',
       [["metric","Filter"],["min","Min"],["max","Max"],["survivors","Survivors"],["killed","Killed"],["kill_pct","Kill %"]],
-      fd.stages, s=>`<tr>
+      fd.stages,s=>`<tr>
         <td class="sym">${s.metric.replace(/_/g,' ')}</td>
         <td>${s.min===null?'—':s.min}</td><td>${s.max===null?'—':s.max}</td>
-        <td>${s.survivors}</td>
-        <td class="${s.killed>0?'neg':''}">${s.killed}</td>
+        <td>${s.survivors}</td><td class="${s.killed>0?'neg':''}">${s.killed}</td>
         <td>${num(s.kill_pct,1)}%</td></tr>`,
-      {sortKey:'survivors', dir:1, empty:"No funnel data"});
-  } else { html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`; }
-  if(pc && pc.stocks){
+      {sortKey:'survivors',dir:1,empty:"No funnel data"});
+  } else html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`;
+  if(pc&&pc.stocks){
     html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     html+=sortTbl('ffp',
       [["symbol","Symbol"],["passed","Passed"],["total","of"],["gvm_score","GVM"],["mom_2d","2D Mom%"],["failed_filters","Failed filters"]],
-      pc.stocks, x=>{
-        const sc_cls = scoreClass(x.passed, x.total);
-        return `<tr>
+      pc.stocks,x=>{
+        const sc_cls=scoreClass(x.passed,x.total);
+        return`<tr>
           <td class="sym">${x.symbol}</td>
-          <td class="${sc_cls}" style="font-weight:700">${x.passed}</td>
-          <td>${x.total}</td>
+          <td class="${sc_cls}" style="font-weight:700">${x.passed}</td><td>${x.total}</td>
           <td>${num(x.gvm_score,2)}</td>
           <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
           <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`;
-      },
-      {sortKey:'passed', dir:-1, empty:"No stocks"});
+      },{sortKey:'passed',dir:-1,empty:"No stocks"});
   }
   html+=preFreezeBanner();
   el.innerHTML=html;
@@ -588,37 +495,29 @@ async function loadAll(){
   document.getElementById('refreshBtn').textContent='↻ …';
   const errs=[];
   const tasks=[
-    ['mood', ()=>getJSON(EP.mood)],
-    ['metricsAll', ()=>getJSON(EP.metricsAll)],
-    ['sellOB', ()=>getJSON(EP.sellOB)],
-    ['paper', ()=>getJSON(EP.paper)],
-    ['scan', ()=>getJSON(EP.scan)],
-    ...BASKETS.map(b=>['q_'+b.id, ()=>getJSON(EP.qualified(b.id))]),
+    ['mood',()=>getJSON(EP.mood)],['metricsAll',()=>getJSON(EP.metricsAll)],
+    ['sellOB',()=>getJSON(EP.sellOB)],['paper',()=>getJSON(EP.paper)],
+    ['scan',()=>getJSON(EP.scan)],
+    ...BASKETS.map(b=>['q_'+b.id,()=>getJSON(EP.qualified(b.id))]),
   ];
   await Promise.all(tasks.map(async([k,fn])=>{
-    try{ cache[k]=await fn(); }catch(e){ errs.push(e.message); cache[k]=cache[k]||null; }
+    try{cache[k]=await fn();}catch(e){errs.push(e.message);cache[k]=cache[k]||null;}
   }));
-  if(cache.mood) renderMood(cache.mood);
+  if(cache.mood)renderMood(cache.mood);
   paint();
-  if(errs.length){
-    document.getElementById('panel0').insertAdjacentHTML('afterbegin',
-      `<div class="err">⚠ ${errs.length} endpoint(s) failed:<br>${errs.join('<br>')}</div>`);
-  }
+  if(errs.length)document.getElementById('panel0').insertAdjacentHTML('afterbegin',
+    `<div class="err">⚠ ${errs.length} endpoint(s) failed:<br>${errs.join('<br>')}</div>`);
   document.getElementById('refreshBtn').textContent='↻ Refresh';
   document.getElementById('apiBase').textContent=API_BASE||location.origin;
-  const now = Date.now();
-  const ist = new Date(now + (5*60+30)*60000);
+  const ist=new Date(Date.now()+(5*60+30)*60000);
   document.getElementById('lastUpd').textContent='Last refresh: '+
-    String(ist.getUTCHours()).padStart(2,'0')+':'+
-    String(ist.getUTCMinutes()).padStart(2,'0')+':'+
-    String(ist.getUTCSeconds()).padStart(2,'0')+' IST';
+    String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0')+':'+String(ist.getUTCSeconds()).padStart(2,'0')+' IST';
 }
 
 function toggleAuto(){
-  AUTO=!AUTO;
-  const b=document.getElementById('autoBtn');
-  b.textContent='Auto 5m: '+(AUTO?'ON':'OFF'); b.classList.toggle('on',AUTO);
-  if(AUTO){ autoTimer=setInterval(loadAll,5*60*1000); } else { clearInterval(autoTimer); }
+  AUTO=!AUTO;const b=document.getElementById('autoBtn');
+  b.textContent='Auto 5m: '+(AUTO?'ON':'OFF');b.classList.toggle('on',AUTO);
+  if(AUTO){autoTimer=setInterval(loadAll,5*60*1000);}else{clearInterval(autoTimer);}
 }
 
 loadAll();
