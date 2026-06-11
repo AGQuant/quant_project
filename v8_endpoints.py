@@ -29,6 +29,10 @@ GVM gate (08-Jun-2026): buy baskets relaxed gvm_score min 7.0 -> 6.0
 
 mom_2d formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum (T vs T-2).
   Renamed from 'day_change' 10-Jun-2026 to remove naming confusion (it was never 1-day).
+day_1d (live) = price vs T-1 close. eod_chg (frozen) = T-1 vs T-2. DISPLAY ONLY.
+
+/scan (11-Jun-2026): one-call payload for dashboard Filter Scan + Master Top Sectors.
+  gainers/losers ranked by mom_2d with gate_pass; sectors show avg mom_2d + avg day_1d.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -117,6 +121,17 @@ BASKET_META = {
     "sell_overbought": {"side": "SELL", "target": "S1", "win_pct": "71%",  "signals_per_day": "~3"},
 }
 
+INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
+
+def _seg_override(symbol: str, segment):
+    if segment:
+        return segment
+    if symbol in INDEX_SYMBOLS:
+        return "Index"
+    if symbol.endswith("BEES"):
+        return "ETF"
+    return None
+
 _BLACKOUT_SQL = """
     symbol NOT IN (
         SELECT UPPER(ticker) FROM earnings_calendar
@@ -132,6 +147,15 @@ def _passes_filter(value, mn, mx) -> bool:
     v = float(value)
     if mn is not None and v < mn: return False
     if mx is not None and v > mx: return False
+    return True
+
+
+def _strict_pass(stock: dict, basket: str) -> bool:
+    """True if stock passes ALL filters of the basket (strict all-pass)."""
+    for metric, bounds in FILTER_CONFIG[basket].items():
+        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+        if not _passes_filter(stock.get(metric), mn, mx):
+            return False
     return True
 
 
@@ -168,7 +192,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         SELECT symbol, gvm_score,
                dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                week_return, month_return, year_return,
-               mom_2d, week_index_52,
+               mom_2d, week_index_52, vol_ratio,
                sector_week, sector_month
         FROM v8_metrics
         WHERE {where_sql}
@@ -321,6 +345,84 @@ def market_mood():
         raise HTTPException(500, f"market_mood failed: {e}")
 
 
+@router.get("/scan")
+def scan(limit: int = 25):
+    """
+    One-call payload for dashboard Filter Scan + Master Top Sectors.
+      gainers/losers: top N by mom_2d with full column set + gate_pass
+        (gainers -> buy_reversal strict all-pass; losers -> sell_reversal).
+      sectors: per-segment avg mom_2d + avg day_1d (both, per spec) + avg week.
+    """
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT m.symbol, m.gvm_score, m.mom_2d, m.day_1d, m.eod_chg,
+                       m.week_return, m.month_return, m.year_return,
+                       m.dma_20, m.dma_50, m.dma_200,
+                       m.rsi_weekly, m.rsi_month, m.daily_rsi,
+                       m.vol_ratio, m.week_index_52,
+                       m.sector_week, m.sector_month,
+                       m.score_date, g.segment
+                FROM v8_metrics m
+                LEFT JOIN gvm_scores g ON g.symbol = m.symbol
+                WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        score_date = str(rows[0]["score_date"]) if rows else None
+        for s in rows:
+            s["segment"] = _seg_override(s["symbol"], s.get("segment"))
+            s.pop("score_date", None)
+            # floats for JSON cleanliness
+            for k, v in list(s.items()):
+                if k not in ("symbol", "segment") and v is not None:
+                    try: s[k] = float(v)
+                    except (TypeError, ValueError): pass
+
+        movers = [s for s in rows if s.get("mom_2d") is not None]
+        movers.sort(key=lambda s: s["mom_2d"], reverse=True)
+        n = min(max(limit, 1), 100)
+        gainers = movers[:n]
+        losers  = list(reversed(movers[-n:]))
+
+        for s in gainers:
+            s["gate_pass"] = _strict_pass(s, "buy_reversal")
+        for s in losers:
+            s["gate_pass"] = _strict_pass(s, "sell_reversal")
+
+        # Sector aggregation — avg mom_2d AND avg day_1d (both shown per spec)
+        from collections import defaultdict
+        seg_groups = defaultdict(list)
+        for s in rows:
+            if s.get("segment"):
+                seg_groups[s["segment"]].append(s)
+
+        sectors = []
+        for seg, members in seg_groups.items():
+            m2 = [x["mom_2d"]  for x in members if x.get("mom_2d")  is not None]
+            d1 = [x["day_1d"]  for x in members if x.get("day_1d")  is not None]
+            wk = [x["week_return"] for x in members if x.get("week_return") is not None]
+            if not m2:
+                continue
+            top = max((x for x in members if x.get("mom_2d") is not None),
+                      key=lambda x: x["mom_2d"])
+            sectors.append({
+                "segment":    seg,
+                "stocks":     len(members),
+                "avg_mom_2d": round(sum(m2) / len(m2), 2),
+                "avg_day_1d": round(sum(d1) / len(d1), 2) if d1 else None,
+                "avg_week":   round(sum(wk) / len(wk), 2) if wk else None,
+                "top_stock":  top["symbol"],
+            })
+        sectors.sort(key=lambda s: s["avg_mom_2d"], reverse=True)
+
+        return {"score_date": score_date, "universe": len(rows),
+                "gainers": gainers, "losers": losers, "sectors": sectors}
+    except Exception as e:
+        raise HTTPException(500, f"scan failed: {e}")
+
+
 @router.get("/filter_config/{basket}")
 def filter_config(basket: str):
     basket = basket.lower()
@@ -357,6 +459,7 @@ def qualified(basket: str, limit: int = 50):
                     dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
                     week_return, month_return,
                     mom_2d, week_index_52,
+                    (metrics->>'vol_ratio')::numeric AS vol_ratio,
                     sector_week, sector_month,
                     source, signal_ts
                 FROM v8_qualified
@@ -536,7 +639,7 @@ def raw_metrics(limit: int = 250):
                m.rsi_month, m.rsi_weekly, m.daily_rsi,
                m.month_return, m.week_return, m.year_return,
                m.month_index, m.week_index_52,
-               m.mom_2d,
+               m.mom_2d, m.day_1d, m.eod_chg,
                m.sector_week, m.sector_month,
                p.pp, p.r1, p.r2, p.s1, p.s2
         FROM v8_metrics m
