@@ -15,11 +15,31 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; line-height: 1.5; }
-  .app { display: flex; height: 100vh; max-width: 1400px; margin: 0 auto; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+
+  /* ── Model nav bar (dark, matches /dashboard) ── */
+  .model-nav{
+    display:flex;align-items:center;gap:4px;height:44px;
+    background:#0b1220;border-bottom:1px solid #1c2940;
+    padding:0 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;flex-shrink:0;
+  }
+  .model-nav::-webkit-scrollbar{display:none}
+  .mnav-brand{font-size:13px;font-weight:800;color:#3d8bff;letter-spacing:.5px;
+    padding-right:12px;border-right:1px solid #1c2940;margin-right:4px;white-space:nowrap}
+  .mnav-item{display:flex;align-items:center;gap:6px;
+    padding:0 12px;height:44px;cursor:pointer;border-bottom:2px solid transparent;
+    text-decoration:none;white-space:nowrap;flex-shrink:0;color:#7e90ac;font-size:12px;font-weight:600}
+  .mnav-item:hover{color:#dbe4f0}
+  .mnav-item.active{border-bottom-color:#3d8bff;color:#3d8bff}
+  .mnav-item .mi-icon{font-size:14px}
+  .mnav-item.soon{opacity:.4;cursor:default}
+  .mnav-item.soon:hover{color:#566080}
+
+  .app { display: flex; height: calc(100vh - 44px); max-width: 1400px; margin: 0 auto; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
   .sidebar { width: 240px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface2); display: flex; flex-direction: column; transition: width 0.2s ease, margin 0.2s ease; overflow: hidden; }
   .sidebar.collapsed { width: 0; margin-left: -1px; }
   @media (max-width: 767px) {
-    .sidebar { position: fixed; top: 0; left: 0; height: 100%; z-index: 200; width: 80vw; max-width: 300px; transform: translateX(-100%); transition: transform 0.25s ease; border-right: 1px solid var(--border); }
+    .sidebar { position: fixed; top: 44px; left: 0; height: calc(100% - 44px); z-index: 200; width: 80vw; max-width: 300px; transform: translateX(-100%); transition: transform 0.25s ease; border-right: 1px solid var(--border); }
     .sidebar.open { transform: translateX(0); }
     .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 199; }
     .sidebar-backdrop.show { display: block; }
@@ -143,6 +163,14 @@
 </style>
 </head>
 <body>
+<nav class="model-nav">
+  <div class="mnav-brand">SCORR</div>
+  <a class="mnav-item" href="/dashboard"><span class="mi-icon">⚡</span>V8</a>
+  <a class="mnav-item" href="/cio2?model=gvm"><span class="mi-icon">▦</span>GVM</a>
+  <a class="mnav-item active" href="/cio"><span class="mi-icon">◉</span>Max</a>
+  <a class="mnav-item soon"><span class="mi-icon">⌂</span>QB</a>
+  <a class="mnav-item soon"><span class="mi-icon">⟁</span>V10</a>
+</nav>
 <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
 <div class="app">
   <div class="sidebar" id="sidebar">
@@ -227,9 +255,9 @@
 const API_BASE = '', SONNET_MODEL = 'claude-sonnet-4-6', MAX_TOKENS = 3000, BUDGET_CAP = 0.05;
 const STORE_KEY = 'scorr_max_v8';
 const RETAIN_MS = 30 * 86400000;
-const USER_KEY = 'scorr_arpit';  // fixed personal key — single user
-const AR_INTERVAL = 60000;       // 60s auto-refresh
-let claudeOn = false;            // Reasoning OFF by default
+const USER_KEY = 'scorr_arpit';
+const AR_INTERVAL = 60000;
+let claudeOn = false;
 let totalCost = 0, totalIn = 0, totalOut = 0;
 let attachedFiles = [], currentController = null;
 let arTimer = null;
@@ -255,11 +283,9 @@ function renderQuickFetch() {
   });
 }
 
-// ── Auto-refresh: silently refreshes page session data every 60s ─────────────
 function startAutoRefresh() {
   if (arTimer) return;
   arTimer = setInterval(() => {
-    // Ping health silently to keep session alive; update status dot
     fetch('/api/scorr/chat/health').then(r=>r.json()).then(d=>{
       document.getElementById('statusDot').style.background = (d.status==='ok'&&d.anthropic_api_key_set)?'#2d8d71':'#d32f2f';
     }).catch(()=>{});
@@ -273,7 +299,6 @@ function stopAutoRefresh() {
   document.getElementById('arLabel').textContent = 'Auto-refresh OFF';
 }
 
-// ── DB persistence (Railway max_chats table) ─────────────────────────────────
 async function dbSaveChat(chat) {
   try {
     await fetch(`${API_BASE}/api/scorr/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -316,7 +341,6 @@ async function dbDeleteChat(id) {
   } catch(e) {}
 }
 
-// ── In-memory store + localStorage fallback ───────────────────────────────────
 let store = { chats: {}, activeId: null };
 let conversationHistory = [];
 
@@ -551,7 +575,6 @@ document.getElementById('userInput').addEventListener('keydown',function(e){if(e
 (async()=>{
   lsLoad(); applyToggleUI(); renderQuickFetch();
 
-  // Load chats from DB first, fall back to localStorage
   const dbChats = await dbLoadChats();
   if (dbChats.length > 0) {
     dbChats.forEach(c => { store.chats[c.id] = c; });
@@ -565,7 +588,6 @@ document.getElementById('userInput').addEventListener('keydown',function(e){if(e
   renderChatList(); loadActiveIntoView(); lsPersist();
   if (isMobile()) document.getElementById('sidebar').classList.remove('open');
 
-  // Start auto-refresh
   startAutoRefresh();
 
   try{const r=await fetch('/api/scorr/chat/health'),d=await r.json();document.getElementById('statusDot').style.background=(d.status==='ok'&&d.anthropic_api_key_set)?'#2d8d71':'#d32f2f';}catch{document.getElementById('statusDot').style.background='#d32f2f';}
