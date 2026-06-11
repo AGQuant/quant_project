@@ -1,12 +1,12 @@
 """
-V8 Signal Writer — Single Live Engine (v2.0.0)
+V8 Signal Writer — Single Live Engine (v2.1.0)
 ===============================================
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
 What it does every 5-min during market hours:
   1. Loads latest EOD v8_metrics row per symbol (slow metrics: GVM, RSI M/W, sector_week, sector_month)
   2. Reads intraday_prices (today's bars) per symbol
-  3. Recomputes all 19 live-moving metrics from intraday close spliced onto EOD history
+  3. Recomputes all live-moving metrics from intraday close spliced onto EOD history
   4. Preserves EOD-frozen metrics: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month
   5. Upserts v8_metrics (today's row) with live values
   6. Applies FILTER_CONFIG → writes v8_qualified (today only)
@@ -18,10 +18,11 @@ Frozen at EOD (never recomputed live):
   - rsi_weekly      (weekly-resampled Wilder, recomputes 15:45 IST)
   - sector_week     (peer avg 5-day return, recomputes 15:45 IST)
   - sector_month    (peer avg 21-day return, recomputes 15:45 IST)
+  - eod_chg         (last COMPLETED day's 1-day change: T-1 vs T-2 close)
 
 Live (recomputed every 5-min from intraday_prices):
   dma_20, dma_50, dma_200, daily_rsi, month_return, week_return,
-  year_return, mom_2d, ma9_vs_ma21, vol_ratio, week_index_52,
+  year_return, mom_2d, day_1d, ma9_vs_ma21, vol_ratio, week_index_52,
   month_index, range_1d, range_3d, upper_bb, lower_bb,
   sector_day (live peer avg mom_2d across segment)
 
@@ -30,6 +31,12 @@ v8_live.py and v8_history_cache are archived — no longer used.
 RSI periods: Month=6 (monthly bars), Weekly=8 (weekly bars), Daily=14 (Wilder).
 mom_2d = (cmp / close_2_days_ago - 1) * 100  [2-day momentum, T vs T-2]
   Renamed from 'day_change' 10-Jun-2026 — it was never a 1-day change.
+day_1d = (cmp / close_1_day_ago - 1) * 100  [true intraday day change, T vs T-1]
+eod_chg = (close_T-1 / close_T-2 - 1) * 100 [frozen, last completed day]
+  day_1d + eod_chg added 11-Jun-2026 — DISPLAY ONLY, never used as filters.
+
+SEGMENT_OVERRIDES (11-Jun-2026): symbols without gvm_scores rows get
+  NIFTY50/BANKNIFTY -> 'Index', *BEES -> 'ETF'.
 
 08-Jun-2026 FIX: _load_eod_metrics no longer reads frozen metrics from today's own
 half-built v8_metrics row (NULL pre-15:45 -> circular NULL -> funnel collapse). It now
@@ -59,6 +66,18 @@ log = logging.getLogger("scorr.signal_writer")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 RSI_DAILY_PERIOD = 14
+
+INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
+
+def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
+    """Indices -> 'Index', ETFs (*BEES) -> 'ETF' when no gvm segment exists."""
+    if segment:
+        return segment
+    if symbol in INDEX_SYMBOLS:
+        return "Index"
+    if symbol.endswith("BEES"):
+        return "ETF"
+    return segment
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -111,13 +130,16 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
     possibly-empty row):
       - gvm_score + segment  ← latest gvm_scores (authoritative daily source)
       - rsi_month, rsi_weekly, sector_week, sector_month
-            ← most recent v8_metrics row PER SYMBOL where each is non-null
+            ← most recent v8_metrics row PER SYMBOL where they are non-null
               (DISTINCT ON carries yesterday's EOD freeze forward intraday).
 
     Rationale: the 5-min writer must never read frozen metrics from today's own
     half-built row (circular NULL). It pulls the last computed EOD value forward
     until the 15:45 EOD engine refreshes them. gvm/rsi/sector are EOD by design
     and do not change intraday.
+
+    Segment override: symbols without gvm rows (indices, ETFs) get
+    'Index' / 'ETF' so sector_day computes within their own bucket.
     """
     # gvm_score + segment from authoritative gvm_scores (latest score_date)
     gvm_map: Dict[str, dict] = {}
@@ -157,7 +179,7 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
         out[sym] = {
             "symbol":        sym,
             "gvm_score":     g.get("gvm_score"),
-            "segment":       g.get("segment"),
+            "segment":       _segment_override(sym, g.get("segment")),
             "rsi_month":     _safe_float(f.get("rsi_month")),
             "rsi_weekly":    _safe_float(f.get("rsi_weekly")),
             "sector_week":   _safe_float(f.get("sector_week")),
@@ -173,7 +195,8 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
     """
     Last 400 raw_prices rows per symbol strictly before today.
     Returns dict: symbol -> {closes, highs, lows, vols, vol_avg10,
-                              hi_252, lo_252, hi_21, lo_21, close_2d_ago}
+                              hi_252, lo_252, hi_21, lo_21,
+                              close_1d_ago, close_2d_ago}
     """
     today = datetime.now(IST).date()
     with conn.cursor() as cur:
@@ -207,6 +230,7 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
             "lo_252":      float(min(lows[-252:]))  if len(lows)  >= 252 else (float(min(lows))  if lows  else None),
             "hi_21":       float(max(highs[-21:]))  if len(highs) >= 21  else (float(max(highs)) if highs else None),
             "lo_21":       float(min(lows[-21:]))   if len(lows)  >= 21  else (float(min(lows))  if lows  else None),
+            "close_1d_ago": closes[-1] if len(closes) >= 1 else None,
             "close_2d_ago": closes[-2] if len(closes) >= 2 else None,
         }
     return history
@@ -256,13 +280,13 @@ def _load_cmp(conn) -> Dict[str, float]:
         return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
 
 
-# ── Step 5: Compute 19 live metrics ───────────────────────────────────────────
+# ── Step 5: Compute live metrics ──────────────────────────────────────────────
 
 def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
                            eod: dict) -> dict:
     """
-    Splice today's live bar onto EOD history. Recompute 19 live metrics.
-    EOD-frozen: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month.
+    Splice today's live bar onto EOD history. Recompute live metrics.
+    EOD-frozen: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month, eod_chg.
     """
     closes = hist["closes"][:]
     highs  = hist["highs"][:]
@@ -285,6 +309,7 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         "daily_rsi": None,
         "month_return": None, "week_return": None, "year_return": None,
         "mom_2d": None,
+        "day_1d": None, "eod_chg": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
         "week_index_52": None, "month_index": None,
         "range_1d": None, "range_3d": None,
@@ -300,11 +325,21 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     if len(c) >= 22:  out["month_return"] = _safe_pct(live, c[-22])
     if len(c) >= 6:   out["week_return"]  = _safe_pct(live, c[-6])
 
-    # mom_2d: use cmp if available, else live close, vs close_2_days_ago (2-candle gap)
+    price = cmp if cmp else live
+
+    # mom_2d: price vs close_2_days_ago (2-candle gap, T vs T-2)
     base_2d = hist.get("close_2d_ago")
-    price   = cmp if cmp else live
     if base_2d and base_2d > 0:
         out["mom_2d"] = (price / base_2d - 1) * 100
+
+    # day_1d (LIVE): price vs yesterday's close — true intraday day change.
+    # eod_chg (FROZEN): yesterday's close vs day-before close — last completed day.
+    # DISPLAY ONLY — never used as filters.
+    base_1d = hist.get("close_1d_ago")
+    if base_1d and base_1d > 0:
+        out["day_1d"] = (price / base_1d - 1) * 100
+        if base_2d and base_2d > 0:
+            out["eod_chg"] = (base_1d / base_2d - 1) * 100
 
     out["daily_rsi"] = _wilder_rsi(pd.Series(c), RSI_DAILY_PERIOD)
 
@@ -377,11 +412,13 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
              dma_20, dma_50, dma_200, daily_rsi,
              rsi_month, rsi_weekly,
              month_return, week_return, year_return, mom_2d,
+             day_1d, eod_chg,
              sector_day, sector_week, sector_month,
              month_index, week_index_52,
              range_1d, range_3d, upper_bb, lower_bb,
              ma9_vs_ma21, vol_ratio)
             VALUES (%s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s,
+                    %s,%s,
                     %s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
                 gvm_score     = EXCLUDED.gvm_score,
@@ -395,6 +432,8 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
                 week_return   = EXCLUDED.week_return,
                 year_return   = EXCLUDED.year_return,
                 mom_2d        = EXCLUDED.mom_2d,
+                day_1d        = EXCLUDED.day_1d,
+                eod_chg       = EXCLUDED.eod_chg,
                 sector_day    = EXCLUDED.sector_day,
                 sector_week   = EXCLUDED.sector_week,
                 sector_month  = EXCLUDED.sector_month,
@@ -411,6 +450,7 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
             m.get("dma_20"), m.get("dma_50"), m.get("dma_200"), m.get("daily_rsi"),
             m.get("rsi_month"), m.get("rsi_weekly"),
             m.get("month_return"), m.get("week_return"), m.get("year_return"), m.get("mom_2d"),
+            m.get("day_1d"), m.get("eod_chg"),
             m.get("sector_day"), m.get("sector_week"), m.get("sector_month"),
             m.get("month_index"), m.get("week_index_52"),
             m.get("range_1d"), m.get("range_3d"), m.get("upper_bb"), m.get("lower_bb"),
@@ -608,7 +648,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
 def run_live_signal_writer(conn) -> dict:
     """
     Called every 5-min from scheduler._live_loop.
-    Single live engine — computes all 19 intraday metrics + writes v8_metrics,
+    Single live engine — computes all intraday metrics + writes v8_metrics,
     v8_qualified, v8_funnel_counts.
     """
     today = datetime.now(IST).date()
