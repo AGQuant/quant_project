@@ -11,12 +11,35 @@
     --text: #1a1a1a; --text-secondary: #636363; --muted: #8a8a8a;
     --green: #2d8d71; --amber: #b87500; --red: #d32f2f;
     --font: 'Segoe UI', 'Roboto', '-apple-system', sans-serif;
+    --mono: 'SF Mono', 'Consolas', 'Roboto Mono', monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; line-height: 1.5; }
-  .app { display: flex; flex-direction: column; height: 100vh; max-width: 1280px; margin: 0 auto; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+  .app { display: flex; height: 100vh; max-width: 1400px; margin: 0 auto; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+
+  /* Sidebar for chat sessions */
+  .sidebar { width: 240px; flex-shrink: 0; border-right: 1px solid var(--border); background: var(--surface2); display: flex; flex-direction: column; transition: width 0.2s ease, margin 0.2s ease; }
+  .sidebar.collapsed { width: 0; margin-left: -1px; overflow: hidden; }
+  .sidebar-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
+  .new-chat-btn { width: 100%; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--accent); cursor: pointer; font-family: var(--font); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 7px; transition: all 0.2s ease; }
+  .new-chat-btn:hover { background: var(--accent-light); border-color: var(--accent); }
+  .chat-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 3px; }
+  .chat-list::-webkit-scrollbar { width: 5px; }
+  .chat-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .chat-item { padding: 9px 11px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12.5px; transition: background 0.15s ease; position: relative; }
+  .chat-item:hover { background: var(--surface3); }
+  .chat-item.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+  .chat-item .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-item .del { opacity: 0; color: var(--muted); font-weight: 700; padding: 0 2px; flex-shrink: 0; }
+  .chat-item:hover .del { opacity: 1; }
+  .chat-item .del:hover { color: var(--red); }
+  .sidebar-foot { padding: 10px 14px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .header { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
   .header-left { display: flex; align-items: center; gap: 12px; }
+  .hamburger { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-secondary); padding: 4px 6px; border-radius: 5px; line-height: 1; }
+  .hamburger:hover { background: var(--surface2); }
   .logo { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
   .logo .brand { font-weight: 700; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 4px rgba(45,141,113,0.3); }
@@ -43,8 +66,8 @@
   .msg.user .msg-avatar { background: var(--accent); color: white; }
   .msg.assistant .msg-avatar { background: var(--surface2); color: var(--accent); border: 1px solid var(--border); }
   .msg-body { max-width: 80%; }
-  .msg-bubble { padding: 12px 16px; border-radius: 8px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-  .msg.user .msg-bubble { background: var(--accent); color: white; box-shadow: 0 1px 3px rgba(74,74,74,0.12); }
+  .msg-bubble { padding: 12px 16px; border-radius: 8px; line-height: 1.6; word-break: break-word; }
+  .msg.user .msg-bubble { background: var(--accent); color: white; box-shadow: 0 1px 3px rgba(74,74,74,0.12); white-space: pre-wrap; }
   .msg.assistant .msg-bubble { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
   .msg-meta { font-size: 11px; color: var(--muted); margin-top: 6px; padding: 0 4px; }
   .msg.user .msg-meta { text-align: right; }
@@ -52,10 +75,26 @@
   .attachment-badge { padding: 4px 10px; border-radius: 5px; background: var(--surface2); border: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
   .tools-used { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
   .tool-badge { padding: 3px 9px; border-radius: 4px; background: var(--accent-light); border: 1px solid var(--border); font-size: 11px; color: var(--accent); font-weight: 500; }
-  .msg-bubble table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; }
-  .msg-bubble th { background: var(--surface3); color: var(--text); padding: 8px 12px; text-align: left; border: 1px solid var(--border); font-weight: 600; }
-  .msg-bubble td { padding: 6px 12px; border: 1px solid var(--border); }
-  .msg-bubble tr:hover td { background: var(--accent-light); }
+
+  /* Markdown rendering inside assistant bubble */
+  .md h1, .md h2, .md h3 { line-height: 1.3; margin: 12px 0 6px; font-weight: 700; color: var(--text); }
+  .md h1 { font-size: 18px; } .md h2 { font-size: 16px; } .md h3 { font-size: 14px; }
+  .md h1:first-child, .md h2:first-child, .md h3:first-child, .md p:first-child { margin-top: 0; }
+  .md p { margin: 6px 0; }
+  .md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+  .md li { margin: 3px 0; }
+  .md strong { font-weight: 700; color: var(--text); }
+  .md em { font-style: italic; }
+  .md code.inline { background: var(--surface3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; color: #b5179e; }
+  .md pre { background: #1a1a1a; color: #e8e8e8; border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 8px 0; }
+  .md pre code { font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre; }
+  .md blockquote { border-left: 3px solid var(--border); padding-left: 12px; margin: 8px 0; color: var(--text-secondary); }
+  .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  .md a { color: #1565c0; text-decoration: underline; }
+  .md table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; }
+  .md th { background: var(--surface3); color: var(--text); padding: 8px 12px; text-align: left; border: 1px solid var(--border); font-weight: 600; }
+  .md td { padding: 6px 12px; border: 1px solid var(--border); }
+  .md tr:hover td { background: var(--accent-light); }
   .pnl-pos { color: var(--green); font-weight: 600; }
   .pnl-neg { color: var(--red); font-weight: 600; }
   .typing { display: none; align-items: center; gap: 6px; padding: 12px 16px; }
@@ -90,86 +129,193 @@
 </head>
 <body>
 <div class="app">
-  <div class="header">
-    <div class="header-left">
-      <div class="status-dot" id="statusDot"></div>
-      <div class="logo">CIO Assistant <span class="brand">MAX</span></div>
+  <!-- Sidebar: chat sessions -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <button class="new-chat-btn" onclick="newChat()">＋ New chat</button>
     </div>
-    <div class="header-right">
-      <div class="claude-toggle on" id="claudeToggle" onclick="toggleClaude()" title="Toggle Claude API interpretation">
-        <div class="toggle-dot" id="toggleDot"></div>
-        <span id="toggleLabel">Claude ON</span>
-        <span class="budget-cap" id="budgetCap">· Sonnet · $0.05 cap</span>
+    <div class="chat-list" id="chatList"></div>
+    <div class="sidebar-foot">Chats saved locally · 30 day retention</div>
+  </div>
+
+  <div class="main">
+    <div class="header">
+      <div class="header-left">
+        <button class="hamburger" onclick="toggleSidebar()" title="Toggle chat list">☰</button>
+        <div class="status-dot" id="statusDot"></div>
+        <div class="logo">CIO Assistant <span class="brand">MAX</span></div>
+      </div>
+      <div class="header-right">
+        <div class="claude-toggle on" id="claudeToggle" onclick="toggleClaude()" title="Toggle Claude API interpretation">
+          <div class="toggle-dot" id="toggleDot"></div>
+          <span id="toggleLabel">Claude ON</span>
+          <span class="budget-cap" id="budgetCap">· Sonnet · $0.05 cap</span>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div class="quick-bar">
-    <button class="qbtn" onclick="quickAsk('Virtual Dashboard V8')">Virtual Dashboard V8</button>
-    <button class="qbtn" onclick="quickAsk('QB summary by basket')">QB Summary</button>
-    <button class="qbtn" onclick="quickAsk('System health check')">Health</button>
-  </div>
+    <div class="quick-bar">
+      <button class="qbtn" onclick="quickAsk('Virtual Dashboard V8')">Virtual Dashboard V8</button>
+      <button class="qbtn" onclick="quickAsk('QB summary by basket')">QB Summary</button>
+      <button class="qbtn" onclick="quickAsk('System health check')">Health</button>
+    </div>
 
-  <div class="messages" id="messages">
-    <div class="welcome" id="welcome">
-      <div class="welcome-logo">MAX</div>
-      <div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div>
-      <div class="welcome-desc">
-        Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br>
-        <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Memory persists across sessions</span>
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <div class="welcome-logo">MAX</div>
+        <div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div>
+        <div class="welcome-desc">
+          Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br>
+          <span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Multi-chat · Markdown</span>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div style="padding: 0 24px 4px; display:none" id="typingWrap">
-    <div class="msg">
-      <div class="msg-avatar">MAX</div>
-      <div class="typing show">
-        <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+    <div style="padding: 0 24px 4px; display:none" id="typingWrap">
+      <div class="msg">
+        <div class="msg-avatar">MAX</div>
+        <div class="typing show">
+          <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div class="cost-bar">
-    <span id="sessionCost">Session cost: $0.000000</span>
-    <span id="tokenCount">Tokens: 0 in / 0 out</span>
-  </div>
+    <div class="cost-bar">
+      <span id="sessionCost">Session cost: $0.000000</span>
+      <span id="tokenCount">Tokens: 0 in / 0 out</span>
+    </div>
 
-  <div class="input-area">
-    <div class="file-list" id="fileList"></div>
-    <div class="input-controls">
-      <input type="file" id="fileInput" multiple accept=".pdf,.csv,.json,.txt,.xlsx,.png,.jpg,.jpeg,.gif" />
-      <button class="btn secondary" onclick="document.getElementById('fileInput').click();" title="Attach file">📎 Attach</button>
-      <div class="input-wrap">
-        <textarea id="userInput" placeholder="Ask Max anything — paste images (Ctrl+V), URLs, analyze trades... Enter to send" rows="1"></textarea>
+    <div class="input-area">
+      <div class="file-list" id="fileList"></div>
+      <div class="input-controls">
+        <input type="file" id="fileInput" multiple accept=".pdf,.csv,.json,.txt,.xlsx,.png,.jpg,.jpeg,.gif" />
+        <button class="btn secondary" onclick="document.getElementById('fileInput').click();" title="Attach file">📎 Attach</button>
+        <div class="input-wrap">
+          <textarea id="userInput" placeholder="Ask Max anything — paste images (Ctrl+V), URLs, analyze trades... Enter to send" rows="1"></textarea>
+        </div>
+        <button class="btn stop" id="stopBtn" onclick="stopQuery()">■ Stop</button>
+        <button class="btn" id="sendBtn" onclick="sendMessage()">Send</button>
       </div>
-      <button class="btn stop" id="stopBtn" onclick="stopQuery()">■ Stop</button>
-      <button class="btn" id="sendBtn" onclick="sendMessage()">Send</button>
     </div>
   </div>
 </div>
 
 <script>
 const API_BASE = '', SONNET_MODEL = 'claude-sonnet-4-6', MAX_TOKENS = 3000, BUDGET_CAP = 0.05;
-const STORAGE_KEY = 'scorr_max_v6';
-let claudeOn = true, conversationHistory = [], totalCost = 0, totalIn = 0, totalOut = 0;
+const STORE_KEY = 'scorr_max_v7';
+const RETAIN_MS = 30 * 86400000;
+let claudeOn = true, totalCost = 0, totalIn = 0, totalOut = 0;
 let attachedFiles = [], currentController = null;
 
-function saveSession() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ conversationHistory, totalCost, totalIn, totalOut, claudeOn, savedAt: Date.now() })); } catch(e) {}
-}
-function loadSession() {
+// Multi-chat store: { chats: { id: {id,title,history,cost,tin,tout,updated} }, activeId, claudeOn }
+let store = { chats: {}, activeId: null, claudeOn: true };
+let conversationHistory = [];
+
+function uid() { return 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function persist() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY); if (!raw) return false;
-    const s = JSON.parse(raw);
-    if (Date.now() - s.savedAt > 86400000) { localStorage.removeItem(STORAGE_KEY); return false; }
-    conversationHistory = s.conversationHistory || []; totalCost = s.totalCost || 0;
-    totalIn = s.totalIn || 0; totalOut = s.totalOut || 0;
-    claudeOn = s.claudeOn !== undefined ? s.claudeOn : true;
-    return conversationHistory.length > 0;
-  } catch(e) { return false; }
+    const active = store.chats[store.activeId];
+    if (active) { active.history = conversationHistory; active.cost = totalCost; active.tin = totalIn; active.tout = totalOut; active.updated = Date.now(); }
+    store.claudeOn = claudeOn;
+    localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  } catch(e) {}
 }
-function toggleClaude() { claudeOn = !claudeOn; applyToggleUI(); saveSession(); }
+
+function loadStore() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      store = JSON.parse(raw);
+      // prune old
+      const now = Date.now();
+      for (const id of Object.keys(store.chats)) { if (now - (store.chats[id].updated||0) > RETAIN_MS) delete store.chats[id]; }
+      if (store.claudeOn !== undefined) claudeOn = store.claudeOn;
+    }
+  } catch(e) { store = { chats: {}, activeId: null, claudeOn: true }; }
+  if (!store.chats) store.chats = {};
+  // migrate legacy single-session if present
+  try {
+    const legacy = localStorage.getItem('scorr_max_v6');
+    if (legacy && Object.keys(store.chats).length === 0) {
+      const s = JSON.parse(legacy);
+      if (s.conversationHistory?.length) {
+        const id = uid();
+        store.chats[id] = { id, title: deriveTitle(s.conversationHistory), history: s.conversationHistory, cost: s.totalCost||0, tin: s.totalIn||0, tout: s.totalOut||0, updated: s.savedAt||Date.now() };
+        store.activeId = id;
+      }
+      localStorage.removeItem('scorr_max_v6');
+    }
+  } catch(e) {}
+}
+
+function deriveTitle(history) {
+  const first = history.find(m => m.role === 'user');
+  let t = '';
+  if (first) t = typeof first.content === 'string' ? first.content : (Array.isArray(first.content) ? (first.content.find(p=>p.type==='text')?.text || '[attachment]') : '[attachment]');
+  t = (t || 'New chat').trim().replace(/\s+/g,' ');
+  return t.length > 32 ? t.slice(0,32) + '…' : (t || 'New chat');
+}
+
+function renderChatList() {
+  const list = document.getElementById('chatList'); list.innerHTML = '';
+  const ids = Object.keys(store.chats).sort((a,b) => (store.chats[b].updated||0) - (store.chats[a].updated||0));
+  for (const id of ids) {
+    const c = store.chats[id];
+    const item = document.createElement('div');
+    item.className = 'chat-item' + (id === store.activeId ? ' active' : '');
+    item.innerHTML = `<span style="opacity:.6">✦</span><span class="title">${escapeHtml(c.title || 'New chat')}</span><span class="del" title="Delete">✕</span>`;
+    item.querySelector('.title').onclick = () => switchChat(id);
+    item.querySelector('span:first-child').onclick = () => switchChat(id);
+    item.querySelector('.del').onclick = (e) => { e.stopPropagation(); deleteChat(id); };
+    list.appendChild(item);
+  }
+}
+
+function loadActiveIntoView() {
+  const c = store.chats[store.activeId];
+  conversationHistory = c ? (c.history || []) : [];
+  totalCost = c ? (c.cost || 0) : 0; totalIn = c ? (c.tin || 0) : 0; totalOut = c ? (c.tout || 0) : 0;
+  const msgs = document.getElementById('messages'); msgs.innerHTML = '';
+  if (conversationHistory.length === 0) {
+    msgs.innerHTML = `<div class="welcome" id="welcome"><div class="welcome-logo">MAX</div><div class="welcome-sub">CIO Assistant Max · Your AI Chief Investment Officer</div><div class="welcome-desc">Full Railway DB · V8 signals · QB positions · GVM scores · Paste images · URL fetch<br><span style="color: var(--green); font-weight:500;">Claude ON · Sonnet · $0.05/query cap · Multi-chat · Markdown</span></div></div>`;
+  } else {
+    for (const m of conversationHistory) addMessage(m.role, typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? (m.content.find(p=>p.type==='text')?.text || '[file/image]') : '[file/image]'), {});
+  }
+  document.getElementById('sessionCost').textContent = `Session cost: $${totalCost.toFixed(6)}`;
+  document.getElementById('tokenCount').textContent = `Tokens: ${totalIn} in / ${totalOut} out`;
+}
+
+function newChat() {
+  persist();
+  const id = uid();
+  store.chats[id] = { id, title: 'New chat', history: [], cost: 0, tin: 0, tout: 0, updated: Date.now() };
+  store.activeId = id;
+  conversationHistory = []; totalCost = 0; totalIn = 0; totalOut = 0;
+  renderChatList(); loadActiveIntoView(); persist();
+  document.getElementById('userInput').focus();
+}
+
+function switchChat(id) {
+  if (id === store.activeId) return;
+  persist();
+  store.activeId = id;
+  renderChatList(); loadActiveIntoView(); persist();
+}
+
+function deleteChat(id) {
+  delete store.chats[id];
+  if (store.activeId === id) {
+    const remaining = Object.keys(store.chats).sort((a,b)=>(store.chats[b].updated||0)-(store.chats[a].updated||0));
+    if (remaining.length) { store.activeId = remaining[0]; }
+    else { newChat(); return; }
+  }
+  renderChatList(); loadActiveIntoView(); persist();
+}
+
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
+
+function toggleClaude() { claudeOn = !claudeOn; applyToggleUI(); persist(); }
 function applyToggleUI() {
   const el = document.getElementById('claudeToggle'), label = document.getElementById('toggleLabel'), cap = document.getElementById('budgetCap');
   if (claudeOn) { el.className = 'claude-toggle on'; label.textContent = 'Claude ON'; cap.textContent = '· Sonnet · $0.05 cap'; }
@@ -184,29 +330,82 @@ function stopQuery() {
   addMessage('assistant', '⏹ Stopped by user.', { native: true, duration_ms: 0, cost: '0.000000' });
 }
 function quickAsk(text) { document.getElementById('userInput').value = text; sendMessage(); }
-function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeHtml(t) { return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function colorCell(raw) {
   const esc = escapeHtml(raw), m = raw.match(/^([+-])[\d,]*\.?\d+%?$/);
-  if (!m) return esc;
+  if (!m) return inlineMd(esc);
   return m[1]==='+' ? `<span class="pnl-pos">${esc}</span>` : `<span class="pnl-neg">${esc}</span>`;
 }
+
+// Inline markdown: bold, italic, inline code, links
+function inlineMd(s) {
+  s = s.replace(/`([^`]+)`/g, (m,c)=>`<code class="inline">${c}</code>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s;
+}
+
+// Full markdown block renderer
 function formatReply(text) {
-  const lines = text.split('\n'); let html = '', inTable = false, tableLines = [];
-  for (const line of lines) {
-    if (line.trim().startsWith('|') && line.trim().endsWith('|')) { if (!inTable) { inTable=true; tableLines=[]; } tableLines.push(line); }
-    else { if (inTable) { html += renderTable(tableLines); inTable=false; tableLines=[]; } html += escapeHtml(line)+'\n'; }
+  const lines = text.split('\n');
+  let html = '', i = 0;
+  let listType = null, listBuf = [];
+  const flushList = () => {
+    if (listType) { html += `<${listType}>` + listBuf.map(li=>`<li>${inlineMd(escapeHtml(li))}</li>`).join('') + `</${listType}>`; listType = null; listBuf = []; }
+  };
+  while (i < lines.length) {
+    let line = lines[i];
+    // fenced code block
+    if (/^\s*```/.test(line)) {
+      flushList();
+      const fence = line.replace(/^\s*```/, '').trim();
+      let code = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { code.push(lines[i]); i++; }
+      i++;
+      html += `<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`;
+      continue;
+    }
+    // table block
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      flushList();
+      let tbl = [];
+      while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) { tbl.push(lines[i]); i++; }
+      html += renderTable(tbl);
+      continue;
+    }
+    // headings
+    let hm = line.match(/^(#{1,3})\s+(.*)$/);
+    if (hm) { flushList(); const lvl = hm[1].length; html += `<h${lvl}>${inlineMd(escapeHtml(hm[2]))}</h${lvl}>`; i++; continue; }
+    // hr
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flushList(); html += '<hr>'; i++; continue; }
+    // blockquote
+    if (/^\s*>\s?/.test(line)) { flushList(); html += `<blockquote>${inlineMd(escapeHtml(line.replace(/^\s*>\s?/,'')))}</blockquote>`; i++; continue; }
+    // unordered list
+    let um = line.match(/^\s*[-*•]\s+(.*)$/);
+    if (um) { if (listType && listType !== 'ul') flushList(); listType = 'ul'; listBuf.push(um[1]); i++; continue; }
+    // ordered list
+    let om = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (om) { if (listType && listType !== 'ol') flushList(); listType = 'ol'; listBuf.push(om[1]); i++; continue; }
+    // blank line
+    if (line.trim() === '') { flushList(); i++; continue; }
+    // paragraph
+    flushList();
+    html += `<p>${inlineMd(escapeHtml(line))}</p>`;
+    i++;
   }
-  if (inTable) html += renderTable(tableLines);
+  flushList();
   return html;
 }
 function renderTable(lines) {
-  if (lines.length < 2) return lines.map(l => escapeHtml(l)).join('\n');
+  if (lines.length < 1) return '';
   let html = '<table>';
   lines.forEach((line, i) => {
     if (i===1 && /^[\s|:-]+$/.test(line)) return;
     const cells = line.split('|').filter((_,idx,arr) => idx>0 && idx<arr.length-1);
     const tag = i===0 ? 'th' : 'td';
-    html += '<tr>' + cells.map(c => tag==='th' ? `<th>${escapeHtml(c.trim())}</th>` : `<td>${colorCell(c.trim())}</td>`).join('') + '</tr>';
+    html += '<tr>' + cells.map(c => tag==='th' ? `<th>${inlineMd(escapeHtml(c.trim()))}</th>` : `<td>${colorCell(c.trim())}</td>`).join('') + '</tr>';
   });
   return html + '</table>';
 }
@@ -214,17 +413,12 @@ function addMessage(role, content, meta={}) {
   document.getElementById('welcome')?.remove();
   const msgs = document.getElementById('messages'), div = document.createElement('div');
   div.className = `msg ${role}`;
-  const bubbleContent = role==='assistant' ? formatReply(content) : escapeHtml(content);
+  const bubbleContent = role==='assistant' ? `<div class="md">${formatReply(content)}</div>` : escapeHtml(content);
   let toolsHtml = meta.toolCalls?.length>0 ? `<div class="tools-used">${meta.toolCalls.map(t=>`<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>` : '';
   let filesHtml = meta.files?.length>0 ? `<div class="attachments">${meta.files.map(f=>`<span class="attachment-badge">📄 ${f}</span>`).join('')}</div>` : '';
   let modeTag = meta.model ? `sonnet · ${meta.duration_ms}ms · $${meta.cost}` : meta.native ? `native · ${meta.duration_ms}ms · $0.000000` : '';
   div.innerHTML = `<div class="msg-avatar">${role==='user'?'YOU':'MAX'}</div><div class="msg-body"><div class="msg-bubble">${bubbleContent}</div>${filesHtml}${toolsHtml}${modeTag?`<div class="msg-meta">${modeTag}</div>`:''}</div>`;
   msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
-}
-function restoreMessages() {
-  for (const msg of conversationHistory) addMessage(msg.role, typeof msg.content==='string' ? msg.content : '[file/image]', {});
-  document.getElementById('sessionCost').textContent = `Session cost: $${totalCost.toFixed(6)}`;
-  document.getElementById('tokenCount').textContent = `Tokens: ${totalIn} in / ${totalOut} out`;
 }
 function renderFileList() {
   const fl = document.getElementById('fileList'); fl.innerHTML = '';
@@ -239,6 +433,7 @@ document.getElementById('userInput').addEventListener('paste', function(e) {
 async function sendMessage() {
   const input=document.getElementById('userInput'), text=input.value.trim();
   if (!text && attachedFiles.length===0) return;
+  if (!store.activeId || !store.chats[store.activeId]) newChat();
   let fileNames=[], contentParts=[];
   if (text) contentParts.push({type:'text',text});
   for (const file of attachedFiles) {
@@ -254,6 +449,9 @@ async function sendMessage() {
   const userContent=contentParts.length>1?contentParts:text;
   addMessage('user',text||'[image]',{files:fileNames});
   conversationHistory.push({role:'user',content:userContent});
+  // set title from first user message
+  const active = store.chats[store.activeId];
+  if (active && (active.title === 'New chat' || !active.title)) { active.title = deriveTitle(conversationHistory); renderChatList(); }
   attachedFiles=[]; document.getElementById('fileInput').value=''; document.getElementById('fileList').innerHTML='';
   document.getElementById('typingWrap').style.display='block';
   document.getElementById('messages').scrollTop=document.getElementById('messages').scrollHeight;
@@ -268,15 +466,19 @@ async function sendMessage() {
     if (!isNative) { totalCost+=data.usage?.cost_usd||0; totalIn+=data.usage?.input_tokens||0; totalOut+=data.usage?.output_tokens||0; }
     document.getElementById('sessionCost').textContent=`Session cost: $${totalCost.toFixed(6)}`;
     document.getElementById('tokenCount').textContent=`Tokens: ${totalIn} in / ${totalOut} out`;
-    saveSession();
+    persist();
   } catch(e) { document.getElementById('typingWrap').style.display='none'; if (e.name!=='AbortError') addMessage('assistant',`Network error: ${e.message}`); }
   finally { currentController=null; document.getElementById('stopBtn').style.display='none'; document.getElementById('sendBtn').style.display=''; document.getElementById('sendBtn').disabled=false; input.focus(); }
 }
 document.getElementById('userInput').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});
 document.getElementById('userInput').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
 (async()=>{
-  const hasHistory=loadSession(); applyToggleUI();
-  if (hasHistory){document.getElementById('welcome')?.remove();restoreMessages();}
+  loadStore(); applyToggleUI();
+  if (!store.activeId || !store.chats[store.activeId]) {
+    const ids = Object.keys(store.chats).sort((a,b)=>(store.chats[b].updated||0)-(store.chats[a].updated||0));
+    if (ids.length) store.activeId = ids[0]; else { const id=uid(); store.chats[id]={id,title:'New chat',history:[],cost:0,tin:0,tout:0,updated:Date.now()}; store.activeId=id; }
+  }
+  renderChatList(); loadActiveIntoView(); persist();
   try{const r=await fetch('/api/scorr/chat/health'),d=await r.json();document.getElementById('statusDot').style.background=(d.status==='ok'&&d.anthropic_api_key_set)?'#2d8d71':'#d32f2f';}catch{document.getElementById('statusDot').style.background='#d32f2f';}
 })();
 </script>
