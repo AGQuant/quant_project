@@ -23,7 +23,18 @@
   .sidebar-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--border); }
   .new-chat-btn { width: 100%; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--accent); cursor: pointer; font-family: var(--font); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 7px; transition: all 0.2s ease; }
   .new-chat-btn:hover { background: var(--accent-light); border-color: var(--accent); }
-  .chat-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 3px; }
+
+  /* Quick Fetch shortcut boxes */
+  .quick-fetch { padding: 12px 12px 10px; border-bottom: 1px solid var(--border); }
+  .quick-fetch .qf-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 2px 8px; }
+  .qf-grid { display: flex; flex-direction: column; gap: 5px; }
+  .qf-box { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; font-family: var(--font); font-size: 12.5px; font-weight: 500; text-align: left; transition: all 0.15s ease; }
+  .qf-box:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+  .qf-box:disabled { opacity: 0.5; cursor: not-allowed; }
+  .qf-box .qf-ic { width: 16px; text-align: center; font-size: 13px; }
+
+  .chat-list-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 12px 14px 4px; }
+  .chat-list { flex: 1; overflow-y: auto; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 3px; }
   .chat-list::-webkit-scrollbar { width: 5px; }
   .chat-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   .chat-item { padding: 9px 11px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12.5px; transition: background 0.15s ease; position: relative; }
@@ -129,11 +140,18 @@
 </head>
 <body>
 <div class="app">
-  <!-- Sidebar: chat sessions -->
+  <!-- Sidebar: quick fetch + chat sessions -->
   <div class="sidebar" id="sidebar">
     <div class="sidebar-head">
       <button class="new-chat-btn" onclick="newChat()">＋ New chat</button>
     </div>
+
+    <div class="quick-fetch">
+      <div class="qf-label">Quick Fetch</div>
+      <div class="qf-grid" id="qfGrid"></div>
+    </div>
+
+    <div class="chat-list-label">Chats</div>
     <div class="chat-list" id="chatList"></div>
     <div class="sidebar-foot">Chats saved locally · 30 day retention</div>
   </div>
@@ -206,6 +224,27 @@ const STORE_KEY = 'scorr_max_v7';
 const RETAIN_MS = 30 * 86400000;
 let claudeOn = true, totalCost = 0, totalIn = 0, totalOut = 0;
 let attachedFiles = [], currentController = null;
+
+// Quick Fetch shortcuts — each fires the ready-made query into current chat (respects Reasoning toggle)
+const QUICK_FETCH = [
+  { icon: '◷', label: 'Health',       query: 'System health check' },
+  { icon: '⇄', label: 'V8 Summary',   query: 'Virtual Dashboard V8' },
+  { icon: '⌂', label: 'QB Summary',   query: 'QB summary by basket' },
+  { icon: '▦', label: 'GVM Top',      query: 'Top 10 stocks by GVM score' },
+  { icon: '◉', label: 'Market Mood',  query: 'V8 market mood gate and slot allocation' },
+];
+
+function renderQuickFetch() {
+  const grid = document.getElementById('qfGrid'); if (!grid) return;
+  grid.innerHTML = '';
+  QUICK_FETCH.forEach(qf => {
+    const b = document.createElement('button');
+    b.className = 'qf-box';
+    b.innerHTML = `<span class="qf-ic">${qf.icon}</span><span>${qf.label}</span>`;
+    b.onclick = () => quickAsk(qf.query);
+    grid.appendChild(b);
+  });
+}
 
 // Multi-chat store: { chats: { id: {id,title,history,cost,tin,tout,updated} }, activeId, claudeOn }
 let store = { chats: {}, activeId: null, claudeOn: true };
@@ -473,7 +512,7 @@ async function sendMessage() {
 document.getElementById('userInput').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});
 document.getElementById('userInput').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
 (async()=>{
-  loadStore(); applyToggleUI();
+  loadStore(); applyToggleUI(); renderQuickFetch();
   if (!store.activeId || !store.chats[store.activeId]) {
     const ids = Object.keys(store.chats).sort((a,b)=>(store.chats[b].updated||0)-(store.chats[a].updated||0));
     if (ids.length) store.activeId = ids[0]; else { const id=uid(); store.chats[id]={id,title:'New chat',history:[],cost:0,tin:0,tout:0,updated:Date.now()}; store.activeId=id; }
