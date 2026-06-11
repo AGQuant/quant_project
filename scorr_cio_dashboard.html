@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Scorr · AI CIO</title>
+<title>CIO · Models</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
-  html,body{margin:0;padding:0;background:#0a0d14;height:100%;overflow:hidden;}
+  html,body{margin:0;padding:0;background:#f4f6f9;height:100%;overflow:hidden;}
   #root{height:100vh;}
   *{box-sizing:border-box;}
 </style>
@@ -39,26 +39,27 @@ async function apiGet(path) {
 }
 
 const C = {
-  bg: "#0a0d14", card: "#0f1420", border: "#1e2540",
-  accent: "#00d4ff", gold: "#f0b429", green: "#22c55e",
-  red: "#ef4444", orange: "#f97316", purple: "#a855f7",
-  text: "#e2e8f0", muted: "#64748b", gridLine: "#151b2e",
-  nav: "#0b0f1c",
+  bg: "#f4f6f9", card: "#ffffff", border: "#e2e7ee",
+  accent: "#2563eb", gold: "#b45309", green: "#0a9e63",
+  red: "#dd3a4a", orange: "#d97706", purple: "#7c3aed",
+  text: "#1c2536", muted: "#5a6781", gridLine: "#edf1f6",
+  nav: "#ffffff",
 };
 
 const MODELS = [
-  { id: "v8",     icon: "⚡", label: "V8",      full: "V8 Long-Short",       color: C.accent,  live: true },
-  { id: "gvm",    icon: "▦", label: "GVM",     full: "GVM Scoring",         color: C.gold,    live: true },
-  { id: "max",    icon: "◉", label: "Max",     full: "Max Chat",            color: "#7c5cff", live: true },
-  { id: "sector", icon: "◉", label: "Sector",  full: "Sector Intelligence", color: C.purple,  live: false },
-  { id: "qb",     icon: "⌂", label: "QB",      full: "Quant Basket",        color: C.green,   live: false },
-  { id: "v10",    icon: "⟁", label: "V10",     full: "Nifty Options V10",   color: "#ec4899", live: false },
+  { id: "v8",    icon: "⚡", label: "V8",    full: "V8 Long-Short",     color: C.accent,  live: true },
+  { id: "gvm",   icon: "▦", label: "GVM",   full: "GVM Scoring",       color: C.gold,    live: true },
+  { id: "check", icon: "✓", label: "Check", full: "Trade Check",       color: C.green,   live: true },
+  { id: "max",   icon: "◉", label: "Max",   full: "Max Chat",          color: "#6d4fe0", live: true },
+  { id: "ask",   icon: "✦", label: "Ask",   full: "Ask · Native",      color: C.accent,  live: true },
+  { id: "qb",    icon: "⌂", label: "QB",    full: "Quant Basket",      color: C.green,   live: false },
+  { id: "v10",   icon: "⟁", label: "V10",   full: "Nifty Options V10", color: "#db2777", live: false },
 ];
 
 const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
 const gvmColor = (g) => g == null ? C.muted : g >= 8 ? C.green : g >= 7 ? C.gold : g >= 6 ? C.orange : C.red;
 const ratingColor = (r) => r == null ? C.muted : r >= 7 ? C.green : r >= 5 ? C.gold : C.red;
-const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#86efac", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
+const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#22a06b", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
 
 function Loader({ msg }) {
   return (
@@ -79,14 +80,15 @@ function Tag({ children, color = C.accent }) {
   );
 }
 
-// ── Bottom Nav Bar ───────────────────────────────────────────────
-function BottomNav({ current, onPick }) {
+// ── Top Nav Bar ───────────────────────────────────────────────
+function TopNav({ current, onPick }) {
   return (
     <div style={{
-      position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 1000,
-      background: "rgba(11,15,28,0.97)", backdropFilter: "blur(12px)",
-      borderTop: `1px solid ${C.border}`,
-      display: "flex", height: 56,
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
+      background: C.nav,
+      borderBottom: `1px solid ${C.border}`,
+      display: "flex", alignItems: "stretch", height: 46,
+      overflowX: "auto",
     }}>
       {MODELS.map(m => {
         const active = current === m.id;
@@ -95,16 +97,16 @@ function BottomNav({ current, onPick }) {
             onClick={() => m.live && onPick(m.id)}
             disabled={!m.live}
             style={{
-              flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-              justifyContent: "center", gap: 3, border: "none", background: "transparent",
-              cursor: m.live ? "pointer" : "not-allowed", opacity: m.live ? 1 : 0.35,
-              borderTop: active ? `2px solid ${m.color}` : "2px solid transparent",
-              transition: "all 0.15s",
+              display: "flex", alignItems: "center", gap: 7,
+              padding: "0 16px", border: "none", background: "transparent",
+              cursor: m.live ? "pointer" : "not-allowed", opacity: m.live ? 1 : 0.4,
+              borderBottom: active ? `2px solid ${m.color}` : "2px solid transparent",
+              transition: "all 0.15s", whiteSpace: "nowrap",
             }}>
-            <span style={{ fontSize: 16, color: active ? m.color : C.muted }}>{m.icon}</span>
-            <span style={{ fontSize: 9, fontWeight: active ? 700 : 400, color: active ? m.color : C.muted, letterSpacing: "0.05em" }}>
+            <span style={{ fontSize: 13, color: active ? m.color : C.muted }}>{m.icon}</span>
+            <span style={{ fontSize: 12, fontWeight: active ? 700 : 500, color: active ? C.text : C.muted, letterSpacing: "0.03em" }}>
               {m.label}
-              {!m.live && <span style={{ fontSize: 7, display: "block", color: C.muted }}>soon</span>}
+              {!m.live && <span style={{ fontSize: 9, marginLeft: 5, color: C.muted }}>soon</span>}
             </span>
           </button>
         );
@@ -180,12 +182,12 @@ function GvmModule() {
               />
             </div>
             <button onClick={() => suggest[0] && loadReport(suggest[0].symbol)}
-              style={{ padding: "0 20px", borderRadius: 10, border: "none", background: C.gold, color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              style={{ padding: "0 20px", borderRadius: 10, border: "none", background: C.gold, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
               Search
             </button>
           </div>
           {showSug && suggest.length > 0 && (
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(25,40,70,0.12)" }}>
               {suggest.map(s => (
                 <div key={s.symbol} onClick={() => loadReport(s.symbol)}
                   style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${C.gridLine}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
@@ -395,12 +397,20 @@ function ComingSoon({ mod }) {
 }
 
 function App() {
-  const [page, setPage] = useState("v8");
+  const urlModel = new URLSearchParams(window.location.search).get("model");
+  const valid = MODELS.find(m => m.id === urlModel && m.live);
+  const [page, setPageRaw] = useState(valid ? valid.id : "v8");
+  const setPage = (id) => {
+    setPageRaw(id);
+    try { window.history.replaceState(null, "", `?model=${id}`); } catch (e) {}
+  };
   const mod = MODELS.find(m => m.id === page);
 
   let body;
-  if (page === "v8")  body = <FrameModule src={`${API}/dashboard`} />;
-  else if (page === "max")  body = <FrameModule src={`${API}/cio`} />;
+  if (page === "v8")  body = <FrameModule src={`${API}/dashboard?embed=1`} />;
+  else if (page === "max")  body = <FrameModule src={`${API}/cio?embed=1`} />;
+  else if (page === "check")  body = <FrameModule src={`${API}/check?embed=1`} />;
+  else if (page === "ask")  body = <FrameModule src={`${API}/ask?embed=1`} />;
   else if (page === "gvm")  body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
 
@@ -410,16 +420,16 @@ function App() {
         @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
         * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0a0d14; }
-        ::-webkit-scrollbar-thumb { background: #1e2540; border-radius: 3px; }
+        ::-webkit-scrollbar-track { background: #f4f6f9; }
+        ::-webkit-scrollbar-thumb { background: #cfd8e3; border-radius: 3px; }
         button { transition: all 0.15s ease; }
-        input::placeholder { color: #475569; }
+        input::placeholder { color: #9aa4b5; }
       `}</style>
-      {/* Content area — padded bottom for nav bar */}
-      <div style={{ height: "calc(100% - 56px)", width: "100%", overflow: "hidden" }}>
+      <TopNav current={page} onPick={setPage} />
+      {/* Content area — padded top for nav bar */}
+      <div style={{ height: "calc(100% - 46px)", width: "100%", overflow: "hidden", marginTop: 46 }}>
         {body}
       </div>
-      <BottomNav current={page} onPick={setPage} />
     </div>
   );
 }
