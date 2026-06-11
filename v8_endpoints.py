@@ -4,29 +4,13 @@ V8 endpoints — Quant Long-Short Basket Strategy
 FILTER_CONFIG reorder (06-Jun-2026):
   Filters ordered by descending kill rate (biggest drop first) for clean waterfall.
 
-  buy_reversal (11 filters):
-    gvm(164) → year_ret(2) → dma_200(20) → dma_50(14) → month_ret(5) →
-    week_ret(3) → rsi_month(1) → rsi_weekly(0) → mom_2d(1) →
-    sector_week → sector_month
-  buy_momentum (11 filters):
-    gvm(164) → year_ret(2) → dma_50(14) → dma_200(10) → rsi_month(9) →
-    rsi_weekly(4) → month_ret(4) → week_ret(2) → mom_2d(0) →
-    sector_week → sector_month
-  sell_reversal (9 filters):
-    dma_200(86) → dma_50(24) → rsi_weekly(23) → rsi_month(2) →
-    week_ret(6) → month_ret(2) → mom_2d → sector_week → sector_month
-  sell_momentum (12 filters):
-    dma_200(97) → dma_50(29) → dma_20(30) → rsi_month(12) → daily_rsi(14) →
-    rsi_weekly(0) → week_ret(3) → mom_2d(4) → month_ret(1) →
-    week_index_52(7) → sector_week → sector_month
-
-  sector_week/month NULL until Monday 15:45 GVM engine run.
-  NULL filter = all stocks pass (no kill).
-
 GVM gate (08-Jun-2026): buy baskets relaxed gvm_score min 7.0 -> 6.0
 mom_2d formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum (T vs T-2).
 day_1d (live) = price vs T-1 close. eod_chg (frozen) = T-1 vs T-2. DISPLAY ONLY.
 buy_momentum RSI relaxed (11-Jun-2026): rsi_month + rsi_weekly min 71.5 -> 60.0
+buy_momentum mom_2d replaced by day_1d 0..3 (11-Jun-2026): momentum needs positive today, not 2-day noise
+sell_reversal tightened (11-Jun-2026): rsi_weekly max 45->35, week_return min -6->-3 (~5-8 signals)
+sell_momentum tightened (11-Jun-2026): daily_rsi max 40->30, mom_2d min -3->-2 (~8-10 signals)
 /scan (11-Jun-2026): gate_score = int count of filters passed (not bool).
 /qualified (11-Jun-2026): adds day_1d, segment, pp/r1/s1, first_seen.
 /funnel_detail (11-Jun-2026): pivot stage appended (above PP + room to R1 >= 1%).
@@ -72,16 +56,16 @@ FILTER_CONFIG = {
         "rsi_weekly":   [60.0, 80.0],   # relaxed 71.5→60 (11-Jun-2026)
         "month_return": [3.0,  14.0],
         "week_return":  [1.0,  7.0],
-        "mom_2d":       [0.0,  3.5],
+        "day_1d":       [0.0,  3.0],    # replaced mom_2d: need +ve today, not 2-day noise (11-Jun-2026)
         "sector_week":  [0.0,  4.0],
         "sector_month": [0.0,  6.0],
     },
     "sell_reversal": {
         "dma_200":      [-30.0, 2.0],
         "dma_50":       [-20.0, 2.0],
-        "rsi_weekly":   [10.0,  45.0],
+        "rsi_weekly":   [10.0,  35.0],  # tightened max 45→35 (11-Jun-2026)
         "rsi_month":    [20.0,  60.0],
-        "week_return":  [-6.0,  3.0],
+        "week_return":  [-3.0,  3.0],   # tightened min -6→-3 (11-Jun-2026)
         "month_return": [-20.0, 2.0],
         "mom_2d":       [-6.0,  0.0],
         "sector_week":  [-4.0,  0.0],
@@ -92,10 +76,10 @@ FILTER_CONFIG = {
         "dma_50":       [-30.0, 0.0],
         "dma_20":       [None,  -2.0],
         "rsi_month":    [10.0,  45.0],
-        "daily_rsi":    [None,  40.0],
+        "daily_rsi":    [None,  30.0],  # tightened max 40→30 (11-Jun-2026)
         "rsi_weekly":   [5.0,   60.0],
         "week_return":  [-8.0,  0.0],
-        "mom_2d":       [-3.0,  0.0],
+        "mom_2d":       [-2.0,  0.0],   # tightened min -3→-2 (11-Jun-2026)
         "month_return": [-30.0, 0.0],
         "week_index_52":[None,  20.0],
         "sector_week":  [-4.0,  0.0],
@@ -352,11 +336,6 @@ def market_mood():
 
 @router.get("/scan")
 def scan(limit: int = 25):
-    """
-    One-call payload for dashboard Filter Scan + Master Top Sectors.
-    gainers/losers: gate_score = int count of buy_reversal/sell_reversal filters passed.
-    sectors: avg mom_2d + avg day_1d + avg week.
-    """
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -560,7 +539,7 @@ def _basket_universe(cur):
     cur.execute("""
         SELECT symbol, gvm_score, dma_20, dma_50, dma_200,
                rsi_month, rsi_weekly, daily_rsi,
-               month_return, week_return, year_return, mom_2d,
+               month_return, week_return, year_return, mom_2d, day_1d,
                week_index_52, ma9_vs_ma21, vol_ratio,
                sector_week, sector_month
         FROM v8_metrics
