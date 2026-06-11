@@ -1,32 +1,29 @@
 """
-Native v3.3 Trade Check — zero-token, pure Railway DB.
+Native v3.3 Trade Check — zero-token, pure Railway DB. ENGINE v3.
 
-Computes the OBJECTIVE subset of the canonical v3.3 framework
-(session_log id=143 + 209 + 240) directly from v8_metrics + gvm_scores
-+ v8_paper_pivots. Subjective/chart rules (5-min strength, 1D pattern,
-news/events, fib bounce) are surfaced as HUMAN-INPUT rows the trader
-confirms — never machine-guessed.
+ALL 18 parameters auto-computed from DB:
+  Tier1: R1 ADR, R2 sector, R3 peers, R4 GVM, R6 MAs, R7 volume pattern
+         (30d up/down vol ratio), R8 RSI, R9 returns, R10 intraday strength
+         (today's 5m bars: day-up + close-position + 2nd-half trend),
+         R11 RSI room, R12 30d pattern (breakout OR higher-lows+contraction)
+  Tier2: F1 blackout, F2 pivot room, F3 fib proximity (30d swing
+         38.2/50/61.8 within 1.5%), F4 R:R, F5 entry window (live IST),
+         F6 DTE to last-Tuesday expiry >=3, F7 basis trend
 
-The caller may pass gate1 (5-min strength) and gate2 (1-Day reversal/breakout)
-as booleans (human-in-the-AI-loop). When supplied:
-  gate1 -> resolves R10 (5-min recovery/weakness)
-  gate2 -> resolves R12 (30-day pattern) AND F3 (fib bounce proxy)
-Unsupplied gates stay as 🟡 chart rows.
+gate1/gate2 (bool|None) = OPTIONAL human overrides:
+  gate1 overrides R10 (your eyes on the 5-min chart beat the proxy)
+  gate2 overrides R12
+Yellow (🟡) now appears ONLY when data is genuinely missing
+(no intraday bars yet, no pivots, no basis rows).
 
-Scope (per Arpit 11-Jun): v3.3 ONLY. Not v3.4.1.
-
-Tier1: LONG 11 rules (min 8) / SHORT 10 rules (min 8, GVM N/A)
-Tier2: 7 filters (min 5/7)
-
-Verdict:
-  Tier1 < 8                  -> REJECT
-  Tier1 >=8 & Tier2 >=5      -> VALID (STRONG if Tier1>=10 & Tier2>=6)
-  Tier1 >=8 & Tier2 <5       -> WEAK / WATCH
+Scope: v3.3 ONLY (id=143+209). Not v3.4.1.
+Tier1: LONG 11 (min 8) / SHORT 10 (min 8). Tier2: 7 (min 5).
 """
 
 import os
 import re
-from datetime import datetime
+import calendar
+from datetime import datetime, date, timedelta
 import psycopg
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -39,19 +36,28 @@ def _f(v):
         return None
 
 
-def _yn(ok):
-    if ok is None:
-        return "—"
-    return "PASS" if ok else "FAIL"
+def _ist_now():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
-def _resolve_symbol(cur, raw: str):
-    """Find symbol from free text. Returns (symbol, company, segment) or None."""
+def _last_tuesday(y, m):
+    d = date(y, m, calendar.monthrange(y, m)[1])
+    while d.weekday() != 1:  # Tuesday
+        d -= timedelta(days=1)
+    return d
+
+
+def _next_expiry(today):
+    e = _last_tuesday(today.year, today.month)
+    if today > e:
+        y, m = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+        e = _last_tuesday(y, m)
+    return e
+
+
+def _resolve_symbol(cur, raw):
     raw = raw.strip().upper()
-    cur.execute(
-        "SELECT symbol, company_name, segment FROM gvm_scores WHERE UPPER(symbol)=%s LIMIT 1",
-        (raw,),
-    )
+    cur.execute("SELECT symbol, company_name, segment FROM gvm_scores WHERE UPPER(symbol)=%s LIMIT 1", (raw,))
     r = cur.fetchone()
     if r:
         return r
@@ -61,40 +67,156 @@ def _resolve_symbol(cur, raw: str):
             """SELECT symbol, company_name, segment FROM gvm_scores
                WHERE UPPER(symbol) LIKE %s OR UPPER(company_name) LIKE %s
                ORDER BY LENGTH(symbol) LIMIT 1""",
-            (f"%{w}%", f"%{w}%"),
-        )
+            (f"%{w}%", f"%{w}%"))
         r = cur.fetchone()
         if r:
             return r
     return None
 
 
-def _parse_side(q: str) -> str:
-    ql = q.lower()
-    if "short" in ql or "sell" in ql:
-        return "SHORT"
-    return "LONG"
+def _parse_side(q):
+    return "SHORT" if ("short" in q.lower() or "sell" in q.lower()) else "LONG"
 
 
-def compute_trade_check(symbol_text: str, side: str = None,
-                        gate1: bool = None, gate2: bool = None) -> dict:
-    """
-    Structured native v3.3 trade check. Returns a dict:
-      { ok, symbol, company, segment, side, gvm, ts,
-        tier1:[{rule,cond,val,state}], tier2:[...],
-        t1_pass, t1_auto_n, t1_human_n, t1_total,
-        t2_pass, t2_auto_n, t2_human_n,
-        verdict, verdict_class }
-    state in {'pass','fail','chart'}.
-    gate1/gate2 (bool|None): human chart confirmations.
-    """
+# ──────────────────────────── parameter computers ────────────────────────────
+
+def _r7_volume_pattern(cur, symbol, side):
+    """30d up-day vol vs down-day vol. LONG: ratio>=1.1. SHORT: ratio<=0.9."""
+    cur.execute("""
+        WITH d AS (
+          SELECT close, volume, LAG(close) OVER (ORDER BY price_date) AS pc
+          FROM (SELECT price_date, close, volume FROM raw_prices
+                WHERE symbol=%s AND volume>0 ORDER BY price_date DESC LIMIT 31) s
+          ORDER BY price_date
+        )
+        SELECT AVG(volume) FILTER (WHERE close>pc),
+               AVG(volume) FILTER (WHERE close<pc)
+        FROM d WHERE pc IS NOT NULL""", (symbol,))
+    r = cur.fetchone()
+    up, dn = _f(r[0]) if r else None, _f(r[1]) if r else None
+    if not up or not dn:
+        return None, "no vol data"
+    ratio = up / dn
+    ok = ratio >= 1.1 if side == "LONG" else ratio <= 0.9
+    return ok, f"up/dn {ratio:.2f}"
+
+
+def _r10_intraday(cur, symbol, side):
+    """Today's (or latest) 5m bars: day-up + close-position + 2nd-half trend. 2/3."""
+    cur.execute("""
+        SELECT ts, open, high, low, close FROM intraday_prices
+        WHERE symbol=%s AND timeframe='5m'
+          AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices
+                        WHERE symbol=%s AND timeframe='5m')
+        ORDER BY ts""", (symbol, symbol))
+    bars = cur.fetchall()
+    if len(bars) < 8:
+        return None, f"{len(bars)} bars only"
+    bar_date = bars[0][0].date()
+    o0 = _f(bars[0][1]); cN = _f(bars[-1][4])
+    hi = max(_f(b[2]) for b in bars); lo = min(_f(b[3]) for b in bars)
+    closes = [_f(b[4]) for b in bars]
+    half = len(closes) // 2
+    h1 = sum(closes[:half]) / half
+    h2 = sum(closes[half:]) / (len(closes) - half)
+    pos = (cN - lo) / (hi - lo) if hi > lo else 0.5
+    if side == "LONG":
+        checks = [cN > o0, pos >= 0.6, h2 > h1]
+    else:
+        checks = [cN < o0, pos <= 0.4, h2 < h1]
+    n = sum(checks)
+    stale = "" if bar_date == _ist_now().date() else f" ({bar_date.strftime('%d-%b')})"
+    return n >= 2, f"{n}/3 sub{stale}"
+
+
+def _r12_pattern(cur, symbol, side):
+    """30d: breakout OR (higher-lows AND contraction). SHORT inverts."""
+    cur.execute("""
+        WITH d AS (
+          SELECT high, low, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
+          FROM raw_prices WHERE symbol=%s AND volume>0
+          ORDER BY price_date DESC LIMIT 30)
+        SELECT AVG(low)  FILTER (WHERE rn<=10), AVG(low)  FILTER (WHERE rn>20),
+               AVG(high) FILTER (WHERE rn<=10), AVG(high) FILTER (WHERE rn>20),
+               AVG(high-low) FILTER (WHERE rn<=10), AVG(high-low) FILTER (WHERE rn>20),
+               (SELECT close FROM d WHERE rn=1),
+               (SELECT MAX(high) FROM d WHERE rn BETWEEN 6 AND 30),
+               (SELECT MIN(low)  FROM d WHERE rn BETWEEN 6 AND 30),
+               COUNT(*)
+        FROM d""", (symbol,))
+    r = cur.fetchone()
+    if not r or (r[9] or 0) < 25:
+        return None, "insufficient history"
+    rlo, olo, rhi, ohi, rrng, orng, lc, phi, plo = (_f(x) for x in r[:9])
+    contraction = rrng < orng
+    if side == "LONG":
+        breakout = lc > phi
+        higher_lows = rlo > olo
+        ok = breakout or (higher_lows and contraction)
+        tag = "brkout" if breakout else ("HL+ctr" if ok else
+              ("HL only" if higher_lows else ("ctr only" if contraction else "none")))
+    else:
+        breakdown = lc < plo
+        lower_highs = rhi < ohi
+        ok = breakdown or (lower_highs and contraction)
+        tag = "brkdwn" if breakdown else ("LH+ctr" if ok else
+              ("LH only" if lower_highs else ("ctr only" if contraction else "none")))
+    return ok, tag
+
+
+def _f3_fib(cur, symbol, cmp):
+    """30d swing hi/lo; PASS if CMP within 1.5% of 38.2/50/61.8 level."""
+    if not cmp:
+        return None, "no cmp"
+    cur.execute("""
+        SELECT MAX(high), MIN(low) FROM (
+          SELECT high, low FROM raw_prices WHERE symbol=%s AND volume>0
+          ORDER BY price_date DESC LIMIT 30) s""", (symbol,))
+    r = cur.fetchone()
+    hi, lo = _f(r[0]), _f(r[1])
+    if not hi or not lo or hi <= lo:
+        return None, "no swing"
+    best, best_lbl = 99.0, ""
+    for ratio, lbl in ((0.382, "38.2"), (0.5, "50"), (0.618, "61.8")):
+        lvl = hi - ratio * (hi - lo)
+        dist = abs(cmp - lvl) / cmp * 100
+        if dist < best:
+            best, best_lbl = dist, lbl
+    return best <= 1.5, f"{best_lbl}% lvl {best:.1f}% away"
+
+
+def _f5_window(side):
+    now = _ist_now()
+    if now.weekday() >= 5:
+        return False, "weekend"
+    t = now.time()
+    if side == "LONG":
+        ok = (t >= datetime.strptime("14:00", "%H:%M").time()
+              and t <= datetime.strptime("15:30", "%H:%M").time())
+        win = "14:00-15:30"
+    else:
+        ok = (t >= datetime.strptime("10:30", "%H:%M").time()
+              and t <= datetime.strptime("12:00", "%H:%M").time())
+        win = "10:30-12:00"
+    return ok, f"now {now.strftime('%H:%M')} / {win}"
+
+
+def _f6_dte():
+    today = _ist_now().date()
+    exp = _next_expiry(today)
+    dte = (exp - today).days
+    return dte >= 3, f"DTE {dte} (exp {exp.strftime('%d-%b')})"
+
+
+# ──────────────────────────── main compute ────────────────────────────
+
+def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
     if side is None:
         side = _parse_side(symbol_text)
     side = side.upper()
     cleaned = re.sub(
-        r"\b(trade\s*check|trade\s*journal|journal\s*check|check|evaluate|review|analyse|analyze|stock|on|for|a|the|long|short|buy|sell)\b",
-        " ", symbol_text, flags=re.I,
-    ).strip()
+        r"\b(trade\s*check|trade\s*review|trade\s*journal|journal\s*check|check|review|evaluate|analyse|analyze|stock|on|for|a|the|long|short|buy|sell|motors?|ltd|limited)\b",
+        " ", symbol_text, flags=re.I).strip()
     if not cleaned:
         return {"ok": False, "error": "Specify a symbol, e.g. RELIANCE."}
 
@@ -105,260 +227,246 @@ def compute_trade_check(symbol_text: str, side: str = None,
                 return {"ok": False, "error": f"No stock found for '{cleaned}'."}
             symbol, company, segment = resolved
 
-            cur.execute(
-                """SELECT gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly,
-                          daily_rsi, week_return, month_return, year_return, mom_2d,
-                          day_1d, sector_week, sector_month, week_index_52, vol_ratio
-                   FROM v8_metrics
-                   WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM v8_metrics)
-                   LIMIT 1""",
-                (symbol,),
-            )
+            cur.execute("""
+                SELECT gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly,
+                       daily_rsi, week_return, month_return, day_1d,
+                       sector_week, sector_month
+                FROM v8_metrics WHERE symbol=%s
+                  AND score_date=(SELECT MAX(score_date) FROM v8_metrics) LIMIT 1""", (symbol,))
             m = cur.fetchone()
             if not m:
                 return {"ok": False, "symbol": symbol, "company": company,
-                        "error": f"No V8 metrics for {symbol} (may be outside futures universe)."}
+                        "error": f"No V8 metrics for {symbol} (outside futures universe)."}
             (gvm, dma20, dma50, dma200, rsi_m, rsi_w, rsi_d,
-             wk_ret, mo_ret, yr_ret, mom2d, day1d, sec_w, sec_m, wk52, vol) = m
+             wk_ret, mo_ret, day1d, sec_w, sec_m) = m
 
             cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
-            adr_row = cur.fetchone()
-            adr_val = _f(adr_row[0]) if adr_row else 1.0
-            mood_bearish = adr_val is not None and adr_val < 0.8
+            ar = cur.fetchone()
+            adr = _f(ar[0]) if ar else None
 
-            cur.execute(
-                """SELECT COUNT(*) FROM v8_metrics v
-                   JOIN gvm_scores g ON g.symbol=v.symbol
-                   WHERE g.segment=%s AND v.symbol<>%s
-                     AND v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
-                     AND v.day_1d IS NOT NULL AND v.day_1d %s 0""" % ("%s", "%s", ">" if side == "LONG" else "<"),
-                (segment, symbol),
-            )
-            peers_aligned = (cur.fetchone()[0] or 0) >= 2
+            op = ">" if side == "LONG" else "<"
+            cur.execute(f"""
+                SELECT COUNT(*) FROM v8_metrics v JOIN gvm_scores g ON g.symbol=v.symbol
+                WHERE g.segment=%s AND v.symbol<>%s
+                  AND v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                  AND v.day_1d {op} 0""", (segment, symbol))
+            peers_n = cur.fetchone()[0] or 0
 
-            cur.execute(
-                """SELECT pp, r1, s1 FROM v8_paper_pivots
-                   WHERE symbol=%s AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
-                   LIMIT 1""",
-                (symbol,),
-            )
+            cur.execute("""SELECT pp, r1, s1 FROM v8_paper_pivots WHERE symbol=%s
+                           AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) LIMIT 1""", (symbol,))
             piv = cur.fetchone()
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (symbol,))
-            cmp_row = cur.fetchone()
-            cmp = _f(cmp_row[0]) if cmp_row else None
+            cr = cur.fetchone()
+            cmp = _f(cr[0]) if cr else None
 
-            cur.execute(
-                """SELECT 1 FROM earnings_calendar
-                   WHERE UPPER(ticker)=%s AND ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day') LIMIT 1""",
-                (symbol,),
-            )
+            cur.execute("""SELECT 1 FROM earnings_calendar WHERE UPPER(ticker)=%s
+                           AND ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day') LIMIT 1""", (symbol,))
             in_blackout = cur.fetchone() is not None
 
-            cur.execute(
-                """SELECT basis, basis_pct FROM futures_basis
-                   WHERE symbol=%s ORDER BY ts DESC LIMIT 5""",
-                (symbol,),
-            )
-            basis_rows = cur.fetchall()
+            cur.execute("""SELECT basis_pct FROM futures_basis WHERE symbol=%s
+                           ORDER BY ts DESC LIMIT 5""", (symbol,))
+            basis = [_f(x[0]) for x in cur.fetchall()]
 
-            def st(ok):
-                return "chart" if ok is None else ("pass" if ok else "fail")
+            # new auto computers
+            r7_ok, r7_val = _r7_volume_pattern(cur, symbol, side)
+            r10_ok, r10_val = _r10_intraday(cur, symbol, side)
+            r12_ok, r12_val = _r12_pattern(cur, symbol, side)
+            f3_ok, f3_val = _f3_fib(cur, symbol, cmp)
+            f5_ok, f5_val = _f5_window(side)
+            f6_ok, f6_val = _f6_dte()
 
-            # ════════ TIER 1 ════════
+            # gate overrides (human eyes win)
+            r10_method = "auto"
+            if gate1 is not None:
+                r10_ok, r10_val, r10_method = gate1, f"Gate1 {'✓' if gate1 else '✗'}", "gate"
+            r12_method = "auto"
+            if gate2 is not None:
+                r12_ok, r12_val, r12_method = gate2, f"Gate2 {'✓' if gate2 else '✗'}", "gate"
+
+            def row(rule, cond, val, ok, method="auto"):
+                return (rule, cond, val, ok, method)
+
+            # ── TIER 1 ──
             t1 = []
-
-            t1.append(("R1 Market", "not extremely " + ("bearish" if side == "LONG" else "bullish"),
-                       f"ADR {adr_val:.2f}" if adr_val is not None else "—",
-                       (not mood_bearish) if side == "LONG" else True))
-
             if side == "LONG":
-                t1.append(("R2 Sector", "sec_week>0 & month>0",
-                           f"W {_f(sec_w):.1f} / M {_f(sec_m):.1f}" if sec_w is not None else "—",
-                           (sec_w is not None and sec_m is not None and float(sec_w) > 0 and float(sec_m) > 0)))
+                t1.append(row("R1 Market", "not extremely bearish",
+                              f"ADR {adr:.2f}" if adr is not None else "—",
+                              (adr is not None and adr >= 0.8) if adr is not None else None))
+                t1.append(row("R2 Sector", "week>0 & month>0",
+                              f"W {_f(sec_w):.1f} / M {_f(sec_m):.1f}",
+                              sec_w is not None and sec_m is not None and float(sec_w) > 0 and float(sec_m) > 0))
             else:
-                t1.append(("R2 Sector", "sec_week<0 & month<0",
-                           f"W {_f(sec_w):.1f} / M {_f(sec_m):.1f}" if sec_w is not None else "—",
-                           (sec_w is not None and sec_m is not None and float(sec_w) < 0 and float(sec_m) < 0)))
+                t1.append(row("R1 Market", "not extremely bullish",
+                              f"ADR {adr:.2f}" if adr is not None else "—",
+                              (adr is not None and adr <= 1.2) if adr is not None else None))
+                t1.append(row("R2 Sector", "week<0 & month<0",
+                              f"W {_f(sec_w):.1f} / M {_f(sec_m):.1f}",
+                              sec_w is not None and sec_m is not None and float(sec_w) < 0 and float(sec_m) < 0))
 
-            t1.append(("R3 Peers", f"2+ peers {'up' if side == 'LONG' else 'down'}",
-                       "yes" if peers_aligned else "no", peers_aligned))
-
+            t1.append(row("R3 Peers", f"2+ peers {'up' if side=='LONG' else 'down'}",
+                          f"{peers_n} aligned", peers_n >= 2))
             if side == "LONG":
-                t1.append(("R4 GVM", "GVM>=7.0", f"{_f(gvm):.2f}" if gvm is not None else "—",
-                           (gvm is not None and float(gvm) >= 7.0)))
+                t1.append(row("R4 GVM", ">=7.0", f"{_f(gvm):.2f}" if gvm is not None else "—",
+                              gvm is not None and float(gvm) >= 7.0))
 
             mas = [dma20, dma50, dma200]
             if side == "LONG":
-                above = sum(1 for x in mas if x is not None and float(x) > 0)
-                t1.append(("R6 MAs", "above 2 of 3 MAs", f"{above}/3 above", above >= 2))
+                n = sum(1 for x in mas if x is not None and float(x) > 0)
+                t1.append(row("R6 MAs", "above 2of3", f"{n}/3 above", n >= 2))
             else:
-                below = sum(1 for x in mas if x is not None and float(x) < 0)
-                t1.append(("R6 MAs", "below 2 of 3 MAs", f"{below}/3 below", below >= 2))
+                n = sum(1 for x in mas if x is not None and float(x) < 0)
+                t1.append(row("R6 MAs", "below 2of3", f"{n}/3 below", n >= 2))
 
-            t1.append(("R7 Volume", f"1-mo {'buying' if side == 'LONG' else 'selling'}",
-                       "chart", None))
+            t1.append(row("R7 Volume", f"1-mo {'buying' if side=='LONG' else 'selling'} (vol ratio)",
+                          r7_val, r7_ok))
 
             if side == "LONG":
-                t1.append(("R8 RSI M/W", "RSI_m>=50 & w>=50",
-                           f"M {_f(rsi_m):.0f} / W {_f(rsi_w):.0f}" if rsi_m is not None else "—",
-                           (rsi_m is not None and rsi_w is not None and float(rsi_m) >= 50 and float(rsi_w) >= 50)))
-                t1.append(("R9 Returns", "week>0 & month>0",
-                           f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%" if wk_ret is not None else "—",
-                           (wk_ret is not None and mo_ret is not None and float(wk_ret) > 0 and float(mo_ret) > 0)))
+                t1.append(row("R8 RSI M/W", ">=50 both",
+                              f"M {_f(rsi_m):.0f} / W {_f(rsi_w):.0f}",
+                              rsi_m is not None and rsi_w is not None and float(rsi_m) >= 50 and float(rsi_w) >= 50))
+                t1.append(row("R9 Returns", "week>0 & month>0",
+                              f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
+                              wk_ret is not None and mo_ret is not None and float(wk_ret) > 0 and float(mo_ret) > 0))
             else:
-                t1.append(("R8 RSI M/W", "RSI_m<=50 & w<=50",
-                           f"M {_f(rsi_m):.0f} / W {_f(rsi_w):.0f}" if rsi_m is not None else "—",
-                           (rsi_m is not None and rsi_w is not None and float(rsi_m) <= 50 and float(rsi_w) <= 50)))
-                t1.append(("R9 Returns", "week<0 & month<0",
-                           f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%" if wk_ret is not None else "—",
-                           (wk_ret is not None and mo_ret is not None and float(wk_ret) < 0 and float(mo_ret) < 0)))
+                t1.append(row("R8 RSI M/W", "<=50 both",
+                              f"M {_f(rsi_m):.0f} / W {_f(rsi_w):.0f}",
+                              rsi_m is not None and rsi_w is not None and float(rsi_m) <= 50 and float(rsi_w) <= 50))
+                t1.append(row("R9 Returns", "week<0 & month<0",
+                              f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
+                              wk_ret is not None and mo_ret is not None and float(wk_ret) < 0 and float(mo_ret) < 0))
 
-            # R10 5-min — resolved by gate1 if supplied
-            r10_val = "Gate1 ✓" if gate1 is True else ("Gate1 ✗" if gate1 is False else "chart")
-            t1.append(("R10 5-min", f"5M {'recovery+strong' if side == 'LONG' else 'weak+weak close'}",
-                       r10_val, gate1))
+            t1.append(row("R10 5-min", "intraday strength (2/3 sub)", r10_val, r10_ok, r10_method))
 
             if side == "LONG":
-                t1.append(("R11 RSI room", "daily RSI < 80",
-                           f"{_f(rsi_d):.0f}" if rsi_d is not None else "—",
-                           (rsi_d is not None and float(rsi_d) < 80)))
+                t1.append(row("R11 RSI room", "daily<80", f"{_f(rsi_d):.0f}",
+                              rsi_d is not None and float(rsi_d) < 80))
             else:
-                t1.append(("R11 RSI room", "daily RSI > 20",
-                           f"{_f(rsi_d):.0f}" if rsi_d is not None else "—",
-                           (rsi_d is not None and float(rsi_d) > 20)))
+                t1.append(row("R11 RSI room", "daily>20", f"{_f(rsi_d):.0f}",
+                              rsi_d is not None and float(rsi_d) > 20))
 
-            # R12 Pattern — resolved by gate2 if supplied
-            r12_val = "Gate2 ✓" if gate2 is True else ("Gate2 ✗" if gate2 is False else "chart")
-            t1.append(("R12 Pattern", f"30-day {'accum/consol' if side == 'LONG' else 'distrib/brkdn'}",
-                       r12_val, gate2))
+            t1.append(row("R12 Pattern", "brkout OR HL+contraction" if side == "LONG"
+                          else "brkdwn OR LH+contraction", r12_val, r12_ok, r12_method))
 
             t1_total = 11 if side == "LONG" else 10
             t1_auto = [r for r in t1 if r[3] is not None]
-            t1_human = [r for r in t1 if r[3] is None]
             t1_pass = sum(1 for r in t1_auto if r[3])
-            t1_human_n = len(t1_human)
+            t1_unk = len(t1) - len(t1_auto)
 
-            # ════════ TIER 2 ════════
-            t2 = []
-            t2.append(("F1 News", "no blackout/ex-date", "blackout" if in_blackout else "clear", not in_blackout))
+            # ── TIER 2 ──
+            t2 = [row("F1 News", "no blackout/ex-date", "blackout" if in_blackout else "clear", not in_blackout)]
 
             if piv and cmp:
                 pp, r1, s1 = _f(piv[0]), _f(piv[1]), _f(piv[2])
                 if side == "LONG" and pp and r1:
-                    room = (r1 - cmp) / cmp * 100 if cmp else 0
-                    t2.append(("F2 Pivot", "above PP, room>1%",
-                               f"CMP {cmp:.0f} PP {pp:.0f} R1 {r1:.0f}", cmp > pp and room > 1.0))
+                    room = (r1 - cmp) / cmp * 100
+                    t2.append(row("F2 Pivot", "above PP, room>1%",
+                                  f"CMP {cmp:.0f} PP {pp:.0f} R1 {r1:.0f}", cmp > pp and room > 1.0))
                 elif side == "SHORT" and pp and s1:
-                    room = (cmp - s1) / cmp * 100 if cmp else 0
-                    t2.append(("F2 Pivot", "below PP, room>1%",
-                               f"CMP {cmp:.0f} PP {pp:.0f} S1 {s1:.0f}", cmp < pp and room > 1.0))
+                    room = (cmp - s1) / cmp * 100
+                    t2.append(row("F2 Pivot", "below PP, room>1%",
+                                  f"CMP {cmp:.0f} PP {pp:.0f} S1 {s1:.0f}", cmp < pp and room > 1.0))
                 else:
-                    t2.append(("F2 Pivot", "pivot room", "no pivot", None))
+                    t2.append(row("F2 Pivot", "pivot room", "no pivot", None))
             else:
-                t2.append(("F2 Pivot", "pivot room", "no pivot/cmp", None))
+                t2.append(row("F2 Pivot", "pivot room", "no pivot/cmp", None))
 
-            # F3 Fibonacci — proxy via gate2 (1D structure) if supplied
-            f3_val = "Gate2 ✓" if gate2 is True else ("Gate2 ✗" if gate2 is False else "chart")
-            t2.append(("F3 Fib", "at 38.2/50/61.8", f3_val, gate2))
+            t2.append(row("F3 Fib", "near 38.2/50/61.8 (±1.5%)", f3_val, f3_ok))
 
             if piv and cmp:
                 pp, r1, s1 = _f(piv[0]), _f(piv[1]), _f(piv[2])
-                if side == "LONG" and r1 and s1 and cmp:
+                rr = None
+                if side == "LONG" and r1 and s1:
                     risk = cmp - s1
-                    rr = (r1 - cmp) / risk if risk and risk > 0 else None
-                    t2.append(("F4 R:R", ">=1:2", f"{rr:.2f}" if rr else "—", (rr is not None and rr >= 2.0)))
-                elif side == "SHORT" and s1 and r1 and cmp:
+                    rr = (r1 - cmp) / risk if risk > 0 else None
+                elif side == "SHORT" and r1 and s1:
                     risk = r1 - cmp
-                    rr = (cmp - s1) / risk if risk and risk > 0 else None
-                    t2.append(("F4 R:R", ">=1:2", f"{rr:.2f}" if rr else "—", (rr is not None and rr >= 2.0)))
-                else:
-                    t2.append(("F4 R:R", ">=1:2", "no pivot", None))
+                    rr = (cmp - s1) / risk if risk > 0 else None
+                t2.append(row("F4 R:R", ">=1:2", f"{rr:.2f}" if rr is not None else "—",
+                              rr is not None and rr >= 2.0))
             else:
-                t2.append(("F4 R:R", ">=1:2", "no pivot", None))
+                t2.append(row("F4 R:R", ">=1:2", "no pivot", None))
 
-            win = "14:00-15:30" if side == "LONG" else "10:30-12:00"
-            t2.append(("F5 Window", f"{win} IST", "manual", None))
-            t2.append(("F6 Instrument", "Futures 1-5d DTE>=3", "manual", None))
+            t2.append(row("F5 Window", "LONG 14:00-15:30 / SHORT 10:30-12:00", f5_val, f5_ok))
+            t2.append(row("F6 Instrument", "futures DTE>=3", f6_val, f6_ok))
 
-            if basis_rows and len(basis_rows) >= 2:
-                lb = _f(basis_rows[0][1]); ob = _f(basis_rows[-1][1])
-                if lb is not None and ob is not None:
-                    f7_ok = lb >= ob if side == "LONG" else lb <= ob
-                    t2.append(("F7 Deriv", "OI + basis", f"basis {lb:.1f}", f7_ok))
-                else:
-                    t2.append(("F7 Deriv", "OI + basis", "no basis", None))
+            if len(basis) >= 2 and basis[0] is not None and basis[-1] is not None:
+                f7_ok = basis[0] >= basis[-1] if side == "LONG" else basis[0] <= basis[-1]
+                t2.append(row("F7 Deriv", "basis trend aligned", f"basis {basis[0]:.2f}%", f7_ok))
             else:
-                t2.append(("F7 Deriv", "OI + basis", "no basis", None))
+                t2.append(row("F7 Deriv", "OI + basis", "no basis", None))
 
             t2_auto = [r for r in t2 if r[3] is not None]
-            t2_human = [r for r in t2 if r[3] is None]
             t2_pass = sum(1 for r in t2_auto if r[3])
-            t2_human_n = len(t2_human)
+            t2_unk = len(t2) - len(t2_auto)
 
             # ── verdict ──
-            best_t1 = t1_pass + t1_human_n
-            best_t2 = t2_pass + t2_human_n
+            best_t1 = t1_pass + t1_unk
             if best_t1 < 8:
-                verdict = f"REJECT — Tier1 max {best_t1}/{t1_total}, can't reach 8."
-                vclass = "reject"
+                verdict, vclass = f"REJECT — Tier1 max {best_t1}/{t1_total}, can't reach 8.", "reject"
             elif t1_pass >= 8 and t2_pass >= 5:
                 if t1_pass >= 10 and t2_pass >= 6:
-                    verdict = f"STRONG — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7. Clean setup."
-                    vclass = "strong"
+                    verdict, vclass = f"STRONG — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7.", "strong"
                 else:
-                    verdict = f"VALID — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7. Entry allowed."
-                    vclass = "valid"
+                    verdict, vclass = f"VALID — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7. Entry allowed.", "valid"
+            elif t1_unk or t2_unk:
+                verdict, vclass = (f"CONDITIONAL — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7; "
+                                   f"{t1_unk + t2_unk} unresolved (missing data).", "conditional")
             else:
-                if t1_human_n or t2_human_n:
-                    verdict = (f"CONDITIONAL — objective Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7. "
-                               f"Depends on remaining chart confirmations.")
-                    vclass = "conditional"
-                else:
-                    verdict = f"WEAK — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7 below threshold."
-                    vclass = "weak"
+                verdict, vclass = f"WEAK — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7 below threshold.", "weak"
 
-            ts = datetime.now().strftime("%d-%b %H:%M IST")
+            def st(ok):
+                return "chart" if ok is None else ("pass" if ok else "fail")
+
             return {
                 "ok": True, "symbol": symbol, "company": company, "segment": segment,
-                "side": side, "gvm": _f(gvm), "ts": ts,
-                "tier1": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3])} for r in t1],
-                "tier2": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3])} for r in t2],
-                "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_human_n, "t1_total": t1_total,
-                "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_human_n,
+                "side": side, "gvm": _f(gvm), "ts": _ist_now().strftime("%d-%b %H:%M IST"),
+                "tier1": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3]), "method": r[4]} for r in t1],
+                "tier2": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3]), "method": r[4]} for r in t2],
+                "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_unk, "t1_total": t1_total,
+                "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk,
                 "verdict": verdict, "verdict_class": vclass,
             }
     except Exception as e:
         return {"ok": False, "error": f"DB error: {str(e)[:160]}"}
 
 
-def native_trade_check(query: str, gate1: bool = None, gate2: bool = None) -> str:
-    """Markdown wrapper (used by native_router for /ask text path)."""
-    side = _parse_side(query)
-    d = compute_trade_check(query, side, gate1, gate2)
+def compute_single_rule(symbol, side, rule):
+    """Single-parameter API: returns just one rule's row from the composite."""
+    d = compute_trade_check(symbol, side)
+    if not d.get("ok"):
+        return d
+    rule = rule.upper().replace(" ", "")
+    for r in d["tier1"] + d["tier2"]:
+        if r["rule"].upper().replace(" ", "").startswith(rule):
+            return {"ok": True, "symbol": d["symbol"], "side": d["side"], **r}
+    return {"ok": False, "error": f"Unknown rule '{rule}'. Use R1-R12 or F1-F7."}
+
+
+def native_trade_check(query, gate1=None, gate2=None):
+    """Markdown wrapper for /ask + native_router."""
+    d = compute_trade_check(query, _parse_side(query), gate1, gate2)
     if not d.get("ok"):
         return f"**Trade Check — v3.3**\n{d.get('error', 'error')}"
 
-    def mark(state):
-        return {"pass": "PASS", "fail": "FAIL", "chart": "🟡 chart"}[state]
+    def mark(r):
+        s = {"pass": "PASS", "fail": "FAIL", "chart": "🟡 no data"}[r["state"]]
+        return s + (" (gate)" if r.get("method") == "gate" else "")
 
     out = [f"**Trade Check v3.3 — {d['company']} ({d['symbol']}) · {d['side']}**"]
     gv = f"GVM {d['gvm']:.2f} · " if d.get("gvm") is not None else ""
-    out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0_")
-    out.append("\n**TIER 1** _(objective from DB; chart rows need confirmation)_")
+    out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0 · all-auto engine v3_")
+    out.append("\n**TIER 1**")
     out.append("| Rule | Condition | Value | State |")
     out.append("| --- | --- | --- | --- |")
     for r in d["tier1"]:
-        out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r['state'])} |")
-    out.append(f"\n**Tier1: {d['t1_pass']}/{d['t1_auto_n']} auto-pass** "
-               f"({d['t1_human_n']} chart) · need 8/{d['t1_total']}")
-    out.append("\n**TIER 2** _(min 5/7 to enter)_")
+        out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r)} |")
+    out.append(f"\n**Tier1: {d['t1_pass']}/{d['t1_total']}** · need 8")
+    out.append("\n**TIER 2**")
     out.append("| Filter | Condition | Value | State |")
     out.append("| --- | --- | --- | --- |")
     for r in d["tier2"]:
-        out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r['state'])} |")
-    out.append(f"\n**Tier2: {d['t2_pass']}/{d['t2_auto_n']} auto-pass** "
-               f"({d['t2_human_n']} manual) · need 5/7")
-    out.append("\n---")
-    out.append(f"**Verdict: {d['verdict']}**")
-    out.append("_Personal trade context — not a V8 algo signal. v3.3 objective subset._")
+        out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r)} |")
+    out.append(f"\n**Tier2: {d['t2_pass']}/7** · need 5")
+    out.append(f"\n---\n**Verdict: {d['verdict']}**")
+    out.append("_Personal trade context — not a V8 algo signal._")
     return "\n".join(out)
