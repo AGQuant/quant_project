@@ -8,7 +8,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
-  html,body{margin:0;padding:0;background:#0a0d14;min-height:100vh;}
+  html,body{margin:0;padding:0;background:#0a0d14;height:100%;overflow:hidden;}
+  #root{height:100vh;}
   *{box-sizing:border-box;}
 </style>
 </head>
@@ -45,17 +46,16 @@ const C = {
 };
 
 const MODELS = [
-  { id: "v8",     icon: "⇄", label: "V8 Long-Short",       sub: "Futures · 5 Baskets",   color: C.accent,  live: true,  desc: "Live paper engine · Mood gate · Pivots" },
-  { id: "max",    icon: "✦", label: "Max Chat",            sub: "AI CIO Assistant",      color: "#7c5cff", live: true,  desc: "Conversational research · All models · Ask anything" },
-  { id: "gvm",    icon: "▦", label: "GVM Scoring",         sub: "1,762 stocks · Peer-rel", color: C.gold,    live: true,  desc: "Search any company · Full peer-benchmark report" },
-  { id: "sector", icon: "◉", label: "Sector Intelligence", sub: "129 segments",          color: C.purple,  live: false, desc: "Rotation map · Coming soon" },
-  { id: "qb",     icon: "⌂", label: "Quant Basket",        sub: "4 Baskets · Equity",    color: C.green,   live: false, desc: "Buy-and-hold · Coming soon" },
-  { id: "health", icon: "◷", label: "Portfolio Health",    sub: "Score card · Risk",     color: C.orange,  live: false, desc: "Winners · Losers · Coming soon" },
-  { id: "v10",    icon: "⟁", label: "Nifty Options V10",   sub: "ST + EMA · Advisory",   color: "#ec4899", live: false, desc: "SuperTrend + EMA · Coming soon" },
+  { id: "v8",     icon: "⇄", label: "V8 Long-Short",       color: C.accent,  live: true },
+  { id: "max",    icon: "✦", label: "Max Chat",            color: "#7c5cff", live: true },
+  { id: "gvm",    icon: "▦", label: "GVM Scoring",         color: C.gold,    live: true },
+  { id: "sector", icon: "◉", label: "Sector Intelligence", color: C.purple,  live: false },
+  { id: "qb",     icon: "⌂", label: "Quant Basket",        color: C.green,   live: false },
+  { id: "health", icon: "◷", label: "Portfolio Health",    color: C.orange,  live: false },
+  { id: "v10",    icon: "⟁", label: "Nifty Options V10",   color: "#ec4899", live: false },
 ];
 
 const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
-const pct = (n, d = 1) => n == null ? "—" : `${n > 0 ? "+" : ""}${Number(n).toFixed(d)}%`;
 const gvmColor = (g) => g == null ? C.muted : g >= 8 ? C.green : g >= 7 ? C.gold : g >= 6 ? C.orange : C.red;
 const ratingColor = (r) => r == null ? C.muted : r >= 7 ? C.green : r >= 5 ? C.gold : C.red;
 const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#86efac", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
@@ -79,39 +79,14 @@ function Tag({ children, color = C.accent }) {
   );
 }
 
-// ── Max: iframe CIO chat cockpit ─────────────────────────────────────────────
-function MaxModule() {
+// ── Full-screen iframe wrapper (V8 + Max) ────────────────────────────────────
+function FrameModule({ src }) {
   return (
-    <div>
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
-        Max — AI CIO assistant · live from <span style={{ fontFamily: "monospace", color: "#7c5cff" }}>/cio</span>
-      </div>
-      <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${C.border}`, background: C.card }}>
-        <iframe
-          src={`${API}/cio`}
-          title="Max Chat"
-          style={{ width: "100%", height: "calc(100vh - 200px)", minHeight: 600, border: "none", display: "block", background: "#fff" }}
-        />
-      </div>
-    </div>
-  );
-}
-
-// ── V8: iframe original dashboard ────────────────────────────────────────────
-function V8Module() {
-  return (
-    <div>
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
-        Original V8 dashboard — live from <span style={{ fontFamily: "monospace", color: C.accent }}>/dashboard</span>
-      </div>
-      <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${C.border}`, background: C.card }}>
-        <iframe
-          src={`${API}/dashboard`}
-          title="V8 Dashboard"
-          style={{ width: "100%", height: "calc(100vh - 200px)", minHeight: 600, border: "none", display: "block", background: "#fff" }}
-        />
-      </div>
-    </div>
+    <iframe
+      src={src}
+      title="frame"
+      style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#fff" }}
+    />
   );
 }
 
@@ -127,7 +102,6 @@ function GvmModule() {
   const boxRef = useRef(null);
   const debounce = useRef(null);
 
-  // autocomplete
   useEffect(() => {
     if (!query || query.length < 1) { setSuggest([]); return; }
     clearTimeout(debounce.current);
@@ -156,51 +130,52 @@ function GvmModule() {
   };
 
   return (
-    <div>
-      {/* Search bar */}
-      <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "0 auto 24px" }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          <div style={{ position: "relative", flex: 1 }}>
-            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 15 }}>⌕</span>
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value.toUpperCase())}
-              onFocus={() => suggest.length && setShowSug(true)}
-              onKeyDown={e => { if (e.key === "Enter" && suggest[0]) loadReport(suggest[0].symbol); }}
-              placeholder="Search any company — e.g. TCS, RELIANCE, HDFCBANK"
-              style={{ width: "100%", padding: "12px 14px 12px 38px", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 14, outline: "none" }}
-            />
+    <div style={{ height: "100%", overflowY: "auto", padding: "24px" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "0 auto 24px" }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 15 }}>⌕</span>
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value.toUpperCase())}
+                onFocus={() => suggest.length && setShowSug(true)}
+                onKeyDown={e => { if (e.key === "Enter" && suggest[0]) loadReport(suggest[0].symbol); }}
+                placeholder="Search any company — e.g. TCS, RELIANCE, HDFCBANK"
+                style={{ width: "100%", padding: "12px 14px 12px 38px", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontSize: 14, outline: "none" }}
+              />
+            </div>
+            <button onClick={() => suggest[0] && loadReport(suggest[0].symbol)}
+              style={{ padding: "0 20px", borderRadius: 10, border: "none", background: C.gold, color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              Search
+            </button>
           </div>
-          <button onClick={() => suggest[0] && loadReport(suggest[0].symbol)}
-            style={{ padding: "0 20px", borderRadius: 10, border: "none", background: C.gold, color: "#000", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-            Search
-          </button>
+          {showSug && suggest.length > 0 && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
+              {suggest.map(s => (
+                <div key={s.symbol} onClick={() => loadReport(s.symbol)}
+                  style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${C.gridLine}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                  onMouseEnter={e => e.currentTarget.style.background = C.border}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{s.symbol}</span>
+                    <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>{s.company_name}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{s.gvm_score?.toFixed(2)}</span>
+                    <Tag color={verdictColor(s.verdict)}>{s.verdict}</Tag>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {showSug && suggest.length > 0 && (
-          <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.5)" }}>
-            {suggest.map(s => (
-              <div key={s.symbol} onClick={() => loadReport(s.symbol)}
-                style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${C.gridLine}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
-                onMouseEnter={e => e.currentTarget.style.background = C.border}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: C.accent }}>{s.symbol}</span>
-                  <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>{s.company_name}</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: gvmColor(s.gvm_score), fontFamily: "monospace" }}>{s.gvm_score?.toFixed(2)}</span>
-                  <Tag color={verdictColor(s.verdict)}>{s.verdict}</Tag>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {!symbol && !loading && <GvmEmptyState onPick={loadReport} />}
-      {loading && <Loader msg={`Building ${symbol} peer-benchmark report…`} />}
-      {err && <div style={{ textAlign: "center", color: C.red, padding: 24 }}>{err}</div>}
-      {report && !loading && <GvmReport r={report} />}
+        {!symbol && !loading && <GvmEmptyState onPick={loadReport} />}
+        {loading && <Loader msg={`Building ${symbol} peer-benchmark report…`} />}
+        {err && <div style={{ textAlign: "center", color: C.red, padding: 24 }}>{err}</div>}
+        {report && !loading && <GvmReport r={report} />}
+      </div>
     </div>
   );
 }
@@ -259,7 +234,6 @@ function GvmReport({ r }) {
 
   return (
     <div>
-      {/* Header card */}
       <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16, display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ textAlign: "center", minWidth: 120 }}>
           <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
@@ -288,7 +262,6 @@ function GvmReport({ r }) {
         </div>
       </div>
 
-      {/* Punchline */}
       {r.punchline && (
         <div style={{ background: `${vc}10`, border: `1px solid ${vc}30`, borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
           <div style={{ fontSize: 10, color: vc, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Expert Verdict</div>
@@ -296,7 +269,6 @@ function GvmReport({ r }) {
         </div>
       )}
 
-      {/* Group ratings */}
       {r.group_scores && Object.keys(r.group_scores).length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(5, Object.keys(r.group_scores).length)},1fr)`, gap: 10, marginBottom: 16 }}>
           {Object.entries(r.group_scores).map(([g, v]) => (
@@ -308,7 +280,6 @@ function GvmReport({ r }) {
         </div>
       )}
 
-      {/* Positives / Negatives */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "14px 16px" }}>
           <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>✓ Key Strengths</div>
@@ -328,7 +299,6 @@ function GvmReport({ r }) {
         </div>
       </div>
 
-      {/* Peer benchmark by group */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
           <div>
@@ -344,7 +314,6 @@ function GvmReport({ r }) {
         ))}
       </div>
 
-      {/* Segment rank ladder */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: C.purple, marginBottom: 4 }}>Segment Rank Ladder</div>
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{r.segment} · ranked by GVM</div>
@@ -359,7 +328,6 @@ function GvmReport({ r }) {
         ))}
       </div>
 
-      {/* Company content */}
       {r.content?.overview && (
         <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />
       )}
@@ -370,7 +338,7 @@ function GvmReport({ r }) {
         <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />
       )}
 
-      <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 4px" }}>
+      <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
       </div>
     </div>
@@ -389,118 +357,77 @@ function ContentCard({ title, color, body, updated }) {
   );
 }
 
-// ── Placeholder for coming models ────────────────────────────────────────────
 function ComingSoon({ mod }) {
   return (
-    <div style={{ textAlign: "center", padding: "80px 20px" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px" }}>
       <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.4 }}>{mod.icon}</div>
       <div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{mod.label}</div>
-      <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>{mod.desc}</div>
       <div style={{ marginTop: 16 }}><Tag color={mod.color}>Building in coming days</Tag></div>
     </div>
   );
 }
 
-// ── Home ─────────────────────────────────────────────────────────────────────
-function HomePage({ onNavigate }) {
-  return (
-    <div>
-      <div style={{ background: `linear-gradient(135deg, ${C.accent}08 0%, ${C.purple}08 100%)`, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 24 }}>
-        <div style={{ fontSize: 22, fontWeight: 900, color: C.text, letterSpacing: "-0.02em" }}>V8 <span style={{ color: C.accent }}>Model</span></div>
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Learn More. Score More. · Proprietary quant models</div>
-      </div>
+// ── Compact ⋯ switcher ───────────────────────────────────────────────────────
+function Switcher({ current, onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const mod = MODELS.find(m => m.id === current);
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14 }}>
-        {MODELS.map(m => (
-          <button key={m.id} onClick={() => onNavigate(m.id)}
-            style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 20px", cursor: "pointer", textAlign: "left", position: "relative", overflow: "hidden", opacity: m.live ? 1 : 0.78 }}
-            onMouseEnter={e => { e.currentTarget.style.border = `1px solid ${m.color}60`; e.currentTarget.style.background = `${m.color}06`; }}
-            onMouseLeave={e => { e.currentTarget.style.border = `1px solid ${C.border}`; e.currentTarget.style.background = C.card; }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${m.color}, ${m.color}40)` }} />
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-              <div style={{ fontSize: 26, width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: m.color + "15", borderRadius: 10, border: `1px solid ${m.color}30`, color: m.color }}>{m.icon}</div>
-              <Tag color={m.live ? C.green : C.muted}>{m.live ? "Live" : "Soon"}</Tag>
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 3 }}>{m.label}</div>
-            <div style={{ fontSize: 11, color: m.color, marginBottom: 8 }}>{m.sub}</div>
-            <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>{m.desc}</div>
-            <div style={{ position: "absolute", bottom: 14, right: 16, color: m.color, fontSize: 16, opacity: 0.5 }}>→</div>
-          </button>
-        ))}
-      </div>
-
-      <div style={{ marginTop: 20, padding: "12px 16px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 11, color: C.muted }}>🔴 Live · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</div>
-        <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>V8 Model · proprietary quant</div>
-      </div>
-    </div>
-  );
-}
-
-function InnerPage({ moduleId, onBack }) {
-  const mod = MODELS.find(m => m.id === moduleId);
-  if (!mod) return null;
-  let body;
-  if (moduleId === "v8") body = <V8Module />;
-  else if (moduleId === "max") body = <MaxModule />;
-  else if (moduleId === "gvm") body = <GvmModule />;
-  else body = <ComingSoon mod={mod} />;
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
-        <button onClick={onBack} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 14px", cursor: "pointer", fontSize: 12, color: C.muted }}>← Home</button>
-        <div style={{ width: 1, height: 16, background: C.border }} />
-        <div style={{ width: 32, height: 32, background: mod.color + "15", border: `1px solid ${mod.color}30`, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: mod.color, fontSize: 16 }}>{mod.icon}</div>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{mod.label}</div>
-          <div style={{ fontSize: 11, color: C.muted }}>{mod.sub}</div>
+    <div ref={ref} style={{ position: "fixed", top: 12, right: 12, zIndex: 1000 }}>
+      <button onClick={() => setOpen(o => !o)}
+        title="Switch model"
+        style={{ display: "flex", alignItems: "center", gap: 8, height: 34, padding: "0 12px", borderRadius: 8, border: `1px solid ${mod.color}40`, background: "rgba(15,20,32,0.92)", backdropFilter: "blur(8px)", color: mod.color, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+        <span style={{ fontSize: 14 }}>{mod.icon}</span>
+        <span style={{ letterSpacing: "0.12em", color: C.muted, fontSize: 16, lineHeight: 1 }}>⋯</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: 40, right: 0, minWidth: 210, background: "rgba(15,20,32,0.97)", backdropFilter: "blur(10px)", border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 10px 30px rgba(0,0,0,0.6)" }}>
+          {MODELS.map(m => (
+            <button key={m.id} disabled={!m.live} onClick={() => { if (m.live) { onPick(m.id); setOpen(false); } }}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", border: "none", borderLeft: current === m.id ? `3px solid ${m.color}` : "3px solid transparent", background: current === m.id ? `${m.color}14` : "transparent", color: m.live ? (current === m.id ? m.color : C.text) : C.muted, cursor: m.live ? "pointer" : "not-allowed", fontSize: 13, fontWeight: 600, textAlign: "left", opacity: m.live ? 1 : 0.5 }}
+              onMouseEnter={e => { if (m.live && current !== m.id) e.currentTarget.style.background = C.border; }}
+              onMouseLeave={e => { if (current !== m.id) e.currentTarget.style.background = "transparent"; }}>
+              <span style={{ width: 18, textAlign: "center", color: m.color }}>{m.icon}</span>
+              <span style={{ flex: 1 }}>{m.label}</span>
+              {!m.live && <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase" }}>soon</span>}
+              {current === m.id && <span style={{ color: m.color }}>✓</span>}
+            </button>
+          ))}
         </div>
-        <div style={{ marginLeft: "auto", fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
-          {new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" })} IST
-        </div>
-      </div>
-      {body}
+      )}
     </div>
   );
 }
 
 function App() {
-  const [page, setPage] = useState("home");
+  const [page, setPage] = useState("v8");
+
+  let body;
+  if (page === "v8") body = <FrameModule src={`${API}/dashboard`} />;
+  else if (page === "max") body = <FrameModule src={`${API}/cio`} />;
+  else if (page === "gvm") body = <GvmModule />;
+  else body = <ComingSoon mod={MODELS.find(m => m.id === page)} />;
+
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif", paddingBottom: 40 }}>
+    <div style={{ height: "100vh", width: "100vw", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif", position: "relative", overflow: "hidden" }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0a0d14; }
         ::-webkit-scrollbar-thumb { background: #1e2540; border-radius: 3px; }
         button { transition: all 0.15s ease; }
         input::placeholder { color: #475569; }
       `}</style>
-
-      <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: "0 24px", display: "flex", alignItems: "center", gap: 16, height: 52, position: "sticky", top: 0, zIndex: 100 }}>
-        <button onClick={() => setPage("home")} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 28, height: 28, background: C.accent, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, color: "#000" }}>V8</div>
-          <span style={{ fontSize: 14, fontWeight: 800, color: C.text, letterSpacing: "0.05em" }}>V8 MODEL</span>
-        </button>
-        <div style={{ width: 1, height: 20, background: C.border }} />
-        <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
-          {MODELS.map(m => (
-            <button key={m.id} onClick={() => setPage(m.id)} style={{ padding: "5px 10px", borderRadius: 5, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", background: page === m.id ? m.color + "20" : "transparent", color: page === m.id ? m.color : C.muted, borderBottom: page === m.id ? `2px solid ${m.color}` : "2px solid transparent" }}>
-              {m.icon} {m.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.green, boxShadow: `0 0 6px ${C.green}`, animation: "pulse 2s ease-in-out infinite" }} />
-          <span style={{ fontSize: 10, color: C.muted }}>LIVE</span>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px 24px 0" }}>
-        {page === "home" ? <HomePage onNavigate={setPage} /> : <InnerPage moduleId={page} onBack={() => setPage("home")} />}
-      </div>
+      <Switcher current={page} onPick={setPage} />
+      <div style={{ height: "100%", width: "100%" }}>{body}</div>
     </div>
   );
 }
