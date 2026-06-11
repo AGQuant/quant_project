@@ -27,8 +27,8 @@ FILTER_CONFIG reorder (06-Jun-2026):
 GVM gate (08-Jun-2026): buy baskets relaxed gvm_score min 7.0 -> 6.0
   (lets in 'Watch' band 6-7). Widens buy universe ~46 -> ~123. Permanent spec change.
 
-mom_2d formula (renamed from day_change 10-Jun-2026):
-  (cmp / close_2_days_ago - 1) * 100 — 2-day momentum (T vs T-2, intentional 2-candle gap).
+mom_2d formula: (cmp / close_2_days_ago - 1) * 100 — 2-day momentum (T vs T-2).
+  Renamed from 'day_change' 10-Jun-2026 to remove naming confusion (it was never 1-day).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -46,7 +46,7 @@ def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
-# ── Filter configs ───────────────────────────────────────────────────────────
+# ── Filter configs ────────────────────────────────────────────────────────────
 # Ordered by descending kill rate for optimal funnel waterfall display.
 
 FILTER_CONFIG = {
