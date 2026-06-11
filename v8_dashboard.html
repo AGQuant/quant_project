@@ -809,7 +809,7 @@ function scAutoSearch(val){
       dd.innerHTML=items.map(r=>`<div onclick="scSetSymbol('${r.symbol}')"
         style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line);color:var(--txt)"
         onmouseover="this.style.background='var(--panel)'" onmouseout="this.style.background=''">
-        <b>${r.symbol}</b> <span style="color:var(--mut);font-size:11px">${r.name||''}</span>
+        <b>${r.symbol}</b> <span style="color:var(--mut);font-size:11px">${r.company_name||r.name||''}</span>
         <span style="float:right;color:var(--cyan);font-family:'Space Mono';font-size:11px">GVM ${num(r.gvm_score,1)}</span>
       </div>`).join('');
       dd.style.display='block';
@@ -847,15 +847,25 @@ async function runStockCheck(){
   const btn=document.getElementById('scRunBtn');
   if(btn){btn.disabled=true;btn.textContent='Analysing…';}
   const resEl=document.getElementById('scResult');
-  resEl.innerHTML=`<div class="loading">Running trade check on ${sym}…</div>`;
+  resEl.innerHTML=`<div class="loading">Running trade check on ${sym}… (may take 20-40s)</div>`;
   try{
-    const payload={
-      message:`Run a complete Trade Check on ${sym} for a ${scSide} trade.\nGate 1 (5-min chart strength): ${scGate1?'PASS':'FAIL'}\nGate 2 (1-Day chart reversal/breakout): ${scGate2?'PASS':'FAIL'}\nSide: ${scSide}\n\nRun BOTH frameworks:\n1. PRIMARY v3.3: Tier1 (${scSide==='LONG'?'11':'10'} rules, min 8) + Tier2 (7 filters, min 5/7). Show full table. Score + verdict.\n2. SECONDARY v3.4.1: One-line weighted score /21.\n\nContext: personal trade check only. Never apply V8 basket/mood rules. Use v8_metrics, gvm_scores, sector_ratings, futures_basis.`,
-      claude_on:true,symbol:sym,side:scSide
-    };
-    const r=await fetch(API_BASE+EP.scorr,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const prompt=`Run a complete Trade Check on ${sym} for a ${scSide} trade.\nGate 1 (5-min chart strength): ${scGate1?'PASS':'FAIL'}\nGate 2 (1-Day chart reversal/breakout): ${scGate2?'PASS':'FAIL'}\nSide: ${scSide}\n\nRun BOTH frameworks:\n1. PRIMARY v3.3: Tier1 (${scSide==='LONG'?'11':'10'} rules, min 8) + Tier2 (7 filters, min 5/7). Show full table. Score + verdict.\n2. SECONDARY v3.4.1: One-line weighted score /21.\n\nContext: personal trade check only. Never apply V8 basket/mood rules. Use v8_metrics, gvm_scores, sector_ratings, futures_basis.`;
+    const r=await fetch(API_BASE+EP.scorr,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        messages:[{role:'user',content:prompt}],
+        claude_on:true,
+        use_tools:true,
+        budget_cap_usd:0.05
+      })
+    });
     const d=await r.json();
-    const text=d.response||d.message||d.answer||JSON.stringify(d);
+    if(!r.ok){
+      resEl.innerHTML=`<div class="err">⚠ ${d.detail||('HTTP '+r.status)}</div>`;
+      scRunning=false; if(btn){btn.disabled=false;btn.textContent='RUN TRADE CHECK →';} return;
+    }
+    const text=d.reply||d.response||d.message||'(no response returned)';
     resEl.innerHTML=renderScResult(text,sym,scSide);
   }catch(e){
     resEl.innerHTML=`<div class="err">⚠ ${e.message}</div>`;
