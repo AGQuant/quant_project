@@ -182,7 +182,6 @@ function inr(x){ if(x===null||x===undefined||isNaN(x)) return "—";
   return "₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0}); }
 function pnlCls(x){ return Number(x)>=0?"pos":"neg"; }
 
-// Fixed IST formatter — always UTC+5:30, no browser offset dependency
 function fmtTs(ts){
   if(!ts) return "—";
   try{
@@ -313,7 +312,6 @@ function renderMaster(){
   const open=(p&&p.open_positions)||[], sum=(p&&p.summary)||{};
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const sectors=(cache.scan&&cache.scan.sectors)||[];
-  // C2: filter by avg_day_1d sign
   const top8=sectors.filter(s=>s.avg_day_1d > 0).slice(0,8);
   const bot8=sectors.filter(s=>s.avg_day_1d < 0).slice(-8).reverse();
   const cards=`<div class="cards">
@@ -353,7 +351,36 @@ function posTable(open){
     </tr>`, {empty:"No open positions"});
 }
 
-// C3+C4+C6: unified basket tab layout — Symbol|1D Live%|Sector|2D Mom%|DMA50|DMA200|RSI(m)|RSI(w)|52W|Vol×|GVM|Since|PP/R1/S1
+// Pivot bar: S1 ──[red zone]── PP ──[green zone]── R1  with CMP ▲/▼ arrow
+function pivotBar(cmp, pp, r1, s1){
+  if(!pp || !r1 || !s1) return '<span style="color:var(--dim);font-size:11px">—</span>';
+  const lo=parseFloat(s1), mid=parseFloat(pp), hi=parseFloat(r1), c=parseFloat(cmp||0);
+  const range = hi - lo;
+  if(range <= 0) return '<span style="color:var(--dim);font-size:11px">—</span>';
+  const cmpPct = Math.min(100, Math.max(0, (c - lo) / range * 100));
+  const ppPct  = ((mid - lo) / range * 100).toFixed(1);
+  const buyW   = (100 - parseFloat(ppPct)).toFixed(1);
+  const arrowColor = c >= hi ? 'var(--grn)' : c >= mid ? 'var(--amber)' : 'var(--red)';
+  const arrow = c >= mid ? '▲' : '▼';
+  return `<div style="display:inline-block;width:160px;vertical-align:middle;padding:2px 0">
+    <div style="position:relative;height:20px">
+      <div style="position:absolute;top:10px;left:0;right:0;height:3px;background:var(--line2);border-radius:2px"></div>
+      <div style="position:absolute;top:10px;left:0;width:${ppPct}%;height:3px;background:#3a1620;border-radius:2px 0 0 2px"></div>
+      <div style="position:absolute;top:10px;left:${ppPct}%;width:${buyW}%;height:3px;background:#0f3b2c;border-radius:0 2px 2px 0"></div>
+      <div style="position:absolute;top:7px;left:0;width:2px;height:9px;background:var(--red);border-radius:1px"></div>
+      <div style="position:absolute;top:7px;left:${ppPct}%;width:2px;height:9px;background:var(--mut);border-radius:1px;transform:translateX(-50%)"></div>
+      <div style="position:absolute;top:7px;right:0;width:2px;height:9px;background:var(--grn);border-radius:1px"></div>
+      <div style="position:absolute;top:1px;left:${cmpPct.toFixed(1)}%;transform:translateX(-50%);font-size:9px;color:${arrowColor};line-height:1;font-weight:700">${arrow}</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';margin-top:0px;line-height:1.2">
+      <span style="color:var(--red)">${Math.round(lo)}</span>
+      <span style="color:var(--mut)">${Math.round(mid)}</span>
+      <span style="color:var(--grn)">${Math.round(hi)}</span>
+    </div>
+  </div>`;
+}
+
+// Unified basket tab layout — Symbol|1D Live%|Sector|2D Mom%|DMA50|DMA200|RSI(m)|RSI(w)|52W|Vol×|GVM|Since|CMP|S1─PP─R1
 function renderFunnel(b){
   const d=cache['q_'+b.id];
   if(!d) return '<div class="loading">…</div>';
@@ -363,13 +390,10 @@ function renderFunnel(b){
     ["mom_2d","2D Mom%"],["dma_50","DMA50"],["dma_200","DMA200"],
     ["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W"],
     ["vol_ratio","Vol×"],["gvm_score","GVM"],
-    ["first_seen","Since"],["_pivot","PP / R1 / S1"]
+    ["first_seen","Since"],["cmp","CMP"],["_pivot","S1 ─ PP ─ R1"]
   ];
   return meta+sortTbl('q_'+b.id, cols,
     d.stocks||[], x=>{
-      const pivStr = (x.pp||x.r1||x.s1)
-        ? `${num(x.pp,0)} / ${num(x.r1,0)} / ${num(x.s1,0)}`
-        : '—';
       return `<tr>
         <td class="sym">${x.symbol}</td>
         <td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td>
@@ -383,7 +407,8 @@ function renderFunnel(b){
         <td>${num(x.vol_ratio,2)}</td>
         <td>${num(x.gvm_score,2)}</td>
         <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
-        <td class="piv-cell">${pivStr}</td>
+        <td style="font-family:'Space Mono';font-size:12px">${num(x.cmp,2)}</td>
+        <td style="white-space:nowrap">${pivotBar(x.cmp, x.pp, x.r1, x.s1)}</td>
       </tr>`;
     }, {sortKey:'gvm_score', dir:-1, empty:`No qualified names — gate may be closed for this side.`});
 }
@@ -456,7 +481,7 @@ function renderRaw(){
     {sortKey:'mom_2d', dir:-1, empty:"No metrics"});
 }
 
-/* C8: Filter Scan — numeric gate score X/N */
+/* Filter Scan — numeric gate score X/N */
 let scanMode='gainers';
 function renderScan(){
   const sc=cache.scan; if(!sc) return '<div class="loading">…</div>';
@@ -496,16 +521,15 @@ function renderScan(){
 }
 function scanSet(m){ scanMode=m; document.getElementById('panel8').innerHTML=renderScan(); }
 
-/* C9: Filter Funnel — pivot_room stage shown in table */
+/* Filter Funnel */
 let ffBasket='buy_reversal';
 function ffSet(b){ ffBasket=b; loadFF(); }
 function preFreezeBanner(){
   const now = Date.now();
   const ist = new Date(now + (5*60+30)*60000);
   const dow=ist.getUTCDay(), mins=ist.getUTCHours()*60+ist.getUTCMinutes();
-  const weekday = dow>=1 && dow<=5;
-  if(weekday && mins < 945){
-    return `<div class="err" style="margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate. Numbers fill in after 15:45 EOD freeze.</div>`;
+  if(dow>=1 && dow<=5 && mins < 945){
+    return `<div class="err" style="margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate.</div>`;
   }
   return '';
 }
@@ -521,22 +545,19 @@ async function loadFF(){
   if(fd && fd.stages){
     html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
     html+=sortTbl('ffs',
-      [["metric","Filter"],["min","Min"],["max","Max"],["survivors","Survivors"],
-       ["killed","Killed"],["kill_pct","Kill %"]],
+      [["metric","Filter"],["min","Min"],["max","Max"],["survivors","Survivors"],["killed","Killed"],["kill_pct","Kill %"]],
       fd.stages, s=>`<tr>
         <td class="sym">${s.metric.replace(/_/g,' ')}</td>
-        <td>${s.min===null?'—':s.min}</td>
-        <td>${s.max===null?'—':s.max}</td>
+        <td>${s.min===null?'—':s.min}</td><td>${s.max===null?'—':s.max}</td>
         <td>${s.survivors}</td>
         <td class="${s.killed>0?'neg':''}">${s.killed}</td>
         <td>${num(s.kill_pct,1)}%</td></tr>`,
       {sortKey:'survivors', dir:1, empty:"No funnel data"});
   } else { html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`; }
   if(pc && pc.stocks){
-    html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count · high → low <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
+    html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     html+=sortTbl('ffp',
-      [["symbol","Symbol"],["passed","Passed"],["total","of"],["gvm_score","GVM"],
-       ["mom_2d","2D Mom%"],["failed_filters","Failed filters"]],
+      [["symbol","Symbol"],["passed","Passed"],["total","of"],["gvm_score","GVM"],["mom_2d","2D Mom%"],["failed_filters","Failed filters"]],
       pc.stocks, x=>{
         const sc_cls = scoreClass(x.passed, x.total);
         return `<tr>
@@ -548,7 +569,7 @@ async function loadFF(){
           <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`;
       },
       {sortKey:'passed', dir:-1, empty:"No stocks"});
-  } else { html+=`<div class="err">⚠ stock_passcount not available for ${ffBasket}</div>`; }
+  }
   html+=preFreezeBanner();
   el.innerHTML=html;
 }
