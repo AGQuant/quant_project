@@ -57,7 +57,10 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.34
+# Scorr / Project Quant — main.py v2.9.35
+# v2.9.35: Root / now serves scorr_home.html — consolidated menu (light/
+#   white theme) linking all surfaces (V8, GVM, Check, Max, Ask, CIO shell;
+#   QB + V10 shown as soon). Old JSON status moved to GET /status.
 # v2.9.34: /check route wired — serves scorr_check.html. Dedicated native
 #   v3.3 Trade Check page (own top-bar tab after GVM). POST /api/check
 #   (check_endpoint.py -> native_trade_check.compute_trade_check) is $0,
@@ -83,7 +86,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.34"
+VERSION = "2.9.35"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -272,7 +275,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.34)")
+        log.info("Tables ready (v2.9.35)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -360,8 +363,13 @@ async def startup():
     scheduler.start_background(app, BASE_URL, ADMIN_TOKEN)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
-@app.get("/")
-def root(): return {"service": "Scorr API", "version": VERSION, "status": "live"}
+@app.get("/", response_class=HTMLResponse)
+def home():
+    with open("scorr_home.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/status")
+def status(): return {"service": "Scorr API", "version": VERSION, "status": "live"}
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
