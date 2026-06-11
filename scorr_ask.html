@@ -105,7 +105,6 @@
 </head>
 <body>
 <nav class="model-nav">
-  <div class="mnav-brand">SCORR</div>
   <a class="mnav-item" href="/dashboard"><span>⚡</span>V8</a>
   <a class="mnav-item" href="/cio2?model=gvm"><span>▦</span>GVM</a>
   <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
@@ -271,6 +270,12 @@ document.getElementById('q').addEventListener('keydown',function(e){if(e.key==='
   if(history.length){for(const m of history)add(m.role==='assistant'?'bot':'user',
     typeof m.content==='string'?m.content:'[data]');}
 })();
+</script>
+
+<script>
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  var _mn=document.querySelector('.model-nav'); if(_mn)_mn.style.display='none';
+}
 </script>
 </body>
 </html>
