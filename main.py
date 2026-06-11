@@ -56,7 +56,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.32
+# Scorr / Project Quant — main.py v2.9.33
+# v2.9.33: /ask route wired — serves scorr_ask.html. Native-first query
+#   page ($0 Railway DB via native_router) + small Reasoning toggle
+#   (Claude API fallback). Native v3.3 trade check added to router
+#   (native_trade_check.py). Chats saved to max_chats (id ask_*).
 # v2.9.32: GVM company report wired — gvm_report_router (INCLUDED BEFORE
 #   gvm_market_router so /api/gvm/company/{symbol} + /api/gvm/search match
 #   before the /api/gvm/{symbol} catch-all). New files: gvm_company_report.py
@@ -73,7 +77,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.32"
+VERSION = "2.9.33"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -261,7 +265,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.32)")
+        log.info("Tables ready (v2.9.33)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -365,6 +369,11 @@ def cio():
 @app.get("/cio2", response_class=HTMLResponse)
 def cio2():
     with open("scorr_cio_dashboard.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/ask", response_class=HTMLResponse)
+def ask():
+    with open("scorr_ask.html", "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/health")
