@@ -69,6 +69,55 @@
   .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);
     border:1px solid var(--line);padding:2px 8px;border-radius:20px}
 
+  /* ── Compact sector numbered cards ── */
+  .sec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:4px}
+  .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;position:relative;cursor:default}
+  .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Space Mono';
+    font-size:10px;color:var(--dim)}
+  .sec-card .sc-name{font-size:11px;font-weight:600;color:var(--txt);margin-top:2px;
+    line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .sec-card .sc-pct{font-family:'Space Mono';font-size:13px;font-weight:700;margin-top:6px}
+  .sec-card .sc-top{font-size:10px;color:var(--mut);margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
+
+  /* ── Compact basket stock rows ── */
+  .bk-rows{display:flex;flex-direction:column;gap:6px}
+  .bk-row{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .bk-row .br-sym{font-weight:700;font-size:13px;color:#fff;min-width:90px}
+  .bk-row .br-stat{display:flex;gap:8px;flex-wrap:wrap;flex:1}
+  .bk-row .br-chip{font-family:'Space Mono';font-size:11px;padding:2px 7px;
+    border-radius:5px;background:var(--bg2);border:1px solid var(--line2)}
+  .bk-row .br-pivot{margin-left:auto}
+
+  /* ── Compact filter scan ── */
+  .scan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .scan-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .scan-card .sk-sym{font-weight:700;font-size:12px;color:#fff;margin-bottom:5px}
+  .scan-card .sk-score{font-family:'Space Mono';font-size:13px;font-weight:700;margin-bottom:4px}
+  .scan-card .sk-chips{display:flex;flex-wrap:wrap;gap:4px}
+  .scan-card .sk-chip{font-family:'Space Mono';font-size:10px;padding:1px 5px;
+    border-radius:4px;background:var(--bg2);border:1px solid var(--line2)}
+
+  /* ── Compact funnel stages ── */
+  .funnel-stages{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+  .funnel-stage{display:flex;align-items:center;gap:8px;padding:7px 12px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px}
+  .fs-name{flex:1;font-size:12px;color:var(--txt)}
+  .fs-bar{width:80px;height:6px;background:var(--line2);border-radius:3px;overflow:hidden;flex-shrink:0}
+  .fs-bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
+  .fs-surv{font-family:'Space Mono';font-size:11px;color:var(--grn);min-width:28px;text-align:right}
+  .fs-kill{font-family:'Space Mono';font-size:11px;color:var(--red);min-width:36px;text-align:right}
+
+  /* Pass count compact */
+  .pc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:7px}
+  .pc-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .pc-card .pc-sym{font-weight:700;font-size:12px;color:#fff;margin-bottom:4px}
+  .pc-card .pc-score{font-family:'Space Mono';font-size:14px;font-weight:700}
+  .pc-card .pc-fail{font-size:10px;color:var(--mut);margin-top:3px;line-height:1.3}
+
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
@@ -117,7 +166,7 @@
     <div class="spacer"></div>
     <div class="clock" id="clock">—</div>
     <div class="toggle">
-      <button class="btn" id="autoBtn" onclick="toggleAuto()">Auto 5m: OFF</button>
+      <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
       <button class="btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
     </div>
   </header>
@@ -156,7 +205,7 @@ const ALL5 = [
 const TABS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel"];
 
-let AUTO=false, autoTimer=null;
+let AUTO=true, autoTimer=null;
 const cache={};
 
 async function getJSON(path){
@@ -244,12 +293,22 @@ function renderMood(m){
     <div class="moodChecks">${checks}</div>`;
 }
 
-const SECTOR_COLS=[["segment","Segment"],["stocks","Stocks"],["avg_day_1d","1D Live%"],["avg_mom_2d","2D Mom%"],["avg_week","Week%"],["top_stock","Top Stock"]];
-const sectorRow=s=>`<tr><td class="sym">${s.segment}</td><td>${s.stocks}</td>
-  <td class="${cls(s.avg_day_1d)}">${sign(s.avg_day_1d)}%</td>
-  <td class="${cls(s.avg_mom_2d)}">${sign(s.avg_mom_2d)}%</td>
-  <td class="${cls(s.avg_week)}">${sign(s.avg_week)}%</td>
-  <td class="sym">${s.top_stock||'—'}</td></tr>`;
+// ── Sector numbered cards ─────────────────────────────────────────────────────
+function sectorCards(sectors, title, label) {
+  if (!sectors || !sectors.length) return `<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;color:var(--dim);font-size:12px">No data</div>`;
+  const cards = sectors.map((s,i) => {
+    const pct = s.avg_day_1d;
+    const color = pct >= 0 ? 'var(--grn)' : 'var(--red)';
+    return `<div class="sec-card">
+      <div class="sc-num">${i+1}</div>
+      <div class="sc-name" style="margin-top:14px">${s.segment}</div>
+      <div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>
+      <div class="sc-top">${s.top_stock||''}</div>
+      <div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>
+    </div>`;
+  }).join('');
+  return `<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
+}
 
 function renderMaster(){
   const p=cache.paper,open=(p&&p.open_positions)||[],sum=(p&&p.summary)||{};
@@ -264,7 +323,7 @@ function renderMaster(){
     <div class="card"><div class="k">Win / Loss</div><div class="v">${sum.wins??'—'}/${sum.losses??'—'}</div></div>
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(sum.total_pnl||0)}">${inr(sum.total_pnl||0)}</div></div>
   </div>`;
-  return cards+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>`+
+  const openPos = `<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>`+
     sortTbl('pos',
       [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
        ["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","Stop"],["qty","Qty"],["unrealised_pnl","Unreal P&L"]],
@@ -275,14 +334,14 @@ function renderMaster(){
         <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
         <td>${num(x.entry_price)}</td><td>${num(x.cmp)}</td><td>${num(x.target)}</td><td>${num(x.stop_loss)}</td>
         <td>${x.qty}</td><td class="${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</td></tr>`,
-      {empty:"No open positions"})+
+      {empty:"No open positions"});
+  return cards + openPos +
     `<div class="funnelGrid" style="margin-top:16px">
-       <div><div class="ptitle">Top Sectors <span class="ct">1D Live% positive</span></div>${sortTbl('sectop',SECTOR_COLS,top8,sectorRow,{sortKey:'avg_day_1d',dir:-1,empty:"No positive sectors"})}</div>
-       <div><div class="ptitle">Bottom Sectors <span class="ct">1D Live% negative</span></div>${sortTbl('secbot',SECTOR_COLS,bot8,sectorRow,{sortKey:'avg_day_1d',dir:1,empty:"No negative sectors"})}</div>
+       <div>${sectorCards(top8,'Top Sectors','1D Live% positive')}</div>
+       <div>${sectorCards(bot8,'Bottom Sectors','1D Live% negative')}</div>
      </div>`;
 }
 
-// Pivot bar: CMP label above, S1─PP─R1 bar below
 function pivotBar(cmp, pp, r1, s1){
   if(!pp||!r1||!s1)return'<span style="color:var(--dim);font-size:11px">—</span>';
   const lo=parseFloat(s1),mid=parseFloat(pp),hi=parseFloat(r1),c=parseFloat(cmp||0);
@@ -294,8 +353,8 @@ function pivotBar(cmp, pp, r1, s1){
   const arrowColor=c>=hi?'var(--grn)':c>=mid?'var(--amber)':'var(--red)';
   const arrow=c>=mid?'▲':'▼';
   const cmpFmt=c>=1000?Math.round(c):c.toFixed(1);
-  return `<div style="display:inline-block;width:158px;vertical-align:middle">
-    <div style="font-family:'Space Mono';font-size:9px;color:${arrowColor};margin-left:calc(${cmpPct.toFixed(0)}% - 16px);white-space:nowrap">${arrow}${cmpFmt}</div>
+  return `<div style="display:inline-block;width:140px;vertical-align:middle">
+    <div style="font-family:'Space Mono';font-size:9px;color:${arrowColor};margin-left:calc(${cmpPct.toFixed(0)}% - 14px);white-space:nowrap">${arrow}${cmpFmt}</div>
     <div style="position:relative;height:14px">
       <div style="position:absolute;top:5px;left:0;right:0;height:3px;background:var(--line2);border-radius:2px"></div>
       <div style="position:absolute;top:5px;left:0;width:${ppPct}%;height:3px;background:#3a1620;border-radius:2px 0 0 2px"></div>
@@ -312,50 +371,48 @@ function pivotBar(cmp, pp, r1, s1){
   </div>`;
 }
 
-// Unified basket tab layout — Symbol|1D Live%|2D Mom%|DMA50|DMA200|RSI(m)|RSI(w)|52W|Vol×|GVM|Since|CMP·S1─PP─R1
+// ── Compact basket stock cards ────────────────────────────────────────────────
 function renderFunnel(b){
   const d=cache['q_'+b.id];
   if(!d)return'<div class="loading">…</div>';
   const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
-  const cols=[
-    ["symbol","Symbol"],["day_1d","1D Live%"],
-    ["mom_2d","2D Mom%"],["dma_50","DMA50"],["dma_200","DMA200"],
-    ["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W"],
-    ["vol_ratio","Vol×"],["gvm_score","GVM"],
-    ["first_seen","Since"],["_pivot","CMP · S1─PP─R1"]
-  ];
-  return meta+sortTbl('q_'+b.id,cols,d.stocks||[],x=>`<tr>
-    <td class="sym">${x.symbol}</td>
-    <td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td>
-    <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-    <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
-    <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-    <td>${num(x.rsi_month,0)}</td>
-    <td>${num(x.rsi_weekly,0)}</td>
-    <td>${num(x.week_index_52,0)}</td>
-    <td>${num(x.vol_ratio,2)}</td>
-    <td>${num(x.gvm_score,2)}</td>
-    <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
-    <td style="white-space:nowrap">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</td>
-  </tr>`,{sortKey:'gvm_score',dir:-1,empty:`No qualified names — gate may be closed for this side.`});
+  const stocks = d.stocks || [];
+  if (!stocks.length) return meta + `<div class="empty">No qualified names — gate may be closed for this side.</div>`;
+  const rows = stocks.sort((a,b)=>((b.gvm_score||0)-(a.gvm_score||0))).map(x => {
+    const side = b.id.startsWith('sell') ? 'sell' : 'buy';
+    const chipColor = side === 'sell' ? 'var(--red)' : 'var(--grn)';
+    return `<div class="bk-row">
+      <div class="br-sym">${x.symbol}</div>
+      <div class="br-stat">
+        <span class="br-chip" style="color:${Number(x.day_1d)>=0?'var(--grn)':'var(--red)'}">${sign(x.day_1d,1)}%</span>
+        <span class="br-chip" style="color:${Number(x.mom_2d)>=0?'var(--grn)':'var(--red)'}">${sign(x.mom_2d,1)}% 2d</span>
+        <span class="br-chip">DMA50 ${num(x.dma_50,0)}</span>
+        <span class="br-chip">RSIm ${num(x.rsi_month,0)}</span>
+        <span class="br-chip">GVM ${num(x.gvm_score,1)}</span>
+        <span class="br-chip" style="color:var(--dim)">${fmtSince(x.first_seen)}</span>
+      </div>
+      <div class="br-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div>
+    </div>`;
+  }).join('');
+  return meta + `<div class="bk-rows">${rows}</div>`;
 }
 
 function renderSellOB(){
   const d=cache.sellOB;if(!d)return'<div class="loading">…</div>';
-  return`<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`+
-    sortTbl('sob',
-    [["symbol","Symbol"],["entry","Entry"],["target","Target"],["stop","Stop"],
-     ["tgt_pct","Tgt %"],["rsi_month","RSI(m)"],["daily_rsi","RSI(d)"],
-     ["dma_200","DMA200"],["week_index_52","52W"],["vol_ratio","Vol×"],["gvm_score","GVM"]],
-    d.stocks||[],x=>`<tr>
-      <td class="sym">${x.symbol}</td>
-      <td>${num(x.entry)}</td><td>${num(x.target)}</td><td>${num(x.stop)}</td>
-      <td class="neg">${num(x.tgt_pct,2)}%</td>
-      <td>${num(x.rsi_month,0)}</td><td>${num(x.daily_rsi,0)}</td>
-      <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-      <td>${num(x.week_index_52,0)}</td><td>${num(x.vol_ratio,2)}</td>
-      <td>${num(x.gvm_score,2)}</td></tr>`,
-    {sortKey:'dma_200',dir:-1,empty:"No overbought signals"});
+  const stocks = d.stocks || [];
+  const meta = `<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`;
+  if (!stocks.length) return meta + `<div class="empty">No overbought signals</div>`;
+  const rows = stocks.map(x => `<div class="bk-row">
+    <div class="br-sym">${x.symbol}</div>
+    <div class="br-stat">
+      <span class="br-chip">Entry ${num(x.entry)}</span>
+      <span class="br-chip" style="color:var(--red)">Tgt ${num(x.target)} (${num(x.tgt_pct,1)}%)</span>
+      <span class="br-chip">RSIm ${num(x.rsi_month,0)}</span>
+      <span class="br-chip">DMA200 ${num(x.dma_200,0)}</span>
+      <span class="br-chip">GVM ${num(x.gvm_score,1)}</span>
+    </div>
+  </div>`).join('');
+  return meta + `<div class="bk-rows">${rows}</div>`;
 }
 
 function renderTradeLog(){
@@ -404,6 +461,7 @@ function renderRaw(){
     {sortKey:'mom_2d',dir:-1,empty:"No metrics"});
 }
 
+// ── Compact Filter Scan ───────────────────────────────────────────────────────
 let scanMode='gainers';
 function renderScan(){
   const sc=cache.scan;if(!sc)return'<div class="loading">…</div>';
@@ -411,30 +469,40 @@ function renderScan(){
     .map(([k,l])=>`<button class="btn ${scanMode===k?'on':''}" onclick="scanSet('${k}')">${l}</button>`).join('');
   let body;
   if(scanMode==='sectors'){
-    body=sortTbl('scan',SECTOR_COLS,sc.sectors||[],sectorRow,{sortKey:'avg_day_1d',dir:-1,empty:"No sector data"});
+    const secs = sc.sectors || [];
+    body = secs.length
+      ? `<div class="sec-cards">${secs.map((s,i)=>{
+          const color=s.avg_day_1d>=0?'var(--grn)':'var(--red)';
+          return`<div class="sec-card"><div class="sc-num">${i+1}</div>
+            <div class="sc-name" style="margin-top:14px">${s.segment}</div>
+            <div class="sc-pct" style="color:${color}">${sign(s.avg_day_1d,2)}%</div>
+            <div class="sc-top">${s.top_stock||''}</div>
+            <div class="sc-stocks">${s.stocks} stocks</div></div>`;
+        }).join('')}</div>`
+      : `<div class="empty">No sector data</div>`;
   } else {
     const rows=(scanMode==='gainers'?sc.gainers:sc.losers)||[];
-    const gateLbl=scanMode==='gainers'?'BuyRev Score':'SellRev Score';
-    body=sortTbl('scan',
-      [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Week%"],
-       ["dma_50","DMA50"],["dma_200","DMA200"],["rsi_weekly","RSI Wk"],["rsi_month","RSI Mo"],["vol_ratio","Vol×"],["gate_score",gateLbl]],
-      rows,x=>{
-        const sv=x.gate_score??0,st=x.gate_total??11;
-        return`<tr>
-          <td class="sym">${x.symbol}</td>
-          <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-          <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
-          <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
-          <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-          <td>${num(x.rsi_weekly,0)}</td><td>${num(x.rsi_month,0)}</td><td>${num(x.vol_ratio,2)}</td>
-          <td class="${scoreClass(sv,st)}" style="font-weight:700">${sv}/${st}</td></tr>`;
-      },{sortKey:'mom_2d',dir:scanMode==='gainers'?-1:1,empty:"No matches"});
+    body = rows.length
+      ? `<div class="scan-grid">${rows.map(x=>{
+          const sv=x.gate_score??0,st=x.gate_total??11;
+          const sc_cls=scoreClass(sv,st);
+          return`<div class="scan-card">
+            <div class="sk-sym">${x.symbol}</div>
+            <div class="sk-score ${sc_cls}">${sv}/${st}</div>
+            <div class="sk-chips">
+              <span class="sk-chip" style="color:${Number(x.mom_2d)>=0?'var(--grn)':'var(--red)'}">${sign(x.mom_2d,1)}%</span>
+              <span class="sk-chip">RSI ${num(x.rsi_weekly,0)}</span>
+              <span class="sk-chip">Vol ${num(x.vol_ratio,1)}×</span>
+            </div></div>`;
+        }).join('')}</div>`
+      : `<div class="empty">No matches</div>`;
   }
   return`<div class="subnav">${nav}</div>`+
     `<div class="ptitle">Filter Scan · ${scanMode} <span class="ct">score_date ${sc.score_date||'—'} · universe ${sc.universe||'—'}</span></div>`+body;
 }
 function scanSet(m){scanMode=m;document.getElementById('panel8').innerHTML=renderScan();}
 
+// ── Compact Filter Funnel ─────────────────────────────────────────────────────
 let ffBasket='buy_reversal';
 function ffSet(b){ffBasket=b;loadFF();}
 function preFreezeBanner(){
@@ -442,8 +510,7 @@ function preFreezeBanner(){
   const dow=ist.getUTCDay(),mins=ist.getUTCHours()*60+ist.getUTCMinutes();
   if(dow>=1&&dow<=5&&mins<945)
     return`<div class="err" style="margin-top:18px">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate.</div>`;
-  return'';
-}
+  return'';}
 async function loadFF(){
   const el=document.getElementById('panel9');if(!el)return;
   const nav=ALL5.map(b=>`<button class="btn ${ffBasket===b.id?'on':''}" onclick="ffSet('${b.id}')">${b.label}</button>`).join('');
@@ -452,30 +519,35 @@ async function loadFF(){
   try{fd=await getJSON(EP.funnelDetail(ffBasket));}catch(e){}
   try{pc=await getJSON(EP.passCount(ffBasket));}catch(e){}
   let html=`<div class="subnav">${nav}</div>`;
+
   if(fd&&fd.stages){
+    const maxSurv = Math.max(...fd.stages.map(s=>s.survivors||0),1);
     html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
-    html+=sortTbl('ffs',
-      [["metric","Filter"],["min","Min"],["max","Max"],["survivors","Survivors"],["killed","Killed"],["kill_pct","Kill %"]],
-      fd.stages,s=>`<tr>
-        <td class="sym">${s.metric.replace(/_/g,' ')}</td>
-        <td>${s.min===null?'—':s.min}</td><td>${s.max===null?'—':s.max}</td>
-        <td>${s.survivors}</td><td class="${s.killed>0?'neg':''}">${s.killed}</td>
-        <td>${num(s.kill_pct,1)}%</td></tr>`,
-      {sortKey:'survivors',dir:1,empty:"No funnel data"});
+    html+=`<div class="funnel-stages">${fd.stages.map(s=>{
+      const pct=Math.round((s.survivors/maxSurv)*100);
+      const killColor=s.killed>0?'var(--red)':'var(--dim)';
+      const barColor=s.killed>0?'var(--amber)':'var(--grn)';
+      return`<div class="funnel-stage">
+        <div class="fs-name">${s.metric.replace(/_/g,' ')}</div>
+        <div class="fs-bar"><div class="fs-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        <div class="fs-surv">${s.survivors}</div>
+        <div class="fs-kill" style="color:${killColor}">${s.killed>0?'-'+s.killed:''}</div>
+      </div>`;
+    }).join('')}</div>`;
   } else html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`;
+
   if(pc&&pc.stocks){
-    html+=`<div class="ptitle" style="margin-top:18px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
-    html+=sortTbl('ffp',
-      [["symbol","Symbol"],["passed","Passed"],["total","of"],["gvm_score","GVM"],["mom_2d","2D Mom%"],["failed_filters","Failed filters"]],
-      pc.stocks,x=>{
-        const sc_cls=scoreClass(x.passed,x.total);
-        return`<tr>
-          <td class="sym">${x.symbol}</td>
-          <td class="${sc_cls}" style="font-weight:700">${x.passed}</td><td>${x.total}</td>
-          <td>${num(x.gvm_score,2)}</td>
-          <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-          <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`;
-      },{sortKey:'passed',dir:-1,empty:"No stocks"});
+    html+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
+    const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
+    html+=`<div class="pc-grid">${sorted.map(x=>{
+      const sc_cls=scoreClass(x.passed,x.total);
+      const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
+      return`<div class="pc-card">
+        <div class="pc-sym">${x.symbol}</div>
+        <div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div>
+        <div class="pc-fail">${fails||'all pass'}</div>
+      </div>`;
+    }).join('')}</div>`;
   }
   html+=preFreezeBanner();
   el.innerHTML=html;
@@ -520,5 +592,7 @@ function toggleAuto(){
   if(AUTO){autoTimer=setInterval(loadAll,5*60*1000);}else{clearInterval(autoTimer);}
 }
 
+// Start with Auto ON
 loadAll();
+autoTimer=setInterval(loadAll,5*60*1000);
 </script>
