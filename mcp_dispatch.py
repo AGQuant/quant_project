@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Response
 
 import yahoo_ondemand
 
-# ── MCP dispatch layer ───────────────────────────────────────────────────────
+# ── MCP dispatch layer ────────────────────────────────────────────────────────────────────────────
 # Extracted from main.py (File 5/5 split, piece B). Self-contained:
 # reads env vars directly, owns its get_conn, imports yahoo_ondemand.
 # NO import from main.py -> no circular import.
@@ -34,6 +34,8 @@ MCP_TOOLS = [
     {"name":"gvm_recompute","description":"GVM: full recompute.","inputSchema":{"type":"object","properties":{"refresh_momentum":{"type":"boolean"}},"required":[]}},
     {"name":"gvm_history","description":"GVM: get the GVM score trend series for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"},"days":{"type":"integer"}},"required":["symbol"]}},
     {"name":"get_gvm","description":"Fetch full GVM score for a stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"gvm_company","description":"GVM: full peer-benchmarked company analytics report (rating, G/V/M, per-parameter peer comparison, segment rank, overview/takeaways). Persists detail to gvm_scores.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
+    {"name":"gvm_search","description":"GVM: autocomplete search companies by symbol or name.","inputSchema":{"type":"object","properties":{"q":{"type":"string"},"limit":{"type":"integer"}},"required":["q"]}},
     {"name":"get_top_stocks","description":"Get top N stocks by GVM.","inputSchema":{"type":"object","properties":{"n":{"type":"integer"},"verdict":{"type":"string"}},"required":["n"]}},
     {"name":"get_sector","description":"Get all stocks in a sector ordered by GVM.","inputSchema":{"type":"object","properties":{"sector":{"type":"string"}},"required":["sector"]}},
     {"name":"get_filter","description":"Filter stocks by GVM range.","inputSchema":{"type":"object","properties":{"min_gvm":{"type":"number"},"max_gvm":{"type":"number"}},"required":[]}},
@@ -95,7 +97,7 @@ MCP_TOOLS = [
     {"name":"v9_best_combo","description":"V9 Pair Strategy: get best parameter combo by total PnL.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v10_signal","description":"V10 ST+EMA: current NIFTY directional signal (ST 150/3 10m + EMA 3/10 30m gate, SL100/T200).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v10_tick","description":"V10 ST+EMA: run one 5-min cycle — append 5m bar, compute signal, Telegram alert on BUY/SELL.","inputSchema":{"type":"object","properties":{},"required":[]}},
-    {"name":"pcr_intraday","description":"5-min intraday PCR trend (ATM\u00b15 + total) for NIFTY/BANKNIFTY from pcr_intraday.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
+    {"name":"pcr_intraday","description":"5-min intraday PCR trend (ATM±5 + total) for NIFTY/BANKNIFTY from pcr_intraday.","inputSchema":{"type":"object","properties":{"underlying":{"type":"string"},"days":{"type":"integer"}},"required":[]}},
     {"name":"compute_pcr_intraday","description":"Compute/self-heal 5-min PCR into pcr_intraday (ts optional = single bar, else heal all missing).","inputSchema":{"type":"object","properties":{"ts":{"type":"string"}},"required":[]}},
     {"name":"v8_replay_run","description":"V8 PAPER REPLAY: true 5-min stepped replay from start date. wipe=true clears the paper book first (DESTRUCTIVE). Walks intraday bar-by-bar, point-in-time entries/exits.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"wipe":{"type":"boolean"}},"required":["start"]}},
     {"name":"v8_replay_summary","description":"V8 PAPER REPLAY: current paper book stats — open positions + realized trade stats by basket.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -113,6 +115,8 @@ async def _call_tool(name, args):
         elif name == "gvm_recompute": r = await client.post(f"{BASE_URL}/api/gvm/recompute", params={"refresh_momentum": args.get("refresh_momentum",True)}, headers=h); return r.json()
         elif name == "gvm_history": r = await client.get(f"{BASE_URL}/api/gvm/history/{args['symbol']}", params={"days": args.get("days",180)}); return r.json()
         elif name == "get_gvm": r = await client.get(f"{BASE_URL}/api/gvm/{args['symbol']}"); return r.json()
+        elif name == "gvm_company": r = await client.get(f"{BASE_URL}/api/gvm/company/{args['symbol']}"); return r.json()
+        elif name == "gvm_search": r = await client.get(f"{BASE_URL}/api/gvm/search", params={"q": args["q"], "limit": args.get("limit",12)}); return r.json()
         elif name == "get_top_stocks":
             params = {}
             if args.get("verdict"): params["verdict"] = args["verdict"]
