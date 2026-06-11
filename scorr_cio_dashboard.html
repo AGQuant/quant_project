@@ -46,6 +46,7 @@ const C = {
 
 const MODELS = [
   { id: "v8",     icon: "⇄", label: "V8 Long-Short",       sub: "Futures · 5 Baskets",   color: C.accent,  live: true,  desc: "Live paper engine · Mood gate · Pivots" },
+  { id: "max",    icon: "✦", label: "Max Chat",            sub: "AI CIO Assistant",      color: "#7c5cff", live: true,  desc: "Conversational research · All models · Ask anything" },
   { id: "gvm",    icon: "▦", label: "GVM Scoring",         sub: "1,762 stocks · Peer-rel", color: C.gold,    live: true,  desc: "Search any company · Full peer-benchmark report" },
   { id: "sector", icon: "◉", label: "Sector Intelligence", sub: "129 segments",          color: C.purple,  live: false, desc: "Rotation map · Coming soon" },
   { id: "qb",     icon: "⌂", label: "Quant Basket",        sub: "4 Baskets · Equity",    color: C.green,   live: false, desc: "Buy-and-hold · Coming soon" },
@@ -75,6 +76,24 @@ function Loader({ msg }) {
 function Tag({ children, color = C.accent }) {
   return (
     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color, background: color + "20", border: `1px solid ${color}40`, borderRadius: 4, padding: "2px 7px", textTransform: "uppercase" }}>{children}</span>
+  );
+}
+
+// ── Max: iframe CIO chat cockpit ─────────────────────────────────────────────
+function MaxModule() {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+        Max — AI CIO assistant · live from <span style={{ fontFamily: "monospace", color: "#7c5cff" }}>/cio</span>
+      </div>
+      <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${C.border}`, background: C.card }}>
+        <iframe
+          src={`${API}/cio`}
+          title="Max Chat"
+          style={{ width: "100%", height: "calc(100vh - 200px)", minHeight: 600, border: "none", display: "block", background: "#fff" }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -411,7 +430,7 @@ function HomePage({ onNavigate }) {
       </div>
 
       <div style={{ marginTop: 20, padding: "12px 16px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 11, color: C.muted }}>🔴 Live · Railway PostgreSQL · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</div>
+        <div style={{ fontSize: 11, color: C.muted }}>🔴 Live · {new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</div>
         <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>V8 Model · proprietary quant</div>
       </div>
     </div>
@@ -423,6 +442,7 @@ function InnerPage({ moduleId, onBack }) {
   if (!mod) return null;
   let body;
   if (moduleId === "v8") body = <V8Module />;
+  else if (moduleId === "max") body = <MaxModule />;
   else if (moduleId === "gvm") body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
 
