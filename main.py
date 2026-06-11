@@ -29,6 +29,7 @@ from v8_engine import (
 from v8_endpoints import router as v8_router
 from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
+from gvm_report_endpoints import router as gvm_report_router
 from gvm_market_endpoints import router as gvm_market_router
 from admin_data import router as admin_data_router
 from fyers_endpoints import router as fyers_router
@@ -55,28 +56,24 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.31
+# Scorr / Project Quant — main.py v2.9.32
+# v2.9.32: GVM company report wired — gvm_report_router (INCLUDED BEFORE
+#   gvm_market_router so /api/gvm/company/{symbol} + /api/gvm/search match
+#   before the /api/gvm/{symbol} catch-all). New files: gvm_company_report.py
+#   (peer-benchmark compute engine, persists detail to gvm_scores),
+#   gvm_report_endpoints.py. 2 MCP tools added: gvm_company, gvm_search.
+#   /cio2 GVM tab = full peer-benchmarked company report (search any stock).
 # v2.9.31: /cio2 route wired — serves scorr_cio_dashboard.html.
-#   6-module CIO Dashboard: V8 Long-Short, GVM Scoring, Sector Intelligence,
-#   Quant Basket, Portfolio Health, Nifty Options V10. Live Railway MCP data.
-#   React+Babel in-browser. No build step. Self-contained HTML.
+#   Multi-model dashboard (V8 embed + GVM + future models).
 # v2.9.30: Trade Check v3.4 wired — trade_check_v34_endpoints router.
 #   POST /api/trade-check/v34 (weighted + core-gate scoring, caller passes
 #   2 chart gates = human-in-AI-loop), POST /api/trade-check/v34/promote
 #   (manual-only personal_journal write), GET /api/trade-check/v34/health.
-#   Files: trade_check_v34.py, trade_check_v34_endpoints.py. Side-by-side
-#   with v3.3 (conversational spec id=143). HARD V8 separation — module
-#   reads only v8_metrics/gvm_scores/futures_basis, never v8_paper/v8_qualified.
 # v2.9.29: Fix day_change -> mom_2d in /api/v8/metrics/all SQL (runtime fix).
-#   Adds day_1d + eod_chg to metrics/all response.
-#   Removes postgresql from nixpacks.toml (not needed with psycopg[binary]).
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
-#   Haiku default (routine queries ~$0.001). Sonnet on-demand for deep analysis.
-#   Full system prompt with trading rules + memory blueprint in scorr_chat_endpoint.py.
-#   CIO = independent brain with all 69 Railway MCP tools.
 # ============================================================
 
-VERSION = "2.9.31"
+VERSION = "2.9.32"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -103,6 +100,7 @@ app.include_router(v8_router)
 app.include_router(v8_futures_router)
 app.include_router(qb_router)
 app.include_router(gvm_nightly_router)
+app.include_router(gvm_report_router)
 app.include_router(gvm_market_router)
 app.include_router(admin_data_router)
 app.include_router(fyers_router)
@@ -263,7 +261,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.31)")
+        log.info("Tables ready (v2.9.32)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
