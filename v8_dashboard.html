@@ -22,7 +22,6 @@
   a{color:inherit}
   .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 60px}
 
-  /* Header */
   header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
     padding:14px 0 18px;border-bottom:1px solid var(--line)}
   .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
@@ -38,7 +37,6 @@
   .btn.on{background:var(--grn-d);border-color:var(--grn);color:var(--grn)}
   .toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}
 
-  /* Mood banner */
   .mood{margin:18px 0;border:1px solid var(--line);border-radius:14px;
     background:linear-gradient(135deg,var(--panel),var(--bg2));padding:16px 18px;
     display:flex;align-items:center;gap:22px;flex-wrap:wrap;box-shadow:var(--shadow)}
@@ -54,7 +52,6 @@
   .slots b{font-size:18px;font-family:'Space Mono'}
   .slots .buy b{color:var(--grn)} .slots .sell b{color:var(--red)}
 
-  /* Tabs */
   .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 16px;
     border-bottom:1px solid var(--line);padding-bottom:0}
   .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;
@@ -64,7 +61,6 @@
   .tab.active{color:#fff;background:var(--panel);border-color:var(--line);
     box-shadow:0 -2px 0 var(--blu) inset}
 
-  /* Panels */
   .panel{display:none;animation:fade .25s ease}
   .panel.active{display:block}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
@@ -73,7 +69,6 @@
   .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);
     border:1px solid var(--line);padding:2px 8px;border-radius:20px}
 
-  /* Tables */
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
@@ -87,6 +82,7 @@
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:#16223a}
   .sym{font-family:'Sora';font-weight:600;color:#fff}
+  .seg{font-family:'Sora';font-size:11px;color:var(--mut);text-align:left}
   .pos{color:var(--grn)} .neg{color:var(--red)}
   .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;
     font-family:'Sora';letter-spacing:.5px}
@@ -97,8 +93,9 @@
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
   .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';
     border:1px dashed var(--amber);border-radius:10px;background:#2a200a;margin-bottom:10px}
+  .score-hi{color:var(--grn)} .score-mid{color:var(--amber)} .score-lo{color:var(--red)}
+  .piv-cell{font-size:11px;color:var(--dim);text-align:right}
 
-  /* Cards row */
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   .card .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
@@ -126,13 +123,8 @@
     </div>
   </header>
 
-  <!-- Market Mood -->
   <div class="mood" id="mood"><div class="loading">Loading market gate…</div></div>
-
-  <!-- Tabs -->
   <div class="tabs" id="tabs"></div>
-
-  <!-- Panels -->
   <div id="panels"></div>
 
   <footer>
@@ -145,12 +137,12 @@
 const API_BASE = "";
 
 const EP = {
-  mood:        "/api/v8/market_mood",
-  metricsAll:  "/api/v8/metrics/all",
-  qualified:   b => `/api/v8/qualified/${b}`,
-  sellOB:      "/api/v8/sell_overbought?limit=25",
-  paper:       "/api/paper/status",
-  scan:        "/api/v8/scan",
+  mood:         "/api/v8/market_mood",
+  metricsAll:   "/api/v8/metrics/all",
+  qualified:    b => `/api/v8/qualified/${b}`,
+  sellOB:       "/api/v8/sell_overbought?limit=25",
+  paper:        "/api/paper/status",
+  scan:         "/api/v8/scan",
   funnelDetail: b => `/api/v8/funnel_detail/${b}`,
   passCount:    b => `/api/v8/stock_passcount/${b}`,
 };
@@ -168,7 +160,6 @@ const ALL5 = [
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 
-/* 10 tabs — "In Position" merged into Master (posTable has Entry Time) */
 const TABS = [
   "Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Raw Data",
@@ -190,33 +181,57 @@ function cls(x){ if(x===null||x===undefined||isNaN(x)) return ""; return Number(
 function inr(x){ if(x===null||x===undefined||isNaN(x)) return "—";
   return "₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0}); }
 function pnlCls(x){ return Number(x)>=0?"pos":"neg"; }
+
+// Fixed IST formatter — always UTC+5:30, no browser offset dependency
 function fmtTs(ts){
   if(!ts) return "—";
   try{
     const d = new Date(ts);
-    const ist = new Date(d.getTime() + (330 + d.getTimezoneOffset()) * 60000);
-    const dd = String(ist.getDate()).padStart(2,'0');
-    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getMonth()];
-    const hh = String(ist.getHours()).padStart(2,'0');
-    const mm = String(ist.getMinutes()).padStart(2,'0');
+    const ist = new Date(d.getTime() + (5*60+30)*60000);
+    const dd = String(ist.getUTCDate()).padStart(2,'0');
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()];
+    const hh = String(ist.getUTCHours()).padStart(2,'0');
+    const mm = String(ist.getUTCMinutes()).padStart(2,'0');
     return `${dd} ${mo} ${hh}:${mm}`;
   } catch(e){ return ts; }
 }
 
-/* ---------- IST clock ---------- */
+function fmtSince(ts){
+  if(!ts) return "—";
+  try{
+    const d = new Date(ts);
+    const ist = new Date(d.getTime() + (5*60+30)*60000);
+    const dd = String(ist.getUTCDate()).padStart(2,'0');
+    const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()];
+    const hh = String(ist.getUTCHours()).padStart(2,'0');
+    const mm = String(ist.getUTCMinutes()).padStart(2,'0');
+    return `${dd}/${mo} ${hh}:${mm}`;
+  } catch(e){ return "—"; }
+}
+
+function scoreClass(score, total){
+  const pct = total ? score/total : 0;
+  if(pct >= 0.8) return "score-hi";
+  if(pct >= 0.5) return "score-mid";
+  return "score-lo";
+}
+
+/* IST clock */
 function tick(){
-  const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
-  const hh=String(ist.getHours()).padStart(2,'0'),
-        mm=String(ist.getMinutes()).padStart(2,'0'),
-        ss=String(ist.getSeconds()).padStart(2,'0');
-  const open = (ist.getDay()>=1&&ist.getDay()<=5) &&
-    (ist.getHours()*60+ist.getMinutes())>=555 && (ist.getHours()*60+ist.getMinutes())<=930;
+  const now = Date.now();
+  const ist = new Date(now + (5*60+30)*60000);
+  const hh=String(ist.getUTCHours()).padStart(2,'0'),
+        mm=String(ist.getUTCMinutes()).padStart(2,'0'),
+        ss=String(ist.getUTCSeconds()).padStart(2,'0');
+  const totalMin = ist.getUTCHours()*60 + ist.getUTCMinutes();
+  const dow = ist.getUTCDay();
+  const open = dow>=1 && dow<=5 && totalMin>=555 && totalMin<=930;
   document.getElementById('clock').innerHTML =
     `<b>${hh}:${mm}:${ss}</b> IST &nbsp;·&nbsp; <span style="color:${open?'var(--grn)':'var(--dim)'}">NSE ${open?'OPEN':'CLOSED'}</span>`;
 }
 setInterval(tick,1000); tick();
 
-/* ---------- build tabs ---------- */
+/* Build tabs */
 const tabsEl=document.getElementById('tabs'), panelsEl=document.getElementById('panels');
 TABS.forEach((t,i)=>{
   const b=document.createElement('div'); b.className='tab'+(i===0?' active':'');
@@ -229,10 +244,7 @@ function selectTab(i){
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
 }
 
-/* ---------- sortable table engine ----------
-   Every table registers in SORTREG by uid. Header click re-sorts + re-renders
-   only that table. cols = [[fieldKey, label], ...] — fieldKey must exist on
-   row objects. Handles number / string / bool / null. */
+/* Sortable table engine */
 const SORTREG = {};
 function sortTbl(uid, cols, rows, rowFn, opts={}){
   SORTREG[uid] = {cols, rows: rows||[], rowFn,
@@ -265,7 +277,7 @@ function tblSort(uid,k){
   if(el) el.innerHTML = drawTbl(uid);
 }
 
-/* ---------- renderers ---------- */
+/* Renderers */
 function renderMood(m){
   const moodColors={Bearish:['var(--red-d)','var(--red)'],Neutral:['#2a2410','var(--amber)'],
     Bullish:['#0f2b3a','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
@@ -286,13 +298,13 @@ function renderMood(m){
     <div class="moodChecks">${checks}</div>`;
 }
 
-const SECTOR_COLS = [["segment","Segment"],["stocks","Stocks"],["avg_mom_2d","2D Mom%"],
-  ["avg_day_1d","1D Live%"],["avg_week","Week%"],["top_stock","Top Stock"]];
+const SECTOR_COLS = [["segment","Segment"],["stocks","Stocks"],["avg_day_1d","1D Live%"],["avg_mom_2d","2D Mom%"],
+  ["avg_week","Week%"],["top_stock","Top Stock"]];
 const sectorRow = s=>`<tr>
   <td class="sym">${s.segment}</td>
   <td>${s.stocks}</td>
-  <td class="${cls(s.avg_mom_2d)}">${sign(s.avg_mom_2d)}%</td>
   <td class="${cls(s.avg_day_1d)}">${sign(s.avg_day_1d)}%</td>
+  <td class="${cls(s.avg_mom_2d)}">${sign(s.avg_mom_2d)}%</td>
   <td class="${cls(s.avg_week)}">${sign(s.avg_week)}%</td>
   <td class="sym">${s.top_stock||'—'}</td></tr>`;
 
@@ -301,8 +313,9 @@ function renderMaster(){
   const open=(p&&p.open_positions)||[], sum=(p&&p.summary)||{};
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const sectors=(cache.scan&&cache.scan.sectors)||[];
-  const top8=sectors.slice(0,8);
-  const bot8=sectors.slice(-8).reverse();
+  // C2: filter by avg_day_1d sign
+  const top8=sectors.filter(s=>s.avg_day_1d > 0).slice(0,8);
+  const bot8=sectors.filter(s=>s.avg_day_1d < 0).slice(-8).reverse();
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div></div>
@@ -314,10 +327,10 @@ function renderMaster(){
     `<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>`+
     posTable(open)+
     `<div class="funnelGrid" style="margin-top:16px">
-       <div><div class="ptitle">Top Sectors <span class="ct">by 2D Mom%</span></div>${
-         sortTbl('sectop', SECTOR_COLS, top8, sectorRow, {sortKey:'avg_mom_2d',dir:-1,empty:"No sector data"})}</div>
-       <div><div class="ptitle">Bottom Sectors <span class="ct">by 2D Mom%</span></div>${
-         sortTbl('secbot', SECTOR_COLS, bot8, sectorRow, {sortKey:'avg_mom_2d',dir:1,empty:"No sector data"})}</div>
+       <div><div class="ptitle">Top Sectors <span class="ct">1D Live% positive</span></div>${
+         sortTbl('sectop', SECTOR_COLS, top8, sectorRow, {sortKey:'avg_day_1d',dir:-1,empty:"No positive sectors"})}</div>
+       <div><div class="ptitle">Bottom Sectors <span class="ct">1D Live% negative</span></div>${
+         sortTbl('secbot', SECTOR_COLS, bot8, sectorRow, {sortKey:'avg_day_1d',dir:1,empty:"No negative sectors"})}</div>
      </div>`;
 }
 
@@ -340,26 +353,39 @@ function posTable(open){
     </tr>`, {empty:"No open positions"});
 }
 
+// C3+C4+C6: unified basket tab layout — Symbol|1D Live%|Sector|2D Mom%|DMA50|DMA200|RSI(m)|RSI(w)|52W|Vol×|GVM|Since|PP/R1/S1
 function renderFunnel(b){
   const d=cache['q_'+b.id];
   if(!d) return '<div class="loading">…</div>';
   const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
-  return meta+sortTbl('q_'+b.id,
-    [["symbol","Symbol"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["dma_200","DMA200"],
-     ["rsi_month","RSI(m)"],["daily_rsi","RSI(d)"],["week_index_52","52W idx"],
-     ["vol_ratio","Vol×"],["gvm_score","GVM"]],
-    d.stocks||[], x=>`<tr>
-      <td class="sym">${x.symbol}</td>
-      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-      <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
-      <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-      <td>${num(x.rsi_month,0)}</td>
-      <td>${num(x.daily_rsi,0)}</td>
-      <td>${num(x.week_index_52,0)}</td>
-      <td>${num(x.vol_ratio,2)}</td>
-      <td>${num(x.gvm_score,2)}</td>
-    </tr>`, {sortKey:'gvm_score', dir:-1,
-      empty:`No qualified names — gate may be closed for this side.`});
+  const cols = [
+    ["symbol","Symbol"],["day_1d","1D Live%"],["segment","Sector"],
+    ["mom_2d","2D Mom%"],["dma_50","DMA50"],["dma_200","DMA200"],
+    ["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W"],
+    ["vol_ratio","Vol×"],["gvm_score","GVM"],
+    ["first_seen","Since"],["_pivot","PP / R1 / S1"]
+  ];
+  return meta+sortTbl('q_'+b.id, cols,
+    d.stocks||[], x=>{
+      const pivStr = (x.pp||x.r1||x.s1)
+        ? `${num(x.pp,0)} / ${num(x.r1,0)} / ${num(x.s1,0)}`
+        : '—';
+      return `<tr>
+        <td class="sym">${x.symbol}</td>
+        <td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td>
+        <td class="seg">${x.segment||'—'}</td>
+        <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
+        <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+        <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+        <td>${num(x.rsi_month,0)}</td>
+        <td>${num(x.rsi_weekly,0)}</td>
+        <td>${num(x.week_index_52,0)}</td>
+        <td>${num(x.vol_ratio,2)}</td>
+        <td>${num(x.gvm_score,2)}</td>
+        <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
+        <td class="piv-cell">${pivStr}</td>
+      </tr>`;
+    }, {sortKey:'gvm_score', dir:-1, empty:`No qualified names — gate may be closed for this side.`});
 }
 
 function renderSellOB(){
@@ -430,7 +456,7 @@ function renderRaw(){
     {sortKey:'mom_2d', dir:-1, empty:"No metrics"});
 }
 
-/* ---------- Filter Scan: Gainers / Losers / Sectors from /scan ---------- */
+/* C8: Filter Scan — numeric gate score X/N */
 let scanMode='gainers';
 function renderScan(){
   const sc=cache.scan; if(!sc) return '<div class="loading">…</div>';
@@ -439,24 +465,29 @@ function renderScan(){
   let body;
   if(scanMode==='sectors'){
     body = sortTbl('scan', SECTOR_COLS, sc.sectors||[], sectorRow,
-      {sortKey:'avg_mom_2d', dir:-1, empty:"No sector data"});
+      {sortKey:'avg_day_1d', dir:-1, empty:"No sector data"});
   } else {
     const rows=(scanMode==='gainers'?sc.gainers:sc.losers)||[];
-    const gateLbl = scanMode==='gainers' ? 'BuyRev Gate' : 'SellRev Gate';
+    const gateLbl = scanMode==='gainers' ? 'BuyRev Score' : 'SellRev Score';
     body = sortTbl('scan',
       [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Week%"],
        ["dma_50","DMA50"],["dma_200","DMA200"],["rsi_weekly","RSI Wk"],
-       ["rsi_month","RSI Mo"],["vol_ratio","Vol×"],["gate_pass",gateLbl]],
-      rows, x=>`<tr>
-        <td class="sym">${x.symbol}</td>
-        <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-        <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
-        <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
-        <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-        <td>${num(x.rsi_weekly,0)}</td>
-        <td>${num(x.rsi_month,0)}</td>
-        <td>${num(x.vol_ratio,2)}</td>
-        <td class="${x.gate_pass?'pos':'neg'}">${x.gate_pass?'✓':'✗'}</td></tr>`,
+       ["rsi_month","RSI Mo"],["vol_ratio","Vol×"],["gate_score",gateLbl]],
+      rows, x=>{
+        const sc_val = x.gate_score ?? 0;
+        const sc_tot = x.gate_total ?? 11;
+        const sc_cls = scoreClass(sc_val, sc_tot);
+        return `<tr>
+          <td class="sym">${x.symbol}</td>
+          <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
+          <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
+          <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+          <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+          <td>${num(x.rsi_weekly,0)}</td>
+          <td>${num(x.rsi_month,0)}</td>
+          <td>${num(x.vol_ratio,2)}</td>
+          <td class="${sc_cls}" style="font-weight:700">${sc_val}/${sc_tot}</td></tr>`;
+      },
       {sortKey:'mom_2d', dir: scanMode==='gainers'?-1:1, empty:"No matches"});
   }
   return `<div class="subnav">${nav}</div>`+
@@ -465,15 +496,16 @@ function renderScan(){
 }
 function scanSet(m){ scanMode=m; document.getElementById('panel8').innerHTML=renderScan(); }
 
-/* ---------- Filter Funnel ---------- */
+/* C9: Filter Funnel — pivot_room stage shown in table */
 let ffBasket='buy_reversal';
 function ffSet(b){ ffBasket=b; loadFF(); }
 function preFreezeBanner(){
-  const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
-  const dow=ist.getDay(), mins=ist.getHours()*60+ist.getMinutes();
+  const now = Date.now();
+  const ist = new Date(now + (5*60+30)*60000);
+  const dow=ist.getUTCDay(), mins=ist.getUTCHours()*60+ist.getUTCMinutes();
   const weekday = dow>=1 && dow<=5;
   if(weekday && mins < 945){
-    return `<div class="err" style="color:var(--amber);border-color:var(--amber);margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) &amp; sector metrics are not yet computed today — they auto-fail, so survivor counts are understated and the funnel collapses early. Numbers fill in after the 15:45 EOD freeze.</div>`;
+    return `<div class="err" style="margin-top:18px;margin-bottom:0">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate. Numbers fill in after 15:45 EOD freeze.</div>`;
   }
   return '';
 }
@@ -505,13 +537,16 @@ async function loadFF(){
     html+=sortTbl('ffp',
       [["symbol","Symbol"],["passed","Passed"],["total","of"],["gvm_score","GVM"],
        ["mom_2d","2D Mom%"],["failed_filters","Failed filters"]],
-      pc.stocks, x=>`<tr>
-        <td class="sym">${x.symbol}</td>
-        <td class="${x.passed===x.total?'pos':''}">${x.passed}</td>
-        <td>${x.total}</td>
-        <td>${num(x.gvm_score,2)}</td>
-        <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
-        <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`,
+      pc.stocks, x=>{
+        const sc_cls = scoreClass(x.passed, x.total);
+        return `<tr>
+          <td class="sym">${x.symbol}</td>
+          <td class="${sc_cls}" style="font-weight:700">${x.passed}</td>
+          <td>${x.total}</td>
+          <td>${num(x.gvm_score,2)}</td>
+          <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
+          <td style="font-family:Sora;color:var(--mut);text-align:left;white-space:normal;max-width:380px">${(x.failed_filters||[]).map(f=>f.replace(/_/g,' ')).join(', ')||'—'}</td></tr>`;
+      },
       {sortKey:'passed', dir:-1, empty:"No stocks"});
   } else { html+=`<div class="err">⚠ stock_passcount not available for ${ffBasket}</div>`; }
   html+=preFreezeBanner();
@@ -550,8 +585,12 @@ async function loadAll(){
   }
   document.getElementById('refreshBtn').textContent='↻ Refresh';
   document.getElementById('apiBase').textContent=API_BASE||location.origin;
-  const ist=new Date(Date.now()+(330+new Date().getTimezoneOffset())*60000);
-  document.getElementById('lastUpd').textContent='Last refresh: '+ist.toTimeString().slice(0,8)+' IST';
+  const now = Date.now();
+  const ist = new Date(now + (5*60+30)*60000);
+  document.getElementById('lastUpd').textContent='Last refresh: '+
+    String(ist.getUTCHours()).padStart(2,'0')+':'+
+    String(ist.getUTCMinutes()).padStart(2,'0')+':'+
+    String(ist.getUTCSeconds()).padStart(2,'0')+' IST';
 }
 
 function toggleAuto(){
