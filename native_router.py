@@ -3,7 +3,7 @@ Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
 
 ARCHITECTURE:
-  Layer 0: Hardcoded commands (virtual dashboard, health, PCR, QB, mood, qualified)
+  Layer 0: Hardcoded commands (trade check, virtual dashboard, health, PCR, QB, mood, qualified)
   Layer 1: Grammar parser+executor (RANK/FILTER/SCREEN/LOOKUP/HISTORY/SECTOR_VIEW)
   Layer 2: Fallback hint → Claude
 
@@ -11,6 +11,9 @@ ARCHITECTURE:
 
 NOTE (10-Jun-2026): mom_2d = 2-day momentum (close vs T-2). Renamed from day_change.
   Display label is "2D Mom%". Grammar metric alias "day change" maps to mom_2d.
+
+NOTE (11-Jun-2026): 'trade check <symbol> <long|short>' routes to native_trade_check
+  (v3.3 objective subset, $0). Subjective chart rules flagged for human confirmation.
 """
 
 import os
@@ -20,6 +23,8 @@ import time
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any
 import psycopg
+
+from native_trade_check import native_trade_check
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -270,7 +275,7 @@ def parse_query(q: str) -> Dict[str, Any]:
     }
 
 
-# ── GRAMMAR EXECUTOR ──────────────────────────────────────────────────────────
+# ── GRAMMAR EXECUTOR ───────────────────────────────────────────────────────────
 
 def fmt_table(headers: list, rows: list) -> str:
     if not rows:
@@ -516,7 +521,7 @@ def execute_grammar(query: str) -> Optional[str]:
         return f"DB error: {str(e)[:150]}\nToggle Claude ON for full access."
 
 
-# ── QUERY LOGGER ─────────────────────────────────────────────────────────────
+# ── QUERY LOGGER ───────────────────────────────────────────────────────────────
 
 def _log_query(query: str, mode: str, operation: str, metric: str,
                sector: str, resolved: bool, latency_ms: int,
@@ -536,7 +541,7 @@ def _log_query(query: str, mode: str, operation: str, metric: str,
         pass
 
 
-# ── VIRTUAL DASHBOARD V8 ──────────────────────────────────────────────────────
+# ── VIRTUAL DASHBOARD V8 ───────────────────────────────────────────────────────
 
 def _vd_market_gate(cur) -> str:
     cur.execute("""
@@ -656,7 +661,7 @@ def _virtual_dashboard(cur) -> str:
     return "\n\n".join(parts)
 
 
-# ── MAIN QUERY HANDLER ────────────────────────────────────────────────────────
+# ── MAIN QUERY HANDLER ─────────────────────────────────────────────────────────
 
 def _query_sync(query: str) -> str:
     q = query.lower().strip()
@@ -666,10 +671,17 @@ def _query_sync(query: str) -> str:
         _log_query(query, mode, op, metric, sector, resolved,
                    int((time.time()-t0)*1000))
 
+    # ── LAYER 0a: Native v3.3 Trade Check (own DB connection inside) ──────────
+    if any(k in q for k in ["trade check", "trade journal", "journal check",
+                            "evaluate stock", "trade card"]):
+        result = native_trade_check(query)
+        log("native", "trade_check_v33")
+        return result
+
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
 
-            # ── LAYER 0: Hardcoded commands ───────────────────────────────────
+            # ── LAYER 0: Hardcoded commands ──────────────────────────────────
 
             if "virtual dashboard" in q or "v8 dashboard" in q:
                 result=_virtual_dashboard(cur); log("native","virtual_dashboard"); return result
@@ -756,7 +768,7 @@ def _query_sync(query: str) -> str:
                     log("native","v8_watchlist"); return result
                 log("native","v8_watchlist","","",False); return "No V8 candidates today."
 
-            # ── LAYER 1: Grammar ──────────────────────────────────────────────
+            # ── LAYER 1: Grammar ─────────────────────────────────────────────
 
             slots = parse_query(q)
             grammar_result = execute_grammar(q)
@@ -772,6 +784,7 @@ def _query_sync(query: str) -> str:
                 slots["sector"] or "", False)
 
             return ("⚡ Native — $0. Try:\n"
+                    "• 'trade check RELIANCE long' | 'check INFY short'\n"
                     "• 'Virtual Dashboard V8' | 'market mood' | 'QB summary' | 'PCR'\n"
                     "• 'top 10 pharma gvm above 7.5' | 'tech stocks vm score'\n"
                     "• 'tech largecap vm score' | 'midcap opm above 20'\n"
