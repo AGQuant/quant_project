@@ -40,16 +40,32 @@ SELL_OVERBOUGHT (added 12-Jun-2026, founder decision):
   Exits flow through the SAME generic exit block (target/SL/gap/gate).
   Signals are CACHED per-day (stable off EOD metrics) — see _SO_CACHE below.
 
+CONFLICT HANDLING (added 12-Jun-2026, founder-locked):
+  A symbol can produce opposite-side signals (zone LONG + sell_overbought SHORT,
+  or zone LONG vs zone SHORT across days). Same-side duplicates are already
+  impossible (_has_open + _traded_today + UNIQUE(symbol,side,status)). The
+  opposite-side cases are handled by _resolve_conflict + a same-tick precompute:
+    - Same day, opposite signal while a position is open -> BLOCK new entry,
+      existing holds. Logged missed 'opposite_open'.
+    - Both sides fire on the SAME tick with NOTHING open -> SKIP BOTH. Logged
+      missed 'conflict' (each side).
+    - Next day, opposite signal on a still-open position -> EXIT the existing
+      position at the current 5-min close (result CONFLICT_EXIT), stay FLAT, do
+      NOT reverse. New entry blocked, logged missed 'conflict_exit_blocked'.
+      A flattened name may re-enter the opposite on a LATER day if still valid.
+
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
   gap at first bar of day past level -> GAP_TARGET_EXIT / GAP_SL_EXIT (exit at open)
   gate rebalance once at 15:20 both sides: open > current slots -> close excess
      order best-profit, worst-loss, 2nd-best, 2nd-worst... stop when enough -> GATE_EXIT
+  conflict -> CONFLICT_EXIT (next-day opposite signal flattens position @ live close)
 
 SIZING : 1 lot (futures_universe.lot_size, default 1).
 GATE   : market-mood buy_slots/sell_slots (sum 15) cap concurrent open per side.
-MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff ->
-         v8_paper_missed, one row per (symbol, side, day).
+MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff|
+         opposite_open|conflict|conflict_exit_blocked -> v8_paper_missed,
+         one row per (symbol, side, day).
 
 Price feed: intraday_prices (Fyers 5-min, NAIVE IST ts — read RAW, no TZ math).
 
@@ -387,6 +403,67 @@ def _traded_today(conn, sym, side, d):
         cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1", (sym, side, d))
         return cur.fetchone() is not None
 
+def _opposite_open(conn, sym, want_side, d):
+    """
+    Conflict guard (12-Jun-2026, founder-locked). Returns the opposing OPEN
+    position for `sym` if one exists, else None. `want_side` is the side we are
+    about to enter; the opposite side is what we look for.
+      Returns (pid, open_side, entry_price, entry_ts, qty, target, stop, basket,
+               pivot_date, same_day:bool) or None.
+    Rules:
+      - same_day True  (opp opened today)        -> caller BLOCKS new entry (opposite_open)
+      - same_day False (opp opened a prior day)  -> caller EXITs the opp @ live close
+                                                    (CONFLICT_EXIT), stays flat, then
+                                                    blocks new entry (conflict_exit_blocked)
+    No stop-and-reverse: a flattened name may re-enter the opposite on a LATER day
+    if the signal is still valid.
+    """
+    opp = "SHORT" if want_side == "LONG" else "LONG"
+    with conn.cursor() as cur:
+        cur.execute("""SELECT id, side, entry_price, entry_ts, qty, target, stop_loss, basket, pivot_date
+                       FROM v8_paper_positions
+                       WHERE symbol=%s AND side=%s AND status='OPEN' LIMIT 1""",
+                    (sym, opp))
+        r = cur.fetchone()
+    if not r:
+        return None
+    pid, oside, entry, ets, qty, tgt, sl, basket, pdt = r
+    same_day = (ets is not None and ets.date() == d)
+    return (pid, oside, float(entry), ets, int(qty), float(tgt), float(sl),
+            basket, pdt, same_day)
+
+
+def _resolve_conflict(conn, sym, want_side, basket, d, exit_close, exit_ts):
+    """
+    Apply the conflict policy for `sym` before opening a `want_side` position.
+    Returns True if the caller should PROCEED (no conflict), False if it must SKIP.
+    Side effects:
+      same-day conflict      -> log missed 'opposite_open', return False
+      prior-day conflict      -> CONFLICT_EXIT the opposing position @ exit_close,
+                                 log missed 'conflict_exit_blocked', return False
+    `exit_close`/`exit_ts` = current 5-min close + ts for the conflict exit fill.
+    """
+    conf = _opposite_open(conn, sym, want_side, d)
+    if conf is None:
+        return True
+    pid, oside, oentry, oets, oqty, otgt, osl, obasket, opdt, same_day = conf
+    if same_day:
+        # opposite opened TODAY -> block the new entry, position holds
+        _log_missed(conn, d, sym, want_side, basket, exit_close, exit_close, exit_close,
+                    "opposite_open")
+        log.info(f"conflict {sym}: {want_side} blocked, {oside} opened same-day holds")
+        return False
+    # opposite opened a PRIOR day -> flatten it now at live close, stay flat
+    if exit_close is not None and exit_ts is not None:
+        _close_position(conn, pid, sym, oside, obasket, oentry, oets, oqty, otgt, osl,
+                        opdt, exit_close, exit_ts, "CONFLICT_EXIT")
+        _log_missed(conn, d, sym, want_side, basket, exit_close, exit_close, exit_close,
+                    "conflict_exit_blocked")
+        log.info(f"conflict {sym}: {oside} flattened CONFLICT_EXIT @ {exit_close}, "
+                 f"{want_side} NOT opened (re-enters later day if valid)")
+    return False
+
+
 def _lot(conn, sym):
     with conn.cursor() as cur:
         cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (sym,))
@@ -473,6 +550,17 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
 
     qual = qualified_set(conn)
     so_sig = _sell_overbought_signals(conn, for_date=d)   # cached, sell_overbought (own model)
+
+    # ── Rule 2 (12-Jun-2026): same-tick BOTH-SIDES collision ──────────────────
+    # A symbol can appear LONG in the zone qual AND SHORT via sell_overbought (or
+    # SHORT in qual). If a fresh entry would be attempted on BOTH sides this tick
+    # with NOTHING open yet, skip BOTH and log 'conflict'. qual is one-per-symbol
+    # (single side); collision = that symbol also has a sell_overbought short, or
+    # qual short vs ... (qual is single-side so the only cross is qual-long x SO).
+    _long_syms  = {s for s, q in qual.items() if q["side"] == "LONG"}
+    _short_syms = {s for s, q in qual.items() if q["side"] == "SHORT"} | set(so_sig.keys())
+    _tick_conflict = _long_syms & _short_syms
+
     exits, entries = [], []
 
     # ---- 1) EXITS ----
@@ -551,6 +639,9 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
                 if _has_open(conn,sym,"LONG"): continue
                 if _traded_today(conn,sym,"LONG",d): continue
+                if sym in _tick_conflict:                       # Rule 2: both sides fired
+                    _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"conflict"); continue
+                if not _resolve_conflict(conn,sym,"LONG",basket,d,cur_close,cur_ts): continue
                 if _blackout(conn,sym):
                     _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"blackout"); continue
                 if buy_slots is not None and long_open >= buy_slots:
@@ -570,6 +661,9 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"): continue
                 if _traded_today(conn,sym,"SHORT",d): continue
+                if sym in _tick_conflict:                       # Rule 2: both sides fired
+                    _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"conflict"); continue
+                if not _resolve_conflict(conn,sym,"SHORT",basket,d,cur_close,cur_ts): continue
                 if _blackout(conn,sym):
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"blackout"); continue
                 if sell_slots is not None and short_open >= sell_slots:
@@ -591,6 +685,9 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             stop  = entry + (entry - target)       # 1:1 off LIVE entry
             if _has_open(conn,sym,"SHORT"): continue
             if _traded_today(conn,sym,"SHORT",d): continue
+            if sym in _tick_conflict:                          # Rule 2: both sides fired
+                _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"conflict"); continue
+            if not _resolve_conflict(conn,sym,"SHORT","sell_overbought",d,cur_close,cur_ts): continue
             if _blackout(conn,sym):
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"blackout"); continue
             if sell_slots is not None and short_open >= sell_slots:
