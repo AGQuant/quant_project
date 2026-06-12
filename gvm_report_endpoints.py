@@ -1,19 +1,15 @@
 """
 GVM Company Report — peer-benchmark analytics endpoint (Model 2).
 
-v3 (12-Jun-2026 evening):
-  - PARAMS now mirrors the canonical engine scored set (G13 + V2 + M5 + IC).
-    Drops: FII Change, DII Change (replaced by combined Inst Holding Change),
-           ROE, Debt-to-Equity (not in engine).
-    Adds:  OPM Expansion, Fixed Asset Growth, Inst Holding Absolute,
-           Inst Holding Change (combined FII+DII delta),
-           Potential Upside (will display "—" until populated; agenda id=277).
-  - build_page_extras(symbol, ladder, segment=…) — segment ctx wiring.
-  - Params with no company AND no peer data anywhere are hidden, not shown
-    as "—" everywhere (clean default).
+v3.1 (12-Jun-2026 night):
+  - hotfix: "Fixed assets growth" → fixed_asset_growth (actual snake_case col)
+  - hotfix: "Institutional Holding" doesn't exist → synthetic _inst_combined_abs
+            (fii_holding + dii_holding), computed in Python.
 
-v2 wired payload.extras + enriched ladder.
-v1 base peer-benchmark report.
+v3 (12-Jun-2026 evening):
+  - PARAMS mirrors canonical engine scored set (G13 + V2 + M5 + IC).
+  - build_page_extras(symbol, ladder, segment=…) — segment ctx wiring.
+  - Params with no company AND no peer data anywhere are hidden.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -68,8 +64,8 @@ PARAMS = [
     ("qoq_profit",   "QoQ Profit Growth",     "qoq_profit_growth",      "G", True,  "%"),
     ("opm",          "Operating Margin",      "opm",                    "G", True,  "%"),
     ("opm_exp",      "OPM Expansion",         "Operating profit growth","G", True,  "%"),
-    ("fa_growth",    "Fixed Asset Growth",    "Fixed assets growth",    "G", True,  "%"),
-    ("inst_abs",     "Inst Holding (abs)",    "Institutional Holding",  "G", True,  "%"),
+    ("fa_growth",    "Fixed Asset Growth",    "fixed_asset_growth",     "G", True,  "%"),
+    ("inst_abs",     "Inst Holding (abs)",    "_inst_combined_abs",     "G", True,  "%"),
     ("inst_chg",     "Inst Holding Change",   "_inst_combined_chg",     "G", True,  "%"),
     ("roce",         "ROCE",                  "roce",                   "G", True,  "%"),
     ("div_yield",    "Dividend Yield",        "dividend_yield",         "G", True,  "%"),
@@ -178,6 +174,7 @@ def gvm_company_report(symbol: str, persist: bool = True):
     sel_cols = ", ".join(f"s.{_col_sql(col)} AS {key}" for key, col in real_cols)
     peers = _query_all(f"""
         SELECT g.symbol, g.company_name, g.market_cap,
+               s.fii_holding AS _fii_abs, s.dii_holding AS _dii_abs,
                s.fii_change AS _fii_chg, s.dii_change AS _dii_chg,
                {sel_cols}
         FROM gvm_scores g
@@ -188,6 +185,10 @@ def gvm_company_report(symbol: str, persist: bool = True):
 
     # Compute synthetic columns per peer
     for p in peers:
+        fa = _f(p.get("_fii_abs"))
+        da = _f(p.get("_dii_abs"))
+        p["inst_abs"] = (round((fa or 0) + (da or 0), 2)
+                         if (fa is not None or da is not None) else None)
         fc = _f(p.get("_fii_chg"))
         dc = _f(p.get("_dii_chg"))
         p["inst_chg"] = (round((fc or 0) + (dc or 0), 2)
@@ -210,7 +211,6 @@ def gvm_company_report(symbol: str, persist: bool = True):
         comp_val = _f(company_row.get(key)) if company_row else None
         peer_avg = round(sum(peer_vals) / len(peer_vals), 2) if peer_vals else None
 
-        # Hide param entirely if NO data anywhere in segment (clean default)
         if comp_val is None and peer_avg is None:
             continue
 
