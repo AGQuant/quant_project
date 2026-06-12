@@ -1,25 +1,27 @@
 """
-Native v3.3.1 Trade Check — zero-token, pure Railway DB. ENGINE v3.2 (STRICT).
+Native v3.3.2 Trade Check — zero-token, pure Railway DB. ENGINE v3.3 (STRICT).
 
-ALL 19 parameters auto-computed from DB:
-  Tier1 (LONG 12 / SHORT 11, min 8):
-         R1 ADR, R2 sector, R3 peers, R4 GVM (LONG only), R6 MAs,
-         R7 volume pattern (30d up/down vol ratio), R8 RSI, R9 returns,
-         R10 intraday strength (5m bars: day-up + close-position + 2nd-half),
-         R11 RSI room, R12 30d pattern (breakout OR higher-lows+contraction),
-         R13 ATR Ignition (ATR5/ATR20 >= 1.05 — energy arriving; complements
-         R12 contraction: squeeze + release. Added v3.3.1, 12-Jun-2026)
-  Tier2 (7, min 5): F1 blackout, F2 pivot room, F3 fib proximity (30d swing
-         38.2/50/61.8 within 1.5%), F4 R:R, F5 entry window (live IST),
-         F6 DTE to last-Tuesday expiry >=3, F7 basis trend
+v3.3.2 (12-Jun-2026): R6+R8 MERGED into single "R6 Trend" rule after
+redundancy scan found 88% agreement across 209 futures (paying twice for
+the same fact). R13 ATR Ignition KEPT (21.9% pass rate, 63-75% overlap =
+lowest in framework = genuinely new volatility axis).
+Tier1 back to LONG 11 / SHORT 10, min 8 — original locked denominators,
+every rule now on a distinct axis:
+  R1 breadth | R2 sector RS | R3 peer confirm | R4 quality (LONG only) |
+  R6 trend (MAs+RSI merged) | R7 participation | R9 price momentum |
+  R10 timing | R11 room | R12 structure | R13 volatility
+
+ALL parameters auto-computed from DB.
+Tier2 (7, min 5): F1 blackout, F2 pivot room, F3 fib proximity,
+F4 R:R, F5 entry window (live IST), F6 DTE>=3, F7 basis trend.
 
 STRICT SCORING: only confirmed PASSes count. FAIL and no-data (🟡) both
-count as NOT passed — no optimistic credit.
+count as NOT passed.
 
 gate1/gate2 (bool|None) = OPTIONAL human overrides:
   gate1 overrides R10, gate2 overrides R12.
 
-Scope: v3.3.1 (id=143+209 + R13 delta). Not v3.4.1.
+Scope: v3.3.2 (id=143 base + delta id=263 R13 + merge delta). Not v3.4.1.
 """
 
 import os
@@ -167,9 +169,8 @@ def _r12_pattern(cur, symbol, side):
 
 
 def _r13_atr_ignition(cur, symbol):
-    """v3.3.1: ATR(5) vs ATR(20). >=1.05 = energy arriving (both sides).
-    Complements R12 contraction: R12 = structure coiled (10d vs 10d),
-    R13 = release trigger (5d vs 20d baseline)."""
+    """ATR(5) vs ATR(20). >=1.05 = energy arriving (both sides).
+    R12 = structure coiled, R13 = release trigger."""
     cur.execute("""
         WITH d AS (
           SELECT price_date, high, low, close,
@@ -313,7 +314,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             def row(rule, cond, val, ok, method="auto"):
                 return (rule, cond, val, ok, method)
 
-            # ── TIER 1 ──
+            # ── TIER 1 (v3.3.2: LONG 11 / SHORT 10, min 8) ──
             t1 = []
             if side == "LONG":
                 t1.append(row("R1 Market", "not extremely bearish",
@@ -336,28 +337,32 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 t1.append(row("R4 GVM", ">=7.0", f"{_f(gvm):.2f}" if gvm is not None else "—",
                               gvm is not None and float(gvm) >= 7.0))
 
+            # R6 Trend — MERGED R6+R8 (v3.3.2): MAs + RSI M/W together
+            # (redundancy scan 12-Jun: 88% agreement = same fact paid twice)
             mas = [dma20, dma50, dma200]
             if side == "LONG":
                 n = sum(1 for x in mas if x is not None and float(x) > 0)
-                t1.append(row("R6 MAs", "above 2of3", f"{n}/3 above", n >= 2))
+                rsi_ok = (rsi_m is not None and rsi_w is not None
+                          and float(rsi_m) >= 50 and float(rsi_w) >= 50)
+                t1.append(row("R6 Trend", "2of3 MAs above + RSI M/W>=50 (merged R6+R8)",
+                              f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}",
+                              n >= 2 and rsi_ok))
             else:
                 n = sum(1 for x in mas if x is not None and float(x) < 0)
-                t1.append(row("R6 MAs", "below 2of3", f"{n}/3 below", n >= 2))
+                rsi_ok = (rsi_m is not None and rsi_w is not None
+                          and float(rsi_m) <= 50 and float(rsi_w) <= 50)
+                t1.append(row("R6 Trend", "2of3 MAs below + RSI M/W<=50 (merged R6+R8)",
+                              f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}",
+                              n >= 2 and rsi_ok))
 
             t1.append(row("R7 Volume", f"1-mo {'buying' if side=='LONG' else 'selling'} (vol ratio)",
                           r7_val, r7_ok))
 
             if side == "LONG":
-                t1.append(row("R8 RSI M/W", ">=50 both",
-                              f"M {_f(rsi_m):.0f} / W {_f(rsi_w):.0f}",
-                              rsi_m is not None and rsi_w is not None and float(rsi_m) >= 50 and float(rsi_w) >= 50))
                 t1.append(row("R9 Returns", "week>0 & month>0",
                               f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
                               wk_ret is not None and mo_ret is not None and float(wk_ret) > 0 and float(mo_ret) > 0))
             else:
-                t1.append(row("R8 RSI M/W", "<=50 both",
-                              f"M {_f(rsi_m):.0f} / W {_f(rsi_w):.0f}",
-                              rsi_m is not None and rsi_w is not None and float(rsi_m) <= 50 and float(rsi_w) <= 50))
                 t1.append(row("R9 Returns", "week<0 & month<0",
                               f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
                               wk_ret is not None and mo_ret is not None and float(wk_ret) < 0 and float(mo_ret) < 0))
@@ -376,7 +381,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
 
             t1.append(row("R13 ATR", "ignition ATR5/20>=1.05", r13_val, r13_ok))
 
-            t1_total = 12 if side == "LONG" else 11
+            t1_total = 11 if side == "LONG" else 10
             t1_auto = [r for r in t1 if r[3] is not None]
             t1_pass = sum(1 for r in t1_auto if r[3])
             t1_unk = len(t1) - len(t1_auto)
@@ -452,7 +457,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_unk, "t1_total": t1_total,
                 "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk,
                 "verdict": verdict, "verdict_class": vclass,
-                "version": "v3.3.1",
+                "version": "v3.3.2",
                 "scoring": "strict — fails and no-data both count as not passed",
             }
     except Exception as e:
@@ -468,7 +473,7 @@ def compute_single_rule(symbol, side, rule):
     for r in d["tier1"] + d["tier2"]:
         if r["rule"].upper().replace(" ", "").startswith(rule):
             return {"ok": True, "symbol": d["symbol"], "side": d["side"], **r}
-    return {"ok": False, "error": f"Unknown rule '{rule}'. Use R1-R13 or F1-F7."}
+    return {"ok": False, "error": f"Unknown rule '{rule}'. Use R1-R13 or F1-F7 (R8 merged into R6 in v3.3.2)."}
 
 
 def native_trade_check(query, gate1=None, gate2=None):
@@ -481,7 +486,7 @@ def native_trade_check(query, gate1=None, gate2=None):
         s = {"pass": "PASS", "fail": "FAIL", "chart": "🟡 no data (not passed)"}[r["state"]]
         return s + (" (gate)" if r.get("method") == "gate" else "")
 
-    out = [f"**Trade Check v3.3.1 — {d['company']} ({d['symbol']}) · {d['side']}**"]
+    out = [f"**Trade Check v3.3.2 — {d['company']} ({d['symbol']}) · {d['side']}**"]
     gv = f"GVM {d['gvm']:.2f} · " if d.get("gvm") is not None else ""
     out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0 · strict scoring_")
     out.append("\n**TIER 1**")
