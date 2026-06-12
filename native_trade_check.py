@@ -1,25 +1,25 @@
 """
-Native v3.3 Trade Check — zero-token, pure Railway DB. ENGINE v3.1 (STRICT).
+Native v3.3.1 Trade Check — zero-token, pure Railway DB. ENGINE v3.2 (STRICT).
 
-ALL 18 parameters auto-computed from DB:
-  Tier1: R1 ADR, R2 sector, R3 peers, R4 GVM, R6 MAs, R7 volume pattern
-         (30d up/down vol ratio), R8 RSI, R9 returns, R10 intraday strength
-         (today's 5m bars: day-up + close-position + 2nd-half trend),
-         R11 RSI room, R12 30d pattern (breakout OR higher-lows+contraction)
-  Tier2: F1 blackout, F2 pivot room, F3 fib proximity (30d swing
+ALL 19 parameters auto-computed from DB:
+  Tier1 (LONG 12 / SHORT 11, min 8):
+         R1 ADR, R2 sector, R3 peers, R4 GVM (LONG only), R6 MAs,
+         R7 volume pattern (30d up/down vol ratio), R8 RSI, R9 returns,
+         R10 intraday strength (5m bars: day-up + close-position + 2nd-half),
+         R11 RSI room, R12 30d pattern (breakout OR higher-lows+contraction),
+         R13 ATR Ignition (ATR5/ATR20 >= 1.05 — energy arriving; complements
+         R12 contraction: squeeze + release. Added v3.3.1, 12-Jun-2026)
+  Tier2 (7, min 5): F1 blackout, F2 pivot room, F3 fib proximity (30d swing
          38.2/50/61.8 within 1.5%), F4 R:R, F5 entry window (live IST),
          F6 DTE to last-Tuesday expiry >=3, F7 basis trend
 
-STRICT SCORING (per Arpit 12-Jun): only confirmed PASSes count.
-FAIL and no-data (🟡) rules both count as NOT passed — no optimistic
-credit for unknowns. Verdict thresholds: Tier1 >=8 confirmed AND
-Tier2 >=5 confirmed, else REJECT/WEAK.
+STRICT SCORING: only confirmed PASSes count. FAIL and no-data (🟡) both
+count as NOT passed — no optimistic credit.
 
 gate1/gate2 (bool|None) = OPTIONAL human overrides:
   gate1 overrides R10, gate2 overrides R12.
 
-Scope: v3.3 ONLY (id=143+209). Not v3.4.1.
-Tier1: LONG 11 (min 8) / SHORT 10 (min 8). Tier2: 7 (min 5).
+Scope: v3.3.1 (id=143+209 + R13 delta). Not v3.4.1.
 """
 
 import os
@@ -166,6 +166,30 @@ def _r12_pattern(cur, symbol, side):
     return ok, tag
 
 
+def _r13_atr_ignition(cur, symbol):
+    """v3.3.1: ATR(5) vs ATR(20). >=1.05 = energy arriving (both sides).
+    Complements R12 contraction: R12 = structure coiled (10d vs 10d),
+    R13 = release trigger (5d vs 20d baseline)."""
+    cur.execute("""
+        WITH d AS (
+          SELECT price_date, high, low, close,
+                 LAG(close) OVER (ORDER BY price_date) pc
+          FROM (SELECT price_date, high, low, close FROM raw_prices
+                WHERE symbol=%s AND volume>0 ORDER BY price_date DESC LIMIT 21) s
+          ORDER BY price_date),
+        t AS (
+          SELECT GREATEST(high-low, ABS(high-pc), ABS(low-pc)) AS trng,
+                 ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
+          FROM d WHERE pc IS NOT NULL)
+        SELECT AVG(trng) FILTER (WHERE rn<=5), AVG(trng) FROM t""", (symbol,))
+    r = cur.fetchone()
+    a5, a20 = (_f(r[0]) if r else None), (_f(r[1]) if r else None)
+    if not a5 or not a20:
+        return None, "no ATR data"
+    ratio = a5 / a20
+    return ratio >= 1.05, f"ATR5/20 {ratio:.2f}"
+
+
 def _f3_fib(cur, symbol, cmp):
     """30d swing hi/lo; PASS if CMP within 1.5% of 38.2/50/61.8 level."""
     if not cmp:
@@ -269,10 +293,11 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                            ORDER BY ts DESC LIMIT 5""", (symbol,))
             basis = [_f(x[0]) for x in cur.fetchall()]
 
-            # new auto computers
+            # auto computers
             r7_ok, r7_val = _r7_volume_pattern(cur, symbol, side)
             r10_ok, r10_val = _r10_intraday(cur, symbol, side)
             r12_ok, r12_val = _r12_pattern(cur, symbol, side)
+            r13_ok, r13_val = _r13_atr_ignition(cur, symbol)
             f3_ok, f3_val = _f3_fib(cur, symbol, cmp)
             f5_ok, f5_val = _f5_window(side)
             f6_ok, f6_val = _f6_dte()
@@ -349,7 +374,9 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             t1.append(row("R12 Pattern", "brkout OR HL+contraction" if side == "LONG"
                           else "brkdwn OR LH+contraction", r12_val, r12_ok, r12_method))
 
-            t1_total = 11 if side == "LONG" else 10
+            t1.append(row("R13 ATR", "ignition ATR5/20>=1.05", r13_val, r13_ok))
+
+            t1_total = 12 if side == "LONG" else 11
             t1_auto = [r for r in t1 if r[3] is not None]
             t1_pass = sum(1 for r in t1_auto if r[3])
             t1_unk = len(t1) - len(t1_auto)
@@ -402,7 +429,6 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             t2_unk = len(t2) - len(t2_auto)
 
             # ── verdict — STRICT: only confirmed PASSes count.
-            # FAIL and no-data both count as NOT passed. No optimistic credit.
             if t1_pass >= 8 and t2_pass >= 5:
                 if t1_pass >= 10 and t2_pass >= 6:
                     verdict, vclass = f"STRONG — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7.", "strong"
@@ -426,6 +452,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_unk, "t1_total": t1_total,
                 "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk,
                 "verdict": verdict, "verdict_class": vclass,
+                "version": "v3.3.1",
                 "scoring": "strict — fails and no-data both count as not passed",
             }
     except Exception as e:
@@ -441,7 +468,7 @@ def compute_single_rule(symbol, side, rule):
     for r in d["tier1"] + d["tier2"]:
         if r["rule"].upper().replace(" ", "").startswith(rule):
             return {"ok": True, "symbol": d["symbol"], "side": d["side"], **r}
-    return {"ok": False, "error": f"Unknown rule '{rule}'. Use R1-R12 or F1-F7."}
+    return {"ok": False, "error": f"Unknown rule '{rule}'. Use R1-R13 or F1-F7."}
 
 
 def native_trade_check(query, gate1=None, gate2=None):
@@ -454,7 +481,7 @@ def native_trade_check(query, gate1=None, gate2=None):
         s = {"pass": "PASS", "fail": "FAIL", "chart": "🟡 no data (not passed)"}[r["state"]]
         return s + (" (gate)" if r.get("method") == "gate" else "")
 
-    out = [f"**Trade Check v3.3 — {d['company']} ({d['symbol']}) · {d['side']}**"]
+    out = [f"**Trade Check v3.3.1 — {d['company']} ({d['symbol']}) · {d['side']}**"]
     gv = f"GVM {d['gvm']:.2f} · " if d.get("gvm") is not None else ""
     out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0 · strict scoring_")
     out.append("\n**TIER 1**")
