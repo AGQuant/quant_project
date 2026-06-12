@@ -1,17 +1,17 @@
 """
-gvm_page_extras.py — DB-only enrichment block for the GVM company page (v2).
+gvm_page_extras.py — DB-only enrichment block for the GVM company page (v3).
+
+v3 (12-Jun-2026 night):
+  + DMA-50 / DMA-200 displayed as deviation % from price (not raw price level).
+  + Week/Month/Year returns: fallback to raw_prices for non-futures stocks
+    (v8_metrics only covers the 210 futures universe).
+  + Annual Upside computed via engine formula: fy27_growth × (pe/hist_pe).
+    Uses input_raw.fy27_growth (1,536 stocks populated).
+  + Universe pivot lookup: v8_paper_pivots now has rows for ALL 1,720 stocks
+    (gvm_universe_pivots job), so pivot block works for non-futures too.
 
 v2 (12-Jun-2026 evening):
-  + segment context block (sector_ratings + computed sector rank + sector
-    week/month % from v8_metrics peer-average + stock-vs-sector delta)
-  + universe z-score (μ/σ across full scored universe)
-  + ladder enriched with G/V/M components, mcap, p/b, roe, opm, div_yield,
-    rsi_month, week_return, month_return, ret_1y, upside_raw, peer-segment
-    averages for "vs segment" compare toggle
-  + volume.cum_pct_series for cumulative-return overlay on A/D panel
-
-v1: trend / volume A/D / pivot / 52W / percentile / flow / valuation /
-    earnings blackout / tier1 auto / ladder_extra basics.
+  + segment context block, z-score, ladder enrichment, cumulative price series.
 
 Design rules honoured:
   - own file, main.py untouched (wiring-only rule)
@@ -27,9 +27,9 @@ import psycopg
 
 log = logging.getLogger("scorr.gvm_extras")
 
-BLACKOUT_DAYS = 5          # days before a results/ex event = blackout
-AD_ACCUM_RATIO = 1.30      # up-vol / down-vol >= this  -> ACCUMULATION
-AD_DIST_RATIO = 0.77       # up-vol / down-vol <= this  -> DISTRIBUTION
+BLACKOUT_DAYS = 5
+AD_ACCUM_RATIO = 1.30
+AD_DIST_RATIO = 0.77
 
 
 def _conn():
@@ -48,7 +48,6 @@ def _r(v, d=2) -> Optional[float]:
     return round(f, d) if f is not None else None
 
 
-# ── Tier-1 auto-checkable subset (price-action facts, NOT a trade verdict) ──
 def _tier1_auto(m: Dict[str, Any], ad_ratio: Optional[float]) -> Dict[str, Any]:
     """7 Tier-1 rules computable per-symbol from v8_metrics + volume A/D.
     Manual chart-judgment rules (5M recovery, 1D pattern, reversal-only,
@@ -96,6 +95,54 @@ def _ad_verdict(ratio: Optional[float]) -> Optional[str]:
     if ratio <= AD_DIST_RATIO:
         return "DISTRIBUTION"
     return "NEUTRAL"
+
+
+def _compute_upside(fy27, pe, hist_pe):
+    """Engine formula: upside = fy27_growth * (pe / hist_pe).
+    Multiplier capped at 1.0 if hist_pe is invalid (matches gvm_nightly._pu)."""
+    fy = _f(fy27)
+    if fy is None:
+        return None
+    if fy == 0:
+        return 0.0
+    p, h = _f(pe), _f(hist_pe)
+    mult = (p / h) if (p is not None and h is not None and h > 0) else 1.0
+    return round(fy * mult, 2)
+
+
+def _compute_returns_from_prices(cur, syms: List[str]) -> Dict[str, Dict[str, Optional[float]]]:
+    """One query: week (5d), month (22d), year (252d) % returns from raw_prices.
+    Works for ALL stocks (universal fallback for non-futures)."""
+    out: Dict[str, Dict[str, Optional[float]]] = {}
+    if not syms:
+        return out
+    try:
+        cur.execute("""
+            WITH ranked AS (
+                SELECT symbol, price_date, close,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                FROM raw_prices
+                WHERE symbol = ANY(%s)
+                  AND price_date >= CURRENT_DATE - INTERVAL '400 days'
+            )
+            SELECT symbol,
+                   MAX(CASE WHEN rn = 1 THEN close END)   AS latest,
+                   MAX(CASE WHEN rn = 6 THEN close END)   AS c_5d,
+                   MAX(CASE WHEN rn = 23 THEN close END)  AS c_22d,
+                   MAX(CASE WHEN rn = 253 THEN close END) AS c_252d
+            FROM ranked
+            GROUP BY symbol
+        """, (syms,))
+        for s, latest, c5, c22, c252 in cur.fetchall():
+            l, c5f, c22f, c252f = _f(latest), _f(c5), _f(c22), _f(c252)
+            out[s] = {
+                "week_return":  round((l / c5f - 1) * 100, 2) if l and c5f else None,
+                "month_return": round((l / c22f - 1) * 100, 2) if l and c22f else None,
+                "year_return":  round((l / c252f - 1) * 100, 1) if l and c252f else None,
+            }
+    except Exception as e:
+        log.warning(f"raw_prices returns failed: {e}")
+    return out
 
 
 def build_page_extras(symbol: str, ladder_symbols: List[str],
@@ -157,7 +204,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
             except Exception as e:
                 log.warning(f"ad_map failed: {e}")
 
-            # daily bars + biggest day + cumulative % series for main symbol
+            # main symbol daily bars (no cumulative line — removed v3 per feedback)
             vol_block: Dict[str, Any] = {}
             try:
                 cur.execute("""
@@ -175,25 +222,21 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 """, (symbol,))
                 rows = list(reversed(cur.fetchall()))
                 bars = []
-                cum_series = []
                 base_close = _f(rows[0][1]) if rows else None
+                last_close = _f(rows[-1][1]) if rows else None
                 for d, close, vol, chg in rows:
                     bars.append({"d": d, "v": _f(vol) or 0.0,
                                  "up": (_f(chg) or 0.0) > 0,
                                  "close": _f(close)})
-                    c = _f(close)
-                    cum_pct = (round((c / base_close - 1) * 100, 2)
-                               if c is not None and base_close else None)
-                    cum_series.append({"d": d, "cum_pct": cum_pct})
                 ad = ad_map.get(symbol, {})
                 biggest = max(bars, key=lambda b: b["v"]) if bars else None
-                total_ret = cum_series[-1]["cum_pct"] if cum_series else None
+                total_ret = (round((last_close / base_close - 1) * 100, 2)
+                             if last_close and base_close else None)
                 vol_block = {
                     "up_vol": ad.get("up"), "down_vol": ad.get("dn"),
                     "ratio": ad.get("ratio"),
                     "verdict": _ad_verdict(ad.get("ratio")),
                     "bars": bars,
-                    "cum_pct_series": cum_series,
                     "total_return_pct": total_ret,
                     "biggest_day": ({"d": biggest["d"], "v": biggest["v"],
                                      "direction": "UP" if biggest["up"] else "DOWN"}
@@ -203,7 +246,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"vol bars failed {symbol}: {e}")
             extras["volume"] = vol_block or None
 
-            # ── 3. Pivot levels (latest rolling-5d) ───────────────────────
+            # ── 3. Pivot levels (rolling-5d, now universe-wide via universe pivots job)
             try:
                 cur.execute("""
                     SELECT pivot_date::text, pp, r1, s1, r2, s2
@@ -276,26 +319,38 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 extras["percentile"] = None
 
             # ── 6. Flow + valuation extras + ladder enrichment ────────────
-            # one query pulls everything needed for main stock AND every peer
+            # Also pull fy27_growth from input_raw for Annual Upside formula.
             try:
                 cur.execute("""
-                    SELECT nse_code, pe, historical_pe, segment_pe,
-                           "Price to book value", "PEG Ratio", "EVEBITDA",
-                           "Cfo by Pat", dividend_yield,
-                           fii_holding, fii_change, dii_holding, dii_change,
-                           "Promoter holding", return_1y, "Return on equity",
-                           opm
-                    FROM screener_raw
-                    WHERE nse_code = ANY(%s)
+                    SELECT s.nse_code, s.pe, s.historical_pe, s.segment_pe,
+                           s."Price to book value", s."PEG Ratio", s."EVEBITDA",
+                           s."Cfo by Pat", s.dividend_yield,
+                           s.fii_holding, s.fii_change, s.dii_holding, s.dii_change,
+                           s."Promoter holding", s.return_1y, s."Return on equity",
+                           s.opm, s.price, s.dma_50, s.dma_200,
+                           i.fy27_growth
+                    FROM screener_raw s
+                    LEFT JOIN input_raw i ON i.nse_code = s.nse_code
+                    WHERE s.nse_code = ANY(%s)
                 """, (syms,))
                 for r in cur.fetchall():
                     (s, pe, hpe, spe, pb, peg, ev, cfo, dy,
-                     fii, fii_c, dii, dii_c, prom, r1y, roe, opm) = r
+                     fii, fii_c, dii, dii_c, prom, r1y, roe, opm,
+                     price, dma50, dma200, fy27) = r
                     ladder_extra.setdefault(s, {})
+                    upside = _compute_upside(fy27, pe, hpe)
+                    # DMA deviation = (price - dma)/dma * 100  (engine formula)
+                    pf, d50, d200 = _f(price), _f(dma50), _f(dma200)
+                    dma50_dev = (round((pf - d50) / d50 * 100, 2)
+                                 if pf is not None and d50 and d50 > 0 else None)
+                    dma200_dev = (round((pf - d200) / d200 * 100, 2)
+                                  if pf is not None and d200 and d200 > 0 else None)
                     ladder_extra[s].update({
                         "pe": _r(pe, 1), "ret_1y": _r(r1y, 1),
                         "pb": _r(pb, 2), "roe": _r(roe, 1),
                         "opm": _r(opm, 1), "div_yield": _r(dy, 2),
+                        "upside": upside,
+                        "dma_50_dev": dma50_dev, "dma_200_dev": dma200_dev,
                     })
                     if s == symbol:
                         pe_f, hpe_f = _f(pe), _f(hpe)
@@ -314,6 +369,8 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                             "pb": _r(pb, 2), "peg": _r(peg, 2),
                             "ev_ebitda": _r(ev, 2), "cfo_pat": _r(cfo, 2),
                             "div_yield": _r(dy, 2),
+                            "annual_upside": upside,
+                            "fy27_growth": _r(fy27, 1),
                         }
             except Exception as e:
                 log.warning(f"flow/valuation failed: {e}")
@@ -342,7 +399,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"earnings failed {symbol}: {e}")
                 extras["earnings"] = None
 
-            # ── 8. v8_metrics for ALL ladder symbols -> Tier-1 + ladder ───
+            # ── 8. v8_metrics for futures peers -> Tier-1 + ladder ────────
             try:
                 cur.execute("""
                     SELECT DISTINCT ON (symbol)
@@ -364,31 +421,50 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                     ladder_extra[s]["tier1_passed"] = t1["passed"]
                     ladder_extra[s]["tier1_total"] = t1["total"]
                     ladder_extra[s]["rsi_month"] = _r(m.get("rsi_month"), 0)
-                    ladder_extra[s]["week_return"] = _r(m.get("week_return"), 2)
-                    ladder_extra[s]["month_return"] = _r(m.get("month_return"), 2)
-                    ladder_extra[s]["year_return"] = _r(m.get("year_return"), 1)
+                    # v8_metrics returns are point-in-time EOD-frozen; prefer
+                    # these when available, fallback below fills the rest.
+                    if m.get("week_return") is not None:
+                        ladder_extra[s]["week_return"] = _r(m.get("week_return"), 2)
+                    if m.get("month_return") is not None:
+                        ladder_extra[s]["month_return"] = _r(m.get("month_return"), 2)
+                    if m.get("year_return") is not None:
+                        ladder_extra[s]["year_return"] = _r(m.get("year_return"), 1)
                     if s == symbol:
                         extras["tier1"] = t1
                         extras["vol_ratio_10_30"] = _r(m.get("vol_ratio"))
-
             except Exception as e:
                 log.warning(f"tier1 failed: {e}")
 
-            # ── 9. Pull G/V/M components + mcap + upside per ladder ───────
+            # ── 8b. raw_prices fallback for Wk/Mo/Yr returns (non-futures) ─
+            try:
+                missing = [s for s in syms
+                           if ladder_extra.get(s, {}).get("week_return") is None
+                           or ladder_extra.get(s, {}).get("month_return") is None
+                           or ladder_extra.get(s, {}).get("year_return") is None]
+                if missing:
+                    ret_map = _compute_returns_from_prices(cur, missing)
+                    for s, vals in ret_map.items():
+                        ladder_extra.setdefault(s, {})
+                        for k in ("week_return", "month_return", "year_return"):
+                            if ladder_extra[s].get(k) is None and vals.get(k) is not None:
+                                ladder_extra[s][k] = vals[k]
+            except Exception as e:
+                log.warning(f"returns fallback failed: {e}")
+
+            # ── 9. Pull G/V/M components + mcap per ladder ────────────────
             try:
                 cur.execute("""
-                    SELECT symbol, g_score, v_score, m_score, market_cap, upside_raw
+                    SELECT symbol, g_score, v_score, m_score, market_cap
                     FROM gvm_scores
                     WHERE symbol = ANY(%s)
                       AND score_date = (SELECT MAX(score_date) FROM gvm_scores)
                 """, (syms,))
-                for s, g, v, m_s, mcap, up in cur.fetchall():
+                for s, g, v, m_s, mcap in cur.fetchall():
                     ladder_extra.setdefault(s, {})
                     ladder_extra[s]["g"] = _r(g, 2)
                     ladder_extra[s]["v"] = _r(v, 2)
                     ladder_extra[s]["m"] = _r(m_s, 2)
                     ladder_extra[s]["market_cap"] = _r(mcap, 0)
-                    ladder_extra[s]["upside"] = _r(up, 1)
             except Exception as e:
                 log.warning(f"ladder gvm components failed: {e}")
 
@@ -418,7 +494,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
             except Exception as e:
                 log.warning(f"gvm_d13 failed: {e}")
 
-            # ── 11. SEGMENT CONTEXT ──────────────────────────────────────
+            # ── 11. SEGMENT CONTEXT — sector_ratings + computed averages ─
             try:
                 if segment:
                     cur.execute("""
@@ -443,15 +519,18 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                     """, (segment,))
                     sect_total, sect_better = cur.fetchone()
 
-                    cur.execute("""
-                        SELECT AVG(week_return)::float, AVG(month_return)::float,
-                               AVG(year_return)::float
-                        FROM v8_metrics
-                        WHERE symbol = ANY(%s)
-                          AND score_date = (SELECT MAX(score_date) FROM v8_metrics
-                                             WHERE symbol = ANY(%s))
-                    """, (syms, syms))
-                    sw_avg, sm_avg, sy_avg = cur.fetchone()
+                    # Sector Week/Month/Year — average across peer ladder_extra
+                    # (already covers v8_metrics + raw_prices fallback).
+                    def _avg_ladder(key):
+                        vals = [v.get(key) for v in ladder_extra.values()
+                                if v.get(key) is not None]
+                        return round(sum(vals) / len(vals), 2) if vals else None
+
+                    sw_avg = _avg_ladder("week_return")
+                    sm_avg = _avg_ladder("month_return")
+                    sy_avg = _avg_ladder("year_return")
+                    if sy_avg is not None:
+                        sy_avg = round(sy_avg, 1)
 
                     if sr:
                         cur.execute("""
@@ -477,9 +556,9 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                             "score_date": sr[10],
                             "sector_rank": int(sect_better) + 1 if sect_total else None,
                             "sector_total": int(sect_total) if sect_total else None,
-                            "week_return_avg": _r(sw_avg, 2),
-                            "month_return_avg": _r(sm_avg, 2),
-                            "year_return_avg": _r(sy_avg, 1),
+                            "week_return_avg": sw_avg,
+                            "month_return_avg": sm_avg,
+                            "year_return_avg": sy_avg,
                             "stock_vs_sector": (round(stock_gvm - sect_gvm, 2)
                                                 if stock_gvm is not None and sect_gvm is not None
                                                 else None),
@@ -487,24 +566,6 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
             except Exception as e:
                 log.warning(f"segment_ctx failed: {e}")
                 extras["segment_ctx"] = None
-
-            # ── 12. Segment averages for "vs Segment" compare toggle ─────
-            try:
-                def avg(key):
-                    vals = [v[key] for v in ladder_extra.values()
-                            if v.get(key) is not None]
-                    return round(sum(vals) / len(vals), 2) if vals else None
-
-                seg_avg = {
-                    k: avg(k) for k in [
-                        "pe", "pb", "roe", "opm", "div_yield",
-                        "ret_1y", "rsi_month", "week_return", "month_return",
-                        "year_return", "upside", "market_cap",
-                    ]
-                }
-                extras["segment_avg"] = seg_avg
-            except Exception as e:
-                log.warning(f"segment_avg failed: {e}")
 
     except Exception as e:
         log.error(f"build_page_extras connection failed: {e}")
