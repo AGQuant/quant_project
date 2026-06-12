@@ -3,10 +3,10 @@ Fyers Backfill + Gap Healer - Scorr V8
 ========================================
 Fills intraday_prices history from the Fyers HISTORY REST API.
 
-All 208 futures: 1-min bars, 7-day rolling.
+All 208 futures: 5-min bars, 7-day rolling.
 
 Two jobs:
-  1. backfill_7day()  - one-time on worker boot: pulls 7 days of 1-min bars
+  1. backfill_7day()  - one-time on worker boot: pulls 7 days of 5-min bars
                         for all futures SEQUENTIALLY with 5s sleep to avoid
                         Fyers rate limits. ~208 symbols x 5s = ~17 min.
   2. heal_gap()       - on WebSocket reconnect: pulls only the slice from
@@ -102,11 +102,11 @@ def backfill_7day(token, conn=None):
     date_to   = now.date()
     symbols   = get_universe(conn)
 
-    log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures, 1m, sequential 5s sleep")
+    log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures, 5m, sequential 5s sleep")
 
     total, empty = 0, 0
     for i, sym in enumerate(symbols, 1):
-        rows = fetch_history(token, sym, '1', '1m', date_from, date_to)
+        rows = fetch_history(token, sym, '5', '5m', date_from, date_to)
         if rows:
             upsert_candles(conn, rows)
             total += len(rows)
@@ -133,9 +133,9 @@ def heal_gap(token, conn, symbols):
     now    = datetime.now(IST)
     healed = 0
     for sym in symbols:
-        last      = newest_ts(conn, sym, '1m')
+        last      = newest_ts(conn, sym, '5m')
         date_from = last.date() if last else (now - timedelta(days=RETENTION_DAYS)).date()
-        rows      = fetch_history(token, sym, '1', '1m', date_from, now.date())
+        rows      = fetch_history(token, sym, '5', '5m', date_from, now.date())
         if rows:
             upsert_candles(conn, rows)
             healed += len(rows)
