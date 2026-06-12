@@ -17,33 +17,28 @@
   html,body{margin:0;background:var(--bg);
     color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
   a{color:inherit}
-  .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 60px}
+  .wrap{max-width:1240px;margin:0 auto;padding:12px 18px 26px}
 
-  /* ── Model nav bar ── */
-  .model-nav{
-    display:flex;align-items:center;gap:4px;
-    background:var(--panel);border-bottom:1px solid var(--line);
-    padding:0 18px;overflow-x:auto;-webkit-overflow-scrolling:touch;
-    scrollbar-width:none;position:sticky;top:0;z-index:100;
-  }
-  .model-nav::-webkit-scrollbar{display:none}
-  .mnav-brand{font-size:13px;font-weight:800;color:var(--blu);letter-spacing:.5px;
-    padding:10px 12px 10px 0;border-right:1px solid var(--line);margin-right:4px;white-space:nowrap}
-  .mnav-item{display:flex;flex-direction:column;align-items:center;gap:2px;
-    padding:8px 12px;cursor:pointer;border-bottom:2px solid transparent;
-    text-decoration:none;transition:.15s;white-space:nowrap;flex-shrink:0}
-  .mnav-item:hover{border-bottom-color:var(--line2)}
-  .mnav-item.active{border-bottom-color:var(--blu)}
-  .mnav-item .mi-icon{font-size:14px}
-  .mnav-item .mi-label{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
-  .mnav-item.active .mi-label{color:var(--blu)}
-  .mnav-item:not(.active) .mi-label{color:var(--mut)}
-  .mnav-item.soon .mi-label{color:var(--dim)}
-  .mnav-item.soon{cursor:default;opacity:.45}
-  .mnav-soon{font-size:8px;color:var(--dim);letter-spacing:.3px}
+  /* ── 3-dot model switcher ── */
+  .mswitch{position:relative}
+  .mswitch-btn{width:38px;height:38px;border-radius:9px;border:1px solid var(--line2);
+    background:var(--panel);color:var(--mut);font-size:18px;font-weight:800;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .mswitch-btn:hover{border-color:var(--blu);color:var(--blu)}
+  .mswitch-menu{position:absolute;top:calc(100% + 6px);right:0;min-width:172px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 8px 28px rgba(25,40,70,.14);padding:6px;z-index:200;display:none}
+  .mswitch-menu.open{display:block}
+  .ms-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;
+    text-decoration:none;color:var(--txt);font-size:13px;font-weight:600;white-space:nowrap;transition:.12s}
+  .ms-item span{font-size:14px;width:18px;text-align:center;color:var(--mut)}
+  .ms-item:hover{background:var(--panel2)}
+  .ms-item.active{color:var(--blu)}.ms-item.active span{color:var(--blu)}
+  .ms-item.soon{opacity:.45;cursor:default;pointer-events:none}
+  .ms-item em{font-size:9px;color:var(--dim);margin-left:auto;font-style:normal;letter-spacing:.3px}
 
   header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-    padding:14px 0 18px;border-bottom:1px solid var(--line)}
+    padding:4px 0 12px;border-bottom:1px solid var(--line)}
   .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
   .logo b{color:var(--blu)}
   .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
@@ -57,7 +52,7 @@
   .btn.on{background:var(--grn-d);border-color:var(--grn);color:var(--grn)}
   .toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}
 
-  .mood{margin:18px 0;border:1px solid var(--line);border-radius:14px;
+  .mood{margin:12px 0;border:1px solid var(--line);border-radius:14px;
     background:var(--panel);padding:16px 18px;
     display:flex;align-items:center;gap:22px;flex-wrap:wrap;box-shadow:var(--shadow)}
   .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
@@ -237,45 +232,6 @@
     font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
 </style>
 
-<!-- ── Model Nav Bar ── -->
-<nav class="model-nav">
-  <a class="mnav-item active" href="/dashboard">
-    <span class="mi-icon">⚡</span>
-    <span class="mi-label">V8</span>
-  </a>
-  <a class="mnav-item" href="/cio2?model=gvm">
-    <span class="mi-icon">▦</span>
-    <span class="mi-label">GVM</span>
-  </a>
-  <a class="mnav-item" href="/check">
-    <span class="mi-icon">✓</span>
-    <span class="mi-label">Check</span>
-  </a>
-  <a class="mnav-item" href="/cio">
-    <span class="mi-icon">◉</span>
-    <span class="mi-label">Max</span>
-  </a>
-  <a class="mnav-item" href="/ask">
-    <span class="mi-icon">✦</span>
-    <span class="mi-label">Ask</span>
-  </a>
-  <a class="mnav-item soon">
-    <span class="mi-icon">⌂</span>
-    <span class="mi-label">QB</span>
-    <span class="mnav-soon">soon</span>
-  </a>
-  <a class="mnav-item soon">
-    <span class="mi-icon">⟁</span>
-    <span class="mi-label">V10</span>
-    <span class="mnav-soon">soon</span>
-  </a>
-</nav>
-<script>
-if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
-  document.currentScript.previousElementSibling.style.display='none';
-}
-</script>
-
 <div class="wrap">
   <header>
     <div>
@@ -288,7 +244,25 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
       <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
       <button class="btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
     </div>
+    <div class="mswitch" id="mswitch">
+      <button class="mswitch-btn" onclick="event.stopPropagation();document.getElementById('mswitchMenu').classList.toggle('open')" aria-label="Switch model">⋮</button>
+      <div class="mswitch-menu" id="mswitchMenu">
+        <a class="ms-item active" href="/dashboard"><span>⚡</span>V8</a>
+        <a class="ms-item" href="/cio2?model=gvm"><span>▦</span>GVM</a>
+        <a class="ms-item" href="/check"><span>✓</span>Check</a>
+        <a class="ms-item" href="/cio"><span>◉</span>Max</a>
+        <a class="ms-item" href="/ask"><span>✦</span>Ask</a>
+        <a class="ms-item soon"><span>⌂</span>QB<em>soon</em></a>
+        <a class="ms-item soon"><span>⟁</span>V10<em>soon</em></a>
+      </div>
+    </div>
   </header>
+  <script>
+    document.addEventListener('click',function(){var m=document.getElementById('mswitchMenu');if(m)m.classList.remove('open');});
+    if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+      var _s=document.getElementById('mswitch'); if(_s)_s.style.display='none';
+    }
+  </script>
 
   <div class="mood" id="mood"><div class="loading">Loading market gate…</div></div>
   <div class="tabs" id="tabs"></div>
