@@ -55,7 +55,7 @@ const GVM_PILLAR_MAP = {
   sales_5y:"G", sales_3y:"G", profit_5y:"G", profit_3y:"G",
   qoq_sales:"G", qoq_profit:"G", opm:"G", opm_exp:"G",
   fa_growth:"G", promoter:"G", inst_change:"G", roce:"G",
-  int_cov:"G", div_yield:"G",
+  int_cov:"G", div_yield:"G", roe:"G", de:"G", fii_change:"G", dii_change:"G",
   pe:"V", upside:"V",
   ret_1y:"M", ret_3y:"M", dma_50:"M", dma_200:"M",
   ret_52w_idx:"M", ret_1m:"M", rsi_month:"M", vol_trend:"M",
@@ -82,6 +82,7 @@ const gvmColor = (g) => g == null ? C.muted : g >= 8 ? C.green : g >= 7 ? C.gold
 const ratingColor = (r) => r == null ? C.muted : r >= 7 ? C.green : r >= 5 ? C.gold : C.red;
 const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#22a06b", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
 const pillarOf = (key) => GVM_PILLAR_MAP[key] || null;
+const signFmt = (n, d = 2) => n == null ? "—" : (n >= 0 ? "+" : "") + Number(n).toFixed(d);
 
 function Loader({ msg }) {
   return (
@@ -102,7 +103,7 @@ function Tag({ children, color = C.accent }) {
   );
 }
 
-// ── Top Nav ──────────────────────────────────────────────────────────
+// ── Top Nav ──────────────────────────────────────────────────────────────
 function Switcher({ current, onPick }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -152,40 +153,259 @@ function FrameModule({ src }) {
   return <iframe src={src} title="frame" style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#fff" }} />;
 }
 
-// ── GVM Sparkline ────────────────────────────────────────────────────
-function GvmSparkline({ points }) {
+// ── Trend Chart (13d, G/V/M decomposed — hero center) ────────────────────
+function TrendChart({ points }) {
   if (!points || points.length < 2) return null;
-  const pts = [...points].reverse();
-  const xs = pts.map(p => p.gvm_score);
-  const min = Math.min(...xs, 0), max = Math.max(...xs, 10);
-  const W = 180, H = 44, pad = 4;
+  const W = 280, H = 88, pad = 6;
+  const allVals = [];
+  points.forEach(p => { ["gvm","g","v","m"].forEach(k => { if (p[k] != null) allVals.push(p[k]); }); });
+  const min = Math.min(...allVals) - 0.15, max = Math.max(...allVals) + 0.15;
   const span = (max - min) || 1;
-  const path = pts.map((p, i) => {
-    const x = pad + (i / (pts.length - 1)) * (W - 2 * pad);
-    const y = H - pad - ((p.gvm_score - min) / span) * (H - 2 * pad);
-    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const last = pts[pts.length - 1].gvm_score, first = pts[0].gvm_score;
-  const delta = last - first;
-  const stroke = delta > 0.05 ? "#0a9e63" : delta < -0.05 ? "#dd3a4a" : "#5a6781";
-  const lx = pad + (W - 2 * pad), ly = H - pad - ((last - min) / span) * (H - 2 * pad);
+  const X = i => pad + (i / (points.length - 1)) * (W - 2 * pad);
+  const Y = v => H - pad - ((v - min) / span) * (H - 2 * pad);
+  const mkPath = key => points.map((p, i) =>
+    p[key] == null ? "" : `${i === 0 || points[i-1][key] == null ? "M" : "L"}${X(i).toFixed(1)},${Y(p[key]).toFixed(1)}`
+  ).join(" ");
+  const first = points[0].gvm, last = points[points.length - 1].gvm;
+  const delta = (last != null && first != null) ? last - first : 0;
+  const mainStroke = delta > 0.05 ? C.green : delta < -0.05 ? C.red : C.muted;
+  const lines = [
+    { key: "g", color: C.gPillar }, { key: "v", color: C.vPillar }, { key: "m", color: C.mPillar },
+  ];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <svg width={W} height={H} style={{ overflow: "visible" }}>
-        <path d={path} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={lx} cy={ly} r="3" fill={stroke} />
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: ".06em" }}>GVM Trend · {points.length}d</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: mainStroke, fontFamily: "monospace" }}>
+          {delta >= 0 ? "▲ " : "▼ "}{signFmt(delta)}
+        </span>
+      </div>
+      <svg width={W} height={H} style={{ overflow: "visible", display: "block" }}>
+        {lines.map(l => (
+          <path key={l.key} d={mkPath(l.key)} fill="none" stroke={l.color}
+            strokeWidth="1" strokeOpacity="0.45" strokeLinejoin="round" />
+        ))}
+        <path d={mkPath("gvm")} fill="none" stroke={mainStroke} strokeWidth="2.2"
+          strokeLinejoin="round" strokeLinecap="round" />
+        {last != null && <circle cx={X(points.length - 1)} cy={Y(last)} r="3.2" fill={mainStroke} />}
       </svg>
-      <div style={{ lineHeight: 1.3 }}>
-        <div style={{ fontSize: 10, color: "#5a6781", textTransform: "uppercase", letterSpacing: ".06em" }}>GVM Trend · {pts.length}d</div>
-        <div style={{ fontSize: 13, fontWeight: 800, color: stroke, fontFamily: "monospace" }}>
-          {delta >= 0 ? "▲ +" : "▼ "}{delta.toFixed(2)}
-        </div>
+      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        {lines.map(l => (
+          <span key={l.key} style={{ fontSize: 9, color: l.color, fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
+            <span style={{ width: 10, height: 2, background: l.color, opacity: .6, display: "inline-block" }} />{l.key.toUpperCase()}
+          </span>
+        ))}
+        <span style={{ fontSize: 9, color: C.muted, marginLeft: "auto" }}>thin = components</span>
       </div>
     </div>
   );
 }
 
-// ── Bench Cell (grouped view) ─────────────────────────────────────────
+// ── 52-Week position bar ─────────────────────────────────────────────────
+function Bar52W({ r52, cmp }) {
+  if (!r52 || r52.hi == null || r52.lo == null || cmp == null || r52.hi <= r52.lo) return null;
+  const pos = Math.min(100, Math.max(0, (cmp - r52.lo) / (r52.hi - r52.lo) * 100));
+  const fromHigh = ((cmp / r52.hi - 1) * 100);
+  const col = pos >= 75 ? C.green : pos >= 40 ? C.gold : C.red;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.muted, marginBottom: 3 }}>
+        <span>52W ₹{fmt(r52.lo, 0)}</span>
+        <span style={{ color: col, fontWeight: 700 }}>{pos.toFixed(0)}% of range · {fromHigh.toFixed(1)}% from high</span>
+        <span>₹{fmt(r52.hi, 0)}</span>
+      </div>
+      <div style={{ position: "relative", height: 8, background: C.gridLine, borderRadius: 4 }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pos}%`,
+          background: `linear-gradient(90deg, ${col}40, ${col})`, borderRadius: 4 }} />
+        <div style={{ position: "absolute", left: `${pos}%`, top: -2, width: 3, height: 12,
+          background: col, borderRadius: 2, transform: "translateX(-50%)" }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Action Strip (informational facts — NOT a trade verdict) ─────────────
+function ActionStrip({ x }) {
+  if (!x) return null;
+  const chips = [];
+  if (x.tier1) {
+    const ok = x.tier1.passed >= Math.ceil(x.tier1.total * 0.7);
+    chips.push({
+      label: `Tier-1 auto ${x.tier1.passed}/${x.tier1.total}`,
+      color: ok ? C.green : x.tier1.passed >= x.tier1.total / 2 ? C.gold : C.red,
+      title: (x.tier1.checks || []).map(c => `${c.pass === true ? "✓" : c.pass === false ? "✗" : "·"} ${c.name}`).join("\n"),
+    });
+  }
+  if (x.pivot && x.pivot.pp != null) {
+    // zone derived live from CMP passed via x._cmp
+    const cmp = x._cmp;
+    let zone = "—", zc = C.muted;
+    if (cmp != null) {
+      if (cmp >= x.pivot.r1) { zone = "Above R1 — extended"; zc = C.orange; }
+      else if (cmp >= x.pivot.pp) { zone = "PP–R1 — LONG zone"; zc = C.green; }
+      else if (cmp >= x.pivot.s1) { zone = "S1–PP — below pivot"; zc = C.gold; }
+      else { zone = "Below S1 — weak"; zc = C.red; }
+    }
+    chips.push({ label: `Pivot: ${zone}`, color: zc, title: `PP ${x.pivot.pp} · R1 ${x.pivot.r1} · S1 ${x.pivot.s1}` });
+    if (cmp != null && x.pivot.r1 != null && cmp < x.pivot.r1) {
+      const room = ((x.pivot.r1 / cmp - 1) * 100);
+      chips.push({ label: `Room to R1 ${room.toFixed(1)}%`, color: room >= 1 ? C.green : C.gold, title: "Tier-2 pivot filter wants > 1%" });
+    }
+  }
+  if (x.volume && x.volume.verdict) {
+    const vc = x.volume.verdict === "ACCUMULATION" ? C.green : x.volume.verdict === "DISTRIBUTION" ? C.red : C.gold;
+    chips.push({ label: `30D Vol: ${x.volume.verdict} ${x.volume.ratio != null ? x.volume.ratio + "×" : ""}`, color: vc, title: "up-volume / down-volume over 30 sessions" });
+  }
+  if (x.earnings) {
+    chips.push({
+      label: x.earnings.blackout ? `⚠ ${x.earnings.event_type || "Event"} in ${x.earnings.days_to}d — BLACKOUT` : `Next event ${x.earnings.next_date} (${x.earnings.days_to}d)`,
+      color: x.earnings.blackout ? C.red : C.muted,
+    });
+  } else {
+    chips.push({ label: "No upcoming event", color: C.muted });
+  }
+  if (x.percentile) {
+    chips.push({ label: `Top ${x.percentile.top_pct}% · #${x.percentile.universe_rank}/${x.percentile.universe_total}`, color: C.purple, title: "GVM rank in full scored universe" });
+  }
+  if (!chips.length) return null;
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16,
+      display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <span style={{ fontSize: 10, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: ".08em", marginRight: 4 }}>Snapshot</span>
+      {chips.map((ch, i) => (
+        <span key={i} title={ch.title || ""}
+          style={{ fontSize: 11, fontWeight: 700, color: ch.color, background: `${ch.color}14`,
+            border: `1px solid ${ch.color}35`, borderRadius: 14, padding: "4px 11px", cursor: ch.title ? "help" : "default" }}>
+          {ch.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ── Pivot Ladder panel ───────────────────────────────────────────────────
+function PivotLadder({ p, cmp }) {
+  if (!p || p.s2 == null || p.r2 == null || p.r2 <= p.s2) return (
+    <div style={{ fontSize: 12, color: C.muted, padding: 12 }}>No pivot levels available.</div>
+  );
+  const levels = [
+    { k: "S2", v: p.s2, c: C.red }, { k: "S1", v: p.s1, c: C.red },
+    { k: "PP", v: p.pp, c: C.muted }, { k: "R1", v: p.r1, c: C.green },
+    { k: "R2", v: p.r2, c: C.green },
+  ];
+  const lo = p.s2, hi = p.r2, span = hi - lo;
+  const X = v => Math.min(99, Math.max(1, (v - lo) / span * 100));
+  const cmpX = cmp != null ? X(cmp) : null;
+  const cmpCol = cmp == null ? C.muted : cmp >= p.r1 ? C.orange : cmp >= p.pp ? C.green : cmp >= p.s1 ? C.gold : C.red;
+  return (
+    <div>
+      <div style={{ position: "relative", height: 56, marginTop: 18 }}>
+        {cmpX != null && (
+          <div style={{ position: "absolute", left: `${cmpX}%`, top: -16, transform: "translateX(-50%)",
+            fontSize: 11, fontWeight: 800, color: cmpCol, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+            ▼ ₹{fmt(cmp, 1)}
+          </div>
+        )}
+        <div style={{ position: "absolute", top: 8, left: 0, right: 0, height: 5, borderRadius: 3,
+          background: `linear-gradient(90deg, ${C.red}30 0%, ${C.red}18 ${X(p.pp)}%, ${C.green}18 ${X(p.pp)}%, ${C.green}30 100%)` }} />
+        {cmpX != null && (
+          <div style={{ position: "absolute", left: `${cmpX}%`, top: 3, width: 3, height: 15,
+            background: cmpCol, borderRadius: 2, transform: "translateX(-50%)" }} />
+        )}
+        {levels.map(l => l.v != null && (
+          <React.Fragment key={l.k}>
+            <div style={{ position: "absolute", left: `${X(l.v)}%`, top: 5, width: 2, height: 11,
+              background: l.c, transform: "translateX(-50%)", opacity: .8 }} />
+            <div style={{ position: "absolute", left: `${X(l.v)}%`, top: 26, transform: "translateX(-50%)",
+              textAlign: "center", lineHeight: 1.25 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: l.c }}>{l.k}</div>
+              <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>{fmt(l.v, 0)}</div>
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 8 }}>
+        Rolling-5-day pivots · built {p.pivot_date || "—"}
+        {cmp != null && p.r1 != null && cmp < p.r1 && (
+          <span style={{ color: C.green, fontWeight: 700 }}> · room to R1 {((p.r1 / cmp - 1) * 100).toFixed(1)}%</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Volume A/D panel ─────────────────────────────────────────────────────
+function VolumePanel({ va, volRatio }) {
+  if (!va || !va.bars || !va.bars.length) return (
+    <div style={{ fontSize: 12, color: C.muted, padding: 12 }}>No volume data.</div>
+  );
+  const maxV = Math.max(...va.bars.map(b => b.v), 1);
+  const vc = va.verdict === "ACCUMULATION" ? C.green : va.verdict === "DISTRIBUTION" ? C.red : C.gold;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 15, fontWeight: 900, color: vc }}>{va.verdict || "—"}</span>
+        <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
+          A/D {va.ratio != null ? va.ratio + "×" : "—"} · up {fmt(va.up_vol)} / down {fmt(va.down_vol)}
+        </span>
+        {volRatio != null && <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>· vol 10/30d {volRatio}×</span>}
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 64 }}>
+        {va.bars.map((b, i) => (
+          <div key={i} title={`${b.d} · ${fmt(b.v)} · ${b.up ? "up" : "down"} day`}
+            style={{ flex: 1, height: `${Math.max(3, b.v / maxV * 100)}%`,
+              background: b.up ? C.green : C.red, opacity: .75, borderRadius: "2px 2px 0 0" }} />
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
+        Last 30 sessions · green = up-day volume, red = down-day
+        {va.biggest_day && (
+          <span> · biggest: <b style={{ color: va.biggest_day.direction === "UP" ? C.green : C.red }}>
+            {va.biggest_day.d} ({va.biggest_day.direction})</b></span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Flow + Valuation strip ───────────────────────────────────────────────
+function FlowStrip({ flow, val }) {
+  if (!flow && !val) return null;
+  const cell = (k, v, sub, color) => (
+    <div key={k} style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 8, padding: "8px 12px", minWidth: 96 }}>
+      <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em" }}>{k}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "monospace", color: color || C.text }}>{v}</div>
+      {sub && <div style={{ fontSize: 9.5, color: C.muted, fontFamily: "monospace" }}>{sub}</div>}
+    </div>
+  );
+  const cells = [];
+  if (flow) {
+    const fc = flow.fii_chg == null ? C.text : flow.fii_chg >= 0 ? C.green : C.red;
+    const dc = flow.dii_chg == null ? C.text : flow.dii_chg >= 0 ? C.green : C.red;
+    cells.push(cell("FII", flow.fii != null ? flow.fii + "%" : "—", flow.fii_chg != null ? `QoQ ${signFmt(flow.fii_chg)}%` : null, fc));
+    cells.push(cell("DII", flow.dii != null ? flow.dii + "%" : "—", flow.dii_chg != null ? `QoQ ${signFmt(flow.dii_chg)}%` : null, dc));
+    cells.push(cell("Promoter", flow.promoter != null ? flow.promoter + "%" : "—", null, C.text));
+  }
+  if (val) {
+    const rc = val.rerating_pct == null ? C.text : val.rerating_pct > 25 ? C.red : val.rerating_pct > 0 ? C.gold : C.green;
+    cells.push(cell("PE", val.pe != null ? val.pe + "x" : "—",
+      val.historical_pe != null ? `hist ${val.historical_pe}x · seg ${val.segment_pe != null ? val.segment_pe + "x" : "—"}` : null, C.text));
+    if (val.rerating_pct != null) cells.push(cell("Re-rating", signFmt(val.rerating_pct, 1) + "%", "vs own history", rc));
+    if (val.pb != null) cells.push(cell("P/B", val.pb + "x", null, C.text));
+    if (val.peg != null) cells.push(cell("PEG", val.peg, null, val.peg > 2 ? C.red : val.peg > 1 ? C.gold : C.green));
+    if (val.ev_ebitda != null) cells.push(cell("EV/EBITDA", val.ev_ebitda + "x", null, C.text));
+    if (val.cfo_pat != null) cells.push(cell("CFO/PAT", val.cfo_pat, "earnings quality", val.cfo_pat >= 0.8 ? C.green : C.gold));
+  }
+  if (!cells.length) return null;
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 10 }}>Ownership Flow & Valuation Context</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{cells}</div>
+    </div>
+  );
+}
+
+// ── Bench Cell (grouped view) ────────────────────────────────────────────
 function cellColor(rating) {
   if (rating == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
   if (rating >= 6.5) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
@@ -212,7 +432,7 @@ function BenchCell({ b }) {
   );
 }
 
-// ── Bird's-eye flat matrix row ────────────────────────────────────────
+// ── Heat-strip matrix row (default view) ─────────────────────────────────
 function MatrixRow({ b, pillar }) {
   const c = cellColor(b.rating);
   const barW = b.rating != null ? Math.min(100, Math.max(4, b.rating * 10)) : 0;
@@ -254,17 +474,23 @@ function MatrixRow({ b, pillar }) {
   );
 }
 
-// ── GVM Report ───────────────────────────────────────────────────────
+// ── GVM Report ───────────────────────────────────────────────────────────
 function GvmReport({ r, hist }) {
-  const [view, setView] = useState("grouped"); // "grouped" | "matrix"
+  const [view, setView] = useState("matrix"); // heat-strip rows by default
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
+  const x = r.extras || {};
+  if (x && x.pivot) x._cmp = r.price; // pass CMP into strip helpers
 
   // Map benchmark items to G/V/M using canonical map
   const benchByPillar = { G: [], V: [], M: [], _: [] };
   (r.benchmark || []).forEach(b => {
     const p = GVM_PILLAR_MAP[b.key] || "_";
     benchByPillar[p].push(b);
+  });
+  // strengths float to top within each pillar
+  Object.keys(benchByPillar).forEach(k => {
+    benchByPillar[k].sort((a, b2) => ((b2.rating ?? -1) - (a.rating ?? -1)));
   });
 
   // Verdict distribution in ladder
@@ -280,6 +506,10 @@ function GvmReport({ r, hist }) {
     return null;
   };
 
+  const trendPoints = (x.trend && x.trend.length > 1)
+    ? x.trend
+    : (hist && hist.length > 1 ? hist.map(p => ({ d: p.score_date, gvm: p.gvm_score })) : null);
+
   return (
     <div style={{ paddingBottom: 80 }}>
 
@@ -291,10 +521,15 @@ function GvmReport({ r, hist }) {
             <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
             <div style={{ fontSize: 11, color: C.muted, margin: "4px 0 6px" }}>GVM Score</div>
             <Tag color={vc}>{r.verdict}</Tag>
+            {x.percentile && (
+              <div style={{ fontSize: 9.5, color: C.purple, fontWeight: 700, marginTop: 6 }}>
+                Top {x.percentile.top_pct}% of {fmt(x.percentile.universe_total)}
+              </div>
+            )}
           </div>
 
           {/* Company + G/V/M pillars */}
-          <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ flex: 1.2, minWidth: 230 }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{r.company_name}</div>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <span>{r.symbol}</span>
@@ -305,6 +540,7 @@ function GvmReport({ r, hist }) {
               {r.mcap_rank && <span>· MCap #{r.mcap_rank}</span>}
               {r.cap_category && <Tag color={C.muted}>{r.cap_category}</Tag>}
               {r.is_bfsi && <Tag color={C.purple}>BFSI</Tag>}
+              {x.earnings && x.earnings.blackout && <Tag color={C.red}>⚠ Blackout {x.earnings.days_to}d</Tag>}
             </div>
 
             {/* G / V / M pillars as primary display */}
@@ -326,20 +562,22 @@ function GvmReport({ r, hist }) {
                 );
               })}
             </div>
-
-            {hist && hist.length > 1 && (
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.gridLine}` }}>
-                <GvmSparkline points={hist} />
-              </div>
-            )}
           </div>
 
-          {/* Price + segment distribution */}
-          <div style={{ textAlign: "right", minWidth: 140 }}>
+          {/* CENTER: GVM trend, decomposed */}
+          {trendPoints && (
+            <div style={{ minWidth: 290, flex: 1, alignSelf: "center",
+              background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px" }}>
+              <TrendChart points={trendPoints} />
+            </div>
+          )}
+
+          {/* Price + 52W + segment distribution */}
+          <div style={{ textAlign: "right", minWidth: 175 }}>
             <div style={{ fontSize: 11, color: C.muted }}>CMP</div>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(r.price, 1)}</div>
             <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
-            {/* Verdict distribution */}
+            <Bar52W r52={x.range52} cmp={r.price} />
             {Object.keys(verdictDist).length > 0 && (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }}>
                 <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em" }}>Segment peers</div>
@@ -361,6 +599,9 @@ function GvmReport({ r, hist }) {
           <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{r.punchline}</div>
         </div>
       )}
+
+      {/* ── Snapshot / Action Strip ── */}
+      <ActionStrip x={x} />
 
       {/* ── Strengths / Weaknesses ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
@@ -401,9 +642,9 @@ function GvmReport({ r, hist }) {
               vs {r.peer_count} peers in {r.segment}{r.is_bfsi ? " · BFSI rule applied (D/E + Int.Cov excluded)" : ""}
             </div>
           </div>
-          {/* Grouped / Bird's-eye toggle */}
+          {/* Heat-strip / Grouped toggle */}
           <div style={{ display: "flex", gap: 6 }}>
-            {[["grouped","G/V/M Grouped"],["matrix","Bird's-eye"]].map(([v,l]) => (
+            {[["matrix","Heat Strips"],["grouped","G/V/M Cards"]].map(([v,l]) => (
               <button key={v} onClick={() => setView(v)}
                 style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 7,
                   border: `1px solid ${view===v ? C.accent : C.border}`,
@@ -426,9 +667,45 @@ function GvmReport({ r, hist }) {
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
             <span style={{ width: 10, height: 10, borderRadius: 3, background: "#dd3a4a" }} />Lower than segment
           </span>
+          <span style={{ color: C.muted }}>· sorted strengths-first within each pillar</span>
         </div>
 
-        {/* ── GROUPED VIEW ── */}
+        {/* ── HEAT-STRIP MATRIX (default) ── */}
+        {view === "matrix" && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${C.border}` }}>
+                  {["Pillar","Metric","Company","Peer Avg","Rating","Rank","Best","Worst"].map(h => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10,
+                      fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em",
+                      background: "#f8fafc", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {["G","V","M"].flatMap(pillar => {
+                  const items = benchByPillar[pillar] || [];
+                  if (!items.length) return [];
+                  const pi = PILLAR_INFO[pillar];
+                  const score = pillarScore(pillar);
+                  return [
+                    <tr key={`hdr-${pillar}`}>
+                      <td colSpan={8} style={{ padding: "10px 10px 6px", background: pi.bg }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: pi.color }}>{pi.label}</span>
+                        <span style={{ fontSize: 10, color: C.muted, marginLeft: 8 }}>{pi.desc}</span>
+                        {score != null && <span style={{ float: "right", fontSize: 14, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace" }}>{score.toFixed(2)}</span>}
+                      </td>
+                    </tr>,
+                    ...items.map(b => <MatrixRow key={b.key} b={b} pillar={pillar} />)
+                  ];
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── GROUPED CARDS (toggle) ── */}
         {view === "grouped" && ["G","V","M"].map(pillar => {
           const items = benchByPillar[pillar];
           if (!items.length) return null;
@@ -455,47 +732,69 @@ function GvmReport({ r, hist }) {
             </div>
           );
         })}
-
-        {/* ── BIRD'S-EYE MATRIX ── */}
-        {view === "matrix" && (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ borderBottom: `2px solid ${C.border}` }}>
-                  {["Pillar","Metric","Company","Peer Avg","Rating","Rank","Best","Worst"].map(h => (
-                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10,
-                      fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em",
-                      background: "#f8fafc", whiteSpace: "nowrap" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {["G","V","M"].flatMap(pillar =>
-                  (benchByPillar[pillar] || []).map(b => (
-                    <MatrixRow key={b.key} b={b} pillar={pillar} />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
-      {/* ── Segment Rank Ladder ── */}
+      {/* ── Price Structure: Pivot ladder + Volume A/D ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 4 }}>Pivot Range</div>
+          <PivotLadder p={x.pivot} cmp={r.price} />
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 4 }}>30-Day Volume · Accumulation / Distribution</div>
+          <VolumePanel va={x.volume} volRatio={x.vol_ratio_10_30} />
+        </div>
+      </div>
+
+      {/* ── Ownership flow + valuation context ── */}
+      <FlowStrip flow={x.flow} val={x.valuation} />
+
+      {/* ── Segment Rank Ladder+ ── */}
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: C.purple, marginBottom: 4 }}>Segment Rank Ladder</div>
-        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{r.segment} · ranked by GVM</div>
-        {(r.ladder || []).map((row, i) => (
-          <div key={row.symbol} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 6,
-            background: row.is_self ? `${C.accent}12` : "transparent",
-            border: row.is_self ? `1px solid ${C.accent}40` : "1px solid transparent", marginBottom: 2 }}>
-            <span style={{ fontSize: 11, color: C.muted, width: 22, fontFamily: "monospace" }}>{i + 1}</span>
-            <span style={{ fontSize: 13, fontWeight: row.is_self ? 800 : 600, color: row.is_self ? C.accent : C.text, flex: 1 }}>{row.symbol}</span>
-            <span style={{ fontSize: 11, color: C.muted, flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.company_name}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: gvmColor(row.gvm), fontFamily: "monospace", width: 44, textAlign: "right" }}>{row.gvm?.toFixed(2)}</span>
-            <div style={{ width: 70, textAlign: "right" }}><Tag color={verdictColor(row.verdict)}>{row.verdict}</Tag></div>
-          </div>
-        ))}
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{r.segment} · ranked by GVM · T1 = price-action auto-checks passed</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 8px 6px", fontSize: 9, color: C.muted,
+          textTransform: "uppercase", letterSpacing: ".05em", borderBottom: `1px solid ${C.gridLine}`, marginBottom: 4 }}>
+          <span style={{ width: 22 }}>#</span>
+          <span style={{ flex: 1 }}>Symbol</span>
+          <span style={{ flex: 2 }}>Company</span>
+          <span style={{ width: 44, textAlign: "right" }}>GVM</span>
+          <span style={{ width: 48, textAlign: "right" }}>Δ13D</span>
+          <span style={{ width: 52, textAlign: "right" }}>PE</span>
+          <span style={{ width: 56, textAlign: "right" }}>1Y%</span>
+          <span style={{ width: 42, textAlign: "right" }}>T1</span>
+          <span style={{ width: 70, textAlign: "right" }}>Verdict</span>
+        </div>
+        {(r.ladder || []).map((row, i) => {
+          const d13 = row.gvm_d13;
+          const t1ok = row.tier1_passed != null && row.tier1_total ? row.tier1_passed / row.tier1_total : null;
+          return (
+            <div key={row.symbol} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 6,
+              background: row.is_self ? `${C.accent}12` : "transparent",
+              border: row.is_self ? `1px solid ${C.accent}40` : "1px solid transparent", marginBottom: 2 }}>
+              <span style={{ fontSize: 11, color: C.muted, width: 22, fontFamily: "monospace" }}>{i + 1}</span>
+              <span style={{ fontSize: 13, fontWeight: row.is_self ? 800 : 600, color: row.is_self ? C.accent : C.text, flex: 1 }}>{row.symbol}</span>
+              <span style={{ fontSize: 11, color: C.muted, flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.company_name}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: gvmColor(row.gvm), fontFamily: "monospace", width: 44, textAlign: "right" }}>{row.gvm?.toFixed(2)}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", width: 48, textAlign: "right",
+                color: d13 == null ? C.muted : d13 > 0.02 ? C.green : d13 < -0.02 ? C.red : C.muted }}>
+                {d13 != null ? signFmt(d13) : "—"}
+              </span>
+              <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace", width: 52, textAlign: "right" }}>
+                {row.pe != null ? row.pe + "x" : "—"}
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", width: 56, textAlign: "right",
+                color: row.ret_1y == null ? C.muted : row.ret_1y >= 0 ? C.green : C.red }}>
+                {row.ret_1y != null ? signFmt(row.ret_1y, 1) + "%" : "—"}
+              </span>
+              <span style={{ fontSize: 11, fontWeight: 800, fontFamily: "monospace", width: 42, textAlign: "right",
+                color: t1ok == null ? C.muted : t1ok >= 0.7 ? C.green : t1ok >= 0.5 ? C.gold : C.red }}>
+                {row.tier1_passed != null ? `${row.tier1_passed}/${row.tier1_total}` : "—"}
+              </span>
+              <div style={{ width: 70, textAlign: "right" }}><Tag color={verdictColor(row.verdict)}>{row.verdict}</Tag></div>
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Content Cards ── */}
@@ -523,7 +822,7 @@ function ContentCard({ title, color, body, updated }) {
   );
 }
 
-// ── GVM Module ───────────────────────────────────────────────────────
+// ── GVM Module ───────────────────────────────────────────────────────────
 function GvmModule() {
   const [query, setQuery] = useState("");
   const [suggest, setSuggest] = useState([]);
@@ -559,7 +858,10 @@ function GvmModule() {
     try {
       const d = await apiGet(`/api/gvm/company/${encodeURIComponent(sym)}`);
       setReport(d);
-      mcpCall("gvm_history", { symbol: sym, days: 90 }).then(h => setHist(h && h.points ? h.points : null)).catch(() => {});
+      // fallback trend source only if extras.trend missing
+      if (!d.extras || !d.extras.trend || d.extras.trend.length < 2) {
+        mcpCall("gvm_history", { symbol: sym, days: 90 }).then(h => setHist(h && h.points ? h.points : null)).catch(() => {});
+      }
     } catch (e) { setErr(`Could not load ${sym}. Try another symbol.`); }
     finally { setLoading(false); }
   };
