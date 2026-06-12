@@ -72,9 +72,12 @@ def _section_data_feeds(cur) -> Dict:
     checks = []
 
     # Fyers intraday
+    # FIX (12-Jun-2026): Fyers writes 5-min bars (timeframe='5m'), not '1m'.
+    # The old '1m' filter matched zero rows -> false "feed dead" red while the
+    # 5m feed was healthy. Source tags are fyers_eq / fyers_fut.
     cur.execute("""
         SELECT COUNT(DISTINCT symbol) as syms, MAX(ts) as latest, COUNT(*) as rows
-        FROM intraday_prices WHERE ts::date = CURRENT_DATE AND timeframe='1m'
+        FROM intraday_prices WHERE ts::date = CURRENT_DATE AND timeframe='5m'
     """)
     r = cur.fetchone()
     syms, latest_ts, rows = r[0] or 0, r[1], r[2] or 0
@@ -196,13 +199,25 @@ def _section_v8_engine(cur) -> Dict:
     checks.append(_chk('Paper win rate', f'{wr}% ({wins}W/{total}T)',
         ok=(wr >= 60 or total < 5), warn=(wr >= 40 or total < 5)))
 
-    # Market mood
-    cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+    # Market mood — FIX (12-Jun-2026): the live gate reads adr_intraday (5-min),
+    # NOT adr_daily. The old adr_daily read showed a stale EOD value (e.g. 0.235)
+    # and false-flagged red while the real gate saw a healthy live ADR. Mirror the
+    # gate: adr_intraday primary (universe>=50), adr_daily fallback off-hours.
+    cur.execute("""
+        SELECT adr, universe_count FROM adr_intraday
+        WHERE ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
+    """)
     r = cur.fetchone()
-    adr = float(r[0]) if r and r[0] else 0.0
+    if r and r[0] is not None and (r[1] or 0) >= 50:
+        adr = float(r[0]); adr_src = 'adr_intraday (live)'
+    else:
+        cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+        r = cur.fetchone()
+        adr = float(r[0]) if r and r[0] else 0.0
+        adr_src = 'adr_daily (EOD fallback)'
     checks.append(_chk('Market mood ADR', adr,
         ok=(adr >= 1.0), warn=(adr >= 0.8),
-        detail='Gate open if >= 1.0'))
+        detail=f'Gate open if >= 1.0 · src={adr_src}'))
 
     return {'name': 'V8 Engine', 'checks': checks, 'status': _status(checks)}
 
@@ -290,14 +305,26 @@ def _section_scheduler(cur) -> Dict:
         ok=gi_ok, warn=(gi_date is not None),
         detail='Expected: daily 07:00 IST'))
 
-    # 09:00 — V8 history cache
-    cur.execute("SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache")
+    # 09:00 — V8 history cache: RETIRED 06-Jun-2026 (v8_live removed, single engine
+    # = v8_signal_writer). The v8_history_cache table is no longer written, so the
+    # old check was permanently red on a dead artifact. Replaced with the live
+    # signal-writer heartbeat (sched_writer_hb) which proves the 5-min engine is
+    # firing. FIX (12-Jun-2026).
+    cur.execute("SELECT value FROM app_config WHERE key='sched_writer_hb'")
     r = cur.fetchone()
-    cache_date, cache_cnt = r[0], r[1] or 0
-    cache_ok = cache_date == today
-    checks.append(_chk('09:00 V8 history cache', str(cache_date),
-        ok=cache_ok, warn=(cache_date == today - timedelta(days=1)),
-        detail=f'{cache_cnt} symbols cached'))
+    hb_ts = None
+    if r and r[0]:
+        try:
+            hb_ts = datetime.strptime(r[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=IST)
+        except Exception:
+            hb_ts = None
+    hb_mins = _mins_ago(hb_ts)
+    # During market hours expect a tick within ~10 min; off-hours just report last.
+    mkt = (now.weekday() < 5 and (now.hour*60+now.minute) >= 555 and (now.hour*60+now.minute) <= 930)
+    checks.append(_chk('Live signal writer (5-min)', f'{hb_mins} min ago',
+        ok=(not mkt) or (hb_mins <= 10),
+        warn=(not mkt) or (hb_mins <= 30),
+        detail='heartbeat sched_writer_hb' + ('' if mkt else ' (off-hours)')))
 
     # 15:45 — V8 EOD engine
     cur.execute("SELECT MAX(score_date) FROM v8_metrics")
