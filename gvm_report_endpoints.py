@@ -1,15 +1,17 @@
 """
 GVM Company Report — peer-benchmark analytics endpoint (Model 2).
 
-v3.1 (12-Jun-2026 night):
-  - hotfix: "Fixed assets growth" → fixed_asset_growth (actual snake_case col)
-  - hotfix: "Institutional Holding" doesn't exist → synthetic _inst_combined_abs
-            (fii_holding + dii_holding), computed in Python.
+v4 (12-Jun-2026 night):
+  - Annual Upside (Potential Upside) computed live from
+    input_raw.fy27_growth × (pe / historical_pe)  — engine formula,
+    matches gvm_nightly._pu() verbatim. No dependency on gvm_scores.upside_raw.
+  - DMA-50 / DMA-200 changed to synthetic deviation % columns
+    (_dma50_dev, _dma200_dev) = ((price - dma) / dma) × 100.
+    Raw screener columns dma_50 / dma_200 store the DMA price LEVEL, not %.
+  - dropped segment_avg from extras (vs-Segment toggle removed in UI).
 
-v3 (12-Jun-2026 evening):
+v3 (12-Jun-2026 eve):
   - PARAMS mirrors canonical engine scored set (G13 + V2 + M5 + IC).
-  - build_page_extras(symbol, ladder, segment=…) — segment ctx wiring.
-  - Params with no company AND no peer data anywhere are hidden.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -38,7 +40,6 @@ def _f(v):
         return None
 
 
-# ── BFSI segments: Interest Coverage irrelevant ──────────────────────────
 _BFSI_KEYWORDS = (
     "bank", "nbfc", "finance", "financial", "insurance", "amc",
     "exchange", "capital market", "broking", "wealth", "housing finance",
@@ -72,12 +73,12 @@ PARAMS = [
     ("int_cov",      "Interest Coverage",     "interest_coverage",      "G", True,  "x"),
     # V — Value
     ("pe",           "PE Multiple",           "pe",                     "V", False, "x"),
-    ("upside",       "Potential Upside",      "_upside_placeholder",    "V", True,  "%"),
+    ("upside",       "Annual Upside",         "_upside_computed",       "V", True,  "%"),
     # M — Momentum
     ("ret_1y",       "Return 1 Year",         "return_1y",              "M", True,  "%"),
     ("ret_3y",       "Return 3 Year",         "return_3y",              "M", True,  "%"),
-    ("dma_50",       "Price vs 50 DMA",       "dma_50",                 "M", True,  "%"),
-    ("dma_200",      "Price vs 200 DMA",      "dma_200",                "M", True,  "%"),
+    ("dma_50",       "Price vs 50 DMA",       "_dma50_dev",             "M", True,  "%"),
+    ("dma_200",      "Price vs 200 DMA",      "_dma200_dev",            "M", True,  "%"),
     ("ret_52w_idx",  "52W vs Index",          "return_52w_vs_index",    "M", True,  "%"),
 ]
 
@@ -92,7 +93,6 @@ def _col_sql(col: str) -> Optional[str]:
 
 
 def _rate(value: Optional[float], peer_values: List[float], higher_is_better: bool) -> Optional[float]:
-    """0-10 rating: where the company sits within the peer distribution."""
     if value is None or not peer_values:
         return None
     lo = min(peer_values)
@@ -114,6 +114,18 @@ def _rank(value: Optional[float], peer_values: List[float], higher_is_better: bo
             return i + 1
     better = sum(1 for v in peer_values if (v > value if higher_is_better else v < value))
     return better + 1
+
+
+def _compute_upside(fy27, pe, hist_pe):
+    """Engine formula: upside = fy27_growth × (pe / hist_pe). Multiplier 1.0 if hist invalid."""
+    fy = _f(fy27)
+    if fy is None:
+        return None
+    if fy == 0:
+        return 0.0
+    p, h = _f(pe), _f(hist_pe)
+    mult = (p / h) if (p is not None and h is not None and h > 0) else 1.0
+    return round(fy * mult, 2)
 
 
 # ── Search ─────────────────────────────────────────────────────────────────
@@ -149,7 +161,6 @@ def gvm_search(q: str, limit: int = 10):
 def gvm_company_report(symbol: str, persist: bool = True):
     symbol = symbol.upper().strip()
 
-    # 1) headline GVM + content
     head = _query_single("""
         SELECT g.symbol, g.company_name, g.segment, g.price,
                g.g_score, g.v_score, g.m_score, g.gvm_score,
@@ -169,36 +180,45 @@ def gvm_company_report(symbol: str, persist: bool = True):
     segment = head.get("segment")
     is_bfsi = _is_bfsi(segment)
 
-    # 2) Peer set in segment from screener_raw
+    # Peer fetch — pull all real columns + raw bits needed to derive synthetics.
     real_cols = [(key, col) for key, _, col, *_ in PARAMS if not col.startswith("_")]
     sel_cols = ", ".join(f"s.{_col_sql(col)} AS {key}" for key, col in real_cols)
     peers = _query_all(f"""
         SELECT g.symbol, g.company_name, g.market_cap,
+               s.price AS _price, s.dma_50 AS _dma50, s.dma_200 AS _dma200,
                s.fii_holding AS _fii_abs, s.dii_holding AS _dii_abs,
                s.fii_change AS _fii_chg, s.dii_change AS _dii_chg,
+               s.pe AS _pe_raw, s.historical_pe AS _hpe_raw,
+               i.fy27_growth AS _fy27,
                {sel_cols}
         FROM gvm_scores g
         JOIN screener_raw s ON s.nse_code = g.symbol
+        LEFT JOIN input_raw i ON i.nse_code = g.symbol
         WHERE g.segment = %s
         ORDER BY g.market_cap DESC NULLS LAST
     """, (segment,))
 
     # Compute synthetic columns per peer
     for p in peers:
-        fa = _f(p.get("_fii_abs"))
-        da = _f(p.get("_dii_abs"))
+        # Inst holding combined
+        fa, da = _f(p.get("_fii_abs")), _f(p.get("_dii_abs"))
         p["inst_abs"] = (round((fa or 0) + (da or 0), 2)
                          if (fa is not None or da is not None) else None)
-        fc = _f(p.get("_fii_chg"))
-        dc = _f(p.get("_dii_chg"))
+        fc, dc = _f(p.get("_fii_chg")), _f(p.get("_dii_chg"))
         p["inst_chg"] = (round((fc or 0) + (dc or 0), 2)
                          if (fc is not None or dc is not None) else None)
-        p["upside"] = None  # placeholder until populated (agenda id=277)
+        # Annual Upside (engine formula)
+        p["upside"] = _compute_upside(p.get("_fy27"), p.get("_pe_raw"), p.get("_hpe_raw"))
+        # DMA deviation % (price vs DMA level)
+        price, d50, d200 = _f(p.get("_price")), _f(p.get("_dma50")), _f(p.get("_dma200"))
+        p["dma_50"] = (round((price - d50) / d50 * 100, 2)
+                       if price is not None and d50 and d50 > 0 else None)
+        p["dma_200"] = (round((price - d200) / d200 * 100, 2)
+                        if price is not None and d200 and d200 > 0 else None)
 
     peer_count = len(peers)
     peer_names = [p["symbol"] for p in peers]
 
-    # 3) compute per-parameter benchmark
     benchmark = []
     company_row = next((p for p in peers if p["symbol"] == symbol), None)
 
@@ -230,7 +250,6 @@ def gvm_company_report(symbol: str, persist: bool = True):
             "worst": _best_peer(peers, key, not hib),
         })
 
-    # 4) pillar (G/V/M) ratings = avg of param ratings
     groups: Dict[str, List[float]] = {}
     for b in benchmark:
         if b["rating"] is None:
@@ -238,14 +257,12 @@ def gvm_company_report(symbol: str, persist: bool = True):
         groups.setdefault(b["pillar"], []).append(b["rating"])
     group_scores = {g: round(sum(v) / len(v), 2) for g, v in groups.items()}
 
-    # 5) segment rank ladder (by gvm)
     ladder = _query_all("""
         SELECT symbol, company_name, gvm_score, verdict
         FROM gvm_scores WHERE segment=%s ORDER BY gvm_score DESC
     """, (segment,))
     seg_rank = next((i + 1 for i, r in enumerate(ladder) if r["symbol"] == symbol), None)
 
-    # 5.5) page extras
     try:
         px = build_page_extras(symbol, [r["symbol"] for r in ladder], segment=segment)
         extras_block = px.get("extras") or {}
@@ -254,7 +271,6 @@ def gvm_company_report(symbol: str, persist: bool = True):
         extras_block = {"error": str(e)[:200]}
         ladder_extra = {}
 
-    # 6) positives / negatives
     rated = [b for b in benchmark if b["rating"] is not None]
     positives = sorted([b for b in rated if b["rating"] >= 6.5], key=lambda x: -x["rating"])[:5]
     negatives = sorted([b for b in rated if b["rating"] < 5.0], key=lambda x: x["rating"])[:5]
@@ -306,7 +322,6 @@ def gvm_company_report(symbol: str, persist: bool = True):
         "generated_at": _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"),
     }
 
-    # 7) persist computed detail (best-effort)
     if persist:
         try:
             _persist_detail(symbol, benchmark)
