@@ -25,6 +25,19 @@ ENTRY (qualified name + zone condition + free slot + not blackout + before 15:20
   Band condition (pp < close <= r1) REMOVED 12-Jun-2026 (founder decision) —
   only the room fraction matters.
 
+SELL_OVERBOUGHT (added 12-Jun-2026, founder decision):
+  Separate basket with its OWN entry model — NOT the PP/R1/S1 zone trigger.
+  Signal SQL (lifted from v8_endpoints.sell_overbought) filters on
+  dma_200>=10, week_index_52>=80, ma9_vs_ma21>=3, vol_ratio<=0.8, mom_2d<0,
+  rsi_month>=60, with target = prev-day S1 (a fixed pivot level).
+  Paper entry rule (Option A, founder-locked 12-Jun-2026):
+    - enter SHORT at the CURRENT 5-min close (enter whenever tick runs, no
+      price sanity gate — "enter regardless"),
+    - target = S1 (fixed pivot level from the signal),
+    - stop = entry + (entry - S1)  -> recomputed off the LIVE entry to keep 1:1,
+  Gated by slots / blackout / _traded_today / cutoff exactly like the others.
+  Exits flow through the SAME generic exit block (target/SL/gap/gate).
+
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
   gap at first bar of day past level -> GAP_TARGET_EXIT / GAP_SL_EXIT (exit at open)
@@ -39,6 +52,12 @@ MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff
 Price feed: intraday_prices (Fyers 5-min, NAIVE IST ts — read RAW, no TZ math).
 
 FILTER_CONFIG: imported from v8_endpoints (canonical). Do NOT duplicate here.
+
+PIVOT SELF-HEALING (added 12-Jun-2026, founder decision):
+  paper_tick auto-computes today's pivots if absent before reading them, so the
+  engine never trades on stale (prior-day) pivots while waiting for the 22:05
+  nightly job. The nightly job (scheduler _task_build_paper_pivots) is RETAINED
+  as belt-and-suspenders; this guard only fills a same-day gap.
 """
 
 import logging
@@ -146,6 +165,23 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
     return {"pivot_date": str(for_date), "built": built, "total": len(symbols), "skipped": len(skipped)}
 
 
+def _ensure_pivots_for(conn, d: date) -> int:
+    """
+    SELF-HEALING (12-Jun-2026): if no pivots exist for date d, compute them now.
+    Returns the count of pivot rows present for d after the check. Cheap COUNT
+    guard so this is effectively a no-op once the day's pivots exist (the first
+    market-hours tick builds them; every later tick just sees them present).
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM v8_paper_pivots WHERE pivot_date=%s", (d,))
+        n = int(cur.fetchone()[0])
+    if n == 0:
+        log.info(f"paper pivots missing for {d} — self-healing build")
+        res = compute_pivots(conn, d)
+        return int(res.get("built", 0))
+    return n
+
+
 # ============================================================ QUALIFIED SET
 def _passes(metric_row: Dict, bands: Dict) -> bool:
     for metric, bounds in bands.items():
@@ -172,11 +208,70 @@ def qualified_set(conn) -> Dict[str, Dict]:
     for m in rows:
         sym = m["symbol"]
         for basket, filters in FILTER_CONFIG.items():
+            # sell_overbought has its OWN entry model (precomputed entry/target/stop)
+            # handled by _sell_overbought_signals + a dedicated entry branch; it does
+            # NOT flow through the PP/R1/S1 zone path, so it is skipped here.
             if basket == "sell_overbought": continue
             side = BASKET_META[basket]["side"]
             if _passes(m, filters):
                 out[sym] = {"basket": basket, "side": side}
                 break
+    return out
+
+
+def _sell_overbought_signals(conn) -> Dict[str, Dict]:
+    """
+    sell_overbought signals — SQL lifted verbatim from v8_endpoints.sell_overbought
+    (single logic, kept in sync). Returns {symbol: {"entry","target","stop"}} where:
+      entry  = yesterday's close (signal anchor — NOT used as paper fill price),
+      target = S1 (prev-day pivot, a fixed level the paper engine enters against),
+      stop   = signal's own 1:1 stop (NOT used; paper recomputes off live entry).
+    Paper entry uses target (S1) only; entry/stop are recomputed off the live
+    5-min close at fill time (Option A, founder-locked 12-Jun-2026).
+    """
+    out = {}
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH price_window AS (
+                SELECT r.symbol, r.price_date, r.close, r.high, r.low, r.volume,
+                       AVG(r.close) OVER w9 AS ma9, AVG(r.close) OVER w21 AS ma21,
+                       AVG(r.volume) OVER w10 AS vol_avg10,
+                       LAG(r.high,1) OVER ws AS prev_high, LAG(r.low,1) OVER ws AS prev_low,
+                       LAG(r.close,1) OVER ws AS prev_close,
+                       ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.price_date DESC) AS rn
+                FROM raw_prices r
+                JOIN futures_universe fu ON fu.symbol = r.symbol AND fu.is_active = TRUE
+                WHERE r.price_date >= CURRENT_DATE - INTERVAL '60 days'
+                WINDOW w9 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 8 PRECEDING),
+                       w21 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 20 PRECEDING),
+                       w10 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 9 PRECEDING),
+                       ws  AS (PARTITION BY r.symbol ORDER BY r.price_date)
+            ),
+            latest AS (
+                SELECT pw.symbol, pw.close AS entry, pw.ma9, pw.ma21,
+                       ROUND(((pw.ma9-pw.ma21)/NULLIF(pw.ma21,0)*100)::numeric,2) AS ma9_vs_ma21,
+                       ROUND((pw.volume/NULLIF(pw.vol_avg10,0))::numeric,2) AS vol_ratio,
+                       ROUND((((pw.prev_high+pw.prev_low+pw.prev_close)/3)-(pw.prev_high-(pw.prev_high+pw.prev_low+pw.prev_close)/3))::numeric,2) AS s1
+                FROM price_window pw WHERE pw.rn=1 AND pw.ma21 IS NOT NULL AND pw.volume>0
+            ),
+            filtered AS (
+                SELECT l.*, vm.dma_200, vm.week_index_52, vm.rsi_month,
+                       vm.daily_rsi, vm.mom_2d, vm.gvm_score
+                FROM latest l
+                JOIN v8_metrics vm ON vm.symbol=l.symbol
+                  AND vm.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                WHERE vm.dma_200>=10 AND vm.week_index_52>=80 AND l.ma9_vs_ma21>=3
+                  AND l.vol_ratio<=0.8 AND vm.mom_2d<0 AND vm.rsi_month>=60
+                  AND l.s1<l.entry
+                  AND l.symbol NOT IN (SELECT UPPER(ticker) FROM earnings_calendar
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day'))
+            )
+            SELECT symbol, ROUND(entry::numeric,2) AS entry, s1 AS target,
+                ROUND((entry+(entry-s1))::numeric,2) AS stop
+            FROM filtered ORDER BY dma_200 DESC NULLS LAST
+        """)
+        for r in cur.fetchall():
+            out[r[0]] = {"entry": float(r[1]), "target": float(r[2]), "stop": float(r[3])}
     return out
 
 
@@ -191,6 +286,19 @@ def _two_latest_closes(conn, sym, d):
         rows = cur.fetchall()
     if len(rows) < 2: return None
     return float(rows[1][0]), float(rows[0][0]), rows[0][1]
+
+def _latest_close(conn, sym, d):
+    """Single most-recent 5-min close for d (used by sell_overbought entry,
+    which needs only the current close, not the prev/cur pair)."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT close, ts FROM intraday_prices
+            WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
+            ORDER BY ts DESC LIMIT 1
+        """, (sym, d))
+        r = cur.fetchone()
+    if not r: return None
+    return float(r[0]), r[1]
 
 def _first_bar(conn, sym, d):
     with conn.cursor() as cur:
@@ -261,11 +369,29 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
     return {"symbol":sym,"side":side,"result":result,"exit":exit_px,"pnl":round(pnl,2)}
 
 
+def _open_short(conn, sym, basket, entry, cur_ts, target, stop, pp, d):
+    """Insert a SHORT paper position. Shared by zone-short and sell_overbought."""
+    qty = _lot(conn, sym)
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO v8_paper_positions
+            (symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pp,pivot_date,status)
+            VALUES (%s,'SHORT',%s,%s,%s,%s,%s,%s,%s,%s,'OPEN')
+            ON CONFLICT (symbol,side,status) DO NOTHING""",
+            (sym,basket,entry,cur_ts,qty,round(target,2),round(stop,2),pp,d))
+        conn.commit()
+    return {"symbol":sym,"side":"SHORT","basket":basket,"entry":entry,
+            "target":round(target,2),"sl":round(stop,2)}
+
+
 # ============================================================ 5-MIN TICK
 def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots: int = None) -> Dict:
     ensure_schema(conn)
     d = target_date or date.today()
     now_t = datetime.now().time() if target_date is None else None
+
+    # SELF-HEALING pivots (12-Jun-2026): build today's pivots if absent so the
+    # engine never trades on prior-day pivots while waiting for the 22:05 job.
+    _ensure_pivots_for(conn, d)
 
     with conn.cursor() as cur:
         cur.execute("SELECT symbol,pp,r1,s1 FROM v8_paper_pivots WHERE pivot_date=%s", (d,))
@@ -281,6 +407,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
         return {"status":"warn","msg":"no pivots — run compute_pivots"}
 
     qual = qualified_set(conn)
+    so_sig = _sell_overbought_signals(conn)   # sell_overbought (own model)
     exits, entries = [], []
 
     # ---- 1) EXITS ----
@@ -382,16 +509,30 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"blackout"); continue
                 if sell_slots is not None and short_open >= sell_slots:
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"slot_full"); continue
-                qty=_lot(conn,sym)
-                with conn.cursor() as cur:
-                    cur.execute("""INSERT INTO v8_paper_positions
-                        (symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pp,pivot_date,status)
-                        VALUES (%s,'SHORT',%s,%s,%s,%s,%s,%s,%s,%s,'OPEN')
-                        ON CONFLICT (symbol,side,status) DO NOTHING""",
-                        (sym,basket,entry,cur_ts,qty,round(target,2),round(stop,2),pp,d))
-                    conn.commit()
+                entries.append(_open_short(conn,sym,basket,entry,cur_ts,target,stop,pp,d))
                 short_open+=1
-                entries.append({"symbol":sym,"side":"SHORT","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
+
+        # ---- 3b) SELL_OVERBOUGHT ENTRIES (own model, 12-Jun-2026) ----
+        # Enter SHORT at CURRENT 5-min close; target=S1 (signal), stop recomputed
+        # off live entry for 1:1 (Option A). No price sanity gate ("enter regardless").
+        for sym, sig in so_sig.items():
+            target = sig["target"]                 # S1 (fixed pivot from signal)
+            lc = _latest_close(conn, sym, d)
+            if not lc: continue
+            cur_close, cur_ts = lc
+            if cur_close <= target:                # already at/below S1 — no trade room
+                continue
+            entry = cur_close
+            stop  = entry + (entry - target)       # 1:1 off LIVE entry
+            if _has_open(conn,sym,"SHORT"): continue
+            if _traded_today(conn,sym,"SHORT",d): continue
+            if _blackout(conn,sym):
+                _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"blackout"); continue
+            if sell_slots is not None and short_open >= sell_slots:
+                _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"slot_full"); continue
+            # pp stored as None for sell_overbought (no PP/R1/S1 zone anchor)
+            entries.append(_open_short(conn,sym,"sell_overbought",entry,cur_ts,target,stop,None,d))
+            short_open+=1
     else:
         for sym, q in qual.items():
             if sym not in piv: continue
@@ -404,7 +545,16 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 _log_missed(conn,d,sym,"LONG",q["basket"],cur_close,r1,cur_close-(r1-cur_close),"after_cutoff")
             elif side=="SHORT" and (cur_close-s1)>=GAP_ROOM_FRAC*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
                 _log_missed(conn,d,sym,"SHORT",q["basket"],cur_close,s1,cur_close+(cur_close-s1),"after_cutoff")
+        # sell_overbought after-cutoff missed log
+        for sym, sig in so_sig.items():
+            target = sig["target"]
+            lc = _latest_close(conn, sym, d)
+            if not lc: continue
+            cur_close, _ = lc
+            if cur_close <= target: continue
+            if not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
+                _log_missed(conn,d,sym,"SHORT","sell_overbought",cur_close,target,cur_close+(cur_close-target),"after_cutoff")
 
-    return {"date":str(d),"qualified":len(qual),"pivots":len(piv),
+    return {"date":str(d),"qualified":len(qual),"sell_overbought":len(so_sig),"pivots":len(piv),
             "entries":entries,"exits":exits,"gate_exits":rebalanced,
             "open_long":long_open,"open_short":short_open}
