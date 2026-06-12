@@ -10,18 +10,20 @@ FUNNEL (3 layers):
      CANONICAL filters imported from v8_endpoints.FILTER_CONFIG (single source of truth).
   2. Rolling-5-day PIVOTS  — PP/R1/S1 from last 5 trading days (T-1..T-5) of
      raw_prices, recomputed nightly; window rolls daily.
-  3. Zone + gap trigger — on 1-min candle close, on qualified names only.
+  3. Zone trigger — on 5-min candle close, on qualified names only.
 
-ENTRY (qualified name + zone + gap condition + free slot + not blackout + before 15:20):
-  BUY  : pp < this_close <= r1  AND  (r1-this_close) >= GAP_ROOM_FRAC*(r1-pp)
+ENTRY (qualified name + zone condition + free slot + not blackout + before 15:20):
+  BUY  : (r1-this_close) >= GAP_ROOM_FRAC*(r1-pp)
          -> enter @ close, target R1, SL = entry-(R1-entry)
-  SHORT: s1 <= this_close < pp  AND  (this_close-s1) >= GAP_ROOM_FRAC*(pp-s1)
+  SHORT: (this_close-s1) >= GAP_ROOM_FRAC*(pp-s1)
          -> enter @ close, target S1, SL = entry+(entry-S1)
   + _traded_today guard: one entry per symbol/side/day maximum.
-  No prev_close condition — captures gap-down/up names opening in the zone.
+  No pp<close<=r1 band condition — only room-to-target fraction gate.
   GAP_ROOM_FRAC (0.3) = minimum remaining gap to target as a fraction of the
   pp->r1 (or pp->s1) band. Lower = looser entry, more signals, weaker R:R on
   marginal trades. Was 0.5; lowered to 0.3 on 11-Jun-2026 (founder decision).
+  Band condition (pp < close <= r1) REMOVED 12-Jun-2026 (founder decision) —
+  only the room fraction matters.
 
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
@@ -34,7 +36,7 @@ GATE   : market-mood buy_slots/sell_slots (sum 15) cap concurrent open per side.
 MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff ->
          v8_paper_missed, one row per (symbol, side, day).
 
-Price feed: intraday_prices (Fyers 1-min, NAIVE IST ts — read RAW, no TZ math).
+Price feed: intraday_prices (Fyers 5-min, NAIVE IST ts — read RAW, no TZ math).
 
 FILTER_CONFIG: imported from v8_endpoints (canonical). Do NOT duplicate here.
 """
@@ -55,6 +57,7 @@ REBALANCE_TIME = time(15, 20)
 # 0.5 = close must be in lower/upper half of zone (room >= distance travelled, R:R >= 1:1).
 # 0.3 = looser; close may travel up to 70% toward target. More signals, weaker R:R
 #       on marginal trades. Lowered 0.5 -> 0.3 on 11-Jun-2026 (founder decision).
+# Band condition (pp < close <= r1) REMOVED 12-Jun-2026 — only room fraction applies.
 GAP_ROOM_FRAC  = 0.3
 
 
@@ -258,7 +261,7 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
     return {"symbol":sym,"side":side,"result":result,"exit":exit_px,"pnl":round(pnl,2)}
 
 
-# ============================================================ 1-MIN TICK
+# ============================================================ 5-MIN TICK
 def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots: int = None) -> Dict:
     ensure_schema(conn)
     d = target_date or date.today()
@@ -351,7 +354,8 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl = _two_latest_closes(conn, sym, d)
             if not tl: continue
             prev_close, cur_close, cur_ts = tl
-            if side=="LONG" and (pp < cur_close <= r1) and (r1 - cur_close) >= GAP_ROOM_FRAC * (r1 - pp):
+            # LONG entry: room-to-target fraction only (band condition removed 12-Jun-2026)
+            if side=="LONG" and (r1 - cur_close) >= GAP_ROOM_FRAC * (r1 - pp):
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
                 if _has_open(conn,sym,"LONG"): continue
                 if _traded_today(conn,sym,"LONG",d): continue
@@ -369,7 +373,8 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     conn.commit()
                 long_open+=1
                 entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
-            elif side=="SHORT" and (s1 <= cur_close < pp) and (cur_close - s1) >= GAP_ROOM_FRAC * (pp - s1):
+            # SHORT entry: room-to-target fraction only (band condition removed 12-Jun-2026)
+            elif side=="SHORT" and (cur_close - s1) >= GAP_ROOM_FRAC * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"): continue
                 if _traded_today(conn,sym,"SHORT",d): continue
@@ -394,9 +399,10 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl=_two_latest_closes(conn,sym,d)
             if not tl: continue
             prev_close,cur_close,_=tl
-            if side=="LONG" and (pp < cur_close <= r1) and (r1-cur_close)>=GAP_ROOM_FRAC*(r1-pp) and not _has_open(conn,sym,"LONG") and not _traded_today(conn,sym,"LONG",d):
+            # After-cutoff missed log — room fraction only (band condition removed 12-Jun-2026)
+            if side=="LONG" and (r1-cur_close)>=GAP_ROOM_FRAC*(r1-pp) and not _has_open(conn,sym,"LONG") and not _traded_today(conn,sym,"LONG",d):
                 _log_missed(conn,d,sym,"LONG",q["basket"],cur_close,r1,cur_close-(r1-cur_close),"after_cutoff")
-            elif side=="SHORT" and (s1<=cur_close<pp) and (cur_close-s1)>=GAP_ROOM_FRAC*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
+            elif side=="SHORT" and (cur_close-s1)>=GAP_ROOM_FRAC*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
                 _log_missed(conn,d,sym,"SHORT",q["basket"],cur_close,s1,cur_close+(cur_close-s1),"after_cutoff")
 
     return {"date":str(d),"qualified":len(qual),"pivots":len(piv),
