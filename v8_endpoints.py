@@ -9,6 +9,12 @@ Filter tuning (12-Jun-2026): sell_overbought rsi_month>=68 + day_1d<0 +
   sector_week<=2 + gvm_score<=8 (FILTER_CONFIG + live SQL, consistent);
   sell_reversal week_return max 3.0->1.0; buy_reversal week_return 1.0-4.0,
   year_return dead filter removed (adaptive gate auto-adjusts 11->10).
+Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
+  upper cap 4.0->6.0. The 4.0 cap rejected sector leadership on bullish days
+  (a strong sector runs >4% on the week, so the cap fought the environment).
+  FORTIS confirmed clean reversal-in-uptrend, failed ONLY on sector_week 4.2
+  vs 4.0. Verified not to over-admit (basket held at 1 with 6.0). Sells +
+  sell_overbought untouched.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -36,7 +42,7 @@ FILTER_CONFIG = {
         "rsi_month":    [58.5, 75.0],
         "rsi_weekly":   [50.0, 67.5],
         "mom_2d":       [0.0,  2.4],
-        "sector_week":  [0.0,  4.0],
+        "sector_week":  [0.0,  6.0],
         "sector_month": [0.0,  6.0],
     },
     "buy_momentum": {
@@ -49,7 +55,7 @@ FILTER_CONFIG = {
         "month_return": [3.0,  14.0],
         "week_return":  [1.0,  7.0],
         "day_1d":       [0.0,  3.0],
-        "sector_week":  [0.0,  4.0],
+        "sector_week":  [0.0,  6.0],
         "sector_month": [0.0,  6.0],
     },
     "sell_reversal": {
