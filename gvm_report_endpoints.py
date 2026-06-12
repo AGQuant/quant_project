@@ -8,6 +8,11 @@ rank-in-segment, and a 0-10 rating. BFSI rule applied (D/E + interest
 coverage dropped for financial segments). Persists computed detail back
 into gvm_scores.*_raw / *_peer / *_rating so data survives for testing.
 
+v2 (12-Jun-2026): page extras wired in via gvm_page_extras.build_page_extras
+  -> payload["extras"]   : trend / volume A/D / pivot / 52W / percentile /
+                           flow / valuation / earnings blackout / tier1 auto
+  -> ladder rows enriched: pe, ret_1y, gvm_d13, tier1_passed/total
+
 Endpoints:
   GET /api/gvm/search?q=...          - symbol/company autocomplete
   GET /api/gvm/company/{symbol}      - full report payload (compute + persist)
@@ -21,6 +26,8 @@ from datetime import datetime, timedelta, date
 from typing import Optional, List, Dict, Any
 import psycopg
 import os
+
+from gvm_page_extras import build_page_extras
 
 router = APIRouter(tags=["gvm_report"])
 
@@ -40,7 +47,7 @@ def _f(v):
         return None
 
 
-# ── BFSI segments: D/E + interest coverage irrelevant ────────────────────────
+# ── BFSI segments: D/E + interest coverage irrelevant ────────────────────
 _BFSI_KEYWORDS = (
     "bank", "nbfc", "finance", "financial", "insurance", "amc",
     "exchange", "capital market", "broking", "wealth", "housing finance",
@@ -53,7 +60,7 @@ def _is_bfsi(segment: str) -> bool:
     return any(k in s for k in _BFSI_KEYWORDS)
 
 
-# ── Parameter definitions ────────────────────────────────────────────────────
+# ── Parameter definitions ──────────────────────────────────────────────────
 # key, label, screener_raw column, group, higher_is_better, unit
 PARAMS = [
     ("sales_5y",   "Sales 5Y CAGR",        "sales_growth_5y",   "Trackrecord", True,  "%"),
@@ -113,7 +120,7 @@ def _rank(value: Optional[float], peer_values: List[float], higher_is_better: bo
     return better + 1
 
 
-# ── Search ───────────────────────────────────────────────────────────────────
+# ── Search ─────────────────────────────────────────────────────────────────
 @router.get("/api/gvm/search")
 def gvm_search(q: str, limit: int = 10):
     q = (q or "").strip()
@@ -141,7 +148,7 @@ def gvm_search(q: str, limit: int = 10):
         raise HTTPException(500, f"search failed: {e}")
 
 
-# ── Full company report ──────────────────────────────────────────────────────
+# ── Full company report ────────────────────────────────────────────────────
 @router.get("/api/gvm/company/{symbol}")
 def gvm_company_report(symbol: str, persist: bool = True):
     symbol = symbol.upper().strip()
@@ -225,6 +232,15 @@ def gvm_company_report(symbol: str, persist: bool = True):
     """, (segment,))
     seg_rank = next((i + 1 for i, r in enumerate(ladder) if r["symbol"] == symbol), None)
 
+    # 5.5) page extras — DB-only enrichment (best-effort, never fatal)
+    try:
+        px = build_page_extras(symbol, [r["symbol"] for r in ladder])
+        extras_block = px.get("extras") or {}
+        ladder_extra = px.get("ladder_extra") or {}
+    except Exception as e:
+        extras_block = {"error": str(e)[:200]}
+        ladder_extra = {}
+
     # 6) positives / negatives auto-derived
     rated = [b for b in benchmark if b["rating"] is not None]
     positives = sorted([b for b in rated if b["rating"] >= 6.5], key=lambda x: -x["rating"])[:5]
@@ -255,7 +271,8 @@ def gvm_company_report(symbol: str, persist: bool = True):
         "ladder": [
             {"symbol": r["symbol"], "company_name": r["company_name"],
              "gvm": _f(r["gvm_score"]), "verdict": r["verdict"],
-             "is_self": r["symbol"] == symbol}
+             "is_self": r["symbol"] == symbol,
+             **(ladder_extra.get(r["symbol"], {}))}
             for r in ladder
         ],
         "peers": peer_names,
@@ -264,6 +281,7 @@ def gvm_company_report(symbol: str, persist: bool = True):
                        "peer_avg": b["peer_avg"], "unit": b["unit"]} for b in positives],
         "negatives": [{"label": b["label"], "rating": b["rating"], "company": b["company"],
                        "peer_avg": b["peer_avg"], "unit": b["unit"]} for b in negatives],
+        "extras": extras_block,
         "content": {
             "overview": head.get("overview"),
             "key_takeaway": head.get("key_takeaway"),
