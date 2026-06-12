@@ -37,6 +37,7 @@ SELL_OVERBOUGHT (added 12-Jun-2026, founder decision):
     - stop = entry + (entry - S1)  -> recomputed off the LIVE entry to keep 1:1,
   Gated by slots / blackout / _traded_today / cutoff exactly like the others.
   Exits flow through the SAME generic exit block (target/SL/gap/gate).
+  Signals are CACHED per-day (stable off EOD metrics) — see _SO_CACHE below.
 
 EXIT (close-based, multi-day, levels frozen at entry):
   target hit / SL hit -> TARGET / SL
@@ -57,7 +58,9 @@ PIVOT SELF-HEALING (added 12-Jun-2026, founder decision):
   paper_tick auto-computes today's pivots if absent before reading them, so the
   engine never trades on stale (prior-day) pivots while waiting for the 22:05
   nightly job. The nightly job (scheduler _task_build_paper_pivots) is RETAINED
-  as belt-and-suspenders; this guard only fills a same-day gap.
+  as belt-and-suspenders; this guard only fills a same-day gap. If a same-day
+  build fails and the engine falls back to older pivots, a PIVOT DRIFT warning
+  is logged (date-drift observability, 12-Jun-2026 follow-up).
 """
 
 import logging
@@ -78,6 +81,21 @@ REBALANCE_TIME = time(15, 20)
 #       on marginal trades. Lowered 0.5 -> 0.3 on 11-Jun-2026 (founder decision).
 # Band condition (pp < close <= r1) REMOVED 12-Jun-2026 — only room fraction applies.
 GAP_ROOM_FRAC  = 0.3
+
+# ── sell_overbought signal cache (12-Jun-2026, follow-up) ────────────────────
+# The signal set is built off EOD v8_metrics + prior-day pivots — nothing intraday
+# changes it, so it is stable for the whole trading day. Caching it avoids running
+# the 60-day-window SQL on every 1-min tick (~375 runs/day -> 1). Keyed by date.
+# A manual force-refresh busts the cache when the EOD engine is rerun intraday
+# (testing/backfills) so paper_tick doesn't serve stale signals until midnight.
+_SO_CACHE: Dict = {"date": None, "signals": None}
+
+def invalidate_sell_overbought_cache():
+    """Bust the sell_overbought signal cache. Call after an intraday EOD-engine
+    rerun so the next paper_tick recomputes signals instead of serving stale."""
+    _SO_CACHE["date"] = None
+    _SO_CACHE["signals"] = None
+    log.info("sell_overbought signal cache invalidated")
 
 
 # ============================================================ SCHEMA
@@ -219,7 +237,24 @@ def qualified_set(conn) -> Dict[str, Dict]:
     return out
 
 
-def _sell_overbought_signals(conn) -> Dict[str, Dict]:
+def _sell_overbought_signals(conn, for_date: date = None, force: bool = False) -> Dict[str, Dict]:
+    """
+    Cached accessor for sell_overbought signals (12-Jun-2026 follow-up).
+    Signals are stable for the trading day, so this recomputes at most once per
+    date. Pass force=True (or call invalidate_sell_overbought_cache()) to bust
+    the cache after an intraday EOD-engine rerun.
+    """
+    d = for_date or date.today()
+    if not force and _SO_CACHE["date"] == d and _SO_CACHE["signals"] is not None:
+        return _SO_CACHE["signals"]
+    sigs = _sell_overbought_signals_raw(conn)
+    _SO_CACHE["date"] = d
+    _SO_CACHE["signals"] = sigs
+    log.info(f"sell_overbought signals computed for {d}: {len(sigs)} names (cached)")
+    return sigs
+
+
+def _sell_overbought_signals_raw(conn) -> Dict[str, Dict]:
     """
     sell_overbought signals — SQL lifted verbatim from v8_endpoints.sell_overbought
     (single logic, kept in sync). Returns {symbol: {"entry","target","stop"}} where:
@@ -401,13 +436,21 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             cur.execute("SELECT MAX(pivot_date) FROM v8_paper_pivots")
             md = cur.fetchone()[0]
             if md:
+                # DATE-DRIFT WARNING (12-Jun-2026 follow-up): self-heal should have
+                # built pivots for d above; if we are here, today's build failed and
+                # we are trading on OLDER pivots. Log loudly so staleness is visible
+                # instead of silent. Convention itself (pivot_date=d, built from
+                # price_date<d) is correct — this only flags a same-day build gap.
+                if md < d:
+                    log.warning(f"PIVOT DRIFT: no pivots for {d}, falling back to {md} "
+                                f"({(d - md).days}d old) — self-heal build may have failed")
                 cur.execute("SELECT symbol,pp,r1,s1 FROM v8_paper_pivots WHERE pivot_date=%s", (md,))
                 piv = {r[0]:{"pp":float(r[1]),"r1":float(r[2]),"s1":float(r[3])} for r in cur.fetchall() if r[1] is not None}
     if not piv:
         return {"status":"warn","msg":"no pivots — run compute_pivots"}
 
     qual = qualified_set(conn)
-    so_sig = _sell_overbought_signals(conn)   # sell_overbought (own model)
+    so_sig = _sell_overbought_signals(conn, for_date=d)   # cached, sell_overbought (own model)
     exits, entries = [], []
 
     # ---- 1) EXITS ----
