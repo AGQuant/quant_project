@@ -44,6 +44,27 @@ const C = {
   red: "#dd3a4a", orange: "#d97706", purple: "#7c3aed",
   text: "#1c2536", muted: "#5a6781", gridLine: "#edf1f6",
   nav: "#ffffff",
+  gPillar: "#0a9e63",   // G — Growth: green
+  vPillar: "#b45309",   // V — Value: gold
+  mPillar: "#2563eb",   // M — Momentum: blue
+};
+
+// ── CANONICAL G/V/M PILLAR MAP — session_log id=269, locked 12-Jun-2026
+// Source: DB schema (momentum_scores + gvm_scores). G=14, V=2, M=8.
+const GVM_PILLAR_MAP = {
+  sales_5y:"G", sales_3y:"G", profit_5y:"G", profit_3y:"G",
+  qoq_sales:"G", qoq_profit:"G", opm:"G", opm_exp:"G",
+  fa_growth:"G", promoter:"G", inst_change:"G", roce:"G",
+  int_cov:"G", div_yield:"G",
+  pe:"V", upside:"V",
+  ret_1y:"M", ret_3y:"M", dma_50:"M", dma_200:"M",
+  ret_52w_idx:"M", ret_1m:"M", rsi_month:"M", vol_trend:"M",
+};
+
+const PILLAR_INFO = {
+  G: { label:"G — Growth", color: C.gPillar, bg:"#e3f6ed", desc:"Fundamentals, profitability & quality" },
+  V: { label:"V — Value",  color: C.vPillar, bg:"#fdf3df", desc:"Valuation vs history & annual upside" },
+  M: { label:"M — Momentum", color: C.mPillar, bg:"#e8effd", desc:"Price returns, trend & technicals" },
 };
 
 const MODELS = [
@@ -60,6 +81,7 @@ const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", 
 const gvmColor = (g) => g == null ? C.muted : g >= 8 ? C.green : g >= 7 ? C.gold : g >= 6 ? C.orange : C.red;
 const ratingColor = (r) => r == null ? C.muted : r >= 7 ? C.green : r >= 5 ? C.gold : C.red;
 const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#22a06b", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
+const pillarOf = (key) => GVM_PILLAR_MAP[key] || null;
 
 function Loader({ msg }) {
   return (
@@ -80,7 +102,7 @@ function Tag({ children, color = C.accent }) {
   );
 }
 
-// ── Top Nav Bar ───────────────────────────────────────────────
+// ── Top Nav ──────────────────────────────────────────────────────────
 function Switcher({ current, onPick }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -96,7 +118,7 @@ function Switcher({ current, onPick }) {
         style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 12px",
           borderRadius: 9, border: `1px solid ${C.border}`, background: C.card,
           cursor: "pointer", boxShadow: "0 2px 8px rgba(25,40,70,0.06)" }}>
-        <span style={{ fontSize: 14, color: cur ? cur.color : C.muted }}>{cur ? cur.icon : "⋮"}</span>
+        <span style={{ fontSize: 14, color: cur ? cur.color : C.muted }}>{cur ? cur.icon : "⋯"}</span>
         <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{cur ? cur.label : "Models"}</span>
         <span style={{ fontSize: 16, color: C.muted, lineHeight: 1 }}>⋮</span>
       </button>
@@ -126,18 +148,382 @@ function Switcher({ current, onPick }) {
   );
 }
 
-// ── Full-screen iframe wrapper ───────────────────────────────────
 function FrameModule({ src }) {
+  return <iframe src={src} title="frame" style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#fff" }} />;
+}
+
+// ── GVM Sparkline ────────────────────────────────────────────────────
+function GvmSparkline({ points }) {
+  if (!points || points.length < 2) return null;
+  const pts = [...points].reverse();
+  const xs = pts.map(p => p.gvm_score);
+  const min = Math.min(...xs, 0), max = Math.max(...xs, 10);
+  const W = 180, H = 44, pad = 4;
+  const span = (max - min) || 1;
+  const path = pts.map((p, i) => {
+    const x = pad + (i / (pts.length - 1)) * (W - 2 * pad);
+    const y = H - pad - ((p.gvm_score - min) / span) * (H - 2 * pad);
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const last = pts[pts.length - 1].gvm_score, first = pts[0].gvm_score;
+  const delta = last - first;
+  const stroke = delta > 0.05 ? "#0a9e63" : delta < -0.05 ? "#dd3a4a" : "#5a6781";
+  const lx = pad + (W - 2 * pad), ly = H - pad - ((last - min) / span) * (H - 2 * pad);
   return (
-    <iframe
-      src={src}
-      title="frame"
-      style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#fff" }}
-    />
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <svg width={W} height={H} style={{ overflow: "visible" }}>
+        <path d={path} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={lx} cy={ly} r="3" fill={stroke} />
+      </svg>
+      <div style={{ lineHeight: 1.3 }}>
+        <div style={{ fontSize: 10, color: "#5a6781", textTransform: "uppercase", letterSpacing: ".06em" }}>GVM Trend · {pts.length}d</div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: stroke, fontFamily: "monospace" }}>
+          {delta >= 0 ? "▲ +" : "▼ "}{delta.toFixed(2)}
+        </div>
+      </div>
+    </div>
   );
 }
 
-// ── GVM Module ───────────────────────────────────────────────────
+// ── Bench Cell (grouped view) ─────────────────────────────────────────
+function cellColor(rating) {
+  if (rating == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
+  if (rating >= 6.5) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
+  if (rating >= 4)   return { bg: "#fdf3df", bd: "#d9a73a", fg: "#9a6a00" };
+  return { bg: "#fceaec", bd: "#dd3a4a", fg: "#bf2230" };
+}
+
+function BenchCell({ b }) {
+  const c = cellColor(b.rating);
+  const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
+  const peer = b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—";
+  return (
+    <div title={`Best: ${b.best?.symbol||"—"} ${b.best?.value??""} · Worst: ${b.worst?.symbol||"—"} ${b.worst?.value??""}`}
+      style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: c.fg, lineHeight: 1.25 }}>{b.label}</span>
+        <span style={{ fontSize: 10, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>
+        <span>peer {peer}</span><span>#{b.rank ?? "—"}/{b.peer_n}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Bird's-eye flat matrix row ────────────────────────────────────────
+function MatrixRow({ b, pillar }) {
+  const c = cellColor(b.rating);
+  const barW = b.rating != null ? Math.min(100, Math.max(4, b.rating * 10)) : 0;
+  const pInfo = PILLAR_INFO[pillar];
+  return (
+    <tr style={{ borderBottom: `1px solid ${C.gridLine}` }}>
+      <td style={{ padding: "8px 10px", fontSize: 11, color: C.muted, fontWeight: 700 }}>
+        <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 5px", borderRadius: 3,
+          background: pInfo?.bg, color: pInfo?.color, letterSpacing: ".05em" }}>{pillar}</span>
+      </td>
+      <td style={{ padding: "8px 10px", fontSize: 12, color: C.text, fontWeight: 600 }}>{b.label}</td>
+      <td style={{ padding: "8px 10px", fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: c.fg }}>
+        {b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—"}
+      </td>
+      <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: C.muted }}>
+        {b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—"}
+      </td>
+      <td style={{ padding: "8px 14px", minWidth: 120 }}>
+        <div style={{ position: "relative", height: 20, background: C.bg, borderRadius: 4, border: `1px solid ${C.gridLine}` }}>
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${barW}%`,
+            background: `${ratingColor(b.rating)}30`, borderRight: `2px solid ${ratingColor(b.rating)}`,
+            borderRadius: 4, transition: "width .4s ease" }} />
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0,
+            display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: ratingColor(b.rating), fontFamily: "monospace" }}>
+              {b.rating != null ? b.rating.toFixed(1) : "—"}
+            </span>
+          </div>
+        </div>
+      </td>
+      <td style={{ padding: "8px 10px", fontSize: 10, color: C.muted }}>#{b.rank ?? "—"}/{b.peer_n}</td>
+      <td style={{ padding: "8px 10px", fontSize: 10, color: C.green, fontFamily: "monospace" }}>
+        {b.best?.symbol || "—"}
+      </td>
+      <td style={{ padding: "8px 10px", fontSize: 10, color: C.red, fontFamily: "monospace" }}>
+        {b.worst?.symbol || "—"}
+      </td>
+    </tr>
+  );
+}
+
+// ── GVM Report ───────────────────────────────────────────────────────
+function GvmReport({ r, hist }) {
+  const [view, setView] = useState("grouped"); // "grouped" | "matrix"
+  const s = r.scores || {};
+  const vc = verdictColor(r.verdict);
+
+  // Map benchmark items to G/V/M using canonical map
+  const benchByPillar = { G: [], V: [], M: [], _: [] };
+  (r.benchmark || []).forEach(b => {
+    const p = GVM_PILLAR_MAP[b.key] || "_";
+    benchByPillar[p].push(b);
+  });
+
+  // Verdict distribution in ladder
+  const verdictDist = {};
+  (r.ladder || []).forEach(row => {
+    verdictDist[row.verdict] = (verdictDist[row.verdict] || 0) + 1;
+  });
+
+  const pillarScore = (pillar) => {
+    if (pillar === "G") return s.g;
+    if (pillar === "V") return s.v;
+    if (pillar === "M") return s.m;
+    return null;
+  };
+
+  return (
+    <div style={{ paddingBottom: 80 }}>
+
+      {/* ── Hero ── */}
+      <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+          {/* GVM Big Number */}
+          <div style={{ textAlign: "center", minWidth: 110 }}>
+            <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
+            <div style={{ fontSize: 11, color: C.muted, margin: "4px 0 6px" }}>GVM Score</div>
+            <Tag color={vc}>{r.verdict}</Tag>
+          </div>
+
+          {/* Company + G/V/M pillars */}
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{r.company_name}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span>{r.symbol}</span>
+              <span>·</span>
+              <span>{r.segment}</span>
+              <span>·</span>
+              <span style={{ fontWeight: 700, color: C.accent }}>#{r.segment_rank}/{r.segment_total} in segment</span>
+              {r.mcap_rank && <span>· MCap #{r.mcap_rank}</span>}
+              {r.cap_category && <Tag color={C.muted}>{r.cap_category}</Tag>}
+              {r.is_bfsi && <Tag color={C.purple}>BFSI</Tag>}
+            </div>
+
+            {/* G / V / M pillars as primary display */}
+            <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+              {["G","V","M"].map(pillar => {
+                const pi = PILLAR_INFO[pillar];
+                const score = pillarScore(pillar);
+                return (
+                  <div key={pillar} style={{ background: pi.bg, border: `1px solid ${pi.color}40`,
+                    borderRadius: 10, padding: "10px 16px", minWidth: 90, textAlign: "center" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: pi.color, textTransform: "uppercase", letterSpacing: ".05em" }}>
+                      {pillar}
+                    </div>
+                    <div style={{ fontSize: 26, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace", lineHeight: 1.1 }}>
+                      {score?.toFixed(2) ?? "—"}
+                    </div>
+                    <div style={{ fontSize: 9, color: C.muted, marginTop: 2 }}>{pi.desc.split(" ").slice(0,2).join(" ")}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {hist && hist.length > 1 && (
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.gridLine}` }}>
+                <GvmSparkline points={hist} />
+              </div>
+            )}
+          </div>
+
+          {/* Price + segment distribution */}
+          <div style={{ textAlign: "right", minWidth: 140 }}>
+            <div style={{ fontSize: 11, color: C.muted }}>CMP</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(r.price, 1)}</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
+            {/* Verdict distribution */}
+            {Object.keys(verdictDist).length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }}>
+                <div style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em" }}>Segment peers</div>
+                {Object.entries(verdictDist).map(([v, n]) => (
+                  <div key={v} style={{ fontSize: 10, color: verdictColor(v), fontWeight: 700 }}>
+                    {n}× {v}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Punchline ── */}
+      {r.punchline && (
+        <div style={{ background: `${vc}10`, border: `1px solid ${vc}30`, borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
+          <div style={{ fontSize: 10, color: vc, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Expert Verdict</div>
+          <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{r.punchline}</div>
+        </div>
+      )}
+
+      {/* ── Strengths / Weaknesses ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>✓ Key Strengths</div>
+          {(r.positives || []).length ? r.positives.map((p, i) => (
+            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.positives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+              <span style={{ color: C.green, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit}
+              <span style={{ color: C.muted }}> ({p.rating.toFixed(1)})</span>
+              <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>
+                [{GVM_PILLAR_MAP[r.benchmark?.find(b=>b.label===p.label)?.key] || "G"}]
+              </span>
+            </div>
+          )) : <div style={{ fontSize: 12, color: C.muted }}>No standout strengths vs peers.</div>}
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "14px 16px" }}>
+          <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>⚠ Key Weaknesses</div>
+          {(r.negatives || []).length ? r.negatives.map((p, i) => (
+            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.negatives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+              <span style={{ color: C.red, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit}
+              <span style={{ color: C.muted }}> ({p.rating.toFixed(1)})</span>
+              <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>
+                [{GVM_PILLAR_MAP[r.benchmark?.find(b=>b.label===p.label)?.key] || "G"}]
+              </span>
+            </div>
+          )) : <div style={{ fontSize: 12, color: C.muted }}>No major weaknesses vs peers.</div>}
+        </div>
+      </div>
+
+      {/* ── Peer Benchmarking ── */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+
+        {/* Header + toggle */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>Peer Benchmarking</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+              vs {r.peer_count} peers in {r.segment}{r.is_bfsi ? " · BFSI rule applied (D/E + Int.Cov excluded)" : ""}
+            </div>
+          </div>
+          {/* Grouped / Bird's-eye toggle */}
+          <div style={{ display: "flex", gap: 6 }}>
+            {[["grouped","G/V/M Grouped"],["matrix","Bird's-eye"]].map(([v,l]) => (
+              <button key={v} onClick={() => setView(v)}
+                style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 7,
+                  border: `1px solid ${view===v ? C.accent : C.border}`,
+                  background: view===v ? `${C.accent}15` : "transparent",
+                  color: view===v ? C.accent : C.muted, cursor: "pointer", transition: "all .15s" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14, fontSize: 10.5 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#0a9e63" }} />Better than segment
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#d9a73a" }} />In-line
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#dd3a4a" }} />Lower than segment
+          </span>
+        </div>
+
+        {/* ── GROUPED VIEW ── */}
+        {view === "grouped" && ["G","V","M"].map(pillar => {
+          const items = benchByPillar[pillar];
+          if (!items.length) return null;
+          const pi = PILLAR_INFO[pillar];
+          const score = pillarScore(pillar);
+          return (
+            <div key={pillar} style={{ marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10,
+                padding: "8px 12px", background: pi.bg, borderRadius: 8, border: `1px solid ${pi.color}30` }}>
+                <span style={{ fontSize: 18, fontWeight: 900, color: pi.color, fontFamily: "monospace" }}>{pillar}</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: pi.color }}>{pi.label}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{pi.desc}</div>
+                </div>
+                {score != null && (
+                  <span style={{ marginLeft: "auto", fontSize: 20, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace" }}>
+                    {score.toFixed(2)}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+                {items.map(b => <BenchCell key={b.key} b={b} />)}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* ── BIRD'S-EYE MATRIX ── */}
+        {view === "matrix" && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${C.border}` }}>
+                  {["Pillar","Metric","Company","Peer Avg","Rating","Rank","Best","Worst"].map(h => (
+                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10,
+                      fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em",
+                      background: "#f8fafc", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {["G","V","M"].flatMap(pillar =>
+                  (benchByPillar[pillar] || []).map(b => (
+                    <MatrixRow key={b.key} b={b} pillar={pillar} />
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Segment Rank Ladder ── */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.purple, marginBottom: 4 }}>Segment Rank Ladder</div>
+        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{r.segment} · ranked by GVM</div>
+        {(r.ladder || []).map((row, i) => (
+          <div key={row.symbol} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 6,
+            background: row.is_self ? `${C.accent}12` : "transparent",
+            border: row.is_self ? `1px solid ${C.accent}40` : "1px solid transparent", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: C.muted, width: 22, fontFamily: "monospace" }}>{i + 1}</span>
+            <span style={{ fontSize: 13, fontWeight: row.is_self ? 800 : 600, color: row.is_self ? C.accent : C.text, flex: 1 }}>{row.symbol}</span>
+            <span style={{ fontSize: 11, color: C.muted, flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.company_name}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: gvmColor(row.gvm), fontFamily: "monospace", width: 44, textAlign: "right" }}>{row.gvm?.toFixed(2)}</span>
+            <div style={{ width: 70, textAlign: "right" }}><Tag color={verdictColor(row.verdict)}>{row.verdict}</Tag></div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Content Cards ── */}
+      {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
+      {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
+      {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
+
+      <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
+        Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
+        {r.persist_error && <span style={{ color: C.red }}> · persist error (schema migration pending)</span>}
+      </div>
+    </div>
+  );
+}
+
+function ContentCard({ title, color, body, updated }) {
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color }}>{title}</div>
+        {updated && <div style={{ fontSize: 10, color: C.muted }}>Updated {updated}</div>}
+      </div>
+      <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{body}</div>
+    </div>
+  );
+}
+
+// ── GVM Module ───────────────────────────────────────────────────────
 function GvmModule() {
   const [query, setQuery] = useState("");
   const [suggest, setSuggest] = useState([]);
@@ -247,227 +633,6 @@ function GvmEmptyState({ onPick }) {
   );
 }
 
-// segment-relative cell color (matches legend: green better / amber in-line / red lower)
-function cellColor(rating) {
-  if (rating == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
-  if (rating >= 6.5) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
-  if (rating >= 4)   return { bg: "#fdf3df", bd: "#d9a73a", fg: "#9a6a00" };
-  return { bg: "#fceaec", bd: "#dd3a4a", fg: "#bf2230" };
-}
-function BenchCell({ b }) {
-  const c = cellColor(b.rating);
-  const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
-  const peer = b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—";
-  return (
-    <div title={`Best ${b.best?.symbol||"—"} ${b.best?.value??""}${b.unit} · Worst ${b.worst?.symbol||"—"} ${b.worst?.value??""}${b.unit}`}
-      style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, color: c.fg, lineHeight: 1.25 }}>{b.label}</span>
-        <span style={{ fontSize: 10, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
-      </div>
-      <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>
-        <span>peer {peer}</span><span>#{b.rank ?? "—"}/{b.peer_n}</span>
-      </div>
-    </div>
-  );
-}
-function GvmSparkline({ points }) {
-  if (!points || points.length < 2) return null;
-  const pts = [...points].reverse(); // oldest -> newest
-  const xs = pts.map(p => p.gvm_score);
-  const min = Math.min(...xs, 0), max = Math.max(...xs, 10);
-  const W = 180, H = 44, pad = 4;
-  const span = (max - min) || 1;
-  const path = pts.map((p, i) => {
-    const x = pad + (i / (pts.length - 1)) * (W - 2 * pad);
-    const y = H - pad - ((p.gvm_score - min) / span) * (H - 2 * pad);
-    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const last = pts[pts.length - 1].gvm_score, first = pts[0].gvm_score;
-  const delta = last - first;
-  const stroke = delta > 0.05 ? "#0a9e63" : delta < -0.05 ? "#dd3a4a" : "#5a6781";
-  const lx = pad + (W - 2 * pad), ly = H - pad - ((last - min) / span) * (H - 2 * pad);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <svg width={W} height={H} style={{ overflow: "visible" }}>
-        <path d={path} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={lx} cy={ly} r="3" fill={stroke} />
-      </svg>
-      <div style={{ lineHeight: 1.3 }}>
-        <div style={{ fontSize: 10, color: "#5a6781", textTransform: "uppercase", letterSpacing: ".06em" }}>GVM Trend · {pts.length}d</div>
-        <div style={{ fontSize: 13, fontWeight: 800, color: stroke, fontFamily: "monospace" }}>
-          {delta >= 0 ? "▲ +" : "▼ "}{delta.toFixed(2)}
-        </div>
-      </div>
-    </div>
-  );
-}
-function BenchRow({ b }) {
-  const compW = b.peer_avg != null && b.company != null
-    ? Math.min(100, Math.max(4, (b.rating ?? 5) * 10)) : 0;
-  return (
-    <div style={{ padding: "10px 0", borderBottom: `1px solid ${C.gridLine}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-        <span style={{ fontSize: 12, color: C.text }}>{b.label}</span>
-        <span style={{ fontSize: 11, color: C.muted }}>
-          Rank {b.rank ?? "—"}/{b.peer_n} · <span style={{ color: ratingColor(b.rating), fontWeight: 700 }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
-        </span>
-      </div>
-      <div style={{ position: "relative", height: 22, background: C.bg, borderRadius: 5, border: `1px solid ${C.gridLine}` }}>
-        <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${compW}%`, background: `${ratingColor(b.rating)}30`, borderRight: `2px solid ${ratingColor(b.rating)}`, borderRadius: 5, transition: "width .5s ease" }} />
-        <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 8px" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>
-            {b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—"}
-          </span>
-          <span style={{ fontSize: 10, color: C.muted, fontFamily: "monospace" }}>
-            peer {b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—"}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GvmReport({ r, hist }) {
-  const s = r.scores || {};
-  const vc = verdictColor(r.verdict);
-  const groupsOrder = ["Trackrecord", "Valuation", "Reliability", "Technicals", "Outlook"];
-  const byGroup = {};
-  (r.benchmark || []).forEach(b => { (byGroup[b.group] = byGroup[b.group] || []).push(b); });
-
-  return (
-    <div style={{ paddingBottom: 80 }}>
-      <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16, display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ textAlign: "center", minWidth: 120 }}>
-          <div style={{ fontSize: 52, fontWeight: 900, color: gvmColor(s.gvm), fontFamily: "monospace", lineHeight: 1 }}>{s.gvm?.toFixed(2)}</div>
-          <div style={{ fontSize: 11, color: C.muted, margin: "4px 0 6px" }}>GVM Score</div>
-          <Tag color={vc}>{r.verdict}</Tag>
-        </div>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{r.company_name}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-            {r.symbol} · {r.segment} · Rank {r.segment_rank}/{r.segment_total} in segment
-          </div>
-          <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
-            {[["G — Growth", s.g], ["V — Value", s.v], ["M — Momentum", s.m]].map(([lbl, val]) => (
-              <div key={lbl}>
-                <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase" }}>{lbl}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: gvmColor(val), fontFamily: "monospace" }}>{val?.toFixed(2)}</div>
-              </div>
-            ))}
-          </div>
-          {hist && hist.length > 1 && <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.gridLine}` }}><GvmSparkline points={hist} /></div>}
-        </div>
-        <div style={{ textAlign: "right", minWidth: 130 }}>
-          <div style={{ fontSize: 11, color: C.muted }}>CMP</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(r.price, 1)}</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
-          {r.mcap_rank && <div style={{ fontSize: 11, color: C.muted }}>MCap rank #{r.mcap_rank}</div>}
-        </div>
-      </div>
-
-      {r.punchline && (
-        <div style={{ background: `${vc}10`, border: `1px solid ${vc}30`, borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: vc, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Expert Verdict</div>
-          <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{r.punchline}</div>
-        </div>
-      )}
-
-      {r.group_scores && Object.keys(r.group_scores).length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(5, Object.keys(r.group_scores).length)},1fr)`, gap: 10, marginBottom: 16 }}>
-          {Object.entries(r.group_scores).map(([g, v]) => (
-            <div key={g} style={{ background: C.card, border: `1px solid ${ratingColor(v)}40`, borderRadius: 8, padding: "12px 14px", textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: ratingColor(v), fontFamily: "monospace" }}>{v.toFixed(1)}</div>
-              <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", marginTop: 2 }}>{g}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>✓ Key Strengths</div>
-          {(r.positives || []).length ? r.positives.map((p, i) => (
-            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.positives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
-              <span style={{ color: C.green, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit} <span style={{ color: C.muted }}>({p.rating.toFixed(1)})</span>
-            </div>
-          )) : <div style={{ fontSize: 12, color: C.muted }}>No standout strengths vs peers.</div>}
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>⚠ Key Weaknesses</div>
-          {(r.negatives || []).length ? r.negatives.map((p, i) => (
-            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.negatives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
-              <span style={{ color: C.red, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit} <span style={{ color: C.muted }}>({p.rating.toFixed(1)})</span>
-            </div>
-          )) : <div style={{ fontSize: 12, color: C.muted }}>No major weaknesses vs peers.</div>}
-        </div>
-      </div>
-
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>Peer Benchmarking</div>
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>vs {r.peer_count} peers in {r.segment}{r.is_bfsi ? " · BFSI rule applied (D/E + Int.Cov excluded)" : ""}</div>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14, fontSize: 10.5 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#0a9e63" }} />Better than segment</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d9a73a" }} />In-line</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dd3a4a" }} />Lower than segment</span>
-        </div>
-        {groupsOrder.filter(g => byGroup[g]).map(g => (
-          <div key={g} style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 11, color: C.accent, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>{g}</span>
-              {r.group_scores && r.group_scores[g] != null && (
-                <span style={{ fontSize: 11, fontWeight: 800, color: ratingColor(r.group_scores[g]), fontFamily: "monospace" }}>{r.group_scores[g].toFixed(1)}</span>
-              )}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
-              {byGroup[g].map(b => <BenchCell key={b.key} b={b} />)}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: C.purple, marginBottom: 4 }}>Segment Rank Ladder</div>
-        <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>{r.segment} · ranked by GVM</div>
-        {(r.ladder || []).map((row, i) => (
-          <div key={row.symbol} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 6, background: row.is_self ? `${C.accent}12` : "transparent", border: row.is_self ? `1px solid ${C.accent}40` : "1px solid transparent", marginBottom: 2 }}>
-            <span style={{ fontSize: 11, color: C.muted, width: 22, fontFamily: "monospace" }}>{i + 1}</span>
-            <span style={{ fontSize: 13, fontWeight: row.is_self ? 800 : 600, color: row.is_self ? C.accent : C.text, flex: 1 }}>{row.symbol}</span>
-            <span style={{ fontSize: 11, color: C.muted, flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.company_name}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: gvmColor(row.gvm), fontFamily: "monospace", width: 44, textAlign: "right" }}>{row.gvm?.toFixed(2)}</span>
-            <div style={{ width: 70, textAlign: "right" }}><Tag color={verdictColor(row.verdict)}>{row.verdict}</Tag></div>
-          </div>
-        ))}
-      </div>
-
-      {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
-      {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
-      {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
-
-      <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
-        Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
-      </div>
-    </div>
-  );
-}
-
-function ContentCard({ title, color, body, updated }) {
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color }}>{title}</div>
-        {updated && <div style={{ fontSize: 10, color: C.muted }}>Updated {updated}</div>}
-      </div>
-      <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{body}</div>
-    </div>
-  );
-}
-
 function ComingSoon({ mod }) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px" }}>
@@ -489,15 +654,17 @@ function App() {
   const mod = MODELS.find(m => m.id === page);
 
   let body;
-  if (page === "v8")  body = <FrameModule src={`${API}/dashboard?embed=1`} />;
-  else if (page === "max")  body = <FrameModule src={`${API}/cio?embed=1`} />;
-  else if (page === "check")  body = <FrameModule src={`${API}/check?embed=1`} />;
-  else if (page === "ask")  body = <FrameModule src={`${API}/ask?embed=1`} />;
-  else if (page === "gvm")  body = <GvmModule />;
+  if (page === "v8")    body = <FrameModule src={`${API}/dashboard?embed=1`} />;
+  else if (page === "max")   body = <FrameModule src={`${API}/cio?embed=1`} />;
+  else if (page === "check") body = <FrameModule src={`${API}/check?embed=1`} />;
+  else if (page === "ask")   body = <FrameModule src={`${API}/ask?embed=1`} />;
+  else if (page === "gvm")   body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
 
   return (
-    <div style={{ height: "100vh", width: "100vw", background: C.bg, color: C.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif", position: "relative", overflow: "hidden" }}>
+    <div style={{ height: "100vh", width: "100vw", background: C.bg, color: C.text,
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif",
+      position: "relative", overflow: "hidden" }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
         * { box-sizing: border-box; }
