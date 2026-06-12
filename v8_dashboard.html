@@ -76,8 +76,6 @@
   .tab:hover{color:var(--txt)}
   .tab.active{color:var(--txt);background:var(--panel);border-color:var(--line);
     box-shadow:0 -2px 0 var(--blu) inset}
-  .tab.tab-accent{color:var(--cyan)}
-  .tab.tab-accent.active{color:var(--cyan)}
 
   .panel{display:none;animation:fade .25s ease;padding-top:16px}
   .panel.active{display:block}
@@ -166,48 +164,6 @@
   .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .subnav .btn.on{background:var(--blu);border-color:var(--blu);color:#fff}
 
-  /* ── Stock Check ── */
-  .sc-form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
-  .sc-input-row{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-  .sc-input{flex:1;min-width:160px;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;
-    padding:10px 14px;color:var(--txt);font:inherit;font-size:14px;outline:none}
-  .sc-input:focus{border-color:var(--blu)}
-  .sc-side-row{display:flex;gap:8px;margin-bottom:12px}
-  .sc-side{flex:1;padding:9px 0;border-radius:8px;border:1px solid var(--line2);
-    background:transparent;color:var(--mut);font:inherit;font-weight:700;font-size:13px;cursor:pointer;transition:.15s}
-  .sc-side.long.active{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
-  .sc-side.short.active{border-color:var(--red);background:var(--red-d);color:var(--red)}
-  .sc-gates{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-  .sc-gate{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:12px}
-  .sc-gate-label{font-size:11px;color:var(--mut);margin-bottom:8px;line-height:1.4}
-  .sc-gate-btns{display:flex;gap:6px}
-  .sc-gate-btn{flex:1;padding:6px 0;border-radius:6px;border:1px solid var(--line2);
-    background:transparent;color:var(--mut);font:inherit;font-size:11px;cursor:pointer;transition:.15s}
-  .sc-gate-btn.pass{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
-  .sc-gate-btn.fail{border-color:var(--red);background:var(--red-d);color:var(--red)}
-  .sc-run{width:100%;padding:12px;background:var(--blu);
-    color:#fff;border:none;border-radius:10px;font:inherit;font-weight:800;font-size:14px;
-    cursor:pointer;letter-spacing:.5px;transition:.15s}
-  .sc-run:hover{opacity:.9}
-  .sc-run:disabled{background:var(--panel2);color:var(--dim);cursor:not-allowed}
-  .sc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
-  .sc-chip{background:var(--bg2);border:1px solid var(--line2);border-radius:16px;
-    padding:5px 12px;font-size:11px;color:var(--txt);cursor:pointer;transition:.15s}
-  .sc-chip:hover{border-color:var(--blu);color:var(--blu)}
-  .sc-verdict{border-radius:14px;padding:18px;margin-bottom:14px;text-align:center;border:2px solid}
-  .sc-verdict.strong{border-color:var(--grn);background:var(--grn-d)}
-  .sc-verdict.valid{border-color:var(--blu);background:#e8effd}
-  .sc-verdict.watch{border-color:var(--amber);background:#fdf3df}
-  .sc-verdict-label{font-size:30px;font-weight:900;letter-spacing:1px}
-  .sc-verdict.strong .sc-verdict-label{color:var(--grn)}
-  .sc-verdict.valid .sc-verdict-label{color:var(--blu)}
-  .sc-verdict.watch .sc-verdict-label{color:var(--amber)}
-  .sc-verdict-sub{font-size:12px;color:var(--mut);margin-top:5px}
-  .sc-verdict-score{font-size:18px;font-weight:800;margin-top:8px;font-family:'Space Mono'}
-  .sc-tier{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
-  .sc-tier-header{padding:10px 14px;background:var(--panel2);display:flex;justify-content:space-between;align-items:center;cursor:pointer}
-  .sc-tier-title{font-size:12px;font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:.5px}
-
   .scan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
   .scan-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
   .scan-card .sk-sym{font-weight:700;font-size:12px;color:var(--txt);margin-bottom:5px}
@@ -286,8 +242,6 @@ const EP = {
   scan:         "/api/v8/scan",
   funnelDetail: b => `/api/v8/funnel_detail/${b}`,
   passCount:    b => `/api/v8/stock_passcount/${b}`,
-  tradeCheck:   "/api/trade-check/v34",
-  scorr:        "/api/scorr/chat",
   gvmSearch:    q => `/api/gvm/search?q=${encodeURIComponent(q)}`,
 };
 const BASKETS = [
@@ -299,11 +253,10 @@ const ALL5 = [
   {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
-// Panel content is fixed by index 0..10. TAB_LABELS keeps each panel's title.
+// Panel content fixed by index 0..9
 const TAB_LABELS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel","Stock Check"];
-// Display order of tabs (panel indices). Stock Check (10) pinned to position 2.
-const TAB_ORDER = [0,10,1,2,3,4,5,6,7,8,9];
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel"];
+const TAB_ORDER = [0,1,2,3,4,5,6,7,8,9];
 
 let AUTO=true, autoTimer=null;
 const cache={};
@@ -348,15 +301,13 @@ function tick(){
 setInterval(tick,1000);tick();
 
 const tabsEl=document.getElementById('tabs'),panelsEl=document.getElementById('panels');
-// Create panels in fixed index order 0..10 (content functions rely on panelN ids)
 TAB_LABELS.forEach((t,i)=>{
   const p=document.createElement('div');p.className='panel'+(i===0?' active':'');
   p.id='panel'+i;p.innerHTML='<div class="loading">…</div>';panelsEl.appendChild(p);
 });
-// Create tab buttons in display order (Stock Check pinned 2nd)
-TAB_ORDER.forEach((panelIdx,pos)=>{
+TAB_ORDER.forEach((panelIdx)=>{
   const b=document.createElement('div');
-  b.className='tab'+(panelIdx===0?' active':'')+(panelIdx===10?' tab-accent':'');
+  b.className='tab'+(panelIdx===0?' active':'');
   b.textContent=TAB_LABELS[panelIdx];
   b.onclick=()=>selectTab(panelIdx);
   tabsEl.appendChild(b);
@@ -364,7 +315,6 @@ TAB_ORDER.forEach((panelIdx,pos)=>{
 function selectTab(i){
   [...tabsEl.children].forEach(t=>t.classList.toggle('active',t.textContent===TAB_LABELS[i]));
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
-  if(i===10) initStockCheck();
 }
 
 const SORTREG={};
@@ -735,173 +685,6 @@ async function loadFF(){
     }).join('')}</div>`;}
   html+=preFreezeBanner();
   el.innerHTML=html;
-}
-
-/* ── Stock Check ── */
-let scSide='LONG', scGate1=null, scGate2=null, scRunning=false;
-const scSuggestions=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
-
-function initStockCheck(){
-  const el=document.getElementById('panel10');
-  if(el&&el.dataset.init)return;
-  if(el)el.dataset.init='1';
-  renderStockCheckForm();
-}
-
-function renderStockCheckForm(){
-  const el=document.getElementById('panel10');
-  if(!el)return;
-  const chips=scSuggestions.map(s=>`<button class="sc-chip" onclick="scSetSymbol('${s}')">${s}</button>`).join('');
-  el.innerHTML=`
-    <div class="ptitle">Stock Check <span class="ct">v3.3 PRIMARY · v3.4.1 SECONDARY</span></div>
-    <div class="sc-form">
-      <div class="sc-input-row">
-        <input id="scSym" class="sc-input" placeholder="Type symbol e.g. RELIANCE" oninput="scAutoSearch(this.value)" style="text-transform:uppercase" />
-      </div>
-      <div id="scDropdown" style="display:none;position:relative;z-index:10;margin-top:-8px;margin-bottom:10px;
-        background:var(--panel2);border:1px solid var(--line2);border-radius:8px;overflow:hidden"></div>
-      <div class="sc-side-row">
-        <button class="sc-side long ${scSide==='LONG'?'active':''}" onclick="scSetSide('LONG')">▲ LONG</button>
-        <button class="sc-side short ${scSide==='SHORT'?'active':''}" onclick="scSetSide('SHORT')">▼ SHORT</button>
-      </div>
-      <div class="sc-gates">
-        <div class="sc-gate">
-          <div class="sc-gate-label">Gate 1 — 5-min chart<br>strength through day?</div>
-          <div class="sc-gate-btns">
-            <button class="sc-gate-btn ${scGate1===true?'pass':''}" onclick="scSetGate(1,true)">✓ YES</button>
-            <button class="sc-gate-btn ${scGate1===false?'fail':''}" onclick="scSetGate(1,false)">✗ NO</button>
-          </div>
-        </div>
-        <div class="sc-gate">
-          <div class="sc-gate-label">Gate 2 — 1-Day chart<br>reversal / breakout?</div>
-          <div class="sc-gate-btns">
-            <button class="sc-gate-btn ${scGate2===true?'pass':''}" onclick="scSetGate(2,true)">✓ YES</button>
-            <button class="sc-gate-btn ${scGate2===false?'fail':''}" onclick="scSetGate(2,false)">✗ NO</button>
-          </div>
-        </div>
-      </div>
-      <button id="scRunBtn" class="sc-run" onclick="runStockCheck()">RUN TRADE CHECK →</button>
-      <div style="margin-top:12px">
-        <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Quick checks:</div>
-        <div class="sc-chips">${chips}</div>
-      </div>
-    </div>
-    <div id="scResult"></div>`;
-}
-
-let scSearchTimer=null;
-function scAutoSearch(val){
-  clearTimeout(scSearchTimer);
-  const sym=(val||'').trim().toUpperCase();
-  document.getElementById('scSym').value=sym;
-  if(!sym||sym.length<2){document.getElementById('scDropdown').style.display='none';return;}
-  scSearchTimer=setTimeout(async()=>{
-    try{
-      const res=await getJSON(EP.gvmSearch(sym));
-      const items=(res.results||[]).slice(0,5);
-      const dd=document.getElementById('scDropdown');
-      if(!items.length){dd.style.display='none';return;}
-      dd.innerHTML=items.map(r=>`<div onclick="scSetSymbol('${r.symbol}')"
-        style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line);color:var(--txt)"
-        onmouseover="this.style.background='var(--panel)'" onmouseout="this.style.background=''">
-        <b>${r.symbol}</b> <span style="color:var(--mut);font-size:11px">${r.company_name||r.name||''}</span>
-        <span style="float:right;color:var(--cyan);font-family:'Space Mono';font-size:11px">GVM ${num(r.gvm_score,1)}</span>
-      </div>`).join('');
-      dd.style.display='block';
-    }catch(e){document.getElementById('scDropdown').style.display='none';}
-  },300);
-}
-
-function scSetSymbol(s){
-  document.getElementById('scSym').value=s.toUpperCase();
-  const dd=document.getElementById('scDropdown');
-  if(dd)dd.style.display='none';
-}
-function scSetSide(s){
-  scSide=s;
-  document.querySelectorAll('.sc-side').forEach(b=>{
-    b.classList.remove('active');
-    if((b.classList.contains('long')&&s==='LONG')||(b.classList.contains('short')&&s==='SHORT'))b.classList.add('active');
-  });
-}
-function scSetGate(g,v){
-  if(g===1)scGate1=v; else scGate2=v;
-  document.querySelectorAll(`.sc-gate:nth-child(${g}) .sc-gate-btn`).forEach((b,i)=>{
-    b.classList.remove('pass','fail');
-    if(i===0&&v===true)b.classList.add('pass');
-    if(i===1&&v===false)b.classList.add('fail');
-  });
-}
-
-async function runStockCheck(){
-  const sym=(document.getElementById('scSym')?.value||'').trim().toUpperCase();
-  if(!sym){alert('Enter a symbol');return;}
-  if(scGate1===null||scGate2===null){alert('Please set both chart gates');return;}
-  if(scRunning)return;
-  scRunning=true;
-  const btn=document.getElementById('scRunBtn');
-  if(btn){btn.disabled=true;btn.textContent='Analysing…';}
-  const resEl=document.getElementById('scResult');
-  resEl.innerHTML=`<div class="loading">Running trade check on ${sym}… (may take 20-40s)</div>`;
-  try{
-    const prompt=`Run a complete Trade Check on ${sym} for a ${scSide} trade.\nGate 1 (5-min chart strength): ${scGate1?'PASS':'FAIL'}\nGate 2 (1-Day chart reversal/breakout): ${scGate2?'PASS':'FAIL'}\nSide: ${scSide}\n\nRun BOTH frameworks:\n1. PRIMARY v3.3: Tier1 (${scSide==='LONG'?'11':'10'} rules, min 8) + Tier2 (7 filters, min 5/7). Show full table. Score + verdict.\n2. SECONDARY v3.4.1: One-line weighted score /21.\n\nContext: personal trade check only. Never apply V8 basket/mood rules. Use v8_metrics, gvm_scores, sector_ratings, futures_basis.`;
-    const r=await fetch(API_BASE+EP.scorr,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        messages:[{role:'user',content:prompt}],
-        claude_on:true,
-        use_tools:true,
-        budget_cap_usd:0.05
-      })
-    });
-    const d=await r.json();
-    if(!r.ok){
-      resEl.innerHTML=`<div class="err">⚠ ${d.detail||('HTTP '+r.status)}</div>`;
-      scRunning=false; if(btn){btn.disabled=false;btn.textContent='RUN TRADE CHECK →';} return;
-    }
-    const text=d.reply||d.response||d.message||'(no response returned)';
-    resEl.innerHTML=renderScResult(text,sym,scSide);
-  }catch(e){
-    resEl.innerHTML=`<div class="err">⚠ ${e.message}</div>`;
-  }
-  scRunning=false;
-  if(btn){btn.disabled=false;btn.textContent='RUN TRADE CHECK →';}
-}
-
-function renderScResult(text,sym,side){
-  const isStrong=/STRONG SETUP|STRONG/i.test(text)&&!/NOT STRONG/i.test(text);
-  const isValid=/CONDITIONAL|VALID|ENTER/i.test(text)&&!isStrong;
-  const verdictCls=isStrong?'strong':isValid?'valid':'watch';
-  const verdictLabel=isStrong?'STRONG SETUP':isValid?'VALID ENTRY':'WATCH / SKIP';
-  const t1Match=text.match(/(\d+)\s*\/\s*(11|10|12)\b/);
-  const t2Match=text.match(/(\d+)\s*\/\s*7\b/);
-  const t1Score=t1Match?t1Match[0]:'—';
-  const t2Score=t2Match?t2Match[0]:'—';
-  const formatted=text
-    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-    .replace(/^#{1,3}\s+(.+)$/gm,'<div style="font-size:13px;font-weight:700;color:var(--cyan);margin:12px 0 6px">$1</div>')
-    .replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>')
-    .replace(/✓/g,'<span style="color:var(--grn)">✓</span>')
-    .replace(/✗/g,'<span style="color:var(--red)">✗</span>')
-    .replace(/PASS/g,'<span style="color:var(--grn);font-weight:700">PASS</span>')
-    .replace(/FAIL/g,'<span style="color:var(--red);font-weight:700">FAIL</span>');
-  return`
-    <div class="sc-verdict ${verdictCls}">
-      <div class="sc-verdict-label">${verdictLabel}</div>
-      <div class="sc-verdict-sub">${sym} · ${side}</div>
-      <div class="sc-verdict-score">Tier1: ${t1Score} &nbsp;|&nbsp; Tier2: ${t2Score}</div>
-    </div>
-    <div class="sc-tier">
-      <div class="sc-tier-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-        <span class="sc-tier-title">v3.3 + v3.4.1 Full Analysis</span>
-        <span style="color:var(--mut);font-size:12px">▼</span>
-      </div>
-      <div style="padding:14px 16px;font-size:12px;line-height:1.7;color:var(--txt)">${formatted}</div>
-    </div>
-    <div style="font-size:10px;color:var(--dim);margin-top:8px;padding:8px;background:var(--panel);border-radius:8px">
-      Personal trade context only — not V8 algo signals.
-    </div>`;
 }
 
 function paint(){
