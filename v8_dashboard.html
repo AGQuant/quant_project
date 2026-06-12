@@ -370,6 +370,9 @@ function pivotBar(cmp, pp, r1, s1){
 }
 
 function renderMood(m){
+  const _op=(cache.paper&&cache.paper.open_positions)||[];
+  const _lo=_op.filter(p=>(p.side||'').toUpperCase()==='LONG').length;
+  const _so=_op.filter(p=>(p.side||'').toUpperCase()==='SHORT').length;
   const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#fdf3df','var(--amber)'],
     Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
   const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
@@ -377,7 +380,7 @@ function renderMood(m){
   document.getElementById('mood').innerHTML=`
     <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'—'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div></div>
-    <div class="slots"><span class="buy">Buy slots <b>${m.buy_slots}</b></span><span class="sell">Sell slots <b>${m.sell_slots}</b></span></div>
+    <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span></div>
     <div class="moodChecks">${checks}</div>`;
 }
 
