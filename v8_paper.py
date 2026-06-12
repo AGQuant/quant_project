@@ -55,6 +55,12 @@ Price feed: intraday_prices (Fyers 5-min, NAIVE IST ts — read RAW, no TZ math)
 
 FILTER_CONFIG: imported from v8_endpoints (canonical). Do NOT duplicate here.
 
+SIDE MAPPING (12-Jun-2026): BASKET_META["side"] is "BUY"/"SELL" (UI vocabulary);
+  the entry loop tests side=="LONG"/"SHORT". qualified_set() translates BUY->LONG
+  and SELL->SHORT via _SIDE_MAP. Without this every zone name carried "BUY"/"SELL",
+  matched neither entry branch, and fell through silently (no zone trade ever
+  entered; only sell_overbought, which uses its own _open_short branch, worked).
+
 PIVOT SELF-HEALING (added 12-Jun-2026, founder decision):
   paper_tick auto-computes today's pivots if absent before reading them, so the
   engine never trades on stale (prior-day) pivots while waiting for the 22:05
@@ -233,6 +239,12 @@ def qualified_set(conn) -> Dict[str, Dict]:
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     out = {}
+    # BASKET_META side is "BUY"/"SELL" (UI vocabulary); the paper engine's entry
+    # loop tests side=="LONG"/"SHORT". Without this mapping every zone name carried
+    # side="BUY"/"SELL", matched NEITHER entry branch, and silently fell through —
+    # so no zone trade could ever enter (only sell_overbought, which uses its own
+    # _open_short branch, worked). FIX (12-Jun-2026): translate to LONG/SHORT here.
+    _SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
     for m in rows:
         sym = m["symbol"]
         for basket, filters in FILTER_CONFIG.items():
@@ -240,7 +252,7 @@ def qualified_set(conn) -> Dict[str, Dict]:
             # handled by _sell_overbought_signals + a dedicated entry branch; it does
             # NOT flow through the PP/R1/S1 zone path, so it is skipped here.
             if basket == "sell_overbought": continue
-            side = BASKET_META[basket]["side"]
+            side = _SIDE_MAP.get(BASKET_META[basket]["side"], BASKET_META[basket]["side"])
             if _passes(m, filters):
                 out[sym] = {"basket": basket, "side": side}
                 break
