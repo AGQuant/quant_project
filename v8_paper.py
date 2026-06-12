@@ -19,9 +19,10 @@ ENTRY (qualified name + zone condition + free slot + not blackout + before 15:20
          -> enter @ close, target S1, SL = entry+(entry-S1)
   + _traded_today guard: one entry per symbol/side/day maximum.
   No pp<close<=r1 band condition — only room-to-target fraction gate.
-  GAP_ROOM_FRAC (0.3) = minimum remaining gap to target as a fraction of the
+  GAP_ROOM_FRAC (0.5) = minimum remaining gap to target as a fraction of the
   pp->r1 (or pp->s1) band. Lower = looser entry, more signals, weaker R:R on
-  marginal trades. Was 0.5; lowered to 0.3 on 11-Jun-2026 (founder decision).
+  marginal trades. Was 0.5; lowered to 0.3 on 11-Jun-2026, then reverted back to
+  0.5 on 12-Jun-2026 (founder decision).
   Band condition (pp < close <= r1) REMOVED 12-Jun-2026 (founder decision) —
   only the room fraction matters.
 
@@ -78,9 +79,10 @@ REBALANCE_TIME = time(15, 20)
 # Entry requires the close to leave at least this much room to the target.
 # 0.5 = close must be in lower/upper half of zone (room >= distance travelled, R:R >= 1:1).
 # 0.3 = looser; close may travel up to 70% toward target. More signals, weaker R:R
-#       on marginal trades. Lowered 0.5 -> 0.3 on 11-Jun-2026 (founder decision).
+#       on marginal trades. Lowered 0.5 -> 0.3 on 11-Jun-2026, then REVERTED back to
+#       0.5 on 12-Jun-2026 (founder decision) — restore R:R >= 1:1 discipline.
 # Band condition (pp < close <= r1) REMOVED 12-Jun-2026 — only room fraction applies.
-GAP_ROOM_FRAC  = 0.3
+GAP_ROOM_FRAC  = 0.5
 
 # ── sell_overbought signal cache (12-Jun-2026, follow-up) ────────────────────
 # The signal set is built off EOD v8_metrics + prior-day pivots — nothing intraday
@@ -214,10 +216,18 @@ def _passes(metric_row: Dict, bands: Dict) -> bool:
 def qualified_set(conn) -> Dict[str, Dict]:
     from v8_endpoints import FILTER_CONFIG, BASKET_META
     with conn.cursor() as cur:
+        # NOTE (12-Jun-2026 fix): day_1d, sector_week, sector_month MUST be selected.
+        # buy_momentum requires day_1d + sector_week + sector_month; buy_reversal and
+        # the sell baskets require sector_week + sector_month. _passes() returns False
+        # on any missing key, so omitting these silently emptied the ENTIRE zone-based
+        # qualified set (every buy/sell_reversal/momentum name failed) — root cause of
+        # "qualified=0" and no zone trades since the column list drifted. Keep in sync
+        # with the metrics referenced by v8_endpoints.FILTER_CONFIG.
         cur.execute("""
             SELECT symbol, gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-                   month_return, week_return, year_return, mom_2d,
-                   week_index_52, range_3d, ma9_vs_ma21, vol_ratio
+                   month_return, week_return, year_return, mom_2d, day_1d,
+                   week_index_52, range_3d, ma9_vs_ma21, vol_ratio,
+                   sector_week, sector_month
             FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics)
         """)
         cols = [d[0] for d in cur.description]
