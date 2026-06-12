@@ -81,36 +81,47 @@ function Tag({ children, color = C.accent }) {
 }
 
 // ── Top Nav Bar ───────────────────────────────────────────────
-function TopNav({ current, onPick }) {
+function Switcher({ current, onPick }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  const cur = MODELS.find(m => m.id === current);
   return (
-    <div style={{
-      position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
-      background: C.nav,
-      borderBottom: `1px solid ${C.border}`,
-      display: "flex", alignItems: "stretch", height: 46,
-      overflowX: "auto",
-    }}>
-      {MODELS.map(m => {
-        const active = current === m.id;
-        return (
-          <button key={m.id}
-            onClick={() => m.live && onPick(m.id)}
-            disabled={!m.live}
-            style={{
-              display: "flex", alignItems: "center", gap: 7,
-              padding: "0 16px", border: "none", background: "transparent",
-              cursor: m.live ? "pointer" : "not-allowed", opacity: m.live ? 1 : 0.4,
-              borderBottom: active ? `2px solid ${m.color}` : "2px solid transparent",
-              transition: "all 0.15s", whiteSpace: "nowrap",
-            }}>
-            <span style={{ fontSize: 13, color: active ? m.color : C.muted }}>{m.icon}</span>
-            <span style={{ fontSize: 12, fontWeight: active ? 700 : 500, color: active ? C.text : C.muted, letterSpacing: "0.03em" }}>
-              {m.label}
-              {!m.live && <span style={{ fontSize: 9, marginLeft: 5, color: C.muted }}>soon</span>}
-            </span>
-          </button>
-        );
-      })}
+    <div ref={ref} style={{ position: "fixed", top: 12, right: 14, zIndex: 1000 }}>
+      <button onClick={() => setOpen(o => !o)} aria-label="Switch model"
+        style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 12px",
+          borderRadius: 9, border: `1px solid ${C.border}`, background: C.card,
+          cursor: "pointer", boxShadow: "0 2px 8px rgba(25,40,70,0.06)" }}>
+        <span style={{ fontSize: 14, color: cur ? cur.color : C.muted }}>{cur ? cur.icon : "⋮"}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{cur ? cur.label : "Models"}</span>
+        <span style={{ fontSize: 16, color: C.muted, lineHeight: 1 }}>⋮</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 178,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+          boxShadow: "0 8px 28px rgba(25,40,70,0.14)", padding: 6 }}>
+          {MODELS.map(m => {
+            const active = current === m.id;
+            return (
+              <button key={m.id} disabled={!m.live}
+                onClick={() => { if (m.live) { onPick(m.id); setOpen(false); } }}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 12px", borderRadius: 8, border: "none",
+                  background: active ? `${m.color}12` : "transparent",
+                  cursor: m.live ? "pointer" : "not-allowed", opacity: m.live ? 1 : 0.45,
+                  textAlign: "left", transition: "all 0.12s" }}>
+                <span style={{ fontSize: 14, width: 18, textAlign: "center", color: active ? m.color : C.muted }}>{m.icon}</span>
+                <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: active ? m.color : C.text }}>{m.label}</span>
+                {!m.live && <span style={{ fontSize: 9, marginLeft: "auto", color: C.muted, letterSpacing: ".3px" }}>soon</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -133,6 +144,7 @@ function GvmModule() {
   const [showSug, setShowSug] = useState(false);
   const [symbol, setSymbol] = useState(null);
   const [report, setReport] = useState(null);
+  const [hist, setHist] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const boxRef = useRef(null);
@@ -157,10 +169,11 @@ function GvmModule() {
   }, []);
 
   const loadReport = async (sym) => {
-    setSymbol(sym); setShowSug(false); setQuery(sym); setLoading(true); setErr(null); setReport(null);
+    setSymbol(sym); setShowSug(false); setQuery(sym); setLoading(true); setErr(null); setReport(null); setHist(null);
     try {
       const d = await apiGet(`/api/gvm/company/${encodeURIComponent(sym)}`);
       setReport(d);
+      mcpCall("gvm_history", { symbol: sym, days: 90 }).then(h => setHist(h && h.points ? h.points : null)).catch(() => {});
     } catch (e) { setErr(`Could not load ${sym}. Try another symbol.`); }
     finally { setLoading(false); }
   };
@@ -209,7 +222,7 @@ function GvmModule() {
         {!symbol && !loading && <GvmEmptyState onPick={loadReport} />}
         {loading && <Loader msg={`Building ${symbol} peer-benchmark report…`} />}
         {err && <div style={{ textAlign: "center", color: C.red, padding: 24 }}>{err}</div>}
-        {report && !loading && <GvmReport r={report} />}
+        {report && !loading && <GvmReport r={report} hist={hist} />}
       </div>
     </div>
   );
@@ -234,6 +247,62 @@ function GvmEmptyState({ onPick }) {
   );
 }
 
+// segment-relative cell color (matches legend: green better / amber in-line / red lower)
+function cellColor(rating) {
+  if (rating == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
+  if (rating >= 6.5) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
+  if (rating >= 4)   return { bg: "#fdf3df", bd: "#d9a73a", fg: "#9a6a00" };
+  return { bg: "#fceaec", bd: "#dd3a4a", fg: "#bf2230" };
+}
+function BenchCell({ b }) {
+  const c = cellColor(b.rating);
+  const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
+  const peer = b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—";
+  return (
+    <div title={`Best ${b.best?.symbol||"—"} ${b.best?.value??""}${b.unit} · Worst ${b.worst?.symbol||"—"} ${b.worst?.value??""}${b.unit}`}
+      style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: c.fg, lineHeight: 1.25 }}>{b.label}</span>
+        <span style={{ fontSize: 10, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>
+        <span>peer {peer}</span><span>#{b.rank ?? "—"}/{b.peer_n}</span>
+      </div>
+    </div>
+  );
+}
+function GvmSparkline({ points }) {
+  if (!points || points.length < 2) return null;
+  const pts = [...points].reverse(); // oldest -> newest
+  const xs = pts.map(p => p.gvm_score);
+  const min = Math.min(...xs, 0), max = Math.max(...xs, 10);
+  const W = 180, H = 44, pad = 4;
+  const span = (max - min) || 1;
+  const path = pts.map((p, i) => {
+    const x = pad + (i / (pts.length - 1)) * (W - 2 * pad);
+    const y = H - pad - ((p.gvm_score - min) / span) * (H - 2 * pad);
+    return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const last = pts[pts.length - 1].gvm_score, first = pts[0].gvm_score;
+  const delta = last - first;
+  const stroke = delta > 0.05 ? "#0a9e63" : delta < -0.05 ? "#dd3a4a" : "#5a6781";
+  const lx = pad + (W - 2 * pad), ly = H - pad - ((last - min) / span) * (H - 2 * pad);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <svg width={W} height={H} style={{ overflow: "visible" }}>
+        <path d={path} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={lx} cy={ly} r="3" fill={stroke} />
+      </svg>
+      <div style={{ lineHeight: 1.3 }}>
+        <div style={{ fontSize: 10, color: "#5a6781", textTransform: "uppercase", letterSpacing: ".06em" }}>GVM Trend · {pts.length}d</div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: stroke, fontFamily: "monospace" }}>
+          {delta >= 0 ? "▲ +" : "▼ "}{delta.toFixed(2)}
+        </div>
+      </div>
+    </div>
+  );
+}
 function BenchRow({ b }) {
   const compW = b.peer_avg != null && b.company != null
     ? Math.min(100, Math.max(4, (b.rating ?? 5) * 10)) : 0;
@@ -260,7 +329,7 @@ function BenchRow({ b }) {
   );
 }
 
-function GvmReport({ r }) {
+function GvmReport({ r, hist }) {
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
   const groupsOrder = ["Trackrecord", "Valuation", "Reliability", "Technicals", "Outlook"];
@@ -288,6 +357,7 @@ function GvmReport({ r }) {
               </div>
             ))}
           </div>
+          {hist && hist.length > 1 && <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.gridLine}` }}><GvmSparkline points={hist} /></div>}
         </div>
         <div style={{ textAlign: "right", minWidth: 130 }}>
           <div style={{ fontSize: 11, color: C.muted }}>CMP</div>
@@ -341,10 +411,22 @@ function GvmReport({ r }) {
             <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>vs {r.peer_count} peers in {r.segment}{r.is_bfsi ? " · BFSI rule applied (D/E + Int.Cov excluded)" : ""}</div>
           </div>
         </div>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14, fontSize: 10.5 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#0a9e63" }} />Better than segment</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#d9a73a" }} />In-line</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}><span style={{ width: 10, height: 10, borderRadius: 3, background: "#dd3a4a" }} />Lower than segment</span>
+        </div>
         {groupsOrder.filter(g => byGroup[g]).map(g => (
-          <div key={g} style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: C.accent, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>{g}</div>
-            {byGroup[g].map(b => <BenchRow key={b.key} b={b} />)}
+          <div key={g} style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 11, color: C.accent, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>{g}</span>
+              {r.group_scores && r.group_scores[g] != null && (
+                <span style={{ fontSize: 11, fontWeight: 800, color: ratingColor(r.group_scores[g]), fontFamily: "monospace" }}>{r.group_scores[g].toFixed(1)}</span>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+              {byGroup[g].map(b => <BenchCell key={b.key} b={b} />)}
+            </div>
           </div>
         ))}
       </div>
@@ -425,9 +507,8 @@ function App() {
         button { transition: all 0.15s ease; }
         input::placeholder { color: #9aa4b5; }
       `}</style>
-      <TopNav current={page} onPick={setPage} />
-      {/* Content area — padded top for nav bar */}
-      <div style={{ height: "calc(100% - 46px)", width: "100%", overflow: "hidden", marginTop: 46 }}>
+      <Switcher current={page} onPick={setPage} />
+      <div style={{ height: "100%", width: "100%", overflow: "hidden" }}>
         {body}
       </div>
     </div>
