@@ -31,6 +31,7 @@ from v8_futures import router as v8_futures_router
 from qb_endpoints import router as qb_router
 from gvm_report_endpoints import router as gvm_report_router
 from gvm_market_endpoints import router as gvm_market_router
+from gvm_universe_pivots import router as gvm_universe_pivots_router
 from admin_data import router as admin_data_router
 from fyers_endpoints import router as fyers_router
 from diagnosis import router as diagnosis_router
@@ -57,7 +58,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.35
+# Scorr / Project Quant — main.py v2.9.36
+# v2.9.36: gvm_universe_pivots router wired — POST /api/admin/build_universe_pivots
+#   computes rolling-5d PP/R1/S1 for the entire raw_prices universe (1720+)
+#   and writes to v8_paper_pivots (shared schema). GVM company page now
+#   shows pivot range for any stock, not only the 210 futures.
 # v2.9.35: Root / now serves scorr_home.html — consolidated menu (light/
 #   white theme) linking all surfaces (V8, GVM, Check, Max, Ask, CIO shell;
 #   QB + V10 shown as soon). Old JSON status moved to GET /status.
@@ -86,7 +91,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.35"
+VERSION = "2.9.36"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -115,6 +120,7 @@ app.include_router(qb_router)
 app.include_router(gvm_nightly_router)
 app.include_router(gvm_report_router)
 app.include_router(gvm_market_router)
+app.include_router(gvm_universe_pivots_router)
 app.include_router(admin_data_router)
 app.include_router(fyers_router)
 app.include_router(diagnosis_router)
@@ -275,7 +281,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.35)")
+        log.info("Tables ready (v2.9.36)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
