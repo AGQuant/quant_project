@@ -80,7 +80,7 @@ INDEX_LTP_SYMBOLS = {
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
-# ── Option chain config ────────────────────────────────────────────────────────────
+# ── Option chain config ─────────────────────────────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
@@ -144,7 +144,7 @@ log = logging.getLogger('fyers_feed')
 
 
 
-# ── helpers ────────────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -263,7 +263,7 @@ class OptionMaster:
         return (not self.loaded) or (ticker in self.valid_symbols)
 
 
-# ── DB / token ─────────────────────────────────────────────────────────────────────
+# ── DB / token ───────────────────────────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
     with conn.cursor() as cur:
@@ -344,7 +344,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ── universe ───────────────────────────────────────────────────────────────────────
+# ── universe ───────────────────────────────────────────────────────────────────────────────────────────
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -383,7 +383,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ──────────────────────────────────────────────────────────
+# ── option symbol manager ───────────────────────────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
@@ -531,7 +531,7 @@ class OptionSymbolManager:
             return self.sym_map.get(fsym)
 
 
-# ── bar aggregator ─────────────────────────────────────────────────────────────────
+# ── bar aggregator ───────────────────────────────────────────────────────────────────────────────────
 
 class BarAggregator:
     def __init__(self, conn):
@@ -654,7 +654,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ───────────────────────────────────────────────────────────────
+# ── option bar store ─────────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 5-min option ticks into option_chain."""
@@ -711,7 +711,7 @@ class OptionBarStore:
                 self._flush(fsym, bar)
 
 
-# ── index LTP ──────────────────────────────────────────────────────────────────────
+# ── index LTP ─────────────────────────────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -738,13 +738,13 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ──────────────────────────────────────────────────────────────────────────
+# ── purge ─────────────────────────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND source IN ('fyers_eq','fyers_fut')", (cutoff,))
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m'", (cutoff,))
             eq_del = cur.rowcount
             cur.execute("DELETE FROM option_chain WHERE ts < %s", (cutoff,))
             opt_del = cur.rowcount
@@ -767,7 +767,7 @@ def ensure_schemas(conn):
     log.info("Schemas ready (option_chain, futures_basis)")
 
 
-# ── futures OI poll (DEPTH REST — quotes API has NO OI) ────────────────────────────
+# ── futures OI poll (DEPTH REST — quotes API has NO OI) ─────────────────────────────────────────────
 
 _OI_POLL_LOCK = threading.Lock()
 
@@ -816,7 +816,7 @@ def poll_futures_oi(token, fut_syms, agg):
         _OI_POLL_LOCK.release()
 
 
-# ── main run ───────────────────────────────────────────────────────────────────────
+# ── main run ───────────────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
