@@ -5,6 +5,10 @@ ADR (11-Jun-2026): market_mood reads adr_intraday (live 5-min) primary,
   falls back to adr_daily (EOD). Per spec id=165.
 qualified JOIN fix (11-Jun-2026): replaced window-function JOIN causing
   duplicate rows (FORTIS appeared twice) with subquery for first_seen.
+Filter tuning (12-Jun-2026): sell_overbought rsi_month>=68 + day_1d<0 +
+  sector_week<=2 + gvm_score<=8 (FILTER_CONFIG + live SQL, consistent);
+  sell_reversal week_return max 3.0->1.0; buy_reversal week_return 1.0-4.0,
+  year_return dead filter removed (adaptive gate auto-adjusts 11->10).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -25,11 +29,10 @@ def _ist_now() -> datetime:
 FILTER_CONFIG = {
     "buy_reversal": {
         "gvm_score":    [6.0,  10.0],
-        "year_return":  [-1.5, None],
         "dma_200":      [1.5,  20.0],
         "dma_50":       [1.5,  8.0],
         "month_return": [0.0,  7.2],
-        "week_return":  [1.5,  3.0],
+        "week_return":  [1.0,  4.0],
         "rsi_month":    [58.5, 75.0],
         "rsi_weekly":   [50.0, 67.5],
         "mom_2d":       [0.0,  2.4],
@@ -54,7 +57,7 @@ FILTER_CONFIG = {
         "dma_50":       [-20.0, 2.0],
         "rsi_weekly":   [10.0,  35.0],
         "rsi_month":    [20.0,  60.0],
-        "week_return":  [-3.0,  3.0],
+        "week_return":  [-3.0,  1.0],
         "month_return": [-20.0, 2.0],
         "mom_2d":       [-6.0,  0.0],
         "sector_week":  [-4.0,  0.0],
@@ -77,8 +80,11 @@ FILTER_CONFIG = {
     "sell_overbought": {
         "dma_200":      [10.0, None],
         "week_index_52":[80.0, None],
-        "rsi_month":    [60.0, None],
+        "rsi_month":    [68.0, None],
         "mom_2d":       [None, 0.0],
+        "day_1d":       [None, 0.0],
+        "sector_week":  [None, 2.0],
+        "gvm_score":    [None, 8.0],
     },
 }
 
@@ -575,12 +581,15 @@ def sell_overbought(limit: int = 50):
                 ),
                 filtered AS (
                     SELECT l.*, vm.dma_200, vm.week_index_52, vm.rsi_month,
-                           vm.daily_rsi, vm.mom_2d, vm.gvm_score
+                           vm.daily_rsi, vm.mom_2d, vm.day_1d, vm.sector_week, vm.gvm_score
                     FROM latest l
                     JOIN v8_metrics vm ON vm.symbol=l.symbol
                       AND vm.score_date=(SELECT MAX(score_date) FROM v8_metrics)
                     WHERE vm.dma_200>=10 AND vm.week_index_52>=80 AND l.ma9_vs_ma21>=3
-                      AND l.vol_ratio<=0.8 AND vm.mom_2d<0 AND vm.rsi_month>=60
+                      AND l.vol_ratio<=0.8 AND vm.mom_2d<0 AND vm.rsi_month>=68
+                      AND COALESCE(vm.day_1d,0)<0
+                      AND COALESCE(vm.sector_week,0)<=2
+                      AND COALESCE(vm.gvm_score,0)<=8
                       AND l.s1<l.entry
                       AND l.symbol NOT IN (SELECT UPPER(ticker) FROM earnings_calendar
                           WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day'))
