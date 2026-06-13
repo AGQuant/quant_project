@@ -19,16 +19,13 @@ Off-topic: any explicit OFF_TOPIC_WORDS hit → redirect.
            No domain words + meaningful query length → redirect.
 
 Used by native_router._query_sync as the final fallback before the hint.
-Order in router: classify FIRST, off-topic check ONLY if no intent match.
+Order in router: explicit-off-topic FIRST → classify → soft-off-topic.
 """
 
 import re
 from typing import Optional, Tuple, List
 
 # ── Generic / stopwords filtered from query scoring ──────────────────────────
-# These words exist in everyone's vocabulary; matching them creates false
-# positives (e.g. "my journal" vs "my portfolio" — "my" shouldn't differentiate).
-
 GENERIC_WORDS = {
     "my","the","a","an","and","or","is","are","was","be","been","to","of","for",
     "with","in","on","at","by","from","as","that","this","its",
@@ -43,12 +40,7 @@ GENERIC_WORDS = {
 }
 
 # ── Canonical Intent Library ─────────────────────────────────────────────────
-# (intent_id, canonical_query, keywords)
-# Each canonical_query MUST hit an existing Layer 0/0a-0f or Layer 1 handler
-# directly when re-routed. Verified 13-Jun-2026 against native_router.py.
-
 INTENTS: List[Tuple[str, str, List[str]]] = [
-    # V8 Signals ─────────────────────────────────────────────────────────────
     ("v8_dashboard",   "virtual dashboard v8",
      ["v8","dashboard","virtual","signals","live","cockpit"]),
     ("v8_mood",        "market mood",
@@ -57,45 +49,28 @@ INTENTS: List[Tuple[str, str, List[str]]] = [
      ["qualified","candidates","watchlist","signals","today","picks","ideas"]),
     ("v8_paper",       "v8 paper book",
      ["paper","book","positions","open","closed","pnl","unrealised","trades"]),
-
-    # GVM Engine ─────────────────────────────────────────────────────────────
     ("gvm_top",        "top 10 stocks by gvm",
      ["top","gvm","best","quality","rank","ranking","leaders"]),
     ("gvm_strong",     "gvm above 8",
      ["strong","strongbuy","accumulate","conviction"]),
     ("gvm_sector",     "sector ratings",
      ["sector","sectors","ratings","rotation","industry","segment","segments"]),
-
-    # Trade Check (routes via Layer 0a) ──────────────────────────────────────
-    # NOTE: trade check needs a SYMBOL — handled by frontend prompt before query.
-
-    # Quant Basket ───────────────────────────────────────────────────────────
     ("qb_summary",     "qb summary",
      ["qb","quant","basket","baskets","equity","portfolio","pf","holdings"]),
-
-    # Daily Digest ───────────────────────────────────────────────────────────
     ("daily_digest",   "daily digest",
      ["digest","daily","morning","brief","briefing","summary","recap"]),
     ("top_gainers",    "top gainers today",
      ["gainers","gainer","winners","movers","rising","rallying","green"]),
     ("top_losers",     "top losers today",
      ["losers","loser","decliners","falling","dropping","red"]),
-
-    # Market Intelligence ────────────────────────────────────────────────────
     ("server_time",    "server time",
      ["time","clock","ist","hours"]),
     ("pcr",            "pcr",
      ["pcr","putcall","ratio","options"]),
-
-    # Personal Journal ───────────────────────────────────────────────────────
-    # Note: "my" is GENERIC and gets filtered, so journal canonicals must
-    # match without it. Specific journal words remain.
     ("journal_open",   "my personal journal open trades",
      ["journal","personal","open","current","running"]),
     ("journal_closed", "my personal journal closed trades and pnl",
      ["journal","personal","closed","exit","exits","pnl","performance","stats"]),
-
-    # System ─────────────────────────────────────────────────────────────────
     ("system_health",  "system health",
      ["health","system","status","working","feeds"]),
 ]
@@ -119,7 +94,6 @@ OFF_TOPIC_WORDS = {
     "horoscope","astrology","zodiac",
 }
 
-# Domain whitelist — used only by off_topic fallback (after classifier misses).
 DOMAIN_WORDS = {
     "stock","stocks","share","shares","trade","trades","trading",
     "invest","investing","investment","investor","market","markets",
@@ -163,7 +137,6 @@ OFF_TOPIC_REDIRECT = (
 
 # ── Levenshtein (capped, early-exit) ─────────────────────────────────────────
 def _lev(a: str, b: str, cap: int = 2) -> int:
-    """Edit distance with early exit at cap+1."""
     if a == b: return 0
     if abs(len(a) - len(b)) > cap: return cap + 1
     if len(a) < len(b): a, b = b, a
@@ -177,32 +150,37 @@ def _lev(a: str, b: str, cap: int = 2) -> int:
     return prev[-1]
 
 
-# ── Off-topic check ──────────────────────────────────────────────────────────
+# ── Off-topic checks ─────────────────────────────────────────────────────────
+def is_off_topic_explicit(query: str) -> bool:
+    """
+    HIGH-CONFIDENCE off-topic — query contains a known off-topic word.
+    Used by native_router as the FIRST check (before intent classifier).
+    Examples: "cricket score", "movie tonight", "biryani recipe", "weather today".
+    """
+    if not query: return False
+    words = set(re.findall(r"[a-z]+", query.lower()))
+    return bool(words & OFF_TOPIC_WORDS)
+
+
 def is_off_topic(query: str) -> bool:
     """
-    Returns True if query is clearly off-topic.
-
-    Called by native_router ONLY AFTER classify() returns None.
-    So this is a safety net for queries the classifier couldn't match.
+    SOFT off-topic — no off-topic word, but query has no domain words either.
+    Used by native_router as the LAST check (after intent classifier misses).
+    Catches generic chitchat like "hello how are you".
 
     Rules:
-      1. Explicit OFF_TOPIC_WORDS hit → off-topic (cricket beats "score")
-      2. Zero DOMAIN_WORDS hits and query has ≥3 words → off-topic (chit-chat)
-      3. Otherwise → on-topic (fall through to help hint)
+      1. Any OFF_TOPIC_WORDS hit → off-topic
+      2. No DOMAIN_WORDS hit + ≥3 distinct words → off-topic (chitchat)
+      3. Otherwise → on-topic
     """
     if not query: return False
     words = set(re.findall(r"[a-z]+", query.lower()))
     if not words: return False
-
-    # Rule 1: explicit off-topic word always wins
     if words & OFF_TOPIC_WORDS:
         return True
-
-    # Rule 2: no domain words + non-trivial query → off-topic
     has_domain = bool(words & DOMAIN_WORDS)
     if not has_domain and len(words) >= 3:
         return True
-
     return False
 
 
@@ -213,11 +191,9 @@ def _score_intent(query_lower: str, query_words: List[str],
     bag_words = set(re.findall(r"[a-z]+", bag_text))
     score = 0.0
 
-    # Exact substring of the full query (rare but high signal)
     if query_lower in bag_text:
         score += 10.0
 
-    # Filter generic words BEFORE scoring — they dilute and false-match.
     meaningful = [w for w in query_words
                   if w not in GENERIC_WORDS and len(w) >= 2]
 
@@ -225,14 +201,12 @@ def _score_intent(query_lower: str, query_words: List[str],
         if w in bag_words:
             score += 3.0
         elif len(w) >= 4:
-            # Prefix or suffix stem match (typo-tolerant)
             stem_pre = w[:4]
             stem_suf = w[-4:]
             for bw in bag_words:
                 if bw.startswith(stem_pre) or bw.endswith(stem_suf):
                     score += 1.0
                     break
-            # Levenshtein ≤1 for typos
             for kw in kws:
                 if abs(len(w) - len(kw)) <= 2 and _lev(w, kw, cap=1) <= 1:
                     score += 2.0
@@ -244,10 +218,6 @@ def _score_intent(query_lower: str, query_words: List[str],
 def classify(query: str, min_score: float = 3.0) -> Optional[Tuple[str, str, float]]:
     """
     Returns (intent_id, canonical_query, score) if best score >= min_score, else None.
-
-    min_score=3.0 means one strong meaningful keyword match is sufficient.
-    Caller (native_router) reroutes the canonical query through Layer 0/1
-    which has authoritative handlers.
     """
     if not query: return None
     ql = query.lower().strip()
