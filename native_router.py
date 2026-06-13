@@ -18,6 +18,13 @@ ARCHITECTURE:
 
   query_log captures every query for native training analytics.
 
+FIXES v8 (13-Jun-2026) — Level-2 v2 polish:
+  O. Variant action verb forms added: "trust", "held", "owning", "owned",
+     "picked", "pick", "picks". Catches "can I trust RELIANCE long term",
+     "can MARUTI be held for 1 year", "stocks I should be owning".
+     Final form of action-verb routing — together with v7 catches all
+     natural buy/sell/hold/own/pick question patterns.
+
 FIXES v7 (13-Jun-2026) — Level-2 v2 100-query test:
   N. Action verbs + judgment words added to LOOKUP_TRIGGER_WORDS:
      buy/sell/hold/exit/enter/dump/trim/book/accumulate/recommend/worth/
@@ -236,6 +243,8 @@ LOOKUP_TRIGGER_WORDS = {
     "buy", "sell", "hold", "exit", "enter", "dump", "trim", "book",
     "accumulate", "recommend", "worth", "overvalued", "undervalued",
     "cheap", "expensive",
+    # FIX O (v8): variant forms — "can I trust RELIANCE", "can MARUTI be held"
+    "trust", "held", "owning", "owned", "picked", "pick",
 }
 
 
@@ -512,6 +521,8 @@ def exec_lookup(cur, slots: Dict) -> str:
         "accumulate","recommend","worth","overvalued","undervalued",
         "cheap","expensive","should","would","could","trust","long","term",
         "year","years","now","today","tomorrow","next","next year",
+        # v8 additions (FIX O): variant action verb forms
+        "held","owning","owned","picked","pick","picks",
     }
     words = [w.strip(".,?!") for w in raw.lower().split()
              if w.strip(".,?!") not in stop and len(w.strip(".,?!")) >= 2]
