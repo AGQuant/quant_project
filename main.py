@@ -48,7 +48,7 @@ from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
 from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
-from sector_brief_endpoints import router as sector_brief_router
+from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -60,48 +60,30 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.38
+# Scorr / Project Quant — main.py v2.9.39
+# v2.9.39: Startup auto-fill sector_briefs — on every Railway start,
+#   if any of the 129 segments are missing a brief, _sector_brief_batch()
+#   fires in background via Claude Haiku. Idempotent (skips cached).
 # v2.9.38: sector_brief_endpoints router wired — GET /api/sector/brief?segment=...
 #   Lazy AI brief generation via Claude Haiku, cached in sector_briefs table.
 #   Returns: what_is_it, growth_drivers, application_type, business_model,
 #   key_risks, constituents. First call ~3s, subsequent instant from cache.
 # v2.9.37: sector_endpoints router wired — GET /api/sector/rotation (5-signal
 #   percentile-rank composite: GVM, GVM-delta-14d, inst-change, QoQ-profit,
-#   annual-upside). Returns top5/bottom5 + full 129-segment ranked list.
+#   annual-upside). Returns top5/cold + full 129-segment ranked list.
 #   /sector route serves scorr_sector.html (live fetch replaces hardcoded data).
 # v2.9.36: gvm_universe_pivots router wired — POST /api/admin/build_universe_pivots
-#   computes rolling-5d PP/R1/S1 for the entire raw_prices universe (1720+)
-#   and writes to v8_paper_pivots (shared schema). GVM company page now
-#   shows pivot range for any stock, not only the 210 futures.
-# v2.9.35: Root / now serves scorr_home.html — consolidated menu (light/
-#   white theme) linking all surfaces (V8, GVM, Check, Max, Ask, CIO shell;
-#   QB + V10 shown as soon). Old JSON status moved to GET /status.
-# v2.9.34: /check route wired — serves scorr_check.html. Dedicated native
-#   v3.3 Trade Check page (own top-bar tab after GVM). POST /api/check
-#   (check_endpoint.py -> native_trade_check.compute_trade_check) is $0,
-#   no Claude, no ADMIN_TOKEN, no MCP — never hangs on the 20-40s tool path.
-#   Caller passes symbol+side+gate1+gate2; gates fold into R10/R12/F3.
-# v2.9.33: /ask route wired — serves scorr_ask.html. Native-first query
-#   page ($0 Railway DB via native_router) + small Reasoning toggle
-#   (Claude API fallback). Native v3.3 trade check added to router
-#   (native_trade_check.py). Chats saved to max_chats (id ask_*).
-# v2.9.32: GVM company report wired — gvm_report_router (INCLUDED BEFORE
-#   gvm_market_router so /api/gvm/company/{symbol} + /api/gvm/search match
-#   before the /api/gvm/{symbol} catch-all). New files: gvm_company_report.py
-#   (peer-benchmark compute engine, persists detail to gvm_scores),
-#   gvm_report_endpoints.py. 2 MCP tools added: gvm_company, gvm_search.
-#   /cio2 GVM tab = full peer-benchmarked company report (search any stock).
+# v2.9.35: Root / now serves scorr_home.html — consolidated menu.
+# v2.9.34: /check route wired — serves scorr_check.html.
+# v2.9.33: /ask route wired — serves scorr_ask.html.
+# v2.9.32: GVM company report wired — gvm_report_router.
 # v2.9.31: /cio2 route wired — serves scorr_cio_dashboard.html.
-#   Multi-model dashboard (V8 embed + GVM + future models).
 # v2.9.30: Trade Check v3.4 wired — trade_check_v34_endpoints router.
-#   POST /api/trade-check/v34 (weighted + core-gate scoring, caller passes
-#   2 chart gates = human-in-AI-loop), POST /api/trade-check/v34/promote
-#   (manual-only personal_journal write), GET /api/trade-check/v34/health.
-# v2.9.29: Fix day_change -> mom_2d in /api/v8/metrics/all SQL (runtime fix).
+# v2.9.29: Fix day_change -> mom_2d in /api/v8/metrics/all SQL.
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.38"
+VERSION = "2.9.39"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -304,7 +286,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.38)")
+        log.info("Tables ready (v2.9.39)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -387,8 +369,30 @@ async def startup():
     async def _init_tables():
         try: await asyncio.to_thread(create_tables)
         except Exception as e: log.error(f"create_tables (bg) failed: {e}")
+
+    async def _auto_fill_briefs():
+        """Fire sector brief batch if any segments are missing briefs."""
+        await asyncio.sleep(15)  # wait for tables to be ready
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM sector_briefs")
+                cached = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(DISTINCT segment) FROM sector_ratings WHERE score_date=(SELECT MAX(score_date) FROM sector_ratings)")
+                total = cur.fetchone()[0]
+            if cached < total:
+                log.info(f"[startup] sector_briefs: {cached}/{total} cached — launching batch generation")
+                await _sector_brief_batch(refresh=False)
+            else:
+                log.info(f"[startup] sector_briefs: all {cached}/{total} cached — skipping")
+        except Exception as e:
+            log.error(f"[startup] sector_brief auto-fill failed: {e}")
+
     t0 = asyncio.create_task(_init_tables())
     _BG_TASKS.add(t0); t0.add_done_callback(_BG_TASKS.discard)
+
+    t1 = asyncio.create_task(_auto_fill_briefs())
+    _BG_TASKS.add(t1); t1.add_done_callback(_BG_TASKS.discard)
+
     scheduler.start_background(app, BASE_URL, ADMIN_TOKEN)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
