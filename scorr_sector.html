@@ -66,8 +66,8 @@ function RankCard({row, rank, isBottom}) {
       onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"}
       onMouseLeave={e=>e.currentTarget.style.transform=""}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontSize:rank<3?18:13,lineHeight:1}}>
-          {rank<3 ? MEDALS[rank] : <span style={{fontWeight:800,color:C.muted,fontFamily:"monospace"}}>#{rank+1}</span>}
+        <span style={{fontSize:rank<3&&!isBottom?18:12,lineHeight:1}}>
+          {!isBottom && rank<3 ? MEDALS[rank] : <span style={{fontWeight:800,color:C.muted,fontFamily:"monospace"}}>#{rank+1}</span>}
         </span>
         <span style={{fontSize:19,fontWeight:900,color:sclr(row.composite_score),fontFamily:"monospace",letterSpacing:"-1px"}}>
           {fmt(row.composite_score,1)}
@@ -86,15 +86,16 @@ function RankCard({row, rank, isBottom}) {
   );
 }
 
-function Strip({top5, bottom5, onSel}) {
+function Strip({top5, cold, onSel}) {
   return (
     <div style={{background:"#fff",borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
       <div style={{display:"flex",gap:0,alignItems:"flex-start"}}>
-        <div style={{flex:1,minWidth:0}}>
+        {/* TOP 5 */}
+        <div style={{flex:"0 0 auto",marginRight:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8,letterSpacing:".06em"}}>
-            🔥 TOP 5 · HIGHEST COMPOSITE SCORE
+            🔥 TOP 5 · HIGHEST SCORE
           </div>
-          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:2}}>
+          <div style={{display:"flex",gap:8}}>
             {top5.map((r,i)=>(
               <div key={r.segment} onClick={()=>onSel(r)}>
                 <RankCard row={r} rank={i} isBottom={false}/>
@@ -102,13 +103,20 @@ function Strip({top5, bottom5, onSel}) {
             ))}
           </div>
         </div>
-        <div style={{width:1,background:C.border,margin:"0 16px",alignSelf:"stretch"}}/>
-        <div style={{flex:1,minWidth:0}}>
+
+        <div style={{width:1,background:C.border,margin:"0 0 0 0",alignSelf:"stretch",flexShrink:0}}/>
+
+        {/* COLD: score < 4 */}
+        <div style={{flex:1,minWidth:0,marginLeft:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,letterSpacing:".06em"}}>
-            ❄️ BOTTOM 5 · LOWEST COMPOSITE SCORE
+            ❄️ COLD SECTORS · Score &lt; 4.0 &nbsp;
+            <span style={{background:"#fef2f2",color:C.red,border:"1px solid #fecaca",
+              borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:800}}>
+              {cold.length}
+            </span>
           </div>
-          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:2}}>
-            {bottom5.map((r,i)=>(
+          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+            {cold.map((r,i)=>(
               <div key={r.segment} onClick={()=>onSel(r)}>
                 <RankCard row={r} rank={i} isBottom={true}/>
               </div>
@@ -117,7 +125,7 @@ function Strip({top5, bottom5, onSel}) {
         </div>
       </div>
       <div style={{fontSize:9,color:C.muted,marginTop:8}}>
-        Score 0–10 · Percentile rank avg of 5 signals: GVM quality · GVM Δ14d · Institutional flow · QoQ profit growth · Annual PE-based upside · Dots = signal pass/fail
+        Score 0–10 · Percentile rank avg of 5 signals: GVM · GVM Δ14d · Institutional flow (median) · QoQ profit (median) · Annual upside · Dots = signal pass/fail
       </div>
     </div>
   );
@@ -128,8 +136,8 @@ function Detail({row, onClose}) {
   const sigs = [
     {lbl:"GVM",     sub:"Quality",       v:row.gvm,           fmt:v=>fmt(v),     good:v=>v>=6.5},
     {lbl:"GVM Δ14d",sub:"Trend",         v:row.gvm_change,    fmt:v=>(v>0?"+":"")+fmt(v,3), good:v=>v>0},
-    {lbl:"Inst %",  sub:"FII+DII avg",   v:row.inst_change,   fmt:v=>pct(v),     good:v=>v>0},
-    {lbl:"QoQ %",   sub:"Profit growth", v:row.qoq_profit,    fmt:v=>pct(v,1),   good:v=>v>10},
+    {lbl:"Inst %",  sub:"FII+DII median",v:row.inst_change,   fmt:v=>pct(v),     good:v=>v>0},
+    {lbl:"QoQ %",   sub:"Profit median", v:row.qoq_profit,    fmt:v=>pct(v,1),   good:v=>v>10},
     {lbl:"Upside %",sub:"PE-based",      v:row.annual_upside, fmt:v=>pct(v,1),   good:v=>v>15},
   ];
   return (
@@ -214,7 +222,8 @@ function RankTab({data, onSel}) {
         </tr></thead>
         <tbody>
           {rows.map((r,i)=>(
-            <tr key={r.segment} onClick={()=>onSel(r)}>
+            <tr key={r.segment} onClick={()=>onSel(r)}
+              style={{background:r.composite_score<4?"#fff5f5":undefined}}>
               <td className="mono" style={{textAlign:"center",color:C.muted,fontSize:11}}>{i+1}</td>
               <td style={{fontWeight:600,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}}>{clip(r.segment,30)}</td>
               <td className="mono" style={{textAlign:"right",fontWeight:900,color:sclr(r.composite_score)}}>{fmt(r.composite_score,2)}</td>
@@ -314,9 +323,9 @@ function App() {
   if (!d)  return <Loading/>;
 
   const stats = {
-    buy: d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,
-    hi:  d.all.filter(r=>r.composite_score>=7).length,
-    lo:  d.all.filter(r=>r.composite_score<=3).length,
+    buy:  d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,
+    hi:   d.all.filter(r=>r.composite_score>=7).length,
+    cold: d.all.filter(r=>r.composite_score<4).length,
   };
 
   const TABS = [["rank","Composite Rank"],["gvm","G · V · M"]];
@@ -334,7 +343,7 @@ function App() {
           <div style={{marginLeft:"auto",display:"flex",gap:16,fontSize:11}}>
             <span>Buy+: <b style={{color:C.green}}>{stats.buy}</b></span>
             <span>Score≥7: <b style={{color:C.green}}>{stats.hi}</b></span>
-            <span>Score≤3: <b style={{color:C.red}}>{stats.lo}</b></span>
+            <span>Cold&lt;4: <b style={{color:C.red}}>{stats.cold}</b></span>
           </div>
         </div>
         <div style={{display:"flex",marginTop:10,borderBottom:`1px solid ${C.border}`,marginLeft:-20,paddingLeft:20,marginBottom:-13}}>
@@ -348,7 +357,7 @@ function App() {
         </div>
       </div>
 
-      <Strip top5={d.top5} bottom5={d.bottom5} onSel={setSel}/>
+      <Strip top5={d.top5} cold={d.bottom5} onSel={setSel}/>
 
       {sel && <div style={{padding:"12px 20px 0"}}><Detail row={sel} onClose={()=>setSel(null)}/></div>}
 
