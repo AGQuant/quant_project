@@ -18,6 +18,16 @@ ARCHITECTURE:
 
   query_log captures every query for native training analytics.
 
+FIXES v6 (13-Jun-2026) — Level-2 100-query test:
+  K. COMPARE op routed to LOOKUP (single-stock for now; multi-stock TODO).
+     "TCS vs INFY" / "compare HDFC and ICICI" no longer fall through to
+     off-topic redirect — surfaces primary stock instead.
+  L. Added "news", "update", "latest", "happened" to LOOKUP_TRIGGER_WORDS.
+     "any news on Adani" / "latest on Reliance" now route to LOOKUP.
+  M. exec_lookup stop set expanded with compare/news/preposition noise
+     (vs/versus/compare/peer/news/update/latest/any/on/to/with/from/at/in)
+     so company search finds the actual stock cleanly.
+
 FIXES v5 (13-Jun-2026) — final polish from Level-1 100-query test:
   J. Added "result" and "results" to LOOKUP_TRIGGER_WORDS. Docstring lists
      "result" but the set was missing it. "Bharti Airtel result" now routes
@@ -206,6 +216,8 @@ BELOW_WORDS = {"below","under","less","fewer","<","<=","maximum","max","atmost"}
 LOOKUP_TRIGGER_WORDS = {
     "about", "overview", "profile", "tell", "details", "info",
     "analysis", "report", "result", "results", "takeaway", "like",
+    # FIX L (v6): news-style queries ("any news on X", "latest on X")
+    "news", "update", "latest", "happened",
 }
 
 
@@ -301,8 +313,11 @@ def _parse_operation(q: str) -> str:
     # RANK first (explicit "top/best/highest")
     if any(w in q.split() for w in {"top","best","highest","leaders","leading"}):
         return "RANK"
+    # FIX K (v6): COMPARE → LOOKUP. Comparison ops have no dedicated executor;
+    # routing to LOOKUP at least surfaces the primary stock instead of falling
+    # through to off-topic redirect. Multi-stock comparison TODO.
     if any(w in q for w in ["vs ","versus","compare","peer"]):
-        return "COMPARE"
+        return "LOOKUP"
     if any(w in q for w in ["history","trend","historical","over time","past "]):
         return "HISTORY"
     if any(w in q for w in ["sector rating","sector view","sectors","segments"]):
@@ -469,6 +484,10 @@ def exec_lookup(cur, slots: Dict) -> str:
         # v3 additions:
         "analysis","report","like","stocks","stock","key","top","best","by",
         "my","mine","i","be","share","shares",
+        # v6 additions: compare/news/preposition noise
+        "vs","versus","compare","compared","comparison","peer","peers","or",
+        "news","update","updates","latest","happened","happens","any",
+        "on","to","with","from","at","in",
     }
     words = [w.strip(".,?!") for w in raw.lower().split()
              if w.strip(".,?!") not in stop and len(w.strip(".,?!")) >= 2]
