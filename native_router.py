@@ -1,6 +1,6 @@
 """
 Native Query Router — Zero token, pure Railway DB queries.
-Column names verified against live DB schema 10-Jun-2026.
+Column names verified against live DB schema 13-Jun-2026.
 
 ARCHITECTURE:
   Layer 0a:  Trade Check v3.3 (string triggers + regex pattern)
@@ -17,6 +17,31 @@ ARCHITECTURE:
   Layer 2:   Fallback hint → suggest Claude toggle
 
   query_log captures every query for native training analytics.
+
+FIXES v10 (13-Jun-2026) — research-driven dictionary expansion (FIX Q):
+  Sourced from 18 retail-investor research articles (Zerodha Varsity,
+  Tickertape, Motilal Oswal, Bajaj Finserv, Univest, Britannica Money).
+  METRIC_MAP +12 new metrics, all column names verified against live
+  screener_raw schema (63 cols, 13-Jun-2026):
+    pb / p/b / price to book  → "Price to book value"
+    peg / peg ratio           → "PEG Ratio"
+    roe / return on equity    → "Return on equity"
+    eps                       → "EPS"
+    eps growth                → "EPS growth 5Years"
+    ev ebitda / evebitda      → EVEBITDA
+    debt                      → "Debt"  (distinct from d/e → "Debt to equity")
+    cfo pat / cash flow       → "Cfo by Pat"  (cash conversion quality)
+    profit growth 3y          → profit_growth_3y
+    qoq sales                 → qoq_sales_growth
+    qoq profit                → qoq_profit_growth
+  LOOKUP_TRIGGER_WORDS +16 judgment/research words:
+    research, study, multibagger, gem, turnaround, oversold, moat,
+    fundamentals, fundamentally, quality, bargain, prospects, outlook,
+    valuation, intrinsic, fairvalue.
+  Safe: RANK (top/best/highest) checked first; LOOKUP gate is
+  "has_lookup_word and not has_metric_thresh" so metric+threshold queries
+  still route to FILTER. New words mirrored into exec_lookup stop set and
+  _parse_sector stopwords so they don't pollute company/sector matching.
 
 FIXES v9 (13-Jun-2026) — CAPLIPOINT bug + research-verb expansion:
   P. Research verb forms added to LOOKUP_TRIGGER_WORDS: "analyse", "analyze",
@@ -216,6 +241,29 @@ METRIC_MAP = {
     "d/e":              ("s", "\"Debt to equity\"",     "screener"),
     "interest coverage":("s", "interest_coverage",      "screener"),
     "int coverage":     ("s", "interest_coverage",      "screener"),
+    # ── FIX Q (v10): research-driven additions, all columns verified vs
+    # screener_raw live schema (13-Jun-2026). Longer phrases sort first in
+    # _parse_metric, so "price to book" matches before bare "pe" etc.
+    "price to book":    ("s", "\"Price to book value\"", "screener"),
+    "p/b":              ("s", "\"Price to book value\"", "screener"),
+    "pb":               ("s", "\"Price to book value\"", "screener"),
+    "peg ratio":        ("s", "\"PEG Ratio\"",          "screener"),
+    "peg":              ("s", "\"PEG Ratio\"",          "screener"),
+    "return on equity": ("s", "\"Return on equity\"",   "screener"),
+    "roe":              ("s", "\"Return on equity\"",   "screener"),
+    "eps growth":       ("s", "\"EPS growth 5Years\"",  "screener"),
+    "eps":              ("s", "\"EPS\"",                "screener"),
+    "ev ebitda":        ("s", "EVEBITDA",               "screener"),
+    "evebitda":         ("s", "EVEBITDA",               "screener"),
+    "cash flow":        ("s", "\"Cfo by Pat\"",         "screener"),
+    "cfo pat":          ("s", "\"Cfo by Pat\"",         "screener"),
+    "cfo by pat":       ("s", "\"Cfo by Pat\"",         "screener"),
+    "debt":             ("s", "\"Debt\"",               "screener"),
+    "profit growth 3y": ("s", "profit_growth_3y",       "screener"),
+    "qoq sales":        ("s", "qoq_sales_growth",       "screener"),
+    "qoq sales growth": ("s", "qoq_sales_growth",       "screener"),
+    "qoq profit":       ("s", "qoq_profit_growth",      "screener"),
+    "qoq profit growth":("s", "qoq_profit_growth",      "screener"),
     "2d mom":           ("v", "mom_2d",                 "v8"),
     "2d momentum":      ("v", "mom_2d",                 "v8"),
     "mom 2d":           ("v", "mom_2d",                 "v8"),
@@ -264,6 +312,12 @@ LOOKUP_TRIGGER_WORDS = {
     # queries ("gvm score above 7") still route to FILTER.
     "analyse", "analyze", "evaluate", "assess", "review",
     "rate", "rating", "score", "view",
+    # FIX Q (v10): research/judgment vocabulary from 18 retail-investor
+    # articles. "is RELIANCE a multibagger", "TCS fundamentals", "INFY moat",
+    # "is SBIN a bargain", "ITC prospects", "HDFC quality stock".
+    "research", "study", "multibagger", "gem", "turnaround", "oversold",
+    "moat", "fundamentals", "fundamentally", "quality", "bargain",
+    "prospects", "outlook", "valuation", "intrinsic", "fairvalue",
 }
 
 
@@ -281,9 +335,11 @@ def _is_vm(q: str) -> bool:
 def _parse_metric(q: str) -> Optional[Tuple]:
     """
     FIX H (v4): Short metric phrases (<=4 chars: pe, fii, dii, rsi, opm, gvm,
-    d/e, mcap) require word-boundary match. Without this, "pe" substring-matches
-    inside "recipe" / "horoscope" and the query routes to PE-ranked stocks.
-    Multi-word or longer single-word phrases keep substring match (safe).
+    d/e, mcap, pb, peg, roe, eps) require word-boundary match. Without this,
+    "pe" substring-matches inside "recipe" / "horoscope" and the query routes
+    to PE-ranked stocks. Multi-word or longer single-word phrases keep
+    substring match (safe). Sorted by length desc so "price to book" /
+    "eps growth" / "qoq sales growth" match before their short aliases.
     """
     for phrase in sorted(METRIC_MAP.keys(), key=len, reverse=True):
         if " " in phrase or len(phrase) > 4:
@@ -322,6 +378,10 @@ def _parse_sector(q: str) -> Optional[str]:
         "time","like","analysis","report","takeaway","key",
         # FIX P (v9): research verbs as sector-noise stopwords
         "analyse","analyze","evaluate","assess","review","rate","rating","view",
+        # FIX Q (v10): research/judgment words as sector-noise stopwords
+        "research","study","multibagger","gem","turnaround","oversold","moat",
+        "fundamentals","fundamentally","quality","bargain","prospects","outlook",
+        "valuation","intrinsic","fairvalue",
     }
     cleaned = re.sub(r"top\s+\d+|\d+\s+stocks?", "", q)
     cleaned = re.sub(
@@ -546,6 +606,10 @@ def exec_lookup(cur, slots: Dict) -> str:
         "held","owning","owned","picked","pick","picks",
         # v9 additions (FIX P): research verb forms
         "analyse","analyze","evaluate","assess","review","rate","rating","view",
+        # v10 additions (FIX Q): research/judgment vocabulary
+        "research","study","multibagger","gem","turnaround","oversold","moat",
+        "fundamentals","fundamentally","quality","bargain","prospects","outlook",
+        "valuation","intrinsic","fairvalue",
     }
     words = [w.strip(".,?!") for w in raw.lower().split()
              if w.strip(".,?!") not in stop and len(w.strip(".,?!")) >= 2]
@@ -1144,6 +1208,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                     "• 'my journal open trades' | 'my journal closed trades'\n"
                     "• 'V8 paper book' | 'top gainers' | 'top losers' | 'daily digest'\n"
                     "• 'top 10 pharma gvm above 7.5' | 'tech stocks vm score'\n"
+                    "• 'low pe banks' | 'high roe stocks' | 'peg below 1' | 'best dividend stocks'\n"
                     "• 'sector ratings' | 'GVM history HDFC bank' | 'global indices'\n"
                     "• 'overview Torrent Pharma' | 'RELIANCE analysis' | 'whats SBIN like'\n"
                     "Or toggle Claude ON for free-text queries.")
