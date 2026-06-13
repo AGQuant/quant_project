@@ -20,7 +20,19 @@ def _ensure_table():
                 key_risks JSONB,
                 generated_at TIMESTAMP DEFAULT NOW(),
                 model TEXT DEFAULT 'claude-haiku-4-5-20251001'
-            )
+            );
+            CREATE TABLE IF NOT EXISTS sector_themes (
+                id SERIAL PRIMARY KEY,
+                rank INTEGER NOT NULL,
+                theme_name TEXT NOT NULL,
+                tagline TEXT,
+                reasoning TEXT,
+                key_drivers JSONB,
+                related_segments JSONB,
+                macro_tailwind TEXT,
+                generated_at TIMESTAMP DEFAULT NOW(),
+                model TEXT DEFAULT 'claude-haiku-4-5-20251001'
+            );
         """)
         conn.commit()
 
@@ -129,7 +141,7 @@ async def _batch_job(refresh: bool = False):
             await _save_brief(seg, brief)
             ok += 1
             log.info(f"[sector_brief_batch] ✓ {seg}")
-            await asyncio.sleep(0.5)  # rate limit
+            await asyncio.sleep(0.5)
         except Exception as e:
             fail.append(f"{seg}: {str(e)[:60]}")
             log.warning(f"[sector_brief_batch] ✗ {seg}: {e}")
@@ -174,16 +186,10 @@ async def sector_brief_batch(background_tasks: BackgroundTasks,
         total = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM sector_briefs")
         cached = cur.fetchone()[0]
-
     background_tasks.add_task(_batch_job, refresh)
-    return {
-        "status": "started",
-        "total_segments": total,
-        "already_cached": cached,
-        "to_generate": total - cached if not refresh else total,
-        "refresh": refresh,
-        "note": "Running in background — check /api/admin/sector/brief/status for progress"
-    }
+    return {"status": "started", "total_segments": total, "already_cached": cached,
+            "to_generate": total - cached if not refresh else total,
+            "note": "Check /api/admin/sector/brief/status for progress"}
 
 # ── Status check ─────────────────────────────────────────────
 @router.get("/api/admin/sector/brief/status")
@@ -193,10 +199,53 @@ def sector_brief_status():
         cur.execute("SELECT COUNT(DISTINCT segment) FROM sector_ratings WHERE score_date=(SELECT MAX(score_date) FROM sector_ratings)")
         total = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*), MAX(generated_at)::text FROM sector_briefs")
-        r = cur.fetchone()
-        cached, last_gen = r[0], r[1]
+        r = cur.fetchone(); cached, last_gen = r[0], r[1]
         cur.execute("SELECT segment, generated_at::text FROM sector_briefs ORDER BY generated_at DESC LIMIT 5")
         recent = [{"segment": r[0], "at": r[1]} for r in cur.fetchall()]
     return {"total_segments": total, "briefs_cached": cached,
             "missing": total - cached, "pct_complete": round(cached/total*100, 1) if total else 0,
             "last_generated": last_gen, "recent": recent}
+
+# ── Emerging Themes ───────────────────────────────────────────
+@router.get("/api/sector/themes")
+def sector_themes():
+    """Return 10 emerging themes with top companies per theme from live GVM data."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            # Fetch all themes
+            cur.execute("""
+                SELECT rank, theme_name, tagline, reasoning,
+                       key_drivers, related_segments, macro_tailwind,
+                       generated_at::text
+                FROM sector_themes
+                ORDER BY rank
+            """)
+            cols = [d[0] for d in cur.description]
+            themes = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+            # For each theme, fetch top 10 companies across related segments
+            score_date_q = "SELECT MAX(score_date) FROM gvm_scores"
+            for t in themes:
+                segs = t.get("related_segments") or []
+                if not segs:
+                    t["companies"] = []
+                    continue
+                cur.execute("""
+                    SELECT g.symbol, g.company_name,
+                           ROUND(g.gvm_score::numeric, 2) AS gvm_score,
+                           g.segment, g.verdict,
+                           ROUND(g.g_score::numeric, 2) AS g_score,
+                           ROUND(g.v_score::numeric, 2) AS v_score,
+                           ROUND(g.m_score::numeric, 2) AS m_score
+                    FROM gvm_scores g
+                    WHERE g.segment = ANY(%s)
+                      AND g.score_date = (""" + score_date_q + """)
+                    ORDER BY g.gvm_score DESC
+                    LIMIT 10
+                """, (segs,))
+                ccols = [d[0] for d in cur.description]
+                t["companies"] = [dict(zip(ccols, r)) for r in cur.fetchall()]
+
+        return {"count": len(themes), "themes": themes}
+    except Exception as e:
+        return {"error": str(e)}
