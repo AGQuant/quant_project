@@ -47,6 +47,7 @@ from scorr_endpoints import router as scorr_router
 from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
 from check_endpoint import router as check_router
+from sector_endpoints import router as sector_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -58,7 +59,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.36
+# Scorr / Project Quant — main.py v2.9.37
+# v2.9.37: sector_endpoints router wired — GET /api/sector/rotation (5-signal
+#   percentile-rank composite: GVM, GVM-delta-14d, inst-change, QoQ-profit,
+#   annual-upside). Returns top5/bottom5 + full 129-segment ranked list.
+#   /sector route serves scorr_sector.html (live fetch replaces hardcoded data).
 # v2.9.36: gvm_universe_pivots router wired — POST /api/admin/build_universe_pivots
 #   computes rolling-5d PP/R1/S1 for the entire raw_prices universe (1720+)
 #   and writes to v8_paper_pivots (shared schema). GVM company page now
@@ -91,7 +96,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.36"
+VERSION = "2.9.37"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -134,6 +139,7 @@ app.include_router(scorr_router)
 app.include_router(scorr_chat_router)
 app.include_router(trade_check_v34_router)
 app.include_router(check_router)
+app.include_router(sector_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -281,7 +287,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.36)")
+        log.info("Tables ready (v2.9.37)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -400,6 +406,11 @@ def ask():
 @app.get("/check", response_class=HTMLResponse)
 def check():
     with open("scorr_check.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+@app.get("/sector", response_class=HTMLResponse)
+def sector():
+    with open("scorr_sector.html", "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/health")
