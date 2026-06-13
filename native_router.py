@@ -18,6 +18,11 @@ ARCHITECTURE:
 
   query_log captures every query for native training analytics.
 
+FIXES v5 (13-Jun-2026) — final polish from Level-1 100-query test:
+  J. Added "result" and "results" to LOOKUP_TRIGGER_WORDS. Docstring lists
+     "result" but the set was missing it. "Bharti Airtel result" now routes
+     to LOOKUP correctly.
+
 FIXES v4 (13-Jun-2026) — regressions surfaced from v3 verification:
   H. _parse_metric uses word-boundary for short phrases (<=4 chars) — stops
      "pe" matching inside "recipe" or "horoscope" and ranking PE stocks.
@@ -200,7 +205,7 @@ BELOW_WORDS = {"below","under","less","fewer","<","<=","maximum","max","atmost"}
 # specific stock by name/symbol rather than ranking a list.
 LOOKUP_TRIGGER_WORDS = {
     "about", "overview", "profile", "tell", "details", "info",
-    "analysis", "report", "takeaway", "like",
+    "analysis", "report", "result", "results", "takeaway", "like",
 }
 
 
