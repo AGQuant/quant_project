@@ -18,6 +18,13 @@ ARCHITECTURE:
 
   query_log captures every query for native training analytics.
 
+FIXES v4 (13-Jun-2026) — regressions surfaced from v3 verification:
+  H. _parse_metric uses word-boundary for short phrases (<=4 chars) — stops
+     "pe" matching inside "recipe" or "horoscope" and ranking PE stocks.
+  I. exec_lookup returns canonical NO_RESULT_MSG on no-match — so queries
+     like "tell me a joke" fall through to Layer 1.5 off-topic redirect
+     instead of returning "No stock found for 'joke'".
+
 FIXES (13-Jun-2026 v3) — from 100-query test:
   A. LOOKUP_TRIGGER_WORDS added → _parse_operation now returns "LOOKUP" for
      "analysis/result/details/profile/takeaway/like" without ranking signal.
@@ -209,9 +216,21 @@ def _is_vm(q: str) -> bool:
 
 
 def _parse_metric(q: str) -> Optional[Tuple]:
+    """
+    FIX H (v4): Short metric phrases (<=4 chars: pe, fii, dii, rsi, opm, gvm,
+    d/e, mcap) require word-boundary match. Without this, "pe" substring-matches
+    inside "recipe" / "horoscope" and the query routes to PE-ranked stocks.
+    Multi-word or longer single-word phrases keep substring match (safe).
+    """
     for phrase in sorted(METRIC_MAP.keys(), key=len, reverse=True):
-        if phrase in q:
-            return METRIC_MAP[phrase]
+        if " " in phrase or len(phrase) > 4:
+            # Multi-word or longer single-word: substring is safe.
+            if phrase in q:
+                return METRIC_MAP[phrase]
+        else:
+            # Short single-word (<=4 chars): word-boundary required.
+            if re.search(r"\b" + re.escape(phrase) + r"\b", q):
+                return METRIC_MAP[phrase]
     return None
 
 
@@ -467,7 +486,12 @@ def exec_lookup(cur, slots: Dict) -> str:
         if r: break
 
     if not r:
-        return f"No stock found for '{company}'. Try exact symbol or company name."
+        # FIX I (v4): return canonical NO_RESULT_MSG so the router falls
+        # through to Layer 1.5 (off-topic / intent / hint). Previously
+        # "tell me a joke" surfaced "No stock found for 'joke'" — now
+        # the off-topic check fires correctly via the same fallthrough
+        # the RANK path uses.
+        return "No stocks found. Try a broader query or toggle Claude ON."
 
     parts = [f"**{r[1]} ({r[0]}) — {r[2]}**"]
     parts.append(f"GVM: {r[3]} | G: {r[4]} | V: {r[5]} | M: {r[6]} | {r[7]}")
