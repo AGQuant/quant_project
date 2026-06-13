@@ -3,10 +3,12 @@ Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
 
 ARCHITECTURE:
-  Layer 0: Hardcoded commands (trade check, virtual dashboard, health, PCR, QB, mood, qualified,
-           personal_journal, v8_paper, daily_digest, gainers/losers, server_time)
-  Layer 1: Grammar parser+executor (RANK/FILTER/SCREEN/LOOKUP/HISTORY/SECTOR_VIEW)
-  Layer 2: Fallback hint → Claude
+  Layer 0:   Hardcoded commands (trade check, virtual dashboard, health, PCR, QB, mood, qualified,
+             personal_journal, v8_paper, daily_digest, gainers/losers, server_time)
+  Layer 1:   Grammar parser+executor (RANK/FILTER/SCREEN/LOOKUP/HISTORY/SECTOR_VIEW)
+  Layer 1.5: Native intent classifier (native_intent.py) — pure Python, $0, fuzzy + Levenshtein.
+             Off-topic guard, typo-tolerance, natural-language reroute to Layer 0 canonical.
+  Layer 2:   Fallback hint → Claude
 
   query_log captures every query for native training analytics.
 
@@ -22,6 +24,11 @@ NOTE (13-Jun-2026): Added Layer 0b-0f handlers to cover Max AICIO card library:
   - daily_digest (gate + qualified + signals + gainers composite)
   - top_gainers / top_losers
   - server_time / NSE state
+
+NOTE (13-Jun-2026 v2): Added Layer 1.5 — pure-Python intent classifier (native_intent.py).
+  No LLM. No API. Catches off-topic queries, typos, natural-language phrasing.
+  Reroutes to canonical Layer 0 handler. Recursion guard via _depth param.
+  Intercepts grammar's "No stocks found" soft-fail and retries via intent classifier.
 """
 
 import os
@@ -33,10 +40,11 @@ from typing import Optional, Tuple, Dict, Any
 import psycopg
 
 from native_trade_check import native_trade_check
+from native_intent import classify as intent_classify, is_off_topic, OFF_TOPIC_REDIRECT
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# ── SECTOR ALIAS MAP ────────────────────────────────────────────────────────
+# ── SECTOR ALIAS MAP ─────────────────────────────────────────────────────────
 # Maps investor shorthand → exact DB segment prefix (used in ILIKE '{val}%')
 # Use full prefix where needed to avoid substring collisions (e.g. IT vs Capital)
 
@@ -112,7 +120,7 @@ def resolve_sector(raw: Optional[str]) -> Optional[str]:
     return raw
 
 
-# ── GRAMMAR PARSER ──────────────────────────────────────────────────────────
+# ── GRAMMAR PARSER ───────────────────────────────────────────────────────────
 
 METRIC_MAP = {
     "gvm":              ("g", "gvm_score",              "gvm"),
@@ -283,7 +291,7 @@ def parse_query(q: str) -> Dict[str, Any]:
     }
 
 
-# ── GRAMMAR EXECUTOR ────────────────────────────────────────────────────────
+# ── GRAMMAR EXECUTOR ─────────────────────────────────────────────────────────
 
 def fmt_table(headers: list, rows: list) -> str:
     if not rows:
@@ -526,7 +534,7 @@ def execute_grammar(query: str) -> Optional[str]:
         return f"DB error: {str(e)[:150]}\nToggle Claude ON for full access."
 
 
-# ── QUERY LOGGER ────────────────────────────────────────────────────────────
+# ── QUERY LOGGER ─────────────────────────────────────────────────────────────
 
 def _log_query(query: str, mode: str, operation: str, metric: str,
                sector: str, resolved: bool, latency_ms: int,
@@ -546,7 +554,7 @@ def _log_query(query: str, mode: str, operation: str, metric: str,
         pass
 
 
-# ── VIRTUAL DASHBOARD V8 ────────────────────────────────────────────────────
+# ── VIRTUAL DASHBOARD V8 ─────────────────────────────────────────────────────
 
 def _vd_market_gate(cur) -> str:
     cur.execute("""
@@ -666,9 +674,14 @@ def _virtual_dashboard(cur) -> str:
     return "\n\n".join(parts)
 
 
-# ── MAIN QUERY HANDLER ──────────────────────────────────────────────────────
+# ── MAIN QUERY HANDLER ───────────────────────────────────────────────────────
 
-def _query_sync(query: str) -> str:
+def _query_sync(query: str, _depth: int = 0) -> str:
+    """
+    Main query handler.
+    _depth: recursion guard. 0 = original call; 1 = Layer 1.5 reroute.
+            Prevents Layer 1.5 from firing on already-canonicalized queries.
+    """
     q = query.lower().strip()
     t0 = time.time()
 
@@ -919,7 +932,10 @@ def _query_sync(query: str) -> str:
             slots = parse_query(q)
             grammar_result = execute_grammar(q)
 
-            if grammar_result is not None:
+            # Grammar succeeded with a REAL result → return it.
+            # Grammar's "No stocks found..." → treat as soft-fail, fall through to Layer 1.5.
+            NO_RESULT_MSG = "No stocks found. Try a broader query or toggle Claude ON."
+            if grammar_result is not None and grammar_result != NO_RESULT_MSG:
                 log("grammar", slots["operation"],
                     slots["metric"][1] if slots["metric"] else "",
                     slots["sector"] or "", True)
@@ -928,6 +944,20 @@ def _query_sync(query: str) -> str:
             log("grammar", slots["operation"],
                 slots["metric"][1] if slots["metric"] else "",
                 slots["sector"] or "", False)
+
+            # ── LAYER 1.5: Native Intent Classifier (pure Python, $0) ───────
+            # Off-topic guard + fuzzy keyword + Levenshtein typo-tolerance.
+            # Reroutes ONCE to a canonical query that hits an existing Layer 0
+            # handler. _depth guard prevents infinite recursion.
+            if _depth == 0:
+                if is_off_topic(query):
+                    log("native", "off_topic")
+                    return OFF_TOPIC_REDIRECT
+                intent = intent_classify(query)
+                if intent is not None:
+                    intent_id, canonical_q, score = intent
+                    log("native", f"intent_{intent_id}")
+                    return _query_sync(canonical_q, _depth=1)
 
             return ("⚡ Native — $0. Try:\n"
                     "• 'trade check RELIANCE long' | 'check INFY short'\n"
