@@ -64,7 +64,7 @@ const PILLAR_INFO = {
 
 const MODELS = [
   { id: "v8",    icon: "⚡", label: "V8",    full: "V8 Long-Short",     color: C.accent,  live: true },
-  { id: "gvm",   icon: "▦", label: "GVM",   full: "GVM Scoring",       color: C.gold,    live: true },
+  { id: "gvm",   icon: "◦", label: "GVM",   full: "GVM Scoring",       color: C.gold,    live: true },
   { id: "check", icon: "✓", label: "Check", full: "Trade Check",       color: C.green,   live: true },
   { id: "max",   icon: "◉", label: "Max",   full: "Max Chat",          color: "#6d4fe0", live: true },
   { id: "ask",   icon: "✦", label: "Ask",   full: "Ask · Native",      color: C.accent,  live: true },
@@ -206,13 +206,10 @@ function PillarRadar({ company, sector }) {
   const triPath = (data, k1, k2, k3) =>
     [pt(k1, data[k1.toLowerCase()]), pt(k2, data[k2.toLowerCase()]), pt(k3, data[k3.toLowerCase()])]
       .map(([x,y], i) => `${i===0?"M":"L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ") + "Z";
-
   const compPath = triPath(company, "G", "V", "M");
   const sectorPath = sector ? triPath(sector, "G", "V", "M") : null;
-
   const axisEnd = k => [cx + Math.cos(ANG[k]) * R, cy + Math.sin(ANG[k]) * R];
   const labelPos = k => [cx + Math.cos(ANG[k]) * (R + 8), cy + Math.sin(ANG[k]) * (R + 8)];
-
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <svg width={W} height={H + 4}>
@@ -402,7 +399,6 @@ function PivotLadder({ p, cmp }) {
   );
 }
 
-// ── Volume A/D panel ────────────────────────────────────────────────────
 function VolumePanel({ va, volRatio }) {
   if (!va || !va.bars || !va.bars.length) return (
     <div style={{ fontSize: 12, color: C.muted, padding: 12 }}>No volume data.</div>
@@ -411,7 +407,6 @@ function VolumePanel({ va, volRatio }) {
   const vc = va.verdict === "ACCUMULATION" ? C.green : va.verdict === "DISTRIBUTION" ? C.red : C.gold;
   const tot = va.total_return_pct;
   const totColor = tot == null ? C.muted : tot >= 0 ? C.green : C.red;
-
   return (
     <div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
@@ -576,14 +571,12 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
     { key: "t1",     lbl: "T1",   w: 42,  align: "right" },
     { key: "verd",   lbl: "Verdict", w: 78, align: "right" },
   ];
-
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 16 }}>
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Segment Rank Ladder</div>
         <div style={{ fontSize: 11, color: C.muted }}>{segment} · ranked by GVM · T1 = price-action auto-checks passed</div>
       </div>
-
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 1100 }}>
           <thead>
@@ -603,18 +596,14 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
               const t1ok = row.tier1_passed != null && row.tier1_total ? row.tier1_passed / row.tier1_total : null;
               const isSelf = row.is_self;
               const td = (txt, color = null, weight = 600) => (
-                <td style={{
-                  padding: "7px 6px", fontSize: 12.5, fontFamily: "monospace",
-                  fontWeight: weight, color: color || C.text,
-                  textAlign: "right", whiteSpace: "nowrap"
-                }}>{txt}</td>
+                <td style={{ padding: "7px 6px", fontSize: 12.5, fontFamily: "monospace",
+                  fontWeight: weight, color: color || C.text, textAlign: "right", whiteSpace: "nowrap" }}>{txt}</td>
               );
               return (
                 <tr key={row.symbol} style={{
                   background: isSelf ? `${C.accent}10` : "transparent",
                   borderBottom: `1px solid ${C.gridLine}`,
-                  outline: isSelf ? `1px solid ${C.accent}40` : "none"
-                }}>
+                  outline: isSelf ? `1px solid ${C.accent}40` : "none" }}>
                   <td style={{ padding: "7px 6px", fontSize: 11.5, color: C.muted, fontFamily: "monospace", textAlign: "left" }}>{i + 1}</td>
                   <td style={{ padding: "7px 6px", fontSize: 13, fontWeight: isSelf ? 800 : 700,
                     color: isSelf ? C.accent : C.text, textAlign: "left", whiteSpace: "nowrap" }}>{row.symbol}</td>
@@ -637,14 +626,10 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
                   {td(row.opm != null ? row.opm + "%" : "—",
                     row.opm == null ? C.muted : row.opm >= 20 ? C.green : row.opm >= 10 ? C.gold : C.red)}
                   {td(row.rsi_month != null ? row.rsi_month : "—",
-                    row.rsi_month == null ? C.muted : row.rsi_month >= 60 ? C.green :
-                      row.rsi_month >= 50 ? C.gold : C.red)}
-                  {td(row.week_return != null ? signFmt(row.week_return, 1) + "%" : "—",
-                    deltaColor(row.week_return, 0.3))}
-                  {td(row.month_return != null ? signFmt(row.month_return, 1) + "%" : "—",
-                    deltaColor(row.month_return, 1))}
-                  {td(row.year_return != null ? signFmt(row.year_return, 1) + "%"
-                       : row.ret_1y != null ? signFmt(row.ret_1y, 1) + "%" : "—",
+                    row.rsi_month == null ? C.muted : row.rsi_month >= 60 ? C.green : row.rsi_month >= 50 ? C.gold : C.red)}
+                  {td(row.week_return != null ? signFmt(row.week_return, 1) + "%" : "—", deltaColor(row.week_return, 0.3))}
+                  {td(row.month_return != null ? signFmt(row.month_return, 1) + "%" : "—", deltaColor(row.month_return, 1))}
+                  {td(row.year_return != null ? signFmt(row.year_return, 1) + "%" : row.ret_1y != null ? signFmt(row.ret_1y, 1) + "%" : "—",
                     deltaColor(row.year_return ?? row.ret_1y, 3))}
                   {td(row.upside != null ? signFmt(row.upside, 1) + "%" : "—",
                     row.upside == null ? C.muted : row.upside >= 15 ? C.green : row.upside >= 0 ? C.gold : C.red)}
@@ -663,6 +648,105 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
   );
 }
 
+// ── Operational Metrics ─────────────────────────────────────────────
+function OpsMetrics({ symbol }) {
+  const [rows, setRows] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!symbol) return;
+    setLoading(true);
+    setRows(null);
+    mcpCall("run_sql", {
+      query: `SELECT metric_name, metric_value, unit, confidence, quarter, notes, source_1
+              FROM sector_ops_metrics
+              WHERE symbol = '${symbol}'
+              ORDER BY confidence DESC, metric_name ASC
+              LIMIT 30`
+    }).then(d => {
+      const r = d?.rows || [];
+      setRows(r.length ? r : []);
+    }).catch(() => setRows([])).finally(() => setLoading(false));
+  }, [symbol]);
+
+  if (loading) return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.purple, marginBottom: 8 }}>Operational Metrics</div>
+      <div style={{ fontSize: 12, color: C.muted }}>Loading…</div>
+    </div>
+  );
+
+  if (!rows || !rows.length) return null;
+
+  const confColor = c => c === "HIGH" ? C.green : c === "MEDIUM" ? C.gold : C.muted;
+  const confBg    = c => c === "HIGH" ? "#e3f6ed" : c === "MEDIUM" ? "#fdf3df" : "#f0f2f5";
+  const confBd    = c => c === "HIGH" ? "#0a9e6340" : c === "MEDIUM" ? "#b4530940" : "#cdd3dc";
+
+  const fmtVal = (v, u) => {
+    if (v == null) return "—";
+    const n = Number(v);
+    if (isNaN(n)) return String(v);
+    const abs = Math.abs(n);
+    const formatted = abs >= 100000 ? (n/100000).toFixed(2) + "L"
+      : abs >= 1000 ? (n/1000).toFixed(1) + "K"
+      : abs >= 1 ? n.toFixed(2)
+      : n.toFixed(4);
+    return formatted + (u ? " " + u : "");
+  };
+
+  const quarters = [...new Set(rows.map(r => r.quarter))];
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>Operational Metrics</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
+            {rows.length} metrics · {quarters.join(", ")} · earnings calls & filings
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {["HIGH","MEDIUM","LOW"].map(c => (
+            <span key={c} style={{ fontSize: 9, fontWeight: 800, color: confColor(c),
+              background: confBg(c), border: `1px solid ${confBd(c)}`,
+              borderRadius: 4, padding: "2px 7px" }}>{c}</span>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(195px, 1fr))", gap: 10 }}>
+        {rows.map((row, i) => {
+          const cc = confColor(row.confidence);
+          const bg = confBg(row.confidence);
+          const bd = confBd(row.confidence);
+          const label = (row.metric_name || "").replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+          const rawNote = (row.notes || "").replace(/^MANAGEMENT AUTHORITATIVE \([^)]+\)\. (Source 1 primary\. )?/, "");
+          const shortNote = rawNote.length > 95 ? rawNote.substring(0, 92) + "…" : rawNote;
+          return (
+            <div key={i} title={row.notes || ""}
+              style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 9, padding: "10px 13px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 3 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a6781", lineHeight: 1.3, maxWidth: "76%" }}>{label}</div>
+                <span style={{ fontSize: 8.5, fontWeight: 800, color: cc, flexShrink: 0, marginLeft: 4, letterSpacing: ".04em" }}>{row.confidence}</span>
+              </div>
+              <div style={{ fontSize: 19, fontWeight: 900, fontFamily: "monospace", color: "#1c2536", lineHeight: 1.1, marginBottom: 4 }}>
+                {fmtVal(row.metric_value, row.unit)}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#5a6781" }}>
+                <span>{row.quarter}</span>
+                {row.source_1 && <span style={{ fontStyle: "italic" }}>{row.source_1.replace(/_/g," ")}</span>}
+              </div>
+              {shortNote && (
+                <div style={{ fontSize: 9, color: "#5a6781", marginTop: 5, lineHeight: 1.35,
+                  borderTop: `1px solid ${bd}`, paddingTop: 4 }}>{shortNote}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const s = r.scores || {};
@@ -676,7 +760,6 @@ function GvmReport({ r, hist }) {
     const p = b.pillar || GVM_PILLAR_MAP[b.key] || "_";
     benchByPillar[p].push(b);
   });
-  // keep PARAMS order (no pillar-rating sort — v4)
 
   const verdictDist = {};
   (r.ladder || []).forEach(row => {
@@ -690,9 +773,7 @@ function GvmReport({ r, hist }) {
     return null;
   };
 
-  const sectorPillars = segCtx ? {
-    g: segCtx.weighted_g, v: segCtx.weighted_v, m: segCtx.weighted_m
-  } : null;
+  const sectorPillars = segCtx ? { g: segCtx.weighted_g, v: segCtx.weighted_v, m: segCtx.weighted_m } : null;
   const companyPillars = { g: s.g, v: s.v, m: s.m };
 
   const trendPoints = (x.trend && x.trend.length > 1)
@@ -726,17 +807,13 @@ function GvmReport({ r, hist }) {
           <div style={{ flex: 1.2, minWidth: 280 }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{r.company_name}</div>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span>{r.symbol}</span>
-              <span>·</span>
-              <span>{r.segment}</span>
-              <span>·</span>
+              <span>{r.symbol}</span><span>·</span><span>{r.segment}</span><span>·</span>
               <span style={{ fontWeight: 700, color: C.accent }}>#{r.segment_rank}/{r.segment_total} in segment</span>
               {r.mcap_rank && <span>· MCap #{r.mcap_rank}</span>}
               {r.cap_category && <Tag color={C.muted}>{r.cap_category}</Tag>}
               {r.is_bfsi && <Tag color={C.purple}>BFSI</Tag>}
               {x.earnings && x.earnings.blackout && <Tag color={C.red}>⚠ Blackout {x.earnings.days_to}d</Tag>}
             </div>
-
             <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "nowrap", overflowX: "auto" }}>
               {["G","V","M"].map(pillar => {
                 const pi = PILLAR_INFO[pillar];
@@ -744,9 +821,7 @@ function GvmReport({ r, hist }) {
                 return (
                   <div key={pillar} style={{ background: pi.bg, border: `1px solid ${pi.color}40`,
                     borderRadius: 10, padding: "9px 14px", flex: 1, minWidth: 80, textAlign: "center" }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: pi.color, textTransform: "uppercase", letterSpacing: ".05em" }}>
-                      {pillar}
-                    </div>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: pi.color, textTransform: "uppercase", letterSpacing: ".05em" }}>{pillar}</div>
                     <div style={{ fontSize: 24, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace", lineHeight: 1.1 }}>
                       {score?.toFixed(2) ?? "—"}
                     </div>
@@ -759,8 +834,7 @@ function GvmReport({ r, hist }) {
 
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             {trendPoints && (
-              <div style={{ minWidth: 280,
-                background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px" }}>
                 <TrendChart points={trendPoints} />
               </div>
             )}
@@ -801,7 +875,6 @@ function GvmReport({ r, hist }) {
       )}
 
       <ActionStrip x={x} />
-
       <SegmentContextCard ctx={segCtx} stockSym={r.symbol} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
@@ -933,12 +1006,13 @@ function GvmReport({ r, hist }) {
       </div>
 
       <FlowStrip flow={x.flow} val={x.valuation} />
-
       <SegmentRankLadder ladder={r.ladder} segment={r.segment} stockSym={r.symbol} />
 
       {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
       {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
       {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
+
+      <OpsMetrics symbol={r.symbol} />
 
       <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
