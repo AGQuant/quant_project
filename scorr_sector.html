@@ -96,41 +96,28 @@ function Strip({top5, cold, onSel}) {
   );
 }
 
-// ── Sector Brief (AI Education Panel) ──────────────────────
 function SectorBrief({segment}) {
   const [brief, setBrief] = useState(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-
   const load = (refresh=false) => {
     setLoading(true);
     fetch(`/api/sector/brief?segment=${encodeURIComponent(segment)}${refresh?"&refresh=true":""}`)
-      .then(r=>r.json())
-      .then(d=>{ setBrief(d); setLoading(false); })
-      .catch(()=>setLoading(false));
+      .then(r=>r.json()).then(d=>{ setBrief(d); setLoading(false); }).catch(()=>setLoading(false));
   };
-
-  const toggle = () => {
-    if (!open && !brief) load();
-    setOpen(p=>!p);
-  };
-
+  const toggle = () => { if (!open && !brief) load(); setOpen(p=>!p); };
   return (
     <div style={{marginTop:12,borderTop:`1px solid ${C.border}`,paddingTop:10}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <button onClick={toggle} style={{
-          cursor:"pointer",borderRadius:6,fontSize:11,fontWeight:700,padding:"5px 12px",
-          border:`1px solid ${C.purple}`,background:open?"#f5f3ff":"#fff",color:C.purple}}>
+        <button onClick={toggle} style={{cursor:"pointer",borderRadius:6,fontSize:11,fontWeight:700,padding:"5px 12px",border:`1px solid ${C.purple}`,background:open?"#f5f3ff":"#fff",color:C.purple}}>
           {open?"▲ Hide":"▼ Sector Brief"} · Education
         </button>
         {brief && !loading && <span style={{fontSize:9,color:C.muted}}>{brief.cached?"cached":"freshly generated"} · Claude Haiku</span>}
         {brief && open && <button onClick={()=>load(true)} style={{fontSize:9,color:C.muted,border:"none",background:"none",cursor:"pointer",textDecoration:"underline"}}>Refresh</button>}
         {loading && <span style={{fontSize:10,color:C.muted}}>Generating brief… ~3s</span>}
       </div>
-
       {open && brief && !brief.error && (
         <div style={{marginTop:10,display:"grid",gap:12}}>
-          {/* What is it + Application type */}
           <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:12,alignItems:"start"}}>
             <div style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.purple,marginBottom:4,letterSpacing:".05em"}}>WHAT IS THIS SECTOR</div>
@@ -142,8 +129,6 @@ function SectorBrief({segment}) {
               <div style={{fontSize:10,color:C.muted,marginTop:6,borderTop:`1px solid #ddd6fe`,paddingTop:6}}>{brief.business_model}</div>
             </div>
           </div>
-
-          {/* Growth Drivers + Key Risks */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"10px 12px"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.green,marginBottom:6,letterSpacing:".05em"}}>🚀 KEY GROWTH DRIVERS</div>
@@ -164,8 +149,6 @@ function SectorBrief({segment}) {
               ))}
             </div>
           </div>
-
-          {/* Constituents */}
           {brief.constituents && brief.constituents.length > 0 && (
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.muted,padding:"8px 12px",borderBottom:`1px solid ${C.border}`,letterSpacing:".05em"}}>
@@ -174,14 +157,10 @@ function SectorBrief({segment}) {
               <div style={{overflowX:"auto"}}>
                 <table>
                   <thead><tr>
-                    <th style={{textAlign:"left"}}>#</th>
-                    <th style={{textAlign:"left"}}>Symbol</th>
-                    <th style={{textAlign:"left"}}>Company</th>
-                    <th style={{textAlign:"right"}}>GVM</th>
-                    <th style={{textAlign:"right"}}>G</th>
-                    <th style={{textAlign:"right"}}>V</th>
-                    <th style={{textAlign:"right"}}>M</th>
-                    <th style={{textAlign:"left"}}>Verdict</th>
+                    <th style={{textAlign:"left"}}>#</th><th style={{textAlign:"left"}}>Symbol</th>
+                    <th style={{textAlign:"left"}}>Company</th><th style={{textAlign:"right"}}>GVM</th>
+                    <th style={{textAlign:"right"}}>G</th><th style={{textAlign:"right"}}>V</th>
+                    <th style={{textAlign:"right"}}>M</th><th style={{textAlign:"left"}}>Verdict</th>
                   </tr></thead>
                   <tbody>
                     {brief.constituents.map((s,i)=>(
@@ -211,11 +190,11 @@ function SectorBrief({segment}) {
 function Detail({row, onClose}) {
   if (!row) return null;
   const sigs = [
-    {lbl:"GVM",      sub:"Quality",       v:row.gvm,           fmt:v=>fmt(v),     good:v=>v>=6.5},
-    {lbl:"GVM Δ14d", sub:"Trend",         v:row.gvm_change,    fmt:v=>(v>0?"+":"")+fmt(v,3), good:v=>v>0},
-    {lbl:"Inst %",   sub:"FII+DII median",v:row.inst_change,   fmt:v=>pct(v),     good:v=>v>0},
-    {lbl:"QoQ %",    sub:"Profit median", v:row.qoq_profit,    fmt:v=>pct(v,1),   good:v=>v>10},
-    {lbl:"Upside %", sub:"PE-based",      v:row.annual_upside, fmt:v=>pct(v,1),   good:v=>v>15},
+    {lbl:"GVM",sub:"Quality",v:row.gvm,fmt:v=>fmt(v),good:v=>v>=6.5},
+    {lbl:"GVM Δ14d",sub:"Trend",v:row.gvm_change,fmt:v=>(v>0?"+":"")+fmt(v,3),good:v=>v>0},
+    {lbl:"Inst %",sub:"FII+DII median",v:row.inst_change,fmt:v=>pct(v),good:v=>v>0},
+    {lbl:"QoQ %",sub:"Profit median",v:row.qoq_profit,fmt:v=>pct(v,1),good:v=>v>10},
+    {lbl:"Upside %",sub:"PE-based",v:row.annual_upside,fmt:v=>pct(v,1),good:v=>v>15},
   ];
   return (
     <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",marginBottom:12}}>
@@ -354,6 +333,169 @@ function GVMTab({data, onSel}) {
   );
 }
 
+// ── Emerging Themes Section ────────────────────────────────
+const THEME_COLORS = ["#7c3aed","#0891b2","#0a9e63","#d97706","#dd3a4a","#7c3aed","#2563eb","#b45309","#0891b2","#0a9e63"];
+
+function ThemesSection() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+
+  useEffect(()=>{
+    fetch("/api/sector/themes")
+      .then(r=>r.json())
+      .then(d=>{ setData(d); setLoading(false); })
+      .catch(()=>setLoading(false));
+  },[]);
+
+  if (loading) return (
+    <div style={{textAlign:"center",padding:"30px",color:"#5a6781",fontSize:12,marginTop:24}}>
+      <div style={{width:24,height:24,border:"2px solid #e2e7ee",borderTop:"2px solid #7c3aed",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/>
+      <div>Loading emerging themes…</div>
+    </div>
+  );
+  if (!data || data.error) return null;
+
+  return (
+    <div style={{marginTop:32}}>
+      {/* Section header */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:12,borderBottom:"2px solid #e2e7ee"}}>
+        <span style={{fontSize:22}}>🌱</span>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#1c2536"}}>Top 10 Emerging Investment Themes</div>
+          <div style={{fontSize:11,color:"#5a6781",marginTop:2}}>
+            Cross-sector structural plays · Expert reasoning · Live GVM-ranked companies · Click any theme to expand
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gap:10}}>
+        {data.themes.map((t,i)=>{
+          const col = THEME_COLORS[i] || "#7c3aed";
+          const isOpen = expanded===i;
+          return (
+            <div key={i} style={{background:"#fff",border:"1px solid #e2e7ee",borderRadius:10,
+              overflow:"hidden",borderLeft:`4px solid ${col}`,
+              boxShadow:isOpen?"0 4px 16px rgba(0,0,0,.06)":"0 1px 3px rgba(0,0,0,.04)"}}>
+
+              {/* Collapsed header */}
+              <div onClick={()=>setExpanded(isOpen?null:i)}
+                style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}}
+                onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <div style={{width:30,height:30,borderRadius:"50%",background:col,color:"#fff",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:13,fontWeight:900,flexShrink:0}}>
+                  {i+1}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"#1c2536"}}>{t.theme_name}</div>
+                  <div style={{fontSize:11,color:"#5a6781",marginTop:2,fontStyle:"italic"}}>{t.tagline}</div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                  <span style={{fontSize:10,fontWeight:700,color:col,background:col+"15",
+                    border:`1px solid ${col}40`,borderRadius:20,padding:"3px 10px"}}>
+                    {t.macro_tailwind}
+                  </span>
+                  <span style={{fontSize:10,color:"#5a6781",background:"#f4f6f9",
+                    border:"1px solid #e2e7ee",borderRadius:20,padding:"3px 10px"}}>
+                    {(t.companies||[]).length} companies
+                  </span>
+                  <span style={{color:"#5a6781",fontSize:16,fontWeight:700,lineHeight:1}}>
+                    {isOpen?"−":"+"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Expanded content */}
+              {isOpen && (
+                <div style={{borderTop:"1px solid #e2e7ee",padding:"18px 16px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+
+                    {/* LEFT: reasoning + drivers */}
+                    <div>
+                      {/* Reasoning box */}
+                      <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,
+                        padding:"12px 14px",marginBottom:14,borderLeft:`3px solid ${col}`}}>
+                        <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:6,letterSpacing:".06em"}}>
+                          WHY THIS THEME IS EMERGING NOW
+                        </div>
+                        <div style={{fontSize:12,color:"#1c2536",lineHeight:1.7}}>{t.reasoning}</div>
+                      </div>
+                      {/* Drivers */}
+                      <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:8,letterSpacing:".06em"}}>
+                        🚀 KEY STRUCTURAL DRIVERS
+                      </div>
+                      {(t.key_drivers||[]).map((d,j)=>(
+                        <div key={j} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start",
+                          background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"8px 10px"}}>
+                          <span style={{width:20,height:20,borderRadius:"50%",background:col,color:"#fff",
+                            display:"flex",alignItems:"center",justifyContent:"center",
+                            fontSize:10,fontWeight:800,flexShrink:0,marginTop:1}}>{j+1}</span>
+                          <span style={{fontSize:11,color:"#166534",lineHeight:1.5}}>{d}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* RIGHT: companies table */}
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#5a6781",marginBottom:8,letterSpacing:".06em"}}>
+                        FOCUSED COMPANIES · Ranked by GVM Score
+                      </div>
+                      <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,overflow:"hidden"}}>
+                        <table style={{fontSize:11}}>
+                          <thead>
+                            <tr style={{background:"#f0f4f9"}}>
+                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>#</th>
+                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Symbol</th>
+                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Company</th>
+                              <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:700,color:"#5a6781"}}>GVM</th>
+                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Segment</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(t.companies||[]).map((co,k)=>(
+                              <tr key={k} style={{borderTop:"1px solid #edf1f6"}}>
+                                <td style={{padding:"5px 10px",color:"#5a6781",fontSize:10}}>{k+1}</td>
+                                <td style={{padding:"5px 10px",fontWeight:800,color:"#2563eb",fontFamily:"monospace"}}>{co.symbol}</td>
+                                <td style={{padding:"5px 10px",color:"#1c2536",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.company_name}</td>
+                                <td style={{padding:"5px 10px",textAlign:"right",fontWeight:900,fontFamily:"monospace",
+                                  color:co.gvm_score>=7?"#0a9e63":co.gvm_score>=6?"#d97706":"#dd3a4a"}}>
+                                  {Number(co.gvm_score).toFixed(2)}
+                                </td>
+                                <td style={{padding:"5px 10px",color:"#5a6781",fontSize:9,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.segment}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {/* Segment tags */}
+                      <div style={{marginTop:10}}>
+                        <div style={{fontSize:9,color:"#5a6781",fontWeight:700,marginBottom:5,letterSpacing:".05em"}}>RELATED SEGMENTS</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                          {(t.related_segments||[]).map((s,k)=>(
+                            <span key={k} style={{fontSize:9,color:col,background:col+"12",
+                              border:`1px solid ${col}35`,borderRadius:20,padding:"3px 9px",fontWeight:600}}>
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{fontSize:9,color:"#5a6781",textAlign:"center",marginTop:12,paddingTop:12,borderTop:"1px solid #e2e7ee"}}>
+        Themes curated by Scorr · Companies ranked by live GVM score · Updated with market data
+      </div>
+    </div>
+  );
+}
+
 function Loading() {
   return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}>
@@ -411,9 +553,10 @@ function App() {
 
       {sel && <div style={{padding:"12px 20px 0"}}><Detail row={sel} onClose={()=>setSel(null)}/></div>}
 
-      <div style={{padding:"12px 20px 24px",maxWidth:1440,margin:"0 auto"}}>
+      <div style={{padding:"12px 20px 40px",maxWidth:1440,margin:"0 auto"}}>
         {tab==="rank" && <RankTab data={d.all} onSel={setSel}/>}
         {tab==="gvm"  && <GVMTab  data={d.all} onSel={setSel}/>}
+        <ThemesSection/>
       </div>
     </div>
   );
