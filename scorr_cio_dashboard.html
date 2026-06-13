@@ -304,9 +304,9 @@ function SegmentContextCard({ ctx, stockSym }) {
   if (!ctx) return null;
   const vc = verdictColor(ctx.verdict);
   const cell = (lbl, val, sub, color) => (
-    <div style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 8, padding: "9px 13px", flex: 1, minWidth: 120 }}>
+    <div style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 8, padding: "10px 13px", flex: 1, minWidth: 110, minHeight: 56 }}>
       <div style={{ fontSize: 9.5, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 2 }}>{lbl}</div>
-      <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: color || C.text, lineHeight: 1.1 }}>{val}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: color || C.text, lineHeight: 1.3 }}>{val}</div>
       {sub && <div style={{ fontSize: 10, color: C.muted, fontFamily: "monospace", marginTop: 2 }}>{sub}</div>}
     </div>
   );
@@ -337,9 +337,9 @@ function SegmentContextCard({ ctx, stockSym }) {
           ctx.sector_rank != null && ctx.sector_total ? `top ${((ctx.sector_rank/ctx.sector_total)*100).toFixed(0)}%` : null,
           ctx.sector_rank != null && ctx.sector_total && ctx.sector_rank <= ctx.sector_total / 4 ? C.green :
             ctx.sector_rank != null && ctx.sector_total && ctx.sector_rank <= ctx.sector_total / 2 ? C.gold : C.red)}
-        {cell("Week %", signFmt(ctx.week_return_avg, 2) + "%", "segment avg", deltaColor(ctx.week_return_avg, 0.5))}
-        {cell("Month %", signFmt(ctx.month_return_avg, 2) + "%", "segment avg", deltaColor(ctx.month_return_avg, 1))}
-        {cell("Year %", signFmt(ctx.year_return_avg, 1) + "%", "segment avg", deltaColor(ctx.year_return_avg, 3))}
+        {cell("Week %", ctx.week_return_avg != null ? signFmt(ctx.week_return_avg, 2) + "%" : "—", "segment avg", deltaColor(ctx.week_return_avg, 0.5))}
+        {cell("Month %", ctx.month_return_avg != null ? signFmt(ctx.month_return_avg, 2) + "%" : "—", "segment avg", deltaColor(ctx.month_return_avg, 1))}
+        {cell("Year %", ctx.year_return_avg != null ? signFmt(ctx.year_return_avg, 1) + "%" : "—", "segment avg", deltaColor(ctx.year_return_avg, 3))}
         {cell("Top Stock", ctx.top_stock || "—",
           ctx.top_stock_gvm != null ? `GVM ${ctx.top_stock_gvm}` : null,
           C.accent)}
@@ -402,6 +402,7 @@ function PivotLadder({ p, cmp }) {
   );
 }
 
+// ── Volume A/D panel ────────────────────────────────────────────────────
 function VolumePanel({ va, volRatio }) {
   if (!va || !va.bars || !va.bars.length) return (
     <div style={{ fontSize: 12, color: C.muted, padding: 12 }}>No volume data.</div>
@@ -410,23 +411,6 @@ function VolumePanel({ va, volRatio }) {
   const vc = va.verdict === "ACCUMULATION" ? C.green : va.verdict === "DISTRIBUTION" ? C.red : C.gold;
   const tot = va.total_return_pct;
   const totColor = tot == null ? C.muted : tot >= 0 ? C.green : C.red;
-
-  const cum = va.cum_pct_series || [];
-  const cumVals = cum.map(p => p.cum_pct).filter(v => v != null);
-  const cumLine = (() => {
-    if (cumVals.length < 2) return null;
-    const W = 100, H = 100;
-    const min = Math.min(...cumVals, 0), max = Math.max(...cumVals, 0);
-    const span = (max - min) || 1;
-    const zeroY = H - ((0 - min) / span) * H;
-    const path = cum.map((p, i) => {
-      if (p.cum_pct == null) return "";
-      const x = (i / (cum.length - 1)) * W;
-      const y = H - ((p.cum_pct - min) / span) * H;
-      return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(" ");
-    return { path, zeroY };
-  })();
 
   return (
     <div>
@@ -442,7 +426,7 @@ function VolumePanel({ va, volRatio }) {
         )}
         {volRatio != null && <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>vol 10/30d {volRatio}×</span>}
       </div>
-      <div style={{ position: "relative", height: 72 }}>
+      <div style={{ position: "relative", height: 72, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: "100%", position: "absolute", inset: 0 }}>
           {va.bars.map((b, i) => (
             <div key={i} title={`${b.d} · ${fmt(b.v)} · ${b.up ? "up" : "down"} day${b.close != null ? ` · ₹${b.close.toFixed(1)}` : ""}`}
@@ -450,15 +434,9 @@ function VolumePanel({ va, volRatio }) {
                 background: b.up ? C.green : C.red, opacity: .60, borderRadius: "2px 2px 0 0" }} />
           ))}
         </div>
-        {cumLine && (
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-            <line x1="0" y1={cumLine.zeroY} x2="100" y2={cumLine.zeroY} stroke={C.muted} strokeWidth="0.4" strokeDasharray="1.5,1.5" />
-            <path d={cumLine.path} fill="none" stroke={totColor} strokeWidth="1.3" strokeLinejoin="round" />
-          </svg>
-        )}
       </div>
       <div style={{ fontSize: 10, color: C.muted, marginTop: 6 }}>
-        Bars = daily volume (green/red = up/down day) · line = cumulative % return
+        Bars = daily volume (green/red = up/down day)
         {va.biggest_day && (
           <span> · biggest: <b style={{ color: va.biggest_day.direction === "UP" ? C.green : C.red }}>
             {va.biggest_day.d} ({va.biggest_day.direction})</b></span>
@@ -493,6 +471,9 @@ function FlowStrip({ flow, val }) {
     cells.push(cell("PE", val.pe != null ? val.pe + "x" : "—",
       val.historical_pe != null ? `hist ${val.historical_pe}x · seg ${val.segment_pe != null ? val.segment_pe + "x" : "—"}` : null, C.text));
     if (val.rerating_pct != null) cells.push(cell("Re-rating", signFmt(val.rerating_pct, 1) + "%", "vs own history", rc));
+    if (val.annual_upside != null) cells.push(cell("Annual Upside", signFmt(val.annual_upside, 1) + "%",
+      val.fy27_growth != null ? `FY27 growth ${val.fy27_growth}%` : null,
+      val.annual_upside >= 15 ? C.green : val.annual_upside >= 0 ? C.gold : C.red));
     if (val.pb != null) cells.push(cell("P/B", val.pb + "x", null, C.text));
     if (val.peg != null) cells.push(cell("PEG", val.peg, null, val.peg > 2 ? C.red : val.peg > 1 ? C.gold : C.green));
     if (val.ev_ebitda != null) cells.push(cell("EV/EBITDA", val.ev_ebitda + "x", null, C.text));
@@ -574,9 +555,7 @@ function MatrixRow({ b, pillar }) {
   );
 }
 
-function SegmentRankLadder({ ladder, segment, segAvg, stockSym }) {
-  const [mode, setMode] = useState("abs");
-
+function SegmentRankLadder({ ladder, segment, stockSym }) {
   const cols = [
     { key: "rank",   lbl: "#",    w: 28,  align: "left"  },
     { key: "sym",    lbl: "Symbol", w: 92, align: "left" },
@@ -598,40 +577,11 @@ function SegmentRankLadder({ ladder, segment, segAvg, stockSym }) {
     { key: "verd",   lbl: "Verdict", w: 78, align: "right" },
   ];
 
-  const renderCell = (row, key) => {
-    const v = row[key];
-    if (mode === "vs" && segAvg) {
-      const segKey = ({ pe:"pe", pb:"pb", roe:"roe", opm:"opm", rsi_m:"rsi_month",
-        wk:"week_return", mo:"month_return", yr:"year_return", up:"upside",
-        divy:"div_yield", mcap:"market_cap" })[key];
-      if (segKey && segAvg[segKey] != null && v != null) {
-        const delta = (key === "pe" || key === "pb") ? ((v / segAvg[segKey] - 1) * 100)
-                      : (v - segAvg[segKey]);
-        const unit = (key === "pe" || key === "pb" || key === "mcap") ? "%" : "pp";
-        return { txt: signFmt(delta, 1) + unit,
-                 color: (key === "pe" || key === "pb") ? (delta < 0 ? C.green : C.red)
-                       : deltaColor(delta, 0.3) };
-      }
-    }
-    return null;
-  };
-
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Segment Rank Ladder</div>
-          <div style={{ fontSize: 11, color: C.muted }}>{segment} · ranked by GVM · T1 = price-action auto-checks passed</div>
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[["abs","Absolute"],["vs","vs Segment"]].map(([v,l]) => (
-            <button key={v} onClick={() => setMode(v)}
-              style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 7,
-                border: `1px solid ${mode===v ? C.accent : C.border}`,
-                background: mode===v ? `${C.accent}15` : "transparent",
-                color: mode===v ? C.accent : C.muted, cursor: "pointer" }}>{l}</button>
-          ))}
-        </div>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Segment Rank Ladder</div>
+        <div style={{ fontSize: 11, color: C.muted }}>{segment} · ranked by GVM · T1 = price-action auto-checks passed</div>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -652,18 +602,13 @@ function SegmentRankLadder({ ladder, segment, segAvg, stockSym }) {
               const d13 = row.gvm_d13;
               const t1ok = row.tier1_passed != null && row.tier1_total ? row.tier1_passed / row.tier1_total : null;
               const isSelf = row.is_self;
-              const td = (txt, key, color = null, weight = 600) => {
-                const vsCell = renderCell(row, key);
-                const displayTxt = (mode === "vs" && vsCell) ? vsCell.txt : txt;
-                const displayCol = (mode === "vs" && vsCell) ? vsCell.color : color;
-                return (
-                  <td style={{
-                    padding: "7px 6px", fontSize: 12.5, fontFamily: "monospace",
-                    fontWeight: weight, color: displayCol || C.text,
-                    textAlign: "right", whiteSpace: "nowrap"
-                  }}>{displayTxt}</td>
-                );
-              };
+              const td = (txt, color = null, weight = 600) => (
+                <td style={{
+                  padding: "7px 6px", fontSize: 12.5, fontFamily: "monospace",
+                  fontWeight: weight, color: color || C.text,
+                  textAlign: "right", whiteSpace: "nowrap"
+                }}>{txt}</td>
+              );
               return (
                 <tr key={row.symbol} style={{
                   background: isSelf ? `${C.accent}10` : "transparent",
@@ -684,26 +629,26 @@ function SegmentRankLadder({ ladder, segment, segAvg, stockSym }) {
                   </td>
                   <td style={{ padding: "7px 6px", fontSize: 12, fontFamily: "monospace", fontWeight: 700,
                     color: deltaColor(d13, 0.02), textAlign: "right" }}>{d13 != null ? signFmt(d13) : "—"}</td>
-                  {td(fmtMcap(row.market_cap), "mcap", C.muted)}
-                  {td(row.pe != null ? row.pe + "x" : "—", "pe", C.text)}
-                  {td(row.pb != null ? row.pb + "x" : "—", "pb", C.text)}
-                  {td(row.roe != null ? row.roe + "%" : "—", "roe",
+                  {td(fmtMcap(row.market_cap), C.muted)}
+                  {td(row.pe != null ? row.pe + "x" : "—", C.text)}
+                  {td(row.pb != null ? row.pb + "x" : "—", C.text)}
+                  {td(row.roe != null ? row.roe + "%" : "—",
                     row.roe == null ? C.muted : row.roe >= 15 ? C.green : row.roe >= 10 ? C.gold : C.red)}
-                  {td(row.opm != null ? row.opm + "%" : "—", "opm",
+                  {td(row.opm != null ? row.opm + "%" : "—",
                     row.opm == null ? C.muted : row.opm >= 20 ? C.green : row.opm >= 10 ? C.gold : C.red)}
-                  {td(row.rsi_month != null ? row.rsi_month : "—", "rsi_m",
+                  {td(row.rsi_month != null ? row.rsi_month : "—",
                     row.rsi_month == null ? C.muted : row.rsi_month >= 60 ? C.green :
                       row.rsi_month >= 50 ? C.gold : C.red)}
-                  {td(row.week_return != null ? signFmt(row.week_return, 1) + "%" : "—", "wk",
+                  {td(row.week_return != null ? signFmt(row.week_return, 1) + "%" : "—",
                     deltaColor(row.week_return, 0.3))}
-                  {td(row.month_return != null ? signFmt(row.month_return, 1) + "%" : "—", "mo",
+                  {td(row.month_return != null ? signFmt(row.month_return, 1) + "%" : "—",
                     deltaColor(row.month_return, 1))}
                   {td(row.year_return != null ? signFmt(row.year_return, 1) + "%"
-                       : row.ret_1y != null ? signFmt(row.ret_1y, 1) + "%" : "—", "yr",
+                       : row.ret_1y != null ? signFmt(row.ret_1y, 1) + "%" : "—",
                     deltaColor(row.year_return ?? row.ret_1y, 3))}
-                  {td(row.upside != null ? signFmt(row.upside, 1) + "%" : "—", "up",
+                  {td(row.upside != null ? signFmt(row.upside, 1) + "%" : "—",
                     row.upside == null ? C.muted : row.upside >= 15 ? C.green : row.upside >= 0 ? C.gold : C.red)}
-                  {td(row.div_yield != null ? row.div_yield + "%" : "—", "divy", C.muted)}
+                  {td(row.div_yield != null ? row.div_yield + "%" : "—", C.muted)}
                   <td style={{ padding: "7px 6px", fontSize: 12, fontFamily: "monospace", fontWeight: 800,
                     color: t1ok == null ? C.muted : t1ok >= 0.7 ? C.green : t1ok >= 0.5 ? C.gold : C.red,
                     textAlign: "right" }}>{row.tier1_passed != null ? `${row.tier1_passed}/${row.tier1_total}` : "—"}</td>
@@ -714,11 +659,6 @@ function SegmentRankLadder({ ladder, segment, segAvg, stockSym }) {
           </tbody>
         </table>
       </div>
-      {mode === "vs" && (
-        <div style={{ fontSize: 10, color: C.muted, marginTop: 8 }}>
-          Showing delta vs segment average · PE/P/B/MCap as % (negative = cheaper) · others in absolute points (pp)
-        </div>
-      )}
     </div>
   );
 }
@@ -729,7 +669,6 @@ function GvmReport({ r, hist }) {
   const vc = verdictColor(r.verdict);
   const x = r.extras || {};
   if (x && x.pivot) x._cmp = r.price;
-  const segAvg = x.segment_avg || null;
   const segCtx = x.segment_ctx || null;
 
   const benchByPillar = { G: [], V: [], M: [], _: [] };
@@ -737,9 +676,7 @@ function GvmReport({ r, hist }) {
     const p = b.pillar || GVM_PILLAR_MAP[b.key] || "_";
     benchByPillar[p].push(b);
   });
-  Object.keys(benchByPillar).forEach(k => {
-    benchByPillar[k].sort((a, b2) => ((b2.rating ?? -1) - (a.rating ?? -1)));
-  });
+  // keep PARAMS order (no pillar-rating sort — v4)
 
   const verdictDist = {};
   (r.ladder || []).forEach(row => {
@@ -858,7 +795,7 @@ function GvmReport({ r, hist }) {
 
       {r.punchline && (
         <div style={{ background: `${vc}10`, border: `1px solid ${vc}30`, borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: vc, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Expert Verdict</div>
+          <div style={{ fontSize: 10, color: vc, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Model Verdict</div>
           <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{r.punchline}</div>
         </div>
       )}
@@ -919,7 +856,7 @@ function GvmReport({ r, hist }) {
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
             <span style={{ width: 10, height: 10, borderRadius: 3, background: "#dd3a4a" }} />Lower than segment
           </span>
-          <span style={{ color: C.muted }}>· canonical engine-scored metrics only · sorted strengths-first within each pillar</span>
+          <span style={{ color: C.muted }}>· canonical engine-scored metrics only</span>
         </div>
 
         {view === "matrix" && (
@@ -997,7 +934,7 @@ function GvmReport({ r, hist }) {
 
       <FlowStrip flow={x.flow} val={x.valuation} />
 
-      <SegmentRankLadder ladder={r.ladder} segment={r.segment} segAvg={segAvg} stockSym={r.symbol} />
+      <SegmentRankLadder ladder={r.ladder} segment={r.segment} stockSym={r.symbol} />
 
       {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}
       {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
