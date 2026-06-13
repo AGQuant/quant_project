@@ -101,6 +101,8 @@ MCP_TOOLS = [
     {"name":"compute_pcr_intraday","description":"Compute/self-heal 5-min PCR into pcr_intraday (ts optional = single bar, else heal all missing).","inputSchema":{"type":"object","properties":{"ts":{"type":"string"}},"required":[]}},
     {"name":"v8_replay_run","description":"V8 PAPER REPLAY: true 5-min stepped replay from start date. wipe=true clears the paper book first (DESTRUCTIVE). Walks intraday bar-by-bar, point-in-time entries/exits.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"wipe":{"type":"boolean"}},"required":["start"]}},
     {"name":"v8_replay_summary","description":"V8 PAPER REPLAY: current paper book stats — open positions + realized trade stats by basket.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"sector_brief_batch","description":"Generate AI sector briefs for all 129 segments via Claude Haiku and cache in sector_briefs table. Runs in background. refresh=true regenerates all.","inputSchema":{"type":"object","properties":{"refresh":{"type":"boolean"}},"required":[]}},
+    {"name":"sector_brief_status","description":"Check how many of the 129 sector briefs are cached in DB vs pending generation.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"anthropic_chat","description":"Call Claude via Anthropic API (bypasses chat limit). Returns response, tokens used, cost estimate. Use when chat is at 98%+ weekly limit.","inputSchema":{"type":"object","properties":{"prompt":{"type":"string"},"model":{"type":"string"},"max_tokens":{"type":"integer"}},"required":["prompt"]}},
 ]
 
@@ -236,6 +238,10 @@ async def _call_tool(name, args):
             r = await client.post(f"{BASE_URL}/api/v8/replay/run", params=params, headers=h); return r.json()
         elif name == "v8_replay_summary":
             r = await client.get(f"{BASE_URL}/api/v8/replay/summary"); return r.json()
+        elif name == "sector_brief_batch":
+            r = await client.post(f"{BASE_URL}/api/admin/sector/brief/batch", params={"refresh": args.get("refresh", False)}, headers=h); return r.json()
+        elif name == "sector_brief_status":
+            r = await client.get(f"{BASE_URL}/api/admin/sector/brief/status"); return r.json()
         elif name == "anthropic_chat":
             prompt = args["prompt"]
             model = args.get("model", "claude-sonnet-4-6")
