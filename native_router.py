@@ -18,6 +18,18 @@ ARCHITECTURE:
 
   query_log captures every query for native training analytics.
 
+FIXES v7 (13-Jun-2026) — Level-2 v2 100-query test:
+  N. Action verbs + judgment words added to LOOKUP_TRIGGER_WORDS:
+     buy/sell/hold/exit/enter/dump/trim/book/accumulate/recommend/worth/
+     overvalued/undervalued/cheap/expensive. Catches "is SBIN a buy",
+     "should I buy TCS", "sell my TCS", "hold ITC", "is HDFCBANK overvalued".
+     Same words added to exec_lookup stop set + question-prefix words
+     (should/would/could/trust/long/term/year/now/today) so company search
+     finds the actual stock without verb pollution.
+     Tradeoff: "strong buy stocks" now routes to LOOKUP (was RANK with
+     verdict filter). Acceptable — RANK path was already returning
+     NO_RESULT_MSG for that query in production (sector mismatch).
+
 FIXES v6 (13-Jun-2026) — Level-2 100-query test:
   K. COMPARE op routed to LOOKUP (single-stock for now; multi-stock TODO).
      "TCS vs INFY" / "compare HDFC and ICICI" no longer fall through to
@@ -218,6 +230,12 @@ LOOKUP_TRIGGER_WORDS = {
     "analysis", "report", "result", "results", "takeaway", "like",
     # FIX L (v6): news-style queries ("any news on X", "latest on X")
     "news", "update", "latest", "happened",
+    # FIX N (v7): action verbs + judgment words. Catches "is SBIN a buy",
+    # "should I buy TCS", "sell my TCS", "hold ITC", "is HDFCBANK overvalued",
+    # "would you recommend INFY". Action verb + stock symbol → LOOKUP.
+    "buy", "sell", "hold", "exit", "enter", "dump", "trim", "book",
+    "accumulate", "recommend", "worth", "overvalued", "undervalued",
+    "cheap", "expensive",
 }
 
 
@@ -488,6 +506,12 @@ def exec_lookup(cur, slots: Dict) -> str:
         "vs","versus","compare","compared","comparison","peer","peers","or",
         "news","update","updates","latest","happened","happens","any",
         "on","to","with","from","at","in",
+        # v7 additions (FIX N): action verbs + question-prefix words.
+        # Strip these so "is SBIN a buy" searches "sbin" not "is sbin buy".
+        "buy","sell","hold","exit","enter","dump","trim","book",
+        "accumulate","recommend","worth","overvalued","undervalued",
+        "cheap","expensive","should","would","could","trust","long","term",
+        "year","years","now","today","tomorrow","next","next year",
     }
     words = [w.strip(".,?!") for w in raw.lower().split()
              if w.strip(".,?!") not in stop and len(w.strip(".,?!")) >= 2]
