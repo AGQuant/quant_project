@@ -6,20 +6,41 @@ Fuzzy matches arbitrary user queries to one of N canonical Scorr intents,
 each of which maps to a query string that an existing Layer 0 handler catches.
 
 Algorithm:
-  1. Off-topic guard: explicit OFF_TOPIC_WORDS hit → polite redirect
-  2. Score every intent's keyword-bag against query words using:
-     - exact substring match  (+10)
-     - exact word match       (+3)
-     - prefix/suffix stem     (+1 each, for words ≥4 chars)
-     - Levenshtein ≤1         (+2, for typos)
-  3. Best score ≥ 4.0 → return canonical query for Layer 0 reroute
-  4. Else → None (caller shows help hint)
+  1. Filter GENERIC_WORDS (my/what/how/show/etc.) from input — they dilute scoring
+  2. Score every intent's keyword-bag against meaningful query words:
+     - exact substring of full query  (+10)
+     - exact word match               (+3)
+     - prefix or suffix stem (≥4 ch)  (+1)
+     - Levenshtein ≤1 (≥4 ch)         (+2, for typos)
+  3. Best score ≥ 3.0 → return canonical for Layer 0 reroute
+  4. Else → None (caller checks off-topic, then shows hint)
+
+Off-topic: any explicit OFF_TOPIC_WORDS hit → redirect.
+           No domain words + meaningful query length → redirect.
 
 Used by native_router._query_sync as the final fallback before the hint.
+Order in router: classify FIRST, off-topic check ONLY if no intent match.
 """
 
 import re
 from typing import Optional, Tuple, List
+
+# ── Generic / stopwords filtered from query scoring ──────────────────────────
+# These words exist in everyone's vocabulary; matching them creates false
+# positives (e.g. "my journal" vs "my portfolio" — "my" shouldn't differentiate).
+
+GENERIC_WORDS = {
+    "my","the","a","an","and","or","is","are","was","be","been","to","of","for",
+    "with","in","on","at","by","from","as","that","this","its",
+    "what","whats","how","hows","why","when","where","which","who","whom",
+    "show","tell","get","give","fetch","find","display","view","list",
+    "please","can","could","would","should","want","need","like",
+    "do","does","did","have","has","had",
+    "me","you","i","we","they","he","she","them","us",
+    "yes","ok","okay","hi","hello","hey",
+    "any","some","all","many","few","more","most","each","every","really",
+    "quick","slow","fast","easy","hard","new","old",
+}
 
 # ── Canonical Intent Library ─────────────────────────────────────────────────
 # (intent_id, canonical_query, keywords)
@@ -33,7 +54,7 @@ INTENTS: List[Tuple[str, str, List[str]]] = [
     ("v8_mood",        "market mood",
      ["mood","gate","adr","nifty","slot","sentiment","bullish","bearish"]),
     ("v8_qualified",   "qualified now",
-     ["qualified","candidates","watchlist","signals","today","picks"]),
+     ["qualified","candidates","watchlist","signals","today","picks","ideas"]),
     ("v8_paper",       "v8 paper book",
      ["paper","book","positions","open","closed","pnl","unrealised","trades"]),
 
@@ -54,33 +75,32 @@ INTENTS: List[Tuple[str, str, List[str]]] = [
 
     # Daily Digest ───────────────────────────────────────────────────────────
     ("daily_digest",   "daily digest",
-     ["digest","daily","morning","brief","briefing","summary","overview","recap"]),
+     ["digest","daily","morning","brief","briefing","summary","recap"]),
     ("top_gainers",    "top gainers today",
-     ["gainers","gainer","winners","movers","rising","rallying","up","green"]),
+     ["gainers","gainer","winners","movers","rising","rallying","green"]),
     ("top_losers",     "top losers today",
-     ["losers","loser","decliners","falling","dropping","down","red"]),
+     ["losers","loser","decliners","falling","dropping","red"]),
 
     # Market Intelligence ────────────────────────────────────────────────────
     ("server_time",    "server time",
-     ["time","clock","ist","now","when","hours","market","open"]),
+     ["time","clock","ist","hours"]),
     ("pcr",            "pcr",
-     ["pcr","put","call","ratio","options","oi"]),
+     ["pcr","putcall","ratio","options"]),
 
     # Personal Journal ───────────────────────────────────────────────────────
+    # Note: "my" is GENERIC and gets filtered, so journal canonicals must
+    # match without it. Specific journal words remain.
     ("journal_open",   "my personal journal open trades",
-     ["my","journal","personal","open","current","running","live"]),
+     ["journal","personal","open","current","running"]),
     ("journal_closed", "my personal journal closed trades and pnl",
-     ["my","journal","personal","closed","exit","exits","pnl","performance","stats"]),
+     ["journal","personal","closed","exit","exits","pnl","performance","stats"]),
 
     # System ─────────────────────────────────────────────────────────────────
     ("system_health",  "system health",
-     ["health","system","status","check","working","ok","feeds","data"]),
+     ["health","system","status","working","feeds"]),
 ]
 
 # ── Off-topic detection ──────────────────────────────────────────────────────
-# Explicit words that strongly indicate non-investing query.
-# Keeping the list focused — only obvious non-financial domains.
-
 OFF_TOPIC_WORDS = {
     # Sports
     "cricket","football","soccer","hockey","tennis","kabaddi","badminton",
@@ -99,52 +119,35 @@ OFF_TOPIC_WORDS = {
     "horoscope","astrology","zodiac",
 }
 
-# ── Domain keywords ──────────────────────────────────────────────────────────
-# At least one of these in the query strongly suggests on-topic.
-
+# Domain whitelist — used only by off_topic fallback (after classifier misses).
 DOMAIN_WORDS = {
-    # Generic finance
     "stock","stocks","share","shares","trade","trades","trading",
     "invest","investing","investment","investor","market","markets",
     "price","prices","buy","sell","long","short","pnl","profit","loss",
     "gain","gainer","loser","return","returns","growth","value","momentum",
     "score","rank","top","best","high","low",
-    # Indian indices / exchanges
     "nifty","sensex","banknifty","nse","bse","sebi","mcx",
-    # Sectors
     "bank","banks","banking","pharma","auto","it","tech","technology",
     "fmcg","cement","steel","power","metal","metals","energy","oil","gas",
     "consumer","retail","textile","sugar","paper","mining","fertilizer",
     "chemical","chemicals","telecom","media","defence","defense","shipping",
     "logistics","hotel","hospitality","realty","property","infra","epc",
     "renewable","solar","healthcare","hospital","insurance","nbfc","amc",
-    # Caps / classifications
     "largecap","midcap","smallcap","microcap","large","mid","small","micro",
-    # Scorr products
     "scorr","max","aicio","cio","gvm","v8","qb","v10","v9","claude",
-    # Technical
     "rsi","pe","roce","opm","margin","dma","ema","macd","fibonacci","fib",
     "pivot","support","resistance","breakout","reversal","consolidation",
     "dividend","yield","fii","dii","promoter","institutional","mcap",
     "earnings","result","results","quarter","quarterly","annual","report",
-    # Trade-flow
-    "check","review","journal","personal","my","mine","open","closed",
-    "entry","exit","target","stoploss","sl","slot","slots","basket",
-    "watchlist","qualified","candidate","candidates","signal","signals",
-    "alert","alerts","mood","gate","adr","pcr","puts","calls","oi",
-    "futures","options","fno","intraday","swing","positional",
-    "paper","portfolio","position","positions","trade","book",
-    # Time
-    "now","today","week","weekly","month","monthly","yearly","daily",
+    "check","review","journal","personal","mine","entry","exit","target",
+    "stoploss","sl","slot","slots","basket","watchlist","qualified",
+    "candidate","candidates","signal","signals","alert","alerts",
+    "mood","gate","adr","pcr","puts","calls","oi","futures","options",
+    "intraday","swing","positional","paper","portfolio","position","positions",
+    "book","today","week","weekly","month","monthly","yearly","daily",
     "digest","brief","time","clock","ist",
-    # Misc
-    "company","companies","corporate","equity","equities","fundamental",
-    "technical","alpha","beta","strategy","backtest","posted","reported",
-    "good","strong","weak","outperform","underperform","beat","miss",
-    "find","show","list","get","fetch","display","view","tell",
-    "what","whats","which","how","hows","why","when","where",
     "global","dow","nasdaq","sp500","gold","silver","crude","commodity",
-    "commodities","currency","usdinr","rupee","dollar","yen","euro",
+    "currency","usdinr","rupee","dollar","yen","euro",
 }
 
 OFF_TOPIC_REDIRECT = (
@@ -176,18 +179,30 @@ def _lev(a: str, b: str, cap: int = 2) -> int:
 
 # ── Off-topic check ──────────────────────────────────────────────────────────
 def is_off_topic(query: str) -> bool:
-    """True if query has off-topic words AND no domain words."""
+    """
+    Returns True if query is clearly off-topic.
+
+    Called by native_router ONLY AFTER classify() returns None.
+    So this is a safety net for queries the classifier couldn't match.
+
+    Rules:
+      1. Explicit OFF_TOPIC_WORDS hit → off-topic (cricket beats "score")
+      2. Zero DOMAIN_WORDS hits and query has ≥3 words → off-topic (chit-chat)
+      3. Otherwise → on-topic (fall through to help hint)
+    """
     if not query: return False
     words = set(re.findall(r"[a-z]+", query.lower()))
     if not words: return False
-    has_off_topic = bool(words & OFF_TOPIC_WORDS)
+
+    # Rule 1: explicit off-topic word always wins
+    if words & OFF_TOPIC_WORDS:
+        return True
+
+    # Rule 2: no domain words + non-trivial query → off-topic
     has_domain = bool(words & DOMAIN_WORDS)
-    # Strong off-topic word with NO domain word → off-topic
-    if has_off_topic and not has_domain:
+    if not has_domain and len(words) >= 3:
         return True
-    # No off-topic word, no domain word, query is non-trivial → probably off-topic
-    if not has_off_topic and not has_domain and len(words) >= 2:
-        return True
+
     return False
 
 
@@ -198,23 +213,26 @@ def _score_intent(query_lower: str, query_words: List[str],
     bag_words = set(re.findall(r"[a-z]+", bag_text))
     score = 0.0
 
-    # Exact substring of the full query
+    # Exact substring of the full query (rare but high signal)
     if query_lower in bag_text:
         score += 10.0
 
-    # Per-word scoring
-    for w in query_words:
-        if len(w) < 2: continue
+    # Filter generic words BEFORE scoring — they dilute and false-match.
+    meaningful = [w for w in query_words
+                  if w not in GENERIC_WORDS and len(w) >= 2]
+
+    for w in meaningful:
         if w in bag_words:
             score += 3.0
         elif len(w) >= 4:
+            # Prefix or suffix stem match (typo-tolerant)
             stem_pre = w[:4]
             stem_suf = w[-4:]
             for bw in bag_words:
                 if bw.startswith(stem_pre) or bw.endswith(stem_suf):
                     score += 1.0
                     break
-            # Levenshtein for typo tolerance
+            # Levenshtein ≤1 for typos
             for kw in kws:
                 if abs(len(w) - len(kw)) <= 2 and _lev(w, kw, cap=1) <= 1:
                     score += 2.0
@@ -223,9 +241,13 @@ def _score_intent(query_lower: str, query_words: List[str],
     return score
 
 
-def classify(query: str, min_score: float = 4.0) -> Optional[Tuple[str, str, float]]:
+def classify(query: str, min_score: float = 3.0) -> Optional[Tuple[str, str, float]]:
     """
     Returns (intent_id, canonical_query, score) if best score >= min_score, else None.
+
+    min_score=3.0 means one strong meaningful keyword match is sufficient.
+    Caller (native_router) reroutes the canonical query through Layer 0/1
+    which has authoritative handlers.
     """
     if not query: return None
     ql = query.lower().strip()
