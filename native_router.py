@@ -3,32 +3,38 @@ Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
 
 ARCHITECTURE:
-  Layer 0:   Hardcoded commands (trade check, virtual dashboard, health, PCR, QB, mood, qualified,
-             personal_journal, v8_paper, daily_digest, gainers/losers, server_time)
+  Layer 0a:  Trade Check v3.3 (string triggers + regex pattern)
+  Layer 0:   Hardcoded commands (dashboard, mood, qb, pcr, health, qualified)
+  Layer 0b:  Personal journal (open/closed)
+  Layer 0c:  V8 paper book
+  Layer 0d:  Daily digest
+  Layer 0e:  Top gainers / losers
+  Layer 0f:  Server time / market state ("what time"/"market open"/"market hours")
+  Layer 0g:  Global indices (NEW 13-Jun-2026)
   Layer 1:   Grammar parser+executor (RANK/FILTER/SCREEN/LOOKUP/HISTORY/SECTOR_VIEW)
-  Layer 1.5: Native intent classifier (native_intent.py) — pure Python, $0, fuzzy + Levenshtein.
-             Off-topic guard, typo-tolerance, natural-language reroute to Layer 0 canonical.
-  Layer 2:   Fallback hint → Claude
+  Layer 1.5: Native intent classifier — pure Python, $0
+             Order: explicit off-topic → classify → soft off-topic
+  Layer 2:   Fallback hint → suggest Claude toggle
 
   query_log captures every query for native training analytics.
 
-NOTE (10-Jun-2026): mom_2d = 2-day momentum (close vs T-2). Renamed from day_change.
-  Display label is "2D Mom%". Grammar metric alias "day change" maps to mom_2d.
-
-NOTE (11-Jun-2026): 'trade check <symbol> <long|short>' routes to native_trade_check
-  (v3.3 objective subset, $0). Subjective chart rules flagged for human confirmation.
-
-NOTE (13-Jun-2026): Added Layer 0b-0f handlers to cover Max AICIO card library:
-  - personal_journal (open / closed / pnl)
-  - v8_paper (positions + trades + summary composite)
-  - daily_digest (gate + qualified + signals + gainers composite)
-  - top_gainers / top_losers
-  - server_time / NSE state
-
-NOTE (13-Jun-2026 v2): Added Layer 1.5 — pure-Python intent classifier (native_intent.py).
-  No LLM. No API. Catches off-topic queries, typos, natural-language phrasing.
-  Reroutes to canonical Layer 0 handler. Recursion guard via _depth param.
-  Intercepts grammar's "No stocks found" soft-fail and retries via intent classifier.
+FIXES (13-Jun-2026 v3) — from 100-query test:
+  A. LOOKUP_TRIGGER_WORDS added → _parse_operation now returns "LOOKUP" for
+     "analysis/result/details/profile/takeaway/like" without ranking signal.
+     execute_grammar's has_signal now includes "LOOKUP" in the op gate.
+  B. resolve_sector() uses re.search(r"\\bALIAS\\b") for single-word aliases —
+     prevents "it" matching inside "favorite/ITC/Bharti". Multi-word aliases
+     keep substring match (they're unambiguous).
+  C. native_intent split into is_off_topic_explicit + is_off_topic. Router
+     order: explicit off-topic → intent classify → soft off-topic. Stops
+     "whats the weather today" misrouting to v8_qualified on weak "today" score.
+  D. Layer 0a accepts "evaluate X long", "check X long" via TRADE_CHECK_PATTERN.
+  E. Layer 0g: global indices handler (was hint fallback before).
+  F. Layer 0f extended: "what time", "market open", "market closed",
+     "current time" all hit server_time handler.
+  G. exec_lookup stop set expanded: "analysis", "report", "like", "stocks",
+     "key", "top", "by", "my" — strips noise so company-name search finds the
+     actual stock instead of false-matching unrelated words.
 """
 
 import os
@@ -40,57 +46,38 @@ from typing import Optional, Tuple, Dict, Any
 import psycopg
 
 from native_trade_check import native_trade_check
-from native_intent import classify as intent_classify, is_off_topic, OFF_TOPIC_REDIRECT
+from native_intent import (classify as intent_classify,
+                           is_off_topic, is_off_topic_explicit,
+                           OFF_TOPIC_REDIRECT)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # ── SECTOR ALIAS MAP ─────────────────────────────────────────────────────────
-# Maps investor shorthand → exact DB segment prefix (used in ILIKE '{val}%')
-# Use full prefix where needed to avoid substring collisions (e.g. IT vs Capital)
-
 SECTOR_ALIASES = {
-    # IT/Tech — must use 'IT - ' prefix to avoid matching 'Capital', 'Spirits' etc.
     "tech": "IT - ", "it": "IT - ", "software": "IT - ",
     "technology": "IT - ", "infotech": "IT - ",
-    # Banks
     "bank": "Banks", "banking": "Banks", "banks": "Banks",
     "psu bank": "PSU Banks", "private bank": "Private Banks",
     "small finance bank": "Small Finance Banks",
-    # Pharma
     "pharma": "Pharma", "drug": "Pharma", "drugs": "Pharma",
-    # Auto
     "auto": "Auto", "automobile": "Auto", "automotive": "Auto",
-    # FMCG
     "fmcg": "FMCG", "consumer goods": "FMCG",
-    # Realty
     "realty": "Realty", "real estate": "Realty", "property": "Realty",
-    # Power/Energy
     "power": "Power", "energy": "Power",
     "renewable": "Renewable Energy", "solar": "Solar",
-    # Defence
     "defence": "Defence", "defense": "Defence",
-    # Cement
     "cement": "Cement",
-    # Steel/Metal
     "steel": "Steel", "metal": "Steel", "aluminium": "Aluminium", "metals": "Steel",
-    # Chemicals
     "chemical": "Chemicals", "chemicals": "Chemicals",
     "specialty chemical": "Specialty Chemicals", "agro chemical": "Agro Chemicals",
-    # Insurance
     "insurance": "Insurance", "life insurance": "Life Insurance",
-    # NBFC/Finance
     "nbfc": "NBFC", "housing finance": "Housing Finance",
     "microfinance": "Microfinance", "msme": "MSME Finance",
-    # Infrastructure
     "infra": "Infrastructure", "infrastructure": "Infrastructure", "epc": "EPC",
-    # Telecom
     "telecom": "Telecom", "telco": "Telecom",
-    # Logistics
     "logistics": "Logistics",
-    # Hospitals/Healthcare
     "hospital": "Hospitals", "hospitals": "Hospitals",
     "diagnostic": "Diagnostics", "diagnostics": "Diagnostics",
-    # Others
     "oil": "Oil", "refinery": "Refineries", "mining": "Mining",
     "fertilizer": "Fertilizers", "fertilizers": "Fertilizers",
     "retail": "Retail", "sugar": "Sugar",
@@ -110,13 +97,25 @@ SECTOR_ALIASES = {
 
 
 def resolve_sector(raw: Optional[str]) -> Optional[str]:
-    """Resolve investor shorthand to DB segment keyword via alias map."""
+    """
+    Resolve investor shorthand to DB segment keyword.
+
+    FIX B (13-Jun-2026 v3): Single-word aliases use word-boundary match.
+    Prevents "it" inside "favorite/ITC/Bharti" → IT sector misfire.
+    Multi-word aliases keep substring match (unambiguous).
+    """
     if not raw:
         return raw
     rl = raw.lower().strip()
     for alias in sorted(SECTOR_ALIASES.keys(), key=len, reverse=True):
-        if alias in rl:
-            return SECTOR_ALIASES[alias]
+        if " " in alias:
+            # Multi-word: substring is safe ("small finance bank" is unique)
+            if alias in rl:
+                return SECTOR_ALIASES[alias]
+        else:
+            # Single-word: enforce word boundary
+            if re.search(r"\b" + re.escape(alias) + r"\b", rl):
+                return SECTOR_ALIASES[alias]
     return raw
 
 
@@ -174,7 +173,6 @@ METRIC_MAP = {
 
 VM_ALIASES = {"vm", "vm score", "v m", "value momentum", "value and momentum"}
 
-# cap_category in DB is lowercase: large, mid, small, micro
 CAP_MAP = {
     "large cap": "large", "largecap": "large", "large": "large",
     "mid cap":   "mid",   "midcap":   "mid",   "mid":   "mid",
@@ -188,6 +186,15 @@ VERDICT_MAP = {
 }
 
 BELOW_WORDS = {"below","under","less","fewer","<","<=","maximum","max","atmost"}
+
+# FIX A (13-Jun-2026 v3): LOOKUP trigger words.
+# When any of these appear in the query AND there's no metric+threshold combo,
+# _parse_operation returns "LOOKUP" — routing to exec_lookup which finds a
+# specific stock by name/symbol rather than ranking a list.
+LOOKUP_TRIGGER_WORDS = {
+    "about", "overview", "profile", "tell", "details", "info",
+    "analysis", "report", "takeaway", "like",
+}
 
 
 def _parse_count(q: str, default: int = 10) -> int:
@@ -229,6 +236,8 @@ def _parse_sector(q: str) -> Optional[str]:
         "segment","industry","cap","large","mid","small","micro","history",
         "trend","historical","past","last","return","returns","growth","value",
         "momentum","change","latest","current","today","now","good","high","vm",
+        # FIX (v3): generic words that previously dragged "it" into sector match
+        "time","like","analysis","report","takeaway","key",
     }
     cleaned = re.sub(r"top\s+\d+|\d+\s+stocks?", "", q)
     cleaned = re.sub(
@@ -260,6 +269,12 @@ def _parse_verdict(q: str) -> Optional[str]:
 
 
 def _parse_operation(q: str) -> str:
+    """
+    FIX A (v3): LOOKUP now reachable. When a trigger word is present and the
+    query lacks a metric+threshold combo (which signals FILTER), return LOOKUP.
+    LOOKUP must come BEFORE FILTER to keep "RELIANCE analysis" out of FILTER's path.
+    """
+    # RANK first (explicit "top/best/highest")
     if any(w in q.split() for w in {"top","best","highest","leaders","leading"}):
         return "RANK"
     if any(w in q for w in ["vs ","versus","compare","peer"]):
@@ -268,7 +283,12 @@ def _parse_operation(q: str) -> str:
         return "HISTORY"
     if any(w in q for w in ["sector rating","sector view","sectors","segments"]):
         return "SECTOR_VIEW"
-    if _parse_metric(q) and _parse_threshold(q):
+    # LOOKUP: trigger word present, no metric+threshold
+    has_lookup_word = any(w in q for w in LOOKUP_TRIGGER_WORDS)
+    has_metric_thresh = bool(_parse_metric(q)) and bool(_parse_threshold(q))
+    if has_lookup_word and not has_metric_thresh:
+        return "LOOKUP"
+    if has_metric_thresh:
         return "FILTER"
     if re.search(r"\band\b", q) and _parse_metric(q):
         return "SCREEN"
@@ -321,11 +341,6 @@ def _build_from(join_type: str, needs_input: bool = False) -> str:
 
 
 def _sector_condition(sector: Optional[str]) -> Optional[str]:
-    """
-    Build the segment WHERE condition.
-    Aliases ending with ' - ' or ' ' use prefix match (ILIKE 'IT - %').
-    Others use substring match (ILIKE '%Pharma%').
-    """
     if not sector:
         return None
     if sector.endswith(" ") or sector.endswith("- "):
@@ -416,10 +431,21 @@ def exec_screen(cur, slots: Dict) -> str:
 
 
 def exec_lookup(cur, slots: Dict) -> str:
+    """
+    FIX G (v3): expanded stop set so noise words ("analysis", "report",
+    "like", "stocks", "key", "top", "by", "my") are stripped before company
+    search. Prevents "key takeaway for ITC" from searching "key itc" and
+    falsely matching a different "Key..." company.
+    """
     raw = slots["raw"]
-    stop = {"about","overview","profile","tell","what","details","info","me",
-            "the","give","show","for","is","a","an","of","gvm","score","result",
-            "takeaway","and","can","you","please"}
+    stop = {
+        "about","overview","profile","tell","what","whats","details","info","me",
+        "the","give","show","for","is","a","an","of","gvm","score","result",
+        "results","takeaway","and","can","you","please",
+        # v3 additions:
+        "analysis","report","like","stocks","stock","key","top","best","by",
+        "my","mine","i","be","share","shares",
+    }
     words = [w.strip(".,?!") for w in raw.lower().split()
              if w.strip(".,?!") not in stop and len(w.strip(".,?!")) >= 2]
     company = " ".join(words).strip()
@@ -513,10 +539,11 @@ def exec_sector_view(cur, slots: Dict) -> str:
 def execute_grammar(query: str) -> Optional[str]:
     slots = parse_query(query)
     op    = slots["operation"]
+    # FIX A (v3): LOOKUP added to has_signal so exec_lookup runs when op==LOOKUP.
     has_signal = (
         slots["metric"] or slots["sector"] or slots["cap"] or
         slots["verdict"] or slots["threshold"] or slots["vm"] or
-        op in ("HISTORY", "SECTOR_VIEW")
+        op in ("HISTORY", "SECTOR_VIEW", "LOOKUP")
     )
     if not has_signal:
         return None
@@ -674,13 +701,25 @@ def _virtual_dashboard(cur) -> str:
     return "\n\n".join(parts)
 
 
+# ── FIX D (v3): Trade Check pattern ──────────────────────────────────────────
+# Catches "evaluate X long", "check X short", "trade check X long/short", etc.
+# Strict pattern: must end with "long" or "short" to avoid false positives.
+TRADE_CHECK_PATTERN = re.compile(
+    r"^(trade\s+check|evaluate|check)\s+([A-Za-z][A-Za-z0-9\-_]+)\s+(long|short)$",
+    re.IGNORECASE
+)
+
+# ── FIX F (v3): Layer 0f extended triggers ───────────────────────────────────
+TIME_TRIGGERS = ["server time", "ist time", "market hours",
+                 "market open", "market closed",
+                 "what time", "current time"]
+
+
 # ── MAIN QUERY HANDLER ───────────────────────────────────────────────────────
 
 def _query_sync(query: str, _depth: int = 0) -> str:
     """
-    Main query handler.
-    _depth: recursion guard. 0 = original call; 1 = Layer 1.5 reroute.
-            Prevents Layer 1.5 from firing on already-canonicalized queries.
+    Main query handler. _depth guards Layer 1.5 recursion.
     """
     q = query.lower().strip()
     t0 = time.time()
@@ -689,9 +728,13 @@ def _query_sync(query: str, _depth: int = 0) -> str:
         _log_query(query, mode, op, metric, sector, resolved,
                    int((time.time()-t0)*1000))
 
-    # ── LAYER 0a: Native v3.3 Trade Check (own DB connection inside) ──────
-    if any(k in q for k in ["trade check", "trade journal", "journal check",
-                            "evaluate stock", "trade card"]):
+    # ── LAYER 0a: Trade Check ───────────────────────────────────────────────
+    trade_check_triggered = (
+        any(k in q for k in ["trade check", "trade journal", "journal check",
+                              "evaluate stock", "trade card"])
+        or TRADE_CHECK_PATTERN.match(q)
+    )
+    if trade_check_triggered:
         result = native_trade_check(query)
         log("native", "trade_check_v33")
         return result
@@ -791,9 +834,6 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                                     "my closed trades","journal closed","journal open",
                                     "journal pnl","journal stats","my trades"]):
                 want_open = "open" in q
-                want_closed = ("closed" in q or "pnl" in q or "stats" in q or
-                               "performance" in q) and not want_open
-
                 if want_open:
                     cur.execute("""
                         SELECT trade_date, symbol, direction, qty,
@@ -813,7 +853,6 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                     return (f"**My Journal — Open Trades ({len(rows)})**\n"
                             f"{fmt_table(['Date','Symbol','Side','Qty','Entry','SL','Target','Days','Basket'], data)}")
 
-                # closed (default if not explicitly open)
                 cur.execute("""
                     SELECT trade_date, symbol, direction, qty,
                            entry_price, exit_price, pnl, result, holding_days
@@ -835,7 +874,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                         f"Total P&L: {total_pnl:+,.0f} · Wins: {wins}/{len(rows)} ({acc}%)\n\n"
                         f"{fmt_table(['Date','Symbol','Side','Qty','Entry','Exit','P&L','Result','Days'], data)}")
 
-            # ── LAYER 0c: V8 Paper Book (positions + trades + summary) ──────
+            # ── LAYER 0c: V8 Paper Book ─────────────────────────────────────
             if (("v8 paper" in q) or ("paper open" in q) or ("paper closed" in q)
                 or ("paper book" in q) or ("paper positions" in q)
                 or ("paper trades" in q) or ("paper pnl" in q) or ("paper summary" in q)):
@@ -859,7 +898,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 log("native","v8_paper_book")
                 return "\n\n".join(parts)
 
-            # ── LAYER 0d: Daily Digest (composite) ──────────────────────────
+            # ── LAYER 0d: Daily Digest ──────────────────────────────────────
             if "daily digest" in q or q.strip() == "digest" or "morning brief" in q:
                 parts = [f"**Daily Digest — {datetime.now().strftime('%d-%b-%Y %H:%M IST')}**"]
                 for fn in [_vd_market_gate, _vd_qualified, _vd_top_signals]:
@@ -884,7 +923,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 log("native","daily_digest")
                 return "\n\n".join(parts)
 
-            # ── LAYER 0e: Top Gainers / Losers ──────────────────────────────
+            # ── LAYER 0e: Gainers / Losers ──────────────────────────────────
             if "top gainers" in q or "biggest movers" in q or "gainers today" in q:
                 cur.execute("""
                     SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2),
@@ -915,8 +954,8 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 log("native","losers")
                 return f"**Top Losers Today**\n{fmt_table(['Symbol','Company','Segment','GVM','Day%'], d)}"
 
-            # ── LAYER 0f: Server Time / NSE State ───────────────────────────
-            if ("server time" in q) or ("ist time" in q) or ("market hours" in q):
+            # ── LAYER 0f: Server Time / Market State (FIX F v3) ─────────────
+            if any(t in q for t in TIME_TRIGGERS):
                 now = datetime.now()
                 is_weekday = now.weekday() < 5
                 t = now.time()
@@ -927,13 +966,40 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                         f"NSE: {state} · Hours: Mon-Fri 09:15 – 15:30 IST\n"
                         f"Day: {now.strftime('%A')}")
 
+            # ── LAYER 0g: Global Indices (NEW — FIX E v3) ───────────────────
+            if ("global indices" in q or "global markets" in q
+                or "world markets" in q or "global market" in q):
+                try:
+                    cur.execute("""
+                        SELECT g.name, g.category, g.price, g.chg_pct
+                        FROM global_indices g
+                        JOIN (SELECT symbol, MAX(quote_date) AS md
+                              FROM global_indices GROUP BY symbol) m
+                          ON g.symbol=m.symbol AND g.quote_date=m.md
+                        ORDER BY CASE g.category
+                            WHEN 'index' THEN 1 WHEN 'volatility' THEN 2
+                            WHEN 'commodity' THEN 3 WHEN 'currency' THEN 4
+                            ELSE 5 END, g.name
+                    """)
+                    rows = cur.fetchall()
+                    if rows:
+                        d = [(r[0][:22], (r[1] or "")[:10],
+                              f"{_f(r[2]):.2f}", f"{_f(r[3]):+.2f}%") for r in rows]
+                        log("native","global_indices")
+                        return f"**Global Indices**\n{fmt_table(['Name','Category','Price','Chg%'], d)}"
+                    log("native","global_indices","","",False)
+                    return "No global indices data."
+                except Exception as e:
+                    try: cur.connection.rollback()
+                    except: pass
+                    log("native","global_indices","","",False)
+                    return f"Global indices unavailable: {str(e)[:80]}"
+
             # ── LAYER 1: Grammar ────────────────────────────────────────────
 
             slots = parse_query(q)
             grammar_result = execute_grammar(q)
 
-            # Grammar succeeded with a REAL result → return it.
-            # Grammar's "No stocks found..." → treat as soft-fail, fall through to Layer 1.5.
             NO_RESULT_MSG = "No stocks found. Try a broader query or toggle Claude ON."
             if grammar_result is not None and grammar_result != NO_RESULT_MSG:
                 log("grammar", slots["operation"],
@@ -945,28 +1011,35 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 slots["metric"][1] if slots["metric"] else "",
                 slots["sector"] or "", False)
 
-            # ── LAYER 1.5: Native Intent Classifier (pure Python, $0) ───────
-            # Off-topic guard + fuzzy keyword + Levenshtein typo-tolerance.
-            # Reroutes ONCE to a canonical query that hits an existing Layer 0
-            # handler. _depth guard prevents infinite recursion.
+            # ── LAYER 1.5: Native Intent Classifier ─────────────────────────
+            # FIX C (v3): explicit off-topic → classify → soft off-topic.
+            # Previously soft-off-topic ran first and false-flagged
+            # "morning briefing please". Reorder also stops "weather today"
+            # from matching v8_qualified on weak "today" score.
             if _depth == 0:
-                if is_off_topic(query):
+                # Priority 1: explicit off-topic word
+                if is_off_topic_explicit(query):
                     log("native", "off_topic")
                     return OFF_TOPIC_REDIRECT
+                # Priority 2: intent classifier reroute
                 intent = intent_classify(query)
                 if intent is not None:
                     intent_id, canonical_q, score = intent
                     log("native", f"intent_{intent_id}")
                     return _query_sync(canonical_q, _depth=1)
+                # Priority 3: soft off-topic (no domain words)
+                if is_off_topic(query):
+                    log("native", "off_topic")
+                    return OFF_TOPIC_REDIRECT
 
             return ("⚡ Native — $0. Try:\n"
-                    "• 'trade check RELIANCE long' | 'check INFY short'\n"
+                    "• 'trade check RELIANCE long' | 'check INFY short' | 'evaluate TCS long'\n"
                     "• 'Virtual Dashboard V8' | 'market mood' | 'QB summary' | 'PCR'\n"
                     "• 'my journal open trades' | 'my journal closed trades'\n"
                     "• 'V8 paper book' | 'top gainers' | 'top losers' | 'daily digest'\n"
                     "• 'top 10 pharma gvm above 7.5' | 'tech stocks vm score'\n"
-                    "• 'sector ratings' | 'GVM history HDFC bank'\n"
-                    "• 'overview Torrent Pharma' | 'largecap roce above 15'\n"
+                    "• 'sector ratings' | 'GVM history HDFC bank' | 'global indices'\n"
+                    "• 'overview Torrent Pharma' | 'RELIANCE analysis' | 'whats SBIN like'\n"
                     "Or toggle Claude ON for free-text queries.")
 
 
