@@ -26,7 +26,6 @@
   html,body{min-height:100%;background:var(--bg);color:var(--txt);
     font-family:var(--font);font-size:13px;line-height:1.55}
 
-  /* ── Nav ── */
   .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
     border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
     position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
@@ -39,20 +38,15 @@
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
-  /* ── Layout ── */
   .wrap{max-width:720px;margin:0 auto;padding:22px 14px 70px}
-
-  /* ── Page header ── */
   .page-head{margin-bottom:20px}
   .page-title{font-size:22px;font-weight:800;color:var(--txt);letter-spacing:-.3px}
   .page-title span{color:var(--cyan)}
   .page-sub{font-size:10.5px;color:var(--dim);letter-spacing:1.8px;text-transform:uppercase;margin-top:3px}
 
-  /* ── Card ── */
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
     padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
 
-  /* ── Symbol input ── */
   .sym-wrap{position:relative}
   .sym-input{width:100%;background:var(--bg);border:1.5px solid var(--line2);border-radius:10px;
     color:var(--txt);font-family:var(--font);font-size:17px;font-weight:700;
@@ -73,7 +67,6 @@
   .ac-gvm{font-size:10.5px;font-weight:700;color:var(--cyan);flex-shrink:0;
     background:var(--cyan-d);padding:2px 7px;border-radius:6px}
 
-  /* ── Side buttons ── */
   .side-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
   .side-btn{padding:12px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
     color:var(--mut);font-family:var(--font);font-size:13.5px;font-weight:700;cursor:pointer;
@@ -82,7 +75,6 @@
   .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
 
-  /* ── Gates ── */
   .gate-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}
   .gate{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:12px}
   .gate-q{font-size:11px;color:var(--mut);line-height:1.45;margin-bottom:9px;min-height:28px}
@@ -94,14 +86,12 @@
   .gate-opt.yes.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .gate-opt.no.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
 
-  /* ── Run button ── */
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
     cursor:pointer;letter-spacing:.2px;transition:.15s;box-shadow:0 2px 8px rgba(37,99,235,.25)}
   .run-btn:hover{background:#1d52d5;box-shadow:0 4px 14px rgba(37,99,235,.32)}
   .run-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
 
-  /* ── Quick chips ── */
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:13px;
     border-top:1px solid var(--line)}
   .chip-label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1.2px;
@@ -111,7 +101,6 @@
     font-family:var(--mono)}
   .chip:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-d)}
 
-  /* ── Loading ── */
   .loading{display:none;text-align:center;padding:32px 20px;color:var(--cyan);
     font-weight:600;font-size:13px}
   .loading.show{display:block}
@@ -120,13 +109,11 @@
     border-radius:50%;animation:spin .7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* ── Error ── */
   .err{display:none;padding:12px 16px;border-radius:9px;background:var(--red-d);
     border:1px solid var(--red-b);color:var(--red);font-size:12.5px;font-weight:600;
     margin-bottom:14px}
   .err.show{display:block}
 
-  /* ── Result ── */
   .result{display:none}
   .result.show{display:block}
   .r-company{font-size:16px;font-weight:800;color:var(--txt);display:block;margin-bottom:6px}
@@ -142,7 +129,6 @@
   .r-gvm.lo{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
   .r-ts{font-size:10px;color:var(--dim)}
 
-  /* ── Verdict hero ── */
   .verdict-card{border-radius:11px;padding:16px 18px;margin-bottom:0;border:1.5px solid}
   .verdict-card.strong{background:var(--grn-d);border-color:var(--grn-b)}
   .verdict-card.valid{background:var(--cyan-d);border-color:#a5d8e8}
@@ -167,14 +153,12 @@
     color:var(--txt);width:54px;text-align:right;flex-shrink:0}
   .v-bar-need{font-size:10px;color:var(--mut);width:42px;flex-shrink:0}
 
-  /* ── Tier label ── */
   .tier-label{font-size:10.5px;font-weight:700;color:var(--mut);text-transform:uppercase;
     letter-spacing:1.2px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}
   .tier-score{font-family:var(--mono);font-size:10.5px;color:var(--txt);font-weight:400;
     background:var(--panel2);border:1px solid var(--line);padding:2px 9px;border-radius:5px;
     text-transform:none;letter-spacing:0}
 
-  /* ── Rules table ── */
   .rules-table{width:100%;border-collapse:separate;border-spacing:0;
     border:1px solid var(--line2);border-radius:9px;overflow:hidden;font-size:11.5px}
   .rules-table th{background:var(--panel2);color:var(--dim);padding:7px 10px;text-align:left;
@@ -202,12 +186,10 @@
     color:var(--amber);background:var(--amber-d);border:1px solid var(--amber-b);
     padding:2px 8px;border-radius:5px}
 
-  /* ── Legend ── */
   .legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 14px;background:var(--bg);
     border:1px solid var(--line);border-radius:8px;margin-top:12px;font-size:10.5px;color:var(--mut)}
   .legend-item{display:flex;align-items:center;gap:5px}
   .leg-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-
   .foot{font-size:10px;color:var(--dim);text-align:center;margin-top:18px;line-height:1.8}
 
   @media(max-width:540px){
@@ -273,7 +255,6 @@
   <div class="err" id="err"></div>
 
   <div class="result" id="result">
-    <!-- header + verdict -->
     <div class="card" style="padding:16px 18px">
       <span class="r-company" id="rCompany"></span>
       <div class="r-pills">
@@ -301,24 +282,16 @@
       </div>
     </div>
 
-    <!-- tier 1 -->
     <div class="card" style="padding:14px 18px">
-      <div class="tier-label">
-        Tier 1 — Process Rules
-        <span class="tier-score" id="t1Score"></span>
-      </div>
+      <div class="tier-label">Tier 1 — Process Rules<span class="tier-score" id="t1Score"></span></div>
       <table class="rules-table">
         <thead><tr><th>Rule</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
         <tbody id="t1Body"></tbody>
       </table>
     </div>
 
-    <!-- tier 2 -->
     <div class="card" style="padding:14px 18px">
-      <div class="tier-label">
-        Tier 2 — Entry Filters
-        <span class="tier-score" id="t2Score"></span>
-      </div>
+      <div class="tier-label">Tier 2 — Entry Filters<span class="tier-score" id="t2Score"></span></div>
       <table class="rules-table">
         <thead><tr><th>Filter</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
         <tbody id="t2Body"></tbody>
@@ -335,7 +308,8 @@
 </div>
 
 <script>
-let side='LONG', gate1=null, gate2=null, acSel=-1, acItems=[], acTimer=null;
+let side='LONG', gate1=null, gate2=null;
+let acSel=-1, acItems=[], acTimer=null, runTimer=null;  // ← runTimer added
 const QUICK=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
 
 function renderChips(){
@@ -397,6 +371,7 @@ function renderAC(){
 }
 function pickAC(i){
   const it=acItems[i];if(!it)return;
+  clearTimeout(runTimer);  // cancel debounce — pickAC calls run() directly
   document.getElementById('sym').value=(it.symbol||it.nse_code||'').toUpperCase();
   closeAC();run();
 }
@@ -408,16 +383,21 @@ function moveAC(dir){
   acSel=Math.max(0,Math.min(items.length-1,(acSel<0?-1:acSel)+dir));
   items[acSel].classList.add('sel');
 }
+
 const symEl=document.getElementById('sym');
 symEl.addEventListener('input',function(){
+  const v=this.value.trim();
   clearTimeout(acTimer);
-  acTimer=setTimeout(()=>fetchAC(this.value.trim()),200);
+  clearTimeout(runTimer);
+  acTimer=setTimeout(()=>fetchAC(v),200);          // autocomplete: 200ms
+  if(v.length>=2) runTimer=setTimeout(()=>run(),700); // ← auto-run: 700ms
 });
 symEl.addEventListener('keydown',function(e){
   if(e.key==='ArrowDown'){e.preventDefault();moveAC(1);}
   else if(e.key==='ArrowUp'){e.preventDefault();moveAC(-1);}
   else if(e.key==='Enter'){
     e.preventDefault();
+    clearTimeout(runTimer);
     if(acSel>=0&&document.getElementById('acDrop').classList.contains('show')){pickAC(acSel);}
     else{closeAC();run();}
   }
@@ -430,9 +410,7 @@ function stateBadge(st){
   if(st==='fail')return '<span class="badge-fail">✗ FAIL</span>';
   return '<span class="badge-na">🟡</span>';
 }
-function rowClass(st){
-  return st==='pass'?'row-pass':st==='fail'?'row-fail':'row-na';
-}
+function rowClass(st){return st==='pass'?'row-pass':st==='fail'?'row-fail':'row-na';}
 
 async function run(){
   const sym=document.getElementById('sym').value.trim().toUpperCase();
@@ -465,8 +443,7 @@ function render(d){
   sd.className='r-side-badge '+d.side;
   document.getElementById('rSeg').textContent=d.segment||'';
   const gvmEl=document.getElementById('rGvm');
-  if(d.gvm!=null){
-    gvmEl.textContent='GVM '+d.gvm.toFixed(2);
+  if(d.gvm!=null){gvmEl.textContent='GVM '+d.gvm.toFixed(2);
     gvmEl.className='r-gvm '+(d.gvm>=7?'hi':d.gvm>=6?'mid':'lo');
   }else{gvmEl.textContent='';}
   document.getElementById('rTs').textContent=d.ts||'';
@@ -483,7 +460,6 @@ function render(d){
   document.getElementById('vScore2').textContent=`${d.t2_pass}/7`;
   document.getElementById('vNeed1').textContent='need 8';
   document.getElementById('vNeed2').textContent=`need ${t2min}`;
-
   document.getElementById('t1Score').textContent=
     `${d.t1_pass}/${d.t1_auto_n} auto · ${d.t1_human_n} chart · min 8/${d.t1_total}`;
   document.getElementById('t2Score').textContent=
