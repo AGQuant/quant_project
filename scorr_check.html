@@ -75,17 +75,6 @@
   .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
 
-  .gate-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}
-  .gate{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:12px}
-  .gate-q{font-size:11px;color:var(--mut);line-height:1.45;margin-bottom:9px;min-height:28px}
-  .gate-opts{display:flex;gap:6px}
-  .gate-opt{flex:1;padding:7px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);
-    color:var(--mut);font-family:var(--font);font-size:11.5px;font-weight:700;cursor:pointer;
-    text-align:center;transition:.12s}
-  .gate-opt:hover{border-color:var(--line)}
-  .gate-opt.yes.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
-  .gate-opt.no.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
-
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
     cursor:pointer;letter-spacing:.2px;transition:.15s;box-shadow:0 2px 8px rgba(37,99,235,.25)}
@@ -193,7 +182,6 @@
   .foot{font-size:10px;color:var(--dim);text-align:center;margin-top:18px;line-height:1.8}
 
   @media(max-width:540px){
-    .gate-row{grid-template-columns:1fr}
     .v-bar-need{display:none}
     .rules-table .td-cond{display:none}
   }
@@ -208,8 +196,6 @@
   <a class="mnav-item active" href="/check"><span>✓</span>Check</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
-  <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/ask"><span>✦</span>Ask</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item soon"><span>⌂</span>QB</a>
   <a class="mnav-item soon"><span>⟁</span>V10</a>
@@ -230,22 +216,6 @@
     <div class="side-row">
       <button class="side-btn long on" id="btnLong" onclick="setSide('LONG')">▲ LONG</button>
       <button class="side-btn short" id="btnShort" onclick="setSide('SHORT')">▼ SHORT</button>
-    </div>
-    <div class="gate-row">
-      <div class="gate">
-        <div class="gate-q">Gate 1 — 5-min chart strength through the day?</div>
-        <div class="gate-opts">
-          <button class="gate-opt yes" id="g1y" onclick="setGate(1,true)">✓ Yes</button>
-          <button class="gate-opt no"  id="g1n" onclick="setGate(1,false)">✗ No</button>
-        </div>
-      </div>
-      <div class="gate">
-        <div class="gate-q">Gate 2 — 1-Day chart reversal / breakout?</div>
-        <div class="gate-opts">
-          <button class="gate-opt yes" id="g2y" onclick="setGate(2,true)">✓ Yes</button>
-          <button class="gate-opt no"  id="g2n" onclick="setGate(2,false)">✗ No</button>
-        </div>
-      </div>
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <div class="chips" id="chips"></div>
@@ -299,17 +269,19 @@
       <div class="legend">
         <div class="legend-item"><div class="leg-dot" style="background:var(--grn)"></div>PASS — DB computed, met</div>
         <div class="legend-item"><div class="leg-dot" style="background:var(--red)"></div>FAIL — DB computed, not met</div>
-        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>🟡 Chart / N/A — Gates resolve R10, R12, F3. F5 excluded weekends.</div>
+        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>🟡 Chart / N/A — R10, R12, F3 need chart confirmation. F5 excluded weekends.</div>
       </div>
     </div>
 
-    <div class="foot">Personal trade context — not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
+    <div class="foot">Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
   </div>
 </div>
 
 <script>
-let side='LONG', gate1=null, gate2=null;
-let acSel=-1, acItems=[], acTimer=null, runTimer=null;  // ← runTimer added
+let side='LONG';
+// Gates removed from UI — engine receives null and resolves R10/R12/F3 as N/A.
+let gate1=null, gate2=null;
+let acSel=-1, acItems=[], acTimer=null, runTimer=null;
 const QUICK=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
 
 function renderChips(){
@@ -327,19 +299,6 @@ function setSide(s){
   side=s;
   document.getElementById('btnLong').className='side-btn long'+(s==='LONG'?' on':'');
   document.getElementById('btnShort').className='side-btn short'+(s==='SHORT'?' on':'');
-  if(document.getElementById('sym').value.trim())run();
-}
-
-function setGate(n,v){
-  if(n===1){
-    gate1=(gate1===v)?null:v;
-    document.getElementById('g1y').classList.toggle('on',gate1===true);
-    document.getElementById('g1n').classList.toggle('on',gate1===false);
-  } else {
-    gate2=(gate2===v)?null:v;
-    document.getElementById('g2y').classList.toggle('on',gate2===true);
-    document.getElementById('g2n').classList.toggle('on',gate2===false);
-  }
   if(document.getElementById('sym').value.trim())run();
 }
 
@@ -371,7 +330,7 @@ function renderAC(){
 }
 function pickAC(i){
   const it=acItems[i];if(!it)return;
-  clearTimeout(runTimer);  // cancel debounce — pickAC calls run() directly
+  clearTimeout(runTimer);
   document.getElementById('sym').value=(it.symbol||it.nse_code||'').toUpperCase();
   closeAC();run();
 }
@@ -389,8 +348,8 @@ symEl.addEventListener('input',function(){
   const v=this.value.trim();
   clearTimeout(acTimer);
   clearTimeout(runTimer);
-  acTimer=setTimeout(()=>fetchAC(v),200);          // autocomplete: 200ms
-  if(v.length>=2) runTimer=setTimeout(()=>run(),700); // ← auto-run: 700ms
+  acTimer=setTimeout(()=>fetchAC(v),200);
+  if(v.length>=2) runTimer=setTimeout(()=>run(),700);
 });
 symEl.addEventListener('keydown',function(e){
   if(e.key==='ArrowDown'){e.preventDefault();moveAC(1);}
