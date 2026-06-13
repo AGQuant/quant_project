@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.9.0/Recharts.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;padding:0;background:#f4f6f9;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:13px;color:#1c2536}
@@ -17,559 +16,271 @@ th:hover{color:#2563eb}
 td{padding:5px 8px;border-bottom:1px solid #edf1f6;vertical-align:middle;white-space:nowrap}
 tr:hover td{background:#f0f4f9;cursor:pointer}
 .mono{font-family:'SFMono-Regular',Consolas,monospace}
-input{border:1px solid #e2e7ee;border-radius:6px;padding:6px 10px;font-size:12px;outline:none;background:#fff;color:#1c2536}
-input:focus{border-color:#2563eb}
-button{cursor:pointer;border-radius:6px;font-size:11px;font-weight:600;padding:5px 10px;border:1px solid #e2e7ee;background:#fff;color:#5a6781;transition:all .1s}
-button:hover{border-color:#2563eb;color:#2563eb}
-button.on{border-color:#2563eb;background:#eff4ff;color:#2563eb}
+button.tab{padding:8px 16px;border-radius:0;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:500}
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:#cfd8e3;border-radius:3px}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState, useMemo} = React;
-const RC = window.Recharts||{};
-const {ScatterChart,Scatter,XAxis,YAxis,CartesianGrid,Tooltip:RT,ReferenceLine,ReferenceArea,ResponsiveContainer} = RC;
+const {useState,useEffect,useMemo} = React;
 
-const C = {bg:"#f4f6f9",card:"#fff",border:"#e2e7ee",grid:"#edf1f6",accent:"#2563eb",gold:"#b45309",green:"#0a9e63",red:"#dd3a4a",orange:"#d97706",text:"#1c2536",muted:"#5a6781"};
+const C = {bg:"#f4f6f9",card:"#fff",border:"#e2e7ee",accent:"#2563eb",green:"#0a9e63",red:"#dd3a4a",gold:"#b45309",orange:"#d97706",text:"#1c2536",muted:"#5a6781"};
 const VC = {"Strong Buy":"#0a9e63","Buy":"#22a06b","Watch":"#d97706","Exit":"#dd3a4a"};
-const RC2 = {HOT:"#0a9e63",FADING:"#d97706",REVERTING:"#2563eb",COLD:"#dd3a4a"};
-const RBG = {HOT:"rgba(10,158,99,.07)",FADING:"rgba(217,119,6,.07)",REVERTING:"rgba(37,99,235,.07)",COLD:"rgba(221,58,74,.07)"};
-const sc = n=>n>=70?"#0a9e63":n>=55?"#22a06b":n>=40?"#d97706":"#dd3a4a";
-const pn = (n,d=2)=>n==null?"—":(n>0?"+":"")+Number(n).toFixed(d)+"%";
-const short = (s,n=30)=>s.length>n?s.slice(0,n)+"…":s;
 
-// [seg, n, gvm, g, v, m, top, tgvm, verdict, mcap_lakh_cr]
-const SR=[
-["Small Finance Banks",15,7.14,6.87,7.07,7.48,"SOUTHBANK",7.93,"Buy",0.9],
-["Pharma - Bulk & API",8,7.12,6.55,6.19,8.62,"SUPRIYA",8.25,"Buy",1.3],
-["Shipping & Maritime",5,6.96,6.70,6.95,7.24,"SEAMECLTD",7.81,"Watch",0.2],
-["Beverages & Spirits",14,6.96,7.67,6.95,6.25,"VBL",8.08,"Watch",4.0],
-["Hospitals - Large",6,6.93,7.37,6.31,7.10,"APOLLOHOSP",7.65,"Watch",3.9],
-["Diversified",20,6.90,5.57,7.15,7.98,"ADANIENT",7.12,"Watch",4.7],
-["Electrical Cables",11,6.88,7.05,5.86,7.74,"DIACABS",7.56,"Watch",2.6],
-["Auto - Body & Stampings",13,6.81,6.72,5.84,7.87,"JAYBARMARU",8.13,"Watch",0.7],
-["Exchanges & Ratings - Mid",8,6.81,7.69,7.20,5.53,"MCX",8.26,"Watch",1.7],
-["Pharma - Formulations",17,6.79,6.74,6.83,6.79,"MARKSANS",8.20,"Watch",3.0],
-["Castings & Forgings",17,6.78,7.26,6.03,7.05,"PTCIL",8.17,"Watch",3.0],
-["Auto - Drivetrain & Precision",17,6.76,6.97,6.25,7.04,"UNIPARTS",8.27,"Watch",0.9],
-["Pharma - Large Formulations",12,6.74,7.04,6.79,6.38,"ZYDUSLIFE",8.37,"Watch",15.4],
-["Power - Mid",6,6.73,6.75,7.22,6.23,"PREMIERENE",7.66,"Watch",1.6],
-["Electronics - Heavy Electrical & Industrial",14,6.72,6.95,5.90,7.33,"POWERINDIA",8.23,"Watch",11.0],
-["Power Services & Trading",11,6.71,6.40,6.93,6.80,"SKIPPER",8.13,"Watch",0.9],
-["Aluminium & Non Ferrous",14,6.70,6.63,7.11,6.36,"HINDCOPPER",7.54,"Watch",6.8],
-["PSU Banks",14,6.69,6.38,6.94,6.77,"MAHABANK",8.48,"Watch",18.5],
-["Capital Goods - Heavy Electrical",16,6.68,6.99,5.50,7.53,"KIRLOSENG",7.62,"Watch",2.8],
-["Organic Chemicals - Large",15,6.65,7.17,6.21,6.59,"HSCL",8.21,"Watch",3.9],
-["CDMO & Contract Mfg",11,6.64,6.79,6.14,6.98,"ACUTAAS",8.07,"Watch",2.3],
-["Garments & Apparel",6,6.62,6.73,6.69,6.45,"SBC",7.61,"Watch",0.1],
-["Logistics - Large & Mid",9,6.59,6.82,6.04,6.90,"ADANIPORTS",7.40,"Watch",7.7],
-["Hospitals - Mid & Small",16,6.57,6.79,6.19,6.73,"CUPID",7.92,"Watch",2.0],
-["Auto - Wiring & Electricals",14,6.56,7.19,5.40,7.10,"SANDHAR",7.95,"Watch",3.1],
-["Specialty Chemicals - Small",11,6.56,6.41,6.62,6.64,"VISHNU",7.35,"Watch",0.3],
-["Auto OEM",19,6.54,7.03,6.82,5.76,"ATHERENERG",7.71,"Watch",21.8],
-["Engineering - Large",14,6.53,6.79,5.69,7.11,"MTARTECH",7.92,"Watch",9.2],
-["Steel - Mid & Small",25,6.53,6.58,6.04,6.97,"RPEL",7.72,"Watch",2.5],
-["MSME Finance - Mid",13,6.52,6.83,7.15,5.58,"CGCL",8.28,"Watch",1.0],
-["Business Services",14,6.51,6.45,6.79,6.28,"SIS",7.43,"Watch",0.3],
-["Paints",6,6.50,6.96,5.79,6.75,"SIRCA",6.81,"Watch",3.5],
-["Adhesives, Coatings & Polymers",11,6.49,7.24,5.60,6.62,"GULPOLY",7.37,"Watch",2.0],
-["Auto - Engines & Thermal",23,6.48,6.60,5.96,6.88,"BANCOINDIA",7.86,"Watch",2.7],
-["NBFC - Large",9,6.47,7.39,6.75,5.25,"SHRIRAMFIN",7.24,"Watch",12.8],
-["Power Generation - Large",8,6.46,6.34,6.38,6.67,"ADANIPOWER",7.70,"Watch",17.0],
-["Pharma - Micro",21,6.46,6.41,6.25,6.73,"VENUSREM",8.07,"Watch",0.2],
-["Renewable Energy - Small",12,6.46,6.68,7.72,4.99,"WEBELSOLAR",7.44,"Watch",0.5],
-["Print Media & Publishing",15,6.46,7.33,7.28,4.77,"MPSLTD",7.29,"Watch",0.5],
-["City Gas Distribution",6,6.42,6.58,7.59,5.09,"AEGISLOG",7.80,"Watch",1.4],
-["REITs",6,6.41,6.47,6.36,6.42,"MINDSPACE",6.93,"Watch",1.3],
-["Solar & Renewable Equipment Small",12,6.41,6.34,7.05,5.85,"SPECTRUM",7.46,"Watch",0.2],
-["Engineering - Industrial Mfg A",18,6.39,6.30,6.58,6.31,"JNKINDIA",8.30,"Watch",0.3],
-["IT - Small",34,6.39,6.74,6.85,5.59,"RAMCOSYS",8.11,"Watch",1.6],
-["Mining",14,6.39,6.77,6.19,6.21,"SOUTHWEST",7.68,"Watch",6.2],
-["Renewable Energy - Mid",12,6.37,6.65,6.30,6.17,"ACMESOLAR",7.44,"Watch",7.0],
-["Gems & Jewellery - Small",18,6.36,6.63,6.52,5.94,"TBZ",7.78,"Watch",0.4],
-["Pharma - Small",14,6.35,6.42,6.26,6.38,"SENORES",8.25,"Watch",0.6],
-["Defence - Small",12,6.33,6.00,5.78,7.22,"KRISHNADEF",8.78,"Watch",0.5],
-["Pharma - Mid Formulations",20,6.31,6.56,6.52,5.85,"CAPLIPOINT",8.46,"Watch",2.8],
-["Consumer Durables - Small",13,6.30,6.39,7.17,5.35,"CARYSIL",9.14,"Watch",0.4],
-["Integrated Steel - Large",6,6.30,6.37,5.91,6.62,"LLOYDSME",7.18,"Watch",9.5],
-["Education",11,6.30,6.68,7.06,5.16,"GLOBAL",7.25,"Watch",0.5],
-["Capital Markets - Large",16,6.28,7.06,6.02,5.77,"BSE",8.22,"Watch",11.0],
-["Gems & Jewellery - Large",10,6.28,7.09,5.90,5.85,"SKYGOLD",8.29,"Watch",4.7],
-["Steel Tubes & Wires",12,6.26,6.44,6.63,5.70,"MWL",8.28,"Watch",0.2],
-["Engineering - EPC Small",10,6.26,6.29,6.34,6.13,"GAYAPROJ",7.13,"Watch",0.3],
-["FMCG - Small",24,6.26,6.47,6.54,5.76,"ADFFOODS",7.82,"Watch",0.5],
-["Electronics - Consumer & Smart",23,6.25,6.60,5.88,6.27,"APOLLO",7.95,"Watch",3.3],
-["Building Materials - Glass, Ceramics & Ply",18,6.24,6.59,6.19,5.95,"STYLAMIND",8.31,"Watch",1.0],
-["MSME Finance - Large",6,6.23,7.00,6.57,5.10,"LTF",7.05,"Watch",3.6],
-["Oil Services & Small",11,6.22,6.62,6.12,5.92,"DEEPINDS",7.86,"Watch",0.2],
-["Packaged Foods & Dairy",7,6.20,6.44,6.70,5.46,"BAJAJCON",8.05,"Watch",0.5],
-["Cement - Large & Mid",8,6.20,6.98,6.32,5.30,"GRASIM",7.21,"Watch",8.6],
-["Pipes & Tubes",16,6.19,7.26,6.18,5.13,"MANINDS",7.29,"Watch",1.6],
-["Microfinance & MSME",13,6.18,6.46,6.45,5.63,"SATIN",8.59,"Watch",0.2],
-["Telecom Services",14,6.16,6.97,6.48,5.01,"ASTRAMICRO",8.33,"Watch",16.5],
-["Hotels - Mid",12,6.15,6.80,6.83,4.83,"RATEGAIN",7.63,"Watch",2.3],
-["Broadcasting & OTT",8,6.15,6.45,6.63,5.35,"TIPSMUSIC",7.86,"Watch",0.9],
-["Textiles - Large",9,6.14,6.00,5.76,6.67,"ICIL",7.10,"Watch",1.1],
-["Digital Aggregators & E-Commerce",13,6.13,6.90,6.55,4.94,"NYKAA",7.47,"Watch",8.6],
-["Internet & Digital Small",9,6.12,6.32,7.05,4.98,"CARTRADE",8.75,"Watch",0.4],
-["Engineering - EPC Mid",16,6.11,6.26,6.19,5.87,"LLOYDSENGG",7.47,"Watch",1.0],
-["Electrical Equipment Small",22,6.10,6.44,5.88,6.00,"MODISONLTD",8.60,"Watch",0.3],
-["Broking & Wealth Management",26,6.10,6.41,6.73,5.16,"MONARCH",8.26,"Watch",0.9],
-["Petrochemicals & Lubricants",9,6.10,6.42,6.44,5.43,"SOTL",7.53,"Watch",0.3],
-["Defence PSU",11,6.07,6.57,7.10,4.55,"DATAPATTNS",7.37,"Watch",8.8],
-["Retail - Large",8,6.05,7.24,6.87,4.03,"ARVIND",7.32,"Watch",5.6],
-["Restaurants & QSR",9,6.05,7.41,6.39,4.34,"TRAVELFOOD",7.80,"Watch",0.8],
-["Retail - Mid",24,6.05,6.43,6.47,5.24,"VINCOFE",8.10,"Watch",0.9],
-["Diagnostics & Healthcare Services",17,6.04,6.33,6.72,5.06,"UNIHEALTH",7.55,"Watch",0.3],
-["Entertainment, Content & Digital",18,6.03,7.37,6.77,3.94,"BCG",7.25,"Watch",0.4],
-["Flexible Packaging & Films",15,6.02,7.37,5.48,5.21,"SHAILY",8.08,"Watch",1.2],
-["Private Banks",12,6.02,6.96,6.01,5.09,"FEDERALBNK",7.83,"Watch",32.3],
-["Steel Products & Misc",15,6.02,6.00,5.83,6.22,"MSPL",7.19,"Watch",0.3],
-["Bearings & Abrasives",9,6.00,6.99,5.42,5.60,"MENONBE",8.07,"Exit",1.5],
-["Fluorochemicals & Industrial Gases",9,5.99,6.18,6.34,5.45,"NAVINFLUOR",7.44,"Exit",2.3],
-["Cement - Small",22,5.98,6.33,7.01,4.61,"RAMCOIND",8.01,"Exit",0.9],
-["Logistics - Small",22,5.97,6.40,6.30,5.21,"SJLOGISTIC",7.20,"Exit",0.5],
-["Realty - Large",8,5.96,6.78,6.57,4.53,"PHOENIXLTD",7.40,"Exit",5.4],
-["Home Textiles & Technical",14,5.95,6.04,5.87,5.95,"MAYURUNIQ",8.62,"Exit",0.4],
-["Agro Chemicals - Small",17,5.95,6.20,6.57,5.09,"DHARMAJ",6.86,"Exit",0.4],
-["Pumps, Refractories & Industrial",15,5.95,6.57,5.69,5.60,"KIRLPNU",8.51,"Exit",2.0],
-["IT - Mid",19,5.94,6.76,6.48,4.57,"STYL",6.77,"Exit",2.7],
-["Synthetic Fibres & Yarn",24,5.93,5.90,5.82,6.06,"RUBYMILLS",7.82,"Exit",0.2],
-["Footwear",5,5.91,7.19,6.56,3.99,"CAMPUS",6.43,"Exit",0.5],
-["IT - Micro",28,5.88,6.17,6.35,5.13,"CNL",7.91,"Exit",0.3],
-["Diversified Trading",21,5.88,6.75,5.73,5.14,"MSTCLTD",7.96,"Exit",0.7],
-["Capital Goods - Industrial Small",15,5.87,6.21,6.07,5.34,"PRIZOR",6.74,"Exit",0.3],
-["Infrastructure - Roads",21,5.86,6.36,6.34,4.88,"SRM",8.07,"Exit",2.0],
-["FMCG - Large",23,5.82,6.71,6.40,4.37,"HONASA",8.28,"Exit",19.3],
-["Organic Chemicals - Small",21,5.82,5.95,5.65,5.86,"NEOGEN",7.62,"Exit",0.7],
-["Hotels - Small",19,5.80,6.22,6.49,4.70,"TAJGVK",6.92,"Exit",0.4],
-["Tyres",7,5.79,6.76,6.91,3.69,"JKTYRE",7.02,"Exit",1.5],
-["Edible Oil & Animal Feed",9,5.79,6.41,5.98,4.98,"MANORAMA",7.45,"Exit",0.8],
-["Power - Small",10,5.78,5.90,7.07,4.38,"BHAGYANGR",7.91,"Exit",0.3],
-["Life Insurance",14,5.78,6.28,7.14,3.92,"ABCAPITAL",7.90,"Exit",15.8],
-["Realty - Mid",31,5.77,6.35,6.45,4.50,"ASHIANA",7.15,"Exit",1.9],
-["Housing Finance",20,5.76,6.26,6.51,4.51,"CANFINHOME",7.37,"Exit",5.9],
-["Telecom Equipment & Services",7,5.76,5.65,5.61,6.01,"VINDHYATEL",7.48,"Exit",0.1],
-["Sugar & Agri Processing",23,5.75,6.22,6.06,4.97,"APCOTEXIND",8.08,"Exit",0.7],
-["Environmental Services",11,5.74,6.43,5.92,4.86,"WABAG",7.16,"Exit",0.5],
-["MSME Finance - Small",8,5.70,6.37,5.14,5.60,"SGFIN",6.45,"Exit",0.1],
-["Consumer Durables - Large",8,5.70,6.36,5.88,4.87,"HBLENGINE",7.61,"Exit",2.1],
-["Consumer Plastics & Others",17,5.70,6.09,6.32,4.69,"PREMIERPOL",7.69,"Exit",0.2],
-["Fertilizers",14,5.70,5.84,5.88,5.36,"KRISHANA",7.66,"Exit",1.7],
-["Holding Companies",18,5.68,6.84,6.22,3.98,"JPOLYINVST",6.99,"Exit",2.6],
-["Realty - Small",17,5.68,5.91,6.30,4.82,"ARIHANT",6.90,"Exit",0.2],
-["Specialty Chemicals - Micro",18,5.66,5.85,5.56,5.56,"BHAGERIA",7.37,"Exit",0.1],
-["Paper & Packaging",10,5.65,6.09,6.29,4.58,"NRAIL",6.67,"Exit",0.2],
-["Engineering - EPC Civil Small",11,5.60,5.78,6.08,4.94,"EFFWA",7.56,"Exit",0.2],
-["IT - Large",11,5.56,6.56,6.35,3.76,"OFSS",7.51,"Exit",25.7],
-["Refineries & Exploration - Large",10,5.40,6.22,6.08,3.91,"CHENNPETRO",7.38,"Exit",28.3],
-["Agro Chemicals - Large",6,5.33,5.97,5.57,4.44,"SHARDACROP",7.60,"Exit",1.6],
-["Commodity & Chlor-Alkali Chemicals",12,5.24,5.60,5.20,4.90,"RAIN",7.23,"Exit",0.5],
-["Engineering - Industrial Mfg B",7,5.22,6.06,5.81,3.78,"GGBL",6.34,"Exit",0.1],
-["Plastics and Packaging",1,4.52,4.82,3.75,5.00,"TIRUPATI",4.52,"Exit",0.0],
-];
-// [seg, wk%, mo%]
-const RD=[
-["Hospitals - Large",2.560,0.897],["Adhesives, Coatings & Polymers",1.503,1.011],
-["CDMO & Contract Mfg",0.885,-0.728],["Auto - Engines & Thermal",0.873,1.678],
-["Pharma - Large Formulations",0.597,-1.583],["FMCG - Large",0.364,-5.691],
-["Private Banks",0.347,2.264],["Paints",0.156,2.620],["Beverages & Spirits",0.120,0.882],
-["Hotels - Mid",-0.289,0.846],["PSU Banks",-0.492,0.187],
-["Castings & Forgings",-1.088,-0.362],["Diversified Trading",-1.212,-10.795],
-["Logistics - Large & Mid",-1.714,-4.487],["Fluorochemicals & Industrial Gases",-1.719,-2.601],
-["Agro Chemicals - Large",-1.895,-8.369],["Cement - Large & Mid",-1.938,-4.963],
-["Auto OEM",-1.945,-2.531],["Auto - Wiring & Electricals",-2.023,3.350],
-["Power - Mid",-2.046,8.246],["Retail - Large",-2.141,-9.550],
-["City Gas Distribution",-2.375,-3.201],["Pipes & Tubes",-2.546,-5.610],
-["Defence PSU",-2.618,-10.498],["Capital Markets - Large",-3.079,-2.405],
-["Electrical Cables",-3.129,1.196],["Integrated Steel - Large",-3.157,-7.367],
-["Realty - Large",-3.162,-3.141],["Restaurants & QSR",-3.184,-10.175],
-["Holding Companies",-3.294,-4.770],["Telecom Services",-3.320,0.560],
-["Pumps, Refractories & Industrial",-3.333,-6.640],["Consumer Durables - Large",-3.479,10.280],
-["Renewable Energy - Mid",-3.509,-3.081],["Digital Aggregators & E-Commerce",-3.605,-5.632],
-["Engineering - Large",-3.650,3.232],["Life Insurance",-3.709,-13.236],
-["Exchanges & Ratings - Mid",-3.785,-6.834],["Pharma - Bulk & API",-3.871,5.724],
-["Capital Goods - Heavy Electrical",-3.925,3.540],["Refineries & Exploration - Large",-4.225,-6.939],
-["Power Services & Trading",-4.339,-8.852],["MSME Finance - Large",-4.356,-8.674],
-["Flexible Packaging & Films",-4.392,-1.864],["NBFC - Large",-4.395,-8.520],
-["Housing Finance",-4.460,-5.102],["Power Generation - Large",-4.487,-0.942],
-["Electronics - Heavy Electrical & Industrial",-4.488,-0.791],["Mining",-4.562,-5.616],
-["IT - Large",-4.567,2.287],["Diversified",-4.573,7.221],
-["Electronics - Consumer & Smart",-5.032,-11.319],["Aluminium & Non Ferrous",-5.480,-12.245],
-["IT - Mid",-6.024,1.763],["Organic Chemicals - Large",-7.050,2.856],
-["Gems & Jewellery - Large",-8.278,-5.513],
-];
-// [seg, inst_chg, qoq_profit(capped -200/+200), gvm_delta_7d]
-const MF=[
-["Adhesives, Coatings & Polymers",0.00,49.6,0.210],["Agro Chemicals - Large",0.47,12.3,-0.075],
-["Agro Chemicals - Small",-0.16,93.7,0],["Aluminium & Non Ferrous",0.10,135.7,-0.227],
-["Auto - Body & Stampings",0.26,54.9,0],["Auto - Drivetrain & Precision",0.24,27.7,0],
-["Auto - Engines & Thermal",0.21,89.1,0.200],["Auto OEM",0.35,27.9,-0.005],
-["Auto - Wiring & Electricals",0.19,33.5,-0.075],["Bearings & Abrasives",0.38,-8.2,0],
-["Beverages & Spirits",0.17,39.2,0.105],["Broadcasting & OTT",-0.08,29.8,0],
-["Broking & Wealth Management",-0.18,90.0,0],["Building Materials - Glass, Ceramics & Ply",-0.12,146.2,0],
-["Business Services",-0.23,53.9,0],["Capital Goods - Heavy Electrical",0.13,200,-0.210],
-["Capital Goods - Industrial Small",-0.02,143.6,0],["Capital Markets - Large",0.16,14.7,-0.085],
-["Castings & Forgings",0.06,5.6,-0.050],["CDMO & Contract Mfg",0.65,118.8,-0.360],
-["Cement - Large & Mid",0.21,46.6,0.020],["Cement - Small",-0.15,-200,0],
-["City Gas Distribution",3.04,-5.4,0],["Commodity & Chlor-Alkali Chemicals",-0.37,-86.9,0],
-["Consumer Durables - Large",-0.37,6.4,-0.470],["Consumer Durables - Small",-0.02,15.8,0],
-["Consumer Plastics & Others",0.17,-4.6,0],["Defence PSU",0.39,-38.5,-0.038],
-["Defence - Small",0.41,130.2,0],["Diagnostics & Healthcare Services",-0.56,17.8,0],
-["Digital Aggregators & E-Commerce",0.37,133.7,-0.132],["Diversified",-0.38,149.5,-0.310],
-["Diversified Trading",0.17,200,-0.100],["Edible Oil & Animal Feed",0.20,55.6,0],
-["Education",-0.17,50.2,0],["Electrical Cables",0.18,145.4,-0.130],
-["Electrical Equipment Small",0.11,45.2,0],["Electronics - Consumer & Smart",0.20,-19.1,-0.078],
-["Electronics - Heavy Electrical & Industrial",1.07,60.4,-0.261],["Engineering - EPC Civil Small",0.07,43.1,0],
-["Engineering - EPC Mid",0.35,99.3,0],["Engineering - EPC Small",2.22,200,0],
-["Engineering - Industrial Mfg A",-0.15,45.0,0],["Engineering - Industrial Mfg B",-0.27,118.3,0],
-["Engineering - Large",0.39,12.5,-0.220],["Entertainment, Content & Digital",-0.30,-12.5,0],
-["Environmental Services",-0.09,-30.9,0],["Exchanges & Ratings - Mid",0.01,49.5,-0.115],
-["Fertilizers",0.03,22.9,0],["Flexible Packaging & Films",0.10,-6.2,-0.160],
-["Fluorochemicals & Industrial Gases",0.16,48.9,-0.110],["FMCG - Large",-0.12,55.8,-0.010],
-["FMCG - Small",0.14,115.1,0],["Footwear",-0.13,-29.6,0],
-["Garments & Apparel",-0.15,52.7,0],["Gems & Jewellery - Large",0.75,106.7,-0.310],
-["Gems & Jewellery - Small",-0.01,-93.1,0],["Holding Companies",0.02,200,-0.150],
-["Home Textiles & Technical",0.17,74.8,0],["Hospitals - Large",0.19,20.8,0.173],
-["Hospitals - Mid & Small",-0.23,43.7,0],["Hotels - Mid",-0.25,32.0,0.360],
-["Hotels - Small",-0.22,26.6,0],["Housing Finance",1.27,-62.3,-0.210],
-["Infrastructure - Roads",-0.29,200,0],["Integrated Steel - Large",0.27,156.8,-0.107],
-["Internet & Digital Small",-1.32,-200,0],["IT - Large",-1.88,29.4,-0.147],
-["IT - Micro",1.02,148.0,0],["IT - Mid",-0.20,18.4,-0.205],
-["IT - Small",-0.23,4.8,0],["Life Insurance",0.21,200,-0.105],
-["Logistics - Large & Mid",0.33,43.2,-0.065],["Logistics - Small",-0.27,15.0,0],
-["Microfinance & MSME",-0.02,69.5,0],["Mining",0.24,35.1,-0.417],
-["MSME Finance - Large",0.40,139.5,-0.100],["MSME Finance - Mid",0.09,-200,0],
-["MSME Finance - Small",0.17,96.6,0],["NBFC - Large",0.96,87.0,-0.099],
-["Oil Services & Small",-0.03,107.8,0],["Organic Chemicals - Large",0.50,128.8,-0.360],
-["Organic Chemicals - Small",-0.20,129.1,0],["Packaged Foods & Dairy",0.93,36.8,0],
-["Paints",-0.32,19.7,-0.160],["Paper & Packaging",0.00,190.4,0],
-["Petrochemicals & Lubricants",0.16,36.1,0],["Pharma - Bulk & API",0.19,38.8,-0.050],
-["Pharma - Formulations",0.41,91.4,0],["Pharma - Large Formulations",-0.08,7.2,-0.015],
-["Pharma - Micro",0.51,145.3,0],["Pharma - Mid Formulations",0.04,85.6,0],
-["Pharma - Small",0.18,200,0],["Pipes & Tubes",0.10,-4.7,0.100],
-["Power Generation - Large",0.56,10.1,-0.262],["Power - Mid",0.73,21.0,0.050],
-["Power Services & Trading",-0.08,35.8,0.050],["Power - Small",0.16,115.6,0],
-["Print Media & Publishing",-0.08,-107.8,0],["Private Banks",-0.41,52.6,-0.020],
-["PSU Banks",0.66,12.1,-0.063],["Pumps, Refractories & Industrial",0.08,0.0,-0.170],
-["Realty - Large",-0.83,82.9,-0.172],["Realty - Mid",-0.42,200,0],
-["Realty - Small",0.07,144.2,0],["Refineries & Exploration - Large",0.16,37.5,-0.320],
-["REITs",0.00,-34.0,0],["Renewable Energy - Mid",0.05,27.2,-0.116],
-["Renewable Energy - Small",0.13,-200,0],["Restaurants & QSR",-0.56,22.9,0.050],
-["Retail - Large",1.96,30.0,-0.053],["Retail - Mid",-0.81,-200,0],
-["Shipping & Maritime",-0.35,132.5,0],["Small Finance Banks",0.53,-200,0],
-["Solar & Renewable Equipment Small",-0.21,107.0,0],["Specialty Chemicals - Micro",-0.16,135.5,0],
-["Specialty Chemicals - Small",-0.36,84.6,0],["Steel - Mid & Small",0.16,53.4,0],
-["Steel Products & Misc",-0.21,200,0],["Steel Tubes & Wires",0.20,-22.6,0],
-["Sugar & Agri Processing",1.96,-115.4,0],["Synthetic Fibres & Yarn",-0.19,166.5,0],
-["Telecom Equipment & Services",-0.46,54.9,0],["Telecom Services",0.05,76.1,-0.120],
-["Textiles - Large",0.21,66.5,0],["Tyres",0.10,143.2,0],
-];
+const fmt  = (v,d=2) => v==null ? "—" : Number(v).toFixed(d);
+const pct  = (v,d=1) => v==null ? "—" : (v>0?"+":"")+Number(v).toFixed(d)+"%";
+const clr  = v => v==null ? C.muted : v>0 ? C.green : v<0 ? C.red : C.muted;
+const sclr = s => s>=7 ? C.green : s>=4 ? C.orange : C.red;
+const clip = (s,n=28) => s&&s.length>n ? s.slice(0,n)+"…" : (s||"");
+const MEDALS = ["🥇","🥈","🥉"];
 
-function score(gvm, rotation, inst, profit, delta) {
-  const pa = rotation==="HOT"?25:rotation==="REVERTING"?18:rotation==="FADING"?12:rotation==="COLD"?5:12;
-  const gvmPts = Math.round(Math.max(0,Math.min(25,((gvm-5)/5)*25)));
-  const d=delta||0, dPts=d>0.3?15:d>0.15?12:d>0?9:d<-0.3?1:d<-0.1?4:7;
-  const i=inst||0, iPts=i>2?20:i>1?17:i>0.5?14:i>0.1?11:i>-0.1?8:i>-0.5?5:2;
-  const p=Math.max(-200,Math.min(200,profit||0)), ePts=p>100?15:p>50?12:p>20?10:p>0?7:p>-50?4:1;
-  return {pa,gvmPts,dPts,iPts,ePts,total:pa+gvmPts+dPts+iPts+ePts};
+function Dots({row}) {
+  const sigs = [
+    row.gvm >= 6.5,
+    (row.gvm_change||0) > 0,
+    (row.inst_change||0) > 0,
+    (row.qoq_profit||0) > 10,
+    (row.annual_upside||0) > 15,
+  ];
+  const labels = ["GVM≥6.5","GVMδ>0","Inst+","QoQ>10%","Upside>15%"];
+  return (
+    <span style={{display:"inline-flex",gap:3,marginLeft:6}}>
+      {sigs.map((ok,i)=>(
+        <span key={i} title={labels[i]}
+          style={{width:7,height:7,borderRadius:"50%",display:"inline-block",
+            background:ok?"#0a9e63":"#dd3a4a",opacity:0.85}}/>
+      ))}
+    </span>
+  );
 }
 
-const rotMap=Object.fromEntries(RD.map(([s,w,m])=>[s,{wk:w,mo:m}]));
-const mfMap=Object.fromEntries(MF.map(([s,i,p,d])=>[s,{inst:i,profit:p,delta:d}]));
-const MERGED=SR.map(([seg,n,gvm,g,v,m,top,tgvm,verdict,mcap])=>{
-  const rot=rotMap[seg]; const mf=mfMap[seg]||{};
-  const rotation=rot?(rot.wk>0&&rot.mo>0?"HOT":rot.wk>0?"REVERTING":rot.mo>0?"FADING":"COLD"):null;
-  const f=score(gvm,rotation,mf.inst,mf.profit,mf.delta);
-  return{seg,n,gvm,g,v,m,top,tgvm,verdict,mcap,wk:rot?rot.wk:null,mo:rot?rot.mo:null,
-    inst:mf.inst,profit:mf.profit,delta:mf.delta,rotation,
-    pa:f.pa,gvmPts:f.gvmPts,dPts:f.dPts,iPts:f.iPts,ePts:f.ePts,composite:f.total};
-});
-
-function useTbl(def,defDir="desc"){
-  const [k,setK]=useState(def); const [d,setD]=useState(defDir);
-  const sort=key=>{ if(key===k)setD(p=>p==="desc"?"asc":"desc"); else{setK(key);setD("desc");} };
-  const apply=arr=>[...arr].sort((a,b)=>{const av=a[k]??-Infinity,bv=b[k]??-Infinity;return d==="desc"?bv-av:av-bv;});
-  const Th=({k:key,lbl,r})=><th onClick={()=>sort(key)} style={{textAlign:r?"right":"left"}}>{lbl}{k===key?(d==="desc"?"↓":"↑"):""}</th>;
-  return{apply,Th};
+function RankCard({row, rank, isBottom}) {
+  const border = isBottom ? C.red : C.green;
+  const shadow = isBottom ? "0 1px 6px rgba(221,58,74,.12)" : "0 1px 6px rgba(10,158,99,.12)";
+  return (
+    <div style={{flex:"0 0 auto",width:176,background:C.card,border:`1.5px solid ${border}`,
+        borderRadius:8,padding:"10px 12px",boxShadow:shadow,cursor:"pointer",transition:"transform .1s"}}
+      onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"}
+      onMouseLeave={e=>e.currentTarget.style.transform=""}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:rank<3?18:13,lineHeight:1}}>
+          {rank<3 ? MEDALS[rank] : <span style={{fontWeight:800,color:C.muted,fontFamily:"monospace"}}>#{rank+1}</span>}
+        </span>
+        <span style={{fontSize:19,fontWeight:900,color:sclr(row.composite_score),fontFamily:"monospace",letterSpacing:"-1px"}}>
+          {fmt(row.composite_score,1)}
+        </span>
+      </div>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginTop:5,lineHeight:1.3}}>{clip(row.segment,22)}</div>
+      <div style={{fontSize:10,color:C.muted,marginTop:3}}>
+        GVM <b style={{color:row.gvm>=7?C.green:row.gvm>=6?C.orange:C.red}}>{fmt(row.gvm)}</b>
+        <span style={{marginLeft:6}}>↑ {row.top_stock}</span>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:7}}>
+        <span style={{fontSize:10,fontWeight:700,color:VC[row.verdict]||C.muted}}>{row.verdict}</span>
+        <Dots row={row}/>
+      </div>
+    </div>
+  );
 }
 
-function Panel({s,onClose}){
-  if(!s)return null;
-  const FDEFS=[["pa","Price Action",25,"#0a9e63"],["gvmPts","GVM Level",25,"#b45309"],["dPts","GVM Δ7d",15,"#2563eb"],["iPts","Institutional",20,"#7c3aed"],["ePts","Earnings QoQ",15,"#d97706"]];
-  return(
-    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"16px 20px",marginBottom:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <div>
-          <div style={{fontSize:15,fontWeight:800,color:C.text}}>{s.seg}</div>
-          <div style={{fontSize:11,color:C.muted,marginTop:3}}>
-            {s.n} stocks · ₹{s.mcap}L Cr · Top pick: <b style={{color:C.accent}}>{s.top}</b> (GVM {s.tgvm})
+function Strip({top5, bottom5, onSel}) {
+  return (
+    <div style={{background:"#fff",borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
+      <div style={{display:"flex",gap:0,alignItems:"flex-start"}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8,letterSpacing:".06em"}}>
+            🔥 TOP 5 · HIGHEST COMPOSITE SCORE
+          </div>
+          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:2}}>
+            {top5.map((r,i)=>(
+              <div key={r.segment} onClick={()=>onSel(r)}>
+                <RankCard row={r} rank={i} isBottom={false}/>
+              </div>
+            ))}
           </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:22,fontWeight:900,color:sc(s.composite),fontFamily:"monospace"}}>{s.composite}<span style={{fontSize:11,fontWeight:400,color:C.muted}}>/100</span></span>
-          <span style={{fontWeight:700,color:VC[s.verdict]||C.muted,fontSize:12}}>{s.verdict}</span>
-          {s.rotation&&<span style={{fontWeight:700,color:RC2[s.rotation],fontSize:12}}>{s.rotation}</span>}
-          <button onClick={onClose} style={{fontSize:16,padding:"2px 8px",color:C.muted}}>×</button>
+        <div style={{width:1,background:C.border,margin:"0 16px",alignSelf:"stretch"}}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,letterSpacing:".06em"}}>
+            ❄️ BOTTOM 5 · LOWEST COMPOSITE SCORE
+          </div>
+          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:2}}>
+            {bottom5.map((r,i)=>(
+              <div key={r.segment} onClick={()=>onSel(r)}>
+                <RankCard row={r} rank={i} isBottom={true}/>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{fontSize:9,color:C.muted,marginTop:8}}>
+        Score 0–10 · Percentile rank avg of 5 signals: GVM quality · GVM Δ14d · Institutional flow · QoQ profit growth · Annual PE-based upside · Dots = signal pass/fail
+      </div>
+    </div>
+  );
+}
+
+function Detail({row, onClose}) {
+  if (!row) return null;
+  const sigs = [
+    {lbl:"GVM",     sub:"Quality",       v:row.gvm,           fmt:v=>fmt(v),     good:v=>v>=6.5},
+    {lbl:"GVM Δ14d",sub:"Trend",         v:row.gvm_change,    fmt:v=>(v>0?"+":"")+fmt(v,3), good:v=>v>0},
+    {lbl:"Inst %",  sub:"FII+DII avg",   v:row.inst_change,   fmt:v=>pct(v),     good:v=>v>0},
+    {lbl:"QoQ %",   sub:"Profit growth", v:row.qoq_profit,    fmt:v=>pct(v,1),   good:v=>v>10},
+    {lbl:"Upside %",sub:"PE-based",      v:row.annual_upside, fmt:v=>pct(v,1),   good:v=>v>15},
+  ];
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:800}}>{row.segment}</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:3}}>
+            {row.stocks_count} stocks · ₹{row.total_mcap}L Cr · Top: <b style={{color:C.accent}}>{row.top_stock}</b> (GVM {row.top_stock_gvm})
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:26,fontWeight:900,color:sclr(row.composite_score),fontFamily:"monospace"}}>{fmt(row.composite_score,2)}</div>
+            <div style={{fontSize:9,color:C.muted}}>/ 10 composite</div>
+          </div>
+          <span style={{fontSize:12,fontWeight:700,color:VC[row.verdict]||C.muted}}>{row.verdict}</span>
+          <button onClick={onClose} style={{fontSize:18,border:"none",background:"none",cursor:"pointer",color:C.muted,lineHeight:1}}>×</button>
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:12}}>
-        {FDEFS.map(([k,lbl,max,col])=>{
-          const pts=s[k]; const pct=Math.round((pts/max)*100);
-          return<div key={k} style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>
-            <div style={{fontSize:10,color:C.muted,marginBottom:3}}>{lbl}</div>
-            <div style={{fontSize:16,fontWeight:800,color:col,fontFamily:"monospace"}}>{pts}<span style={{fontSize:10,color:C.muted}}>/{max}</span></div>
-            <div style={{height:4,background:"#e2e7ee",borderRadius:2,marginTop:4}}>
-              <div style={{height:4,width:pct+"%",background:col,borderRadius:2}}/>
+        {sigs.map(s=>{
+          const ok = s.v!=null && s.good(s.v);
+          const col = s.v==null ? C.muted : ok ? C.green : C.red;
+          return (
+            <div key={s.lbl} style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>
+              <div style={{fontSize:10,color:C.muted}}>{s.lbl}</div>
+              <div style={{fontSize:9,color:C.muted,marginBottom:4}}>{s.sub}</div>
+              <div style={{fontSize:16,fontWeight:900,color:col,fontFamily:"monospace"}}>{s.v==null?"—":s.fmt(s.v)}</div>
+              <div style={{width:6,height:6,borderRadius:"50%",background:col,marginTop:4}}/>
             </div>
-          </div>;
+          );
         })}
       </div>
-      <div style={{display:"flex",gap:20,fontSize:12,color:C.muted,flexWrap:"wrap"}}>
-        <span>GVM <b className="mono" style={{color:C.text}}>{s.gvm}</b></span>
-        <span>G <b className="mono" style={{color:C.green}}>{s.g}</b></span>
-        <span>V <b className="mono" style={{color:C.gold}}>{s.v}</b></span>
-        <span>M <b className="mono" style={{color:C.accent}}>{s.m}</b></span>
-        {s.wk!=null&&<span>Week <b className="mono" style={{color:s.wk>=0?C.green:C.red}}>{pn(s.wk)}</b></span>}
-        {s.mo!=null&&<span>Month <b className="mono" style={{color:s.mo>=0?C.green:C.red}}>{pn(s.mo)}</b></span>}
-        {s.inst!=null&&<span>Inst Δ <b className="mono" style={{color:s.inst>=0?C.green:C.red}}>{pn(s.inst)}</b></span>}
-        {s.profit!=null&&<span>QoQ Profit <b className="mono" style={{color:s.profit>=0?C.green:C.red}}>{s.profit>0?"+":""}{s.profit}%</b></span>}
-        {s.delta!=null&&<span>GVM Δ7d <b className="mono" style={{color:s.delta>0?C.green:s.delta<0?C.red:C.muted}}>{s.delta>0?"+":""}{(s.delta||0).toFixed(3)}</b></span>}
+      <div style={{display:"flex",gap:20,fontSize:11,color:C.muted}}>
+        <span>G <b className="mono" style={{color:C.green}}>{fmt(row.g_score)}</b></span>
+        <span>V <b className="mono" style={{color:C.gold}}>{fmt(row.v_score)}</b></span>
+        <span>M <b className="mono" style={{color:C.accent}}>{fmt(row.m_score)}</b></span>
+        <span style={{marginLeft:"auto",fontSize:10}}>as of {row.score_date}</span>
       </div>
     </div>
   );
 }
 
-function CompositeTab({onSel}){
-  const {apply,Th}=useTbl("composite");
-  const [lim,setLim]=useState(40);
-  const rows=useMemo(()=>apply(MERGED).slice(0,lim),[apply,lim]);
-  return(
-    <div>
-      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
-        <span style={{fontSize:11,color:C.muted}}>Score = Price Action (25) + GVM Level (25) + GVM Δ7d (15) + Institutional (20) + Earnings QoQ (15) = 100 max · Click row for detail</span>
-        <div style={{marginLeft:"auto",display:"flex",gap:4}}>
-          {[25,40,60,129].map(n=><button key={n} className={lim===n?"on":""} onClick={()=>setLim(n)}>Top {n}</button>)}
-        </div>
-      </div>
-      <div style={{overflowX:"auto",background:C.card,border:`1px solid ${C.border}`,borderRadius:8}}>
-        <table>
-          <thead><tr>
-            <th style={{width:30}}>#</th>
-            <Th k="seg" lbl="Segment"/>
-            <Th k="composite" lbl="Score" r/>
-            <Th k="pa" lbl="PA/25" r/>
-            <Th k="gvmPts" lbl="GVM/25" r/>
-            <Th k="dPts" lbl="Δ7d/15" r/>
-            <Th k="iPts" lbl="Inst/20" r/>
-            <Th k="ePts" lbl="Earn/15" r/>
-            <Th k="rotation" lbl="Rotation"/>
-            <Th k="verdict" lbl="Verdict"/>
-            <Th k="gvm" lbl="GVM" r/>
-            <Th k="mcap" lbl="₹LCr" r/>
-            <th>Top Pick</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((s,i)=>(
-              <tr key={s.seg} onClick={()=>onSel(s)}>
-                <td style={{color:C.muted,fontSize:11}}>{i+1}</td>
-                <td><b style={{fontWeight:600}}>{short(s.seg,32)}</b></td>
-                <td className="mono" style={{textAlign:"right",fontWeight:800,color:sc(s.composite)}}>{s.composite}</td>
-                <td className="mono" style={{textAlign:"right"}}>{s.pa}</td>
-                <td className="mono" style={{textAlign:"right"}}>{s.gvmPts}</td>
-                <td className="mono" style={{textAlign:"right",color:s.dPts>=9?C.green:s.dPts<=4?C.red:C.muted}}>{s.dPts}</td>
-                <td className="mono" style={{textAlign:"right",color:s.iPts>=11?C.green:s.iPts<=5?C.red:C.muted}}>{s.iPts}</td>
-                <td className="mono" style={{textAlign:"right",color:s.ePts>=10?C.green:s.ePts<=4?C.red:C.muted}}>{s.ePts}</td>
-                <td style={{color:RC2[s.rotation]||C.muted,fontWeight:600,fontSize:11}}>{s.rotation||"—"}</td>
-                <td style={{color:VC[s.verdict]||C.muted,fontWeight:600,fontSize:11}}>{s.verdict}</td>
-                <td className="mono" style={{textAlign:"right"}}>{s.gvm}</td>
-                <td className="mono" style={{textAlign:"right",color:C.muted}}>{s.mcap}</td>
-                <td style={{color:C.accent,fontSize:11}}>{s.top}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+function useSort(def, defDir="desc") {
+  const [k, setK] = useState(def);
+  const [d, setD] = useState(defDir);
+  const toggle = key => { if(key===k) setD(p=>p==="desc"?"asc":"desc"); else {setK(key);setD("desc");} };
+  const Th = ({k:key,lbl,r}) => (
+    <th onClick={()=>toggle(key)} style={{textAlign:r?"right":"left"}}>
+      {lbl}{k===key?(d==="desc"?"↓":"↑"):""}
+    </th>
+  );
+  return {sortK:k, sortD:d, Th};
+}
+
+function RankTab({data, onSel}) {
+  const {sortK, sortD, Th} = useSort("composite_score");
+  const rows = useMemo(()=>
+    [...data].sort((a,b)=>{
+      const av=a[sortK]??-Infinity, bv=b[sortK]??-Infinity;
+      return sortD==="desc"?bv-av:av-bv;
+    }), [data,sortK,sortD]);
+  return (
+    <div style={{overflowX:"auto",background:C.card,border:`1px solid ${C.border}`,borderRadius:8}}>
+      <table>
+        <thead><tr>
+          <th style={{width:32,textAlign:"center"}}>#</th>
+          <Th k="segment" lbl="Segment"/>
+          <Th k="composite_score" lbl="Score" r/>
+          <Th k="gvm" lbl="GVM" r/>
+          <Th k="g_score" lbl="G" r/>
+          <Th k="v_score" lbl="V" r/>
+          <Th k="m_score" lbl="M" r/>
+          <Th k="gvm_change" lbl="GVMδ14d" r/>
+          <Th k="inst_change" lbl="Inst%" r/>
+          <Th k="qoq_profit" lbl="QoQ%" r/>
+          <Th k="annual_upside" lbl="Upside%" r/>
+          <Th k="verdict" lbl="Verdict"/>
+          <Th k="stocks_count" lbl="Stks" r/>
+          <th>Top Pick</th>
+        </tr></thead>
+        <tbody>
+          {rows.map((r,i)=>(
+            <tr key={r.segment} onClick={()=>onSel(r)}>
+              <td className="mono" style={{textAlign:"center",color:C.muted,fontSize:11}}>{i+1}</td>
+              <td style={{fontWeight:600,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}}>{clip(r.segment,30)}</td>
+              <td className="mono" style={{textAlign:"right",fontWeight:900,color:sclr(r.composite_score)}}>{fmt(r.composite_score,2)}</td>
+              <td className="mono" style={{textAlign:"right",color:r.gvm>=7?C.green:r.gvm>=6?C.orange:C.red}}>{fmt(r.gvm)}</td>
+              <td className="mono" style={{textAlign:"right",color:C.green}}>{fmt(r.g_score)}</td>
+              <td className="mono" style={{textAlign:"right",color:C.gold}}>{fmt(r.v_score)}</td>
+              <td className="mono" style={{textAlign:"right",color:C.accent}}>{fmt(r.m_score)}</td>
+              <td className="mono" style={{textAlign:"right",color:clr(r.gvm_change)}}>{r.gvm_change==null?"—":(r.gvm_change>0?"+":"")+fmt(r.gvm_change,3)}</td>
+              <td className="mono" style={{textAlign:"right",color:clr(r.inst_change)}}>{pct(r.inst_change)}</td>
+              <td className="mono" style={{textAlign:"right",color:clr(r.qoq_profit)}}>{pct(r.qoq_profit,1)}</td>
+              <td className="mono" style={{textAlign:"right",color:clr(r.annual_upside)}}>{pct(r.annual_upside,1)}</td>
+              <td style={{color:VC[r.verdict]||C.muted,fontSize:11,fontWeight:600}}>{r.verdict}</td>
+              <td className="mono" style={{textAlign:"right",color:C.muted,fontSize:11}}>{r.stocks_count}</td>
+              <td style={{color:C.accent,fontSize:11}}>{r.top_stock}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-const FILTERS=[
-  {k:"hot",lbl:"🔥 HOT Only",fn:d=>d.rotation==="HOT"},
-  {k:"gvm7",lbl:"GVM ≥ 7",fn:d=>d.gvm>=7},
-  {k:"rising",lbl:"GVM Rising",fn:d=>(d.delta||0)>0},
-  {k:"inst",lbl:"Inst Buying",fn:d=>(d.inst||0)>0.2},
-  {k:"earn",lbl:"QoQ > 20%",fn:d=>(d.profit||0)>20},
-];
-function ScatterTip({active,payload}){
-  if(!active||!payload?.length)return null;
-  const d=payload[0].payload;
-  return<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px",fontSize:11,lineHeight:1.7}}>
-    <b style={{fontSize:12}}>{d.seg}</b><br/>
-    <span style={{color:RC2[d.rotation]||C.muted}}>{d.rotation||"—"}</span> · <span style={{color:VC[d.verdict]||C.muted}}>{d.verdict}</span><br/>
-    Score: <b>{d.composite}</b> · GVM: <b>{d.gvm}</b><br/>
-    Week: <b style={{color:d.wk>=0?C.green:C.red}}>{pn(d.wk)}</b> · Month: <b style={{color:d.mo>=0?C.green:C.red}}>{pn(d.mo)}</b><br/>
-    Inst: <b style={{color:(d.inst||0)>=0?C.green:C.red}}>{d.inst!=null?pn(d.inst):"—"}</b> · QoQ: <b style={{color:(d.profit||0)>0?C.green:C.red}}>{d.profit!=null?`${d.profit>0?"+":""}${d.profit}%`:"—"}</b>
-  </div>;
-}
-function RotDot({cx,cy,payload,dim}){
-  if(!cx||!cy)return null;
-  const r=Math.max(5,Math.min(18,Math.sqrt(Math.max(0.1,payload.mcap))*2.5));
-  const col=RC2[payload.rotation]||"#9ca3af";
-  return<circle cx={cx}cy={cy}r={r}fill={col}fillOpacity={dim?0.1:0.6}stroke={col}strokeWidth={dim?0.5:1.5}strokeOpacity={dim?0.15:0.85}style={{cursor:"pointer"}}/>;
-}
-function RotationTab({onSel}){
-  const [filters,setFilters]=useState({});
-  const active=Object.entries(filters).filter(([,v])=>v).map(([k])=>k);
-  const scatter=useMemo(()=>MERGED.filter(s=>s.wk!=null),[]);
-  const passes=d=>active.every(k=>{const f=FILTERS.find(x=>x.k===k);return f?f.fn(d):true;});
-  const yes=active.length?scatter.filter(passes):scatter;
-  const no=active.length?scatter.filter(d=>!passes(d)):[];
-  const cnts={HOT:0,FADING:0,REVERTING:0,COLD:0};
-  scatter.forEach(s=>s.rotation&&cnts[s.rotation]++);
-  return(
+function GVMTab({data, onSel}) {
+  const [mode, setMode] = useState("composite_score");
+  const rows = useMemo(()=>[...data].sort((a,b)=>b[mode]-a[mode]).slice(0,25), [data,mode]);
+  const MODES = [
+    ["composite_score","Score"],["gvm","GVM"],["g_score","G · Growth"],
+    ["v_score","V · Value"],["m_score","M · Momentum"]
+  ];
+  return (
     <div>
-      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-        <span style={{fontSize:11,color:C.muted,fontWeight:700}}>FILTER:</span>
-        {FILTERS.map(f=><button key={f.k} className={filters[f.k]?"on":""} onClick={()=>setFilters(p=>({...p,[f.k]:!p[f.k]}))}>{f.lbl}</button>)}
-        {active.length>0&&<button onClick={()=>setFilters({})}>Clear</button>}
-        {active.length>0&&<span style={{fontSize:11,color:C.muted}}>{yes.length} match</span>}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
-        {[["HOT","Week↑ Month↑ · Momentum building"],["FADING","Week↓ Month↑ · Taking profits"],["REVERTING","Week↑ Month↓ · Early recovery"],["COLD","Week↓ Month↓ · Avoid / short"]].map(([r,desc])=>
-          <div key={r} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 12px"}}>
-            <span style={{fontWeight:700,color:RC2[r],fontSize:12}}>{r} ({cnts[r]})</span>
-            <div style={{fontSize:10,color:C.muted,marginTop:2}}>{desc}</div>
-          </div>
-        )}
-      </div>
-      {ScatterChart?<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 8px 14px 4px"}}>
-        <div style={{fontSize:10,color:C.muted,paddingLeft:12,marginBottom:4}}>Bubble size = Market Cap · Click to inspect · HOT = top-right · COLD = bottom-left</div>
-        <ResponsiveContainer width="100%" height={440}>
-          <ScatterChart margin={{top:8,right:24,bottom:28,left:8}}>
-            <CartesianGrid strokeDasharray="2 2" stroke="#edf1f6"/>
-            <ReferenceArea x1={0}x2={4}y1={0}y2={12}fill={RBG.HOT}/>
-            <ReferenceArea x1={-10}x2={0}y1={0}y2={12}fill={RBG.FADING}/>
-            <ReferenceArea x1={-10}x2={0}y1={-15}y2={0}fill={RBG.COLD}/>
-            <ReferenceArea x1={0}x2={4}y1={-15}y2={0}fill={RBG.REVERTING}/>
-            <XAxis type="number" dataKey="wk" domain={[-10,4]} tick={{fontSize:10,fill:C.muted}} name="Week%" label={{value:"Week Return %",position:"insideBottom",offset:-14,fontSize:10,fill:C.muted}}/>
-            <YAxis type="number" dataKey="mo" domain={[-15,12]} tick={{fontSize:10,fill:C.muted}} name="Month%" label={{value:"Month %",angle:-90,position:"insideLeft",offset:12,fontSize:10,fill:C.muted}}/>
-            <ReferenceLine x={0} stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3"/>
-            <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3"/>
-            <RT content={<ScatterTip/>} cursor={{fill:"transparent"}}/>
-            {no.length>0&&<Scatter data={no} shape={p=><RotDot{...p}dim/>}/>}
-            <Scatter data={yes} shape={p=><RotDot{...p}/>} onClick={d=>{const s=MERGED.find(x=>x.seg===d.seg);if(s)onSel(s);}}/>
-          </ScatterChart>
-        </ResponsiveContainer>
-      </div>:<div style={{padding:24,color:C.muted}}>Recharts not loaded</div>}
-      <div style={{marginTop:10,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px"}}>
-        <div style={{fontSize:11,fontWeight:700,color:C.green,marginBottom:6}}>HOT sectors right now</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {MERGED.filter(s=>s.rotation==="HOT").sort((a,b)=>b.composite-a.composite).map(s=>
-            <button key={s.seg} onClick={()=>onSel(s)} style={{fontSize:11,color:C.green,borderColor:"#d1fae5",background:"#f0fdf4"}}>
-              {s.seg} <span style={{color:C.muted}}>· {s.composite}</span>
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LeaderboardTab({onSel}){
-  const {apply,Th}=useTbl("gvm");
-  const [q,setQ]=useState(""); const [vf,setVf]=useState("ALL");
-  const filtered=useMemo(()=>{
-    let l=MERGED;
-    if(q)l=l.filter(s=>s.seg.toLowerCase().includes(q.toLowerCase())||s.top.toLowerCase().includes(q.toLowerCase()));
-    if(vf!=="ALL")l=l.filter(s=>s.verdict===vf);
-    return apply(l);
-  },[q,vf,apply]);
-  return(
-    <div>
-      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search segment or stock…" style={{width:220}}/>
-        {["ALL","Buy","Watch","Exit"].map(v=><button key={v} className={vf===v?"on":""} onClick={()=>setVf(v)}>{v}</button>)}
-        <span style={{marginLeft:"auto",fontSize:11,color:C.muted}}>{filtered.length} segments</span>
-      </div>
-      <div style={{overflowX:"auto",background:C.card,border:`1px solid ${C.border}`,borderRadius:8}}>
-        <table>
-          <thead><tr>
-            <th>#</th><Th k="seg" lbl="Segment"/><Th k="gvm" lbl="GVM" r/>
-            <Th k="g" lbl="G" r/><Th k="v" lbl="V" r/><Th k="m" lbl="M" r/>
-            <Th k="wk" lbl="Week%" r/><Th k="mo" lbl="Month%" r/>
-            <Th k="inst" lbl="Inst%" r/><Th k="profit" lbl="QoQ%" r/>
-            <Th k="delta" lbl="GVMδ7d" r/><Th k="composite" lbl="Score" r/>
-            <Th k="rotation" lbl="Rotation"/><Th k="verdict" lbl="Verdict"/>
-            <Th k="n" lbl="Stocks" r/><Th k="mcap" lbl="₹LCr" r/><th>Top</th>
-          </tr></thead>
-          <tbody>
-            {filtered.map((s,i)=>(
-              <tr key={s.seg} onClick={()=>onSel(s)}>
-                <td style={{color:C.muted,fontSize:11}}>{i+1}</td>
-                <td style={{fontWeight:600,maxWidth:200}}>{short(s.seg,30)}</td>
-                <td className="mono" style={{textAlign:"right",fontWeight:800,color:s.gvm>=7?C.green:s.gvm>=6?C.gold:C.red}}>{s.gvm}</td>
-                <td className="mono" style={{textAlign:"right",color:C.green}}>{s.g}</td>
-                <td className="mono" style={{textAlign:"right",color:C.gold}}>{s.v}</td>
-                <td className="mono" style={{textAlign:"right",color:C.accent}}>{s.m}</td>
-                <td className="mono" style={{textAlign:"right",color:s.wk==null?C.muted:s.wk>=0?C.green:C.red}}>{s.wk!=null?pn(s.wk):"—"}</td>
-                <td className="mono" style={{textAlign:"right",color:s.mo==null?C.muted:s.mo>=0?C.green:C.red}}>{s.mo!=null?pn(s.mo):"—"}</td>
-                <td className="mono" style={{textAlign:"right",color:s.inst==null?C.muted:s.inst>=0?C.green:C.red}}>{s.inst!=null?pn(s.inst):"—"}</td>
-                <td className="mono" style={{textAlign:"right",color:s.profit==null?C.muted:s.profit>=0?C.green:C.red}}>{s.profit!=null?`${s.profit>0?"+":""}${s.profit}%`:"—"}</td>
-                <td className="mono" style={{textAlign:"right",color:s.delta==null?C.muted:s.delta>0?C.green:s.delta<0?C.red:C.muted}}>{s.delta!=null?(s.delta>0?"+":"")+s.delta.toFixed(3):"—"}</td>
-                <td className="mono" style={{textAlign:"right",fontWeight:700,color:sc(s.composite)}}>{s.composite}</td>
-                <td style={{color:RC2[s.rotation]||C.muted,fontSize:11,fontWeight:600}}>{s.rotation||"—"}</td>
-                <td style={{color:VC[s.verdict]||C.muted,fontSize:11,fontWeight:600}}>{s.verdict}</td>
-                <td className="mono" style={{textAlign:"right",color:C.muted}}>{s.n}</td>
-                <td className="mono" style={{textAlign:"right",color:C.muted}}>{s.mcap}</td>
-                <td style={{color:C.accent,fontSize:11}}>{s.top}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function GVMTab({onSel}){
-  const [mode,setMode]=useState("gvm");
-  const rows=useMemo(()=>[...MERGED].sort((a,b)=>b[mode]-a[mode]).slice(0,25),[mode]);
-  return(
-    <div>
-      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+      <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
         <span style={{fontSize:11,color:C.muted,fontWeight:700}}>RANK BY:</span>
-        {[["gvm","GVM"],["g","G · Growth"],["v","V · Value"],["m","M · Momentum"]].map(([k,l])=>
-          <button key={k} className={mode===k?"on":""} onClick={()=>setMode(k)}>{l}</button>
-        )}
-      </div>
-      <div style={{display:"flex",gap:8,marginBottom:10,fontSize:11,color:C.muted}}>
-        <span><span style={{display:"inline-block",width:10,height:10,background:C.green,borderRadius:2,marginRight:4}}/>G · Growth</span>
-        <span><span style={{display:"inline-block",width:10,height:10,background:C.gold,borderRadius:2,marginRight:4}}/>V · Value</span>
-        <span><span style={{display:"inline-block",width:10,height:10,background:C.accent,borderRadius:2,marginRight:4}}/>M · Momentum</span>
-        <span style={{marginLeft:"auto"}}>Top 25 · Bar = score/10</span>
+        {MODES.map(([k,l])=>(
+          <button key={k} onClick={()=>setMode(k)} style={{
+            cursor:"pointer",borderRadius:6,fontSize:11,fontWeight:600,padding:"5px 10px",
+            border:`1px solid ${mode===k?C.accent:C.border}`,
+            background:mode===k?"#eff4ff":"#fff",color:mode===k?C.accent:C.muted}}>
+            {l}
+          </button>
+        ))}
+        <span style={{marginLeft:"auto",fontSize:10,color:C.muted}}>Top 25 · Click for detail</span>
       </div>
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
-        {rows.map((s,i)=>(
-          <div key={s.seg} onClick={()=>onSel(s)} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",borderBottom:i<rows.length-1?`1px solid ${C.grid}`:"none",cursor:"pointer"}}
-            onMouseEnter={e=>e.currentTarget.style.background="#f0f4f9"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <div style={{fontSize:11,color:C.muted,width:22,textAlign:"right"}}>{i+1}</div>
-            <div style={{width:200,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.seg}</div>
+        {rows.map((r,i)=>(
+          <div key={r.segment} onClick={()=>onSel(r)} style={{
+            display:"flex",alignItems:"center",gap:10,padding:"8px 14px",
+            borderBottom:i<rows.length-1?`1px solid ${C.border}`:"none",cursor:"pointer"}}
+            onMouseEnter={e=>e.currentTarget.style.background="#f0f4f9"}
+            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <div className="mono" style={{fontSize:11,color:C.muted,width:22,textAlign:"right"}}>{i+1}</div>
+            <div style={{width:210,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.segment}</div>
             <div style={{flex:1,display:"flex",flexDirection:"column",gap:2}}>
-              {[["g",C.green],["v",C.gold],["m",C.accent]].map(([k,col])=>(
+              {[["g_score",C.green,"G"],["v_score",C.gold,"V"],["m_score",C.accent,"M"]].map(([k,col,lbl])=>(
                 <div key={k} style={{display:"flex",alignItems:"center",gap:4}}>
-                  <div style={{width:24,fontSize:10,color:col,fontWeight:700}}>{k.toUpperCase()} {s[k]}</div>
+                  <span className="mono" style={{width:18,fontSize:10,color:col,fontWeight:700}}>{lbl}</span>
                   <div style={{flex:1,height:5,background:"#f0f4f9",borderRadius:3}}>
-                    <div style={{height:5,width:(s[k]/10*100)+"%",background:col,borderRadius:3}}/>
+                    <div style={{height:5,width:(r[k]/10*100)+"%",background:col,borderRadius:3}}/>
                   </div>
+                  <span className="mono" style={{fontSize:11,color:col,width:30,textAlign:"right"}}>{fmt(r[k])}</span>
                 </div>
               ))}
             </div>
-            <div className="mono" style={{fontSize:14,fontWeight:800,color:s.gvm>=7?C.green:s.gvm>=6?C.gold:C.red,width:36,textAlign:"right"}}>{s.gvm}</div>
-            <div style={{fontSize:11,color:VC[s.verdict]||C.muted,fontWeight:600,width:56}}>{s.verdict}</div>
+            <div className="mono" style={{fontSize:13,fontWeight:800,color:r.gvm>=7?C.green:r.gvm>=6?C.orange:C.red,width:36,textAlign:"right"}}>{fmt(r.gvm)}</div>
+            <div className="mono" style={{fontSize:13,fontWeight:900,color:sclr(r.composite_score),width:32,textAlign:"right"}}>{fmt(r.composite_score,1)}</div>
+            <div style={{fontSize:11,color:VC[r.verdict]||C.muted,fontWeight:600,width:60}}>{r.verdict}</div>
           </div>
         ))}
       </div>
@@ -577,48 +288,79 @@ function GVMTab({onSel}){
   );
 }
 
-function App(){
-  const [tab,setTab]=useState("composite");
-  const [sel,setSel]=useState(null);
-  const stats=useMemo(()=>({
-    hot:MERGED.filter(s=>s.rotation==="HOT").length,
-    buy:MERGED.filter(s=>["Strong Buy","Buy"].includes(s.verdict)).length,
-    strong:MERGED.filter(s=>s.composite>=70).length,
-  }),[]);
-  const TABS=[["composite","Composite Score"],["rotation","Rotation Matrix"],["leaderboard","Leaderboard"],["gvm","G · V · M"]];
-  return(
+function Loading() {
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}>
+      <div style={{width:32,height:32,border:"3px solid #e2e7ee",borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+      <div style={{color:C.muted,fontSize:12}}>Loading sector data from Railway…</div>
+    </div>
+  );
+}
+
+function App() {
+  const [d, setD]     = useState(null);
+  const [err, setE]   = useState(null);
+  const [tab, setTab] = useState("rank");
+  const [sel, setSel] = useState(null);
+
+  useEffect(()=>{
+    fetch("/api/sector/rotation")
+      .then(r=>r.json())
+      .then(data=>{ data.error ? setE(data.error) : setD(data); })
+      .catch(e=>setE(e.message));
+  },[]);
+
+  if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
+  if (!d)  return <Loading/>;
+
+  const stats = {
+    buy: d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,
+    hi:  d.all.filter(r=>r.composite_score>=7).length,
+    lo:  d.all.filter(r=>r.composite_score<=3).length,
+  };
+
+  const TABS = [["rank","Composite Rank"],["gvm","G · V · M"]];
+
+  return (
     <div style={{minHeight:"100vh",background:C.bg}}>
       <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
         <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
           <div>
-            <span style={{fontSize:12,fontWeight:800,color:C.text}}>SCORR · Sector Analysis</span>
-            <span style={{fontSize:10,color:C.muted,marginLeft:10}}>129 segments · 5-factor scoring · 12-Jun-2026</span>
+            <span style={{fontSize:13,fontWeight:800,color:C.text}}>SCORR · Sector Analysis</span>
+            <span style={{fontSize:10,color:C.muted,marginLeft:10}}>
+              {d.total_segments} segments · {d.score_date} · 5-signal percentile composite
+            </span>
           </div>
-          <div style={{display:"flex",gap:10,marginLeft:"auto",fontSize:11}}>
+          <div style={{marginLeft:"auto",display:"flex",gap:16,fontSize:11}}>
             <span>Buy+: <b style={{color:C.green}}>{stats.buy}</b></span>
-            <span>🔥 HOT: <b style={{color:C.gold}}>{stats.hot}</b></span>
-            <span>Score≥70: <b style={{color:C.green}}>{stats.strong}</b></span>
+            <span>Score≥7: <b style={{color:C.green}}>{stats.hi}</b></span>
+            <span>Score≤3: <b style={{color:C.red}}>{stats.lo}</b></span>
           </div>
         </div>
-        <div style={{display:"flex",gap:0,marginTop:10,borderBottom:`1px solid ${C.border}`,marginBottom:-13,marginLeft:-20,paddingLeft:20}}>
+        <div style={{display:"flex",marginTop:10,borderBottom:`1px solid ${C.border}`,marginLeft:-20,paddingLeft:20,marginBottom:-13}}>
           {TABS.map(([id,lbl])=>(
-            <button key={id} onClick={()=>setTab(id)} style={{padding:"8px 16px",borderRadius:0,border:"none",borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,background:"transparent",color:tab===id?C.accent:C.muted,fontWeight:tab===id?700:500,fontSize:12}}>
+            <button key={id} className="tab" onClick={()=>setTab(id)} style={{
+              borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,
+              color:tab===id?C.accent:C.muted,fontWeight:tab===id?700:500}}>
               {lbl}
             </button>
           ))}
         </div>
       </div>
-      <div style={{padding:"16px 20px",maxWidth:1400,margin:"0 auto"}}>
-        {sel&&<Panel s={sel} onClose={()=>setSel(null)}/>}
-        {tab==="composite"&&<CompositeTab onSel={setSel}/>}
-        {tab==="rotation"&&<RotationTab onSel={setSel}/>}
-        {tab==="leaderboard"&&<LeaderboardTab onSel={setSel}/>}
-        {tab==="gvm"&&<GVMTab onSel={setSel}/>}
+
+      <Strip top5={d.top5} bottom5={d.bottom5} onSel={setSel}/>
+
+      {sel && <div style={{padding:"12px 20px 0"}}><Detail row={sel} onClose={()=>setSel(null)}/></div>}
+
+      <div style={{padding:"12px 20px 24px",maxWidth:1440,margin:"0 auto"}}>
+        {tab==="rank" && <RankTab data={d.all} onSel={setSel}/>}
+        {tab==="gvm"  && <GVMTab  data={d.all} onSel={setSel}/>}
       </div>
     </div>
   );
 }
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
