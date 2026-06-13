@@ -3,7 +3,8 @@ Native Query Router — Zero token, pure Railway DB queries.
 Column names verified against live DB schema 10-Jun-2026.
 
 ARCHITECTURE:
-  Layer 0: Hardcoded commands (trade check, virtual dashboard, health, PCR, QB, mood, qualified)
+  Layer 0: Hardcoded commands (trade check, virtual dashboard, health, PCR, QB, mood, qualified,
+           personal_journal, v8_paper, daily_digest, gainers/losers, server_time)
   Layer 1: Grammar parser+executor (RANK/FILTER/SCREEN/LOOKUP/HISTORY/SECTOR_VIEW)
   Layer 2: Fallback hint → Claude
 
@@ -14,13 +15,20 @@ NOTE (10-Jun-2026): mom_2d = 2-day momentum (close vs T-2). Renamed from day_cha
 
 NOTE (11-Jun-2026): 'trade check <symbol> <long|short>' routes to native_trade_check
   (v3.3 objective subset, $0). Subjective chart rules flagged for human confirmation.
+
+NOTE (13-Jun-2026): Added Layer 0b-0f handlers to cover Max AICIO card library:
+  - personal_journal (open / closed / pnl)
+  - v8_paper (positions + trades + summary composite)
+  - daily_digest (gate + qualified + signals + gainers composite)
+  - top_gainers / top_losers
+  - server_time / NSE state
 """
 
 import os
 import re
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, time as dtime
 from typing import Optional, Tuple, Dict, Any
 import psycopg
 
@@ -28,7 +36,7 @@ from native_trade_check import native_trade_check
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# ── SECTOR ALIAS MAP ──────────────────────────────────────────────────────────
+# ── SECTOR ALIAS MAP ────────────────────────────────────────────────────────
 # Maps investor shorthand → exact DB segment prefix (used in ILIKE '{val}%')
 # Use full prefix where needed to avoid substring collisions (e.g. IT vs Capital)
 
@@ -104,7 +112,7 @@ def resolve_sector(raw: Optional[str]) -> Optional[str]:
     return raw
 
 
-# ── GRAMMAR PARSER ────────────────────────────────────────────────────────────
+# ── GRAMMAR PARSER ──────────────────────────────────────────────────────────
 
 METRIC_MAP = {
     "gvm":              ("g", "gvm_score",              "gvm"),
@@ -275,7 +283,7 @@ def parse_query(q: str) -> Dict[str, Any]:
     }
 
 
-# ── GRAMMAR EXECUTOR ───────────────────────────────────────────────────────────
+# ── GRAMMAR EXECUTOR ────────────────────────────────────────────────────────
 
 def fmt_table(headers: list, rows: list) -> str:
     if not rows:
@@ -312,7 +320,6 @@ def _sector_condition(sector: Optional[str]) -> Optional[str]:
     """
     if not sector:
         return None
-    # If alias ends with space/dash (e.g. 'IT - '), use prefix ILIKE
     if sector.endswith(" ") or sector.endswith("- "):
         return f"g.segment ILIKE '{sector}%'"
     return f"g.segment ILIKE '%{sector}%'"
@@ -322,7 +329,6 @@ def exec_rank(cur, slots: Dict) -> str:
     n, sector, cap, verdict = slots["count"], slots["sector"], slots["cap"], slots["verdict"]
     metric, threshold, vm = slots["metric"], slots["threshold"], slots["vm"]
 
-    # VM dual metric
     if vm:
         needs_input = cap is not None
         from_clause = _build_from("gvm", needs_input)
@@ -350,7 +356,6 @@ def exec_rank(cur, slots: Dict) -> str:
                  f"{_f(r[3]):.2f}", f"{_f(r[4]):.2f}", f"{_f(r[5]):.2f}") for r in rows]
         return f"**{' '.join(title_parts)}**\n{fmt_table(['Symbol','Company','Segment','GVM','V Score','M Score'], data)}"
 
-    # Standard single metric
     if metric:
         alias, col, join_type = metric
         order_col = f"{alias}.{col}"
@@ -521,7 +526,7 @@ def execute_grammar(query: str) -> Optional[str]:
         return f"DB error: {str(e)[:150]}\nToggle Claude ON for full access."
 
 
-# ── QUERY LOGGER ───────────────────────────────────────────────────────────────
+# ── QUERY LOGGER ────────────────────────────────────────────────────────────
 
 def _log_query(query: str, mode: str, operation: str, metric: str,
                sector: str, resolved: bool, latency_ms: int,
@@ -541,7 +546,7 @@ def _log_query(query: str, mode: str, operation: str, metric: str,
         pass
 
 
-# ── VIRTUAL DASHBOARD V8 ───────────────────────────────────────────────────────
+# ── VIRTUAL DASHBOARD V8 ────────────────────────────────────────────────────
 
 def _vd_market_gate(cur) -> str:
     cur.execute("""
@@ -661,7 +666,7 @@ def _virtual_dashboard(cur) -> str:
     return "\n\n".join(parts)
 
 
-# ── MAIN QUERY HANDLER ─────────────────────────────────────────────────────────
+# ── MAIN QUERY HANDLER ──────────────────────────────────────────────────────
 
 def _query_sync(query: str) -> str:
     q = query.lower().strip()
@@ -671,7 +676,7 @@ def _query_sync(query: str) -> str:
         _log_query(query, mode, op, metric, sector, resolved,
                    int((time.time()-t0)*1000))
 
-    # ── LAYER 0a: Native v3.3 Trade Check (own DB connection inside) ──────────
+    # ── LAYER 0a: Native v3.3 Trade Check (own DB connection inside) ──────
     if any(k in q for k in ["trade check", "trade journal", "journal check",
                             "evaluate stock", "trade card"]):
         result = native_trade_check(query)
@@ -681,7 +686,7 @@ def _query_sync(query: str) -> str:
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
 
-            # ── LAYER 0: Hardcoded commands ──────────────────────────────────
+            # ── LAYER 0: Hardcoded commands ─────────────────────────────────
 
             if "virtual dashboard" in q or "v8 dashboard" in q:
                 result=_virtual_dashboard(cur); log("native","virtual_dashboard"); return result
@@ -768,7 +773,148 @@ def _query_sync(query: str) -> str:
                     log("native","v8_watchlist"); return result
                 log("native","v8_watchlist","","",False); return "No V8 candidates today."
 
-            # ── LAYER 1: Grammar ─────────────────────────────────────────────
+            # ── LAYER 0b: Personal Journal ──────────────────────────────────
+            if any(k in q for k in ["personal journal","my journal","my open trades",
+                                    "my closed trades","journal closed","journal open",
+                                    "journal pnl","journal stats","my trades"]):
+                want_open = "open" in q
+                want_closed = ("closed" in q or "pnl" in q or "stats" in q or
+                               "performance" in q) and not want_open
+
+                if want_open:
+                    cur.execute("""
+                        SELECT trade_date, symbol, direction, qty,
+                               entry_price, sl, target, holding_days, v8_basket
+                        FROM personal_journal WHERE exit_price IS NULL
+                        ORDER BY trade_date DESC, id DESC LIMIT 30
+                    """)
+                    rows = cur.fetchall()
+                    if not rows:
+                        log("native","journal_open","","",False)
+                        return "**My Journal — Open Trades**\nNo open trades. Add via: 'add SBIN 1 qty to journal long'"
+                    data = [(str(r[0]),r[1],r[2],r[3],f"{_f(r[4]):.1f}",
+                             f"{_f(r[5]):.1f}" if r[5] else "—",
+                             f"{_f(r[6]):.1f}" if r[6] else "—",
+                             r[7] or "—", r[8] or "—") for r in rows]
+                    log("native","journal_open")
+                    return (f"**My Journal — Open Trades ({len(rows)})**\n"
+                            f"{fmt_table(['Date','Symbol','Side','Qty','Entry','SL','Target','Days','Basket'], data)}")
+
+                # closed (default if not explicitly open)
+                cur.execute("""
+                    SELECT trade_date, symbol, direction, qty,
+                           entry_price, exit_price, pnl, result, holding_days
+                    FROM personal_journal WHERE exit_price IS NOT NULL
+                    ORDER BY trade_date DESC, id DESC LIMIT 30
+                """)
+                rows = cur.fetchall()
+                if not rows:
+                    log("native","journal_closed","","",False)
+                    return "**My Journal — Closed Trades**\nNo closed trades yet."
+                data = [(str(r[0]),r[1],r[2],r[3],f"{_f(r[4]):.1f}",
+                         f"{_f(r[5]):.1f}",f"{_f(r[6]):+,.0f}",
+                         r[7] or "—",r[8] or "—") for r in rows]
+                wins = sum(1 for r in rows if _f(r[6])>0)
+                total_pnl = sum(_f(r[6]) for r in rows)
+                acc = round(wins/len(rows)*100,1) if rows else 0.0
+                log("native","journal_closed")
+                return (f"**My Journal — Closed Trades ({len(rows)})**\n"
+                        f"Total P&L: {total_pnl:+,.0f} · Wins: {wins}/{len(rows)} ({acc}%)\n\n"
+                        f"{fmt_table(['Date','Symbol','Side','Qty','Entry','Exit','P&L','Result','Days'], data)}")
+
+            # ── LAYER 0c: V8 Paper Book (positions + trades + summary) ──────
+            if (("v8 paper" in q) or ("paper open" in q) or ("paper closed" in q)
+                or ("paper book" in q) or ("paper positions" in q)
+                or ("paper trades" in q) or ("paper pnl" in q) or ("paper summary" in q)):
+                summary = closed = detail = ""
+                try: summary = _vd_paper_summary(cur)
+                except Exception:
+                    try: cur.connection.rollback()
+                    except: pass
+                try: closed = _vd_closed_performance(cur)
+                except Exception:
+                    try: cur.connection.rollback()
+                    except: pass
+                try: detail = _vd_open_detail(cur)
+                except Exception:
+                    try: cur.connection.rollback()
+                    except: pass
+                parts = ["**V8 Paper Book**"]
+                if summary: parts.append(summary)
+                if closed: parts.append(closed)
+                if detail: parts.append(detail)
+                log("native","v8_paper_book")
+                return "\n\n".join(parts)
+
+            # ── LAYER 0d: Daily Digest (composite) ──────────────────────────
+            if "daily digest" in q or q.strip() == "digest" or "morning brief" in q:
+                parts = [f"**Daily Digest — {datetime.now().strftime('%d-%b-%Y %H:%M IST')}**"]
+                for fn in [_vd_market_gate, _vd_qualified, _vd_top_signals]:
+                    try: parts.append(fn(cur))
+                    except Exception:
+                        try: cur.connection.rollback()
+                        except: pass
+                try:
+                    cur.execute("""
+                        SELECT g.symbol, g.company_name, ROUND(v.day_1d::numeric,2) as dchg
+                        FROM v8_metrics v JOIN gvm_scores g ON g.symbol=v.symbol
+                        WHERE v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                        ORDER BY v.day_1d DESC NULLS LAST LIMIT 5
+                    """)
+                    gainers = cur.fetchall()
+                    if gainers:
+                        d = [(r[0], r[1][:22], f"{_f(r[2]):+.2f}%") for r in gainers]
+                        parts.append(f"**Top Gainers**\n{fmt_table(['Symbol','Company','Day%'], d)}")
+                except Exception:
+                    try: cur.connection.rollback()
+                    except: pass
+                log("native","daily_digest")
+                return "\n\n".join(parts)
+
+            # ── LAYER 0e: Top Gainers / Losers ──────────────────────────────
+            if "top gainers" in q or "biggest movers" in q or "gainers today" in q:
+                cur.execute("""
+                    SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2),
+                           ROUND(v.day_1d::numeric,2), g.segment
+                    FROM v8_metrics v JOIN gvm_scores g ON g.symbol=v.symbol
+                    WHERE v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                    ORDER BY v.day_1d DESC NULLS LAST LIMIT 15
+                """)
+                rows = cur.fetchall()
+                if not rows: log("native","gainers","","",False); return "No gainer data."
+                d = [(r[0], r[1][:22], r[4][:18] if r[4] else "—",
+                      f"{_f(r[2]):.2f}", f"{_f(r[3]):+.2f}%") for r in rows]
+                log("native","gainers")
+                return f"**Top Gainers Today**\n{fmt_table(['Symbol','Company','Segment','GVM','Day%'], d)}"
+
+            if "top losers" in q or "biggest decliners" in q or "losers today" in q:
+                cur.execute("""
+                    SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2),
+                           ROUND(v.day_1d::numeric,2), g.segment
+                    FROM v8_metrics v JOIN gvm_scores g ON g.symbol=v.symbol
+                    WHERE v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                    ORDER BY v.day_1d ASC NULLS LAST LIMIT 15
+                """)
+                rows = cur.fetchall()
+                if not rows: log("native","losers","","",False); return "No loser data."
+                d = [(r[0], r[1][:22], r[4][:18] if r[4] else "—",
+                      f"{_f(r[2]):.2f}", f"{_f(r[3]):+.2f}%") for r in rows]
+                log("native","losers")
+                return f"**Top Losers Today**\n{fmt_table(['Symbol','Company','Segment','GVM','Day%'], d)}"
+
+            # ── LAYER 0f: Server Time / NSE State ───────────────────────────
+            if ("server time" in q) or ("ist time" in q) or ("market hours" in q):
+                now = datetime.now()
+                is_weekday = now.weekday() < 5
+                t = now.time()
+                mkt_open = dtime(9,15); mkt_close = dtime(15,30)
+                state = "OPEN" if (is_weekday and mkt_open <= t <= mkt_close) else "CLOSED"
+                log("native","server_time")
+                return (f"**Server Time — {now.strftime('%d-%b-%Y %H:%M:%S IST')}**\n"
+                        f"NSE: {state} · Hours: Mon-Fri 09:15 – 15:30 IST\n"
+                        f"Day: {now.strftime('%A')}")
+
+            # ── LAYER 1: Grammar ────────────────────────────────────────────
 
             slots = parse_query(q)
             grammar_result = execute_grammar(q)
@@ -786,8 +932,9 @@ def _query_sync(query: str) -> str:
             return ("⚡ Native — $0. Try:\n"
                     "• 'trade check RELIANCE long' | 'check INFY short'\n"
                     "• 'Virtual Dashboard V8' | 'market mood' | 'QB summary' | 'PCR'\n"
+                    "• 'my journal open trades' | 'my journal closed trades'\n"
+                    "• 'V8 paper book' | 'top gainers' | 'top losers' | 'daily digest'\n"
                     "• 'top 10 pharma gvm above 7.5' | 'tech stocks vm score'\n"
-                    "• 'tech largecap vm score' | 'midcap opm above 20'\n"
                     "• 'sector ratings' | 'GVM history HDFC bank'\n"
                     "• 'overview Torrent Pharma' | 'largecap roce above 15'\n"
                     "Or toggle Claude ON for free-text queries.")
