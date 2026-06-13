@@ -27,14 +27,21 @@ gvm_delta AS (
 ),
 screener_agg AS (
     SELECT g.segment,
-           AVG(NULLIF(s.fii_change::numeric, 0) + NULLIF(s.dii_change::numeric, 0)) AS inst_change,
-           AVG(s.qoq_profit_growth::numeric) AS qoq_profit,
-           AVG(CASE WHEN s.pe::numeric > 0
+           -- Median: robust to FII/DII outliers
+           ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
+               ORDER BY (NULLIF(s.fii_change::numeric, 0) + NULLIF(s.dii_change::numeric, 0))
+           )::numeric, 2) AS inst_change,
+           -- Median: robust to loss-to-profit base effect outliers
+           ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
+               ORDER BY s.qoq_profit_growth::numeric
+           )::numeric, 1) AS qoq_profit,
+           ROUND(AVG(CASE WHEN s.pe::numeric > 0
                THEN (s.historical_pe::numeric - s.pe::numeric) / s.pe::numeric * 100
-               END) AS annual_upside
+               END)::numeric, 1) AS annual_upside
     FROM screener_raw s
     JOIN gvm_scores g ON g.symbol = s.nse_code
     WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+    AND s.qoq_profit_growth IS NOT NULL
     GROUP BY g.segment
 ),
 combined AS (
@@ -63,8 +70,8 @@ SELECT
     stocks_count, verdict, top_stock, top_stock_gvm,
     ROUND(total_mcap::numeric, 1)    AS total_mcap,
     ROUND(gvm_change::numeric, 3)    AS gvm_change,
-    ROUND(inst_change::numeric, 2)   AS inst_change,
-    ROUND(qoq_profit::numeric, 1)    AS qoq_profit,
+    inst_change,
+    qoq_profit,
     ROUND(annual_upside::numeric, 1) AS annual_upside,
     ROUND(((r_gvm + r_gvm_change + r_inst + r_profit + r_upside) / 5 * 10)::numeric, 2) AS composite_score
 FROM ranked
