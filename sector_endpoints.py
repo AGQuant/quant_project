@@ -27,11 +27,9 @@ gvm_delta AS (
 ),
 screener_agg AS (
     SELECT g.segment,
-           -- Median: robust to FII/DII outliers
            ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
                ORDER BY (NULLIF(s.fii_change::numeric, 0) + NULLIF(s.dii_change::numeric, 0))
            )::numeric, 2) AS inst_change,
-           -- Median: robust to loss-to-profit base effect outliers
            ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (
                ORDER BY s.qoq_profit_growth::numeric
            )::numeric, 1) AS qoq_profit,
@@ -85,13 +83,14 @@ def sector_rotation():
             cur.execute(COMPOSITE_SQL)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            top5    = rows[:5]
-            bottom5 = list(reversed(rows[-5:]))
+            top5   = rows[:5]
+            # Cold = all sectors with composite score < 4.0, worst first
+            cold   = [r for r in reversed(rows) if float(r["composite_score"]) < 4.0]
             return {
                 "score_date": rows[0]["score_date"] if rows else None,
                 "total_segments": len(rows),
                 "top5": top5,
-                "bottom5": bottom5,
+                "bottom5": cold,   # key kept for HTML compatibility
                 "all": rows,
             }
     except Exception as e:
