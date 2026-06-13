@@ -17,6 +17,8 @@ F4 R:R, F5 entry window (live IST), F6 DTE>=3, F7 basis trend.
 
 STRICT SCORING: only confirmed PASSes count. FAIL and no-data (🟡) both
 count as NOT passed.
+F5 EXCEPTION: weekend / pre-post market hours → None (excluded, threshold
+drops to 4). Research mode — timing is irrelevant.
 
 gate1/gate2 (bool|None) = OPTIONAL human overrides:
   gate1 overrides R10, gate2 overrides R12.
@@ -82,7 +84,7 @@ def _parse_side(q):
     return "SHORT" if ("short" in q.lower() or "sell" in q.lower()) else "LONG"
 
 
-# ──────────────────────────── parameter computers ────────────────────────────
+# ──────────────────────────────── parameter computers ────────────────────────────────
 
 def _r7_volume_pattern(cur, symbol, side):
     """30d up-day vol vs down-day vol. LONG: ratio>=1.1. SHORT: ratio<=0.9."""
@@ -213,10 +215,15 @@ def _f3_fib(cur, symbol, cmp):
 
 
 def _f5_window(side):
+    """Entry window check. Returns None (excluded) on weekends/off-hours — research mode."""
     now = _ist_now()
-    if now.weekday() >= 5:
-        return False, "weekend"
     t = now.time()
+    mkt_open = datetime.strptime("09:15", "%H:%M").time()
+    mkt_close = datetime.strptime("15:30", "%H:%M").time()
+    if now.weekday() >= 5:
+        return None, "Weekend — Analysis Mode"
+    if t < mkt_open or t > mkt_close:
+        return None, f"Pre/Post market {now.strftime('%H:%M')} IST"
     if side == "LONG":
         ok = (t >= datetime.strptime("14:00", "%H:%M").time()
               and t <= datetime.strptime("15:30", "%H:%M").time())
@@ -235,7 +242,7 @@ def _f6_dte():
     return dte >= 3, f"DTE {dte} (exp {exp.strftime('%d-%b')})"
 
 
-# ──────────────────────────── main compute ────────────────────────────
+# ──────────────────────────────── main compute ────────────────────────────────
 
 def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
     if side is None:
@@ -290,9 +297,19 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                            AND ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day') LIMIT 1""", (symbol,))
             in_blackout = cur.fetchone() is not None
 
-            cur.execute("""SELECT basis_pct FROM futures_basis WHERE symbol=%s
-                           ORDER BY ts DESC LIMIT 5""", (symbol,))
-            basis = [_f(x[0]) for x in cur.fetchall()]
+            # F7: compute basis inline from futures_close vs intraday spot close
+            cur.execute("""
+                SELECT ROUND(((fb.futures_close - ip.close) / ip.close * 100)::numeric, 3),
+                       fb.oi, fb.oi_chg, fb.ts
+                FROM futures_basis fb
+                CROSS JOIN (
+                    SELECT close FROM intraday_prices
+                    WHERE symbol=%s ORDER BY ts DESC LIMIT 1
+                ) ip
+                WHERE fb.symbol=%s AND fb.futures_close IS NOT NULL
+                ORDER BY fb.ts DESC LIMIT 5""", (symbol, symbol))
+            basis_rows = cur.fetchall()
+            basis = [_f(r[0]) for r in basis_rows]
 
             # auto computers
             r7_ok, r7_val = _r7_volume_pattern(cur, symbol, side)
@@ -338,7 +355,6 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                               gvm is not None and float(gvm) >= 7.0))
 
             # R6 Trend — MERGED R6+R8 (v3.3.2): MAs + RSI M/W together
-            # (redundancy scan 12-Jun: 88% agreement = same fact paid twice)
             mas = [dma20, dma50, dma200]
             if side == "LONG":
                 n = sum(1 for x in mas if x is not None and float(x) > 0)
@@ -423,18 +439,23 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             t2.append(row("F5 Window", "LONG 14:00-15:30 / SHORT 10:30-12:00", f5_val, f5_ok))
             t2.append(row("F6 Instrument", "futures DTE>=3", f6_val, f6_ok))
 
+            # F7: basis trend from computed basis (futures_close - intraday spot)
             if len(basis) >= 2 and basis[0] is not None and basis[-1] is not None:
+                oi_chg = basis_rows[0][2] if basis_rows else None
+                oi_str = f" · OI {oi_chg:+,}" if oi_chg is not None else ""
                 f7_ok = basis[0] >= basis[-1] if side == "LONG" else basis[0] <= basis[-1]
-                t2.append(row("F7 Deriv", "basis trend aligned", f"basis {basis[0]:.2f}%", f7_ok))
+                t2.append(row("F7 Deriv", "basis trend aligned", f"basis {basis[0]:.3f}%{oi_str}", f7_ok))
             else:
-                t2.append(row("F7 Deriv", "OI + basis", "no basis", None))
+                t2.append(row("F7 Deriv", "OI + basis", "no futures data", None))
 
             t2_auto = [r for r in t2 if r[3] is not None]
             t2_pass = sum(1 for r in t2_auto if r[3])
             t2_unk = len(t2) - len(t2_auto)
+            # F5 excluded on weekends/off-hours → threshold drops to 4
+            t2_min = 4 if f5_ok is None else 5
 
             # ── verdict — STRICT: only confirmed PASSes count.
-            if t1_pass >= 8 and t2_pass >= 5:
+            if t1_pass >= 8 and t2_pass >= t2_min:
                 if t1_pass >= 10 and t2_pass >= 6:
                     verdict, vclass = f"STRONG — Tier1 {t1_pass}/{t1_total}, Tier2 {t2_pass}/7.", "strong"
                 else:
@@ -444,7 +465,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 verdict, vclass = f"REJECT — Tier1 {t1_pass}/{t1_total} confirmed, need 8{miss}.", "reject"
             else:
                 miss = f" ({t2_unk} no-data counted as not-passed)" if t2_unk else ""
-                verdict, vclass = f"WEAK — Tier1 {t1_pass}/{t1_total} ok, Tier2 {t2_pass}/7 below 5{miss}.", "weak"
+                verdict, vclass = f"WEAK — Tier1 {t1_pass}/{t1_total} ok, Tier2 {t2_pass}/7 below {t2_min}{miss}.", "weak"
 
             def st(ok):
                 return "chart" if ok is None else ("pass" if ok else "fail")
@@ -455,7 +476,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 "tier1": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3]), "method": r[4]} for r in t1],
                 "tier2": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3]), "method": r[4]} for r in t2],
                 "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_unk, "t1_total": t1_total,
-                "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk,
+                "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk, "t2_min": t2_min,
                 "verdict": verdict, "verdict_class": vclass,
                 "version": "v3.3.2",
                 "scoring": "strict — fails and no-data both count as not passed",
@@ -500,7 +521,7 @@ def native_trade_check(query, gate1=None, gate2=None):
     out.append("| --- | --- | --- | --- |")
     for r in d["tier2"]:
         out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r)} |")
-    out.append(f"\n**Tier2: {d['t2_pass']}/7 confirmed** · need 5")
+    out.append(f"\n**Tier2: {d['t2_pass']}/7 confirmed** · need {d.get('t2_min', 5)}")
     out.append(f"\n---\n**Verdict: {d['verdict']}**")
     out.append("_Personal trade context — not a V8 algo signal._")
     return "\n".join(out)
