@@ -48,6 +48,7 @@ from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
 from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
+from sector_brief_endpoints import router as sector_brief_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -59,7 +60,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.37
+# Scorr / Project Quant — main.py v2.9.38
+# v2.9.38: sector_brief_endpoints router wired — GET /api/sector/brief?segment=...
+#   Lazy AI brief generation via Claude Haiku, cached in sector_briefs table.
+#   Returns: what_is_it, growth_drivers, application_type, business_model,
+#   key_risks, constituents. First call ~3s, subsequent instant from cache.
 # v2.9.37: sector_endpoints router wired — GET /api/sector/rotation (5-signal
 #   percentile-rank composite: GVM, GVM-delta-14d, inst-change, QoQ-profit,
 #   annual-upside). Returns top5/bottom5 + full 129-segment ranked list.
@@ -96,7 +101,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
 # ============================================================
 
-VERSION = "2.9.37"
+VERSION = "2.9.38"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -140,6 +145,7 @@ app.include_router(scorr_chat_router)
 app.include_router(trade_check_v34_router)
 app.include_router(check_router)
 app.include_router(sector_router)
+app.include_router(sector_brief_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -283,11 +289,22 @@ def create_tables():
     INSERT INTO cache_metadata (key, status)
     VALUES ('gvm_cache', 'pending_first_load')
     ON CONFLICT (key) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS sector_briefs (
+        id SERIAL PRIMARY KEY,
+        segment TEXT NOT NULL UNIQUE,
+        what_is_it TEXT,
+        growth_drivers JSONB,
+        application_type TEXT,
+        business_model TEXT,
+        key_risks JSONB,
+        generated_at TIMESTAMP DEFAULT NOW(),
+        model TEXT DEFAULT 'claude-haiku-4-5-20251001'
+    );
     """ + V8_SCHEMA_SQL
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.37)")
+        log.info("Tables ready (v2.9.38)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
