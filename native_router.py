@@ -18,6 +18,18 @@ ARCHITECTURE:
 
   query_log captures every query for native training analytics.
 
+FIXES v9 (13-Jun-2026) — CAPLIPOINT bug + research-verb expansion:
+  P. Research verb forms added to LOOKUP_TRIGGER_WORDS: "analyse", "analyze",
+     "evaluate", "assess", "review", "rate", "rating", "score", "view".
+     Bug: "analyse caplin point" had no trigger word (noun "analysis" was
+     present, verb "analyse" was not), fell to RANK, sector resolved to
+     "caplin point", exec_rank found 0 rows on segment mismatch, fell through
+     to off-topic help card. Now routes to LOOKUP → finds CAPLIPOINT.
+     score/rate are SAFE: _parse_operation checks RANK first (top/best/highest)
+     and the LOOKUP gate is "has_lookup_word and not has_metric_thresh", so
+     "gvm score above 7" still routes to FILTER. Same words added to
+     exec_lookup stop set so company-name search strips the verb cleanly.
+
 FIXES v8 (13-Jun-2026) — Level-2 v2 polish:
   O. Variant action verb forms added: "trust", "held", "owning", "owned",
      "picked", "pick", "picks". Catches "can I trust RELIANCE long term",
@@ -93,7 +105,7 @@ from native_intent import (classify as intent_classify,
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-# ── SECTOR ALIAS MAP ─────────────────────────────────────────────────────────
+# ── SECTOR ALIAS MAP ───────────────────────────────────────────────────────
 SECTOR_ALIASES = {
     "tech": "IT - ", "it": "IT - ", "software": "IT - ",
     "technology": "IT - ", "infotech": "IT - ",
@@ -245,6 +257,13 @@ LOOKUP_TRIGGER_WORDS = {
     "cheap", "expensive",
     # FIX O (v8): variant forms — "can I trust RELIANCE", "can MARUTI be held"
     "trust", "held", "owning", "owned", "picked", "pick",
+    # FIX P (v9): research verb forms. "analyse caplin point", "evaluate INFY",
+    # "review TCS", "rate SBIN", "score of HDFC". Noun "analysis" was present
+    # but verb forms were not. score/rate SAFE: RANK checked first + LOOKUP
+    # gate is "has_lookup_word and not has_metric_thresh" so metric+threshold
+    # queries ("gvm score above 7") still route to FILTER.
+    "analyse", "analyze", "evaluate", "assess", "review",
+    "rate", "rating", "score", "view",
 }
 
 
@@ -301,6 +320,8 @@ def _parse_sector(q: str) -> Optional[str]:
         "momentum","change","latest","current","today","now","good","high","vm",
         # FIX (v3): generic words that previously dragged "it" into sector match
         "time","like","analysis","report","takeaway","key",
+        # FIX P (v9): research verbs as sector-noise stopwords
+        "analyse","analyze","evaluate","assess","review","rate","rating","view",
     }
     cleaned = re.sub(r"top\s+\d+|\d+\s+stocks?", "", q)
     cleaned = re.sub(
@@ -523,6 +544,8 @@ def exec_lookup(cur, slots: Dict) -> str:
         "year","years","now","today","tomorrow","next","next year",
         # v8 additions (FIX O): variant action verb forms
         "held","owning","owned","picked","pick","picks",
+        # v9 additions (FIX P): research verb forms
+        "analyse","analyze","evaluate","assess","review","rate","rating","view",
     }
     words = [w.strip(".,?!") for w in raw.lower().split()
              if w.strip(".,?!") not in stop and len(w.strip(".,?!")) >= 2]
@@ -811,7 +834,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
         _log_query(query, mode, op, metric, sector, resolved,
                    int((time.time()-t0)*1000))
 
-    # ── LAYER 0a: Trade Check ───────────────────────────────────────────────
+    # ── LAYER 0a: Trade Check ─────────────────────────────────────────────────
     trade_check_triggered = (
         any(k in q for k in ["trade check", "trade journal", "journal check",
                               "evaluate stock", "trade card"])
@@ -825,7 +848,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
 
-            # ── LAYER 0: Hardcoded commands ─────────────────────────────────
+            # ── LAYER 0: Hardcoded commands ───────────────────────────────────
 
             if "virtual dashboard" in q or "v8 dashboard" in q:
                 result=_virtual_dashboard(cur); log("native","virtual_dashboard"); return result
@@ -912,7 +935,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                     log("native","v8_watchlist"); return result
                 log("native","v8_watchlist","","",False); return "No V8 candidates today."
 
-            # ── LAYER 0b: Personal Journal ──────────────────────────────────
+            # ── LAYER 0b: Personal Journal ────────────────────────────────────
             if any(k in q for k in ["personal journal","my journal","my open trades",
                                     "my closed trades","journal closed","journal open",
                                     "journal pnl","journal stats","my trades"]):
@@ -957,7 +980,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                         f"Total P&L: {total_pnl:+,.0f} · Wins: {wins}/{len(rows)} ({acc}%)\n\n"
                         f"{fmt_table(['Date','Symbol','Side','Qty','Entry','Exit','P&L','Result','Days'], data)}")
 
-            # ── LAYER 0c: V8 Paper Book ─────────────────────────────────────
+            # ── LAYER 0c: V8 Paper Book ───────────────────────────────────────
             if (("v8 paper" in q) or ("paper open" in q) or ("paper closed" in q)
                 or ("paper book" in q) or ("paper positions" in q)
                 or ("paper trades" in q) or ("paper pnl" in q) or ("paper summary" in q)):
@@ -981,7 +1004,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 log("native","v8_paper_book")
                 return "\n\n".join(parts)
 
-            # ── LAYER 0d: Daily Digest ──────────────────────────────────────
+            # ── LAYER 0d: Daily Digest ────────────────────────────────────────
             if "daily digest" in q or q.strip() == "digest" or "morning brief" in q:
                 parts = [f"**Daily Digest — {datetime.now().strftime('%d-%b-%Y %H:%M IST')}**"]
                 for fn in [_vd_market_gate, _vd_qualified, _vd_top_signals]:
@@ -1006,7 +1029,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 log("native","daily_digest")
                 return "\n\n".join(parts)
 
-            # ── LAYER 0e: Gainers / Losers ──────────────────────────────────
+            # ── LAYER 0e: Gainers / Losers ────────────────────────────────────
             if "top gainers" in q or "biggest movers" in q or "gainers today" in q:
                 cur.execute("""
                     SELECT g.symbol, g.company_name, ROUND(g.gvm_score::numeric,2),
@@ -1037,7 +1060,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 log("native","losers")
                 return f"**Top Losers Today**\n{fmt_table(['Symbol','Company','Segment','GVM','Day%'], d)}"
 
-            # ── LAYER 0f: Server Time / Market State (FIX F v3) ─────────────
+            # ── LAYER 0f: Server Time / Market State (FIX F v3) ───────────
             if any(t in q for t in TIME_TRIGGERS):
                 now = datetime.now()
                 is_weekday = now.weekday() < 5
@@ -1049,7 +1072,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                         f"NSE: {state} · Hours: Mon-Fri 09:15 – 15:30 IST\n"
                         f"Day: {now.strftime('%A')}")
 
-            # ── LAYER 0g: Global Indices (NEW — FIX E v3) ───────────────────
+            # ── LAYER 0g: Global Indices (NEW — FIX E v3) ─────────────────
             if ("global indices" in q or "global markets" in q
                 or "world markets" in q or "global market" in q):
                 try:
@@ -1078,7 +1101,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                     log("native","global_indices","","",False)
                     return f"Global indices unavailable: {str(e)[:80]}"
 
-            # ── LAYER 1: Grammar ────────────────────────────────────────────
+            # ── LAYER 1: Grammar ──────────────────────────────────────────────
 
             slots = parse_query(q)
             grammar_result = execute_grammar(q)
@@ -1094,7 +1117,7 @@ def _query_sync(query: str, _depth: int = 0) -> str:
                 slots["metric"][1] if slots["metric"] else "",
                 slots["sector"] or "", False)
 
-            # ── LAYER 1.5: Native Intent Classifier ─────────────────────────
+            # ── LAYER 1.5: Native Intent Classifier ───────────────────────
             # FIX C (v3): explicit off-topic → classify → soft off-topic.
             # Previously soft-off-topic ran first and false-flagged
             # "morning briefing please". Reorder also stops "weather today"
