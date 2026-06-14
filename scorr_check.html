@@ -40,24 +40,11 @@
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
   .wrap{max-width:720px;margin:0 auto;padding:22px 14px 70px}
-  .page-head{margin-bottom:20px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-  .page-head-left{}
+  .page-head{margin-bottom:20px}
   .page-title{font-size:22px;font-weight:800;color:var(--txt);letter-spacing:-.3px}
   .page-title span{color:var(--cyan)}
+  .page-title span.invest{color:var(--purp)}
   .page-sub{font-size:10.5px;color:var(--dim);letter-spacing:1.8px;text-transform:uppercase;margin-top:3px}
-
-  /* ── INVEST CORNER TAB ── */
-  .invest-corner-tab{
-    display:flex;align-items:center;gap:7px;
-    padding:8px 14px;border-radius:10px;
-    background:var(--purp-d);border:1.5px solid var(--purp-b);
-    color:var(--purp);font-size:12px;font-weight:700;
-    cursor:pointer;transition:.15s;white-space:nowrap;flex-shrink:0;
-    letter-spacing:.2px;
-  }
-  .invest-corner-tab:hover{background:var(--purp);color:#fff;border-color:var(--purp)}
-  .invest-corner-tab.active{background:var(--purp);color:#fff;border-color:var(--purp)}
-  .invest-corner-tab .tab-icon{font-size:14px}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
     padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
@@ -82,13 +69,15 @@
   .ac-gvm{font-size:10.5px;font-weight:700;color:var(--cyan);flex-shrink:0;
     background:var(--cyan-d);padding:2px 7px;border-radius:6px}
 
-  .side-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
+  /* ── 3-button side row ── */
+  .side-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:12px}
   .side-btn{padding:12px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
-    color:var(--mut);font-family:var(--font);font-size:13.5px;font-weight:700;cursor:pointer;
+    color:var(--mut);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer;
     transition:.15s;letter-spacing:.2px}
   .side-btn:hover{border-color:var(--line);background:var(--panel)}
   .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
+  .side-btn.invest.on{border-color:var(--purp);background:var(--purp-d);color:var(--purp)}
 
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
@@ -267,32 +256,32 @@
     .v-bar-need{display:none}
     .rules-table .td-cond{display:none}
     .inv-rules-table .td-cond{display:none}
+    .side-btn{font-size:11.5px;padding:10px 6px}
   }
 </style>
 </head>
 <body>
 <nav class="model-nav">
+  <a class="mnav-item" href="/"><span>⌂</span>Home</a>
+  <div class="mnav-sep"></div>
   <a class="mnav-item" href="/dashboard"><span>⚡</span>V8</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/cio2?model=gvm"><span>▦</span>GVM</a>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>◦</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>⊙</span>Sector</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item active" href="/check"><span>✓</span>Check</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item soon"><span>⌂</span>QB</a>
-  <a class="mnav-item soon"><span>⟁</span>V10</a>
+  <a class="mnav-item soon"><span>⊞</span>QB</a>
+  <a class="mnav-item soon"><span>△</span>V10</a>
 </nav>
 
 <div class="wrap">
   <div class="page-head">
-    <div class="page-head-left">
-      <div class="page-title" id="pageTitle">Trade <span>Check</span></div>
-      <div class="page-sub" id="pageSub">v3.3 · Native $0 · Tier 1 + Tier 2</div>
-    </div>
-    <button class="invest-corner-tab" id="investTab" onclick="toggleInvestMode()">
-      <span class="tab-icon">◆</span> Investment Check
-    </button>
+    <div class="page-title" id="pageTitle">Trade <span>Check</span></div>
+    <div class="page-sub" id="pageSub">V3.3 · NATIVE $0 · TIER 1 + TIER 2</div>
   </div>
 
   <div class="card">
@@ -301,10 +290,11 @@
              autocomplete="off" spellcheck="false">
       <div class="ac-drop" id="acDrop"></div>
     </div>
-    <!-- Trade side buttons — hidden in invest mode -->
+    <!-- 3-button row: LONG / SHORT / INVEST -->
     <div class="side-row" id="sideRow">
-      <button class="side-btn long on" id="btnLong" onclick="setSide('LONG')">▲ LONG</button>
-      <button class="side-btn short" id="btnShort" onclick="setSide('SHORT')">▼ SHORT</button>
+      <button class="side-btn long on"    id="btnLong"   onclick="setMode('LONG')">▲ LONG</button>
+      <button class="side-btn short"      id="btnShort"  onclick="setMode('SHORT')">▼ SHORT</button>
+      <button class="side-btn invest"     id="btnInvest" onclick="setMode('INVEST')">◆ INVEST</button>
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <div class="chips" id="chips"></div>
@@ -410,8 +400,7 @@
 </div>
 
 <script>
-let side='LONG';
-let investMode=false;
+let mode='LONG'; // LONG | SHORT | INVEST
 let gate1=null, gate2=null;
 let acSel=-1, acItems=[], acTimer=null, runTimer=null;
 const QUICK=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
@@ -427,44 +416,30 @@ function renderChips(){
   });
 }
 
-function toggleInvestMode(){
-  investMode=!investMode;
-  const tab=document.getElementById('investTab');
-  const sideRow=document.getElementById('sideRow');
+function setMode(m){
+  mode=m;
+  const investMode=(m==='INVEST');
+  document.getElementById('btnLong').className='side-btn long'+(m==='LONG'?' on':'');
+  document.getElementById('btnShort').className='side-btn short'+(m==='SHORT'?' on':'');
+  document.getElementById('btnInvest').className='side-btn invest'+(m==='INVEST'?' on':'');
   const runBtn=document.getElementById('runBtn');
   const pageTitle=document.getElementById('pageTitle');
   const pageSub=document.getElementById('pageSub');
-
   if(investMode){
-    tab.classList.add('active');
-    sideRow.style.display='none';
     runBtn.textContent='Run Investment Check';
     runBtn.classList.add('invest-mode');
-    pageTitle.innerHTML='Investment <span style="color:var(--purp)">Check</span>';
-    pageSub.textContent='v1.0 · 12 Rules · GVM-native · Medium-Long Term';
-    // hide trade result, show invest slot
-    document.getElementById('result').classList.remove('show');
-    document.getElementById('invResult').classList.remove('show');
+    pageTitle.innerHTML='Investment <span class="invest">Check</span>';
+    pageSub.textContent='V1.0 · 12 RULES · GVM-NATIVE · MEDIUM-LONG TERM';
   } else {
-    tab.classList.remove('active');
-    sideRow.style.display='grid';
     runBtn.textContent='Run Trade Check';
     runBtn.classList.remove('invest-mode');
     pageTitle.innerHTML='Trade <span>Check</span>';
-    pageSub.textContent='v3.3 · Native $0 · Tier 1 + Tier 2';
-    document.getElementById('result').classList.remove('show');
-    document.getElementById('invResult').classList.remove('show');
+    pageSub.textContent='V3.3 · NATIVE $0 · TIER 1 + TIER 2';
   }
-  // re-run if symbol already entered
+  document.getElementById('result').classList.remove('show');
+  document.getElementById('invResult').classList.remove('show');
   const sym=document.getElementById('sym').value.trim();
   if(sym) run();
-}
-
-function setSide(s){
-  side=s;
-  document.getElementById('btnLong').className='side-btn long'+(s==='LONG'?' on':'');
-  document.getElementById('btnShort').className='side-btn short'+(s==='SHORT'?' on':'');
-  if(document.getElementById('sym').value.trim())run();
 }
 
 async function fetchAC(q){
@@ -547,6 +522,7 @@ async function run(){
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('err').classList.remove('show');
   const ld=document.getElementById('loading');
+  const investMode=(mode==='INVEST');
   ld.className='loading show'+(investMode?' invest-loading':'');
   ld.textContent=investMode?'Running Investment Check…':'Computing v3.3…';
 
@@ -564,6 +540,7 @@ async function run(){
 }
 
 async function runTradeCheck(sym){
+  const side=mode; // LONG or SHORT
   const r=await fetch('/api/check',{method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({symbol:sym,side,gate1,gate2})});
@@ -621,11 +598,9 @@ function renderTrade(d){
 }
 
 function renderInvest(d){
-  // Header
   document.getElementById('invCompany').textContent=`${d.company} (${d.symbol})`;
   document.getElementById('invSeg').textContent=d.segment||'';
 
-  // Verdict badge
   const badge=document.getElementById('invBadge');
   const verdictMap={
     'STRONG BUY':'🟢 STRONG BUY',
@@ -636,7 +611,6 @@ function renderInvest(d){
   badge.textContent=verdictMap[d.verdict]||d.verdict;
   badge.className='inv-badge '+(d.verdict||'').replace(' ','-');
 
-  // Cap + GVM
   document.getElementById('invCap').textContent=d.cap_category||'';
   const gvmEl=document.getElementById('invGvm');
   if(d.gvm_verdict){gvmEl.textContent='GVM '+d.gvm_verdict;
@@ -644,7 +618,6 @@ function renderInvest(d){
     gvmEl.className='r-gvm '+(sc>=7?'hi':sc>=6?'mid':'lo');
   }
 
-  // Score card
   const sc=document.getElementById('invScoreCard');
   const cssClass={'STRONG BUY':'strong-buy','ACCUMULATE':'accumulate','WATCH':'watch','AVOID':'avoid'}[d.verdict]||'avoid';
   sc.className='inv-score-card '+cssClass;
@@ -655,7 +628,6 @@ function renderInvest(d){
   document.getElementById('invBand').textContent=`Band: ${d.band}`;
   document.getElementById('invRuleScore').textContent=`${d.score}/${d.max_score} · min 8 to buy`;
 
-  // Rules table
   const tbody=document.getElementById('invBody');tbody.innerHTML='';
   (d.rules||[]).forEach(r=>{
     const passed=r.pass===true;
@@ -672,7 +644,6 @@ function renderInvest(d){
       </tr>`);
   });
 
-  // Pass/fail chips
   const passDiv=document.getElementById('invPasses');passDiv.innerHTML='';
   (d.passes||[]).forEach(n=>{
     passDiv.insertAdjacentHTML('beforeend',`<span class="inv-pass-chip">✓ ${n}</span>`);
