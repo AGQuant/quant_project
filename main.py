@@ -62,7 +62,12 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.44
+# Scorr / Project Quant — main.py v2.9.45
+# v2.9.45: Auth fix — middleware no longer injects logout button / idle-timer
+#   into embedded iframe loads (?embed=1). CIO Shell modules load /dashboard,
+#   /sector, /cio, /check as iframes; nested idle timers + injected /logout
+#   links were tearing down the shared session on interaction. Parent shell
+#   owns the chrome. Password is hardcoded in scorr_auth.py.
 # v2.9.44: Investment Check v1.0 — 12-rule GVM-native equity filter.
 #   Endpoints: GET /api/investment-check?symbol=X
 #              GET /api/investment-check/screener?verdict=STRONG+BUY&cap=Large
@@ -81,7 +86,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.44"
+VERSION = "2.9.45"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -133,10 +138,15 @@ async def auth_gate(request: Request, call_next):
         return _RR(url="/login")
     response = await call_next(request)
     if request.url.path in PROTECTED and "text/html" in response.headers.get("content-type", ""):
+        # Embedded iframe loads (CIO Shell modules pass ?embed=1) must NOT get the
+        # logout button or idle-timer injected — nested timers + injected /logout
+        # links tear down the shared session on interaction. Parent shell owns chrome.
+        is_embed = request.query_params.get("embed") == "1"
         body = b""
         async for chunk in response.body_iterator:
             body += chunk
-        body = body.replace(b"</body>", _LOGOUT_BTN + _IDLE_SCRIPT + b"</body>", 1)
+        if not is_embed:
+            body = body.replace(b"</body>", _LOGOUT_BTN + _IDLE_SCRIPT + b"</body>", 1)
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"
@@ -327,7 +337,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.44)")
+        log.info("Tables ready (v2.9.45)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
