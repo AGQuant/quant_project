@@ -2,9 +2,18 @@
 scorr_auth.py — Simple password gate for all HTML pages.
 
 Password stored in Railway env var: SCORR_PASSWORD
-Cookie: scorr_auth (7-day, httponly, path=/)
+Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=lax)
 Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status
+
+Fixes (v2):
+  - Cookie now secure=True (Railway serves HTTPS; non-secure cookies were
+    being dropped on the POST /login -> 302 -> GET / redirect, so login
+    appeared to "not work").
+  - Password compare strips whitespace on BOTH sides (trailing newline/space
+    in the Railway env value no longer locks you out).
+  - Logout overwrites the cookie with an expired empty value (delete_cookie
+    alone can fail to match when attributes differ) so it always clears.
 """
 
 import os
@@ -19,15 +28,18 @@ PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector"}
 _SALT = "scorr2026"
 
 
+def _password() -> str:
+    """Configured password, whitespace-stripped."""
+    return os.getenv("SCORR_PASSWORD", "").strip()
+
+
 def _expected_token() -> str:
-    pw = os.getenv("SCORR_PASSWORD", "")
-    return hashlib.sha256(f"{pw}:{_SALT}".encode()).hexdigest()
+    return hashlib.sha256(f"{_password()}:{_SALT}".encode()).hexdigest()
 
 
 def _is_authed(request: Request) -> bool:
     """Return True if request has valid auth cookie (or no password is set)."""
-    pw = os.getenv("SCORR_PASSWORD", "")
-    if not pw:
+    if not _password():
         return True  # no password configured = open access
     return request.cookies.get(COOKIE_NAME, "") == _expected_token()
 
@@ -82,6 +94,14 @@ button:hover{{background:#9a4507;}}
 </html>"""
 
 
+def _set_auth_cookie(response):
+    response.set_cookie(
+        COOKIE_NAME, _expected_token(),
+        max_age=7 * 24 * 3600, path="/",
+        httponly=True, samesite="lax", secure=True,
+    )
+
+
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
 async def login_get(request: Request):
     if _is_authed(request):
@@ -92,16 +112,12 @@ async def login_get(request: Request):
 @router.post("/login", include_in_schema=False)
 async def login_post(request: Request):
     form = await request.form()
-    password = str(form.get("password", ""))
-    correct = os.getenv("SCORR_PASSWORD", "")
-    next_url = str(form.get("next", "/"))
+    password = str(form.get("password", "")).strip()
+    correct = _password()
+    next_url = str(form.get("next", "/")) or "/"
     if not correct or password == correct:
         response = RedirectResponse(url=next_url, status_code=302)
-        response.set_cookie(
-            COOKIE_NAME, _expected_token(),
-            max_age=7 * 24 * 3600, path="/",
-            httponly=True, samesite="lax", secure=False
-        )
+        _set_auth_cookie(response)
         return response
     return HTMLResponse(_login_page(error=True), status_code=401)
 
@@ -109,8 +125,14 @@ async def login_post(request: Request):
 @router.get("/logout", include_in_schema=False)
 async def logout():
     response = RedirectResponse(url="/login", status_code=302)
+    # Overwrite with an expired empty cookie (matches set attributes) so it
+    # reliably clears even if delete_cookie's attribute match is imperfect.
+    response.set_cookie(
+        COOKIE_NAME, "",
+        max_age=0, expires=0, path="/",
+        httponly=True, samesite="lax", secure=True,
+    )
     response.delete_cookie(COOKIE_NAME, path="/")
-    # Prevent browser from serving cached protected pages after logout
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     return response
