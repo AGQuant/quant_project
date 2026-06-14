@@ -1101,6 +1101,8 @@ function GvmReport({ r, hist }) {
 
       <OpsMetrics symbol={r.symbol} segment={r.segment} />
 
+      <SectorBrief segment={r.segment} />
+
       <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
         {r.persist_error && <span style={{ color: C.red }}> · persist error (schema migration pending)</span>}
@@ -1117,6 +1119,83 @@ function ContentCard({ title, color, body, updated }) {
         {updated && <div style={{ fontSize: 10, color: C.muted }}>Updated {updated}</div>}
       </div>
       <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{body}</div>
+    </div>
+  );
+}
+
+function SectorBrief({ segment }) {
+  const [brief, setBrief] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!segment) { setLoading(false); return; }
+    setLoading(true); setBrief(null);
+    apiGet(`/api/sector/brief?segment=${encodeURIComponent(segment)}`)
+      .then(d => { if (d && !d.error) setBrief(d); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [segment]);
+
+  if (loading) return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: C.purple, marginBottom: 8 }}>Sector Brief</div>
+      <div style={{ fontSize: 12, color: C.muted }}>Loading sector education…</div>
+    </div>
+  );
+  if (!brief) return null;
+
+  const drivers = Array.isArray(brief.growth_drivers) ? brief.growth_drivers : [];
+  const risks = Array.isArray(brief.key_risks) ? brief.key_risks : [];
+  const tags = (brief.application_type || "").split(/[\/,]/).map(t => t.trim()).filter(Boolean);
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.purple}30`, borderRadius: 12, padding: "18px 20px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Sector Brief</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{brief.segment} · investor education</div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {tags.map((t, i) => <Tag key={i} color={C.purple}>{t}</Tag>)}
+        </div>
+      </div>
+
+      {brief.what_is_it && (
+        <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 14 }}>{brief.what_is_it}</div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: brief.business_model ? 14 : 0 }}>
+        {drivers.length > 0 && (
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: C.green, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Growth Drivers</div>
+            {drivers.map((d, i) => (
+              <div key={i} style={{ fontSize: 12, color: C.text, padding: "4px 0", display: "flex", gap: 7 }}>
+                <span style={{ color: C.green, fontWeight: 700 }}>+</span><span>{d}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {risks.length > 0 && (
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: C.red, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Key Risks</div>
+            {risks.map((d, i) => (
+              <div key={i} style={{ fontSize: 12, color: C.text, padding: "4px 0", display: "flex", gap: 7 }}>
+                <span style={{ color: C.red, fontWeight: 700 }}>!</span><span>{d}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {brief.business_model && (
+        <div style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 8, padding: "10px 13px" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 3 }}>Business Model</div>
+          <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.5 }}>{brief.business_model}</div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 9.5, color: C.muted, textAlign: "right", marginTop: 10 }}>
+        AI-generated sector education{brief.generated_at ? ` · ${String(brief.generated_at).slice(0, 10)}` : ""}
+      </div>
     </div>
   );
 }
