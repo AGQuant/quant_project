@@ -27,7 +27,7 @@ from typing import Optional, Dict, Any, List
 
 log = logging.getLogger("scorr.gvm_report")
 
-# ─── Parameter definitions ────────────────────────────────────────────────────
+# ─── Parameter definitions ──────────────────────────────────────────────────
 # Each: (key, label, group, screener_col, higher_is_better, db_prefix, unit)
 #   group  : Trackrecord | Valuation | Outlook | Reliability | Technicals
 #   db_prefix maps to gvm_scores.<prefix>_raw/_peer/_rating columns (when present)
@@ -50,6 +50,15 @@ PARAMS = [
     ("ret_1y",     "Return over 1 Year",     "Technicals",  "return_1y",              True,  "ret_1y",     "%"),
     ("ret_3y",     "Return over 3 Years",    "Technicals",  "return_3y",              True,  "ret_3y",     "%"),
     ("ret_52w_idx","52W vs Index",           "Technicals",  "return_52w_vs_index",    True,  "ret_52w_idx","%"),
+]
+
+# 5 additional M metrics sourced from momentum_scores (not screener_raw)
+_M_EXTRA = [
+    ("ret_1m",    "1M Return",    "%", "ret_1m",    True),
+    ("dma_50",    "% vs DMA-50",  "%", "dma_50",    True),
+    ("dma_200",   "% vs DMA-200", "%", "dma_200",   True),
+    ("rsi_month", "RSI Monthly",  "",  "rsi_month", True),
+    ("vol_trend", "Volume Trend", "x", "vol_trend", True),
 ]
 
 # Segments where D/E + Interest Coverage are irrelevant (BFSI rule)
@@ -190,6 +199,46 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                 persist_vals[f"{prefix}_raw"] = round(raw, 2) if raw is not None else None
                 persist_vals[f"{prefix}_peer"] = peer_avg
                 persist_vals[f"{prefix}_rating"] = rating
+
+        # ── Missing M metrics: DMA50/200, RSI Monthly, 1M Return, Volume Trend ──
+        # These come from momentum_scores (not screener_raw), queried separately.
+        try:
+            cur.execute("""
+                SELECT symbol, ret_1m, dma_50, dma_200, rsi_month, vol_trend
+                FROM momentum_scores
+                WHERE symbol = ANY(%s)
+                  AND score_date = (SELECT MAX(score_date) FROM momentum_scores)
+            """, (symbols,))
+            _mom = {r[0]: r for r in cur.fetchall()}
+            _mcols = ["symbol", "ret_1m", "dma_50", "dma_200", "rsi_month", "vol_trend"]
+            for _key, _label, _unit, _col, _hib in _M_EXTRA:
+                _ci = _mcols.index(_col)
+                _cv = [_f(_mom[s][_ci]) if s in _mom else None for s in symbols]
+                _nn = [v for v in _cv if v is not None]
+                _avg = round(sum(_nn) / len(_nn), 2) if _nn else None
+                _raw = _cv[me_idx] if me_idx is not None else None
+                _rat = _rate_within(_cv, me_idx, _hib) if me_idx is not None else None
+                _rnk = _rank_within(_cv, me_idx, _hib) if me_idx is not None else None
+                _best = _worst = None
+                if _nn:
+                    _pp = sorted([(symbols[i], v) for i, v in enumerate(_cv) if v is not None],
+                                 key=lambda x: x[1], reverse=_hib)
+                    _best  = {"symbol": _pp[0][0],  "value": round(_pp[0][1], 2)}
+                    _worst = {"symbol": _pp[-1][0], "value": round(_pp[-1][1], 2)}
+                params_out.append({
+                    "key": _key, "label": _label, "group": "Technicals", "unit": _unit,
+                    "raw": round(_raw, 2) if _raw is not None else None,
+                    "peer_avg": _avg,
+                    "rank": _rnk, "peer_count": len(_nn),
+                    "rating": _rat, "higher_is_better": _hib,
+                    "best": _best, "worst": _worst,
+                    "beats_peer": (_raw is not None and _avg is not None and
+                                   ((_raw >= _avg) if _hib else (_raw <= _avg))),
+                })
+                if _rat is not None:
+                    pillar_acc.setdefault("Technicals", []).append(_rat)
+        except Exception as _me:
+            log.warning(f"momentum_scores M extras failed for {symbol}: {_me}")
 
         # Pillar (headline) scores = avg of param ratings in that group
         pillars = {}
