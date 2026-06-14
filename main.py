@@ -61,12 +61,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.41
-# v2.9.41: Inactivity logout — 15-min idle timer injected into all
-#   protected HTML pages via auth_gate middleware. Any mouse/key/scroll
-#   activity resets the timer. On timeout → /logout (clears cookie).
-# v2.9.40: Password gate — scorr_auth.py wired. Set SCORR_PASSWORD in Railway
-#   env vars to protect all HTML pages. API routes + /mcp + /oauth/* open.
+# Scorr / Project Quant — main.py v2.9.42
+# v2.9.42: Logout button — floating bottom-right on all protected pages,
+#   injected via middleware alongside idle timer. CSS hover, no JS needed.
+# v2.9.41: Inactivity logout — 15-min idle timer injected via middleware.
+# v2.9.40: Password gate — scorr_auth.py. Set SCORR_PASSWORD in Railway.
 # v2.9.39: Startup auto-fill sector_briefs.
 # v2.9.38: sector_brief_endpoints router wired.
 # v2.9.37: sector_endpoints router wired.
@@ -79,7 +78,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.30: Trade Check v3.4 wired.
 # ============================================================
 
-VERSION = "2.9.41"
+VERSION = "2.9.42"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -102,7 +101,17 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# 15-min inactivity logout script — injected into every protected HTML page
+# Injected into every protected HTML page: logout button + 15-min idle timer
+_LOGOUT_BTN = (
+    b"<style>#scorr-lo a{position:fixed;bottom:16px;right:16px;z-index:9999;"
+    b"display:flex;align-items:center;gap:6px;padding:7px 14px;"
+    b"background:rgba(15,22,35,0.9);border:1px solid #2a3548;border-radius:8px;"
+    b"color:#5a6781;font-size:11px;font-weight:600;text-decoration:none;"
+    b"font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;"
+    b"backdrop-filter:blur(8px);transition:all .15s;}"
+    b"#scorr-lo a:hover{color:#b45309!important;border-color:#b45309!important;}</style>"
+    b'<div id="scorr-lo"><a href="/logout">&#x23CF; Logout</a></div>'
+)
 _IDLE_SCRIPT = (
     b"<script>(function(){"
     b"var T=15*60*1000,id;"
@@ -115,17 +124,16 @@ _IDLE_SCRIPT = (
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Password gate + 15-min inactivity logout for all HTML page routes."""
+    """Password gate + logout button + 15-min inactivity logout for HTML pages."""
     if request.url.path in PROTECTED and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
     response = await call_next(request)
-    # Inject inactivity timer into HTML responses for protected pages
     if request.url.path in PROTECTED and "text/html" in response.headers.get("content-type", ""):
         body = b""
         async for chunk in response.body_iterator:
             body += chunk
-        body = body.replace(b"</body>", _IDLE_SCRIPT + b"</body>", 1)
+        body = body.replace(b"</body>", _LOGOUT_BTN + _IDLE_SCRIPT + b"</body>", 1)
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         return Response(content=body, status_code=response.status_code,
@@ -313,7 +321,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.41)")
+        log.info("Tables ready (v2.9.42)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
