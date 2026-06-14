@@ -67,13 +67,14 @@
   .ac-gvm{font-size:10.5px;font-weight:700;color:var(--cyan);flex-shrink:0;
     background:var(--cyan-d);padding:2px 7px;border-radius:6px}
 
-  .side-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
+  .side-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:12px}
   .side-btn{padding:12px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
     color:var(--mut);font-family:var(--font);font-size:13.5px;font-weight:700;cursor:pointer;
     transition:.15s;letter-spacing:.2px}
   .side-btn:hover{border-color:var(--line);background:var(--panel)}
   .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
+  .side-btn.invest.on{border-color:var(--cyan);background:var(--cyan-d);color:var(--cyan)}
 
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
@@ -110,6 +111,7 @@
   .r-side-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;letter-spacing:.3px}
   .r-side-badge.LONG{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
   .r-side-badge.SHORT{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
+  .r-side-badge.INVEST{background:var(--cyan-d);color:var(--cyan);border:1px solid #a5d8e8}
   .r-seg{font-size:10.5px;color:var(--mut);background:var(--panel2);border:1px solid var(--line2);
     padding:2px 8px;border-radius:5px}
   .r-gvm{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:5px}
@@ -216,6 +218,7 @@
     <div class="side-row">
       <button class="side-btn long on" id="btnLong" onclick="setSide('LONG')">▲ LONG</button>
       <button class="side-btn short" id="btnShort" onclick="setSide('SHORT')">▼ SHORT</button>
+      <button class="side-btn invest" id="btnInvest" onclick="setSide('INVEST')">◆ INVEST</button>
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <div class="chips" id="chips"></div>
@@ -237,13 +240,13 @@
         <div class="v-label" id="vLabel"></div>
         <div class="v-bars">
           <div class="v-bar-row">
-            <span class="v-bar-label">Tier 1</span>
+            <span class="v-bar-label" id="vBar1Label">Tier 1</span>
             <div class="v-bar-track"><div class="v-bar-fill" id="vBar1"></div></div>
             <span class="v-bar-score" id="vScore1"></span>
             <span class="v-bar-need" id="vNeed1"></span>
           </div>
           <div class="v-bar-row">
-            <span class="v-bar-label">Tier 2</span>
+            <span class="v-bar-label" id="vBar2Label">Tier 2</span>
             <div class="v-bar-track"><div class="v-bar-fill" id="vBar2"></div></div>
             <span class="v-bar-score" id="vScore2"></span>
             <span class="v-bar-need" id="vNeed2"></span>
@@ -253,7 +256,7 @@
     </div>
 
     <div class="card" style="padding:14px 18px">
-      <div class="tier-label">Tier 1 — Process Rules<span class="tier-score" id="t1Score"></span></div>
+      <div class="tier-label"><span id="t1Label">Tier 1 — Process Rules</span><span class="tier-score" id="t1Score"></span></div>
       <table class="rules-table">
         <thead><tr><th>Rule</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
         <tbody id="t1Body"></tbody>
@@ -261,7 +264,7 @@
     </div>
 
     <div class="card" style="padding:14px 18px">
-      <div class="tier-label">Tier 2 — Entry Filters<span class="tier-score" id="t2Score"></span></div>
+      <div class="tier-label"><span id="t2Label">Tier 2 — Entry Filters</span><span class="tier-score" id="t2Score"></span></div>
       <table class="rules-table">
         <thead><tr><th>Filter</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
         <tbody id="t2Body"></tbody>
@@ -273,7 +276,7 @@
       </div>
     </div>
 
-    <div class="foot">Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
+    <div class="foot" id="rFoot">Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
   </div>
 </div>
 
@@ -299,6 +302,7 @@ function setSide(s){
   side=s;
   document.getElementById('btnLong').className='side-btn long'+(s==='LONG'?' on':'');
   document.getElementById('btnShort').className='side-btn short'+(s==='SHORT'?' on':'');
+  document.getElementById('btnInvest').className='side-btn invest'+(s==='INVEST'?' on':'');
   if(document.getElementById('sym').value.trim())run();
 }
 
@@ -398,7 +402,7 @@ function showErr(m){const e=document.getElementById('err');e.textContent=m;e.cla
 function render(d){
   document.getElementById('rCompany').textContent=`${d.company} (${d.symbol})`;
   const sd=document.getElementById('rSide');
-  sd.textContent=d.side==='LONG'?'▲ LONG':'▼ SHORT';
+  sd.textContent=d.side==='LONG'?'▲ LONG':d.side==='SHORT'?'▼ SHORT':'◆ INVEST';
   sd.className='r-side-badge '+d.side;
   document.getElementById('rSeg').textContent=d.segment||'';
   const gvmEl=document.getElementById('rGvm');
@@ -409,20 +413,31 @@ function render(d){
 
   const vc=document.getElementById('vCard');
   vc.className='verdict-card '+d.verdict_class;
-  document.getElementById('vLabel').textContent=
+  document.getElementById('vLabel').textContent= d.v_label ||
     {strong:'✦ STRONG',valid:'✓ VALID',weak:'⚠ WEAK',reject:'✗ REJECT'}[d.verdict_class]||d.verdict_class.toUpperCase();
 
   const t2min=d.t2_min||5;
+  const t2total=d.t2_total||7;
   document.getElementById('vBar1').style.width=Math.round(d.t1_pass/d.t1_total*100)+'%';
-  document.getElementById('vBar2').style.width=Math.round(d.t2_pass/7*100)+'%';
+  document.getElementById('vBar2').style.width=Math.round(d.t2_pass/t2total*100)+'%';
   document.getElementById('vScore1').textContent=`${d.t1_pass}/${d.t1_total}`;
-  document.getElementById('vScore2').textContent=`${d.t2_pass}/7`;
-  document.getElementById('vNeed1').textContent='need 8';
-  document.getElementById('vNeed2').textContent=`need ${t2min}`;
-  document.getElementById('t1Score').textContent=
-    `${d.t1_pass}/${d.t1_auto_n} auto · ${d.t1_human_n} chart · min 8/${d.t1_total}`;
-  document.getElementById('t2Score').textContent=
-    `${d.t2_pass}/${d.t2_auto_n} auto · ${d.t2_human_n} chart · min ${t2min}/7`;
+  document.getElementById('vScore2').textContent=`${d.t2_pass}/${t2total}`;
+  document.getElementById('vNeed1').textContent=d.need1||'need 8';
+  document.getElementById('vNeed2').textContent=d.need2||`need ${t2min}`;
+
+  const isInvest=d.side==='INVEST';
+  document.getElementById('vBar1Label').textContent=isInvest?'Group A':'Tier 1';
+  document.getElementById('vBar2Label').textContent=isInvest?'Group B':'Tier 2';
+  document.getElementById('t1Label').textContent=d.tier1_label||'Tier 1 — Process Rules';
+  document.getElementById('t2Label').textContent=d.tier2_label||'Tier 2 — Entry Filters';
+  document.getElementById('t1Score').textContent= isInvest
+    ? `${d.t1_pass}/${d.t1_total} · ${d.need1||''}`
+    : `${d.t1_pass}/${d.t1_auto_n} auto · ${d.t1_human_n} chart · min 8/${d.t1_total}`;
+  document.getElementById('t2Score').textContent= isInvest
+    ? `${d.t2_pass}/${t2total} · ${d.need2||''}`
+    : `${d.t2_pass}/${d.t2_auto_n} auto · ${d.t2_human_n} chart · min ${t2min}/7`;
+  document.getElementById('rFoot').textContent= d.foot ||
+    'Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.';
 
   const t1b=document.getElementById('t1Body');t1b.innerHTML='';
   d.tier1.forEach(r=>{t1b.insertAdjacentHTML('beforeend',
