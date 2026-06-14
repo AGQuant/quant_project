@@ -1,6 +1,13 @@
 """
 GVM Company Report — peer-benchmark analytics endpoint (Model 2).
 
+v5 (14-Jun-2026):
+  - Added m_absolute block: 3 absolute-scored M metrics (ret_1m, rsi_month,
+    vol_trend) pulled straight from momentum_scores (canonical 8-metric M
+    engine = momentum_daily.py). Ratings are engine-computed, never recomputed
+    here, so the page reconciles exactly to the live M score. These 3 are NOT
+    peer-benchmarked (absolute bands only) — kept separate from PARAMS loop.
+
 v4 (12-Jun-2026 night):
   - Annual Upside (Potential Upside) computed live from
     input_raw.fy27_growth × (pe / historical_pe)  — engine formula,
@@ -271,6 +278,35 @@ def gvm_company_report(symbol: str, persist: bool = True):
         extras_block = {"error": str(e)[:200]}
         ladder_extra = {}
 
+    # ── M-pillar absolute metrics (canonical 8-metric M engine = momentum_daily.py).
+    # These 3 are ABSOLUTE-scored (no peer benchmark): ret_1m, rsi_month, vol_trend.
+    # Ratings come straight from momentum_scores (engine-computed) — never recomputed
+    # here, so the page reconciles exactly to the live M score.
+    m_absolute = []
+    try:
+        ma = _query_single("""
+            SELECT ret_1m, ret_1m_rating, rsi_month, rsi_month_rating,
+                   vol_trend, vol_trend_rating
+            FROM momentum_scores
+            WHERE symbol = %s
+              AND score_date = (SELECT MAX(score_date) FROM momentum_scores)
+        """, (symbol,))
+        if ma:
+            for key, label, val_k, rate_k, unit in [
+                ("ret_1m",    "1M Return",  "ret_1m",    "ret_1m_rating",    "%"),
+                ("rsi_month", "RSI Month",  "rsi_month", "rsi_month_rating", ""),
+                ("vol_trend", "Vol Trend",  "vol_trend", "vol_trend_rating", "x"),
+            ]:
+                m_absolute.append({
+                    "key": key, "label": label, "pillar": "M",
+                    "company": _f(ma.get(val_k)),
+                    "rating": _f(ma.get(rate_k)),
+                    "unit": unit,
+                    "scoring": "absolute",
+                })
+    except Exception as e:
+        m_absolute = []
+
     rated = [b for b in benchmark if b["rating"] is not None]
     positives = sorted([b for b in rated if b["rating"] >= 6.5], key=lambda x: -x["rating"])[:5]
     negatives = sorted([b for b in rated if b["rating"] < 5.0], key=lambda x: x["rating"])[:5]
@@ -297,6 +333,7 @@ def gvm_company_report(symbol: str, persist: bool = True):
         "segment_total": len(ladder),
         "group_scores": group_scores,
         "benchmark": benchmark,
+        "m_absolute": m_absolute,
         "ladder": [
             {"symbol": r["symbol"], "company_name": r["company_name"],
              "gvm": _f(r["gvm_score"]), "verdict": r["verdict"],
