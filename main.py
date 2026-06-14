@@ -49,6 +49,7 @@ from trade_check_v34_endpoints import router as trade_check_v34_router
 from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
+from scorr_auth import router as auth_router, _is_authed, PROTECTED
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -60,30 +61,26 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.39
+# Scorr / Project Quant — main.py v2.9.40
+# v2.9.40: Password gate — scorr_auth.py wired. Set SCORR_PASSWORD in Railway
+#   env vars to protect all HTML pages (/, /dashboard, /cio, /cio2, /ask,
+#   /check, /sector). API routes + /mcp + /oauth/* remain open.
+#   Login at /login · logout at /logout · 7-day cookie.
 # v2.9.39: Startup auto-fill sector_briefs — on every Railway start,
 #   if any of the 129 segments are missing a brief, _sector_brief_batch()
 #   fires in background via Claude Haiku. Idempotent (skips cached).
 # v2.9.38: sector_brief_endpoints router wired — GET /api/sector/brief?segment=...
-#   Lazy AI brief generation via Claude Haiku, cached in sector_briefs table.
-#   Returns: what_is_it, growth_drivers, application_type, business_model,
-#   key_risks, constituents. First call ~3s, subsequent instant from cache.
-# v2.9.37: sector_endpoints router wired — GET /api/sector/rotation (5-signal
-#   percentile-rank composite: GVM, GVM-delta-14d, inst-change, QoQ-profit,
-#   annual-upside). Returns top5/cold + full 129-segment ranked list.
-#   /sector route serves scorr_sector.html (live fetch replaces hardcoded data).
-# v2.9.36: gvm_universe_pivots router wired — POST /api/admin/build_universe_pivots
-# v2.9.35: Root / now serves scorr_home.html — consolidated menu.
-# v2.9.34: /check route wired — serves scorr_check.html.
-# v2.9.33: /ask route wired — serves scorr_ask.html.
-# v2.9.32: GVM company report wired — gvm_report_router.
-# v2.9.31: /cio2 route wired — serves scorr_cio_dashboard.html.
-# v2.9.30: Trade Check v3.4 wired — trade_check_v34_endpoints router.
-# v2.9.29: Fix day_change -> mom_2d in /api/v8/metrics/all SQL.
-# v2.9.28: Max CIO Assistant launched. /cio route + scorr_cockpit.html UI.
+# v2.9.37: sector_endpoints router wired — GET /api/sector/rotation
+# v2.9.36: gvm_universe_pivots router wired
+# v2.9.35: Root / now serves scorr_home.html
+# v2.9.34: /check route wired
+# v2.9.33: /ask route wired
+# v2.9.32: GVM company report wired — gvm_report_router
+# v2.9.31: /cio2 route wired — serves scorr_cio_dashboard.html
+# v2.9.30: Trade Check v3.4 wired
 # ============================================================
 
-VERSION = "2.9.39"
+VERSION = "2.9.40"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -106,6 +103,15 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    """Password gate — protects all HTML page routes."""
+    if request.url.path in PROTECTED and not _is_authed(request):
+        from fastapi.responses import RedirectResponse as _RR
+        return _RR(url="/login")
+    return await call_next(request)
+
+app.include_router(auth_router)
 app.include_router(v8_router)
 app.include_router(v8_futures_router)
 app.include_router(qb_router)
@@ -286,7 +292,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.39)")
+        log.info("Tables ready (v2.9.40)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -699,7 +705,7 @@ def content_update(req_body: dict, x_admin_token: Optional[str] = Header(None)):
 @app.get("/api/admin/env_check")
 def env_check(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); keys = sorted(os.environ.keys())
-    interesting = ["SCREENER_EMAIL","SCREENER_PASSWORD","GITHUB_TOKEN","GITHUB_REPO","ADMIN_TOKEN","DATABASE_URL","DEPLOY_GUARD","RAILWAY_PUBLIC_DOMAIN"]
+    interesting = ["SCREENER_EMAIL","SCREENER_PASSWORD","GITHUB_TOKEN","GITHUB_REPO","ADMIN_TOKEN","DATABASE_URL","DEPLOY_GUARD","RAILWAY_PUBLIC_DOMAIN","SCORR_PASSWORD"]
     return {"version": VERSION, "all_keys_count": len(keys), "interesting": {k: {"present": k in os.environ, "len": len(os.environ.get(k,""))} for k in interesting}}
 
 @app.post("/api/v8/run_signal_writer")
