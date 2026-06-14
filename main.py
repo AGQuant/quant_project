@@ -50,6 +50,7 @@ from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
+from investment_check import router as investment_check_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -61,7 +62,11 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.43
+# Scorr / Project Quant — main.py v2.9.44
+# v2.9.44: Investment Check v1.0 — 12-rule GVM-native equity filter.
+#   Endpoints: GET /api/investment-check?symbol=X
+#              GET /api/investment-check/screener?verdict=STRONG+BUY&cap=Large
+#              GET /api/investment-check/summary
 # v2.9.43: Auth hardening — logout button moved top-left (no overlap),
 #   no-cache headers on all protected pages (prevents back-button bypass),
 #   explicit cookie path="/" on set+delete (ensures proper deletion).
@@ -76,7 +81,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.43"
+VERSION = "2.9.44"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -163,6 +168,7 @@ app.include_router(trade_check_v34_router)
 app.include_router(check_router)
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
+app.include_router(investment_check_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -321,7 +327,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.43)")
+        log.info("Tables ready (v2.9.44)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
