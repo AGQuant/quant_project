@@ -276,7 +276,7 @@ function ActionStrip({ x }) {
   if (x.percentile) {
     const z = x.percentile.z_score;
     chips.push({
-      label: `Top ${x.percentile.top_pct}% · #${x.percentile.universe_rank}/${x.percentile.universe_total}${z != null ? ` · Z=${signFmt(z, 2)}` : ""}`,
+      label: `#${x.percentile.universe_rank}/${x.percentile.universe_total}${z != null ? ` · Z=${signFmt(z, 2)}` : ""}`,
       color: C.purple,
       title: z != null ? `GVM mean ${x.percentile.mean} · stdev ${x.percentile.stdev} · Z = (gvm − μ) / σ` : "GVM rank in scored universe",
     });
@@ -320,15 +320,6 @@ function SegmentContextCard({ ctx, stockSym }) {
         {cell("Sector GVM", ctx.mcap_wtd_gvm != null ? ctx.mcap_wtd_gvm : "—",
           ctx.simple_avg_gvm != null ? `simple avg ${ctx.simple_avg_gvm}` : null,
           gvmColor(ctx.mcap_wtd_gvm))}
-        {cell("Sector G·V·M",
-          <span>
-            <span style={{ color: C.gPillar }}>{ctx.weighted_g ?? "—"}</span>
-            <span style={{ color: C.muted, margin: "0 4px" }}>·</span>
-            <span style={{ color: C.vPillar }}>{ctx.weighted_v ?? "—"}</span>
-            <span style={{ color: C.muted, margin: "0 4px" }}>·</span>
-            <span style={{ color: C.mPillar }}>{ctx.weighted_m ?? "—"}</span>
-          </span>,
-          "mcap-weighted")}
         {cell("Sector Rank",
           ctx.sector_rank != null ? `#${ctx.sector_rank}/${ctx.sector_total}` : "—",
           ctx.sector_rank != null && ctx.sector_total ? `top ${((ctx.sector_rank/ctx.sector_total)*100).toFixed(0)}%` : null,
@@ -472,7 +463,6 @@ function FlowStrip({ flow, val }) {
     if (val.pb != null) cells.push(cell("P/B", val.pb + "x", null, C.text));
     if (val.peg != null) cells.push(cell("PEG", val.peg, null, val.peg > 2 ? C.red : val.peg > 1 ? C.gold : C.green));
     if (val.ev_ebitda != null) cells.push(cell("EV/EBITDA", val.ev_ebitda + "x", null, C.text));
-    if (val.cfo_pat != null) cells.push(cell("CFO/PAT", val.cfo_pat, "earnings quality", val.cfo_pat >= 0.8 ? C.green : C.gold));
   }
   if (!cells.length) return null;
   return (
@@ -658,14 +648,40 @@ function OpsMetrics({ symbol }) {
     setLoading(true);
     setRows(null);
     mcpCall("run_sql", {
-      query: `SELECT metric_name, metric_value, unit, confidence, quarter, notes, source_1
+      query: `SELECT metric_name, metric_value, unit, confidence, quarter, notes
               FROM sector_ops_metrics
               WHERE symbol = '${symbol}'
-              ORDER BY confidence DESC, metric_name ASC
-              LIMIT 30`
+              ORDER BY metric_name ASC, quarter DESC
+              LIMIT 120`
     }).then(d => {
-      const r = d?.rows || [];
-      setRows(r.length ? r : []);
+      const raw = d?.rows || [];
+      // Pivot: one entry per metric_name, current = latest quarter, prev = prior.
+      const byMetric = {};
+      raw.forEach(r => {
+        const k = r.metric_name;
+        if (!byMetric[k]) byMetric[k] = [];
+        byMetric[k].push(r);
+      });
+      const merged = Object.keys(byMetric).map(k => {
+        // already ordered quarter DESC; [0]=current, [1]=prior
+        const q = byMetric[k].sort((a, b) => (b.quarter || "").localeCompare(a.quarter || ""));
+        const cur = q[0], prev = q[1] || null;
+        const cv = cur && cur.metric_value != null ? Number(cur.metric_value) : null;
+        const pv = prev && prev.metric_value != null ? Number(prev.metric_value) : null;
+        const qoq = (cv != null && pv != null && pv !== 0) ? ((cv / pv - 1) * 100) : null;
+        return {
+          metric_name: k, unit: cur?.unit, confidence: cur?.confidence,
+          quarter: cur?.quarter, notes: cur?.notes,
+          metric_value: cur?.metric_value,
+          prev_quarter: prev?.quarter || null,
+          prev_value: prev?.metric_value ?? null,
+          qoq_pct: qoq,
+        };
+      });
+      // sort by confidence then name, like before
+      const order = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+      merged.sort((a, b) => (order[a.confidence] ?? 3) - (order[b.confidence] ?? 3) || a.metric_name.localeCompare(b.metric_name));
+      setRows(merged.length ? merged.slice(0, 30) : []);
     }).catch(() => setRows([])).finally(() => setLoading(false));
   }, [symbol]);
 
@@ -694,7 +710,8 @@ function OpsMetrics({ symbol }) {
     return formatted + (u ? " " + u : "");
   };
 
-  const quarters = [...new Set(rows.map(r => r.quarter))];
+  const curQ = rows[0]?.quarter || "—";
+  const prevQ = rows.map(r => r.prev_quarter).find(Boolean) || null;
 
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
@@ -702,7 +719,7 @@ function OpsMetrics({ symbol }) {
         <div>
           <div style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>Operational Metrics</div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-            {rows.length} metrics · {quarters.join(", ")} · earnings calls & filings
+            {rows.length} metrics · {curQ}{prevQ ? ` vs ${prevQ}` : ""} · earnings calls & filings
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -731,14 +748,55 @@ function OpsMetrics({ symbol }) {
               <div style={{ fontSize: 19, fontWeight: 900, fontFamily: "monospace", color: "#1c2536", lineHeight: 1.1, marginBottom: 4 }}>
                 {fmtVal(row.metric_value, row.unit)}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#5a6781" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 9, color: "#5a6781" }}>
                 <span>{row.quarter}</span>
-                {row.source_1 && <span style={{ fontStyle: "italic" }}>{row.source_1.replace(/_/g," ")}</span>}
+                {row.prev_value != null ? (
+                  <span style={{ fontFamily: "monospace" }}>
+                    {row.prev_quarter}: {fmtVal(row.prev_value, row.unit)}
+                    {row.qoq_pct != null && (
+                      <span style={{ fontWeight: 800, marginLeft: 5,
+                        color: row.qoq_pct > 0 ? C.green : row.qoq_pct < 0 ? C.red : C.muted }}>
+                        {(row.qoq_pct >= 0 ? "▲" : "▼")}{Math.abs(row.qoq_pct).toFixed(1)}%
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span style={{ fontStyle: "italic", color: "#9aa4b5" }}>no prior qtr</span>
+                )}
               </div>
               {shortNote && (
                 <div style={{ fontSize: 9, color: "#5a6781", marginTop: 5, lineHeight: 1.35,
                   borderTop: `1px solid ${bd}`, paddingTop: 4 }}>{shortNote}</div>
               )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MAbsoluteStrip({ items }) {
+  if (!items || !items.length) return null;
+  const pi = PILLAR_INFO.M;
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: pi.color }}>M — Momentum · Absolute</span>
+        <span style={{ fontSize: 10, color: C.muted }}>engine-scored, not peer-benchmarked</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
+        {items.map(b => {
+          const c = cellColor(b.rating);
+          const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
+          return (
+            <div key={b.key} style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: c.fg }}>{b.label}</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
+              <div style={{ fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>absolute band</div>
             </div>
           );
         })}
@@ -798,7 +856,7 @@ function GvmReport({ r, hist }) {
             <Tag color={vc}>{r.verdict}</Tag>
             {x.percentile && (
               <div style={{ fontSize: 9.5, color: C.purple, fontWeight: 700, marginTop: 6, lineHeight: 1.3 }}>
-                Top {x.percentile.top_pct}% of {fmt(x.percentile.universe_total)}
+                #{fmt(x.percentile.universe_rank)} / {fmt(x.percentile.universe_total)}
                 {x.percentile.z_score != null && <div>Z = {signFmt(x.percentile.z_score, 2)}</div>}
               </div>
             )}
@@ -993,6 +1051,8 @@ function GvmReport({ r, hist }) {
           );
         })}
       </div>
+
+      <MAbsoluteStrip items={r.m_absolute} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
