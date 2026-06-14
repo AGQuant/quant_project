@@ -58,21 +58,47 @@ ranked AS (
            PERCENT_RANK() OVER (ORDER BY qoq_profit)   AS r_profit,
            PERCENT_RANK() OVER (ORDER BY annual_upside) AS r_upside
     FROM combined
+),
+picks AS (
+    SELECT t.segment,
+           json_agg(json_build_object(
+               'symbol',  t.symbol,
+               'gvm',     ROUND(t.gvm_score::numeric, 2),
+               'day_ret', ROUND(((
+                     (SELECT close FROM raw_prices WHERE symbol = t.symbol ORDER BY price_date DESC LIMIT 1)
+                   - (SELECT close FROM raw_prices WHERE symbol = t.symbol
+                        AND price_date < (SELECT MAX(price_date) FROM raw_prices WHERE symbol = t.symbol)
+                      ORDER BY price_date DESC LIMIT 1)
+                 ) / NULLIF((SELECT close FROM raw_prices WHERE symbol = t.symbol
+                        AND price_date < (SELECT MAX(price_date) FROM raw_prices WHERE symbol = t.symbol)
+                      ORDER BY price_date DESC LIMIT 1), 0) * 100)::numeric, 2)
+           ) ORDER BY t.rn) AS top_stocks
+    FROM (
+        SELECT segment, symbol, gvm_score,
+               ROW_NUMBER() OVER (PARTITION BY segment ORDER BY gvm_score DESC NULLS LAST, symbol) AS rn
+        FROM gvm_scores
+        WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
+          AND segment IS NOT NULL
+    ) t
+    WHERE t.rn <= 2
+    GROUP BY t.segment
 )
 SELECT
-    segment, score_date,
-    ROUND(gvm::numeric, 2)           AS gvm,
-    ROUND(g::numeric, 2)             AS g_score,
-    ROUND(v::numeric, 2)             AS v_score,
-    ROUND(m::numeric, 2)             AS m_score,
-    stocks_count, verdict, top_stock, top_stock_gvm,
-    ROUND(total_mcap::numeric, 1)    AS total_mcap,
-    ROUND(gvm_change::numeric, 3)    AS gvm_change,
-    inst_change,
-    qoq_profit,
-    ROUND(annual_upside::numeric, 1) AS annual_upside,
-    ROUND(((r_gvm + r_gvm_change + r_inst + r_profit + r_upside) / 5 * 10)::numeric, 2) AS composite_score
+    ranked.segment, ranked.score_date,
+    ROUND(ranked.gvm::numeric, 2)           AS gvm,
+    ROUND(ranked.g::numeric, 2)             AS g_score,
+    ROUND(ranked.v::numeric, 2)             AS v_score,
+    ROUND(ranked.m::numeric, 2)             AS m_score,
+    ranked.stocks_count, ranked.verdict, ranked.top_stock, ranked.top_stock_gvm,
+    ROUND(ranked.total_mcap::numeric, 1)    AS total_mcap,
+    ROUND(ranked.gvm_change::numeric, 3)    AS gvm_change,
+    ranked.inst_change,
+    ranked.qoq_profit,
+    ROUND(ranked.annual_upside::numeric, 1) AS annual_upside,
+    ROUND(((ranked.r_gvm + ranked.r_gvm_change + ranked.r_inst + ranked.r_profit + ranked.r_upside) / 5 * 10)::numeric, 2) AS composite_score,
+    COALESCE(pk.top_stocks, '[]'::json)     AS top_stocks
 FROM ranked
+LEFT JOIN picks pk ON pk.segment = ranked.segment
 ORDER BY composite_score DESC
 """
 
