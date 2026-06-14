@@ -11,6 +11,12 @@
   html,body{margin:0;padding:0;background:#f4f6f9;height:100%;overflow:hidden;}
   #root{height:100vh;}
   *{box-sizing:border-box;}
+  @media print{
+    html,body{height:auto!important;overflow:visible!important;background:#fff!important;}
+    #root{height:auto!important;overflow:visible!important;}
+    .no-print{display:none!important;}
+    .print-scroll{overflow:visible!important;height:auto!important;}
+  }
 </style>
 </head>
 <body>
@@ -182,7 +188,17 @@ function TrendChart({ points }) {
         ))}
         <path d={mkPath("gvm")} fill="none" stroke={mainStroke} strokeWidth="2.2"
           strokeLinejoin="round" strokeLinecap="round" />
-        {last != null && <circle cx={X(points.length - 1)} cy={Y(last)} r="3.2" fill={mainStroke} />}
+        {points[0]?.gvm != null && (
+          <text x={X(0)} y={Y(points[0].gvm) - 6} fontSize="9" fill={mainStroke} fontWeight="700"
+            fontFamily="monospace" textAnchor="middle" style={{userSelect:"none"}}>{points[0].gvm.toFixed(2)}</text>
+        )}
+        {last != null && (
+          <>
+            <circle cx={X(points.length - 1)} cy={Y(last)} r="3.2" fill={mainStroke} />
+            <text x={X(points.length - 1)} y={Y(last) - 7} fontSize="9" fill={mainStroke} fontWeight="700"
+              fontFamily="monospace" textAnchor="middle" style={{userSelect:"none"}}>{last.toFixed(2)}</text>
+          </>
+        )}
       </svg>
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         {lines.map(l => (
@@ -764,9 +780,16 @@ function OpsMetrics({ symbol, segment }) {
               <div style={{ fontSize: 19, fontWeight: 900, fontFamily: "monospace", color: "#1c2536", lineHeight: 1.1, marginBottom: 4 }}>
                 {m.company != null ? fmtVal(m.company, m.unit) : "—"}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>
-                <span>peer {fmtVal(m.peer_avg, m.unit)}</span>
-                <span>{m.rank ? `#${m.rank}/${m.peer_n}` : `${m.peer_n} peers`}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>
+                <span>peer {fmtVal(m.peer_avg, m.unit)} <span style={{color:"#b0b8c8",fontSize:8}}>({m.peer_n})</span></span>
+                {m.company != null && m.peer_avg != null && m.peer_avg !== 0 && (() => {
+                  const diff = m.lower_better
+                    ? (m.peer_avg - m.company) / Math.abs(m.peer_avg) * 100
+                    : (m.company - m.peer_avg) / Math.abs(m.peer_avg) * 100;
+                  return <span style={{fontWeight:700, color: diff >= 0 ? "#0a7a4d" : "#bf2230", fontSize:9}}>
+                    {diff >= 0 ? `▲${diff.toFixed(1)}%` : `▼${(-diff).toFixed(1)}%`}
+                  </span>;
+                })()}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#9aa4b5", fontFamily: "monospace", marginTop: 3,
                 borderTop: `1px solid ${c.bd}`, paddingTop: 3 }}>
@@ -823,6 +846,16 @@ function GvmReport({ r, hist }) {
 
   return (
     <div style={{ paddingBottom: 80 }}>
+
+      <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <button onClick={() => window.print()}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+            background: "#fff", border: `1px solid ${C.border}`, borderRadius: 7,
+            fontSize: 11, fontWeight: 700, color: C.muted, cursor: "pointer",
+            boxShadow: "0 1px 4px rgba(25,40,70,0.06)" }}>
+          ↓ Download PDF
+        </button>
+      </div>
 
       <div style={{ background: C.card, border: `1px solid ${vc}40`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 22, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -911,28 +944,35 @@ function GvmReport({ r, hist }) {
       <ActionStrip x={x} />
       <SegmentContextCard ctx={segCtx} stockSym={r.symbol} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>✓ Key Strengths</div>
-          {(r.positives || []).length ? r.positives.map((p, i) => (
-            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.positives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
-              <span style={{ color: C.green, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit}
-              <span style={{ color: C.muted }}> ({p.rating.toFixed(1)})</span>
-              <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>[{p.pillar || "G"}]</span>
+      {(() => {
+        const realWeaknesses = (r.negatives || []).filter(p => p.rating != null && p.rating < 5);
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: realWeaknesses.length ? "1fr 1fr" : "1fr", gap: 16, marginBottom: 16 }}>
+            <div style={{ background: C.card, border: `1px solid ${C.green}30`, borderRadius: 10, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: C.green, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>✓ Key Strengths</div>
+              {(r.positives || []).length ? r.positives.map((p, i) => (
+                <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.positives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+                  <span style={{ color: C.green, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit}
+                  <span style={{ color: C.muted }}> ({p.rating.toFixed(1)})</span>
+                  <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>[{p.pillar || "G"}]</span>
+                </div>
+              )) : <div style={{ fontSize: 12, color: C.muted }}>No standout strengths vs peers.</div>}
             </div>
-          )) : <div style={{ fontSize: 12, color: C.muted }}>No standout strengths vs peers.</div>}
-        </div>
-        <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>⚠ Key Weaknesses</div>
-          {(r.negatives || []).length ? r.negatives.map((p, i) => (
-            <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < r.negatives.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
-              <span style={{ color: C.red, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit}
-              <span style={{ color: C.muted }}> ({p.rating.toFixed(1)})</span>
-              <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>[{p.pillar || "G"}]</span>
-            </div>
-          )) : <div style={{ fontSize: 12, color: C.muted }}>No major weaknesses vs peers.</div>}
-        </div>
-      </div>
+            {realWeaknesses.length > 0 && (
+              <div style={{ background: C.card, border: `1px solid ${C.red}30`, borderRadius: 10, padding: "14px 16px" }}>
+                <div style={{ fontSize: 11, color: C.red, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>⚠ Key Weaknesses</div>
+                {realWeaknesses.map((p, i) => (
+                  <div key={i} style={{ fontSize: 12, color: C.text, padding: "5px 0", borderBottom: i < realWeaknesses.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+                    <span style={{ color: C.red, fontWeight: 700 }}>{p.label}</span> — {p.company?.toFixed(2)}{p.unit} vs peer {p.peer_avg?.toFixed(2)}{p.unit}
+                    <span style={{ color: C.muted }}> ({p.rating.toFixed(1)})</span>
+                    <span style={{ fontSize: 9, color: C.muted, marginLeft: 6 }}>[{p.pillar || "G"}]</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: `1px solid ${C.border}` }}>
@@ -1111,7 +1151,7 @@ function GvmModule() {
   };
 
   return (
-    <div style={{ height: "100%", overflowY: "auto", padding: "24px 24px 80px" }}>
+    <div className="print-scroll" style={{ height: "100%", overflowY: "auto", padding: "24px 24px 80px" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
         <div ref={boxRef} style={{ position: "relative", maxWidth: 520, margin: "0 auto 24px" }}>
           <div style={{ display: "flex", gap: 8 }}>
