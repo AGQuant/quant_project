@@ -61,26 +61,25 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.40
+# Scorr / Project Quant — main.py v2.9.41
+# v2.9.41: Inactivity logout — 15-min idle timer injected into all
+#   protected HTML pages via auth_gate middleware. Any mouse/key/scroll
+#   activity resets the timer. On timeout → /logout (clears cookie).
 # v2.9.40: Password gate — scorr_auth.py wired. Set SCORR_PASSWORD in Railway
-#   env vars to protect all HTML pages (/, /dashboard, /cio, /cio2, /ask,
-#   /check, /sector). API routes + /mcp + /oauth/* remain open.
-#   Login at /login · logout at /logout · 7-day cookie.
-# v2.9.39: Startup auto-fill sector_briefs — on every Railway start,
-#   if any of the 129 segments are missing a brief, _sector_brief_batch()
-#   fires in background via Claude Haiku. Idempotent (skips cached).
-# v2.9.38: sector_brief_endpoints router wired — GET /api/sector/brief?segment=...
-# v2.9.37: sector_endpoints router wired — GET /api/sector/rotation
-# v2.9.36: gvm_universe_pivots router wired
-# v2.9.35: Root / now serves scorr_home.html
-# v2.9.34: /check route wired
-# v2.9.33: /ask route wired
-# v2.9.32: GVM company report wired — gvm_report_router
-# v2.9.31: /cio2 route wired — serves scorr_cio_dashboard.html
-# v2.9.30: Trade Check v3.4 wired
+#   env vars to protect all HTML pages. API routes + /mcp + /oauth/* open.
+# v2.9.39: Startup auto-fill sector_briefs.
+# v2.9.38: sector_brief_endpoints router wired.
+# v2.9.37: sector_endpoints router wired.
+# v2.9.36: gvm_universe_pivots router wired.
+# v2.9.35: Root / now serves scorr_home.html.
+# v2.9.34: /check route wired.
+# v2.9.33: /ask route wired.
+# v2.9.32: GVM company report wired.
+# v2.9.31: /cio2 route wired.
+# v2.9.30: Trade Check v3.4 wired.
 # ============================================================
 
-VERSION = "2.9.40"
+VERSION = "2.9.41"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -103,13 +102,35 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+# 15-min inactivity logout script — injected into every protected HTML page
+_IDLE_SCRIPT = (
+    b"<script>(function(){"
+    b"var T=15*60*1000,id;"
+    b"function r(){clearTimeout(id);id=setTimeout(function(){window.location='/logout';},T);}"
+    b"['mousemove','keydown','click','scroll','touchstart','mousedown']"
+    b".forEach(function(e){document.addEventListener(e,r,true);});"
+    b"r();"
+    b"})();</script>"
+)
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Password gate — protects all HTML page routes."""
+    """Password gate + 15-min inactivity logout for all HTML page routes."""
     if request.url.path in PROTECTED and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
-    return await call_next(request)
+    response = await call_next(request)
+    # Inject inactivity timer into HTML responses for protected pages
+    if request.url.path in PROTECTED and "text/html" in response.headers.get("content-type", ""):
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        body = body.replace(b"</body>", _IDLE_SCRIPT + b"</body>", 1)
+        headers = dict(response.headers)
+        headers["content-length"] = str(len(body))
+        return Response(content=body, status_code=response.status_code,
+                        headers=headers, media_type="text/html")
+    return response
 
 app.include_router(auth_router)
 app.include_router(v8_router)
@@ -292,7 +313,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.40)")
+        log.info("Tables ready (v2.9.41)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -377,8 +398,7 @@ async def startup():
         except Exception as e: log.error(f"create_tables (bg) failed: {e}")
 
     async def _auto_fill_briefs():
-        """Fire sector brief batch if any segments are missing briefs."""
-        await asyncio.sleep(15)  # wait for tables to be ready
+        await asyncio.sleep(15)
         try:
             with get_conn() as conn, conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM sector_briefs")
@@ -395,50 +415,41 @@ async def startup():
 
     t0 = asyncio.create_task(_init_tables())
     _BG_TASKS.add(t0); t0.add_done_callback(_BG_TASKS.discard)
-
     t1 = asyncio.create_task(_auto_fill_briefs())
     _BG_TASKS.add(t1); t1.add_done_callback(_BG_TASKS.discard)
-
     scheduler.start_background(app, BASE_URL, ADMIN_TOKEN)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    with open("scorr_home.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("scorr_home.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/status")
 def status(): return {"service": "Scorr API", "version": VERSION, "status": "live"}
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    with open("v8_dashboard.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("v8_dashboard.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/cio", response_class=HTMLResponse)
 def cio():
-    with open("scorr_cockpit.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("scorr_cockpit.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/cio2", response_class=HTMLResponse)
 def cio2():
-    with open("scorr_cio_dashboard.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("scorr_cio_dashboard.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/ask", response_class=HTMLResponse)
 def ask():
-    with open("scorr_ask.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("scorr_ask.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/check", response_class=HTMLResponse)
 def check():
-    with open("scorr_check.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("scorr_check.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/sector", response_class=HTMLResponse)
 def sector():
-    with open("scorr_sector.html", "r", encoding="utf-8") as f:
-        return f.read()
+    with open("scorr_sector.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
