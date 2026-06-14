@@ -1,12 +1,13 @@
 """
 GVM Company Report — peer-benchmark analytics endpoint (Model 2).
 
-v5 (14-Jun-2026):
-  - Added m_absolute block: 3 absolute-scored M metrics (ret_1m, rsi_month,
-    vol_trend) pulled straight from momentum_scores (canonical 8-metric M
-    engine = momentum_daily.py). Ratings are engine-computed, never recomputed
-    here, so the page reconciles exactly to the live M score. These 3 are NOT
-    peer-benchmarked (absolute bands only) — kept separate from PARAMS loop.
+v6 (14-Jun-2026):
+  - M pillar now shows all 8 canonical metrics in the main peer table.
+    ret_1m, rsi_month, vol_trend folded into PARAMS, sourced from
+    momentum_scores (8-metric M engine = momentum_daily.py). Peer avg + rank
+    computed across segment peers for context, but the RATING column shows the
+    engine value (_ENGINE_RATED) — not the peer-relative _rate() — so the page
+    reconciles exactly to the live M score. Separate m_absolute block removed.
 
 v4 (12-Jun-2026 night):
   - Annual Upside (Potential Upside) computed live from
@@ -82,12 +83,20 @@ PARAMS = [
     ("pe",           "PE Multiple",           "pe",                     "V", False, "x"),
     ("upside",       "Annual Upside",         "_upside_computed",       "V", True,  "%"),
     # M — Momentum
+    ("ret_1m",       "1M Return",             "_m_ret_1m",              "M", True,  "%"),
     ("ret_1y",       "Return 1 Year",         "return_1y",              "M", True,  "%"),
     ("ret_3y",       "Return 3 Year",         "return_3y",              "M", True,  "%"),
     ("dma_50",       "Price vs 50 DMA",       "_dma50_dev",             "M", True,  "%"),
     ("dma_200",      "Price vs 200 DMA",      "_dma200_dev",            "M", True,  "%"),
     ("ret_52w_idx",  "52W vs Index",          "return_52w_vs_index",    "M", True,  "%"),
+    ("rsi_month",    "RSI Month",             "_m_rsi_month",           "M", True,  ""),
+    ("vol_trend",    "Vol Trend",             "_m_vol_trend",           "M", True,  "x"),
 ]
+
+# These M keys carry an ENGINE rating from momentum_scores (not the peer-relative
+# _rate()). Peer avg + rank are still computed across peers for display, but the
+# rating column shows the canonical engine value so the page reconciles to M-score.
+_ENGINE_RATED = {"ret_1m": "ret_1m_rating", "rsi_month": "rsi_month_rating", "vol_trend": "vol_trend_rating"}
 
 
 def _col_sql(col: str) -> Optional[str]:
@@ -197,10 +206,15 @@ def gvm_company_report(symbol: str, persist: bool = True):
                s.fii_change AS _fii_chg, s.dii_change AS _dii_chg,
                s.pe AS _pe_raw, s.historical_pe AS _hpe_raw,
                i.fy27_growth AS _fy27,
+               ms.ret_1m AS _m_ret_1m, ms.ret_1m_rating AS _r_ret_1m,
+               ms.rsi_month AS _m_rsi_month, ms.rsi_month_rating AS _r_rsi_month,
+               ms.vol_trend AS _m_vol_trend, ms.vol_trend_rating AS _r_vol_trend,
                {sel_cols}
         FROM gvm_scores g
         JOIN screener_raw s ON s.nse_code = g.symbol
         LEFT JOIN input_raw i ON i.nse_code = g.symbol
+        LEFT JOIN momentum_scores ms ON ms.symbol = g.symbol
+            AND ms.score_date = (SELECT MAX(score_date) FROM momentum_scores)
         WHERE g.segment = %s
         ORDER BY g.market_cap DESC NULLS LAST
     """, (segment,))
@@ -222,6 +236,10 @@ def gvm_company_report(symbol: str, persist: bool = True):
                        if price is not None and d50 and d50 > 0 else None)
         p["dma_200"] = (round((price - d200) / d200 * 100, 2)
                         if price is not None and d200 and d200 > 0 else None)
+        # M-pillar metrics from momentum_scores (value under param key; engine rating kept separate)
+        p["ret_1m"]    = _f(p.get("_m_ret_1m"))
+        p["rsi_month"] = _f(p.get("_m_rsi_month"))
+        p["vol_trend"] = _f(p.get("_m_vol_trend"))
 
     peer_count = len(peers)
     peer_names = [p["symbol"] for p in peers]
@@ -241,6 +259,13 @@ def gvm_company_report(symbol: str, persist: bool = True):
         if comp_val is None and peer_avg is None:
             continue
 
+        # For engine-rated M metrics, the rating comes from momentum_scores (canonical),
+        # not the peer-relative _rate(). Peer avg + rank still computed for context.
+        if key in _ENGINE_RATED and company_row is not None:
+            rating = _f(company_row.get("_r_" + key))
+        else:
+            rating = _rate(comp_val, peer_vals, hib)
+
         benchmark.append({
             "key": key,
             "label": label,
@@ -250,7 +275,7 @@ def gvm_company_report(symbol: str, persist: bool = True):
             "higher_is_better": hib,
             "company": comp_val,
             "peer_avg": peer_avg,
-            "rating": _rate(comp_val, peer_vals, hib),
+            "rating": rating,
             "rank": _rank(comp_val, peer_vals, hib),
             "peer_n": len(peer_vals),
             "best": _best_peer(peers, key, hib),
@@ -278,35 +303,6 @@ def gvm_company_report(symbol: str, persist: bool = True):
         extras_block = {"error": str(e)[:200]}
         ladder_extra = {}
 
-    # ── M-pillar absolute metrics (canonical 8-metric M engine = momentum_daily.py).
-    # These 3 are ABSOLUTE-scored (no peer benchmark): ret_1m, rsi_month, vol_trend.
-    # Ratings come straight from momentum_scores (engine-computed) — never recomputed
-    # here, so the page reconciles exactly to the live M score.
-    m_absolute = []
-    try:
-        ma = _query_single("""
-            SELECT ret_1m, ret_1m_rating, rsi_month, rsi_month_rating,
-                   vol_trend, vol_trend_rating
-            FROM momentum_scores
-            WHERE symbol = %s
-              AND score_date = (SELECT MAX(score_date) FROM momentum_scores)
-        """, (symbol,))
-        if ma:
-            for key, label, val_k, rate_k, unit in [
-                ("ret_1m",    "1M Return",  "ret_1m",    "ret_1m_rating",    "%"),
-                ("rsi_month", "RSI Month",  "rsi_month", "rsi_month_rating", ""),
-                ("vol_trend", "Vol Trend",  "vol_trend", "vol_trend_rating", "x"),
-            ]:
-                m_absolute.append({
-                    "key": key, "label": label, "pillar": "M",
-                    "company": _f(ma.get(val_k)),
-                    "rating": _f(ma.get(rate_k)),
-                    "unit": unit,
-                    "scoring": "absolute",
-                })
-    except Exception as e:
-        m_absolute = []
-
     rated = [b for b in benchmark if b["rating"] is not None]
     positives = sorted([b for b in rated if b["rating"] >= 6.5], key=lambda x: -x["rating"])[:5]
     negatives = sorted([b for b in rated if b["rating"] < 5.0], key=lambda x: x["rating"])[:5]
@@ -333,7 +329,6 @@ def gvm_company_report(symbol: str, persist: bool = True):
         "segment_total": len(ladder),
         "group_scores": group_scores,
         "benchmark": benchmark,
-        "m_absolute": m_absolute,
         "ladder": [
             {"symbol": r["symbol"], "company_name": r["company_name"],
              "gvm": _f(r["gvm_score"]), "verdict": r["verdict"],
