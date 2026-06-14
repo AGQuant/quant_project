@@ -62,15 +62,14 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.46
-# v2.9.46: Auth fix (root cause) — middleware now treats ANY iframe-destined
-#   request as embedded, via Sec-Fetch-Dest: iframe (browser-set on every
-#   iframe load AND in-iframe navigation), in addition to ?embed=1. The CIO
-#   Shell module pages (/dashboard, /check, /sector, /cio) contain their own
-#   top-nav <a href> links; clicking one navigated the iframe to a NON-embed
-#   URL, which re-injected the logout button + 15-min idle script inside the
-#   iframe → interacting tore down the shared session. Header check closes
-#   that gap regardless of query string.
+# Scorr / Project Quant — main.py v2.9.47
+# v2.9.47: Auth fix — 15-min idle-logout timer REMOVED entirely. The injected
+#   idle script (window.location='/logout') was the thing tearing down the
+#   session; inside the CIO Shell iframes it fired on interaction. Now only a
+#   static logout button is injected on non-embedded pages. No auto-logout on
+#   any page. (Embedded iframe loads still get no injection at all.)
+# v2.9.46: Auth fix (root cause) — middleware treats Sec-Fetch-Dest: iframe as
+#   embedded, in addition to ?embed=1.
 # v2.9.45: Auth fix — no logout/idle injection on ?embed=1 iframe loads.
 # v2.9.44: Investment Check v1.0 — 12-rule GVM-native equity filter.
 #   Endpoints: GET /api/investment-check?symbol=X
@@ -90,7 +89,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.46"
+VERSION = "2.9.47"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -113,7 +112,9 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# Injected into every protected HTML page: logout button (top-left) + 15-min idle timer
+# Injected into every protected (non-embedded) HTML page: a static logout button.
+# NOTE: the 15-min idle-logout timer was removed in v2.9.47 — it was firing
+# window.location='/logout' and tearing down sessions (badly inside iframes).
 _LOGOUT_BTN = (
     b"<style>#scorr-lo{position:fixed;top:12px;left:14px;z-index:9999;}"
     b"#scorr-lo a{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;"
@@ -124,15 +125,6 @@ _LOGOUT_BTN = (
     b"#scorr-lo a:hover{color:#b45309!important;border-color:#b45309!important;}</style>"
     b'<div id="scorr-lo"><a href="/logout">&#x23CF; Logout</a></div>'
 )
-_IDLE_SCRIPT = (
-    b"<script>(function(){"
-    b"var T=15*60*1000,id;"
-    b"function r(){clearTimeout(id);id=setTimeout(function(){window.location='/logout';},T);}"
-    b"['mousemove','keydown','click','scroll','touchstart','mousedown']"
-    b".forEach(function(e){document.addEventListener(e,r,true);});"
-    b"r();"
-    b"})();</script>"
-)
 
 def _is_embedded(request: Request) -> bool:
     """True if this HTML load is happening inside an iframe (CIO Shell module).
@@ -142,8 +134,7 @@ def _is_embedded(request: Request) -> bool:
       2. Sec-Fetch-Dest: iframe — set by the browser on EVERY iframe document
          load, including in-iframe navigations that drop the embed param
          (e.g. clicking a module's own top-nav <a href> link).
-    Embedded loads must NOT get the logout button / idle-timer injected, else
-    nested timers + an injected /logout link tear down the shared session.
+    Embedded loads get no chrome injected — the parent shell owns it.
     """
     if request.query_params.get("embed") == "1":
         return True
@@ -153,7 +144,7 @@ def _is_embedded(request: Request) -> bool:
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Password gate + logout button + no-cache + 15-min idle logout for HTML pages."""
+    """Password gate + static logout button + no-cache headers for HTML pages."""
     if request.url.path in PROTECTED and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
@@ -164,7 +155,7 @@ async def auth_gate(request: Request, call_next):
         async for chunk in response.body_iterator:
             body += chunk
         if not is_embed:
-            body = body.replace(b"</body>", _LOGOUT_BTN + _IDLE_SCRIPT + b"</body>", 1)
+            body = body.replace(b"</body>", _LOGOUT_BTN + b"</body>", 1)
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"
@@ -355,7 +346,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.46)")
+        log.info("Tables ready (v2.9.47)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
