@@ -16,6 +16,7 @@
     --blu:#2563eb; --blu-d:#eff4ff;
     --cyan:#0891b2; --cyan-d:#e0f5fb;
     --amber:#d97706; --amber-d:#fef3e2; --amber-b:#fcd89a;
+    --purp:#7c3aed; --purp-d:#f0ebff; --purp-b:#c4b5fd;
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --mono:'Space Mono','SF Mono',Consolas,monospace;
     --radius:14px; --radius-sm:8px;
@@ -39,10 +40,24 @@
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
   .wrap{max-width:720px;margin:0 auto;padding:22px 14px 70px}
-  .page-head{margin-bottom:20px}
+  .page-head{margin-bottom:20px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .page-head-left{}
   .page-title{font-size:22px;font-weight:800;color:var(--txt);letter-spacing:-.3px}
   .page-title span{color:var(--cyan)}
   .page-sub{font-size:10.5px;color:var(--dim);letter-spacing:1.8px;text-transform:uppercase;margin-top:3px}
+
+  /* ── INVEST CORNER TAB ── */
+  .invest-corner-tab{
+    display:flex;align-items:center;gap:7px;
+    padding:8px 14px;border-radius:10px;
+    background:var(--purp-d);border:1.5px solid var(--purp-b);
+    color:var(--purp);font-size:12px;font-weight:700;
+    cursor:pointer;transition:.15s;white-space:nowrap;flex-shrink:0;
+    letter-spacing:.2px;
+  }
+  .invest-corner-tab:hover{background:var(--purp);color:#fff;border-color:var(--purp)}
+  .invest-corner-tab.active{background:var(--purp);color:#fff;border-color:var(--purp)}
+  .invest-corner-tab .tab-icon{font-size:14px}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
     padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
@@ -67,20 +82,21 @@
   .ac-gvm{font-size:10.5px;font-weight:700;color:var(--cyan);flex-shrink:0;
     background:var(--cyan-d);padding:2px 7px;border-radius:6px}
 
-  .side-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:12px}
+  .side-row{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
   .side-btn{padding:12px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
     color:var(--mut);font-family:var(--font);font-size:13.5px;font-weight:700;cursor:pointer;
     transition:.15s;letter-spacing:.2px}
   .side-btn:hover{border-color:var(--line);background:var(--panel)}
   .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
-  .side-btn.invest.on{border-color:var(--cyan);background:var(--cyan-d);color:var(--cyan)}
 
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
     cursor:pointer;letter-spacing:.2px;transition:.15s;box-shadow:0 2px 8px rgba(37,99,235,.25)}
   .run-btn:hover{background:#1d52d5;box-shadow:0 4px 14px rgba(37,99,235,.32)}
   .run-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+  .run-btn.invest-mode{background:var(--purp);box-shadow:0 2px 8px rgba(124,58,237,.25)}
+  .run-btn.invest-mode:hover{background:#6d28d9;box-shadow:0 4px 14px rgba(124,58,237,.32)}
 
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;padding-top:13px;
     border-top:1px solid var(--line)}
@@ -97,6 +113,8 @@
   .loading::before{content:'';display:block;width:28px;height:28px;margin:0 auto 10px;
     border:2.5px solid var(--line2);border-top-color:var(--cyan);
     border-radius:50%;animation:spin .7s linear infinite}
+  .loading.invest-loading{color:var(--purp)}
+  .loading.invest-loading::before{border-top-color:var(--purp)}
   @keyframes spin{to{transform:rotate(360deg)}}
 
   .err{display:none;padding:12px 16px;border-radius:9px;background:var(--red-d);
@@ -104,6 +122,7 @@
     margin-bottom:14px}
   .err.show{display:block}
 
+  /* ── TRADE CHECK RESULT ── */
   .result{display:none}
   .result.show{display:block}
   .r-company{font-size:16px;font-weight:800;color:var(--txt);display:block;margin-bottom:6px}
@@ -111,7 +130,6 @@
   .r-side-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;letter-spacing:.3px}
   .r-side-badge.LONG{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
   .r-side-badge.SHORT{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
-  .r-side-badge.INVEST{background:var(--cyan-d);color:var(--cyan);border:1px solid #a5d8e8}
   .r-seg{font-size:10.5px;color:var(--mut);background:var(--panel2);border:1px solid var(--line2);
     padding:2px 8px;border-radius:5px}
   .r-gvm{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:5px}
@@ -183,9 +201,72 @@
   .leg-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
   .foot{font-size:10px;color:var(--dim);text-align:center;margin-top:18px;line-height:1.8}
 
+  /* ── INVEST RESULT ── */
+  .inv-result{display:none}
+  .inv-result.show{display:block}
+
+  .inv-header{display:flex;align-items:flex-start;justify-content:space-between;
+    gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .inv-company{font-size:16px;font-weight:800;color:var(--txt)}
+  .inv-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:5px}
+  .inv-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:6px;letter-spacing:.3px}
+  .inv-badge.STRONG-BUY{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
+  .inv-badge.ACCUMULATE{background:var(--cyan-d);color:var(--cyan);border:1px solid #a5d8e8}
+  .inv-badge.WATCH{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+  .inv-badge.AVOID{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
+  .inv-cap{font-size:10.5px;color:var(--mut);background:var(--panel2);
+    border:1px solid var(--line2);padding:2px 8px;border-radius:5px}
+
+  .inv-score-card{border-radius:11px;padding:18px 20px;border:2px solid;margin-bottom:0}
+  .inv-score-card.strong-buy{background:var(--grn-d);border-color:var(--grn-b)}
+  .inv-score-card.accumulate{background:var(--cyan-d);border-color:#a5d8e8}
+  .inv-score-card.watch{background:var(--amber-d);border-color:var(--amber-b)}
+  .inv-score-card.avoid{background:var(--red-d);border-color:var(--red-b)}
+
+  .inv-verdict-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .inv-verdict-label{font-size:20px;font-weight:800;letter-spacing:.5px}
+  .inv-score-card.strong-buy .inv-verdict-label{color:var(--grn)}
+  .inv-score-card.accumulate .inv-verdict-label{color:var(--cyan)}
+  .inv-score-card.watch .inv-verdict-label{color:var(--amber)}
+  .inv-score-card.avoid .inv-verdict-label{color:var(--red)}
+  .inv-score-pill{font-size:22px;font-weight:800;font-family:var(--mono);
+    padding:6px 16px;border-radius:9px;background:rgba(255,255,255,.6)}
+  .inv-score-card.strong-buy .inv-score-pill{color:var(--grn)}
+  .inv-score-card.accumulate .inv-score-pill{color:var(--cyan)}
+  .inv-score-card.watch .inv-score-pill{color:var(--amber)}
+  .inv-score-card.avoid .inv-score-pill{color:var(--red)}
+
+  .inv-bar-track{height:8px;background:rgba(0,0,0,.08);border-radius:4px;overflow:hidden;margin-bottom:6px}
+  .inv-bar-fill{height:100%;border-radius:4px;transition:width .5s ease}
+  .inv-score-card.strong-buy .inv-bar-fill{background:var(--grn)}
+  .inv-score-card.accumulate .inv-bar-fill{background:var(--cyan)}
+  .inv-score-card.watch .inv-bar-fill{background:var(--amber)}
+  .inv-score-card.avoid .inv-bar-fill{background:var(--red)}
+  .inv-bar-sub{font-size:10px;color:var(--mut);display:flex;justify-content:space-between}
+
+  .inv-rules-table{width:100%;border-collapse:separate;border-spacing:0;
+    border:1px solid var(--line2);border-radius:9px;overflow:hidden;font-size:11.5px}
+  .inv-rules-table th{background:var(--panel2);color:var(--dim);padding:7px 10px;text-align:left;
+    font-weight:600;font-family:var(--mono);font-size:10px;letter-spacing:.5px;
+    border-bottom:1px solid var(--line2)}
+  .inv-rules-table td{padding:8px 10px;border-bottom:1px solid var(--line);
+    border-left:3px solid transparent;font-family:var(--mono);vertical-align:middle}
+  .inv-rules-table tr:last-child td{border-bottom:none}
+  .inv-rules-table tr.row-pass td:first-child{border-left-color:var(--grn)}
+  .inv-rules-table tr.row-fail td:first-child{border-left-color:var(--red)}
+  .inv-rules-table tr.row-pass{background:rgba(15,169,104,.025)}
+  .inv-rules-table tr.row-fail{background:rgba(226,55,68,.025)}
+
+  .inv-passes{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+  .inv-pass-chip{font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;
+    background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b);font-family:var(--mono)}
+  .inv-fail-chip{font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;
+    background:var(--red-d);color:var(--red);border:1px solid var(--red-b);font-family:var(--mono)}
+
   @media(max-width:540px){
     .v-bar-need{display:none}
     .rules-table .td-cond{display:none}
+    .inv-rules-table .td-cond{display:none}
   }
 </style>
 </head>
@@ -205,8 +286,13 @@
 
 <div class="wrap">
   <div class="page-head">
-    <div class="page-title">Trade <span>Check</span></div>
-    <div class="page-sub">v3.3 · Native $0 · Tier 1 + Tier 2</div>
+    <div class="page-head-left">
+      <div class="page-title" id="pageTitle">Trade <span>Check</span></div>
+      <div class="page-sub" id="pageSub">v3.3 · Native $0 · Tier 1 + Tier 2</div>
+    </div>
+    <button class="invest-corner-tab" id="investTab" onclick="toggleInvestMode()">
+      <span class="tab-icon">◆</span> Investment Check
+    </button>
   </div>
 
   <div class="card">
@@ -215,10 +301,10 @@
              autocomplete="off" spellcheck="false">
       <div class="ac-drop" id="acDrop"></div>
     </div>
-    <div class="side-row">
+    <!-- Trade side buttons — hidden in invest mode -->
+    <div class="side-row" id="sideRow">
       <button class="side-btn long on" id="btnLong" onclick="setSide('LONG')">▲ LONG</button>
       <button class="side-btn short" id="btnShort" onclick="setSide('SHORT')">▼ SHORT</button>
-      <button class="side-btn invest" id="btnInvest" onclick="setSide('INVEST')">◆ INVEST</button>
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <div class="chips" id="chips"></div>
@@ -227,6 +313,7 @@
   <div class="loading" id="loading">Computing v3.3…</div>
   <div class="err" id="err"></div>
 
+  <!-- Trade Check Result -->
   <div class="result" id="result">
     <div class="card" style="padding:16px 18px">
       <span class="r-company" id="rCompany"></span>
@@ -240,13 +327,13 @@
         <div class="v-label" id="vLabel"></div>
         <div class="v-bars">
           <div class="v-bar-row">
-            <span class="v-bar-label" id="vBar1Label">Tier 1</span>
+            <span class="v-bar-label">Tier 1</span>
             <div class="v-bar-track"><div class="v-bar-fill" id="vBar1"></div></div>
             <span class="v-bar-score" id="vScore1"></span>
             <span class="v-bar-need" id="vNeed1"></span>
           </div>
           <div class="v-bar-row">
-            <span class="v-bar-label" id="vBar2Label">Tier 2</span>
+            <span class="v-bar-label">Tier 2</span>
             <div class="v-bar-track"><div class="v-bar-fill" id="vBar2"></div></div>
             <span class="v-bar-score" id="vScore2"></span>
             <span class="v-bar-need" id="vNeed2"></span>
@@ -254,7 +341,6 @@
         </div>
       </div>
     </div>
-
     <div class="card" style="padding:14px 18px">
       <div class="tier-label"><span id="t1Label">Tier 1 — Process Rules</span><span class="tier-score" id="t1Score"></span></div>
       <table class="rules-table">
@@ -262,7 +348,6 @@
         <tbody id="t1Body"></tbody>
       </table>
     </div>
-
     <div class="card" style="padding:14px 18px">
       <div class="tier-label"><span id="t2Label">Tier 2 — Entry Filters</span><span class="tier-score" id="t2Score"></span></div>
       <table class="rules-table">
@@ -270,19 +355,63 @@
         <tbody id="t2Body"></tbody>
       </table>
       <div class="legend">
-        <div class="legend-item"><div class="leg-dot" style="background:var(--grn)"></div>PASS — DB computed, met</div>
-        <div class="legend-item"><div class="leg-dot" style="background:var(--red)"></div>FAIL — DB computed, not met</div>
-        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>🟡 Chart / N/A — R10, R12, F3 need chart confirmation. F5 excluded weekends.</div>
+        <div class="legend-item"><div class="leg-dot" style="background:var(--grn)"></div>PASS</div>
+        <div class="legend-item"><div class="leg-dot" style="background:var(--red)"></div>FAIL</div>
+        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>🟡 Chart / N/A</div>
+      </div>
+    </div>
+    <div class="foot" id="rFoot">Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
+  </div>
+
+  <!-- Investment Check Result -->
+  <div class="inv-result" id="invResult">
+    <div class="card" style="padding:16px 18px">
+      <div class="inv-header">
+        <div>
+          <div class="inv-company" id="invCompany"></div>
+          <div class="inv-meta">
+            <span class="inv-badge" id="invBadge"></span>
+            <span class="inv-cap" id="invCap"></span>
+            <span class="r-seg" id="invSeg"></span>
+            <span class="r-gvm" id="invGvm"></span>
+          </div>
+        </div>
+      </div>
+      <div class="inv-score-card" id="invScoreCard">
+        <div class="inv-verdict-row">
+          <div class="inv-verdict-label" id="invVerdictLabel"></div>
+          <div class="inv-score-pill" id="invScorePill"></div>
+        </div>
+        <div class="inv-bar-track"><div class="inv-bar-fill" id="invBarFill"></div></div>
+        <div class="inv-bar-sub">
+          <span id="invBarSub">0 / 12 rules passed</span>
+          <span id="invBand"></span>
+        </div>
       </div>
     </div>
 
-    <div class="foot" id="rFoot">Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
+    <div class="card" style="padding:14px 18px">
+      <div class="tier-label">
+        <span>Investment Check v1.0 — 12 Rules</span>
+        <span class="tier-score" id="invRuleScore"></span>
+      </div>
+      <table class="inv-rules-table">
+        <thead><tr><th>Rule</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
+        <tbody id="invBody"></tbody>
+      </table>
+      <div style="margin-top:12px">
+        <div style="font-size:10px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Passes</div>
+        <div class="inv-passes" id="invPasses"></div>
+      </div>
+    </div>
+    <div class="foot">Investment Check v1.0 · GVM-native · Medium-long term holding · Not a trade signal</div>
   </div>
+
 </div>
 
 <script>
 let side='LONG';
-// Gates removed from UI — engine receives null and resolves R10/R12/F3 as N/A.
+let investMode=false;
 let gate1=null, gate2=null;
 let acSel=-1, acItems=[], acTimer=null, runTimer=null;
 const QUICK=['RELIANCE','INFY','HDFCBANK','TCS','ONGC','WIPRO','AXISBANK','SBIN'];
@@ -298,11 +427,43 @@ function renderChips(){
   });
 }
 
+function toggleInvestMode(){
+  investMode=!investMode;
+  const tab=document.getElementById('investTab');
+  const sideRow=document.getElementById('sideRow');
+  const runBtn=document.getElementById('runBtn');
+  const pageTitle=document.getElementById('pageTitle');
+  const pageSub=document.getElementById('pageSub');
+
+  if(investMode){
+    tab.classList.add('active');
+    sideRow.style.display='none';
+    runBtn.textContent='Run Investment Check';
+    runBtn.classList.add('invest-mode');
+    pageTitle.innerHTML='Investment <span style="color:var(--purp)">Check</span>';
+    pageSub.textContent='v1.0 · 12 Rules · GVM-native · Medium-Long Term';
+    // hide trade result, show invest slot
+    document.getElementById('result').classList.remove('show');
+    document.getElementById('invResult').classList.remove('show');
+  } else {
+    tab.classList.remove('active');
+    sideRow.style.display='grid';
+    runBtn.textContent='Run Trade Check';
+    runBtn.classList.remove('invest-mode');
+    pageTitle.innerHTML='Trade <span>Check</span>';
+    pageSub.textContent='v3.3 · Native $0 · Tier 1 + Tier 2';
+    document.getElementById('result').classList.remove('show');
+    document.getElementById('invResult').classList.remove('show');
+  }
+  // re-run if symbol already entered
+  const sym=document.getElementById('sym').value.trim();
+  if(sym) run();
+}
+
 function setSide(s){
   side=s;
   document.getElementById('btnLong').className='side-btn long'+(s==='LONG'?' on':'');
   document.getElementById('btnShort').className='side-btn short'+(s==='SHORT'?' on':'');
-  document.getElementById('btnInvest').className='side-btn invest'+(s==='INVEST'?' on':'');
   if(document.getElementById('sym').value.trim())run();
 }
 
@@ -350,8 +511,7 @@ function moveAC(dir){
 const symEl=document.getElementById('sym');
 symEl.addEventListener('input',function(){
   const v=this.value.trim();
-  clearTimeout(acTimer);
-  clearTimeout(runTimer);
+  clearTimeout(acTimer);clearTimeout(runTimer);
   acTimer=setTimeout(()=>fetchAC(v),200);
   if(v.length>=2) runTimer=setTimeout(()=>run(),700);
 });
@@ -359,8 +519,7 @@ symEl.addEventListener('keydown',function(e){
   if(e.key==='ArrowDown'){e.preventDefault();moveAC(1);}
   else if(e.key==='ArrowUp'){e.preventDefault();moveAC(-1);}
   else if(e.key==='Enter'){
-    e.preventDefault();
-    clearTimeout(runTimer);
+    e.preventDefault();clearTimeout(runTimer);
     if(acSel>=0&&document.getElementById('acDrop').classList.contains('show')){pickAC(acSel);}
     else{closeAC();run();}
   }
@@ -369,11 +528,15 @@ symEl.addEventListener('keydown',function(e){
 document.addEventListener('click',e=>{if(!e.target.closest('.sym-wrap'))closeAC();});
 
 function stateBadge(st){
-  if(st==='pass')return '<span class="badge-pass">✓ PASS</span>';
-  if(st==='fail')return '<span class="badge-fail">✗ FAIL</span>';
+  if(st===true||st==='pass')return '<span class="badge-pass">✓ PASS</span>';
+  if(st===false||st==='fail')return '<span class="badge-fail">✗ FAIL</span>';
   return '<span class="badge-na">🟡</span>';
 }
-function rowClass(st){return st==='pass'?'row-pass':st==='fail'?'row-fail':'row-na';}
+function rowClass(st){
+  if(st===true||st==='pass')return 'row-pass';
+  if(st===false||st==='fail')return 'row-fail';
+  return 'row-na';
+}
 
 async function run(){
   const sym=document.getElementById('sym').value.trim().toUpperCase();
@@ -381,28 +544,49 @@ async function run(){
   document.getElementById('sym').value=sym;
   document.getElementById('runBtn').disabled=true;
   document.getElementById('result').classList.remove('show');
+  document.getElementById('invResult').classList.remove('show');
   document.getElementById('err').classList.remove('show');
-  document.getElementById('loading').classList.add('show');
+  const ld=document.getElementById('loading');
+  ld.className='loading show'+(investMode?' invest-loading':'');
+  ld.textContent=investMode?'Running Investment Check…':'Computing v3.3…';
+
   try{
-    const r=await fetch('/api/check',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({symbol:sym,side,gate1,gate2})});
-    const d=await r.json();
-    document.getElementById('loading').classList.remove('show');
-    if(!d.ok){showErr(d.error||'No data.');return;}
-    render(d);
+    if(investMode){
+      await runInvestCheck(sym);
+    } else {
+      await runTradeCheck(sym);
+    }
   }catch(e){
     document.getElementById('loading').classList.remove('show');
     showErr('Network error: '+e.message);
   }
   document.getElementById('runBtn').disabled=false;
 }
+
+async function runTradeCheck(sym){
+  const r=await fetch('/api/check',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({symbol:sym,side,gate1,gate2})});
+  const d=await r.json();
+  document.getElementById('loading').classList.remove('show');
+  if(!d.ok){showErr(d.error||'No data.');return;}
+  renderTrade(d);
+}
+
+async function runInvestCheck(sym){
+  const r=await fetch(`/api/investment-check?symbol=${encodeURIComponent(sym)}`);
+  const d=await r.json();
+  document.getElementById('loading').classList.remove('show');
+  if(d.error){showErr(d.error);return;}
+  renderInvest(d);
+}
+
 function showErr(m){const e=document.getElementById('err');e.textContent=m;e.classList.add('show');}
 
-function render(d){
+function renderTrade(d){
   document.getElementById('rCompany').textContent=`${d.company} (${d.symbol})`;
   const sd=document.getElementById('rSide');
-  sd.textContent=d.side==='LONG'?'▲ LONG':d.side==='SHORT'?'▼ SHORT':'◆ INVEST';
+  sd.textContent=d.side==='LONG'?'▲ LONG':'▼ SHORT';
   sd.className='r-side-badge '+d.side;
   document.getElementById('rSeg').textContent=d.segment||'';
   const gvmEl=document.getElementById('rGvm');
@@ -410,45 +594,97 @@ function render(d){
     gvmEl.className='r-gvm '+(d.gvm>=7?'hi':d.gvm>=6?'mid':'lo');
   }else{gvmEl.textContent='';}
   document.getElementById('rTs').textContent=d.ts||'';
-
   const vc=document.getElementById('vCard');
   vc.className='verdict-card '+d.verdict_class;
-  document.getElementById('vLabel').textContent= d.v_label ||
+  document.getElementById('vLabel').textContent=d.v_label||
     {strong:'✦ STRONG',valid:'✓ VALID',weak:'⚠ WEAK',reject:'✗ REJECT'}[d.verdict_class]||d.verdict_class.toUpperCase();
-
-  const t2min=d.t2_min||5;
-  const t2total=d.t2_total||7;
+  const t2min=d.t2_min||5;const t2total=d.t2_total||7;
   document.getElementById('vBar1').style.width=Math.round(d.t1_pass/d.t1_total*100)+'%';
   document.getElementById('vBar2').style.width=Math.round(d.t2_pass/t2total*100)+'%';
   document.getElementById('vScore1').textContent=`${d.t1_pass}/${d.t1_total}`;
   document.getElementById('vScore2').textContent=`${d.t2_pass}/${t2total}`;
   document.getElementById('vNeed1').textContent=d.need1||'need 8';
   document.getElementById('vNeed2').textContent=d.need2||`need ${t2min}`;
-
-  const isInvest=d.side==='INVEST';
-  document.getElementById('vBar1Label').textContent=isInvest?'Group A':'Tier 1';
-  document.getElementById('vBar2Label').textContent=isInvest?'Group B':'Tier 2';
   document.getElementById('t1Label').textContent=d.tier1_label||'Tier 1 — Process Rules';
   document.getElementById('t2Label').textContent=d.tier2_label||'Tier 2 — Entry Filters';
-  document.getElementById('t1Score').textContent= isInvest
-    ? `${d.t1_pass}/${d.t1_total} · ${d.need1||''}`
-    : `${d.t1_pass}/${d.t1_auto_n} auto · ${d.t1_human_n} chart · min 8/${d.t1_total}`;
-  document.getElementById('t2Score').textContent= isInvest
-    ? `${d.t2_pass}/${t2total} · ${d.need2||''}`
-    : `${d.t2_pass}/${d.t2_auto_n} auto · ${d.t2_human_n} chart · min ${t2min}/7`;
-  document.getElementById('rFoot').textContent= d.foot ||
-    'Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.';
-
+  document.getElementById('t1Score').textContent=`${d.t1_pass}/${d.t1_auto_n} auto · ${d.t1_human_n} chart · min 8/${d.t1_total}`;
+  document.getElementById('t2Score').textContent=`${d.t2_pass}/${d.t2_auto_n} auto · ${d.t2_human_n} chart · min ${t2min}/7`;
+  document.getElementById('rFoot').textContent=d.foot||'Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.';
   const t1b=document.getElementById('t1Body');t1b.innerHTML='';
   d.tier1.forEach(r=>{t1b.insertAdjacentHTML('beforeend',
     `<tr class="${rowClass(r.state)}"><td class="td-rule">${r.rule}</td><td class="td-cond">${r.cond}</td><td class="td-val">${r.val}</td><td class="td-state">${stateBadge(r.state)}</td></tr>`);});
   const t2b=document.getElementById('t2Body');t2b.innerHTML='';
   d.tier2.forEach(r=>{t2b.insertAdjacentHTML('beforeend',
     `<tr class="${rowClass(r.state)}"><td class="td-rule">${r.rule}</td><td class="td-cond">${r.cond}</td><td class="td-val">${r.val}</td><td class="td-state">${stateBadge(r.state)}</td></tr>`);});
-
   document.getElementById('result').classList.add('show');
   document.getElementById('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
+
+function renderInvest(d){
+  // Header
+  document.getElementById('invCompany').textContent=`${d.company} (${d.symbol})`;
+  document.getElementById('invSeg').textContent=d.segment||'';
+
+  // Verdict badge
+  const badge=document.getElementById('invBadge');
+  const verdictMap={
+    'STRONG BUY':'🟢 STRONG BUY',
+    'ACCUMULATE':'🟡 ACCUMULATE',
+    'WATCH':'🟠 WATCH',
+    'AVOID':'🔴 AVOID'
+  };
+  badge.textContent=verdictMap[d.verdict]||d.verdict;
+  badge.className='inv-badge '+(d.verdict||'').replace(' ','-');
+
+  // Cap + GVM
+  document.getElementById('invCap').textContent=d.cap_category||'';
+  const gvmEl=document.getElementById('invGvm');
+  if(d.gvm_verdict){gvmEl.textContent='GVM '+d.gvm_verdict;
+    const sc=parseFloat(d.rules&&d.rules[0]&&d.rules[0].value)||0;
+    gvmEl.className='r-gvm '+(sc>=7?'hi':sc>=6?'mid':'lo');
+  }
+
+  // Score card
+  const sc=document.getElementById('invScoreCard');
+  const cssClass={'STRONG BUY':'strong-buy','ACCUMULATE':'accumulate','WATCH':'watch','AVOID':'avoid'}[d.verdict]||'avoid';
+  sc.className='inv-score-card '+cssClass;
+  document.getElementById('invVerdictLabel').textContent=verdictMap[d.verdict]||d.verdict;
+  document.getElementById('invScorePill').textContent=`${d.score}/${d.max_score}`;
+  document.getElementById('invBarFill').style.width=Math.round(d.score/d.max_score*100)+'%';
+  document.getElementById('invBarSub').textContent=`${d.score} of ${d.max_score} rules passed`;
+  document.getElementById('invBand').textContent=`Band: ${d.band}`;
+  document.getElementById('invRuleScore').textContent=`${d.score}/${d.max_score} · min 8 to buy`;
+
+  // Rules table
+  const tbody=document.getElementById('invBody');tbody.innerHTML='';
+  (d.rules||[]).forEach(r=>{
+    const passed=r.pass===true;
+    const cls=passed?'row-pass':'row-fail';
+    const val=r.value!=null?r.value:'—';
+    const peer=r.peer!=null?` (peer: ${r.peer})`:'';
+    const note=r.note?` · ${r.note}`:'';
+    tbody.insertAdjacentHTML('beforeend',
+      `<tr class="${cls}">
+        <td class="td-rule">${r.rule} ${r.name}</td>
+        <td class="td-cond">${r.condition}</td>
+        <td class="td-val">${val}${peer}${note}</td>
+        <td class="td-state">${stateBadge(passed?'pass':'fail')}</td>
+      </tr>`);
+  });
+
+  // Pass/fail chips
+  const passDiv=document.getElementById('invPasses');passDiv.innerHTML='';
+  (d.passes||[]).forEach(n=>{
+    passDiv.insertAdjacentHTML('beforeend',`<span class="inv-pass-chip">✓ ${n}</span>`);
+  });
+  (d.fails||[]).forEach(n=>{
+    passDiv.insertAdjacentHTML('beforeend',`<span class="inv-fail-chip">✗ ${n}</span>`);
+  });
+
+  document.getElementById('invResult').classList.add('show');
+  document.getElementById('invResult').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
 renderChips();
 </script>
 <script>
