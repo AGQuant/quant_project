@@ -1,6 +1,10 @@
 """
 V8 endpoints — Quant Long-Short Basket Strategy
 
+ADR (14-Jun-2026): _read_adr gates the live tiers (adr_intraday 5-min, then
+  live compute from intraday_prices) behind _market_open(). When NSE is CLOSED
+  (weekend/holiday/outside 09:15-15:30 IST) it returns the last EOD adr_daily
+  row directly, so a stale/partial intraday breadth (e.g. 0.26) is never shown.
 ADR (11-Jun-2026): market_mood reads adr_intraday (live 5-min) primary,
   falls back to adr_daily (EOD). Per spec id=165.
 qualified JOIN fix (11-Jun-2026): replaced window-function JOIN causing
@@ -23,6 +27,8 @@ from typing import Optional
 import psycopg
 import os
 
+from nse_holidays import is_trading_day
+
 router = APIRouter(prefix="/api/v8", tags=["v8"])
 
 def _conn():
@@ -30,6 +36,16 @@ def _conn():
 
 def _ist_now() -> datetime:
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
+def _market_open() -> bool:
+    """True only during live NSE hours (Mon–Fri, non-holiday, 09:15–15:30 IST)."""
+    now = _ist_now()
+    if not is_trading_day(now.date()):
+        return False
+    open_t  = now.replace(hour=9,  minute=15, second=0, microsecond=0)
+    close_t = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return open_t <= now <= close_t
 
 
 FILTER_CONFIG = {
@@ -165,52 +181,56 @@ def _live_qualified_fallback(basket: str, limit: int):
 
 def _read_adr(cur):
     """
-    Read ADR: adr_intraday (live, 5-min) primary → adr_daily fallback.
+    Read ADR. During live market hours: adr_intraday (5-min) → live compute
+    from intraday_prices → adr_daily. When the market is CLOSED, skip the live
+    tiers entirely and use adr_daily (last EOD) — a stale/partial intraday
+    breadth (e.g. 0.26) must never be shown outside session hours.
     Returns (advances, declines, unchanged, adr, source, date_str).
     """
-    # 1. Try adr_intraday (written by signal_writer every 5-min)
-    cur.execute("""
-        SELECT advances, declines, unchanged, adr, universe_count, ts
-        FROM adr_intraday
-        WHERE ts::date = CURRENT_DATE
-        ORDER BY ts DESC LIMIT 1
-    """)
-    row = cur.fetchone()
-    if row and (row[4] or 0) >= 50:
-        adv, dec, unc, adr = row[0] or 0, row[1] or 0, row[2] or 0, float(row[3])
-        return adv, dec, unc, adr, "adr_intraday", str(date.today())
+    if _market_open():
+        # 1. Try adr_intraday (written by signal_writer every 5-min)
+        cur.execute("""
+            SELECT advances, declines, unchanged, adr, universe_count, ts
+            FROM adr_intraday
+            WHERE ts::date = CURRENT_DATE
+            ORDER BY ts DESC LIMIT 1
+        """)
+        row = cur.fetchone()
+        if row and (row[4] or 0) >= 50:
+            adv, dec, unc, adr = row[0] or 0, row[1] or 0, row[2] or 0, float(row[3])
+            return adv, dec, unc, adr, "adr_intraday", str(date.today())
 
-    # 2. Try live computation from intraday_prices (same-day fallback)
-    cur.execute("""
-        WITH li AS (
-            SELECT DISTINCT ON (symbol) symbol, close AS cmp
-            FROM intraday_prices WHERE ts::date = CURRENT_DATE
-            ORDER BY symbol, ts DESC
-        ),
-        pc AS (
-            SELECT DISTINCT ON (symbol) symbol, close AS pclose
-            FROM raw_prices WHERE price_date < CURRENT_DATE
-            ORDER BY symbol, price_date DESC
-        )
-        SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
-               COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
-               COUNT(*) FILTER (WHERE li.cmp = pc.pclose),
-               COUNT(*)
-        FROM li JOIN pc ON pc.symbol = li.symbol
-    """)
-    r = cur.fetchone()
-    if r and (r[3] or 0) >= 50:
-        adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
-        adr = round(adv / dec, 3) if dec else float(adv)
-        return adv, dec, unc, adr, "live_intraday", str(date.today())
+        # 2. Try live computation from intraday_prices (same-day fallback)
+        cur.execute("""
+            WITH li AS (
+                SELECT DISTINCT ON (symbol) symbol, close AS cmp
+                FROM intraday_prices WHERE ts::date = CURRENT_DATE
+                ORDER BY symbol, ts DESC
+            ),
+            pc AS (
+                SELECT DISTINCT ON (symbol) symbol, close AS pclose
+                FROM raw_prices WHERE price_date < CURRENT_DATE
+                ORDER BY symbol, price_date DESC
+            )
+            SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
+                   COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
+                   COUNT(*) FILTER (WHERE li.cmp = pc.pclose),
+                   COUNT(*)
+            FROM li JOIN pc ON pc.symbol = li.symbol
+        """)
+        r = cur.fetchone()
+        if r and (r[3] or 0) >= 50:
+            adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
+            adr = round(adv / dec, 3) if dec else float(adv)
+            return adv, dec, unc, adr, "live_intraday", str(date.today())
 
-    # 3. EOD fallback
+    # 3. EOD fallback (adr_daily) — also the default whenever the market is closed
     cur.execute("SELECT advances, declines, unchanged, adr, price_date FROM adr_daily ORDER BY price_date DESC LIMIT 1")
     r = cur.fetchone()
     if r:
         adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
         adr = round(float(r[3]), 3) if r[3] is not None else 1.0
-        return adv, dec, unc, adr, "adr_daily_fallback", str(r[4])
+        return adv, dec, unc, adr, "adr_daily", str(r[4])
 
     return 0, 0, 0, 1.0, "no_data", str(date.today())
 
