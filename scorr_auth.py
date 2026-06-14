@@ -6,14 +6,15 @@ Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=lax)
 Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status
 
-Fixes (v2):
-  - Cookie now secure=True (Railway serves HTTPS; non-secure cookies were
-    being dropped on the POST /login -> 302 -> GET / redirect, so login
-    appeared to "not work").
-  - Password compare strips whitespace on BOTH sides (trailing newline/space
-    in the Railway env value no longer locks you out).
-  - Logout overwrites the cookie with an expired empty value (delete_cookie
-    alone can fail to match when attributes differ) so it always clears.
+Fixes (v3):
+  - Cookie secure=True (Railway HTTPS).
+  - Password compare cleans ASCII + unicode whitespace AND zero-width /
+    non-breaking chars on BOTH sides (a hidden char in the Railway env value
+    was making a correct password compare False).
+  - Login success now returns a 200 HTML page that sets the cookie and
+    redirects via JS, instead of a 302 (some browsers drop Set-Cookie on a
+    cross-path 302 even with secure+lax).
+  - Logout overwrites the cookie with an expired empty value so it always clears.
 """
 
 import os
@@ -28,9 +29,25 @@ PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector"}
 _SALT = "scorr2026"
 
 
+def _js_str(s: str) -> str:
+    """Safely embed a string as a JS string literal."""
+    import json
+    return json.dumps(s)
+
+
+def _clean(s: str) -> str:
+    """Strip ASCII + unicode whitespace and zero-width / non-breaking chars."""
+    if s is None:
+        return ""
+    # Remove zero-width and BOM chars that .strip() does not catch.
+    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"):
+        s = s.replace(ch, "")
+    return s.strip()
+
+
 def _password() -> str:
-    """Configured password, whitespace-stripped."""
-    return os.getenv("SCORR_PASSWORD", "").strip()
+    """Configured password, whitespace/zero-width cleaned."""
+    return _clean(os.getenv("SCORR_PASSWORD", ""))
 
 
 def _expected_token() -> str:
@@ -112,11 +129,21 @@ async def login_get(request: Request):
 @router.post("/login", include_in_schema=False)
 async def login_post(request: Request):
     form = await request.form()
-    password = str(form.get("password", "")).strip()
+    password = _clean(str(form.get("password", "")))
     correct = _password()
     next_url = str(form.get("next", "/")) or "/"
     if not correct or password == correct:
-        response = RedirectResponse(url=next_url, status_code=302)
+        # Set cookie on a 200 HTML page with JS redirect. Some browsers drop
+        # Set-Cookie on a cross-path 302 even with secure+lax; this avoids it.
+        safe_next = next_url if next_url.startswith("/") else "/"
+        html = (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            f"<meta http-equiv='refresh' content='0;url={safe_next}'>"
+            "</head><body style='background:#0f1623'>"
+            f"<script>window.location.replace({_js_str(safe_next)});</script>"
+            "</body></html>"
+        )
+        response = HTMLResponse(html, status_code=200)
         _set_auth_cookie(response)
         return response
     return HTMLResponse(_login_page(error=True), status_code=401)
