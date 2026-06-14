@@ -61,10 +61,12 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.42
-# v2.9.42: Logout button — floating bottom-right on all protected pages,
-#   injected via middleware alongside idle timer. CSS hover, no JS needed.
-# v2.9.41: Inactivity logout — 15-min idle timer injected via middleware.
+# Scorr / Project Quant — main.py v2.9.43
+# v2.9.43: Auth hardening — logout button moved top-left (no overlap),
+#   no-cache headers on all protected pages (prevents back-button bypass),
+#   explicit cookie path="/" on set+delete (ensures proper deletion).
+# v2.9.42: Logout button injected via middleware + 15-min idle timer.
+# v2.9.41: 15-min inactivity logout injected via middleware.
 # v2.9.40: Password gate — scorr_auth.py. Set SCORR_PASSWORD in Railway.
 # v2.9.39: Startup auto-fill sector_briefs.
 # v2.9.38: sector_brief_endpoints router wired.
@@ -72,13 +74,9 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.36: gvm_universe_pivots router wired.
 # v2.9.35: Root / now serves scorr_home.html.
 # v2.9.34: /check route wired.
-# v2.9.33: /ask route wired.
-# v2.9.32: GVM company report wired.
-# v2.9.31: /cio2 route wired.
-# v2.9.30: Trade Check v3.4 wired.
 # ============================================================
 
-VERSION = "2.9.42"
+VERSION = "2.9.43"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -101,12 +99,12 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# Injected into every protected HTML page: logout button + 15-min idle timer
+# Injected into every protected HTML page: logout button (top-left) + 15-min idle timer
 _LOGOUT_BTN = (
-    b"<style>#scorr-lo a{position:fixed;bottom:16px;right:16px;z-index:9999;"
-    b"display:flex;align-items:center;gap:6px;padding:7px 14px;"
-    b"background:rgba(15,22,35,0.9);border:1px solid #2a3548;border-radius:8px;"
-    b"color:#5a6781;font-size:11px;font-weight:600;text-decoration:none;"
+    b"<style>#scorr-lo{position:fixed;top:12px;left:14px;z-index:9999;}"
+    b"#scorr-lo a{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;"
+    b"background:rgba(15,22,35,0.88);border:1px solid #2a3548;border-radius:7px;"
+    b"color:#5a6781;font-size:10.5px;font-weight:600;text-decoration:none;"
     b"font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;"
     b"backdrop-filter:blur(8px);transition:all .15s;}"
     b"#scorr-lo a:hover{color:#b45309!important;border-color:#b45309!important;}</style>"
@@ -124,7 +122,7 @@ _IDLE_SCRIPT = (
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Password gate + logout button + 15-min inactivity logout for HTML pages."""
+    """Password gate + logout button + no-cache + 15-min idle logout for HTML pages."""
     if request.url.path in PROTECTED and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
@@ -136,6 +134,8 @@ async def auth_gate(request: Request, call_next):
         body = body.replace(b"</body>", _LOGOUT_BTN + _IDLE_SCRIPT + b"</body>", 1)
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
+        headers["cache-control"] = "no-store, no-cache, must-revalidate"
+        headers["pragma"] = "no-cache"
         return Response(content=body, status_code=response.status_code,
                         headers=headers, media_type="text/html")
     return response
@@ -321,7 +321,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.42)")
+        log.info("Tables ready (v2.9.43)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -621,21 +621,17 @@ def _build_digest_daily() -> dict:
             cols = [d[0] for d in cur.description]
             global_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             result["sections"]["1_global_indices"] = {"label": "Global Indices", "quote_date": global_rows[0]["quote_date"] if global_rows else None, "data": global_rows}
-
             domestic = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 domestic[sym] = _digest_domestic_live(cur, sym)
-
             cur.execute("SELECT price_date::text, advances, declines, unchanged, adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
             adr_row = cur.fetchone()
             adr = {"price_date": adr_row[0], "advances": adr_row[1], "declines": adr_row[2], "unchanged": adr_row[3], "adr": _r(adr_row[4])} if adr_row else None
             result["sections"]["2_domestic_indices"] = {"label": "Domestic Indices + ADR", "NIFTY50": domestic.get("NIFTY50"), "BANKNIFTY": domestic.get("BANKNIFTY"), "adr": adr}
-
             t_due = _get_config("takeaway_refresh_due", "false"); ov_due = _get_config("overview_refresh_due", "false")
             if t_due == "true" or ov_due == "true":
                 tier = _get_config("takeaway_refresh_tier", "")
                 result["refresh_alert"] = {"takeaway_due": t_due=="true", "overview_due": ov_due=="true", "tier": tier}
-
             pivots = {}
             for sym in ("NIFTY50", "BANKNIFTY"):
                 cur.execute("SELECT AVG(high), AVG(low), AVG(close) FROM (SELECT high,low,close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 5) sub", (sym,))
@@ -643,18 +639,15 @@ def _build_digest_daily() -> dict:
                 if r and r[0] is not None:
                     h, l, c = float(r[0]), float(r[1]), float(r[2]); pp = _r((h+l+c)/3)
                     pivots[sym] = {"pp": pp, "r1": _r(2*pp-l), "r2": _r(pp+(h-l)), "s1": _r(2*pp-h), "s2": _r(pp-(h-l))}
-
             result["sections"]["3_support_levels"] = {"label": "Support Levels (rolling-5d)",
                 "NIFTY50": {"s1": pivots.get("NIFTY50",{}).get("s1"), "s2": pivots.get("NIFTY50",{}).get("s2")},
                 "BANKNIFTY": {"s1": pivots.get("BANKNIFTY",{}).get("s1"), "s2": pivots.get("BANKNIFTY",{}).get("s2")}}
             result["sections"]["4_pivot_points"] = {"label": "Pivot Points (rolling-5d)", "NIFTY50": pivots.get("NIFTY50"), "BANKNIFTY": pivots.get("BANKNIFTY")}
-
             pcr_out = {}
             for und in ("NIFTY", "BANKNIFTY"):
                 cur.execute("SELECT price_date::text, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying=%s ORDER BY price_date DESC LIMIT 5", (und,))
                 cols2 = [d[0] for d in cur.description]; pcr_out[und] = [dict(zip(cols2, row)) for row in cur.fetchall()]
             result["sections"]["5_pcr_trend"] = {"label": "PCR Trend (5-day rolling)", "NIFTY": pcr_out.get("NIFTY",[]), "BANKNIFTY": pcr_out.get("BANKNIFTY",[])}
-
     except Exception as e:
         log.error(f"_build_digest_daily failed: {e}"); result["error"] = str(e)
     return result
