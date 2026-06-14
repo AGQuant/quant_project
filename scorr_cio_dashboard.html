@@ -642,8 +642,13 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
 // ── Operational Metrics (peer-benchmarked) ─────────────────────────
 // LOWER_BETTER metrics: risk/cost ratios where a smaller number is better.
 const OPS_LOWER_BETTER = new Set([
+  // Banking / NBFC — risk & cost ratios
   "gnpa_pct", "nnpa_pct", "cost_to_income", "credit_cost", "slippage_ratio",
   "gross_npa", "net_npa", "pcr_ex", "opex_ratio",
+  // Insurance — lower is better
+  "claims_ratio", "combined_ratio", "expense_ratio",
+  // Generic cost/leverage ratios
+  "debt_to_equity", "net_debt_to_ebitda", "inventory_days", "receivable_days", "churn_pct",
 ]);
 const OPS_MIN_PEERS = 3;
 
