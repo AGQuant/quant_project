@@ -62,12 +62,16 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.45
-# v2.9.45: Auth fix — middleware no longer injects logout button / idle-timer
-#   into embedded iframe loads (?embed=1). CIO Shell modules load /dashboard,
-#   /sector, /cio, /check as iframes; nested idle timers + injected /logout
-#   links were tearing down the shared session on interaction. Parent shell
-#   owns the chrome. Password is hardcoded in scorr_auth.py.
+# Scorr / Project Quant — main.py v2.9.46
+# v2.9.46: Auth fix (root cause) — middleware now treats ANY iframe-destined
+#   request as embedded, via Sec-Fetch-Dest: iframe (browser-set on every
+#   iframe load AND in-iframe navigation), in addition to ?embed=1. The CIO
+#   Shell module pages (/dashboard, /check, /sector, /cio) contain their own
+#   top-nav <a href> links; clicking one navigated the iframe to a NON-embed
+#   URL, which re-injected the logout button + 15-min idle script inside the
+#   iframe → interacting tore down the shared session. Header check closes
+#   that gap regardless of query string.
+# v2.9.45: Auth fix — no logout/idle injection on ?embed=1 iframe loads.
 # v2.9.44: Investment Check v1.0 — 12-rule GVM-native equity filter.
 #   Endpoints: GET /api/investment-check?symbol=X
 #              GET /api/investment-check/screener?verdict=STRONG+BUY&cap=Large
@@ -86,7 +90,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.45"
+VERSION = "2.9.46"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -130,6 +134,23 @@ _IDLE_SCRIPT = (
     b"})();</script>"
 )
 
+def _is_embedded(request: Request) -> bool:
+    """True if this HTML load is happening inside an iframe (CIO Shell module).
+
+    Two signals, either is sufficient:
+      1. ?embed=1 query param (set on the initial iframe src).
+      2. Sec-Fetch-Dest: iframe — set by the browser on EVERY iframe document
+         load, including in-iframe navigations that drop the embed param
+         (e.g. clicking a module's own top-nav <a href> link).
+    Embedded loads must NOT get the logout button / idle-timer injected, else
+    nested timers + an injected /logout link tear down the shared session.
+    """
+    if request.query_params.get("embed") == "1":
+        return True
+    if request.headers.get("sec-fetch-dest", "").lower() == "iframe":
+        return True
+    return False
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     """Password gate + logout button + no-cache + 15-min idle logout for HTML pages."""
@@ -138,10 +159,7 @@ async def auth_gate(request: Request, call_next):
         return _RR(url="/login")
     response = await call_next(request)
     if request.url.path in PROTECTED and "text/html" in response.headers.get("content-type", ""):
-        # Embedded iframe loads (CIO Shell modules pass ?embed=1) must NOT get the
-        # logout button or idle-timer injected — nested timers + injected /logout
-        # links tear down the shared session on interaction. Parent shell owns chrome.
-        is_embed = request.query_params.get("embed") == "1"
+        is_embed = _is_embedded(request)
         body = b""
         async for chunk in response.body_iterator:
             body += chunk
@@ -337,7 +355,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.45)")
+        log.info("Tables ready (v2.9.46)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
