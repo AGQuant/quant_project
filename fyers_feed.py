@@ -80,13 +80,14 @@ INDEX_LTP_SYMBOLS = {
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
-# ── Option chain config ─────────────────────────────────────────────────────────────────────────────
+# ── Option chain config ──────────────────────────────────────────────────────────────────────────────────────────────────────
 OPTION_RETENTION_DAYS = 7
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
 N_STRIKES             = 10     # ATM ± 10
 BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
 OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quotes has NO OI)
+CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
 OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
 NIFTY_STEP   = 50
@@ -144,7 +145,7 @@ log = logging.getLogger('fyers_feed')
 
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -263,7 +264,7 @@ class OptionMaster:
         return (not self.loaded) or (ticker in self.valid_symbols)
 
 
-# ── DB / token ───────────────────────────────────────────────────────────────────────────────────────
+# ── DB / token ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
     with conn.cursor() as cur:
@@ -344,7 +345,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ── universe ───────────────────────────────────────────────────────────────────────────────────────────
+# ── universe ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -383,7 +384,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ───────────────────────────────────────────────────────────────────────────
+# ── option symbol manager ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
@@ -403,13 +404,15 @@ class OptionSymbolManager:
         self._underlyings = []
 
     def _build_underlyings(self):
+        # INDEX-ONLY (locked 14-Jun-2026): NIFTY + BANKNIFTY options only.
+        # Stock options dropped from live WS to save DB + Fyers load; the stock
+        # helpers (get_top50_option_underlyings / STOCK_STEPS) are intentionally
+        # retained for future on-demand revival.
         out = []
         for name, meta in INDEX_OPTION_UNDERLYINGS.items():
             out.append({'name': name, 'step': meta['step'], 'cmp_sym': meta['cmp_sym']})
-        for sym in get_top50_option_underlyings(self.conn):
-            out.append({'name': sym, 'step': STOCK_STEPS.get(sym), 'cmp_sym': sym})
         self._underlyings = out
-        log.info(f"OptionSymbolManager: {len(out)} underlyings")
+        log.info(f"OptionSymbolManager: {len(out)} underlyings (index-only)")
 
     def _get_cmp(self, cmp_sym):
         # 1) table first (warm path)
@@ -531,7 +534,7 @@ class OptionSymbolManager:
             return self.sym_map.get(fsym)
 
 
-# ── bar aggregator ───────────────────────────────────────────────────────────────────────────────────
+# ── bar aggregator ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class BarAggregator:
     def __init__(self, conn):
@@ -654,7 +657,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ─────────────────────────────────────────────────────────────────────────────────
+# ── option bar store ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 5-min option ticks into option_chain."""
@@ -663,6 +666,7 @@ class OptionBarStore:
         self.opt_mgr = opt_mgr
         self.bars    = {}
         self.lock    = threading.RLock()
+        self.last_oi = {}   # fyers_option_symbol -> latest OI from DEPTH poll (WS strips OI)
 
     def _bucket(self, ts):
         # 5-min bucket
@@ -690,6 +694,8 @@ class OptionBarStore:
         meta = self.opt_mgr.lookup(fsym)
         if not meta: return
         underlying, strike, otype, expiry = meta
+        # WS strips OI (Fyers SDK pops it) -> fall back to the DEPTH-poll value.
+        oi = bar['oi'] if bar.get('oi') is not None else self.last_oi.get(fsym)
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
@@ -700,7 +706,7 @@ class OptionBarStore:
                         ltp=EXCLUDED.ltp, oi=EXCLUDED.oi, volume=EXCLUDED.volume,
                         bid=EXCLUDED.bid, ask=EXCLUDED.ask
                 """, (fsym, underlying, strike, otype, expiry,
-                      bar['ltp'], bar['oi'], bar['vol'], bar['bid'], bar['ask'], bar['bkt']))
+                      bar['ltp'], oi, bar['vol'], bar['bid'], bar['ask'], bar['bkt']))
             self.conn.commit()
         except Exception as e:
             log.warning(f"option_bar flush {fsym}: {e}")
@@ -711,7 +717,7 @@ class OptionBarStore:
                 self._flush(fsym, bar)
 
 
-# ── index LTP ─────────────────────────────────────────────────────────────────────────────────────────
+# ── index LTP ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -738,7 +744,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ─────────────────────────────────────────────────────────────────────────────────────────────
+# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
@@ -816,7 +822,51 @@ def poll_futures_oi(token, fut_syms, agg):
         _OI_POLL_LOCK.release()
 
 
-# ── main run ───────────────────────────────────────────────────────────────────────────────────────────
+_OPT_OI_POLL_LOCK = threading.Lock()
+
+def poll_options_oi(token, opt_syms, opt_store):
+    """
+    Index option OI via DEPTH REST. The WS feed strips OI (Fyers SDK pops the 'OI'
+    field), so depth is the only live source — same pattern as poll_futures_oi.
+    INDEX-ONLY scope keeps this to ~136 symbols (NIFTY+BANKNIFTY ATM+/-10) so a full
+    cycle (~136 * OI_CALL_SPACING_SEC ~= 48s) fits inside the 5-min bar.
+    Latest OI -> opt_store.last_oi[fsym] -> attached on next option bar flush.
+    """
+    if not _OPT_OI_POLL_LOCK.acquire(blocking=False):
+        log.info("Option OI poll skipped — previous cycle still running")
+        return
+    try:
+        log.info(f"Option OI poll starting: {len(opt_syms)} index options via depth API")
+        headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
+        got = 0
+        for fsym in opt_syms:
+            try:
+                r = requests.get(DEPTH_URL,
+                                 params={'symbol': fsym, 'ohlcv_flag': 1},
+                                 headers=headers, timeout=8)
+                d = r.json()
+                if d.get('s') != 'ok':
+                    continue
+                data_d = d.get('d')
+                node = {}
+                if isinstance(data_d, dict):
+                    node = data_d.get(fsym) or (next(iter(data_d.values())) if data_d else {})
+                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
+                    node = data_d[0].get('v', data_d[0])
+                oi = node.get('oi') if isinstance(node, dict) else None
+                if oi is None:
+                    continue
+                opt_store.last_oi[fsym] = int(oi)   # GIL-atomic dict write; no lock needed
+                got += 1
+            except Exception as e:
+                log.warning(f"poll_options_oi {fsym}: {e}")
+            time.sleep(OI_CALL_SPACING_SEC)
+        log.info(f"Option OI poll (depth API): {got}/{len(opt_syms)} index option OI updated")
+    finally:
+        _OPT_OI_POLL_LOCK.release()
+
+
+# ── main run ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
@@ -918,6 +968,7 @@ def run(auth_code=None):
         last_heal_day   = None
         last_roll_check = None
         last_oi_poll    = None
+        last_cmp_flush  = None
 
         while True:
             now    = datetime.now(IST)
@@ -928,8 +979,16 @@ def run(auth_code=None):
             if in_market:
                 update_index_ltp(conn, token, agg)
                 agg.flush_all()
-                agg.flush_cmp()
+                # CMP flush throttled 30s -> 5-min (14-Jun-2026): cmp_prices is a
+                # 218-row UPSERT (no growth); sub-minute freshness not needed
+                # (ATM drift check is 15-min). flush_all still writes 5-min bars
+                # every pass (dedupes by bucket).
+                if (last_cmp_flush is None or
+                        (now_dt - last_cmp_flush).total_seconds() >= CMP_FLUSH_MINS * 60):
+                    agg.flush_cmp()
+                    last_cmp_flush = now_dt
                 opt_store.flush_all()
+                # Index option OI poll added alongside the futures OI poll below.
 
                 # Futures OI poll every OI_POLL_MINS via DEPTH API (quotes has NO OI).
                 # Background thread: 208 depth calls ≈ 75s — must not block flushes.
@@ -937,6 +996,9 @@ def run(auth_code=None):
                         (now_dt - last_oi_poll).total_seconds() >= OI_POLL_MINS * 60):
                     threading.Thread(target=poll_futures_oi,
                                      args=(token, list(futures_fyers_syms), agg),
+                                     daemon=True).start()
+                    threading.Thread(target=poll_options_oi,
+                                     args=(token, list(option_syms), opt_store),
                                      daemon=True).start()
                     last_oi_poll = now_dt
 
