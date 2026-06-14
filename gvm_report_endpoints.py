@@ -65,6 +65,58 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
+                sym: str, lower_is_better: bool) -> Optional[Dict[str, Any]]:
+    """Build a self-contained, peer-benchmarked Valuation block from a
+    {symbol: value} map. Mirrors the Forward PE rating logic. pillar=V.
+    Returns None if fewer than 2 peers have a value."""
+    pairs = [(s, v) for s, v in value_map.items() if v is not None]
+    if len(pairs) < 2:
+        return None
+    vals     = [v for _, v in pairs]
+    peer_avg = round(sum(vals) / len(vals), 2)
+    ordered  = sorted(pairs, key=lambda x: x[1], reverse=not lower_is_better)  # best first
+    best     = {"symbol": ordered[0][0],  "value": round(ordered[0][1], 2)}
+    worst    = {"symbol": ordered[-1][0], "value": round(ordered[-1][1], 2)}
+    n        = len(ordered)
+    sym_val  = value_map.get(sym)
+    rank = rating = None
+    beats = False
+    if sym_val is not None:
+        pos    = next((i for i, (s_i, _) in enumerate(ordered) if s_i == sym), 0)
+        rank   = pos + 1
+        rating = round(10.0 - (pos / max(1, n - 1)) * 8.0, 2)
+        beats  = (sym_val <= peer_avg) if lower_is_better else (sym_val >= peer_avg)
+    return {
+        "key":        key,
+        "label":      label,
+        "group":      "Valuation",
+        "pillar":     "V",
+        "unit":       unit,
+        "company":    round(sym_val, 2) if sym_val is not None else None,
+        "peer_avg":   peer_avg,
+        "rating":     rating,
+        "rank":       rank,
+        "peer_n":     n,
+        "best":       best,
+        "worst":      worst,
+        "beats_peer": beats,
+    }
+
+
+def _insert_after_valuation(benchmark: List[Dict[str, Any]], block: Dict[str, Any]) -> None:
+    """Insert a block right after the last existing Valuation-pillar row so the
+    V section stays contiguous; else append."""
+    last_v = -1
+    for i, b in enumerate(benchmark):
+        if b.get("pillar") == "V":
+            last_v = i
+    if last_v >= 0:
+        benchmark.insert(last_v + 1, block)
+    else:
+        benchmark.append(block)
+
+
 @router.get("/api/gvm/company/{symbol}")
 def gvm_company_report(symbol: str):
     """Full peer-benchmarked GVM analytics report for one company."""
@@ -142,6 +194,43 @@ def gvm_company_report(symbol: str):
                     benchmark.append(fwd_pe_bench)
     except Exception as e:
         log.warning(f"forward_pe benchmark failed for {sym}: {e}")
+
+    # --- 4b. PB + EV/EBITDA + Annual Upside (FY27e) — peer-benchmarked V blocks ---
+    try:
+        if ladder_syms:
+            pb_map: Dict[str, float] = {}
+            ev_map: Dict[str, float] = {}
+            ups_map: Dict[str, float] = {}
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT nse_code, "Price to book value", "EVEBITDA"
+                    FROM screener_raw
+                    WHERE nse_code = ANY(%s)
+                """, (ladder_syms,))
+                for code, pb_v, ev_v in cur.fetchall():
+                    pb_f, ev_f = _f(pb_v), _f(ev_v)
+                    if pb_f is not None and pb_f > 0:
+                        pb_map[code] = pb_f
+                    if ev_f is not None and ev_f > 0:
+                        ev_map[code] = ev_f
+                cur.execute("""
+                    SELECT nse_code, fy27_growth
+                    FROM input_raw
+                    WHERE nse_code = ANY(%s)
+                """, (ladder_syms,))
+                for code, ups_v in cur.fetchall():
+                    ups_f = _f(ups_v)
+                    if ups_f is not None and ups_f > -100:
+                        ups_map[code] = ups_f
+
+            pb_block  = _peer_block("pb", "Price / Book", "x", pb_map, sym, lower_is_better=True)
+            ev_block  = _peer_block("ev_ebitda", "EV / EBITDA", "x", ev_map, sym, lower_is_better=True)
+            ups_block = _peer_block("annual_upside", "Annual Upside (FY27e)", "%", ups_map, sym, lower_is_better=False)
+            for blk in (pb_block, ev_block, ups_block):
+                if blk:
+                    _insert_after_valuation(benchmark, blk)
+    except Exception as e:
+        log.warning(f"valuation extras benchmark failed for {sym}: {e}")
 
     # --- 5. Positives / negatives (add company alias + pillar) ---
     positives = [_transform_param(p) for p in (base.get("positives") or [])]
