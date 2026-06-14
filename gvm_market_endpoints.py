@@ -8,7 +8,7 @@ Endpoints:
   GET /api/gvm/{symbol}            — full GVM + input_raw overview/takeaway/result_analysis
   GET /api/gvm/top/{n}             — top N by GVM (optional verdict filter)
   GET /api/filter                  — stocks in a GVM range
-  GET /api/sectors                 — sector mcap-weighted ratings
+  GET /api/sectors                 — sector ratings (no param) OR per-stock segment ladder (?segment=)
   GET /api/market/top_gainers      — top gainers by day%, joined with GVM
   GET /api/cmp/{symbol}            — latest CMP
   GET /api/intraday/{symbol}       — intraday OHLC from DB
@@ -93,8 +93,39 @@ def get_filter(min_gvm: float = 0, max_gvm: float = 10):
 
 
 @router.get("/api/sectors")
-def get_sectors():
-    return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
+def get_sectors(segment: Optional[str] = None):
+    # No segment → sector-level mcap-weighted ratings (legacy behaviour, unchanged).
+    if not segment:
+        return api_query("SELECT segment, simple_avg_gvm AS avg_gvm, mcap_weighted_gvm, stocks_count AS stock_count, verdict, top_stock, top_stock_gvm FROM sector_ratings ORDER BY mcap_weighted_gvm DESC")
+    # Segment provided → per-stock ladder for that segment, ordered by GVM.
+    # RSIm sourced from momentum_scores (full-universe coverage). v8_metrics holds
+    # only the F&O set, so non-futures segments (microfinance/MSME/etc.) returned
+    # blank RSIm before this fix (15-Jun-2026). Validated live same day.
+    return api_query("""
+        SELECT g.symbol, g.company_name, g.segment,
+               ROUND(g.gvm_score::numeric,2) AS gvm_score,
+               ROUND(g.g_score::numeric,2)   AS g_score,
+               ROUND(g.v_score::numeric,2)   AS v_score,
+               ROUND(g.m_score::numeric,2)   AS m_score,
+               g.verdict, g.market_cap,
+               ROUND(g.price::numeric,2)     AS price,
+               ROUND(s.pe::numeric,2)                    AS pe,
+               ROUND(s."Price to book value"::numeric,2) AS pb,
+               ROUND(s."Return on equity"::numeric,2)    AS roe,
+               ROUND(s.opm::numeric,2)                   AS opm,
+               ROUND(s.dividend_yield::numeric,2)        AS div_yield,
+               ROUND(s.return_1y::numeric,2)             AS return_1y,
+               ROUND(rsi.rsi_month::numeric,2)           AS rsi_month,
+               rsi.rsi_month_rating
+        FROM gvm_scores g
+        LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+        LEFT JOIN LATERAL (
+            SELECT rsi_month, rsi_month_rating FROM momentum_scores ms
+            WHERE ms.symbol = g.symbol ORDER BY ms.score_date DESC LIMIT 1
+        ) rsi ON true
+        WHERE g.segment ILIKE %s
+        ORDER BY g.gvm_score DESC NULLS LAST
+    """, (f"%{segment}%",))
 
 
 # ── Market ───────────────────────────────────────────────────────────────────
