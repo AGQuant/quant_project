@@ -53,7 +53,8 @@ const GVM_PILLAR_MAP = {
   fa_growth:"G", inst_abs:"G", inst_chg:"G", roce:"G",
   int_cov:"G", div_yield:"G",
   pe:"V", upside:"V",
-  ret_1y:"M", ret_3y:"M", dma_50:"M", dma_200:"M", ret_52w_idx:"M",
+  ret_1m:"M", ret_1y:"M", ret_3y:"M", dma_50:"M", dma_200:"M", ret_52w_idx:"M",
+  rsi_month:"M", vol_trend:"M",
 };
 
 const PILLAR_INFO = {
@@ -776,35 +777,6 @@ function OpsMetrics({ symbol }) {
   );
 }
 
-function MAbsoluteStrip({ items }) {
-  if (!items || !items.length) return null;
-  const pi = PILLAR_INFO.M;
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 800, color: pi.color }}>M — Momentum · Absolute</span>
-        <span style={{ fontSize: 10, color: C.muted }}>engine-scored, not peer-benchmarked</span>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
-        {items.map(b => {
-          const c = cellColor(b.rating);
-          const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
-          return (
-            <div key={b.key} style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: c.fg }}>{b.label}</span>
-                <span style={{ fontSize: 10, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
-              <div style={{ fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>absolute band</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const s = r.scores || {};
@@ -1051,8 +1023,6 @@ function GvmReport({ r, hist }) {
           );
         })}
       </div>
-
-      <MAbsoluteStrip items={r.m_absolute} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
