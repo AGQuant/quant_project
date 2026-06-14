@@ -123,13 +123,19 @@ def _fetch_option_history(token, sym, start, end):
 def _upsert_oi(conn, sym, underlying, strike, otype, exp, candles):
     """UPSERT each 5-min bar's OI onto option_chain (matches live schema)."""
     from pytz import timezone
+    from datetime import time as _dt_time
     ist = timezone('Asia/Kolkata')
+    MKT_OPEN, MKT_CLOSE = _dt_time(9, 15), _dt_time(15, 30)
     rows = 0
     with conn.cursor() as cur:
         for c in candles:
             if len(c) < 7:
                 continue
             ts = datetime.fromtimestamp(c[0], tz=ist).replace(tzinfo=None)
+            # Skip History-API daily-rollup / after-hours bars (e.g. 23:30 with NULL OI).
+            # The live feed only writes during market hours; backfill must match.
+            if not (MKT_OPEN <= ts.time() <= MKT_CLOSE):
+                continue
             oi = int(c[6]) if c[6] is not None else None
             cur.execute("""
                 INSERT INTO option_chain
