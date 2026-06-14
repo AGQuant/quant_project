@@ -639,51 +639,68 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
   );
 }
 
-// ── Operational Metrics ─────────────────────────────────────────────
-function OpsMetrics({ symbol }) {
-  const [rows, setRows] = useState(null);
+// ── Operational Metrics (peer-benchmarked) ─────────────────────────
+// LOWER_BETTER metrics: risk/cost ratios where a smaller number is better.
+const OPS_LOWER_BETTER = new Set([
+  "gnpa_pct", "nnpa_pct", "cost_to_income", "credit_cost", "slippage_ratio",
+  "gross_npa", "net_npa", "pcr_ex", "opex_ratio",
+]);
+const OPS_MIN_PEERS = 3;
+
+function OpsMetrics({ symbol, segment }) {
+  const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [curQ, setCurQ] = useState(null);
 
   useEffect(() => {
     if (!symbol) return;
     setLoading(true);
-    setRows(null);
+    setMetrics(null);
+    // Pull the whole segment's latest-quarter ops metrics in one query.
     mcpCall("run_sql", {
-      query: `SELECT metric_name, metric_value, unit, confidence, quarter, notes
-              FROM sector_ops_metrics
-              WHERE symbol = '${symbol}'
-              ORDER BY metric_name ASC, quarter DESC
-              LIMIT 120`
+      query: `SELECT som.symbol, som.metric_name, som.metric_value, som.unit,
+                     som.confidence, som.quarter, som.notes
+              FROM sector_ops_metrics som
+              JOIN gvm_scores g ON g.symbol = som.symbol
+              WHERE g.segment = (SELECT segment FROM gvm_scores WHERE symbol='${symbol}')
+                AND som.quarter = (SELECT MAX(quarter) FROM sector_ops_metrics)
+              ORDER BY som.metric_name ASC`
     }).then(d => {
       const raw = d?.rows || [];
-      // Pivot: one entry per metric_name, current = latest quarter, prev = prior.
+      if (raw.length) setCurQ(raw[0].quarter);
+      // Group by metric_name across peers.
       const byMetric = {};
       raw.forEach(r => {
         const k = r.metric_name;
         if (!byMetric[k]) byMetric[k] = [];
-        byMetric[k].push(r);
+        const v = r.metric_value != null ? Number(r.metric_value) : null;
+        if (v != null && !isNaN(v)) byMetric[k].push({ sym: r.symbol, v, unit: r.unit, conf: r.confidence, notes: r.notes });
       });
-      const merged = Object.keys(byMetric).map(k => {
-        // already ordered quarter DESC; [0]=current, [1]=prior
-        const q = byMetric[k].sort((a, b) => (b.quarter || "").localeCompare(a.quarter || ""));
-        const cur = q[0], prev = q[1] || null;
-        const cv = cur && cur.metric_value != null ? Number(cur.metric_value) : null;
-        const pv = prev && prev.metric_value != null ? Number(prev.metric_value) : null;
-        const qoq = (cv != null && pv != null && pv !== 0) ? ((cv / pv - 1) * 100) : null;
-        return {
-          metric_name: k, unit: cur?.unit, confidence: cur?.confidence,
-          quarter: cur?.quarter, notes: cur?.notes,
-          metric_value: cur?.metric_value,
-          prev_quarter: prev?.quarter || null,
-          prev_value: prev?.metric_value ?? null,
-          qoq_pct: qoq,
-        };
+      const out = [];
+      Object.keys(byMetric).forEach(k => {
+        const peers = byMetric[k];
+        if (peers.length < OPS_MIN_PEERS) return;            // ≥3-peer threshold
+        const lowerBetter = OPS_LOWER_BETTER.has(k.toLowerCase());
+        const self = peers.find(p => p.sym === symbol) || null;
+        const vals = peers.map(p => p.v);
+        const peerAvg = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const sorted = [...peers].sort((a, b) => lowerBetter ? a.v - b.v : b.v - a.v);
+        const best = sorted[0], worst = sorted[sorted.length - 1];
+        const rank = self ? sorted.findIndex(p => p.sym === symbol) + 1 : null;
+        out.push({
+          metric_name: k, unit: self?.unit || peers[0].unit,
+          confidence: self?.conf || null, notes: self?.notes || null,
+          company: self ? self.v : null,
+          peer_avg: Math.round(peerAvg * 100) / 100,
+          rank, peer_n: peers.length,
+          best: { sym: best.sym, v: best.v }, worst: { sym: worst.sym, v: worst.v },
+          lower_better: lowerBetter,
+        });
       });
-      // sort by confidence then name, like before
-      const order = { HIGH: 0, MEDIUM: 1, LOW: 2 };
-      merged.sort((a, b) => (order[a.confidence] ?? 3) - (order[b.confidence] ?? 3) || a.metric_name.localeCompare(b.metric_name));
-      setRows(merged.length ? merged.slice(0, 30) : []);
-    }).catch(() => setRows([])).finally(() => setLoading(false));
+      // Sort: metrics the company actually has first, then by peer count.
+      out.sort((a, b) => (b.company != null) - (a.company != null) || b.peer_n - a.peer_n || a.metric_name.localeCompare(b.metric_name));
+      setMetrics(out);
+    }).catch(() => setMetrics([])).finally(() => setLoading(false));
   }, [symbol]);
 
   if (loading) return (
@@ -693,82 +710,64 @@ function OpsMetrics({ symbol }) {
     </div>
   );
 
-  if (!rows || !rows.length) return null;
-
-  const confColor = c => c === "HIGH" ? C.green : c === "MEDIUM" ? C.gold : C.muted;
-  const confBg    = c => c === "HIGH" ? "#e3f6ed" : c === "MEDIUM" ? "#fdf3df" : "#f0f2f5";
-  const confBd    = c => c === "HIGH" ? "#0a9e6340" : c === "MEDIUM" ? "#b4530940" : "#cdd3dc";
+  if (!metrics || !metrics.length) return null;
 
   const fmtVal = (v, u) => {
     if (v == null) return "—";
     const n = Number(v);
     if (isNaN(n)) return String(v);
     const abs = Math.abs(n);
-    const formatted = abs >= 100000 ? (n/100000).toFixed(2) + "L"
+    const f = abs >= 100000 ? (n/100000).toFixed(2) + "L"
       : abs >= 1000 ? (n/1000).toFixed(1) + "K"
       : abs >= 1 ? n.toFixed(2)
       : n.toFixed(4);
-    return formatted + (u ? " " + u : "");
+    return f + (u ? " " + u : "");
   };
 
-  const curQ = rows[0]?.quarter || "—";
-  const prevQ = rows.map(r => r.prev_quarter).find(Boolean) || null;
+  // Rating proxy for cell color: company vs peer avg, direction-aware.
+  const cellTone = (m) => {
+    if (m.company == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
+    const better = m.lower_better ? m.company < m.peer_avg : m.company > m.peer_avg;
+    const worse  = m.lower_better ? m.company > m.peer_avg : m.company < m.peer_avg;
+    if (better) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
+    if (worse)  return { bg: "#fceaec", bd: "#dd3a4a", fg: "#bf2230" };
+    return { bg: "#fdf3df", bd: "#d9a73a", fg: "#9a6a00" };
+  };
 
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>Operational Metrics</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>Operational Metrics · Peer Benchmarked</div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-            {rows.length} metrics · {curQ}{prevQ ? ` vs ${prevQ}` : ""} · earnings calls & filings
+            {metrics.length} metrics · {curQ || "—"} · {segment || "segment"} · ≥{OPS_MIN_PEERS} peers · earnings calls & filings
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {["HIGH","MEDIUM","LOW"].map(c => (
-            <span key={c} style={{ fontSize: 9, fontWeight: 800, color: confColor(c),
-              background: confBg(c), border: `1px solid ${confBd(c)}`,
-              borderRadius: 4, padding: "2px 7px" }}>{c}</span>
-          ))}
-        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(195px, 1fr))", gap: 10 }}>
-        {rows.map((row, i) => {
-          const cc = confColor(row.confidence);
-          const bg = confBg(row.confidence);
-          const bd = confBd(row.confidence);
-          const label = (row.metric_name || "").replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
-          const rawNote = (row.notes || "").replace(/^MANAGEMENT AUTHORITATIVE \([^)]+\)\. (Source 1 primary\. )?/, "");
-          const shortNote = rawNote.length > 95 ? rawNote.substring(0, 92) + "…" : rawNote;
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10 }}>
+        {metrics.map((m, i) => {
+          const c = cellTone(m);
+          const label = (m.metric_name || "").replace(/_/g, " ").replace(/\bpct\b/i, "%").replace(/\b\w/g, l => l.toUpperCase());
+          const dirArrow = m.lower_better ? "↓ better" : "↑ better";
           return (
-            <div key={i} title={row.notes || ""}
-              style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 9, padding: "10px 13px" }}>
+            <div key={i} title={m.notes || ""}
+              style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 13px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 3 }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a6781", lineHeight: 1.3, maxWidth: "76%" }}>{label}</div>
-                <span style={{ fontSize: 8.5, fontWeight: 800, color: cc, flexShrink: 0, marginLeft: 4, letterSpacing: ".04em" }}>{row.confidence}</span>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: c.fg, lineHeight: 1.3, maxWidth: "74%" }}>{label}</div>
+                <span style={{ fontSize: 8, fontWeight: 700, color: C.muted, flexShrink: 0, marginLeft: 4 }}>{dirArrow}</span>
               </div>
               <div style={{ fontSize: 19, fontWeight: 900, fontFamily: "monospace", color: "#1c2536", lineHeight: 1.1, marginBottom: 4 }}>
-                {fmtVal(row.metric_value, row.unit)}
+                {m.company != null ? fmtVal(m.company, m.unit) : "—"}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 9, color: "#5a6781" }}>
-                <span>{row.quarter}</span>
-                {row.prev_value != null ? (
-                  <span style={{ fontFamily: "monospace" }}>
-                    {row.prev_quarter}: {fmtVal(row.prev_value, row.unit)}
-                    {row.qoq_pct != null && (
-                      <span style={{ fontWeight: 800, marginLeft: 5,
-                        color: row.qoq_pct > 0 ? C.green : row.qoq_pct < 0 ? C.red : C.muted }}>
-                        {(row.qoq_pct >= 0 ? "▲" : "▼")}{Math.abs(row.qoq_pct).toFixed(1)}%
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span style={{ fontStyle: "italic", color: "#9aa4b5" }}>no prior qtr</span>
-                )}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#5a6781", fontFamily: "monospace" }}>
+                <span>peer {fmtVal(m.peer_avg, m.unit)}</span>
+                <span>{m.rank ? `#${m.rank}/${m.peer_n}` : `${m.peer_n} peers`}</span>
               </div>
-              {shortNote && (
-                <div style={{ fontSize: 9, color: "#5a6781", marginTop: 5, lineHeight: 1.35,
-                  borderTop: `1px solid ${bd}`, paddingTop: 4 }}>{shortNote}</div>
-              )}
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#9aa4b5", fontFamily: "monospace", marginTop: 3,
+                borderTop: `1px solid ${c.bd}`, paddingTop: 3 }}>
+                <span style={{ color: C.green }}>▲ {m.best.sym} {fmtVal(m.best.v, "")}</span>
+                <span style={{ color: C.red }}>▼ {m.worst.sym} {fmtVal(m.worst.v, "")}</span>
+              </div>
             </div>
           );
         })}
@@ -1042,7 +1041,7 @@ function GvmReport({ r, hist }) {
       {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
       {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
 
-      <OpsMetrics symbol={r.symbol} />
+      <OpsMetrics symbol={r.symbol} segment={r.segment} />
 
       <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
