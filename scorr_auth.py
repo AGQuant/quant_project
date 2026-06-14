@@ -2,7 +2,7 @@
 scorr_auth.py — Simple password gate for all HTML pages.
 
 Password stored in Railway env var: SCORR_PASSWORD
-Cookie: scorr_auth (7-day, httponly)
+Cookie: scorr_auth (7-day, httponly, path=/)
 Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status
 """
@@ -99,7 +99,7 @@ async def login_post(request: Request):
         response = RedirectResponse(url=next_url, status_code=302)
         response.set_cookie(
             COOKIE_NAME, _expected_token(),
-            max_age=7 * 24 * 3600,
+            max_age=7 * 24 * 3600, path="/",
             httponly=True, samesite="lax", secure=False
         )
         return response
@@ -109,5 +109,8 @@ async def login_post(request: Request):
 @router.get("/logout", include_in_schema=False)
 async def logout():
     response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie(COOKIE_NAME)
+    response.delete_cookie(COOKIE_NAME, path="/")
+    # Prevent browser from serving cached protected pages after logout
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     return response
