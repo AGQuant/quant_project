@@ -80,20 +80,28 @@
   .cat-section{display:flex;flex-direction:column;gap:8px}
   .cat-title{font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;
     letter-spacing:1.5px;padding:0 2px}
-  .cat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-  .cat-card{display:flex;align-items:center;gap:10px;padding:11px 13px;background:var(--panel);
-    border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:.15s;
-    text-align:left;font-family:var(--font);box-shadow:var(--shadow)}
-  .cat-card:hover{border-color:var(--cyan);transform:translateY(-1px);box-shadow:var(--shadow-md)}
-  .cat-ic{font-size:18px;width:32px;height:32px;background:var(--panel2);
-    border-radius:7px;display:flex;align-items:center;justify-content:center;
-    flex-shrink:0;color:var(--cyan)}
-  .cat-info{flex:1;min-width:0}
-  .cat-label{font-size:12.5px;font-weight:700;color:var(--txt);margin-bottom:2px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .cat-desc{font-size:10.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  @media(max-width:540px){.cat-grid{grid-template-columns:1fr}}
+  /* compact quick-link chips */
+  .chip-wrap{display:flex;flex-wrap:wrap;gap:7px}
+  .qchip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;cursor:pointer;transition:.12s;
+    font-family:var(--font);box-shadow:var(--shadow);max-width:100%}
+  .qchip:hover{border-color:var(--cyan);background:var(--cyan-d);transform:translateY(-1px)}
+  .qchip .qc-ic{font-size:13px;color:var(--cyan);flex-shrink:0;line-height:1}
+  .qchip .qc-lb{font-size:12px;font-weight:600;color:var(--txt);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .qchip.quick{border-color:var(--cyan)}
+
+  /* chip search bar */
+  .chip-search{display:flex;gap:8px;margin:0 0 4px;position:sticky;top:0;z-index:5}
+  .chip-search input{flex:1;background:var(--panel);border:1.5px solid var(--line2);
+    border-radius:9px;color:var(--txt);font-family:var(--font);font-size:13px;font-weight:600;
+    padding:10px 13px;outline:none;transition:.15s}
+  .chip-search input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(8,145,178,.08)}
+  .chip-search input::placeholder{color:var(--dim);font-weight:400}
+  .chip-search-btn{flex-shrink:0;border:none;border-radius:9px;background:var(--cyan);color:#fff;
+    font-size:15px;font-weight:700;padding:0 15px;cursor:pointer;transition:.15s}
+  .chip-search-btn:hover{background:#0a7d99}
 
   .msgs{flex:1;overflow-y:auto;padding:14px 18px;display:none;flex-direction:column;gap:14px;
     -webkit-overflow-scrolling:touch}
@@ -237,6 +245,10 @@
       <div class="w-logo">Max <b>AICIO</b></div>
       <div class="w-tag">Six models. One intelligence. Every answer.</div>
       <div class="w-desc">Native $0 · Railway · Auto-refresh ON</div>
+    </div>
+    <div class="chip-search">
+      <input id="chipSearch" placeholder="Search actions… (e.g. pivot, gainers, pharma)" autocomplete="off" spellcheck="false">
+      <button class="chip-search-btn" id="chipSearchBtn" title="Search actions">🔍</button>
     </div>
     <div id="catSections"></div>
   </div>
@@ -386,26 +398,50 @@ const CARDS=[
 
 const CAT_ORDER=['V8 Signals','GVM Engine','Trade Check','Quant Basket','Daily Digest','V10 Index','Market Intel','V9 Pair','My Journal','System'];
 
+// Most-used quick links, shown first as a priority row.
+const MOST_USED=['v8-dash','v8-qual','dd-full','gvm-top','tc-card','qb-sum',
+                 'dd-rot','v8-mood','gvm-strong','dd-adr','tc-long','sys-h'];
+
+function chipEl(c){
+  const b=document.createElement('button');
+  b.className='qchip'+(MOST_USED.includes(c.id)?' quick':'');
+  b.innerHTML=`<span class="qc-ic">${c.icon}</span><span class="qc-lb">${c.label}</span>`;
+  b.title=c.desc||c.cat;
+  b.onclick=()=>runCard(c);
+  return b;
+}
+
+function chipSection(title,items){
+  const s=document.createElement('div');s.className='cat-section';
+  const t=document.createElement('div');t.className='cat-title';t.textContent=title;
+  const wrap=document.createElement('div');wrap.className='chip-wrap';
+  items.forEach(c=>wrap.appendChild(chipEl(c)));
+  s.appendChild(t);s.appendChild(wrap);
+  return s;
+}
+
 function renderWelcome(){
   const root=document.getElementById('catSections');root.innerHTML='';
+  const quick=MOST_USED.map(id=>CARDS.find(c=>c.id===id)).filter(Boolean);
+  if(quick.length)root.appendChild(chipSection('★ Quick Access',quick));
   for(const cat of CAT_ORDER){
-    const items=CARDS.filter(c=>c.cat===cat).slice(0,4);
-    if(!items.length)continue;
-    const section=document.createElement('div');section.className='cat-section';
-    section.innerHTML=`<div class="cat-title">${cat}</div><div class="cat-grid"></div>`;
-    const grid=section.querySelector('.cat-grid');
-    items.forEach(c=>{
-      const card=document.createElement('button');card.className='cat-card';
-      card.innerHTML=`<div class="cat-ic">${c.icon}</div>
-        <div class="cat-info">
-          <div class="cat-label">${c.label}</div>
-          <div class="cat-desc">${c.desc||c.cat}</div>
-        </div>`;
-      card.onclick=()=>runCard(c);
-      grid.appendChild(card);
-    });
-    root.appendChild(section);
+    const items=CARDS.filter(c=>c.cat===cat);
+    if(items.length)root.appendChild(chipSection(cat,items));
   }
+}
+
+function filterChips(q){
+  const root=document.getElementById('catSections');
+  q=(q||'').trim();
+  if(q.length<1){renderWelcome();return;}
+  const matches=searchCardsAll(q);
+  root.innerHTML='';
+  if(!matches.length){
+    const e=document.createElement('div');e.className='cat-title';
+    e.style.padding='10px 2px';e.textContent='No matching actions';
+    root.appendChild(e);return;
+  }
+  root.appendChild(chipSection(`Matches (${matches.length})`,matches));
 }
 
 function runCard(c){
@@ -442,6 +478,25 @@ function searchCards(q){
     }
     return {c,s};
   }).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,6);
+  return scored.map(x=>x.c);
+}
+
+// Uncapped variant for the welcome chip filter (shows all matches, not just 6).
+function searchCardsAll(q){
+  if(!q||q.length<1)return[];
+  const ql=q.toLowerCase().trim().replace(/[^a-z0-9\s]/g,' ');
+  const words=ql.split(/\s+/).filter(w=>w.length>=1);
+  if(!words.length)return[];
+  const scored=CARDS.map(c=>{
+    const bag=(c.label+' '+c.desc+' '+c.kw.join(' ')+' '+c.cat).toLowerCase();
+    let s=0;
+    if(bag.includes(ql))s+=10;
+    for(const w of words){
+      if(bag.includes(w))s+=3;
+      else if(w.length>=4&&(bag.includes(w.slice(0,4))||bag.includes(w.slice(-4))))s+=1;
+    }
+    return {c,s};
+  }).filter(x=>x.s>0).sort((a,b)=>b.s-a.s);
   return scored.map(x=>x.c);
 }
 
@@ -684,6 +739,13 @@ async function checkHealth(){
 
 (async function(){
   loadLocal();applyReason();renderWelcome();renderRecent();
+  const csEl=document.getElementById('chipSearch');
+  if(csEl){
+    csEl.addEventListener('input',function(){filterChips(this.value);});
+    csEl.addEventListener('keydown',function(e){if(e.key==='Escape'){this.value='';filterChips('');}});
+    const csBtn=document.getElementById('chipSearchBtn');
+    if(csBtn)csBtn.onclick=()=>filterChips(csEl.value);
+  }
   document.getElementById('costLabel').textContent=`Session: $${totalCost.toFixed(6)}`;
 
   if(history.length){
