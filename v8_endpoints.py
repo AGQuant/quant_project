@@ -14,17 +14,15 @@ Filter tuning (12-Jun-2026): sell_overbought rsi_month>=68 + day_1d<0 +
   sell_reversal week_return max 3.0->1.0; buy_reversal week_return 1.0-4.0,
   year_return dead filter removed (adaptive gate auto-adjusts 11->10).
 Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
-  upper cap 4.0->6.0. The 4.0 cap rejected sector leadership on bullish days
-  (a strong sector runs >4% on the week, so the cap fought the environment).
-  FORTIS confirmed clean reversal-in-uptrend, failed ONLY on sector_week 4.2
-  vs 4.0. Verified not to over-admit (basket held at 1 with 6.0). Sells +
-  sell_overbought untouched.
+  upper cap 4.0->6.0.
 Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
-  All 4 non-overbought baskets now gate on live pivot room in fallback path.
-  funnel_detail formula fixed: (r1-pp)/r1 bug replaced with paper-engine rule.
-  BUY: (r1-cmp)>=0.5*(r1-pp) | SELL: (cmp-s1)>=0.5*(pp-s1)
-Score-based fallback (15-Jun-2026): _live_qualified_fallback now uses score-based
-  qualification (n-3 threshold) matching the signal_writer's scoring logic.
+Score-based fallback (15-Jun-2026): _live_qualified_fallback score-based.
+rsi_month widened (15-Jun-2026): buy_reversal [58.5, 75.0] → [45.0, 80.0].
+  Old bounds killed all 7 candidates: 4 were recovering (rsi 37-51), 3 were
+  momentum (rsi 79-86). Widened to catch full reversal + early-momentum range.
+funnel_detail individual (15-Jun-2026): replaced strict cumulative with
+  per-filter individual pass counts vs full universe. Adds score_threshold,
+  score_qualified, pivot_pass for score-based context.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -61,7 +59,7 @@ FILTER_CONFIG = {
         "dma_50":       [1.5,  8.0],
         "month_return": [0.0,  7.2],
         "week_return":  [1.0,  4.0],
-        "rsi_month":    [58.5, 75.0],
+        "rsi_month":    [45.0, 80.0],  # widened from [58.5, 75.0]
         "rsi_weekly":   [50.0, 67.5],
         "mom_2d":       [0.0,  2.4],
         "sector_week":  [0.0,  6.0],
@@ -149,7 +147,7 @@ def _passes_filter(value, mn, mx) -> bool:
 
 def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
     """
-    Paper-engine pivot-room gate — the ONLY live intraday check.
+    Paper-engine pivot-room gate.
     BUY:  pp < cmp <= r1  AND  (r1 - cmp) >= 0.5 * (r1 - pp)
     SELL: s1 <= cmp < pp  AND  (cmp - s1) >= 0.5 * (pp - s1)
     """
@@ -184,11 +182,7 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
             'sell_overbought':'Sell Overbought'}.get(basket.lower(), basket)
 
 def _live_qualified_fallback(basket: str, limit: int):
-    """
-    Score-based fallback for when v8_qualified table is empty (pre-market / off-hours).
-    Uses n-3 threshold (Neutral/Bearish equivalent — most lenient).
-    Scores each stock against FILTER_CONFIG, applies pivot-room gate.
-    """
+    """Score-based fallback — n-3 threshold (most lenient, pre-market default)."""
     config    = FILTER_CONFIG[basket]
     n_filters = len(config)
     need      = max(n_filters - 3, 1)
@@ -237,15 +231,7 @@ def _live_qualified_fallback(basket: str, limit: int):
 # ── ADR helpers ───────────────────────────────────────────────────────────────
 
 def _read_adr(cur):
-    """
-    Read ADR. During live market hours: adr_intraday (5-min) → live compute
-    from intraday_prices → adr_daily. When the market is CLOSED, skip the live
-    tiers entirely and use adr_daily (last EOD) — a stale/partial intraday
-    breadth (e.g. 0.26) must never be shown outside session hours.
-    Returns (advances, declines, unchanged, adr, source, date_str).
-    """
     if _market_open():
-        # 1. Try adr_intraday (written by signal_writer every 5-min)
         cur.execute("""
             SELECT advances, declines, unchanged, adr, universe_count, ts
             FROM adr_intraday
@@ -257,7 +243,6 @@ def _read_adr(cur):
             adv, dec, unc, adr = row[0] or 0, row[1] or 0, row[2] or 0, float(row[3])
             return adv, dec, unc, adr, "adr_intraday", str(date.today())
 
-        # 2. Try live computation from intraday_prices (same-day fallback)
         cur.execute("""
             WITH li AS (
                 SELECT DISTINCT ON (symbol) symbol, close AS cmp
@@ -281,7 +266,6 @@ def _read_adr(cur):
             adr = round(adv / dec, 3) if dec else float(adv)
             return adv, dec, unc, adr, "live_intraday", str(date.today())
 
-    # 3. EOD fallback (adr_daily) — also the default whenever the market is closed
     cur.execute("SELECT advances, declines, unchanged, adr, price_date FROM adr_daily ORDER BY price_date DESC LIMIT 1")
     r = cur.fetchone()
     if r:
@@ -565,32 +549,65 @@ def funnel_detail(basket: str):
             all_rows = _basket_universe(cur)
             pivots   = _basket_pivots(cur)
             cmp_map  = _basket_cmp(cur)
-        total = len(all_rows); filters = FILTER_CONFIG[basket]
-        stages = []; survivors = all_rows[:]; prev = total
+            cur.execute("""
+                SELECT COUNT(*) FROM v8_qualified
+                WHERE basket=%s AND signal_date=CURRENT_DATE
+            """, (basket,))
+            score_qualified = int(cur.fetchone()[0])
+            cur.execute("""
+                SELECT counts->>'_score_threshold'
+                FROM v8_funnel_counts WHERE basket=%s AND score_date=CURRENT_DATE
+                ORDER BY computed_at DESC LIMIT 1
+            """, (basket,))
+            fc = cur.fetchone()
+            score_threshold = int(fc[0]) if fc and fc[0] else None
+
+        total   = len(all_rows)
+        filters = FILTER_CONFIG[basket]
+        n       = len(filters)
+        side    = "BUY" if basket.startswith("buy") else "SELL"
+
+        # Individual pass counts — each filter scored independently vs full universe
+        stages = []
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            survivors = [s for s in survivors if _passes_filter(s.get(metric), mn, mx)]
-            passed = len(survivors); killed = prev - passed
-            stages.append({"metric": metric, "min": mn, "max": mx,
-                           "survivors": passed, "killed": killed,
-                           "kill_pct": round(killed/prev*100,1) if prev else 0.0})
-            prev = passed
-        side = "BUY" if basket.startswith("buy") else "SELL"
-        piv_survivors = []
-        for s in survivors:
-            pv  = pivots.get(s["symbol"])
-            cmp = cmp_map.get(s["symbol"])
-            if pv and _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
-                piv_survivors.append(s)
-        piv_passed = len(piv_survivors); piv_killed = prev - piv_passed
-        room_label = "(r1-cmp)>=0.5x(r1-pp)" if side == "BUY" else "(cmp-s1)>=0.5x(pp-s1)"
-        stages.append({"metric": "pivot_room", "min": room_label, "max": None,
-                       "survivors": piv_passed, "killed": piv_killed,
-                       "kill_pct": round(piv_killed/prev*100,1) if prev else 0.0})
-        return {"basket": basket, "score_date": str(date.today()),
-                "universe": total, "final": piv_passed,
-                "filter_count": len(filters)+1, "stages": stages,
-                **BASKET_META.get(basket, {})}
+            passes = sum(1 for s in all_rows if _passes_filter(s.get(metric), mn, mx))
+            stages.append({
+                "metric":   metric,
+                "min":      mn,
+                "max":      mx,
+                "passes":   passes,
+                "fails":    total - passes,
+                "pass_pct": round(passes / total * 100, 1) if total else 0,
+            })
+
+        # Pivot-room: how many score-qualified stocks also have room to target
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT q.symbol, p.pp, p.r1, p.s1, c.cmp
+                FROM v8_qualified q
+                LEFT JOIN v8_paper_pivots p ON p.symbol = q.symbol
+                    AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                LEFT JOIN cmp_prices c ON c.symbol = q.symbol
+                WHERE q.basket = %s AND q.signal_date = CURRENT_DATE
+            """, (basket,))
+            sq_rows = cur.fetchall()
+        pivot_pass = sum(
+            1 for _, pp, r1, s1, cmp in sq_rows
+            if pp and _pivot_room_ok(side, cmp, pp, r1, s1)
+        )
+
+        return {
+            "basket":          basket,
+            "score_date":      str(date.today()),
+            "universe":        total,
+            "n_filters":       n,
+            "score_threshold": score_threshold,
+            "score_qualified": score_qualified,
+            "pivot_pass":      pivot_pass,
+            "stages":          stages,
+            **BASKET_META.get(basket, {}),
+        }
     except Exception as e:
         raise HTTPException(500, f"funnel_detail failed: {e}")
 
