@@ -275,7 +275,10 @@ function netPnl(pnl, trades){return (Number(pnl)||0) - (Number(trades)||1)*BROKE
 
 function fmtTs(ts){
   if(!ts)return"—";
-  try{const d=new Date(ts),ist=new Date(d.getTime()+(5*60+30)*60000);
+  try{
+    // DB stores UTC (Railway NOW()) — append Z so browser treats as UTC, not local IST
+    const utc=typeof ts==='string'&&!ts.includes('Z')&&!ts.includes('+')?ts.replace(' ','T')+'Z':ts;
+    const d=new Date(utc),ist=new Date(d.getTime()+(5*60+30)*60000);
     return String(ist.getUTCDate()).padStart(2,'0')+' '+
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
       String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
@@ -283,7 +286,9 @@ function fmtTs(ts){
 
 function fmtSince(ts){
   if(!ts)return"—";
-  try{const d=new Date(ts),ist=new Date(d.getTime()+(5*60+30)*60000);
+  try{
+    const utc=typeof ts==='string'&&!ts.includes('Z')&&!ts.includes('+')?ts.replace(' ','T')+'Z':ts;
+    const d=new Date(utc),ist=new Date(d.getTime()+(5*60+30)*60000);
     return String(ist.getUTCDate()).padStart(2,'0')+'/'+
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
       String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
