@@ -450,7 +450,7 @@ async function fetchAC(q){
     const d=await r.json();
     acItems=(d.results||d||[]).slice(0,7);
     renderAC();
-  }catch(e){}
+  }catch(e){console.warn('autocomplete fetch failed',e);}
 }
 function renderAC(){
   const drop=document.getElementById('acDrop');
@@ -544,16 +544,20 @@ async function runTradeCheck(sym){
   const r=await fetch('/api/check',{method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({symbol:sym,side,gate1,gate2})});
-  const d=await r.json();
   document.getElementById('loading').classList.remove('show');
+  if(!r.ok){showErr('Server error '+r.status+' — trade check failed. Try again shortly.');return;}
+  let d;
+  try{d=await r.json();}catch(e){showErr('Bad response from server (not JSON). Try again shortly.');return;}
   if(!d.ok){showErr(d.error||'No data.');return;}
   renderTrade(d);
 }
 
 async function runInvestCheck(sym){
   const r=await fetch(`/api/investment-check?symbol=${encodeURIComponent(sym)}`);
-  const d=await r.json();
   document.getElementById('loading').classList.remove('show');
+  if(!r.ok){showErr('Server error '+r.status+' — investment check failed. Try again shortly.');return;}
+  let d;
+  try{d=await r.json();}catch(e){showErr('Bad response from server (not JSON). Try again shortly.');return;}
   if(d.error){showErr(d.error);return;}
   renderInvest(d);
 }
@@ -614,7 +618,8 @@ function renderInvest(d){
   document.getElementById('invCap').textContent=d.cap_category||'';
   const gvmEl=document.getElementById('invGvm');
   if(d.gvm_verdict){gvmEl.textContent='GVM '+d.gvm_verdict;
-    const sc=parseFloat(d.rules&&d.rules[0]&&d.rules[0].value)||0;
+    const r1=(d.rules||[]).find(x=>x.rule==='R1');
+    const sc=parseFloat(r1&&r1.value)||0;
     gvmEl.className='r-gvm '+(sc>=7?'hi':sc>=6?'mid':'lo');
   }
 
