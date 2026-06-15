@@ -17,7 +17,8 @@ Architecture (v6 — 5-MIN SYSTEM, equity + futures + options on single WS):
   6. ATM ROLL  - every 15 min during market hours: recheck ATM per option symbol,
                  re-subscribe if drifted ±2 strikes.
   7. MONTHLY ROLL - on expiry day (last Tuesday): rebuild futures + option symbol lists.
-  8. PURGE     - 7-day rolling: rows older than 7 days deleted daily.
+  8. PURGE     - rolling: intraday_prices + futures_basis at RETENTION_DAYS (30d),
+                 option_chain at OPTION_RETENTION_DAYS (7d). Rows older deleted daily.
 
 v6.1 (10-Jun-2026):
   * CRITICAL DEADLOCK FIX: flush_all() holds agg.lock while _flush → _compute_basis
@@ -29,6 +30,12 @@ v6.1 (10-Jun-2026):
   * OPTION SYMBOL MASTER: ladders from Fyers NSE_FO master (actually-listed strikes).
   * INDEX/ETF LTP: NIFTY500, GOLDBEES, SILVERBEES in the 30s quotes poll.
   * OI POLL DEBUG: start/first-response logging + dict/list response handling.
+
+v6.2 (15-Jun-2026):
+  * RETENTION SPLIT: intraday_prices + futures_basis extended 7d → 30d to bank
+    real 5-min history for the intraday filter optimizer. option_chain stays 7d
+    (heaviest churn, not used by the sim) via OPTION_RETENTION_DAYS. purge_old_bars
+    now uses two cutoffs.
 
 5-MIN SYSTEM (canonical spec session_log id=167):
   All rolling intraday feeds store at 5-min granularity. NOT a flash/1-min system.
@@ -64,7 +71,7 @@ DEPTH_URL         = 'https://api-t1.fyers.in/data/depth'
 OPTION_MASTER_URL = 'https://public.fyers.in/sym_details/NSE_FO.csv'
 IST               = pytz.timezone('Asia/Kolkata')
 
-RETENTION_DAYS = 7
+RETENTION_DAYS = 30   # intraday_prices + futures_basis (extended 7→30 on 15-Jun-2026 for sim history)
 MARKET_OPEN    = dt_time(9, 15)
 MARKET_CLOSE   = dt_time(15, 30)
 
@@ -80,8 +87,8 @@ INDEX_LTP_SYMBOLS = {
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
-# ── Option chain config ──────────────────────────────────────────────────────────────────────────────────────────────────────
-OPTION_RETENTION_DAYS = 7
+# ── Option chain config ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+OPTION_RETENTION_DAYS = 7      # option_chain stays lean (heaviest churn, not used by sim)
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
 N_STRIKES             = 10     # ATM ± 10
@@ -145,7 +152,7 @@ log = logging.getLogger('fyers_feed')
 
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -264,7 +271,7 @@ class OptionMaster:
         return (not self.loaded) or (ticker in self.valid_symbols)
 
 
-# ── DB / token ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── DB / token ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def load_tokens(conn):
     with conn.cursor() as cur:
@@ -345,7 +352,7 @@ def get_valid_token(conn, auth_code=None):
             "  2. python fyers_feed.py --auth-code <code>\n")
 
 
-# ── universe ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── universe ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def get_universe(conn):
     with conn.cursor() as cur:
@@ -384,7 +391,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── option symbol manager ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
@@ -534,7 +541,7 @@ class OptionSymbolManager:
             return self.sym_map.get(fsym)
 
 
-# ── bar aggregator ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── bar aggregator ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class BarAggregator:
     def __init__(self, conn):
@@ -657,7 +664,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── option bar store ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 5-min option ticks into option_chain."""
@@ -717,7 +724,7 @@ class OptionBarStore:
                 self._flush(fsym, bar)
 
 
-# ── index LTP ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── index LTP ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def update_index_ltp(conn, token, agg=None):
     try:
@@ -744,20 +751,23 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
-    cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(days=RETENTION_DAYS)
+    now          = datetime.now(IST).replace(tzinfo=None)
+    cutoff       = now - timedelta(days=RETENTION_DAYS)         # intraday_prices + futures_basis (30d)
+    opt_cutoff   = now - timedelta(days=OPTION_RETENTION_DAYS)  # option_chain (7d, leaner)
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m'", (cutoff,))
             eq_del = cur.rowcount
-            cur.execute("DELETE FROM option_chain WHERE ts < %s", (cutoff,))
+            cur.execute("DELETE FROM option_chain WHERE ts < %s", (opt_cutoff,))
             opt_del = cur.rowcount
             cur.execute("DELETE FROM futures_basis WHERE ts < %s", (cutoff,))
             basis_del = cur.rowcount
         conn.commit()
-        log.info(f"Purged: intraday={eq_del}, option_chain={opt_del}, futures_basis={basis_del}")
+        log.info(f"Purged: intraday={eq_del} (>{RETENTION_DAYS}d), "
+                 f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), futures_basis={basis_del} (>{RETENTION_DAYS}d)")
     except Exception as e:
         log.warning(f"purge_old_bars: {e}")
 
@@ -773,7 +783,7 @@ def ensure_schemas(conn):
     log.info("Schemas ready (option_chain, futures_basis)")
 
 
-# ── futures OI poll (DEPTH REST — quotes API has NO OI) ─────────────────────────────────────────────
+# ── futures OI poll (DEPTH REST — quotes API has NO OI) ───────────────────────────────────────────────────────────────────────────────
 
 _OI_POLL_LOCK = threading.Lock()
 
@@ -866,7 +876,7 @@ def poll_options_oi(token, opt_syms, opt_store):
         _OPT_OI_POLL_LOCK.release()
 
 
-# ── main run ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
