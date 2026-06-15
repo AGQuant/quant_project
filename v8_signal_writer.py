@@ -10,14 +10,20 @@ What it does every 5-min during market hours:
   4. Only EOD-frozen metric: gvm_score (22:00 nightly). All others now live.
   5. Upserts v8_metrics (today's row) with live values
   6. Applies score-based FILTER_CONFIG → writes v8_qualified (latch semantics)
-  7. Writes v8_funnel_counts (strict cumulative — diagnostic only)
-  8. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
+  7. On first qualification: auto-logs paper trade in v8_paper_positions
+  8. Writes v8_funnel_counts (strict cumulative — diagnostic only)
+  9. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
 
 Score-based qualification (15-Jun-2026):
   BUY  threshold = n - 1 - min(fails, 2)  [tight in bull, loose in bear]
   SELL threshold = n - 3 + min(fails, 2)  [loose in bull, tight in bear — inverse]
   buy_reversal  (10): 9/8/7   buy_momentum  (11): 10/9/8
   sell_reversal  (9): 6/7/8   sell_momentum (12):  9/10/11
+
+Auto paper trade (15-Jun-2026):
+  First time a stock qualifies today (rowcount=1 on DO NOTHING INSERT),
+  _auto_paper_entry() opens a paper position at live CMP.
+  Guards: blackout, has_open, traded_today, slot_full (mood-aware).
 
 All-live filters (15-Jun-2026):
   rsi_month, rsi_weekly, sector_week, sector_month — all recomputed every 5-min.
@@ -593,14 +599,120 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
     """
     Score-based adaptive threshold.
     BUY:  Strong Bullish → n-1 (tight), Neutral/Bear → n-3 (loose)
-          Formula: n_filters - 1 - min(fails, 2)
     SELL: Strong Bullish → n-3 (loose — sells scarce in bull market)
           Neutral/Bear   → n-1 (tight — sells plentiful, be selective)
-          Formula: n_filters - 3 + min(fails, 2)   [inverse of BUY]
     """
     if side == "SELL":
         return max(n_filters - 3 + min(fails, 2), 1)
     return n_filters - 1 - min(fails, 2)
+
+
+# ── Mood slots + auto paper entry ────────────────────────────────────────────
+
+def _mood_slots(gate_fails: int) -> tuple:
+    """Returns (buy_slots, sell_slots) based on mood gate fails."""
+    if gate_fails == 0: return 10, 5
+    if gate_fails == 1: return 8, 7
+    if gate_fails == 2: return 7, 8
+    return 5, 10
+
+_PAPER_SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
+
+def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
+                       pv: Optional[dict], d: date, gate_fails: int):
+    """
+    Auto-log paper trade when a stock first qualifies (score-gate + pivot-room pass).
+    Called from _write_qualified on first INSERT (ON CONFLICT DO NOTHING → rowcount=1).
+    Guards: blackout, has_open, traded_today, slot_full.
+    """
+    if not cmp or not pv:
+        return
+
+    paper_side = _PAPER_SIDE_MAP.get(side, "LONG")
+    pp, r1, s1 = pv["pp"], pv["r1"], pv["s1"]
+
+    # Blackout check
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 1 FROM earnings_calendar
+                WHERE UPPER(ticker)=%s
+                  AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                LIMIT 1
+            """, (sym.upper(),))
+            if cur.fetchone():
+                log.debug(f"auto_paper {sym}: skipped — blackout")
+                return
+    except Exception as e:
+        log.warning(f"auto_paper blackout check {sym}: {e}"); return
+
+    # Already open or traded today
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND status='OPEN'",
+                        (sym, paper_side))
+            if cur.fetchone():
+                log.debug(f"auto_paper {sym}: skipped — already open {paper_side}")
+                return
+            cur.execute("SELECT 1 FROM v8_paper_trades WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1",
+                        (sym, paper_side, d))
+            if cur.fetchone():
+                return
+            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1",
+                        (sym, paper_side, d))
+            if cur.fetchone():
+                return
+    except Exception as e:
+        log.warning(f"auto_paper guard check {sym}: {e}"); return
+
+    # Slot check
+    try:
+        buy_slots, sell_slots = _mood_slots(gate_fails)
+        with conn.cursor() as cur:
+            cur.execute("SELECT side, COUNT(*) FROM v8_paper_positions WHERE status='OPEN' GROUP BY side")
+            counts = {r[0]: int(r[1]) for r in cur.fetchall()}
+        long_open  = counts.get("LONG",  0)
+        short_open = counts.get("SHORT", 0)
+        if paper_side == "LONG"  and long_open  >= buy_slots:
+            log.info(f"auto_paper {sym}: slot_full LONG ({long_open}/{buy_slots})"); return
+        if paper_side == "SHORT" and short_open >= sell_slots:
+            log.info(f"auto_paper {sym}: slot_full SHORT ({short_open}/{sell_slots})"); return
+    except Exception as e:
+        log.warning(f"auto_paper slot check {sym}: {e}"); return
+
+    # Compute entry / target / SL
+    entry = round(cmp, 2)
+    if paper_side == "LONG":
+        target = round(r1, 2)
+        stop   = round(entry - (r1 - entry), 2)
+    else:
+        target = round(s1, 2)
+        stop   = round(entry + (entry - s1), 2)
+
+    # Lot size
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (sym,))
+            r = cur.fetchone()
+            qty = int(r[0]) if r and r[0] else 1
+    except Exception:
+        qty = 1
+
+    # Insert paper position
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO v8_paper_positions
+                (symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date, status)
+                VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, 'OPEN')
+                ON CONFLICT (symbol, side, status) DO NOTHING
+            """, (sym, paper_side, basket, entry, qty, target, stop, pp, d))
+            inserted = cur.rowcount
+        conn.commit()
+        if inserted:
+            log.info(f"auto_paper entry: {sym} {paper_side} @ {entry} target={target} sl={stop} basket={basket}")
+    except Exception as e:
+        log.warning(f"auto_paper insert {sym} {paper_side}: {e}")
 
 
 # ── Step 8: Write v8_qualified + funnel ──────────────────────────────────────
@@ -631,7 +743,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             if score >= need:
                 universe.append(s)
 
-        # Funnel counts (strict cumulative — diagnostic display, not used for qualification)
+        # Funnel counts (strict cumulative — diagnostic display, not qualification)
         funnel    = {}
         survivors = all_metrics[:]
         for metric, bounds in filters.items():
@@ -644,7 +756,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         log.info(f"{basket}: score-gate need={need}/{n_filters} "
                  f"gate_fails={gate_fails} → {len(universe)} score-qualified")
 
-        # Pivot-room gate — latch semantics (side already set above)
+        # Pivot-room gate — latch semantics
         universe = [
             s for s in universe
             if (pv := pivots.get(s["symbol"])) and _pivot_room_ok(
@@ -699,7 +811,13 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                         s.get("daily_rsi"), s.get("range_3d"),
                         json.dumps(snap), "live_5min",
                     ))
+                    first_qualification = cur.rowcount > 0  # True = new row, not a latch replay
                 conn.commit()
+                # Auto-log paper trade on FIRST qualification today
+                if first_qualification:
+                    _auto_paper_entry(conn, sym, basket, side,
+                                      s.get("_cmp"), pivots.get(sym),
+                                      target_date, gate_fails)
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
