@@ -4,7 +4,7 @@ scorr_auth.py — Simple password gate for all HTML pages.
 Password: HARDCODED (env var was unreliable). Change _PASSWORD below to update.
 Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=none)
 Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector
-Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status
+Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status, /authdebug
 
 Fixes (v5):
   - SameSite Lax -> None (with Secure). The CIO Shell (/cio2) embeds module
@@ -24,7 +24,7 @@ Fixes (v4):
 
 import hashlib
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 router = APIRouter()
 
@@ -163,3 +163,24 @@ async def logout():
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     return response
+
+
+@router.get("/authdebug", include_in_schema=False)
+async def authdebug(request: Request):
+    """Auth-exempt diagnostic. Echoes exactly what the server sees so we can
+    diagnose the login/cookie loop. Safe: reveals no secret beyond a token the
+    correct password already produces. Remove after debugging."""
+    raw_cookie_header = request.headers.get("cookie", "")
+    cookie_val = request.cookies.get(COOKIE_NAME, "")
+    expected = _expected_token()
+    return JSONResponse({
+        "saw_cookie_header": raw_cookie_header,
+        "scorr_auth_cookie_value": cookie_val,
+        "expected_token": expected,
+        "match": cookie_val == expected,
+        "is_authed": _is_authed(request),
+        "all_cookie_names": list(request.cookies.keys()),
+        "host": request.headers.get("host", ""),
+        "x_forwarded_proto": request.headers.get("x-forwarded-proto", ""),
+        "user_agent": request.headers.get("user-agent", "")[:80],
+    })
