@@ -13,6 +13,13 @@ What it does every 5-min during market hours:
   7. Writes v8_funnel_counts (cumulative step counts)
   8. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
 
+Pivot-room gate (15-Jun-2026): Pivot-room is the ONLY live intraday check.
+  EOD bands are static (frozen at 15:45). After EOD-band qualification,
+  _pivot_room_ok() gates on live CMP vs rolling-5d pivots. Latch semantics:
+  once a name passes today it stays in v8_qualified for the session (no DELETE).
+  BUY:  pp < cmp <= r1  AND  (r1-cmp) >= 0.5*(r1-pp)
+  SELL: s1 <= cmp < pp  AND  (cmp-s1) >= 0.5*(pp-s1)
+
 adr_intraday (11-Jun-2026): Live advance/decline ratio from intraday_prices vs
   prev raw_prices close. Written every 5-min. market_mood gate reads this first,
   falls back to adr_daily when no live bar (off-hours/weekend).
@@ -47,7 +54,7 @@ def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
     return segment
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _safe_float(v) -> Optional[float]:
     try:
@@ -89,6 +96,51 @@ def _passes(value, mn, mx) -> bool:
     return True
 
 
+# ── Pivot-room gate ───────────────────────────────────────────────────────────
+
+BASKET_SIDE = {
+    "buy_reversal":  "BUY",
+    "buy_momentum":  "BUY",
+    "sell_reversal": "SELL",
+    "sell_momentum": "SELL",
+}
+
+
+def _load_pivots(conn) -> Dict[str, dict]:
+    """Load latest rolling-5-day pivot levels for all symbols."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT symbol, pp, r1, s1
+            FROM v8_paper_pivots
+            WHERE pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+              AND pp IS NOT NULL AND r1 IS NOT NULL AND s1 IS NOT NULL
+        """)
+        return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3])}
+                for r in cur.fetchall()}
+
+
+def _pivot_room_ok(side: str, cmp: Optional[float],
+                    pp: Optional[float], r1: Optional[float],
+                    s1: Optional[float]) -> bool:
+    """
+    Paper-engine pivot-room gate — the ONLY live intraday check.
+    BUY:  pp < cmp <= r1  AND  (r1 - cmp) >= 0.5 * (r1 - pp)
+    SELL: s1 <= cmp < pp  AND  (cmp - s1) >= 0.5 * (pp - s1)
+    """
+    if cmp is None or pp is None:
+        return False
+    if side == "BUY":
+        if r1 is None:
+            return False
+        band = r1 - pp
+        return band > 0 and pp < cmp <= r1 and (r1 - cmp) >= 0.5 * band
+    else:
+        if s1 is None:
+            return False
+        band = pp - s1
+        return band > 0 and s1 <= cmp < pp and (cmp - s1) >= 0.5 * band
+
+
 # ── ADR intraday write ────────────────────────────────────────────────────────
 
 def _write_adr_intraday(conn):
@@ -123,7 +175,6 @@ def _write_adr_intraday(conn):
                 return
             adv, dec, unc, tot = row[0] or 0, row[1] or 0, row[2] or 0, row[3] or 0
             adr = round(adv / dec, 3) if dec else float(adv)
-            # Round to nearest 5-min boundary
             now_ist = datetime.now(IST).replace(tzinfo=None)
             ts_5m = now_ist.replace(second=0, microsecond=0)
             ts_5m = ts_5m.replace(minute=(ts_5m.minute // 5) * 5)
@@ -448,7 +499,6 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
 def _market_gate_fails(conn) -> int:
     try:
         with conn.cursor() as cur:
-            # ADR: adr_intraday primary, adr_daily fallback
             cur.execute("""
                 SELECT advances, declines, universe_count
                 FROM adr_intraday
@@ -460,7 +510,6 @@ def _market_gate_fails(conn) -> int:
                 adv, dec = row[0] or 0, row[1] or 0
                 adr = (adv / dec) if dec else float(adv)
             else:
-                # Fallback: compute live from intraday
                 cur.execute("""
                     WITH li AS (
                         SELECT DISTINCT ON (symbol) symbol, close AS cmp
@@ -526,12 +575,13 @@ def _gate_threshold(fails: int, n_filters: int) -> int:
     return n_filters - 2
 
 
-# ── Step 8: Write v8_qualified + funnel ───────────────────────────────────────
+# ── Step 8: Write v8_qualified + funnel ──────────────────────────────────────
 
 def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     from v8_endpoints import FILTER_CONFIG
 
     gate_fails = _market_gate_fails(conn)
+    pivots     = _load_pivots(conn)   # loaded once, used across all baskets
 
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
@@ -563,6 +613,18 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             log.info(f"buy_reversal adaptive: gate_fails={gate_fails} need={need}/{n_filters} "
                      f"mom_2d>0 mandatory → {len(universe)} qualified")
 
+        # ── Pivot-room gate (paper-engine rule) — ONLY live intraday check ──
+        # Latch semantics: once a name passes today it stays in v8_qualified.
+        # ON CONFLICT DO NOTHING ensures first qualification wins.
+        side = BASKET_SIDE.get(basket, "BUY")
+        universe = [
+            s for s in universe
+            if (pv := pivots.get(s["symbol"])) and _pivot_room_ok(
+                side, s.get("_cmp"), pv["pp"], pv["r1"], pv["s1"]
+            )
+        ]
+        log.info(f"{basket}: pivot-room gate ({side}) → {len(universe)} with room")
+
         try:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -575,13 +637,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         except Exception as e:
             log.warning(f"funnel {basket}: {e}")
 
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM v8_qualified WHERE basket=%s AND signal_date=%s",
-                            (basket, target_date))
-            conn.commit()
-        except Exception as e:
-            log.warning(f"clear qualified {basket}: {e}")
+        # NO DELETE — latch semantics: qualified names persist for the full session.
+        # A name that passed pivot-room once today stays actionable all day.
 
         for s in universe:
             sym  = s["symbol"]
@@ -602,12 +659,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                          month_index, week_index_52, daily_rsi, range_3d,
                          metrics, source)
                         VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
-                            signal_ts  = NOW(),
-                            cmp        = EXCLUDED.cmp,
-                            mom_2d     = EXCLUDED.mom_2d,
-                            metrics    = EXCLUDED.metrics,
-                            source     = EXCLUDED.source
+                        ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date,
                         s.get("gvm_score"), s.get("_cmp"),
