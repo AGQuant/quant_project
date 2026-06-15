@@ -1,5 +1,5 @@
 """
-V8 Signal Writer — Single Live Engine (v2.1.1)
+V8 Signal Writer — Single Live Engine (v2.2.0)
 ===============================================
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
@@ -19,6 +19,14 @@ Score-based qualification (15-Jun-2026):
   SELL threshold = n - 3 + min(fails, 2)  [loose in bull, tight in bear — inverse]
   buy_reversal  (10): 9/8/7   buy_momentum  (11): 10/9/8
   sell_reversal  (9): 6/7/8   sell_momentum (12):  9/10/11
+
+Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
+  Nifty 1-month return used as regime gate. 3 filters adjust dynamically:
+  BULL    (Nifty 1M > +2%): week_return<=3, rsi_month<=67, sector_week<=4
+  NEUTRAL (Nifty 1M  0-2%): week_return<=2, rsi_month<=62, sector_week<=3
+  BEAR    (Nifty 1M  < 0%): week_return<=1, rsi_month<=58, sector_week<=2
+  1-yr EOD backtest: Dynamic=63.4% WR/+0.25% exp vs Static=50.3%/-0.15% exp.
+  session_log: buy_reversal_filter_optimisation_v1.
 
 Auto paper trade (15-Jun-2026):
   First time a stock qualifies today (rowcount=1 on DO NOTHING INSERT),
@@ -67,7 +75,7 @@ def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
     return segment
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _safe_float(v) -> Optional[float]:
     try:
@@ -609,6 +617,57 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
     return n_filters - 1 - min(fails, 2)
 
 
+# ── Dynamic buy_reversal Nifty-linked filters ─────────────────────────────────
+
+def _get_nifty_1m_return(conn) -> float:
+    """
+    Nifty 1-month return: (close_today / close_22d_ago - 1) * 100.
+    Used as regime gate for buy_reversal dynamic filters (v2.2.0, 15-Jun-2026).
+    1-yr EOD backtest result:
+      BULL    (>+2%): week_ret<=3, rsi_m<=67, sec_wk<=4  → WR=71.4%, Exp=+0.59%
+      NEUTRAL ( 0-2%): week_ret<=2, rsi_m<=62, sec_wk<=3 → WR=48.0%, Exp=-0.35%
+      BEAR    (< 0%): week_ret<=1, rsi_m<=58, sec_wk<=2  → WR=54.4%, Exp=-0.16%
+    Overall Dynamic: 63.4% WR, +0.25% exp, +48.91% P&L vs Static -81.52%.
+    Mood gate handles daily regime; Nifty 1M handles monthly regime.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT close,
+                           ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
+                    FROM raw_prices
+                    WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                    LIMIT 25
+                )
+                SELECT
+                    (SELECT close FROM ranked WHERE rn=1)  AS latest,
+                    (SELECT close FROM ranked WHERE rn=22) AS month_ago
+            """)
+            row = cur.fetchone()
+            if row and row[0] and row[1] and float(row[1]) > 0:
+                return (float(row[0]) / float(row[1]) - 1) * 100
+    except Exception as e:
+        log.warning(f"_get_nifty_1m_return: {e}")
+    return 0.0
+
+
+def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
+    """
+    Returns override bounds for the 3 dynamic filters in buy_reversal.
+    Only these 3 change; all other filters use FILTER_CONFIG static values.
+    """
+    if nifty_1m > 2.0:       # BULL
+        return {"week_return": (0.0, 3.0), "rsi_month": (52.0, 67.0),
+                "sector_week": (1.0, 4.0), "_regime": "BULL"}
+    elif nifty_1m >= 0.0:    # NEUTRAL
+        return {"week_return": (0.0, 2.0), "rsi_month": (52.0, 62.0),
+                "sector_week": (1.0, 3.0), "_regime": "NEUTRAL"}
+    else:                    # BEAR
+        return {"week_return": (0.0, 1.0), "rsi_month": (52.0, 58.0),
+                "sector_week": (1.0, 2.0), "_regime": "BEAR"}
+
+
 # ── Mood slots + auto paper entry ─────────────────────────────────────────────
 
 def _mood_slots(gate_fails: int) -> tuple:
@@ -732,18 +791,33 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     gate_fails = _market_gate_fails(conn)
     pivots     = _load_pivots(conn)
 
+    # Nifty 1M regime for dynamic buy_reversal filters (v2.2.0)
+    nifty_1m   = _get_nifty_1m_return(conn)
+    dyn_br     = _get_dynamic_buy_reversal_overrides(nifty_1m)
+    log.info(f"Nifty 1M={nifty_1m:+.2f}% → buy_reversal regime={dyn_br['_regime']} "
+             f"(wk<={dyn_br['week_return'][1]} rsi_m<={dyn_br['rsi_month'][1]} sec_wk<={dyn_br['sector_week'][1]})")
+
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
             continue
 
-        n_filters = len(filters)
+        # Apply dynamic overrides for buy_reversal
+        if basket == "buy_reversal":
+            active_filters = dict(filters)
+            active_filters["week_return"] = list(dyn_br["week_return"])
+            active_filters["rsi_month"]   = list(dyn_br["rsi_month"])
+            active_filters["sector_week"] = list(dyn_br["sector_week"])
+        else:
+            active_filters = filters
+
+        n_filters = len(active_filters)
         side      = BASKET_SIDE.get(basket, "BUY")
         need      = _gate_threshold(gate_fails, n_filters, side)
 
         universe = []
         for s in all_metrics:
             score = sum(
-                1 for metric, bounds in filters.items()
+                1 for metric, bounds in active_filters.items()
                 if _passes(s.get(metric),
                            *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
             )
@@ -753,12 +827,15 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
 
         funnel    = {}
         survivors = all_metrics[:]
-        for metric, bounds in filters.items():
+        for metric, bounds in active_filters.items():
             mn, mx    = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             survivors = [s for s in survivors if _passes(s.get(metric), mn, mx)]
             funnel[metric] = len(survivors)
         funnel["_score_threshold"] = need
         funnel["_score_qualified"] = len(universe)
+        if basket == "buy_reversal":
+            funnel["_regime"] = dyn_br["_regime"]
+            funnel["_nifty_1m"] = round(nifty_1m, 2)
 
         log.info(f"{basket}: score-gate need={need}/{n_filters} "
                  f"gate_fails={gate_fails} → {len(universe)} score-qualified")
@@ -794,6 +871,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             ]}
             snap["filter_score"] = s.get("_filter_score")
             snap["filter_total"] = n_filters
+            if basket == "buy_reversal":
+                snap["regime"] = dyn_br["_regime"]
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
