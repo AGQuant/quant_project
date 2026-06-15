@@ -9,26 +9,28 @@ What it does every 5-min during market hours:
   3. Recomputes all live-moving metrics from intraday close spliced onto EOD history
   4. Only EOD-frozen metric: gvm_score (22:00 nightly). All others now live.
   5. Upserts v8_metrics (today's row) with live values
-  6. Applies FILTER_CONFIG → writes v8_qualified (today only)
-  7. Writes v8_funnel_counts (cumulative step counts)
+  6. Applies score-based FILTER_CONFIG → writes v8_qualified (latch semantics)
+  7. Writes v8_funnel_counts (strict cumulative — diagnostic only)
   8. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
+
+Score-based qualification (15-Jun-2026):
+  Threshold = n_filters - 1 - min(mood_fails, 2)
+  Strong Bullish (0 fails): n-1  |  Bullish (1 fail): n-2  |  Neutral/Bear (2+): n-3
+  buy_reversal (10): 9/8/7  |  buy_momentum (11): 10/9/8
+  sell_reversal (9): 8/7/6  |  sell_momentum (12): 11/10/9
+  filter_score + filter_total stored in metrics JSONB per qualified row.
 
 All-live filters (15-Jun-2026):
   rsi_month   = RSI(6) on closes sampled every ~22 bars (monthly approximation)
   rsi_weekly  = RSI(8) on closes sampled every ~5 bars (weekly approximation)
   sector_week  = live avg week_return of segment peers
   sector_month = live avg month_return of segment peers
-  EOD fallback preserved when history < minimum required bars.
 
-Pivot-room gate (15-Jun-2026): Pivot-room is the ONLY pure CMP gate.
+Pivot-room gate (15-Jun-2026): pure CMP gate, latch semantics.
   BUY:  pp < cmp <= r1  AND  (r1-cmp) >= 0.5*(r1-pp)
   SELL: s1 <= cmp < pp  AND  (cmp-s1) >= 0.5*(pp-s1)
-  Latch semantics: once qualified today, stays in v8_qualified all session.
 
-adr_intraday (11-Jun-2026): Live advance/decline ratio from intraday_prices vs
-  prev raw_prices close. Written every 5-min. market_mood gate reads this first,
-  falls back to adr_daily when no live bar (off-hours/weekend).
-  Primary source per spec id=165 (locked 08-Jun-2026).
+adr_intraday (11-Jun-2026): per spec id=165.
 """
 
 import logging
@@ -149,12 +151,6 @@ def _pivot_room_ok(side: str, cmp: Optional[float],
 # ── ADR intraday write ────────────────────────────────────────────────────────
 
 def _write_adr_intraday(conn):
-    """
-    Compute live ADR from intraday_prices vs prev raw_prices close.
-    Written every 5-min tick to adr_intraday (PRIMARY KEY = ts rounded to 5-min).
-    market_mood gate reads adr_intraday first, falls back to adr_daily.
-    Per spec id=165 (locked 08-Jun-2026).
-    """
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -239,10 +235,10 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
             "symbol":        sym,
             "gvm_score":     g.get("gvm_score"),
             "segment":       _segment_override(sym, g.get("segment")),
-            "rsi_month":     _safe_float(f.get("rsi_month")),    # fallback only
-            "rsi_weekly":    _safe_float(f.get("rsi_weekly")),   # fallback only
-            "sector_week":   _safe_float(f.get("sector_week")),  # fallback only
-            "sector_month":  _safe_float(f.get("sector_month")), # fallback only
+            "rsi_month":     _safe_float(f.get("rsi_month")),
+            "rsi_weekly":    _safe_float(f.get("rsi_weekly")),
+            "sector_week":   _safe_float(f.get("sector_week")),
+            "sector_month":  _safe_float(f.get("sector_month")),
             "eod_mom_2d":    _safe_float(f.get("eod_mom_2d")),
         }
     return out
@@ -274,15 +270,15 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
         vols    = [float(r[3]) for r in data if r[3] is not None]
 
         history[sym] = {
-            "closes":      closes,
-            "highs":       highs,
-            "lows":        lows,
-            "vols":        vols,
-            "vol_avg10":   float(np.mean(vols[-10:])) if len(vols) >= 10 else None,
-            "hi_252":      float(max(highs[-252:])) if len(highs) >= 252 else (float(max(highs)) if highs else None),
-            "lo_252":      float(min(lows[-252:]))  if len(lows)  >= 252 else (float(min(lows))  if lows  else None),
-            "hi_21":       float(max(highs[-21:]))  if len(highs) >= 21  else (float(max(highs)) if highs else None),
-            "lo_21":       float(min(lows[-21:]))   if len(lows)  >= 21  else (float(min(lows))  if lows  else None),
+            "closes":       closes,
+            "highs":        highs,
+            "lows":         lows,
+            "vols":         vols,
+            "vol_avg10":    float(np.mean(vols[-10:])) if len(vols) >= 10 else None,
+            "hi_252":       float(max(highs[-252:])) if len(highs) >= 252 else (float(max(highs)) if highs else None),
+            "lo_252":       float(min(lows[-252:]))  if len(lows)  >= 252 else (float(min(lows))  if lows  else None),
+            "hi_21":        float(max(highs[-21:]))  if len(highs) >= 21  else (float(max(highs)) if highs else None),
+            "lo_21":        float(min(lows[-21:]))   if len(lows)  >= 21  else (float(min(lows))  if lows  else None),
             "close_1d_ago": closes[-1] if len(closes) >= 1 else None,
             "close_2d_ago": closes[-2] if len(closes) >= 2 else None,
         }
@@ -347,8 +343,8 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 
     out = {
         "gvm_score":    _safe_float(eod.get("gvm_score")),
-        "rsi_month":    None,   # computed live below — RSI(6) on monthly samples
-        "rsi_weekly":   None,   # computed live below — RSI(8) on weekly samples
+        "rsi_month":    None,   # computed live below
+        "rsi_weekly":   None,   # computed live below
         "sector_week":  _safe_float(eod.get("sector_week")),   # overwritten by _add_sector_aggregates
         "sector_month": _safe_float(eod.get("sector_month")),  # overwritten by _add_sector_aggregates
         "dma_20": None, "dma_50": None, "dma_200": None,
@@ -422,19 +418,19 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
             out["upper_bb"] = (live - (ma + 2*sd)) / live * 100
             out["lower_bb"] = (live - (ma - 2*sd)) / live * 100
 
-    # ── Live RSI: monthly RSI(6) + weekly RSI(8) from spliced close series ──
+    # Live RSI: monthly RSI(6) + weekly RSI(8)
     MONTH_BARS, WEEK_BARS = 22, 5
     if len(c) >= MONTH_BARS * 7:
         monthly = pd.Series([c[i] for i in range(-MONTH_BARS * 7, 0, MONTH_BARS)] + [c[-1]])
         out["rsi_month"] = _wilder_rsi(monthly, 6)
     else:
-        out["rsi_month"] = _safe_float(eod.get("rsi_month"))   # fallback: EOD frozen
+        out["rsi_month"] = _safe_float(eod.get("rsi_month"))
 
     if len(c) >= WEEK_BARS * 9:
         weekly_s = pd.Series([c[i] for i in range(-WEEK_BARS * 9, 0, WEEK_BARS)] + [c[-1]])
         out["rsi_weekly"] = _wilder_rsi(weekly_s, 8)
     else:
-        out["rsi_weekly"] = _safe_float(eod.get("rsi_weekly"))  # fallback: EOD frozen
+        out["rsi_weekly"] = _safe_float(eod.get("rsi_weekly"))
 
     out["_live"] = live
     return out
@@ -443,10 +439,7 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 # ── Step 6: Sector aggregates (live) ─────────────────────────────────────────
 
 def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
-    """
-    Compute live sector_day, sector_week, sector_month from live metrics.
-    All three are now 5-min live — sector_week/sector_month no longer EOD-frozen.
-    """
+    """Live sector_day, sector_week, sector_month — all 5-min."""
     seg_day:   Dict[str, list] = defaultdict(list)
     seg_week:  Dict[str, list] = defaultdict(list)
     seg_month: Dict[str, list] = defaultdict(list)
@@ -486,8 +479,7 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
              range_1d, range_3d, upper_bb, lower_bb,
              ma9_vs_ma21, vol_ratio)
             VALUES (%s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s,
-                    %s,%s,
-                    %s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s)
+                    %s,%s, %s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
                 gvm_score     = EXCLUDED.gvm_score,
                 dma_20        = EXCLUDED.dma_20,
@@ -601,11 +593,14 @@ def _market_gate_fails(conn) -> int:
 
 
 def _gate_threshold(fails: int, n_filters: int) -> int:
-    if fails <= 1:
-        return n_filters
-    if fails == 2:
-        return n_filters - 1
-    return n_filters - 2
+    """
+    Score-based adaptive threshold — all 4 baskets.
+    Strong Bullish (0 fails): n-1
+    Bullish        (1 fail):  n-2
+    Neutral/Bear   (2+ fails): n-3
+    Formula: n_filters - 1 - min(fails, 2)
+    """
+    return n_filters - 1 - min(fails, 2)
 
 
 # ── Step 8: Write v8_qualified + funnel ──────────────────────────────────────
@@ -620,31 +615,33 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         if basket == "sell_overbought":
             continue
 
-        universe = all_metrics[:]
-        funnel   = {}
-        for metric, bounds in filters.items():
-            mn, mx   = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            universe = [s for s in universe if _passes(s.get(metric), mn, mx)]
-            funnel[metric] = len(universe)
+        # ── Score-based qualification — uniform across all 4 baskets ──────
+        n_filters = len(filters)
+        need      = _gate_threshold(gate_fails, n_filters)
 
-        if basket == "buy_reversal":
-            n_filters = len(filters)
-            need = _gate_threshold(gate_fails, n_filters)
-            adaptive = []
-            for s in all_metrics:
-                dc = s.get("mom_2d")
-                if dc is None or float(dc) <= 0:
-                    continue
-                passed = sum(
-                    1 for metric, bounds in filters.items()
-                    if _passes(s.get(metric),
-                               *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
-                )
-                if passed >= need:
-                    adaptive.append(s)
-            universe = adaptive
-            log.info(f"buy_reversal adaptive: gate_fails={gate_fails} need={need}/{n_filters} "
-                     f"mom_2d>0 mandatory → {len(universe)} qualified")
+        universe = []
+        for s in all_metrics:
+            score = sum(
+                1 for metric, bounds in filters.items()
+                if _passes(s.get(metric),
+                           *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
+            )
+            s["_filter_score"] = score
+            if score >= need:
+                universe.append(s)
+
+        # Funnel counts (strict cumulative — diagnostic display, not used for qualification)
+        funnel    = {}
+        survivors = all_metrics[:]
+        for metric, bounds in filters.items():
+            mn, mx    = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            survivors = [s for s in survivors if _passes(s.get(metric), mn, mx)]
+            funnel[metric] = len(survivors)
+        funnel["_score_threshold"] = need
+        funnel["_score_qualified"] = len(universe)
+
+        log.info(f"{basket}: score-gate need={need}/{n_filters} "
+                 f"gate_fails={gate_fails} → {len(universe)} score-qualified")
 
         # Pivot-room gate — latch semantics
         side = BASKET_SIDE.get(basket, "BUY")
@@ -678,6 +675,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                 "week_index_52", "range_3d", "ma9_vs_ma21", "vol_ratio",
                 "sector_week", "sector_month", "sector_day",
             ]}
+            snap["filter_score"] = s.get("_filter_score")
+            snap["filter_total"] = n_filters
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
