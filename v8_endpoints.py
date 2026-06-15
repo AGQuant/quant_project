@@ -18,11 +18,9 @@ Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
 Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
 Score-based fallback (15-Jun-2026): _live_qualified_fallback score-based.
 rsi_month widened (15-Jun-2026): buy_reversal [58.5, 75.0] → [45.0, 80.0].
-  Old bounds killed all 7 candidates: 4 were recovering (rsi 37-51), 3 were
-  momentum (rsi 79-86). Widened to catch full reversal + early-momentum range.
-funnel_detail individual (15-Jun-2026): replaced strict cumulative with
-  per-filter individual pass counts vs full universe. Adds score_threshold,
-  score_qualified, pivot_pass for score-based context.
+funnel_detail individual (15-Jun-2026): per-filter individual pass counts.
+  Each stage: passes, fails, pass_pct, condition_min, condition_max,
+  survivors (compat), killed (compat). Top-level: filter_count, final (compat).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -597,13 +595,24 @@ def funnel_detail(basket: str):
             if pp and _pivot_room_ok(side, cmp, pp, r1, s1)
         )
 
+        # Enrich stages with aliases + formatted condition columns
+        for st in stages:
+            mn, mx = st.get("min"), st.get("max")
+            st["survivors"]     = st["passes"]           # frontend compat
+            st["killed"]        = st["fails"]             # frontend compat
+            st["kill_pct"]      = st["pass_pct"]          # frontend compat
+            st["condition_min"] = f">= {mn}" if mn is not None else "—"
+            st["condition_max"] = f"<= {mx}" if mx is not None else "—"
+
         return {
             "basket":          basket,
             "score_date":      str(date.today()),
             "universe":        total,
             "n_filters":       n,
+            "filter_count":    n,                    # frontend compat
             "score_threshold": score_threshold,
             "score_qualified": score_qualified,
+            "final":           score_qualified,      # frontend compat
             "pivot_pass":      pivot_pass,
             "stages":          stages,
             **BASKET_META.get(basket, {}),
