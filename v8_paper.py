@@ -6,8 +6,9 @@ ISOLATED from real trades / personal_journal — own v8_paper_* tables.
 
 FUNNEL (3 layers):
   1. Basket FILTERS first  — a stock is ELIGIBLE only if it passes a V8 basket's
-     bands on the latest v8_metrics (EOD). Qualified set is fixed for the day.
-     CANONICAL filters imported from v8_endpoints.FILTER_CONFIG (single source of truth).
+     score threshold on the latest v8_metrics (EOD). Qualified set is written to
+     v8_qualified every 5-min by v8_signal_writer (score-based, latch semantics).
+     qualified_set() reads from v8_qualified (15-Jun-2026, was strict all-pass).
   2. Rolling-5-day PIVOTS  — PP/R1/S1 from last 5 trading days (T-1..T-5) of
      raw_prices, recomputed nightly; window rolls daily.
   3. Zone trigger — on 5-min candle close, on qualified names only.
@@ -84,6 +85,11 @@ PIVOT SELF-HEALING (added 12-Jun-2026, founder decision):
   as belt-and-suspenders; this guard only fills a same-day gap. If a same-day
   build fails and the engine falls back to older pivots, a PIVOT DRIFT warning
   is logged (date-drift observability, 12-Jun-2026 follow-up).
+
+qualified_set v2 (15-Jun-2026):
+  Reads from v8_qualified table (score-based, latch semantics) instead of
+  recomputing strict all-pass from v8_metrics. v8_qualified is the single
+  source of truth populated every 5-min by v8_signal_writer.
 """
 
 import logging
@@ -106,7 +112,7 @@ REBALANCE_TIME = time(15, 20)
 # Band condition (pp < close <= r1) REMOVED 12-Jun-2026 — only room fraction applies.
 GAP_ROOM_FRAC  = 0.5
 
-# ── sell_overbought signal cache (12-Jun-2026, follow-up) ────────────────────
+# ── sell_overbought signal cache (12-Jun-2026, follow-up) ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # The signal set is built off EOD v8_metrics + prior-day pivots — nothing intraday
 # changes it, so it is stable for the whole trading day. Caching it avoids running
 # the 60-day-window SQL on every 1-min tick (~375 runs/day -> 1). Keyed by date.
@@ -210,9 +216,7 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
 def _ensure_pivots_for(conn, d: date) -> int:
     """
     SELF-HEALING (12-Jun-2026): if no pivots exist for date d, compute them now.
-    Returns the count of pivot rows present for d after the check. Cheap COUNT
-    guard so this is effectively a no-op once the day's pivots exist (the first
-    market-hours tick builds them; every later tick just sees them present).
+    Returns the count of pivot rows present for d after the check.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM v8_paper_pivots WHERE pivot_date=%s", (d,))
@@ -236,42 +240,32 @@ def _passes(metric_row: Dict, bands: Dict) -> bool:
     return True
 
 def qualified_set(conn) -> Dict[str, Dict]:
-    from v8_endpoints import FILTER_CONFIG, BASKET_META
-    with conn.cursor() as cur:
-        # NOTE (12-Jun-2026 fix): day_1d, sector_week, sector_month MUST be selected.
-        # buy_momentum requires day_1d + sector_week + sector_month; buy_reversal and
-        # the sell baskets require sector_week + sector_month. _passes() returns False
-        # on any missing key, so omitting these silently emptied the ENTIRE zone-based
-        # qualified set (every buy/sell_reversal/momentum name failed) — root cause of
-        # "qualified=0" and no zone trades since the column list drifted. Keep in sync
-        # with the metrics referenced by v8_endpoints.FILTER_CONFIG.
-        cur.execute("""
-            SELECT symbol, gvm_score, dma_20, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-                   month_return, week_return, year_return, mom_2d, day_1d,
-                   week_index_52, range_3d, ma9_vs_ma21, vol_ratio,
-                   sector_week, sector_month
-            FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics)
-        """)
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    out = {}
-    # BASKET_META side is "BUY"/"SELL" (UI vocabulary); the paper engine's entry
-    # loop tests side=="LONG"/"SHORT". Without this mapping every zone name carried
-    # side="BUY"/"SELL", matched NEITHER entry branch, and silently fell through —
-    # so no zone trade could ever enter (only sell_overbought, which uses its own
-    # _open_short branch, worked). FIX (12-Jun-2026): translate to LONG/SHORT here.
+    """
+    Read score-based qualified set from v8_qualified table (15-Jun-2026).
+    Replaces strict all-pass recompute — v8_qualified is the single source of truth,
+    populated every 5-min by v8_signal_writer with score-based + pivot-room gate.
+    Latch semantics: a stock that qualified once today stays in the table all session.
+    """
+    from v8_endpoints import BASKET_META
     _SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
-    for m in rows:
-        sym = m["symbol"]
-        for basket, filters in FILTER_CONFIG.items():
-            # sell_overbought has its OWN entry model (precomputed entry/target/stop)
-            # handled by _sell_overbought_signals + a dedicated entry branch; it does
-            # NOT flow through the PP/R1/S1 zone path, so it is skipped here.
-            if basket == "sell_overbought": continue
-            side = _SIDE_MAP.get(BASKET_META[basket]["side"], BASKET_META[basket]["side"])
-            if _passes(m, filters):
-                out[sym] = {"basket": basket, "side": side}
-                break
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT ON (symbol) symbol, basket
+            FROM v8_qualified
+            WHERE signal_date = CURRENT_DATE
+              AND basket != 'sell_overbought'
+              AND symbol NOT IN (
+                  SELECT UPPER(ticker) FROM earnings_calendar
+                  WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+              )
+            ORDER BY symbol, signal_ts DESC
+        """)
+        rows = cur.fetchall()
+    out = {}
+    for sym, basket in rows:
+        meta_side = BASKET_META.get(basket, {}).get("side", "BUY")
+        side = _SIDE_MAP.get(meta_side, "LONG")
+        out[sym] = {"basket": basket, "side": side}
     return out
 
 
@@ -361,8 +355,7 @@ def _two_latest_closes(conn, sym, d):
     return float(rows[1][0]), float(rows[0][0]), rows[0][1]
 
 def _latest_close(conn, sym, d):
-    """Single most-recent 5-min close for d (used by sell_overbought entry,
-    which needs only the current close, not the prev/cur pair)."""
+    """Single most-recent 5-min close for d (used by sell_overbought entry)."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT close, ts FROM intraday_prices
@@ -406,17 +399,7 @@ def _traded_today(conn, sym, side, d):
 def _opposite_open(conn, sym, want_side, d):
     """
     Conflict guard (12-Jun-2026, founder-locked). Returns the opposing OPEN
-    position for `sym` if one exists, else None. `want_side` is the side we are
-    about to enter; the opposite side is what we look for.
-      Returns (pid, open_side, entry_price, entry_ts, qty, target, stop, basket,
-               pivot_date, same_day:bool) or None.
-    Rules:
-      - same_day True  (opp opened today)        -> caller BLOCKS new entry (opposite_open)
-      - same_day False (opp opened a prior day)  -> caller EXITs the opp @ live close
-                                                    (CONFLICT_EXIT), stays flat, then
-                                                    blocks new entry (conflict_exit_blocked)
-    No stop-and-reverse: a flattened name may re-enter the opposite on a LATER day
-    if the signal is still valid.
+    position for `sym` if one exists, else None.
     """
     opp = "SHORT" if want_side == "LONG" else "LONG"
     with conn.cursor() as cur:
@@ -437,23 +420,16 @@ def _resolve_conflict(conn, sym, want_side, basket, d, exit_close, exit_ts):
     """
     Apply the conflict policy for `sym` before opening a `want_side` position.
     Returns True if the caller should PROCEED (no conflict), False if it must SKIP.
-    Side effects:
-      same-day conflict      -> log missed 'opposite_open', return False
-      prior-day conflict      -> CONFLICT_EXIT the opposing position @ exit_close,
-                                 log missed 'conflict_exit_blocked', return False
-    `exit_close`/`exit_ts` = current 5-min close + ts for the conflict exit fill.
     """
     conf = _opposite_open(conn, sym, want_side, d)
     if conf is None:
         return True
     pid, oside, oentry, oets, oqty, otgt, osl, obasket, opdt, same_day = conf
     if same_day:
-        # opposite opened TODAY -> block the new entry, position holds
         _log_missed(conn, d, sym, want_side, basket, exit_close, exit_close, exit_close,
                     "opposite_open")
         log.info(f"conflict {sym}: {want_side} blocked, {oside} opened same-day holds")
         return False
-    # opposite opened a PRIOR day -> flatten it now at live close, stay flat
     if exit_close is not None and exit_ts is not None:
         _close_position(conn, pid, sym, oside, obasket, oentry, oets, oqty, otgt, osl,
                         opdt, exit_close, exit_ts, "CONFLICT_EXIT")
@@ -523,8 +499,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     d = target_date or date.today()
     now_t = datetime.now().time() if target_date is None else None
 
-    # SELF-HEALING pivots (12-Jun-2026): build today's pivots if absent so the
-    # engine never trades on prior-day pivots while waiting for the 22:05 job.
+    # SELF-HEALING pivots (12-Jun-2026)
     _ensure_pivots_for(conn, d)
 
     with conn.cursor() as cur:
@@ -535,11 +510,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             cur.execute("SELECT MAX(pivot_date) FROM v8_paper_pivots")
             md = cur.fetchone()[0]
             if md:
-                # DATE-DRIFT WARNING (12-Jun-2026 follow-up): self-heal should have
-                # built pivots for d above; if we are here, today's build failed and
-                # we are trading on OLDER pivots. Log loudly so staleness is visible
-                # instead of silent. Convention itself (pivot_date=d, built from
-                # price_date<d) is correct — this only flags a same-day build gap.
                 if md < d:
                     log.warning(f"PIVOT DRIFT: no pivots for {d}, falling back to {md} "
                                 f"({(d - md).days}d old) — self-heal build may have failed")
@@ -549,14 +519,8 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
         return {"status":"warn","msg":"no pivots — run compute_pivots"}
 
     qual = qualified_set(conn)
-    so_sig = _sell_overbought_signals(conn, for_date=d)   # cached, sell_overbought (own model)
+    so_sig = _sell_overbought_signals(conn, for_date=d)
 
-    # ── Rule 2 (12-Jun-2026): same-tick BOTH-SIDES collision ──────────────────
-    # A symbol can appear LONG in the zone qual AND SHORT via sell_overbought (or
-    # SHORT in qual). If a fresh entry would be attempted on BOTH sides this tick
-    # with NOTHING open yet, skip BOTH and log 'conflict'. qual is one-per-symbol
-    # (single side); collision = that symbol also has a sell_overbought short, or
-    # qual short vs ... (qual is single-side so the only cross is qual-long x SO).
     _long_syms  = {s for s, q in qual.items() if q["side"] == "LONG"}
     _short_syms = {s for s, q in qual.items() if q["side"] == "SHORT"} | set(so_sig.keys())
     _tick_conflict = _long_syms & _short_syms
@@ -634,12 +598,11 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl = _two_latest_closes(conn, sym, d)
             if not tl: continue
             prev_close, cur_close, cur_ts = tl
-            # LONG entry: room-to-target fraction only (band condition removed 12-Jun-2026)
             if side=="LONG" and (r1 - cur_close) >= GAP_ROOM_FRAC * (r1 - pp):
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
                 if _has_open(conn,sym,"LONG"): continue
                 if _traded_today(conn,sym,"LONG",d): continue
-                if sym in _tick_conflict:                       # Rule 2: both sides fired
+                if sym in _tick_conflict:
                     _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"conflict"); continue
                 if not _resolve_conflict(conn,sym,"LONG",basket,d,cur_close,cur_ts): continue
                 if _blackout(conn,sym):
@@ -656,12 +619,11 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     conn.commit()
                 long_open+=1
                 entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
-            # SHORT entry: room-to-target fraction only (band condition removed 12-Jun-2026)
             elif side=="SHORT" and (cur_close - s1) >= GAP_ROOM_FRAC * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
                 if _has_open(conn,sym,"SHORT"): continue
                 if _traded_today(conn,sym,"SHORT",d): continue
-                if sym in _tick_conflict:                       # Rule 2: both sides fired
+                if sym in _tick_conflict:
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"conflict"); continue
                 if not _resolve_conflict(conn,sym,"SHORT",basket,d,cur_close,cur_ts): continue
                 if _blackout(conn,sym):
@@ -671,28 +633,25 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 entries.append(_open_short(conn,sym,basket,entry,cur_ts,target,stop,pp,d))
                 short_open+=1
 
-        # ---- 3b) SELL_OVERBOUGHT ENTRIES (own model, 12-Jun-2026) ----
-        # Enter SHORT at CURRENT 5-min close; target=S1 (signal), stop recomputed
-        # off live entry for 1:1 (Option A). No price sanity gate ("enter regardless").
+        # ---- 3b) SELL_OVERBOUGHT ENTRIES ----
         for sym, sig in so_sig.items():
-            target = sig["target"]                 # S1 (fixed pivot from signal)
+            target = sig["target"]
             lc = _latest_close(conn, sym, d)
             if not lc: continue
             cur_close, cur_ts = lc
-            if cur_close <= target:                # already at/below S1 — no trade room
+            if cur_close <= target:
                 continue
             entry = cur_close
-            stop  = entry + (entry - target)       # 1:1 off LIVE entry
+            stop  = entry + (entry - target)
             if _has_open(conn,sym,"SHORT"): continue
             if _traded_today(conn,sym,"SHORT",d): continue
-            if sym in _tick_conflict:                          # Rule 2: both sides fired
+            if sym in _tick_conflict:
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"conflict"); continue
             if not _resolve_conflict(conn,sym,"SHORT","sell_overbought",d,cur_close,cur_ts): continue
             if _blackout(conn,sym):
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"blackout"); continue
             if sell_slots is not None and short_open >= sell_slots:
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"slot_full"); continue
-            # pp stored as None for sell_overbought (no PP/R1/S1 zone anchor)
             entries.append(_open_short(conn,sym,"sell_overbought",entry,cur_ts,target,stop,None,d))
             short_open+=1
     else:
@@ -702,12 +661,10 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             tl=_two_latest_closes(conn,sym,d)
             if not tl: continue
             prev_close,cur_close,_=tl
-            # After-cutoff missed log — room fraction only (band condition removed 12-Jun-2026)
             if side=="LONG" and (r1-cur_close)>=GAP_ROOM_FRAC*(r1-pp) and not _has_open(conn,sym,"LONG") and not _traded_today(conn,sym,"LONG",d):
                 _log_missed(conn,d,sym,"LONG",q["basket"],cur_close,r1,cur_close-(r1-cur_close),"after_cutoff")
             elif side=="SHORT" and (cur_close-s1)>=GAP_ROOM_FRAC*(pp-s1) and not _has_open(conn,sym,"SHORT") and not _traded_today(conn,sym,"SHORT",d):
                 _log_missed(conn,d,sym,"SHORT",q["basket"],cur_close,s1,cur_close+(cur_close-s1),"after_cutoff")
-        # sell_overbought after-cutoff missed log
         for sym, sig in so_sig.items():
             target = sig["target"]
             lc = _latest_close(conn, sym, d)
