@@ -23,6 +23,9 @@ drops to 4). Research mode — timing is irrelevant.
 gate1/gate2 (bool|None) = OPTIONAL human overrides:
   gate1 overrides R10, gate2 overrides R12.
 
+ADR source (15-Jun-2026 fix): adr_intraday (5-min live, today) → adr_daily
+fallback. Was reading only adr_daily which could be days old on a live session.
+
 Scope: v3.3.2 (id=143 base + delta id=263 R13 + merge delta). Not v3.4.1.
 """
 
@@ -274,9 +277,19 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             (gvm, dma20, dma50, dma200, rsi_m, rsi_w, rsi_d,
              wk_ret, mo_ret, day1d, sec_w, sec_m) = m
 
-            cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+            # Live ADR: adr_intraday (5-min, today) → adr_daily fallback
+            cur.execute("""
+                SELECT adr FROM adr_intraday
+                WHERE ts::date = CURRENT_DATE
+                ORDER BY ts DESC LIMIT 1
+            """)
             ar = cur.fetchone()
-            adr = _f(ar[0]) if ar else None
+            if ar and ar[0] is not None:
+                adr = _f(ar[0])
+            else:
+                cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+                ar = cur.fetchone()
+                adr = _f(ar[0]) if ar else None
 
             op = ">" if side == "LONG" else "<"
             cur.execute(f"""
