@@ -50,6 +50,7 @@ from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
+from scorr_authset_probe import router as authset_probe_router
 from investment_check import router as investment_check_router
 import yahoo_ondemand
 import yahoo_index_backfill
@@ -62,25 +63,19 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.47
-# v2.9.47: Auth fix — 15-min idle-logout timer REMOVED entirely. The injected
-#   idle script (window.location='/logout') was the thing tearing down the
-#   session; inside the CIO Shell iframes it fired on interaction. Now only a
-#   static logout button is injected on non-embedded pages. No auto-logout on
-#   any page. (Embedded iframe loads still get no injection at all.)
-# v2.9.46: Auth fix (root cause) — middleware treats Sec-Fetch-Dest: iframe as
-#   embedded, in addition to ?embed=1.
+# Scorr / Project Quant — main.py v2.9.48
+# v2.9.48: TEMP cookie diagnostic — authset/authdebug2 probe router wired to
+#   isolate whether the browser is rejecting (not storing) the auth cookie vs
+#   not sending it. /authdebug showed empty cookie header post-login. Remove
+#   probe after diagnosis.
+# v2.9.47: Auth fix — 15-min idle-logout timer REMOVED entirely.
+# v2.9.46: Auth fix — middleware treats Sec-Fetch-Dest: iframe as embedded.
 # v2.9.45: Auth fix — no logout/idle injection on ?embed=1 iframe loads.
 # v2.9.44: Investment Check v1.0 — 12-rule GVM-native equity filter.
-#   Endpoints: GET /api/investment-check?symbol=X
-#              GET /api/investment-check/screener?verdict=STRONG+BUY&cap=Large
-#              GET /api/investment-check/summary
-# v2.9.43: Auth hardening — logout button moved top-left (no overlap),
-#   no-cache headers on all protected pages (prevents back-button bypass),
-#   explicit cookie path="/" on set+delete (ensures proper deletion).
+# v2.9.43: Auth hardening — logout button top-left, no-cache, cookie path="/".
 # v2.9.42: Logout button injected via middleware + 15-min idle timer.
 # v2.9.41: 15-min inactivity logout injected via middleware.
-# v2.9.40: Password gate — scorr_auth.py. Set SCORR_PASSWORD in Railway.
+# v2.9.40: Password gate — scorr_auth.py.
 # v2.9.39: Startup auto-fill sector_briefs.
 # v2.9.38: sector_brief_endpoints router wired.
 # v2.9.37: sector_endpoints router wired.
@@ -89,7 +84,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.47"
+VERSION = "2.9.48"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -165,6 +160,7 @@ async def auth_gate(request: Request, call_next):
     return response
 
 app.include_router(auth_router)
+app.include_router(authset_probe_router)
 app.include_router(v8_router)
 app.include_router(v8_futures_router)
 app.include_router(qb_router)
@@ -346,7 +342,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.47)")
+        log.info("Tables ready (v2.9.48)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
