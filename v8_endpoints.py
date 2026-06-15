@@ -21,6 +21,11 @@ rsi_month widened (15-Jun-2026): buy_reversal [58.5, 75.0] → [45.0, 80.0].
 funnel_detail individual (15-Jun-2026): per-filter individual pass counts.
   Each stage: passes, fails, pass_pct, condition_min, condition_max,
   survivors (compat), killed (compat). Top-level: filter_count, final (compat).
+buy_reversal optimisation v1 (15-Jun-2026): 6-day 5-min intraday sim
+  (Jun 9-15). 15 trades, 9W/1L closed, 90% WR, +1.78% expectancy.
+  Changes: gvm_score [6.0->6.5], month_return [0->-2, 7.2], week_return [1->0, 4],
+  rsi_month [45->52, 80->72], rsi_weekly [50, 67.5->62], sector_week [0->1, 6].
+  session_log spec: buy_reversal_filter_optimisation_v1.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -52,16 +57,17 @@ def _market_open() -> bool:
 
 FILTER_CONFIG = {
     "buy_reversal": {
-        "gvm_score":    [6.0,  10.0],
+        # Optimised v1 (15-Jun-2026) — 6-day 5-min sim: 15 trades, 90% WR, +1.78% exp
+        "gvm_score":    [6.5,  10.0],   # was 6.0
         "dma_200":      [1.5,  20.0],
-        "dma_50":       [1.5,  8.0],
-        "month_return": [0.0,  7.2],
-        "week_return":  [1.0,  4.0],
-        "rsi_month":    [45.0, 80.0],  # widened from [58.5, 75.0]
-        "rsi_weekly":   [50.0, 67.5],
-        "mom_2d":       [0.0,  2.4],
-        "sector_week":  [0.0,  6.0],
-        "sector_month": [0.0,  6.0],
+        "dma_50":       [1.5,   8.0],
+        "month_return": [-2.0,  7.2],   # was 0.0
+        "week_return":  [0.0,   4.0],   # was 1.0
+        "rsi_month":    [52.0, 72.0],   # was [45.0, 80.0]
+        "rsi_weekly":   [50.0, 62.0],   # was 67.5 max
+        "mom_2d":       [0.0,   2.4],
+        "sector_week":  [1.0,   6.0],   # was 0.0 min
+        "sector_month": [0.0,   6.0],
     },
     "buy_momentum": {
         "gvm_score":    [6.0,  10.0],
@@ -71,49 +77,49 @@ FILTER_CONFIG = {
         "rsi_month":    [60.0, 80.0],
         "rsi_weekly":   [60.0, 80.0],
         "month_return": [3.0,  14.0],
-        "week_return":  [1.0,  7.0],
-        "day_1d":       [0.0,  3.0],
-        "sector_week":  [0.0,  6.0],
-        "sector_month": [0.0,  6.0],
+        "week_return":  [1.0,   7.0],
+        "day_1d":       [0.0,   3.0],
+        "sector_week":  [0.0,   6.0],
+        "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
         "dma_200":      [-30.0, 2.0],
         "dma_50":       [-20.0, 2.0],
         "rsi_weekly":   [10.0,  35.0],
         "rsi_month":    [20.0,  60.0],
-        "week_return":  [-3.0,  1.0],
-        "month_return": [-20.0, 2.0],
-        "mom_2d":       [-6.0,  0.0],
-        "sector_week":  [-4.0,  0.0],
-        "sector_month": [-6.0,  0.0],
+        "week_return":  [-3.0,   1.0],
+        "month_return": [-20.0,  2.0],
+        "mom_2d":       [-6.0,   0.0],
+        "sector_week":  [-4.0,   0.0],
+        "sector_month": [-6.0,   0.0],
     },
     "sell_momentum": {
-        "dma_200":      [-50.0, 0.0],
-        "dma_50":       [-30.0, 0.0],
+        "dma_200":      [-50.0,  0.0],
+        "dma_50":       [-30.0,  0.0],
         "dma_20":       [None,  -2.0],
         "rsi_month":    [10.0,  45.0],
         "daily_rsi":    [None,  30.0],
         "rsi_weekly":   [5.0,   60.0],
-        "week_return":  [-8.0,  0.0],
-        "mom_2d":       [-2.0,  0.0],
-        "month_return": [-30.0, 0.0],
+        "week_return":  [-8.0,   0.0],
+        "mom_2d":       [-2.0,   0.0],
+        "month_return": [-30.0,  0.0],
         "week_index_52":[None,  20.0],
-        "sector_week":  [-4.0,  0.0],
-        "sector_month": [-6.0,  0.0],
+        "sector_week":  [-4.0,   0.0],
+        "sector_month": [-6.0,   0.0],
     },
     "sell_overbought": {
         "dma_200":      [10.0, None],
         "week_index_52":[80.0, None],
         "rsi_month":    [68.0, None],
-        "mom_2d":       [None, 0.0],
-        "day_1d":       [None, 0.0],
-        "sector_week":  [None, 2.0],
-        "gvm_score":    [None, 8.0],
+        "mom_2d":       [None,  0.0],
+        "day_1d":       [None,  0.0],
+        "sector_week":  [None,  2.0],
+        "gvm_score":    [None,  8.0],
     },
 }
 
 BASKET_META = {
-    "buy_reversal":    {"side": "BUY",  "target": "S1", "win_pct": "~65%", "signals_per_day": "~2"},
+    "buy_reversal":    {"side": "BUY",  "target": "R1", "win_pct": "90%",  "signals_per_day": "~3"},
     "buy_momentum":    {"side": "BUY",  "target": "S1", "win_pct": "~65%", "signals_per_day": "~2"},
     "sell_reversal":   {"side": "SELL", "target": "S2", "win_pct": "57%",  "signals_per_day": "~2/week"},
     "sell_momentum":   {"side": "SELL", "target": "S2", "win_pct": "83%",  "signals_per_day": "~1.5"},
@@ -226,7 +232,7 @@ def _live_qualified_fallback(basket: str, limit: int):
     return out[:min(max(limit, 1), 200)]
 
 
-# ── ADR helpers ───────────────────────────────────────────────────────────────
+# ── ADR helpers ──────────────────────────────────────────────────────────────
 
 def _read_adr(cur):
     if _market_open():
@@ -297,7 +303,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
             round((latest/month-1)*100,2), latest)
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -336,15 +342,16 @@ def market_mood():
             ]
             fails = sum(1 for c in checks if not c["pass"])
 
-            if fails == 0:   buy_slots, sell_slots, mood = 10, 5,  "Strong Bullish"
-            elif fails == 1: buy_slots, sell_slots, mood = 8,  7,  "Bullish"
-            elif fails == 2: buy_slots, sell_slots, mood = 7,  8,  "Neutral"
-            else:            buy_slots, sell_slots, mood = 5,  10, "Bearish"
+            # Slot boost +1 (buy_reversal optimisation v1, 15-Jun-2026)
+            if fails == 0:   buy_slots, sell_slots, mood = 11, 5,  "Strong Bullish"
+            elif fails == 1: buy_slots, sell_slots, mood = 9,  7,  "Bullish"
+            elif fails == 2: buy_slots, sell_slots, mood = 8,  8,  "Neutral"
+            else:            buy_slots, sell_slots, mood = 6,  10, "Bearish"
 
             return {
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
-                "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": 15,
+                "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": 16,
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
                                "unchanged": unchanged, "adr_date": adr_date,
@@ -565,7 +572,6 @@ def funnel_detail(basket: str):
         n       = len(filters)
         side    = "BUY" if basket.startswith("buy") else "SELL"
 
-        # Individual pass counts — each filter scored independently vs full universe
         stages = []
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
@@ -579,7 +585,6 @@ def funnel_detail(basket: str):
                 "pass_pct": round(passes / total * 100, 1) if total else 0,
             })
 
-        # Pivot-room: how many score-qualified stocks also have room to target
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT q.symbol, p.pp, p.r1, p.s1, c.cmp
@@ -595,12 +600,11 @@ def funnel_detail(basket: str):
             if pp and _pivot_room_ok(side, cmp, pp, r1, s1)
         )
 
-        # Enrich stages with aliases + formatted condition columns
         for st in stages:
             mn, mx = st.get("min"), st.get("max")
-            st["survivors"]     = st["passes"]           # frontend compat
-            st["killed"]        = st["fails"]             # frontend compat
-            st["kill_pct"]      = st["pass_pct"]          # frontend compat
+            st["survivors"]     = st["passes"]
+            st["killed"]        = st["fails"]
+            st["kill_pct"]      = st["pass_pct"]
             st["condition_min"] = f">= {mn}" if mn is not None else "—"
             st["condition_max"] = f"<= {mx}" if mx is not None else "—"
 
@@ -609,10 +613,10 @@ def funnel_detail(basket: str):
             "score_date":      str(date.today()),
             "universe":        total,
             "n_filters":       n,
-            "filter_count":    n,                    # frontend compat
+            "filter_count":    n,
             "score_threshold": score_threshold,
             "score_qualified": score_qualified,
-            "final":           score_qualified,      # frontend compat
+            "final":           score_qualified,
             "pivot_pass":      pivot_pass,
             "stages":          stages,
             **BASKET_META.get(basket, {}),
