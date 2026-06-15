@@ -18,11 +18,13 @@ Universe counts (as of 15-Jun-2026):
 
 from fastapi import APIRouter, Query
 from typing import Optional
+import os
+import psycopg
 import traceback
 
 router = APIRouter()
 
-# ── Verdict bands ──────────────────────────────────────────────
+# ── Verdict bands ────────────────────────────────────────────────────────────
 def get_verdict(score: int) -> dict:
     if score >= 10:
         return {"verdict": "STRONG BUY", "emoji": "🟢", "band": "10-12"}
@@ -52,11 +54,10 @@ def is_bfsi(segment: str) -> bool:
     return any(k in seg for k in BFSI_KEYWORDS)
 
 
-# ── Single symbol check ────────────────────────────────────────
+# ── Single symbol check ──────────────────────────────────────────────────────
 @router.get("/api/investment-check")
 async def investment_check(symbol: str = Query(..., description="NSE symbol")):
-    from db import get_conn
-    conn = get_conn()
+    conn = psycopg.connect(os.getenv("DATABASE_URL"))
     try:
         symbol = symbol.upper().strip()
         cur = conn.cursor()
@@ -122,7 +123,7 @@ async def investment_check(symbol: str = Query(..., description="NSE symbol")):
         avg_up_vol   = float(vol[0] or 0)
         avg_down_vol = float(vol[1] or 0)
 
-        # ── Score rules ────────────────────────────────────────
+        # ── Score rules ──────────────────────────────────────────────────────
         bfsi = is_bfsi(segment)
         cap  = get_cap_category(market_cap)
 
@@ -230,15 +231,14 @@ async def investment_check(symbol: str = Query(..., description="NSE symbol")):
         conn.close()
 
 
-# ── Screener — top N by score ──────────────────────────────────
+# ── Screener — top N by score ────────────────────────────────────────────────
 @router.get("/api/investment-check/screener")
 async def investment_screener(
     verdict: Optional[str] = Query(None, description="STRONG BUY | ACCUMULATE | WATCH | AVOID"),
     cap: Optional[str]     = Query(None, description="Large | Mid | Small"),
     limit: int             = Query(50, le=200)
 ):
-    from db import get_conn
-    conn = get_conn()
+    conn = psycopg.connect(os.getenv("DATABASE_URL"))
     try:
         cur = conn.cursor()
         cur.execute("""
@@ -333,11 +333,10 @@ async def investment_screener(
         conn.close()
 
 
-# ── Summary stats ──────────────────────────────────────────────
+# ── Summary stats ────────────────────────────────────────────────────────────
 @router.get("/api/investment-check/summary")
 async def investment_summary():
-    from db import get_conn
-    conn = get_conn()
+    conn = psycopg.connect(os.getenv("DATABASE_URL"))
     try:
         cur = conn.cursor()
         cur.execute("""
