@@ -56,7 +56,7 @@ def is_bfsi(segment: str) -> bool:
 
 # ── Single symbol check ──────────────────────────────────────────────────────
 @router.get("/api/investment-check")
-async def investment_check(symbol: str = Query(..., description="NSE symbol")):
+def investment_check(symbol: str = Query(..., description="NSE symbol")):
     conn = psycopg.connect(os.getenv("DATABASE_URL"))
     try:
         symbol = symbol.upper().strip()
@@ -233,7 +233,7 @@ async def investment_check(symbol: str = Query(..., description="NSE symbol")):
 
 # ── Screener — top N by score ────────────────────────────────────────────────
 @router.get("/api/investment-check/screener")
-async def investment_screener(
+def investment_screener(
     verdict: Optional[str] = Query(None, description="STRONG BUY | ACCUMULATE | WATCH | AVOID"),
     cap: Optional[str]     = Query(None, description="Large | Mid | Small"),
     limit: int             = Query(50, le=200)
@@ -335,7 +335,7 @@ async def investment_screener(
 
 # ── Summary stats ────────────────────────────────────────────────────────────
 @router.get("/api/investment-check/summary")
-async def investment_summary():
+def investment_summary():
     conn = psycopg.connect(os.getenv("DATABASE_URL"))
     try:
         cur = conn.cursor()
