@@ -14,17 +14,14 @@ What it does every 5-min during market hours:
   8. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
 
 Score-based qualification (15-Jun-2026):
-  Threshold = n_filters - 1 - min(mood_fails, 2)
-  Strong Bullish (0 fails): n-1  |  Bullish (1 fail): n-2  |  Neutral/Bear (2+): n-3
-  buy_reversal (10): 9/8/7  |  buy_momentum (11): 10/9/8
-  sell_reversal (9): 8/7/6  |  sell_momentum (12): 11/10/9
-  filter_score + filter_total stored in metrics JSONB per qualified row.
+  BUY  threshold = n - 1 - min(fails, 2)  [tight in bull, loose in bear]
+  SELL threshold = n - 3 + min(fails, 2)  [loose in bull, tight in bear — inverse]
+  buy_reversal  (10): 9/8/7   buy_momentum  (11): 10/9/8
+  sell_reversal  (9): 6/7/8   sell_momentum (12):  9/10/11
 
 All-live filters (15-Jun-2026):
-  rsi_month   = RSI(6) on closes sampled every ~22 bars (monthly approximation)
-  rsi_weekly  = RSI(8) on closes sampled every ~5 bars (weekly approximation)
-  sector_week  = live avg week_return of segment peers
-  sector_month = live avg month_return of segment peers
+  rsi_month, rsi_weekly, sector_week, sector_month — all recomputed every 5-min.
+  GVM stays EOD-frozen (22:00 nightly, screener fundamentals).
 
 Pivot-room gate (15-Jun-2026): pure CMP gate, latch semantics.
   BUY:  pp < cmp <= r1  AND  (r1-cmp) >= 0.5*(r1-pp)
@@ -343,10 +340,10 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 
     out = {
         "gvm_score":    _safe_float(eod.get("gvm_score")),
-        "rsi_month":    None,   # computed live below
-        "rsi_weekly":   None,   # computed live below
-        "sector_week":  _safe_float(eod.get("sector_week")),   # overwritten by _add_sector_aggregates
-        "sector_month": _safe_float(eod.get("sector_month")),  # overwritten by _add_sector_aggregates
+        "rsi_month":    None,
+        "rsi_weekly":   None,
+        "sector_week":  _safe_float(eod.get("sector_week")),
+        "sector_month": _safe_float(eod.get("sector_month")),
         "dma_20": None, "dma_50": None, "dma_200": None,
         "daily_rsi": None,
         "month_return": None, "week_return": None, "year_return": None,
@@ -592,14 +589,17 @@ def _market_gate_fails(conn) -> int:
         return 0
 
 
-def _gate_threshold(fails: int, n_filters: int) -> int:
+def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
     """
-    Score-based adaptive threshold — all 4 baskets.
-    Strong Bullish (0 fails): n-1
-    Bullish        (1 fail):  n-2
-    Neutral/Bear   (2+ fails): n-3
-    Formula: n_filters - 1 - min(fails, 2)
+    Score-based adaptive threshold.
+    BUY:  Strong Bullish → n-1 (tight), Neutral/Bear → n-3 (loose)
+          Formula: n_filters - 1 - min(fails, 2)
+    SELL: Strong Bullish → n-3 (loose — sells scarce in bull market)
+          Neutral/Bear   → n-1 (tight — sells plentiful, be selective)
+          Formula: n_filters - 3 + min(fails, 2)   [inverse of BUY]
     """
+    if side == "SELL":
+        return max(n_filters - 3 + min(fails, 2), 1)
     return n_filters - 1 - min(fails, 2)
 
 
@@ -615,9 +615,10 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         if basket == "sell_overbought":
             continue
 
-        # ── Score-based qualification — uniform across all 4 baskets ──────
+        # ── Score-based qualification — all 4 baskets ──────────────────────
         n_filters = len(filters)
-        need      = _gate_threshold(gate_fails, n_filters)
+        side      = BASKET_SIDE.get(basket, "BUY")
+        need      = _gate_threshold(gate_fails, n_filters, side)
 
         universe = []
         for s in all_metrics:
@@ -643,8 +644,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         log.info(f"{basket}: score-gate need={need}/{n_filters} "
                  f"gate_fails={gate_fails} → {len(universe)} score-qualified")
 
-        # Pivot-room gate — latch semantics
-        side = BASKET_SIDE.get(basket, "BUY")
+        # Pivot-room gate — latch semantics (side already set above)
         universe = [
             s for s in universe
             if (pv := pivots.get(s["symbol"])) and _pivot_room_ok(
