@@ -39,6 +39,7 @@ from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from pcr_endpoints import router as pcr_router
 from v8_replay_endpoints import router as v8_replay_router
+from v8_intra_backtest_endpoints import router as backtest_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
@@ -63,7 +64,10 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.48
+# Scorr / Project Quant — main.py v2.9.49
+# v2.9.49: V8 intraday backtester wired — backtest_router.
+#   POST /api/v8/backtest/run  GET /api/v8/backtest/last
+#   POST /api/v8/backtest/simulate
 # v2.9.48: TEMP cookie diagnostic — authset/authdebug2 probe router wired to
 #   isolate whether the browser is rejecting (not storing) the auth cookie vs
 #   not sending it. /authdebug showed empty cookie header post-login. Remove
@@ -84,7 +88,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.48"
+VERSION = "2.9.49"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -107,9 +111,6 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# Injected into every protected (non-embedded) HTML page: a static logout button.
-# NOTE: the 15-min idle-logout timer was removed in v2.9.47 — it was firing
-# window.location='/logout' and tearing down sessions (badly inside iframes).
 _LOGOUT_BTN = (
     b"<style>#scorr-lo{position:fixed;top:12px;left:14px;z-index:9999;}"
     b"#scorr-lo a{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;"
@@ -122,15 +123,6 @@ _LOGOUT_BTN = (
 )
 
 def _is_embedded(request: Request) -> bool:
-    """True if this HTML load is happening inside an iframe (CIO Shell module).
-
-    Two signals, either is sufficient:
-      1. ?embed=1 query param (set on the initial iframe src).
-      2. Sec-Fetch-Dest: iframe — set by the browser on EVERY iframe document
-         load, including in-iframe navigations that drop the embed param
-         (e.g. clicking a module's own top-nav <a href> link).
-    Embedded loads get no chrome injected — the parent shell owns it.
-    """
     if request.query_params.get("embed") == "1":
         return True
     if request.headers.get("sec-fetch-dest", "").lower() == "iframe":
@@ -139,7 +131,6 @@ def _is_embedded(request: Request) -> bool:
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Password gate + static logout button + no-cache headers for HTML pages."""
     if request.url.path in PROTECTED and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
@@ -175,6 +166,7 @@ app.include_router(v9_router)
 app.include_router(v10_router)
 app.include_router(pcr_router)
 app.include_router(v8_replay_router)
+app.include_router(backtest_router)
 app.include_router(mcp_router)
 app.include_router(anthropic_router)
 app.include_router(scorr_router)
@@ -342,7 +334,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.48)")
+        log.info("Tables ready (v2.9.49)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
