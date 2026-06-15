@@ -40,6 +40,7 @@ from v10_endpoints import router as v10_router
 from pcr_endpoints import router as pcr_router
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
+from v8_backfill_endpoints import router as v8_backfill_router
 from nse_holidays import is_trading_day, is_nse_holiday
 from gvm_nightly import router as gvm_nightly_router, recompute_gvm, _sql_clean_replace_screener
 from mcp_dispatch import router as mcp_router
@@ -64,31 +65,17 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.49
+# Scorr / Project Quant — main.py v2.9.50
+# v2.9.50: v8_backfill_endpoints wired (POST /api/v8/backfill/metrics).
+#   buy_reversal dynamic Nifty-linked filters live in v8_signal_writer.
+#   buy_reversal_simulator.py saved to GitHub for future reference.
+#   1-yr EOD backtest: Dynamic config 63.4% WR, +0.25% exp, +48.91% P&L.
+#   BULL(>2%): wk<=3,rsi_m<=67,sec<=4 | NEUTRAL: wk<=2,rsi_m<=62,sec<=3
+#   BEAR(<0%): wk<=1,rsi_m<=58,sec<=2.
 # v2.9.49: V8 intraday backtester wired — backtest_router.
-#   POST /api/v8/backtest/run  GET /api/v8/backtest/last
-#   POST /api/v8/backtest/simulate
-# v2.9.48: TEMP cookie diagnostic — authset/authdebug2 probe router wired to
-#   isolate whether the browser is rejecting (not storing) the auth cookie vs
-#   not sending it. /authdebug showed empty cookie header post-login. Remove
-#   probe after diagnosis.
-# v2.9.47: Auth fix — 15-min idle-logout timer REMOVED entirely.
-# v2.9.46: Auth fix — middleware treats Sec-Fetch-Dest: iframe as embedded.
-# v2.9.45: Auth fix — no logout/idle injection on ?embed=1 iframe loads.
-# v2.9.44: Investment Check v1.0 — 12-rule GVM-native equity filter.
-# v2.9.43: Auth hardening — logout button top-left, no-cache, cookie path="/".
-# v2.9.42: Logout button injected via middleware + 15-min idle timer.
-# v2.9.41: 15-min inactivity logout injected via middleware.
-# v2.9.40: Password gate — scorr_auth.py.
-# v2.9.39: Startup auto-fill sector_briefs.
-# v2.9.38: sector_brief_endpoints router wired.
-# v2.9.37: sector_endpoints router wired.
-# v2.9.36: gvm_universe_pivots router wired.
-# v2.9.35: Root / now serves scorr_home.html.
-# v2.9.34: /check route wired.
 # ============================================================
 
-VERSION = "2.9.49"
+VERSION = "2.9.50"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -167,6 +154,7 @@ app.include_router(v10_router)
 app.include_router(pcr_router)
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
+app.include_router(v8_backfill_router)
 app.include_router(mcp_router)
 app.include_router(anthropic_router)
 app.include_router(scorr_router)
@@ -334,7 +322,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.49)")
+        log.info("Tables ready (v2.9.50)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
