@@ -1,1 +1,736 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V8 Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
 
+  :root{
+    --bg:#f4f6f9; --bg2:#fbfcfe; --panel:#ffffff; --panel2:#f1f4f8;
+    --line:#e2e7ee; --line2:#cfd8e3;
+    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
+    --grn:#0a9e63; --grn-d:#e3f6ed;
+    --red:#dd3a4a; --red-d:#fceaec;
+    --blu:#2563eb; --cyan:#0e7490; --amber:#b45309;
+    --shadow:0 2px 10px rgba(25,40,70,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);
+    color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:1240px;margin:0 auto;padding:12px 18px 26px}
+
+  /* ── 3-dot model switcher ── */
+  .mswitch{position:relative}
+  .mswitch-btn{width:38px;height:38px;border-radius:9px;border:1px solid var(--line2);
+    background:var(--panel);color:var(--mut);font-size:18px;font-weight:800;line-height:1;
+    cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+  .mswitch-btn:hover{border-color:var(--blu);color:var(--blu)}
+  .mswitch-menu{position:absolute;top:calc(100% + 6px);right:0;min-width:172px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 8px 28px rgba(25,40,70,.14);padding:6px;z-index:200;display:none}
+  .mswitch-menu.open{display:block}
+  .ms-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;
+    text-decoration:none;color:var(--txt);font-size:13px;font-weight:600;white-space:nowrap;transition:.12s}
+  .ms-item span{font-size:14px;width:18px;text-align:center;color:var(--mut)}
+  .ms-item:hover{background:var(--panel2)}
+  .ms-item.active{color:var(--blu)}.ms-item.active span{color:var(--blu)}
+  .ms-item.soon{opacity:.45;cursor:default;pointer-events:none}
+  .ms-item em{font-size:9px;color:var(--dim);margin-left:auto;font-style:normal;letter-spacing:.3px}
+
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:4px 0 12px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
+  .logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .clock{font-family:'Space Mono';font-size:12px;color:var(--mut)}
+  .clock b{color:var(--txt)}
+  .btn{font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+    background:var(--panel2);color:var(--txt);border:1px solid var(--line2);
+    padding:8px 14px;border-radius:8px;transition:.15s}
+  .btn:hover{border-color:var(--blu);color:var(--blu)}
+  .btn.on{background:var(--grn-d);border-color:var(--grn);color:var(--grn)}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}
+
+  .mood{margin:12px 0;border:1px solid var(--line);border-radius:14px;
+    background:var(--panel);padding:16px 18px;
+    display:flex;align-items:center;gap:22px;flex-wrap:wrap;box-shadow:var(--shadow)}
+  .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
+  .mood .pill{font-size:11px;font-weight:700;padding:5px 12px;border-radius:30px;
+    text-transform:uppercase;letter-spacing:1px}
+  .moodChecks{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
+  .chk{font-size:11px;font-family:'Space Mono';padding:6px 10px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--bg2)}
+  .chk.pass{color:var(--grn);border-color:var(--grn-d)}
+  .chk.fail{color:var(--red);border-color:var(--red-d)}
+  .slots{display:flex;gap:14px;font-size:12px;color:var(--mut)}
+  .slots b{font-size:18px;font-family:'Space Mono'}
+  .slots .buy b{color:var(--grn)} .slots .sell b{color:var(--red)}
+
+  /* ── Tabs ── */
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 0;
+    border-bottom:1px solid var(--line);padding-bottom:0}
+  .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;
+    padding:9px 13px;border-radius:8px 8px 0 0;border:1px solid transparent;
+    border-bottom:none;position:relative;top:1px;transition:.15s}
+  .tab:hover{color:var(--txt)}
+  .tab.active{color:var(--txt);background:var(--panel);border-color:var(--line);
+    box-shadow:0 -2px 0 var(--blu) inset}
+
+  .panel{display:none;animation:fade .25s ease;padding-top:16px}
+  .panel.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);
+    text-transform:uppercase;margin:4px 0 12px;display:flex;gap:10px;align-items:center}
+  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);
+    border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+
+  .sec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:4px}
+  .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;position:relative;cursor:default}
+  .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Space Mono';
+    font-size:10px;color:var(--dim)}
+  .sec-card .sc-name{font-size:11px;font-weight:600;color:var(--txt);margin-top:2px;
+    line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .sec-card .sc-pct{font-family:'Space Mono';font-size:13px;font-weight:700;margin-top:6px}
+  .sec-card .sc-top{font-size:10px;color:var(--mut);margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
+
+  .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
+    text-align:right;padding:10px 12px;border-bottom:1px solid var(--line2);
+    white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;
+    user-select:none}
+  th:first-child,td:first-child{text-align:left}
+  th:hover{color:var(--txt)}
+  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);
+    white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#f0f4f9}
+
+  .mob-cards{display:none;flex-direction:column;gap:8px}
+  .mob-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .mob-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .mob-sym{font-family:'Sora';font-weight:700;font-size:14px;color:var(--txt)}
+  .mob-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;font-family:'Sora'}
+  .mob-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .mob-chip{font-family:'Space Mono';font-size:11px;padding:3px 8px;border-radius:6px;
+    background:var(--bg2);border:1px solid var(--line2);color:var(--txt)}
+  .mob-pivot{margin-top:4px}
+
+  @media(max-width:720px){
+    .scroll table{min-width:unset}
+    .desktop-only{display:none!important}
+    .mob-cards{display:flex}
+    .tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:0}
+    .tabs::-webkit-scrollbar{height:3px}
+    .tabs::-webkit-scrollbar-thumb{background:var(--line2);border-radius:2px}
+    .tab{white-space:nowrap;flex-shrink:0;padding:9px 11px;font-size:12px}
+    .mood{flex-direction:column;align-items:flex-start;gap:12px}
+    .moodChecks{margin-left:0}
+    .cards{grid-template-columns:repeat(2,1fr)}
+    .pivot-bar-wrap{width:120px!important}
+  }
+  @media(min-width:721px){
+    .mob-cards{display:none!important}
+    .desktop-only{display:block}
+    table{min-width:640px}
+  }
+
+  .sym{font-family:'Sora';font-weight:600;color:var(--txt)}
+  .seg{font-family:'Sora';font-size:11px;color:var(--mut);text-align:left}
+  .pos{color:var(--grn)} .neg{color:var(--red)}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;
+    font-family:'Sora';letter-spacing:.5px}
+  .b-long{background:var(--grn-d);color:var(--grn)}
+  .b-short{background:var(--red-d);color:var(--red)}
+  .b-tgt{background:var(--grn-d);color:var(--grn)}
+  .b-sl{background:var(--red-d);color:var(--red)}
+  .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
+  .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';
+    border:1px dashed var(--amber);border-radius:10px;background:#fdf3df;margin-bottom:10px}
+  .score-hi{color:var(--grn)} .score-mid{color:var(--amber)} .score-lo{color:var(--red)}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .card .v{font-size:24px;font-weight:800;font-family:'Space Mono';margin-top:6px}
+  .card .v-sub{font-size:10px;color:var(--dim);margin-top:3px;font-family:'Space Mono'}
+
+  .funnelGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .loading{color:var(--dim);font-size:12px;padding:20px;text-align:center;font-family:'Space Mono'}
+  .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .subnav .btn.on{background:var(--blu);border-color:var(--blu);color:#fff}
+
+  .scan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .scan-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .scan-card .sk-sym{font-weight:700;font-size:12px;color:var(--txt);margin-bottom:5px}
+  .scan-card .sk-score{font-family:'Space Mono';font-size:13px;font-weight:700;margin-bottom:4px}
+  .scan-card .sk-chips{display:flex;flex-wrap:wrap;gap:4px}
+  .scan-card .sk-chip{font-family:'Space Mono';font-size:10px;padding:1px 5px;
+    border-radius:4px;background:var(--bg2);border:1px solid var(--line2)}
+  .funnel-stages{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+  .funnel-stage{display:flex;align-items:center;gap:8px;padding:7px 12px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px}
+  .fs-name{flex:1;font-size:12px;color:var(--txt)}
+  .fs-bar{width:80px;height:6px;background:var(--line2);border-radius:3px;overflow:hidden;flex-shrink:0}
+  .fs-bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
+  .fs-surv{font-family:'Space Mono';font-size:11px;color:var(--grn);min-width:28px;text-align:right}
+  .fs-kill{font-family:'Space Mono';font-size:11px;color:var(--red);min-width:36px;text-align:right}
+  .fs-cond{font-family:'Space Mono';font-size:10px;color:var(--dim);min-width:58px;text-align:center}
+  .pc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:7px}
+  .pc-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .pc-card .pc-sym{font-weight:700;font-size:12px;color:var(--txt);margin-bottom:4px}
+  .pc-card .pc-score{font-family:'Space Mono';font-size:14px;font-weight:700}
+  .pc-card .pc-fail{font-size:10px;color:var(--mut);margin-top:3px;line-height:1.3}
+  footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="logo">V8 <b>Dashboard</b></div>
+      <div class="tag">Learn More. Score More.</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="clock" id="clock">—</div>
+    <div class="toggle">
+      <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
+      <button class="btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
+    </div>
+    <div class="mswitch" id="mswitch">
+      <button class="mswitch-btn" onclick="event.stopPropagation();document.getElementById('mswitchMenu').classList.toggle('open')" aria-label="Switch model">⋮</button>
+      <div class="mswitch-menu" id="mswitchMenu">
+        <a class="ms-item active" href="/dashboard"><span>⚡</span>V8</a>
+        <a class="ms-item" href="/cio2?model=gvm"><span>▦</span>GVM</a>
+        <a class="ms-item" href="/check"><span>✓</span>Check</a>
+        <a class="ms-item" href="/cio"><span>◉</span>Max</a>
+        <a class="ms-item" href="/ask"><span>✦</span>Ask</a>
+        <a class="ms-item soon"><span>⌂</span>QB<em>soon</em></a>
+        <a class="ms-item soon"><span>⟁</span>V10<em>soon</em></a>
+      </div>
+    </div>
+  </header>
+  <script>
+    document.addEventListener('click',function(){var m=document.getElementById('mswitchMenu');if(m)m.classList.remove('open');});
+    if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+      var _s=document.getElementById('mswitch'); if(_s)_s.style.display='none';
+    }
+  </script>
+
+  <div class="mood" id="mood"><div class="loading">Loading market gate…</div></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="panels"></div>
+
+  <footer>
+    <span id="apiNote">API: <span id="apiBase">—</span></span>
+    <span id="lastUpd">Last refresh: —</span>
+  </footer>
+</div>
+
+<script>
+const API_BASE = "";
+const BROKERAGE_PER_TRADE = 500;
+const EP = {
+  mood:         "/api/v8/market_mood",
+  metricsAll:   "/api/v8/metrics/all",
+  qualified:    b => `/api/v8/qualified/${b}`,
+  sellOB:       "/api/v8/sell_overbought?limit=25",
+  paper:        "/api/paper/status",
+  scan:         "/api/v8/scan",
+  funnelDetail: b => `/api/v8/funnel_detail/${b}`,
+  passCount:    b => `/api/v8/stock_passcount/${b}`,
+  gvmSearch:    q => `/api/gvm/search?q=${encodeURIComponent(q)}`,
+};
+const BASKETS = [
+  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
+  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
+];
+const ALL5 = [
+  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
+  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
+  {id:"sell_overbought",label:"Sell Overbought"},
+];
+const TAB_LABELS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel"];
+const TAB_ORDER = [0,1,2,3,4,5,6,7,8,9];
+
+let AUTO=true, autoTimer=null;
+const cache={};
+
+async function getJSON(path){
+  const r=await fetch(API_BASE+path,{headers:{'Accept':'application/json'}});
+  if(!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+  return r.json();
+}
+function num(x,d=2){if(x===null||x===undefined||isNaN(x))return"—";return Number(x).toFixed(d);}
+function sign(x,d=2){if(x===null||x===undefined||isNaN(x))return"—";const v=Number(x);return(v>=0?"+":"")+v.toFixed(d);}
+function cls(x){if(x===null||x===undefined||isNaN(x))return"";return Number(x)>=0?"pos":"neg";}
+function inr(x){if(x===null||x===undefined||isNaN(x))return"—";return"₹"+Number(x).toLocaleString('en-IN',{maximumFractionDigits:0});}
+function pnlCls(x){return Number(x)>=0?"pos":"neg";}
+function netPnl(pnl, trades){return (Number(pnl)||0) - (Number(trades)||1)*BROKERAGE_PER_TRADE;}
+
+function fmtTs(ts){
+  if(!ts)return"—";
+  try{const d=new Date(ts),ist=new Date(d.getTime()+(5*60+30)*60000);
+    return String(ist.getUTCDate()).padStart(2,'0')+' '+
+      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
+      String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
+  }catch(e){return ts;}}
+
+function fmtSince(ts){
+  if(!ts)return"—";
+  try{const d=new Date(ts),ist=new Date(d.getTime()+(5*60+30)*60000);
+    return String(ist.getUTCDate()).padStart(2,'0')+'/'+
+      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
+      String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
+  }catch(e){return"—";}}
+
+function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
+
+function tick(){
+  const ist=new Date(Date.now()+(5*60+30)*60000);
+  const hh=String(ist.getUTCHours()).padStart(2,'0'),mm=String(ist.getUTCMinutes()).padStart(2,'0'),ss=String(ist.getUTCSeconds()).padStart(2,'0');
+  const mins=ist.getUTCHours()*60+ist.getUTCMinutes(),dow=ist.getUTCDay();
+  const open=dow>=1&&dow<=5&&mins>=555&&mins<=930;
+  document.getElementById('clock').innerHTML=`<b>${hh}:${mm}:${ss}</b> IST &nbsp;·&nbsp; <span style="color:${open?'var(--grn)':'var(--dim)'}">NSE ${open?'OPEN':'CLOSED'}</span>`;
+}
+setInterval(tick,1000);tick();
+
+const tabsEl=document.getElementById('tabs'),panelsEl=document.getElementById('panels');
+TAB_LABELS.forEach((t,i)=>{
+  const p=document.createElement('div');p.className='panel'+(i===0?' active':'');
+  p.id='panel'+i;p.innerHTML='<div class="loading">…</div>';panelsEl.appendChild(p);
+});
+TAB_ORDER.forEach((panelIdx)=>{
+  const b=document.createElement('div');
+  b.className='tab'+(panelIdx===0?' active':'');
+  b.textContent=TAB_LABELS[panelIdx];
+  b.onclick=()=>selectTab(panelIdx);
+  tabsEl.appendChild(b);
+});
+function selectTab(i){
+  [...tabsEl.children].forEach(t=>t.classList.toggle('active',t.textContent===TAB_LABELS[i]));
+  [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
+}
+
+const SORTREG={};
+function sortTbl(uid,cols,rows,rowFn,opts={}){
+  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows"};
+  return `<div id="tw_${uid}" class="desktop-only">${drawTbl(uid)}</div>`;
+}
+function drawTbl(uid){
+  const t=SORTREG[uid];
+  if(!t||!t.rows||!t.rows.length)return`<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
+  let rows=t.rows;
+  if(t.sortKey){rows=[...rows].sort((a,b)=>{
+    const av=a[t.sortKey],bv=b[t.sortKey];
+    if(typeof av==='string'||typeof bv==='string')return t.dir*String(av??'').localeCompare(String(bv??''));
+    return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));
+  });}
+  const head=t.cols.map(([k,l])=>`<th onclick="tblSort('${uid}','${k}')">${l}${t.sortKey===k?(t.dir<0?' ▾':' ▴'):''}</th>`).join('');
+  return`<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows.map(t.rowFn).join('')}</tbody></table></div>`;
+}
+function tblSort(uid,k){
+  const t=SORTREG[uid];if(!t)return;
+  t.dir=(t.sortKey===k)?-t.dir:-1;t.sortKey=k;
+  const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
+}
+
+function pivotBar(cmp, pp, r1, s1){
+  if(!pp||!r1||!s1)return'<span style="color:var(--dim);font-size:11px">—</span>';
+  const lo=parseFloat(s1),mid=parseFloat(pp),hi=parseFloat(r1),c=parseFloat(cmp||0);
+  const range=hi-lo;
+  if(range<=0)return'<span style="color:var(--dim);font-size:11px">—</span>';
+  const cmpPct=Math.min(98,Math.max(2,(c-lo)/range*100));
+  const ppPct=((mid-lo)/range*100).toFixed(1);
+  const buyW=(100-parseFloat(ppPct)).toFixed(1);
+  const arrowColor=c>=hi?'var(--grn)':c>=mid?'var(--amber)':'var(--red)';
+  const arrow=c>=mid?'▲':'▼';
+  const cmpFmt=c>=1000?Math.round(c):c.toFixed(1);
+  return `<div class="pivot-bar-wrap" style="display:inline-block;width:140px;vertical-align:middle">
+    <div style="font-family:'Space Mono';font-size:9px;color:${arrowColor};margin-left:calc(${cmpPct.toFixed(0)}% - 14px);white-space:nowrap">${arrow}${cmpFmt}</div>
+    <div style="position:relative;height:14px">
+      <div style="position:absolute;top:5px;left:0;right:0;height:3px;background:var(--line2);border-radius:2px"></div>
+      <div style="position:absolute;top:5px;left:0;width:${ppPct}%;height:3px;background:var(--red-d);border-radius:2px 0 0 2px"></div>
+      <div style="position:absolute;top:5px;left:${ppPct}%;width:${buyW}%;height:3px;background:var(--grn-d);border-radius:0 2px 2px 0"></div>
+      <div style="position:absolute;top:3px;left:0;width:2px;height:7px;background:var(--red);border-radius:1px"></div>
+      <div style="position:absolute;top:3px;left:${ppPct}%;width:2px;height:7px;background:var(--mut);border-radius:1px;transform:translateX(-50%)"></div>
+      <div style="position:absolute;top:3px;right:0;width:2px;height:7px;background:var(--grn);border-radius:1px"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';line-height:1.3">
+      <span style="color:var(--red)">${Math.round(lo)}</span>
+      <span style="color:var(--mut)">${Math.round(mid)}</span>
+      <span style="color:var(--grn)">${Math.round(hi)}</span>
+    </div>
+  </div>`;
+}
+
+function renderMood(m){
+  const _op=(cache.paper&&cache.paper.open_positions)||[];
+  const _lo=_op.filter(p=>(p.side||'').toUpperCase()==='LONG').length;
+  const _so=_op.filter(p=>(p.side||'').toUpperCase()==='SHORT').length;
+  const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#fdf3df','var(--amber)'],
+    Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
+  const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
+  const checks=(m.checks||[]).map(c=>`<div class="chk ${c.pass?'pass':'fail'}">${c.filter}: ${num(c.value)} ${c.pass?'✓':'✗'}</div>`).join('');
+  document.getElementById('mood').innerHTML=`
+    <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
+      <div class="big">${m.mood||'—'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div></div>
+    <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span></div>
+    <div class="moodChecks">${checks}</div>`;
+}
+
+function sectorCards(sectors, title, label) {
+  if (!sectors || !sectors.length) return `<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;color:var(--dim);font-size:12px">No data</div>`;
+  const cards = sectors.map((s,i) => {
+    const pct = s.avg_day_1d;
+    const color = pct >= 0 ? 'var(--grn)' : 'var(--red)';
+    return `<div class="sec-card">
+      <div class="sc-num">${i+1}</div>
+      <div class="sc-name" style="margin-top:14px">${s.segment}</div>
+      <div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>
+      <div class="sc-top">${s.top_stock||''}</div>
+      <div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>
+    </div>`;
+  }).join('');
+  return `<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
+}
+
+function renderMaster(){
+  const p=cache.paper,open=(p&&p.open_positions)||[],sum=(p&&p.summary)||{};
+  const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
+  const netUnreal=unreal - open.length*BROKERAGE_PER_TRADE;
+  const totalClosedPnl=Number(sum.total_pnl||0);
+  const netClosed=netPnl(totalClosedPnl, sum.trades||0);
+  const sectors=(cache.scan&&cache.scan.sectors)||[];
+  const top8=sectors.filter(s=>s.avg_day_1d>0).slice(0,8);
+  const bot8=sectors.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
+  const cards=`<div class="cards">
+    <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
+    <div class="card"><div class="k">Unrealised P&L</div>
+      <div class="v ${pnlCls(unreal)}">${inr(unreal)}</div>
+      <div class="v-sub">Net ${inr(netUnreal)}</div></div>
+    <div class="card"><div class="k">Closed Trades</div><div class="v">${sum.trades??'—'}</div></div>
+    <div class="card"><div class="k">Win / Loss</div><div class="v">${sum.wins??'—'}/${sum.losses??'—'}</div></div>
+    <div class="card"><div class="k">Realised P&L</div>
+      <div class="v ${pnlCls(totalClosedPnl)}">${inr(totalClosedPnl)}</div>
+      <div class="v-sub">Net ${inr(netClosed)}</div></div>
+  </div>`;
+  const openPosDesktop = sortTbl('pos',
+    [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
+     ["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","Stop"],["qty","Qty"],["unrealised_pnl","Unreal P&L"],["net_pnl","Net P&L"]],
+    open,x=>{const np=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;return`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
+      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td>
+      <td>${num(x.entry_price)}</td><td>${num(x.cmp)}</td><td>${num(x.target)}</td><td>${num(x.stop_loss)}</td>
+      <td>${x.qty}</td><td class="${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</td>
+      <td class="${pnlCls(np)}">${inr(np)}</td></tr>`;},
+    {empty:"No open positions"});
+  const openPosMobile = `<div class="mob-cards">${open.length ? open.map(x=>{const np=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;return`
+    <div class="mob-card">
+      <div class="mob-card-header">
+        <span class="mob-sym">${x.symbol}</span>
+        <span class="mob-badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span>
+      </div>
+      <div class="mob-chips">
+        <span class="mob-chip">Entry ${num(x.entry_price)}</span>
+        <span class="mob-chip">CMP ${num(x.cmp)}</span>
+        <span class="mob-chip">Tgt ${num(x.target)}</span>
+        <span class="mob-chip">SL ${num(x.stop_loss)}</span>
+        <span class="mob-chip ${pnlCls(x.unrealised_pnl)}">${inr(x.unrealised_pnl)}</span>
+        <span class="mob-chip ${pnlCls(np)}">Net ${inr(np)}</span>
+        <span class="mob-chip" style="color:var(--dim)">${fmtTs(x.entry_ts)}</span>
+      </div>
+    </div>`;}).join('') : '<div class="empty">No open positions</div>'}</div>`;
+  return cards +
+    `<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of ₹${BROKERAGE_PER_TRADE}/trade brokerage (entry side)</div>` +
+    openPosDesktop + openPosMobile +
+    `<div class="funnelGrid" style="margin-top:16px">
+       <div>${sectorCards(top8,'Top Sectors','1D Live% positive')}</div>
+       <div>${sectorCards(bot8,'Bottom Sectors','1D Live% negative')}</div>
+     </div>`;
+}
+
+function renderFunnel(b){
+  const d=cache['q_'+b.id];
+  if(!d)return'<div class="loading">…</div>';
+  const isSell = b.id.startsWith('sell');
+  const badgeCls = isSell ? 'b-short' : 'b-long';
+  const meta=`<div class="ptitle">${b.label} <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'—'}</span></div>`;
+  const stocks = d.stocks || [];
+  if (!stocks.length) return meta + `<div class="empty">No qualified names — gate may be closed for this side.</div>`;
+  const sorted = stocks.sort((a,bk)=>((bk.gvm_score||0)-(a.gvm_score||0)));
+  const desktopTable = sortTbl('bk_'+b.id,
+    [["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50 Δ"],
+     ["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["first_seen","Since"]],
+    sorted,
+    x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${cls(x.day_1d)}">${sign(x.day_1d,1)}%</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d,1)}%</td>
+      <td class="${cls(x.dma_50)}">${num(x.dma_50,0)}</td>
+      <td>${num(x.rsi_month,0)}</td>
+      <td class="${Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg'}">${num(x.gvm_score,1)}</td>
+      <td>${num(x.cmp,1)}</td>
+      <td style="color:var(--mut)">${num(x.pp,0)}</td>
+      <td class="pos">${num(x.r1,0)}</td>
+      <td class="neg">${num(x.s1,0)}</td>
+      <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
+    </tr>`,
+    {sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
+  const mobileCards = `<div class="mob-cards">${sorted.map(x=>`
+    <div class="mob-card">
+      <div class="mob-card-header">
+        <span class="mob-sym">${x.symbol}</span>
+        <span class="mob-badge ${badgeCls}">${isSell?'SELL':'BUY'}</span>
+      </div>
+      <div class="mob-chips">
+        <span class="mob-chip ${cls(x.day_1d)}">${sign(x.day_1d,1)}% 1D</span>
+        <span class="mob-chip ${cls(x.mom_2d)}">${sign(x.mom_2d,1)}% 2D</span>
+        <span class="mob-chip">DMA50 ${num(x.dma_50,0)}</span>
+        <span class="mob-chip">RSIm ${num(x.rsi_month,0)}</span>
+        <span class="mob-chip ${Number(x.gvm_score)>=7?'pos':'score-mid'}">GVM ${num(x.gvm_score,1)}</span>
+      </div>
+      <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div>
+    </div>`).join('')}</div>`;
+  return meta + desktopTable + mobileCards;
+}
+
+function renderSellOB(){
+  const d=cache.sellOB;if(!d)return'<div class="loading">…</div>';
+  const stocks = d.stocks || [];
+  const meta = `<div class="ptitle">Sell Overbought <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'—'}</span></div>`;
+  if (!stocks.length) return meta + `<div class="empty">No overbought signals</div>`;
+  const desktopTable = sortTbl('sellob',
+    [["symbol","Symbol"],["entry","Entry"],["target","Target"],["tgt_pct","Tgt%"],
+     ["rsi_month","RSIm"],["dma_200","DMA200"],["gvm_score","GVM"]],
+    stocks,
+    x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td>${num(x.entry)}</td><td class="neg">${num(x.target)}</td>
+      <td class="neg">${num(x.tgt_pct,1)}%</td>
+      <td>${num(x.rsi_month,0)}</td><td>${num(x.dma_200,0)}</td>
+      <td class="${Number(x.gvm_score)>=7?'pos':'score-mid'}">${num(x.gvm_score,1)}</td>
+    </tr>`,
+    {sortKey:'rsi_month',dir:-1,empty:"No overbought signals"});
+  const mobileCards = `<div class="mob-cards">${stocks.map(x=>`
+    <div class="mob-card">
+      <div class="mob-card-header"><span class="mob-sym">${x.symbol}</span><span class="mob-badge b-short">SELL</span></div>
+      <div class="mob-chips">
+        <span class="mob-chip">Entry ${num(x.entry)}</span>
+        <span class="mob-chip neg">Tgt ${num(x.target)} (${num(x.tgt_pct,1)}%)</span>
+        <span class="mob-chip">RSIm ${num(x.rsi_month,0)}</span>
+        <span class="mob-chip">DMA200 ${num(x.dma_200,0)}</span>
+        <span class="mob-chip">GVM ${num(x.gvm_score,1)}</span>
+      </div>
+    </div>`).join('')}</div>`;
+  return meta + desktopTable + mobileCards;
+}
+
+function renderTradeLog(){
+  const p=cache.paper;if(!p)return'<div class="loading">…</div>';
+  const t=p.recent_trades||[],s=p.summary||{};
+  const totalPnl=Number(s.total_pnl||0);
+  const netTotal=netPnl(totalPnl, s.trades||0);
+  const summaryCards=`<div class="cards">
+    <div class="card"><div class="k">Trades</div><div class="v">${s.trades??'—'}</div></div>
+    <div class="card"><div class="k">Wins</div><div class="v pos">${s.wins??'—'}</div></div>
+    <div class="card"><div class="k">Losses</div><div class="v neg">${s.losses??'—'}</div></div>
+    <div class="card"><div class="k">Realised P&L</div>
+      <div class="v ${pnlCls(totalPnl)}">${inr(totalPnl)}</div>
+      <div class="v-sub">Net ${inr(netTotal)}</div></div>
+    <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(s.avg_ret||0)}">${sign(s.avg_ret)}%</div></div>
+  </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of ₹${BROKERAGE_PER_TRADE}/trade brokerage (round trip = ₹${BROKERAGE_PER_TRADE*2})</div>`;
+  const desktopTable = `<div class="ptitle">Recent Closed Trades</div>`+
+    sortTbl('tlog',
+    [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],
+     ["exit_ts","Exit Time"],["entry_price","Entry"],["exit_price","Exit"],
+     ["return_pct","Ret %"],["pnl","Gross P&L"],["net_pnl","Net P&L"],["result","Result"]],
+    t,x=>{const np=Number(x.pnl||0)-BROKERAGE_PER_TRADE*2;return`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td><span class="badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span></td>
+      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td style="color:var(--mut)">${fmtTs(x.entry_ts)}</td><td style="color:var(--mut)">${fmtTs(x.exit_ts)}</td>
+      <td>${num(x.entry_price)}</td><td>${num(x.exit_price)}</td>
+      <td class="${cls(x.return_pct)}">${sign(x.return_pct)}%</td>
+      <td class="${pnlCls(x.pnl)}">${inr(x.pnl)}</td>
+      <td class="${pnlCls(np)}">${inr(np)}</td>
+      <td><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></td></tr>`;},
+    {sortKey:'exit_ts',dir:-1,empty:"No closed trades"});
+  const mobileTradeCards = `<div class="mob-cards">${t.map(x=>{const np=Number(x.pnl||0)-BROKERAGE_PER_TRADE*2;return`
+    <div class="mob-card">
+      <div class="mob-card-header">
+        <span class="mob-sym">${x.symbol}</span>
+        <span class="mob-badge ${x.side==='SHORT'?'b-short':'b-long'}">${x.side}</span>
+      </div>
+      <div class="mob-chips">
+        <span class="mob-chip">Entry ${num(x.entry_price)}</span>
+        <span class="mob-chip">Exit ${num(x.exit_price)}</span>
+        <span class="mob-chip ${cls(x.return_pct)}">${sign(x.return_pct)}%</span>
+        <span class="mob-chip ${pnlCls(x.pnl)}">Gross ${inr(x.pnl)}</span>
+        <span class="mob-chip ${pnlCls(np)}">Net ${inr(np)}</span>
+        <span class="mob-chip"><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></span>
+        <span class="mob-chip" style="color:var(--dim)">${fmtTs(x.exit_ts)}</span>
+      </div>
+    </div>`;}).join('')}</div>`;
+  return summaryCards + desktopTable + mobileTradeCards;
+}
+
+function renderRaw(){
+  const all=cache.metricsAll;if(!all)return'<div class="loading">…</div>';
+  return`<div class="ptitle">Raw Data <span class="ct">${all.length} symbols</span></div>`+
+    sortTbl('raw',
+    [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Wk %"],["month_return","Mo %"],
+     ["year_return","Yr %"],["dma_50","DMA50"],["dma_200","DMA200"],
+     ["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["vol_ratio","Vol×"],["gvm_score","GVM"]],
+    all,x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td>
+      <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
+      <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
+      <td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
+      <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td>
+      <td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+      <td>${num(x.daily_rsi,0)}</td><td>${num(x.week_index_52,0)}</td>
+      <td>${num(x.vol_ratio,2)}</td><td>${num(x.gvm_score,2)}</td></tr>`,
+    {sortKey:'mom_2d',dir:-1,empty:"No metrics"});
+}
+
+let scanMode='gainers';
+function renderScan(){
+  const sc=cache.scan;if(!sc)return'<div class="loading">…</div>';
+  const nav=[["gainers","Top Gainers"],["losers","Top Losers"],["sectors","Top Sectors"]]
+    .map(([k,l])=>`<button class="btn ${scanMode===k?'on':''}" onclick="scanSet('${k}')">${l}</button>`).join('');
+  let body;
+  if(scanMode==='sectors'){
+    const secs = sc.sectors || [];
+    body = secs.length
+      ? `<div class="sec-cards">${secs.map((s,i)=>{
+          const color=s.avg_day_1d>=0?'var(--grn)':'var(--red)';
+          return`<div class="sec-card"><div class="sc-num">${i+1}</div>
+            <div class="sc-name" style="margin-top:14px">${s.segment}</div>
+            <div class="sc-pct" style="color:${color}">${sign(s.avg_day_1d,2)}%</div>
+            <div class="sc-top">${s.top_stock||''}</div>
+            <div class="sc-stocks">${s.stocks} stocks</div></div>`;
+        }).join('')}</div>`
+      : `<div class="empty">No sector data</div>`;
+  } else {
+    const rows=(scanMode==='gainers'?sc.gainers:sc.losers)||[];
+    body = rows.length
+      ? `<div class="scan-grid">${rows.map(x=>{
+          const sv=x.gate_score??0,st=x.gate_total??11;
+          const sc_cls=scoreClass(sv,st);
+          return`<div class="scan-card">
+            <div class="sk-sym">${x.symbol}</div>
+            <div class="sk-score ${sc_cls}">${sv}/${st}</div>
+            <div class="sk-chips">
+              <span class="sk-chip" style="color:${Number(x.mom_2d)>=0?'var(--grn)':'var(--red)'}">${sign(x.mom_2d,1)}%</span>
+              <span class="sk-chip">RSI ${num(x.rsi_weekly,0)}</span>
+              <span class="sk-chip">Vol ${num(x.vol_ratio,1)}×</span>
+            </div></div>`;
+        }).join('')}</div>`
+      : `<div class="empty">No matches</div>`;
+  }
+  return`<div class="subnav">${nav}</div>`+
+    `<div class="ptitle">Filter Scan · ${scanMode} <span class="ct">score_date ${sc.score_date||'—'} · universe ${sc.universe||'—'}</span></div>`+body;
+}
+function scanSet(m){scanMode=m;document.getElementById('panel8').innerHTML=renderScan();}
+
+let ffBasket='buy_reversal';
+function ffSet(b){ffBasket=b;loadFF();}
+function preFreezeBanner(){
+  const ist=new Date(Date.now()+(5*60+30)*60000);
+  const dow=ist.getUTCDay(),mins=ist.getUTCHours()*60+ist.getUTCMinutes();
+  if(dow>=1&&dow<=5&&mins<945)
+    return`<div class="err" style="margin-top:18px">⚠ Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed — funnel may understate.</div>`;
+  return'';}
+async function loadFF(){
+  const el=document.getElementById('panel9');if(!el)return;
+  const nav=ALL5.map(b=>`<button class="btn ${ffBasket===b.id?'on':''}" onclick="ffSet('${b.id}')">${b.label}</button>`).join('');
+  el.innerHTML=`<div class="subnav">${nav}</div><div class="loading">Loading funnel…</div>`;
+  let fd=null,pc=null;
+  try{fd=await getJSON(EP.funnelDetail(ffBasket));}catch(e){}
+  try{pc=await getJSON(EP.passCount(ffBasket));}catch(e){}
+  let html=`<div class="subnav">${nav}</div>`;
+  if(fd&&fd.stages){
+    const maxSurv = Math.max(...fd.stages.map(s=>s.survivors||0),1);
+    html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} → final ${fd.final} · ${fd.filter_count} filters</span></div>`;
+    html+=`<div class="funnel-stages">${fd.stages.map(s=>{
+      const pct=Math.round((s.survivors/maxSurv)*100);
+      const killColor=s.killed>0?'var(--red)':'var(--dim)';
+      const barColor=s.killed>0?'var(--amber)':'var(--grn)';
+      return`<div class="funnel-stage">
+        <div class="fs-name">${s.metric.replace(/_/g,' ')}</div>
+        <div class="fs-cond">${s.condition_min||'-'}</div>
+        <div class="fs-cond">${s.condition_max||'-'}</div>
+        <div class="fs-bar"><div class="fs-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+        <div class="fs-surv">${s.survivors}</div>
+        <div class="fs-kill" style="color:${killColor}">${s.killed>0?'-'+s.killed:''}</div>
+      </div>`;
+    }).join('')}</div>`;
+  } else html+=`<div class="err">⚠ funnel_detail not available for ${ffBasket}</div>`;
+  if(pc&&pc.stocks){
+    html+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
+    const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
+    html+=`<div class="pc-grid">${sorted.map(x=>{
+      const sc_cls=scoreClass(x.passed,x.total);
+      const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
+      return`<div class="pc-card">
+        <div class="pc-sym">${x.symbol}</div>
+        <div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div>
+        <div class="pc-fail">${fails||'all pass'}</div>
+      </div>`;
+    }).join('')}</div>`;}
+  html+=preFreezeBanner();
+  el.innerHTML=html;
+}
+
+function paint(){
+  document.getElementById('panel0').innerHTML=renderMaster();
+  BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
+  document.getElementById('panel5').innerHTML=renderSellOB();
+  document.getElementById('panel6').innerHTML=renderTradeLog();
+  document.getElementById('panel7').innerHTML=renderRaw();
+  document.getElementById('panel8').innerHTML=renderScan();
+  loadFF();
+}
+
+async function loadAll(){
+  document.getElementById('refreshBtn').textContent='↻ …';
+  const errs=[];
+  const tasks=[
+    ['mood',()=>getJSON(EP.mood)],['metricsAll',()=>getJSON(EP.metricsAll)],
+    ['sellOB',()=>getJSON(EP.sellOB)],['paper',()=>getJSON(EP.paper)],
+    ['scan',()=>getJSON(EP.scan)],
+    ...BASKETS.map(b=>['q_'+b.id,()=>getJSON(EP.qualified(b.id))]),
+  ];
+  await Promise.all(tasks.map(async([k,fn])=>{
+    try{cache[k]=await fn();}catch(e){errs.push(e.message);cache[k]=cache[k]||null;}
+  }));
+  if(cache.mood)renderMood(cache.mood);
+  paint();
+  if(errs.length)document.getElementById('panel0').insertAdjacentHTML('afterbegin',
+    `<div class="err">⚠ ${errs.length} endpoint(s) failed:<br>${errs.join('<br>')}</div>`);
+  document.getElementById('refreshBtn').textContent='↻ Refresh';
+  document.getElementById('apiBase').textContent=API_BASE||location.origin;
+  const ist=new Date(Date.now()+(5*60+30)*60000);
+  document.getElementById('lastUpd').textContent='Last refresh: '+
+    String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0')+':'+String(ist.getUTCSeconds()).padStart(2,'0')+' IST';
+}
+
+function toggleAuto(){
+  AUTO=!AUTO;const b=document.getElementById('autoBtn');
+  b.textContent='Auto 5m: '+(AUTO?'ON':'OFF');b.classList.toggle('on',AUTO);
+  if(AUTO){autoTimer=setInterval(loadAll,5*60*1000);}else{clearInterval(autoTimer);}
+}
+
+loadAll();
+autoTimer=setInterval(loadAll,5*60*1000);
+</script>
