@@ -19,6 +19,10 @@ Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
   FORTIS confirmed clean reversal-in-uptrend, failed ONLY on sector_week 4.2
   vs 4.0. Verified not to over-admit (basket held at 1 with 6.0). Sells +
   sell_overbought untouched.
+Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
+  All 4 non-overbought baskets now gate on live pivot room in fallback path.
+  funnel_detail formula fixed: (r1-pp)/r1 bug replaced with paper-engine rule.
+  BUY: (r1-cmp)>=0.5*(r1-pp) | SELL: (cmp-s1)>=0.5*(pp-s1)
 """
 
 from fastapi import APIRouter, HTTPException
@@ -141,6 +145,28 @@ def _passes_filter(value, mn, mx) -> bool:
     if mx is not None and v > mx: return False
     return True
 
+def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
+    """
+    Paper-engine pivot-room gate — the ONLY live intraday check.
+    BUY:  pp < cmp <= r1  AND  (r1 - cmp) >= 0.5 * (r1 - pp)
+    SELL: s1 <= cmp < pp  AND  (cmp - s1) >= 0.5 * (pp - s1)
+    """
+    try:
+        cmp = float(cmp); pp = float(pp)
+    except (TypeError, ValueError):
+        return False
+    if side == "BUY":
+        try: r1 = float(r1)
+        except (TypeError, ValueError): return False
+        band = r1 - pp
+        return band > 0 and pp < cmp <= r1 and (r1 - cmp) >= 0.5 * band
+    else:
+        try: s1 = float(s1)
+        except (TypeError, ValueError): return False
+        band = pp - s1
+        return band > 0 and s1 <= cmp < pp and (cmp - s1) >= 0.5 * band
+
+
 def _gate_score(stock: dict, basket: str) -> int:
     count = 0
     for metric, bounds in FILTER_CONFIG[basket].items():
@@ -173,8 +199,23 @@ def _live_qualified_fallback(basket: str, limit: int):
     params.append(min(max(limit, 1), 200))
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
+        cols    = [d[0] for d in cur.description]
+        rows    = [dict(zip(cols, r)) for r in cur.fetchall()]
+        pivots  = _basket_pivots(cur)
+        cmp_map = _basket_cmp(cur)
+
+    side = "BUY" if basket.startswith("buy") else "SELL"
+    out = []
+    for r in rows:
+        pv  = pivots.get(r["symbol"])
+        cmp = cmp_map.get(r["symbol"])
+        # If no live CMP (pre-market/off-hours), include row — don't gate out
+        if cmp is None or pv is None:
+            out.append(r)
+            continue
+        if _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
+            out.append(r)
+    return out
 
 
 # ── ADR helpers ───────────────────────────────────────────────────────────────
@@ -446,6 +487,12 @@ def qualified(basket: str, limit: int = 50):
         raise HTTPException(500, f"qualified failed: {e}")
 
 
+def _basket_cmp(cur):
+    """Load latest CMP for all symbols from cmp_prices."""
+    cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE cmp IS NOT NULL")
+    return {r[0]: float(r[1]) for r in cur.fetchall()}
+
+
 @router.get("/funnel/{basket}")
 def funnel_counts(basket: str):
     basket = basket.lower()
@@ -498,7 +545,9 @@ def funnel_detail(basket: str):
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
-            all_rows = _basket_universe(cur); pivots = _basket_pivots(cur)
+            all_rows = _basket_universe(cur)
+            pivots   = _basket_pivots(cur)
+            cmp_map  = _basket_cmp(cur)
         total = len(all_rows); filters = FILTER_CONFIG[basket]
         stages = []; survivors = all_rows[:]; prev = total
         for metric, bounds in filters.items():
@@ -509,11 +558,16 @@ def funnel_detail(basket: str):
                            "survivors": passed, "killed": killed,
                            "kill_pct": round(killed/prev*100,1) if prev else 0.0})
             prev = passed
-        piv_survivors = [s for s in survivors
-                         if (pv := pivots.get(s["symbol"])) and pv["r1"] > 0
-                         and (pv["r1"]-pv["pp"])/pv["r1"]*100 >= 1.0]
+        side = "BUY" if basket.startswith("buy") else "SELL"
+        piv_survivors = []
+        for s in survivors:
+            pv  = pivots.get(s["symbol"])
+            cmp = cmp_map.get(s["symbol"])
+            if pv and _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
+                piv_survivors.append(s)
         piv_passed = len(piv_survivors); piv_killed = prev - piv_passed
-        stages.append({"metric": "pivot_room", "min": "PP+1%", "max": None,
+        room_label = "(r1-cmp)>=0.5x(r1-pp)" if side == "BUY" else "(cmp-s1)>=0.5x(pp-s1)"
+        stages.append({"metric": "pivot_room", "min": room_label, "max": None,
                        "survivors": piv_passed, "killed": piv_killed,
                        "kill_pct": round(piv_killed/prev*100,1) if prev else 0.0})
         return {"basket": basket, "score_date": str(date.today()),
