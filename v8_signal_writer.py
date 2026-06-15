@@ -23,7 +23,7 @@ Score-based qualification (15-Jun-2026):
 Auto paper trade (15-Jun-2026):
   First time a stock qualifies today (rowcount=1 on DO NOTHING INSERT),
   _auto_paper_entry() opens a paper position at live CMP.
-  Guards: blackout, has_open, traded_today, slot_full (mood-aware).
+  Guards: market hours (09:15–15:20 IST), blackout, has_open, traded_today, slot_full.
 
 All-live filters (15-Jun-2026):
   rsi_month, rsi_weekly, sector_week, sector_month — all recomputed every 5-min.
@@ -623,9 +623,17 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     """
     Auto-log paper trade when a stock first qualifies (score-gate + pivot-room pass).
     Called from _write_qualified on first INSERT (ON CONFLICT DO NOTHING → rowcount=1).
-    Guards: blackout, has_open, traded_today, slot_full.
+    Guards: market hours (09:15–15:20 IST), blackout, has_open, traded_today, slot_full.
     """
     if not cmp or not pv:
+        return
+
+    # Market hours guard — no entries outside 09:15–15:20 IST
+    now_ist  = datetime.now(IST)
+    mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
+    mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
+    if not (mkt_open <= now_ist <= mkt_cut):
+        log.debug(f"auto_paper {sym}: skipped — outside market hours {now_ist.strftime('%H:%M')} IST")
         return
 
     paper_side = _PAPER_SIDE_MAP.get(side, "LONG")
@@ -811,7 +819,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                         s.get("daily_rsi"), s.get("range_3d"),
                         json.dumps(snap), "live_5min",
                     ))
-                    first_qualification = cur.rowcount > 0  # True = new row, not a latch replay
+                    first_qualification = cur.rowcount > 0
                 conn.commit()
                 # Auto-log paper trade on FIRST qualification today
                 if first_qualification:
