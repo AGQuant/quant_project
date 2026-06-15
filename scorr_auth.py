@@ -2,9 +2,17 @@
 scorr_auth.py — Simple password gate for all HTML pages.
 
 Password: HARDCODED (env var was unreliable). Change _PASSWORD below to update.
-Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=lax)
+Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=none)
 Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status
+
+Fixes (v5):
+  - SameSite Lax -> None (with Secure). The CIO Shell (/cio2) embeds module
+    pages (/dashboard, /check, /sector, /cio) as IFRAMES. With SameSite=Lax,
+    browsers WITHHOLD the auth cookie on iframe subrequests, so the gate saw
+    no cookie and redirected the iframe to /login — which manifested as
+    "login once, then auto-logout, then can't log in again." SameSite=None
+    (Secure) sends the cookie in embedded contexts. Same-origin only; safe.
 
 Fixes (v4):
   - Password hardcoded to remove env-var dependency entirely.
@@ -111,7 +119,7 @@ def _set_auth_cookie(response):
     response.set_cookie(
         COOKIE_NAME, _expected_token(),
         max_age=7 * 24 * 3600, path="/",
-        httponly=True, samesite="lax", secure=True,
+        httponly=True, samesite="none", secure=True,
     )
 
 
@@ -149,7 +157,7 @@ async def logout():
     response.set_cookie(
         COOKIE_NAME, "",
         max_age=0, expires=0, path="/",
-        httponly=True, samesite="lax", secure=True,
+        httponly=True, samesite="none", secure=True,
     )
     response.delete_cookie(COOKIE_NAME, path="/")
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
