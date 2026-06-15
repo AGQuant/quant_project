@@ -23,6 +23,8 @@ Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
   All 4 non-overbought baskets now gate on live pivot room in fallback path.
   funnel_detail formula fixed: (r1-pp)/r1 bug replaced with paper-engine rule.
   BUY: (r1-cmp)>=0.5*(r1-pp) | SELL: (cmp-s1)>=0.5*(pp-s1)
+Score-based fallback (15-Jun-2026): _live_qualified_fallback now uses score-based
+  qualification (n-3 threshold) matching the signal_writer's scoring logic.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -182,40 +184,54 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
             'sell_overbought':'Sell Overbought'}.get(basket.lower(), basket)
 
 def _live_qualified_fallback(basket: str, limit: int):
-    config = FILTER_CONFIG[basket]
-    where_clauses = ["score_date = (SELECT MAX(score_date) FROM v8_metrics)", _BLACKOUT_SQL]
-    params = []
-    for metric, bounds in config.items():
-        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-        if mn is not None: where_clauses.append(f"{metric} >= %s"); params.append(mn)
-        if mx is not None: where_clauses.append(f"{metric} <= %s"); params.append(mx)
-    sql = f"""
-        SELECT symbol, gvm_score, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-               week_return, month_return, year_return, mom_2d, day_1d,
-               week_index_52, vol_ratio, sector_week, sector_month
-        FROM v8_metrics WHERE {" AND ".join(where_clauses)}
-        ORDER BY gvm_score DESC NULLS LAST LIMIT %s
     """
-    params.append(min(max(limit, 1), 200))
+    Score-based fallback for when v8_qualified table is empty (pre-market / off-hours).
+    Uses n-3 threshold (Neutral/Bearish equivalent — most lenient).
+    Scores each stock against FILTER_CONFIG, applies pivot-room gate.
+    """
+    config    = FILTER_CONFIG[basket]
+    n_filters = len(config)
+    need      = max(n_filters - 3, 1)
+
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute(sql, params)
-        cols    = [d[0] for d in cur.description]
-        rows    = [dict(zip(cols, r)) for r in cur.fetchall()]
-        pivots  = _basket_pivots(cur)
-        cmp_map = _basket_cmp(cur)
+        cur.execute(f"""
+            SELECT symbol, gvm_score, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
+                   week_return, month_return, year_return, mom_2d, day_1d,
+                   week_index_52, vol_ratio, sector_week, sector_month
+            FROM v8_metrics
+            WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
+              AND {_BLACKOUT_SQL}
+        """)
+        cols     = [d[0] for d in cur.description]
+        all_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        pivots   = _basket_pivots(cur)
+        cmp_map  = _basket_cmp(cur)
+
+    rows = []
+    for r in all_rows:
+        score = sum(
+            1 for metric, bounds in config.items()
+            if _passes_filter(r.get(metric),
+                              *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
+        )
+        r["filter_score"] = score
+        r["filter_total"] = n_filters
+        if score >= need:
+            rows.append(r)
 
     side = "BUY" if basket.startswith("buy") else "SELL"
     out = []
     for r in rows:
         pv  = pivots.get(r["symbol"])
         cmp = cmp_map.get(r["symbol"])
-        # If no live CMP (pre-market/off-hours), include row — don't gate out
         if cmp is None or pv is None:
             out.append(r)
             continue
         if _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
             out.append(r)
-    return out
+
+    out.sort(key=lambda x: (x.get("filter_score", 0), x.get("gvm_score") or 0), reverse=True)
+    return out[:min(max(limit, 1), 200)]
 
 
 # ── ADR helpers ───────────────────────────────────────────────────────────────
@@ -436,7 +452,6 @@ def qualified(basket: str, limit: int = 50):
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
-            # Use subquery for first_seen to avoid duplicate rows from JOIN
             cur.execute("""
                 SELECT
                     q.symbol, q.gvm_score, q.cmp,
@@ -449,7 +464,9 @@ def qualified(basket: str, limit: int = 50):
                     m.day_1d,
                     g.segment,
                     p.pp, p.r1, p.s1,
-                    fs.first_seen
+                    fs.first_seen,
+                    (q.metrics->>'filter_score')::numeric AS filter_score,
+                    (q.metrics->>'filter_total')::numeric AS filter_total
                 FROM v8_qualified q
                 LEFT JOIN v8_metrics m ON m.symbol = q.symbol
                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
