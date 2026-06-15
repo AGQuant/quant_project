@@ -7,18 +7,23 @@ What it does every 5-min during market hours:
   1. Loads latest EOD v8_metrics row per symbol (slow metrics: GVM, RSI M/W, sector_week, sector_month)
   2. Reads intraday_prices (today's bars) per symbol
   3. Recomputes all live-moving metrics from intraday close spliced onto EOD history
-  4. Preserves EOD-frozen metrics: gvm_score, rsi_month, rsi_weekly, sector_week, sector_month
+  4. Only EOD-frozen metric: gvm_score (22:00 nightly). All others now live.
   5. Upserts v8_metrics (today's row) with live values
   6. Applies FILTER_CONFIG → writes v8_qualified (today only)
   7. Writes v8_funnel_counts (cumulative step counts)
   8. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
 
-Pivot-room gate (15-Jun-2026): Pivot-room is the ONLY live intraday check.
-  EOD bands are static (frozen at 15:45). After EOD-band qualification,
-  _pivot_room_ok() gates on live CMP vs rolling-5d pivots. Latch semantics:
-  once a name passes today it stays in v8_qualified for the session (no DELETE).
+All-live filters (15-Jun-2026):
+  rsi_month   = RSI(6) on closes sampled every ~22 bars (monthly approximation)
+  rsi_weekly  = RSI(8) on closes sampled every ~5 bars (weekly approximation)
+  sector_week  = live avg week_return of segment peers
+  sector_month = live avg month_return of segment peers
+  EOD fallback preserved when history < minimum required bars.
+
+Pivot-room gate (15-Jun-2026): Pivot-room is the ONLY pure CMP gate.
   BUY:  pp < cmp <= r1  AND  (r1-cmp) >= 0.5*(r1-pp)
   SELL: s1 <= cmp < pp  AND  (cmp-s1) >= 0.5*(pp-s1)
+  Latch semantics: once qualified today, stays in v8_qualified all session.
 
 adr_intraday (11-Jun-2026): Live advance/decline ratio from intraday_prices vs
   prev raw_prices close. Written every 5-min. market_mood gate reads this first,
@@ -123,7 +128,7 @@ def _pivot_room_ok(side: str, cmp: Optional[float],
                     pp: Optional[float], r1: Optional[float],
                     s1: Optional[float]) -> bool:
     """
-    Paper-engine pivot-room gate — the ONLY live intraday check.
+    Paper-engine pivot-room gate — pure CMP gate.
     BUY:  pp < cmp <= r1  AND  (r1 - cmp) >= 0.5 * (r1 - pp)
     SELL: s1 <= cmp < pp  AND  (cmp - s1) >= 0.5 * (pp - s1)
     """
@@ -234,10 +239,10 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
             "symbol":        sym,
             "gvm_score":     g.get("gvm_score"),
             "segment":       _segment_override(sym, g.get("segment")),
-            "rsi_month":     _safe_float(f.get("rsi_month")),
-            "rsi_weekly":    _safe_float(f.get("rsi_weekly")),
-            "sector_week":   _safe_float(f.get("sector_week")),
-            "sector_month":  _safe_float(f.get("sector_month")),
+            "rsi_month":     _safe_float(f.get("rsi_month")),    # fallback only
+            "rsi_weekly":    _safe_float(f.get("rsi_weekly")),   # fallback only
+            "sector_week":   _safe_float(f.get("sector_week")),  # fallback only
+            "sector_month":  _safe_float(f.get("sector_month")), # fallback only
             "eod_mom_2d":    _safe_float(f.get("eod_mom_2d")),
         }
     return out
@@ -342,10 +347,10 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 
     out = {
         "gvm_score":    _safe_float(eod.get("gvm_score")),
-        "rsi_month":    _safe_float(eod.get("rsi_month")),
-        "rsi_weekly":   _safe_float(eod.get("rsi_weekly")),
-        "sector_week":  _safe_float(eod.get("sector_week")),
-        "sector_month": _safe_float(eod.get("sector_month")),
+        "rsi_month":    None,   # computed live below — RSI(6) on monthly samples
+        "rsi_weekly":   None,   # computed live below — RSI(8) on weekly samples
+        "sector_week":  _safe_float(eod.get("sector_week")),   # overwritten by _add_sector_aggregates
+        "sector_month": _safe_float(eod.get("sector_month")),  # overwritten by _add_sector_aggregates
         "dma_20": None, "dma_50": None, "dma_200": None,
         "daily_rsi": None,
         "month_return": None, "week_return": None, "year_return": None,
@@ -417,24 +422,52 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
             out["upper_bb"] = (live - (ma + 2*sd)) / live * 100
             out["lower_bb"] = (live - (ma - 2*sd)) / live * 100
 
+    # ── Live RSI: monthly RSI(6) + weekly RSI(8) from spliced close series ──
+    MONTH_BARS, WEEK_BARS = 22, 5
+    if len(c) >= MONTH_BARS * 7:
+        monthly = pd.Series([c[i] for i in range(-MONTH_BARS * 7, 0, MONTH_BARS)] + [c[-1]])
+        out["rsi_month"] = _wilder_rsi(monthly, 6)
+    else:
+        out["rsi_month"] = _safe_float(eod.get("rsi_month"))   # fallback: EOD frozen
+
+    if len(c) >= WEEK_BARS * 9:
+        weekly_s = pd.Series([c[i] for i in range(-WEEK_BARS * 9, 0, WEEK_BARS)] + [c[-1]])
+        out["rsi_weekly"] = _wilder_rsi(weekly_s, 8)
+    else:
+        out["rsi_weekly"] = _safe_float(eod.get("rsi_weekly"))  # fallback: EOD frozen
+
     out["_live"] = live
     return out
 
 
-# ── Step 6: Sector day pass ───────────────────────────────────────────────────
+# ── Step 6: Sector aggregates (live) ─────────────────────────────────────────
 
-def _add_sector_day(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
-    seg_moves: Dict[str, list] = defaultdict(list)
-    for sym, m in computed.items():
-        seg     = eod_metrics.get(sym, {}).get("segment")
-        day_chg = m.get("mom_2d")
-        if seg and day_chg is not None:
-            seg_moves[seg].append(day_chg)
+def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
+    """
+    Compute live sector_day, sector_week, sector_month from live metrics.
+    All three are now 5-min live — sector_week/sector_month no longer EOD-frozen.
+    """
+    seg_day:   Dict[str, list] = defaultdict(list)
+    seg_week:  Dict[str, list] = defaultdict(list)
+    seg_month: Dict[str, list] = defaultdict(list)
 
-    seg_avg = {seg: float(np.mean(vals)) for seg, vals in seg_moves.items() if vals}
     for sym, m in computed.items():
         seg = eod_metrics.get(sym, {}).get("segment")
-        m["sector_day"] = seg_avg.get(seg)
+        if not seg:
+            continue
+        if m.get("mom_2d")       is not None: seg_day[seg].append(m["mom_2d"])
+        if m.get("week_return")  is not None: seg_week[seg].append(m["week_return"])
+        if m.get("month_return") is not None: seg_month[seg].append(m["month_return"])
+
+    day_avg   = {seg: float(np.mean(v)) for seg, v in seg_day.items()   if v}
+    week_avg  = {seg: float(np.mean(v)) for seg, v in seg_week.items()  if v}
+    month_avg = {seg: float(np.mean(v)) for seg, v in seg_month.items() if v}
+
+    for sym, m in computed.items():
+        seg = eod_metrics.get(sym, {}).get("segment")
+        m["sector_day"]   = day_avg.get(seg)
+        m["sector_week"]  = week_avg.get(seg)
+        m["sector_month"] = month_avg.get(seg)
 
 
 # ── Step 7: Upsert v8_metrics ─────────────────────────────────────────────────
@@ -581,7 +614,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     from v8_endpoints import FILTER_CONFIG
 
     gate_fails = _market_gate_fails(conn)
-    pivots     = _load_pivots(conn)   # loaded once, used across all baskets
+    pivots     = _load_pivots(conn)
 
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
@@ -613,9 +646,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             log.info(f"buy_reversal adaptive: gate_fails={gate_fails} need={need}/{n_filters} "
                      f"mom_2d>0 mandatory → {len(universe)} qualified")
 
-        # ── Pivot-room gate (paper-engine rule) — ONLY live intraday check ──
-        # Latch semantics: once a name passes today it stays in v8_qualified.
-        # ON CONFLICT DO NOTHING ensures first qualification wins.
+        # Pivot-room gate — latch semantics
         side = BASKET_SIDE.get(basket, "BUY")
         universe = [
             s for s in universe
@@ -637,9 +668,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
         except Exception as e:
             log.warning(f"funnel {basket}: {e}")
 
-        # NO DELETE — latch semantics: qualified names persist for the full session.
-        # A name that passed pivot-room once today stays actionable all day.
-
+        # NO DELETE — latch semantics
         for s in universe:
             sym  = s["symbol"]
             snap = {k: s.get(k) for k in [
@@ -727,7 +756,7 @@ def run_live_signal_writer(conn) -> dict:
         m["_cmp"]   = cmp if cmp else bar["close"]
         computed[sym] = m
 
-    _add_sector_day(computed, eod_metrics)
+    _add_sector_aggregates(computed, eod_metrics)
 
     all_metrics = []
     for sym, m in computed.items():
@@ -739,7 +768,6 @@ def run_live_signal_writer(conn) -> dict:
 
     _write_qualified(conn, all_metrics, today)
 
-    # Write live ADR to adr_intraday (spec id=165)
     _write_adr_intraday(conn)
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
