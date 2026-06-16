@@ -1,5 +1,5 @@
 """
-V8 Signal Writer — Single Live Engine (v2.2.0)
+V8 Signal Writer — Single Live Engine (v2.3.0)
 ===============================================
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
@@ -19,20 +19,28 @@ Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
   SELL threshold:
     if n_filters <= 4: always require ALL filters (strict AND — quality baskets)
     else: n - 2 + min(fails, 2)
-  sell_reversal (3 filters): always 3/3 — strict AND
-  sell_momentum (4 filters): always 4/4 — strict AND
+  sell_reversal (5 filters): always 5/5 — strict AND
+  sell_momentum (6 filters): always 6/6 — strict AND
 
 Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
-  Nifty 1-month return used as regime gate. 3 filters adjust dynamically:
+  Nifty 1-month return used as regime gate. 3 filters adjust dynamically.
   BULL    (Nifty 1M > +2%): week_return<=3, rsi_month<=67, sector_week<=4
   NEUTRAL (Nifty 1M  0-2%): week_return<=2, rsi_month<=62, sector_week<=3
   BEAR    (Nifty 1M  < 0%): week_return<=1, rsi_month<=58, sector_week<=2
-  1-yr EOD backtest: Dynamic=63.4% WR/+0.25% exp vs Static=50.3%/-0.15% exp.
+
+Slot architecture (v2.3.0, 16-Jun-2026):
+  Standard pool (4 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum):
+    Strong Bullish: 15B / 5S  | Bullish:  14B / 6S
+    Neutral:        12B / 8S  | Bearish:   8B / 13S
+  Sell Overbought dedicated ring-fenced pool (never competes with standard sell):
+    Strong Bullish: 4 | Bullish: 4 | Neutral: 4 | Bearish: 3
+  Total slots always = 24.
 
 Auto paper trade (15-Jun-2026):
   First time a stock qualifies today (rowcount=1 on DO NOTHING INSERT),
   _auto_paper_entry() opens a paper position at live CMP.
   Guards: market hours (09:15–15:20 IST), blackout, has_open, traded_today, slot_full.
+  sell_overbought uses _auto_paper_entry_so() with dedicated SO slot cap.
 
 All-live filters (15-Jun-2026):
   rsi_month, rsi_weekly, sector_week, sector_month — all recomputed every 5-min.
@@ -42,18 +50,13 @@ Pivot-room gate (15-Jun-2026): pure CMP gate, latch semantics.
   BUY:  pp < cmp <= r1  AND  (r1-cmp) >= 0.5*(r1-pp)
   SELL: s1 <= cmp < pp  AND  (cmp-s1) >= 0.5*(pp-s1)
 
-Slot optimisation (15-Jun-2026): total=20, mood-adaptive.
-  Strong Bullish: 15B/5S | Bullish: 12B/8S | Neutral: 10B/10S | Bearish: 8B/12S
-
-adr_intraday (11-Jun-2026): per spec id=165.
-
 entry_ts IST fix (16-Jun-2026):
   entry_ts now stored as IST naive datetime via _now_ist().
 
-sell_reversal quality v2 (16-Jun-2026):
-  Reduced to 3 strict filters: rsi_weekly<=35, mom_2d<=-2, sector_week<=-2.
-  _gate_threshold: SELL with n_filters<=4 forces strict AND (all must pass).
-  Backtest: 90 sigs, 73.3% WR, ~1-2/week. Quality basket.
+sell_overbought V2 (16-Jun-2026):
+  Mean reversion basket. Filters: week_high>0.9*R1orR2, fall_3d<-3%,
+  rsiW>=80, rsiM>=70, sector_week<0. Target=S1, Stop=R2.
+  Dedicated slot pool: 4 (Bull/Neutral) / 3 (Bear). Ring-fenced.
 """
 
 import logging
@@ -84,7 +87,7 @@ def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
     return segment
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def _safe_float(v) -> Optional[float]:
     try:
@@ -300,6 +303,9 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
             "lo_252":       float(min(lows[-252:]))  if len(lows)  >= 252 else (float(min(lows))  if lows  else None),
             "hi_21":        float(max(highs[-21:]))  if len(highs) >= 21  else (float(max(highs)) if highs else None),
             "lo_21":        float(min(lows[-21:]))   if len(lows)  >= 21  else (float(min(lows))  if lows  else None),
+            "hi_5":         float(max(highs[-5:]))   if len(highs) >= 5   else (float(max(highs)) if highs else None),
+            "lo_5":         float(min(lows[-5:]))    if len(lows)  >= 5   else (float(min(lows))  if lows  else None),
+            "hi_3":         float(max(highs[-3:]))   if len(highs) >= 3   else (float(max(highs)) if highs else None),
             "close_1d_ago": closes[-1] if len(closes) >= 1 else None,
             "close_2d_ago": closes[-2] if len(closes) >= 2 else None,
         }
@@ -615,17 +621,38 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
     """
     Score-based adaptive threshold.
     BUY:  Strong Bullish → n-1 (tight), Neutral/Bear → n-3 (loose)
-    SELL: if n_filters <= 4 → always n (strict AND, quality basket, mood-independent)
+    SELL: if n_filters <= 6 → always n (strict AND, quality basket, mood-independent)
           else → n-2+min(fails,2)
-    sell_reversal (3 filters): always 3/3 — all must pass
-    sell_momentum (4 filters): always 4/4 — all must pass
-    This prevents the n-2 formula collapsing to threshold=1 for small filter sets.
+    sell_reversal (5 filters): always 5/5
+    sell_momentum (6 filters): always 6/6
     """
     if side == "SELL":
-        if n_filters <= 4:
+        if n_filters <= 6:
             return n_filters  # strict AND — all filters must pass
         return max(n_filters - 2 + min(fails, 2), 1)
     return n_filters - 1 - min(fails, 2)
+
+
+# ── Slot architecture ─────────────────────────────────────────────────────────
+
+def _mood_slots(gate_fails: int) -> tuple:
+    """
+    Standard pool slots for 4 baskets (buy_reversal, buy_momentum, sell_reversal, sell_momentum).
+    Returns (buy_slots, sell_slots).
+    Total standard pool = 20 always.
+    """
+    if gate_fails == 0: return 15, 5   # Strong Bullish: 15B/5S
+    if gate_fails == 1: return 14, 6   # Bullish:        14B/6S
+    if gate_fails == 2: return 12, 8   # Neutral:        12B/8S
+    return 8, 13                        # Bearish:         8B/13S
+
+
+def _so_slots(gate_fails: int) -> int:
+    """
+    Dedicated sell_overbought slot cap — ring-fenced, never competes with standard sell pool.
+    Bull/Neutral = 4, Bearish = 3. Total always = 24.
+    """
+    return 3 if gate_fails >= 3 else 4
 
 
 # ── Dynamic buy_reversal Nifty-linked filters ─────────────────────────────────
@@ -665,21 +692,16 @@ def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
                 "sector_week": (1.0, 2.0), "_regime": "BEAR"}
 
 
-# ── Mood slots + auto paper entry ─────────────────────────────────────────────
-
-def _mood_slots(gate_fails: int) -> tuple:
-    if gate_fails == 0: return 15, 5
-    if gate_fails == 1: return 12, 8
-    if gate_fails == 2: return 10, 10
-    return 8, 12
+# ── Auto paper entry (standard baskets) ──────────────────────────────────────
 
 _PAPER_SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
 
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
                        pv: Optional[dict], d: date, gate_fails: int):
     """
-    Auto-log paper trade when a stock first qualifies.
-    entry_ts stored as IST naive datetime — no conversion needed on read.
+    Auto-log paper trade for standard baskets (buy_reversal, buy_momentum,
+    sell_reversal, sell_momentum). Uses standard pool slot caps.
+    entry_ts stored as IST naive datetime.
     """
     if not cmp or not pv:
         return
@@ -729,7 +751,12 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     try:
         buy_slots, sell_slots = _mood_slots(gate_fails)
         with conn.cursor() as cur:
-            cur.execute("SELECT side, COUNT(*) FROM v8_paper_positions WHERE status='OPEN' GROUP BY side")
+            # Count standard pool positions only (exclude sell_overbought)
+            cur.execute("""
+                SELECT side, COUNT(*) FROM v8_paper_positions
+                WHERE status='OPEN' AND basket != 'sell_overbought'
+                GROUP BY side
+            """)
             counts = {r[0]: int(r[1]) for r in cur.fetchall()}
         long_open  = counts.get("LONG",  0)
         short_open = counts.get("SHORT", 0)
@@ -776,7 +803,106 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         log.warning(f"auto_paper insert {sym} {paper_side}: {e}")
 
 
-# ── Step 8: Write v8_qualified + funnel ───────────────────────────────────────
+# ── Auto paper entry (sell_overbought — dedicated ring-fenced slots) ──────────
+
+def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
+                          pv: Optional[dict], d: date, gate_fails: int):
+    """
+    Auto-log paper trade for sell_overbought basket.
+    Uses dedicated SO slot cap (4 in Bull/Neutral, 3 in Bearish).
+    Ring-fenced — never competes with standard sell pool.
+    Target=S1, Stop=R2 (pivot ceiling).
+    """
+    if not cmp or not pv:
+        return
+
+    now_ist  = datetime.now(IST)
+    mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
+    mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
+    if not (mkt_open <= now_ist <= mkt_cut):
+        return
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 1 FROM earnings_calendar
+                WHERE UPPER(ticker)=%s
+                  AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                LIMIT 1
+            """, (sym.upper(),))
+            if cur.fetchone():
+                return
+    except Exception as e:
+        log.warning(f"auto_paper_so blackout {sym}: {e}"); return
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side='SHORT' AND status='OPEN'",
+                        (sym,))
+            if cur.fetchone():
+                return
+            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side='SHORT' AND basket='sell_overbought' AND entry_ts::date=%s LIMIT 1",
+                        (sym, d))
+            if cur.fetchone():
+                return
+    except Exception as e:
+        log.warning(f"auto_paper_so guard {sym}: {e}"); return
+
+    # Check SO dedicated slot cap
+    so_cap = _so_slots(gate_fails)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM v8_paper_positions
+                WHERE status='OPEN' AND basket='sell_overbought' AND side='SHORT'
+            """)
+            so_open = int(cur.fetchone()[0])
+        if so_open >= so_cap:
+            log.info(f"auto_paper_so {sym}: SO slot_full ({so_open}/{so_cap})")
+            return
+    except Exception as e:
+        log.warning(f"auto_paper_so slot check {sym}: {e}"); return
+
+    pp, r1, s1 = pv["pp"], pv["r1"], pv["s1"]
+    # R2 = PP + (R1 - PP) + (R1 - PP) = PP + 2*(R1-PP) ... actually R2 = PP + (H5-L5)
+    # Approximate R2 from pivots: R2 ≈ R1 + (R1 - PP)
+    r2 = r1 + (r1 - pp)
+    target = round(s1, 2)   # S1 = 2*PP - H5
+    stop   = round(r2, 2)   # R2 = PP + (H5 - L5) ≈ R1 + (R1-PP)
+    entry  = round(cmp, 2)
+
+    if target >= entry:
+        log.debug(f"auto_paper_so {sym}: S1 ({target}) >= entry ({entry}), skip")
+        return
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (sym,))
+            r = cur.fetchone()
+            qty = int(r[0]) if r and r[0] else 1
+    except Exception:
+        qty = 1
+
+    entry_ts_ist = _now_ist()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO v8_paper_positions
+                (symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date, status)
+                VALUES (%s, 'SHORT', 'sell_overbought', %s, %s, %s, %s, %s, %s, %s, 'OPEN')
+                ON CONFLICT (symbol, side, status) DO NOTHING
+            """, (sym, entry, entry_ts_ist, qty, target, stop, pp, d))
+            inserted = cur.rowcount
+        conn.commit()
+        if inserted:
+            log.info(f"auto_paper_so entry: {sym} SHORT @ {entry} "
+                     f"entry_ts={entry_ts_ist.strftime('%H:%M')} IST "
+                     f"target(S1)={target} sl(R2)={stop} so_slots={so_open+1}/{so_cap}")
+    except Exception as e:
+        log.warning(f"auto_paper_so insert {sym}: {e}")
+
+
+# ── Step 8: Write v8_qualified + funnel ──────────────────────────────────────
 
 def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     from v8_endpoints import FILTER_CONFIG
@@ -791,9 +917,10 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
 
     signal_ts_ist = _now_ist()
 
+    # ── Standard 4 baskets ──
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
-            continue
+            continue  # handled separately below
 
         if basket == "buy_reversal":
             active_filters = dict(filters)
@@ -897,6 +1024,163 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                                       target_date, gate_fails)
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
+
+    # ── Sell Overbought — dedicated ring-fenced basket ──
+    _write_sell_overbought_qualified(conn, all_metrics, target_date,
+                                      gate_fails, pivots, signal_ts_ist)
+
+
+def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date: date,
+                                      gate_fails: int, pivots: dict, signal_ts_ist):
+    """
+    Sell Overbought V2 qualification.
+    Filters from v8_metrics (available in all_metrics):
+      rsi_weekly >= 80, rsi_month >= 70, sector_week < 0
+    Pivot filters (week_high > 0.9*R1orR2, fall_3d < -3%) require raw_prices — computed inline.
+    Dedicated slot cap via _auto_paper_entry_so().
+    """
+    so_cap = _so_slots(gate_fails)
+    log.info(f"sell_overbought: dedicated SO slots={so_cap} gate_fails={gate_fails}")
+
+    # Pre-filter by v8_metrics first (fast, in-memory)
+    candidates = [
+        s for s in all_metrics
+        if (s.get("rsi_weekly") or 0) >= 80
+        and (s.get("rsi_month") or 0) >= 70
+        and (s.get("sector_week") or 0) < 0
+    ]
+    log.info(f"sell_overbought: {len(candidates)} candidates after RSI/sector pre-filter")
+
+    if not candidates:
+        return
+
+    syms = [s["symbol"] for s in candidates]
+    today = target_date
+
+    # Compute pivot-based filters from raw_prices
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH pivots AS (
+                    SELECT symbol, price_date,
+                        AVG((high+low+close)/3.0) OVER w AS pp,
+                        MAX(high) OVER w AS h5,
+                        MIN(low)  OVER w AS l5
+                    FROM raw_prices
+                    WHERE symbol = ANY(%s)
+                      AND price_date >= %s - INTERVAL '14 days'
+                    WINDOW w AS (PARTITION BY symbol ORDER BY price_date
+                                 ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
+                ),
+                latest_pivot AS (
+                    SELECT DISTINCT ON (symbol) symbol, pp, h5, l5,
+                        2*pp - h5           AS s1,
+                        2*pp - l5           AS r1,
+                        pp + (h5 - l5)      AS r2
+                    FROM pivots ORDER BY symbol, price_date DESC
+                ),
+                hi5d AS (
+                    SELECT symbol, MAX(high) AS max_h5d
+                    FROM raw_prices
+                    WHERE symbol = ANY(%s)
+                      AND price_date >= %s - INTERVAL '7 days'
+                      AND price_date <= %s
+                    GROUP BY symbol
+                ),
+                hi3d AS (
+                    SELECT symbol, MAX(high) AS max_h3d
+                    FROM raw_prices
+                    WHERE symbol = ANY(%s)
+                      AND price_date >= %s - INTERVAL '4 days'
+                      AND price_date <= %s
+                    GROUP BY symbol
+                ),
+                latest_close AS (
+                    SELECT DISTINCT ON (symbol) symbol, close
+                    FROM raw_prices
+                    WHERE symbol = ANY(%s) AND price_date <= %s
+                    ORDER BY symbol, price_date DESC
+                )
+                SELECT lc.symbol,
+                    lc.close AS entry,
+                    lp.s1, lp.r1, lp.r2, lp.pp,
+                    h5d.max_h5d,
+                    h3d.max_h3d,
+                    (lc.close - h3d.max_h3d) / NULLIF(h3d.max_h3d, 0) * 100 AS fall_3d_pct,
+                    CASE WHEN h5d.max_h5d > 0.9 * lp.r1
+                              OR h5d.max_h5d > 0.9 * lp.r2
+                         THEN TRUE ELSE FALSE END AS near_resistance
+                FROM latest_close lc
+                JOIN latest_pivot lp ON lp.symbol = lc.symbol
+                JOIN hi5d         h5d ON h5d.symbol = lc.symbol
+                JOIN hi3d         h3d ON h3d.symbol = lc.symbol
+                WHERE lp.s1 < lc.close  -- target must be below entry
+            """, (syms, today, syms, today, today, syms, today, today, syms, today))
+            pivot_rows = {r[0]: dict(zip(
+                ["symbol","entry","s1","r1","r2","pp","max_h5d","max_h3d","fall_3d_pct","near_resistance"],
+                r)) for r in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"sell_overbought pivot query: {e}")
+        return
+
+    qualified_so = []
+    for s in candidates:
+        sym = s["symbol"]
+        pr  = pivot_rows.get(sym)
+        if not pr:
+            continue
+        if not pr["near_resistance"]:
+            continue
+        if (pr["fall_3d_pct"] or 0) >= -3.0:
+            continue
+        qualified_so.append((s, pr))
+
+    log.info(f"sell_overbought: {len(qualified_so)} qualified after pivot filters")
+
+    for s, pr in qualified_so:
+        sym = s["symbol"]
+        snap = {
+            "rsi_weekly":   s.get("rsi_weekly"),
+            "rsi_month":    s.get("rsi_month"),
+            "sector_week":  s.get("sector_week"),
+            "fall_3d_pct":  pr["fall_3d_pct"],
+            "near_r1":      float(pr["max_h5d"] or 0) > 0.9 * float(pr["r1"] or 0),
+            "near_r2":      float(pr["max_h5d"] or 0) > 0.9 * float(pr["r2"] or 0),
+            "filter_score": 5,
+            "filter_total": 5,
+            "so_slots": so_cap,
+        }
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_qualified
+                    (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
+                     mom_2d, week_return, month_return, dma_200, dma_50,
+                     rsi_month, rsi_weekly, sector_week, sector_day,
+                     month_index, week_index_52, daily_rsi, range_3d,
+                     metrics, source)
+                    VALUES (%s,'sell_overbought',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (symbol, basket, signal_date) DO NOTHING
+                """, (
+                    sym, target_date, signal_ts_ist,
+                    s.get("gvm_score"), s.get("_cmp"),
+                    s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
+                    s.get("dma_200"), s.get("dma_50"),
+                    s.get("rsi_month"), s.get("rsi_weekly"),
+                    s.get("sector_week"), s.get("sector_day"),
+                    s.get("month_index"), s.get("week_index_52"),
+                    s.get("daily_rsi"), s.get("range_3d"),
+                    json.dumps(snap), "live_5min",
+                ))
+                first_qualification = cur.rowcount > 0
+            conn.commit()
+
+            if first_qualification:
+                pv = pivots.get(sym)
+                _auto_paper_entry_so(conn, sym, s.get("_cmp"), pv,
+                                     target_date, gate_fails)
+        except Exception as e:
+            log.warning(f"sell_overbought qualified insert {sym}: {e}")
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
