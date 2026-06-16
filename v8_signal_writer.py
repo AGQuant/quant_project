@@ -14,11 +14,11 @@ What it does every 5-min during market hours:
   8. Writes v8_funnel_counts (strict cumulative — diagnostic only)
   9. Writes adr_intraday (live ADR every 5-min tick) — 11-Jun-2026
 
-Score-based qualification (15-Jun-2026):
+Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
   BUY  threshold = n - 1 - min(fails, 2)  [tight in bull, loose in bear]
-  SELL threshold = n - 3 + min(fails, 2)  [loose in bull, tight in bear — inverse]
-  buy_reversal  (10): 9/8/7   buy_momentum  (11): 10/9/8
-  sell_reversal  (9): 6/7/8   sell_momentum (12):  9/10/11
+  SELL threshold = n - 2 + min(fails, 2)  [tighter — was n-3, too many qualifying]
+  buy_reversal  (10): 9/8/7   buy_momentum  (10): 9/8/7
+  sell_reversal  (8): 6/7/8   sell_momentum  (4): 2/3/4
 
 Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
   Nifty 1-month return used as regime gate. 3 filters adjust dynamically:
@@ -47,9 +47,14 @@ Slot optimisation (15-Jun-2026): total=20, mood-adaptive.
 adr_intraday (11-Jun-2026): per spec id=165.
 
 entry_ts IST fix (16-Jun-2026):
-  entry_ts now stored as IST (NOW() AT TIME ZONE 'Asia/Kolkata').
+  entry_ts now stored as IST naive datetime via _now_ist().
   Frontend never needs timezone conversion — what's in DB is what's displayed.
   v8_qualified.signal_ts also stored as IST for consistency.
+
+SELL gate tightened (16-Jun-2026):
+  n-3+min(fails,2) → n-2+min(fails,2).
+  sell_reversal Strong Bullish: threshold 5→6, score-qualified 99→~48, post-pivot ~8-10.
+  Reason: 21 qualified (vs target ~5-8) with old formula in Strong Bullish market.
 """
 
 import logging
@@ -199,7 +204,6 @@ def _write_adr_intraday(conn):
                 return
             adv, dec, unc, tot = row[0] or 0, row[1] or 0, row[2] or 0, row[3] or 0
             adr = round(adv / dec, 3) if dec else float(adv)
-            # Store ADR timestamp in IST
             now_ist = _now_ist()
             ts_5m = now_ist.replace(second=0, microsecond=0)
             ts_5m = ts_5m.replace(minute=(ts_5m.minute // 5) * 5)
@@ -619,11 +623,13 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
     """
     Score-based adaptive threshold.
     BUY:  Strong Bullish → n-1 (tight), Neutral/Bear → n-3 (loose)
-    SELL: Strong Bullish → n-3 (loose — sells scarce in bull market)
-          Neutral/Bear   → n-1 (tight — sells plentiful, be selective)
+    SELL: n-2+min(fails,2) — tightened 16-Jun-2026 (was n-3, produced 21 qualified)
+      Strong Bullish (0 fails): n-2  → sell_reversal=6/8, sell_momentum=2/4
+      Bullish        (1 fail):  n-1  → sell_reversal=7/8, sell_momentum=3/4
+      Neutral/Bear   (2 fails): n    → sell_reversal=8/8, sell_momentum=4/4
     """
     if side == "SELL":
-        return max(n_filters - 3 + min(fails, 2), 1)
+        return max(n_filters - 2 + min(fails, 2), 1)
     return n_filters - 1 - min(fails, 2)
 
 
@@ -755,7 +761,6 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     except Exception:
         qty = 1
 
-    # ── KEY FIX: store entry_ts as IST naive datetime ──
     entry_ts_ist = _now_ist()
 
     try:
@@ -789,7 +794,6 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     log.info(f"Nifty 1M={nifty_1m:+.2f}% → buy_reversal regime={dyn_br['_regime']} "
              f"(wk<={dyn_br['week_return'][1]} rsi_m<={dyn_br['rsi_month'][1]} sec_wk<={dyn_br['sector_week'][1]})")
 
-    # signal_ts also in IST
     signal_ts_ist = _now_ist()
 
     for basket, filters in FILTER_CONFIG.items():
@@ -880,7 +884,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                         ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date,
-                        signal_ts_ist,          # IST naive datetime
+                        signal_ts_ist,
                         s.get("gvm_score"), s.get("_cmp"),
                         s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
                         s.get("dma_200"), s.get("dma_50"),
