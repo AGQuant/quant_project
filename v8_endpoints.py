@@ -34,6 +34,13 @@ buy_momentum optimisation v1 (16-Jun-2026): OPT2 adaptive target locked.
   1-yr EOD backtest: 243 signals, 77.4% WR, +1.79% avg win, +120% PnL.
   Regime gate: Nifty 1M return (stable monthly, computed at 15:45 EOD).
   session_log id=342: BUY_MOMENTUM_SPEC_V1.
+qualified status enrichment (16-Jun-2026):
+  Each stock in qualified endpoint now carries a status badge:
+    OPEN      — position open today in v8_paper_positions (+ entry, pnl%, target, stop)
+    SLOT_FULL — passed all filters + pivot room, but slot cap exhausted
+    NEAR_MISS — score-gate fallback only (didn't pass all strict filters)
+    QUALIFIED — default (strict filter pass, no position yet)
+  Same for all 5 baskets. Enables dashboard badge display.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -63,33 +70,25 @@ def _market_open() -> bool:
     return open_t <= now <= close_t
 
 
-# ── Static base FILTER_CONFIG (buy_reversal + buy_momentum dynamic filters overridden at runtime) ──
+# ── Static base FILTER_CONFIG ──
 FILTER_CONFIG = {
     "buy_reversal": {
-        # Base config — 3 dynamic filters (week_return, rsi_month, sector_week)
-        # are overridden at runtime by _get_buy_reversal_live_filters() based on Nifty 1M.
-        # Static values here = BULL regime maxima (widest allowed).
-        # v1 optimisation (15-Jun-2026): 15 trades, 90% WR, +1.78% exp on 6-day 5-min sim.
         "gvm_score":    [6.5,  10.0],
         "dma_200":      [1.5,  20.0],
         "dma_50":       [1.5,   8.0],
         "month_return": [-2.0,  7.2],
-        "week_return":  [0.0,   4.0],   # dynamic: BULL<=3, NEUTRAL<=2, BEAR<=1
-        "rsi_month":    [52.0, 72.0],   # dynamic: BULL<=67, NEUTRAL<=62, BEAR<=58
+        "week_return":  [0.0,   4.0],
+        "rsi_month":    [52.0, 72.0],
         "rsi_weekly":   [50.0, 62.0],
         "mom_2d":       [0.0,   2.4],
-        "sector_week":  [1.0,   6.0],   # dynamic: BULL<=4, NEUTRAL<=3, BEAR<=2
+        "sector_week":  [1.0,   6.0],
         "sector_month": [0.0,   6.0],
     },
     "buy_momentum": {
-        # v1 optimisation (16-Jun-2026): OPT2 adaptive target, 1-yr EOD backtest.
-        # RSI-M>=70 STRICT anchor. Target=R2(BULL)/R1(NEUTRAL+BEAR). Stop=S1.
-        # Sector rule: max 2 per segment, M-score tiebreaker (in signal_writer).
-        # Symbol guard: 1 entry per symbol per 3 days (in signal_writer).
         "gvm_score":    [7.0,  10.0],
         "dma_50":       [8.0,  25.0],
         "dma_200":      [8.0,  40.0],
-        "rsi_month":    [70.0, 100.0],  # STRICT — never changes across regimes
+        "rsi_month":    [70.0, 100.0],
         "rsi_weekly":   [60.0, 85.0],
         "month_return": [2.0,  30.0],
         "week_return":  [0.5,  12.0],
@@ -166,7 +165,6 @@ def _passes_filter(value, mn, mx) -> bool:
 
 
 def _get_nifty_1m_return() -> float:
-    """Compute Nifty 1-month return for dynamic regime gate (buy_reversal + buy_momentum)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -190,33 +188,18 @@ def _get_nifty_1m_return() -> float:
 
 
 def _get_nifty_regime() -> tuple:
-    """Returns (regime, nifty_1m) — shared by buy_reversal and buy_momentum."""
     nifty_1m = _get_nifty_1m_return()
-    if nifty_1m > 2.0:
-        regime = "BULL"
-    elif nifty_1m >= -2.0:
-        regime = "NEUTRAL"
-    else:
-        regime = "BEAR"
+    if nifty_1m > 2.0:   regime = "BULL"
+    elif nifty_1m >= -2.0: regime = "NEUTRAL"
+    else:                 regime = "BEAR"
     return regime, nifty_1m
 
 
 def _get_buy_reversal_live_filters() -> dict:
-    """
-    Returns the LIVE buy_reversal filter config with dynamic thresholds applied.
-    BULL    (Nifty 1M > +2%): week_return<=3, rsi_month<=67, sector_week<=4
-    NEUTRAL (Nifty 1M  0-2%): week_return<=2, rsi_month<=62, sector_week<=3
-    BEAR    (Nifty 1M  < 0%): week_return<=1, rsi_month<=58, sector_week<=2
-    1-yr EOD backtest: Dynamic=63.4% WR, +0.25% exp, +48.91% P&L.
-    """
     regime, nifty_1m = _get_nifty_regime()
-    if regime == "BULL":
-        wk_max, rsi_max, sec_max = 3.0, 67.0, 4.0
-    elif regime == "NEUTRAL":
-        wk_max, rsi_max, sec_max = 2.0, 62.0, 3.0
-    else:
-        wk_max, rsi_max, sec_max = 1.0, 58.0, 2.0
-
+    if regime == "BULL":    wk_max, rsi_max, sec_max = 3.0, 67.0, 4.0
+    elif regime == "NEUTRAL": wk_max, rsi_max, sec_max = 2.0, 62.0, 3.0
+    else:                   wk_max, rsi_max, sec_max = 1.0, 58.0, 2.0
     live = dict(FILTER_CONFIG["buy_reversal"])
     live["week_return"] = [0.0,  wk_max]
     live["rsi_month"]   = [52.0, rsi_max]
@@ -225,21 +208,10 @@ def _get_buy_reversal_live_filters() -> dict:
 
 
 def _get_buy_momentum_target(regime: str) -> str:
-    """
-    Adaptive target for buy_momentum based on Nifty 1M regime.
-    BULL    -> R2 (strong trend, price has room)
-    NEUTRAL -> R1 (moderate, take quicker profit)
-    BEAR    -> R1 (defensive, take quicker profit)
-    1-yr backtest: OPT2, 243 signals, 77.4% WR, +120% PnL. session_log id=342.
-    """
     return "R2" if regime == "BULL" else "R1"
 
 
 def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
-    """
-    BUY:  pp < cmp <= r1  AND  (r1 - cmp) >= 0.5 * (r1 - pp)
-    SELL: s1 <= cmp < pp  AND  (cmp - s1) >= 0.5 * (pp - s1)
-    """
     try:
         cmp = float(cmp); pp = float(pp)
     except (TypeError, ValueError):
@@ -272,7 +244,6 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
             'sell_overbought':'Sell Overbought'}.get(basket.lower(), basket)
 
 def _live_qualified_fallback(basket: str, limit: int):
-    """Score-based fallback — n-3 threshold (most lenient, pre-market default)."""
     if basket == "buy_reversal":
         config, _, _ = _get_buy_reversal_live_filters()
     else:
@@ -303,6 +274,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         )
         r["filter_score"] = score
         r["filter_total"] = n_filters
+        r["status"] = "NEAR_MISS"  # fallback = near miss
         if score >= need:
             rows.append(r)
 
@@ -311,9 +283,11 @@ def _live_qualified_fallback(basket: str, limit: int):
     for r in rows:
         pv  = pivots.get(r["symbol"])
         cmp = cmp_map.get(r["symbol"])
+        r["cmp"] = cmp
+        if pv:
+            r["pp"] = pv.get("pp"); r["r1"] = pv.get("r1"); r["s1"] = pv.get("s1")
         if cmp is None or pv is None:
-            out.append(r)
-            continue
+            out.append(r); continue
         if _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
             out.append(r)
 
@@ -321,7 +295,64 @@ def _live_qualified_fallback(basket: str, limit: int):
     return out[:min(max(limit, 1), 200)]
 
 
-# ── ADR helpers ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── Paper position enrichment ─────────────────────────────────────────────────
+
+def _load_open_positions(basket: str) -> dict:
+    """Load today's open paper positions for this basket → {symbol: position_dict}"""
+    side = "LONG" if basket.startswith("buy") else "SHORT"
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.symbol, p.entry_price, p.target, p.stop_loss, p.qty,
+                       COALESCE(c.cmp, p.entry_price) AS cmp,
+                       CASE WHEN p.side='LONG'
+                            THEN ROUND(((COALESCE(c.cmp,p.entry_price)-p.entry_price)/p.entry_price*100)::numeric,2)
+                            ELSE ROUND(((p.entry_price-COALESCE(c.cmp,p.entry_price))/p.entry_price*100)::numeric,2)
+                       END AS pnl_pct
+                FROM v8_paper_positions p
+                LEFT JOIN cmp_prices c ON c.symbol=p.symbol
+                WHERE p.basket=%s AND p.status='OPEN'
+                  AND p.side=%s
+            """, (basket, side))
+            cols = [d[0] for d in cur.description]
+            return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+def _load_slot_full(basket: str) -> set:
+    """Load symbols that were slot_full today from v8_qualified."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol FROM v8_qualified
+                WHERE basket=%s AND signal_date=CURRENT_DATE
+                  AND metrics->>'status'='slot_full'
+            """, (basket,))
+            return {r[0] for r in cur.fetchall()}
+    except Exception:
+        return set()
+
+
+def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: set) -> list:
+    """Add status, entry_price, pnl_pct, open_target, open_stop to each stock."""
+    for s in stocks:
+        sym = s.get("symbol", "")
+        pos = open_pos.get(sym)
+        if pos:
+            s["status"]       = "OPEN"
+            s["entry_price"]  = float(pos["entry_price"]) if pos.get("entry_price") else None
+            s["open_pnl_pct"] = float(pos["pnl_pct"])    if pos.get("pnl_pct")     else None
+            s["open_target"]  = float(pos["target"])      if pos.get("target")      else None
+            s["open_stop"]    = float(pos["stop_loss"])   if pos.get("stop_loss")   else None
+        elif sym in slot_full:
+            s["status"] = "SLOT_FULL"
+        elif s.get("status") != "NEAR_MISS":
+            s["status"] = "QUALIFIED"
+    return stocks
+
+
+# ── ADR helpers ───────────────────────────────────────────────────────────────
 
 def _read_adr(cur):
     if _market_open():
@@ -392,7 +423,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
             round((latest/month-1)*100,2), latest)
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -431,7 +462,6 @@ def market_mood():
             ]
             fails = sum(1 for c in checks if not c["pass"])
 
-            # Total 20 slots, mood-adaptive split (15-Jun-2026)
             if fails == 0:   buy_slots, sell_slots, mood = 15, 5,  "Strong Bullish"
             elif fails == 1: buy_slots, sell_slots, mood = 12, 8,  "Bullish"
             elif fails == 2: buy_slots, sell_slots, mood = 10, 10, "Neutral"
@@ -517,7 +547,6 @@ def filter_config(basket: str):
 
     regime, nifty_1m = _get_nifty_regime()
 
-    # buy_reversal: return LIVE dynamic thresholds based on Nifty 1M regime
     if basket == "buy_reversal":
         live_config, regime, nifty_1m = _get_buy_reversal_live_filters()
         rows = []
@@ -542,7 +571,6 @@ def filter_config(basket: str):
             **BASKET_META.get(basket, {})
         }
 
-    # buy_momentum: return config + adaptive target based on Nifty 1M regime
     if basket == "buy_momentum":
         target = _get_buy_momentum_target(regime)
         rows = []
@@ -552,7 +580,7 @@ def filter_config(basket: str):
                 "metric": metric, "min": mn, "max": mx,
                 "min_display": "" if mn is None else mn,
                 "max_display": "" if mx is None else mx,
-                "dynamic": metric == "rsi_month",  # strict anchor, shown as key filter
+                "dynamic": metric == "rsi_month",
             })
         return {
             "basket": basket, "filters": rows, "count": len(rows),
@@ -572,7 +600,6 @@ def filter_config(basket: str):
             **BASKET_META.get(basket, {})
         }
 
-    # All other baskets: static config
     rows = []
     for metric, bounds in FILTER_CONFIG[basket].items():
         mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
@@ -588,6 +615,10 @@ def qualified(basket: str, limit: int = 50):
     if basket == "sell_overbought": return sell_overbought(limit=limit)
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
+        # Load open positions + slot_full for enrichment
+        open_pos  = _load_open_positions(basket)
+        slot_full = _load_slot_full(basket)
+
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT
@@ -604,7 +635,8 @@ def qualified(basket: str, limit: int = 50):
                     fs.first_seen,
                     (q.metrics->>'filter_score')::numeric AS filter_score,
                     (q.metrics->>'filter_total')::numeric AS filter_total,
-                    q.metrics->>'regime' AS regime
+                    q.metrics->>'regime' AS regime,
+                    q.metrics->>'status' AS stored_status
                 FROM v8_qualified q
                 LEFT JOIN v8_metrics m ON m.symbol = q.symbol
                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
@@ -632,11 +664,25 @@ def qualified(basket: str, limit: int = 50):
             source_note = 'live_fallback'
         else:
             source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
+            # Ensure pivot + cmp populated for precomputed rows
+            with _conn() as conn, conn.cursor() as cur:
+                pivots  = _basket_pivots(cur)
+                cmp_map = _basket_cmp(cur)
+            for r in rows:
+                sym = r["symbol"]
+                if not r.get("pp") and sym in pivots:
+                    pv = pivots[sym]
+                    r["pp"] = pv.get("pp"); r["r1"] = pv.get("r1"); r["s1"] = pv.get("s1")
+                if not r.get("cmp") and sym in cmp_map:
+                    r["cmp"] = cmp_map[sym]
+                r["status"] = r.pop("stored_status", None) or "QUALIFIED"
 
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
 
-        # For buy_momentum, include live target in response
+        # Enrich all rows with OPEN / SLOT_FULL / NEAR_MISS / QUALIFIED status
+        rows = _enrich_with_status(rows, basket, open_pos, slot_full)
+
         extra = {}
         if basket == "buy_momentum":
             regime, nifty_1m = _get_nifty_regime()
@@ -821,6 +867,10 @@ def raw_metrics(limit: int = 250):
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
     try:
+        # Load open positions for sell_overbought enrichment
+        open_pos  = _load_open_positions("sell_overbought")
+        slot_full = _load_slot_full("sell_overbought")
+
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 WITH price_window AS (
@@ -871,6 +921,12 @@ def sell_overbought(limit: int = 50):
             """, (min(max(limit, 1), 200),))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        # Enrich with status
+        for r in rows:
+            r["status"] = "QUALIFIED"
+        rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full)
+
         return {"basket": "sell_overbought", "count": len(rows),
                 "target": "S1", "sl": "entry + (entry - S1) - 1:1",
                 "win_pct_may2026": "71.4%", "stocks": rows}
