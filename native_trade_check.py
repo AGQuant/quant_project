@@ -31,6 +31,9 @@ v3.3.3 (16-Jun-2026): R11 extended to weekly RSI<80 (overbought = fail on either
 timeframe; consistent with V8 sell_overbought id=359 weekly>=80 short zone). R6
 ceiling stays open (strength uncapped) — R6 owns trend, R11 owns all overbought
 rejection. R12 already breakout-aware (LONG: breakout OR HL+contraction).
+INTERPRETATION LAYER (16-Jun-2026): additive narrative paragraph. Rule-based
+deterministic default (zero-token); optional API enrichment via use_api=True
+(claude-sonnet-4-6). Reads existing rule states — no extra DB calls. Both sides.
 """
 
 import os
@@ -249,9 +252,131 @@ def _f6_dte():
     return dte >= 3, f"DTE {dte} (exp {exp.strftime('%d-%b')})"
 
 
+# ─────────────────────────────── interpretation layer ──────────────────────────────
+# Additive narrative. Rule-based deterministic core (zero-token, default).
+# Optional API enrichment via use_api. Reads the SAME rule states already computed.
+
+def _istate(rows, prefix):
+    for r in rows:
+        if r["rule"].upper().startswith(prefix.upper()):
+            return r["state"], r["val"]
+    return None, None
+
+
+def _weekly_rsi_from(val):
+    if not val:
+        return None
+    mt = re.search(r"W\s*(\d+)", val)
+    return int(mt.group(1)) if mt else None
+
+
+def _interpret_rulebased(d):
+    """Full narrative paragraph from rule states. d = compute_trade_check dict."""
+    side, t1, t2, vclass = d["side"], d["tier1"], d["tier2"], d["verdict_class"]
+    r6_s, r6_v = _istate(t1, "R6")
+    r7_s, _ = _istate(t1, "R7")
+    r9_s, _ = _istate(t1, "R9")
+    r11_s, r11_v = _istate(t1, "R11")
+    r12_s, r12_v = _istate(t1, "R12")
+    r13_s, _ = _istate(t1, "R13")
+    r2_s, _ = _istate(t1, "R2")
+    f4_s, f4_v = _istate(t2, "F4")
+    f7_s, _ = _istate(t2, "F7")
+
+    tag = (r12_v or "").lower()
+    if side == "LONG":
+        if "brkout" in tag:
+            archetype, arch_note = "momentum-continuation long", "the trigger is a breakout from consolidation, not a pullback"
+        elif "hl" in tag:
+            archetype, arch_note = "reversal-from-support long", "higher lows with range contraction — a coiled pullback within trend"
+        else:
+            archetype, arch_note = "long setup", "structure is neither a clean breakout nor a tight base"
+    else:
+        if "brkdwn" in tag:
+            archetype, arch_note = "momentum-continuation short", "the trigger is a breakdown below support, an active downtrend"
+        elif "lh" in tag:
+            archetype, arch_note = "reversal-from-resistance short", "lower highs with contraction — a failing bounce into resistance"
+        else:
+            archetype, arch_note = "short setup", "structure is neither a clean breakdown nor a tight distribution"
+
+    drivers = []
+    if r6_s == "pass":
+        drivers.append(f"trend confirmed ({r6_v})")
+    if r7_s == "pass":
+        drivers.append("volume aligned with direction")
+    if r9_s == "pass":
+        drivers.append("week and month returns agree")
+    if r13_s == "pass":
+        drivers.append("ATR igniting (energy arriving)")
+    if r2_s == "pass":
+        drivers.append("sector backing the move")
+    if f7_s == "pass":
+        drivers.append("derivatives (OI + basis) confirming")
+
+    risk = None
+    if side == "LONG":
+        wk = _weekly_rsi_from(r11_v)
+        if r11_s == "fail":
+            risk = f"overbought — {r11_v} breaches the weekly-80 ceiling; this is now a short-overbought candidate, not a long"
+        elif wk is not None and wk >= 75:
+            risk = f"weekly RSI is elevated ({r11_v}) — one more leg up flips this to a short-overbought candidate"
+    else:
+        if r11_s == "fail":
+            risk = f"oversold — daily RSI {r11_v} is in capitulation territory; bounce risk against the short"
+
+    if risk is None:
+        if f4_s == "fail":
+            risk = f"reward-to-risk is thin ({f4_v}) — below the 1:2 floor, so sizing and stop discipline matter"
+        elif r6_s == "fail":
+            risk = "trend not fully confirmed — the directional backbone is weak, treat as lower conviction"
+        elif r2_s == "fail":
+            risk = "sector is not backing the move — the stock is acting alone, conviction drops"
+        else:
+            gaps = sum(1 for r in t1 + t2 if r["state"] == "chart")
+            risk = (f"{gaps} rules have no data (counted as not-passed) — the read is partial, confirm manually"
+                    if gaps >= 2 else "no single dominant risk — clean on the axes measured")
+
+    conv = {"strong": "High conviction", "valid": "Tradeable conviction",
+            "weak": "Marginal — process gate met but entry filters thin",
+            "reject": "Not actionable — core process score below threshold"}.get(vclass, "Mixed")
+    drv = ", ".join(drivers) if drivers else "few core rules confirmed"
+    return f"{conv}. This reads as a {archetype} — {arch_note}. Supporting it: {drv}. Watch: {risk}."
+
+
+def _interpret_api(d, model="claude-sonnet-4-6"):
+    """Richer interpretation via Anthropic API. Falls back to rule-based on any failure."""
+    try:
+        import anthropic
+        key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not key:
+            return _interpret_rulebased(d)
+        client = anthropic.Anthropic(api_key=key)
+        rows = [f"{r['rule']}: {r['state']} ({r['val']})" for r in d["tier1"] + d["tier2"]]
+        prompt = (
+            f"You are a disciplined futures desk analyst. A {d['side']} setup on "
+            f"{d['company']} ({d['symbol']}, {d['segment']}) scored under a price-action "
+            f"framework (Tier1 process + Tier2 entry):\n" + "\n".join(rows)
+            + f"\n\nVerdict: {d['verdict']}\n\nWrite ONE tight paragraph (max 70 words): name "
+            "the archetype (reversal vs momentum), the conviction drivers, and the single binding "
+            "risk. Price action only, no fundamentals. Do not restate the score. Be decisive.")
+        msg = client.messages.create(model=model, max_tokens=200,
+                                     messages=[{"role": "user", "content": prompt}])
+        txt = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
+        return txt or _interpret_rulebased(d)
+    except Exception:
+        return _interpret_rulebased(d)
+
+
+def interpret(d, use_api=False):
+    """Public entry. Rule-based by default; API enrichment when use_api=True."""
+    if not d.get("ok"):
+        return None
+    return _interpret_api(d) if use_api else _interpret_rulebased(d)
+
+
 # ─────────────────────────────── main compute ───────────────────────────────────────
 
-def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
+def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=False):
     if side is None:
         side = _parse_side(symbol_text)
     side = side.upper()
@@ -493,7 +618,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             def st(ok):
                 return "chart" if ok is None else ("pass" if ok else "fail")
 
-            return {
+            result = {
                 "ok": True, "symbol": symbol, "company": company, "segment": segment,
                 "side": side, "gvm": _f(gvm), "ts": _ist_now().strftime("%d-%b %H:%M IST"),
                 "tier1": [{"rule": r[0], "cond": r[1], "val": r[2], "state": st(r[3]), "method": r[4]} for r in t1],
@@ -504,6 +629,9 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 "version": "v3.3.3",
                 "scoring": "strict — fails and no-data both count as not passed",
             }
+            result["interpretation"] = interpret(result, use_api=use_api)
+            result["interpretation_mode"] = "api" if use_api else "rule-based"
+            return result
     except Exception as e:
         return {"ok": False, "error": f"DB error: {str(e)[:160]}"}
 
@@ -520,9 +648,9 @@ def compute_single_rule(symbol, side, rule):
     return {"ok": False, "error": f"Unknown rule '{rule}'. Use R1-R13 or F1-F7 (R8 merged into R6 in v3.3.2)."}
 
 
-def native_trade_check(query, gate1=None, gate2=None):
+def native_trade_check(query, gate1=None, gate2=None, use_api=False):
     """Markdown wrapper for /ask + native_router."""
-    d = compute_trade_check(query, _parse_side(query), gate1, gate2)
+    d = compute_trade_check(query, _parse_side(query), gate1, gate2, use_api=use_api)
     if not d.get("ok"):
         return f"**Trade Check — v3.3**\n{d.get('error', 'error')}"
 
@@ -546,5 +674,8 @@ def native_trade_check(query, gate1=None, gate2=None):
         out.append(f"| {r['rule']} | {r['cond']} | {r['val']} | {mark(r)} |")
     out.append(f"\n**Tier2: {d['t2_pass']}/7 confirmed** · need {d.get('t2_min', 5)}")
     out.append(f"\n---\n**Verdict: {d['verdict']}**")
+    if d.get("interpretation"):
+        mode = " (AI)" if d.get("interpretation_mode") == "api" else ""
+        out.append(f"\n**Interpretation{mode}:** {d['interpretation']}")
     out.append("_Personal trade context — not a V8 algo signal._")
     return "\n".join(out)
