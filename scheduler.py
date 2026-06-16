@@ -42,12 +42,17 @@ v8_live.py archived — v8_history_cache no longer built or used.
   Fix 2: _scheduler sleep wrapped in try/except CancelledError → checks and relaunches
           _live_loop immediately on cancel rather than waiting up to 300s.
   Fix 3: _scheduler supervisor interval reduced 300s → 60s for faster death detection.
+16-Jun-2026: futures_universe auto-sync from Fyers feed, Monday 08:00 IST.
+  Strips expiry suffix from Fyers symbols (e.g. RADICO26JUNFUT → RADICO).
+  Adds missing symbols as active, deactivates symbols absent 2+ consecutive Mondays.
+  Logs changes to session_log. MCP tool: sync_futures_universe.
 """
 
 import os
 import asyncio
 import time
 import logging
+import re
 import urllib.parse
 from datetime import datetime, date, timedelta
 from typing import Optional, Dict, List
@@ -246,7 +251,145 @@ def _compute_and_store_pcr(conn) -> dict:
         return {"status": "ok", "rows": rowcount}
 
 
-# ── State flags ────────────────────────────────────────────────────────────────
+# ── futures_universe auto-sync from Fyers feed ────────────────────────────────
+
+# Regex to strip expiry suffix from Fyers futures symbols
+# e.g. RADICO26JUNFUT → RADICO, BAJAJ-AUTO26JUNFUT → BAJAJ-AUTO
+_EXPIRY_SUFFIX_RE = re.compile(r'\d{2}[A-Z]{3}FUT$', re.IGNORECASE)
+
+# Indices to always exclude from equity futures universe
+_EXCLUDE_SYMBOLS = {"NIFTY50", "BANKNIFTY", "NIFTYMID50"}
+
+
+def _strip_expiry(fyers_symbol: str) -> str:
+    """Strip Fyers expiry suffix to get base NSE symbol."""
+    return _EXPIRY_SUFFIX_RE.sub("", fyers_symbol).strip()
+
+
+def sync_futures_universe(conn) -> dict:
+    """
+    Sync futures_universe with Fyers feed (futures_basis last 7 days).
+    - Strips expiry suffix from Fyers symbols to get base symbol
+    - ADDs missing active symbols (lot_size=1 default, updated manually later)
+    - DEACTIVATEs symbols absent from Fyers for 2+ consecutive Mondays
+      (tracked via app_config key 'fu_absent_last_monday')
+    Logs result to session_log.
+    """
+    today = _ist_now().date()
+
+    # 1. Get distinct base symbols from Fyers feed (last 7 days)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT symbol FROM futures_basis
+            WHERE DATE(ts) >= CURRENT_DATE - 7
+        """)
+        fyers_raw = [r[0] for r in cur.fetchall()]
+
+    fyers_base = set()
+    for sym in fyers_raw:
+        base = _strip_expiry(sym)
+        if base and base not in _EXCLUDE_SYMBOLS:
+            fyers_base.add(base)
+
+    # 2. Get current futures_universe
+    with conn.cursor() as cur:
+        cur.execute("SELECT symbol, is_active FROM futures_universe")
+        fu_rows = {r[0]: r[1] for r in cur.fetchall()}
+
+    fu_active   = {s for s, active in fu_rows.items() if active}
+    fu_all      = set(fu_rows.keys())
+
+    # 3. Symbols to ADD (in Fyers but not in FU at all)
+    to_add = fyers_base - fu_all - _EXCLUDE_SYMBOLS
+
+    # 4. Symbols to REACTIVATE (in Fyers, in FU but inactive)
+    to_reactivate = (fyers_base & fu_all) - fu_active - _EXCLUDE_SYMBOLS
+
+    # 5. Absent from Fyers this Monday — track for deactivation
+    absent_this_week = fu_active - fyers_base - _EXCLUDE_SYMBOLS
+
+    # Load last week's absent list from app_config
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='fu_absent_last_monday'")
+            row = cur.fetchone()
+            absent_last_week = set(row[0].split(",")) if row and row[0] else set()
+    except Exception:
+        absent_last_week = set()
+
+    # Deactivate only if absent BOTH this week AND last week (2 consecutive Mondays)
+    to_deactivate = absent_this_week & absent_last_week
+
+    # Save this week's absent list for next Monday
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO app_config (key, value, updated_at) VALUES ('fu_absent_last_monday', %s, NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                (",".join(sorted(absent_this_week)),)
+            )
+        conn.commit()
+    except Exception as e:
+        log.warning(f"fu_absent save failed: {e}")
+
+    # 6. Execute changes
+    added = []; reactivated = []; deactivated = []
+
+    with conn.cursor() as cur:
+        for sym in sorted(to_add):
+            try:
+                cur.execute("""
+                    INSERT INTO futures_universe (symbol, lot_size, is_active, added_at, updated_at)
+                    VALUES (%s, 1, TRUE, NOW(), NOW())
+                    ON CONFLICT (symbol) DO NOTHING
+                """, (sym,))
+                if cur.rowcount:
+                    added.append(sym)
+            except Exception as e:
+                log.warning(f"fu add {sym}: {e}")
+
+        for sym in sorted(to_reactivate):
+            try:
+                cur.execute("UPDATE futures_universe SET is_active=TRUE, updated_at=NOW() WHERE symbol=%s", (sym,))
+                reactivated.append(sym)
+            except Exception as e:
+                log.warning(f"fu reactivate {sym}: {e}")
+
+        for sym in sorted(to_deactivate):
+            try:
+                cur.execute("UPDATE futures_universe SET is_active=FALSE, updated_at=NOW() WHERE symbol=%s", (sym,))
+                deactivated.append(sym)
+            except Exception as e:
+                log.warning(f"fu deactivate {sym}: {e}")
+
+    conn.commit()
+
+    result = {
+        "sync_date": str(today),
+        "fyers_base_symbols": len(fyers_base),
+        "fu_active_before": len(fu_active),
+        "added": added,
+        "reactivated": reactivated,
+        "deactivated": deactivated,
+        "absent_this_week": sorted(absent_this_week),
+    }
+
+    # Log to session_log
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO session_log (session_date, session_ts, category, title, details)
+                VALUES (CURRENT_DATE, NOW(), 'task', 'futures_universe_sync', %s)
+            """, (psycopg.types.json.Jsonb(result),))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"fu sync session_log: {e}")
+
+    log.info(f"fu_sync: +{len(added)} added, +{len(reactivated)} reactivated, -{len(deactivated)} deactivated")
+    return result
+
+
+# ── State flags ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _raw_prices_updated_today:  Optional[date] = None
 _earnings_loaded_today:     Optional[date] = None
 _yahoo_daily_running:       bool           = False
@@ -268,12 +411,14 @@ _daily_metrics_running:     bool           = False
 _refresh_check_ran_today:   Optional[date] = None
 _v10_running:               bool           = False
 _pcr_intraday_running:      bool           = False
+_fu_sync_ran_this_week:     Optional[date] = None   # tracks Monday sync
+_fu_sync_running:           bool           = False
 
 # Supervisor handle for the live loop task (relaunched if it ever dies)
 _live_loop_task: Optional[asyncio.Task] = None
 
 
-# ── Background tasks ───────────────────────────────────────────────────────────
+# ── Background tasks ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -602,7 +747,41 @@ async def _task_load_earnings_daily():
         log.error(f"_task_load_earnings_daily failed: {e}")
 
 
-# ── Loops ──────────────────────────────────────────────────────────────────────
+def _bg_sync_futures_universe():
+    """Monday 08:00 IST: sync futures_universe with Fyers feed."""
+    global _fu_sync_ran_this_week, _fu_sync_running
+    if _fu_sync_running:
+        return
+    _fu_sync_running = True
+    try:
+        with _conn() as conn:
+            result = sync_futures_universe(conn)
+        _fu_sync_ran_this_week = _ist_now().date()
+        log.info(f"fu_sync done: +{len(result.get('added',[]))} added "
+                 f"+{len(result.get('reactivated',[]))} reactivated "
+                 f"-{len(result.get('deactivated',[]))} deactivated")
+    except Exception as e:
+        log.error(f"fu_sync failed: {e}")
+    finally:
+        _fu_sync_running = False
+
+
+async def _task_sync_futures_universe():
+    """Runs Monday 08:00 IST only — idempotent via _fu_sync_ran_this_week."""
+    global _fu_sync_ran_this_week
+    now = _ist_now()
+    # weekday() == 0 = Monday
+    if now.weekday() != 0:
+        return
+    if now.hour != 8 or now.minute >= 5:
+        return
+    if _fu_sync_ran_this_week == now.date():
+        return
+    log.info("Monday 08:00 IST: futures_universe auto-sync from Fyers feed")
+    asyncio.create_task(asyncio.to_thread(_bg_sync_futures_universe))
+
+
+# ── Loops ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _scheduler():
     global _live_loop_task
@@ -632,6 +811,8 @@ async def _scheduler():
                 await _task_fetch_global()
             # Global intraday every 5 min, 06:00-23:30 IST (incl weekends)
             await _task_fetch_global_intraday()
+            # Monday 08:00 IST: futures_universe sync from Fyers
+            await _task_sync_futures_universe()
             if trading_day and now.hour == 9 and now.minute < 5:   await _task_load_earnings_daily()
             if _is_market_hours():                                   await _task_refresh_cmp()
             if trading_day and now.hour == 15 and 45 <= now.minute < 55: await _task_run_v8_engine()
