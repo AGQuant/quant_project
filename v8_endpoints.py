@@ -9,31 +9,27 @@ ADR (11-Jun-2026): market_mood reads adr_intraday (live 5-min) primary,
   falls back to adr_daily (EOD). Per spec id=165.
 qualified JOIN fix (11-Jun-2026): replaced window-function JOIN causing
   duplicate rows (FORTIS appeared twice) with subquery for first_seen.
-Filter tuning (12-Jun-2026): sell_overbought rsi_month>=68 + day_1d<0 +
-  sector_week<=2 + gvm_score<=8 (FILTER_CONFIG + live SQL, consistent).
 Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
   upper cap 4.0->6.0.
 Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
-Score-based fallback (15-Jun-2026): _live_qualified_fallback score-based.
-buy_reversal optimisation v1 (15-Jun-2026): 6-day 5-min intraday sim.
-  Dynamic Nifty 1M regime: BULL/NEUTRAL/BEAR. 63.4% WR, +0.25% exp.
-  session_log: buy_reversal_dynamic_nifty_filter_v1.
+buy_reversal optimisation v1 (15-Jun-2026): Dynamic Nifty 1M regime.
+  63.4% WR, +0.25% exp. session_log: buy_reversal_dynamic_nifty_filter_v1.
 buy_momentum optimisation v1 (16-Jun-2026): Target=R2(BULL)/R1.
-  1-yr backtest: 243 sigs, 77.4% WR, +1.79% avg win. session_log id=342.
-qualified status enrichment (16-Jun-2026):
-  OPEN / SLOT_FULL / NEAR_MISS / QUALIFIED badges.
+  243 sigs, 77.4% WR, +1.79% avg win. session_log id=342.
 sell_reversal V3 LOCKED (16-Jun-2026): SELL_REVERSAL_SPEC_V3
-  Filters (5, strict AND): rsi_weekly<=45, mom_2d<=-2, sector_week<=-1.5,
-    dma_200<=2, week_return[-10,-0.5]
-  Target=S2 | Stop=PP+0.5*(R1-PP)
-  1-yr: 283 sigs, 75.8% WR, EV +0.26%/trade. session_log: SELL_REVERSAL_SPEC_V3.
+  5 filters: rsi_weekly<=45, mom_2d<=-2, sector_week<=-1.5, dma_200<=2, week_return[-10,-0.5]
+  Target=S2 | Stop=PP+0.5*(R1-PP) | 283 sigs, 75.8% WR, EV +0.26%/trade.
 sell_momentum V2 LOCKED (16-Jun-2026): SELL_MOMENTUM_SPEC_V2
-  Filters (6, strict AND): dma_200<=-2, rsi_month<=38, rsi_weekly<=38,
-    week_index_52<=20, sector_week<=-2, mom_2d<=-1.5
-  Target=S2 | Stop=PP+0.5*(R1-PP)
-  1-yr: 97 sigs, 71.9% WR, EV +0.55%/trade. session_log: SELL_MOMENTUM_SPEC_V2.
-  Fires in clusters during bear phases. Zero in bull months by design.
-  week_index_52 computed live from raw_prices (365-day rolling hi/lo).
+  6 filters: dma_200<=-2, rsi_month<=38, rsi_weekly<=38, week_index_52<=20, sector_week<=-2, mom_2d<=-1.5
+  Target=S2 | Stop=PP+0.5*(R1-PP) | 97 sigs, 71.9% WR, EV +0.55%/trade.
+sell_overbought V2 LOCKED (16-Jun-2026): SELL_OVERBOUGHT_SPEC_V2
+  Mean reversion from overbought resistance. 5 filters (strict AND):
+    week_high > 0.9*R1 OR week_high > 0.9*R2  (near resistance)
+    fall_3d < -3%  (close vs max_high last 3 days)
+    rsi_weekly >= 80  |  rsi_month >= 70  |  sector_week < 0
+  Target=S1 | Stop=R2 (pivot ceiling — old PP+0.5*(R1-PP) was wrong for this basket)
+  112 sigs/yr, 81.5% WR, EV +1.56%/trade. session_log: SELL_OVERBOUGHT_SPEC_V2.
+  Computed live from raw_prices (no v8_metrics columns needed for pivot filters).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -91,8 +87,7 @@ FILTER_CONFIG = {
     },
     "sell_reversal": {
         # V3 LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V3
-        # Target=S2 | Stop=PP+0.5*(R1-PP)
-        # 5 filters strict AND — 283 sigs/yr, 75.8% WR, EV +0.26%/trade
+        # Target=S2 | Stop=PP+0.5*(R1-PP) | 283 sigs, 75.8% WR, EV +0.26%/trade
         "rsi_weekly":   [None, 45.0],
         "mom_2d":       [None, -2.0],
         "sector_week":  [None, -1.5],
@@ -101,9 +96,7 @@ FILTER_CONFIG = {
     },
     "sell_momentum": {
         # V2 LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V2
-        # Target=S2 | Stop=PP+0.5*(R1-PP)
-        # 6 filters strict AND — 97 sigs/yr, 71.9% WR, EV +0.55%/trade
-        # Fires in clusters during bear phases — zero in bull months by design
+        # Target=S2 | Stop=PP+0.5*(R1-PP) | 97 sigs, 71.9% WR, EV +0.55%/trade
         "dma_200":       [None,  -2.0],
         "rsi_month":     [None,  38.0],
         "rsi_weekly":    [None,  38.0],
@@ -111,27 +104,27 @@ FILTER_CONFIG = {
         "sector_week":   [None,  -2.0],
         "mom_2d":        [None,  -1.5],
     },
+    # sell_overbought V2: filters computed live in sell_overbought() from raw_prices
+    # Not stored in FILTER_CONFIG (pivot-based — week_high/fall_3d not in v8_metrics)
+    # Kept as informational reference only
     "sell_overbought": {
-        "dma_200":      [10.0, None],
-        "week_index_52":[80.0, None],
-        "rsi_month":    [68.0, None],
-        "mom_2d":       [None,  0.0],
-        "day_1d":       [None,  0.0],
-        "sector_week":  [None,  2.0],
-        "gvm_score":    [None,  8.0],
+        "rsi_weekly":   [80.0, None],
+        "rsi_month":    [70.0, None],
+        "sector_week":  [None,  0.0],
     },
 }
 
-# ── Sell Reversal V3 + Sell Momentum V2: both Target=S2, Stop=PP+0.5*(R1-PP) ──
-SELL_REVERSAL_SL_MULT  = 0.5
-SELL_MOMENTUM_SL_MULT  = 0.5
+# ── SL multipliers ──
+SELL_REVERSAL_SL_MULT  = 0.5   # stop = PP + 0.5*(R1-PP)
+SELL_MOMENTUM_SL_MULT  = 0.5   # stop = PP + 0.5*(R1-PP)
+# sell_overbought: stop = R2 (pivot ceiling)
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
     "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2"},
     "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "75.8%", "signals_per_day": "~1.1/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
-    "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "71.4%", "signals_per_day": "~3"},
+    "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
 }
 
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
@@ -627,6 +620,33 @@ def filter_config(basket: str):
             **BASKET_META.get(basket, {})
         }
 
+    if basket == "sell_overbought":
+        return {
+            "basket": basket,
+            "principle": "Mean reversion from overbought resistance",
+            "filters": [
+                {"metric": "week_high_vs_pivot", "condition": "hi5d > 0.9*R1 OR hi5d > 0.9*R2", "note": "Near resistance ceiling"},
+                {"metric": "fall_3d",            "condition": "< -3.0%",                         "note": "(close - max_high_3d) / max_high_3d * 100"},
+                {"metric": "rsi_weekly",         "condition": ">= 80"},
+                {"metric": "rsi_month",          "condition": ">= 70"},
+                {"metric": "sector_week",        "condition": "< 0"},
+            ],
+            "count": 5,
+            "target": "S1",
+            "target_formula": "S1 = 2*PP - H5  [rolling-5-day pivot]",
+            "stop": "R2",
+            "stop_formula": "R2 = PP + (H5 - L5)  [rolling-5-day pivot]",
+            "stop_note": "R2 is natural ceiling — PP+0.5*(R1-PP) was too tight for near-R1 stocks",
+            "priority": "accuracy first (WR 81.5%, EV +1.56%/trade)",
+            "regime_gate": "mood gate handles slot reduction — no blanket block",
+            "backtest": {
+                "signals": 112, "wr_pct": 81.5,
+                "avg_tgt_pct": -4.05, "avg_sl_pct": 9.47,
+                "expected_value": 1.56,
+            },
+            **BASKET_META.get(basket, {})
+        }
+
     rows = []
     for metric, bounds in FILTER_CONFIG[basket].items():
         mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
@@ -901,57 +921,106 @@ def raw_metrics(limit: int = 250):
 
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
+    """
+    Sell Overbought V2 — Mean reversion from overbought resistance.
+    Filters (5, strict AND):
+      1. week_high > 0.9*R1 OR week_high > 0.9*R2  (near resistance ceiling)
+      2. fall_3d < -3%  (close vs max_high of last 3 days)
+      3. RSI Weekly >= 80
+      4. RSI Monthly >= 70
+      5. sector_week < 0
+    Target = S1  |  Stop = R2  (pivot ceiling — much wider than old SL, gives 81.5% WR)
+    All pivots are rolling-5-day: PP=avg(H+L+C)/3, R1=2PP-L5, R2=PP+(H5-L5), S1=2PP-H5
+    """
     try:
         open_pos  = _load_open_positions("sell_overbought")
         slot_full = _load_slot_full("sell_overbought")
 
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                WITH price_window AS (
-                    SELECT r.symbol, r.price_date, r.close, r.high, r.low, r.volume,
-                           AVG(r.close) OVER w9 AS ma9, AVG(r.close) OVER w21 AS ma21,
-                           AVG(r.volume) OVER w10 AS vol_avg10,
-                           LAG(r.high,1) OVER ws AS prev_high, LAG(r.low,1) OVER ws AS prev_low,
-                           LAG(r.close,1) OVER ws AS prev_close,
-                           ROW_NUMBER() OVER (PARTITION BY r.symbol ORDER BY r.price_date DESC) AS rn
-                    FROM raw_prices r
-                    JOIN futures_universe fu ON fu.symbol = r.symbol AND fu.is_active = TRUE
-                    WHERE r.price_date >= CURRENT_DATE - INTERVAL '60 days'
-                    WINDOW w9  AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 8 PRECEDING),
-                           w21 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 20 PRECEDING),
-                           w10 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 9 PRECEDING),
-                           ws  AS (PARTITION BY r.symbol ORDER BY r.price_date)
+                WITH pivots AS (
+                    SELECT symbol, price_date,
+                        AVG((high+low+close)/3.0) OVER w              AS pp,
+                        MAX(high)                 OVER w              AS h5,
+                        MIN(low)                  OVER w              AS l5
+                    FROM raw_prices
+                    WHERE price_date >= CURRENT_DATE - INTERVAL '14 days'
+                    WINDOW w AS (PARTITION BY symbol ORDER BY price_date
+                                 ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
                 ),
-                latest AS (
-                    SELECT pw.symbol, pw.close AS entry, pw.ma9, pw.ma21,
-                           ROUND(((pw.ma9-pw.ma21)/NULLIF(pw.ma21,0)*100)::numeric,2) AS ma9_vs_ma21,
-                           ROUND((pw.volume/NULLIF(pw.vol_avg10,0))::numeric,2) AS vol_ratio,
-                           ROUND((((pw.prev_high+pw.prev_low+pw.prev_close)/3)-(pw.prev_high-(pw.prev_high+pw.prev_low+pw.prev_close)/3))::numeric,2) AS s1
-                    FROM price_window pw WHERE pw.rn=1 AND pw.ma21 IS NOT NULL AND pw.volume>0
+                latest_pivot AS (
+                    SELECT symbol,
+                        pp,
+                        2*pp - h5           AS s1,
+                        2*pp - l5           AS r1,
+                        pp + (h5 - l5)      AS r2
+                    FROM pivots
+                    WHERE price_date = (SELECT MAX(price_date) FROM pivots p2 WHERE p2.symbol=pivots.symbol)
                 ),
-                filtered AS (
-                    SELECT l.*, vm.dma_200, vm.week_index_52, vm.rsi_month,
-                           vm.daily_rsi, vm.mom_2d, vm.day_1d, vm.sector_week, vm.gvm_score
-                    FROM latest l
-                    JOIN v8_metrics vm ON vm.symbol=l.symbol
-                      AND vm.score_date=(SELECT MAX(score_date) FROM v8_metrics)
-                    WHERE vm.dma_200>=10 AND vm.week_index_52>=80 AND l.ma9_vs_ma21>=3
-                      AND l.vol_ratio<=0.8 AND vm.mom_2d<0 AND vm.rsi_month>=68
-                      AND COALESCE(vm.day_1d,0)<0
-                      AND COALESCE(vm.sector_week,0)<=2
-                      AND COALESCE(vm.gvm_score,0)<=8
-                      AND l.s1<l.entry
-                      AND l.symbol NOT IN (SELECT UPPER(ticker) FROM earnings_calendar
-                          WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day'))
+                hi3d AS (
+                    SELECT symbol, MAX(high) AS max_high_3d
+                    FROM raw_prices
+                    WHERE price_date >= CURRENT_DATE - INTERVAL '4 days'
+                      AND price_date <= CURRENT_DATE
+                    GROUP BY symbol
+                ),
+                hi5d AS (
+                    SELECT symbol, MAX(high) AS max_high_5d
+                    FROM raw_prices
+                    WHERE price_date >= CURRENT_DATE - INTERVAL '7 days'
+                      AND price_date <= CURRENT_DATE
+                    GROUP BY symbol
+                ),
+                latest_close AS (
+                    SELECT DISTINCT ON (symbol) symbol, close, price_date
+                    FROM raw_prices
+                    WHERE price_date <= CURRENT_DATE
+                    ORDER BY symbol, price_date DESC
                 )
-                SELECT symbol, ROUND(entry::numeric,2) AS entry, s1 AS target,
-                    ROUND((entry+(entry-s1))::numeric,2) AS stop,
-                    ROUND(((entry-s1)/NULLIF(entry,0)*100)::numeric,2) AS tgt_pct,
-                    dma_200, week_index_52, ma9_vs_ma21, vol_ratio, mom_2d,
-                    ROUND(rsi_month::numeric,1) AS rsi_month,
-                    ROUND(daily_rsi::numeric,1) AS daily_rsi,
-                    ROUND(gvm_score::numeric,2) AS gvm_score
-                FROM filtered ORDER BY dma_200 DESC NULLS LAST LIMIT %s
+                SELECT
+                    lc.symbol,
+                    ROUND(lc.close::numeric, 2)                                      AS entry,
+                    ROUND(lp.s1::numeric, 2)                                         AS target,
+                    ROUND(lp.r2::numeric, 2)                                         AS stop,
+                    ROUND(((lp.s1 - lc.close)/NULLIF(lc.close,0)*100)::numeric, 2)  AS tgt_pct,
+                    ROUND(((lp.r2 - lc.close)/NULLIF(lc.close,0)*100)::numeric, 2)  AS sl_pct,
+                    ROUND(h5d.max_high_5d::numeric, 2)                               AS week_high,
+                    ROUND(h3d.max_high_3d::numeric, 2)                               AS high_3d,
+                    ROUND(((lc.close - h3d.max_high_3d)/NULLIF(h3d.max_high_3d,0)*100)::numeric, 2) AS fall_3d_pct,
+                    ROUND(lp.r1::numeric, 2)                                         AS r1,
+                    ROUND(lp.r2::numeric, 2)                                         AS r2,
+                    ROUND(lp.pp::numeric, 2)                                         AS pp,
+                    ROUND(vm.rsi_weekly::numeric, 1)                                 AS rsi_weekly,
+                    ROUND(vm.rsi_month::numeric, 1)                                  AS rsi_month,
+                    ROUND(vm.sector_week::numeric, 2)                                AS sector_week,
+                    ROUND(vm.gvm_score::numeric, 2)                                  AS gvm_score
+                FROM latest_close lc
+                JOIN futures_universe fu ON fu.symbol = lc.symbol AND fu.is_active = TRUE
+                JOIN latest_pivot  lp  ON lp.symbol  = lc.symbol
+                JOIN hi3d          h3d ON h3d.symbol  = lc.symbol
+                JOIN hi5d          h5d ON h5d.symbol  = lc.symbol
+                JOIN v8_metrics    vm  ON vm.symbol   = lc.symbol
+                    AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                WHERE
+                    -- Filter 1: week_high near R1 or R2
+                    (h5d.max_high_5d > 0.9 * lp.r1 OR h5d.max_high_5d > 0.9 * lp.r2)
+                    -- Filter 2: fall from 3-day high > -3%
+                    AND (lc.close - h3d.max_high_3d) / NULLIF(h3d.max_high_3d, 0) * 100 < -3.0
+                    -- Filter 3: RSI weekly >= 80
+                    AND vm.rsi_weekly >= 80
+                    -- Filter 4: RSI monthly >= 70
+                    AND vm.rsi_month >= 70
+                    -- Filter 5: sector_week < 0
+                    AND vm.sector_week < 0
+                    -- Target must be below entry
+                    AND lp.s1 < lc.close
+                    -- Blackout
+                    AND lc.symbol NOT IN (
+                        SELECT UPPER(ticker) FROM earnings_calendar
+                        WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                    )
+                ORDER BY vm.rsi_weekly DESC NULLS LAST
+                LIMIT %s
             """, (min(max(limit, 1), 200),))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -960,9 +1029,17 @@ def sell_overbought(limit: int = 50):
             r["status"] = "QUALIFIED"
         rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full)
 
-        return {"basket": "sell_overbought", "count": len(rows),
-                "target": "S1", "sl": "entry + (entry - S1) - 1:1",
-                "win_pct_may2026": "71.4%", "stocks": rows}
+        return {
+            "basket": "sell_overbought",
+            "count": len(rows),
+            "target": "S1",
+            "target_formula": "S1 = 2*PP - H5  [rolling-5-day pivot]",
+            "stop": "R2",
+            "stop_formula": "R2 = PP + (H5 - L5)  [rolling-5-day pivot]",
+            "win_pct": "81.5%",
+            "ev_per_trade": "+1.56%",
+            "stocks": rows,
+        }
     except Exception as e:
         raise HTTPException(500, f"sell_overbought failed: {e}")
 
