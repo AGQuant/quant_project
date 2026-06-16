@@ -1,35 +1,24 @@
 """
 V8 endpoints — Quant Long-Short Basket Strategy
 
-ADR (14-Jun-2026): _read_adr gates the live tiers (adr_intraday 5-min, then
-  live compute from intraday_prices) behind _market_open(). When NSE is CLOSED
-  (weekend/holiday/outside 09:15-15:30 IST) it returns the last EOD adr_daily
-  row directly, so a stale/partial intraday breadth (e.g. 0.26) is never shown.
-ADR (11-Jun-2026): market_mood reads adr_intraday (live 5-min) primary,
-  falls back to adr_daily (EOD). Per spec id=165.
-qualified JOIN fix (11-Jun-2026): replaced window-function JOIN causing
-  duplicate rows (FORTIS appeared twice) with subquery for first_seen.
-Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
-  upper cap 4.0->6.0.
-Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
-buy_reversal optimisation v1 (15-Jun-2026): Dynamic Nifty 1M regime.
-  63.4% WR, +0.25% exp. session_log: buy_reversal_dynamic_nifty_filter_v1.
-buy_momentum optimisation v1 (16-Jun-2026): Target=R2(BULL)/R1.
-  243 sigs, 77.4% WR, +1.79% avg win. session_log id=342.
-sell_reversal V3 LOCKED (16-Jun-2026): SELL_REVERSAL_SPEC_V3
-  5 filters: rsi_weekly<=45, mom_2d<=-2, sector_week<=-1.5, dma_200<=2, week_return[-10,-0.5]
-  Target=S2 | Stop=PP+0.5*(R1-PP) | 283 sigs, 75.8% WR, EV +0.26%/trade.
-sell_momentum V2 LOCKED (16-Jun-2026): SELL_MOMENTUM_SPEC_V2
-  6 filters: dma_200<=-2, rsi_month<=38, rsi_weekly<=38, week_index_52<=20, sector_week<=-2, mom_2d<=-1.5
-  Target=S2 | Stop=PP+0.5*(R1-PP) | 97 sigs, 71.9% WR, EV +0.55%/trade.
-sell_overbought V2 LOCKED (16-Jun-2026): SELL_OVERBOUGHT_SPEC_V2
-  Mean reversion from overbought resistance. 5 filters (strict AND):
-    week_high > 0.9*R1 OR week_high > 0.9*R2  (near resistance)
-    fall_3d < -3%  (close vs max_high last 3 days)
-    rsi_weekly >= 80  |  rsi_month >= 70  |  sector_week < 0
-  Target=S1 | Stop=R2 (pivot ceiling — old PP+0.5*(R1-PP) was wrong for this basket)
-  112 sigs/yr, 81.5% WR, EV +1.56%/trade. session_log: SELL_OVERBOUGHT_SPEC_V2.
-  Computed live from raw_prices (no v8_metrics columns needed for pivot filters).
+ADR (14-Jun-2026): _read_adr gates the live tiers behind _market_open().
+ADR (11-Jun-2026): market_mood reads adr_intraday primary, falls back to adr_daily.
+buy_reversal dynamic Nifty filter v1 (15-Jun-2026): BULL/NEUTRAL/BEAR regime.
+buy_momentum optimisation v1 (16-Jun-2026): Target=R2(BULL)/R1. 77.4% WR.
+sell_reversal V3 LOCKED (16-Jun-2026): 5 filters, Target=S2, Stop=PP+0.5*(R1-PP), 75.8% WR.
+sell_momentum V2 LOCKED (16-Jun-2026): 6 filters, Target=S2, Stop=PP+0.5*(R1-PP), 71.9% WR.
+sell_overbought V2 LOCKED (16-Jun-2026): Pivot-based mean reversion.
+  5 filters: week_high>0.9*R1orR2, fall_3d<-3%, rsiW>=80, rsiM>=70, sector_week<0.
+  Target=S1 | Stop=R2 | 81.5% WR | EV +1.56%/trade.
+  Dedicated ring-fenced slot pool (never competes with standard sell):
+    Strong Bullish/Bullish/Neutral: 4 SO slots
+    Bearish: 3 SO slots
+  Total slots always = 24.
+Slot architecture (16-Jun-2026):
+  Standard pool (4 baskets):
+    Strong Bullish: 15B/5S | Bullish: 14B/6S | Neutral: 12B/8S | Bearish: 8B/13S
+  SO dedicated: 4 (Bull/Neutral) / 3 (Bearish)
+  Total: 24 in all moods.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -50,7 +39,6 @@ def _ist_now() -> datetime:
 
 
 def _market_open() -> bool:
-    """True only during live NSE hours (Mon-Fri, non-holiday, 09:15-15:30 IST)."""
     now = _ist_now()
     if not is_trading_day(now.date()):
         return False
@@ -86,8 +74,7 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # V3 LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V3
-        # Target=S2 | Stop=PP+0.5*(R1-PP) | 283 sigs, 75.8% WR, EV +0.26%/trade
+        # V3 LOCKED 16-Jun-2026 — 5 strict AND — 283 sigs, 75.8% WR, EV +0.26%
         "rsi_weekly":   [None, 45.0],
         "mom_2d":       [None, -2.0],
         "sector_week":  [None, -1.5],
@@ -95,8 +82,7 @@ FILTER_CONFIG = {
         "week_return":  [-10.0, -0.5],
     },
     "sell_momentum": {
-        # V2 LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V2
-        # Target=S2 | Stop=PP+0.5*(R1-PP) | 97 sigs, 71.9% WR, EV +0.55%/trade
+        # V2 LOCKED 16-Jun-2026 — 6 strict AND — 97 sigs, 71.9% WR, EV +0.55%
         "dma_200":       [None,  -2.0],
         "rsi_month":     [None,  38.0],
         "rsi_weekly":    [None,  38.0],
@@ -104,9 +90,8 @@ FILTER_CONFIG = {
         "sector_week":   [None,  -2.0],
         "mom_2d":        [None,  -1.5],
     },
-    # sell_overbought V2: filters computed live in sell_overbought() from raw_prices
-    # Not stored in FILTER_CONFIG (pivot-based — week_high/fall_3d not in v8_metrics)
-    # Kept as informational reference only
+    # sell_overbought: pivot-based filters not in v8_metrics — computed live in sell_overbought()
+    # Informational reference only (rsi/sector thresholds)
     "sell_overbought": {
         "rsi_weekly":   [80.0, None],
         "rsi_month":    [70.0, None],
@@ -114,10 +99,8 @@ FILTER_CONFIG = {
     },
 }
 
-# ── SL multipliers ──
-SELL_REVERSAL_SL_MULT  = 0.5   # stop = PP + 0.5*(R1-PP)
-SELL_MOMENTUM_SL_MULT  = 0.5   # stop = PP + 0.5*(R1-PP)
-# sell_overbought: stop = R2 (pivot ceiling)
+SELL_REVERSAL_SL_MULT  = 0.5
+SELL_MOMENTUM_SL_MULT  = 0.5
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
@@ -156,15 +139,11 @@ def _get_nifty_1m_return() -> float:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 WITH ranked AS (
-                    SELECT close,
-                           ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
-                    FROM raw_prices
-                    WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
-                    LIMIT 25
+                    SELECT close, ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
+                    FROM raw_prices WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE LIMIT 25
                 )
-                SELECT
-                    (SELECT close FROM ranked WHERE rn=1)  AS latest,
-                    (SELECT close FROM ranked WHERE rn=22) AS month_ago
+                SELECT (SELECT close FROM ranked WHERE rn=1),
+                       (SELECT close FROM ranked WHERE rn=22)
             """)
             row = cur.fetchone()
             if row and row[0] and row[1] and float(row[1]) > 0:
@@ -176,21 +155,21 @@ def _get_nifty_1m_return() -> float:
 
 def _get_nifty_regime() -> tuple:
     nifty_1m = _get_nifty_1m_return()
-    if nifty_1m > 2.0:   regime = "BULL"
+    if nifty_1m > 2.0:    regime = "BULL"
     elif nifty_1m >= -2.0: regime = "NEUTRAL"
-    else:                 regime = "BEAR"
+    else:                  regime = "BEAR"
     return regime, nifty_1m
 
 
 def _get_buy_reversal_live_filters() -> dict:
     regime, nifty_1m = _get_nifty_regime()
-    if regime == "BULL":    wk_max, rsi_max, sec_max = 3.0, 67.0, 4.0
+    if regime == "BULL":     wk_max, rsi_max, sec_max = 3.0, 67.0, 4.0
     elif regime == "NEUTRAL": wk_max, rsi_max, sec_max = 2.0, 62.0, 3.0
-    else:                   wk_max, rsi_max, sec_max = 1.0, 58.0, 2.0
+    else:                    wk_max, rsi_max, sec_max = 1.0, 58.0, 2.0
     live = dict(FILTER_CONFIG["buy_reversal"])
-    live["week_return"] = [0.0,  wk_max]
+    live["week_return"] = [0.0, wk_max]
     live["rsi_month"]   = [52.0, rsi_max]
-    live["sector_week"] = [1.0,  sec_max]
+    live["sector_week"] = [1.0, sec_max]
     return live, regime, nifty_1m
 
 
@@ -217,12 +196,9 @@ def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
 
 def _gate_score(stock: dict, basket: str) -> int:
     config = _get_buy_reversal_live_filters()[0] if basket == "buy_reversal" else FILTER_CONFIG[basket]
-    count = 0
-    for metric, bounds in config.items():
-        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-        if _passes_filter(stock.get(metric), mn, mx):
-            count += 1
-    return count
+    return sum(1 for metric, bounds in config.items()
+               if _passes_filter(stock.get(metric),
+                                 *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1]))))
 
 def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
     if not basket: return ''
@@ -254,11 +230,9 @@ def _live_qualified_fallback(basket: str, limit: int):
 
     rows = []
     for r in all_rows:
-        score = sum(
-            1 for metric, bounds in config.items()
-            if _passes_filter(r.get(metric),
-                              *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
-        )
+        score = sum(1 for metric, bounds in config.items()
+                    if _passes_filter(r.get(metric),
+                                      *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1]))))
         r["filter_score"] = score
         r["filter_total"] = n_filters
         r["status"] = "NEAR_MISS"
@@ -281,8 +255,6 @@ def _live_qualified_fallback(basket: str, limit: int):
     out.sort(key=lambda x: (x.get("filter_score", 0), x.get("gvm_score") or 0), reverse=True)
     return out[:min(max(limit, 1), 200)]
 
-
-# ── Paper position enrichment ─────────────────────────────────────────────────
 
 def _load_open_positions(basket: str) -> dict:
     side = "LONG" if basket.startswith("buy") else "SHORT"
@@ -335,8 +307,6 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
     return stocks
 
 
-# ── ADR helpers ───────────────────────────────────────────────────────────────
-
 def _read_adr(cur):
     if _market_open():
         cur.execute("""
@@ -347,7 +317,6 @@ def _read_adr(cur):
         if row and (row[4] or 0) >= 50:
             adv, dec, unc, adr = row[0] or 0, row[1] or 0, row[2] or 0, float(row[3])
             return adv, dec, unc, adr, "adr_intraday", str(date.today())
-
         cur.execute("""
             WITH li AS (
                 SELECT DISTINCT ON (symbol) symbol, close AS cmp
@@ -368,14 +337,12 @@ def _read_adr(cur):
             adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
             adr = round(adv / dec, 3) if dec else float(adv)
             return adv, dec, unc, adr, "live_intraday", str(date.today())
-
     cur.execute("SELECT advances, declines, unchanged, adr, price_date FROM adr_daily ORDER BY price_date DESC LIMIT 1")
     r = cur.fetchone()
     if r:
         adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
         adr = round(float(r[3]), 3) if r[3] is not None else 1.0
         return adv, dec, unc, adr, "adr_daily", str(r[4])
-
     return 0, 0, 0, 1.0, "no_data", str(date.today())
 
 
@@ -439,15 +406,22 @@ def market_mood():
             ]
             fails = sum(1 for c in checks if not c["pass"])
 
+            # Standard pool (4 baskets)
             if fails == 0:   buy_slots, sell_slots, mood = 15, 5,  "Strong Bullish"
-            elif fails == 1: buy_slots, sell_slots, mood = 12, 8,  "Bullish"
-            elif fails == 2: buy_slots, sell_slots, mood = 10, 10, "Neutral"
-            else:            buy_slots, sell_slots, mood = 8,  12, "Bearish"
+            elif fails == 1: buy_slots, sell_slots, mood = 14, 6,  "Bullish"
+            elif fails == 2: buy_slots, sell_slots, mood = 12, 8,  "Neutral"
+            else:            buy_slots, sell_slots, mood = 8,  13, "Bearish"
+
+            # Dedicated SO slots — ring-fenced, never compete with standard sell
+            so_slots = 3 if fails >= 3 else 4
+            total_slots = buy_slots + sell_slots + so_slots  # always 24
 
             return {
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
-                "buy_slots": buy_slots, "sell_slots": sell_slots, "total_slots": 20,
+                "buy_slots": buy_slots, "sell_slots": sell_slots,
+                "so_slots": so_slots, "total_slots": total_slots,
+                "slot_note": "so_slots are ring-fenced for sell_overbought only — do not compete with sell_slots",
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
                                "unchanged": unchanged, "adr_date": adr_date,
@@ -529,12 +503,10 @@ def filter_config(basket: str):
         rows = []
         for metric, bounds in live_config.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            rows.append({
-                "metric": metric, "min": mn, "max": mx,
-                "min_display": "" if mn is None else mn,
-                "max_display": "" if mx is None else mx,
-                "dynamic": metric in ("week_return", "rsi_month", "sector_week"),
-            })
+            rows.append({"metric": metric, "min": mn, "max": mx,
+                         "min_display": "" if mn is None else mn,
+                         "max_display": "" if mx is None else mx,
+                         "dynamic": metric in ("week_return", "rsi_month", "sector_week")})
         return {
             "basket": basket, "filters": rows, "count": len(rows),
             "regime": regime, "nifty_1m_return": round(nifty_1m, 2),
@@ -551,12 +523,10 @@ def filter_config(basket: str):
         rows = []
         for metric, bounds in FILTER_CONFIG["buy_momentum"].items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            rows.append({
-                "metric": metric, "min": mn, "max": mx,
-                "min_display": "" if mn is None else mn,
-                "max_display": "" if mx is None else mx,
-                "dynamic": metric == "rsi_month",
-            })
+            rows.append({"metric": metric, "min": mn, "max": mx,
+                         "min_display": "" if mn is None else mn,
+                         "max_display": "" if mx is None else mx,
+                         "dynamic": metric == "rsi_month"})
         return {
             "basket": basket, "filters": rows, "count": len(rows),
             "regime": regime, "nifty_1m_return": round(nifty_1m, 2),
@@ -564,8 +534,8 @@ def filter_config(basket: str):
             "stop": "S1",
             "regime_rules": {
                 "BULL":    {"condition": "Nifty 1M > +2%", "target": "R2", "slots": 15},
-                "NEUTRAL": {"condition": "-2% to +2%",     "target": "R1", "slots": 10},
-                "BEAR":    {"condition": "Nifty 1M < -2%", "target": "R1", "slots": 5},
+                "NEUTRAL": {"condition": "-2% to +2%",     "target": "R1", "slots": 12},
+                "BEAR":    {"condition": "Nifty 1M < -2%", "target": "R1", "slots": 8},
             },
             "sector_rule": "max 2 per segment, M-score tiebreaker",
             "symbol_guard": "1 entry per symbol per 3 days",
@@ -582,17 +552,12 @@ def filter_config(basket: str):
                          "max_display": "" if mx is None else mx})
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "target": "S2",
-            "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
-            "stop":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
-            "sl_mult": SELL_REVERSAL_SL_MULT,
+            "target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
+            "stop": f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)", "sl_mult": SELL_REVERSAL_SL_MULT,
             "priority": "profitable (WR 75.8%, EV +0.26%/trade)",
             "regime_gate": "mood gate handles slot reduction — no blanket block",
-            "backtest": {
-                "signals": 283, "wr_pct": 75.8,
-                "avg_tgt_pct": -3.04, "avg_sl_pct": 5.99,
-                "rr_ratio": 0.51, "expected_value": 0.26,
-            },
+            "backtest": {"signals": 283, "wr_pct": 75.8, "avg_tgt_pct": -3.04,
+                         "avg_sl_pct": 5.99, "rr_ratio": 0.51, "expected_value": 0.26},
             **BASKET_META.get(basket, {})
         }
 
@@ -605,18 +570,13 @@ def filter_config(basket: str):
                          "max_display": "" if mx is None else mx})
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "target": "S2",
-            "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
-            "stop":   f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)",
-            "sl_mult": SELL_MOMENTUM_SL_MULT,
+            "target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
+            "stop": f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)", "sl_mult": SELL_MOMENTUM_SL_MULT,
             "priority": "profitable (WR 71.9%, EV +0.55%/trade)",
             "design_intent": "Genuine downtrend basket — fires in clusters during bear phases",
             "regime_gate": "mood gate handles slot reduction — no blanket block",
-            "backtest": {
-                "signals": 97, "wr_pct": 71.9,
-                "avg_tgt_pct": -3.25, "avg_sl_pct": 6.35,
-                "rr_ratio": 0.51, "expected_value": 0.55,
-            },
+            "backtest": {"signals": 97, "wr_pct": 71.9, "avg_tgt_pct": -3.25,
+                         "avg_sl_pct": 6.35, "rr_ratio": 0.51, "expected_value": 0.55},
             **BASKET_META.get(basket, {})
         }
 
@@ -626,24 +586,23 @@ def filter_config(basket: str):
             "principle": "Mean reversion from overbought resistance",
             "filters": [
                 {"metric": "week_high_vs_pivot", "condition": "hi5d > 0.9*R1 OR hi5d > 0.9*R2", "note": "Near resistance ceiling"},
-                {"metric": "fall_3d",            "condition": "< -3.0%",                         "note": "(close - max_high_3d) / max_high_3d * 100"},
+                {"metric": "fall_3d",            "condition": "< -3.0%", "note": "(close - max_high_3d) / max_high_3d * 100"},
                 {"metric": "rsi_weekly",         "condition": ">= 80"},
                 {"metric": "rsi_month",          "condition": ">= 70"},
                 {"metric": "sector_week",        "condition": "< 0"},
             ],
             "count": 5,
-            "target": "S1",
-            "target_formula": "S1 = 2*PP - H5  [rolling-5-day pivot]",
-            "stop": "R2",
-            "stop_formula": "R2 = PP + (H5 - L5)  [rolling-5-day pivot]",
-            "stop_note": "R2 is natural ceiling — PP+0.5*(R1-PP) was too tight for near-R1 stocks",
-            "priority": "accuracy first (WR 81.5%, EV +1.56%/trade)",
-            "regime_gate": "mood gate handles slot reduction — no blanket block",
-            "backtest": {
-                "signals": 112, "wr_pct": 81.5,
-                "avg_tgt_pct": -4.05, "avg_sl_pct": 9.47,
-                "expected_value": 1.56,
+            "target": "S1", "target_formula": "S1 = 2*PP - H5  [rolling-5-day pivot]",
+            "stop": "R2",  "stop_formula":   "R2 = PP + (H5 - L5)  [rolling-5-day pivot]",
+            "stop_note": "R2 is natural ceiling for stocks near R1",
+            "slot_architecture": {
+                "type": "dedicated_ring_fenced",
+                "note": "Never competes with standard sell pool",
+                "strong_bullish": 4, "bullish": 4, "neutral": 4, "bearish": 3,
             },
+            "priority": "accuracy first (WR 81.5%, EV +1.56%/trade — Bull mood only)",
+            "backtest": {"signals": 112, "wr_pct": 81.5,
+                         "avg_tgt_pct": -4.05, "avg_sl_pct": 9.47, "expected_value": 1.56},
             **BASKET_META.get(basket, {})
         }
 
@@ -667,8 +626,7 @@ def qualified(basket: str, limit: int = 50):
 
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT
-                    q.symbol, q.gvm_score, q.cmp,
+                SELECT q.symbol, q.gvm_score, q.cmp,
                     q.dma_50, q.dma_200, q.rsi_month, q.rsi_weekly,
                     q.week_return, q.month_return,
                     q.mom_2d, q.week_index_52,
@@ -683,20 +641,18 @@ def qualified(basket: str, limit: int = 50):
                     q.metrics->>'regime' AS regime,
                     q.metrics->>'status' AS stored_status
                 FROM v8_qualified q
-                LEFT JOIN v8_metrics m ON m.symbol = q.symbol
-                    AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-                LEFT JOIN gvm_scores g ON g.symbol = q.symbol
-                LEFT JOIN v8_paper_pivots p ON p.symbol = q.symbol
-                    AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
-                LEFT JOIN (
-                    SELECT symbol, basket, MIN(signal_ts) AS first_seen
-                    FROM v8_qualified GROUP BY symbol, basket
-                ) fs ON fs.symbol = q.symbol AND fs.basket = q.basket
-                WHERE q.basket = %s AND q.signal_date = CURRENT_DATE
+                LEFT JOIN v8_metrics m ON m.symbol=q.symbol
+                    AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                LEFT JOIN gvm_scores g ON g.symbol=q.symbol
+                LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
+                    AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                LEFT JOIN (SELECT symbol, basket, MIN(signal_ts) AS first_seen
+                           FROM v8_qualified GROUP BY symbol, basket) fs
+                    ON fs.symbol=q.symbol AND fs.basket=q.basket
+                WHERE q.basket=%s AND q.signal_date=CURRENT_DATE
                   AND q.symbol NOT IN (
                       SELECT UPPER(ticker) FROM earnings_calendar
-                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
-                  )
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day'))
                 ORDER BY q.gvm_score DESC NULLS LAST LIMIT %s
             """, (basket, min(max(limit, 1), 200)))
             cols = [d[0] for d in cur.description]
@@ -730,19 +686,11 @@ def qualified(basket: str, limit: int = 50):
             extra = {"regime": regime, "nifty_1m": round(nifty_1m, 2),
                      "target": _get_buy_momentum_target(regime)}
         elif basket == "sell_reversal":
-            extra = {
-                "target": "S2",
-                "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
-                "stop_formula":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
-                "sl_mult": SELL_REVERSAL_SL_MULT,
-            }
+            extra = {"target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
+                     "stop_formula": f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)", "sl_mult": SELL_REVERSAL_SL_MULT}
         elif basket == "sell_momentum":
-            extra = {
-                "target": "S2",
-                "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
-                "stop_formula":   f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)",
-                "sl_mult": SELL_MOMENTUM_SL_MULT,
-            }
+            extra = {"target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
+                     "stop_formula": f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)", "sl_mult": SELL_MOMENTUM_SL_MULT}
 
         return {"basket": basket, "count": len(rows), "stocks": rows,
                 "source": source_note, **BASKET_META.get(basket, {}), **extra}
@@ -826,21 +774,18 @@ def funnel_detail(basket: str):
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             passes = sum(1 for s in all_rows if _passes_filter(s.get(metric), mn, mx))
-            stages.append({
-                "metric": metric, "min": mn, "max": mx,
-                "passes": passes, "fails": total - passes,
-                "pass_pct": round(passes / total * 100, 1) if total else 0,
-                "dynamic": basket == "buy_reversal" and metric in ("week_return", "rsi_month", "sector_week"),
-            })
+            stages.append({"metric": metric, "min": mn, "max": mx,
+                           "passes": passes, "fails": total - passes,
+                           "pass_pct": round(passes / total * 100, 1) if total else 0,
+                           "dynamic": basket == "buy_reversal" and metric in ("week_return", "rsi_month", "sector_week")})
 
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT q.symbol, p.pp, p.r1, p.s1, c.cmp
-                FROM v8_qualified q
-                LEFT JOIN v8_paper_pivots p ON p.symbol = q.symbol
-                    AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
-                LEFT JOIN cmp_prices c ON c.symbol = q.symbol
-                WHERE q.basket = %s AND q.signal_date = CURRENT_DATE
+                SELECT q.symbol, p.pp, p.r1, p.s1, c.cmp FROM v8_qualified q
+                LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
+                    AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                LEFT JOIN cmp_prices c ON c.symbol=q.symbol
+                WHERE q.basket=%s AND q.signal_date=CURRENT_DATE
             """, (basket,))
             sq_rows = cur.fetchall()
         pivot_pass = sum(1 for _, pp, r1, s1, cmp in sq_rows if pp and _pivot_room_ok(side, cmp, pp, r1, s1))
@@ -853,13 +798,11 @@ def funnel_detail(basket: str):
             st["condition_min"] = f">= {mn}" if mn is not None else "-"
             st["condition_max"] = f"<= {mx}" if mx is not None else "-"
 
-        return {
-            "basket": basket, "score_date": str(date.today()),
-            "universe": total, "n_filters": n, "filter_count": n,
-            "score_threshold": score_threshold, "score_qualified": score_qualified,
-            "final": score_qualified, "pivot_pass": pivot_pass, "stages": stages,
-            **BASKET_META.get(basket, {}),
-        }
+        return {"basket": basket, "score_date": str(date.today()),
+                "universe": total, "n_filters": n, "filter_count": n,
+                "score_threshold": score_threshold, "score_qualified": score_qualified,
+                "final": score_qualified, "pivot_pass": pivot_pass, "stages": stages,
+                **BASKET_META.get(basket, {})}
     except Exception as e:
         raise HTTPException(500, f"funnel_detail failed: {e}")
 
@@ -904,10 +847,10 @@ def raw_metrics(limit: int = 250):
                        m.sector_week, m.sector_month,
                        p.pp, p.r1, p.r2, p.s1, p.s2
                 FROM v8_metrics m
-                JOIN futures_universe f ON f.symbol = m.symbol AND f.is_active = TRUE
-                LEFT JOIN v8_paper_pivots p ON p.symbol = m.symbol
-                    AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
-                WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                JOIN futures_universe f ON f.symbol=m.symbol AND f.is_active=TRUE
+                LEFT JOIN v8_paper_pivots p ON p.symbol=m.symbol
+                    AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                WHERE m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
                 ORDER BY m.gvm_score DESC NULLS LAST LIMIT %s
             """, (min(max(limit, 1), 300),))
             cols = [d[0] for d in cur.description]
@@ -923,14 +866,7 @@ def raw_metrics(limit: int = 250):
 def sell_overbought(limit: int = 50):
     """
     Sell Overbought V2 — Mean reversion from overbought resistance.
-    Filters (5, strict AND):
-      1. week_high > 0.9*R1 OR week_high > 0.9*R2  (near resistance ceiling)
-      2. fall_3d < -3%  (close vs max_high of last 3 days)
-      3. RSI Weekly >= 80
-      4. RSI Monthly >= 70
-      5. sector_week < 0
-    Target = S1  |  Stop = R2  (pivot ceiling — much wider than old SL, gives 81.5% WR)
-    All pivots are rolling-5-day: PP=avg(H+L+C)/3, R1=2PP-L5, R2=PP+(H5-L5), S1=2PP-H5
+    Dedicated ring-fenced slots: 4 (Bull/Neutral) / 3 (Bearish).
     """
     try:
         open_pos  = _load_open_positions("sell_overbought")
@@ -940,17 +876,15 @@ def sell_overbought(limit: int = 50):
             cur.execute("""
                 WITH pivots AS (
                     SELECT symbol, price_date,
-                        AVG((high+low+close)/3.0) OVER w              AS pp,
-                        MAX(high)                 OVER w              AS h5,
-                        MIN(low)                  OVER w              AS l5
+                        AVG((high+low+close)/3.0) OVER w AS pp,
+                        MAX(high) OVER w AS h5, MIN(low) OVER w AS l5
                     FROM raw_prices
                     WHERE price_date >= CURRENT_DATE - INTERVAL '14 days'
                     WINDOW w AS (PARTITION BY symbol ORDER BY price_date
                                  ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
                 ),
                 latest_pivot AS (
-                    SELECT symbol,
-                        pp,
+                    SELECT symbol, pp,
                         2*pp - h5           AS s1,
                         2*pp - l5           AS r1,
                         pp + (h5 - l5)      AS r2
@@ -958,69 +892,50 @@ def sell_overbought(limit: int = 50):
                     WHERE price_date = (SELECT MAX(price_date) FROM pivots p2 WHERE p2.symbol=pivots.symbol)
                 ),
                 hi3d AS (
-                    SELECT symbol, MAX(high) AS max_high_3d
-                    FROM raw_prices
-                    WHERE price_date >= CURRENT_DATE - INTERVAL '4 days'
-                      AND price_date <= CURRENT_DATE
+                    SELECT symbol, MAX(high) AS max_high_3d FROM raw_prices
+                    WHERE price_date >= CURRENT_DATE - INTERVAL '4 days' AND price_date <= CURRENT_DATE
                     GROUP BY symbol
                 ),
                 hi5d AS (
-                    SELECT symbol, MAX(high) AS max_high_5d
-                    FROM raw_prices
-                    WHERE price_date >= CURRENT_DATE - INTERVAL '7 days'
-                      AND price_date <= CURRENT_DATE
+                    SELECT symbol, MAX(high) AS max_high_5d FROM raw_prices
+                    WHERE price_date >= CURRENT_DATE - INTERVAL '7 days' AND price_date <= CURRENT_DATE
                     GROUP BY symbol
                 ),
                 latest_close AS (
                     SELECT DISTINCT ON (symbol) symbol, close, price_date
-                    FROM raw_prices
-                    WHERE price_date <= CURRENT_DATE
-                    ORDER BY symbol, price_date DESC
+                    FROM raw_prices WHERE price_date <= CURRENT_DATE ORDER BY symbol, price_date DESC
                 )
-                SELECT
-                    lc.symbol,
-                    ROUND(lc.close::numeric, 2)                                      AS entry,
-                    ROUND(lp.s1::numeric, 2)                                         AS target,
-                    ROUND(lp.r2::numeric, 2)                                         AS stop,
-                    ROUND(((lp.s1 - lc.close)/NULLIF(lc.close,0)*100)::numeric, 2)  AS tgt_pct,
-                    ROUND(((lp.r2 - lc.close)/NULLIF(lc.close,0)*100)::numeric, 2)  AS sl_pct,
-                    ROUND(h5d.max_high_5d::numeric, 2)                               AS week_high,
-                    ROUND(h3d.max_high_3d::numeric, 2)                               AS high_3d,
-                    ROUND(((lc.close - h3d.max_high_3d)/NULLIF(h3d.max_high_3d,0)*100)::numeric, 2) AS fall_3d_pct,
-                    ROUND(lp.r1::numeric, 2)                                         AS r1,
-                    ROUND(lp.r2::numeric, 2)                                         AS r2,
-                    ROUND(lp.pp::numeric, 2)                                         AS pp,
-                    ROUND(vm.rsi_weekly::numeric, 1)                                 AS rsi_weekly,
-                    ROUND(vm.rsi_month::numeric, 1)                                  AS rsi_month,
-                    ROUND(vm.sector_week::numeric, 2)                                AS sector_week,
-                    ROUND(vm.gvm_score::numeric, 2)                                  AS gvm_score
+                SELECT lc.symbol,
+                    ROUND(lc.close::numeric,2)                                       AS entry,
+                    ROUND(lp.s1::numeric,2)                                          AS target,
+                    ROUND(lp.r2::numeric,2)                                          AS stop,
+                    ROUND(((lp.s1-lc.close)/NULLIF(lc.close,0)*100)::numeric,2)     AS tgt_pct,
+                    ROUND(((lp.r2-lc.close)/NULLIF(lc.close,0)*100)::numeric,2)     AS sl_pct,
+                    ROUND(h5d.max_high_5d::numeric,2)                                AS week_high,
+                    ROUND(h3d.max_high_3d::numeric,2)                                AS high_3d,
+                    ROUND(((lc.close-h3d.max_high_3d)/NULLIF(h3d.max_high_3d,0)*100)::numeric,2) AS fall_3d_pct,
+                    ROUND(lp.r1::numeric,2) AS r1, ROUND(lp.r2::numeric,2) AS r2, ROUND(lp.pp::numeric,2) AS pp,
+                    ROUND(vm.rsi_weekly::numeric,1) AS rsi_weekly,
+                    ROUND(vm.rsi_month::numeric,1)  AS rsi_month,
+                    ROUND(vm.sector_week::numeric,2) AS sector_week,
+                    ROUND(vm.gvm_score::numeric,2)   AS gvm_score
                 FROM latest_close lc
-                JOIN futures_universe fu ON fu.symbol = lc.symbol AND fu.is_active = TRUE
-                JOIN latest_pivot  lp  ON lp.symbol  = lc.symbol
-                JOIN hi3d          h3d ON h3d.symbol  = lc.symbol
-                JOIN hi5d          h5d ON h5d.symbol  = lc.symbol
-                JOIN v8_metrics    vm  ON vm.symbol   = lc.symbol
-                    AND vm.score_date = (SELECT MAX(score_date) FROM v8_metrics)
-                WHERE
-                    -- Filter 1: week_high near R1 or R2
-                    (h5d.max_high_5d > 0.9 * lp.r1 OR h5d.max_high_5d > 0.9 * lp.r2)
-                    -- Filter 2: fall from 3-day high > -3%
-                    AND (lc.close - h3d.max_high_3d) / NULLIF(h3d.max_high_3d, 0) * 100 < -3.0
-                    -- Filter 3: RSI weekly >= 80
-                    AND vm.rsi_weekly >= 80
-                    -- Filter 4: RSI monthly >= 70
-                    AND vm.rsi_month >= 70
-                    -- Filter 5: sector_week < 0
-                    AND vm.sector_week < 0
-                    -- Target must be below entry
-                    AND lp.s1 < lc.close
-                    -- Blackout
-                    AND lc.symbol NOT IN (
-                        SELECT UPPER(ticker) FROM earnings_calendar
-                        WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
-                    )
-                ORDER BY vm.rsi_weekly DESC NULLS LAST
-                LIMIT %s
+                JOIN futures_universe fu ON fu.symbol=lc.symbol AND fu.is_active=TRUE
+                JOIN latest_pivot  lp  ON lp.symbol=lc.symbol
+                JOIN hi3d          h3d ON h3d.symbol=lc.symbol
+                JOIN hi5d          h5d ON h5d.symbol=lc.symbol
+                JOIN v8_metrics    vm  ON vm.symbol=lc.symbol
+                    AND vm.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                WHERE (h5d.max_high_5d > 0.9*lp.r1 OR h5d.max_high_5d > 0.9*lp.r2)
+                  AND (lc.close-h3d.max_high_3d)/NULLIF(h3d.max_high_3d,0)*100 < -3.0
+                  AND vm.rsi_weekly >= 80
+                  AND vm.rsi_month  >= 70
+                  AND vm.sector_week < 0
+                  AND lp.s1 < lc.close
+                  AND lc.symbol NOT IN (
+                      SELECT UPPER(ticker) FROM earnings_calendar
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day'))
+                ORDER BY vm.rsi_weekly DESC NULLS LAST LIMIT %s
             """, (min(max(limit, 1), 200),))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -1030,14 +945,11 @@ def sell_overbought(limit: int = 50):
         rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full)
 
         return {
-            "basket": "sell_overbought",
-            "count": len(rows),
-            "target": "S1",
-            "target_formula": "S1 = 2*PP - H5  [rolling-5-day pivot]",
-            "stop": "R2",
-            "stop_formula": "R2 = PP + (H5 - L5)  [rolling-5-day pivot]",
-            "win_pct": "81.5%",
-            "ev_per_trade": "+1.56%",
+            "basket": "sell_overbought", "count": len(rows),
+            "target": "S1", "target_formula": "S1 = 2*PP - H5  [rolling-5-day pivot]",
+            "stop": "R2",  "stop_formula":   "R2 = PP + (H5 - L5)  [rolling-5-day pivot]",
+            "slot_architecture": "Dedicated ring-fenced: 4 (Bull/Neutral) / 3 (Bearish)",
+            "win_pct": "81.5%", "ev_per_trade": "+1.56%",
             "stocks": rows,
         }
     except Exception as e:
