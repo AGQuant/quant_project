@@ -45,6 +45,11 @@ Slot optimisation (15-Jun-2026): total=20, mood-adaptive.
   Strong Bullish: 15B/5S | Bullish: 12B/8S | Neutral: 10B/10S | Bearish: 8B/12S
 
 adr_intraday (11-Jun-2026): per spec id=165.
+
+entry_ts IST fix (16-Jun-2026):
+  entry_ts now stored as IST (NOW() AT TIME ZONE 'Asia/Kolkata').
+  Frontend never needs timezone conversion — what's in DB is what's displayed.
+  v8_qualified.signal_ts also stored as IST for consistency.
 """
 
 import logging
@@ -75,7 +80,7 @@ def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
     return segment
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _safe_float(v) -> Optional[float]:
     try:
@@ -115,6 +120,10 @@ def _passes(value, mn, mx) -> bool:
     if mx is not None and v > mx:
         return False
     return True
+
+def _now_ist() -> datetime:
+    """Current datetime in IST as a naive datetime (for DB storage)."""
+    return datetime.now(IST).replace(tzinfo=None)
 
 
 # ── Pivot-room gate ───────────────────────────────────────────────────────────
@@ -190,7 +199,8 @@ def _write_adr_intraday(conn):
                 return
             adv, dec, unc, tot = row[0] or 0, row[1] or 0, row[2] or 0, row[3] or 0
             adr = round(adv / dec, 3) if dec else float(adv)
-            now_ist = datetime.now(IST).replace(tzinfo=None)
+            # Store ADR timestamp in IST
+            now_ist = _now_ist()
             ts_5m = now_ist.replace(second=0, microsecond=0)
             ts_5m = ts_5m.replace(minute=(ts_5m.minute // 5) * 5)
             cur.execute("""
@@ -334,7 +344,7 @@ def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
     return bars
 
 
-# ── Step 4: Load CMP ─────────────────────────────────────────────────────────
+# ── Step 4: Load CMP ──────────────────────────────────────────────────────────
 
 def _load_cmp(conn) -> Dict[str, float]:
     with conn.cursor() as cur:
@@ -620,16 +630,6 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
 # ── Dynamic buy_reversal Nifty-linked filters ─────────────────────────────────
 
 def _get_nifty_1m_return(conn) -> float:
-    """
-    Nifty 1-month return: (close_today / close_22d_ago - 1) * 100.
-    Used as regime gate for buy_reversal dynamic filters (v2.2.0, 15-Jun-2026).
-    1-yr EOD backtest result:
-      BULL    (>+2%): week_ret<=3, rsi_m<=67, sec_wk<=4  → WR=71.4%, Exp=+0.59%
-      NEUTRAL ( 0-2%): week_ret<=2, rsi_m<=62, sec_wk<=3 → WR=48.0%, Exp=-0.35%
-      BEAR    (< 0%): week_ret<=1, rsi_m<=58, sec_wk<=2  → WR=54.4%, Exp=-0.16%
-    Overall Dynamic: 63.4% WR, +0.25% exp, +48.91% P&L vs Static -81.52%.
-    Mood gate handles daily regime; Nifty 1M handles monthly regime.
-    """
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -653,17 +653,13 @@ def _get_nifty_1m_return(conn) -> float:
 
 
 def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
-    """
-    Returns override bounds for the 3 dynamic filters in buy_reversal.
-    Only these 3 change; all other filters use FILTER_CONFIG static values.
-    """
-    if nifty_1m > 2.0:       # BULL
+    if nifty_1m > 2.0:
         return {"week_return": (0.0, 3.0), "rsi_month": (52.0, 67.0),
                 "sector_week": (1.0, 4.0), "_regime": "BULL"}
-    elif nifty_1m >= 0.0:    # NEUTRAL
+    elif nifty_1m >= 0.0:
         return {"week_return": (0.0, 2.0), "rsi_month": (52.0, 62.0),
                 "sector_week": (1.0, 3.0), "_regime": "NEUTRAL"}
-    else:                    # BEAR
+    else:
         return {"week_return": (0.0, 1.0), "rsi_month": (52.0, 58.0),
                 "sector_week": (1.0, 2.0), "_regime": "BEAR"}
 
@@ -671,13 +667,6 @@ def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
 # ── Mood slots + auto paper entry ─────────────────────────────────────────────
 
 def _mood_slots(gate_fails: int) -> tuple:
-    """Returns (buy_slots, sell_slots) based on mood gate fails.
-    Total slots = 20, mood-adaptive split (15-Jun-2026).
-    Strong Bullish (0 fails): 15B / 5S
-    Bullish        (1 fail):  12B / 8S
-    Neutral        (2 fails): 10B / 10S
-    Bearish        (3+ fails): 8B / 12S
-    """
     if gate_fails == 0: return 15, 5
     if gate_fails == 1: return 12, 8
     if gate_fails == 2: return 10, 10
@@ -688,9 +677,8 @@ _PAPER_SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
                        pv: Optional[dict], d: date, gate_fails: int):
     """
-    Auto-log paper trade when a stock first qualifies (score-gate + pivot-room pass).
-    Called from _write_qualified on first INSERT (ON CONFLICT DO NOTHING → rowcount=1).
-    Guards: market hours (09:15–15:20 IST), blackout, has_open, traded_today, slot_full.
+    Auto-log paper trade when a stock first qualifies.
+    entry_ts stored as IST naive datetime — no conversion needed on read.
     """
     if not cmp or not pv:
         return
@@ -767,18 +755,23 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     except Exception:
         qty = 1
 
+    # ── KEY FIX: store entry_ts as IST naive datetime ──
+    entry_ts_ist = _now_ist()
+
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO v8_paper_positions
                 (symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date, status)
-                VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, 'OPEN')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'OPEN')
                 ON CONFLICT (symbol, side, status) DO NOTHING
-            """, (sym, paper_side, basket, entry, qty, target, stop, pp, d))
+            """, (sym, paper_side, basket, entry, entry_ts_ist, qty, target, stop, pp, d))
             inserted = cur.rowcount
         conn.commit()
         if inserted:
-            log.info(f"auto_paper entry: {sym} {paper_side} @ {entry} target={target} sl={stop} basket={basket}")
+            log.info(f"auto_paper entry: {sym} {paper_side} @ {entry} "
+                     f"entry_ts={entry_ts_ist.strftime('%H:%M')} IST "
+                     f"target={target} sl={stop} basket={basket}")
     except Exception as e:
         log.warning(f"auto_paper insert {sym} {paper_side}: {e}")
 
@@ -791,17 +784,18 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     gate_fails = _market_gate_fails(conn)
     pivots     = _load_pivots(conn)
 
-    # Nifty 1M regime for dynamic buy_reversal filters (v2.2.0)
     nifty_1m   = _get_nifty_1m_return(conn)
     dyn_br     = _get_dynamic_buy_reversal_overrides(nifty_1m)
     log.info(f"Nifty 1M={nifty_1m:+.2f}% → buy_reversal regime={dyn_br['_regime']} "
              f"(wk<={dyn_br['week_return'][1]} rsi_m<={dyn_br['rsi_month'][1]} sec_wk<={dyn_br['sector_week'][1]})")
 
+    # signal_ts also in IST
+    signal_ts_ist = _now_ist()
+
     for basket, filters in FILTER_CONFIG.items():
         if basket == "sell_overbought":
             continue
 
-        # Apply dynamic overrides for buy_reversal
         if basket == "buy_reversal":
             active_filters = dict(filters)
             active_filters["week_return"] = list(dyn_br["week_return"])
@@ -882,10 +876,11 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                          rsi_month, rsi_weekly, sector_week, sector_day,
                          month_index, week_index_52, daily_rsi, range_3d,
                          metrics, source)
-                        VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date,
+                        signal_ts_ist,          # IST naive datetime
                         s.get("gvm_score"), s.get("_cmp"),
                         s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
                         s.get("dma_200"), s.get("dma_50"),
