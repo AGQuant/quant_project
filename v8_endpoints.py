@@ -41,19 +41,22 @@ qualified status enrichment (16-Jun-2026):
     NEAR_MISS — score-gate fallback only (didn't pass all strict filters)
     QUALIFIED — default (strict filter pass, no position yet)
   Same for all 5 baskets. Enables dashboard badge display.
-sell_reversal locked (16-Jun-2026): SELL_REVERSAL_SPEC_V1
+sell_reversal v1 (16-Jun-2026): SELL_REVERSAL_SPEC_V1
   Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
   Filters: dma_200<=2, dma_50<=2, rsi_weekly<=50, rsi_month[20,70],
            week_return>=-5, month_return>=-15, mom_2d<=0, sector_week<=-1
-  1-yr backtest: 396 sigs, WR 71.2%. Priority: accuracy. Mood gate handles BULL.
-  session_log: SELL_REVERSAL_SPEC_V1.
+  1-yr backtest: 396 sigs, WR 71.2%. session_log: SELL_REVERSAL_SPEC_V1.
+sell_reversal v2 QUALITY (16-Jun-2026): SELL_REVERSAL_SPEC_V2
+  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
+  Filters: rsi_weekly<=35, mom_2d<=-2, sector_week<=-2
+  (stripped to 3 high-signal-quality filters only)
+  1-yr backtest: 90 sigs, WR 73.3%, avg_win +1.13%, avg_loss -5.86%
+  ~1-2 signals/week. Quality over quantity.
+  session_log: SELL_REVERSAL_SPEC_V2.
 sell_momentum locked (16-Jun-2026): SELL_MOMENTUM_SPEC_V1
-  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)  [same multipliers as sell_reversal]
+  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
   Filters: rsi_month<=45, week_index_52<=30, dma_200<=0, mom_2d<=-1
-  1-yr backtest: 119 sigs, WR 72.3%, avg_win +1.07%, avg_loss -3.06%
-  Low frequency by design — fires only in genuine downtrends (~1/week).
-  Priority: accuracy. Mood gate handles slot reduction in BULL.
-  session_log: SELL_MOMENTUM_SPEC_V1.
+  1-yr backtest: 119 sigs, WR 72.3%. session_log: SELL_MOMENTUM_SPEC_V1.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -110,23 +113,18 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V1
+        # QUALITY v2 — 16-Jun-2026 — SELL_REVERSAL_SPEC_V2
         # Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
-        # 396 sigs, WR 71.2%, priority: accuracy
-        "dma_200":      [None,  2.0],
-        "dma_50":       [None,  2.0],
-        "rsi_weekly":   [None, 50.0],
-        "rsi_month":    [20.0, 70.0],
-        "week_return":  [-5.0,  None],
-        "month_return": [-15.0, None],
-        "mom_2d":       [None,  0.0],
-        "sector_week":  [None, -1.0],
+        # 90 sigs, WR 73.3%, ~1-2/week. Quality over quantity.
+        # 3 strict filters: weekly RSI oversold + 2-day momentum down + sector weak
+        "rsi_weekly":   [None, 35.0],
+        "mom_2d":       [None, -2.0],
+        "sector_week":  [None, -2.0],
     },
     "sell_momentum": {
         # LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V1
         # Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
-        # 119 sigs, WR 72.3%, priority: accuracy
-        # Low freq by design — fires only in genuine downtrends (~1/week)
+        # 119 sigs, WR 72.3%, ~1/week. Low freq by design.
         "rsi_month":    [None, 45.0],
         "week_index_52":[None, 30.0],
         "dma_200":      [None,  0.0],
@@ -144,15 +142,15 @@ FILTER_CONFIG = {
 }
 
 # ── Sell Reversal + Sell Momentum: shared target/stop multipliers (locked 16-Jun-2026) ──
-SELL_REVERSAL_TGT_MULT = 0.3   # target = S1 - TGT_MULT*(S1-S2)
-SELL_REVERSAL_SL_MULT  = 0.5   # stop   = PP + SL_MULT*(R1-PP)
-SELL_MOMENTUM_TGT_MULT = 0.3   # same structure, same multipliers
+SELL_REVERSAL_TGT_MULT = 0.3
+SELL_REVERSAL_SL_MULT  = 0.5
+SELL_MOMENTUM_TGT_MULT = 0.3
 SELL_MOMENTUM_SL_MULT  = 0.5
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
     "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2"},
-    "sell_reversal":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "71.2%", "signals_per_day": "~2"},
+    "sell_reversal":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "73.3%", "signals_per_day": "~1-2/week"},
     "sell_momentum":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "72.3%", "signals_per_day": "~1/week"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "71.4%", "signals_per_day": "~3"},
 }
@@ -266,7 +264,7 @@ def _live_qualified_fallback(basket: str, limit: int):
     else:
         config = FILTER_CONFIG[basket]
     n_filters = len(config)
-    need      = max(n_filters - 2, 1)
+    need      = max(n_filters - 1, 1)
 
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"""
@@ -615,9 +613,9 @@ def filter_config(basket: str):
             "target": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
             "stop":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
             "tgt_mult": SELL_REVERSAL_TGT_MULT, "sl_mult": SELL_REVERSAL_SL_MULT,
-            "priority": "accuracy (WR 71.2%)",
+            "priority": "quality (WR 73.3%, ~1-2/week)",
             "regime_gate": "mood gate handles slot reduction — no blanket block",
-            "backtest": {"signals": 396, "wr_pct": 71.2, "avg_win": 0.92, "avg_loss": -3.31},
+            "backtest": {"signals": 90, "wr_pct": 73.3, "avg_win": 1.13, "avg_loss": -5.86},
             **BASKET_META.get(basket, {})
         }
 
