@@ -5,20 +5,18 @@ ADR (14-Jun-2026): _read_adr gates the live tiers behind _market_open().
 ADR (11-Jun-2026): market_mood reads adr_intraday primary, falls back to adr_daily.
 buy_reversal dynamic Nifty filter v1 (15-Jun-2026): BULL/NEUTRAL/BEAR regime.
 buy_momentum optimisation v1 (16-Jun-2026): Target=R2(BULL)/R1. 77.4% WR.
-sell_reversal V3 LOCKED (16-Jun-2026): 5 filters, Target=S2, Stop=PP+0.5*(R1-PP), 75.8% WR.
+sell_reversal V4 LOCKED (16-Jun-2026): mom_2d tightened -2 -> -3.
+  5 filters: rsi_weekly<=45, mom_2d<=-3, sector_week<=-1.5, dma_200<=2, week_return[-10,-0.5]
+  Target=S2 | Stop=PP+0.5*(R1-PP) | 156 sigs/yr, 79.3% WR, EV +0.752%/trade.
 sell_momentum V2 LOCKED (16-Jun-2026): 6 filters, Target=S2, Stop=PP+0.5*(R1-PP), 71.9% WR.
 sell_overbought V2 LOCKED (16-Jun-2026): Pivot-based mean reversion.
   5 filters: week_high>0.9*R1orR2, fall_3d<-3%, rsiW>=80, rsiM>=70, sector_week<0.
   Target=S1 | Stop=R2 | 81.5% WR | EV +1.56%/trade.
-  Dedicated ring-fenced slot pool (never competes with standard sell):
-    Strong Bullish/Bullish/Neutral: 4 SO slots
-    Bearish: 3 SO slots
-  Total slots always = 24.
+  Dedicated ring-fenced slots: 4 (Bull/Neutral) / 3 (Bearish). Total always 24.
 Slot architecture (16-Jun-2026):
   Standard pool (4 baskets):
     Strong Bullish: 15B/5S | Bullish: 14B/6S | Neutral: 12B/8S | Bearish: 8B/13S
-  SO dedicated: 4 (Bull/Neutral) / 3 (Bearish)
-  Total: 24 in all moods.
+  SO dedicated: 4 (Bull/Neutral) / 3 (Bearish). Total: 24 in all moods.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -74,15 +72,20 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # V3 LOCKED 16-Jun-2026 — 5 strict AND — 283 sigs, 75.8% WR, EV +0.26%
+        # V4 LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V4
+        # Target=S2 | Stop=PP+0.5*(R1-PP) | 5 strict AND
+        # 156 sigs/yr, 79.3% WR, EV +0.752%/trade
+        # Change from V3: mom_2d <= -2 → -3 (tighter, higher quality)
         "rsi_weekly":   [None, 45.0],
-        "mom_2d":       [None, -2.0],
+        "mom_2d":       [None, -3.0],
         "sector_week":  [None, -1.5],
         "dma_200":      [None,  2.0],
         "week_return":  [-10.0, -0.5],
     },
     "sell_momentum": {
-        # V2 LOCKED 16-Jun-2026 — 6 strict AND — 97 sigs, 71.9% WR, EV +0.55%
+        # V2 LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V2
+        # Target=S2 | Stop=PP+0.5*(R1-PP) | 6 strict AND
+        # 97 sigs/yr, 71.9% WR, EV +0.55%/trade
         "dma_200":       [None,  -2.0],
         "rsi_month":     [None,  38.0],
         "rsi_weekly":    [None,  38.0],
@@ -91,7 +94,6 @@ FILTER_CONFIG = {
         "mom_2d":        [None,  -1.5],
     },
     # sell_overbought: pivot-based filters not in v8_metrics — computed live in sell_overbought()
-    # Informational reference only (rsi/sector thresholds)
     "sell_overbought": {
         "rsi_weekly":   [80.0, None],
         "rsi_month":    [70.0, None],
@@ -105,7 +107,7 @@ SELL_MOMENTUM_SL_MULT  = 0.5
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
     "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2"},
-    "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "75.8%", "signals_per_day": "~1.1/day"},
+    "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "79.3%", "signals_per_day": "~0.6/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
 }
@@ -554,10 +556,10 @@ def filter_config(basket: str):
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
             "stop": f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)", "sl_mult": SELL_REVERSAL_SL_MULT,
-            "priority": "profitable (WR 75.8%, EV +0.26%/trade)",
+            "priority": "quality (WR 79.3%, EV +0.752%/trade)",
             "regime_gate": "mood gate handles slot reduction — no blanket block",
-            "backtest": {"signals": 283, "wr_pct": 75.8, "avg_tgt_pct": -3.04,
-                         "avg_sl_pct": 5.99, "rr_ratio": 0.51, "expected_value": 0.26},
+            "backtest": {"signals": 156, "wr_pct": 79.3, "avg_tgt_pct": -3.41,
+                         "avg_sl_pct": 5.99, "expected_value": 0.752},
             **BASKET_META.get(basket, {})
         }
 
@@ -600,7 +602,7 @@ def filter_config(basket: str):
                 "note": "Never competes with standard sell pool",
                 "strong_bullish": 4, "bullish": 4, "neutral": 4, "bearish": 3,
             },
-            "priority": "accuracy first (WR 81.5%, EV +1.56%/trade — Bull mood only)",
+            "priority": "accuracy first (WR 81.5%, EV +1.56%/trade)",
             "backtest": {"signals": 112, "wr_pct": 81.5,
                          "avg_tgt_pct": -4.05, "avg_sl_pct": 9.47, "expected_value": 1.56},
             **BASKET_META.get(basket, {})
