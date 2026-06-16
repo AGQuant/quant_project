@@ -41,6 +41,16 @@ qualified status enrichment (16-Jun-2026):
     NEAR_MISS — score-gate fallback only (didn't pass all strict filters)
     QUALIFIED — default (strict filter pass, no position yet)
   Same for all 5 baskets. Enables dashboard badge display.
+sell_reversal locked (16-Jun-2026): SELL_REVERSAL_SPEC_V1
+  Target = S1 - 0.3*(S1-S2)  [30% of the way from S1 toward S2]
+  Stop   = PP + 0.5*(R1-PP)  [halfway between PP and R1]
+  Entry  = close < PP
+  Filters: dma_200<=2, dma_50<=2, rsi_weekly<=50, rsi_month[20,70],
+           week_return>=-5, month_return>=-15, mom_2d<=0, sector_week<=-1
+  1-yr backtest: 396 sigs, WR 71.2%, avg_win +0.92%, avg_loss -3.31%
+  Priority: accuracy (WR) over PnL. Mood gate handles BULL slot reduction.
+  Apr-26 outlier (Nifty +9%): mood gate caps sell slots to 5 in live.
+  session_log: SELL_REVERSAL_SPEC_V1.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -97,15 +107,17 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        "dma_200":      [-30.0, 2.0],
-        "dma_50":       [-20.0, 2.0],
-        "rsi_weekly":   [10.0,  35.0],
-        "rsi_month":    [20.0,  60.0],
-        "week_return":  [-3.0,   1.0],
-        "month_return": [-20.0,  2.0],
-        "mom_2d":       [-6.0,   0.0],
-        "sector_week":  [-4.0,   0.0],
-        "sector_month": [-6.0,   0.0],
+        # LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V1
+        # Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
+        # 396 sigs, WR 71.2%, priority: accuracy
+        "dma_200":      [None,  2.0],
+        "dma_50":       [None,  2.0],
+        "rsi_weekly":   [None, 50.0],
+        "rsi_month":    [20.0, 70.0],
+        "week_return":  [-5.0,  None],
+        "month_return": [-15.0, None],
+        "mom_2d":       [None,  0.0],
+        "sector_week":  [None, -1.0],
     },
     "sell_momentum": {
         "dma_200":      [-50.0,  0.0],
@@ -132,12 +144,16 @@ FILTER_CONFIG = {
     },
 }
 
+# ── Sell Reversal target/stop multipliers (locked 16-Jun-2026) ──
+SELL_REVERSAL_TGT_MULT = 0.3   # target = S1 - TGT_MULT*(S1-S2)
+SELL_REVERSAL_SL_MULT  = 0.5   # stop   = PP + SL_MULT*(R1-PP)
+
 BASKET_META = {
-    "buy_reversal":    {"side": "BUY",  "target": "R1",          "win_pct": "90%",   "signals_per_day": "~3"},
-    "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1", "win_pct": "77.4%", "signals_per_day": "~2"},
-    "sell_reversal":   {"side": "SELL", "target": "S2",          "win_pct": "57%",   "signals_per_day": "~2/week"},
-    "sell_momentum":   {"side": "SELL", "target": "S2",          "win_pct": "83%",   "signals_per_day": "~1.5"},
-    "sell_overbought": {"side": "SELL", "target": "S1",          "win_pct": "71%",   "signals_per_day": "~3"},
+    "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
+    "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2"},
+    "sell_reversal":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "71.2%", "signals_per_day": "~2"},
+    "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "83%",   "signals_per_day": "~1.5"},
+    "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "71.4%", "signals_per_day": "~3"},
 }
 
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
@@ -274,7 +290,7 @@ def _live_qualified_fallback(basket: str, limit: int):
         )
         r["filter_score"] = score
         r["filter_total"] = n_filters
-        r["status"] = "NEAR_MISS"  # fallback = near miss
+        r["status"] = "NEAR_MISS"
         if score >= need:
             rows.append(r)
 
@@ -600,6 +616,25 @@ def filter_config(basket: str):
             **BASKET_META.get(basket, {})
         }
 
+    if basket == "sell_reversal":
+        rows = []
+        for metric, bounds in FILTER_CONFIG["sell_reversal"].items():
+            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            rows.append({"metric": metric, "min": mn, "max": mx,
+                         "min_display": "" if mn is None else mn,
+                         "max_display": "" if mx is None else mx})
+        return {
+            "basket": basket, "filters": rows, "count": len(rows),
+            "target": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
+            "stop":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
+            "tgt_mult": SELL_REVERSAL_TGT_MULT,
+            "sl_mult":  SELL_REVERSAL_SL_MULT,
+            "priority": "accuracy (WR 71.2%)",
+            "regime_gate": "mood gate handles slot reduction — no blanket block",
+            "backtest": {"signals": 396, "wr_pct": 71.2, "avg_win": 0.92, "avg_loss": -3.31},
+            **BASKET_META.get(basket, {})
+        }
+
     rows = []
     for metric, bounds in FILTER_CONFIG[basket].items():
         mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
@@ -615,7 +650,6 @@ def qualified(basket: str, limit: int = 50):
     if basket == "sell_overbought": return sell_overbought(limit=limit)
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
-        # Load open positions + slot_full for enrichment
         open_pos  = _load_open_positions(basket)
         slot_full = _load_slot_full(basket)
 
@@ -664,7 +698,6 @@ def qualified(basket: str, limit: int = 50):
             source_note = 'live_fallback'
         else:
             source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
-            # Ensure pivot + cmp populated for precomputed rows
             with _conn() as conn, conn.cursor() as cur:
                 pivots  = _basket_pivots(cur)
                 cmp_map = _basket_cmp(cur)
@@ -680,7 +713,6 @@ def qualified(basket: str, limit: int = 50):
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
 
-        # Enrich all rows with OPEN / SLOT_FULL / NEAR_MISS / QUALIFIED status
         rows = _enrich_with_status(rows, basket, open_pos, slot_full)
 
         extra = {}
@@ -688,6 +720,13 @@ def qualified(basket: str, limit: int = 50):
             regime, nifty_1m = _get_nifty_regime()
             extra = {"regime": regime, "nifty_1m": round(nifty_1m, 2),
                      "target": _get_buy_momentum_target(regime)}
+        elif basket == "sell_reversal":
+            extra = {
+                "target_formula": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
+                "stop_formula":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
+                "tgt_mult": SELL_REVERSAL_TGT_MULT,
+                "sl_mult":  SELL_REVERSAL_SL_MULT,
+            }
 
         return {"basket": basket, "count": len(rows), "stocks": rows,
                 "source": source_note, **BASKET_META.get(basket, {}), **extra}
@@ -867,7 +906,6 @@ def raw_metrics(limit: int = 250):
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
     try:
-        # Load open positions for sell_overbought enrichment
         open_pos  = _load_open_positions("sell_overbought")
         slot_full = _load_slot_full("sell_overbought")
 
@@ -922,7 +960,6 @@ def sell_overbought(limit: int = 50):
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-        # Enrich with status
         for r in rows:
             r["status"] = "QUALIFIED"
         rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full)
