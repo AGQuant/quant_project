@@ -109,7 +109,6 @@
     white-space:nowrap;font-family:'Space Mono';font-size:12px}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:#f0f4f9}
-  /* Row highlight by status */
   tr.row-open{background:#f0fdf4}
   tr.row-open:hover{background:#dcfce7}
   tr.row-slotfull{background:#fff7ed}
@@ -158,7 +157,6 @@
   .b-short{background:var(--red-d);color:var(--red)}
   .b-tgt{background:var(--grn-d);color:var(--grn)}
   .b-sl{background:var(--red-d);color:var(--red)}
-  /* Status badges */
   .b-open{background:#dcfce7;color:#166534;border:1px solid #86efac}
   .b-slotfull{background:#ffedd5;color:#9a3412;border:1px solid #fdba74}
   .b-nearmiss{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
@@ -288,25 +286,40 @@ function inr(x){if(x===null||x===undefined||isNaN(x))return"—";return"₹"+Num
 function pnlCls(x){return Number(x)>=0?"pos":"neg";}
 function netPnl(pnl, trades){return (Number(pnl)||0) - (Number(trades)||1)*BROKERAGE_PER_TRADE;}
 
-function fmtTs(ts){
-  if(!ts)return"—";
+// ── Timestamp helpers ──
+// DB stores IST naive datetimes (no timezone suffix).
+// Parse directly as local IST — DO NOT add +5:30 offset (that was the double-conversion bug).
+function _parseISTNaive(ts){
+  // ts from DB: "2026-06-16 14:25:00" or "2026-06-16T14:25:00.123456"
+  // Treat it as IST directly: replace space with T, no Z suffix.
+  if(!ts) return null;
   try{
-    const utc=typeof ts==='string'&&!ts.includes('Z')&&!ts.includes('+')?ts.replace(' ','T')+'Z':ts;
-    const d=new Date(utc),ist=new Date(d.getTime()+(5*60+30)*60000);
-    return String(ist.getUTCDate()).padStart(2,'0')+' '+
-      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
-      String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
-  }catch(e){return ts;}}
+    const s = String(ts).replace(' ','T').replace(/Z$/,'').replace(/[+-]\d{2}:\d{2}$/,'');
+    // Parse as local — JS will treat no-timezone as local, but we want to display as-is
+    // So extract parts manually to avoid any local-TZ interpretation
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if(!m) return null;
+    return {day:+m[3], mon:+m[2]-1, hr:+m[4], min:+m[5]};
+  }catch(e){return null;}
+}
+
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function fmtTs(ts){
+  if(!ts) return "—";
+  const p = _parseISTNaive(ts);
+  if(!p) return String(ts);
+  return String(p.day).padStart(2,'0')+' '+MON[p.mon]+' '+
+    String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');
+}
 
 function fmtSince(ts){
-  if(!ts)return"—";
-  try{
-    const utc=typeof ts==='string'&&!ts.includes('Z')&&!ts.includes('+')?ts.replace(' ','T')+'Z':ts;
-    const d=new Date(utc),ist=new Date(d.getTime()+(5*60+30)*60000);
-    return String(ist.getUTCDate()).padStart(2,'0')+'/'+
-      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][ist.getUTCMonth()]+' '+
-      String(ist.getUTCHours()).padStart(2,'0')+':'+String(ist.getUTCMinutes()).padStart(2,'0');
-  }catch(e){return"—";}}
+  if(!ts) return "—";
+  const p = _parseISTNaive(ts);
+  if(!p) return "—";
+  return String(p.day).padStart(2,'0')+'/'+MON[p.mon]+' '+
+    String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');
+}
 
 function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
 
@@ -506,7 +519,6 @@ function renderFunnel(b){
   const stocks = d.stocks || [];
   if (!stocks.length) return meta + `<div class="empty">No qualified names — gate may be closed for this side.</div>`;
 
-  // Sort: OPEN first, then SLOT_FULL, then QUALIFIED, then NEAR_MISS
   const statusOrder = {OPEN:0,SLOT_FULL:1,QUALIFIED:2,NEAR_MISS:3};
   const sorted = [...stocks].sort((a,b)=>{
     const so=(statusOrder[a.status]??2)-(statusOrder[b.status]??2);
@@ -514,7 +526,6 @@ function renderFunnel(b){
     return (b.gvm_score||0)-(a.gvm_score||0);
   });
 
-  // Legend
   const legend = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
     <span class="badge b-open">● OPEN</span><span style="color:var(--dim)">Position entered</span>
     <span style="color:var(--dim);margin:0 4px">·</span>
@@ -528,7 +539,7 @@ function renderFunnel(b){
   const desktopTable = sortTbl('bk_'+b.id,
     [["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50 Δ"],
      ["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],
-     ["entry_price","Entry"],["open_pnl_pct","P&L%"],["first_seen","Since"]],
+     ["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]],
     sorted,
     x=>{
       const st=x.status||'QUALIFIED';
@@ -549,7 +560,7 @@ function renderFunnel(b){
         <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>
           ${isOpen?sign(x.open_pnl_pct,2)+'%':'—'}
         </td>
-        <td style="color:var(--dim);font-size:11px">${fmtSince(x.first_seen)}</td>
+        <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td>
       </tr>`;
     },
     {sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
@@ -575,6 +586,7 @@ function renderFunnel(b){
         ${isOpen?`<span class="mob-chip">Entry ${num(x.entry_price,1)}</span><span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}
         ${isOpen&&x.open_target?`<span class="mob-chip pos">Tgt ${num(x.open_target,1)}</span>`:''}
         ${isOpen&&x.open_stop?`<span class="mob-chip neg">SL ${num(x.open_stop,1)}</span>`:''}
+        <span class="mob-chip" style="color:var(--dim)">${fmtSince(x.signal_ts)}</span>
       </div>
       <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div>
     </div>`;}).join('')}</div>`;
