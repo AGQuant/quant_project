@@ -27,6 +27,13 @@ buy_reversal dynamic Nifty filter v1 (15-Jun-2026):
   filter_config endpoint now returns live dynamic thresholds.
   1-yr EOD backtest: Dynamic=63.4% WR/+0.25% exp vs Static=50.3%/-0.15% exp.
   session_log: buy_reversal_dynamic_nifty_filter_v1.
+buy_momentum optimisation v1 (16-Jun-2026): OPT2 adaptive target locked.
+  RSI-M>=70 strict. Target=R2 in BULL, R1 in NEUTRAL/BEAR. Stop=S1.
+  Sector rule: max 2 per segment, M-score tiebreaker.
+  Symbol guard: 1 entry per symbol per 3 days (in signal_writer).
+  1-yr EOD backtest: 243 signals, 77.4% WR, +1.79% avg win, +120% PnL.
+  Regime gate: Nifty 1M return (stable monthly, computed at 15:45 EOD).
+  session_log id=342: BUY_MOMENTUM_SPEC_V1.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -56,7 +63,7 @@ def _market_open() -> bool:
     return open_t <= now <= close_t
 
 
-# ── Static base FILTER_CONFIG (buy_reversal dynamic 3 filters overridden at runtime) ──
+# ── Static base FILTER_CONFIG (buy_reversal + buy_momentum dynamic filters overridden at runtime) ──
 FILTER_CONFIG = {
     "buy_reversal": {
         # Base config — 3 dynamic filters (week_return, rsi_month, sector_week)
@@ -75,15 +82,18 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "buy_momentum": {
-        "gvm_score":    [6.0,  10.0],
-        "year_return":  [0.0,  None],
-        "dma_50":       [6.5,  25.0],
-        "dma_200":      [7.0,  50.0],
-        "rsi_month":    [60.0, 80.0],
-        "rsi_weekly":   [60.0, 80.0],
-        "month_return": [3.0,  14.0],
-        "week_return":  [1.0,   7.0],
-        "day_1d":       [0.0,   3.0],
+        # v1 optimisation (16-Jun-2026): OPT2 adaptive target, 1-yr EOD backtest.
+        # RSI-M>=70 STRICT anchor. Target=R2(BULL)/R1(NEUTRAL+BEAR). Stop=S1.
+        # Sector rule: max 2 per segment, M-score tiebreaker (in signal_writer).
+        # Symbol guard: 1 entry per symbol per 3 days (in signal_writer).
+        "gvm_score":    [7.0,  10.0],
+        "dma_50":       [8.0,  25.0],
+        "dma_200":      [8.0,  40.0],
+        "rsi_month":    [70.0, 100.0],  # STRICT — never changes across regimes
+        "rsi_weekly":   [60.0, 85.0],
+        "month_return": [2.0,  30.0],
+        "week_return":  [0.5,  12.0],
+        "mom_2d":       [0.0,   6.0],
         "sector_week":  [0.0,   6.0],
         "sector_month": [0.0,   6.0],
     },
@@ -124,11 +134,11 @@ FILTER_CONFIG = {
 }
 
 BASKET_META = {
-    "buy_reversal":    {"side": "BUY",  "target": "R1", "win_pct": "90%",  "signals_per_day": "~3"},
-    "buy_momentum":    {"side": "BUY",  "target": "S1", "win_pct": "~65%", "signals_per_day": "~2"},
-    "sell_reversal":   {"side": "SELL", "target": "S2", "win_pct": "57%",  "signals_per_day": "~2/week"},
-    "sell_momentum":   {"side": "SELL", "target": "S2", "win_pct": "83%",  "signals_per_day": "~1.5"},
-    "sell_overbought": {"side": "SELL", "target": "S1", "win_pct": "71%",  "signals_per_day": "~3"},
+    "buy_reversal":    {"side": "BUY",  "target": "R1",          "win_pct": "90%",   "signals_per_day": "~3"},
+    "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1", "win_pct": "77.4%", "signals_per_day": "~2"},
+    "sell_reversal":   {"side": "SELL", "target": "S2",          "win_pct": "57%",   "signals_per_day": "~2/week"},
+    "sell_momentum":   {"side": "SELL", "target": "S2",          "win_pct": "83%",   "signals_per_day": "~1.5"},
+    "sell_overbought": {"side": "SELL", "target": "S1",          "win_pct": "71%",   "signals_per_day": "~3"},
 }
 
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
@@ -156,7 +166,7 @@ def _passes_filter(value, mn, mx) -> bool:
 
 
 def _get_nifty_1m_return() -> float:
-    """Compute Nifty 1-month return for dynamic buy_reversal regime gate."""
+    """Compute Nifty 1-month return for dynamic regime gate (buy_reversal + buy_momentum)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -179,6 +189,18 @@ def _get_nifty_1m_return() -> float:
     return 0.0
 
 
+def _get_nifty_regime() -> tuple:
+    """Returns (regime, nifty_1m) — shared by buy_reversal and buy_momentum."""
+    nifty_1m = _get_nifty_1m_return()
+    if nifty_1m > 2.0:
+        regime = "BULL"
+    elif nifty_1m >= -2.0:
+        regime = "NEUTRAL"
+    else:
+        regime = "BEAR"
+    return regime, nifty_1m
+
+
 def _get_buy_reversal_live_filters() -> dict:
     """
     Returns the LIVE buy_reversal filter config with dynamic thresholds applied.
@@ -187,15 +209,12 @@ def _get_buy_reversal_live_filters() -> dict:
     BEAR    (Nifty 1M  < 0%): week_return<=1, rsi_month<=58, sector_week<=2
     1-yr EOD backtest: Dynamic=63.4% WR, +0.25% exp, +48.91% P&L.
     """
-    nifty_1m = _get_nifty_1m_return()
-    if nifty_1m > 2.0:
-        regime = "BULL"
+    regime, nifty_1m = _get_nifty_regime()
+    if regime == "BULL":
         wk_max, rsi_max, sec_max = 3.0, 67.0, 4.0
-    elif nifty_1m >= 0.0:
-        regime = "NEUTRAL"
+    elif regime == "NEUTRAL":
         wk_max, rsi_max, sec_max = 2.0, 62.0, 3.0
     else:
-        regime = "BEAR"
         wk_max, rsi_max, sec_max = 1.0, 58.0, 2.0
 
     live = dict(FILTER_CONFIG["buy_reversal"])
@@ -203,6 +222,17 @@ def _get_buy_reversal_live_filters() -> dict:
     live["rsi_month"]   = [52.0, rsi_max]
     live["sector_week"] = [1.0,  sec_max]
     return live, regime, nifty_1m
+
+
+def _get_buy_momentum_target(regime: str) -> str:
+    """
+    Adaptive target for buy_momentum based on Nifty 1M regime.
+    BULL    -> R2 (strong trend, price has room)
+    NEUTRAL -> R1 (moderate, take quicker profit)
+    BEAR    -> R1 (defensive, take quicker profit)
+    1-yr backtest: OPT2, 243 signals, 77.4% WR, +120% PnL. session_log id=342.
+    """
+    return "R2" if regime == "BULL" else "R1"
 
 
 def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
@@ -291,7 +321,7 @@ def _live_qualified_fallback(basket: str, limit: int):
     return out[:min(max(limit, 1), 200)]
 
 
-# ── ADR helpers ───────────────────────────────────────────────────────────────
+# ── ADR helpers ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _read_adr(cur):
     if _market_open():
@@ -362,7 +392,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
             round((latest/month-1)*100,2), latest)
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# ── Endpoints ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 @router.get("/market_mood")
 def market_mood():
@@ -485,6 +515,8 @@ def filter_config(basket: str):
     if basket not in FILTER_CONFIG:
         raise HTTPException(404, f"Unknown basket: {basket}")
 
+    regime, nifty_1m = _get_nifty_regime()
+
     # buy_reversal: return LIVE dynamic thresholds based on Nifty 1M regime
     if basket == "buy_reversal":
         live_config, regime, nifty_1m = _get_buy_reversal_live_filters()
@@ -507,6 +539,36 @@ def filter_config(basket: str):
                 "NEUTRAL": {"condition": "Nifty 1M 0-2%",   "week_return_max": 2.0, "rsi_month_max": 62.0, "sector_week_max": 3.0},
                 "BEAR":    {"condition": "Nifty 1M < 0%",   "week_return_max": 1.0, "rsi_month_max": 58.0, "sector_week_max": 2.0},
             },
+            **BASKET_META.get(basket, {})
+        }
+
+    # buy_momentum: return config + adaptive target based on Nifty 1M regime
+    if basket == "buy_momentum":
+        target = _get_buy_momentum_target(regime)
+        rows = []
+        for metric, bounds in FILTER_CONFIG["buy_momentum"].items():
+            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            rows.append({
+                "metric": metric, "min": mn, "max": mx,
+                "min_display": "" if mn is None else mn,
+                "max_display": "" if mx is None else mx,
+                "dynamic": metric == "rsi_month",  # strict anchor, shown as key filter
+            })
+        return {
+            "basket": basket, "filters": rows, "count": len(rows),
+            "regime": regime,
+            "nifty_1m_return": round(nifty_1m, 2),
+            "target": target,
+            "target_rule": "R2 in BULL (Nifty 1M > +2%), R1 in NEUTRAL/BEAR",
+            "stop": "S1",
+            "regime_rules": {
+                "BULL":    {"condition": "Nifty 1M > +2%", "target": "R2", "slots": 15},
+                "NEUTRAL": {"condition": "-2% to +2%",     "target": "R1", "slots": 10},
+                "BEAR":    {"condition": "Nifty 1M < -2%", "target": "R1", "slots": 5},
+            },
+            "sector_rule": "max 2 per segment, M-score tiebreaker",
+            "symbol_guard": "1 entry per symbol per 3 days",
+            "backtest": {"signals": 243, "wr_pct": 77.4, "avg_win": 1.79, "total_pnl": 120.27},
             **BASKET_META.get(basket, {})
         }
 
@@ -574,8 +636,15 @@ def qualified(basket: str, limit: int = 50):
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
 
+        # For buy_momentum, include live target in response
+        extra = {}
+        if basket == "buy_momentum":
+            regime, nifty_1m = _get_nifty_regime()
+            extra = {"regime": regime, "nifty_1m": round(nifty_1m, 2),
+                     "target": _get_buy_momentum_target(regime)}
+
         return {"basket": basket, "count": len(rows), "stocks": rows,
-                "source": source_note, **BASKET_META.get(basket, {})}
+                "source": source_note, **BASKET_META.get(basket, {}), **extra}
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
@@ -648,7 +717,6 @@ def funnel_detail(basket: str):
             score_threshold = int(fc[0]) if fc and fc[0] else None
 
         total   = len(all_rows)
-        # Use live dynamic config for buy_reversal
         filters = _get_buy_reversal_live_filters()[0] if basket == "buy_reversal" else FILTER_CONFIG[basket]
         n       = len(filters)
         side    = "BUY" if basket.startswith("buy") else "SELL"
