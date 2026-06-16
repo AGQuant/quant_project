@@ -1,5 +1,5 @@
 """
-Native v3.3.2 Trade Check — zero-token, pure Railway DB. ENGINE v3.3 (STRICT).
+Native v3.3.3 Trade Check — zero-token, pure Railway DB. ENGINE v3.3 (STRICT).
 
 v3.3.2 (12-Jun-2026): R6+R8 MERGED into single "R6 Trend" rule after
 redundancy scan found 88% agreement across 209 futures (paying twice for
@@ -26,7 +26,11 @@ gate1/gate2 (bool|None) = OPTIONAL human overrides:
 ADR source (15-Jun-2026 fix): adr_intraday (5-min live, today) → adr_daily
 fallback. Was reading only adr_daily which could be days old on a live session.
 
-Scope: v3.3.2 (id=143 base + delta id=263 R13 + merge delta). Not v3.4.1.
+Scope: v3.3.3 (id=143 base + id=263 R13 + id=264 merge + id=363 open-strength). Not v3.4.1.
+v3.3.3 (16-Jun-2026): R11 extended to weekly RSI<80 (overbought = fail on either
+timeframe; consistent with V8 sell_overbought id=359 weekly>=80 short zone). R6
+ceiling stays open (strength uncapped) — R6 owns trend, R11 owns all overbought
+rejection. R12 already breakout-aware (LONG: breakout OR HL+contraction).
 """
 
 import os
@@ -245,7 +249,7 @@ def _f6_dte():
     return dte >= 3, f"DTE {dte} (exp {exp.strftime('%d-%b')})"
 
 
-# ──────────────────────────────── main compute ────────────────────────────────
+# ─────────────────────────────── main compute ───────────────────────────────────────
 
 def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
     if side is None:
@@ -344,7 +348,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
             def row(rule, cond, val, ok, method="auto"):
                 return (rule, cond, val, ok, method)
 
-            # ── TIER 1 (v3.3.2: LONG 11 / SHORT 10, min 8) ──
+            # ── TIER 1 (v3.3.3: LONG 11 / SHORT 10, min 8) ──
             t1 = []
             if side == "LONG":
                 t1.append(row("R1 Market", "not extremely bearish",
@@ -367,7 +371,9 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 t1.append(row("R4 GVM", ">=7.0", f"{_f(gvm):.2f}" if gvm is not None else "—",
                               gvm is not None and float(gvm) >= 7.0))
 
-            # R6 Trend — MERGED R6+R8 (v3.3.2): MAs + RSI M/W together
+            # R6 Trend — MERGED R6+R8 (v3.3.2): MAs + RSI M/W together.
+            # v3.3.3: ceiling stays open — no upper RSI/extension cap. Overbought
+            # rejection lives in R11 (daily AND weekly < 80).
             mas = [dma20, dma50, dma200]
             if side == "LONG":
                 n = sum(1 for x in mas if x is not None and float(x) > 0)
@@ -398,9 +404,13 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
 
             t1.append(row("R10 5-min", "intraday strength (2/3 sub)", r10_val, r10_ok, r10_method))
 
+            # R11 RSI room — v3.3.3: LONG now caps BOTH daily AND weekly at 80.
+            # Weekly>=80 = overbought = FAIL (V8 sell_overbought id=359 short zone).
             if side == "LONG":
-                t1.append(row("R11 RSI room", "daily<80", f"{_f(rsi_d):.0f}",
-                              rsi_d is not None and float(rsi_d) < 80))
+                t1.append(row("R11 RSI room", "daily<80 & weekly<80",
+                              f"D {_f(rsi_d):.0f} / W {_f(rsi_w):.0f}",
+                              rsi_d is not None and rsi_w is not None
+                              and float(rsi_d) < 80 and float(rsi_w) < 80))
             else:
                 t1.append(row("R11 RSI room", "daily>20", f"{_f(rsi_d):.0f}",
                               rsi_d is not None and float(rsi_d) > 20))
@@ -491,7 +501,7 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None):
                 "t1_pass": t1_pass, "t1_auto_n": len(t1_auto), "t1_human_n": t1_unk, "t1_total": t1_total,
                 "t2_pass": t2_pass, "t2_auto_n": len(t2_auto), "t2_human_n": t2_unk, "t2_min": t2_min,
                 "verdict": verdict, "verdict_class": vclass,
-                "version": "v3.3.2",
+                "version": "v3.3.3",
                 "scoring": "strict — fails and no-data both count as not passed",
             }
     except Exception as e:
@@ -520,7 +530,7 @@ def native_trade_check(query, gate1=None, gate2=None):
         s = {"pass": "PASS", "fail": "FAIL", "chart": "🟡 no data (not passed)"}[r["state"]]
         return s + (" (gate)" if r.get("method") == "gate" else "")
 
-    out = [f"**Trade Check v3.3.2 — {d['company']} ({d['symbol']}) · {d['side']}**"]
+    out = [f"**Trade Check v3.3.3 — {d['company']} ({d['symbol']}) · {d['side']}**"]
     gv = f"GVM {d['gvm']:.2f} · " if d.get("gvm") is not None else ""
     out.append(f"_{d['segment']} · {gv}{d['ts']} · native $0 · strict scoring_")
     out.append("\n**TIER 1**")
