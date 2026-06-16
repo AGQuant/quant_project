@@ -17,42 +17,27 @@ Sector cap relax (12-Jun-2026): buy_reversal + buy_momentum sector_week
   upper cap 4.0->6.0.
 Pivot-room gate (15-Jun-2026): Added _pivot_room_ok() + _basket_cmp().
 Score-based fallback (15-Jun-2026): _live_qualified_fallback score-based.
-buy_reversal optimisation v1 (15-Jun-2026): 6-day 5-min intraday sim
-  (Jun 9-15). 15 trades, 9W/1L closed, 90% WR, +1.78% expectancy.
-  Changes: gvm>=6.5, month_return[-2,7.2], week_return[0,4],
-  rsi_month[52,72], rsi_weekly[50,62], sector_week>=1.
+buy_reversal optimisation v1 (15-Jun-2026): 6-day 5-min intraday sim.
+  Changes: gvm>=6.5, month_return[-2,7.2], rsi_weekly[50,62], sector_week>=1.
   Slots: total=20, StrongBull=15B/5S, Bull=12B/8S, Neutral=10B/10S, Bear=8B/12S.
 buy_reversal dynamic Nifty filter v1 (15-Jun-2026):
   3 filters adjust by Nifty 1M return regime (BULL/NEUTRAL/BEAR).
-  filter_config endpoint now returns live dynamic thresholds.
-  1-yr EOD backtest: Dynamic=63.4% WR/+0.25% exp vs Static=50.3%/-0.15% exp.
-  session_log: buy_reversal_dynamic_nifty_filter_v1.
+  1-yr EOD backtest: Dynamic=63.4% WR/+0.25% exp. session_log: buy_reversal_dynamic_nifty_filter_v1.
 buy_momentum optimisation v1 (16-Jun-2026): OPT2 adaptive target locked.
   RSI-M>=70 strict. Target=R2 in BULL, R1 in NEUTRAL/BEAR. Stop=S1.
-  Sector rule: max 2 per segment, M-score tiebreaker.
-  Symbol guard: 1 entry per symbol per 3 days (in signal_writer).
   1-yr EOD backtest: 243 signals, 77.4% WR, +1.79% avg win, +120% PnL.
-  Regime gate: Nifty 1M return (stable monthly, computed at 15:45 EOD).
   session_log id=342: BUY_MOMENTUM_SPEC_V1.
 qualified status enrichment (16-Jun-2026):
-  Each stock in qualified endpoint now carries a status badge:
-    OPEN      — position open today in v8_paper_positions (+ entry, pnl%, target, stop)
-    SLOT_FULL — passed all filters + pivot room, but slot cap exhausted
-    NEAR_MISS — score-gate fallback only (didn't pass all strict filters)
-    QUALIFIED — default (strict filter pass, no position yet)
-  Same for all 5 baskets. Enables dashboard badge display.
-sell_reversal v1 (16-Jun-2026): SELL_REVERSAL_SPEC_V1
-  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
-  Filters: dma_200<=2, dma_50<=2, rsi_weekly<=50, rsi_month[20,70],
-           week_return>=-5, month_return>=-15, mom_2d<=0, sector_week<=-1
-  1-yr backtest: 396 sigs, WR 71.2%. session_log: SELL_REVERSAL_SPEC_V1.
-sell_reversal v2 QUALITY (16-Jun-2026): SELL_REVERSAL_SPEC_V2
-  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
-  Filters: rsi_weekly<=35, mom_2d<=-2, sector_week<=-2
-  (stripped to 3 high-signal-quality filters only)
-  1-yr backtest: 90 sigs, WR 73.3%, avg_win +1.13%, avg_loss -5.86%
-  ~1-2 signals/week. Quality over quantity.
-  session_log: SELL_REVERSAL_SPEC_V2.
+  Each stock carries: OPEN / SLOT_FULL / NEAR_MISS / QUALIFIED badge.
+sell_reversal V3 LOCKED (16-Jun-2026): SELL_REVERSAL_SPEC_V3
+  Filters (5, strict AND): rsi_weekly<=45, mom_2d<=-2, sector_week<=-1.5,
+    dma_200<=2, week_return[-10,-0.5]
+  Target = S2  (= PP - (H5-L5), rolling-5-day pivot)
+  Stop   = PP + 0.5*(R1-PP)
+  1-yr backtest: 283 sigs, 75.8% WR, avg_tgt -3.04%, avg_sl +5.99%
+  EV = +0.26%/trade — FIRST PROFITABLE sell_reversal version.
+  SL sweep confirmed: wider SL (0.5x) has highest EV; tightening hurts.
+  session_log: SELL_REVERSAL_SPEC_V3. Supersedes V1 + V2.
 sell_momentum locked (16-Jun-2026): SELL_MOMENTUM_SPEC_V1
   Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
   Filters: rsi_month<=45, week_index_52<=30, dma_200<=0, mom_2d<=-1
@@ -113,13 +98,14 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # QUALITY v2 — 16-Jun-2026 — SELL_REVERSAL_SPEC_V2
-        # Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
-        # 90 sigs, WR 73.3%, ~1-2/week. Quality over quantity.
-        # 3 strict filters: weekly RSI oversold + 2-day momentum down + sector weak
-        "rsi_weekly":   [None, 35.0],
+        # V3 LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V3
+        # Target = S2 | Stop = PP + 0.5*(R1-PP)
+        # 5 filters strict AND — 283 sigs/yr, 75.8% WR, EV +0.26%/trade
+        "rsi_weekly":   [None, 45.0],
         "mom_2d":       [None, -2.0],
-        "sector_week":  [None, -2.0],
+        "sector_week":  [None, -1.5],
+        "dma_200":      [None,  2.0],
+        "week_return":  [-10.0, -0.5],
     },
     "sell_momentum": {
         # LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V1
@@ -141,16 +127,18 @@ FILTER_CONFIG = {
     },
 }
 
-# ── Sell Reversal + Sell Momentum: shared target/stop multipliers (locked 16-Jun-2026) ──
-SELL_REVERSAL_TGT_MULT = 0.3
-SELL_REVERSAL_SL_MULT  = 0.5
-SELL_MOMENTUM_TGT_MULT = 0.3
+# ── Sell Reversal V3: Target=S2, Stop=PP+0.5*(R1-PP) ──
+SELL_REVERSAL_SL_MULT  = 0.5   # stop = PP + SL_MULT*(R1-PP)
+# NOTE: sell_reversal target is S2 directly — no multiplier needed
+
+# ── Sell Momentum: same SL formula ──
+SELL_MOMENTUM_TGT_MULT = 0.3   # target = S1 - TGT_MULT*(S1-S2)
 SELL_MOMENTUM_SL_MULT  = 0.5
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
     "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2"},
-    "sell_reversal":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "73.3%", "signals_per_day": "~1-2/week"},
+    "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "75.8%", "signals_per_day": "~1.1/day"},
     "sell_momentum":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "72.3%", "signals_per_day": "~1/week"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "71.4%", "signals_per_day": "~3"},
 }
@@ -610,12 +598,17 @@ def filter_config(basket: str):
                          "max_display": "" if mx is None else mx})
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "target": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
+            "target": "S2",
+            "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
             "stop":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
-            "tgt_mult": SELL_REVERSAL_TGT_MULT, "sl_mult": SELL_REVERSAL_SL_MULT,
-            "priority": "quality (WR 73.3%, ~1-2/week)",
+            "sl_mult": SELL_REVERSAL_SL_MULT,
+            "priority": "profitable (WR 75.8%, EV +0.26%/trade)",
             "regime_gate": "mood gate handles slot reduction — no blanket block",
-            "backtest": {"signals": 90, "wr_pct": 73.3, "avg_win": 1.13, "avg_loss": -5.86},
+            "backtest": {
+                "signals": 283, "wr_pct": 75.8,
+                "avg_tgt_pct": -3.04, "avg_sl_pct": 5.99,
+                "rr_ratio": 0.51, "expected_value": 0.26,
+            },
             **BASKET_META.get(basket, {})
         }
 
@@ -722,9 +715,10 @@ def qualified(basket: str, limit: int = 50):
                      "target": _get_buy_momentum_target(regime)}
         elif basket == "sell_reversal":
             extra = {
-                "target_formula": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
+                "target": "S2",
+                "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
                 "stop_formula":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
-                "tgt_mult": SELL_REVERSAL_TGT_MULT, "sl_mult": SELL_REVERSAL_SL_MULT,
+                "sl_mult": SELL_REVERSAL_SL_MULT,
             }
         elif basket == "sell_momentum":
             extra = {
