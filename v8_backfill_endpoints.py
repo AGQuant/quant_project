@@ -1,5 +1,5 @@
 """
-V8 Backfill Endpoints — One-time historical metric backfill
+V8 Backfill Endpoints — One-time historical metric backfill + universe sync
 ===========================================================
 Saves 1-year EOD computed metrics (Jun 2025 - Jun 2026) into v8_metrics.
 80 GVM>=6.5 futures symbols, 258 trading days, ~20,560 rows.
@@ -8,6 +8,12 @@ Triggered via: POST /api/v8/backfill/metrics
 Auth: ADMIN_TOKEN required
 
 Added: 15-Jun-2026 (buy_reversal_simulator.py validated these metrics)
+
+sync_universe: POST /api/v8/backfill/sync_universe
+  Syncs futures_universe with Fyers feed (futures_basis last 7 days).
+  Strips expiry suffix. Adds missing, deactivates absent 2+ Mondays.
+  Also runs automatically every Monday 08:00 IST via scheduler.
+Added: 16-Jun-2026
 """
 
 import os, logging
@@ -128,3 +134,24 @@ def backfill_metrics(x_admin_token: str = Header(None)):
 
     return {"status":"ok","symbols":len(by_sym),"bt_days":len(bt_dates),
             "rows_inserted":inserted,"date_range":f"{BT_START} to {BT_END}"}
+
+
+@router.post("/sync_universe")
+def sync_universe_endpoint(x_admin_token: str = Header(None)):
+    """
+    Sync futures_universe with Fyers feed (futures_basis last 7 days).
+    - Strips expiry suffix (e.g. RADICO26JUNFUT → RADICO)
+    - Adds missing symbols as active (lot_size=1 default)
+    - Deactivates symbols absent 2+ consecutive Mondays
+    Also runs automatically every Monday 08:00 IST via scheduler.
+    """
+    if x_admin_token != os.getenv("ADMIN_TOKEN"):
+        raise HTTPException(401, "Unauthorized")
+    try:
+        from scheduler import sync_futures_universe
+        with _conn() as conn:
+            result = sync_futures_universe(conn)
+        return result
+    except Exception as e:
+        log.error(f"sync_universe failed: {e}")
+        raise HTTPException(500, str(e))
