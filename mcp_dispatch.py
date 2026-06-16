@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Response
 
 import yahoo_ondemand
 
-# ── MCP dispatch layer ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── MCP dispatch layer ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # Extracted from main.py (File 5/5 split, piece B). Self-contained:
 # reads env vars directly, owns its get_conn, imports yahoo_ondemand.
 # NO import from main.py -> no circular import.
@@ -54,6 +54,7 @@ MCP_TOOLS = [
     {"name":"run_v8_engine","description":"Run the V8 EOD engine — compute metrics + write signals to DB.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_v8_for_date","description":"Backfill v8_metrics for a PAST date (YYYY-MM-DD).","inputSchema":{"type":"object","properties":{"target_date":{"type":"string"}},"required":["target_date"]}},
     {"name":"backfill_v8_metrics","description":"One-time backfill: compute + insert v8_metrics for Jun 2025-Jun 2026 (258 days, 80 symbols, ~20560 rows). Takes ~5-10 mins server-side. Run once then check v8_metrics row count.","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"sync_futures_universe","description":"Sync futures_universe with Fyers feed (last 7 days). Strips expiry suffix, adds missing symbols, deactivates absent 2+ Mondays. Also runs auto Monday 08:00 IST.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"get_v8_metrics","description":"Get computed V8 metrics for one stock.","inputSchema":{"type":"object","properties":{"symbol":{"type":"string"}},"required":["symbol"]}},
     {"name":"get_v8_metrics_all","description":"Get all metrics for the full universe (latest date).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"get_v8_live_metrics","description":"Get real-time CMP, day%, hourly gain for the universe.","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -147,6 +148,7 @@ async def _call_tool(name, args):
         elif name == "run_v8_engine": r = await client.post(f"{BASE_URL}/api/v8/run", headers=h); return r.json()
         elif name == "run_v8_for_date": r = await client.post(f"{BASE_URL}/api/v8/run_for_date", params={"target_date": args["target_date"]}, headers=h); return r.json()
         elif name == "backfill_v8_metrics": r = await client.post(f"{BASE_URL}/api/v8/backfill/metrics", headers=h); return r.json()
+        elif name == "sync_futures_universe": r = await client.post(f"{BASE_URL}/api/v8/backfill/sync_universe", headers=h); return r.json()
         elif name == "get_v8_metrics": r = await client.get(f"{BASE_URL}/api/v8/metrics/{args['symbol']}"); return r.json()
         elif name == "get_v8_metrics_all": r = await client.get(f"{BASE_URL}/api/v8/metrics/all"); return r.json()
         elif name == "get_v8_live_metrics": r = await client.get(f"{BASE_URL}/api/v8/live_metrics"); return r.json()
