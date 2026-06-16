@@ -19,7 +19,6 @@
   a{color:inherit}
   .wrap{max-width:1240px;margin:0 auto;padding:12px 18px 26px}
 
-  /* ── 3-dot model switcher ── */
   .mswitch{position:relative}
   .mswitch-btn{width:38px;height:38px;border-radius:9px;border:1px solid var(--line2);
     background:var(--panel);color:var(--mut);font-size:18px;font-weight:800;line-height:1;
@@ -67,7 +66,6 @@
   .slots b{font-size:18px;font-family:'Space Mono'}
   .slots .buy b{color:var(--grn)} .slots .sell b{color:var(--red)}
 
-  /* ── Tabs ── */
   .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 0;
     border-bottom:1px solid var(--line);padding-bottom:0}
   .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;
@@ -177,13 +175,6 @@
   .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .subnav .btn.on{background:var(--blu);border-color:var(--blu);color:#fff}
 
-  .scan-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
-  .scan-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-  .scan-card .sk-sym{font-weight:700;font-size:12px;color:var(--txt);margin-bottom:5px}
-  .scan-card .sk-score{font-family:'Space Mono';font-size:13px;font-weight:700;margin-bottom:4px}
-  .scan-card .sk-chips{display:flex;flex-wrap:wrap;gap:4px}
-  .scan-card .sk-chip{font-family:'Space Mono';font-size:10px;padding:1px 5px;
-    border-radius:4px;background:var(--bg2);border:1px solid var(--line2)}
   .funnel-stages{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
   .funnel-stage{display:flex;align-items:center;gap:8px;padding:7px 12px;
     background:var(--panel);border:1px solid var(--line);border-radius:8px}
@@ -253,7 +244,6 @@ const EP = {
   qualified:    b => `/api/v8/qualified/${b}`,
   sellOB:       "/api/v8/sell_overbought?limit=25",
   paper:        "/api/paper/status",
-  scan:         "/api/v8/scan",
   funnelDetail: b => `/api/v8/funnel_detail/${b}`,
   passCount:    b => `/api/v8/stock_passcount/${b}`,
   gvmSearch:    q => `/api/gvm/search?q=${encodeURIComponent(q)}`,
@@ -268,7 +258,7 @@ const ALL5 = [
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 const TAB_LABELS = ["Master Dashboard","Buy Reversal","Buy Momentum","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Filter Scan","Filter Funnel"];
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Filter Funnel"];
 const TAB_ORDER = [0,1,2,3,4,5,6,7,8,9];
 
 let AUTO=true, autoTimer=null;
@@ -286,17 +276,10 @@ function inr(x){if(x===null||x===undefined||isNaN(x))return"—";return"₹"+Num
 function pnlCls(x){return Number(x)>=0?"pos":"neg";}
 function netPnl(pnl, trades){return (Number(pnl)||0) - (Number(trades)||1)*BROKERAGE_PER_TRADE;}
 
-// ── Timestamp helpers ──
-// DB stores IST naive datetimes (no timezone suffix).
-// Parse directly as local IST — DO NOT add +5:30 offset (that was the double-conversion bug).
 function _parseISTNaive(ts){
-  // ts from DB: "2026-06-16 14:25:00" or "2026-06-16T14:25:00.123456"
-  // Treat it as IST directly: replace space with T, no Z suffix.
   if(!ts) return null;
   try{
-    const s = String(ts).replace(' ','T').replace(/Z$/,'').replace(/[+-]\d{2}:\d{2}$/,'');
-    // Parse as local — JS will treat no-timezone as local, but we want to display as-is
-    // So extract parts manually to avoid any local-TZ interpretation
+    const s = String(ts).replace(' ','T').replace(/Z$/).replace(/[+-]\d{2}:\d{2}$/,'');
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
     if(!m) return null;
     return {day:+m[3], mon:+m[2]-1, hr:+m[4], min:+m[5]};
@@ -323,7 +306,6 @@ function fmtSince(ts){
 
 function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
 
-// ── Status badge helpers ──
 function statusBadge(status){
   if(!status||status==='QUALIFIED') return `<span class="badge b-qualified">SIGNAL</span>`;
   if(status==='OPEN')      return `<span class="badge b-open">● OPEN</span>`;
@@ -459,9 +441,16 @@ function renderMaster(){
   const netUnreal=unreal - open.length*BROKERAGE_PER_TRADE;
   const totalClosedPnl=Number(sum.total_pnl||0);
   const netClosed=netPnl(totalClosedPnl, sum.trades||0);
-  const sectors=(cache.scan&&cache.scan.sectors)||[];
-  const top8=sectors.filter(s=>s.avg_day_1d>0).slice(0,8);
-  const bot8=sectors.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
+  const sectors=(cache.metricsAll||[]).reduce((acc,x)=>{
+    if(!x.segment)return acc;
+    if(!acc[x.segment])acc[x.segment]={segment:x.segment,stocks:0,sum:0,top_stock:'',top_val:-999};
+    acc[x.segment].stocks++;acc[x.segment].sum+=Number(x.day_1d||0);
+    if(Number(x.day_1d||0)>acc[x.segment].top_val){acc[x.segment].top_val=Number(x.day_1d);acc[x.segment].top_stock=x.symbol;}
+    return acc;
+  },{});
+  const secArr=Object.values(sectors).map(s=>({...s,avg_day_1d:s.sum/s.stocks})).sort((a,b)=>b.avg_day_1d-a.avg_day_1d);
+  const top8=secArr.filter(s=>s.avg_day_1d>0).slice(0,8);
+  const bot8=secArr.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L</div>
@@ -721,45 +710,25 @@ function renderRaw(){
     {sortKey:'mom_2d',dir:-1,empty:"No metrics"});
 }
 
-let scanMode='gainers';
-function renderScan(){
-  const sc=cache.scan;if(!sc)return'<div class="loading">…</div>';
-  const nav=[["gainers","Top Gainers"],["losers","Top Losers"],["sectors","Top Sectors"]]
-    .map(([k,l])=>`<button class="btn ${scanMode===k?'on':''}" onclick="scanSet('${k}')">${l}</button>`).join('');
-  let body;
-  if(scanMode==='sectors'){
-    const secs = sc.sectors || [];
-    body = secs.length
-      ? `<div class="sec-cards">${secs.map((s,i)=>{
-          const color=s.avg_day_1d>=0?'var(--grn)':'var(--red)';
-          return`<div class="sec-card"><div class="sc-num">${i+1}</div>
-            <div class="sc-name" style="margin-top:14px">${s.segment}</div>
-            <div class="sc-pct" style="color:${color}">${sign(s.avg_day_1d,2)}%</div>
-            <div class="sc-top">${s.top_stock||''}</div>
-            <div class="sc-stocks">${s.stocks} stocks</div></div>`;
-        }).join('')}</div>`
-      : `<div class="empty">No sector data</div>`;
-  } else {
-    const rows=(scanMode==='gainers'?sc.gainers:sc.losers)||[];
-    body = rows.length
-      ? `<div class="scan-grid">${rows.map(x=>{
-          const sv=x.gate_score??0,st=x.gate_total??11;
-          const sc_cls=scoreClass(sv,st);
-          return`<div class="scan-card">
-            <div class="sk-sym">${x.symbol}</div>
-            <div class="sk-score ${sc_cls}">${sv}/${st}</div>
-            <div class="sk-chips">
-              <span class="sk-chip" style="color:${Number(x.mom_2d)>=0?'var(--grn)':'var(--red)'}">${sign(x.mom_2d,1)}%</span>
-              <span class="sk-chip">RSI ${num(x.rsi_weekly,0)}</span>
-              <span class="sk-chip">Vol ${num(x.vol_ratio,1)}×</span>
-            </div></div>`;
-        }).join('')}</div>`
-      : `<div class="empty">No matches</div>`;
-  }
-  return`<div class="subnav">${nav}</div>`+
-    `<div class="ptitle">Filter Scan · ${scanMode} <span class="ct">score_date ${sc.score_date||'—'} · universe ${sc.universe||'—'}</span></div>`+body;
+function renderMissed(){
+  const p=cache.paper;if(!p)return'<div class="loading">…</div>';
+  const missed=p.missed||[];
+  return`<div class="ptitle">Paper Missed <span class="ct">${missed.length} entries</span></div>`+
+    `<div style="font-size:11px;color:var(--dim);margin-bottom:12px">Signals that qualified but were not entered — slot exhaustion, conflict, or timing gate.</div>`+
+    sortTbl('missed',
+    [["miss_date","Date"],["symbol","Symbol"],["side","Side"],["basket","Basket"],
+     ["expected_entry","Expected Entry"],["reason","Reason"],["ts","Logged At"]],
+    missed,
+    x=>`<tr>
+      <td style="color:var(--mut);font-family:Sora">${x.miss_date||'—'}</td>
+      <td class="sym">${x.symbol}</td>
+      <td><span class="badge ${(x.side||'')===('SHORT')?'b-short':'b-long'}">${x.side||'—'}</span></td>
+      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
+      <td>${num(x.expected_entry)}</td>
+      <td style="text-align:left;color:var(--dim);font-family:Sora;font-size:11px;white-space:normal;max-width:220px">${x.reason||'—'}</td>
+      <td style="color:var(--dim)">${fmtTs(x.ts)}</td></tr>`,
+    {sortKey:'ts',dir:-1,empty:"No missed entries — clean slate."});
 }
-function scanSet(m){scanMode=m;document.getElementById('panel8').innerHTML=renderScan();}
 
 let ffBasket='buy_reversal';
 function ffSet(b){ffBasket=b;loadFF();}
@@ -816,7 +785,7 @@ function paint(){
   document.getElementById('panel5').innerHTML=renderSellOB();
   document.getElementById('panel6').innerHTML=renderTradeLog();
   document.getElementById('panel7').innerHTML=renderRaw();
-  document.getElementById('panel8').innerHTML=renderScan();
+  document.getElementById('panel8').innerHTML=renderMissed();
   loadFF();
 }
 
@@ -826,7 +795,6 @@ async function loadAll(){
   const tasks=[
     ['mood',()=>getJSON(EP.mood)],['metricsAll',()=>getJSON(EP.metricsAll)],
     ['sellOB',()=>getJSON(EP.sellOB)],['paper',()=>getJSON(EP.paper)],
-    ['scan',()=>getJSON(EP.scan)],
     ...BASKETS.map(b=>['q_'+b.id,()=>getJSON(EP.qualified(b.id))]),
   ];
   await Promise.all(tasks.map(async([k,fn])=>{
