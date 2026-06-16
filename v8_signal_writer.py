@@ -16,9 +16,11 @@ What it does every 5-min during market hours:
 
 Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
   BUY  threshold = n - 1 - min(fails, 2)  [tight in bull, loose in bear]
-  SELL threshold = n - 2 + min(fails, 2)  [tighter — was n-3, too many qualifying]
-  buy_reversal  (10): 9/8/7   buy_momentum  (10): 9/8/7
-  sell_reversal  (8): 6/7/8   sell_momentum  (4): 2/3/4
+  SELL threshold:
+    if n_filters <= 4: always require ALL filters (strict AND — quality baskets)
+    else: n - 2 + min(fails, 2)
+  sell_reversal (3 filters): always 3/3 — strict AND
+  sell_momentum (4 filters): always 4/4 — strict AND
 
 Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
   Nifty 1-month return used as regime gate. 3 filters adjust dynamically:
@@ -26,7 +28,6 @@ Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
   NEUTRAL (Nifty 1M  0-2%): week_return<=2, rsi_month<=62, sector_week<=3
   BEAR    (Nifty 1M  < 0%): week_return<=1, rsi_month<=58, sector_week<=2
   1-yr EOD backtest: Dynamic=63.4% WR/+0.25% exp vs Static=50.3%/-0.15% exp.
-  session_log: buy_reversal_filter_optimisation_v1.
 
 Auto paper trade (15-Jun-2026):
   First time a stock qualifies today (rowcount=1 on DO NOTHING INSERT),
@@ -48,13 +49,11 @@ adr_intraday (11-Jun-2026): per spec id=165.
 
 entry_ts IST fix (16-Jun-2026):
   entry_ts now stored as IST naive datetime via _now_ist().
-  Frontend never needs timezone conversion — what's in DB is what's displayed.
-  v8_qualified.signal_ts also stored as IST for consistency.
 
-SELL gate tightened (16-Jun-2026):
-  n-3+min(fails,2) → n-2+min(fails,2).
-  sell_reversal Strong Bullish: threshold 5→6, score-qualified 99→~48, post-pivot ~8-10.
-  Reason: 21 qualified (vs target ~5-8) with old formula in Strong Bullish market.
+sell_reversal quality v2 (16-Jun-2026):
+  Reduced to 3 strict filters: rsi_weekly<=35, mom_2d<=-2, sector_week<=-2.
+  _gate_threshold: SELL with n_filters<=4 forces strict AND (all must pass).
+  Backtest: 90 sigs, 73.3% WR, ~1-2/week. Quality basket.
 """
 
 import logging
@@ -142,7 +141,6 @@ BASKET_SIDE = {
 
 
 def _load_pivots(conn) -> Dict[str, dict]:
-    """Load latest rolling-5-day pivot levels for all symbols."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, pp, r1, s1
@@ -157,11 +155,6 @@ def _load_pivots(conn) -> Dict[str, dict]:
 def _pivot_room_ok(side: str, cmp: Optional[float],
                     pp: Optional[float], r1: Optional[float],
                     s1: Optional[float]) -> bool:
-    """
-    Paper-engine pivot-room gate — pure CMP gate.
-    BUY:  pp < cmp <= r1  AND  (r1 - cmp) >= 0.5 * (r1 - pp)
-    SELL: s1 <= cmp < pp  AND  (cmp - s1) >= 0.5 * (pp - s1)
-    """
     if cmp is None or pp is None:
         return False
     if side == "BUY":
@@ -466,7 +459,6 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
 # ── Step 6: Sector aggregates (live) ─────────────────────────────────────────
 
 def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dict]):
-    """Live sector_day, sector_week, sector_month — all 5-min."""
     seg_day:   Dict[str, list] = defaultdict(list)
     seg_week:  Dict[str, list] = defaultdict(list)
     seg_month: Dict[str, list] = defaultdict(list)
@@ -623,12 +615,15 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
     """
     Score-based adaptive threshold.
     BUY:  Strong Bullish → n-1 (tight), Neutral/Bear → n-3 (loose)
-    SELL: n-2+min(fails,2) — tightened 16-Jun-2026 (was n-3, produced 21 qualified)
-      Strong Bullish (0 fails): n-2  → sell_reversal=6/8, sell_momentum=2/4
-      Bullish        (1 fail):  n-1  → sell_reversal=7/8, sell_momentum=3/4
-      Neutral/Bear   (2 fails): n    → sell_reversal=8/8, sell_momentum=4/4
+    SELL: if n_filters <= 4 → always n (strict AND, quality basket, mood-independent)
+          else → n-2+min(fails,2)
+    sell_reversal (3 filters): always 3/3 — all must pass
+    sell_momentum (4 filters): always 4/4 — all must pass
+    This prevents the n-2 formula collapsing to threshold=1 for small filter sets.
     """
     if side == "SELL":
+        if n_filters <= 4:
+            return n_filters  # strict AND — all filters must pass
         return max(n_filters - 2 + min(fails, 2), 1)
     return n_filters - 1 - min(fails, 2)
 
