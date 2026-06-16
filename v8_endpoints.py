@@ -42,15 +42,18 @@ qualified status enrichment (16-Jun-2026):
     QUALIFIED — default (strict filter pass, no position yet)
   Same for all 5 baskets. Enables dashboard badge display.
 sell_reversal locked (16-Jun-2026): SELL_REVERSAL_SPEC_V1
-  Target = S1 - 0.3*(S1-S2)  [30% of the way from S1 toward S2]
-  Stop   = PP + 0.5*(R1-PP)  [halfway between PP and R1]
-  Entry  = close < PP
+  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
   Filters: dma_200<=2, dma_50<=2, rsi_weekly<=50, rsi_month[20,70],
            week_return>=-5, month_return>=-15, mom_2d<=0, sector_week<=-1
-  1-yr backtest: 396 sigs, WR 71.2%, avg_win +0.92%, avg_loss -3.31%
-  Priority: accuracy (WR) over PnL. Mood gate handles BULL slot reduction.
-  Apr-26 outlier (Nifty +9%): mood gate caps sell slots to 5 in live.
+  1-yr backtest: 396 sigs, WR 71.2%. Priority: accuracy. Mood gate handles BULL.
   session_log: SELL_REVERSAL_SPEC_V1.
+sell_momentum locked (16-Jun-2026): SELL_MOMENTUM_SPEC_V1
+  Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)  [same multipliers as sell_reversal]
+  Filters: rsi_month<=45, week_index_52<=30, dma_200<=0, mom_2d<=-1
+  1-yr backtest: 119 sigs, WR 72.3%, avg_win +1.07%, avg_loss -3.06%
+  Low frequency by design — fires only in genuine downtrends (~1/week).
+  Priority: accuracy. Mood gate handles slot reduction in BULL.
+  session_log: SELL_MOMENTUM_SPEC_V1.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -120,18 +123,14 @@ FILTER_CONFIG = {
         "sector_week":  [None, -1.0],
     },
     "sell_momentum": {
-        "dma_200":      [-50.0,  0.0],
-        "dma_50":       [-30.0,  0.0],
-        "dma_20":       [None,  -2.0],
-        "rsi_month":    [10.0,  45.0],
-        "daily_rsi":    [None,  30.0],
-        "rsi_weekly":   [5.0,   60.0],
-        "week_return":  [-8.0,   0.0],
-        "mom_2d":       [-2.0,   0.0],
-        "month_return": [-30.0,  0.0],
-        "week_index_52":[None,  20.0],
-        "sector_week":  [-4.0,   0.0],
-        "sector_month": [-6.0,   0.0],
+        # LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V1
+        # Target = S1 - 0.3*(S1-S2) | Stop = PP + 0.5*(R1-PP)
+        # 119 sigs, WR 72.3%, priority: accuracy
+        # Low freq by design — fires only in genuine downtrends (~1/week)
+        "rsi_month":    [None, 45.0],
+        "week_index_52":[None, 30.0],
+        "dma_200":      [None,  0.0],
+        "mom_2d":       [None, -1.0],
     },
     "sell_overbought": {
         "dma_200":      [10.0, None],
@@ -144,15 +143,17 @@ FILTER_CONFIG = {
     },
 }
 
-# ── Sell Reversal target/stop multipliers (locked 16-Jun-2026) ──
+# ── Sell Reversal + Sell Momentum: shared target/stop multipliers (locked 16-Jun-2026) ──
 SELL_REVERSAL_TGT_MULT = 0.3   # target = S1 - TGT_MULT*(S1-S2)
 SELL_REVERSAL_SL_MULT  = 0.5   # stop   = PP + SL_MULT*(R1-PP)
+SELL_MOMENTUM_TGT_MULT = 0.3   # same structure, same multipliers
+SELL_MOMENTUM_SL_MULT  = 0.5
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "63.4%", "signals_per_day": "~3"},
     "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2"},
     "sell_reversal":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "71.2%", "signals_per_day": "~2"},
-    "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "83%",   "signals_per_day": "~1.5"},
+    "sell_momentum":   {"side": "SELL", "target": "S1-0.3*(S1-S2)",            "win_pct": "72.3%", "signals_per_day": "~1/week"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "71.4%", "signals_per_day": "~3"},
 }
 
@@ -265,7 +266,7 @@ def _live_qualified_fallback(basket: str, limit: int):
     else:
         config = FILTER_CONFIG[basket]
     n_filters = len(config)
-    need      = max(n_filters - 3, 1)
+    need      = max(n_filters - 2, 1)
 
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"""
@@ -314,7 +315,6 @@ def _live_qualified_fallback(basket: str, limit: int):
 # ── Paper position enrichment ─────────────────────────────────────────────────
 
 def _load_open_positions(basket: str) -> dict:
-    """Load today's open paper positions for this basket → {symbol: position_dict}"""
     side = "LONG" if basket.startswith("buy") else "SHORT"
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -327,8 +327,7 @@ def _load_open_positions(basket: str) -> dict:
                        END AS pnl_pct
                 FROM v8_paper_positions p
                 LEFT JOIN cmp_prices c ON c.symbol=p.symbol
-                WHERE p.basket=%s AND p.status='OPEN'
-                  AND p.side=%s
+                WHERE p.basket=%s AND p.status='OPEN' AND p.side=%s
             """, (basket, side))
             cols = [d[0] for d in cur.description]
             return {r[0]: dict(zip(cols, r)) for r in cur.fetchall()}
@@ -337,7 +336,6 @@ def _load_open_positions(basket: str) -> dict:
 
 
 def _load_slot_full(basket: str) -> set:
-    """Load symbols that were slot_full today from v8_qualified."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -351,7 +349,6 @@ def _load_slot_full(basket: str) -> set:
 
 
 def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: set) -> list:
-    """Add status, entry_price, pnl_pct, open_target, open_stop to each stock."""
     for s in stocks:
         sym = s.get("symbol", "")
         pos = open_pos.get(sym)
@@ -374,9 +371,7 @@ def _read_adr(cur):
     if _market_open():
         cur.execute("""
             SELECT advances, declines, unchanged, adr, universe_count, ts
-            FROM adr_intraday
-            WHERE ts::date = CURRENT_DATE
-            ORDER BY ts DESC LIMIT 1
+            FROM adr_intraday WHERE ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
         """)
         row = cur.fetchone()
         if row and (row[4] or 0) >= 50:
@@ -386,13 +381,11 @@ def _read_adr(cur):
         cur.execute("""
             WITH li AS (
                 SELECT DISTINCT ON (symbol) symbol, close AS cmp
-                FROM intraday_prices WHERE ts::date = CURRENT_DATE
-                ORDER BY symbol, ts DESC
+                FROM intraday_prices WHERE ts::date = CURRENT_DATE ORDER BY symbol, ts DESC
             ),
             pc AS (
                 SELECT DISTINCT ON (symbol) symbol, close AS pclose
-                FROM raw_prices WHERE price_date < CURRENT_DATE
-                ORDER BY symbol, price_date DESC
+                FROM raw_prices WHERE price_date < CURRENT_DATE ORDER BY symbol, price_date DESC
             )
             SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
                    COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
@@ -419,16 +412,14 @@ def _read_adr(cur):
 def _live_nifty_dwm(cur, symbol="NIFTY50"):
     cur.execute("""
         SELECT close FROM intraday_prices
-        WHERE symbol = %s AND ts::date = CURRENT_DATE
-        ORDER BY ts DESC LIMIT 1
+        WHERE symbol = %s AND ts::date = CURRENT_DATE ORDER BY ts DESC LIMIT 1
     """, (symbol,))
     live = cur.fetchone()
     if not live or live[0] is None: return None
     latest = float(live[0])
     cur.execute("""
         SELECT close FROM raw_prices
-        WHERE symbol = %s AND price_date < CURRENT_DATE
-        ORDER BY price_date DESC LIMIT 30
+        WHERE symbol = %s AND price_date < CURRENT_DATE ORDER BY price_date DESC LIMIT 30
     """, (symbol,))
     hist = cur.fetchall()
     if len(hist) < 22: return None
@@ -568,17 +559,15 @@ def filter_config(basket: str):
         rows = []
         for metric, bounds in live_config.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            is_dynamic = metric in ("week_return", "rsi_month", "sector_week")
             rows.append({
                 "metric": metric, "min": mn, "max": mx,
                 "min_display": "" if mn is None else mn,
                 "max_display": "" if mx is None else mx,
-                "dynamic": is_dynamic,
+                "dynamic": metric in ("week_return", "rsi_month", "sector_week"),
             })
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "regime": regime,
-            "nifty_1m_return": round(nifty_1m, 2),
+            "regime": regime, "nifty_1m_return": round(nifty_1m, 2),
             "regime_rules": {
                 "BULL":    {"condition": "Nifty 1M > +2%",  "week_return_max": 3.0, "rsi_month_max": 67.0, "sector_week_max": 4.0},
                 "NEUTRAL": {"condition": "Nifty 1M 0-2%",   "week_return_max": 2.0, "rsi_month_max": 62.0, "sector_week_max": 3.0},
@@ -600,10 +589,8 @@ def filter_config(basket: str):
             })
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "regime": regime,
-            "nifty_1m_return": round(nifty_1m, 2),
-            "target": target,
-            "target_rule": "R2 in BULL (Nifty 1M > +2%), R1 in NEUTRAL/BEAR",
+            "regime": regime, "nifty_1m_return": round(nifty_1m, 2),
+            "target": target, "target_rule": "R2 in BULL (Nifty 1M > +2%), R1 in NEUTRAL/BEAR",
             "stop": "S1",
             "regime_rules": {
                 "BULL":    {"condition": "Nifty 1M > +2%", "target": "R2", "slots": 15},
@@ -627,11 +614,29 @@ def filter_config(basket: str):
             "basket": basket, "filters": rows, "count": len(rows),
             "target": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
             "stop":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
-            "tgt_mult": SELL_REVERSAL_TGT_MULT,
-            "sl_mult":  SELL_REVERSAL_SL_MULT,
+            "tgt_mult": SELL_REVERSAL_TGT_MULT, "sl_mult": SELL_REVERSAL_SL_MULT,
             "priority": "accuracy (WR 71.2%)",
             "regime_gate": "mood gate handles slot reduction — no blanket block",
             "backtest": {"signals": 396, "wr_pct": 71.2, "avg_win": 0.92, "avg_loss": -3.31},
+            **BASKET_META.get(basket, {})
+        }
+
+    if basket == "sell_momentum":
+        rows = []
+        for metric, bounds in FILTER_CONFIG["sell_momentum"].items():
+            mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
+            rows.append({"metric": metric, "min": mn, "max": mx,
+                         "min_display": "" if mn is None else mn,
+                         "max_display": "" if mx is None else mx})
+        return {
+            "basket": basket, "filters": rows, "count": len(rows),
+            "target": f"S1 - {SELL_MOMENTUM_TGT_MULT}*(S1-S2)",
+            "stop":   f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)",
+            "tgt_mult": SELL_MOMENTUM_TGT_MULT, "sl_mult": SELL_MOMENTUM_SL_MULT,
+            "priority": "accuracy (WR 72.3%)",
+            "design_intent": "Low frequency — fires only in genuine downtrends (~1/week)",
+            "regime_gate": "mood gate handles slot reduction — no blanket block",
+            "backtest": {"signals": 119, "wr_pct": 72.3, "avg_win": 1.07, "avg_loss": -3.06},
             **BASKET_META.get(basket, {})
         }
 
@@ -663,8 +668,7 @@ def qualified(basket: str, limit: int = 50):
                     (q.metrics->>'vol_ratio')::numeric AS vol_ratio,
                     q.sector_week, q.sector_month,
                     q.source, q.signal_ts,
-                    m.day_1d,
-                    g.segment,
+                    m.day_1d, g.segment,
                     p.pp, p.r1, p.s1,
                     fs.first_seen,
                     (q.metrics->>'filter_score')::numeric AS filter_score,
@@ -681,14 +685,12 @@ def qualified(basket: str, limit: int = 50):
                     SELECT symbol, basket, MIN(signal_ts) AS first_seen
                     FROM v8_qualified GROUP BY symbol, basket
                 ) fs ON fs.symbol = q.symbol AND fs.basket = q.basket
-                WHERE q.basket = %s
-                  AND q.signal_date = CURRENT_DATE
+                WHERE q.basket = %s AND q.signal_date = CURRENT_DATE
                   AND q.symbol NOT IN (
                       SELECT UPPER(ticker) FROM earnings_calendar
                       WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
                   )
-                ORDER BY q.gvm_score DESC NULLS LAST
-                LIMIT %s
+                ORDER BY q.gvm_score DESC NULLS LAST LIMIT %s
             """, (basket, min(max(limit, 1), 200)))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -724,8 +726,13 @@ def qualified(basket: str, limit: int = 50):
             extra = {
                 "target_formula": f"S1 - {SELL_REVERSAL_TGT_MULT}*(S1-S2)",
                 "stop_formula":   f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)",
-                "tgt_mult": SELL_REVERSAL_TGT_MULT,
-                "sl_mult":  SELL_REVERSAL_SL_MULT,
+                "tgt_mult": SELL_REVERSAL_TGT_MULT, "sl_mult": SELL_REVERSAL_SL_MULT,
+            }
+        elif basket == "sell_momentum":
+            extra = {
+                "target_formula": f"S1 - {SELL_MOMENTUM_TGT_MULT}*(S1-S2)",
+                "stop_formula":   f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)",
+                "tgt_mult": SELL_MOMENTUM_TGT_MULT, "sl_mult": SELL_MOMENTUM_SL_MULT,
             }
 
         return {"basket": basket, "count": len(rows), "stocks": rows,
@@ -921,7 +928,7 @@ def sell_overbought(limit: int = 50):
                     FROM raw_prices r
                     JOIN futures_universe fu ON fu.symbol = r.symbol AND fu.is_active = TRUE
                     WHERE r.price_date >= CURRENT_DATE - INTERVAL '60 days'
-                    WINDOW w9 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 8 PRECEDING),
+                    WINDOW w9  AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 8 PRECEDING),
                            w21 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 20 PRECEDING),
                            w10 AS (PARTITION BY r.symbol ORDER BY r.price_date ROWS 9 PRECEDING),
                            ws  AS (PARTITION BY r.symbol ORDER BY r.price_date)
@@ -977,8 +984,7 @@ def adr_only():
         with _conn() as conn, conn.cursor() as cur:
             adv, dec, unc, adr, source, adr_date = _read_adr(cur)
         return {"price_date": adr_date, "adr": adr, "advances": adv,
-                "declines": dec, "unchanged": unc,
-                "pass": adr >= 1.0, "source": source}
+                "declines": dec, "unchanged": unc, "pass": adr >= 1.0, "source": source}
     except Exception as e:
         raise HTTPException(500, f"adr failed: {e}")
 
