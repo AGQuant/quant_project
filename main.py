@@ -65,17 +65,13 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.50
+# Scorr / Project Quant — main.py v2.9.51
+# v2.9.51: /fpc route added — serves fpc_v11.html (Financial Planning Calculator V11)
 # v2.9.50: v8_backfill_endpoints wired (POST /api/v8/backfill/metrics).
 #   buy_reversal dynamic Nifty-linked filters live in v8_signal_writer.
-#   buy_reversal_simulator.py saved to GitHub for future reference.
-#   1-yr EOD backtest: Dynamic config 63.4% WR, +0.25% exp, +48.91% P&L.
-#   BULL(>2%): wk<=3,rsi_m<=67,sec<=4 | NEUTRAL: wk<=2,rsi_m<=62,sec<=3
-#   BEAR(<0%): wk<=1,rsi_m<=58,sec<=2.
-# v2.9.49: V8 intraday backtester wired — backtest_router.
 # ============================================================
 
-VERSION = "2.9.50"
+VERSION = "2.9.51"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -322,7 +318,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.50)")
+        log.info("Tables ready (v2.9.51)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -459,6 +455,10 @@ def check():
 @app.get("/sector", response_class=HTMLResponse)
 def sector():
     with open("scorr_sector.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/fpc", response_class=HTMLResponse)
+def fpc():
+    with open("fpc_v11.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
