@@ -71,14 +71,15 @@ const PILLAR_INFO = {
 };
 
 const MODELS = [
-  { id: "home",   icon: "⌂", label: "Home",   full: "Home",              color: C.muted,   live: true },
-  { id: "v8",     icon: "⚡", label: "V8",     full: "V8 Long-Short",     color: C.accent,  live: true },
-  { id: "gvm",    icon: "◦", label: "GVM",    full: "GVM Scoring",       color: C.gold,    live: true },
-  { id: "sector", icon: "◷", label: "Sector", full: "Sector Rotation",   color: C.purple,  live: true },
-  { id: "check",  icon: "✓", label: "Check",  full: "Trade Check",       color: C.green,   live: true },
-  { id: "max",    icon: "◉", label: "Max",    full: "Max Chat",          color: "#6d4fe0", live: true },
-  { id: "qb",     icon: "▦", label: "QB",     full: "Quant Basket",      color: C.green,   live: false },
-  { id: "v10",    icon: "⟁", label: "V10",   full: "Nifty Options V10", color: "#db2777", live: false },
+  { id: "home",   icon: "⌂", label: "Home",   full: "Home",                  color: C.muted,    live: true },
+  { id: "v8",     icon: "⚡", label: "V8",     full: "V8 Long-Short",         color: C.accent,   live: true },
+  { id: "gvm",    icon: "◦", label: "GVM",    full: "GVM Scoring",           color: C.gold,     live: true },
+  { id: "sector", icon: "◷", label: "Sector", full: "Sector Rotation",       color: C.purple,   live: true },
+  { id: "check",  icon: "✓", label: "Check",  full: "Trade Check",           color: C.green,    live: true },
+  { id: "max",    icon: "◉", label: "Max",    full: "Max Chat",              color: "#6d4fe0",  live: true },
+  { id: "fpc",    icon: "📊", label: "FPC",    full: "Financial Planner V11", color: "#0891b2",  live: true },
+  { id: "qb",     icon: "▦", label: "QB",     full: "Quant Basket",          color: C.green,    live: false },
+  { id: "v10",    icon: "⟁", label: "V10",   full: "Nifty Options V10",     color: "#db2777",  live: false },
 ];
 
 const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -128,7 +129,7 @@ function Switcher({ current, onPick }) {
         <span style={{ fontSize: 16, color: C.muted, lineHeight: 1 }}>⋮</span>
       </button>
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 178,
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 194,
           background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
           boxShadow: "0 8px 28px rgba(25,40,70,0.14)", padding: 6 }}>
           {MODELS.map(m => {
@@ -248,7 +249,7 @@ function PillarRadar({ company, sector }) {
         })}
       </svg>
       <div style={{ fontSize: 8, color: C.muted, marginTop: -4, letterSpacing: ".05em" }}>
-        <span style={{ color: C.accent, fontWeight: 700 }}>■</span> stock {sector && <><span style={{ color: C.muted }}>┄</span> sector</>}
+        <span style={{ color: C.accent, fontWeight: 700 }}>▪</span> stock {sector && <><span style={{ color: C.muted }}>⊄</span> sector</>}
       </div>
     </div>
   );
@@ -657,7 +658,6 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
   );
 }
 
-// ── Operational Metrics (peer-benchmarked) ─────────────────────────
 const OPS_LOWER_BETTER = new Set([
   "gnpa_pct", "nnpa_pct", "cost_to_income", "credit_cost", "slippage_ratio",
   "gross_npa", "net_npa", "pcr_ex", "opex_ratio",
@@ -1091,7 +1091,6 @@ function GvmReport({ r, hist }) {
       {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
 
       <OpsMetrics symbol={r.symbol} segment={r.segment} />
-
       <SectorBrief segment={r.segment} />
 
       <div style={{ fontSize: 10, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
@@ -1323,12 +1322,13 @@ function App() {
   const mod = MODELS.find(m => m.id === page);
 
   let body;
-  if (page === "home")  body = <FrameModule src={`${API}/?embed=1`} />;
-  else if (page === "v8")    body = <FrameModule src={`${API}/dashboard?embed=1`} />;
+  if (page === "home")   body = <FrameModule src={`${API}/?embed=1`} />;
+  else if (page === "v8")     body = <FrameModule src={`${API}/dashboard?embed=1`} />;
   else if (page === "sector") body = <FrameModule src={`${API}/sector?embed=1`} />;
-  else if (page === "max")   body = <FrameModule src={`${API}/cio?embed=1`} />;
-  else if (page === "check") body = <FrameModule src={`${API}/check?embed=1`} />;
-  else if (page === "gvm")   body = <GvmModule />;
+  else if (page === "max")    body = <FrameModule src={`${API}/cio?embed=1`} />;
+  else if (page === "check")  body = <FrameModule src={`${API}/check?embed=1`} />;
+  else if (page === "fpc")    body = <FrameModule src={`${API}/fpc?embed=1`} />;
+  else if (page === "gvm")    body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
 
   return (
