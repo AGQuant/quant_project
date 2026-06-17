@@ -6,7 +6,7 @@ Routes:
   POST /api/trade-check/v34        — score a symbol (caller passes chart gates)
   POST /api/trade-check/v34/promote — manual promote a check to personal_journal
   GET  /api/trade-check/v34/health — sanity
-  GET  /api/trade-check/screen-nifty50 — Nifty50 (mcap proxy) screener, both sides (id=371)
+  GET  /api/trade-check/screen-nifty50 — screener, both sides (id=371). n<=210 for All-208 tab.
 """
 
 from fastapi import APIRouter
@@ -70,10 +70,11 @@ def health():
 
 @router.get("/api/trade-check/screen-nifty50")
 def screen_nifty50(n: int = 50, top: int = 10):
-    """Nifty 50 (mcap proxy) screener — runs native v3.4 trade check on the
-    top-N by market cap, BOTH sides, returns top-`top` ranked each side.
-    Same engine as the single check, run x50. WATCH label kept (live v3.4).
+    """Screener — runs native v3.4 trade check on the top-N by market cap,
+    BOTH sides, returns top-`top` ranked each side.
+    n=50 -> Nifty 50 (mcap proxy) tab. n=210 -> All futures (~208) tab.
+    Same engine as the single check, run per symbol. WATCH kept (live v3.4).
     Spec: session_log id=371. On-demand only (heavy: N*2 DB passes)."""
-    n = max(10, min(n, 50))
+    n = max(10, min(n, 210))
     top = max(1, min(top, 20))
     return ntc.screen_top50(n=n, top=top)
