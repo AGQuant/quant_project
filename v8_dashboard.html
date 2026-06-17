@@ -170,8 +170,40 @@
   .sp-a{background:#fdf3df;color:var(--amber)}
   .sp-r{background:var(--red-d);color:var(--red)}
   .sp-c{background:#e0f2f6;color:var(--cyan)}
+  /* Canonical Scorr model-nav */
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;
+    border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;
+    position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+  .model-nav::-webkit-scrollbar{display:none}
+  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
+    border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
+    color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:#1c2536}
+  .mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+  .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+  .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
 </style>
 
+<nav class="model-nav" id="scorr-nav">
+  <a class="mnav-item" href="/"><span>⌂</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item active" href="/dashboard"><span>⚡</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>◦</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>⊙</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>✓</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/intraday"><span>⏱</span>Intraday</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>▦</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item soon"><span>⊞</span>QB</a>
+  <a class="mnav-item soon"><span>△</span>V10</a>
+</nav>
 <div class="wrap">
   <header>
     <div><div class="logo">V8 <b>Dashboard</b></div><div class="tag">Learn More. Score More.</div></div>
@@ -181,28 +213,7 @@
       <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
       <button class="btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
     </div>
-    <div class="mswitch" id="mswitch">
-      <button class="mswitch-btn" onclick="event.stopPropagation();document.getElementById('mswitchMenu').classList.toggle('open')" aria-label="Switch model">⋮</button>
-      <div class="mswitch-menu" id="mswitchMenu">
-        <a class="ms-item" href="/"><span>⌂</span>Home</a>
-        <a class="ms-item active" href="/dashboard"><span>⚡</span>V8</a>
-        <a class="ms-item" href="/cio2?model=gvm"><span>▦</span>GVM</a>
-        <a class="ms-item" href="/sector"><span>⊙</span>Sector</a>
-        <a class="ms-item" href="/check"><span>✓</span>Check</a>
-        <a class="ms-item" href="/intraday"><span>⏱</span>Intraday</a>
-        <a class="ms-item" href="/cio"><span>◉</span>Max</a>
-        <a class="ms-item" href="/fpc"><span>▦</span>FPC</a>
-        <a class="ms-item soon"><span>⊞</span>QB<em>soon</em></a>
-        <a class="ms-item soon"><span>△</span>V10<em>soon</em></a>
-      </div>
-    </div>
   </header>
-  <script>
-    document.addEventListener('click',function(){var m=document.getElementById('mswitchMenu');if(m)m.classList.remove('open');});
-    if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
-      var _s=document.getElementById('mswitch');if(_s)_s.style.display='none';
-    }
-  </script>
 
   <div class="mood" id="mood"><div class="loading">Loading market gate…</div></div>
   <div class="tabs" id="tabs"></div>
@@ -829,3 +840,11 @@ function toggleAuto(){
 loadAll();
 autoTimer=setInterval(loadAll,5*60*1000);
 </script>
+
+<script>
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
+}
+</script>
+</body>
+</html>
