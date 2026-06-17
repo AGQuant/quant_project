@@ -128,25 +128,34 @@
   .r-ts{font-size:10px;color:var(--dim)}
 
   .verdict-card{border-radius:11px;padding:16px 18px;margin-bottom:0;border:1.5px solid}
+  .verdict-card.pass{background:var(--grn-d);border-color:var(--grn-b)}
   .verdict-card.strong{background:var(--grn-d);border-color:var(--grn-b)}
   .verdict-card.valid{background:var(--cyan-d);border-color:#a5d8e8}
   .verdict-card.weak{background:var(--amber-d);border-color:var(--amber-b)}
+  .verdict-card.watch{background:var(--amber-d);border-color:var(--amber-b)}
   .verdict-card.reject{background:var(--red-d);border-color:var(--red-b)}
+  .verdict-card.fail{background:var(--red-d);border-color:var(--red-b)}
   .v-label{font-size:18px;font-weight:800;letter-spacing:.5px;margin-bottom:12px}
+  .verdict-card.pass .v-label{color:var(--grn)}
   .verdict-card.strong .v-label{color:var(--grn)}
   .verdict-card.valid .v-label{color:var(--cyan)}
   .verdict-card.weak .v-label{color:var(--amber)}
+  .verdict-card.watch .v-label{color:var(--amber)}
   .verdict-card.reject .v-label{color:var(--red)}
+  .verdict-card.fail .v-label{color:var(--red)}
   .v-bars{display:flex;flex-direction:column;gap:8px}
   .v-bar-row{display:flex;align-items:center;gap:10px}
   .v-bar-label{font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;
     letter-spacing:1px;width:44px;flex-shrink:0}
   .v-bar-track{flex:1;height:6px;background:rgba(0,0,0,.07);border-radius:3px;overflow:hidden}
   .v-bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
+  .verdict-card.pass .v-bar-fill{background:var(--grn)}
   .verdict-card.strong .v-bar-fill{background:var(--grn)}
   .verdict-card.valid .v-bar-fill{background:var(--cyan)}
   .verdict-card.weak .v-bar-fill{background:var(--amber)}
+  .verdict-card.watch .v-bar-fill{background:var(--amber)}
   .verdict-card.reject .v-bar-fill{background:var(--red)}
+  .verdict-card.fail .v-bar-fill{background:var(--red)}
   .v-bar-score{font-size:11px;font-weight:700;font-family:var(--mono);
     color:var(--txt);width:54px;text-align:right;flex-shrink:0}
   .v-bar-need{font-size:10px;color:var(--mut);width:42px;flex-shrink:0}
@@ -183,6 +192,10 @@
   .badge-na{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;
     color:var(--amber);background:var(--amber-d);border:1px solid var(--amber-b);
     padding:2px 8px;border-radius:5px}
+  .badge-watch{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;
+    color:var(--amber);background:var(--amber-d);border:1px solid var(--amber-b);padding:2px 8px;border-radius:5px}
+  .rules-table tr.row-watch td:first-child{border-left-color:var(--amber)}
+  .rules-table tr.row-watch{background:rgba(217,119,6,.03)}
 
   .legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 14px;background:var(--bg);
     border:1px solid var(--line);border-radius:8px;margin-top:12px;font-size:10.5px;color:var(--mut)}
@@ -281,7 +294,7 @@
 <div class="wrap">
   <div class="page-head">
     <div class="page-title" id="pageTitle">Trade <span>Check</span></div>
-    <div class="page-sub" id="pageSub">V3.3 · NATIVE $0 · TIER 1 + TIER 2</div>
+    <div class="page-sub" id="pageSub">V3.4 · NATIVE $0 · UNIFIED CHECKLIST</div>
   </div>
 
   <div class="card">
@@ -300,7 +313,7 @@
     <div class="chips" id="chips"></div>
   </div>
 
-  <div class="loading" id="loading">Computing v3.3…</div>
+  <div class="loading" id="loading">Computing v3.4…</div>
   <div class="err" id="err"></div>
 
   <!-- Trade Check Result -->
@@ -317,40 +330,29 @@
         <div class="v-label" id="vLabel"></div>
         <div class="v-bars">
           <div class="v-bar-row">
-            <span class="v-bar-label">Tier 1</span>
+            <span class="v-bar-label">Score</span>
             <div class="v-bar-track"><div class="v-bar-fill" id="vBar1"></div></div>
             <span class="v-bar-score" id="vScore1"></span>
             <span class="v-bar-need" id="vNeed1"></span>
           </div>
-          <div class="v-bar-row">
-            <span class="v-bar-label">Tier 2</span>
-            <div class="v-bar-track"><div class="v-bar-fill" id="vBar2"></div></div>
-            <span class="v-bar-score" id="vScore2"></span>
-            <span class="v-bar-need" id="vNeed2"></span>
-          </div>
         </div>
+        <div id="vInterp" style="font-size:11.5px;color:var(--mut);margin-top:12px;line-height:1.5"></div>
       </div>
     </div>
     <div class="card" style="padding:14px 18px">
-      <div class="tier-label"><span id="t1Label">Tier 1 — Process Rules</span><span class="tier-score" id="t1Score"></span></div>
+      <div class="tier-label"><span id="t1Label">Checklist — Process + Entry</span><span class="tier-score" id="t1Score"></span></div>
       <table class="rules-table">
         <thead><tr><th>Rule</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
-        <tbody id="t1Body"></tbody>
-      </table>
-    </div>
-    <div class="card" style="padding:14px 18px">
-      <div class="tier-label"><span id="t2Label">Tier 2 — Entry Filters</span><span class="tier-score" id="t2Score"></span></div>
-      <table class="rules-table">
-        <thead><tr><th>Filter</th><th>Condition</th><th>Value</th><th>State</th></tr></thead>
-        <tbody id="t2Body"></tbody>
+        <tbody id="ruleBody"></tbody>
       </table>
       <div class="legend">
         <div class="legend-item"><div class="leg-dot" style="background:var(--grn)"></div>PASS</div>
+        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>◐ WATCH (0.5)</div>
         <div class="legend-item"><div class="leg-dot" style="background:var(--red)"></div>FAIL</div>
-        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>🟡 Chart / N/A</div>
+        <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>🟡 No data</div>
       </div>
     </div>
-    <div class="foot" id="rFoot">Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.</div>
+    <div class="foot" id="rFoot">Personal trade context · not a V8 algo signal · v3.4 · ⚠ Spot price, not futures.</div>
   </div>
 
   <!-- Investment Check Result -->
@@ -411,7 +413,7 @@ function renderChips(){
   el.appendChild(lbl);
   QUICK.forEach(s=>{
     const b=document.createElement('button');b.className='chip';b.textContent=s;
-    b.onclick=()=>{document.getElementById('sym').value=s;closeAC();run();};
+    b.onclick=()=>{document.getElementById('sym').value=s;closeAC();document.getElementById('sym').focus();};
     el.appendChild(b);
   });
 }
@@ -434,12 +436,11 @@ function setMode(m){
     runBtn.textContent='Run Trade Check';
     runBtn.classList.remove('invest-mode');
     pageTitle.innerHTML='Trade <span>Check</span>';
-    pageSub.textContent='V3.3 · NATIVE $0 · TIER 1 + TIER 2';
+    pageSub.textContent='V3.4 · NATIVE $0 · UNIFIED CHECKLIST';
   }
   document.getElementById('result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
-  const sym=document.getElementById('sym').value.trim();
-  if(sym) run();
+  // mode switch no longer auto-runs
 }
 
 async function fetchAC(q){
@@ -472,7 +473,7 @@ function pickAC(i){
   const it=acItems[i];if(!it)return;
   clearTimeout(runTimer);
   document.getElementById('sym').value=(it.symbol||it.nse_code||'').toUpperCase();
-  closeAC();run();
+  closeAC();document.getElementById('sym').focus();
 }
 function closeAC(){document.getElementById('acDrop').classList.remove('show');acSel=-1;}
 function moveAC(dir){
@@ -488,7 +489,7 @@ symEl.addEventListener('input',function(){
   const v=this.value.trim();
   clearTimeout(acTimer);clearTimeout(runTimer);
   acTimer=setTimeout(()=>fetchAC(v),200);
-  if(v.length>=2) runTimer=setTimeout(()=>run(),700);
+  // auto-run removed
 });
 symEl.addEventListener('keydown',function(e){
   if(e.key==='ArrowDown'){e.preventDefault();moveAC(1);}
@@ -505,11 +506,13 @@ document.addEventListener('click',e=>{if(!e.target.closest('.sym-wrap'))closeAC(
 function stateBadge(st){
   if(st===true||st==='pass')return '<span class="badge-pass">✓ PASS</span>';
   if(st===false||st==='fail')return '<span class="badge-fail">✗ FAIL</span>';
+  if(st==='watch')return '<span class="badge-watch">◐ WATCH</span>';
   return '<span class="badge-na">🟡</span>';
 }
 function rowClass(st){
   if(st===true||st==='pass')return 'row-pass';
   if(st===false||st==='fail')return 'row-fail';
+  if(st==='watch')return 'row-watch';
   return 'row-na';
 }
 
@@ -524,7 +527,7 @@ async function run(){
   const ld=document.getElementById('loading');
   const investMode=(mode==='INVEST');
   ld.className='loading show'+(investMode?' invest-loading':'');
-  ld.textContent=investMode?'Running Investment Check…':'Computing v3.3…';
+  ld.textContent=investMode?'Running Investment Check…':'Computing v3.4…';
 
   try{
     if(investMode){
@@ -567,7 +570,7 @@ function showErr(m){const e=document.getElementById('err');e.textContent=m;e.cla
 function renderTrade(d){
   document.getElementById('rCompany').textContent=`${d.company} (${d.symbol})`;
   const sd=document.getElementById('rSide');
-  sd.textContent=d.side==='LONG'?'▲ LONG':'▼ SHORT';
+  sd.textContent=d.side==='LONG'?'\u25b2 LONG':'\u25bc SHORT';
   sd.className='r-side-badge '+d.side;
   document.getElementById('rSeg').textContent=d.segment||'';
   const gvmEl=document.getElementById('rGvm');
@@ -575,28 +578,29 @@ function renderTrade(d){
     gvmEl.className='r-gvm '+(d.gvm>=7?'hi':d.gvm>=6?'mid':'lo');
   }else{gvmEl.textContent='';}
   document.getElementById('rTs').textContent=d.ts||'';
+
+  // verdict card — single unified score
   const vc=document.getElementById('vCard');
   vc.className='verdict-card '+d.verdict_class;
-  document.getElementById('vLabel').textContent=d.v_label||
-    {strong:'✦ STRONG',valid:'✓ VALID',weak:'⚠ WEAK',reject:'✗ REJECT'}[d.verdict_class]||d.verdict_class.toUpperCase();
-  const t2min=d.t2_min||5;const t2total=d.t2_total||7;
-  document.getElementById('vBar1').style.width=Math.round(d.t1_pass/d.t1_total*100)+'%';
-  document.getElementById('vBar2').style.width=Math.round(d.t2_pass/t2total*100)+'%';
-  document.getElementById('vScore1').textContent=`${d.t1_pass}/${d.t1_total}`;
-  document.getElementById('vScore2').textContent=`${d.t2_pass}/${t2total}`;
-  document.getElementById('vNeed1').textContent=d.need1||'need 8';
-  document.getElementById('vNeed2').textContent=d.need2||`need ${t2min}`;
-  document.getElementById('t1Label').textContent=d.tier1_label||'Tier 1 — Process Rules';
-  document.getElementById('t2Label').textContent=d.tier2_label||'Tier 2 — Entry Filters';
-  document.getElementById('t1Score').textContent=`${d.t1_pass}/${d.t1_auto_n} auto · ${d.t1_human_n} chart · min 8/${d.t1_total}`;
-  document.getElementById('t2Score').textContent=`${d.t2_pass}/${d.t2_auto_n} auto · ${d.t2_human_n} chart · min ${t2min}/7`;
-  document.getElementById('rFoot').textContent=d.foot||'Personal trade context · not a V8 algo signal · v3.3 · ⚠ Spot price, not futures.';
-  const t1b=document.getElementById('t1Body');t1b.innerHTML='';
-  d.tier1.forEach(r=>{t1b.insertAdjacentHTML('beforeend',
+  document.getElementById('vLabel').textContent=
+    {pass:'\u2713 PASS',watch:'\u25d0 WATCH',fail:'\u2717 FAIL'}[d.verdict_class]||d.verdict_class.toUpperCase();
+  const pct=Math.round(d.score/d.total*100);
+  document.getElementById('vBar1').style.width=pct+'%';
+  document.getElementById('vScore1').textContent=`${d.score}/${d.total}`;
+  document.getElementById('vNeed1').textContent=`need ${d.pass_cut}`;
+  const interpEl=document.getElementById('vInterp');
+  if(interpEl) interpEl.textContent=d.interpretation||'';
+
+  // single checklist table
+  document.getElementById('t1Label').textContent='Checklist \u2014 Process + Entry';
+  document.getElementById('t1Score').textContent=
+    `${d.score}/${d.total} \u00b7 ${d.n_pass} pass \u00b7 ${d.n_watch} watch \u00b7 ${d.n_fail} fail \u00b7 PASS\u2265${d.pass_cut}`;
+  document.getElementById('rFoot').textContent=d.foot||'Personal trade context \u00b7 not a V8 algo signal \u00b7 v3.4 \u00b7 \u26a0 Spot price, not futures.';
+
+  const body=document.getElementById('ruleBody');body.innerHTML='';
+  (d.rules||[]).forEach(r=>{body.insertAdjacentHTML('beforeend',
     `<tr class="${rowClass(r.state)}"><td class="td-rule">${r.rule}</td><td class="td-cond">${r.cond}</td><td class="td-val">${r.val}</td><td class="td-state">${stateBadge(r.state)}</td></tr>`);});
-  const t2b=document.getElementById('t2Body');t2b.innerHTML='';
-  d.tier2.forEach(r=>{t2b.insertAdjacentHTML('beforeend',
-    `<tr class="${rowClass(r.state)}"><td class="td-rule">${r.rule}</td><td class="td-cond">${r.cond}</td><td class="td-val">${r.val}</td><td class="td-state">${stateBadge(r.state)}</td></tr>`);});
+
   document.getElementById('result').classList.add('show');
   document.getElementById('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
