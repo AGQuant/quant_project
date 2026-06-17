@@ -265,11 +265,11 @@
   .inv-fail-chip{font-size:10px;font-weight:600;padding:3px 8px;border-radius:5px;
     background:var(--red-d);color:var(--red);border:1px solid var(--red-b);font-family:var(--mono)}
 
-  /* ── NIFTY-50 SCREENER ── */
+  /* ── SCREENER + INTRADAY ── */
   .scr-result{display:none}
   .scr-result.show{display:block}
-  .scr-tabs{display:flex;gap:7px;margin-bottom:12px}
-  .scr-tab{flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
+  .scr-tabs{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
+  .scr-tab{flex:1;min-width:90px;padding:10px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
     color:var(--mut);font-family:var(--font);font-size:12px;font-weight:700;cursor:pointer;transition:.15s}
   .scr-tab:hover{border-color:var(--line);background:var(--panel)}
   .scr-tab.on{border-color:var(--cyan);background:var(--cyan-d);color:var(--cyan)}
@@ -445,22 +445,27 @@
     <div class="foot">Investment Check v1.0 · GVM-native · Medium-long term holding · Not a trade signal</div>
   </div>
 
-  <!-- Screener Result — universe tabs + side toggle -->
+  <!-- Screener / Intraday Result — universe tabs + side toggle -->
   <div class="scr-result" id="scrResult">
     <div class="card" style="padding:14px 18px">
       <div class="scr-tabs">
         <button class="scr-tab on" id="uTabN50" onclick="setUniverse('nifty50')">Nifty 50 (mcap proxy)</button>
         <button class="scr-tab" id="uTab208" onclick="setUniverse('all208')">All 208 Futures</button>
+        <button class="scr-tab" id="uTabIntra" onclick="openIntraday()">⏱ Intraday</button>
+      </div>
+      <div id="icBar" style="display:none;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <span class="tier-score" id="icCacheMeta">cache: not refreshed yet</span>
+        <button id="icRefreshBtn" onclick="refreshTcCache()" style="padding:7px 13px;border:none;border-radius:8px;background:var(--cyan);color:#fff;font-family:var(--font);font-size:11px;font-weight:700;cursor:pointer">↻ Refresh cache</button>
       </div>
       <div class="scr-stabs">
         <button class="scr-stab long on" id="sTabLong" onclick="setScrSide('LONG')">▲ LONG</button>
         <button class="scr-stab short" id="sTabShort" onclick="setScrSide('SHORT')">▼ SHORT</button>
       </div>
       <div class="tier-label"><span id="scrTitle">⊞ Nifty 50 (mcap proxy) · LONG candidates</span><span class="tier-score" id="scrMeta"></span></div>
-      <table class="scr-table"><thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr></thead>
+      <table class="scr-table"><thead id="scrThead"><tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr></thead>
         <tbody id="scrBody"></tbody></table>
     </div>
-    <div class="foot">Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.</div>
+    <div class="foot" id="scrFoot">Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.</div>
   </div>
 
   <!-- chip popup -->
@@ -746,8 +751,9 @@ function renderInvest(d){
 const SCR_VD={pass:'✓ PASS',watch:'◐ WATCH',fail:'✗ FAIL'};
 let scrChipMap=[];
 let scrCache={}; // {nifty50:{...}, all208:{...}}
-let scrUniverse='nifty50'; // nifty50 | all208
+let scrUniverse='nifty50'; // nifty50 | all208 | intra
 let scrSide='LONG';        // LONG | SHORT
+let scrMode='screener';    // screener | intraday
 
 async function loadScreen(universe){
   const n = universe==='all208' ? 210 : 50;
@@ -778,18 +784,35 @@ async function loadScreen(universe){
   document.getElementById('runBtn').disabled=false;
 }
 
-function runScreen(){ scrUniverse='nifty50'; scrSide='LONG'; syncScrTabs(); loadScreen('nifty50'); }
+function runScreen(){ scrMode='screener'; scrUniverse='nifty50'; scrSide='LONG'; document.getElementById('icBar').style.display='none'; document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.'; syncScrTabs(); loadScreen('nifty50'); }
 
 function setUniverse(u){
-  scrUniverse=u; syncScrTabs();
+  scrMode='screener'; scrUniverse=u;
+  document.getElementById('icBar').style.display='none';
+  document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
+  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.';
+  syncScrTabs();
   if(scrCache[u]) renderScreen();
   else loadScreen(u);
 }
-function setScrSide(s){ scrSide=s; syncScrTabs(); renderScreen(); }
+
+function setScrSide(s){
+  scrSide=s; intraSide=s; syncScrTabs();
+  if(scrMode==='intraday') loadIntraday(s); else renderScreen();
+}
+
+function openIntraday(){
+  scrMode='intraday'; scrUniverse='intra'; scrSide='LONG'; intraSide='LONG';
+  syncScrTabs();
+  document.getElementById('icBar').style.display='flex';
+  document.getElementById('scrFoot').textContent='Stage1 cached TC≥10 · Stage2 live intraday (1H positive, vol 1.5×, gain 1-2%, DMA20, week-low S1, hold open) · prototype.';
+  loadIntraday('LONG');
+}
 
 function syncScrTabs(){
   document.getElementById('uTabN50').className='scr-tab'+(scrUniverse==='nifty50'?' on':'');
   document.getElementById('uTab208').className='scr-tab'+(scrUniverse==='all208'?' on':'');
+  var it=document.getElementById('uTabIntra'); if(it) it.className='scr-tab'+(scrUniverse==='intra'?' on':'');
   document.getElementById('sTabLong').className='scr-stab long'+(scrSide==='LONG'?' on':'');
   document.getElementById('sTabShort').className='scr-stab short'+(scrSide==='SHORT'?' on':'');
 }
@@ -817,6 +840,7 @@ function scrRow(r,i){
 function renderScreen(){
   const d=scrCache[scrUniverse]; if(!d)return;
   scrChipMap=[];
+  document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
   const rows = scrSide==='LONG' ? (d.long_top10||[]) : (d.short_top10||[]);
   const scored = scrSide==='LONG' ? d.scored_long : d.scored_short;
   const uName = scrUniverse==='all208' ? 'All 208 Futures' : 'Nifty 50 (mcap proxy)';
@@ -836,6 +860,79 @@ function showPop(idx){
 }
 function closePop(e){
   if(e.target.id==='scrPop')document.getElementById('scrPop').classList.remove('show');
+}
+
+// ── Intraday scan (id=373): Stage1 cached TC>=10 + Stage2 live filters ──
+let intraSide='LONG';
+let intraCache={}; // {LONG:{...}, SHORT:{...}}
+
+async function refreshTcCache(){
+  const ld=document.getElementById('loading');
+  ld.className='loading show';
+  const msgs=['Refreshing TC cache (208×2)…','This takes a moment…','Scoring all names…'];
+  let mi=0; ld.textContent=msgs[0];
+  const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
+  document.getElementById('icRefreshBtn').disabled=true;
+  try{
+    const r=await fetch('/api/trade-check/tc-cache/refresh',{method:'POST'});
+    clearInterval(tk); ld.classList.remove('show');
+    if(!r.ok){showErr('Cache refresh error '+r.status+'.');return;}
+    const d=await r.json();
+    document.getElementById('icCacheMeta').textContent=`cache: ${d.written} rows · ${d.ts} · ${d.elapsed_sec}s`;
+    intraCache={}; // bust local cache, force fresh scan
+    loadIntraday(intraSide);
+  }catch(e){clearInterval(tk);ld.classList.remove('show');showErr('Network error: '+e.message);}
+  document.getElementById('icRefreshBtn').disabled=false;
+}
+
+async function loadIntraday(side){
+  intraSide=side; syncScrTabs();
+  if(intraCache[side]){ renderIntraday(); return; }
+  const ld=document.getElementById('loading');
+  ld.className='loading show'; ld.textContent='Running intraday scan…';
+  document.getElementById('scrResult').classList.remove('show');
+  try{
+    const r=await fetch(`/api/trade-check/intraday-scan?side=${side}`);
+    ld.classList.remove('show');
+    if(!r.ok){showErr('Intraday scan error '+r.status+'.');return;}
+    const d=await r.json();
+    if(!d.ok){showErr(d.error||'Intraday scan failed.');return;}
+    intraCache[side]=d; renderIntraday();
+  }catch(e){ld.classList.remove('show');showErr('Network error: '+e.message);}
+}
+
+function intraRow(r,i){
+  const cmp=r.cmp!=null?r.cmp:'—';
+  const gain=r.gain_pct!=null?(r.gain_pct>0?'+':'')+r.gain_pct+'%':'—';
+  const vp=r.vol_pace!=null?r.vol_pace+'×':'—';
+  const chk=r.checks||{};
+  const chips=Object.keys(chk).filter(k=>k!=='score>=10').map(k=>{
+    const v=chk[k];
+    const cls=v===true?'pass':(v===false?'fail':'na');
+    return `<span class="scr-chip ${cls==='pass'?'':cls}" style="${cls==='pass'?'background:var(--grn-d);color:var(--grn);border-color:var(--grn-b)':''}">${k}</span>`;
+  }).join('');
+  return `<tr>
+    <td>${i+1}</td>
+    <td class="scr-sym">${r.symbol}</td>
+    <td class="scr-score">${r.tc_score}/${r.total}</td>
+    <td>${cmp}</td>
+    <td style="color:${r.gain_pct>=0?'var(--grn)':'var(--red)'};font-weight:700">${gain}</td>
+    <td>${vp}</td>
+    <td><div class="scr-chips">${chips}</div></td>
+  </tr>`;
+}
+
+function renderIntraday(){
+  const d=intraCache[intraSide]; if(!d)return;
+  const head=`<tr><th>#</th><th>Symbol</th><th>TC</th><th>CMP</th><th>Gain</th><th>Vol</th><th>Filters</th></tr>`;
+  document.getElementById('scrThead').innerHTML=head;
+  document.getElementById('scrTitle').textContent=`⏱ Intraday · ${intraSide} · TC≥10 + live filters`;
+  document.getElementById('scrMeta').textContent=`${d.matched}/${d.shortlist} matched · ${d.ts} · ${d.elapsed_sec}s`;
+  document.getElementById('scrBody').innerHTML=(d.rows||[]).map((r,i)=>intraRow(r,i)).join('')
+    || '<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:18px">No intraday matches right now. Refresh cache if scores look stale.</td></tr>';
+  document.getElementById('icBar').style.display='flex';
+  document.getElementById('scrResult').classList.add('show');
+  document.getElementById('scrResult').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 renderChips();
