@@ -331,6 +331,10 @@ const CARDS=[
    q:'Full trade check on {SYMBOL} with v3.3 and v3.4.1 weighted', kw:['deep','full','reasoning','weighted']},
   {id:'tc-card', cat:'Trade Check', icon:'⬔', label:'Trade Card', desc:'Vertical entry/target/stop card',
    q:'Prepare trade card for {SYMBOL} long', kw:['card','trade','idea','entry','target','stoploss']},
+  {id:'tc-screen', cat:'Trade Check', icon:'⊞', label:'Open Screener', desc:'Nifty50 / All-208 TC screener (opens /check)',
+   url:'/check', kw:['screener','screen','scan','nifty50','all','futures']},
+  {id:'tc-intra', cat:'Trade Check', icon:'⏱', label:'Intraday Scan', desc:'TC>=10 + live intraday filters (opens /check)',
+   url:'/check', kw:['intraday','live','scan','hourly','volume','momentum']},
 
   {id:'qb-sum', cat:'Quant Basket', icon:'⌂', label:'QB Summary', desc:'All baskets P&L overview',
    q:'QB summary by basket', kw:['qb','summary','baskets','equity','overview']},
@@ -400,7 +404,7 @@ const CAT_ORDER=['V8 Signals','GVM Engine','Trade Check','Quant Basket','Daily D
 
 // Most-used quick links, shown first as a priority row.
 const MOST_USED=['v8-dash','v8-qual','dd-full','gvm-top','tc-card','qb-sum',
-                 'dd-rot','v8-mood','gvm-strong','dd-adr','tc-long','sys-h'];
+                 'dd-rot','v8-mood','gvm-strong','dd-adr','tc-long','tc-intra'];
 
 function chipEl(c){
   const b=document.createElement('button');
@@ -445,6 +449,7 @@ function filterChips(q){
 }
 
 function runCard(c){
+  if(c.url){ window.open(c.url,'_blank'); return; }
   if(c.q && c.q.includes('{SYMBOL}')){
     const sym=prompt(`${c.label} — enter symbol:`,'');
     if(!sym)return;
