@@ -78,7 +78,7 @@ def _parse_side(q):
     return "SHORT" if ("short" in q.lower() or "sell" in q.lower()) else "LONG"
 
 
-# ──────────────────────────────── parameter computers ────────────────────────────────
+# ─────────────────────────────────────────────── parameter computers ───────────────────────────────────
 
 def _r7_volume_pattern(cur, symbol, side):
     cur.execute("""
@@ -201,7 +201,7 @@ def _f6_dte():
     return dte >= 3, f"DTE {dte} (exp {exp.strftime('%d-%b')})"
 
 
-# ─────────────────────────────── interpretation layer ──────────────────────────────
+# ─────────────────────────────────────────────── interpretation layer ───────────────────────────────────
 
 def _istate(rows, prefix):
     for r in rows:
@@ -325,7 +325,7 @@ def interpret(d, use_api=False):
     return _interpret_api(d) if use_api else _interpret_rulebased(d)
 
 
-# ─────────────────────────────── main compute ───────────────────────────────────────
+# ─────────────────────────────────────────────── main compute ───────────────────────────────────────────
 
 def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=False):
     if side is None:
@@ -613,3 +613,127 @@ def native_trade_check(query, gate1=None, gate2=None, use_api=False):
         out.append(f"\n**Interpretation{mode}:** {d['interpretation']}")
     out.append("_Personal trade context — not a V8 algo signal._")
     return "\n".join(out)
+
+
+# ─────────────────────────────────────────────── NIFTY-50 (mcap proxy) SCREENER ───
+# Added 17-Jun-2026. Runs the EXISTING compute_trade_check() across the top-50
+# by market cap, both sides, returns top-10 ranked each side. Pure DB, no new
+# scoring. Spec: session_log id=371. WATCH label kept (matches live v3.4 engine);
+# Moderate rename (id=370) is a SEPARATE future change, not built here.
+
+def _top_mcap_symbols(cur, n=50):
+    """Top-N active futures by market cap (mcap proxy for Nifty 50)."""
+    cur.execute("""
+        SELECT f.symbol
+        FROM futures_universe f
+        JOIN gvm_scores g ON f.symbol = g.symbol
+        WHERE f.is_active = TRUE AND g.market_cap IS NOT NULL
+        ORDER BY g.market_cap DESC
+        LIMIT %s""", (n,))
+    return [r[0] for r in cur.fetchall()]
+
+
+def _slim_row(d):
+    """Compact a full compute_trade_check dict into one screener row.
+
+    Keeps: identity, score, verdict, CMP, pivot zone, and the non-pass rules
+    (with cond=required + val=company value) for chip + click-popup.
+    """
+    if not d.get("ok"):
+        return None
+
+    # pull CMP + pivot zone from F2 row (already computed by the engine)
+    cmp_val = None
+    pivot_zone = None
+    pp = r1 = s1 = None
+    for r in d["rules"]:
+        if r["rule"].startswith("F2"):
+            # val like "CMP 600 PP 597 R1 611"  or  "no pivot/cmp"
+            import re as _re
+            m = _re.findall(r"(CMP|PP|R1|S1)\s+([\d.]+)", r["val"])
+            vals = {k: float(v) for k, v in m}
+            cmp_val = vals.get("CMP")
+            pp = vals.get("PP"); r1 = vals.get("R1"); s1 = vals.get("S1")
+            if cmp_val is not None and pp is not None:
+                if d["side"] == "LONG":
+                    if cmp_val > pp:
+                        pivot_zone = "above PP"
+                    else:
+                        pivot_zone = "below PP"
+                else:
+                    if cmp_val < pp:
+                        pivot_zone = "below PP"
+                    else:
+                        pivot_zone = "above PP"
+            break
+
+    # non-pass rules -> chips (state + required + company-value for popup)
+    not_passed = [
+        {"rule": r["rule"], "state": r["state"],
+         "required": r["cond"], "value": r["val"]}
+        for r in d["rules"] if r["state"] in ("fail", "watch", "na")
+    ]
+
+    return {
+        "symbol": d["symbol"],
+        "company": d["company"],
+        "segment": d["segment"],
+        "side": d["side"],
+        "gvm": d.get("gvm"),
+        "score": d["score"],
+        "total": d["total"],
+        "verdict_class": d["verdict_class"],
+        "n_pass": d["n_pass"], "n_watch": d["n_watch"],
+        "n_fail": d["n_fail"], "n_na": d["n_na"],
+        "pass_cut": d["pass_cut"],
+        "cmp": cmp_val,
+        "pivot": {"pp": pp, "r1": r1, "s1": s1, "zone": pivot_zone},
+        "not_passed": not_passed,
+    }
+
+
+def screen_top50(n=50, top=10):
+    """Run trade check on top-N mcap stocks, BOTH sides. Return top-`top` each.
+
+    Reuses compute_trade_check unchanged. Heavy (N×2 DB passes) — on-demand only.
+    """
+    started = _ist_now()
+    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        symbols = _top_mcap_symbols(cur, n)
+
+    long_rows, short_rows, errors = [], [], []
+    for sym in symbols:
+        for side in ("LONG", "SHORT"):
+            try:
+                d = compute_trade_check(sym, side)
+                row = _slim_row(d)
+                if row is None:
+                    errors.append({"symbol": sym, "side": side,
+                                   "error": d.get("error", "no data")})
+                    continue
+                (long_rows if side == "LONG" else short_rows).append(row)
+            except Exception as e:
+                errors.append({"symbol": sym, "side": side,
+                               "error": f"{type(e).__name__}: {str(e)[:80]}"})
+
+    # sort high->low by score; tiebreak by n_pass then gvm
+    def _key(r):
+        return (r["score"], r["n_pass"], r["gvm"] or 0)
+    long_rows.sort(key=_key, reverse=True)
+    short_rows.sort(key=_key, reverse=True)
+
+    return {
+        "ok": True,
+        "label": "Nifty 50 (mcap proxy)",
+        "source": "top-50 by market_cap from active futures_universe",
+        "universe_count": len(symbols),
+        "scored_long": len(long_rows),
+        "scored_short": len(short_rows),
+        "long_top10": long_rows[:top],
+        "short_top10": short_rows[:top],
+        "errors": errors[:20],
+        "ts": _ist_now().strftime("%d-%b %H:%M IST"),
+        "elapsed_sec": round((_ist_now() - started).total_seconds(), 1),
+        "version": "v3.4",
+        "note": "Same engine as single check, run x50. WATCH=0.5. mcap proxy, not the real index.",
+    }
