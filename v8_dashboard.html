@@ -184,14 +184,16 @@
     <div class="mswitch" id="mswitch">
       <button class="mswitch-btn" onclick="event.stopPropagation();document.getElementById('mswitchMenu').classList.toggle('open')" aria-label="Switch model">⋮</button>
       <div class="mswitch-menu" id="mswitchMenu">
+        <a class="ms-item" href="/"><span>⌂</span>Home</a>
         <a class="ms-item active" href="/dashboard"><span>⚡</span>V8</a>
         <a class="ms-item" href="/cio2?model=gvm"><span>▦</span>GVM</a>
+        <a class="ms-item" href="/sector"><span>⊙</span>Sector</a>
         <a class="ms-item" href="/check"><span>✓</span>Check</a>
         <a class="ms-item" href="/intraday"><span>⏱</span>Intraday</a>
         <a class="ms-item" href="/cio"><span>◉</span>Max</a>
-        <a class="ms-item" href="/ask"><span>✦</span>Ask</a>
-        <a class="ms-item soon"><span>⌂</span>QB<em>soon</em></a>
-        <a class="ms-item soon"><span>⟁</span>V10<em>soon</em></a>
+        <a class="ms-item" href="/fpc"><span>▦</span>FPC</a>
+        <a class="ms-item soon"><span>⊞</span>QB<em>soon</em></a>
+        <a class="ms-item soon"><span>△</span>V10<em>soon</em></a>
       </div>
     </div>
   </header>
@@ -352,7 +354,7 @@ const BASKET_INFO={
   },
 };
 
-// ── Modal ───────────────────────────────────────────────────────────────────
+// ── Modal ─────────────────────────────────────────────────────────────────
 function openInfo(basket){
   const info=BASKET_INFO[basket];
   if(!info)return;
