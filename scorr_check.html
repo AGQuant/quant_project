@@ -268,6 +268,17 @@
   /* ── NIFTY-50 SCREENER ── */
   .scr-result{display:none}
   .scr-result.show{display:block}
+  .scr-tabs{display:flex;gap:7px;margin-bottom:12px}
+  .scr-tab{flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
+    color:var(--mut);font-family:var(--font);font-size:12px;font-weight:700;cursor:pointer;transition:.15s}
+  .scr-tab:hover{border-color:var(--line);background:var(--panel)}
+  .scr-tab.on{border-color:var(--cyan);background:var(--cyan-d);color:var(--cyan)}
+  .scr-stabs{display:flex;gap:7px;margin-bottom:12px}
+  .scr-stab{flex:1;padding:9px;border-radius:9px;border:1.5px solid var(--line2);background:var(--bg2);
+    color:var(--mut);font-family:var(--font);font-size:12px;font-weight:700;cursor:pointer;transition:.15s}
+  .scr-stab:hover{border-color:var(--line);background:var(--panel)}
+  .scr-stab.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
+  .scr-stab.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
   .scr-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line2);
     border-radius:9px;overflow:hidden;font-size:11px}
   .scr-table th{background:var(--panel2);color:var(--dim);padding:7px 8px;text-align:left;
@@ -434,19 +445,22 @@
     <div class="foot">Investment Check v1.0 · GVM-native · Medium-long term holding · Not a trade signal</div>
   </div>
 
-  <!-- Nifty 50 Screener Result -->
+  <!-- Screener Result — universe tabs + side toggle -->
   <div class="scr-result" id="scrResult">
     <div class="card" style="padding:14px 18px">
-      <div class="tier-label"><span>⊞ Nifty 50 (mcap proxy) · LONG candidates</span><span class="tier-score" id="scrLongMeta"></span></div>
+      <div class="scr-tabs">
+        <button class="scr-tab on" id="uTabN50" onclick="setUniverse('nifty50')">Nifty 50 (mcap proxy)</button>
+        <button class="scr-tab" id="uTab208" onclick="setUniverse('all208')">All 208 Futures</button>
+      </div>
+      <div class="scr-stabs">
+        <button class="scr-stab long on" id="sTabLong" onclick="setScrSide('LONG')">▲ LONG</button>
+        <button class="scr-stab short" id="sTabShort" onclick="setScrSide('SHORT')">▼ SHORT</button>
+      </div>
+      <div class="tier-label"><span id="scrTitle">⊞ Nifty 50 (mcap proxy) · LONG candidates</span><span class="tier-score" id="scrMeta"></span></div>
       <table class="scr-table"><thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr></thead>
-        <tbody id="scrLongBody"></tbody></table>
+        <tbody id="scrBody"></tbody></table>
     </div>
-    <div class="card" style="padding:14px 18px">
-      <div class="tier-label"><span>⊞ Nifty 50 (mcap proxy) · SHORT candidates</span><span class="tier-score" id="scrShortMeta"></span></div>
-      <table class="scr-table"><thead><tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr></thead>
-        <tbody id="scrShortBody"></tbody></table>
-    </div>
-    <div class="foot">Nifty 50 mcap proxy · top 50 by market cap · same v3.4 engine, run ×50 · WATCH=0.5 · not the real index.</div>
+    <div class="foot">Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.</div>
   </div>
 
   <!-- chip popup -->
@@ -728,32 +742,58 @@ function renderInvest(d){
   document.getElementById('invResult').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-// ── Nifty 50 (mcap proxy) screener ──
+// ── Screener v2: universe tabs (Nifty50 / All-208) + LONG|SHORT toggle ──
 const SCR_VD={pass:'✓ PASS',watch:'◐ WATCH',fail:'✗ FAIL'};
-let scrData=null, scrChipMap=[];
-async function runScreen(){
+let scrChipMap=[];
+let scrCache={}; // {nifty50:{...}, all208:{...}}
+let scrUniverse='nifty50'; // nifty50 | all208
+let scrSide='LONG';        // LONG | SHORT
+
+async function loadScreen(universe){
+  const n = universe==='all208' ? 210 : 50;
   document.getElementById('result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
-  document.getElementById('scrResult').classList.remove('show');
   document.getElementById('err').classList.remove('show');
   const ld=document.getElementById('loading');
   ld.className='loading show';
-  const msgs=['Screening 50 names…','Scoring LONG & SHORT…','Ranking candidates…'];
+  const heavy = universe==='all208';
+  const msgs = heavy
+    ? ['Screening all 208 futures…','This takes a moment…','Scoring LONG & SHORT…','Ranking candidates…']
+    : ['Screening 50 names…','Scoring LONG & SHORT…','Ranking candidates…'];
   let mi=0; ld.textContent=msgs[0];
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('screenBtn').disabled=true;
   document.getElementById('runBtn').disabled=true;
+  document.getElementById('scrResult').classList.remove('show');
   try{
-    const r=await fetch('/api/trade-check/screen-nifty50');
+    const r=await fetch(`/api/trade-check/screen-nifty50?n=${n}&top=10`);
     clearInterval(tk); ld.classList.remove('show');
     if(!r.ok){showErr('Screener server error '+r.status+'. Try again shortly.');return;}
     const d=await r.json();
     if(!d.ok){showErr(d.error||'Screener failed.');return;}
-    scrData=d; renderScreen(d);
+    scrCache[universe]=d;
+    renderScreen();
   }catch(e){clearInterval(tk);ld.classList.remove('show');showErr('Network error: '+e.message);}
   document.getElementById('screenBtn').disabled=false;
   document.getElementById('runBtn').disabled=false;
 }
+
+function runScreen(){ scrUniverse='nifty50'; scrSide='LONG'; syncScrTabs(); loadScreen('nifty50'); }
+
+function setUniverse(u){
+  scrUniverse=u; syncScrTabs();
+  if(scrCache[u]) renderScreen();
+  else loadScreen(u);
+}
+function setScrSide(s){ scrSide=s; syncScrTabs(); renderScreen(); }
+
+function syncScrTabs(){
+  document.getElementById('uTabN50').className='scr-tab'+(scrUniverse==='nifty50'?' on':'');
+  document.getElementById('uTab208').className='scr-tab'+(scrUniverse==='all208'?' on':'');
+  document.getElementById('sTabLong').className='scr-stab long'+(scrSide==='LONG'?' on':'');
+  document.getElementById('sTabShort').className='scr-stab short'+(scrSide==='SHORT'?' on':'');
+}
+
 function scrRow(r,i){
   const cmp=r.cmp!=null?Math.round(r.cmp):'—';
   const pz=r.pivot&&r.pivot.zone?r.pivot.zone:'—';
@@ -773,15 +813,20 @@ function scrRow(r,i){
     <td><div class="scr-chips">${chips||'<span class="scr-pivot">clean</span>'}</div></td>
   </tr>`;
 }
-function renderScreen(d){
+
+function renderScreen(){
+  const d=scrCache[scrUniverse]; if(!d)return;
   scrChipMap=[];
-  document.getElementById('scrLongMeta').textContent=`${d.scored_long} scored · ${d.ts}`;
-  document.getElementById('scrShortMeta').textContent=`${d.scored_short} scored · ${d.elapsed_sec}s`;
-  document.getElementById('scrLongBody').innerHTML=(d.long_top10||[]).map((r,i)=>scrRow(r,i)).join('');
-  document.getElementById('scrShortBody').innerHTML=(d.short_top10||[]).map((r,i)=>scrRow(r,i)).join('');
+  const rows = scrSide==='LONG' ? (d.long_top10||[]) : (d.short_top10||[]);
+  const scored = scrSide==='LONG' ? d.scored_long : d.scored_short;
+  const uName = scrUniverse==='all208' ? 'All 208 Futures' : 'Nifty 50 (mcap proxy)';
+  document.getElementById('scrTitle').textContent=`⊞ ${uName} · ${scrSide} candidates`;
+  document.getElementById('scrMeta').textContent=`${scored} scored · ${d.ts} · ${d.elapsed_sec}s`;
+  document.getElementById('scrBody').innerHTML=rows.map((r,i)=>scrRow(r,i)).join('');
   document.getElementById('scrResult').classList.add('show');
   document.getElementById('scrResult').scrollIntoView({behavior:'smooth',block:'start'});
 }
+
 function showPop(idx){
   const c=scrChipMap[idx]; if(!c)return;
   document.getElementById('scrPopHead').textContent=c.rule;
