@@ -6,16 +6,29 @@
 <title>Scorr · Home</title>
 <style>
   :root{
-    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe;
+    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe; --panel:#ffffff;
     --line:#e4e9f1; --line2:#d4dbe7;
     --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
     --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706;
     --font:'Sora',system-ui,-apple-system,sans-serif;
+    --shadow:0 1px 4px rgba(20,35,70,.06);
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{min-height:100%;background:var(--bg);color:var(--txt);
     font-family:var(--font);font-size:14px;line-height:1.55}
+
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
+    border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
+    position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+  .model-nav::-webkit-scrollbar{display:none}
+  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
+    border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
+    color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:var(--txt)}
+  .mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
+  .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+  .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
   .wrap{max-width:760px;margin:0 auto;padding:34px 16px 60px}
   .brand{font-size:30px;font-weight:800;color:var(--blu);letter-spacing:.5px}
@@ -44,12 +57,33 @@
 
   .t-v8{--accent:var(--amber)} .t-gvm{--accent:var(--cyan)} .t-check{--accent:var(--cyan)}
   .t-max{--accent:var(--blu)} .t-cio{--accent:var(--cyan)} .t-sector{--accent:#7c3aed}
-  .t-fpc{--accent:#0891b2}
+  .t-fpc{--accent:#0891b2} .t-intraday{--accent:#7c3aed}
 
   .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:34px;line-height:1.8}
 </style>
 </head>
 <body>
+<nav class="model-nav">
+  <a class="mnav-item active" href="/"><span>⌂</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/dashboard"><span>⚡</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>◦</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>⊙</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>✓</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/intraday"><span>⏱</span>Intraday</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>▦</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item soon"><span>⊞</span>QB</a>
+  <a class="mnav-item soon"><span>△</span>V10</a>
+</nav>
+
 <div class="wrap">
   <div class="brand">SCORR</div>
   <div class="tag">Learn More. Score More. · Invest like an institution.</div>
@@ -61,6 +95,16 @@
       <span class="ic">&#9707;</span>
       <div class="nm">CIO Shell</div>
       <div class="ds">Multi-model dashboard · V8 embed + GVM + future models</div>
+    </a>
+    <a class="tile t-intraday" href="/intraday">
+      <span class="ic">&#9201;</span>
+      <div class="nm">Intraday Engine</div>
+      <div class="ds">TC≥10 + live filters · paper engine · 1.5%/1.5% · 15:15 square-off</div>
+    </a>
+    <a class="tile t-check" href="/check">
+      <span class="ic">&#10003;</span>
+      <div class="nm">Trade Check</div>
+      <div class="ds">v3.4 unified checklist · LONG / SHORT / INVEST · screener + intraday scan</div>
     </a>
     <a class="tile t-fpc" href="/fpc">
       <span class="ic">&#128200;</span>
