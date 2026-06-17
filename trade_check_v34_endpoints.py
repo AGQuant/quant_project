@@ -6,6 +6,7 @@ Routes:
   POST /api/trade-check/v34        — score a symbol (caller passes chart gates)
   POST /api/trade-check/v34/promote — manual promote a check to personal_journal
   GET  /api/trade-check/v34/health — sanity
+  GET  /api/trade-check/screen-nifty50 — Nifty50 (mcap proxy) screener, both sides (id=371)
 """
 
 from fastapi import APIRouter
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 import trade_check_v34 as tc
+import native_trade_check as ntc
 
 router = APIRouter()
 
@@ -64,3 +66,14 @@ def health():
         "separation": "independent of V8 paper engine (id=210)",
         "status": "ok",
     }
+
+
+@router.get("/api/trade-check/screen-nifty50")
+def screen_nifty50(n: int = 50, top: int = 10):
+    """Nifty 50 (mcap proxy) screener — runs native v3.4 trade check on the
+    top-N by market cap, BOTH sides, returns top-`top` ranked each side.
+    Same engine as the single check, run x50. WATCH label kept (live v3.4).
+    Spec: session_log id=371. On-demand only (heavy: N*2 DB passes)."""
+    n = max(10, min(n, 50))
+    top = max(1, min(top, 20))
+    return ntc.screen_top50(n=n, top=top)
