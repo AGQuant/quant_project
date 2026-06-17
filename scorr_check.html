@@ -356,6 +356,7 @@
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <button class="run-btn" id="screenBtn" onclick="runScreen()" style="margin-top:9px;background:var(--cyan);box-shadow:0 2px 8px rgba(8,145,178,.25)">⊞ Screen Nifty 50 (mcap proxy)</button>
+    <button class="run-btn" id="intraBtn" onclick="openIntradayDirect()" style="margin-top:9px;background:var(--purp);box-shadow:0 2px 8px rgba(124,58,237,.25)">⏱ Intraday Scan (live)</button>
     <div class="chips" id="chips"></div>
   </div>
 
@@ -807,6 +808,13 @@ function openIntraday(){
   document.getElementById('icBar').style.display='flex';
   document.getElementById('scrFoot').textContent='Stage1 cached TC≥10 · Stage2 live intraday (1H positive, vol 1.5×, gain 1-2%, DMA20, week-low S1, hold open) · prototype.';
   loadIntraday('LONG');
+}
+
+function openIntradayDirect(){
+  document.getElementById('result').classList.remove('show');
+  document.getElementById('invResult').classList.remove('show');
+  document.getElementById('scrResult').classList.add('show');
+  openIntraday();
 }
 
 function syncScrTabs(){
