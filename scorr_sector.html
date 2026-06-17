@@ -20,9 +20,46 @@ button.tab{padding:8px 16px;border-radius:0;border:none;background:transparent;c
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:#cfd8e3;border-radius:3px}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* ── Canonical Scorr model-nav ── */
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;
+  border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;
+  position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.model-nav::-webkit-scrollbar{display:none}
+.mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
+  border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
+  color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
+.mnav-item:hover{color:#1c2536}
+.mnav-item.active{border-bottom-color:#7c3aed;color:#7c3aed}
+.mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+.mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
 </style>
+<script>
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  document.addEventListener('DOMContentLoaded',function(){var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';});
+}
+</script>
 </head>
 <body>
+<nav class="model-nav" id="scorr-nav">
+  <a class="mnav-item" href="/"><span>⌂</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/dashboard"><span>⚡</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>◦</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item active" href="/sector"><span>⊙</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>✓</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/intraday"><span>⏱</span>Intraday</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>▦</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item soon"><span>⊞</span>QB</a>
+  <a class="mnav-item soon"><span>△</span>V10</a>
+</nav>
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useMemo} = React;
@@ -356,154 +393,64 @@ function GVMTab({data, onSel}) {
   );
 }
 
-// ── Emerging Themes Section ────────────────────────────────
 const THEME_COLORS = ["#7c3aed","#0891b2","#0a9e63","#d97706","#dd3a4a","#7c3aed","#2563eb","#b45309","#0891b2","#0a9e63"];
 
 function ThemesSection() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
-
   useEffect(()=>{
-    fetch("/api/sector/themes")
-      .then(r=>r.json())
-      .then(d=>{ setData(d); setLoading(false); })
-      .catch(()=>setLoading(false));
+    fetch("/api/sector/themes").then(r=>r.json()).then(d=>{ setData(d); setLoading(false); }).catch(()=>setLoading(false));
   },[]);
-
-  if (loading) return (
-    <div style={{textAlign:"center",padding:"30px",color:"#5a6781",fontSize:12,marginTop:24}}>
-      <div style={{width:24,height:24,border:"2px solid #e2e7ee",borderTop:"2px solid #7c3aed",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/>
-      <div>Loading emerging themes…</div>
-    </div>
-  );
+  if (loading) return (<div style={{textAlign:"center",padding:"30px",color:"#5a6781",fontSize:12,marginTop:24}}><div style={{width:24,height:24,border:"2px solid #e2e7ee",borderTop:"2px solid #7c3aed",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/><div>Loading emerging themes…</div></div>);
   if (!data || data.error) return null;
-
   return (
     <div style={{marginTop:32}}>
-      {/* Section header */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:12,borderBottom:"2px solid #e2e7ee"}}>
         <span style={{fontSize:22}}>🌱</span>
         <div>
           <div style={{fontSize:16,fontWeight:800,color:"#1c2536"}}>Top 10 Emerging Investment Themes</div>
-          <div style={{fontSize:11,color:"#5a6781",marginTop:2}}>
-            Cross-sector structural plays · Expert reasoning · Live GVM-ranked companies · Click any theme to expand
-          </div>
+          <div style={{fontSize:11,color:"#5a6781",marginTop:2}}>Cross-sector structural plays · Expert reasoning · Live GVM-ranked companies · Click any theme to expand</div>
         </div>
       </div>
-
       <div style={{display:"grid",gap:10}}>
         {data.themes.map((t,i)=>{
           const col = THEME_COLORS[i] || "#7c3aed";
           const isOpen = expanded===i;
           return (
-            <div key={i} style={{background:"#fff",border:"1px solid #e2e7ee",borderRadius:10,
-              overflow:"hidden",borderLeft:`4px solid ${col}`,
-              boxShadow:isOpen?"0 4px 16px rgba(0,0,0,.06)":"0 1px 3px rgba(0,0,0,.04)"}}>
-
-              {/* Collapsed header */}
-              <div onClick={()=>setExpanded(isOpen?null:i)}
-                style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}}
-                onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"}
-                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <div style={{width:30,height:30,borderRadius:"50%",background:col,color:"#fff",
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:13,fontWeight:900,flexShrink:0}}>
-                  {i+1}
-                </div>
+            <div key={i} style={{background:"#fff",border:"1px solid #e2e7ee",borderRadius:10,overflow:"hidden",borderLeft:`4px solid ${col}`,boxShadow:isOpen?"0 4px 16px rgba(0,0,0,.06)":"0 1px 3px rgba(0,0,0,.04)"}}>
+              <div onClick={()=>setExpanded(isOpen?null:i)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <div style={{width:30,height:30,borderRadius:"50%",background:col,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,flexShrink:0}}>{i+1}</div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:800,color:"#1c2536"}}>{t.theme_name}</div>
                   <div style={{fontSize:11,color:"#5a6781",marginTop:2,fontStyle:"italic"}}>{t.tagline}</div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                  <span style={{fontSize:10,fontWeight:700,color:col,background:col+"15",
-                    border:`1px solid ${col}40`,borderRadius:20,padding:"3px 10px"}}>
-                    {t.macro_tailwind}
-                  </span>
-                  <span style={{fontSize:10,color:"#5a6781",background:"#f4f6f9",
-                    border:"1px solid #e2e7ee",borderRadius:20,padding:"3px 10px"}}>
-                    {(t.companies||[]).length} companies
-                  </span>
-                  <span style={{color:"#5a6781",fontSize:16,fontWeight:700,lineHeight:1}}>
-                    {isOpen?"−":"+"}
-                  </span>
+                  <span style={{fontSize:10,fontWeight:700,color:col,background:col+"15",border:`1px solid ${col}40`,borderRadius:20,padding:"3px 10px"}}>{t.macro_tailwind}</span>
+                  <span style={{fontSize:10,color:"#5a6781",background:"#f4f6f9",border:"1px solid #e2e7ee",borderRadius:20,padding:"3px 10px"}}>{(t.companies||[]).length} companies</span>
+                  <span style={{color:"#5a6781",fontSize:16,fontWeight:700,lineHeight:1}}>{isOpen?"−":"+"}</span>
                 </div>
               </div>
-
-              {/* Expanded content */}
               {isOpen && (
                 <div style={{borderTop:"1px solid #e2e7ee",padding:"18px 16px"}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-
-                    {/* LEFT: reasoning + drivers */}
                     <div>
-                      {/* Reasoning box */}
-                      <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,
-                        padding:"12px 14px",marginBottom:14,borderLeft:`3px solid ${col}`}}>
-                        <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:6,letterSpacing:".06em"}}>
-                          WHY THIS THEME IS EMERGING NOW
-                        </div>
+                      <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,padding:"12px 14px",marginBottom:14,borderLeft:`3px solid ${col}`}}>
+                        <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:6,letterSpacing:".06em"}}>WHY THIS THEME IS EMERGING NOW</div>
                         <div style={{fontSize:12,color:"#1c2536",lineHeight:1.7}}>{t.reasoning}</div>
                       </div>
-                      {/* Drivers */}
-                      <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:8,letterSpacing:".06em"}}>
-                        🚀 KEY STRUCTURAL DRIVERS
-                      </div>
-                      {(t.key_drivers||[]).map((d,j)=>(
-                        <div key={j} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start",
-                          background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"8px 10px"}}>
-                          <span style={{width:20,height:20,borderRadius:"50%",background:col,color:"#fff",
-                            display:"flex",alignItems:"center",justifyContent:"center",
-                            fontSize:10,fontWeight:800,flexShrink:0,marginTop:1}}>{j+1}</span>
-                          <span style={{fontSize:11,color:"#166534",lineHeight:1.5}}>{d}</span>
-                        </div>
-                      ))}
+                      <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:8,letterSpacing:".06em"}}>🚀 KEY STRUCTURAL DRIVERS</div>
+                      {(t.key_drivers||[]).map((d,j)=>(<div key={j} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"8px 10px"}}><span style={{width:20,height:20,borderRadius:"50%",background:col,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0,marginTop:1}}>{j+1}</span><span style={{fontSize:11,color:"#166534",lineHeight:1.5}}>{d}</span></div>))}
                     </div>
-
-                    {/* RIGHT: companies table */}
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#5a6781",marginBottom:8,letterSpacing:".06em"}}>
-                        FOCUSED COMPANIES · Ranked by GVM Score
-                      </div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#5a6781",marginBottom:8,letterSpacing:".06em"}}>FOCUSED COMPANIES · Ranked by GVM Score</div>
                       <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,overflow:"hidden"}}>
                         <table style={{fontSize:11}}>
-                          <thead>
-                            <tr style={{background:"#f0f4f9"}}>
-                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>#</th>
-                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Symbol</th>
-                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Company</th>
-                              <th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:700,color:"#5a6781"}}>GVM</th>
-                              <th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Segment</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(t.companies||[]).map((co,k)=>(
-                              <tr key={k} style={{borderTop:"1px solid #edf1f6"}}>
-                                <td style={{padding:"5px 10px",color:"#5a6781",fontSize:10}}>{k+1}</td>
-                                <td style={{padding:"5px 10px",fontWeight:800,color:"#2563eb",fontFamily:"monospace"}}>{co.symbol}</td>
-                                <td style={{padding:"5px 10px",color:"#1c2536",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.company_name}</td>
-                                <td style={{padding:"5px 10px",textAlign:"right",fontWeight:900,fontFamily:"monospace",
-                                  color:co.gvm_score>=7?"#0a9e63":co.gvm_score>=6?"#d97706":"#dd3a4a"}}>
-                                  {Number(co.gvm_score).toFixed(2)}
-                                </td>
-                                <td style={{padding:"5px 10px",color:"#5a6781",fontSize:9,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.segment}</td>
-                              </tr>
-                            ))}
-                          </tbody>
+                          <thead><tr style={{background:"#f0f4f9"}}><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>#</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Symbol</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Company</th><th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:700,color:"#5a6781"}}>GVM</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Segment</th></tr></thead>
+                          <tbody>{(t.companies||[]).map((co,k)=>(<tr key={k} style={{borderTop:"1px solid #edf1f6"}}><td style={{padding:"5px 10px",color:"#5a6781",fontSize:10}}>{k+1}</td><td style={{padding:"5px 10px",fontWeight:800,color:"#2563eb",fontFamily:"monospace"}}>{co.symbol}</td><td style={{padding:"5px 10px",color:"#1c2536",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.company_name}</td><td style={{padding:"5px 10px",textAlign:"right",fontWeight:900,fontFamily:"monospace",color:co.gvm_score>=7?"#0a9e63":co.gvm_score>=6?"#d97706":"#dd3a4a"}}>{Number(co.gvm_score).toFixed(2)}</td><td style={{padding:"5px 10px",color:"#5a6781",fontSize:9,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.segment}</td></tr>))}</tbody>
                         </table>
                       </div>
-                      {/* Segment tags */}
-                      <div style={{marginTop:10}}>
-                        <div style={{fontSize:9,color:"#5a6781",fontWeight:700,marginBottom:5,letterSpacing:".05em"}}>RELATED SEGMENTS</div>
-                        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                          {(t.related_segments||[]).map((s,k)=>(
-                            <span key={k} style={{fontSize:9,color:col,background:col+"12",
-                              border:`1px solid ${col}35`,borderRadius:20,padding:"3px 9px",fontWeight:600}}>
-                              {s}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                      <div style={{marginTop:10}}><div style={{fontSize:9,color:"#5a6781",fontWeight:700,marginBottom:5,letterSpacing:".05em"}}>RELATED SEGMENTS</div><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{(t.related_segments||[]).map((s,k)=>(<span key={k} style={{fontSize:9,color:col,background:col+"12",border:`1px solid ${col}35`,borderRadius:20,padding:"3px 9px",fontWeight:600}}>{s}</span>))}</div></div>
                     </div>
                   </div>
                 </div>
@@ -512,70 +459,40 @@ function ThemesSection() {
           );
         })}
       </div>
-      <div style={{fontSize:9,color:"#5a6781",textAlign:"center",marginTop:12,paddingTop:12,borderTop:"1px solid #e2e7ee"}}>
-        Themes curated by Scorr · Companies ranked by live GVM score · Updated with market data
-      </div>
+      <div style={{fontSize:9,color:"#5a6781",textAlign:"center",marginTop:12,paddingTop:12,borderTop:"1px solid #e2e7ee"}}>Themes curated by Scorr · Companies ranked by live GVM score · Updated with market data</div>
     </div>
   );
 }
 
 function Loading() {
-  return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}>
-      <div style={{width:32,height:32,border:"3px solid #e2e7ee",borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-      <div style={{color:C.muted,fontSize:12}}>Loading sector data from Railway…</div>
-    </div>
-  );
+  return (<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}><div style={{width:32,height:32,border:"3px solid #e2e7ee",borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><div style={{color:C.muted,fontSize:12}}>Loading sector data from Railway…</div></div>);
 }
 
 function App() {
-  const [d, setD]     = useState(null);
-  const [err, setE]   = useState(null);
+  const [d, setD] = useState(null);
+  const [err, setE] = useState(null);
   const [tab, setTab] = useState("rank");
   const [sel, setSel] = useState(null);
-
   useEffect(()=>{
-    fetch("/api/sector/rotation").then(r=>r.json())
-      .then(data=>{ data.error?setE(data.error):setD(data); })
-      .catch(e=>setE(e.message));
+    fetch("/api/sector/rotation").then(r=>r.json()).then(data=>{ data.error?setE(data.error):setD(data); }).catch(e=>setE(e.message));
   },[]);
-
   if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
   if (!d)  return <Loading/>;
-
-  const stats = {
-    buy:  d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,
-    hi:   d.all.filter(r=>r.composite_score>=7).length,
-    cold: d.all.filter(r=>r.composite_score<4).length,
-  };
-
+  const stats = {buy:d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,hi:d.all.filter(r=>r.composite_score>=7).length,cold:d.all.filter(r=>r.composite_score<4).length};
   const TABS = [["rank","Composite Rank"],["gvm","G · V · M"]];
-
   return (
     <div style={{minHeight:"100vh",background:C.bg}}>
       <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
         <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-          <div>
-            <span style={{fontSize:13,fontWeight:800,color:C.text}}>SCORR · Sector Analysis</span>
-            <span style={{fontSize:10,color:C.muted,marginLeft:10}}>{d.total_segments} segments · {d.score_date} · 5-signal percentile composite</span>
-          </div>
-          <div style={{marginLeft:"auto",display:"flex",gap:16,fontSize:11}}>
-            <span>Buy+: <b style={{color:C.green}}>{stats.buy}</b></span>
-            <span>Score≥7: <b style={{color:C.green}}>{stats.hi}</b></span>
-            <span>Cold&lt;4: <b style={{color:C.red}}>{stats.cold}</b></span>
-          </div>
+          <div><span style={{fontSize:13,fontWeight:800,color:C.text}}>SCORR · Sector Analysis</span><span style={{fontSize:10,color:C.muted,marginLeft:10}}>{d.total_segments} segments · {d.score_date} · 5-signal percentile composite</span></div>
+          <div style={{marginLeft:"auto",display:"flex",gap:16,fontSize:11}}><span>Buy+: <b style={{color:C.green}}>{stats.buy}</b></span><span>Score≥7: <b style={{color:C.green}}>{stats.hi}</b></span><span>Cold&lt;4: <b style={{color:C.red}}>{stats.cold}</b></span></div>
         </div>
         <div style={{display:"flex",marginTop:10,borderBottom:`1px solid ${C.border}`,marginLeft:-20,paddingLeft:20,marginBottom:-13}}>
-          {TABS.map(([id,lbl])=>(
-            <button key={id} className="tab" onClick={()=>setTab(id)} style={{borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,color:tab===id?C.accent:C.muted,fontWeight:tab===id?700:500}}>{lbl}</button>
-          ))}
+          {TABS.map(([id,lbl])=>(<button key={id} className="tab" onClick={()=>setTab(id)} style={{borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,color:tab===id?C.accent:C.muted,fontWeight:tab===id?700:500}}>{lbl}</button>))}
         </div>
       </div>
-
       <Strip top5={d.top5} cold={d.bottom5} onSel={setSel}/>
-
       {sel && <div style={{padding:"12px 20px 0"}}><Detail row={sel} onClose={()=>setSel(null)}/></div>}
-
       <div style={{padding:"12px 20px 40px",maxWidth:1440,margin:"0 auto"}}>
         {tab==="rank" && <RankTab data={d.all} onSel={setSel}/>}
         {tab==="gvm"  && <GVMTab  data={d.all} onSel={setSel}/>}
