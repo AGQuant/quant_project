@@ -7,6 +7,8 @@ Routes:
   POST /api/trade-check/v34/promote — manual promote a check to personal_journal
   GET  /api/trade-check/v34/health — sanity
   GET  /api/trade-check/screen-nifty50 — screener, both sides (id=371). n<=210 for All-208 tab.
+  POST /api/trade-check/tc-cache/refresh — recompute tc_cache snapshot (id=373). Manual, standalone.
+  GET  /api/trade-check/intraday-scan — two-stage intraday scan: cached TC>=10 + live filters (id=373).
 """
 
 from fastapi import APIRouter
@@ -15,6 +17,7 @@ from typing import Optional
 
 import trade_check_v34 as tc
 import native_trade_check as ntc
+import tc_intraday as tci
 
 router = APIRouter()
 
@@ -78,3 +81,21 @@ def screen_nifty50(n: int = 50, top: int = 10):
     n = max(10, min(n, 210))
     top = max(1, min(top, 20))
     return ntc.screen_top50(n=n, top=top)
+
+
+@router.post("/api/trade-check/tc-cache/refresh")
+def tc_cache_refresh(n: int = 210):
+    """Recompute tc_cache snapshot (TC score per symbol x side) for top-N mcap.
+    Standalone/manual in phase 1; scheduler wiring deferred to phase 1.5.
+    Spec id=373. Heavy: N*2 computes."""
+    n = max(10, min(n, 210))
+    return tci.refresh_tc_cache(n=n)
+
+
+@router.get("/api/trade-check/intraday-scan")
+def intraday_scan(side: str = "LONG"):
+    """Two-stage intraday scan (id=373). Stage1: cached TC>=10 universe.
+    Stage2 (live): 1H positive + vol pace>=1.5x + gain 1-2% band + DMA20 + week-low-S1 + hold-open.
+    LONG/SHORT separate. Reads tc_cache (refresh it first for fresh scores)."""
+    side = "SHORT" if side.upper() == "SHORT" else "LONG"
+    return tci.intraday_scan(side=side)
