@@ -21,11 +21,12 @@ Slot architecture (17-Jun-2026) SLOT_ARCHITECTURE_V2.4.0 id=379:
   SO dedicated: 4/4/4/3. S1B dedicated: 3/3/3/2.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from datetime import date, datetime, timedelta
 from typing import Optional
 import psycopg
 import os
+import time
 
 from nse_holidays import is_trading_day
 
@@ -353,6 +354,19 @@ def _read_adr(cur):
     return 0, 0, 0, 1.0, "no_data", str(date.today())
 
 
+_ADR_CACHE = {"ts": 0.0, "data": None}
+
+def _read_adr_cached(cur, ttl=60):
+    """market_mood hits ADR (heavy intraday query) on every call — cache 60s."""
+    now = time.time()
+    if _ADR_CACHE["data"] is not None and (now - _ADR_CACHE["ts"]) < ttl:
+        return _ADR_CACHE["data"]
+    data = _read_adr(cur)
+    _ADR_CACHE["ts"] = now
+    _ADR_CACHE["data"] = data
+    return data
+
+
 def _live_nifty_dwm(cur, symbol="NIFTY50"):
     cur.execute("""
         SELECT close FROM intraday_prices
@@ -378,7 +392,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
 def market_mood():
     try:
         with _conn() as conn, conn.cursor() as cur:
-            advances, declines, unchanged, adr, breadth_source, adr_date = _read_adr(cur)
+            advances, declines, unchanged, adr, breadth_source, adr_date = _read_adr_cached(cur)
             adr_pass = adr >= 1.0
             live_nifty = _live_nifty_dwm(cur, "NIFTY50")
             if live_nifty:
@@ -613,7 +627,8 @@ def filter_config(basket: str):
 
 
 @router.get("/qualified/{basket}")
-def qualified(basket: str, limit: int = 50):
+def qualified(basket: str, response: Response, limit: int = 50):
+    response.headers["Cache-Control"] = "max-age=300"   # 5-min — matches signal cadence
     basket = basket.lower()
     if basket == "sell_overbought": return sell_overbought(limit=limit)
     if basket == "buy_s1_bounce":   return buy_s1_bounce_qualified(limit=limit)
