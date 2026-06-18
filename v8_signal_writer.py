@@ -16,11 +16,11 @@ What it does every 5-min during market hours:
 
 Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
   BUY  threshold = n - 1 - min(fails, 2)  [tight in bull, loose in bear]
-  SELL threshold:
-    if n_filters <= 4: always require ALL filters (strict AND -- quality baskets)
-    else: n - 2 + min(fails, 2)
-  sell_reversal (5 filters): always 5/5 -- strict AND
-  sell_momentum (6 filters): always 6/6 -- strict AND
+  SELL threshold (sell_reversal=5, sell_momentum=6):
+    Strong Bullish (0 fails) + Bullish (1 fail): n-1 (1 miss allowed -- 18-Jun-2026)
+    Neutral (2 fails) + Bearish (3+ fails):       n   (strict AND)
+    Rationale: in bull markets genuine weakness is rarer; n-1 still a
+    meaningful signal. In bear markets signals fire freely -- keep strict.
 
 Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
   Nifty 1-month return used as regime gate. 3 filters adjust dynamically.
@@ -37,9 +37,9 @@ Slot architecture (v2.3.0, 16-Jun-2026):
   Total slots always = 24.
 
 buy_s1_bounce V1 (17-Jun-2026):
-  Bounce from pivot S1 support. 8 strict filters:
-    week_low<=S1, recovery_2d 2-8%, week_return 0-3%, close>open,
-    day_ret>0.5%, vol>=1.5x, Nifty RSI>=55, dma_50>0%.
+  Bounce from pivot S1 support. 7 strict filters (1 gate + 6 stages):
+    nifty_rsi>=55 (gate), week_return 0-3%, dma_50>0%, vol_ratio>=1.5,
+    recovery_2d 2-8%, day_ret>0.5% (implies close>open), week_low<=S1.
   Fixed +1.5%/-1.5% target/stop. Dedicated ring-fenced slots: 3/3/3/2.
   Backtest (Jun25-May26, 211 futures): 88 sigs/yr, 73.9% WR, EV +0.72%.
   New metrics: recovery_2d, week_low, day_ret (live), nifty_rsi (market gate).
@@ -450,16 +450,13 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         out["rsi_weekly"] = _safe_float(eod.get("rsi_weekly"))
 
     # -- New metrics for buy_s1_bounce (v2.4.0) --------------------------------
-    # day_ret: intraday strength (close vs day open)
     if op and op > 0:
         out["day_ret"] = round((live - op) / op * 100, 3)
 
-    # recovery_2d: how far price has recovered from 2-day EOD low
     lo_2d = hist.get("lo_2d")
     if lo_2d and lo_2d > 0:
         out["recovery_2d"] = round((live - lo_2d) / lo_2d * 100, 3)
 
-    # week_low: min of last 5 EOD lows + today's intraday low (for S1 gate)
     lo5 = hist.get("lo_5")
     today_bar_low = bar.get("low")
     if lo5 and today_bar_low:
@@ -631,9 +628,22 @@ def _market_gate_fails(conn) -> int:
 
 
 def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
+    """
+    Minimum filter passes to qualify.
+
+    SELL (sell_reversal=5, sell_momentum=6  --  n_filters <= 6):
+      Strong Bullish (0 fails) + Bullish (1 fail)  -> n-1  (1 miss allowed)
+      Neutral (2 fails) + Bearish (3+ fails)        -> n    (strict AND)
+    sell_overbought / buy_s1_bounce use dedicated handlers -- never reach here.
+
+    BUY:
+      fails=0 -> n-1  |  fails=1 -> n-2  |  fails>=2 -> n-3
+    """
     if side == "SELL":
         if n_filters <= 6:
-            return n_filters
+            if fails <= 1:
+                return n_filters - 1  # 1 miss allowed in Strong Bullish / Bullish
+            return n_filters           # strict AND in Neutral / Bearish
         return max(n_filters - 2 + min(fails, 2), 1)
     return n_filters - 1 - min(fails, 2)
 
@@ -1006,10 +1016,6 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     signal_ts_ist = _now_ist()
 
     for basket, filters in FILTER_CONFIG.items():
-        # sell_overbought and buy_s1_bounce have dedicated handlers below.
-        # buy_s1_bounce appears in FILTER_CONFIG for endpoint display only --
-        # running it through score-gate here would contaminate it with the
-        # wrong filters and wrong entry function (18-Jun-2026 bug fix).
         if basket in ("sell_overbought", "buy_s1_bounce"):
             continue
 
@@ -1116,11 +1122,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
-    # Buy S1 Bounce -- dedicated ring-fenced basket (strict AND, 8 filters)
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
                                     gate_fails, pivots, signal_ts_ist)
-
-    # Sell Overbought -- dedicated ring-fenced basket
     _write_sell_overbought_qualified(conn, all_metrics, target_date,
                                       gate_fails, pivots, signal_ts_ist)
 
@@ -1128,11 +1131,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
 def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: date,
                                     gate_fails: int, pivots: dict, signal_ts_ist):
     """
-    Buy S1 Bounce V1 (17-Jun-2026).
-    8 strict-AND filters: week_return 0-3%, dma_50>0%, vol_ratio>=1.5,
-    recovery_2d 2-8%, day_ret>0.5%, week_low<=S1, Nifty RSI>=55.
-    Fixed +1.5%/-1.5% target/stop. Dedicated ring-fenced slots 3/3/3/2.
-    Backtest: 88 sigs/yr, 73.9% WR, EV +0.72%.
+    Buy S1 Bounce V1 (17-Jun-2026). 7 strict filters (1 gate + 6 stages).
+    Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR.
     """
     nifty_rsi = _get_nifty_rsi(conn)
     if nifty_rsi is None or nifty_rsi < 55.0:
@@ -1175,7 +1175,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
             "week_return": s.get("week_return"), "dma_50": s.get("dma_50"),
             "vol_ratio": s.get("vol_ratio"), "recovery_2d": s.get("recovery_2d"),
             "day_ret": s.get("day_ret"), "week_low": s.get("week_low"),
-            "nifty_rsi": round(nifty_rsi, 1), "filter_score": 8, "filter_total": 8,
+            "nifty_rsi": round(nifty_rsi, 1), "filter_score": 7, "filter_total": 7,
         }
         try:
             with conn.cursor() as cur:
