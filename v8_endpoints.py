@@ -5,31 +5,20 @@ ADR (14-Jun-2026): _read_adr gates the live tiers behind _market_open().
 ADR (11-Jun-2026): market_mood reads adr_intraday primary, falls back to adr_daily.
 buy_reversal V2 LOCKED (16-Jun-2026): RSI caps widened, dma_50 widened, mom_2d widened.
   rsiM[52-82] rsiW[57-73] dma50[2-12] mom2d[0-3] | 83 sigs/yr, 85.9% WR, EV +0.496%
-  Root cause V1: rsi caps too tight -- bull market stocks have high RSI by nature.
-buy_momentum optimisation v1 (16-Jun-2026): Target=R2(BULL)/R1. 77.4% WR.
-sell_reversal V4 LOCKED (16-Jun-2026): mom_2d tightened -2 -> -3.
-  5 filters: rsi_weekly<=45, mom_2d<=-3, sector_week<=-1.5, dma_200<=2, week_return[-10,-0.5]
-  Target=S2 | Stop=PP+0.5*(R1-PP) | 156 sigs/yr, 79.3% WR, EV +0.752%/trade.
-sell_momentum V2 LOCKED (16-Jun-2026): 6 filters, Target=S2, Stop=PP+0.5*(R1-PP), 71.9% WR.
-sell_overbought V2 LOCKED (16-Jun-2026): Pivot-based mean reversion.
-  5 filters: week_high>0.9*R1orR2, fall_3d<-3%, rsiW>=80, rsiM>=70, sector_week<0.
-  Target=S1 | Stop=R2 | 81.5% WR | EV +1.56%/trade.
+sell_reversal V4 LOCKED (16-Jun-2026): 5 strict AND | 79.3% WR | EV +0.752%/trade.
+  Mood relaxation (18-Jun-2026): 4/5 in Strong Bullish + Bullish | 5/5 in Neutral/Bear.
+sell_momentum V2 LOCKED (16-Jun-2026): 6 strict AND | 71.9% WR | EV +0.55%/trade.
+  Mood relaxation (18-Jun-2026): 5/6 in Strong Bullish + Bullish | 6/6 in Neutral/Bear.
+sell_overbought V2 LOCKED (16-Jun-2026): 5 strict AND | 81.5% WR | EV +1.56%/trade.
   Dedicated ring-fenced slots: 4 (Bull/Neutral) / 3 (Bearish). Total always 24.
   Funnel: dedicated so_funnel_detail() computes all 5 filters live from raw_prices.
-  FILTER_CONFIG entry (3 cols) is reference only -- funnel bypasses it.
-buy_s1_bounce V1 LOCKED (17-Jun-2026): S1 support bounce -- BUY_S1_BOUNCE_SPEC_V1 id=378.
-  7 filters (1 market gate + 6 cumulative stages). 73.9% WR | EV +0.716%/trade | 88 sigs/yr.
-  Note: close_vs_open is implied by day_ret>0.5% -- not a separate filter.
+buy_s1_bounce V1 LOCKED (17-Jun-2026): 7 filters (1 gate + 6 stages). 73.9% WR.
   Dedicated ring-fenced slots: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
   Funnel: dedicated s1b_funnel_detail() computes all 7 filters live.
-  FILTER_CONFIG entry (3 cols) is reference only -- funnel bypasses it.
-Generic funnel_detail: stages emit both passes/fails AND survivors/killed (aliases)
-  so dashboard JS (reads survivors/killed) works for all baskets.
+Generic funnel_detail stages emit survivors/killed (dashboard aliases for passes/fails).
 Slot architecture (17-Jun-2026) SLOT_ARCHITECTURE_V2.4.0 id=379:
-  Standard pool (4 baskets):
-    Strong Bullish: 15B/5S | Bullish: 14B/6S | Neutral: 12B/8S | Bearish: 8B/13S
-  SO dedicated: 4 (Bull/Neutral) / 3 (Bearish).
-  S1B dedicated: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
+  Standard pool: Strong Bullish 15B/5S | Bullish 14B/6S | Neutral 12B/8S | Bearish 8B/13S
+  SO dedicated: 4/4/4/3. S1B dedicated: 3/3/3/2.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -58,10 +47,8 @@ def _market_open() -> bool:
     return open_t <= now <= close_t
 
 
-# -- Static base FILTER_CONFIG --
 FILTER_CONFIG = {
     "buy_reversal": {
-        # V2 LOCKED 16-Jun-2026 -- BUY_REVERSAL_SPEC_V2
         "gvm_score":    [6.5,  10.0],
         "dma_200":      [1.5,  20.0],
         "dma_50":       [2.0,  12.0],
@@ -86,7 +73,8 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # V4 LOCKED 16-Jun-2026 -- 5 strict AND
+        # V4 LOCKED 16-Jun-2026. 5 strict AND in Neutral/Bear.
+        # Mood relaxation 18-Jun-2026: 4/5 in Strong Bullish + Bullish.
         "rsi_weekly":   [None, 45.0],
         "mom_2d":       [None, -3.0],
         "sector_week":  [None, -1.5],
@@ -94,7 +82,8 @@ FILTER_CONFIG = {
         "week_return":  [-10.0, -0.5],
     },
     "sell_momentum": {
-        # V2 LOCKED 16-Jun-2026 -- 6 strict AND
+        # V2 LOCKED 16-Jun-2026. 6 strict AND in Neutral/Bear.
+        # Mood relaxation 18-Jun-2026: 5/6 in Strong Bullish + Bullish.
         "dma_200":       [None,  -2.0],
         "rsi_month":     [None,  38.0],
         "rsi_weekly":    [None,  38.0],
@@ -102,14 +91,13 @@ FILTER_CONFIG = {
         "sector_week":   [None,  -2.0],
         "mom_2d":        [None,  -1.5],
     },
-    # sell_overbought: 2 pivot-based filters computed live. 3 RSI/sector cols here for reference only.
+    # sell_overbought: 2 pivot-based filters computed live. 3 RSI/sector here for reference.
     "sell_overbought": {
         "rsi_weekly":   [80.0, None],
         "rsi_month":    [70.0, None],
         "sector_week":  [None,  0.0],
     },
-    # buy_s1_bounce: 7 filters (1 gate + 6 stages). Only v8_metrics cols here (reference only).
-    # close_vs_open is implied by day_ret>0.5% -- not a separate filter.
+    # buy_s1_bounce: 7 filters (1 gate + 6 stages). Reference cols only.
     "buy_s1_bounce": {
         "week_return":  [0.0,  3.0],
         "vol_ratio":    [1.5, None],
@@ -386,8 +374,6 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
             round((latest/month-1)*100,2), latest)
 
 
-# -- Endpoints -----------------------------------------------------------------
-
 @router.get("/market_mood")
 def market_mood():
     try:
@@ -558,6 +544,7 @@ def filter_config(basket: str):
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
             "stop": f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)", "sl_mult": SELL_REVERSAL_SL_MULT,
+            "gate_note": "Strict AND in Neutral/Bear (5/5). 1 miss allowed (4/5) in Strong Bullish + Bullish (18-Jun-2026).",
             "backtest": {"signals": 156, "wr_pct": 79.3, "expected_value": 0.752},
             **BASKET_META.get(basket, {})
         }
@@ -572,6 +559,7 @@ def filter_config(basket: str):
             "basket": basket, "filters": rows, "count": len(rows),
             "target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
             "stop": f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)", "sl_mult": SELL_MOMENTUM_SL_MULT,
+            "gate_note": "Strict AND in Neutral/Bear (6/6). 1 miss allowed (5/6) in Strong Bullish + Bullish (18-Jun-2026).",
             "backtest": {"signals": 97, "wr_pct": 71.9, "expected_value": 0.55},
             **BASKET_META.get(basket, {})
         }
@@ -865,7 +853,7 @@ def raw_metrics(limit: int = 250):
         raise HTTPException(500, f"raw_metrics failed: {e}")
 
 
-# ── Sell Overbought dedicated funnel (5 real filters) ─────────────────────────
+# ── Sell Overbought dedicated funnel ─────────────────────────────────────────
 _SO_COMMON_SQL = """
     WITH pivots AS (
         SELECT symbol, price_date,
@@ -917,7 +905,6 @@ def _so_enrich(rows):
 
 
 def _so_funnel_stages():
-    """5-filter SO funnel. Validated: 211->211->25->2->2->0 (18-Jun-2026)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(_SO_COMMON_SQL)
@@ -956,8 +943,6 @@ def so_funnel_detail():
             "universe": total, "final": final, "filter_count": 5, "n_filters": 5,
             "gate_type": "strict AND (all must pass)",
             "score_qualified": final, "pivot_pass": final, "stages": stages,
-            "note": "SO 5 strict-AND filters. 2 pivot-based (week_high_vs_pivot, fall_3d) "
-                    "from raw_prices -- not in static FILTER_CONFIG.",
             **BASKET_META.get("sell_overbought", {})
         }
     except Exception as e:
@@ -1005,13 +990,8 @@ def so_stock_passcount():
         raise HTTPException(500, f"so_stock_passcount failed: {e}")
 
 
-# ── Buy S1 Bounce dedicated funnel (7 filters: 1 gate + 6 stages) ─────────────
+# ── Buy S1 Bounce dedicated funnel ────────────────────────────────────────────
 def _s1b_funnel_stages():
-    """
-    7-filter S1B funnel (1 market gate + 6 cumulative stages).
-    close_vs_open is implied by day_ret>0.5% -- not a separate stage.
-    Validated: 211->211->47->22->3->1->1->0 (18-Jun-2026)
-    """
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT close FROM raw_prices
@@ -1031,7 +1011,6 @@ def _s1b_funnel_stages():
             rsi_series = 100 - (100 / (1 + rs))
             v = rsi_series.iloc[-1]
             nifty_rsi = float(v) if v == v else None
-
         cur.execute("""
             WITH td AS (
                 SELECT symbol,
@@ -1103,7 +1082,6 @@ def _s1b_funnel_stages():
     stages.append({"metric": "nifty_rsi (market gate)",
                    "condition_min": ">= 55", "condition_max": f"OPEN ({nifty_rsi:.1f})",
                    "survivors": total, "killed": 0})
-
     _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 3.0), ">= 0%", "<= 3%")
     _stage("dma_50",      lambda s: _passes_filter(s.get("dma_50"), 0.0, None),     "> 0%",   "-")
     _stage("vol_ratio",   lambda s: _passes_filter(s.get("vol_ratio"), 1.5, None),  ">= 1.5x", "-")
@@ -1113,7 +1091,6 @@ def _s1b_funnel_stages():
            lambda s: s.get("week_low") is not None and s.get("s1") is not None
                      and float(s["week_low"]) <= float(s["s1"]),
            "week_low", "<= S1")
-
     return stages, nifty_rsi, gate_open, total
 
 
@@ -1131,8 +1108,6 @@ def s1b_funnel_detail():
                             "open": gate_open},
             "score_qualified": final_qualified, "pivot_pass": final_qualified,
             "stages": stages,
-            "note": "7 filters: 1 market gate + 6 cumulative stages. "
-                    "close_vs_open implied by day_ret>0.5% -- not listed separately.",
             **BASKET_META.get("buy_s1_bounce", {})
         }
     except Exception as e:
@@ -1153,7 +1128,6 @@ def s1b_funnel_counts():
 
 
 def s1b_stock_passcount():
-    """Per-stock 7-filter pass count. close_vs_open removed (implied by day_ret>0.5%)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -1175,7 +1149,6 @@ def s1b_stock_passcount():
                 v = rsi_series.iloc[-1]
                 nifty_rsi = float(v) if v == v else None
             gate_open = nifty_rsi is not None and nifty_rsi >= 55.0
-
             cur.execute("""
                 WITH td AS (
                     SELECT symbol,
@@ -1223,7 +1196,6 @@ def s1b_stock_passcount():
             wl_cand = [x for x in (lo5, tlow) if x is not None]
             week_low = min(wl_cand) if wl_cand else None
             s1 = _f(r.get("s1"))
-
             checks = {
                 "nifty_rsi":      gate_open,
                 "week_return":    _passes_filter(r.get("week_return"), 0.0, 3.0),
@@ -1240,7 +1212,6 @@ def s1b_stock_passcount():
                         "gvm_score": r.get("gvm_score"),
                         "recovery_2d": round(rec2d, 2) if rec2d is not None else None,
                         "day_ret": round(dayret, 2) if dayret is not None else None})
-
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_s1_bounce", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 7, "stocks": out,
@@ -1253,7 +1224,6 @@ def s1b_stock_passcount():
 
 @router.get("/buy_s1_bounce")
 def buy_s1_bounce_qualified(limit: int = 50):
-    """BUY_S1_BOUNCE_SPEC_V1 -- 73.9% WR -- 88 sigs/yr -- LOCKED 17-Jun-2026 id=378"""
     try:
         open_pos  = _load_open_positions("buy_s1_bounce")
         slot_full = _load_slot_full("buy_s1_bounce")
@@ -1291,14 +1261,10 @@ def buy_s1_bounce_qualified(limit: int = 50):
             r['status']  = r.pop('stored_status', None) or 'QUALIFIED'
         rows = _enrich_with_status(rows, "buy_s1_bounce", open_pos, slot_full)
         return {
-            "basket":            "buy_s1_bounce",
-            "count":             len(rows),
-            "target":            "+1.5% fixed from entry",
-            "stop":              "-1.5% fixed from entry",
+            "basket": "buy_s1_bounce", "count": len(rows),
+            "target": "+1.5% fixed from entry", "stop": "-1.5% fixed from entry",
             "slot_architecture": "Dedicated ring-fenced: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish)",
-            "win_pct":           "73.9%",
-            "ev_per_trade":      "+0.716%",
-            "stocks":            rows,
+            "win_pct": "73.9%", "ev_per_trade": "+0.716%", "stocks": rows,
         }
     except Exception as e:
         raise HTTPException(500, f"buy_s1_bounce_qualified failed: {e}")
