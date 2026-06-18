@@ -1,11 +1,11 @@
 """
-V8 endpoints — Quant Long-Short Basket Strategy
+V8 endpoints -- Quant Long-Short Basket Strategy
 
 ADR (14-Jun-2026): _read_adr gates the live tiers behind _market_open().
 ADR (11-Jun-2026): market_mood reads adr_intraday primary, falls back to adr_daily.
 buy_reversal V2 LOCKED (16-Jun-2026): RSI caps widened, dma_50 widened, mom_2d widened.
   rsiM[52-82] rsiW[57-73] dma50[2-12] mom2d[0-3] | 83 sigs/yr, 85.9% WR, EV +0.496%
-  Root cause V1: rsi caps too tight — bull market stocks have high RSI by nature.
+  Root cause V1: rsi caps too tight -- bull market stocks have high RSI by nature.
 buy_momentum optimisation v1 (16-Jun-2026): Target=R2(BULL)/R1. 77.4% WR.
 sell_reversal V4 LOCKED (16-Jun-2026): mom_2d tightened -2 -> -3.
   5 filters: rsi_weekly<=45, mom_2d<=-3, sector_week<=-1.5, dma_200<=2, week_return[-10,-0.5]
@@ -15,10 +15,14 @@ sell_overbought V2 LOCKED (16-Jun-2026): Pivot-based mean reversion.
   5 filters: week_high>0.9*R1orR2, fall_3d<-3%, rsiW>=80, rsiM>=70, sector_week<0.
   Target=S1 | Stop=R2 | 81.5% WR | EV +1.56%/trade.
   Dedicated ring-fenced slots: 4 (Bull/Neutral) / 3 (Bearish). Total always 24.
-Slot architecture (16-Jun-2026):
+buy_s1_bounce V1 LOCKED (17-Jun-2026): S1 support bounce -- BUY_S1_BOUNCE_SPEC_V1 id=378.
+  8 strict-AND filters. 73.9% WR | EV +0.716%/trade | 88 sigs/yr.
+  Dedicated ring-fenced slots: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
+Slot architecture (17-Jun-2026) SLOT_ARCHITECTURE_V2.4.0 id=379:
   Standard pool (4 baskets):
     Strong Bullish: 15B/5S | Bullish: 14B/6S | Neutral: 12B/8S | Bearish: 8B/13S
-  SO dedicated: 4 (Bull/Neutral) / 3 (Bearish). Total: 24 in all moods.
+  SO dedicated: 4 (Bull/Neutral) / 3 (Bearish).
+  S1B dedicated: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -47,10 +51,10 @@ def _market_open() -> bool:
     return open_t <= now <= close_t
 
 
-# ── Static base FILTER_CONFIG ──
+# -- Static base FILTER_CONFIG --
 FILTER_CONFIG = {
     "buy_reversal": {
-        # V2 LOCKED 16-Jun-2026 — BUY_REVERSAL_SPEC_V2
+        # V2 LOCKED 16-Jun-2026 -- BUY_REVERSAL_SPEC_V2
         # Root cause V1: rsi_month cap 67 + rsi_weekly cap 62 too tight.
         # Bull stocks have high RSI; rsi_month 70-80+ showed 100% WR. dma_50 1.5-8 too narrow.
         # 83 sigs/yr, 85.9% WR, EV +0.496%/trade
@@ -78,7 +82,7 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # V4 LOCKED 16-Jun-2026 — SELL_REVERSAL_SPEC_V4
+        # V4 LOCKED 16-Jun-2026 -- SELL_REVERSAL_SPEC_V4
         # Target=S2 | Stop=PP+0.5*(R1-PP) | 5 strict AND
         # 156 sigs/yr, 79.3% WR, EV +0.752%/trade
         "rsi_weekly":   [None, 45.0],
@@ -88,7 +92,7 @@ FILTER_CONFIG = {
         "week_return":  [-10.0, -0.5],
     },
     "sell_momentum": {
-        # V2 LOCKED 16-Jun-2026 — SELL_MOMENTUM_SPEC_V2
+        # V2 LOCKED 16-Jun-2026 -- SELL_MOMENTUM_SPEC_V2
         # Target=S2 | Stop=PP+0.5*(R1-PP) | 6 strict AND
         # 97 sigs/yr, 71.9% WR, EV +0.55%/trade
         "dma_200":       [None,  -2.0],
@@ -98,11 +102,21 @@ FILTER_CONFIG = {
         "sector_week":   [None,  -2.0],
         "mom_2d":        [None,  -1.5],
     },
-    # sell_overbought: pivot-based filters computed live — rsi/sector here for reference only
+    # sell_overbought: pivot-based filters computed live -- rsi/sector here for reference only
     "sell_overbought": {
         "rsi_weekly":   [80.0, None],
         "rsi_month":    [70.0, None],
         "sector_week":  [None,  0.0],
+    },
+    # buy_s1_bounce -- BUY_S1_BOUNCE_SPEC_V1 LOCKED 17-Jun-2026 id=378
+    # 8 strict-AND: week_low_vs_s1, recovery_2d[2-8%], week_return[0-3%],
+    #   close_vs_open, day_ret[>0.5%], vol_ratio[>=1.5x], nifty_rsi[>=55], dma50_pct[>0%]
+    # S1B-specific metrics computed live by v8_signal_writer v2.4.0
+    # Only standard v8_metrics cols listed here (funnel fallback only)
+    "buy_s1_bounce": {
+        "week_return":  [0.0,  3.0],
+        "vol_ratio":    [1.5, None],
+        "dma_50":       [0.0, None],
     },
 }
 
@@ -115,6 +129,7 @@ BASKET_META = {
     "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "79.3%", "signals_per_day": "~0.6/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
+    "buy_s1_bounce":   {"side": "BUY",  "target": "+1.5% fixed",               "win_pct": "73.9%", "signals_per_day": "~0.3/day"},
 }
 
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
@@ -211,7 +226,7 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
     if not basket: return ''
     return {'buy_reversal':'Buy Reversal','buy_momentum':'Buy Momentum',
             'sell_reversal':'Sell Reversal','sell_momentum':'Sell Momentum',
-            'sell_overbought':'Sell Overbought'}.get(basket.lower(), basket)
+            'sell_overbought':'Sell Overbought','buy_s1_bounce':'Buy S1 Bounce'}.get(basket.lower(), basket)
 
 def _live_qualified_fallback(basket: str, limit: int):
     if basket == "buy_reversal":
@@ -374,7 +389,7 @@ def _live_nifty_dwm(cur, symbol="NIFTY50"):
             round((latest/month-1)*100,2), latest)
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------------------------
 
 @router.get("/market_mood")
 def market_mood():
@@ -418,15 +433,16 @@ def market_mood():
             elif fails == 2: buy_slots, sell_slots, mood = 12, 8,  "Neutral"
             else:            buy_slots, sell_slots, mood = 8,  13, "Bearish"
 
-            so_slots = 3 if fails >= 3 else 4
-            total_slots = buy_slots + sell_slots + so_slots
+            so_slots  = 3 if fails >= 3 else 4
+            s1b_slots = 2 if fails >= 3 else 3
+            total_slots = buy_slots + sell_slots + so_slots + s1b_slots
 
             return {
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
                 "buy_slots": buy_slots, "sell_slots": sell_slots,
-                "so_slots": so_slots, "total_slots": total_slots,
-                "slot_note": "so_slots ring-fenced for sell_overbought — never compete with sell_slots",
+                "so_slots": so_slots, "s1b_slots": s1b_slots, "total_slots": total_slots,
+                "slot_note": "so_slots ring-fenced for sell_overbought; s1b_slots ring-fenced for buy_s1_bounce -- never compete with standard pools",
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,
                                "unchanged": unchanged, "adr_date": adr_date,
@@ -592,7 +608,7 @@ def filter_config(basket: str):
             "target": "S1", "target_formula": "S1 = 2*PP - H5",
             "stop": "R2",   "stop_formula":   "R2 = PP + (H5 - L5)",
             "slot_architecture": {"strong_bullish": 4, "bullish": 4, "neutral": 4, "bearish": 3,
-                                  "note": "Ring-fenced — never competes with standard sell pool"},
+                                  "note": "Ring-fenced -- never competes with standard sell pool"},
             "backtest": {"signals": 112, "wr_pct": 81.5, "expected_value": 1.56},
             **BASKET_META.get(basket, {})
         }
@@ -610,6 +626,7 @@ def filter_config(basket: str):
 def qualified(basket: str, limit: int = 50):
     basket = basket.lower()
     if basket == "sell_overbought": return sell_overbought(limit=limit)
+    if basket == "buy_s1_bounce":   return buy_s1_bounce_qualified(limit=limit)
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         open_pos  = _load_open_positions(basket)
@@ -848,6 +865,61 @@ def raw_metrics(limit: int = 250):
                 "columns": cols, "stocks": rows}
     except Exception as e:
         raise HTTPException(500, f"raw_metrics failed: {e}")
+
+
+@router.get("/buy_s1_bounce")
+def buy_s1_bounce_qualified(limit: int = 50):
+    """BUY_S1_BOUNCE_SPEC_V1 -- 73.9% WR -- 88 sigs/yr -- LOCKED 17-Jun-2026 id=378"""
+    try:
+        open_pos  = _load_open_positions("buy_s1_bounce")
+        slot_full = _load_slot_full("buy_s1_bounce")
+
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT q.symbol, q.gvm_score, q.cmp,
+                    q.dma_50, q.week_return,
+                    (q.metrics->>'recovery_2d')::numeric AS recovery_2d,
+                    (q.metrics->>'week_low')::numeric    AS week_low,
+                    (q.metrics->>'day_ret')::numeric     AS day_ret,
+                    (q.metrics->>'nifty_rsi')::numeric   AS nifty_rsi,
+                    (q.metrics->>'vol_ratio')::numeric   AS vol_ratio,
+                    (q.metrics->>'target')::numeric      AS target_price,
+                    (q.metrics->>'stop_loss')::numeric   AS stop_price,
+                    q.source, q.signal_ts,
+                    g.segment,
+                    p.pp, p.r1, p.s1,
+                    q.metrics->>'status' AS stored_status
+                FROM v8_qualified q
+                LEFT JOIN gvm_scores g ON g.symbol=q.symbol
+                LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
+                    AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                WHERE q.basket='buy_s1_bounce' AND q.signal_date=CURRENT_DATE
+                  AND q.symbol NOT IN (
+                      SELECT UPPER(ticker) FROM earnings_calendar
+                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day'))
+                ORDER BY q.gvm_score DESC NULLS LAST LIMIT %s
+            """, (min(max(limit, 1), 200),))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        for r in rows:
+            r['segment'] = _seg_override(r['symbol'], r.get('segment'))
+            r['status']  = r.pop('stored_status', None) or 'QUALIFIED'
+
+        rows = _enrich_with_status(rows, "buy_s1_bounce", open_pos, slot_full)
+
+        return {
+            "basket":            "buy_s1_bounce",
+            "count":             len(rows),
+            "target":            "+1.5% fixed from entry",
+            "stop":              "-1.5% fixed from entry",
+            "slot_architecture": "Dedicated ring-fenced: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish)",
+            "win_pct":           "73.9%",
+            "ev_per_trade":      "+0.716%",
+            "stocks":            rows,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"buy_s1_bounce_qualified failed: {e}")
 
 
 @router.get("/sell_overbought")
