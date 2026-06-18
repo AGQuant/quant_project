@@ -46,6 +46,9 @@ v8_live.py archived — v8_history_cache no longer built or used.
   Strips expiry suffix from Fyers symbols (e.g. RADICO26JUNFUT → RADICO).
   Adds missing symbols as active, deactivates symbols absent 2+ consecutive Mondays.
   Logs changes to session_log. MCP tool: sync_futures_universe.
+18-Jun-2026: intraday paper engine wired — every 5-min during market hours,
+  refresh_tc_cache + scan both sides + auto-enter (no cap, +/-1.5%) + exit/square-off.
+  Context-isolated (tc_intraday_* tables). Entry cutoff 15:00, hard square-off 15:15.
 """
 
 import os
@@ -70,6 +73,7 @@ import qb_eod_checker
 import refresh_takeaways as rt
 import v10_st_ema
 import pcr_intraday
+import tc_intraday
 
 log = logging.getLogger("scorr.scheduler")
 
@@ -389,7 +393,7 @@ def sync_futures_universe(conn) -> dict:
     return result
 
 
-# ── State flags ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── State flags ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _raw_prices_updated_today:  Optional[date] = None
 _earnings_loaded_today:     Optional[date] = None
 _yahoo_daily_running:       bool           = False
@@ -411,6 +415,7 @@ _daily_metrics_running:     bool           = False
 _refresh_check_ran_today:   Optional[date] = None
 _v10_running:               bool           = False
 _pcr_intraday_running:      bool           = False
+_intraday_paper_running:    bool           = False
 _fu_sync_ran_this_week:     Optional[date] = None   # tracks Monday sync
 _fu_sync_running:           bool           = False
 
@@ -418,7 +423,7 @@ _fu_sync_running:           bool           = False
 _live_loop_task: Optional[asyncio.Task] = None
 
 
-# ── Background tasks ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── Background tasks ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _task_refresh_cmp():
     if not _yahoo_cmp_fallback_on():
@@ -647,6 +652,27 @@ def _bg_pcr_intraday():
         _pcr_intraday_running = False
 
 
+def _bg_intraday_paper():
+    """Intraday paper engine (18-Jun-2026): refresh tc_cache, scan both sides,
+    auto-enter every fresh match (no cap, +/-1.5%), then check exits + 15:15 square-off.
+    Context-isolated (tc_intraday_* tables) — never mixes with v8_paper."""
+    global _intraday_paper_running
+    if _intraday_paper_running:
+        return
+    _intraday_paper_running = True
+    try:
+        rc = tc_intraday.refresh_tc_cache()
+        en = tc_intraday.run_intraday_paper_entry()
+        ex = tc_intraday.run_intraday_paper_exit()
+        log.info(f"intraday_paper: cache={rc.get('written')} "
+                 f"entered={en.get('entered')} closed={ex.get('closed')} "
+                 f"squareoff={ex.get('square_off')}")
+    except Exception as e:
+        log.error(f"intraday_paper failed: {e}")
+    finally:
+        _intraday_paper_running = False
+
+
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
     if _qb_intraday_mark_running:
@@ -781,7 +807,7 @@ async def _task_sync_futures_universe():
     asyncio.create_task(asyncio.to_thread(_bg_sync_futures_universe))
 
 
-# ── Loops ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── Loops ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _scheduler():
     global _live_loop_task
@@ -844,6 +870,7 @@ async def _live_loop():
     - Every 5 ticks (5-min): signal_writer (single live engine — 19 metrics + qualified)
                               + V10 ST+EMA tick (append 5m bar, signal, alert)
                               + pcr_intraday (5-min PCR rollup, self-healing)
+                              + intraday_paper (tc_cache refresh + scan + entry/exit)
     - Every 15 ticks (15-min): qb_intraday_mark
 
     08-Jun-2026 SELF-HEALING: each tick's work is wrapped so any failure is logged
@@ -871,6 +898,7 @@ async def _live_loop():
                     asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
                     asyncio.create_task(asyncio.to_thread(_bg_v10_tick))
                     asyncio.create_task(asyncio.to_thread(_bg_pcr_intraday))
+                    asyncio.create_task(asyncio.to_thread(_bg_intraday_paper))
                 # 15-min boundary by wall clock
                 if minute % 15 == 0:
                     asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
