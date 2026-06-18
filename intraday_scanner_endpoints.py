@@ -1,21 +1,22 @@
 """
-Intraday Scanner V1 — Scorr (LOCKED 18-Jun-2026, spec INTRADAY_SCANNER_V1_003)
+Intraday Scanner V2 — Scorr (LOCKED 19-Jun-2026, spec INTRADAY_SCANNER_SPEC_V2)
 ==============================================================================
-On-demand 4-gate intraday scanner. No scheduler integration — called from the
+On-demand 2-tier intraday scanner. No scheduler integration — called from the
 Scanners page or manually. v8_signal_writer keeps intraday_prices fresh (5-min).
 
-Gates (all strict AND):
-  Gate 1  V8 pre-bucket   — pass n-1 filters of ANY ONE of 3 buy buckets
-  Gate 2  MA hierarchy    — 5min > 1hr > 1day > 3day, not overextended (<3%)
-  Gate 3  10-check TC     — min 9 of 10 (ADR skipped if NULL → one miss allowed)
-  Gate 4  Room to run     — (week_high - CMP)/CMP > 0.5%
+Tier 1 — pre-bucket: pass n-1 filters of ANY ONE of 4 buckets:
+  buy_reversal (9/10) · buy_momentum (9/10) · buy_s1_bounce (6/7) · TC 14-check (13/14)
+Tier 2 — core filters (BOTH must pass after Tier 1):
+  Gate A  MA hierarchy   — 5min > 1hr > 1day > 3day, not overextended (<3%)
+  Gate B  Room to run    — (15d_high - CMP)/CMP > 2.5%
 
+TC = 14 checks (C1-C14), min 13 of 14 (n-1). C14 (basis) skipped if NULL → 12 of 13.
 Time gate: 09:30–15:15 IST only. CMP at signal time = last today intraday close.
 Passing signals auto-record to intraday_watchlist (ON CONFLICT symbol+date DO NOTHING).
 
 Endpoints:
-  GET /api/scanners/intraday              — full scan, records passes
-  GET /api/scanners/intraday/tc/{symbol}  — 10-check TC for one symbol now
+  GET /api/scanners/intraday              — full BUY scan, records passes
+  GET /api/scanners/intraday/tc/{symbol}  — 14-check TC for one symbol now
   GET /api/scanners/intraday/watchlist    — today's recorded signals + live PnL
 
 Bars are uniform 5-min, so "last 3 bars" = 15min, "last 12 bars" = 1hr.
@@ -124,20 +125,19 @@ def _s1b_filters_eval(row: dict, nifty_rsi: Optional[float]) -> int:
     return sum(1 for c in checks if c)
 
 
-def _gate1(row: dict, reversal_cfg: dict, nifty_rsi: Optional[float]) -> dict:
-    """Best of 3 buckets. Pass if any bucket reaches its n-1 threshold."""
-    buckets = []
-    mom_score = _bucket_pass_count(row, FILTER_CONFIG["buy_momentum"])
-    buckets.append(("buy_momentum", mom_score, len(FILTER_CONFIG["buy_momentum"]), len(FILTER_CONFIG["buy_momentum"]) - 1))
-    rev_score = _bucket_pass_count(row, reversal_cfg)
-    buckets.append(("buy_reversal", rev_score, len(reversal_cfg), len(reversal_cfg) - 1))
-    s1b_score = _s1b_filters_eval(row, nifty_rsi)
-    buckets.append(("buy_s1_bounce", s1b_score, 7, 6))
-
-    passed = [(name, sc, tot, need) for (name, sc, tot, need) in buckets if sc >= need]
+def _gate1(row: dict, reversal_cfg: dict, nifty_rsi: Optional[float], tc: dict) -> dict:
+    """Tier 1: pass n-1 of ANY ONE of 4 buckets (incl. TC 14-check as bucket 4)."""
+    mom_cfg = FILTER_CONFIG["buy_momentum"]
+    buckets = [
+        ("buy_momentum", _bucket_pass_count(row, mom_cfg), len(mom_cfg), len(mom_cfg) - 1),
+        ("buy_reversal", _bucket_pass_count(row, reversal_cfg), len(reversal_cfg), len(reversal_cfg) - 1),
+        ("buy_s1_bounce", _s1b_filters_eval(row, nifty_rsi), 7, 6),
+        ("tc", tc["score"], tc["evaluated"], tc["need"]),
+    ]
+    passed = [b for b in buckets if b[1] >= b[3]]
     if passed:
-        # pick the bucket with the highest absolute pass count
-        name, sc, tot, need = max(passed, key=lambda b: b[1])
+        # among passing buckets, label with the highest pass ratio
+        name, sc, tot, need = max(passed, key=lambda b: (b[1] / b[2]) if b[2] else 0)
         return {"pass": True, "bucket": name, "score": sc, "total": tot}
     name, sc, tot, need = max(buckets, key=lambda b: b[1] - b[3])
     return {"pass": False, "bucket": name, "score": sc, "total": tot}
@@ -159,7 +159,7 @@ def _gate2(row: dict) -> dict:
     return {"pass": all([c1, c2, c3, c4]), "c1": c1, "c2": c2, "c3": c3, "c4": c4}
 
 
-# ── Gate 3: 10-check TC ──────────────────────────────────────────────────────
+# ── TC bucket: 14-check (BUY) ────────────────────────────────────────────────
 
 def _vol_timenorm(row: dict) -> Optional[float]:
     num = _f(row.get("vol_today"))
@@ -169,53 +169,55 @@ def _vol_timenorm(row: dict) -> Optional[float]:
     return num / den
 
 
-def _rsi_month_floor(bucket: Optional[str]) -> float:
-    return {"buy_reversal": 55.0, "buy_momentum": 70.0, "buy_s1_bounce": 50.0}.get(bucket, 55.0)
-
-
-def _gate3(row: dict, adr: Optional[float], bucket: Optional[str]) -> dict:
+def _tc_eval(row: dict, adr: Optional[float]) -> dict:
+    """BUY 14-check TC (spec V2). C14 (basis) skipped if NULL. need = evaluated-1 (n-1)."""
     cmp = _f(row.get("live_close"))
     pp, r1 = _f(row.get("pp")), _f(row.get("r1"))
     today_high = _f(row.get("today_high"))
     lb_open, lb_close = _f(row.get("lb_open")), _f(row.get("lb_close"))
-    rsi_w = _f(row.get("rsi_weekly"))
-    rsi_m = _f(row.get("rsi_month"))
+    rsi_w, rsi_m = _f(row.get("rsi_weekly")), _f(row.get("rsi_month"))
+    basis = _f(row.get("basis"))
     vtn = _vol_timenorm(row)
 
     pivot_room = (cmp is not None and pp is not None and r1 is not None
                   and pp < cmp <= r1 and (r1 - cmp) / cmp * 100 > 0.5)
     day_high_room = (cmp is not None and today_high is not None
                      and (today_high - cmp) / cmp * 100 > 0.3)
+    room_to_r1 = (cmp is not None and pp is not None and r1 is not None
+                  and (r1 - pp) > 0 and (r1 - cmp) >= 0.5 * (r1 - pp))
 
     results = {
-        "adr_ge_1": (None if adr is None else adr >= 1.0),                          # 1 (skippable)
-        "sector_day_pos": _passes_filter(row.get("sector_day"), 0.000001, None),    # 2 (>0)
-        "sector_week_pos": _passes_filter(row.get("sector_week"), 0.000001, None),  # 3 (>0)
-        "pivot_zone": bool(pivot_room),                                             # 4
-        "vol_timenorm_ge_0_8": (vtn is not None and vtn >= 0.8),                    # 5
-        "last_bar_green": (lb_open is not None and lb_close is not None and lb_close > lb_open),  # 6
-        "day_high_room": bool(day_high_room),                                       # 7
-        "week_return_pos": _passes_filter(row.get("week_return"), 0.000001, None),  # 8
-        "rsi_weekly_50_75": _passes_filter(rsi_w, 50.0, 75.0),                      # 9
-        "rsi_month_floor": (rsi_m is not None and rsi_m > _rsi_month_floor(bucket)),  # 10
+        "C1_adr_ge_1": (None if adr is None else adr >= 1.0),                        # skippable
+        "C2_sector_day_pos": _passes_filter(row.get("sector_day"), 1e-9, None),
+        "C3_sector_week_pos": _passes_filter(row.get("sector_week"), 1e-9, None),
+        "C4_pivot_zone": bool(pivot_room),
+        "C5_vol_ge_1_25": (vtn is not None and vtn >= 1.25),
+        "C6_last_bar_green": (lb_open is not None and lb_close is not None and lb_close > lb_open),
+        "C7_day_high_room": bool(day_high_room),
+        "C8_week_return_pos": _passes_filter(row.get("week_return"), 1e-9, None),
+        "C9_rsi_weekly_50_75": _passes_filter(rsi_w, 50.0, 75.0),
+        "C10_rsi_month_gt_55": (rsi_m is not None and rsi_m > 55.0),
+        "C11_day_1d_pos": _passes_filter(row.get("day_1d"), 1e-9, None),
+        "C12_mom_2d_pos": _passes_filter(row.get("mom_2d"), 1e-9, None),
+        "C13_room_to_r1": bool(room_to_r1),
+        "C14_basis_ge_0": (None if basis is None else basis >= 0),                   # skippable
     }
     evaluated = [v for v in results.values() if v is not None]
     passed = sum(1 for v in evaluated if v)
-    # min 9 of 10; if a check is skipped (ADR NULL), still allow exactly one miss
-    need = 9 if len(evaluated) == 10 else (len(evaluated) - 1)
+    need = max(1, len(evaluated) - 1)   # n-1 of available (14->13, basis NULL 13->12)
     return {"pass": passed >= need, "score": passed, "evaluated": len(evaluated),
             "need": need, "checks": results}
 
 
-# ── Gate 4: room to run ──────────────────────────────────────────────────────
+# ── Tier 2 Gate B: room to run (15-trading-day high, > 2.5%) ─────────────────
 
 def _gate4(row: dict) -> dict:
     cmp = _f(row.get("live_close"))
-    week_high = _f(row.get("week_high"))
+    week_high = _f(row.get("week_high"))   # MAX(high) last 15 trading days
     if cmp is None or week_high is None or cmp <= 0:
         return {"pass": False, "room_pct": None}
     room = (week_high - cmp) / cmp * 100
-    return {"pass": room > 0.5, "room_pct": round(room, 2)}
+    return {"pass": room > 2.5, "room_pct": round(room, 2)}
 
 
 # ── Main scan SQL ────────────────────────────────────────────────────────────
@@ -233,8 +235,9 @@ SELECT
     td.day_open, td.live_close, td.lb_open, td.lb_close,
     td.today_high, td.today_low, td.avg_today, td.vol_today,
     a3.avg_3bars, a12.avg_12bars,
-    h.lo_2d, h.lo_5d, h.week_high, h.avg_3day,
-    vden.avg_vol_to_t
+    h.lo_2d, h.lo_5d, h.week_high, h.week_low, h.avg_3day,
+    vden.avg_vol_to_t,
+    fb.basis
 FROM v8_metrics m
 JOIN futures_universe f ON f.symbol = m.symbol AND f.is_active = TRUE
 LEFT JOIN v8_paper_pivots p ON p.symbol = m.symbol
@@ -260,14 +263,15 @@ LEFT JOIN LATERAL (
     ) z
 ) a12 ON true
 LEFT JOIN LATERAL (
-    SELECT MIN(low)  FILTER (WHERE rn<=2) AS lo_2d,
-           MIN(low)  FILTER (WHERE rn<=5) AS lo_5d,
-           MAX(high) FILTER (WHERE rn<=7) AS week_high,
+    SELECT MIN(low)  FILTER (WHERE rn<=2)  AS lo_2d,
+           MIN(low)  FILTER (WHERE rn<=5)  AS lo_5d,
+           MAX(high) FILTER (WHERE rn<=15) AS week_high,
+           MIN(low)  FILTER (WHERE rn<=15) AS week_low,
            AVG(close) FILTER (WHERE rn<=3) AS avg_3day
     FROM (
         SELECT low, high, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
         FROM raw_prices WHERE symbol=m.symbol AND price_date < CURRENT_DATE
-    ) x WHERE rn<=7
+    ) x WHERE rn<=15
 ) h ON true
 LEFT JOIN LATERAL (
     SELECT AVG(daysum) AS avg_vol_to_t FROM (
@@ -279,28 +283,37 @@ LEFT JOIN LATERAL (
         GROUP BY ts::date
     ) z
 ) vden ON true
+LEFT JOIN LATERAL (
+    SELECT basis FROM futures_basis
+    WHERE symbol=m.symbol AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1
+) fb ON true
 WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
 """
 
 
 def _evaluate(row: dict, reversal_cfg: dict, nifty_rsi: Optional[float], adr: Optional[float]) -> dict:
-    g1 = _gate1(row, reversal_cfg, nifty_rsi)
-    g2 = _gate2(row)
-    g3 = _gate3(row, adr, g1["bucket"])
-    g4 = _gate4(row)
-    signal = g1["pass"] and g2["pass"] and g3["pass"] and g4["pass"]
+    tc = _tc_eval(row, adr)                       # 14-check TC (also Tier-1 bucket 4)
+    g1 = _gate1(row, reversal_cfg, nifty_rsi, tc)  # Tier 1: any of 4 buckets
+    g2 = _gate2(row)                              # Tier 2 Gate A: MA hierarchy
+    g4 = _gate4(row)                              # Tier 2 Gate B: room to run
+    tier1 = g1["pass"]
+    tier2 = g2["pass"] and g4["pass"]
+    vtn = _vol_timenorm(row)
     return {
         "symbol": row["symbol"],
         "basket": g1["bucket"],
-        "signal": signal,
-        "gate1_pass": g1["pass"], "gate1_score": g1["score"], "gate1_total": g1["total"],
+        "signal": tier1 and tier2,
+        "tier1_pass": tier1, "tier1_score": g1["score"], "tier1_total": g1["total"],
+        "gate1_score": g1["score"],
+        "tier2_pass": tier2,
         "gate2_ma_pass": g2["pass"], "gate2": {k: v for k, v in g2.items() if k != "pass"},
-        "gate3_tc_score": g3["score"], "gate3_pass": g3["pass"],
-        "gate3_need": g3["need"], "gate3_evaluated": g3["evaluated"],
+        "gate3_tc_score": tc["score"], "tc_pass": tc["pass"],
+        "gate3_need": tc["need"], "gate3_evaluated": tc["evaluated"],
         "gate4_room_pct": g4["room_pct"], "gate4_pass": g4["pass"],
-        "vol_ratio_timenorm": round(_vol_timenorm(row), 3) if _vol_timenorm(row) is not None else None,
+        "vol_ratio_timenorm": round(vtn, 3) if vtn is not None else None,
+        "basis": _f(row.get("basis")),
         "entry_price": _f(row.get("live_close")),
-        "checks": g3["checks"],
+        "checks": tc["checks"],
     }
 
 
@@ -330,7 +343,7 @@ def _record_watchlist(signals: list, signal_ts: datetime):
 
 @router.get("/api/scanners/intraday")
 def scanner_intraday(limit: int = 40):
-    """4-gate intraday scan over the active futures universe."""
+    """V2 BUY scan (Tier1 4 buckets -> Tier2 MA + room) over the active futures universe."""
     now = _ist_now()
     if not _in_window(now):
         return {"scanner": "intraday", "status": "outside_window",
@@ -355,7 +368,7 @@ def scanner_intraday(limit: int = 40):
     recorded = _record_watchlist(signals, now)
 
     return {
-        "scanner": "intraday", "status": "ok",
+        "scanner": "intraday", "side": "BUY", "spec": "V2", "status": "ok",
         "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
         "adr": adr, "universe": len(rows),
@@ -366,7 +379,7 @@ def scanner_intraday(limit: int = 40):
 
 @router.get("/api/scanners/intraday/tc/{symbol}")
 def scanner_intraday_tc(symbol: str):
-    """Run the 10-check TC for a single symbol at current time."""
+    """Run the 14-check TC + Tier1/Tier2 evaluation for a single symbol now."""
     symbol = symbol.upper()
     now = _ist_now()
     if not _in_window(now):
@@ -388,15 +401,18 @@ def scanner_intraday_tc(symbol: str):
 
     res = _evaluate(row, reversal_cfg, nifty_rsi, adr)
     return {
-        "symbol": symbol, "status": "ok",
+        "symbol": symbol, "side": "BUY", "spec": "V2", "status": "ok",
         "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "signal": res["signal"], "basket": res["basket"],
-        "gate1": {"pass": res["gate1_pass"], "score": res["gate1_score"], "total": res["gate1_total"]},
-        "gate2": {"pass": res["gate2_ma_pass"], **res["gate2"]},
-        "gate3": {"pass": res["gate3_pass"], "score": res["gate3_tc_score"],
-                  "need": res["gate3_need"], "evaluated": res["gate3_evaluated"], "checks": res["checks"]},
-        "gate4": {"pass": res["gate4_pass"], "room_pct": res["gate4_room_pct"]},
+        "tier1": {"pass": res["tier1_pass"], "bucket": res["basket"],
+                  "score": res["tier1_score"], "total": res["tier1_total"]},
+        "tier2": {"pass": res["tier2_pass"],
+                  "ma": {"pass": res["gate2_ma_pass"], **res["gate2"]},
+                  "room": {"pass": res["gate4_pass"], "room_pct": res["gate4_room_pct"]}},
+        "tc": {"pass": res["tc_pass"], "score": res["gate3_tc_score"],
+               "need": res["gate3_need"], "evaluated": res["gate3_evaluated"], "checks": res["checks"]},
         "vol_ratio_timenorm": res["vol_ratio_timenorm"],
+        "basis": res["basis"],
         "entry_price": res["entry_price"],
     }
 
