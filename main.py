@@ -97,7 +97,7 @@ app.add_middleware(
 )
 
 _LOGOUT_BTN = (
-    b"<style>#scorr-lo{position:fixed;top:12px;left:14px;z-index:9999;}"
+    b"<style>#scorr-lo{position:fixed;top:12px;right:14px;z-index:9999;}"
     b"#scorr-lo a{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;"
     b"background:rgba(15,22,35,0.88);border:1px solid #2a3548;border-radius:7px;"
     b"color:#5a6781;font-size:10.5px;font-weight:600;text-decoration:none;"

@@ -32,7 +32,7 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 | scorr_cockpit.html | Main nav shell | ~41KB |
 | scorr_scanners.html | Scanners page (3 tabs) | ~8KB |
 | scorr_home.html | Home page | ~6KB |
-| docs/API_REFERENCE.md | Full endpoint reference | |
+| API_REFERENCE.md | Full endpoint reference (repo root) | ~14KB |
 
 ## CC Task System — 2-Way Workflow
 
@@ -60,7 +60,7 @@ If status='blocked' — skip, show Arpit why it is blocked.
 INSERT INTO cc_tasks (title, spec, priority, category) VALUES ('TITLE', '{"description":"...","tasks":[...]}', 'high', 'ui');
 
 ## API Reference
-Full reference in docs/API_REFERENCE.md
+Full reference in API_REFERENCE.md (repo root, not docs/)
 50 direct routes + 100+ router endpoints across 28 mounted routers.
 Key endpoints: /api/v8/*, /api/scanners/*, /api/qb/*, /api/gvm/*, /api/paper/*, /api/cc/tasks/*
 

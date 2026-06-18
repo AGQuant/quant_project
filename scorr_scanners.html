@@ -56,6 +56,7 @@ td{padding:7px 10px;white-space:nowrap}
 .cs{text-align:center;padding:60px 20px;color:#8a94a6}
 .cs big{display:block;font-size:28px;margin-bottom:8px}
 .cs b{display:block;font-size:14px;font-weight:700;color:#1c2536;margin-bottom:4px}
+.wlh{margin:22px 0 10px;font-size:11px;font-weight:700;color:#8a94a6;text-transform:uppercase;letter-spacing:1px}
 </style>
 </head>
 <body>
@@ -91,16 +92,13 @@ td{padding:7px 10px;white-space:nowrap}
   <!-- INTRADAY -->
   <div class="panel on" id="p-intraday">
     <div class="bar">
-      <label>Min 1D%</label>
-      <input type="number" id="f-d" value="0.3" step="0.1" min="-10" max="10" style="width:58px">
-      <label>Min Vol</label>
-      <input type="number" id="f-v" value="1.0" step="0.1" min="0" style="width:52px">
-      <label>Min GVM</label>
-      <input type="number" id="f-g" value="0" step="0.5" min="0" max="10" style="width:52px">
-      <button class="rbtn" id="i-btn" onclick="loadI()">Refresh</button>
+      <span style="font-size:11px;color:#5a6781;font-weight:600">4-gate scan · 09:30–15:15 IST</span>
+      <button class="rbtn" id="i-btn" onclick="loadI()">Run Scan</button>
     </div>
     <div class="st"><span class="dot" id="i-dot"></span><span id="i-st">Loading...</span></div>
     <div id="i-tbl"><div class="empty">Loading...</div></div>
+    <div class="wlh">Watchlist — today's recorded signals</div>
+    <div id="w-tbl"><div class="empty">Loading...</div></div>
   </div>
 
   <!-- POSITIONAL -->
@@ -134,32 +132,55 @@ function sw(t){
   at=t;
   if(t==='intraday'&&!window._li)loadI();
 }
+const chip=(ok)=>'<span class="gp '+(ok?'g4':'g1')+'">'+(ok?'PASS':'FAIL')+'</span>';
+const tcchip=(s,need)=>{const c=s>=(need||9)?'g4':s>=(need||9)-1?'g2':'g1';return'<span class="gp '+c+'">'+(s==null?'--':s)+'</span>';};
 async function loadI(){
   const btn=document.getElementById('i-btn');
   btn.disabled=true;btn.textContent='...';
-  document.getElementById('i-st').textContent='Fetching...';
-  const d=document.getElementById('f-d').value||0.3;
-  const v=document.getElementById('f-v').value||1.0;
-  const g=document.getElementById('f-g').value||0;
+  document.getElementById('i-st').textContent='Scanning...';
   try{
-    const res=await fetch('/api/scanners/intraday?min_day1d='+d+'&min_vol_ratio='+v+'&min_gvm='+g+'&limit=40');
+    const res=await fetch('/api/scanners/intraday?limit=40');
     const data=await res.json();
     window._li=true;
-    document.getElementById('i-dot').className='dot';
-    document.getElementById('i-st').textContent=data.count+' stocks - v8_metrics live';
-    if(!data.rows||!data.rows.length){
-      document.getElementById('i-tbl').innerHTML='<div class="empty">No stocks match filters</div>';
+    if(data.status==='outside_window'){
+      document.getElementById('i-dot').className='dot y';
+      document.getElementById('i-st').textContent='Market closed — scanner runs 09:30–15:15 IST · '+(data.now||'');
+      document.getElementById('i-tbl').innerHTML='<div class="empty">Intraday scanner is active only during market hours (09:30–15:15 IST).</div>';
     }else{
-      document.getElementById('i-tbl').innerHTML='<div class="tw"><table><thead><tr><th>Symbol</th><th>1D%</th><th>2D%</th><th>Vol</th><th>Sec Day</th><th>Sec Wk</th><th>DMA50</th><th>RSI W</th><th>GVM</th><th>CMP</th></tr></thead><tbody>'+
-        data.rows.map(r=>'<tr><td><div class="sym">'+r.symbol+'</div><div class="seg">'+(r.segment||'--')+'</div></td><td>'+pct(r.day_1d_pct)+'</td><td>'+pct(r.mom_2d_pct)+'</td><td class="'+(+(r.vol_ratio||0)>=1.5?'up':'nt')+'">'+num(r.vol_ratio)+'x</td><td>'+pct(r.sector_day_pct)+'</td><td>'+pct(r.sector_week_pct)+'</td><td>'+pct(r.dma_50_pct)+'</td><td class="'+(+(r.rsi_weekly||0)>=60?'up':+(r.rsi_weekly||100)<=40?'dn':'nt')+'">'+num(r.rsi_weekly,0)+'</td><td>'+gp(r.gvm)+'</td><td class="nt">'+pr(r.cmp)+'</td></tr>').join('')+
-        '</tbody></table></div>';
+      document.getElementById('i-dot').className='dot';
+      document.getElementById('i-st').textContent=data.count+' signals · NIFTY RSI '+num(data.nifty_rsi,1)+' · ADR '+num(data.adr,2)+' · universe '+data.universe+' · '+data.recorded_to_watchlist+' recorded';
+      const rows=data.signals||[];
+      if(!rows.length){
+        document.getElementById('i-tbl').innerHTML='<div class="empty">No signals passed all 4 gates</div>';
+      }else{
+        document.getElementById('i-tbl').innerHTML='<div class="tw"><table><thead><tr><th>Symbol</th><th>Basket</th><th>Gate1</th><th>Gate2 MA</th><th>TC</th><th>Room%</th><th>Vol(tn)</th><th>Entry</th></tr></thead><tbody>'+
+          rows.map(r=>'<tr><td class="sym">'+r.symbol+'</td><td class="seg">'+(r.basket||'--')+'</td><td>'+(r.gate1_score==null?'--':r.gate1_score+'/'+r.gate1_total)+'</td><td>'+chip(r.gate2_ma_pass)+'</td><td>'+tcchip(r.gate3_tc_score,r.gate3_need)+'</td><td class="'+(+(r.gate4_room_pct||0)>0?'up':'nt')+'">'+num(r.gate4_room_pct,2)+'%</td><td class="'+(+(r.vol_ratio_timenorm||0)>=0.8?'up':'nt')+'">'+num(r.vol_ratio_timenorm,2)+'</td><td class="nt">'+pr(r.entry_price)+'</td></tr>').join('')+
+          '</tbody></table></div>';
+      }
     }
   }catch(e){
     document.getElementById('i-dot').className='dot y';
     document.getElementById('i-st').textContent='Error';
     document.getElementById('i-tbl').innerHTML='<div class="empty">'+e.message+'</div>';
   }
-  btn.disabled=false;btn.textContent='Refresh';
+  loadW();
+  btn.disabled=false;btn.textContent='Run Scan';
+}
+async function loadW(){
+  try{
+    const res=await fetch('/api/scanners/intraday/watchlist');
+    const data=await res.json();
+    const rows=data.rows||[];
+    if(!rows.length){
+      document.getElementById('w-tbl').innerHTML='<div class="empty">No signals recorded today</div>';
+      return;
+    }
+    document.getElementById('w-tbl').innerHTML='<div class="tw"><table><thead><tr><th>Symbol</th><th>Basket</th><th>Entry</th><th>CMP</th><th>PnL%</th><th>TC</th><th>Room%</th><th>Age</th></tr></thead><tbody>'+
+      rows.map(r=>'<tr><td class="sym">'+r.symbol+'</td><td class="seg">'+(r.basket||'--')+'</td><td class="nt">'+pr(r.entry_price)+'</td><td class="nt">'+pr(r.cmp)+'</td><td>'+pct(r.pnl_pct)+'</td><td>'+tcchip(r.gate3_tc_score)+'</td><td class="nt">'+num(r.gate4_room_pct,2)+'%</td><td class="nt">'+(r.mins_since==null?'--':Math.round(r.mins_since)+'m')+'</td></tr>').join('')+
+      '</tbody></table></div>';
+  }catch(e){
+    document.getElementById('w-tbl').innerHTML='<div class="empty">'+e.message+'</div>';
+  }
 }
 loadI();
 setInterval(()=>{if(at==='intraday')loadI();},300000);
