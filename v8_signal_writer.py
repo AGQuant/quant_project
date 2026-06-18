@@ -556,6 +556,46 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
     conn.commit()
 
 
+# -- Step 7b: Bulk sector_day SQL update (18-Jun-2026) -------------------------
+
+def _update_sector_day_sql(conn, target_date) -> int:
+    """
+    Compute sector_day for all symbols via SQL after every signal_writer tick.
+    sector_day = avg mom_2d of peers in same gvm_scores segment (live).
+    Replaces unreliable Python _add_sector_aggregates which silently returns
+    None when eod_metrics segment lookup fails.
+    Added: 18-Jun-2026.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE v8_metrics
+                SET sector_day = seg_avgs.avg_mom_2d
+                FROM (
+                    SELECT m.symbol, AVG(m2.mom_2d) AS avg_mom_2d
+                    FROM v8_metrics m
+                    JOIN gvm_scores g  ON g.symbol  = m.symbol
+                        AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+                    JOIN v8_metrics m2 ON m2.score_date = m.score_date
+                        AND m2.mom_2d IS NOT NULL
+                    JOIN gvm_scores g2 ON g2.symbol  = m2.symbol
+                        AND g2.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+                        AND g2.segment   = g.segment
+                    WHERE m.score_date = %s
+                    GROUP BY m.symbol
+                ) seg_avgs
+                WHERE v8_metrics.symbol     = seg_avgs.symbol
+                  AND v8_metrics.score_date = %s
+            """, (target_date, target_date))
+            updated = cur.rowcount
+        conn.commit()
+        log.info(f"_update_sector_day_sql: {updated} rows updated for {target_date}")
+        return updated
+    except Exception as e:
+        log.warning(f"_update_sector_day_sql: {e}")
+        return 0
+
+
 # -- Market gate --------------------------------------------------------------
 
 def _market_gate_fails(conn) -> int:
@@ -1418,6 +1458,7 @@ def run_live_signal_writer(conn) -> dict:
     _write_qualified(conn, all_metrics, today)
 
     _write_adr_intraday(conn)
+    _update_sector_day_sql(conn, today)
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
     return {
