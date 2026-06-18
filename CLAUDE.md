@@ -2,7 +2,6 @@
 
 ## What is Scorr
 AI-native investment research platform. scorr.in
-Mission: democratise institutional-grade investing for retail India.
 Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 
 ## Architecture
@@ -29,29 +28,47 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 | v8_signal_writer.py | Live 5-min signal engine | ~61KB |
 | v8_engine.py | EOD engine runs 15:45 IST | ~23KB |
 | scanner_endpoints.py | Scanner API + /scanners HTML route | ~6KB |
-| scorr_cockpit.html | Main nav shell — nav links to all pages | ~41KB |
+| cc_task_endpoints.py | Task queue API (to be created) | |
+| scorr_cockpit.html | Main nav shell | ~41KB |
 | scorr_scanners.html | Scanners page (3 tabs) | ~8KB |
 | scorr_home.html | Home page | ~6KB |
-| docs/API_REFERENCE.md | Full endpoint reference (created by CC) | |
+| docs/API_REFERENCE.md | Full endpoint reference | |
 
-## CC Task System
-Claude.ai creates tasks in Railway session_log with category='cc_task'.
-To get your task list run this SQL via Scorr MCP:
-  SELECT title, details FROM session_log WHERE category='cc_task' AND details::text LIKE '%pending%' ORDER BY session_ts DESC;
+## CC Task System — 2-Way Workflow
 
-Current pending tasks: CC_TASK_001_UI_FIXES (scorr_home.html nav, logout, Scorr branding, back tabs)
+### Trigger phrases (Arpit says these to CC):
+- "read cc tasks" → run the SQL below, show pending tasks, implement them
+- "read railway cc tasks" → same as above
+- "what tasks are pending" → same as above
+
+### SQL to fetch pending tasks:
+SELECT id, title, priority, spec FROM cc_tasks
+WHERE status = 'pending'
+ORDER BY priority DESC, created_at ASC;
+
+### When CC picks up a task:
+1. Claim it: UPDATE cc_tasks SET status='in_progress', claimed_at=NOW() WHERE id=X;
+2. Log start: INSERT INTO cc_task_logs (task_id, actor, message) VALUES (X, 'claude_code', 'Started: <description>');
+3. Implement all items in spec
+4. Log each step: INSERT INTO cc_task_logs (task_id, actor, message) VALUES (X, 'claude_code', 'Done: <what was done>');
+5. Finish: UPDATE cc_tasks SET status='done', finished_at=NOW(), commit_sha='<sha>', result='<summary>', files_changed=ARRAY['file1','file2'] WHERE id=X;
+
+### Blocked tasks:
+If status='blocked' — skip, show Arpit why it is blocked.
+
+### Claude.ai creates tasks via:
+INSERT INTO cc_tasks (title, spec, priority, category) VALUES ('TITLE', '{"description":"...","tasks":[...]}', 'high', 'ui');
+
+## API Reference
+Full reference in docs/API_REFERENCE.md
+50 direct routes + 100+ router endpoints across 28 mounted routers.
+Key endpoints: /api/v8/*, /api/scanners/*, /api/qb/*, /api/gvm/*, /api/paper/*, /api/cc/tasks/*
 
 ## V8 Architecture (locked 18-Jun-2026)
 - EOD frozen: gvm_score only (22:00 GVM nightly)
 - Live every 5-min: all 19 other metrics via v8_signal_writer
-- COALESCE protection: day_1d, mom_2d, sector_week, sector_month
 - day_1d fix live from 19-Jun-2026 (first market day after fix)
 
-## API Reference
-Full reference in docs/API_REFERENCE.md
-Railway summary in session_log title='API_REFERENCE_18JUN2026'
-50 direct routes + 100+ router endpoints across 28 mounted routers.
-
 ## Workflow
-Claude.ai (design + spec) → Railway cc_task → Claude Code (implement + push) → Railway (deploy) → Claude.ai MCP (verify)
+Claude.ai → INSERT cc_tasks → Arpit tells CC "read cc tasks" → CC claims + implements + logs → Claude.ai verifies
 Never push code from Claude.ai chat. Claude Code owns all file changes.
