@@ -39,6 +39,9 @@
   .page-title span{color:var(--purp)}
   .page-sub{font-size:10.5px;color:var(--dim);letter-spacing:1.8px;text-transform:uppercase;margin-top:3px}
   .head-meta{font-size:10.5px;color:var(--mut);font-family:var(--mono);text-align:right}
+  .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);
+    margin-right:4px;animation:pulse 1.6s ease-in-out infinite;vertical-align:middle}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
   .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
   .ctl-btn{padding:9px 14px;border:none;border-radius:9px;font-family:var(--font);font-size:12px;
@@ -103,7 +106,7 @@
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/cio2?model=gvm"><span>◦</span>GVM</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/sector"><span>⊙</span>Sector</a>
+  <a class="mnav-item" href="/sector"><span>☉</span>Sector</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/check"><span>✓</span>Check</a>
   <div class="mnav-sep"></div>
@@ -168,6 +171,8 @@
 <script>
 let side='LONG';
 let data=null;
+let firstLoad=true;
+const AUTO_REFRESH_MS=30000;   // 30s background refresh — keeps page live with the 5-min engine
 
 function setSide(s){
   side=s;
@@ -179,23 +184,29 @@ function setSide(s){
 function pnlCls(v){ return v>0?'pos':(v<0?'neg':''); }
 function fmtPnl(v){ if(v==null)return '—'; return (v>0?'+':'')+v+'%'; }
 
-async function load(){
-  document.getElementById('loading').classList.add('show');
-  document.getElementById('content').style.display='none';
+async function load(silent){
+  // Spinner only on first load; background refreshes update silently (no flash).
+  if(!silent){
+    document.getElementById('loading').classList.add('show');
+    document.getElementById('content').style.display='none';
+  }
   try{
     const r=await fetch('/api/intraday/dashboard');
-    if(!r.ok){alert('Dashboard error '+r.status);return;}
+    if(!r.ok){ if(!silent) alert('Dashboard error '+r.status); return; }
     data=await r.json();
     render();
-  }catch(e){alert('Network error: '+e.message);}
-  document.getElementById('loading').classList.remove('show');
-  document.getElementById('content').style.display='block';
+  }catch(e){ if(!silent) alert('Network error: '+e.message); }
+  if(!silent){
+    document.getElementById('loading').classList.remove('show');
+    document.getElementById('content').style.display='block';
+  }
+  firstLoad=false;
 }
 
 function render(){
   if(!data||!data.sides)return;
   const d=data.sides[side]; if(!d)return;
-  document.getElementById('headMeta').innerHTML=`${data.ts}<br>cache: ${data.cache_ts} · ${data.cache_rows} rows`;
+  document.getElementById('headMeta').innerHTML=`<span class="live-dot"></span>${data.ts}<br>cache: ${data.cache_ts} · ${data.cache_rows} rows`;
   document.getElementById('funnelSide').textContent=side;
 
   // funnel
@@ -222,7 +233,7 @@ function render(){
         <td class="${pnlCls(p.pnl_pct)}">${fmtPnl(p.pnl_pct)}</td>
         <td>${num(p.target)}</td>
         <td>${num(p.stop)}</td></tr>`).join('')
-    : `<tr><td colspan="6" class="empty">No open positions. Run a tick during market hours.</td></tr>`;
+    : `<tr><td colspan="6" class="empty">No open positions yet. The engine enters automatically every 5 min during market hours.</td></tr>`;
 
   // trades
   document.getElementById('tradeCount').textContent=(d.trades||[]).length+' trades';
@@ -250,7 +261,7 @@ async function refreshCache(){
     const d=await r.json();
     b.textContent=`✓ ${d.written||0} rows`;
     setTimeout(()=>{b.textContent=o;b.disabled=false;},2000);
-    load();
+    load(true);
   }catch(e){alert('Refresh error: '+e.message);b.textContent=o;b.disabled=false;}
 }
 
@@ -263,11 +274,15 @@ async function runTick(){
     const ne=(d.new_entries||[]).length;
     b.textContent=`✓ ${ne} entered · ${d.closed||0} closed`;
     setTimeout(()=>{b.textContent=o;b.disabled=false;},2500);
-    load();
+    load(true);
   }catch(e){alert('Tick error: '+e.message);b.textContent=o;b.disabled=false;}
 }
 
-load();
+// First load (with spinner), then silent auto-refresh every 30s.
+load(false);
+setInterval(()=>load(true), AUTO_REFRESH_MS);
+// Refresh immediately when the tab regains focus.
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(true); });
 </script>
 <script>
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
