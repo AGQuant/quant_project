@@ -43,6 +43,10 @@ buy_s1_bounce V1 (17-Jun-2026):
   Fixed +1.5%/-1.5% target/stop. Dedicated ring-fenced slots: 3/3/3/2.
   Backtest (Jun25-May26, 211 futures): 88 sigs/yr, 73.9% WR, EV +0.72%.
   New metrics: recovery_2d, week_low, day_ret (live), nifty_rsi (market gate).
+  NOTE: buy_s1_bounce is EXCLUDED from score-gate main loop (_write_qualified).
+  It is handled exclusively by _write_buy_s1_bounce_qualified (strict AND).
+  buy_s1_bounce appears in FILTER_CONFIG (v8_endpoints.py) for endpoint display
+  only -- the exclusion here prevents score-gate contamination (18-Jun-2026 fix).
 """
 
 import logging
@@ -1002,7 +1006,11 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
     signal_ts_ist = _now_ist()
 
     for basket, filters in FILTER_CONFIG.items():
-        if basket == "sell_overbought":
+        # sell_overbought and buy_s1_bounce have dedicated handlers below.
+        # buy_s1_bounce appears in FILTER_CONFIG for endpoint display only --
+        # running it through score-gate here would contaminate it with the
+        # wrong filters and wrong entry function (18-Jun-2026 bug fix).
+        if basket in ("sell_overbought", "buy_s1_bounce"):
             continue
 
         if basket == "buy_reversal":
@@ -1108,7 +1116,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
-    # Buy S1 Bounce -- dedicated ring-fenced basket
+    # Buy S1 Bounce -- dedicated ring-fenced basket (strict AND, 8 filters)
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
                                     gate_fails, pivots, signal_ts_ist)
 
