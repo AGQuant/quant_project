@@ -76,6 +76,7 @@ const MODELS = [
   { id: "gvm",    icon: "◦", label: "GVM",    full: "GVM Scoring",           color: C.gold,     live: true },
   { id: "sector", icon: "◷", label: "Sector", full: "Sector Rotation",       color: C.purple,   live: true },
   { id: "check",  icon: "✓", label: "Check",  full: "Trade Check",           color: C.green,    live: true },
+  { id: "scanners", icon: "⊞", label: "Scanners", full: "Intraday Scanners", color: C.purple,   live: true },
   { id: "max",    icon: "◉", label: "Max",    full: "Max Chat",              color: "#6d4fe0",  live: true },
   { id: "fpc",    icon: "📊", label: "FPC",    full: "Financial Planner V11", color: "#0891b2",  live: true },
   { id: "qb",     icon: "▦", label: "QB",     full: "Quant Basket",          color: C.green,    live: false },
@@ -1327,6 +1328,7 @@ function App() {
   else if (page === "sector") body = <FrameModule src={`${API}/sector?embed=1`} />;
   else if (page === "max")    body = <FrameModule src={`${API}/cio?embed=1`} />;
   else if (page === "check")  body = <FrameModule src={`${API}/check?embed=1`} />;
+  else if (page === "scanners") body = <FrameModule src={`${API}/scanners?embed=1`} />;
   else if (page === "fpc")    body = <FrameModule src={`${API}/fpc?embed=1`} />;
   else if (page === "gvm")    body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
