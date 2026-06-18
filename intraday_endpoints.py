@@ -1,29 +1,45 @@
 """
-Intraday paper engine endpoints (id=374).
+Intraday paper engine endpoints (id=374; updated 18-Jun-2026).
 
-  POST /api/intraday/tick        — run one engine tick (manage open + enter). Manual phase 1.
-  GET  /api/intraday/dashboard   — full page payload (funnel + open + trade log + stats, per side)
+Single source of truth: tc_intraday_* tables (written by scheduler every 5-min).
+
+  GET  /api/intraday/dashboard   — instant-read dashboard payload for /intraday page
+  POST /api/intraday/tick        — manual engine tick (enter + exit), also refreshes cache
   GET  /api/intraday/open        — open positions (optional ?side=)
   GET  /api/intraday/trades      — today's closed trades (optional ?side=)
 """
 
 from fastapi import APIRouter
+import tc_intraday as tci
 import intraday_engine as ie
 
 router = APIRouter()
 
 
-@router.post("/api/intraday/tick")
-def intraday_tick():
-    """One engine tick: manage/exit open positions, then enter new qualifiers
-    (both sides) if before 15:00 cutoff. Square-off all at/after 15:15.
-    Standalone/manual in phase 1 — scheduler wiring deferred to phase 1.5."""
-    return ie.run_tick()
-
-
 @router.get("/api/intraday/dashboard")
 def intraday_dashboard():
-    return ie.get_dashboard()
+    """INSTANT-READ dashboard payload for the /intraday page.
+    Reads tc_intraday_positions + tc_intraday_trades (the live scheduler tables).
+    Returns {ts, cache_ts, cache_rows, sides:{LONG/SHORT:{funnel,stats,open,trades}}}."""
+    return tci.intraday_dashboard()
+
+
+@router.post("/api/intraday/tick")
+def intraday_tick():
+    """Manual engine tick: refreshes tc_cache, scans + enters new positions,
+    runs exit checks + 15:15 square-off.
+    Returns {new_entries, closed} for the page button feedback."""
+    rc = tci.refresh_tc_cache()
+    en = tci.run_intraday_paper_entry()
+    ex = tci.run_intraday_paper_exit()
+    return {
+        "ok": True,
+        "cache_written": rc.get("written"),
+        "new_entries": en.get("positions", []),
+        "closed": ex.get("closed"),
+        "square_off": ex.get("square_off"),
+        "ts": en.get("ts") or ex.get("ts"),
+    }
 
 
 @router.get("/api/intraday/open")
