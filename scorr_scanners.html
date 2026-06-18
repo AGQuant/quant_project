@@ -7,11 +7,14 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
-.nav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
-.nav::-webkit-scrollbar{display:none}
-.ni{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
-.ni:hover{color:#1c2536}
-.ni.on{border-bottom-color:#2563eb;color:#2563eb}
+/* ── Canonical Scorr model-nav ── */
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.model-nav::-webkit-scrollbar{display:none}
+.mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
+.mnav-item:hover{color:#1c2536}
+.mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+.mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+.mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
 .page{max-width:880px;margin:0 auto;padding:14px 12px}
 .h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
 .h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
@@ -56,15 +59,25 @@ td{padding:7px 10px;white-space:nowrap}
 </style>
 </head>
 <body>
-<nav class="nav">
-  <a class="ni" href="/">&#8962; Home</a>
-  <a class="ni" href="/dashboard">&#9889; V8</a>
-  <a class="ni" href="/cio2?model=gvm">&#9702; GVM</a>
-  <a class="ni" href="/sector">&#8857; Sector</a>
-  <a class="ni" href="/check">&#10003; Check</a>
-  <a class="ni on" href="/scanners">&#8862; Scanners</a>
-  <a class="ni" href="/cio">&#9673; Max</a>
-  <a class="ni" href="/fpc">&#9638; FPC</a>
+<nav class="model-nav" id="scorr-nav">
+  <a class="mnav-item" href="/"><span>&#8962;</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/dashboard"><span>&#9889;</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>&#8857;</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>&#10003;</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item active" href="/scanners"><span>&#8862;</span>Scanners</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>&#9638;</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item soon"><span>&#8862;</span>QB</a>
+  <a class="mnav-item soon"><span>&#9651;</span>V10</a>
 </nav>
 <div class="page">
   <div class="h1">Scanners</div>
