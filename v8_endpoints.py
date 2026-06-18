@@ -15,15 +15,15 @@ sell_overbought V2 LOCKED (16-Jun-2026): Pivot-based mean reversion.
   5 filters: week_high>0.9*R1orR2, fall_3d<-3%, rsiW>=80, rsiM>=70, sector_week<0.
   Target=S1 | Stop=R2 | 81.5% WR | EV +1.56%/trade.
   Dedicated ring-fenced slots: 4 (Bull/Neutral) / 3 (Bearish). Total always 24.
+  Funnel: dedicated so_funnel_detail() computes all 5 filters live from raw_prices.
+  FILTER_CONFIG entry (3 cols) is reference only -- funnel bypasses it.
 buy_s1_bounce V1 LOCKED (17-Jun-2026): S1 support bounce -- BUY_S1_BOUNCE_SPEC_V1 id=378.
   8 strict-AND filters. 73.9% WR | EV +0.716%/trade | 88 sigs/yr.
   Dedicated ring-fenced slots: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
-  Funnel: dedicated s1b_funnel_detail()/s1b_funnel_counts() compute the TRUE
-  8-filter cumulative drop-off (incl 5 live metrics not in FILTER_CONFIG).
-  Stock passcount: dedicated s1b_stock_passcount() evaluates all 8 filters live.
-  The static FILTER_CONFIG entry below (3 cols) is for endpoint display only.
-  Dashboard stage fields: survivors/killed/condition_min/condition_max; header
-  fields: universe/final/filter_count (matches v8_dashboard.html renderer).
+  Funnel: dedicated s1b_funnel_detail() computes all 8 filters live.
+  FILTER_CONFIG entry (3 cols) is reference only -- funnel bypasses it.
+Generic funnel_detail: stages emit both passes/fails AND survivors/killed (aliases)
+  so dashboard JS (reads survivors/killed) works for all baskets.
 Slot architecture (17-Jun-2026) SLOT_ARCHITECTURE_V2.4.0 id=379:
   Standard pool (4 baskets):
     Strong Bullish: 15B/5S | Bullish: 14B/6S | Neutral: 12B/8S | Bearish: 8B/13S
@@ -108,18 +108,15 @@ FILTER_CONFIG = {
         "sector_week":   [None,  -2.0],
         "mom_2d":        [None,  -1.5],
     },
-    # sell_overbought: pivot-based filters computed live -- rsi/sector here for reference only
+    # sell_overbought: 2 pivot-based filters (week_high_vs_pivot, fall_3d) computed live.
+    # Only the 3 RSI/sector cols listed here for reference -- funnel uses dedicated so_funnel_detail().
     "sell_overbought": {
         "rsi_weekly":   [80.0, None],
         "rsi_month":    [70.0, None],
         "sector_week":  [None,  0.0],
     },
     # buy_s1_bounce -- BUY_S1_BOUNCE_SPEC_V1 LOCKED 17-Jun-2026 id=378
-    # 8 strict-AND: week_low_vs_s1, recovery_2d[2-8%], week_return[0-3%],
-    #   close_vs_open, day_ret[>0.5%], vol_ratio[>=1.5x], nifty_rsi[>=55], dma50_pct[>0%]
-    # S1B-specific metrics computed live by v8_signal_writer v2.4.0
-    # Only standard v8_metrics cols listed here (display only -- funnel uses
-    # dedicated s1b_funnel_detail() which computes the full 8-filter drop-off)
+    # 8 strict-AND filters. Only standard v8_metrics cols listed here (reference only).
     "buy_s1_bounce": {
         "week_return":  [0.0,  3.0],
         "vol_ratio":    [1.5, None],
@@ -639,9 +636,6 @@ def filter_config(basket: str):
             "slot_architecture": {"strong_bullish": 3, "bullish": 3, "neutral": 3, "bearish": 2,
                                   "note": "Ring-fenced -- never competes with standard buy pool"},
             "backtest": {"signals": 88, "wr_pct": 73.9, "expected_value": 0.716},
-            "note": "5 of 8 filters (nifty_rsi, recovery_2d, day_ret, close_vs_open, "
-                    "week_low) are computed live by v8_signal_writer -- not in static "
-                    "FILTER_CONFIG. Use /funnel_detail/buy_s1_bounce for true drop-off.",
             **BASKET_META.get(basket, {})
         }
 
@@ -746,7 +740,8 @@ def _basket_cmp(cur):
 @router.get("/funnel/{basket}")
 def funnel_counts(basket: str):
     basket = basket.lower()
-    if basket == "buy_s1_bounce": return s1b_funnel_counts()
+    if basket == "buy_s1_bounce":   return s1b_funnel_counts()
+    if basket == "sell_overbought": return so_funnel_counts()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -793,7 +788,8 @@ def _basket_pivots(cur):
 @router.get("/funnel_detail/{basket}")
 def funnel_detail(basket: str):
     basket = basket.lower()
-    if basket == "buy_s1_bounce": return s1b_funnel_detail()
+    if basket == "buy_s1_bounce":   return s1b_funnel_detail()
+    if basket == "sell_overbought": return so_funnel_detail()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -816,8 +812,10 @@ def funnel_detail(basket: str):
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             passes = sum(1 for s in all_rows if _passes_filter(s.get(metric), mn, mx))
+            # survivors/killed are aliases for dashboard JS compatibility
             stages.append({"metric": metric, "min": mn, "max": mx,
                            "passes": passes, "fails": total - passes,
+                           "survivors": passes, "killed": total - passes,
                            "pass_pct": round(passes / total * 100, 1) if total else 0,
                            "dynamic": basket == "buy_reversal" and metric in ("week_return", "rsi_month", "sector_week")})
 
@@ -849,7 +847,8 @@ def funnel_detail(basket: str):
 @router.get("/stock_passcount/{basket}")
 def stock_passcount(basket: str):
     basket = basket.lower()
-    if basket == "buy_s1_bounce": return s1b_stock_passcount()
+    if basket == "buy_s1_bounce":   return s1b_stock_passcount()
+    if basket == "sell_overbought": return so_stock_passcount()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -902,7 +901,185 @@ def raw_metrics(limit: int = 250):
         raise HTTPException(500, f"raw_metrics failed: {e}")
 
 
+# ── Sell Overbought dedicated funnel (5 real filters) ─────────────────────────
+_SO_COMMON_SQL = """
+    WITH pivots AS (
+        SELECT symbol, price_date,
+            AVG((high+low+close)/3.0) OVER w AS pp,
+            MAX(high) OVER w AS h5, MIN(low) OVER w AS l5
+        FROM raw_prices WHERE price_date >= CURRENT_DATE - INTERVAL '14 days'
+        WINDOW w AS (PARTITION BY symbol ORDER BY price_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
+    ),
+    latest_pivot AS (
+        SELECT symbol, 2*pp-h5 AS s1, 2*pp-l5 AS r1, pp+(h5-l5) AS r2
+        FROM pivots WHERE price_date=(SELECT MAX(price_date) FROM pivots p2 WHERE p2.symbol=pivots.symbol)
+    ),
+    hi3d AS (SELECT symbol, MAX(high) AS max_high_3d FROM raw_prices
+        WHERE price_date>=CURRENT_DATE-INTERVAL '4 days' AND price_date<=CURRENT_DATE GROUP BY symbol),
+    hi5d AS (SELECT symbol, MAX(high) AS max_high_5d FROM raw_prices
+        WHERE price_date>=CURRENT_DATE-INTERVAL '7 days' AND price_date<=CURRENT_DATE GROUP BY symbol),
+    latest_close AS (
+        SELECT DISTINCT ON (symbol) symbol, close
+        FROM raw_prices WHERE price_date<=CURRENT_DATE ORDER BY symbol, price_date DESC
+    )
+    SELECT m.symbol, m.rsi_weekly, m.rsi_month, m.sector_week, m.gvm_score,
+           lp.r1, lp.r2, h5d.max_high_5d, h3d.max_high_3d, lc.close
+    FROM v8_metrics m
+    JOIN futures_universe f ON f.symbol=m.symbol AND f.is_active=TRUE
+    LEFT JOIN latest_pivot lp ON lp.symbol=m.symbol
+    LEFT JOIN hi3d h3d ON h3d.symbol=m.symbol
+    LEFT JOIN hi5d h5d ON h5d.symbol=m.symbol
+    LEFT JOIN latest_close lc ON lc.symbol=m.symbol
+    WHERE m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+"""
 
+
+def _so_enrich(rows):
+    """Compute the 2 pivot-based SO metrics per row."""
+    def _f(v):
+        try: return float(v) if v is not None else None
+        except (TypeError, ValueError): return None
+    for r in rows:
+        r1 = _f(r.get("r1")); r2 = _f(r.get("r2"))
+        h5d = _f(r.get("max_high_5d")); h3d = _f(r.get("max_high_3d"))
+        close = _f(r.get("close"))
+        r["week_high_vs_pivot"] = bool(
+            h5d is not None and (
+                (r1 is not None and h5d > 0.9 * r1) or
+                (r2 is not None and h5d > 0.9 * r2)
+            )
+        )
+        r["fall_3d"] = (
+            (close - h3d) / h3d * 100
+        ) if (close and h3d and h3d > 0) else None
+    return rows
+
+
+def _so_funnel_stages():
+    """
+    True 5-filter Sell Overbought cumulative funnel from raw_prices + v8_metrics.
+    Filter order matches sell_overbought() SQL:
+      F1 week_high_vs_pivot: 5d-high > 0.9*R1 OR 0.9*R2
+      F2 fall_3d:            (close - 3d_high) / 3d_high < -3%
+      F3 rsi_weekly >= 80
+      F4 rsi_month  >= 70
+      F5 sector_week < 0
+    Dashboard stage fields: survivors, killed, condition_min, condition_max.
+    Validated live 18-Jun-2026: 211->211->25->2->2->0
+    """
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(_SO_COMMON_SQL)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as e:
+        raise HTTPException(500, f"_so_funnel_stages DB error: {e}")
+
+    rows = _so_enrich(rows)
+    total = len(rows)
+    survivors_list = rows[:]
+    prev = total
+    stages = []
+
+    def _stage(label, cond, cmin, cmax):
+        nonlocal survivors_list, prev
+        survivors_list = [s for s in survivors_list if cond(s)]
+        n = len(survivors_list)
+        stages.append({"metric": label, "condition_min": cmin, "condition_max": cmax,
+                       "survivors": n, "killed": prev - n})
+        prev = n
+
+    _stage("week_high_vs_pivot",
+           lambda s: s.get("week_high_vs_pivot") is True,
+           "hi5d", "> 0.9*R1/R2")
+    _stage("fall_3d",
+           lambda s: s.get("fall_3d") is not None and float(s["fall_3d"]) < -3.0,
+           "< -3%", "-")
+    _stage("rsi_weekly",
+           lambda s: _passes_filter(s.get("rsi_weekly"), 80.0, None),
+           ">= 80", "-")
+    _stage("rsi_month",
+           lambda s: _passes_filter(s.get("rsi_month"), 70.0, None),
+           ">= 70", "-")
+    _stage("sector_week",
+           lambda s: s.get("sector_week") is not None and float(s["sector_week"]) < 0,
+           "< 0", "-")
+
+    return stages, total
+
+
+def so_funnel_detail():
+    """Dedicated Sell Overbought funnel -- all 5 strict-AND filters."""
+    try:
+        stages, total = _so_funnel_stages()
+        final = stages[-1]["survivors"] if stages else 0
+        return {
+            "basket": "sell_overbought",
+            "score_date": str(date.today()),
+            "universe": total,
+            "final": final,
+            "filter_count": 5,
+            "n_filters": 5,
+            "gate_type": "strict AND (all must pass)",
+            "score_qualified": final,
+            "pivot_pass": final,
+            "stages": stages,
+            "note": "SO uses 5 strict-AND filters. 2 pivot-based (week_high_vs_pivot, "
+                    "fall_3d) computed from raw_prices -- not in static FILTER_CONFIG "
+                    "(which only has the 3 RSI/sector reference cols).",
+            **BASKET_META.get("sell_overbought", {})
+        }
+    except Exception as e:
+        raise HTTPException(500, f"so_funnel_detail failed: {e}")
+
+
+def so_funnel_counts():
+    """Compact cumulative counts for /funnel/sell_overbought."""
+    try:
+        stages, total = _so_funnel_stages()
+        counts = {st["metric"]: st["survivors"] for st in stages}
+        counts["_final_qualified"] = stages[-1]["survivors"] if stages else 0
+        return {"basket": "sell_overbought", "score_date": str(date.today()),
+                "counts": counts, "source": "live_5filter"}
+    except Exception as e:
+        raise HTTPException(500, f"so_funnel_counts failed: {e}")
+
+
+def so_stock_passcount():
+    """Per-stock 5-filter pass count for sell_overbought."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(_SO_COMMON_SQL)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        rows = _so_enrich(rows)
+        out = []
+        for r in rows:
+            checks = {
+                "week_high_vs_pivot": r.get("week_high_vs_pivot") is True,
+                "fall_3d":     r.get("fall_3d") is not None and float(r["fall_3d"]) < -3.0,
+                "rsi_weekly":  _passes_filter(r.get("rsi_weekly"), 80.0, None),
+                "rsi_month":   _passes_filter(r.get("rsi_month"), 70.0, None),
+                "sector_week": r.get("sector_week") is not None and float(r["sector_week"]) < 0,
+            }
+            passed = [k for k, ok in checks.items() if ok]
+            failed = [k for k, ok in checks.items() if not ok]
+            out.append({"symbol": r["symbol"], "passed": len(passed), "total": 5,
+                        "passed_filters": passed, "failed_filters": failed,
+                        "gvm_score": r.get("gvm_score"),
+                        "fall_3d": round(float(r["fall_3d"]), 2) if r.get("fall_3d") is not None else None})
+
+        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1),
+                 reverse=True)
+        return {"basket": "sell_overbought", "score_date": str(date.today()),
+                "universe": len(out), "filter_count": 5, "stocks": out,
+                **BASKET_META.get("sell_overbought", {})}
+    except Exception as e:
+        raise HTTPException(500, f"so_stock_passcount failed: {e}")
+
+
+# ── Buy S1 Bounce dedicated funnel (8 real filters) ────────────────────────────
 def _s1b_funnel_stages():
     """
     Compute the true 8-filter Buy S1 Bounce funnel using live intraday data.
@@ -997,9 +1174,6 @@ def _s1b_funnel_stages():
         wl_candidates = [x for x in (lo5, tlow) if x is not None]
         r["week_low"] = min(wl_candidates) if wl_candidates else None
 
-    # cumulative funnel -- emit dashboard-compatible fields:
-    #   survivors (cumulative pass count), killed (dropped at this stage),
-    #   condition_min / condition_max (display strings)
     stages = []
     survivors_list = rows[:]
     prev = total
@@ -1012,7 +1186,7 @@ def _s1b_funnel_stages():
                        "survivors": n, "killed": prev - n})
         prev = n
 
-    # F0 market gate -- if gate closed, entire basket OFF (0 survivors)
+    # F0 market gate
     if not gate_open:
         rsi_disp = f"{nifty_rsi:.1f}" if nifty_rsi is not None else "n/a"
         stages.append({"metric": "nifty_rsi (market gate)",
@@ -1024,16 +1198,11 @@ def _s1b_funnel_stages():
                    "condition_min": ">= 55", "condition_max": f"OPEN ({nifty_rsi:.1f})",
                    "survivors": total, "killed": 0})
 
-    _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 3.0),
-           ">= 0%", "<= 3%")
-    _stage("dma_50", lambda s: _passes_filter(s.get("dma_50"), 0.0, None),
-           "> 0%", "-")
-    _stage("vol_ratio", lambda s: _passes_filter(s.get("vol_ratio"), 1.5, None),
-           ">= 1.5x", "-")
-    _stage("recovery_2d", lambda s: _passes_filter(s.get("recovery_2d"), 2.0, 8.0),
-           ">= 2%", "<= 8%")
-    _stage("day_ret", lambda s: _passes_filter(s.get("day_ret"), 0.5, None),
-           "> 0.5%", "close>open")
+    _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 3.0), ">= 0%", "<= 3%")
+    _stage("dma_50",      lambda s: _passes_filter(s.get("dma_50"), 0.0, None),     "> 0%",  "-")
+    _stage("vol_ratio",   lambda s: _passes_filter(s.get("vol_ratio"), 1.5, None),  ">= 1.5x", "-")
+    _stage("recovery_2d", lambda s: _passes_filter(s.get("recovery_2d"), 2.0, 8.0), ">= 2%", "<= 8%")
+    _stage("day_ret",     lambda s: _passes_filter(s.get("day_ret"), 0.5, None),    "> 0.5%", "close>open")
     _stage("week_low_vs_s1",
            lambda s: s.get("week_low") is not None and s.get("s1") is not None
                      and float(s["week_low"]) <= float(s["s1"]),
@@ -1084,11 +1253,9 @@ def s1b_funnel_counts():
         raise HTTPException(500, f"s1b_funnel_counts failed: {e}")
 
 
-
 def s1b_stock_passcount():
     """Per-stock pass count for buy_s1_bounce using all 8 strict-AND filters."""
     try:
-        # reuse the same per-symbol live computation as the funnel
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT close FROM raw_prices
@@ -1167,9 +1334,8 @@ def s1b_stock_passcount():
                 "recovery_2d":    _passes_filter(rec2d, 2.0, 8.0),
                 "day_ret":        _passes_filter(dayret, 0.5, None),
                 "week_low_vs_s1": (week_low is not None and s1 is not None and week_low <= s1),
+                "close_vs_open":  (dayret is not None and dayret > 0),
             }
-            # close_vs_open is implied by day_ret>0.5 but list it as its own gate (8th)
-            checks["close_vs_open"] = (dayret is not None and dayret > 0)
 
             passed = [k for k, ok in checks.items() if ok]
             failed = [k for k, ok in checks.items() if not ok]
