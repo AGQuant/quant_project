@@ -227,3 +227,229 @@ def intraday_scan(side="LONG", min_score=10, gain_lo=1.0, gain_hi=2.0, vol_mult=
             "ts": _ist_now().strftime("%d-%b %H:%M IST"),
             "elapsed_sec": round((_ist_now() - started).total_seconds(), 1),
             "note": "Stage1 cached TC>=10; Stage2 live intraday (1H, vol 1.5x, gain 1-2%, DMA20, S1, open). Prototype."}
+
+
+# ─────────────────────────────────────────────────────────── INTRADAY PAPER ENGINE ───
+# Added 18-Jun-2026. Auto-runs every 5-min via scheduler (like V8 paper).
+# Context isolation id=244: tc_intraday_* tables NEVER mix with v8_paper_*.
+#
+# Rules (locked 18-Jun-2026):
+#   Entry source : intraday_scan() matches (TC>=10 + all live filters pass), both sides
+#   Target/Stop  : fixed +1.5% / -1.5% (LONG); mirror for SHORT
+#   Slots        : NO CAP — enter every fresh match
+#   Guards       : 1 entry/symbol/side/day, blackout (earnings ex-date), entry cutoff 15:00
+#   Exit         : target/stop on live CMP, OR hard square-off at 15:15 IST
+#   Sizing       : 1 lot (futures_universe.lot_size)
+
+TGT_PCT = 1.5
+STP_PCT = 1.5
+ENTRY_CUTOFF = (15, 0)    # 15:00 IST — no new entries after
+SQUARE_OFF   = (15, 15)   # 15:15 IST — close everything still open
+
+
+def _lot_size(cur, symbol):
+    try:
+        cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (symbol,))
+        r = cur.fetchone()
+        return int(r[0]) if r and r[0] else 1
+    except Exception:
+        return 1
+
+
+def _is_blackout(cur, symbol):
+    try:
+        cur.execute("""SELECT 1 FROM earnings_calendar
+                       WHERE UPPER(ticker)=%s
+                         AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                       LIMIT 1""", (symbol.upper(),))
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def _before_cutoff(now):
+    return (now.hour, now.minute) < ENTRY_CUTOFF
+
+
+def _at_or_after_squareoff(now):
+    return (now.hour, now.minute) >= SQUARE_OFF
+
+
+def run_intraday_paper_entry():
+    """Scan both sides; auto-enter every fresh match. No slot cap.
+    Called every 5-min by scheduler during market hours."""
+    now = _ist_now()
+    if not _before_cutoff(now):
+        return {"ok": True, "skipped": "after 15:00 entry cutoff", "entered": 0}
+
+    entered = []
+    for side in ("LONG", "SHORT"):
+        scan = intraday_scan(side=side)
+        if not scan.get("ok"):
+            continue
+        for row in scan.get("rows", []):
+            sym = row["symbol"]
+            cmp = _f(row.get("cmp"))
+            if cmp is None:
+                continue
+            try:
+                with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+                    # blackout
+                    if _is_blackout(cur, sym):
+                        continue
+                    # already open?
+                    cur.execute("""SELECT 1 FROM tc_intraday_positions
+                                   WHERE symbol=%s AND side=%s AND status='OPEN' LIMIT 1""",
+                                (sym, side))
+                    if cur.fetchone():
+                        continue
+                    # 1 entry/symbol/side/day (open or already closed today)
+                    cur.execute("""SELECT 1 FROM tc_intraday_positions
+                                   WHERE symbol=%s AND side=%s AND entry_ts::date=CURRENT_DATE LIMIT 1""",
+                                (sym, side))
+                    if cur.fetchone():
+                        continue
+                    cur.execute("""SELECT 1 FROM tc_intraday_trades
+                                   WHERE symbol=%s AND side=%s AND entry_ts::date=CURRENT_DATE LIMIT 1""",
+                                (sym, side))
+                    if cur.fetchone():
+                        continue
+
+                    entry = round(cmp, 2)
+                    if side == "LONG":
+                        target = round(entry * (1 + TGT_PCT / 100), 2)
+                        stop   = round(entry * (1 - STP_PCT / 100), 2)
+                    else:
+                        target = round(entry * (1 - TGT_PCT / 100), 2)
+                        stop   = round(entry * (1 + STP_PCT / 100), 2)
+                    qty = _lot_size(cur, sym)
+
+                    cur.execute("""
+                        INSERT INTO tc_intraday_positions
+                        (symbol, side, entry_price, entry_ts, qty, target, stop_loss, tc_score, status)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'OPEN')
+                        ON CONFLICT (symbol, side, status) DO NOTHING""",
+                        (sym, side, entry, now, qty, target, stop, _f(row.get("tc_score"))))
+                    if cur.rowcount > 0:
+                        conn.commit()
+                        entered.append({"symbol": sym, "side": side, "entry": entry,
+                                        "target": target, "stop": stop, "qty": qty})
+            except Exception:
+                continue
+
+    return {"ok": True, "entered": len(entered), "positions": entered,
+            "ts": now.strftime("%d-%b %H:%M IST")}
+
+
+def run_intraday_paper_exit():
+    """Check open positions for target/stop on live CMP. Hard square-off at 15:15.
+    Called every 5-min by scheduler during market hours."""
+    now = _ist_now()
+    force = _at_or_after_squareoff(now)
+    closed = []
+    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT id, symbol, side, entry_price, entry_ts, qty, target, stop_loss, tc_score
+                       FROM tc_intraday_positions WHERE status='OPEN'""")
+        rows = cur.fetchall()
+        for pid, sym, side, entry, ets, qty, target, stop, tcs in rows:
+            entry = _f(entry); target = _f(target); stop = _f(stop)
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
+            cr = cur.fetchone()
+            cmp = _f(cr[0]) if cr else None
+            if cmp is None and not force:
+                continue
+
+            result, exit_px = None, None
+            if cmp is not None:
+                if side == "LONG":
+                    if cmp >= target: result, exit_px = "TARGET", target
+                    elif cmp <= stop: result, exit_px = "SL", stop
+                else:
+                    if cmp <= target: result, exit_px = "TARGET", target
+                    elif cmp >= stop: result, exit_px = "SL", stop
+
+            if result is None and force:
+                result = "SQUARE_OFF"
+                exit_px = cmp if cmp is not None else entry
+
+            if result is None:
+                continue
+
+            exit_px = round(exit_px, 2)
+            if side == "LONG":
+                ret = (exit_px / entry - 1) * 100
+            else:
+                ret = (entry / exit_px - 1) * 100
+            pnl = round((exit_px - entry) * qty * (1 if side == "LONG" else -1), 2)
+
+            try:
+                cur.execute("""
+                    INSERT INTO tc_intraday_trades
+                    (symbol, side, entry_price, entry_ts, exit_price, exit_ts, qty,
+                     target, stop_loss, tc_score, return_pct, pnl, result)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (sym, side, entry, ets, exit_px, now, qty, target, stop,
+                     _f(tcs), round(ret, 3), pnl, result))
+                cur.execute("UPDATE tc_intraday_positions SET status='CLOSED' WHERE id=%s", (pid,))
+                conn.commit()
+                closed.append({"symbol": sym, "side": side, "result": result,
+                               "exit": exit_px, "return_pct": round(ret, 2), "pnl": pnl})
+            except Exception:
+                conn.rollback()
+                continue
+
+    return {"ok": True, "closed": len(closed), "trades": closed,
+            "square_off": force, "ts": now.strftime("%d-%b %H:%M IST")}
+
+
+def intraday_paper_status():
+    """Open positions + today's closed trades + summary. For dashboard."""
+    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute("""SELECT symbol, side, entry_price, entry_ts, qty, target, stop_loss, tc_score
+                       FROM tc_intraday_positions WHERE status='OPEN' ORDER BY entry_ts DESC""")
+        open_cols = ["symbol", "side", "entry_price", "entry_ts", "qty", "target", "stop_loss", "tc_score"]
+        open_pos = []
+        for r in cur.fetchall():
+            d = dict(zip(open_cols, r))
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (d["symbol"],))
+            cr = cur.fetchone()
+            cmp = _f(cr[0]) if cr else None
+            entry = _f(d["entry_price"])
+            d["cmp"] = round(cmp, 2) if cmp else None
+            if cmp and entry:
+                if d["side"] == "LONG":
+                    d["open_pnl_pct"] = round((cmp / entry - 1) * 100, 2)
+                else:
+                    d["open_pnl_pct"] = round((entry / cmp - 1) * 100, 2)
+                d["unrealised_pnl"] = round((cmp - entry) * int(d["qty"]) * (1 if d["side"] == "LONG" else -1), 2)
+            d["entry_price"] = entry
+            d["target"] = _f(d["target"]); d["stop_loss"] = _f(d["stop_loss"])
+            d["tc_score"] = _f(d["tc_score"])
+            d["entry_ts"] = d["entry_ts"].strftime("%d-%b %H:%M") if d["entry_ts"] else None
+            open_pos.append(d)
+
+        cur.execute("""SELECT symbol, side, entry_price, entry_ts, exit_price, exit_ts,
+                              qty, return_pct, pnl, result
+                       FROM tc_intraday_trades WHERE exit_ts::date=CURRENT_DATE
+                       ORDER BY exit_ts DESC""")
+        tr_cols = ["symbol", "side", "entry_price", "entry_ts", "exit_price", "exit_ts",
+                   "qty", "return_pct", "pnl", "result"]
+        trades = []
+        for r in cur.fetchall():
+            d = dict(zip(tr_cols, r))
+            d["entry_price"] = _f(d["entry_price"]); d["exit_price"] = _f(d["exit_price"])
+            d["return_pct"] = _f(d["return_pct"]); d["pnl"] = _f(d["pnl"])
+            d["entry_ts"] = d["entry_ts"].strftime("%d-%b %H:%M") if d["entry_ts"] else None
+            d["exit_ts"] = d["exit_ts"].strftime("%d-%b %H:%M") if d["exit_ts"] else None
+            trades.append(d)
+
+        wins = sum(1 for t in trades if (t["pnl"] or 0) > 0)
+        losses = sum(1 for t in trades if (t["pnl"] or 0) <= 0)
+        total_pnl = round(sum(t["pnl"] or 0 for t in trades), 2)
+
+    return {"ok": True,
+            "open_positions": open_pos,
+            "recent_trades": trades,
+            "summary": {"open": len(open_pos), "trades": len(trades),
+                        "wins": wins, "losses": losses, "total_pnl": total_pnl},
+            "ts": _ist_now().strftime("%d-%b %H:%M IST")}
