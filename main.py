@@ -1,1 +1,2 @@
-MAIN_PY_CONTENT
+#!/usr/bin/env python3
+MAIN_CONTENT_HERE
