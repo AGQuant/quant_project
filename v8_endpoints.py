@@ -20,7 +20,10 @@ buy_s1_bounce V1 LOCKED (17-Jun-2026): S1 support bounce -- BUY_S1_BOUNCE_SPEC_V
   Dedicated ring-fenced slots: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
   Funnel: dedicated s1b_funnel_detail()/s1b_funnel_counts() compute the TRUE
   8-filter cumulative drop-off (incl 5 live metrics not in FILTER_CONFIG).
+  Stock passcount: dedicated s1b_stock_passcount() evaluates all 8 filters live.
   The static FILTER_CONFIG entry below (3 cols) is for endpoint display only.
+  Dashboard stage fields: survivors/killed/condition_min/condition_max; header
+  fields: universe/final/filter_count (matches v8_dashboard.html renderer).
 Slot architecture (17-Jun-2026) SLOT_ARCHITECTURE_V2.4.0 id=379:
   Standard pool (4 baskets):
     Strong Bullish: 15B/5S | Bullish: 14B/6S | Neutral: 12B/8S | Bearish: 8B/13S
@@ -835,7 +838,7 @@ def funnel_detail(basket: str):
             st["condition_max"] = f"<= {mx}" if mx is not None else "-"
 
         return {"basket": basket, "score_date": str(date.today()),
-                "universe": total, "n_filters": n,
+                "universe": total, "n_filters": n, "filter_count": n, "final": pivot_pass,
                 "score_threshold": score_threshold, "score_qualified": score_qualified,
                 "pivot_pass": pivot_pass, "stages": stages,
                 **BASKET_META.get(basket, {})}
@@ -846,6 +849,7 @@ def funnel_detail(basket: str):
 @router.get("/stock_passcount/{basket}")
 def stock_passcount(basket: str):
     basket = basket.lower()
+    if basket == "buy_s1_bounce": return s1b_stock_passcount()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -902,7 +906,7 @@ def raw_metrics(limit: int = 250):
 def _s1b_funnel_stages():
     """
     Compute the true 8-filter Buy S1 Bounce funnel using live intraday data.
-    Returns (stages, nifty_rsi, gate_open). Each stage shows cumulative survivors.
+    Returns (stages, nifty_rsi, gate_open, total). Each stage shows cumulative survivors.
     Filter order matches signal-writer _write_buy_s1_bounce_qualified():
       F0 Market gate: Nifty RSI(14) >= 55  (global on/off)
       F1 week_return 0-3%       (v8_metrics)
@@ -911,6 +915,7 @@ def _s1b_funnel_stages():
       F4 recovery_2d 2-8%       (live: (cmp-lo_2d)/lo_2d*100)
       F5 day_ret > 0.5%         (live: (cmp-day_open)/day_open*100)
       F6 week_low <= S1         (min(lo_5d, today_low) <= pivot S1)
+    Dashboard expects per-stage: survivors, killed, condition_min, condition_max.
     """
     with _conn() as conn, conn.cursor() as cur:
         # Nifty RSI(14) market gate
@@ -992,42 +997,47 @@ def _s1b_funnel_stages():
         wl_candidates = [x for x in (lo5, tlow) if x is not None]
         r["week_low"] = min(wl_candidates) if wl_candidates else None
 
-    # cumulative funnel
+    # cumulative funnel -- emit dashboard-compatible fields:
+    #   survivors (cumulative pass count), killed (dropped at this stage),
+    #   condition_min / condition_max (display strings)
     stages = []
-    survivors = rows[:]
+    survivors_list = rows[:]
+    prev = total
 
-    def _stage(label, cond, condition_text):
-        nonlocal survivors
-        survivors = [s for s in survivors if cond(s)]
-        stages.append({"metric": label, "condition": condition_text,
-                       "passes": len(survivors), "fails_remaining": 0})
+    def _stage(label, cond, cmin, cmax):
+        nonlocal survivors_list, prev
+        survivors_list = [s for s in survivors_list if cond(s)]
+        n = len(survivors_list)
+        stages.append({"metric": label, "condition_min": cmin, "condition_max": cmax,
+                       "survivors": n, "killed": prev - n})
+        prev = n
 
-    # F0 market gate -- if gate closed, all fail downstream (show 0 survivors)
+    # F0 market gate -- if gate closed, entire basket OFF (0 survivors)
     if not gate_open:
-        # gate is global; entire basket OFF
+        rsi_disp = f"{nifty_rsi:.1f}" if nifty_rsi is not None else "n/a"
         stages.append({"metric": "nifty_rsi (market gate)",
-                       "condition": ">= 55  (GATE CLOSED -- basket OFF)",
-                       "passes": 0, "fails_remaining": total})
+                       "condition_min": ">= 55", "condition_max": f"CLOSED ({rsi_disp})",
+                       "survivors": 0, "killed": total})
         return stages, nifty_rsi, gate_open, total
 
     stages.append({"metric": "nifty_rsi (market gate)",
-                   "condition": f">= 55  (OPEN, Nifty RSI={nifty_rsi:.1f})",
-                   "passes": total, "fails_remaining": 0})
+                   "condition_min": ">= 55", "condition_max": f"OPEN ({nifty_rsi:.1f})",
+                   "survivors": total, "killed": 0})
 
     _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 3.0),
-           "0% to 3%")
+           ">= 0%", "<= 3%")
     _stage("dma_50", lambda s: _passes_filter(s.get("dma_50"), 0.0, None),
-           "> 0%")
+           "> 0%", "-")
     _stage("vol_ratio", lambda s: _passes_filter(s.get("vol_ratio"), 1.5, None),
-           ">= 1.5x")
+           ">= 1.5x", "-")
     _stage("recovery_2d", lambda s: _passes_filter(s.get("recovery_2d"), 2.0, 8.0),
-           "2% to 8%")
+           ">= 2%", "<= 8%")
     _stage("day_ret", lambda s: _passes_filter(s.get("day_ret"), 0.5, None),
-           "> 0.5% (close > open)")
+           "> 0.5%", "close>open")
     _stage("week_low_vs_s1",
            lambda s: s.get("week_low") is not None and s.get("s1") is not None
                      and float(s["week_low"]) <= float(s["s1"]),
-           "week_low <= pivot S1")
+           "week_low", "<= S1")
 
     return stages, nifty_rsi, gate_open, total
 
@@ -1036,11 +1046,13 @@ def s1b_funnel_detail():
     """Dedicated Buy S1 Bounce funnel -- all 8 strict-AND filters, live data."""
     try:
         stages, nifty_rsi, gate_open, total = _s1b_funnel_stages()
-        final_qualified = stages[-1]["passes"] if stages else 0
+        final_qualified = stages[-1]["survivors"] if stages else 0
         return {
             "basket": "buy_s1_bounce",
             "score_date": str(date.today()),
             "universe": total,
+            "final": final_qualified,
+            "filter_count": 8,
             "n_filters": 8,
             "gate_type": "strict AND (all must pass)",
             "market_gate": {"metric": "nifty_rsi", "threshold": 55.0,
@@ -1062,14 +1074,120 @@ def s1b_funnel_counts():
     """Compact cumulative counts version for the /funnel/{basket} shape."""
     try:
         stages, nifty_rsi, gate_open, total = _s1b_funnel_stages()
-        counts = {st["metric"]: st["passes"] for st in stages}
+        counts = {st["metric"]: st["survivors"] for st in stages}
         counts["_market_gate_open"] = gate_open
         counts["_nifty_rsi"] = round(nifty_rsi, 1) if nifty_rsi is not None else None
-        counts["_final_qualified"] = stages[-1]["passes"] if stages else 0
+        counts["_final_qualified"] = stages[-1]["survivors"] if stages else 0
         return {"basket": "buy_s1_bounce", "score_date": str(date.today()),
                 "counts": counts, "source": "live_8filter"}
     except Exception as e:
         raise HTTPException(500, f"s1b_funnel_counts failed: {e}")
+
+
+
+def s1b_stock_passcount():
+    """Per-stock pass count for buy_s1_bounce using all 8 strict-AND filters."""
+    try:
+        # reuse the same per-symbol live computation as the funnel
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT close FROM raw_prices
+                WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                ORDER BY price_date DESC LIMIT 30
+            """)
+            nifty_closes = [float(r[0]) for r in cur.fetchall()]
+            nifty_rsi = None
+            if len(nifty_closes) >= 15:
+                nifty_closes.reverse()
+                import pandas as _pd
+                s = _pd.Series(nifty_closes)
+                delta = s.diff()
+                gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+                loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+                rs = gain / loss.replace(0, float("nan"))
+                rsi_series = 100 - (100 / (1 + rs))
+                v = rsi_series.iloc[-1]
+                nifty_rsi = float(v) if v == v else None
+            gate_open = nifty_rsi is not None and nifty_rsi >= 55.0
+
+            cur.execute("""
+                WITH td AS (
+                    SELECT symbol,
+                        (SELECT open  FROM intraday_prices i2
+                         WHERE i2.symbol=ip.symbol AND i2.ts::date=CURRENT_DATE
+                         ORDER BY ts ASC LIMIT 1)  AS day_open,
+                        (SELECT close FROM intraday_prices i3
+                         WHERE i3.symbol=ip.symbol AND i3.ts::date=CURRENT_DATE
+                         ORDER BY ts DESC LIMIT 1) AS live_close,
+                        MIN(low) FILTER (WHERE ts::date=CURRENT_DATE) AS today_low
+                    FROM intraday_prices ip WHERE ts::date=CURRENT_DATE GROUP BY symbol
+                ),
+                hist AS (
+                    SELECT symbol,
+                        MIN(low) FILTER (WHERE rn<=2) AS lo_2d,
+                        MIN(low) FILTER (WHERE rn<=5) AS lo_5d
+                    FROM (SELECT symbol, low,
+                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                          FROM raw_prices WHERE price_date < CURRENT_DATE) x
+                    WHERE rn<=5 GROUP BY symbol
+                )
+                SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio, m.gvm_score,
+                       td.day_open, td.live_close, td.today_low,
+                       h.lo_2d, h.lo_5d, p.s1
+                FROM v8_metrics m
+                JOIN futures_universe f ON f.symbol=m.symbol AND f.is_active=TRUE
+                LEFT JOIN td ON td.symbol=m.symbol
+                LEFT JOIN hist h ON h.symbol=m.symbol
+                LEFT JOIN v8_paper_pivots p ON p.symbol=m.symbol
+                    AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                WHERE m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+        def _f(v):
+            try: return float(v) if v is not None else None
+            except (TypeError, ValueError): return None
+
+        out = []
+        for r in rows:
+            cmp = _f(r.get("live_close")); op = _f(r.get("day_open"))
+            lo2 = _f(r.get("lo_2d")); lo5 = _f(r.get("lo_5d")); tlow = _f(r.get("today_low"))
+            rec2d = ((cmp - lo2) / lo2 * 100) if (cmp and lo2 and lo2 > 0) else None
+            dayret = ((cmp - op) / op * 100) if (cmp and op and op > 0) else None
+            wl_cand = [x for x in (lo5, tlow) if x is not None]
+            week_low = min(wl_cand) if wl_cand else None
+            s1 = _f(r.get("s1"))
+
+            checks = {
+                "nifty_rsi":      gate_open,
+                "week_return":    _passes_filter(r.get("week_return"), 0.0, 3.0),
+                "dma_50":         _passes_filter(r.get("dma_50"), 0.0, None),
+                "vol_ratio":      _passes_filter(r.get("vol_ratio"), 1.5, None),
+                "recovery_2d":    _passes_filter(rec2d, 2.0, 8.0),
+                "day_ret":        _passes_filter(dayret, 0.5, None),
+                "week_low_vs_s1": (week_low is not None and s1 is not None and week_low <= s1),
+            }
+            # close_vs_open is implied by day_ret>0.5 but list it as its own gate (8th)
+            checks["close_vs_open"] = (dayret is not None and dayret > 0)
+
+            passed = [k for k, ok in checks.items() if ok]
+            failed = [k for k, ok in checks.items() if not ok]
+            out.append({"symbol": r["symbol"], "passed": len(passed), "total": 8,
+                        "passed_filters": passed, "failed_filters": failed,
+                        "gvm_score": r.get("gvm_score"),
+                        "recovery_2d": round(rec2d, 2) if rec2d is not None else None,
+                        "day_ret": round(dayret, 2) if dayret is not None else None})
+
+        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1),
+                 reverse=True)
+        return {"basket": "buy_s1_bounce", "score_date": str(date.today()),
+                "universe": len(out), "filter_count": 8, "stocks": out,
+                "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
+                "gate_open": gate_open,
+                **BASKET_META.get("buy_s1_bounce", {})}
+    except Exception as e:
+        raise HTTPException(500, f"s1b_stock_passcount failed: {e}")
 
 
 @router.get("/buy_s1_bounce")
