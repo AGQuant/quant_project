@@ -9,6 +9,8 @@ Routes:
   GET  /api/trade-check/screen-nifty50 — screener, both sides (id=371). n<=210 for All-208 tab.
   POST /api/trade-check/tc-cache/refresh — recompute tc_cache snapshot (id=373). Manual, standalone.
   GET  /api/trade-check/intraday-scan — two-stage intraday scan: cached TC>=10 + live filters (id=373).
+  GET  /api/trade-check/intraday-paper/status — intraday paper engine: open positions + trades (18-Jun-2026).
+  POST /api/trade-check/intraday-paper/run — manual intraday paper tick (scan+enter+exit).
 """
 
 from fastapi import APIRouter
@@ -99,3 +101,23 @@ def intraday_scan(side: str = "LONG"):
     LONG/SHORT separate. Reads tc_cache (refresh it first for fresh scores)."""
     side = "SHORT" if side.upper() == "SHORT" else "LONG"
     return tci.intraday_scan(side=side)
+
+
+@router.get("/api/trade-check/intraday-paper/status")
+def intraday_paper_status():
+    """Intraday paper engine status (18-Jun-2026): open positions + today's
+    closed trades + summary. Auto-runs every 5-min via scheduler.
+    Context-isolated (tc_intraday_* tables) — never mixes with v8_paper."""
+    return tci.intraday_paper_status()
+
+
+@router.post("/api/trade-check/intraday-paper/run")
+def intraday_paper_run():
+    """Manual trigger: scan + auto-enter + exit check. Same as the 5-min
+    scheduler tick. For testing / on-demand. Heavy (refreshes tc_cache)."""
+    rc = tci.refresh_tc_cache()
+    en = tci.run_intraday_paper_entry()
+    ex = tci.run_intraday_paper_exit()
+    return {"ok": True, "cache_written": rc.get("written"),
+            "entered": en.get("entered"), "closed": ex.get("closed"),
+            "square_off": ex.get("square_off"), "ts": en.get("ts")}
