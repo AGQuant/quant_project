@@ -49,7 +49,6 @@ from scorr_endpoints import router as scorr_router
 from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
 from check_endpoint import router as check_router
-from intraday_endpoints import router as intraday_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
@@ -66,15 +65,13 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.52
-# v2.9.52: intraday paper engine wired (POST /api/intraday/tick, GET /api/intraday/dashboard,
-#   /open, /trades) + /intraday page route. Standalone writer (manual), scheduler = phase 1.5. id=374
-# v2.9.51: /fpc route added — serves fpc_v11.html (Financial Planning Calculator V11)
-# v2.9.50: v8_backfill_endpoints wired (POST /api/v8/backfill/metrics).
-#   buy_reversal dynamic Nifty-linked filters live in v8_signal_writer.
+# Scorr / Project Quant — main.py v2.9.53
+# v2.9.53: Removed intraday_router (intraday_endpoints.py + intraday_engine.py retired).
+#   /api/intraday/* now served by trade_check_v34_router -> tci.intraday_dashboard().
+# v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.52"
+VERSION = "2.9.53"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -160,7 +157,6 @@ app.include_router(scorr_router)
 app.include_router(scorr_chat_router)
 app.include_router(trade_check_v34_router)
 app.include_router(check_router)
-app.include_router(intraday_router)
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(investment_check_router)
@@ -322,7 +318,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.52)")
+        log.info("Tables ready (v2.9.53)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
