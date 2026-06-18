@@ -55,6 +55,7 @@ from scorr_auth import router as auth_router, _is_authed, PROTECTED
 from scorr_authset_probe import router as authset_probe_router
 from investment_check import router as investment_check_router
 from scanner_endpoints import router as scanner_router
+from intraday_scanner_endpoints import router as intraday_scanner_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -162,6 +163,7 @@ app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
+app.include_router(intraday_scanner_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)

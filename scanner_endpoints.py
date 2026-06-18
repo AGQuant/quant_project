@@ -3,9 +3,10 @@ Scanner Endpoints — Scorr (18-Jun-2026)
 Three smart screeners, pure SQL reads from existing live data.
 No new compute. Instant sub-second response.
 
-  /api/scanners/intraday   — live strength today (v8_metrics, 5-min live)
   /api/scanners/positional — V8 qualified signals today (v8_qualified)
   /api/scanners/investment — GVM>=7 quality stocks (gvm_scores)
+
+  /api/scanners/intraday   — moved to intraday_scanner_endpoints.py (4-gate V1, 18-Jun-2026)
 """
 
 import os
@@ -18,45 +19,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 def _conn():
     return psycopg.connect(DATABASE_URL)
-
-
-@router.get("/api/scanners/intraday")
-def scanner_intraday(
-    min_day1d: float = 0.3,
-    min_vol_ratio: float = 1.0,
-    limit: int = 30,
-):
-    """Live intraday strength — stocks up today with volume confirmation."""
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute("""
-            SELECT
-                m.symbol,
-                ROUND(m.day_1d::numeric, 2)        AS day_1d_pct,
-                ROUND(m.mom_2d::numeric, 2)         AS mom_2d_pct,
-                ROUND(m.vol_ratio::numeric, 2)      AS vol_ratio,
-                ROUND(m.sector_day::numeric, 2)     AS sector_day_pct,
-                ROUND(m.sector_week::numeric, 2)    AS sector_week_pct,
-                ROUND(m.dma_50::numeric, 1)         AS dma_50_pct,
-                ROUND(m.rsi_weekly::numeric, 1)     AS rsi_weekly,
-                ROUND(g.gvm_score::numeric, 1)      AS gvm,
-                g.segment,
-                c.cmp
-            FROM v8_metrics m
-            LEFT JOIN gvm_scores g ON g.symbol = m.symbol
-                AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-            LEFT JOIN cmp_prices c ON c.symbol = m.symbol
-            WHERE m.score_date = CURRENT_DATE
-              AND m.day_1d >= %s
-              AND (m.vol_ratio IS NULL OR m.vol_ratio >= %s)
-              AND m.dma_50 > 0
-            ORDER BY m.day_1d DESC
-            LIMIT %s
-        """, (min_day1d, min_vol_ratio, limit))
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-
-    return {"scanner": "intraday", "count": len(rows),
-            "filters": {"min_day1d": min_day1d, "min_vol_ratio": min_vol_ratio}, "rows": rows}
 
 
 @router.get("/api/scanners/positional")
