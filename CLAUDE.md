@@ -26,33 +26,32 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 |---|---|---|
 | main.py | FastAPI app, all routes + routers | ~60KB |
 | scheduler.py | Background jobs. start_background(app, base_url, token) | ~14KB |
-| v8_signal_writer.py | Live 5-min signal engine (v2.4.0) | ~61KB |
+| v8_signal_writer.py | Live 5-min signal engine | ~61KB |
 | v8_engine.py | EOD engine runs 15:45 IST | ~23KB |
 | scanner_endpoints.py | Scanner API + /scanners HTML route | ~6KB |
-| scorr_cockpit.html | Main nav shell (41KB) — nav links to all pages |
-| scorr_scanners.html | Scanners page (3 tabs) |
-| tc_intraday.py | Intraday paper engine — INACTIVE from scheduler |
+| scorr_cockpit.html | Main nav shell — nav links to all pages | ~41KB |
+| scorr_scanners.html | Scanners page (3 tabs) | ~8KB |
+| scorr_home.html | Home page | ~6KB |
+| docs/API_REFERENCE.md | Full endpoint reference (created by CC) | |
 
-## Pending Tasks (do these first)
-1. Wire scanner_endpoints into main.py:
-   - Add: `from scanner_endpoints import router as scanner_router`
-   - Add: `@app.get("/scanners")` route → scorr_scanners.html
-   - Add: `app.include_router(scanner_router)`
+## CC Task System
+Claude.ai creates tasks in Railway session_log with category='cc_task'.
+To get your task list run this SQL via Scorr MCP:
+  SELECT title, details FROM session_log WHERE category='cc_task' AND details::text LIKE '%pending%' ORDER BY session_ts DESC;
 
-2. Fix scorr_cockpit.html nav (line 218):
-   - FROM: `<a class="mnav-item" href="/intraday"><span>⏱</span>Intraday</a>`
-   - TO:   `<a class="mnav-item" href="/scanners"><span>⊞</span>Scanners</a>`
-
-3. Note: scorr_cockpit.html is currently 20 bytes (placeholder) — restore from git history first
+Current pending tasks: CC_TASK_001_UI_FIXES (scorr_home.html nav, logout, Scorr branding, back tabs)
 
 ## V8 Architecture (locked 18-Jun-2026)
 - EOD frozen: gvm_score only (22:00 GVM nightly)
 - Live every 5-min: all 19 other metrics via v8_signal_writer
 - COALESCE protection: day_1d, mom_2d, sector_week, sector_month
-- Sector aggregates: _update_sector_aggregates_sql() — single SQL pass
+- day_1d fix live from 19-Jun-2026 (first market day after fix)
+
+## API Reference
+Full reference in docs/API_REFERENCE.md
+Railway summary in session_log title='API_REFERENCE_18JUN2026'
+50 direct routes + 100+ router endpoints across 28 mounted routers.
 
 ## Workflow
-This is a Claude Code repo. Changes flow:
-  Claude.ai (design + spec) → GitHub Issue [CC] → Claude Code (implement + push) → Railway (deploy) → Claude.ai MCP (verify)
-
-Never push code from Claude.ai chat. Always use Claude Code for file changes.
+Claude.ai (design + spec) → Railway cc_task → Claude Code (implement + push) → Railway (deploy) → Claude.ai MCP (verify)
+Never push code from Claude.ai chat. Claude Code owns all file changes.
