@@ -231,7 +231,8 @@ SELECT
     m.gvm_score, m.dma_50, m.dma_200, m.rsi_month, m.rsi_weekly,
     m.month_return, m.week_return, m.mom_2d,
     m.sector_day, m.sector_week, m.sector_month, m.vol_ratio, m.day_1d,
-    p.pp, p.r1, p.s1,
+    m.daily_rsi, m.week_index_52,
+    p.pp, p.r1, p.s1, p.r2,
     td.day_open, td.live_close, td.lb_open, td.lb_close,
     td.today_high, td.today_low, td.avg_today, td.vol_today,
     a3.avg_3bars, a12.avg_12bars,
@@ -267,6 +268,7 @@ LEFT JOIN LATERAL (
            MIN(low)  FILTER (WHERE rn<=5)  AS lo_5d,
            MAX(high) FILTER (WHERE rn<=15) AS week_high,
            MIN(low)  FILTER (WHERE rn<=15) AS week_low,
+           MAX(high) FILTER (WHERE rn<=3)  AS high_3d,
            AVG(close) FILTER (WHERE rn<=3) AS avg_3day
     FROM (
         SELECT low, high, close, ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
@@ -317,11 +319,134 @@ def _evaluate(row: dict, reversal_cfg: dict, nifty_rsi: Optional[float], adr: Op
     }
 
 
-def _record_watchlist(signals: list, signal_ts: datetime):
+# ── SHORT side (spec INTRADAY_SCANNER_SELL_SPEC_V1) ──────────────────────────
+
+def _sell_overbought_eval(row: dict) -> int:
+    """sell_overbought_v2: 5 filters (2 pivot/computed). Returns pass count."""
+    rsi_w, rsi_m = _f(row.get("rsi_weekly")), _f(row.get("rsi_month"))
+    sec_w = _f(row.get("sector_week"))
+    wh, r1, r2 = _f(row.get("week_high")), _f(row.get("r1")), _f(row.get("r2"))
+    cmp, h3 = _f(row.get("live_close")), _f(row.get("high_3d"))
+    fall_3d = ((cmp - h3) / h3 * 100) if (cmp and h3 and h3 > 0) else None
+    near_resist = wh is not None and ((r1 is not None and wh > 0.9 * r1) or (r2 is not None and wh > 0.9 * r2))
+    checks = [
+        rsi_w is not None and rsi_w >= 80.0,
+        rsi_m is not None and rsi_m >= 70.0,
+        sec_w is not None and sec_w < 0,
+        bool(near_resist),
+        fall_3d is not None and fall_3d < -3.0,
+    ]
+    return sum(1 for c in checks if c)
+
+
+def _sell_tc_eval(row: dict, adr: Optional[float]) -> dict:
+    """SHORT 14-check TC (mirror of BUY). C14 (basis) skipped if NULL. need = evaluated-1."""
+    cmp = _f(row.get("live_close"))
+    pp, s1 = _f(row.get("pp")), _f(row.get("s1"))
+    today_low = _f(row.get("today_low"))
+    lb_open, lb_close = _f(row.get("lb_open")), _f(row.get("lb_close"))
+    rsi_w, rsi_m = _f(row.get("rsi_weekly")), _f(row.get("rsi_month"))
+    daily_rsi = _f(row.get("daily_rsi"))
+    basis = _f(row.get("basis"))
+
+    pivot_room = (cmp is not None and pp is not None and s1 is not None
+                  and s1 < cmp < pp and (cmp - s1) / cmp * 100 > 0.5)
+    day_low_room = (cmp is not None and today_low is not None
+                    and (cmp - today_low) / cmp * 100 > 0.3)
+    room_to_s1 = (cmp is not None and pp is not None and s1 is not None
+                  and (pp - s1) > 0 and (cmp - s1) >= 0.5 * (pp - s1))
+
+    results = {
+        "C1_adr_lt_1": (None if adr is None else adr < 1.0),                         # skippable
+        "C2_sector_day_neg": _passes_filter(row.get("sector_day"), None, -1e-9),
+        "C3_sector_week_neg": _passes_filter(row.get("sector_week"), None, -1e-9),
+        "C4_pivot_zone": bool(pivot_room),
+        "C5_daily_rsi_gt_30": (daily_rsi is not None and daily_rsi > 30.0),
+        "C6_last_bar_red": (lb_open is not None and lb_close is not None and lb_close < lb_open),
+        "C7_day_low_room": bool(day_low_room),
+        "C8_week_return_neg": _passes_filter(row.get("week_return"), None, -1e-9),
+        "C9_rsi_weekly_25_50": _passes_filter(rsi_w, 25.0, 50.0),
+        "C10_rsi_month_lt_45": (rsi_m is not None and rsi_m < 45.0),
+        "C11_day_1d_neg": _passes_filter(row.get("day_1d"), None, -1e-9),
+        "C12_mom_2d_neg": _passes_filter(row.get("mom_2d"), None, -1e-9),
+        "C13_room_to_s1": bool(room_to_s1),
+        "C14_basis_le_0": (None if basis is None else basis <= 0),                   # skippable
+    }
+    evaluated = [v for v in results.values() if v is not None]
+    passed = sum(1 for v in evaluated if v)
+    need = max(1, len(evaluated) - 1)
+    return {"pass": passed >= need, "score": passed, "evaluated": len(evaluated),
+            "need": need, "checks": results}
+
+
+def _gate1_short(row: dict, tc: dict) -> dict:
+    """Tier 1 SHORT: pass n-1 of ANY ONE of 4 sell buckets (incl. TC-14)."""
+    sr_cfg, sm_cfg = FILTER_CONFIG["sell_reversal"], FILTER_CONFIG["sell_momentum"]
+    buckets = [
+        ("sell_reversal", _bucket_pass_count(row, sr_cfg), len(sr_cfg), len(sr_cfg) - 1),
+        ("sell_momentum", _bucket_pass_count(row, sm_cfg), len(sm_cfg), len(sm_cfg) - 1),
+        ("sell_overbought", _sell_overbought_eval(row), 5, 4),
+        ("tc", tc["score"], tc["evaluated"], tc["need"]),
+    ]
+    passed = [b for b in buckets if b[1] >= b[3]]
+    if passed:
+        name, sc, tot, need = max(passed, key=lambda b: (b[1] / b[2]) if b[2] else 0)
+        return {"pass": True, "bucket": name, "score": sc, "total": tot}
+    name, sc, tot, need = max(buckets, key=lambda b: b[1] - b[3])
+    return {"pass": False, "bucket": name, "score": sc, "total": tot}
+
+
+def _gate2_short(row: dict) -> dict:
+    """Tier 2 Gate A SHORT (inverted MA): 5min < 1hr < 1day < 3day, not over-extended down."""
+    a3, a12 = _f(row.get("avg_3bars")), _f(row.get("avg_12bars"))
+    aday, a3day = _f(row.get("avg_today")), _f(row.get("avg_3day"))
+    if None in (a3, a12, aday, a3day) or a3day == 0:
+        return {"pass": False, "c1": False, "c2": False, "c3": False, "c4": False}
+    c1, c2, c3 = a3 < a12, a12 < aday, aday < a3day
+    c4 = (a3day - aday) / a3day * 100 < 3.0
+    return {"pass": all([c1, c2, c3, c4]), "c1": c1, "c2": c2, "c3": c3, "c4": c4}
+
+
+def _gate4_short(row: dict) -> dict:
+    """Tier 2 Gate B SHORT: room to fall — (CMP - 15d_low)/CMP > 2.5%."""
+    cmp, week_low = _f(row.get("live_close")), _f(row.get("week_low"))
+    if cmp is None or week_low is None or cmp <= 0:
+        return {"pass": False, "room_pct": None}
+    room = (cmp - week_low) / cmp * 100
+    return {"pass": room > 2.5, "room_pct": round(room, 2)}
+
+
+def _evaluate_short(row: dict, adr: Optional[float]) -> dict:
+    tc = _sell_tc_eval(row, adr)
+    g1 = _gate1_short(row, tc)
+    g2 = _gate2_short(row)
+    g4 = _gate4_short(row)
+    tier1 = g1["pass"]
+    tier2 = g2["pass"] and g4["pass"]
+    vtn = _vol_timenorm(row)
+    return {
+        "symbol": row["symbol"],
+        "basket": g1["bucket"],
+        "signal": tier1 and tier2,
+        "tier1_pass": tier1, "tier1_score": g1["score"], "tier1_total": g1["total"],
+        "gate1_score": g1["score"],
+        "tier2_pass": tier2,
+        "gate2_ma_pass": g2["pass"], "gate2": {k: v for k, v in g2.items() if k != "pass"},
+        "gate3_tc_score": tc["score"], "tc_pass": tc["pass"],
+        "gate3_need": tc["need"], "gate3_evaluated": tc["evaluated"],
+        "gate4_room_pct": g4["room_pct"], "gate4_pass": g4["pass"],
+        "vol_ratio_timenorm": round(vtn, 3) if vtn is not None else None,
+        "basis": _f(row.get("basis")),
+        "entry_price": _f(row.get("live_close")),
+        "checks": tc["checks"],
+    }
+
+
+def _record_watchlist(signals: list, signal_ts: datetime, direction: str = "LONG"):
     if not signals:
         return 0
     rows = [
-        (s["symbol"], s["basket"], signal_ts, s["entry_price"], s["basket"],
+        (s["symbol"], s["basket"], direction, signal_ts, s["entry_price"], s["basket"],
          s["gate1_score"], s["gate2_ma_pass"], s["gate3_tc_score"], s["gate4_room_pct"],
          Json(s["checks"]))
         for s in signals
@@ -329,10 +454,10 @@ def _record_watchlist(signals: list, signal_ts: datetime):
     with _conn() as conn, conn.cursor() as cur:
         cur.executemany("""
             INSERT INTO intraday_watchlist
-                (symbol, basket, signal_ts, entry_price, gate1_bucket,
+                (symbol, basket, direction, signal_ts, entry_price, gate1_bucket,
                  gate1_score, gate2_ma_pass, gate3_tc_score, gate4_room_pct, checks)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (symbol, signal_date) DO NOTHING
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (symbol, signal_date, direction) DO NOTHING
         """, rows)
         recorded = cur.rowcount
         conn.commit()
@@ -377,10 +502,42 @@ def scanner_intraday(limit: int = 40):
     }
 
 
+@router.get("/api/scanners/intraday/short")
+def scanner_intraday_short(limit: int = 40):
+    """V2 SHORT scan (Tier1 4 sell buckets -> Tier2 inverted MA + room-to-fall)."""
+    now = _ist_now()
+    if not _in_window(now):
+        return {"scanner": "intraday_short", "side": "SHORT", "status": "outside_window",
+                "window": "09:30-15:15 IST", "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+                "signals": [], "count": 0}
+
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT adr FROM adr_daily WHERE price_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
+        ar = cur.fetchone()
+        adr = float(ar[0]) if ar and ar[0] is not None else None
+        cur.execute(_SCAN_SQL)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    scored = [_evaluate_short(r, adr) for r in rows]
+    signals = [s for s in scored if s["signal"]]
+    signals.sort(key=lambda s: (s["gate3_tc_score"], s["gate1_score"]), reverse=True)
+    recorded = _record_watchlist(signals, now, direction="SHORT")
+
+    return {
+        "scanner": "intraday_short", "side": "SHORT", "spec": "V1", "status": "ok",
+        "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "adr": adr, "universe": len(rows),
+        "count": len(signals), "recorded_to_watchlist": recorded,
+        "signals": signals[:max(1, limit)],
+    }
+
+
 @router.get("/api/scanners/intraday/tc/{symbol}")
-def scanner_intraday_tc(symbol: str):
-    """Run the 14-check TC + Tier1/Tier2 evaluation for a single symbol now."""
+def scanner_intraday_tc(symbol: str, side: str = "long"):
+    """Run the 14-check TC + Tier1/Tier2 evaluation for a single symbol now (side=long|short)."""
     symbol = symbol.upper()
+    side = side.lower()
     now = _ist_now()
     if not _in_window(now):
         return {"symbol": symbol, "status": "outside_window",
@@ -399,9 +556,9 @@ def scanner_intraday_tc(symbol: str):
             raise HTTPException(404, f"No live metrics for {symbol} today")
         row = dict(zip(cols, row))
 
-    res = _evaluate(row, reversal_cfg, nifty_rsi, adr)
+    res = _evaluate_short(row, adr) if side == "short" else _evaluate(row, reversal_cfg, nifty_rsi, adr)
     return {
-        "symbol": symbol, "side": "BUY", "spec": "V2", "status": "ok",
+        "symbol": symbol, "side": ("SHORT" if side == "short" else "BUY"), "spec": "V2", "status": "ok",
         "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "signal": res["signal"], "basket": res["basket"],
         "tier1": {"pass": res["tier1_pass"], "bucket": res["basket"],
@@ -418,22 +575,30 @@ def scanner_intraday_tc(symbol: str):
 
 
 @router.get("/api/scanners/intraday/watchlist")
-def scanner_intraday_watchlist(date: Optional[str] = None):
-    """Today's recorded signals with live CMP, PnL%, time since signal."""
-    where_date = "w.signal_date = %s" if date else "w.signal_date = CURRENT_DATE"
-    params = (date,) if date else ()
+def scanner_intraday_watchlist(date: Optional[str] = None, direction: Optional[str] = None):
+    """Today's recorded signals (BUY+SHORT) with live CMP, PnL%, time since signal.
+
+    PnL% is direction-aware: SHORT profits when price falls.
+    """
+    clauses = ["w.signal_date = %s" if date else "w.signal_date = CURRENT_DATE"]
+    params = [date] if date else []
+    if direction:
+        clauses.append("w.direction = %s")
+        params.append(direction.upper())
+    where = " AND ".join(clauses)
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"""
-            SELECT w.symbol, w.basket, w.signal_date, w.signal_ts, w.entry_price,
+            SELECT w.symbol, w.basket, w.direction, w.signal_date, w.signal_ts, w.entry_price,
                    w.gate1_score, w.gate2_ma_pass, w.gate3_tc_score, w.gate4_room_pct,
                    c.cmp,
                    ROUND(CASE WHEN w.entry_price>0
-                        THEN (COALESCE(c.cmp, w.entry_price) - w.entry_price)/w.entry_price*100
+                        THEN (CASE WHEN w.direction='SHORT' THEN -1 ELSE 1 END)
+                             * (COALESCE(c.cmp, w.entry_price) - w.entry_price)/w.entry_price*100
                         ELSE 0 END::numeric, 2) AS pnl_pct,
                    EXTRACT(EPOCH FROM (NOW() - w.signal_ts))/60.0 AS mins_since
             FROM intraday_watchlist w
             LEFT JOIN cmp_prices c ON c.symbol = w.symbol
-            WHERE {where_date}
+            WHERE {where}
             ORDER BY w.signal_ts DESC
         """, params)
         cols = [d[0] for d in cur.description]
