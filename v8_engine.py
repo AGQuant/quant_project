@@ -31,16 +31,16 @@ day_1d / eod_chg (added 11-Jun-2026 — DISPLAY ONLY, never filters):
   eod_chg: frozen yesterday's 1D change. Computed by EOD engine (latest_close/prior_close).
   Both stored in v8_metrics only. NOT in FILTER_CONFIG, NOT in v8_qualified.
 
-store_metrics ON CONFLICT uses COALESCE for day_1d and mom_2d:
+store_metrics ON CONFLICT uses COALESCE for day_1d, mom_2d, sector_week, sector_month:
   COALESCE(v8_metrics.col, EXCLUDED.col) = prefer existing (signal_writer) over EOD.
-  This ensures EOD never overwrites the signal_writer's live values.
+  All four are owned by signal_writer (live, every 5-min). EOD cannot overwrite them.
 
 SEGMENT_OVERRIDES (11-Jun-2026): symbols without a gvm_scores row get
   NIFTY50/BANKNIFTY -> 'Index', *BEES -> 'ETF'. Own bucket = no sector-average pollution.
 
-sector_week  = avg week_return  of peers in same segment (EOD, frozen at 15:45)
-sector_month = avg month_return of peers in same segment (EOD, frozen at 15:45)
-sector_day   = live avg mom_2d of peers — computed by v8_signal_writer every 5-min
+sector_week  = live avg week_return  of peers — computed by v8_signal_writer every 5-min
+sector_month = live avg month_return of peers — computed by v8_signal_writer every 5-min
+sector_day   = live avg mom_2d of peers      — computed by v8_signal_writer every 5-min
 """
 
 import logging
@@ -338,8 +338,9 @@ def store_metrics(conn, m: Dict):
                 year_return=EXCLUDED.year_return,
                 mom_2d=COALESCE(v8_metrics.mom_2d, EXCLUDED.mom_2d),
                 day_1d=COALESCE(v8_metrics.day_1d, EXCLUDED.day_1d), eod_chg=EXCLUDED.eod_chg,
-                sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
-                sector_month=EXCLUDED.sector_month,
+                sector_day=EXCLUDED.sector_day,
+                sector_week=COALESCE(v8_metrics.sector_week, EXCLUDED.sector_week),
+                sector_month=COALESCE(v8_metrics.sector_month, EXCLUDED.sector_month),
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
                 range_1d=EXCLUDED.range_1d, range_3d=EXCLUDED.range_3d,
                 upper_bb=EXCLUDED.upper_bb, lower_bb=EXCLUDED.lower_bb,
@@ -497,6 +498,9 @@ def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
     # Pass 2: sector_week + sector_month — EOD peer avg by segment
     # sector_week  = avg week_return  of peers in same segment
     # sector_month = avg month_return of peers in same segment
+    # NOTE: These are also computed live by v8_signal_writer._update_sector_aggregates_sql.
+    # The EOD values here serve as initial baseline; COALESCE in store_metrics ensures
+    # signal_writer's live values take priority once set.
     from collections import defaultdict
     seg_week:  dict = defaultdict(list)
     seg_month: dict = defaultdict(list)
