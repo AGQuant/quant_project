@@ -25,10 +25,15 @@ mom_2d formula (renamed from day_change 10-Jun-2026):
         Renamed from 'day_change' to 'mom_2d' to remove naming confusion.
 
 day_1d / eod_chg (added 11-Jun-2026 — DISPLAY ONLY, never filters):
-  day_1d:  price vs T-1 close. At EOD = last close vs prior close.
-           Live (signal_writer) = live price vs yesterday's close = true intraday day change.
-  eod_chg: last COMPLETED day's 1-day change (frozen intraday).
+  day_1d:  owned by v8_signal_writer. Live CMP vs yesterday's close = true intraday day change.
+           EOD engine sets this to None (cannot compute today's return from raw_prices).
+           Fix 18-Jun-2026: EOD must not overwrite signal_writer's live value.
+  eod_chg: frozen yesterday's 1D change. Computed by EOD engine (latest_close/prior_close).
   Both stored in v8_metrics only. NOT in FILTER_CONFIG, NOT in v8_qualified.
+
+store_metrics ON CONFLICT uses COALESCE for day_1d and mom_2d:
+  COALESCE(v8_metrics.col, EXCLUDED.col) = prefer existing (signal_writer) over EOD.
+  This ensures EOD never overwrites the signal_writer's live values.
 
 SEGMENT_OVERRIDES (11-Jun-2026): symbols without a gvm_scores row get
   NIFTY50/BANKNIFTY -> 'Index', *BEES -> 'ETF'. Own bucket = no sector-average pollution.
@@ -253,14 +258,15 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
             out["mom_2d"] = (latest_close / base - 1) * 100
 
     # day_1d / eod_chg: true 1-day change (latest close vs prior close).
-    # Identical at EOD; signal_writer recomputes day_1d LIVE intraday while
-    # eod_chg stays frozen as the last completed day's change. DISPLAY ONLY.
+    # EOD writes eod_chg only (frozen yesterday's return, correctly computable from raw_prices).
+    # day_1d is owned by signal_writer (live CMP vs yesterday) — EOD cannot compute today's return.
+    # Fix 18-Jun-2026: EOD must NOT set day_1d; signal_writer's value must survive the 15:45 run.
     if len(df) >= 2:
         base1 = float(df["close"].iloc[-2])
         if base1 > 0:
             chg1 = (latest_close / base1 - 1) * 100
-            out["day_1d"]  = chg1
-            out["eod_chg"] = chg1
+            out["day_1d"]  = None    # owned by signal_writer (live CMP/yesterday); EOD never sets
+            out["eod_chg"] = chg1   # frozen: last completed day's 1D change
 
     if len(df) >= 21:
         ma9  = float(df["close"].tail(9).mean())
@@ -329,8 +335,9 @@ def store_metrics(conn, m: Dict):
                 gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
                 rsi_month=EXCLUDED.rsi_month, rsi_weekly=EXCLUDED.rsi_weekly, daily_rsi=EXCLUDED.daily_rsi,
                 month_return=EXCLUDED.month_return, week_return=EXCLUDED.week_return,
-                year_return=EXCLUDED.year_return, mom_2d=EXCLUDED.mom_2d,
-                day_1d=EXCLUDED.day_1d, eod_chg=EXCLUDED.eod_chg,
+                year_return=EXCLUDED.year_return,
+                mom_2d=COALESCE(v8_metrics.mom_2d, EXCLUDED.mom_2d),
+                day_1d=COALESCE(v8_metrics.day_1d, EXCLUDED.day_1d), eod_chg=EXCLUDED.eod_chg,
                 sector_day=EXCLUDED.sector_day, sector_week=EXCLUDED.sector_week,
                 sector_month=EXCLUDED.sector_month,
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
