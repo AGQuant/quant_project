@@ -11,6 +11,8 @@ Routes:
   GET  /api/trade-check/intraday-scan — two-stage intraday scan: cached TC>=10 + live filters (id=373).
   GET  /api/trade-check/intraday-paper/status — intraday paper engine: open positions + trades (18-Jun-2026).
   POST /api/trade-check/intraday-paper/run — manual intraday paper tick (scan+enter+exit).
+  GET  /api/intraday/dashboard — instant-read dashboard for /intraday page (18-Jun-2026).
+  POST /api/intraday/tick — manual engine tick for /intraday page button.
 """
 
 from fastapi import APIRouter
@@ -120,4 +122,29 @@ def intraday_paper_run():
     ex = tci.run_intraday_paper_exit()
     return {"ok": True, "cache_written": rc.get("written"),
             "entered": en.get("entered"), "closed": ex.get("closed"),
+            "square_off": ex.get("square_off"), "ts": en.get("ts")}
+
+
+# ── Intraday dashboard (scorr_intraday.html) ────────────────────────────────
+
+@router.get("/api/intraday/dashboard")
+def intraday_dashboard():
+    """INSTANT-READ dashboard for /intraday page. Pure SELECTs from
+    tc_intraday_* + tc_cache — no scan, no compute, loads immediately.
+    The 5-min scheduler tick keeps the data fresh; this just reads it.
+    Returns {ts, cache_ts, cache_rows, sides:{LONG/SHORT:{funnel,stats,open,trades}}}."""
+    return tci.intraday_dashboard()
+
+
+@router.post("/api/intraday/tick")
+def intraday_tick():
+    """Manual engine tick for the /intraday page button: scan + enter + exit.
+    Same work as the 5-min scheduler tick. Heavy (refreshes tc_cache).
+    Returns {new_entries, closed} for the button feedback."""
+    rc = tci.refresh_tc_cache()
+    en = tci.run_intraday_paper_entry()
+    ex = tci.run_intraday_paper_exit()
+    return {"ok": True, "cache_written": rc.get("written"),
+            "new_entries": en.get("positions", []),
+            "closed": ex.get("closed"),
             "square_off": ex.get("square_off"), "ts": en.get("ts")}
