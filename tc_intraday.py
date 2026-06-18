@@ -461,83 +461,92 @@ def intraday_dashboard():
 
     INSTANT READ — pure SELECTs from tc_intraday_* + tc_cache. No scan, no compute.
     The 5-min scheduler tick does all the heavy lifting; this just reads results.
+
+    18-Jun-2026 fix: wrapped in try/except (any exception returns partial data + _error
+    instead of raising 500); str()[:16] for cache_ts avoids tz-aware datetime issues;
+    LEFT JOIN for CMP eliminates nested cursor re-use pattern.
     """
     out = {"ts": _ist_now().strftime("%d-%b %H:%M IST"),
            "cache_ts": None, "cache_rows": 0, "sides": {}}
+    try:
+        with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+            # cache freshness — str()[:16] works for both naive and tz-aware datetimes
+            cur.execute("SELECT COUNT(*), MAX(computed_at) FROM tc_cache")
+            cr = cur.fetchone()
+            out["cache_rows"] = int(cr[0]) if cr and cr[0] else 0
+            if cr and cr[1]:
+                out["cache_ts"] = str(cr[1])[:16]
 
-    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        # cache freshness
-        cur.execute("SELECT COUNT(*), MAX(computed_at) FROM tc_cache")
-        cr = cur.fetchone()
-        out["cache_rows"] = int(cr[0]) if cr and cr[0] else 0
-        if cr and cr[1]:
-            out["cache_ts"] = (cr[1] + timedelta(hours=5, minutes=30)).strftime("%d-%b %H:%M") \
-                if cr[1].tzinfo is None else cr[1].astimezone().strftime("%d-%b %H:%M")
+            for side in ("LONG", "SHORT"):
+                # funnel counts
+                cur.execute("SELECT COUNT(*) FROM tc_cache WHERE side=%s", (side,))
+                universe = int(cur.fetchone()[0] or 0)
+                cur.execute("SELECT COUNT(*) FROM tc_cache WHERE side=%s AND score>=10", (side,))
+                tc10 = int(cur.fetchone()[0] or 0)
+                cur.execute("""SELECT COUNT(*) FROM tc_intraday_positions
+                               WHERE side=%s AND status='OPEN'""", (side,))
+                n_open = int(cur.fetchone()[0] or 0)
+                cur.execute("""SELECT COUNT(*) FROM tc_intraday_trades
+                               WHERE side=%s AND exit_ts::date=CURRENT_DATE""", (side,))
+                n_closed = int(cur.fetchone()[0] or 0)
 
-        for side in ("LONG", "SHORT"):
-            # funnel counts
-            cur.execute("SELECT COUNT(*) FROM tc_cache WHERE side=%s", (side,))
-            universe = int(cur.fetchone()[0] or 0)
-            cur.execute("SELECT COUNT(*) FROM tc_cache WHERE side=%s AND score>=10", (side,))
-            tc10 = int(cur.fetchone()[0] or 0)
-            cur.execute("""SELECT COUNT(*) FROM tc_intraday_positions
-                           WHERE side=%s AND status='OPEN'""", (side,))
-            n_open = int(cur.fetchone()[0] or 0)
-            cur.execute("""SELECT COUNT(*) FROM tc_intraday_trades
-                           WHERE side=%s AND exit_ts::date=CURRENT_DATE""", (side,))
-            n_closed = int(cur.fetchone()[0] or 0)
+                # open positions — use JOIN to avoid nested cursor re-use
+                cur.execute("""
+                    SELECT p.symbol, p.entry_price, p.target, p.stop_loss, c.cmp
+                    FROM tc_intraday_positions p
+                    LEFT JOIN cmp_prices c ON c.symbol = p.symbol
+                    WHERE p.side=%s AND p.status='OPEN'
+                    ORDER BY p.entry_ts DESC
+                """, (side,))
+                open_rows = []
+                for sym, entry, target, stop, cmp in cur.fetchall():
+                    entry = _f(entry); cmp = _f(cmp)
+                    pnl_pct = None
+                    if cmp and entry:
+                        pnl_pct = round(((cmp / entry - 1) if side == "LONG"
+                                         else (entry / cmp - 1)) * 100, 2)
+                    open_rows.append({"symbol": sym, "entry_price": entry,
+                                      "cmp": round(cmp, 2) if cmp else None,
+                                      "pnl_pct": pnl_pct,
+                                      "target": _f(target), "stop": _f(stop)})
 
-            # open positions
-            cur.execute("""SELECT symbol, entry_price, qty, target, stop_loss
-                           FROM tc_intraday_positions
-                           WHERE side=%s AND status='OPEN' ORDER BY entry_ts DESC""", (side,))
-            open_rows = []
-            for sym, entry, qty, target, stop in cur.fetchall():
-                entry = _f(entry)
-                cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
-                cm = cur.fetchone(); cmp = _f(cm[0]) if cm else None
-                pnl_pct = None
-                if cmp and entry:
-                    pnl_pct = round(((cmp / entry - 1) if side == "LONG"
-                                     else (entry / cmp - 1)) * 100, 2)
-                open_rows.append({"symbol": sym, "entry_price": entry,
-                                  "cmp": round(cmp, 2) if cmp else None,
-                                  "pnl_pct": pnl_pct,
-                                  "target": _f(target), "stop": _f(stop)})
+                # today's closed trades
+                cur.execute("""
+                    SELECT symbol, entry_price, exit_price, return_pct, result
+                    FROM tc_intraday_trades
+                    WHERE side=%s AND exit_ts::date=CURRENT_DATE
+                    ORDER BY exit_ts DESC
+                """, (side,))
+                trade_rows = []
+                for sym, entry, exit_px, ret, result in cur.fetchall():
+                    ret = _f(ret)
+                    if result == "TARGET":
+                        pill = "WIN"
+                    elif result == "SL":
+                        pill = "LOSS"
+                    else:
+                        pill = "WIN" if (ret or 0) > 0 else ("LOSS" if (ret or 0) < 0 else "FLAT")
+                    trade_rows.append({"symbol": sym, "entry_price": _f(entry),
+                                       "exit_price": _f(exit_px), "pnl_pct": ret,
+                                       "result": pill, "exit_reason": result})
 
-            # today's closed trades
-            cur.execute("""SELECT symbol, entry_price, exit_price, return_pct, result
-                           FROM tc_intraday_trades
-                           WHERE side=%s AND exit_ts::date=CURRENT_DATE
-                           ORDER BY exit_ts DESC""", (side,))
-            trade_rows = []
-            for sym, entry, exit_px, ret, result in cur.fetchall():
-                ret = _f(ret)
-                # map engine result -> dashboard pill (WIN/LOSS/FLAT)
-                if result == "TARGET":
-                    pill = "WIN"
-                elif result == "SL":
-                    pill = "LOSS"
-                else:  # SQUARE_OFF
-                    pill = "WIN" if (ret or 0) > 0 else ("LOSS" if (ret or 0) < 0 else "FLAT")
-                trade_rows.append({"symbol": sym, "entry_price": _f(entry),
-                                   "exit_price": _f(exit_px), "pnl_pct": ret,
-                                   "result": pill, "exit_reason": result})
+                # stats
+                n_tr = len(trade_rows)
+                wins = sum(1 for t in trade_rows if (t["pnl_pct"] or 0) > 0)
+                win_rate = round(wins / n_tr * 100, 1) if n_tr else 0
+                total_pnl = round(sum(t["pnl_pct"] or 0 for t in trade_rows), 2)
+                avg_pnl = round(total_pnl / n_tr, 2) if n_tr else 0
 
-            # stats
-            n_tr = len(trade_rows)
-            wins = sum(1 for t in trade_rows if (t["pnl_pct"] or 0) > 0)
-            win_rate = round(wins / n_tr * 100, 1) if n_tr else 0
-            total_pnl = round(sum(t["pnl_pct"] or 0 for t in trade_rows), 2)
-            avg_pnl = round(total_pnl / n_tr, 2) if n_tr else 0
+                out["sides"][side] = {
+                    "funnel": {"universe": universe, "tc10": tc10,
+                               "open": n_open, "closed": n_closed},
+                    "stats": {"trades": n_tr, "win_rate": win_rate,
+                              "avg_pnl": avg_pnl, "total_pnl": total_pnl},
+                    "open": open_rows,
+                    "trades": trade_rows,
+                }
 
-            out["sides"][side] = {
-                "funnel": {"universe": universe, "tc10": tc10,
-                           "open": n_open, "closed": n_closed},
-                "stats": {"trades": n_tr, "win_rate": win_rate,
-                          "avg_pnl": avg_pnl, "total_pnl": total_pnl},
-                "open": open_rows,
-                "trades": trade_rows,
-            }
+    except Exception as e:
+        out["_error"] = f"{type(e).__name__}: {str(e)[:200]}"
 
     return out
