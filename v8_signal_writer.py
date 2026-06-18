@@ -15,7 +15,9 @@ What it does every 5-min during market hours:
   9. Writes adr_intraday (live ADR every 5-min tick) -- 11-Jun-2026
 
 Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
-  BUY  threshold = n - 1 - min(fails, 2)  [tight in bull, loose in bear]
+  BUY threshold (buy_reversal, buy_momentum -- 18-Jun-2026):
+    Strong Bullish (0 fails) + Bullish (1 fail): n   (strict AND -- fewer, higher quality)
+    Neutral (2 fails) + Bearish (3+ fails):       n-1 (1 miss allowed -- genuine setups rarer)
   SELL threshold (sell_reversal=5, sell_momentum=6):
     Strong Bullish (0 fails) + Bullish (1 fail): n-1 (1 miss allowed -- 18-Jun-2026)
     Neutral (2 fails) + Bearish (3+ fails):       n   (strict AND)
@@ -636,8 +638,9 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
       Neutral (2 fails) + Bearish (3+ fails)        -> n    (strict AND)
     sell_overbought / buy_s1_bounce use dedicated handlers -- never reach here.
 
-    BUY:
-      fails=0 -> n-1  |  fails=1 -> n-2  |  fails>=2 -> n-3
+    BUY (buy_reversal, buy_momentum -- 18-Jun-2026):
+      Strong Bullish (0 fails) + Bullish (1 fail)  -> n    (strict AND -- only best setups)
+      Neutral (2 fails) + Bearish (3+ fails)        -> n-1  (1 miss allowed -- genuine setups rarer)
     """
     if side == "SELL":
         if n_filters <= 6:
@@ -645,7 +648,10 @@ def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
                 return n_filters - 1  # 1 miss allowed in Strong Bullish / Bullish
             return n_filters           # strict AND in Neutral / Bearish
         return max(n_filters - 2 + min(fails, 2), 1)
-    return n_filters - 1 - min(fails, 2)
+    # BUY (buy_reversal, buy_momentum):
+    if fails <= 1:
+        return n_filters      # strict AND in Strong Bullish / Bullish -- only best setups
+    return n_filters - 1      # 1 miss allowed in Neutral / Bearish -- genuine setups rarer
 
 
 # -- Slot architecture --------------------------------------------------------
