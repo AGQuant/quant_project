@@ -1,19 +1,22 @@
 """
-Intraday Paper Engine — Phase 1 prototype (17-Jun-2026, spec id=374).
+Intraday Paper Engine — readers (17-Jun-2026 spec id=374; reader repoint 18-Jun-2026).
 
-Full paper-trading engine (NOT a scanner). Reuses tc_intraday.intraday_scan()
-for the entry shortlist (TC>=10 cached + live filters), then manages paper
-positions with fixed 1.5%/1.5% target/stop and 15:15 square-off.
+SINGLE SOURCE OF TRUTH = tc_intraday_* tables (written by the scheduler every
+5-min via tc_intraday.run_intraday_paper_entry / run_intraday_paper_exit).
 
-ENTRY:  qualifier from intraday_scan + before 15:00 + not already traded today
-        -> INSERT intraday_positions at live CMP, 1 lot.
-EXIT:   target +1.5% OR stop -1.5% (CMP-based) OR 15:15 square-off
-        -> INSERT intraday_trades, mark position CLOSED.
-GUARDS: 1 entry / symbol / side / day (UNIQUE constraint). Flat by 15:15.
+This module's PAGE READERS (get_open / get_trades / get_dashboard) now read
+those tables so the /intraday page shows what the live engine actually trades.
 
-Writer is STANDALONE/manual in phase 1. Scheduler wiring = phase 1.5 — NEVER on
-the v8_signal_writer heartbeat. Context isolation id=244 — separate from v8_paper
-and personal_journal.
+The legacy writer (run_tick / _try_enter / _manage_open) wrote the older
+intraday_positions / intraday_trades tables and is NO LONGER on the scheduler
+path — kept only for reference / manual fallback. Do not wire it to the
+scheduler; tc_intraday.* is the active engine. Context isolation id=244 —
+separate from v8_paper and personal_journal.
+
+Field mapping (tc_intraday_* -> dashboard JS):
+  stop_loss   -> stop
+  return_pct  -> pnl_pct
+  result      -> WIN (TARGET) | LOSS (SL) | WIN/LOSS by sign (SQUARE_OFF)
 """
 
 import os
@@ -47,10 +50,23 @@ def _live_cmp(cur, symbol):
     return _f(r[0]) if r else None
 
 
-# ─────────────────────────────────────────────── ENTRY ───
+def _pill(result, pnl_pct):
+    """Map tc_intraday result -> dashboard pill WIN/LOSS/FLAT."""
+    if result == "TARGET":
+        return "WIN"
+    if result == "SL":
+        return "LOSS"
+    # SQUARE_OFF -> by sign
+    p = pnl_pct or 0
+    return "WIN" if p > 0 else ("LOSS" if p < 0 else "FLAT")
+
+
+# ─────────────────────────────────────────── LEGACY WRITER (OFF the scheduler) ───
+# Kept for reference / manual fallback only. Writes intraday_positions /
+# intraday_trades. The ACTIVE engine is tc_intraday.run_intraday_paper_entry/exit.
 
 def _try_enter(cur, sym, side, cmp):
-    """Insert a paper position if not already traded this symbol/side today."""
+    """LEGACY. Insert into intraday_positions if not traded this symbol/side today."""
     if cmp is None or cmp <= 0:
         return False
     if side == "LONG":
@@ -71,8 +87,6 @@ def _try_enter(cur, sym, side, cmp):
     except Exception:
         return False
 
-
-# ─────────────────────────────────────────────── EXIT / MARK ───
 
 def _pnl_pct(side, entry, cmp):
     if not entry:
@@ -95,7 +109,7 @@ def _close(cur, pos_id, sym, side, entry, exit_price, entry_ts, reason):
 
 
 def _manage_open(cur, force_squareoff=False):
-    """Mark open positions, exit on target/stop, or square-off all if past 15:15."""
+    """LEGACY. Mark/exit open positions in intraday_positions."""
     cur.execute("""SELECT id, symbol, side, entry_price, entry_ts, target, stop
                    FROM intraday_positions WHERE status='OPEN' AND trade_date=CURRENT_DATE""")
     rows = cur.fetchall()
@@ -130,11 +144,10 @@ def _manage_open(cur, force_squareoff=False):
     return closed, marked
 
 
-# ─────────────────────────────────────────────── WRITER TICK ───
-
 def run_tick():
-    """One engine tick: manage open, then enter new qualifiers (both sides)
-    if before cutoff. Square-off everything if past 15:15. Standalone/manual."""
+    """LEGACY standalone tick (writes intraday_*). NOT on the scheduler.
+    The active engine is tc_intraday.run_intraday_paper_entry/exit. Use the
+    /api/intraday/tick endpoint (which calls tc_intraday) for a manual tick."""
     started = _ist_now()
     now_t = started.time()
     square = now_t >= SQUARE_OFF
@@ -144,11 +157,8 @@ def run_tick():
     funnel = {"LONG": {}, "SHORT": {}}
 
     with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        # 1) manage / exit open positions (or square-off all)
         closed, marked = _manage_open(cur, force_squareoff=square)
         conn.commit()
-
-        # 2) entries (skip if square-off window or past cutoff)
         if can_enter and not square:
             for side in ("LONG", "SHORT"):
                 try:
@@ -177,38 +187,69 @@ def run_tick():
             "elapsed_sec": round((_ist_now() - started).total_seconds(), 1)}
 
 
-# ─────────────────────────────────────────────── PAGE READERS ───
+# ───────────────────────────────────────────────── PAGE READERS (tc_intraday_*) ───
+# These power the /intraday page and read the LIVE engine's tables.
 
 def get_open(side=None):
+    """Open positions from tc_intraday_positions, live CMP + pnl_pct computed."""
     with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
-        q = """SELECT symbol, side, entry_price, entry_ts, cmp, pnl_pct, target, stop
-               FROM intraday_positions WHERE status='OPEN' AND trade_date=CURRENT_DATE"""
+        q = """SELECT symbol, side, entry_price, entry_ts, qty, target, stop_loss
+               FROM tc_intraday_positions WHERE status='OPEN'"""
         params = []
         if side:
             q += " AND side=%s"; params.append(side.upper())
         q += " ORDER BY entry_ts DESC"
         cur.execute(q, params)
-        cols = ["symbol", "side", "entry_price", "entry_ts", "cmp", "pnl_pct", "target", "stop"]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = cur.fetchall()
+        out = []
+        for sym, sd, entry, ets, qty, target, stop in rows:
+            entry = _f(entry)
+            cmp = _live_cmp(cur, sym)
+            pnl_pct = None
+            if cmp and entry:
+                pnl_pct = round(((cmp / entry - 1) if sd == "LONG"
+                                 else (entry / cmp - 1)) * 100, 2)
+            out.append({
+                "symbol": sym, "side": sd,
+                "entry_price": entry,
+                "entry_ts": ets.strftime("%d-%b %H:%M") if ets else None,
+                "cmp": round(cmp, 2) if cmp else None,
+                "pnl_pct": pnl_pct,
+                "target": _f(target), "stop": _f(stop),
+            })
+        return out
 
 
 def get_trades(side=None, limit=50):
+    """Today's closed trades from tc_intraday_trades, mapped to dashboard shape."""
     with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         q = """SELECT symbol, side, entry_price, exit_price, entry_ts, exit_ts,
-                      pnl_pct, result, exit_reason FROM intraday_trades
-               WHERE trade_date=CURRENT_DATE"""
+                      return_pct, result FROM tc_intraday_trades
+               WHERE exit_ts::date=CURRENT_DATE"""
         params = []
         if side:
             q += " AND side=%s"; params.append(side.upper())
         q += " ORDER BY exit_ts DESC LIMIT %s"; params.append(limit)
         cur.execute(q, params)
-        cols = ["symbol", "side", "entry_price", "exit_price", "entry_ts", "exit_ts",
-                "pnl_pct", "result", "exit_reason"]
-        return [dict(zip(cols, r)) for r in cur.fetchall()]
+        out = []
+        for sym, sd, entry, exit_px, ets, xts, ret, result in cur.fetchall():
+            ret = _f(ret)
+            out.append({
+                "symbol": sym, "side": sd,
+                "entry_price": _f(entry), "exit_price": _f(exit_px),
+                "entry_ts": ets.strftime("%d-%b %H:%M") if ets else None,
+                "exit_ts": xts.strftime("%d-%b %H:%M") if xts else None,
+                "pnl_pct": ret,
+                "result": _pill(result, ret),
+                "exit_reason": result,
+            })
+        return out
 
 
 def get_dashboard():
-    """Full /intraday page payload: funnel + open + trade log + stats, per side."""
+    """Full /intraday page payload: funnel + open + trade log + stats, per side.
+    Reads tc_intraday_* (the live engine tables) + tc_cache (stage-1 universe).
+    INSTANT READ — no scan, no compute."""
     now = _ist_now()
     with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
         # cache freshness (stage-1 source)
@@ -225,30 +266,38 @@ def get_dashboard():
                "cache_ts": cache_ts, "cache_rows": cache_n, "sides": {}}
 
         for side in ("LONG", "SHORT"):
-            cur.execute("""SELECT COUNT(*) FILTER (WHERE status='OPEN'),
-                                  COUNT(*) FILTER (WHERE status='CLOSED')
-                           FROM intraday_positions WHERE side=%s AND trade_date=CURRENT_DATE""", (side,))
-            pc = cur.fetchone()
-            cur.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE result='WIN'),
-                                  ROUND(AVG(pnl_pct)::numeric,3), ROUND(SUM(pnl_pct)::numeric,3)
-                           FROM intraday_trades WHERE side=%s AND trade_date=CURRENT_DATE""", (side,))
+            cur.execute("""SELECT COUNT(*) FROM tc_intraday_positions
+                           WHERE side=%s AND status='OPEN'""", (side,))
+            n_open = cur.fetchone()[0] or 0
+            cur.execute("""SELECT COUNT(*),
+                                  COUNT(*) FILTER (WHERE result='TARGET'),
+                                  COUNT(*) FILTER (WHERE result='SL'),
+                                  ROUND(AVG(return_pct)::numeric,3),
+                                  ROUND(SUM(return_pct)::numeric,3)
+                           FROM tc_intraday_trades
+                           WHERE side=%s AND exit_ts::date=CURRENT_DATE""", (side,))
             tc = cur.fetchone()
             ntr = tc[0] or 0
+            # wins by pnl sign (covers SQUARE_OFF too)
+            cur.execute("""SELECT COUNT(*) FILTER (WHERE return_pct>0)
+                           FROM tc_intraday_trades
+                           WHERE side=%s AND exit_ts::date=CURRENT_DATE""", (side,))
+            wins = cur.fetchone()[0] or 0
             out["sides"][side] = {
                 "funnel": {
                     "universe": cache_n // 2 if cache_n else 0,
                     "tc10": tc10.get(side, 0),
-                    "open": pc[0] or 0,
-                    "closed": pc[1] or 0,
+                    "open": n_open,
+                    "closed": ntr,
                 },
                 "open": get_open(side),
                 "trades": get_trades(side, 50),
                 "stats": {
                     "trades": ntr,
-                    "wins": tc[1] or 0,
-                    "win_rate": round((tc[1] or 0) / ntr * 100, 1) if ntr else 0,
-                    "avg_pnl": _f(tc[2]) or 0,
-                    "total_pnl": _f(tc[3]) or 0,
+                    "wins": wins,
+                    "win_rate": round(wins / ntr * 100, 1) if ntr else 0,
+                    "avg_pnl": _f(tc[3]) or 0,
+                    "total_pnl": _f(tc[4]) or 0,
                 },
             }
         return out
