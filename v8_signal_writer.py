@@ -49,6 +49,14 @@ buy_s1_bounce V1 (17-Jun-2026):
   It is handled exclusively by _write_buy_s1_bounce_qualified (strict AND).
   buy_s1_bounce appears in FILTER_CONFIG (v8_endpoints.py) for endpoint display
   only -- the exclusion here prevents score-gate contamination (18-Jun-2026 fix).
+
+Sector aggregates (18-Jun-2026):
+  All 3 sector metrics are now fully LIVE for the 209-symbol futures universe:
+    sector_day   = avg mom_2d     (1-day peer avg, every 5-min)
+    sector_week  = avg week_return (1-week peer avg, every 5-min)
+    sector_month = avg month_return (1-month peer avg, every 5-min)
+  Computed via _update_sector_aggregates_sql (single SQL pass) after every tick.
+  EOD engine can no longer overwrite (COALESCE protection in v8_engine.store_metrics).
 """
 
 import logging
@@ -556,28 +564,34 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
     conn.commit()
 
 
-# -- Step 7b: Bulk sector_day SQL update (18-Jun-2026) -------------------------
+# -- Step 7b: Bulk sector aggregates SQL update (18-Jun-2026) ------------------
 
-def _update_sector_day_sql(conn, target_date) -> int:
+def _update_sector_aggregates_sql(conn, target_date) -> int:
     """
-    Compute sector_day for all symbols via SQL after every signal_writer tick.
-    sector_day = avg mom_2d of peers in same gvm_scores segment (live).
-    Replaces unreliable Python _add_sector_aggregates which silently returns
-    None when eod_metrics segment lookup fails.
-    Added: 18-Jun-2026.
+    Compute sector_day, sector_week, sector_month for all 209 futures symbols
+    via a single SQL UPDATE after every signal_writer tick. All three are
+    live peer-averages grouped by gvm_scores segment.
+      sector_day   = avg mom_2d     (live 1-day peer avg, every 5-min)
+      sector_week  = avg week_return (live 1-week peer avg, every 5-min)
+      sector_month = avg month_return (live 1-month peer avg, every 5-min)
+    Single SQL pass for all three. Added: 18-Jun-2026.
     """
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE v8_metrics
-                SET sector_day = seg_avgs.avg_mom_2d
+                SET sector_day   = seg_avgs.avg_mom_2d,
+                    sector_week  = seg_avgs.avg_week_return,
+                    sector_month = seg_avgs.avg_month_return
                 FROM (
-                    SELECT m.symbol, AVG(m2.mom_2d) AS avg_mom_2d
+                    SELECT m.symbol,
+                           AVG(m2.mom_2d)       AS avg_mom_2d,
+                           AVG(m2.week_return)  AS avg_week_return,
+                           AVG(m2.month_return) AS avg_month_return
                     FROM v8_metrics m
                     JOIN gvm_scores g  ON g.symbol  = m.symbol
                         AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
                     JOIN v8_metrics m2 ON m2.score_date = m.score_date
-                        AND m2.mom_2d IS NOT NULL
                     JOIN gvm_scores g2 ON g2.symbol  = m2.symbol
                         AND g2.score_date = (SELECT MAX(score_date) FROM gvm_scores)
                         AND g2.segment   = g.segment
@@ -589,10 +603,10 @@ def _update_sector_day_sql(conn, target_date) -> int:
             """, (target_date, target_date))
             updated = cur.rowcount
         conn.commit()
-        log.info(f"_update_sector_day_sql: {updated} rows updated for {target_date}")
+        log.info(f"_update_sector_aggregates_sql: {updated} rows sector_day/week/month for {target_date}")
         return updated
     except Exception as e:
-        log.warning(f"_update_sector_day_sql: {e}")
+        log.warning(f"_update_sector_aggregates_sql: {e}")
         return 0
 
 
@@ -1458,7 +1472,7 @@ def run_live_signal_writer(conn) -> dict:
     _write_qualified(conn, all_metrics, today)
 
     _write_adr_intraday(conn)
-    _update_sector_day_sql(conn, today)
+    _update_sector_aggregates_sql(conn, today)
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
     return {
