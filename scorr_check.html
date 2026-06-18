@@ -92,7 +92,7 @@
   .chip-label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1.2px;
     align-self:center;margin-right:2px}
   .chip{padding:5px 11px;border-radius:20px;border:1px solid var(--line2);background:var(--bg2);
-    color:var(--mut);cursor:pointer;font-size:11px;font-weight:600;transition:.12s;
+    color:var(--mut);cursor:pointer;font-size:11px;font-weight:600;transition:.12px;
     font-family:var(--mono)}
   .chip:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-d)}
 
@@ -334,7 +334,7 @@
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/fpc"><span>▦</span>FPC</a>
+  <a class="mnav-item" href="/fpc"><span>⊞</span>FPC</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item soon"><span>⊞</span>QB</a>
   <a class="mnav-item soon"><span>△</span>V10</a>
@@ -359,8 +359,7 @@
       <button class="side-btn invest"     id="btnInvest" onclick="setMode('INVEST')">◆ INVEST</button>
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
-    <button class="run-btn" id="screenBtn" onclick="runScreen()" style="margin-top:9px;background:var(--cyan);box-shadow:0 2px 8px rgba(8,145,178,.25)">⊞ Screen Nifty 50 (mcap proxy)</button>
-    <button class="run-btn" id="intraBtn" onclick="openIntradayDirect()" style="margin-top:9px;background:var(--purp);box-shadow:0 2px 8px rgba(124,58,237,.25)">⏱ Intraday Scan (live)</button>
+    <button class="run-btn" id="screenBtn" onclick="runScreen()" style="margin-top:9px;background:var(--cyan);box-shadow:0 2px 8px rgba(8,145,178,.25)">⊞ Future Scans</button>
     <div class="chips" id="chips"></div>
   </div>
 
@@ -526,7 +525,6 @@ function setMode(m){
   document.getElementById('result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
-  // mode switch no longer auto-runs
 }
 
 async function fetchAC(q){
@@ -575,7 +573,6 @@ symEl.addEventListener('input',function(){
   const v=this.value.trim();
   clearTimeout(acTimer);clearTimeout(runTimer);
   acTimer=setTimeout(()=>fetchAC(v),200);
-  // auto-run removed
 });
 symEl.addEventListener('keydown',function(e){
   if(e.key==='ArrowDown'){e.preventDefault();moveAC(1);}
@@ -630,7 +627,7 @@ async function run(){
 }
 
 async function runTradeCheck(sym){
-  const side=mode; // LONG or SHORT
+  const side=mode;
   const r=await fetch('/api/check',{method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({symbol:sym,side,gate1,gate2})});
@@ -666,7 +663,6 @@ function renderTrade(d){
   }else{gvmEl.textContent='';}
   document.getElementById('rTs').textContent=d.ts||'';
 
-  // verdict card — single unified score
   const vc=document.getElementById('vCard');
   vc.className='verdict-card '+d.verdict_class;
   document.getElementById('vLabel').textContent=
@@ -678,7 +674,6 @@ function renderTrade(d){
   const interpEl=document.getElementById('vInterp');
   if(interpEl) interpEl.textContent=d.interpretation||'';
 
-  // single checklist table
   document.getElementById('t1Label').textContent='Checklist \u2014 Process + Entry';
   document.getElementById('t1Score').textContent=
     `${d.score}/${d.total} \u00b7 ${d.n_pass} pass \u00b7 ${d.n_watch} watch \u00b7 ${d.n_fail} fail \u00b7 PASS\u2265${d.pass_cut}`;
@@ -698,10 +693,10 @@ function renderInvest(d){
 
   const badge=document.getElementById('invBadge');
   const verdictMap={
-    'STRONG BUY':'🟢 STRONG BUY',
-    'ACCUMULATE':'🟡 ACCUMULATE',
-    'WATCH':'🟠 WATCH',
-    'AVOID':'🔴 AVOID'
+    'STRONG BUY':'\ud83d\udfe2 STRONG BUY',
+    'ACCUMULATE':'\ud83d\udfe1 ACCUMULATE',
+    'WATCH':'\ud83d\udfe0 WATCH',
+    'AVOID':'\ud83d\udd34 AVOID'
   };
   badge.textContent=verdictMap[d.verdict]||d.verdict;
   badge.className='inv-badge '+(d.verdict||'').replace(' ','-');
@@ -722,15 +717,15 @@ function renderInvest(d){
   document.getElementById('invBarFill').style.width=Math.round(d.score/d.max_score*100)+'%';
   document.getElementById('invBarSub').textContent=`${d.score} of ${d.max_score} rules passed`;
   document.getElementById('invBand').textContent=`Band: ${d.band}`;
-  document.getElementById('invRuleScore').textContent=`${d.score}/${d.max_score} · min 8 to buy`;
+  document.getElementById('invRuleScore').textContent=`${d.score}/${d.max_score} \u00b7 min 8 to buy`;
 
   const tbody=document.getElementById('invBody');tbody.innerHTML='';
   (d.rules||[]).forEach(r=>{
     const passed=r.pass===true;
     const cls=passed?'row-pass':'row-fail';
-    const val=r.value!=null?r.value:'—';
-    const peer=r.peer!=null?` (peer: ${r.peer})`:'';
-    const note=r.note?` · ${r.note}`:'';
+    const val=r.value!=null?r.value:'\u2014';
+    const peer=r.peer!=null?` (peer: ${r.peer})`:';
+    const note=r.note?` \u00b7 ${r.note}`:'';
     tbody.insertAdjacentHTML('beforeend',
       `<tr class="${cls}">
         <td class="td-rule">${r.rule} ${r.name}</td>
@@ -742,10 +737,10 @@ function renderInvest(d){
 
   const passDiv=document.getElementById('invPasses');passDiv.innerHTML='';
   (d.passes||[]).forEach(n=>{
-    passDiv.insertAdjacentHTML('beforeend',`<span class="inv-pass-chip">✓ ${n}</span>`);
+    passDiv.insertAdjacentHTML('beforeend',`<span class="inv-pass-chip">\u2713 ${n}</span>`);
   });
   (d.fails||[]).forEach(n=>{
-    passDiv.insertAdjacentHTML('beforeend',`<span class="inv-fail-chip">✗ ${n}</span>`);
+    passDiv.insertAdjacentHTML('beforeend',`<span class="inv-fail-chip">\u2717 ${n}</span>`);
   });
 
   document.getElementById('invResult').classList.add('show');
@@ -753,7 +748,7 @@ function renderInvest(d){
 }
 
 // ── Screener v2: universe tabs (Nifty50 / All-208) + LONG|SHORT toggle ──
-const SCR_VD={pass:'✓ PASS',watch:'◐ WATCH',fail:'✗ FAIL'};
+const SCR_VD={pass:'\u2713 PASS',watch:'\u25d0 WATCH',fail:'\u2717 FAIL'};
 let scrChipMap=[];
 let scrCache={}; // {nifty50:{...}, all208:{...}}
 let scrUniverse='nifty50'; // nifty50 | all208 | intra
@@ -769,8 +764,8 @@ async function loadScreen(universe){
   ld.className='loading show';
   const heavy = universe==='all208';
   const msgs = heavy
-    ? ['Screening all 208 futures…','This takes a moment…','Scoring LONG & SHORT…','Ranking candidates…']
-    : ['Screening 50 names…','Scoring LONG & SHORT…','Ranking candidates…'];
+    ? ['Screening all 208 futures\u2026','This takes a moment\u2026','Scoring LONG & SHORT\u2026','Ranking candidates\u2026']
+    : ['Screening 50 names\u2026','Scoring LONG & SHORT\u2026','Ranking candidates\u2026'];
   let mi=0; ld.textContent=msgs[0];
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('screenBtn').disabled=true;
@@ -789,13 +784,13 @@ async function loadScreen(universe){
   document.getElementById('runBtn').disabled=false;
 }
 
-function runScreen(){ scrMode='screener'; scrUniverse='nifty50'; scrSide='LONG'; document.getElementById('icBar').style.display='none'; document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.'; syncScrTabs(); loadScreen('nifty50'); }
+function runScreen(){ scrMode='screener'; scrUniverse='nifty50'; scrSide='LONG'; document.getElementById('icBar').style.display='none'; document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) \u00b7 same v3.4 engine, run per symbol \u00b7 mcap proxy, not the real index.'; syncScrTabs(); loadScreen('nifty50'); }
 
 function setUniverse(u){
   scrMode='screener'; scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.';
+  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) \u00b7 same v3.4 engine, run per symbol \u00b7 mcap proxy, not the real index.';
   syncScrTabs();
   if(scrCache[u]) renderScreen();
   else loadScreen(u);
@@ -810,7 +805,7 @@ function openIntraday(){
   scrMode='intraday'; scrUniverse='intra'; scrSide='LONG'; intraSide='LONG';
   syncScrTabs();
   document.getElementById('icBar').style.display='flex';
-  document.getElementById('scrFoot').textContent='Stage1 cached TC≥10 · Stage2 live intraday (1H positive, vol 1.5×, gain 1-2%, DMA20, week-low S1, hold open) · prototype.';
+  document.getElementById('scrFoot').textContent='Stage1 cached TC\u226510 \u00b7 Stage2 live intraday (1H positive, vol 1.5\u00d7, gain 1-2%, DMA20, week-low S1, hold open) \u00b7 prototype.';
   loadIntraday('LONG');
 }
 
@@ -830,8 +825,8 @@ function syncScrTabs(){
 }
 
 function scrRow(r,i){
-  const cmp=r.cmp!=null?Math.round(r.cmp):'—';
-  const pz=r.pivot&&r.pivot.zone?r.pivot.zone:'—';
+  const cmp=r.cmp!=null?Math.round(r.cmp):'\u2014';
+  const pz=r.pivot&&r.pivot.zone?r.pivot.zone:'\u2014';
   const chips=(r.not_passed||[]).map(c=>{
     const cls=c.state==='fail'?'fail':c.state==='watch'?'watch':'na';
     const rid=c.rule.split(' ')[0];
@@ -856,8 +851,8 @@ function renderScreen(){
   const rows = scrSide==='LONG' ? (d.long_top10||[]) : (d.short_top10||[]);
   const scored = scrSide==='LONG' ? d.scored_long : d.scored_short;
   const uName = scrUniverse==='all208' ? 'All 208 Futures' : 'Nifty 50 (mcap proxy)';
-  document.getElementById('scrTitle').textContent=`⊞ ${uName} · ${scrSide} candidates`;
-  document.getElementById('scrMeta').textContent=`${scored} scored · ${d.ts} · ${d.elapsed_sec}s`;
+  document.getElementById('scrTitle').textContent=`\u229e ${uName} \u00b7 ${scrSide} candidates`;
+  document.getElementById('scrMeta').textContent=`${scored} scored \u00b7 ${d.ts} \u00b7 ${d.elapsed_sec}s`;
   document.getElementById('scrBody').innerHTML=rows.map((r,i)=>scrRow(r,i)).join('');
   document.getElementById('scrResult').classList.add('show');
   document.getElementById('scrResult').scrollIntoView({behavior:'smooth',block:'start'});
@@ -866,22 +861,22 @@ function renderScreen(){
 function showPop(idx){
   const c=scrChipMap[idx]; if(!c)return;
   document.getElementById('scrPopHead').textContent=c.rule;
-  document.getElementById('scrPopVal').textContent=c.value||'—';
-  document.getElementById('scrPopReq').textContent=c.required||'—';
+  document.getElementById('scrPopVal').textContent=c.value||'\u2014';
+  document.getElementById('scrPopReq').textContent=c.required||'\u2014';
   document.getElementById('scrPop').classList.add('show');
 }
 function closePop(e){
   if(e.target.id==='scrPop')document.getElementById('scrPop').classList.remove('show');
 }
 
-// ── Intraday scan (id=373): Stage1 cached TC>=10 + Stage2 live filters ──
+// ── Intraday scan: Stage1 cached TC>=10 + Stage2 live filters ──
 let intraSide='LONG';
 let intraCache={}; // {LONG:{...}, SHORT:{...}}
 
 async function refreshTcCache(){
   const ld=document.getElementById('loading');
   ld.className='loading show';
-  const msgs=['Refreshing TC cache (208×2)…','This takes a moment…','Scoring all names…'];
+  const msgs=['Refreshing TC cache (208\u00d72)\u2026','This takes a moment\u2026','Scoring all names\u2026'];
   let mi=0; ld.textContent=msgs[0];
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('icRefreshBtn').disabled=true;
@@ -890,9 +885,8 @@ async function refreshTcCache(){
     clearInterval(tk); ld.classList.remove('show');
     if(!r.ok){showErr('Cache refresh error '+r.status+'.');return;}
     const d=await r.json();
-    document.getElementById('icCacheMeta').textContent=`cache: ${d.written} rows · ${d.ts} · ${d.elapsed_sec}s`;
-    intraCache={}; // bust local cache, force fresh scan
-    loadIntraday(intraSide);
+    document.getElementById('icCacheMeta').textContent=`cache: ${d.written} rows \u00b7 ${d.ts} \u00b7 ${d.elapsed_sec}s`;
+    intraCache={}; loadIntraday(intraSide);
   }catch(e){clearInterval(tk);ld.classList.remove('show');showErr('Network error: '+e.message);}
   document.getElementById('icRefreshBtn').disabled=false;
 }
@@ -901,7 +895,7 @@ async function loadIntraday(side){
   intraSide=side; syncScrTabs();
   if(intraCache[side]){ renderIntraday(); return; }
   const ld=document.getElementById('loading');
-  ld.className='loading show'; ld.textContent='Running intraday scan…';
+  ld.className='loading show'; ld.textContent='Running intraday scan\u2026';
   document.getElementById('scrResult').classList.remove('show');
   try{
     const r=await fetch(`/api/trade-check/intraday-scan?side=${side}`);
@@ -914,14 +908,14 @@ async function loadIntraday(side){
 }
 
 function intraRow(r,i){
-  const cmp=r.cmp!=null?r.cmp:'—';
-  const gain=r.gain_pct!=null?(r.gain_pct>0?'+':'')+r.gain_pct+'%':'—';
-  const vp=r.vol_pace!=null?r.vol_pace+'×':'—';
+  const cmp=r.cmp!=null?r.cmp:'\u2014';
+  const gain=r.gain_pct!=null?(r.gain_pct>0?'+':'')+r.gain_pct+'%':'\u2014';
+  const vp=r.vol_pace!=null?r.vol_pace+'\u00d7':'\u2014';
   const chk=r.checks||{};
   const chips=Object.keys(chk).filter(k=>k!=='score>=10').map(k=>{
     const v=chk[k];
     const cls=v===true?'pass':(v===false?'fail':'na');
-    return `<span class="scr-chip ${cls==='pass'?'':cls}" style="${cls==='pass'?'background:var(--grn-d);color:var(--grn);border-color:var(--grn-b)':''}">${k}</span>`;
+    return `<span class="scr-chip ${cls===\'pass\'?'':cls}" style="${cls===\'pass\'?\'background:var(--grn-d);color:var(--grn);border-color:var(--grn-b)\':\'\'}">${k}</span>`;
   }).join('');
   return `<tr>
     <td>${i+1}</td>
@@ -938,8 +932,8 @@ function renderIntraday(){
   const d=intraCache[intraSide]; if(!d)return;
   const head=`<tr><th>#</th><th>Symbol</th><th>TC</th><th>CMP</th><th>Gain</th><th>Vol</th><th>Filters</th></tr>`;
   document.getElementById('scrThead').innerHTML=head;
-  document.getElementById('scrTitle').textContent=`⏱ Intraday · ${intraSide} · TC≥10 + live filters`;
-  document.getElementById('scrMeta').textContent=`${d.matched}/${d.shortlist} matched · ${d.ts} · ${d.elapsed_sec}s`;
+  document.getElementById('scrTitle').textContent=`\u23f1 Intraday \u00b7 ${intraSide} \u00b7 TC\u226510 + live filters`;
+  document.getElementById('scrMeta').textContent=`${d.matched}/${d.shortlist} matched \u00b7 ${d.ts} \u00b7 ${d.elapsed_sec}s`;
   document.getElementById('scrBody').innerHTML=(d.rows||[]).map((r,i)=>intraRow(r,i)).join('')
     || '<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:18px">No intraday matches right now. Refresh cache if scores look stale.</td></tr>';
   document.getElementById('icBar').style.display='flex';
