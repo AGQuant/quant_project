@@ -877,7 +877,7 @@ def buy_s1_bounce_qualified(limit: int = 50):
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT q.symbol, q.gvm_score, q.cmp,
-                    q.dma_50, q.week_return,
+                    q.dma_50, q.week_return, q.mom_2d, q.rsi_month,
                     (q.metrics->>'recovery_2d')::numeric AS recovery_2d,
                     (q.metrics->>'week_low')::numeric    AS week_low,
                     (q.metrics->>'day_ret')::numeric     AS day_ret,
@@ -886,10 +886,12 @@ def buy_s1_bounce_qualified(limit: int = 50):
                     (q.metrics->>'target')::numeric      AS target_price,
                     (q.metrics->>'stop_loss')::numeric   AS stop_price,
                     q.source, q.signal_ts,
-                    g.segment,
+                    m.day_1d, g.segment,
                     p.pp, p.r1, p.s1,
                     q.metrics->>'status' AS stored_status
                 FROM v8_qualified q
+                LEFT JOIN v8_metrics m ON m.symbol=q.symbol
+                    AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
                 LEFT JOIN gvm_scores g ON g.symbol=q.symbol
                 LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
                     AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
