@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scorr - Scanners</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
+.nav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.nav::-webkit-scrollbar{display:none}
+.ni{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
+.ni:hover{color:#1c2536}
+.ni.on{border-bottom-color:#2563eb;color:#2563eb}
+.page{max-width:880px;margin:0 auto;padding:14px 12px}
+.h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
+.h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
+.tabs{display:flex;border-bottom:1px solid #e4e9f1;margin-bottom:14px}
+.tab{padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600;color:#5a6781;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.12s}
+.tab:hover{color:#1c2536;background:#f8faff}
+.tab.on{color:#2563eb;border-bottom-color:#2563eb}
+.panel{display:none}
+.panel.on{display:block}
+.bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.bar label{font-size:11px;color:#5a6781;font-weight:600}
+.bar input,.bar select{border:1px solid #dde2ed;border-radius:6px;padding:4px 8px;font-size:12px;background:#fff;outline:none}
+.bar input:focus,.bar select:focus{border-color:#2563eb}
+.rbtn{margin-left:auto;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:11px;font-weight:600;cursor:pointer}
+.rbtn:hover{background:#1d4ed8}
+.rbtn:disabled{background:#a0aec0;cursor:default}
+.st{font-size:11px;color:#8a94a6;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0}
+.dot.y{background:#f59e0b}
+.tw{overflow-x:auto;border-radius:8px;border:1px solid #e4e9f1;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:#f8faff;border-bottom:1px solid #e4e9f1}
+th{padding:8px 10px;text-align:left;font-weight:700;font-size:11px;color:#5a6781;white-space:nowrap}
+tbody tr{border-bottom:1px solid #f1f4f9}
+tbody tr:hover{background:#f8faff}
+tbody tr:last-child{border-bottom:none}
+td{padding:7px 10px;white-space:nowrap}
+.sym{font-weight:700}
+.seg{font-size:10px;color:#8a94a6;margin-top:1px}
+.up{color:#059669;font-weight:600}
+.dn{color:#dc2626;font-weight:600}
+.nt{color:#5a6781}
+.gp{display:inline-flex;align-items:center;justify-content:center;width:32px;height:18px;border-radius:4px;font-size:10px;font-weight:700}
+.g4{background:#d1fae5;color:#065f46}
+.g3{background:#dbeafe;color:#1e40af}
+.g2{background:#fef3c7;color:#92400e}
+.g1{background:#fee2e2;color:#991b1b}
+.empty{text-align:center;padding:40px 20px;color:#8a94a6}
+.cs{text-align:center;padding:60px 20px;color:#8a94a6}
+.cs big{display:block;font-size:28px;margin-bottom:8px}
+.cs b{display:block;font-size:14px;font-weight:700;color:#1c2536;margin-bottom:4px}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a class="ni" href="/">&#8962; Home</a>
+  <a class="ni" href="/dashboard">&#9889; V8</a>
+  <a class="ni" href="/cio2?model=gvm">&#9702; GVM</a>
+  <a class="ni" href="/sector">&#8857; Sector</a>
+  <a class="ni" href="/check">&#10003; Check</a>
+  <a class="ni on" href="/scanners">&#8862; Scanners</a>
+  <a class="ni" href="/cio">&#9673; Max</a>
+  <a class="ni" href="/fpc">&#9638; FPC</a>
+</nav>
+<div class="page">
+  <div class="h1">Scanners</div>
+  <div class="h2">Smart screeners powered by V8 + GVM</div>
+  <div class="tabs">
+    <div class="tab on" onclick="sw('intraday')">Intraday</div>
+    <div class="tab" onclick="sw('positional')">Positional</div>
+    <div class="tab" onclick="sw('investment')">Investment</div>
+  </div>
+
+  <!-- INTRADAY -->
+  <div class="panel on" id="p-intraday">
+    <div class="bar">
+      <label>Min 1D%</label>
+      <input type="number" id="f-d" value="0.3" step="0.1" min="-10" max="10" style="width:58px">
+      <label>Min Vol</label>
+      <input type="number" id="f-v" value="1.0" step="0.1" min="0" style="width:52px">
+      <label>Min GVM</label>
+      <input type="number" id="f-g" value="0" step="0.5" min="0" max="10" style="width:52px">
+      <button class="rbtn" id="i-btn" onclick="loadI()">Refresh</button>
+    </div>
+    <div class="st"><span class="dot" id="i-dot"></span><span id="i-st">Loading...</span></div>
+    <div id="i-tbl"><div class="empty">Loading...</div></div>
+  </div>
+
+  <!-- POSITIONAL -->
+  <div class="panel" id="p-positional">
+    <div class="cs">
+      <big>&#8857;</big>
+      <b>Positional Scanner</b>
+      Coming soon — swing setups 1-5 days
+    </div>
+  </div>
+
+  <!-- INVESTMENT -->
+  <div class="panel" id="p-investment">
+    <div class="cs">
+      <big>&#9702;</big>
+      <b>Investment Scanner</b>
+      Coming soon — GVM quality stocks for buy-and-hold
+    </div>
+  </div>
+</div>
+<script>
+const pct=(v,d=2)=>v==null?'--':+v>=0?'<span class="up">+'+Math.abs(+v).toFixed(d)+'%</span>':'<span class="dn">'+((+v).toFixed(d))+'%</span>';
+const num=(v,d=1)=>v==null?'--':(+v).toFixed(d);
+const pr=v=>v==null?'--':'Rs.'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
+const gp=g=>{if(g==null)return'--';const c=g>=8?'g4':g>=7?'g3':g>=6?'g2':'g1';return'<span class="gp '+c+'">'+(+g).toFixed(1)+'</span>';};
+let at='intraday';
+function sw(t){
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('on',['intraday','positional','investment'][i]===t));
+  document.querySelectorAll('.panel').forEach(el=>el.classList.remove('on'));
+  document.getElementById('p-'+t).classList.add('on');
+  at=t;
+  if(t==='intraday'&&!window._li)loadI();
+}
+async function loadI(){
+  const btn=document.getElementById('i-btn');
+  btn.disabled=true;btn.textContent='...';
+  document.getElementById('i-st').textContent='Fetching...';
+  const d=document.getElementById('f-d').value||0.3;
+  const v=document.getElementById('f-v').value||1.0;
+  const g=document.getElementById('f-g').value||0;
+  try{
+    const res=await fetch('/api/scanners/intraday?min_day1d='+d+'&min_vol_ratio='+v+'&min_gvm='+g+'&limit=40');
+    const data=await res.json();
+    window._li=true;
+    document.getElementById('i-dot').className='dot';
+    document.getElementById('i-st').textContent=data.count+' stocks - v8_metrics live';
+    if(!data.rows||!data.rows.length){
+      document.getElementById('i-tbl').innerHTML='<div class="empty">No stocks match filters</div>';
+    }else{
+      document.getElementById('i-tbl').innerHTML='<div class="tw"><table><thead><tr><th>Symbol</th><th>1D%</th><th>2D%</th><th>Vol</th><th>Sec Day</th><th>Sec Wk</th><th>DMA50</th><th>RSI W</th><th>GVM</th><th>CMP</th></tr></thead><tbody>'+
+        data.rows.map(r=>'<tr><td><div class="sym">'+r.symbol+'</div><div class="seg">'+(r.segment||'--')+'</div></td><td>'+pct(r.day_1d_pct)+'</td><td>'+pct(r.mom_2d_pct)+'</td><td class="'+(+(r.vol_ratio||0)>=1.5?'up':'nt')+'">'+num(r.vol_ratio)+'x</td><td>'+pct(r.sector_day_pct)+'</td><td>'+pct(r.sector_week_pct)+'</td><td>'+pct(r.dma_50_pct)+'</td><td class="'+(+(r.rsi_weekly||0)>=60?'up':+(r.rsi_weekly||100)<=40?'dn':'nt')+'">'+num(r.rsi_weekly,0)+'</td><td>'+gp(r.gvm)+'</td><td class="nt">'+pr(r.cmp)+'</td></tr>').join('')+
+        '</tbody></table></div>';
+    }
+  }catch(e){
+    document.getElementById('i-dot').className='dot y';
+    document.getElementById('i-st').textContent='Error';
+    document.getElementById('i-tbl').innerHTML='<div class="empty">'+e.message+'</div>';
+  }
+  btn.disabled=false;btn.textContent='Refresh';
+}
+loadI();
+setInterval(()=>{if(at==='intraday')loadI();},300000);
+</script>
+</body>
+</html>
