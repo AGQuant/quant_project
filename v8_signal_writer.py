@@ -549,7 +549,8 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
                 upper_bb      = EXCLUDED.upper_bb,
                 lower_bb      = EXCLUDED.lower_bb,
                 ma9_vs_ma21   = EXCLUDED.ma9_vs_ma21,
-                vol_ratio     = EXCLUDED.vol_ratio
+                vol_ratio     = EXCLUDED.vol_ratio,
+                computed_at   = NOW()
         """, (
             sym, target_date, m.get("gvm_score"),
             m.get("dma_20"), m.get("dma_50"), m.get("dma_200"), m.get("daily_rsi"),

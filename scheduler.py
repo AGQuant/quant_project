@@ -36,6 +36,8 @@ _signal_writer_fail_streak = 0
 _last_signal_writer_ok: Optional[datetime] = None
 SIGNAL_WRITER_TIMEOUT = timedelta(minutes=4)   # spec #16: assume hung after ~4 min
 WATCHDOG_STALE_MIN = 10                          # spec #16: stale if no tick in 10 min
+WATCHDOG_RESTART_COOLDOWN = timedelta(minutes=5) # cap restart attempts (avoid storm if
+                                                 # the writer itself, not the loop, is broken)
 _eod_running = False
 _eod_ran_today: Optional[date] = None
 _adr_pcr_ran_today: Optional[date] = None
@@ -208,7 +210,10 @@ def _check_watchdog(now):
             _log_alert("scheduler_stall",
                        f"v8_metrics stale {age:.1f} min during market hours — restarting live loop")
             _watchdog_alerted = True
-        _request_restart(f"watchdog: tick stale {age:.1f} min")
+        # cooldown: if a restart didn't help (writer-logic bug, not a hung loop),
+        # don't hammer — retry at most once per cooldown window.
+        if _last_restart_ts is None or (now - _last_restart_ts) >= WATCHDOG_RESTART_COOLDOWN:
+            _request_restart(f"watchdog: tick stale {age:.1f} min")
     else:
         _watchdog_alerted = False
 
