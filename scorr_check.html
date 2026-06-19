@@ -389,6 +389,44 @@
     <div class="foot" id="rFoot">Personal trade context &middot; not a V8 algo signal &middot; v3.4 &middot; &#9888; Spot price, not futures.</div>
   </div>
 
+  <!-- Room Left (task #12) — 1D structure room from /api/structure -->
+  <style>
+    .room-card{max-width:720px;margin:14px auto 0;background:var(--panel);border:1px solid var(--line);
+      border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;display:none}
+    .room-card.show{display:block}
+    .room-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .room-title{font-size:13px;font-weight:800;letter-spacing:.3px;color:var(--txt)}
+    .room-verdict{font-size:11px;font-weight:800;padding:4px 10px;border-radius:8px}
+    .room-verdict.good{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
+    .room-verdict.tight{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+    .room-verdict.at{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
+    .room-verdict.na{background:var(--panel2);color:var(--mut)}
+    .room-analysis{font-size:12px;color:var(--mut);margin-bottom:10px;line-height:1.5}
+    .room-warn{display:none;font-size:11.5px;font-weight:700;color:var(--red);background:var(--red-d);
+      border:1px solid var(--red-b);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+    .room-warn.show{display:block}
+    .room-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px}
+    .room-table th{text-align:left;color:var(--dim);font-weight:700;padding:6px 8px;
+      border-bottom:1px solid var(--line);font-size:10px;text-transform:uppercase}
+    .room-table td{padding:6px 8px;border-bottom:1px solid var(--panel2)}
+    .room-table tr:last-child td{border-bottom:none}
+    .room-pin{color:var(--cyan);font-weight:700}
+    .room-major{font-weight:700;color:var(--txt)}
+    .room-up{color:var(--grn)} .room-dn{color:var(--red)} .room-nt{color:var(--mut)}
+  </style>
+  <div class="room-card" id="roomCard">
+    <div class="room-head">
+      <span class="room-title">Room Left &middot; 1D</span>
+      <span class="room-verdict na" id="roomVerdict">--</span>
+    </div>
+    <div class="room-analysis" id="roomAnalysis"></div>
+    <div class="room-warn" id="roomWarn"></div>
+    <table class="room-table">
+      <thead><tr><th>Level</th><th>Price</th><th>Pts</th><th>%</th><th>Strength</th></tr></thead>
+      <tbody id="roomBody"></tbody>
+    </table>
+  </div>
+
   <!-- Investment Check Result -->
   <div class="inv-result" id="invResult">
     <div class="card" style="padding:16px 18px">
@@ -508,6 +546,7 @@ function setMode(m){
   document.getElementById('result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
+  document.getElementById('roomCard').classList.remove('show');
 }
 
 async function fetchAC(q){
@@ -589,6 +628,7 @@ async function run(){
   document.getElementById('result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
+  document.getElementById('roomCard').classList.remove('show');
   document.getElementById('err').classList.remove('show');
   const ld=document.getElementById('loading');
   const inv=(mode==='INVEST');
@@ -658,6 +698,48 @@ function renderTrade(d){
     '<tr class="'+rowClass(r.state)+'"><td class="td-rule">'+r.rule+'</td><td class="td-cond">'+r.cond+'</td><td class="td-val">'+r.val+'</td><td class="td-state">'+stateBadge(r.state)+'</td></tr>');});
   document.getElementById('result').classList.add('show');
   document.getElementById('result').scrollIntoView({behavior:'smooth',block:'start'});
+  loadRoom(d.symbol, d.side);
+}
+
+// ── Room Left (task #12): 1D structure room via existing /api/structure ──
+async function loadRoom(sym, side){
+  const card=document.getElementById('roomCard');
+  if(side!=='LONG'&&side!=='SHORT'){card.classList.remove('show');return;}
+  try{
+    const r=await fetch('/api/structure/'+encodeURIComponent(sym)+'?direction='+side);
+    if(!r.ok){card.classList.remove('show');return;}
+    const d=await r.json();
+    if(!d||d.detail||!d.room){card.classList.remove('show');return;}
+    renderRoom(d, side);
+  }catch(e){card.classList.remove('show');}
+}
+
+function renderRoom(d, side){
+  const room=d.room||{};
+  const vmap={GOOD_ROOM:['good','GOOD'],TIGHT:['tight','TIGHT'],AT_LEVEL:['at','AT LEVEL'],NO_DATA:['na','NO DATA']};
+  const vb=vmap[room.verdict]||['na',(room.verdict||'--')];
+  const vEl=document.getElementById('roomVerdict');
+  vEl.className='room-verdict '+vb[0]; vEl.textContent=vb[1];
+  document.getElementById('roomAnalysis').textContent=room.analysis||'';
+  const warn=document.getElementById('roomWarn');
+  const rsiW=d.metrics?d.metrics.rsi_weekly:null;
+  if(side==='SHORT'&&rsiW!=null&&rsiW<20){
+    warn.textContent='⚠ Weekly RSI '+(+rsiW).toFixed(0)+' below 20 — alarm for shorts, consider covering.';
+    warn.classList.add('show');
+  }else{warn.classList.remove('show');}
+  const body=document.getElementById('roomBody'); body.innerHTML='';
+  (room.levels||[]).forEach(l=>{
+    const major=l.strength==='MAJOR';
+    const pin=(l.label||'').startsWith('Pivot');
+    const pctCls=(+l.distance_pct>=0)?'room-up':'room-dn';
+    body.insertAdjacentHTML('beforeend',
+      '<tr><td class="'+(pin?'room-pin':(major?'room-major':''))+'">'+l.label+(major?' <b>MAJOR</b>':'')+'</td>'+
+      '<td>'+(l.price!=null?(+l.price).toFixed(1):'--')+'</td>'+
+      '<td class="room-nt">'+(l.distance_pts!=null?(+l.distance_pts).toFixed(1):'--')+'</td>'+
+      '<td class="'+pctCls+'">'+(l.distance_pct!=null?(+l.distance_pct).toFixed(2)+'%':'--')+'</td>'+
+      '<td class="'+(major?'room-major':'room-nt')+'">'+(l.strength||'--')+'</td></tr>');
+  });
+  document.getElementById('roomCard').classList.add('show');
 }
 
 function renderInvest(d){
