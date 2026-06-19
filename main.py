@@ -70,13 +70,14 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.53
+# Scorr / Project Quant — main.py v2.9.54
+# v2.9.54: Added /quant-basket route (Quant Basket dashboard).
 # v2.9.53: Removed intraday_router (intraday_endpoints.py + intraday_engine.py retired).
 #   /api/intraday/* now served by trade_check_v34_router -> tci.intraday_dashboard().
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.53"
+VERSION = "2.9.54"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -328,7 +329,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.53)")
+        log.info("Tables ready (v2.9.54)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -485,6 +486,10 @@ def structure_page():
 @app.get("/performance", response_class=HTMLResponse)
 def performance():
     with open("scorr_performance.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/quant-basket", response_class=HTMLResponse)
+def quant_basket():
+    with open("quant_basket.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
