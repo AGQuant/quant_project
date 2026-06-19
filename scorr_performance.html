@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scorr · Performance</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
+/* ── Canonical Scorr model-nav ── */
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.model-nav::-webkit-scrollbar{display:none}
+.mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
+.mnav-item:hover{color:#1c2536}
+.mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+.mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+.mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+.page{max-width:920px;margin:0 auto;padding:14px 12px}
+.h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
+.h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
+.tabs{display:flex;border-bottom:1px solid #e4e9f1;margin-bottom:14px}
+.tab{padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600;color:#5a6781;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.12s}
+.tab:hover{color:#1c2536;background:#f8faff}
+.tab.on{color:#2563eb;border-bottom-color:#2563eb}
+.panel{display:none}
+.panel.on{display:block}
+.cards{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.card{flex:1;min-width:140px;background:#fff;border:1px solid #e4e9f1;border-radius:10px;padding:12px 14px}
+.card .k{font-size:10px;color:#8a94a6;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.card .v{font-size:18px;font-weight:800;margin-top:4px}
+.card .s{font-size:11px;color:#5a6781;margin-top:2px}
+.st{font-size:11px;color:#8a94a6;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0}
+.dot.y{background:#f59e0b}
+.tw{overflow-x:auto;border-radius:8px;border:1px solid #e4e9f1;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:#f8faff;border-bottom:1px solid #e4e9f1}
+th{padding:8px 10px;text-align:left;font-weight:700;font-size:11px;color:#5a6781;white-space:nowrap}
+tbody tr{border-bottom:1px solid #f1f4f9}
+tbody tr:hover{background:#f8faff}
+td{padding:7px 10px;white-space:nowrap}
+.sym{font-weight:700}
+.up{color:#059669;font-weight:600}
+.dn{color:#dc2626;font-weight:600}
+.nt{color:#5a6781}
+.gp{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:18px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:700}
+.g4{background:#d1fae5;color:#065f46}.g3{background:#dbeafe;color:#1e40af}.g2{background:#fef3c7;color:#92400e}.g1{background:#fee2e2;color:#991b1b}
+.empty{text-align:center;padding:40px 20px;color:#8a94a6}
+.wlh{margin:18px 0 8px;font-size:11px;font-weight:700;color:#8a94a6;text-transform:uppercase;letter-spacing:1px}
+</style>
+</head>
+<body>
+<nav class="model-nav" id="scorr-nav">
+  <a class="mnav-item" href="/"><span>&#8962;</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/dashboard"><span>&#9889;</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>&#8857;</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>&#10003;</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/scanners"><span>&#8862;</span>Scanners</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>&#9638;</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item soon"><span>&#8862;</span>QB</a>
+  <a class="mnav-item soon"><span>&#9651;</span>V10</a>
+</nav>
+<div class="page">
+  <div class="h1">Performance</div>
+  <div class="h2">Quant Baskets · Alpha vs Nifty500 · Options (V5)</div>
+  <div class="tabs">
+    <div class="tab on" onclick="sw('qb')">Quant Baskets</div>
+    <div class="tab" onclick="sw('alpha')">Alpha vs Nifty500</div>
+    <div class="tab" onclick="sw('options')">Options (V5)</div>
+  </div>
+
+  <div class="panel on" id="p-qb">
+    <div id="qb-cards" class="cards"></div>
+    <div class="wlh">Open positions</div>
+    <div id="qb-tbl"><div class="empty">Loading...</div></div>
+  </div>
+
+  <div class="panel" id="p-alpha">
+    <div id="alpha-cards" class="cards"></div>
+    <div id="alpha-tbl"><div class="empty">Loading...</div></div>
+  </div>
+
+  <div class="panel" id="p-options">
+    <div id="opt-cards" class="cards"></div>
+    <div class="wlh">Trades</div>
+    <div id="opt-tbl"><div class="empty">Loading...</div></div>
+  </div>
+</div>
+<script>
+const inr=v=>v==null?'--':(v<0?'-':'+')+'Rs.'+Math.abs(+v).toLocaleString('en-IN',{maximumFractionDigits:0});
+const pct=(v,d=2)=>v==null?'--':+v>=0?'<span class="up">+'+(+v).toFixed(d)+'%</span>':'<span class="dn">'+(+v).toFixed(d)+'%</span>';
+const num=(v,d=2)=>v==null?'--':(+v).toFixed(d);
+const pnlCls=v=>+v>=0?'up':'dn';
+const gp=g=>{if(g==null)return'--';const c=g>=8?'g4':g>=7?'g3':g>=6?'g2':'g1';return'<span class="gp '+c+'">'+(+g).toFixed(1)+'</span>';};
+let at='qb',loaded={};
+function sw(t){
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('on',['qb','alpha','options'][i]===t));
+  document.querySelectorAll('.panel').forEach(el=>el.classList.remove('on'));
+  document.getElementById('p-'+t).classList.add('on');
+  at=t;
+  if(!loaded[t]){loaded[t]=true;({qb:loadQB,alpha:loadAlpha,options:loadOpt}[t])();}
+}
+async function loadQB(){
+  try{
+    const d=await(await fetch('/api/performance/qb')).json();
+    document.getElementById('qb-cards').innerHTML=
+      '<div class="card"><div class="k">Total P&amp;L</div><div class="v '+pnlCls(d.total_pnl)+'">'+inr(d.total_pnl)+'</div><div class="s">'+d.total_positions+' open positions</div></div>'+
+      (d.baskets||[]).map(b=>'<div class="card"><div class="k">'+b.basket.replace(/_/g,\' \')+'</div><div class="v '+pnlCls(b.pnl)+'">'+inr(b.pnl)+'</div><div class="s">'+pct(b.return_pct)+' · '+b.positions+' pos</div></div>').join('');
+    const rows=d.positions||[];
+    document.getElementById('qb-tbl').innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Basket</th><th>Entry</th><th>CMP</th><th>P&amp;L</th><th>P&amp;L%</th><th>GVM</th></tr></thead><tbody>'+
+      rows.map(r=>'<tr><td class="sym">'+r.symbol+'</td><td class="nt">'+(r.basket||\'\').replace(/_/g,\' \')+'</td><td class="nt">'+num(r.entry_price)+'</td><td class="nt">'+num(r.current_price)+'</td><td class="'+pnlCls(r.pnl)+'">'+inr(r.pnl)+'</td><td>'+pct(r.pnl_pct)+'</td><td>'+gp(r.gvm)+'</td></tr>').join('')+
+      '</tbody></table></div>'):'<div class="empty">No open positions</div>';
+  }catch(e){document.getElementById('qb-tbl').innerHTML='<div class="empty">'+e.message+'</div>';}
+}
+async function loadAlpha(){
+  try{
+    const d=await(await fetch('/api/performance/alpha')).json();
+    const t=d.total||{};
+    document.getElementById('alpha-cards').innerHTML=
+      '<div class="card"><div class="k">Nifty500 Benchmark</div><div class="v nt">'+pct(d.benchmark_return)+'</div><div class="s">base '+d.base_date+'</div></div>'+
+      '<div class="card"><div class="k">Portfolio Return</div><div class="v '+pnlCls(t.return_pct)+'">'+pct(t.return_pct)+'</div><div class="s">'+inr(t.pnl)+'</div></div>'+
+      '<div class="card"><div class="k">Total Alpha</div><div class="v '+pnlCls(t.alpha)+'">'+(t.alpha==null?\'--\':(t.alpha>=0?\'+\':\'\')+t.alpha)+'</div><div class="s">vs Nifty500</div></div>';
+    const rows=d.baskets||[];
+    document.getElementById('alpha-tbl').innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Basket</th><th>Return%</th><th>Benchmark%</th><th>Alpha</th><th>Positions</th></tr></thead><tbody>'+
+      rows.map(b=>'<tr><td class="sym">'+b.basket.replace(/_/g,\' \')+'</td><td>'+pct(b.return_pct)+'</td><td class="nt">'+num(d.benchmark_return,3)+'%</td><td class="'+pnlCls(b.alpha)+'">'+(b.alpha==null?\'--\':(b.alpha>=0?\'+\':\'\')+b.alpha)+'</td><td class="nt">'+b.positions+'</td></tr>').join('')+
+      '</tbody></table></div>'):'<div class="empty">No baskets</div>';
+  }catch(e){document.getElementById('alpha-tbl').innerHTML='<div class="empty">'+e.message+'</div>';}
+}
+async function loadOpt(){
+  try{
+    const d=await(await fetch('/api/performance/options')).json();
+    document.getElementById('opt-cards').innerHTML=
+      '<div class="card"><div class="k">Total P&amp;L</div><div class="v '+pnlCls(d.total_pnl)+'">'+inr(d.total_pnl)+'</div><div class="s">'+d.total_trades+' trades · '+d.strategy+'</div></div>'+
+      (d.by_ticker||[]).map(t=>'<div class="card"><div class="k">'+t.ticker+'</div><div class="v '+pnlCls(t.pnl)+'">'+inr(t.pnl)+'</div><div class="s">'+t.trades+' trades · '+t.wins+'W/'+t.losses+'L</div></div>').join('');
+    const rows=d.trades||[];
+    document.getElementById('opt-tbl').innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Date</th><th>Ticker</th><th>Type</th><th>Strike</th><th>Action</th><th>Lots</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Status</th></tr></thead><tbody>'+
+      rows.map(r=>'<tr><td class="nt">'+r.trade_date+'</td><td class="sym">'+r.ticker+'</td><td class="nt">'+r.option_type+'</td><td class="nt">'+num(r.strike,0)+'</td><td class="nt">'+r.action+'</td><td class="nt">'+r.lots+'</td><td class="nt">'+num(r.entry_price)+'</td><td class="nt">'+num(r.exit_price)+'</td><td class="'+pnlCls(r.pnl)+'">'+inr(r.pnl)+'</td><td class="nt">'+r.status+'</td></tr>').join('')+
+      '</tbody></table></div>'):'<div class="empty">No trades</div>';
+  }catch(e){document.getElementById('opt-tbl').innerHTML='<div class="empty">'+e.message+'</div>';}
+}
+loaded.qb=true;loadQB();
+</script>
+<script>
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
+}
+</script>
+</body>
+</html>
