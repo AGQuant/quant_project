@@ -26,6 +26,7 @@
     color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
   .mnav-item:hover{color:var(--txt)}
   .mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
+  .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
   .wrap{max-width:980px;margin:0 auto;padding:28px 16px 60px}
@@ -44,7 +45,7 @@
   @media(max-width:440px){.basket-grid{grid-template-columns:1fr}}
 
   .bcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;
-    cursor:pointer;transition:.15s;border-top:3px solid var(--blu)}
+    cursor:pointer;transition:.15s;border-top:3px solid var(--blu);display:flex;flex-direction:column}
   .bcard:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(20,30,50,.09);border-color:var(--blu)}
   .bcard.active{box-shadow:0 0 0 3px rgba(37,99,235,.15)}
   .bc-name{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:2px}
@@ -60,7 +61,18 @@
   .bc-badge.ok{background:#f0fdf8;color:var(--grn);border-color:#a7f3d0}
   .bc-badge.warn{background:#fffbeb;color:var(--amber);border-color:#fcd34d}
   .bc-badge.risk{background:#fef2f2;color:var(--red);border-color:#fca5a5}
-  .bc-click{font-size:10px;color:var(--blu);margin-top:8px;text-align:center;font-weight:500}
+
+  /* entry/exit criteria */
+  .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);flex:1}
+  .bc-crit-row{display:flex;gap:6px;margin-bottom:5px;align-items:flex-start}
+  .bc-crit-row:last-child{margin-bottom:0}
+  .bc-crit-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+    padding:2px 6px;border-radius:5px;white-space:nowrap;flex-shrink:0;margin-top:1px}
+  .bc-crit-label.entry{background:#eff6ff;color:#2563eb}
+  .bc-crit-label.exit{background:#fef2f2;color:#e23744}
+  .bc-crit-text{font-size:10px;color:var(--mut);line-height:1.5}
+
+  .bc-click{font-size:10px;color:var(--blu);margin-top:10px;text-align:center;font-weight:500}
 
   .pos{color:var(--grn);font-weight:700}
   .neg{color:var(--red);font-weight:700}
@@ -128,6 +140,8 @@
   <a class="mnav-item" href="/fpc"><span>◪</span>FPC</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item active" href="/quant-basket"><span>◫</span>QB</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item soon"><span>△</span>V10</a>
 </nav>
 
 <div class="wrap">
@@ -136,7 +150,7 @@
       <div class="ph-title">Quant Basket</div>
       <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · 4 Baskets · Click any basket for holdings</div>
     </div>
-    <div class="ph-stats" id="ph-stats">
+    <div class="ph-stats">
       <div class="ph-stat"><div class="sk">Capital</div><div class="sv" id="s-cap">—</div></div>
       <div class="ph-stat"><div class="sk">Total P&amp;L</div><div class="sv" id="s-pnl">—</div></div>
       <div class="ph-stat"><div class="sk">Portfolio Alpha</div><div class="sv" id="s-alpha">—</div></div>
@@ -172,9 +186,34 @@
 
 <script>
 const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap'};
-const BRULE  = {large_cap:'GVM ≥ 7.0 · Mcap Top 100 · Monthly rebalance',mid_cap:'GVM ≥ 7.5 · Rank 101–250 · Monthly rebalance',small_cap:'GVM ≥ 8.0 · Thematic · 5 themes · Quarterly',alpha_multicap:'GVM×0.6 + Mom×0.4 · Nifty 500 · Quarterly'};
-const BCOL   = {large_cap:'#0fa968',mid_cap:'#2563eb',small_cap:'#d97706',alpha_multicap:'#7c3aed'};
+const BRULE  = {
+  large_cap:'GVM ≥ 7.0 · Mcap Top 100 · Monthly rebalance',
+  mid_cap:'GVM ≥ 7.5 · Rank 101–250 · Monthly rebalance',
+  small_cap:'GVM ≥ 8.0 · Thematic · 5 themes · Quarterly',
+  alpha_multicap:'GVM×0.6 + Mom×0.4 · Nifty 500 · Quarterly'
+};
+const BCOL = {large_cap:'#0fa968',mid_cap:'#2563eb',small_cap:'#d97706',alpha_multicap:'#7c3aed'};
 const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap'];
+
+const BCRITERIA = {
+  large_cap: {
+    entry: 'GVM ≥ 7.0 · Top 100 by Mcap · Price above 200 DMA · Monthly screen',
+    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: drops out of top-20 qualified at monthly rebalance'
+  },
+  mid_cap: {
+    entry: 'GVM ≥ 7.5 · Mcap rank 101–250 · Price above 200 DMA · Monthly screen',
+    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: drops out of top-20 qualified at monthly rebalance'
+  },
+  small_cap: {
+    entry: 'GVM ≥ 8.0 · 5 thematic segments · Sector + momentum alignment · Quarterly screen',
+    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: drops out of qualified list at quarterly rebalance'
+  },
+  alpha_multicap: {
+    entry: 'Composite score = GVM×0.6 + Momentum×0.4 · Nifty 500 universe · Top-ranked by score · Quarterly screen',
+    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: score rank drops below threshold at quarterly rebalance'
+  }
+};
+
 let curBasket = null, curTab = 'holdings';
 
 const f = (n,pre='₹') => {
@@ -194,7 +233,6 @@ async function init(){
       fetch('/api/qb/registry').then(r=>r.json()),
     ]);
 
-    // header
     const tot=qb.total_pnl||0;
     const alp=alpha.total?.alpha;
     document.getElementById('s-cap').textContent='₹20,00,000';
@@ -202,14 +240,12 @@ async function init(){
     document.getElementById('s-alpha').innerHTML=`<span class="${c(alp)}">${p(alp)} vs N500</span>`;
     document.getElementById('s-pos').textContent=qb.total_positions||'—';
 
-    // merge
     const bmap={};
     (qb.baskets||[]).forEach(b=>{bmap[b.basket]={...b}});
     (alpha.baskets||[]).forEach(b=>{if(bmap[b.basket]){bmap[b.basket].alpha=b.alpha;bmap[b.basket].return_pct=b.return_pct;}});
     const rmap={};
     (Array.isArray(reg)?reg:[reg]).forEach(r=>{if(r&&r.basket_name)rmap[r.basket_name]=r;});
 
-    // render cards
     const grid=document.getElementById('basket-grid');
     grid.innerHTML='';
     BASKETS.forEach(key=>{
@@ -218,8 +254,8 @@ async function init(){
       const ret=d.return_pct, alp=d.alpha, pnl=d.pnl||0, pos=d.positions||0;
       const reb=r.next_rebalance?(r.next_rebalance+'').split('T')[0]:'—';
       const mv=d.market_value;
+      const crit=BCRITERIA[key];
 
-      // risk badge
       const allPos=(qb.positions||[]).filter(p=>p.basket===key);
       const atRisk=allPos.filter(p=>p.pnl_pct<-15);
       let badge='<span class="bc-badge ok">No risk</span>';
@@ -246,11 +282,20 @@ async function init(){
           <div class="bc-info">${pos} positions &nbsp;·&nbsp; Reb <b>${reb}</b></div>
           ${badge}
         </div>
+        <div class="bc-criteria">
+          <div class="bc-crit-row">
+            <span class="bc-crit-label entry">Entry</span>
+            <span class="bc-crit-text">${crit.entry}</span>
+          </div>
+          <div class="bc-crit-row">
+            <span class="bc-crit-label exit">Exit</span>
+            <span class="bc-crit-text">${crit.exit}</span>
+          </div>
+        </div>
         <div class="bc-click">↗ View holdings &amp; history</div>`;
       grid.appendChild(card);
     });
 
-    // alerts
     const atRiskAll=(qb.positions||[]).filter(p=>p.pnl_pct<-15);
     if(atRiskAll.length){
       const rows=atRiskAll.map(p=>`
