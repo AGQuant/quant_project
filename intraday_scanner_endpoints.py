@@ -482,6 +482,7 @@ def scanner_intraday(limit: int = 40):
         cur.execute("SELECT adr FROM adr_daily WHERE price_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
         ar = cur.fetchone()
         adr = float(ar[0]) if ar and ar[0] is not None else None
+        cur.execute("SET LOCAL jit = off")   # ~800ms JIT overhead on the many-LATERAL scan; data access is ~400ms
         cur.execute(_SCAN_SQL)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -515,6 +516,7 @@ def scanner_intraday_short(limit: int = 40):
         cur.execute("SELECT adr FROM adr_daily WHERE price_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
         ar = cur.fetchone()
         adr = float(ar[0]) if ar and ar[0] is not None else None
+        cur.execute("SET LOCAL jit = off")   # ~800ms JIT overhead on the many-LATERAL scan; data access is ~400ms
         cur.execute(_SCAN_SQL)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
