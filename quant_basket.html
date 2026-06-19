@@ -62,9 +62,8 @@
   .bc-badge.warn{background:#fffbeb;color:var(--amber);border-color:#fcd34d}
   .bc-badge.risk{background:#fef2f2;color:var(--red);border-color:#fca5a5}
 
-  /* entry/exit criteria */
-  .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);flex:1}
-  .bc-crit-row{display:flex;gap:6px;margin-bottom:5px;align-items:flex-start}
+  .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+  .bc-crit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
   .bc-crit-row:last-child{margin-bottom:0}
   .bc-crit-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
     padding:2px 6px;border-radius:5px;white-space:nowrap;flex-shrink:0;margin-top:1px}
@@ -187,30 +186,30 @@
 <script>
 const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap'};
 const BRULE  = {
-  large_cap:'GVM ≥ 7.0 · Mcap Top 100 · Monthly rebalance',
-  mid_cap:'GVM ≥ 7.5 · Rank 101–250 · Monthly rebalance',
-  small_cap:'GVM ≥ 8.0 · Thematic · 5 themes · Quarterly',
-  alpha_multicap:'GVM×0.6 + Mom×0.4 · Nifty 500 · Quarterly'
+  large_cap:'GVM ≥ 7.4 · Mcap Top 100 · Monthly rebalance',
+  mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · V ≥ 5.0 · Rank 101–250 · Monthly rebalance',
+  small_cap:'GVM ≥ 8.0 · 5 Thematic segments · Quarterly rebalance',
+  alpha_multicap:'GVM×0.6 + Mom×0.4 · GVM ≥ 7.5 · Mom ≥ 8 · Nifty 500 · Quarterly'
 };
 const BCOL = {large_cap:'#0fa968',mid_cap:'#2563eb',small_cap:'#d97706',alpha_multicap:'#7c3aed'};
 const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap'];
 
 const BCRITERIA = {
   large_cap: {
-    entry: 'GVM ≥ 7.0 · Top 100 by Mcap · Price above 200 DMA · Monthly screen',
-    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: drops out of top-20 qualified at monthly rebalance'
+    entry: 'GVM ≥ 7.4 · M-Score ≥ 7.0 · RSI Monthly ≥ 45 · Annual Upside ≥ 10% · PE Multiplier ≤ 1.5 · FII+DII buying · 1Y return ≥ 2.2% · Above 200 DMA · Top-20 by avg momentum (1M+3M+6M+1Y)',
+    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −10% from entry · Filter: fails screen or drops out of top-20 at Monday open'
   },
   mid_cap: {
-    entry: 'GVM ≥ 7.5 · Mcap rank 101–250 · Price above 200 DMA · Monthly screen',
-    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: drops out of top-20 qualified at monthly rebalance'
+    entry: 'GVM ≥ 7.5 · G-Score ≥ 7.0 · V-Score ≥ 5.0 · M-Score ≥ 7.0 · Annual Upside ≥ 10% · Mcap rank 101–250 · Top-20 by avg momentum (1M+3M+6M+1Y)',
+    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −5% from entry · Filter: fails screen or drops out of top-20 at Monday open · Banking/NBFC: D/E + Interest Coverage excluded'
   },
   small_cap: {
-    entry: 'GVM ≥ 8.0 · 5 thematic segments · Sector + momentum alignment · Quarterly screen',
-    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: drops out of qualified list at quarterly rebalance'
+    entry: 'GVM ≥ 8.0 · 5 futuristic thematic segments (sector avg GVM > 6.0) · Equal weight within theme · Slot ≈ ₹23,500 per stock',
+    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −5% from entry · Filter: fails GVM or theme screen at Monday open · Quarterly rebalance'
   },
   alpha_multicap: {
-    entry: 'Composite score = GVM×0.6 + Momentum×0.4 · Nifty 500 universe · Top-ranked by score · Quarterly screen',
-    exit:  'HS1: position ≤ −20% from entry · HS2: return vs Nifty ≤ −10% · Filter: score rank drops below threshold at quarterly rebalance'
+    entry: 'Composite score = GVM×0.6 + Momentum×0.4 · GVM ≥ 7.5 AND Momentum ≥ 8 · Tiers: Large 35% (5 stocks) · Mid 35% (6 stocks) · Small 25% (5 stocks) · GOLDBEES buffer ~14% · Drift band ±5% per tier',
+    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −8% (wider — alpha-chasing basket) · Quarterly rebalance · Drift rebalance if tier drifts >5%'
   }
 };
 
@@ -256,8 +255,10 @@ async function init(){
       const mv=d.market_value;
       const crit=BCRITERIA[key];
 
+      // HS2 thresholds per basket
+      const hs2={large_cap:-10,mid_cap:-5,small_cap:-5,alpha_multicap:-8};
       const allPos=(qb.positions||[]).filter(p=>p.basket===key);
-      const atRisk=allPos.filter(p=>p.pnl_pct<-15);
+      const atRisk=allPos.filter(p=>p.pnl_pct<(hs2[key]+5));
       let badge='<span class="bc-badge ok">No risk</span>';
       if(atRisk.length>0){
         const hs1=atRisk.filter(p=>p.pnl_pct<-20).length;
@@ -296,22 +297,24 @@ async function init(){
       grid.appendChild(card);
     });
 
-    const atRiskAll=(qb.positions||[]).filter(p=>p.pnl_pct<-15);
+    // alerts using per-basket HS2
+    const hs2thresh={large_cap:-10,mid_cap:-5,small_cap:-5,alpha_multicap:-8};
+    const atRiskAll=(qb.positions||[]).filter(p=>p.pnl_pct<(hs2thresh[p.basket]+5));
     if(atRiskAll.length){
       const rows=atRiskAll.map(p=>`
         <div class="alert-row">
           <span class="ar-sym">${p.symbol}</span>
           <span class="ar-basket">${BNAMES[p.basket]||p.basket}</span>
           <span class="ar-val">${p(p.pnl_pct)} from entry</span>
-          <span class="ar-chip ${+p.pnl_pct<-20?'hs1':'hs2'}">${+p.pnl_pct<-20?'HS1 ≤−20%':'HS2 watch'}</span>
+          <span class="ar-chip ${+p.pnl_pct<-20?'hs1':'hs2'}">${+p.pnl_pct<-20?'HS1 ≤−20%':'Near HS2'}</span>
         </div>`).join('');
       document.getElementById('alerts-wrap').innerHTML=`<div class="alerts-box">
-        <div class="alerts-hd">⚠ Exit Alerts &nbsp;·&nbsp; HS1=−20% absolute &nbsp;|&nbsp; HS2=−10% vs Nifty</div>
+        <div class="alerts-hd">⚠ Exit Alerts · HS1=−20% · HS2: Large −10% · Mid/Small −5% · Alpha −8%</div>
         ${rows}</div>`;
     }
 
   }catch(e){
-    document.getElementById('basket-grid').innerHTML=`<div class="err-msg" style="grid-column:1/-1">Failed to load: ${e.message}</div>`;
+    document.getElementById('basket-grid').innerHTML=`<div class="err-msg" style="grid-column:1/-1">Failed: ${e.message}</div>`;
   }
 }
 
@@ -382,7 +385,7 @@ async function showHoldings(body){
 async function showRebalance(body){
   try{
     const data=await fetch(`/api/qb/rebalance_log?basket_name=${curBasket}&limit=10`).then(r=>r.json());
-    if(!Array.isArray(data)||!data.length){body.innerHTML='<div class="msg">No rebalance history yet.</div>';return;}
+    if(!Array.isArray(data)||!data.length){body.innerHTML='<div class="msg">No rebalance history yet. First rebalance: Large Cap + Mid Cap on 4 Jul 2026.</div>';return;}
     body.innerHTML=`<div class="tbl-wrap"><table>
       <thead><tr>
         <th>Date</th><th>Stocks In</th><th>Stocks Out</th><th>Held</th><th>Portfolio Value</th>
