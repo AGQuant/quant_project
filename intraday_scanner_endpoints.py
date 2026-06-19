@@ -312,6 +312,7 @@ def _evaluate(row: dict, reversal_cfg: dict, nifty_rsi: Optional[float], adr: Op
         "gate3_tc_score": tc["score"], "tc_pass": tc["pass"],
         "gate3_need": tc["need"], "gate3_evaluated": tc["evaluated"],
         "gate4_room_pct": g4["room_pct"], "gate4_pass": g4["pass"],
+        "room_ref": _f(row.get("week_high")),   # 15-trading-day high (Gate B reference)
         "vol_ratio_timenorm": round(vtn, 3) if vtn is not None else None,
         "basis": _f(row.get("basis")),
         "entry_price": _f(row.get("live_close")),
@@ -435,6 +436,7 @@ def _evaluate_short(row: dict, adr: Optional[float]) -> dict:
         "gate3_tc_score": tc["score"], "tc_pass": tc["pass"],
         "gate3_need": tc["need"], "gate3_evaluated": tc["evaluated"],
         "gate4_room_pct": g4["room_pct"], "gate4_pass": g4["pass"],
+        "room_ref": _f(row.get("week_low")),    # 15-trading-day low (Gate B reference)
         "vol_ratio_timenorm": round(vtn, 3) if vtn is not None else None,
         "basis": _f(row.get("basis")),
         "entry_price": _f(row.get("live_close")),
@@ -464,6 +466,70 @@ def _record_watchlist(signals: list, signal_ts: datetime, direction: str = "LONG
     return recorded
 
 
+# ── Near-miss (Tier1 pass, Tier2 fail) + signal enrichment ───────────────────
+
+def _near_failed(s: dict) -> str:
+    """Which Tier-2 gate failed for a Tier-1 passer."""
+    a = not s["gate2_ma_pass"]   # Gate A — MA hierarchy
+    b = not s["gate4_pass"]      # Gate B — room to run
+    if a and b:
+        return "Both"
+    if a:
+        return "Gate A (MA)"
+    if b:
+        return "Gate B (Room)"
+    return "—"
+
+
+def _build_near_misses(scored: list, direction: str) -> list:
+    """Stocks that cleared Tier 1 (any bucket n-1) but failed one/both Tier-2 gates."""
+    nm = [s for s in scored if s["tier1_pass"] and not s["tier2_pass"]]
+    nm.sort(key=lambda s: (s["tier1_score"], s.get("gate4_room_pct") or 0), reverse=True)
+    return [{
+        "symbol": s["symbol"], "direction": direction, "basket": s["basket"],
+        "tier1_score": s["tier1_score"], "tier1_total": s["tier1_total"],
+        "failed": _near_failed(s),
+        "gate2_ma_pass": s["gate2_ma_pass"], "gate4_pass": s["gate4_pass"],
+        "room_pct": s.get("gate4_room_pct"), "room_ref": s.get("room_ref"),
+        "entry_price": s.get("entry_price"),
+    } for s in nm]
+
+
+def _enrich(rows: list, direction: str):
+    """In place: add recorded entry, live CMP, direction-aware PnL%, signal time,
+    and native Future-Scan TC (tc_cache) with a pass flag. direction = LONG | SHORT."""
+    syms = sorted({r["symbol"] for r in rows})
+    if not syms:
+        return
+    fs_need = 12 if direction == "LONG" else 11   # spec #14: >=12/15 LONG, >=11 SHORT
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""SELECT symbol, MIN(entry_price) AS e, MIN(signal_ts) AS t
+                       FROM intraday_watchlist
+                       WHERE signal_date=CURRENT_DATE AND direction=%s AND symbol = ANY(%s)
+                       GROUP BY symbol""", (direction, syms))
+        wl = {r[0]: (_f(r[1]), r[2]) for r in cur.fetchall()}
+        cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE symbol = ANY(%s)", (syms,))
+        cmp_map = {r[0]: _f(r[1]) for r in cur.fetchall()}
+        cur.execute("SELECT symbol, score, total FROM tc_cache WHERE side=%s AND symbol = ANY(%s)",
+                    (direction, syms))
+        tc_map = {r[0]: (_f(r[1]), r[2]) for r in cur.fetchall()}
+    sign = -1 if direction == "SHORT" else 1
+    for r in rows:
+        sym = r["symbol"]
+        rec_entry, rec_ts = wl.get(sym, (None, None))
+        entry = rec_entry if rec_entry is not None else r.get("entry_price")
+        cmp = cmp_map.get(sym)
+        r["recorded_entry"] = round(rec_entry, 2) if rec_entry is not None else None
+        r["signal_ts"] = rec_ts.astimezone(IST).strftime("%H:%M") if rec_ts else None
+        r["cmp"] = round(cmp, 2) if cmp is not None else None
+        r["pnl_pct"] = (round(sign * (cmp - entry) / entry * 100, 2)
+                        if (entry and cmp) else None)
+        ns, nt = tc_map.get(sym, (None, None))
+        r["fs_score"] = ns
+        r["fs_total"] = nt
+        r["future_scan_pass"] = bool(ns is not None and ns >= fs_need)
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/api/scanners/intraday")
@@ -473,7 +539,7 @@ def scanner_intraday(limit: int = 40):
     if not _in_window(now):
         return {"scanner": "intraday", "status": "outside_window",
                 "window": "09:30-15:15 IST", "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
-                "signals": [], "count": 0}
+                "signals": [], "count": 0, "near_misses": [], "near_miss_count": 0}
 
     reversal_cfg = _get_buy_reversal_live_filters()[0]
     nifty_rsi = _nifty_rsi()
@@ -493,13 +559,20 @@ def scanner_intraday(limit: int = 40):
 
     recorded = _record_watchlist(signals, now)
 
+    near_misses = _build_near_misses(scored, "LONG")
+    top_signals = signals[:max(1, limit)]
+    top_near = near_misses[:max(1, limit)]
+    _enrich(top_signals, "LONG")
+    _enrich(top_near, "LONG")
+
     return {
         "scanner": "intraday", "side": "BUY", "spec": "V2", "status": "ok",
         "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
         "adr": adr, "universe": len(rows),
         "count": len(signals), "recorded_to_watchlist": recorded,
-        "signals": signals[:max(1, limit)],
+        "signals": top_signals,
+        "near_misses": top_near, "near_miss_count": len(near_misses),
     }
 
 
@@ -510,7 +583,7 @@ def scanner_intraday_short(limit: int = 40):
     if not _in_window(now):
         return {"scanner": "intraday_short", "side": "SHORT", "status": "outside_window",
                 "window": "09:30-15:15 IST", "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
-                "signals": [], "count": 0}
+                "signals": [], "count": 0, "near_misses": [], "near_miss_count": 0}
 
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT adr FROM adr_daily WHERE price_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
@@ -526,12 +599,19 @@ def scanner_intraday_short(limit: int = 40):
     signals.sort(key=lambda s: (s["gate3_tc_score"], s["gate1_score"]), reverse=True)
     recorded = _record_watchlist(signals, now, direction="SHORT")
 
+    near_misses = _build_near_misses(scored, "SHORT")
+    top_signals = signals[:max(1, limit)]
+    top_near = near_misses[:max(1, limit)]
+    _enrich(top_signals, "SHORT")
+    _enrich(top_near, "SHORT")
+
     return {
         "scanner": "intraday_short", "side": "SHORT", "spec": "V1", "status": "ok",
         "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "adr": adr, "universe": len(rows),
         "count": len(signals), "recorded_to_watchlist": recorded,
-        "signals": signals[:max(1, limit)],
+        "signals": top_signals,
+        "near_misses": top_near, "near_miss_count": len(near_misses),
     }
 
 

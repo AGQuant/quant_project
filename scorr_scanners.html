@@ -15,7 +15,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
 .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
 .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
-.page{max-width:880px;margin:0 auto;padding:14px 12px}
+.page{max-width:980px;margin:0 auto;padding:14px 12px}
 .h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
 .h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
 .tabs{display:flex;border-bottom:1px solid #e4e9f1;margin-bottom:14px}
@@ -26,14 +26,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .panel.on{display:block}
 .bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
 .bar label{font-size:11px;color:#5a6781;font-weight:600}
-.bar input,.bar select{border:1px solid #dde2ed;border-radius:6px;padding:4px 8px;font-size:12px;background:#fff;outline:none}
-.bar input:focus,.bar select:focus{border-color:#2563eb}
-.rbtn{margin-left:auto;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:11px;font-weight:600;cursor:pointer}
-.rbtn:hover{background:#1d4ed8}
-.rbtn:disabled{background:#a0aec0;cursor:default}
 .st{font-size:11px;color:#8a94a6;margin-bottom:10px;display:flex;align-items:center;gap:6px}
 .dot{width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0}
 .dot.y{background:#f59e0b}
+.dot.busy{background:#2563eb;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .tw{overflow-x:auto;border-radius:8px;border:1px solid #e4e9f1;background:#fff}
 table{width:100%;border-collapse:collapse;font-size:12px}
 thead tr{background:#f8faff;border-bottom:1px solid #e4e9f1}
@@ -47,16 +44,18 @@ td{padding:7px 10px;white-space:nowrap}
 .up{color:#059669;font-weight:600}
 .dn{color:#dc2626;font-weight:600}
 .nt{color:#5a6781}
-.gp{display:inline-flex;align-items:center;justify-content:center;width:32px;height:18px;border-radius:4px;font-size:10px;font-weight:700}
+.gp{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:18px;padding:0 5px;border-radius:4px;font-size:10px;font-weight:700}
 .g4{background:#d1fae5;color:#065f46}
 .g3{background:#dbeafe;color:#1e40af}
 .g2{background:#fef3c7;color:#92400e}
 .g1{background:#fee2e2;color:#991b1b}
+.fs{display:inline-block;font-size:8px;font-weight:800;background:#0ea5e9;color:#fff;padding:1px 4px;border-radius:3px;margin-left:5px;vertical-align:middle}
+.fsrow{background:#f0f9ff}
+.fsrow:hover{background:#e0f2fe}
 .empty{text-align:center;padding:40px 20px;color:#8a94a6}
 .cs{text-align:center;padding:60px 20px;color:#8a94a6}
 .cs big{display:block;font-size:28px;margin-bottom:8px}
 .cs b{display:block;font-size:14px;font-weight:700;color:#1c2536;margin-bottom:4px}
-.wlh{margin:22px 0 10px;font-size:11px;font-weight:700;color:#8a94a6;text-transform:uppercase;letter-spacing:1px}
 </style>
 </head>
 <body>
@@ -73,6 +72,8 @@ td{padding:7px 10px;white-space:nowrap}
   <div class="mnav-sep"></div>
   <a class="mnav-item active" href="/scanners"><span>&#8862;</span>Scanners</a>
   <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/structure"><span>&#9683;</span>Structure</a>
+  <div class="mnav-sep"></div>
   <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/fpc"><span>&#9638;</span>FPC</a>
@@ -82,40 +83,37 @@ td{padding:7px 10px;white-space:nowrap}
 </nav>
 <div class="page">
   <div class="h1">Scanners</div>
-  <div class="h2">Smart screeners powered by V8 + GVM</div>
+  <div class="h2">Smart screeners powered by V8 + GVM &middot; auto-refresh every 5 min</div>
   <div class="tabs">
-    <div class="tab on" onclick="sw('buy')">BUY</div>
+    <div class="tab on" onclick="sw('long')">LONG</div>
     <div class="tab" onclick="sw('short')">SHORT</div>
     <div class="tab" onclick="sw('watchlist')">Watchlist</div>
     <div class="tab" onclick="sw('positional')">Positional</div>
     <div class="tab" onclick="sw('investment')">Investment</div>
   </div>
 
-  <!-- BUY -->
-  <div class="panel on" id="p-buy">
+  <!-- LONG -->
+  <div class="panel on" id="p-long">
     <div class="bar">
-      <span style="font-size:11px;color:#5a6781;font-weight:600">V2 · Tier1 (4 buckets) → Tier2 (MA + room) · 09:30–15:15 IST</span>
-      <button class="rbtn" id="buy-btn" onclick="loadSide('buy')">Run BUY Scan</button>
+      <span style="font-size:11px;color:#5a6781;font-weight:600">V2 &middot; Tier1 (4 buckets) &rarr; Tier2 (MA + room) &middot; 09:30&ndash;15:15 IST &middot; <span class="fs">FS</span> = also passes Future Scan (native TC)</span>
     </div>
-    <div class="st"><span class="dot" id="buy-dot"></span><span id="buy-st">Loading...</span></div>
-    <div id="buy-tbl"><div class="empty">Loading...</div></div>
+    <div class="st"><span class="dot" id="long-dot"></span><span id="long-st">Loading...</span></div>
+    <div id="long-tbl"><div class="empty">Loading...</div></div>
   </div>
 
   <!-- SHORT -->
   <div class="panel" id="p-short">
     <div class="bar">
-      <span style="font-size:11px;color:#5a6781;font-weight:600">V2 · Tier1 (4 sell buckets) → Tier2 (inverted MA + room-to-fall) · 09:30–15:15 IST</span>
-      <button class="rbtn" id="short-btn" onclick="loadSide('short')">Run SHORT Scan</button>
+      <span style="font-size:11px;color:#5a6781;font-weight:600">V2 &middot; Tier1 (4 sell buckets) &rarr; Tier2 (inverted MA + room-to-fall) &middot; 09:30&ndash;15:15 IST &middot; <span class="fs">FS</span> = also passes Future Scan</span>
     </div>
-    <div class="st"><span class="dot" id="short-dot"></span><span id="short-st">Click Run SHORT Scan</span></div>
-    <div id="short-tbl"><div class="empty">Not yet run</div></div>
+    <div class="st"><span class="dot" id="short-dot"></span><span id="short-st">Loading...</span></div>
+    <div id="short-tbl"><div class="empty">Loading...</div></div>
   </div>
 
-  <!-- WATCHLIST -->
+  <!-- WATCHLIST (near-miss) -->
   <div class="panel" id="p-watchlist">
     <div class="bar">
-      <span style="font-size:11px;color:#5a6781;font-weight:600">Today's recorded signals — live PnL (direction-aware)</span>
-      <button class="rbtn" id="wl-btn" onclick="loadW()">Refresh</button>
+      <span style="font-size:11px;color:#5a6781;font-weight:600">Near-miss &middot; passed Tier 1 (any bucket n-1) but failed a Tier-2 gate &middot; on watch for manual entry</span>
     </div>
     <div class="st"><span class="dot" id="wl-dot"></span><span id="wl-st">Loading...</span></div>
     <div id="wl-tbl"><div class="empty">Loading...</div></div>
@@ -140,60 +138,113 @@ td{padding:7px 10px;white-space:nowrap}
   </div>
 </div>
 <script>
-const pct=(v,d=2)=>v==null?'--':+v>=0?'<span class="up">+'+Math.abs(+v).toFixed(d)+'%</span>':'<span class="dn">'+((+v).toFixed(d))+'%</span>';
+const pct=(v,d=2)=>v==null?'<span class="nt">--</span>':+v>=0?'<span class="up">+'+Math.abs(+v).toFixed(d)+'%</span>':'<span class="dn">'+((+v).toFixed(d))+'%</span>';
 const num=(v,d=1)=>v==null?'--':(+v).toFixed(d);
 const pr=v=>v==null?'--':'Rs.'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
-const gp=g=>{if(g==null)return'--';const c=g>=8?'g4':g>=7?'g3':g>=6?'g2':'g1';return'<span class="gp '+c+'">'+(+g).toFixed(1)+'</span>';};
-let at='buy';
-const TABS=['buy','short','watchlist','positional','investment'];
+const chip=(ok)=>'<span class="gp '+(ok?'g4':'g1')+'">'+(ok?'PASS':'FAIL')+'</span>';
+const tcchip=(s,need)=>{const c=s>=(need||13)?'g4':s>=(need||13)-1?'g2':'g1';return'<span class="gp '+c+'">'+(s==null?'--':s)+'</span>';};
+const badge=(ok)=>ok?'<span class="gp g4">SIGNAL</span>':'<span class="gp g1">--</span>';
+function basisCell(b,side){if(b==null)return'<td class="nt">--</td>';const good=side==='short'?(+b<=0):(+b>=0);return'<td class="'+(good?'up':'dn')+'">'+(+b).toFixed(2)+'</td>';}
+const hhmm=s=>{if(!s)return'--';const m=String(s).match(/(\d{2}:\d{2})/);return m?m[1]:'--';};
+
+let at='long';
+const TABS=['long','short','watchlist','positional','investment'];
+const EP={long:'/api/scanners/intraday',short:'/api/scanners/intraday/short'};
+window._nm={};          // near-misses by side
+window._loaded={};      // which sides have loaded
+window._nmtime='';      // last scan time (HH:MM)
+
 function sw(t){
   document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('on',TABS[i]===t));
   document.querySelectorAll('.panel').forEach(el=>el.classList.remove('on'));
   document.getElementById('p-'+t).classList.add('on');
   at=t;
-  if(t==='buy'&&!window._lbuy)loadSide('buy');
-  if(t==='short'&&!window._lshort)loadSide('short');
-  if(t==='watchlist')loadW();
+  if(t==='long'||t==='short'){if(!window._loaded[t])loadSide(t);}
+  if(t==='watchlist')loadWatchlist();
 }
-const chip=(ok)=>'<span class="gp '+(ok?'g4':'g1')+'">'+(ok?'PASS':'FAIL')+'</span>';
-const tcchip=(s,need)=>{const c=s>=(need||13)?'g4':s>=(need||13)-1?'g2':'g1';return'<span class="gp '+c+'">'+(s==null?'--':s)+'</span>';};
-const badge=(ok)=>ok?'<span class="gp g4">SIGNAL</span>':'<span class="gp g1">--</span>';
-function basisCell(b,side){if(b==null)return'<td class="nt">--</td>';const good=side==='short'?(+b<=0):(+b>=0);return'<td class="'+(good?'up':'dn')+'">'+(+b).toFixed(2)+'</td>';}
+
+function sigRow(r,side){
+  const fs=r.future_scan_pass?'<span class="fs" title="Future Scan PASS '+(r.fs_score!=null?r.fs_score+'/'+r.fs_total:'')+'">FS</span>':'';
+  const entry=r.recorded_entry!=null?r.recorded_entry:r.entry_price;
+  return '<tr'+(r.future_scan_pass?' class="fsrow"':'')+'>'+
+    '<td class="sym">'+r.symbol+fs+'</td>'+
+    '<td class="seg">'+(r.basket||'--')+'</td>'+
+    '<td>'+(r.tier1_score==null?'--':r.tier1_score+'/'+r.tier1_total)+'</td>'+
+    '<td>'+chip(r.gate2_ma_pass)+'</td>'+
+    '<td>'+tcchip(r.gate3_tc_score,r.gate3_need)+'</td>'+
+    '<td class="'+(+(r.gate4_room_pct||0)>0?'up':'nt')+'">'+num(r.gate4_room_pct,2)+'%</td>'+
+    '<td class="nt">'+pr(r.cmp)+'</td>'+
+    '<td class="nt">'+pr(entry)+'</td>'+
+    '<td>'+pct(r.pnl_pct)+'</td>'+
+    '<td class="'+(+(r.vol_ratio_timenorm||0)>=1.25?'up':'nt')+'">'+num(r.vol_ratio_timenorm,2)+'</td>'+
+    basisCell(r.basis,side)+
+    '<td class="nt">'+(r.signal_ts||'--')+'</td>'+
+    '<td>'+badge(r.signal)+'</td></tr>';
+}
+const SIG_HEAD='<tr><th>Symbol</th><th>Bucket</th><th>Tier1</th><th>MA</th><th>TC</th><th>Room%</th><th>CMP</th><th>Entry</th><th>PnL</th><th>Vol(tn)</th><th>Basis</th><th>Time</th><th>Signal</th></tr>';
+
 async function loadSide(side){
-  const ep=side==='short'?'/api/scanners/intraday/short':'/api/scanners/intraday';
-  const btn=document.getElementById(side+'-btn'),dot=document.getElementById(side+'-dot'),st=document.getElementById(side+'-st'),tbl=document.getElementById(side+'-tbl');
-  const lbl=btn.textContent;btn.disabled=true;btn.textContent='...';st.textContent='Scanning...';
+  const dot=document.getElementById(side+'-dot'),st=document.getElementById(side+'-st'),tbl=document.getElementById(side+'-tbl');
+  dot.className='dot busy';st.textContent='Scanning...';
   try{
-    const data=await(await fetch(ep+'?limit=40')).json();
-    window['_l'+side]=true;
+    const data=await(await fetch(EP[side]+'?limit=40')).json();
+    window._loaded[side]=true;
+    window._nm[side]=data.near_misses||[];
+    if(data.now)window._nmtime=hhmm(data.now);
     if(data.status==='outside_window'){
       dot.className='dot y';st.textContent='Market closed — runs 09:30–15:15 IST · '+(data.now||'');
       tbl.innerHTML='<div class="empty">Intraday scanner active only during market hours (09:30–15:15 IST).</div>';
     }else{
       dot.className='dot';
-      st.textContent=data.count+' '+side.toUpperCase()+' signals · ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' · NIFTY RSI '+num(data.nifty_rsi,1):'')+' · universe '+data.universe+' · '+data.recorded_to_watchlist+' recorded';
+      const lbl=side.toUpperCase();
+      st.textContent=data.count+' '+lbl+' signals · '+(data.near_miss_count||0)+' near-miss · ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' · NIFTY RSI '+num(data.nifty_rsi,1):'')+' · universe '+data.universe;
       const rows=data.signals||[];
-      tbl.innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Bucket</th><th>Tier1</th><th>MA</th><th>TC</th><th>Room%</th><th>Vol(tn)</th><th>Basis</th><th>Entry</th><th>Signal</th></tr></thead><tbody>'+
-        rows.map(r=>'<tr><td class="sym">'+r.symbol+'</td><td class="seg">'+(r.basket||'--')+'</td><td>'+(r.tier1_score==null?'--':r.tier1_score+'/'+r.tier1_total)+'</td><td>'+chip(r.gate2_ma_pass)+'</td><td>'+tcchip(r.gate3_tc_score,r.gate3_need)+'</td><td class="'+(+(r.gate4_room_pct||0)>0?'up':'nt')+'">'+num(r.gate4_room_pct,2)+'%</td><td class="'+(+(r.vol_ratio_timenorm||0)>=1.25?'up':'nt')+'">'+num(r.vol_ratio_timenorm,2)+'</td>'+basisCell(r.basis,side)+'<td class="nt">'+pr(r.entry_price)+'</td><td>'+badge(r.signal)+'</td></tr>').join('')+
-        '</tbody></table></div>'):'<div class="empty">No '+side.toUpperCase()+' signals passed Tier1 + Tier2</div>';
+      tbl.innerHTML=rows.length?('<div class="tw"><table><thead>'+SIG_HEAD+'</thead><tbody>'+
+        rows.map(r=>sigRow(r,side)).join('')+'</tbody></table></div>')
+        :'<div class="empty">No '+lbl+' signals passed Tier1 + Tier2</div>';
     }
   }catch(e){dot.className='dot y';st.textContent='Error';tbl.innerHTML='<div class="empty">'+e.message+'</div>';}
-  btn.disabled=false;btn.textContent=lbl;
-  loadW();
+  if(at==='watchlist')renderWatchlist();
 }
-async function loadW(){
+
+async function loadWatchlist(){
+  // near-miss feed needs both sides scanned
+  const missing=['long','short'].filter(s=>!window._loaded[s]);
+  if(missing.length){
+    const dot=document.getElementById('wl-dot'),st=document.getElementById('wl-st');
+    dot.className='dot busy';st.textContent='Scanning both sides...';
+    await Promise.all(missing.map(s=>loadSide(s)));
+  }
+  renderWatchlist();
+}
+
+function nmRow(r){
+  return '<tr><td class="sym">'+r.symbol+'</td>'+
+    '<td><span class="gp '+(r.direction==='SHORT'?'g1':'g3')+'">'+r.direction+'</span></td>'+
+    '<td class="seg">'+(r.basket||'--')+'</td>'+
+    '<td>'+(r.tier1_score==null?'--':r.tier1_score+'/'+r.tier1_total)+'</td>'+
+    '<td><span class="gp '+(r.failed==='Both'?'g1':'g2')+'">'+r.failed+'</span></td>'+
+    '<td class="nt">'+pr(r.cmp)+'</td>'+
+    '<td class="nt">'+pr(r.room_ref)+'</td>'+
+    '<td class="nt">'+num(r.room_pct,2)+'%</td>'+
+    '<td class="nt">'+(window._nmtime||'--')+'</td></tr>';
+}
+function renderWatchlist(){
   const dot=document.getElementById('wl-dot'),st=document.getElementById('wl-st'),tbl=document.getElementById('wl-tbl');
-  try{
-    const data=await(await fetch('/api/scanners/intraday/watchlist')).json();
-    const rows=data.rows||[];
-    if(dot)dot.className='dot';if(st)st.textContent=rows.length+' recorded today';
-    tbl.innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Bucket</th><th>Entry</th><th>CMP</th><th>PnL%</th><th>TC</th><th>Room%</th><th>Age</th></tr></thead><tbody>'+
-      rows.map(r=>'<tr><td class="sym">'+r.symbol+'</td><td><span class="gp '+(r.direction==='SHORT'?'g1':'g3')+'">'+(r.direction||'LONG')+'</span></td><td class="seg">'+(r.basket||'--')+'</td><td class="nt">'+pr(r.entry_price)+'</td><td class="nt">'+pr(r.cmp)+'</td><td>'+pct(r.pnl_pct)+'</td><td>'+tcchip(r.gate3_tc_score)+'</td><td class="nt">'+num(r.gate4_room_pct,2)+'%</td><td class="nt">'+(r.mins_since==null?'--':Math.round(r.mins_since)+'m')+'</td></tr>').join('')+
-      '</tbody></table></div>'):'<div class="empty">No signals recorded today</div>';
-  }catch(e){if(tbl)tbl.innerHTML='<div class="empty">'+e.message+'</div>';}
+  const rows=[].concat(window._nm.long||[],window._nm.short||[])
+    .sort((a,b)=>(b.tier1_score||0)-(a.tier1_score||0));
+  if(dot)dot.className='dot';if(st)st.textContent=rows.length+' near-miss candidates'+(window._nmtime?' · '+window._nmtime:'');
+  tbl.innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Bucket Passed</th><th>Tier1</th><th>What Failed</th><th>CMP</th><th>2W High/Low</th><th>Room%</th><th>Time</th></tr></thead><tbody>'+
+    rows.map(nmRow).join('')+'</tbody></table></div>')
+    :'<div class="empty">No near-miss candidates right now (or market closed)</div>';
 }
-loadSide('buy');
-setInterval(()=>{if(at==='buy')loadSide('buy');else if(at==='short')loadSide('short');else if(at==='watchlist')loadW();},300000);
+
+loadSide('long');
+setInterval(()=>{
+  if(at==='long')loadSide('long');
+  else if(at==='short')loadSide('short');
+  else if(at==='watchlist'){window._loaded={};loadWatchlist();}
+},300000);
 </script>
 <script>
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
