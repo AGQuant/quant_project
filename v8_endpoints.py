@@ -443,6 +443,35 @@ def market_mood():
         raise HTTPException(500, f"market_mood failed: {e}")
 
 
+@router.get("/metrics/all")
+def metrics_all():
+    """Flat array of every stock's latest v8_metrics + segment.
+    Powers the dashboard Master tab (Top/Bottom Sectors). Same universe build
+    as /scan: same query, same float cleanup, same _seg_override."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT m.symbol, m.gvm_score, m.mom_2d, m.day_1d, m.eod_chg,
+                   m.week_return, m.month_return, m.year_return,
+                   m.dma_20, m.dma_50, m.dma_200,
+                   m.rsi_weekly, m.rsi_month, m.daily_rsi,
+                   m.vol_ratio, m.week_index_52,
+                   m.sector_week, m.sector_month,
+                   g.segment
+            FROM v8_metrics m
+            LEFT JOIN gvm_scores g ON g.symbol = m.symbol
+            WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+        """)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    for s in rows:
+        s["segment"] = _seg_override(s["symbol"], s.get("segment"))
+        for k, v in list(s.items()):
+            if k not in ("symbol", "segment") and v is not None:
+                try: s[k] = float(v)
+                except (TypeError, ValueError): pass
+    return rows
+
+
 @router.get("/scan")
 def scan(limit: int = 25):
     try:
