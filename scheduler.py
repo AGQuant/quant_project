@@ -255,17 +255,8 @@ def _bg_signal_writer():
             raise RuntimeError(r["error"])
         _signal_writer_fail_streak = 0
         _last_signal_writer_ok = _ist_now()
-        # DB heartbeat — diagnosis (run_diagnosis) reads sched_writer_hb; without it
-        # the dashboard shows a false RED. Write the last-OK timestamp each tick.
-        try:
-            with _conn() as _hb_conn, _hb_conn.cursor() as _hb_cur:
-                _hb_cur.execute(
-                    "INSERT INTO app_config(key,value) VALUES('sched_writer_hb',%s) "
-                    "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
-                    (_last_signal_writer_ok.isoformat(),))
-                _hb_conn.commit()
-        except Exception as _hb_e:
-            log.warning(f"sched_writer_hb write failed: {_hb_e}")
+        # heartbeat (sched_writer_hb) now written inside run_live_signal_writer using
+        # the already-open conn — covers scheduler + MCP + API paths (task #18).
         log.info(f"signal_writer: {r.get('updated', 0) if isinstance(r, dict) else 0} updated")
     except Exception as e:
         _signal_writer_fail_streak += 1

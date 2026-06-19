@@ -1411,6 +1411,21 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
 
 # -- Main entry point ---------------------------------------------------------
 
+def _write_heartbeat(conn):
+    """Stamp app_config.sched_writer_hb on a successful tick so run_diagnosis sees
+    the writer is alive. Uses the already-open conn (a 2nd psycopg3 connection in the
+    scheduler thread fails silently — task #18). Covers scheduler + MCP + API paths."""
+    try:
+        with conn.cursor() as _hb:
+            _hb.execute(
+                "INSERT INTO app_config(key,value) VALUES('sched_writer_hb',%s) "
+                "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                (_now_ist().isoformat(),))
+        conn.commit()
+    except Exception as _hbe:
+        log.warning(f"sched_writer_hb write failed: {_hbe}")
+
+
 def run_live_signal_writer(conn) -> dict:
     today = datetime.now(IST).date()
 
@@ -1443,6 +1458,7 @@ def run_live_signal_writer(conn) -> dict:
             row["_cmp"]    = cmp
             all_metrics.append(row)
         _write_qualified(conn, all_metrics, today)
+        _write_heartbeat(conn)
         return {"source": "eod_fallback", "msg": "no intraday bars"}
 
     computed: Dict[str, dict] = {}
@@ -1476,6 +1492,7 @@ def run_live_signal_writer(conn) -> dict:
     _update_sector_aggregates_sql(conn, today)
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
+    _write_heartbeat(conn)
     return {
         "date":    str(today),
         "updated": len(computed),
