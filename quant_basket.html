@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scorr · Quant Basket</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #060a12;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px);
+    background-size: 34px 34px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: #e6ecf5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  ::selection { background: rgba(45,191,176,0.3); }
+  @keyframes tapemove { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 30px 26px 42px;
+          background: radial-gradient(110% 40% at 75% 0%, rgba(45,191,176,0.07), transparent 55%); }
+
+  /* header */
+  .head { display:flex; justify-content:space-between; align-items:flex-end; gap:24px; }
+  .eyebrow { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .pulse { width:7px; height:7px; background:#2dbfb0; border-radius:50%;
+           box-shadow:0 0 10px rgba(45,191,176,0.8); display:inline-block; }
+  .eyebrow span.txt { font-size:11px; letter-spacing:0.22em; color:#5d7290; font-weight:500; text-transform:uppercase; }
+  .total { font-size:48px; font-weight:700; letter-spacing:-0.02em; color:#f4f8fd; line-height:0.9; }
+  .totalrow { display:flex; align-items:baseline; gap:16px; }
+  .stats { display:flex; gap:22px; align-items:flex-end; }
+  .stat .k { font-size:10px; letter-spacing:0.1em; color:#5d7290; text-transform:uppercase; margin-bottom:5px; text-align:right; }
+  .stat .v { font-size:20px; font-weight:700; text-align:right; }
+  .vrule { width:1px; height:38px; background:rgba(255,255,255,0.1); }
+
+  /* ribbon */
+  .ribbon { margin-top:24px; }
+  .ribbon-bar { display:flex; gap:3px; height:10px; border-radius:5px; overflow:hidden; }
+  .ribbon-bar > div { flex:1; }
+  .ribbon-labels { display:flex; gap:3px; margin-top:8px; }
+  .ribbon-labels > div { flex:1; display:flex; justify-content:space-between; align-items:center; }
+  .ribbon-labels .n { font-size:11px; color:#6b7e9b; }
+  .ribbon-labels .p { font-size:11px; color:#4f6079; }
+
+  /* strips */
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:22px; }
+  .strip { background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.008));
+           border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:16px 16px 14px;
+           display:flex; flex-direction:column; }
+  .strip-head { display:flex; align-items:center; gap:9px; margin-bottom:2px; }
+  .strip-idx { font-size:11px; font-weight:700; }
+  .strip-name { font-size:15px; font-weight:600; color:#f1f6fc; letter-spacing:-0.01em; }
+  .strip-cap { font-size:11px; color:#5d7290; margin-bottom:14px; }
+  .gp { display:flex; align-items:center; gap:14px; }
+  .gauge { position:relative; width:88px; height:88px; flex:none; }
+  .gauge .c { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .gauge .gv { font-size:21px; font-weight:700; color:#eef4fb; line-height:1; }
+  .gauge .gl { font-size:9px; letter-spacing:0.12em; color:#5d7290; margin-top:2px; }
+  .pnlbox { flex:1; display:flex; align-items:stretch; gap:10px; }
+  .dev { position:relative; width:7px; height:64px; background:rgba(255,255,255,0.06); border-radius:4px; flex:none; }
+  .dev .zero { position:absolute; left:0; right:0; top:32px; height:1px; background:rgba(255,255,255,0.18); }
+  .dev .fill { position:absolute; left:0; right:0; border-radius:4px; }
+  .pnl { font-size:20px; font-weight:700; line-height:1; }
+  .pnlamt { font-size:11px; opacity:0.8; margin-top:4px; }
+  .posrow { margin-top:15px; }
+  .posrow .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; }
+  .posrow .lbl { font-size:10px; letter-spacing:0.08em; color:#5d7290; text-transform:uppercase; }
+  .posrow .cnt { font-size:11px; color:#9fb0c6; font-weight:600; }
+  .dots { display:flex; flex-wrap:wrap; gap:4px; }
+  .dots span { width:8px; height:8px; border-radius:2px; display:inline-block; }
+  .rule { margin-top:14px; padding-top:11px; border-top:1px solid rgba(255,255,255,0.06);
+          font-size:11px; color:#7c90ac; line-height:1.5; }
+  .foot { margin-top:12px; display:flex; justify-content:space-between; align-items:center; }
+  .foot .reb { font-size:10px; color:#5d7290; }
+  .chip { font-size:10px; font-weight:600; padding:3px 8px; border-radius:5px; border:1px solid; }
+
+  /* tape */
+  .tape { margin-top:20px; border:1px solid rgba(255,255,255,0.08); border-radius:10px; overflow:hidden; background:rgba(255,255,255,0.018); }
+  .tape-head { display:flex; align-items:center; gap:12px; padding:10px 16px;
+               border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(217,99,58,0.05); }
+  .tape-title { font-size:11px; letter-spacing:0.16em; color:#d6e0ec; font-weight:700; text-transform:uppercase; }
+  .tape-rule { font-size:11px; color:#8295af; }
+  .tape-track { overflow:hidden; position:relative; padding:14px 0; }
+  .tape-move { display:flex; width:max-content; animation:tapemove 26s linear infinite; }
+  .tape-item { display:flex; align-items:center; gap:14px; padding:0 28px; border-right:1px solid rgba(255,255,255,0.07); }
+  .tape-item .dot { width:8px; height:8px; border-radius:2px; display:inline-block; }
+  .tape-item .tk { font-size:13px; font-weight:700; color:#e8eef7; }
+  .tape-item .bk { font-size:12px; color:#7488a4; }
+  .tape-item .vl { font-size:13px; }
+  .tape-item .tg { font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <div class="head">
+    <div>
+      <div class="eyebrow">
+        <span class="pulse"></span>
+        <span class="txt mono">Scorr · Quant Basket · Equity Buy &amp; Hold</span>
+      </div>
+      <div class="totalrow">
+        <div class="total mono">₹20,00,000</div>
+        <div class="mono" style="font-size:16px; font-weight:600; color:#34d8b4;">+₹70,000</div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">vs Nifty500</div><div class="v mono" style="color:#34d8b4;">+3.2%</div></div>
+      <div class="vrule"></div>
+      <div class="stat"><div class="k">Avg GVM</div><div class="v mono" style="color:#dfe8f3;">7.6</div></div>
+      <div class="vrule"></div>
+      <div class="stat"><div class="k">At risk</div><div class="v mono" style="color:#e0b04a;">2</div></div>
+    </div>
+  </div>
+
+  <!-- ALLOCATION RIBBON -->
+  <div class="ribbon">
+    <div class="ribbon-bar" id="ribbon-bar"></div>
+    <div class="ribbon-labels" id="ribbon-labels"></div>
+  </div>
+
+  <!-- CHANNEL STRIPS -->
+  <div class="grid" id="grid"></div>
+
+  <!-- EXIT ALERT TAPE -->
+  <div class="tape">
+    <div class="tape-head">
+      <span style="font-size:13px;">⚠</span>
+      <span class="tape-title mono">Exit Alert Tape</span>
+      <div style="flex:1;"></div>
+      <span class="tape-rule"><span class="mono" style="color:#d9633a;">HS1</span> = −20% absolute</span>
+      <span style="color:#34465e;">|</span>
+      <span class="tape-rule"><span class="mono" style="color:#e0b04a;">HS2</span> = −10% vs Nifty</span>
+    </div>
+    <div class="tape-track">
+      <div class="tape-move" id="tape-move"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const POS = '#34d8b4', NEG = '#ef6b6b';
+
+  const baskets = [
+    { idx:'01', name:'Large Cap', accent:'#4e9c6b', gvm:7.8, count:13, risk:0, riskTone:'#d9633a',
+      pnl:'+4.8%', pnlNum:4.8, pnlAmt:'+₹24,000', pnlColor:POS, rule:'GVM ≥ 7.0  ·  Mcap Top 100',
+      reb:'Monthly · 4 Jul', riskLabel:'No risk', riskColor:'#6f8aa0', riskBg:'rgba(255,255,255,0.04)', riskBorder:'rgba(255,255,255,0.1)' },
+    { idx:'02', name:'Mid Cap', accent:'#2dbfb0', gvm:8.0, count:15, risk:1, riskTone:'#e0b04a',
+      pnl:'+6.1%', pnlNum:6.1, pnlAmt:'+₹30,500', pnlColor:POS, rule:'GVM ≥ 7.5  ·  Rank 101–250',
+      reb:'Monthly · 4 Jul', riskLabel:'1 near HS2', riskColor:'#e0b04a', riskBg:'rgba(217,162,58,0.12)', riskBorder:'rgba(217,162,58,0.28)' },
+    { idx:'03', name:'Small Cap', accent:'#c98a3e', gvm:8.3, count:22, risk:1, riskTone:'#d9633a',
+      pnl:'−2.3%', pnlNum:-2.3, pnlAmt:'−₹11,500', pnlColor:NEG, rule:'GVM ≥ 8.0 thematic · 5 themes',
+      reb:'Quarterly · 4 Oct', riskLabel:'1 near HS1', riskColor:'#d9633a', riskBg:'rgba(217,99,58,0.12)', riskBorder:'rgba(217,99,58,0.3)' },
+    { idx:'04', name:'Alpha Multicap', accent:'#3f7fd6', gvm:7.5, count:17, risk:0, riskTone:'#d9633a',
+      pnl:'+5.4%', pnlNum:5.4, pnlAmt:'+₹27,000', pnlColor:POS, rule:'GVM×0.6 + Mom×0.4 · Nifty 500',
+      reb:'Quarterly · 4 Oct', riskLabel:'No risk', riskColor:'#6f8aa0', riskBg:'rgba(255,255,255,0.04)', riskBorder:'rgba(255,255,255,0.1)' },
+  ];
+
+  const tape = [
+    { ticker:'BSOFT', basket:'Small Cap', val:'−18.4% DD', valColor:'#ef6b6b',
+      trig:'HS1 · −20%', trigColor:'#e88a55', trigBg:'rgba(217,99,58,0.14)', dotColor:'#d9633a' },
+    { ticker:'COFORGE', basket:'Mid Cap', val:'−8.7% vs Nifty', valColor:'#ef6b6b',
+      trig:'HS2 · −10%', trigColor:'#e0b04a', trigBg:'rgba(217,162,58,0.14)', dotColor:'#e0b04a' },
+  ];
+
+  const gaugeDash = (gvm) => `${Math.round((gvm/10)*179)} 239`;
+  function dev(pnl){
+    const half = 30;
+    const h = Math.min(Math.abs(pnl)/8*half, half);
+    return pnl >= 0 ? { top: (32-h), h } : { top: 32, h };
+  }
+
+  const rbar = document.getElementById('ribbon-bar');
+  const rlab = document.getElementById('ribbon-labels');
+  baskets.forEach(b => {
+    const seg = document.createElement('div'); seg.style.background = b.accent; rbar.appendChild(seg);
+    const l = document.createElement('div');
+    l.innerHTML = `<span class="n">${b.name}</span><span class="p mono">25%</span>`;
+    rlab.appendChild(l);
+  });
+
+  const grid = document.getElementById('grid');
+  baskets.forEach(b => {
+    const d = dev(b.pnlNum);
+    let dots = '';
+    for (let i=0;i<b.count;i++){
+      const atRisk = i >= b.count - b.risk;
+      dots += `<span style="background:${atRisk ? b.riskTone : 'rgba(255,255,255,0.22)'}"></span>`;
+    }
+    const el = document.createElement('div');
+    el.className = 'strip';
+    el.style.borderTop = `2px solid ${b.accent}`;
+    el.innerHTML = `
+      <div class="strip-head">
+        <span class="strip-idx mono" style="color:${b.accent}">${b.idx}</span>
+        <span class="strip-name">${b.name}</span>
+      </div>
+      <div class="strip-cap mono">₹5,00,000 capital</div>
+      <div class="gp">
+        <div class="gauge">
+          <svg width="88" height="88" viewBox="0 0 88 88">
+            <circle cx="44" cy="44" r="38" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="6" stroke-linecap="round" stroke-dasharray="179 239" transform="rotate(135 44 44)"></circle>
+            <circle cx="44" cy="44" r="38" fill="none" stroke="${b.accent}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${gaugeDash(b.gvm)}" transform="rotate(135 44 44)"></circle>
+          </svg>
+          <div class="c"><span class="gv mono">${b.gvm.toFixed(1)}</span><span class="gl">GVM</span></div>
+        </div>
+        <div class="pnlbox">
+          <div class="dev">
+            <div class="zero"></div>
+            <div class="fill" style="background:${b.pnlColor}; top:${d.top}px; height:${d.h}px;"></div>
+          </div>
+          <div>
+            <div class="pnl mono" style="color:${b.pnlColor}">${b.pnl}</div>
+            <div class="pnlamt mono" style="color:${b.pnlColor}">${b.pnlAmt}</div>
+          </div>
+        </div>
+      </div>
+      <div class="posrow">
+        <div class="top"><span class="lbl">Positions</span><span class="cnt mono">${b.count}</span></div>
+        <div class="dots">${dots}</div>
+      </div>
+      <div class="rule mono">${b.rule}</div>
+      <div class="foot">
+        <span class="reb mono">⟳ ${b.reb}</span>
+        <span class="chip mono" style="color:${b.riskColor}; background:${b.riskBg}; border-color:${b.riskBorder}">${b.riskLabel}</span>
+      </div>`;
+    grid.appendChild(el);
+  });
+
+  const move = document.getElementById('tape-move');
+  function tapeBlock(){
+    const block = document.createElement('div');
+    block.style.display = 'flex';
+    tape.forEach(a => {
+      const item = document.createElement('div');
+      item.className = 'tape-item';
+      item.innerHTML = `
+        <span class="dot" style="background:${a.dotColor}"></span>
+        <span class="tk mono">${a.ticker}</span>
+        <span class="bk">${a.basket}</span>
+        <span class="vl mono" style="color:${a.valColor}">${a.val}</span>
+        <span class="tg mono" style="color:${a.trigColor}; background:${a.trigBg}">${a.trig}</span>`;
+      block.appendChild(item);
+    });
+    return block;
+  }
+  move.appendChild(tapeBlock());
+  move.appendChild(tapeBlock());
+</script>
+</body>
+</html>
