@@ -255,6 +255,17 @@ def _bg_signal_writer():
             raise RuntimeError(r["error"])
         _signal_writer_fail_streak = 0
         _last_signal_writer_ok = _ist_now()
+        # DB heartbeat — diagnosis (run_diagnosis) reads sched_writer_hb; without it
+        # the dashboard shows a false RED. Write the last-OK timestamp each tick.
+        try:
+            with _conn() as _hb_conn, _hb_conn.cursor() as _hb_cur:
+                _hb_cur.execute(
+                    "INSERT INTO app_config(key,value) VALUES('sched_writer_hb',%s) "
+                    "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                    (_last_signal_writer_ok.isoformat(),))
+                _hb_conn.commit()
+        except Exception as _hb_e:
+            log.warning(f"sched_writer_hb write failed: {_hb_e}")
         log.info(f"signal_writer: {r.get('updated', 0) if isinstance(r, dict) else 0} updated")
     except Exception as e:
         _signal_writer_fail_streak += 1
@@ -428,9 +439,11 @@ async def _scheduler_loop():
         try: await asyncio.sleep(60)
         except asyncio.CancelledError: break
         now = _ist_now(); today = now.date(); h, m = now.hour, now.minute
-        # watchdog: detect a silently-stalled signal writer and recover
+        # watchdog: detect a silently-stalled signal writer and recover.
+        # Called directly (NOT via to_thread): the check is light + thread-safe, and
+        # offloading it can block when the thread pool is saturated during market hours.
         try:
-            await asyncio.to_thread(_check_watchdog, now)
+            _check_watchdog(now)
         except Exception as e:
             log.error(f"watchdog check error: {e}")
         if _restart_requested:
