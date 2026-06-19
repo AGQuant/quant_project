@@ -628,7 +628,7 @@ def _top_mcap_symbols(cur, n=50):
         FROM futures_universe f
         JOIN gvm_scores g ON f.symbol = g.symbol
         WHERE f.is_active = TRUE AND g.market_cap IS NOT NULL
-        ORDER BY g.market_cap DESC
+        ORDER BY g.market_cap DESC NULLS LAST
         LIMIT %s""", (n,))
     return [r[0] for r in cur.fetchall()]
 

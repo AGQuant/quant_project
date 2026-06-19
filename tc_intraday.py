@@ -55,7 +55,7 @@ def refresh_tc_cache(n=210):
             cur.execute("""SELECT f.symbol FROM futures_universe f
                            JOIN gvm_scores g ON f.symbol=g.symbol
                            WHERE f.is_active=TRUE AND g.market_cap IS NOT NULL
-                           ORDER BY g.market_cap DESC LIMIT %s""", (n,))
+                           ORDER BY g.market_cap DESC NULLS LAST LIMIT %s""", (n,))
             symbols = [r[0] for r in cur.fetchall()]
 
     written, errors = 0, []
