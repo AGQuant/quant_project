@@ -56,6 +56,7 @@ from scorr_authset_probe import router as authset_probe_router
 from investment_check import router as investment_check_router
 from scanner_endpoints import router as scanner_router
 from intraday_scanner_endpoints import router as intraday_scanner_router
+from structure_endpoints import structure_router
 from performance_endpoints import router as performance_router
 import yahoo_ondemand
 import yahoo_index_backfill
@@ -165,6 +166,7 @@ app.include_router(sector_brief_router)
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
 app.include_router(intraday_scanner_router)
+app.include_router(structure_router)
 app.include_router(performance_router)
 
 def get_conn():
@@ -473,6 +475,10 @@ def fpc():
 @app.get("/scanners", response_class=HTMLResponse)
 def scanners():
     with open("scorr_scanners.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/structure", response_class=HTMLResponse)
+def structure_page():
+    with open("scorr_structure.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/performance", response_class=HTMLResponse)
 def performance():
