@@ -608,10 +608,14 @@ class BarAggregator:
             if oi is None:
                 oi = self.last_oi.get(sym)
             with self.conn.cursor() as cur:
+                # Spot = nearest non-futures intraday bar for this symbol at/before ts.
+                # (exact ts + source='fyers_eq' missed: eq feed is sparse & ts-misaligned;
+                #  bulk spot data is source='fyers'. Match nearest, exclude fyers_fut self.)
                 cur.execute("""
                     SELECT close FROM intraday_prices
-                    WHERE symbol=%s AND ts=%s AND source='fyers_eq' LIMIT 1
-                """, (sym, ts))
+                    WHERE symbol=%s AND ts::date=%s::date AND ts<=%s AND source<>'fyers_fut'
+                    ORDER BY ts DESC LIMIT 1
+                """, (sym, ts, ts))
                 row       = cur.fetchone()
                 spot      = float(row[0]) if row else None
                 basis     = round(fut_close - spot, 4) if spot is not None else None
