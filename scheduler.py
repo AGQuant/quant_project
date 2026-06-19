@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import psycopg
+from psycopg.types.json import Json
 
 log = logging.getLogger("scorr.scheduler")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -27,7 +28,14 @@ def _is_market_hours(now):
     return (9,15) <= t <= (15,30)
 
 # ── run-guards ────────────────────────────────────────────────────────────────
-_signal_writer_running = False
+# signal_writer uses a started_at timestamp + token (not a bare bool) so a hung
+# tick can't permanently block future ticks — see _bg_signal_writer / _check_watchdog.
+_signal_writer_started_at: Optional[datetime] = None
+_signal_writer_token = 0
+_signal_writer_fail_streak = 0
+_last_signal_writer_ok: Optional[datetime] = None
+SIGNAL_WRITER_TIMEOUT = timedelta(minutes=4)   # spec #16: assume hung after ~4 min
+WATCHDOG_STALE_MIN = 10                          # spec #16: stale if no tick in 10 min
 _eod_running = False
 _eod_ran_today: Optional[date] = None
 _adr_pcr_ran_today: Optional[date] = None
@@ -44,6 +52,12 @@ _v10_running = False
 _pcr_intraday_running = False
 _intraday_paper_running = False
 _fu_sync_ran_this_week: Optional[date] = None
+
+# ── health / watchdog state ────────────────────────────────────────────────────
+_restart_requested = False
+_watchdog_restarts = 0
+_last_restart_ts: Optional[datetime] = None
+_watchdog_alerted = False        # throttle: one alert per stall episode
 
 # ── exported to main.py ───────────────────────────────────────────────────────
 
@@ -135,17 +149,116 @@ async def _bg_yahoo_daily(app=None):
 
 # ── job wrappers ──────────────────────────────────────────────────────────────
 
+# ── health / watchdog helpers (spec #16) ───────────────────────────────────────
+
+def _log_alert(kind: str, message: str):
+    """Write a visible alert to session_log (category=alert)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s)""",
+                        (kind, Json({"message": message, "ist": _ist_now().isoformat()})))
+            conn.commit()
+        log.error(f"ALERT[{kind}]: {message}")
+    except Exception as e:
+        log.error(f"_log_alert failed ({kind}): {e}")
+
+
+def _reset_guards():
+    """Clear stuck run-guards so the next tick can proceed cleanly."""
+    global _signal_writer_started_at, _signal_writer_token
+    _signal_writer_started_at = None
+    _signal_writer_token += 1   # invalidate any in-flight (hung) tick's finally
+
+
+def _request_restart(reason: str):
+    """Reset guards and ask the scheduler loop to restart fresh (via supervisor)."""
+    global _restart_requested, _watchdog_restarts, _last_restart_ts
+    _reset_guards()
+    _restart_requested = True
+    _watchdog_restarts += 1
+    _last_restart_ts = _ist_now()
+    log.error(f"scheduler RESTART requested: {reason}")
+
+
+def _tick_age_minutes() -> Optional[float]:
+    """Minutes since the most recent v8_metrics computed_at (DB-clock consistent)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT EXTRACT(EPOCH FROM (NOW() - MAX(computed_at)))/60.0 FROM v8_metrics")
+            r = cur.fetchone()
+        return float(r[0]) if r and r[0] is not None else None
+    except Exception as e:
+        log.error(f"_tick_age_minutes failed: {e}")
+        return None
+
+
+def _check_watchdog(now):
+    """During market hours, if no signal tick landed in WATCHDOG_STALE_MIN, the
+    writer has silently stalled — alert, reset guards, request restart."""
+    global _watchdog_alerted
+    if not _is_market_hours(now):
+        _watchdog_alerted = False
+        return
+    age = _tick_age_minutes()
+    if age is None:
+        return
+    if age > WATCHDOG_STALE_MIN:
+        if not _watchdog_alerted:
+            _log_alert("scheduler_stall",
+                       f"v8_metrics stale {age:.1f} min during market hours — restarting live loop")
+            _watchdog_alerted = True
+        _request_restart(f"watchdog: tick stale {age:.1f} min")
+    else:
+        _watchdog_alerted = False
+
+
+def health_state() -> dict:
+    """Snapshot for /api/health/scheduler."""
+    return {
+        "fail_streak": _signal_writer_fail_streak,
+        "watchdog_restarts": _watchdog_restarts,
+        "last_restart_ts": _last_restart_ts.isoformat() if _last_restart_ts else None,
+        "last_signal_writer_ok": _last_signal_writer_ok.isoformat() if _last_signal_writer_ok else None,
+        "tick_in_progress": _signal_writer_started_at is not None,
+    }
+
+
+# ── job wrappers ──────────────────────────────────────────────────────────────
+
 def _bg_signal_writer():
-    global _signal_writer_running
-    if _signal_writer_running: return
-    _signal_writer_running = True
+    global _signal_writer_started_at, _signal_writer_token
+    global _signal_writer_fail_streak, _last_signal_writer_ok
+    now = _ist_now()
+    # guard: skip only if a tick is genuinely in flight and within the timeout window
+    if _signal_writer_started_at is not None:
+        if (now - _signal_writer_started_at) < SIGNAL_WRITER_TIMEOUT:
+            return
+        # exceeded timeout → previous tick is hung; abandon it and start fresh
+        _log_alert("signal_writer_timeout",
+                   f"previous tick hung >{SIGNAL_WRITER_TIMEOUT} (since {_signal_writer_started_at}) — starting fresh")
+        _signal_writer_token += 1   # invalidate the hung tick's finally
+
+    my_token = _signal_writer_token + 1
+    _signal_writer_token = my_token
+    _signal_writer_started_at = now
     try:
         import v8_signal_writer
         with _conn() as conn:
             r = v8_signal_writer.run_live_signal_writer(conn)
-        log.info(f"signal_writer: {r.get('updated',0)} updated")
-    except Exception as e: log.error(f"signal_writer: {e}")
-    finally: _signal_writer_running = False
+        if isinstance(r, dict) and r.get("error"):
+            raise RuntimeError(r["error"])
+        _signal_writer_fail_streak = 0
+        _last_signal_writer_ok = _ist_now()
+        log.info(f"signal_writer: {r.get('updated', 0) if isinstance(r, dict) else 0} updated")
+    except Exception as e:
+        _signal_writer_fail_streak += 1
+        log.error(f"signal_writer: FAIL #{_signal_writer_fail_streak}: {e}")
+        if _signal_writer_fail_streak >= 3:
+            _request_restart(f"signal_writer 3 consecutive failures: {e}")
+    finally:
+        if _signal_writer_token == my_token:   # only the latest run clears the marker
+            _signal_writer_started_at = None
 
 def _bg_v10_tick():
     global _v10_running
@@ -304,11 +417,24 @@ def _bg_fetch_global_intraday():
 # ── main loop ─────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
+    global _restart_requested
     log.info("Scheduler loop started")
     while not _stop_event.is_set():
         try: await asyncio.sleep(60)
         except asyncio.CancelledError: break
         now = _ist_now(); today = now.date(); h, m = now.hour, now.minute
+        # watchdog: detect a silently-stalled signal writer and recover
+        try:
+            await asyncio.to_thread(_check_watchdog, now)
+        except Exception as e:
+            log.error(f"watchdog check error: {e}")
+        if _restart_requested:
+            _restart_requested = False
+            # guards already reset by _request_restart — fire an immediate recovery
+            # tick (don't wait up to 5 min for the next m%5 dispatch) and keep looping.
+            log.warning("scheduler: guards reset by watchdog/fail-streak — firing recovery tick")
+            if _is_market_hours(now):
+                asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
         if h == 6 and m == 0:
             asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
         if 6 <= h <= 23 and m % 5 == 0:
