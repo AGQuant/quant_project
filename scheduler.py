@@ -376,13 +376,48 @@ def _bg_adr_pcr():
         log.info("adr_pcr done")
     except Exception as e: log.error(f"adr_pcr: {e}")
 
+def _check_universe_shrink(conn):
+    """Task #35: after the nightly EOD load, alert if raw_prices symbol coverage
+    dropped sharply vs the prior trading day — catches silent partial loads (the
+    17-Jun 1717→1676 drop went unnoticed). Threshold: >10 symbols."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT price_date, COUNT(DISTINCT symbol)
+                           FROM raw_prices GROUP BY price_date
+                           ORDER BY price_date DESC LIMIT 2""")
+            rows = cur.fetchall()
+        if len(rows) < 2:
+            return
+        (today_d, today_n), (prev_d, prev_n) = rows[0], rows[1]
+        drop = prev_n - today_n
+        if drop <= 10:
+            return
+        with conn.cursor() as cur:
+            cur.execute("""SELECT symbol FROM raw_prices WHERE price_date=%s
+                           EXCEPT SELECT symbol FROM raw_prices WHERE price_date=%s
+                           ORDER BY symbol""", (prev_d, today_d))
+            dropped = [r[0] for r in cur.fetchall()]
+        sample = ", ".join(dropped[:30]) + (" …" if len(dropped) > 30 else "")
+        msg = (f"raw_prices universe shrank {prev_n}→{today_n} ({drop} symbols) "
+               f"{prev_d}→{today_d}. Dropped: {sample}")
+        _log_alert("universe_shrink", msg)
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO cc_task_logs (task_id, actor, level, message)
+                           VALUES (35, 'scheduler', 'warn', %s)""", (msg,))
+            conn.commit()
+        log.warning(f"universe_shrink alert: {prev_n}->{today_n} ({drop})")
+    except Exception as e:
+        log.error(f"_check_universe_shrink: {e}")
+
 def _bg_yahoo_daily_sync():
     global _yahoo_daily_running, _yahoo_ran_today
     if _yahoo_daily_running: return
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
-        with _conn() as conn: result = ydu.run_update(conn)
+        with _conn() as conn:
+            result = ydu.run_update(conn)
+            _check_universe_shrink(conn)   # task #35: alert on silent coverage drop
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result}")
     except Exception as e: log.error(f"yahoo_daily: {e}")
