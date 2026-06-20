@@ -78,7 +78,7 @@ def scanner_investment(
     """Investment quality screen — GVM>=7 stocks for buy-and-hold consideration."""
     with _conn() as conn, conn.cursor() as cur:
         verdict_filter = "AND g.verdict = %s" if verdict else \
-                         "AND g.verdict IN ('Strong Buy', 'Buy')"
+                         "AND g.verdict IN ('Excellent', 'Good')"
         params = [min_gvm]
         if verdict:
             params.append(verdict)
@@ -112,4 +112,4 @@ def scanner_investment(
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
     return {"scanner": "investment", "count": len(rows),
-            "filters": {"min_gvm": min_gvm, "verdict": verdict or "Strong Buy + Buy"}, "rows": rows}
+            "filters": {"min_gvm": min_gvm, "verdict": verdict or "Excellent + Good"}, "rows": rows}
