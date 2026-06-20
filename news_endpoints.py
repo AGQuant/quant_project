@@ -8,6 +8,7 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
   GET  /api/news/company/{symbol} — latest 10 polished for a symbol (raw fallback)
   GET  /api/news/unpolished       — count + sample of raw_news awaiting polish
   GET  /api/news/live             — raw headlines grouped by source_type (CIO tab, task #40)
+  GET  /api/news/top              — polished news by category for /news page (task #47)
   POST /api/admin/refresh_news    — background fetch (market + company), returns started
 """
 
@@ -133,6 +134,50 @@ def news_live(hours: int = 72, per_cat: int = 60):
             "domestic": groups.get("domestic", []),
             "global": groups.get("global", []),
             "company": groups.get("company", [])}
+
+
+@router.get("/api/news/top")
+def news_top(days: int = 3, category: str = "domestic", limit: int = 50):
+    """Polished news for the dedicated /news page, by category (task #47).
+      domestic = source_type domestic AND polished category != 'ipo'
+      global   = source_type global
+      ipo      = polished category = 'ipo' (any source)
+      company  = source_type company (searchable client-side by symbol)"""
+    days = max(1, min(days, 30))
+    limit = max(1, min(limit, 200))
+    cat = (category or "domestic").lower()
+    sql = """
+        SELECT p.id AS polished_id, r.id AS raw_id,
+               COALESCE(p.headline_clean, r.headline) AS headline,
+               p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
+               r.symbol, r.source_type, r.source_name, r.url, r.published_at
+        FROM polished_news p
+        JOIN raw_news r ON r.id = p.raw_news_id
+        WHERE r.published_at >= NOW() - (%s || ' days')::interval
+    """
+    params = [days]
+    if cat == "ipo":
+        sql += " AND p.category = 'ipo'"
+    elif cat == "global":
+        sql += " AND r.source_type = 'global'"
+    elif cat == "company":
+        sql += " AND r.source_type = 'company'"
+    else:  # domestic
+        cat = "domestic"
+        sql += " AND r.source_type = 'domestic' AND (p.category IS NULL OR p.category <> 'ipo')"
+    sql += " ORDER BY r.published_at DESC NULLS LAST LIMIT %s"
+    params.append(limit)
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        articles = _rows(cur)
+        cur.execute("SELECT MAX(polished_at) FROM polished_news")
+        last = cur.fetchone()[0]
+        cur.execute("""SELECT COUNT(*) FROM polished_news
+                       WHERE polished_at::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date""")
+        today_count = cur.fetchone()[0]
+    return {"category": cat, "days": days, "count": len(articles),
+            "last_polished": last.isoformat() if last else None,
+            "today_count": today_count, "articles": articles}
 
 
 def _refresh_job():
