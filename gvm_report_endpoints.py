@@ -11,6 +11,8 @@ Endpoints:
 from fastapi import APIRouter, HTTPException
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
+from decimal import Decimal
+import math
 import psycopg
 import os
 import logging
@@ -40,9 +42,30 @@ def _ist_now() -> str:
 
 def _f(v) -> Optional[float]:
     try:
-        return float(v) if v is not None else None
+        f = float(v) if v is not None else None
     except (TypeError, ValueError):
         return None
+    if f is not None and not math.isfinite(f):   # NaN / Inf -> None
+        return None
+    return f
+
+
+def _json_safe(o):
+    """Recursively replace non-finite floats (NaN/Inf) with None.
+
+    Starlette's JSONResponse serializes with allow_nan=False, so a single
+    NaN/Inf anywhere in the payload raises ValueError -> 500 AFTER the endpoint
+    returns (uncatchable by in-handler try/except). This neutralizes them.
+    """
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, Decimal):
+        return float(o) if o.is_finite() else None
+    if isinstance(o, dict):
+        return {k: _json_safe(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_json_safe(v) for v in o]
+    return o
 
 
 def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
@@ -339,8 +362,8 @@ def gvm_company_report(symbol: str):
         log.warning(f"content fetch failed for {sym}: {e}")
         persist_error = str(e)
 
-    # --- 8. Assemble final response ---
-    return {
+    # --- 8. Assemble final response (NaN/Inf-scrubbed for JSON safety) ---
+    return _json_safe({
         "symbol":        sym,
         "company_name":  base.get("company_name"),
         "segment":       segment,
@@ -371,7 +394,7 @@ def gvm_company_report(symbol: str):
         "persisted":    persist_error is None,
         "persist_error": persist_error,
         "degraded":     base.get("degraded", False),
-    }
+    })
 
 
 @router.get("/api/gvm/search")
