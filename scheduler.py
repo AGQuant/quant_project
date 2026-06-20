@@ -376,6 +376,14 @@ def _bg_adr_pcr():
         log.info("adr_pcr done")
     except Exception as e: log.error(f"adr_pcr: {e}")
 
+def _bg_tc_screener_precompute():
+    # task #43: nightly TC screener cache @16:00 IST (after market close + ADR/PCR)
+    try:
+        import trade_check_v34_endpoints as tce
+        res = tce.run_tc_screener_precompute()
+        log.info(f"tc_screener_precompute: {res.get('rows') if isinstance(res, dict) else res} rows")
+    except Exception as e: log.error(f"tc_screener_precompute: {e}")
+
 def _check_universe_shrink(conn):
     """Task #35: after the nightly EOD load, alert if raw_prices symbol coverage
     dropped sharply vs the prior trading day — catches silent partial loads (the
@@ -559,6 +567,7 @@ async def _scheduler_loop():
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
+        if h == 16 and m == 0:  _spawn(_bg_tc_screener_precompute)  # task #43: TC screener cache
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
         # window collided with CC deploy pushes — a Railway redeploy kills the
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
