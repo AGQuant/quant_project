@@ -200,3 +200,110 @@ def intraday_tick():
             "closed": ex.get("closed"),
             "square_off": ex.get("square_off"),
             "ts": en.get("ts") or ex.get("ts")}
+
+
+# ── TC screener nightly pre-compute cache (task #43) ──────────────────────────
+# Kills the 60-90s live-screen spinner: score the full futures universe once
+# after market close, store in tc_screener_cache, serve instantly from cache.
+
+TC_UNIVERSE = "futures"
+
+
+def _pivot_zone(cmp_v, pp, r1, s1):
+    if cmp_v is None or pp is None:
+        return None
+    if r1 is not None and cmp_v >= r1:
+        return "Above R1"
+    if cmp_v >= pp:
+        return "PP-R1"
+    if s1 is not None and cmp_v >= s1:
+        return "S1-PP"
+    return "Below S1"
+
+
+def run_tc_screener_precompute():
+    """Score the full active futures universe (LONG + SHORT) via trade_check_v34
+    and replace today's rows in tc_screener_cache. Heavy (~universe x2 scorer
+    calls) — nightly @16:00 IST or manual POST /api/admin/run-tc-screener only."""
+    run_date = _ist().date()
+    conn = psycopg.connect(_DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS tc_screener_cache (
+                id SERIAL PRIMARY KEY, run_date DATE, universe VARCHAR(20), side VARCHAR(10),
+                symbol VARCHAR(20), score NUMERIC, verdict VARCHAR(20), cmp NUMERIC,
+                pivot_zone TEXT, failed_rules TEXT[], computed_at TIMESTAMPTZ DEFAULT NOW())""")
+            cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE ORDER BY symbol")
+            symbols = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT symbol, cmp FROM cmp_prices")
+            cmp_map = {r[0]: _f(r[1]) for r in cur.fetchall()}
+            cur.execute("""SELECT symbol, pp, r1, s1 FROM v8_paper_pivots
+                           WHERE pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)""")
+            piv_map = {r[0]: (_f(r[1]), _f(r[2]), _f(r[3])) for r in cur.fetchall()}
+        conn.commit()
+
+        out_rows = []
+        for sym in symbols:
+            cmp_v = cmp_map.get(sym)
+            pp, r1, s1 = piv_map.get(sym, (None, None, None))
+            zone = _pivot_zone(cmp_v, pp, r1, s1)
+            for side in ("LONG", "SHORT"):
+                res = tc.trade_check(sym, side)
+                if not isinstance(res, dict) or res.get("error"):
+                    continue
+                failed = [r.get("rule") for r in res.get("rules", [])
+                          if r.get("status") in ("FAIL", "VETO") and r.get("rule")]
+                out_rows.append((run_date, TC_UNIVERSE, side, sym,
+                                 res.get("earned"), res.get("verdict"), cmp_v, zone, failed))
+
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tc_screener_cache WHERE run_date = %s AND universe = %s",
+                        (run_date, TC_UNIVERSE))
+            cur.executemany("""INSERT INTO tc_screener_cache
+                (run_date, universe, side, symbol, score, verdict, cmp, pivot_zone, failed_rules)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""", out_rows)
+        conn.commit()
+        longs = sum(1 for r in out_rows if r[2] == "LONG")
+        shorts = sum(1 for r in out_rows if r[2] == "SHORT")
+        return {"ok": True, "run_date": str(run_date), "symbols": len(symbols),
+                "rows": len(out_rows), "long": longs, "short": shorts}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+    finally:
+        conn.close()
+
+
+@router.get("/api/trade-check/screen-cached")
+def screen_cached(universe: str = "nifty50", side: Optional[str] = None, top: int = 10):
+    """Fast read of the nightly tc_screener_cache — top LONG + top SHORT for today.
+    Falls back to live ntc.screen_top50 if today's cache is empty (first day/weekend)."""
+    top = max(1, min(top, 50))
+    run_date = _ist().date()
+    conn = psycopg.connect(_DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM tc_screener_cache WHERE run_date = %s", (run_date,))
+            n_today = int(cur.fetchone()[0] or 0)
+            if n_today == 0:
+                return {"cached": False, "run_date": str(run_date), "universe": universe,
+                        "note": "cache empty for today — live fallback",
+                        "live": ntc.screen_top50(n=50, top=top)}
+            sides = ["LONG", "SHORT"] if not side else [side.upper()]
+            result = {}
+            for sd in sides:
+                cur.execute("""SELECT symbol, score, verdict, cmp, pivot_zone, failed_rules
+                               FROM tc_screener_cache
+                               WHERE run_date = %s AND side = %s
+                               ORDER BY score DESC NULLS LAST LIMIT %s""",
+                            (run_date, sd, top))
+                cols = [d[0] for d in cur.description]
+                result[sd.lower()] = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+    return {"cached": True, "run_date": str(run_date), "universe": universe, "top": top, **result}
+
+
+@router.post("/api/admin/run-tc-screener")
+def run_tc_screener():
+    """Manually seed today's tc_screener_cache (synchronous; off-hours use)."""
+    return run_tc_screener_precompute()
