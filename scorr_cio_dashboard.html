@@ -1055,6 +1055,8 @@ function GvmReport({ r, hist }) {
         })}
       </div>
 
+      <NewsCard symbol={r.symbol} />
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 4 }}>Pivot Range</div>
@@ -1080,6 +1082,80 @@ function GvmReport({ r, hist }) {
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
         {r.persist_error && <span style={{ color: C.red }}> · persist error (schema migration pending)</span>}
       </div>
+    </div>
+  );
+}
+
+function _timeAgo(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  const dd = Math.floor(h / 24); if (dd < 30) return `${dd}d ago`;
+  const mo = Math.floor(dd / 30); return `${mo}mo ago`;
+}
+
+// Polished company news (task #44). Endpoint returns {articles:[...]}; polished rows
+// carry sentiment/impact, raw fallback rows don't — badges render only when present.
+function NewsCard({ symbol }) {
+  const [articles, setArticles] = useState(null);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (!symbol) return;
+    setArticles(null);
+    apiGet(`/api/news/company/${encodeURIComponent(symbol)}`)
+      .then(d => setArticles(Array.isArray(d?.articles) ? d.articles.slice(0, 5) : []))
+      .catch(() => setArticles([]));
+  }, [symbol]);
+
+  const sentDot = (s) => {
+    const col = s === "positive" ? C.green : s === "negative" ? C.red : C.muted;
+    return <span title={s || "no sentiment"} style={{ width: 8, height: 8, borderRadius: "50%", background: col, display: "inline-block", flexShrink: 0 }} />;
+  };
+  const impactTag = (im) => {
+    if (!im) return null;
+    const col = im === "high" ? C.red : im === "mid" ? C.gold : C.muted;
+    return <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase",
+      color: col, background: col + "18", border: `1px solid ${col}33`, borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}>{im}</span>;
+  };
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 16 }}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none" }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: C.purple }}>Latest News · {symbol}</div>
+        <span style={{ fontSize: 12, color: C.muted, transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▸</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          {articles == null ? (
+            <div style={{ fontSize: 12, color: C.muted }}>Loading…</div>
+          ) : !articles.length ? (
+            <div style={{ fontSize: 12, color: C.muted }}>No recent news available</div>
+          ) : articles.map((a, i) => (
+            <div key={a.polished_id || a.raw_id || i}
+              style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 0",
+                borderBottom: i < articles.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+              <div style={{ marginTop: 5 }}>{sentDot(a.sentiment)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <a href={a.url || "#"} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 13, fontWeight: 700, color: C.text, textDecoration: "none", lineHeight: 1.4 }}>
+                  {a.headline}
+                </a>
+                <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span>{a.source_name || "—"}</span>
+                  {a.published_at && <><span>·</span><span>{_timeAgo(a.published_at)}</span></>}
+                  {a.category && <><span>·</span><span style={{ textTransform: "capitalize" }}>{a.category}</span></>}
+                </div>
+              </div>
+              {impactTag(a.impact)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
