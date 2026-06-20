@@ -337,8 +337,11 @@ def _load_merged_df(target_date: date) -> pd.DataFrame:
             return np.nan
         if fy27 == 0:
             return 0.0
-        mult = (pe / hist) if (pd.notna(pe) and pd.notna(hist) and hist > 0) else 1.0
-        return round(float(fy27) * mult, 4)
+        # hist_pe from screener_raw has dirty values (0.01, 0.14) that blow up the
+        # pe/hist multiplier (task #41: SKFINDUS 44399%). Only trust hist_pe in a
+        # sane band; else fall back to raw fy27 growth. Cap final upside at 150%.
+        mult = (pe / hist) if (pd.notna(pe) and pd.notna(hist) and 5 < hist < 500) else 1.0
+        return round(min(float(fy27) * mult, 150.0), 4)
 
     df["potential_upside"] = df.apply(_pu, axis=1)
     return df
