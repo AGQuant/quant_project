@@ -7,6 +7,7 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
   GET  /api/news/market           — latest 20 polished domestic + 10 global
   GET  /api/news/company/{symbol} — latest 10 polished for a symbol (raw fallback)
   GET  /api/news/unpolished       — count + sample of raw_news awaiting polish
+  GET  /api/news/live             — raw headlines grouped by source_type (CIO tab, task #40)
   POST /api/admin/refresh_news    — background fetch (market + company), returns started
 """
 
@@ -103,6 +104,35 @@ def news_unpolished(sample: int = 20):
         """, (sample,))
         rows = _rows(cur)
     return {"unpolished_count": pending, "sample_size": len(rows), "sample": rows}
+
+
+@router.get("/api/news/live")
+def news_live(hours: int = 72, per_cat: int = 60):
+    """Raw unpolished headlines from the last N hours, grouped by source_type.
+    Powers the CIO Dashboard Top News tab — raw only, no polished join, fast.
+    Per-category cap (ROW_NUMBER) so domestic/global aren't drowned by company."""
+    hours = max(1, min(hours, 168))
+    per_cat = max(1, min(per_cat, 200))
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, headline, description, source_name, source_type, symbol, published_at
+            FROM (
+                SELECT id, headline, description, source_name, source_type, symbol, published_at,
+                       ROW_NUMBER() OVER (PARTITION BY source_type ORDER BY published_at DESC NULLS LAST) AS rn
+                FROM raw_news
+                WHERE published_at >= NOW() - (%s || ' hours')::interval
+            ) t
+            WHERE rn <= %s
+            ORDER BY source_type, published_at DESC NULLS LAST
+        """, (hours, per_cat))
+        rows = _rows(cur)
+    groups = {"domestic": [], "global": [], "company": []}
+    for r in rows:
+        groups.setdefault(r["source_type"], []).append(r)
+    return {"hours": hours, "count": len(rows),
+            "domestic": groups.get("domestic", []),
+            "global": groups.get("global", []),
+            "company": groups.get("company", [])}
 
 
 def _refresh_job():
