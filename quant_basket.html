@@ -225,7 +225,7 @@ const f = (n,pre='₹') => {
   const s=a>=100000?pre+(a/100000).toFixed(2)+'L':pre+a.toLocaleString('en-IN');
   return (+n)<0?'−'+s:s;
 };
-const p=(n,d=2)=>n==null?'—':(+n>=0?'+':'')+((+n).toFixed(d))+'%';
+const pct=(n,d=2)=>n==null?'—':(+n>=0?'+':'')+((+n).toFixed(d))+'%';
 const c=(n)=>+n>0?'pos':+n<0?'neg':'neu';
 
 async function init(){
@@ -240,7 +240,7 @@ async function init(){
     const alp=alpha.total?.alpha;
     document.getElementById('s-cap').textContent='₹20,00,000';
     document.getElementById('s-pnl').innerHTML=`<span class="${c(tot)}">${f(tot)}</span>`;
-    document.getElementById('s-alpha').innerHTML=`<span class="${c(alp)}">${p(alp)} vs N500</span>`;
+    document.getElementById('s-alpha').innerHTML=`<span class="${c(alp)}">${pct(alp)} vs N500</span>`;
     document.getElementById('s-pos').textContent=qb.total_positions||'—';
 
     const bmap={};
@@ -277,8 +277,8 @@ async function init(){
         <div class="bc-name">${BNAMES[key]}</div>
         <div class="bc-rule">${BRULE[key]}</div>
         <div class="bc-metrics">
-          <div class="bc-m"><div class="mk">Return</div><div class="mv ${c(ret)}">${p(ret)}</div></div>
-          <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv ${c(alp)}">${p(alp)}</div></div>
+          <div class="bc-m"><div class="mk">Return</div><div class="mv ${c(ret)}">${pct(ret)}</div></div>
+          <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv ${c(alp)}">${pct(alp)}</div></div>
           <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv ${c(pnl)}">${f(pnl)}</div></div>
           <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv neu">${f(mv)}</div></div>
         </div>
@@ -309,7 +309,7 @@ async function init(){
         <div class="alert-row">
           <span class="ar-sym">${p.symbol}</span>
           <span class="ar-basket">${BNAMES[p.basket]||p.basket}</span>
-          <span class="ar-val">${p(p.pnl_pct)} from entry</span>
+          <span class="ar-val">${pct(p.pnl_pct)} from entry</span>
           <span class="ar-chip ${+p.pnl_pct<-20?'hs1':'hs2'}">${+p.pnl_pct<-20?'HS1 ≤−20%':'Near HS2'}</span>
         </div>`).join('');
       document.getElementById('alerts-wrap').innerHTML=`<div class="alerts-box">
@@ -378,7 +378,7 @@ async function showHoldings(body){
         <td>${r.cost_basis!=null?'₹'+(+r.cost_basis/1000).toFixed(1)+'K':'—'}</td>
         <td>${r.current_value!=null?'₹'+(+r.current_value/1000).toFixed(1)+'K':'—'}</td>
         <td class="${c(r.pnl)}">${r.pnl!=null?(+r.pnl>=0?'+':'')+'₹'+Math.abs(+r.pnl).toLocaleString('en-IN'):'—'}</td>
-        <td class="${c(r.pnl_pct)}">${p(r.pnl_pct)}</td>
+        <td class="${c(r.pnl_pct)}">${pct(r.pnl_pct)}</td>
         <td>${r.gvm!=null?(+r.gvm).toFixed(1):'—'}</td>
         <td>${r.stop_loss_price!=null?(+r.stop_loss_price).toFixed(0):'—'}</td>
       </tr>`).join('')}</tbody>
