@@ -448,9 +448,13 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
             mcap = row.get("market_cap")
             price = float(price) if pd.notna(price) else None
             mcap = float(mcap) if pd.notna(mcap) else None
+            # potential_upside is computed in _load_merged_df (fy27_growth × pe/hist)
+            # and already drives the V score — also persist it for display (task #39).
+            upside_val = row.get("potential_upside")
+            upside_val = float(upside_val) if pd.notna(upside_val) else None
 
             history_rows.append((sym, target_date, g, vv, m, total, verd, seg))
-            latest_rows.append((sym, cname, seg, price, g, vv, m, total, verd, punch, mcap, target_date))
+            latest_rows.append((sym, cname, seg, price, g, vv, m, total, verd, punch, mcap, target_date, upside_val))
         except Exception as e:
             errors += 1
             log.warning(f"GVM score {row.get('nse_code','?')}: {e}")
@@ -466,8 +470,8 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
         cur.execute("DELETE FROM gvm_scores")
         cur.executemany("""
             INSERT INTO gvm_scores
-                (symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap, score_date)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                (symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap, score_date, upside_raw)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, latest_rows)
         conn.commit()
 
