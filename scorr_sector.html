@@ -73,7 +73,7 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 const {useState,useEffect,useMemo,useRef} = React;
 
 const C = {bg:"#f4f6f9",card:"#fff",border:"#e2e7ee",accent:"#2563eb",green:"#0a9e63",red:"#dd3a4a",gold:"#b45309",orange:"#d97706",purple:"#7c3aed",text:"#1c2536",muted:"#5a6781"};
-const VC = {"Strong Buy":"#0a9e63","Buy":"#22a06b","Watch":"#d97706","Exit":"#dd3a4a"};
+const VC = {"Excellent":"#0a9e63","Good":"#2563eb","Average":"#d97706","Weak":"#dd3a4a"};
 
 const fmt  = (v,d=2) => v==null ? "—" : Number(v).toFixed(d);
 const pct  = (v,d=1) => v==null ? "—" : (v>0?"+":"")+Number(v).toFixed(d)+"%";
@@ -603,7 +603,7 @@ function App() {
   },[]);
   if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
   if (!d)  return <Loading/>;
-  const stats = {buy:d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,hi:d.all.filter(r=>r.composite_score>=7).length,cold:d.all.filter(r=>r.composite_score<4).length};
+  const stats = {buy:d.all.filter(r=>["Excellent","Good"].includes(r.verdict)).length,hi:d.all.filter(r=>r.composite_score>=7).length,cold:d.all.filter(r=>r.composite_score<4).length};
   const TABS = [["themes","Themes"],["search","Sector Search"],["rank","Rank Table"],["gvm","G · V · M"]];
   return (
     <div style={{minHeight:"100vh",background:C.bg}}>
