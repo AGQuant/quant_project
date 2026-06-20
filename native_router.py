@@ -282,8 +282,10 @@ CAP_MAP = {
 }
 
 VERDICT_MAP = {
-    "strong buy": "Strong Buy", "buy": "Buy",
-    "hold": "Hold", "avoid": "Avoid", "sell": "Sell",
+    "strong buy": "Excellent", "excellent": "Excellent",
+    "buy": "Good", "good": "Good",
+    "watch": "Average", "average": "Average", "accumulate": "Average",
+    "exit": "Weak", "weak": "Weak", "avoid": "Weak",
 }
 
 BELOW_WORDS = {"below","under","less","fewer","<","<=","maximum","max","atmost"}
