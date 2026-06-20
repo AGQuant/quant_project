@@ -493,6 +493,10 @@ def performance():
 def quant_basket():
     with open("quant_basket.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/news", response_class=HTMLResponse)
+def news_page():
+    with open("scorr_news.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
 
