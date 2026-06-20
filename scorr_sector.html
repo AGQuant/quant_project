@@ -79,6 +79,8 @@ const fmt  = (v,d=2) => v==null ? "—" : Number(v).toFixed(d);
 const pct  = (v,d=1) => v==null ? "—" : (v>0?"+":"")+Number(v).toFixed(d)+"%";
 const clr  = v => v==null ? C.muted : v>0 ? C.green : v<0 ? C.red : C.muted;
 const sclr = s => s>=7 ? C.green : s>=4 ? C.orange : C.red;
+const peClr = v => v==null ? C.muted : v<30 ? C.green : v<50 ? C.gold : C.red;
+const mcapFmt = v => { if(v==null) return "—"; v=Number(v); return v>=100000?(v/100000).toFixed(1)+"LCr":v>=1000?(v/1000).toFixed(1)+"KCr":Math.round(v)+"Cr"; };
 const clip = (s,n=28) => s&&s.length>n ? s.slice(0,n)+"…" : (s||"");
 const MEDALS = ["🥇","🥈","🥉"];
 
@@ -556,6 +558,8 @@ function SectorSearch({allSectors}) {
                   <th style={{textAlign:"left"}}>Company</th><th style={{textAlign:"right"}}>GVM</th>
                   <th style={{textAlign:"right"}}>G</th><th style={{textAlign:"right"}}>V</th>
                   <th style={{textAlign:"right"}}>M</th><th style={{textAlign:"left"}}>Verdict</th>
+                  <th style={{textAlign:"right"}}>MCap</th><th style={{textAlign:"right"}}>Close</th>
+                  <th style={{textAlign:"right"}}>PE</th><th style={{textAlign:"right"}}>Fwd PE</th>
                 </tr></thead>
                 <tbody>
                   {stocks.map((s,i)=>(
@@ -568,6 +572,10 @@ function SectorSearch({allSectors}) {
                       <td className="mono" style={{textAlign:"right",color:C.gold,fontSize:11}}>{fmt(s.v_score)}</td>
                       <td className="mono" style={{textAlign:"right",color:C.accent,fontSize:11}}>{fmt(s.m_score)}</td>
                       <td style={{color:VC[s.verdict]||C.muted,fontSize:10,fontWeight:600}}>{s.verdict}</td>
+                      <td className="mono" style={{textAlign:"right",fontSize:11,color:C.muted}}>{mcapFmt(s.market_cap)}</td>
+                      <td className="mono" style={{textAlign:"right",fontSize:11}}>{s.prev_close==null?"—":"₹"+fmt(s.prev_close,2)}</td>
+                      <td className="mono" style={{textAlign:"right",fontSize:11,color:peClr(s.pe)}}>{s.pe==null?"—":fmt(s.pe,1)+"x"}</td>
+                      <td className="mono" style={{textAlign:"right",fontSize:11,color:peClr(s.fwd_pe)}}>{s.fwd_pe==null?"—":fmt(s.fwd_pe,1)+"x"}</td>
                     </tr>
                   ))}
                 </tbody>
