@@ -117,14 +117,49 @@ def _insert_after_valuation(benchmark: List[Dict[str, Any]], block: Dict[str, An
         benchmark.append(block)
 
 
+def _minimal_base(conn, sym: str) -> Optional[Dict[str, Any]]:
+    """Degraded fallback when full report computation crashes — header only,
+    so the page still renders instead of a blank 500."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT company_name, segment, gvm_score, g_score, v_score, m_score,
+                   verdict, punchline, price, market_cap, score_date
+            FROM gvm_scores
+            WHERE symbol = %s AND score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            LIMIT 1
+        """, (sym,))
+        r = cur.fetchone()
+    if not r:
+        return None
+    return {
+        "company_name": r[0], "segment": r[1],
+        "gvm_score": _f(r[2]), "g_score": _f(r[3]), "v_score": _f(r[4]), "m_score": _f(r[5]),
+        "verdict": r[6], "punchline": r[7], "price": _f(r[8]), "market_cap": _f(r[9]),
+        "score_date": str(r[10]) if r[10] is not None else None,
+        "parameters": [], "positives": [], "negatives": [], "segment_ladder": [],
+        "segment_rank": None, "segment_size": 0, "is_bfsi": False, "degraded": True,
+    }
+
+
 @router.get("/api/gvm/company/{symbol}")
 def gvm_company_report(symbol: str):
     """Full peer-benchmarked GVM analytics report for one company."""
     sym = symbol.strip().upper()
 
     # --- 1. Core report (parameters, positives, negatives, ladder) ---
-    with _conn() as conn:
-        base = build_company_report(conn, sym)
+    # Crash-isolated: if full computation fails, serve a degraded header so the
+    # page loads (not a blank 500), and log the traceback for root-cause fix.
+    try:
+        with _conn() as conn:
+            base = build_company_report(conn, sym)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"build_company_report crashed for {sym}: {e}", exc_info=True)
+        with _conn() as conn:
+            base = _minimal_base(conn, sym)
+        if base is None:
+            raise HTTPException(404, f"{sym} not found in gvm_scores")
 
     if "error" in base:
         raise HTTPException(404, base["error"])
@@ -133,7 +168,11 @@ def gvm_company_report(symbol: str):
     ladder_syms  = [row["symbol"] for row in (base.get("segment_ladder") or [])]
 
     # --- 2. Extras (trend, volume, pivot, segment_ctx, etc.) ---
-    page         = build_page_extras(sym, ladder_syms, segment=segment)
+    try:
+        page = build_page_extras(sym, ladder_syms, segment=segment)
+    except Exception as e:
+        log.error(f"build_page_extras crashed for {sym}: {e}", exc_info=True)
+        page = {"extras": {}, "ladder_extra": {}}
     extras       = page.get("extras", {})
     ladder_extra = page.get("ladder_extra", {})
 
@@ -331,6 +370,7 @@ def gvm_company_report(symbol: str):
         "generated_at": _ist_now(),
         "persisted":    persist_error is None,
         "persist_error": persist_error,
+        "degraded":     base.get("degraded", False),
     }
 
 
