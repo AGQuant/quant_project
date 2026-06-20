@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scorr News · AI-Polished Market Intelligence</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --card:#ffffff; --panel:#ffffff;
+    --line:#e4e9f1; --line2:#d4dbe7;
+    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
+    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706; --purple:#7c3aed;
+    --font:'Sora',system-ui,-apple-system,sans-serif;
+    --shadow:0 1px 4px rgba(20,35,70,.06);
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:var(--font);font-size:14px;line-height:1.55}
+
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
+    border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
+    position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+  .model-nav::-webkit-scrollbar{display:none}
+  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
+    border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
+    color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:var(--txt)}
+  .mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
+  .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+  .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 16px 70px}
+
+  .ph{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:18px}
+  .ph-title{font-size:22px;font-weight:800;color:var(--txt)}
+  .ph-sub{font-size:12px;color:var(--mut);margin-top:3px}
+  .ph-meta{font-size:11.5px;color:var(--dim);margin-top:8px}
+  .refresh-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;font-size:12px;font-weight:700;
+    color:#fff;background:var(--blu);border:none;border-radius:9px;cursor:pointer;transition:.15s}
+  .refresh-btn:hover{filter:brightness(1.07)}
+  .refresh-btn:disabled{opacity:.55;cursor:default}
+
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{padding:7px 16px;border-radius:20px;border:1px solid var(--line2);background:var(--card);
+    color:var(--mut);font-size:12px;font-weight:600;cursor:pointer;transition:.12s}
+  .tab:hover{color:var(--txt)}
+  .tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
+
+  .searchbar{margin-bottom:14px}
+  .searchbar input{width:100%;max-width:360px;padding:9px 13px;border-radius:9px;border:1px solid var(--line2);
+    background:var(--card);color:var(--txt);font-size:13px;font-family:inherit;outline:none}
+  .searchbar input:focus{border-color:var(--blu)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+
+  .ncard{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);
+    border-radius:13px;padding:15px 16px;text-decoration:none;transition:.15s;box-shadow:0 1px 3px rgba(20,30,50,.04)}
+  .ncard:hover{border-color:var(--blu);transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.09)}
+  .nc-top{display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap}
+  .nc-sym{font-size:10px;font-weight:800;color:var(--blu);background:rgba(37,99,235,.10);
+    border:1px solid rgba(37,99,235,.25);border-radius:6px;padding:2px 7px;letter-spacing:.03em}
+  .nc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .nc-badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
+    padding:2px 7px;border-radius:6px;margin-left:auto}
+  .nc-head{font-size:16px;font-weight:700;color:var(--txt);line-height:1.35}
+  .nc-summary{font-size:12.5px;color:var(--mut);margin-top:6px;line-height:1.5;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .nc-foot{font-size:11px;color:var(--dim);margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .nc-foot b{color:var(--mut);font-weight:600}
+
+  .msg{grid-column:1/-1;text-align:center;color:var(--mut);font-size:13px;padding:48px 20px}
+  .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:34px;line-height:1.8}
+</style>
+</head>
+<body>
+<nav class="model-nav" id="scorr-nav">
+  <a class="mnav-item" href="/"><span>&#8962;</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/dashboard"><span>&#9889;</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>&#8855;</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>&#10003;</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item active" href="/news"><span>&#128478;</span>News</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/scanners"><span>&#8862;</span>Scanners</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>&#9706;</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/quant-basket"><span>&#9707;</span>QB</a>
+</nav>
+
+<div class="wrap">
+  <div class="ph">
+    <div>
+      <div class="ph-title">Scorr News</div>
+      <div class="ph-sub">AI-Polished Market Intelligence</div>
+      <div class="ph-meta" id="meta">Loading…</div>
+    </div>
+    <button class="refresh-btn" id="refreshBtn" onclick="load()">&#8635; Refresh</button>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="searchbar" id="searchbar" style="display:none">
+    <input id="symSearch" type="text" placeholder="Filter by stock symbol — e.g. RELIANCE" oninput="render()">
+  </div>
+
+  <div class="grid" id="grid">
+    <div class="msg">Loading…</div>
+  </div>
+
+  <div class="foot">
+    Scorr News &middot; AI-polished market intelligence &middot; sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
+  </div>
+</div>
+
+<script>
+const API = "";
+const CATS = [
+  { id: "domestic", label: "Domestic" },
+  { id: "global",   label: "Global" },
+  { id: "ipo",      label: "IPO" },
+  { id: "company",  label: "Company" },
+];
+let curCat = "domestic";
+let articles = [];
+
+const SENT = { positive:"#0fa968", negative:"#e23744", neutral:"#8a96ad", bullish:"#0fa968", bearish:"#e23744" };
+const IMPACT = { high:{bg:"rgba(226,55,68,.12)",fg:"#e23744"}, mid:{bg:"rgba(217,119,6,.14)",fg:"#d97706"}, low:{bg:"rgba(90,103,129,.12)",fg:"#5a6781"} };
+
+function timeAgo(iso){
+  if(!iso) return "";
+  const s = Math.floor((Date.now() - new Date(iso).getTime())/1000);
+  if(s < 60) return "just now";
+  const m = Math.floor(s/60); if(m < 60) return m+" min ago";
+  const h = Math.floor(m/60); if(h < 24) return h+"h ago";
+  return Math.floor(h/24)+"d ago";
+}
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+
+function buildTabs(){
+  document.getElementById("tabs").innerHTML = CATS.map(c =>
+    `<button class="tab ${c.id===curCat?'active':''}" onclick="pick('${c.id}')">${c.label}</button>`
+  ).join("");
+}
+function pick(cat){
+  curCat = cat;
+  document.getElementById("searchbar").style.display = cat === "company" ? "block" : "none";
+  buildTabs();
+  load();
+}
+
+async function load(){
+  const btn = document.getElementById("refreshBtn");
+  btn.disabled = true;
+  document.getElementById("grid").innerHTML = '<div class="msg">Loading…</div>';
+  try{
+    const r = await fetch(`${API}/api/news/top?days=3&category=${curCat}&limit=60`);
+    const d = await r.json();
+    articles = d.articles || [];
+    const lp = d.last_polished ? new Date(d.last_polished).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:false}) : "—";
+    document.getElementById("meta").innerHTML = `Last polished: <b>${lp}</b> &middot; ${d.today_count||0} articles polished today`;
+    render();
+  }catch(e){
+    document.getElementById("grid").innerHTML = `<div class="msg">Could not load news (${esc(e.message)}).</div>`;
+  }finally{ btn.disabled = false; }
+}
+
+function render(){
+  let rows = articles;
+  if(curCat === "company"){
+    const q = (document.getElementById("symSearch").value || "").trim().toUpperCase();
+    if(q) rows = rows.filter(a => (a.symbol||"").toUpperCase().includes(q));
+  }
+  const grid = document.getElementById("grid");
+  if(!rows.length){
+    grid.innerHTML = '<div class="msg">No polished news yet for this category. Polished articles appear here after the daily polish run.</div>';
+    return;
+  }
+  grid.innerHTML = rows.map(a => {
+    const sent = (a.sentiment||"neutral").toLowerCase();
+    const dot = SENT[sent] || SENT.neutral;
+    const imp = (a.impact||"").toLowerCase();
+    const ib = IMPACT[imp];
+    const sym = (curCat === "company" && a.symbol) ? `<span class="nc-sym">${esc(a.symbol)}</span>` : "";
+    const badge = ib ? `<span class="nc-badge" style="background:${ib.bg};color:${ib.fg}">${esc(imp)} impact</span>` : "";
+    const summary = a.summary ? `<div class="nc-summary">${esc(a.summary)}</div>` : "";
+    return `<a class="ncard" href="${esc(a.url||'#')}" target="_blank" rel="noopener noreferrer">
+      <div class="nc-top">
+        ${sym}
+        <span class="nc-dot" style="background:${dot}" title="${esc(sent)}"></span>
+        ${badge}
+      </div>
+      <div class="nc-head">${esc(a.headline)}</div>
+      ${summary}
+      <div class="nc-foot"><b>${esc(a.source_name||"")}</b> &middot; ${timeAgo(a.published_at)}${a.category?` &middot; ${esc(a.category)}`:""}</div>
+    </a>`;
+  }).join("");
+}
+
+// Hide own model-nav when embedded (iframe or ?embed=1) — shell renders its own nav.
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  var _mn=document.getElementById('scorr-nav'); if(_mn) _mn.style.display='none';
+}
+
+buildTabs();
+load();
+</script>
+</body>
+</html>
