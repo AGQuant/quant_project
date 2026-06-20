@@ -497,10 +497,14 @@ async def _scheduler_loop():
                 _spawn(_bg_qb_intraday_mark)
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
-        if h == 21 and m == 0:  _spawn(_bg_yahoo_daily_sync)
-        if h == 21 and m == 5:  _spawn(_bg_qb_eod)
-        if h == 22 and m == 0:  _spawn(_bg_gvm)
-        if h == 22 and m == 5:  _spawn(_bg_pivots)
+        # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
+        # window collided with CC deploy pushes — a Railway redeploy kills the
+        # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
+        # 15-min spacing gives each job runway; order preserves deps (prices→QB→GVM→pivots).
+        if h == 1 and m == 0:   _spawn(_bg_yahoo_daily_sync)
+        if h == 1 and m == 15:  _spawn(_bg_qb_eod)
+        if h == 1 and m == 30:  _spawn(_bg_gvm)
+        if h == 1 and m == 45:  _spawn(_bg_pivots)
 
 
 async def _supervisor():
