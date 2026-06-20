@@ -87,7 +87,7 @@ const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", 
 const fmtMcap = (n) => n == null ? "—" : n >= 100000 ? `₹${(n/100000).toFixed(1)}LCr` : n >= 1000 ? `₹${(n/1000).toFixed(1)}KCr` : `₹${Math.round(n)}Cr`;
 const gvmColor = (g) => g == null ? C.muted : g >= 8 ? C.green : g >= 7 ? C.gold : g >= 6 ? C.orange : C.red;
 const ratingColor = (r) => r == null ? C.muted : r >= 7 ? C.green : r >= 5 ? C.gold : C.red;
-const verdictColor = (v = "") => ({ "Strong Buy": C.green, "Buy": "#22a06b", "Watch": C.gold, "Exit": C.red }[v] || C.muted);
+const verdictColor = (v = "") => ({ "Excellent": C.green, "Good": C.accent, "Average": C.orange, "Weak": C.red }[v] || C.muted);
 const signFmt = (n, d = 2) => n == null ? "—" : (n >= 0 ? "+" : "") + Number(n).toFixed(d);
 const deltaColor = (n, threshold = 0.05) => n == null ? C.muted : n > threshold ? C.green : n < -threshold ? C.red : C.muted;
 
@@ -1270,7 +1270,7 @@ function GvmModule() {
 
 function GvmEmptyState({ onPick }) {
   const [top, setTop] = useState([]);
-  useEffect(() => { mcpCall("get_top_stocks", { n: 8, verdict: "Strong Buy" }).then(d => setTop(Array.isArray(d) ? d : [])); }, []);
+  useEffect(() => { mcpCall("get_top_stocks", { n: 8, verdict: "Excellent" }).then(d => setTop(Array.isArray(d) ? d : [])); }, []);
   return (
     <div style={{ textAlign: "center", padding: "20px 0" }}>
       <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>Search a company above, or start with a top-rated pick:</div>
