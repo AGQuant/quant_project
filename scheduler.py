@@ -3,6 +3,7 @@ Scheduler — Scorr background tasks (restored 18-Jun-2026).
 Deactivation: _bg_intraday_paper commented out — on-demand only via /api/intraday/tick.
 """
 import asyncio, logging, os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -16,11 +17,45 @@ IST = timezone(timedelta(hours=5, minutes=30))
 _stop_event: Optional[asyncio.Event] = None
 _bg_tasks: set = set()
 
+# Dedicated, bounded pool for blocking jobs — isolated from the default loop
+# executor (which FastAPI's sync request handlers also use) so a request burst
+# can't starve the scheduler, and bounded so a hung job can't be masked by an
+# unbounded thread spawn. Root cause of the 19-Jun stall: blocked jobs piled up
+# on the small shared default pool until every to_thread dispatch silently
+# queued forever — so the watchdog's "restart" never got a worker to run on.
+_EXECUTOR = ThreadPoolExecutor(max_workers=12, thread_name_prefix="sched-job")
+
 def _ist_now():
     return datetime.now(IST).replace(tzinfo=None)
 
-def _conn():
-    return psycopg.connect(DATABASE_URL)
+# Socket-level safety applied to EVERY connection: a connect/socket that hangs in
+# a worker thread is uncancellable and silently holds the worker forever (root
+# cause of the 19-Jun stall). connect_timeout caps the TCP handshake (also guards
+# the watchdog, which connects on the event loop); keepalives detect dead sockets.
+# These never affect query logic, so they're safe for the heavy nightly jobs too.
+_BASE_CONNECT_KW = dict(
+    connect_timeout=10,
+    keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
+)
+
+def _conn(statement_timeout_ms: int = 0):
+    """statement_timeout_ms>0 also caps any single query + idle-in-transaction —
+    used by the live 5-min path + watchdog so a DB lock or runaway query can't pin
+    a worker thread. Left OFF (0) for nightly batch jobs (EOD/GVM/yahoo/pivots),
+    which legitimately compute in Python between statements within one txn."""
+    kw = dict(_BASE_CONNECT_KW)
+    if statement_timeout_ms > 0:
+        kw["options"] = (f"-c statement_timeout={statement_timeout_ms} "
+                         f"-c idle_in_transaction_session_timeout={statement_timeout_ms}")
+    return psycopg.connect(DATABASE_URL, **kw)
+
+def _spawn(fn, *args):
+    """Dispatch a blocking job on the dedicated scheduler pool (never the shared
+    default executor) and keep a reference so the task isn't GC'd mid-flight."""
+    loop = asyncio.get_running_loop()
+    t = asyncio.ensure_future(loop.run_in_executor(_EXECUTOR, fn, *args))
+    _bg_tasks.add(t); t.add_done_callback(_bg_tasks.discard)
+    return t
 
 def _is_market_hours(now):
     if now.weekday() >= 5: return False
@@ -186,7 +221,8 @@ def _request_restart(reason: str):
 def _tick_age_minutes() -> Optional[float]:
     """Minutes since the most recent v8_metrics computed_at (DB-clock consistent)."""
     try:
-        with _conn() as conn, conn.cursor() as cur:
+        # tight cap: this runs on the event loop, so it must never block it for long.
+        with _conn(statement_timeout_ms=8000) as conn, conn.cursor() as cur:
             cur.execute("SELECT EXTRACT(EPOCH FROM (NOW() - MAX(computed_at)))/60.0 FROM v8_metrics")
             r = cur.fetchone()
         return float(r[0]) if r and r[0] is not None else None
@@ -249,7 +285,9 @@ def _bg_signal_writer():
     _signal_writer_started_at = now
     try:
         import v8_signal_writer
-        with _conn() as conn:
+        # 90s query cap: writer issues many small fast statements, so a 90s ceiling
+        # only ever trips on a genuine lock/hang — exactly what must not pin a thread.
+        with _conn(statement_timeout_ms=90000) as conn:
             r = v8_signal_writer.run_live_signal_writer(conn)
         if isinstance(r, dict) and r.get("error"):
             raise RuntimeError(r["error"])
@@ -443,26 +481,26 @@ async def _scheduler_loop():
             # tick (don't wait up to 5 min for the next m%5 dispatch) and keep looping.
             log.warning("scheduler: guards reset by watchdog/fail-streak — firing recovery tick")
             if _is_market_hours(now):
-                asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
+                _spawn(_bg_signal_writer)
         if h == 6 and m == 0:
-            asyncio.create_task(asyncio.to_thread(_bg_fetch_global))
+            _spawn(_bg_fetch_global)
         if 6 <= h <= 23 and m % 5 == 0:
-            asyncio.create_task(asyncio.to_thread(_bg_fetch_global_intraday))
+            _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
-            asyncio.create_task(asyncio.to_thread(_bg_fu_sync))
+            _spawn(_bg_fu_sync)
         if _is_market_hours(now) and m % 5 == 0:
-            asyncio.create_task(asyncio.to_thread(_bg_signal_writer))
-            asyncio.create_task(asyncio.to_thread(_bg_v10_tick))
-            asyncio.create_task(asyncio.to_thread(_bg_pcr_intraday))
-            # asyncio.create_task(asyncio.to_thread(_bg_intraday_paper))  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
+            _spawn(_bg_signal_writer)
+            _spawn(_bg_v10_tick)
+            _spawn(_bg_pcr_intraday)
+            # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             if m % 15 == 0:
-                asyncio.create_task(asyncio.to_thread(_bg_qb_intraday_mark))
-        if h == 15 and m == 45: asyncio.create_task(asyncio.to_thread(_bg_v8_eod))
-        if h == 15 and m == 50: asyncio.create_task(asyncio.to_thread(_bg_adr_pcr))
-        if h == 21 and m == 0:  asyncio.create_task(asyncio.to_thread(_bg_yahoo_daily_sync))
-        if h == 21 and m == 5:  asyncio.create_task(asyncio.to_thread(_bg_qb_eod))
-        if h == 22 and m == 0:  asyncio.create_task(asyncio.to_thread(_bg_gvm))
-        if h == 22 and m == 5:  asyncio.create_task(asyncio.to_thread(_bg_pivots))
+                _spawn(_bg_qb_intraday_mark)
+        if h == 15 and m == 45: _spawn(_bg_v8_eod)
+        if h == 15 and m == 50: _spawn(_bg_adr_pcr)
+        if h == 21 and m == 0:  _spawn(_bg_yahoo_daily_sync)
+        if h == 21 and m == 5:  _spawn(_bg_qb_eod)
+        if h == 22 and m == 0:  _spawn(_bg_gvm)
+        if h == 22 and m == 5:  _spawn(_bg_pivots)
 
 
 async def _supervisor():
@@ -488,4 +526,5 @@ def start_background(app=None, base_url: str = "", admin_token: str = ""):
 async def stop_background():
     if _stop_event: _stop_event.set()
     for t in list(_bg_tasks): t.cancel()
+    _EXECUTOR.shutdown(wait=False, cancel_futures=True)
     log.info("scheduler stopped")
