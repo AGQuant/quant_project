@@ -8,10 +8,11 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0D1117;--bg2:#161B22;--bg3:#21262D;
-  --text:#E6EDF3;--text2:#8B949E;--text3:#6E7681;
-  --border:#30363D;--border2:#444C56;
-  --accent:#00C6FF;--green:#1D9E75;--gold:#FFD700;
+  /* Scorr light theme (canonical tokens from scorr_home.html) */
+  --bg:#f6f8fb;--bg2:#ffffff;--bg3:#eef1f6;
+  --text:#1c2536;--text2:#5a6781;--text3:#8a96ad;
+  --border:#e4e9f1;--border2:#d4dbe7;
+  --accent:#0891b2;--green:#1D9E75;--gold:#c79200;
   --red:#E24B4A;--warn:#BA7517;--blue:#378ADD;
   --radius:8px;--radius-lg:12px;
 }
@@ -46,10 +47,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .row-item:last-child{border-bottom:none}
 .rl{color:var(--text2)}.rv{font-weight:500;color:var(--text)}
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500}
-.bg{background:rgba(29,158,117,.15);color:#4ECDC4}
-.br{background:rgba(226,75,74,.15);color:#FF6B6B}
-.bw{background:rgba(186,117,23,.15);color:#FFB347}
-.bi{background:rgba(55,138,221,.15);color:#5BA4F5}
+.bg{background:rgba(29,158,117,.15);color:#0e7a50}
+.br{background:rgba(226,75,74,.15);color:#c0392b}
+.bw{background:rgba(186,117,23,.15);color:#a16207}
+.bi{background:rgba(55,138,221,.15);color:#2563eb}
 .sb{display:flex;align-items:center;font-size:13px;padding:8px 0;border-bottom:0.5px solid var(--border)}
 .sb:last-child{border-bottom:none}
 .sl{width:140px;color:var(--text2);font-size:12px}
@@ -75,14 +76,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .yt tr:hover td{background:var(--bg3)}
 .yt .num{text-align:right;font-variant-numeric:tabular-nums}
 .cbtn{width:100%;margin-top:12px;padding:11px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg3);color:var(--text);font-size:14px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s}
-.cbtn:hover{background:var(--accent);border-color:var(--accent);color:#000}
+.cbtn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
 .q-opt{display:flex;align-items:center;gap:8px;padding:9px 12px;border:0.5px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;color:var(--text2);background:var(--bg2);transition:all .15s}
-.q-opt.selected{border-color:var(--green);background:rgba(29,158,117,.12);color:#4ECDC4}
+.q-opt.selected{border-color:var(--green);background:rgba(29,158,117,.12);color:#0e7a50}
 .q-opt:hover:not(.selected){border-color:var(--border2);color:var(--text)}
 .q-opt input[type=radio]{display:none}
-.swp-ok{background:rgba(29,158,117,.15);color:#4ECDC4;border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
-.swp-warn{background:rgba(186,117,23,.15);color:#FFB347;border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
-.swp-bad{background:rgba(226,75,74,.15);color:#FF6B6B;border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
+.swp-ok{background:rgba(29,158,117,.15);color:#0e7a50;border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
+.swp-warn{background:rgba(186,117,23,.15);color:#a16207;border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
+.swp-bad{background:rgba(226,75,74,.15);color:#c0392b;border-radius:var(--radius);padding:10px 16px;display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;margin-bottom:16px}
 .prob-band{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:0.5px solid var(--border);font-size:13px}
 .prob-band:last-child{border-bottom:none}
 .prob-label{width:130px;color:var(--text2);font-size:12px}
@@ -486,7 +487,7 @@ function calculate(){
           <span style="font-weight:500;color:var(--text)">${g.n}</span>
           <span style="text-align:right;color:var(--text2)">${g.year}</span>
           <span style="text-align:right">${fmt(g.fv)}</span>
-          <span style="text-align:right;color:#4ECDC4;font-weight:600">${g.sip>0?fmt(g.sip):g.yrs===0?'Now':'—'}</span>
+          <span style="text-align:right;color:#0e7a50;font-weight:600">${g.sip>0?fmt(g.sip):g.yrs===0?'Now':'—'}</span>
         </div>`).join('')}
       <div style="display:flex;justify-content:space-between;padding:10px 0 0;font-size:13px;font-weight:600">
         <span style="color:var(--text2)">Total goal SIPs per month</span>
@@ -528,10 +529,10 @@ function buildProjChart(){
   pChart=new Chart(ctx,{
     type:'line',
     data:{labels:projData.map(d=>''+d.age),datasets:[{label:'Corpus',data:projData.map(d=>+(d.close/10000000).toFixed(2)),borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`₹${c.parsed.y} Cr`}}},scales:{y:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#8B949E',callback:v2=>v2+'Cr'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`₹${c.parsed.y} Cr`}}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'Cr'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
   });
   const rows=projData.filter((_,i)=>i%2===0||i===projData.length-1).slice(0,20);
-  document.getElementById('projTable').innerHTML=`<div class="card"><table class="yt"><thead><tr><th>Year</th><th>Age</th><th class="num">Opening</th><th class="num">Annual SIP</th><th class="num">Return</th><th class="num">Closing</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.y}</td><td>${r.age}</td><td class="num">${fmt(r.open)}</td><td class="num">${fmt(r.sip)}</td><td class="num">${fmt(r.roi)}</td><td class="num" style="font-weight:600;color:#4ECDC4">${fmt(r.close)}</td></tr>`).join('')}</tbody></table></div>`;
+  document.getElementById('projTable').innerHTML=`<div class="card"><table class="yt"><thead><tr><th>Year</th><th>Age</th><th class="num">Opening</th><th class="num">Annual SIP</th><th class="num">Return</th><th class="num">Closing</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r.y}</td><td>${r.age}</td><td class="num">${fmt(r.open)}</td><td class="num">${fmt(r.sip)}</td><td class="num">${fmt(r.roi)}</td><td class="num" style="font-weight:600;color:#0e7a50">${fmt(r.close)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 let swpC=null;
@@ -562,7 +563,7 @@ function runSWP(){
     <div class="grid3" style="margin-bottom:16px">
       <div class="mc"><div class="mc-label">Starting corpus</div><div class="mc-value">${fmt(corpus)}</div></div>
       <div class="mc"><div class="mc-label">Year-1 annual withdrawal</div><div class="mc-value">${fmt(wdl*12)}</div><div class="mc-sub">${fmt(wdl)}/month</div></div>
-      <div class="mc"><div class="mc-label">Remaining after ${rows.length} yrs</div><div class="mc-value" style="color:${surviving?'#4ECDC4':'#FF6B6B'}">${fmt(last.closeBal)}</div></div>
+      <div class="mc"><div class="mc-label">Remaining after ${rows.length} yrs</div><div class="mc-value" style="color:${surviving?'#0e7a50':'#c0392b'}">${fmt(last.closeBal)}</div></div>
     </div>`;
   document.getElementById('swpChartWrap').style.display='block';
   if(swpC)swpC.destroy();
@@ -572,7 +573,7 @@ function runSWP(){
       {label:'Corpus',data:rows.map(r=>+(r.closeBal/100000).toFixed(1)),borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2},
       {label:'Annual withdrawal',data:rows.map(r=>+(r.wdl/100000).toFixed(1)),borderColor:'#BA7517',fill:false,tension:.3,pointRadius:0,borderWidth:1.5,borderDash:[5,3]},
     ]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#8B949E',callback:v2=>v2+'L'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'L'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
   });
   document.getElementById('swpTable').innerHTML=`
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text2)">
@@ -580,7 +581,7 @@ function runSWP(){
       <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#BA7517;display:inline-block;border-radius:2px"></span>Annual withdrawal (step-up)</span>
     </div>
     <div class="card"><table class="yt"><thead><tr><th>Year</th><th class="num">Opening</th><th class="num">Annual withdrawal</th><th class="num">Real value (infl. adj.)</th><th class="num">Closing corpus</th></tr></thead>
-    <tbody>${rows.map(r=>`<tr style="${r.ex?'color:#FF6B6B':''}"><td>${r.y}</td><td class="num">${fmt(r.openBal)}</td><td class="num">${fmt(r.wdl)}</td><td class="num">${fmt(r.realWdl)}</td><td class="num" style="font-weight:600;${r.ex?'color:#FF6B6B':'color:#4ECDC4'}">${fmt(r.closeBal)}</td></tr>`).join('')}</tbody></table></div>`;
+    <tbody>${rows.map(r=>`<tr style="${r.ex?'color:#c0392b':''}"><td>${r.y}</td><td class="num">${fmt(r.openBal)}</td><td class="num">${fmt(r.wdl)}</td><td class="num">${fmt(r.realWdl)}</td><td class="num" style="font-weight:600;${r.ex?'color:#c0392b':'color:#0e7a50'}">${fmt(r.closeBal)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 let mcC=null;
@@ -617,9 +618,9 @@ function runMonteCarlo(){
 
   document.getElementById('mcSummary').innerHTML=`
     <div class="grid4" style="margin-bottom:16px">
-      <div class="mc"><div class="mc-label">Worst 10%</div><div class="mc-value" style="color:#FF6B6B">${fmt(p10)}</div><div class="mc-sub">Unlucky scenario</div></div>
+      <div class="mc"><div class="mc-label">Worst 10%</div><div class="mc-value" style="color:#c0392b">${fmt(p10)}</div><div class="mc-sub">Unlucky scenario</div></div>
       <div class="mc"><div class="mc-label">Median (50th)</div><div class="mc-value">${fmt(p50)}</div><div class="mc-sub">Most likely</div></div>
-      <div class="mc"><div class="mc-label">Best 10%</div><div class="mc-value" style="color:#4ECDC4">${fmt(p90)}</div><div class="mc-sub">Lucky scenario</div></div>
+      <div class="mc"><div class="mc-label">Best 10%</div><div class="mc-value" style="color:#0e7a50">${fmt(p90)}</div><div class="mc-sub">Lucky scenario</div></div>
       <div class="mc"><div class="mc-label">Success rate</div><div class="mc-value">${Math.round(successRate)}%</div><div class="mc-sub">Scenarios above start</div></div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -644,7 +645,7 @@ function runMonteCarlo(){
       {label:'25th',data:bands[1].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#BA7517',backgroundColor:'rgba(186,117,23,.04)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1},
       {label:'10th',data:bands[0].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#E24B4A',backgroundColor:'rgba(226,75,74,.04)',fill:false,tension:.4,pointRadius:0,borderWidth:1.5},
     ]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#8B949E',callback:v2=>v2+'L'}},x:{ticks:{autoSkip:true,maxTicksLimit:10,color:'#8B949E'},grid:{display:false}}}}
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'L'}},x:{ticks:{autoSkip:true,maxTicksLimit:10,color:'#8B949E'},grid:{display:false}}}}
   });
 
   document.getElementById('mcDetail').innerHTML=`
@@ -655,9 +656,9 @@ function runMonteCarlo(){
       <div class="card-title"><i class="ti ti-info-circle"></i> What this means for you</div>
       <div style="font-size:13px;color:var(--text2);line-height:1.8">
         Based on <strong style="color:var(--text)">${nsims.toLocaleString()} simulations</strong> at mean return <strong style="color:var(--text)">${v('mcMean')}%</strong> with volatility <strong style="color:var(--text)">${v('mcStd')}%</strong> over <strong style="color:var(--text)">${yrs} years</strong>:<br><br>
-        → <span style="color:#4ECDC4;font-weight:600">${Math.round(successRate)}%</span> of scenarios ended above your starting corpus.<br>
-        → Worst 10% of market environments: corpus ends at <span style="color:#FF6B6B;font-weight:600">${fmt(p10)}</span>.<br>
-        → Best 10% of market environments: corpus reaches <span style="color:#4ECDC4;font-weight:600">${fmt(p90)}</span> (${Math.round(p90/corpus)}× multiple).<br>
+        → <span style="color:#0e7a50;font-weight:600">${Math.round(successRate)}%</span> of scenarios ended above your starting corpus.<br>
+        → Worst 10% of market environments: corpus ends at <span style="color:#c0392b;font-weight:600">${fmt(p10)}</span>.<br>
+        → Best 10% of market environments: corpus reaches <span style="color:#0e7a50;font-weight:600">${fmt(p90)}</span> (${Math.round(p90/corpus)}× multiple).<br>
         → Median realistic outcome: <span style="font-weight:600;color:var(--text)">${fmt(p50)}</span>.<br>
         ${detMin?`→ Fixed-return projection (₹${fmt(detMin)}) ${detMin>p50?'is above the median — the fixed return assumption is optimistic':'is below the median — you may be undershooting'}.`:''}
         <br><br>
