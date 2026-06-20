@@ -155,6 +155,33 @@ function Switcher({ current, onPick }) {
   );
 }
 
+function ShellNav({ current, onPick }) {
+  // Shell-level top model-nav — renders for ALL models (React + iframe).
+  // Iframe pages hide their own nav when embedded, so no double navbar.
+  return (
+    <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 2, height: 46, flexShrink: 0,
+      background: "#fff", borderBottom: `1px solid ${C.border}`, padding: "0 14px", overflowX: "auto", whiteSpace: "nowrap" }}>
+      {MODELS.map(m => {
+        const active = current === m.id;
+        return (
+          <button key={m.id} disabled={!m.live} onClick={() => { if (m.live) onPick(m.id); }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 46, padding: "0 11px",
+              border: "none", borderBottom: `2px solid ${active ? m.color : "transparent"}`, background: "transparent",
+              cursor: m.live ? "pointer" : "default", flexShrink: 0, whiteSpace: "nowrap",
+              color: active ? m.color : (m.live ? C.text : C.muted), opacity: m.live ? 1 : 0.4,
+              fontSize: 11.5, fontWeight: active ? 700 : 600 }}>
+            <span style={{ color: active ? m.color : C.muted }}>{m.icon}</span>{m.label}
+            {!m.live && <span style={{ fontSize: 8, marginLeft: 3, color: C.muted, letterSpacing: ".3px" }}>soon</span>}
+          </button>
+        );
+      })}
+      <a href="/logout" className="no-print" style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5,
+        height: 30, padding: "0 12px", borderRadius: 7, border: `1px solid ${C.border}`, flexShrink: 0,
+        color: C.muted, textDecoration: "none", fontSize: 11, fontWeight: 600 }}>⏏ Logout</a>
+    </div>
+  );
+}
+
 function FrameModule({ src }) {
   return <iframe src={src} title="frame" style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#fff" }} />;
 }
@@ -1339,7 +1366,7 @@ function App() {
   return (
     <div className="app-shell" style={{ height: "100vh", width: "100vw", background: C.bg, color: C.text,
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif",
-      position: "relative", overflow: "hidden" }}>
+      display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:.3;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
         * { box-sizing: border-box; }
@@ -1348,9 +1375,10 @@ function App() {
         ::-webkit-scrollbar-thumb { background: #cfd8e3; border-radius: 3px; }
         button { transition: all 0.15s ease; }
         input::placeholder { color: #9aa4b5; }
+        #scorr-lo { display: none !important; }   /* injected logout replaced by ShellNav Logout */
       `}</style>
-      <Switcher current={page} onPick={setPage} />
-      <div className="app-body" style={{ height: "100%", width: "100%", overflow: "hidden" }}>
+      <ShellNav current={page} onPick={setPage} />
+      <div className="app-body" style={{ flex: 1, width: "100%", overflow: "hidden" }}>
         {body}
       </div>
     </div>
