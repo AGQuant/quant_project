@@ -556,6 +556,7 @@ async def _scheduler_loop():
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
+                _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
