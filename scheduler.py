@@ -174,8 +174,10 @@ async def _bg_yahoo_daily(app=None):
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
-        with _conn() as conn:
-            result = ydu.run_update(conn)
+        # ydu exposes the async run_async() (no sync run_update). This wrapper is
+        # itself a coroutine on the live event loop (manual MCP trigger path), so
+        # await it directly — never block the loop or call asyncio.run() here.
+        result = await ydu.run_async()
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result}")
         return result
@@ -415,8 +417,11 @@ def _bg_yahoo_daily_sync():
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
+        # runs in the dedicated thread pool (no event loop here) → asyncio.run is
+        # safe. ydu.run_async manages its own connections; _check_universe_shrink
+        # (task #35) gets its own conn after the load completes.
+        result = asyncio.run(ydu.run_async())
         with _conn() as conn:
-            result = ydu.run_update(conn)
             _check_universe_shrink(conn)   # task #35: alert on silent coverage drop
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result}")
