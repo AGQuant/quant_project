@@ -482,6 +482,7 @@
         <button class="scr-tab on" id="uTabN50" onclick="setUniverse('nifty50')">Nifty 50 (mcap proxy)</button>
         <button class="scr-tab" id="uTab208" onclick="setUniverse('all208')">All 208 Futures</button>
         <button class="scr-tab" id="uTabIntra" onclick="openIntraday()">&#9201; Intraday</button>
+        <button class="scr-tab" id="uTabMovers" onclick="openMovers()">&#128202; Movers</button>
       </div>
       <div id="icBar" style="display:none;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
         <span class="tier-score" id="icCacheMeta">cache: not refreshed yet</span>
@@ -492,8 +493,9 @@
         <button class="scr-stab short" id="sTabShort" onclick="setScrSide('SHORT')">&#9660; SHORT</button>
       </div>
       <div class="tier-label"><span id="scrTitle">&#8862; Nifty 50 (mcap proxy) &middot; LONG candidates</span><span class="tier-score" id="scrMeta"></span></div>
-      <table class="scr-table"><thead id="scrThead"><tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr></thead>
+      <table class="scr-table" id="scrTable"><thead id="scrThead"><tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr></thead>
         <tbody id="scrBody"></tbody></table>
+      <div id="moversWrap" style="display:none"></div>
     </div>
     <div class="foot" id="scrFoot">Top 10 by score (WATCH included) &middot; same v3.4 engine, run per symbol &middot; mcap proxy, not the real index.</div>
   </div>
@@ -541,12 +543,12 @@ function setMode(m){
     runBtn.textContent='Run Investment Check';
     runBtn.classList.add('invest-mode');
     pageTitle.innerHTML='Investment <span class="invest">Check</span>';
-    pageSub.textContent='V1.0 \u00b7 12 RULES \u00b7 GVM-NATIVE \u00b7 MEDIUM-LONG TERM';
+    pageSub.textContent='V1.0 · 12 RULES · GVM-NATIVE · MEDIUM-LONG TERM';
   } else {
     runBtn.textContent='Run Trade Check';
     runBtn.classList.remove('invest-mode');
     pageTitle.innerHTML='Trade <span>Check</span>';
-    pageSub.textContent='V3.4 \u00b7 NATIVE $0 \u00b7 UNIFIED CHECKLIST';
+    pageSub.textContent='V3.4 · NATIVE $0 · UNIFIED CHECKLIST';
   }
   document.getElementById('result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
@@ -638,7 +640,7 @@ async function run(){
   const ld=document.getElementById('loading');
   const inv=(mode==='INVEST');
   ld.className='loading show'+(inv?' invest-loading':'');
-  ld.textContent=inv?'Running Investment Check\u2026':'Computing v3.4\u2026';
+  ld.textContent=inv?'Running Investment Check…':'Computing v3.4…';
   try{
     if(inv){ await runInvestCheck(sym); }
     else { await runTradeCheck(sym); }
@@ -655,7 +657,7 @@ async function runTradeCheck(sym){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({symbol:sym,side:side,gate1:gate1,gate2:gate2})});
   document.getElementById('loading').classList.remove('show');
-  if(!r.ok){showErr('Server error '+r.status+' \u2014 trade check failed. Try again shortly.');return;}
+  if(!r.ok){showErr('Server error '+r.status+' — trade check failed. Try again shortly.');return;}
   let d;
   try{d=await r.json();}catch(e){showErr('Bad response from server. Try again shortly.');return;}
   if(!d.ok){showErr(d.error||'No data.');return;}
@@ -665,7 +667,7 @@ async function runTradeCheck(sym){
 async function runInvestCheck(sym){
   const r=await fetch('/api/investment-check?symbol='+encodeURIComponent(sym));
   document.getElementById('loading').classList.remove('show');
-  if(!r.ok){showErr('Server error '+r.status+' \u2014 investment check failed.');return;}
+  if(!r.ok){showErr('Server error '+r.status+' — investment check failed.');return;}
   let d;
   try{d=await r.json();}catch(e){showErr('Bad response from server.');return;}
   if(d.error){showErr(d.error);return;}
@@ -677,7 +679,7 @@ function showErr(m){const e=document.getElementById('err');e.textContent=m;e.cla
 function renderTrade(d){
   document.getElementById('rCompany').textContent=d.company+' ('+d.symbol+')';
   const sd=document.getElementById('rSide');
-  sd.textContent=d.side==='LONG'?'\u25b2 LONG':'\u25bc SHORT';
+  sd.textContent=d.side==='LONG'?'▲ LONG':'▼ SHORT';
   sd.className='r-side-badge '+d.side;
   document.getElementById('rSeg').textContent=d.segment||'';
   const gvmEl=document.getElementById('rGvm');
@@ -687,7 +689,7 @@ function renderTrade(d){
   document.getElementById('rTs').textContent=d.ts||'';
   const vc=document.getElementById('vCard');
   vc.className='verdict-card '+d.verdict_class;
-  const vLabels={pass:'\u2713 PASS',watch:'\u25d0 WATCH',fail:'\u2717 FAIL'};
+  const vLabels={pass:'✓ PASS',watch:'◐ WATCH',fail:'✗ FAIL'};
   document.getElementById('vLabel').textContent=vLabels[d.verdict_class]||d.verdict_class.toUpperCase();
   const pct=Math.round(d.score/d.total*100);
   document.getElementById('vBar1').style.width=pct+'%';
@@ -695,9 +697,9 @@ function renderTrade(d){
   document.getElementById('vNeed1').textContent='need '+d.pass_cut;
   const interpEl=document.getElementById('vInterp');
   if(interpEl)interpEl.textContent=d.interpretation||'';
-  document.getElementById('t1Label').textContent='Checklist \u2014 Process + Entry';
-  document.getElementById('t1Score').textContent=d.score+'/'+d.total+' \u00b7 '+d.n_pass+' pass \u00b7 '+d.n_watch+' watch \u00b7 '+d.n_fail+' fail \u00b7 PASS\u2265'+d.pass_cut;
-  document.getElementById('rFoot').textContent=d.foot||'Personal trade context \u00b7 not a V8 algo signal \u00b7 v3.4 \u00b7 \u26a0 Spot price, not futures.';
+  document.getElementById('t1Label').textContent='Checklist — Process + Entry';
+  document.getElementById('t1Score').textContent=d.score+'/'+d.total+' · '+d.n_pass+' pass · '+d.n_watch+' watch · '+d.n_fail+' fail · PASS≥'+d.pass_cut;
+  document.getElementById('rFoot').textContent=d.foot||'Personal trade context · not a V8 algo signal · v3.4 · ⚠ Spot price, not futures.';
   const body=document.getElementById('ruleBody');body.innerHTML='';
   (d.rules||[]).forEach(r=>{body.insertAdjacentHTML('beforeend',
     '<tr class="'+rowClass(r.state)+'"><td class="td-rule">'+r.rule+'</td><td class="td-cond">'+r.cond+'</td><td class="td-val">'+r.val+'</td><td class="td-state">'+stateBadge(r.state)+'</td></tr>');});
@@ -751,7 +753,7 @@ function renderInvest(d){
   document.getElementById('invCompany').textContent=d.company+' ('+d.symbol+')';
   document.getElementById('invSeg').textContent=d.segment||'';
   const badge=document.getElementById('invBadge');
-  const verdictMap={'STRONG BUY':'\ud83d\udfe2 STRONG BUY','ACCUMULATE':'\ud83d\udfe1 ACCUMULATE','WATCH':'\ud83d\udfe0 WATCH','AVOID':'\ud83d\udd34 AVOID'};
+  const verdictMap={'STRONG BUY':'🟢 STRONG BUY','ACCUMULATE':'🟡 ACCUMULATE','WATCH':'🟠 WATCH','AVOID':'🔴 AVOID'};
   badge.textContent=verdictMap[d.verdict]||d.verdict;
   badge.className='inv-badge '+(d.verdict||'').replace(' ','-');
   document.getElementById('invCap').textContent=d.cap_category||'';
@@ -769,25 +771,25 @@ function renderInvest(d){
   document.getElementById('invBarFill').style.width=Math.round(d.score/d.max_score*100)+'%';
   document.getElementById('invBarSub').textContent=d.score+' of '+d.max_score+' rules passed';
   document.getElementById('invBand').textContent='Band: '+d.band;
-  document.getElementById('invRuleScore').textContent=d.score+'/'+d.max_score+' \u00b7 min 8 to buy';
+  document.getElementById('invRuleScore').textContent=d.score+'/'+d.max_score+' · min 8 to buy';
   const tbody=document.getElementById('invBody');tbody.innerHTML='';
   (d.rules||[]).forEach(r=>{
     const passed=r.pass===true;
-    const val=r.value!=null?r.value:'\u2014';
+    const val=r.value!=null?r.value:'—';
     const peer=r.peer!=null?' (peer: '+r.peer+')':'';
-    const note=r.note?' \u00b7 '+r.note:'';
+    const note=r.note?' · '+r.note:'';
     tbody.insertAdjacentHTML('beforeend',
       '<tr class="'+(passed?'row-pass':'row-fail')+'">'+'<td class="td-rule">'+r.rule+' '+r.name+'</td>'+'<td class="td-cond">'+r.condition+'</td>'+'<td class="td-val">'+val+peer+note+'</td>'+'<td class="td-state">'+stateBadge(passed?'pass':'fail')+'</td></tr>');
   });
   const passDiv=document.getElementById('invPasses');passDiv.innerHTML='';
-  (d.passes||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-pass-chip">\u2713 '+n+'</span>');});
-  (d.fails||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-fail-chip">\u2717 '+n+'</span>');});
+  (d.passes||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-pass-chip">✓ '+n+'</span>');});
+  (d.fails||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-fail-chip">✗ '+n+'</span>');});
   document.getElementById('invResult').classList.add('show');
   document.getElementById('invResult').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 // Screener
-const SCR_VD={pass:'\u2713 PASS',watch:'\u25d0 WATCH',fail:'\u2717 FAIL'};
+const SCR_VD={pass:'✓ PASS',watch:'◐ WATCH',fail:'✗ FAIL'};
 let scrChipMap=[];
 let scrCache={};
 let scrUniverse='nifty50';
@@ -802,8 +804,8 @@ async function loadScreen(universe){
   const ld=document.getElementById('loading');
   ld.className='loading show';
   const msgs=universe==='all208'
-    ?['Screening all 208 futures\u2026','This takes a moment\u2026','Scoring LONG & SHORT\u2026','Ranking candidates\u2026']
-    :['Screening 50 names\u2026','Scoring LONG & SHORT\u2026','Ranking candidates\u2026'];
+    ?['Screening all 208 futures…','This takes a moment…','Scoring LONG & SHORT…','Ranking candidates…']
+    :['Screening 50 names…','Scoring LONG & SHORT…','Ranking candidates…'];
   let mi=0;ld.textContent=msgs[0];
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('screenBtn').disabled=true;
@@ -825,7 +827,7 @@ async function loadScreen(universe){
 function runScreen(){
   scrMode='screener';scrUniverse='nifty50';scrSide='LONG';
   document.getElementById('icBar').style.display='none';
-  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) \u00b7 same v3.4 engine, run per symbol \u00b7 mcap proxy, not the real index.';
+  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.';
   syncScrTabs();loadScreen('nifty50');
 }
 
@@ -833,7 +835,7 @@ function setUniverse(u){
   scrMode='screener';scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) \u00b7 same v3.4 engine, run per symbol \u00b7 mcap proxy, not the real index.';
+  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.';
   syncScrTabs();
   if(scrCache[u])renderScreen();
   else loadScreen(u);
@@ -841,14 +843,14 @@ function setUniverse(u){
 
 function setScrSide(s){
   scrSide=s;intraSide=s;syncScrTabs();
-  if(scrMode==='intraday')loadIntraday(s);else renderScreen();
+  if(scrMode==='movers')loadMovers(s);else if(scrMode==='intraday')loadIntraday(s);else renderScreen();
 }
 
 function openIntraday(){
   scrMode='intraday';scrUniverse='intra';scrSide='LONG';intraSide='LONG';
   syncScrTabs();
   document.getElementById('icBar').style.display='flex';
-  document.getElementById('scrFoot').textContent='Stage1 cached TC\u226510 \u00b7 Stage2 live intraday (1H positive, vol 1.5\u00d7, gain 1-2%, DMA20, week-low S1, hold open) \u00b7 prototype.';
+  document.getElementById('scrFoot').textContent='Stage1 cached TC≥10 · Stage2 live intraday (1H positive, vol 1.5×, gain 1-2%, DMA20, week-low S1, hold open) · prototype.';
   loadIntraday('LONG');
 }
 
@@ -863,13 +865,76 @@ function syncScrTabs(){
   document.getElementById('uTabN50').className='scr-tab'+(scrUniverse==='nifty50'?' on':'');
   document.getElementById('uTab208').className='scr-tab'+(scrUniverse==='all208'?' on':'');
   var it=document.getElementById('uTabIntra');if(it)it.className='scr-tab'+(scrUniverse==='intra'?' on':'');
+  var mt=document.getElementById('uTabMovers');if(mt)mt.className='scr-tab'+(scrMode==='movers'?' on':'');
   document.getElementById('sTabLong').className='scr-stab long'+(scrSide==='LONG'?' on':'');
   document.getElementById('sTabShort').className='scr-stab short'+(scrSide==='SHORT'?' on':'');
+  var tbl=document.getElementById('scrTable'),mw=document.getElementById('moversWrap');
+  if(tbl&&mw){var mv=scrMode==='movers';tbl.style.display=mv?'none':'';mw.style.display=mv?'':'none';}
+}
+
+// CC-48: Movers View — daily what-changed engine over tc_screener_cache.
+function openMovers(){
+  scrMode='movers';scrUniverse='movers';
+  document.getElementById('icBar').style.display='none';
+  document.getElementById('scrFoot').textContent='Daily what-changed engine · diffs today’s screener cache vs the prior session.';
+  document.getElementById('scrResult').classList.add('show');
+  syncScrTabs();loadMovers(scrSide);
+}
+async function loadMovers(side){
+  document.getElementById('result').classList.remove('show');
+  document.getElementById('invResult').classList.remove('show');
+  document.getElementById('err').classList.remove('show');
+  document.getElementById('scrResult').classList.add('show');
+  document.getElementById('scrTitle').textContent='⚡ What Changed Today';
+  document.getElementById('scrMeta').textContent='loading…';
+  document.getElementById('moversWrap').innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">Loading movers…</div>';
+  try{
+    const r=await fetch('/api/trade-check/movers?universe=futures&side='+side);
+    const d=await r.json();
+    renderMovers(d);
+    document.getElementById('scrResult').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){document.getElementById('moversWrap').innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Network error: '+e.message+'</div>';document.getElementById('scrMeta').textContent='';}
+}
+function mvBadge(v){
+  if(!v)return '<span class="scr-pivot">absent</span>';
+  const cls=(v==='STRONG'||v==='VALID')?'pass':'watch';
+  return '<span class="scr-vd '+cls+'">'+v+'</span>';
+}
+function mvNum(v){return v==null?'—':(Math.round(v*10)/10);}
+function mvSection(title,color,items,fn){
+  if(!items||!items.length)return '';
+  return '<div style="margin:16px 0 6px;font-size:12px;font-weight:800;color:'+color+'">'+title+' · '+items.length+'</div>'+
+    '<table class="scr-table"><tbody>'+items.map(fn).join('')+'</tbody></table>';
+}
+function renderMovers(d){
+  const mw=document.getElementById('moversWrap');
+  if(!d||d.error){mw.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+((d&&d.error)||'No data')+'</div>';document.getElementById('scrMeta').textContent='';return;}
+  if(d.baseline_only){
+    document.getElementById('scrTitle').textContent='⚡ What Changed Today';
+    document.getElementById('scrMeta').textContent=d.run_date||'';
+    mw.innerHTML='<div style="padding:34px 18px;text-align:center;color:var(--dim);font-size:13px;line-height:1.7">📊 Building baseline.<br>Movers comparison starts tomorrow once we have 2 days of data.</div>';
+    return;
+  }
+  document.getElementById('scrTitle').textContent='⚡ What Changed Today · '+d.side;
+  document.getElementById('scrMeta').textContent=d.run_date+' vs '+d.prev_date;
+  const sym=r=>'<td class="scr-sym">'+r.symbol+'</td>';
+  let html='';
+  html+=mvSection('🟢 New Setups Today','var(--grn)',d.new_pass,r=>
+    '<tr>'+sym(r)+'<td class="scr-score">'+mvNum(r.score)+'</td><td>'+mvBadge(r.verdict)+'</td><td>'+(r.cmp!=null?Math.round(r.cmp):'—')+'</td><td class="scr-pivot">'+(r.pivot_zone||'—')+'</td></tr>');
+  html+=mvSection('🔴 Dropped Out','var(--red)',d.dropped,r=>
+    '<tr>'+sym(r)+'<td>'+mvBadge(r.prev_verdict)+' → '+mvBadge(r.verdict)+'</td><td class="scr-pivot">'+(r.prev_score!=null?('was '+mvNum(r.prev_score)):'')+'</td></tr>');
+  html+=mvSection('⬆️ Strengthening','var(--grn)',d.score_up,r=>
+    '<tr>'+sym(r)+'<td>'+mvBadge(r.verdict)+'</td><td class="scr-score">'+mvNum(r.prev_score)+' → '+mvNum(r.score)+'</td></tr>');
+  html+=mvSection('⬇️ Weakening','var(--amber)',d.score_down,r=>
+    '<tr>'+sym(r)+'<td>'+mvBadge(r.verdict)+'</td><td class="scr-score">'+mvNum(r.prev_score)+' → '+mvNum(r.score)+'</td></tr>');
+  html+=mvSection('🔄 Verdict Changes','var(--cyan)',d.verdict_flip,r=>
+    '<tr>'+sym(r)+'<td>'+mvBadge(r.prev_verdict)+' → '+mvBadge(r.verdict)+'</td></tr>');
+  mw.innerHTML=html||'<div style="padding:26px;text-align:center;color:var(--dim)">No changes vs prior session.</div>';
 }
 
 function scrRow(r,i){
-  const cmp=r.cmp!=null?Math.round(r.cmp):'\u2014';
-  const pz=r.pivot&&r.pivot.zone?r.pivot.zone:'\u2014';
+  const cmp=r.cmp!=null?Math.round(r.cmp):'—';
+  const pz=r.pivot&&r.pivot.zone?r.pivot.zone:'—';
   const chips=(r.not_passed||[]).map(c=>{
     const cls=c.state==='fail'?'fail':c.state==='watch'?'watch':'na';
     const rid=c.rule.split(' ')[0];
@@ -886,8 +951,8 @@ function renderScreen(){
   const rows=scrSide==='LONG'?(d.long_top10||[]):(d.short_top10||[]);
   const scored=scrSide==='LONG'?d.scored_long:d.scored_short;
   const uName=scrUniverse==='all208'?'All 208 Futures':'Nifty 50 (mcap proxy)';
-  document.getElementById('scrTitle').textContent='\u229e '+uName+' \u00b7 '+scrSide+' candidates';
-  document.getElementById('scrMeta').textContent=scored+' scored \u00b7 '+d.ts+' \u00b7 '+d.elapsed_sec+'s';
+  document.getElementById('scrTitle').textContent='⊞ '+uName+' · '+scrSide+' candidates';
+  document.getElementById('scrMeta').textContent=scored+' scored · '+d.ts+' · '+d.elapsed_sec+'s';
   document.getElementById('scrBody').innerHTML=rows.map((r,i)=>scrRow(r,i)).join('');
   document.getElementById('scrResult').classList.add('show');
   document.getElementById('scrResult').scrollIntoView({behavior:'smooth',block:'start'});
@@ -896,8 +961,8 @@ function renderScreen(){
 function showPop(idx){
   const c=scrChipMap[idx];if(!c)return;
   document.getElementById('scrPopHead').textContent=c.rule;
-  document.getElementById('scrPopVal').textContent=c.value||'\u2014';
-  document.getElementById('scrPopReq').textContent=c.required||'\u2014';
+  document.getElementById('scrPopVal').textContent=c.value||'—';
+  document.getElementById('scrPopReq').textContent=c.required||'—';
   document.getElementById('scrPop').classList.add('show');
 }
 function closePop(e){if(e.target.id==='scrPop')document.getElementById('scrPop').classList.remove('show');}
@@ -909,7 +974,7 @@ let intraCache={};
 async function refreshTcCache(){
   const ld=document.getElementById('loading');
   ld.className='loading show';
-  const msgs=['Refreshing TC cache (208\u00d72)\u2026','This takes a moment\u2026','Scoring all names\u2026'];
+  const msgs=['Refreshing TC cache (208×2)…','This takes a moment…','Scoring all names…'];
   let mi=0;ld.textContent=msgs[0];
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('icRefreshBtn').disabled=true;
@@ -918,7 +983,7 @@ async function refreshTcCache(){
     clearInterval(tk);ld.classList.remove('show');
     if(!r.ok){showErr('Cache refresh error '+r.status+'.');return;}
     const d=await r.json();
-    document.getElementById('icCacheMeta').textContent='cache: '+d.written+' rows \u00b7 '+d.ts+' \u00b7 '+d.elapsed_sec+'s';
+    document.getElementById('icCacheMeta').textContent='cache: '+d.written+' rows · '+d.ts+' · '+d.elapsed_sec+'s';
     intraCache={};loadIntraday(intraSide);
   }catch(e){clearInterval(tk);ld.classList.remove('show');showErr('Network error: '+e.message);}
   document.getElementById('icRefreshBtn').disabled=false;
@@ -928,7 +993,7 @@ async function loadIntraday(side){
   intraSide=side;syncScrTabs();
   if(intraCache[side]){renderIntraday();return;}
   const ld=document.getElementById('loading');
-  ld.className='loading show';ld.textContent='Running intraday scan\u2026';
+  ld.className='loading show';ld.textContent='Running intraday scan…';
   document.getElementById('scrResult').classList.remove('show');
   try{
     const r=await fetch('/api/trade-check/intraday-scan?side='+side);
@@ -941,9 +1006,9 @@ async function loadIntraday(side){
 }
 
 function intraRow(r,i){
-  const cmp=r.cmp!=null?r.cmp:'\u2014';
-  const gain=r.gain_pct!=null?(r.gain_pct>0?'+':'')+r.gain_pct+'%':'\u2014';
-  const vp=r.vol_pace!=null?r.vol_pace+'\u00d7':'\u2014';
+  const cmp=r.cmp!=null?r.cmp:'—';
+  const gain=r.gain_pct!=null?(r.gain_pct>0?'+':'')+r.gain_pct+'%':'—';
+  const vp=r.vol_pace!=null?r.vol_pace+'×':'—';
   const chk=r.checks||{};
   const chips=Object.keys(chk).filter(k=>k!=='score>=10').map(k=>{
     const v=chk[k];
@@ -959,8 +1024,8 @@ function intraRow(r,i){
 function renderIntraday(){
   const d=intraCache[intraSide];if(!d)return;
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>TC</th><th>CMP</th><th>Gain</th><th>Vol</th><th>Filters</th></tr>';
-  document.getElementById('scrTitle').textContent='\u23f1 Intraday \u00b7 '+intraSide+' \u00b7 TC\u226510 + live filters';
-  document.getElementById('scrMeta').textContent=d.matched+'/'+d.shortlist+' matched \u00b7 '+d.ts+' \u00b7 '+d.elapsed_sec+'s';
+  document.getElementById('scrTitle').textContent='⏱ Intraday · '+intraSide+' · TC≥10 + live filters';
+  document.getElementById('scrMeta').textContent=d.matched+'/'+d.shortlist+' matched · '+d.ts+' · '+d.elapsed_sec+'s';
   document.getElementById('scrBody').innerHTML=(d.rows||[]).map((r,i)=>intraRow(r,i)).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:18px">No intraday matches right now.</td></tr>';
   document.getElementById('icBar').style.display='flex';
   document.getElementById('scrResult').classList.add('show');
