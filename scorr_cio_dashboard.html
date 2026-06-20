@@ -72,6 +72,7 @@ const PILLAR_INFO = {
 
 const MODELS = [
   { id: "home",   icon: "⌂", label: "Home",   full: "Home",                  color: C.muted,    live: true },
+  { id: "news",   icon: "📰", label: "Top News", full: "Top News",            color: C.red,      live: true },
   { id: "v8",     icon: "⚡", label: "V8",     full: "V8 Long-Short",         color: C.accent,   live: true },
   { id: "gvm",    icon: "◦", label: "GVM",    full: "GVM Scoring",           color: C.gold,     live: true },
   { id: "sector", icon: "◷", label: "Sector", full: "Sector Rotation",       color: C.purple,   live: true },
@@ -1363,6 +1364,104 @@ function GvmEmptyState({ onPick }) {
   );
 }
 
+function newsTimeAgo(iso) {
+  if (!iso) return "";
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60); if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+const NEWS_CATS = [
+  { id: "all", label: "All" },
+  { id: "domestic", label: "Domestic" },
+  { id: "global", label: "Global" },
+  { id: "company", label: "Company" },
+];
+const NEWS_SRC_LABEL = { domestic: "Domestic", global: "Global", company: "Company" };
+
+// Top News tab — raw unpolished RSS headlines from raw_news (read-only display).
+// Auto-refreshes every 15 min. Never triggers polish, never stores separately.
+function NewsTab() {
+  const [groups, setGroups] = useState({ domestic: [], global: [], company: [] });
+  const [cat, setCat] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [refreshed, setRefreshed] = useState(null);
+
+  const fetchNews = async () => {
+    try {
+      const d = await apiGet("/api/news/live?hours=72");
+      setGroups({ domestic: d.domestic || [], global: d.global || [], company: d.company || [] });
+      setRefreshed(new Date());
+    } catch (e) { /* keep prior data on transient failure */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    fetchNews();
+    const t = setInterval(fetchNews, 15 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const order = cat === "all" ? ["domestic", "global", "company"] : [cat];
+  const total = groups.domestic.length + groups.global.length + groups.company.length;
+  const refTime = refreshed
+    ? refreshed.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false })
+    : "—";
+
+  return (
+    <div className="print-scroll" style={{ height: "100%", overflowY: "auto", padding: "20px 24px 80px" }}>
+      <div style={{ maxWidth: 920, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.red, display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+            <span style={{ fontSize: 13, fontWeight: 800, color: C.text, letterSpacing: ".05em" }}>LIVE</span>
+            <span style={{ fontSize: 11.5, color: C.muted }}>· Last refreshed: {refTime} IST</span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {NEWS_CATS.map(c => (
+              <button key={c.id} onClick={() => setCat(c.id)}
+                style={{ padding: "5px 12px", borderRadius: 20, border: `1px solid ${cat === c.id ? C.accent : C.border}`,
+                  background: cat === c.id ? C.accent : C.card, color: cat === c.id ? "#fff" : C.muted,
+                  fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>{c.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {loading && total === 0 && <Loader msg="Fetching latest news…" />}
+        {!loading && total === 0 && (
+          <div style={{ textAlign: "center", color: C.muted, padding: 40, fontSize: 13 }}>No news in the last 72 hours.</div>
+        )}
+
+        {order.map(src => {
+          const items = groups[src] || [];
+          if (!items.length) return null;
+          return (
+            <div key={src} style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>
+                {NEWS_SRC_LABEL[src]} · {items.length}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {items.map(n => (
+                  <a key={n.id} href={n.url || "#"} target="_blank" rel="noopener noreferrer"
+                    style={{ display: "block", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", textDecoration: "none" }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, lineHeight: 1.4 }}>{n.headline}</div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
+                      {n.symbol ? <span style={{ fontWeight: 700, color: C.accent }}>{n.symbol} · </span> : null}
+                      {n.source_name} · {newsTimeAgo(n.published_at)}
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ComingSoon({ mod }) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px" }}>
@@ -1392,6 +1491,7 @@ function App() {
   else if (page === "scanners") body = <FrameModule src={`${API}/scanners?embed=1`} />;
   else if (page === "fpc")    body = <FrameModule src={`${API}/fpc?embed=1`} />;
   else if (page === "qb")     body = <FrameModule src={`${API}/quant-basket?embed=1`} />;
+  else if (page === "news")   body = <NewsTab />;
   else if (page === "gvm")    body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
 
