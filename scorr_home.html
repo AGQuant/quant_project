@@ -55,78 +55,122 @@
   .badge.soon{background:var(--line2);color:var(--mut)}
   .badge.new{background:var(--grn);color:#fff}
 
+  /* Tile accent colours */
+  .t-home{--accent:var(--mut)}
   .t-v8{--accent:var(--amber)} .t-gvm{--accent:var(--cyan)} .t-check{--accent:var(--cyan)}
   .t-max{--accent:var(--blu)} .t-cio{--accent:var(--cyan)} .t-sector{--accent:#7c3aed}
   .t-fpc{--accent:#0891b2} .t-scanners{--accent:#7c3aed} .t-perf{--accent:#0fa968}
-  .t-qb{--accent:#2563eb}
+  .t-qb{--accent:#2563eb} .t-v10{--accent:#db2777}
+
+  /* Logout link */
+  .logout-wrap{margin-top:24px;text-align:center}
+  .logout-link{display:inline-block;padding:8px 22px;font-size:11.5px;font-weight:600;
+    letter-spacing:.04em;color:var(--mut);text-decoration:none;
+    border:1px solid var(--line2);border-radius:8px;transition:.15s}
+  .logout-link:hover{color:var(--red);border-color:var(--red);background:rgba(226,55,68,.05)}
 
   .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:34px;line-height:1.8}
 </style>
 </head>
 <body>
 <nav class="model-nav">
-  <a class="mnav-item active" href="/"><span>⌂</span>Home</a>
+  <a class="mnav-item active" href="/"><span>&#8962;</span>Home</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/dashboard"><span>⚡</span>V8</a>
+  <a class="mnav-item" href="/dashboard"><span>&#9889;</span>V8</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/cio2?model=gvm"><span>◦</span>GVM</a>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/sector"><span>⊙</span>Sector</a>
+  <a class="mnav-item" href="/sector"><span>&#8855;</span>Sector</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/check"><span>✓</span>Check</a>
+  <a class="mnav-item" href="/check"><span>&#10003;</span>Check</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/scanners"><span>⊞</span>Scanners</a>
+  <a class="mnav-item" href="/scanners"><span>&#8862;</span>Scanners</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/cio"><span>◉</span>Max</a>
+  <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/fpc"><span>◪</span>FPC</a>
+  <a class="mnav-item" href="/fpc"><span>&#9706;</span>FPC</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/quant-basket"><span>◫</span>QB</a>
+  <a class="mnav-item" href="/quant-basket"><span>&#9707;</span>QB</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item soon"><span>△</span>V10</a>
+  <a class="mnav-item soon"><span>&#9651;</span>V10</a>
 </nav>
 
 <div class="wrap">
-  <div class="tag">Learn More. Score More. · Invest like an institution.</div>
-  <div class="quote">"Claude disrupted the world. Arpit disrupted how to use Claude."</div>
+  <div class="tag">Learn More. Score More. &middot; Invest like an institution.</div>
+  <div class="quote">&ldquo;Claude disrupted the world. Arpit disrupted how to use Claude.&rdquo;</div>
 
   <div class="sec">Live Tools</div>
   <div class="grid">
-    <a class="tile t-cio" href="/cio2">
-      <span class="ic">&#9707;</span>
-      <div class="nm">CIO Shell</div>
-      <div class="ds">Multi-model dashboard · V8 embed + GVM + future models</div>
+
+    <a class="tile t-home" href="/">
+      <span class="ic">&#8962;</span>
+      <div class="nm">Home</div>
+      <div class="ds">Scorr home &middot; Quick links &amp; live tools</div>
     </a>
+
+    <a class="tile t-v8" href="/dashboard">
+      <span class="ic">&#9889;</span>
+      <div class="nm">V8</div>
+      <div class="ds">Quant Long-Short &middot; 5 baskets &middot; live signals</div>
+    </a>
+
+    <a class="tile t-gvm" href="/cio2?model=gvm">
+      <span class="ic">&#9702;</span>
+      <div class="nm">GVM</div>
+      <div class="ds">Growth + Value + Momentum &middot; 1,700+ stocks &middot; peer-relative</div>
+    </a>
+
+    <a class="tile t-sector" href="/sector">
+      <span class="ic">&#8855;</span>
+      <div class="nm">Sector</div>
+      <div class="ds">Sector rotation &middot; weekly + monthly strength &middot; 129 segments</div>
+    </a>
+
+    <a class="tile t-check" href="/check">
+      <span class="ic">&#10003;</span>
+      <div class="nm">Check</div>
+      <div class="ds">Trade Check &middot; v3.4 unified &middot; LONG / SHORT &middot; screener + intraday scan</div>
+    </a>
+
     <a class="tile t-scanners" href="/scanners">
       <span class="ic">&#8862;</span>
       <div class="nm">Scanners</div>
-      <div class="ds">4-gate intraday scanner · V8 pre-screen · MA hierarchy · TC score · time-normalized volume</div>
+      <div class="ds">4-gate intraday scanner &middot; V8 pre-screen &middot; MA hierarchy &middot; TC score</div>
     </a>
-    <a class="tile t-perf" href="/performance">
-      <span class="ic">&#128202;</span>
-      <div class="nm">Performance</div>
-      <div class="ds">Quant Baskets P&L · Alpha vs Nifty500 · Options V5 · live tracking</div>
+
+    <a class="tile t-max" href="/cio">
+      <span class="ic">&#9673;</span>
+      <div class="nm">Max</div>
+      <div class="ds">AI CIO Max &middot; conversational research &middot; on demand</div>
     </a>
-    <a class="tile t-check" href="/check">
-      <span class="ic">&#10003;</span>
-      <div class="nm">Trade Check</div>
-      <div class="ds">v3.4 unified checklist · LONG / SHORT / INVEST · screener + intraday scan</div>
-    </a>
-    <a class="tile t-qb" href="/quant-basket">
-      <span class="ic">&#9635;</span>
-      <div class="nm">Quant Basket <span class="badge new">Live</span></div>
-      <div class="ds">4 GVM-screened equity baskets · Alpha vs Nifty500 · Holdings + rebalance history</div>
-    </a>
+
     <a class="tile t-fpc" href="/fpc">
-      <span class="ic">&#128200;</span>
-      <div class="nm">Financial Planner <span class="badge new">V11</span></div>
-      <div class="ds">Comprehensive FPC · Risk profile · Goals · SWP · Monte Carlo</div>
+      <span class="ic">&#9706;</span>
+      <div class="nm">FPC <span class="badge new">V11</span></div>
+      <div class="ds">Financial Planner &middot; Risk profile &middot; Goals &middot; SWP &middot; Monte Carlo</div>
     </a>
+
+    <a class="tile t-qb" href="/quant-basket">
+      <span class="ic">&#9707;</span>
+      <div class="nm">QB <span class="badge new">Live</span></div>
+      <div class="ds">Quant Basket &middot; 4 GVM-screened equity baskets &middot; Alpha vs Nifty500</div>
+    </a>
+
+    <a class="tile t-v10 soon">
+      <span class="ic">&#9651;</span>
+      <div class="nm">V10 <span class="badge soon">Soon</span></div>
+      <div class="ds">Nifty Options V10 &middot; ST+EMA &middot; index directional engine</div>
+    </a>
+
+  </div>
+
+  <div class="logout-wrap">
+    <a href="/logout" class="logout-link">&#9211; Logout</a>
   </div>
 
   <div class="foot">
-    Scorr · Your AI Chief Investment Officer · Freedom by 2035<br>
-    Single source of truth — Railway PostgreSQL
+    Scorr &middot; Your AI Chief Investment Officer &middot; Freedom by 2035<br>
+    Single source of truth &mdash; Railway PostgreSQL
   </div>
 </div>
 </body>
