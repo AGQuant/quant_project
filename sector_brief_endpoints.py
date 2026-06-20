@@ -44,8 +44,14 @@ def _get_context(segment: str):
                    g.verdict, ROUND(g.g_score::numeric,2) AS g_score,
                    ROUND(g.v_score::numeric,2) AS v_score,
                    ROUND(g.m_score::numeric,2) AS m_score,
-                   ROUND(g.market_cap::numeric,0) AS market_cap
+                   ROUND(g.market_cap::numeric,0) AS market_cap,
+                   ROUND(s.price::numeric,2) AS prev_close,
+                   ROUND(s.pe::numeric,1) AS pe,
+                   CASE WHEN s.pe IS NOT NULL AND i.fy27_growth IS NOT NULL AND i.fy27_growth > -100
+                        THEN ROUND(s.pe::numeric / (1 + i.fy27_growth/100.0), 1) ELSE NULL END AS fwd_pe
             FROM gvm_scores g
+            LEFT JOIN screener_raw s ON s.nse_code = g.symbol
+            LEFT JOIN input_raw   i ON i.nse_code = g.symbol
             WHERE g.segment = %s
               AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
             ORDER BY g.gvm_score DESC
