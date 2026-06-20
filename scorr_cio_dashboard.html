@@ -1376,6 +1376,11 @@ function App() {
         button { transition: all 0.15s ease; }
         input::placeholder { color: #9aa4b5; }
         #scorr-lo { display: none !important; }   /* injected logout replaced by ShellNav Logout */
+        @media (max-width: 768px) {
+          table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          svg { max-width: 100%; }
+          .print-scroll { padding: 16px 12px 70px !important; }
+        }
       `}</style>
       <ShellNav current={page} onPick={setPage} />
       <div className="app-body" style={{ flex: 1, width: "100%", overflow: "hidden" }}>
