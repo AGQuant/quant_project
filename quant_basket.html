@@ -125,7 +125,7 @@
 </head>
 <body>
 
-<nav class="model-nav">
+<nav class="model-nav" id="scorr-nav">
   <a class="mnav-item" href="/"><span>⌂</span>Home</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/dashboard"><span>⚡</span>V8</a>
@@ -406,6 +406,13 @@ async function showRebalance(body){
 }
 
 init();
+</script>
+<script>
+// Hide own model-nav when embedded in the CIO2 shell (iframe or ?embed=1) —
+// ShellNav already renders the nav, so showing ours stacks a double navbar.
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
+}
 </script>
 </body>
 </html>
