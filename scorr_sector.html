@@ -70,7 +70,7 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 </nav>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useMemo} = React;
+const {useState,useEffect,useMemo,useRef} = React;
 
 const C = {bg:"#f4f6f9",card:"#fff",border:"#e2e7ee",accent:"#2563eb",green:"#0a9e63",red:"#dd3a4a",gold:"#b45309",orange:"#d97706",purple:"#7c3aed",text:"#1c2536",muted:"#5a6781"};
 const VC = {"Strong Buy":"#0a9e63","Buy":"#22a06b","Watch":"#d97706","Exit":"#dd3a4a"};
@@ -149,15 +149,16 @@ function Strip({top5, cold, onSel}) {
   );
 }
 
-function SectorBrief({segment}) {
+function SectorBrief({segment, defaultOpen=false, hideConstituents=false}) {
   const [brief, setBrief] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const load = (refresh=false) => {
     setLoading(true);
     fetch(`/api/sector/brief?segment=${encodeURIComponent(segment)}${refresh?"&refresh=true":""}`)
       .then(r=>r.json()).then(d=>{ setBrief(d); setLoading(false); }).catch(()=>setLoading(false));
   };
+  useEffect(()=>{ if(defaultOpen) load(); },[]);  // auto-load when opened by default (Sector Search)
   const toggle = () => { if (!open && !brief) load(); setOpen(p=>!p); };
   return (
     <div style={{marginTop:12,borderTop:`1px solid ${C.border}`,paddingTop:10}}>
@@ -202,7 +203,7 @@ function SectorBrief({segment}) {
               ))}
             </div>
           </div>
-          {brief.constituents && brief.constituents.length > 0 && (
+          {!hideConstituents && brief.constituents && brief.constituents.length > 0 && (
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.muted,padding:"8px 12px",borderBottom:`1px solid ${C.border}`,letterSpacing:".05em"}}>
                 CONSTITUENTS · {brief.constituents.length} companies ranked by GVM
@@ -472,6 +473,114 @@ function ThemesSection() {
   );
 }
 
+function SectorSearch({allSectors}) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [brief, setBrief] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [showSug, setShowSug] = useState(false);
+  const boxRef = useRef(null);
+
+  const names = useMemo(()=>[...new Set(allSectors.map(r=>r.segment))].sort((a,b)=>a.localeCompare(b)),[allSectors]);
+  const matches = useMemo(()=>{
+    const q=query.trim().toLowerCase();
+    if(!q) return [];
+    return names.filter(n=>n.toLowerCase().includes(q)).slice(0,12);
+  },[query,names]);
+
+  useEffect(()=>{
+    const h=e=>{ if(boxRef.current && !boxRef.current.contains(e.target)) setShowSug(false); };
+    document.addEventListener("mousedown",h);
+    return ()=>document.removeEventListener("mousedown",h);
+  },[]);
+
+  const pick = (seg) => {
+    setSelected(seg); setQuery(seg); setShowSug(false); setBrief(null); setLoading(true);
+    fetch(`/api/sector/brief?segment=${encodeURIComponent(seg)}`)
+      .then(r=>r.json()).then(dd=>{ setBrief(dd); setLoading(false); }).catch(()=>setLoading(false));
+  };
+
+  const stocks = useMemo(()=>{
+    const c = (brief && brief.constituents) || [];
+    return [...c].sort((a,b)=>(b.gvm_score==null?-Infinity:b.gvm_score)-(a.gvm_score==null?-Infinity:a.gvm_score));
+  },[brief]);
+
+  return (
+    <div>
+      <div ref={boxRef} style={{position:"relative",maxWidth:520,marginBottom:18}}>
+        <input value={query}
+          onChange={e=>{setQuery(e.target.value);setShowSug(true);if(!e.target.value)setSelected(null);}}
+          onFocus={()=>setShowSug(true)}
+          onKeyDown={e=>{ if(e.key==="Enter"&&matches[0]) pick(matches[0]); }}
+          placeholder="Search a sector — type to filter (e.g. MSME, Banks, Pharma)…"
+          style={{width:"100%",padding:"11px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.card,color:C.text,fontSize:13,outline:"none"}}/>
+        {showSug && matches.length>0 && (
+          <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:0,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden",zIndex:30,boxShadow:"0 8px 24px rgba(25,40,70,.12)",maxHeight:320,overflowY:"auto"}}>
+            {matches.map(n=>(
+              <div key={n} onClick={()=>pick(n)} style={{padding:"9px 14px",fontSize:12,cursor:"pointer",borderBottom:`1px solid ${C.border}`,color:C.text}}
+                onMouseEnter={e=>e.currentTarget.style.background="#f0f4f9"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>{n}</div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!selected && (
+        <div style={{textAlign:"center",padding:"48px 20px",color:C.muted,fontSize:13,background:C.card,border:`1px dashed ${C.border}`,borderRadius:8}}>
+          🔍 Search a sector above to see all stocks and sector intelligence
+        </div>
+      )}
+
+      {selected && loading && (
+        <div style={{textAlign:"center",padding:"40px",color:C.muted,fontSize:12}}>
+          <div style={{width:26,height:26,border:"2px solid #e2e7ee",borderTop:`2px solid ${C.purple}`,borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/>
+          <div>Loading {selected}…</div>
+        </div>
+      )}
+
+      {selected && !loading && brief && brief.error && (
+        <div style={{padding:"14px",fontSize:12,color:C.red,background:"#fff5f5",border:"1px solid #fecaca",borderRadius:8}}>⚠ {brief.error}</div>
+      )}
+
+      {selected && !loading && brief && !brief.error && (
+        <div>
+          <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
+              <span style={{fontSize:13,fontWeight:800,color:C.text}}>{selected}</span>
+              <span style={{fontSize:10,fontWeight:700,color:C.muted,letterSpacing:".05em"}}>{stocks.length} STOCKS · RANKED BY GVM</span>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table>
+                <thead><tr>
+                  <th style={{textAlign:"left"}}>#</th><th style={{textAlign:"left"}}>Symbol</th>
+                  <th style={{textAlign:"left"}}>Company</th><th style={{textAlign:"right"}}>GVM</th>
+                  <th style={{textAlign:"right"}}>G</th><th style={{textAlign:"right"}}>V</th>
+                  <th style={{textAlign:"right"}}>M</th><th style={{textAlign:"left"}}>Verdict</th>
+                </tr></thead>
+                <tbody>
+                  {stocks.map((s,i)=>(
+                    <tr key={s.symbol}>
+                      <td className="mono" style={{color:C.muted,fontSize:10}}>{i+1}</td>
+                      <td style={{fontWeight:700,color:C.accent,fontSize:11}}>{s.symbol}</td>
+                      <td style={{fontSize:11,color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}}>{s.company_name}</td>
+                      <td className="mono" style={{textAlign:"right",fontWeight:800,color:s.gvm_score>=7?C.green:s.gvm_score>=6?C.gold:C.red}}>{fmt(s.gvm_score)}</td>
+                      <td className="mono" style={{textAlign:"right",color:C.green,fontSize:11}}>{fmt(s.g_score)}</td>
+                      <td className="mono" style={{textAlign:"right",color:C.gold,fontSize:11}}>{fmt(s.v_score)}</td>
+                      <td className="mono" style={{textAlign:"right",color:C.accent,fontSize:11}}>{fmt(s.m_score)}</td>
+                      <td style={{color:VC[s.verdict]||C.muted,fontSize:10,fontWeight:600}}>{s.verdict}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <SectorBrief segment={selected} defaultOpen={true} hideConstituents={true} key={selected}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Loading() {
   return (<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}><div style={{width:32,height:32,border:"3px solid #e2e7ee",borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><div style={{color:C.muted,fontSize:12}}>Loading sector data from Railway…</div></div>);
 }
@@ -479,7 +588,7 @@ function Loading() {
 function App() {
   const [d, setD] = useState(null);
   const [err, setE] = useState(null);
-  const [tab, setTab] = useState("rank");
+  const [tab, setTab] = useState("themes");
   const [sel, setSel] = useState(null);
   useEffect(()=>{
     fetch("/api/sector/rotation").then(r=>r.json()).then(data=>{ data.error?setE(data.error):setD(data); }).catch(e=>setE(e.message));
@@ -487,7 +596,7 @@ function App() {
   if (err) return <div style={{padding:40,color:C.red,fontSize:13}}>⚠ {err}</div>;
   if (!d)  return <Loading/>;
   const stats = {buy:d.all.filter(r=>["Strong Buy","Buy"].includes(r.verdict)).length,hi:d.all.filter(r=>r.composite_score>=7).length,cold:d.all.filter(r=>r.composite_score<4).length};
-  const TABS = [["rank","Composite Rank"],["gvm","G · V · M"]];
+  const TABS = [["themes","Themes"],["search","Sector Search"],["rank","Rank Table"],["gvm","G · V · M"]];
   return (
     <div style={{minHeight:"100vh",background:C.bg}}>
       <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
@@ -502,9 +611,10 @@ function App() {
       <Strip top5={d.top5} cold={d.bottom5} onSel={setSel}/>
       {sel && <div style={{padding:"12px 20px 0"}}><Detail row={sel} onClose={()=>setSel(null)}/></div>}
       <div style={{padding:"12px 20px 40px",maxWidth:1440,margin:"0 auto"}}>
-        {tab==="rank" && <RankTab data={d.all} onSel={setSel}/>}
-        {tab==="gvm"  && <GVMTab  data={d.all} onSel={setSel}/>}
-        <ThemesSection/>
+        {tab==="themes" && <ThemesSection/>}
+        {tab==="search" && <SectorSearch allSectors={d.all}/>}
+        {tab==="rank"   && <RankTab data={d.all} onSel={setSel}/>}
+        {tab==="gvm"    && <GVMTab  data={d.all} onSel={setSel}/>}
       </div>
     </div>
   );
