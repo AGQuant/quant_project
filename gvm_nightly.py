@@ -21,10 +21,10 @@ Workflow:
          - sector_ratings (REPLACE; mcap-weighted segment GVM — wired daily)
 
 Verdict framework (Arpit):
-  >= 8.0  -> Strong Buy
-  7.0-8.0 -> Buy
-  6.0-7.0 -> Watch
-  < 6.0   -> Exit
+  >= 8.0  -> Excellent
+  7.0-8.0 -> Good
+  6.0-7.0 -> Average
+  < 6.0   -> Weak
 """
 
 import os
@@ -119,10 +119,10 @@ PEER_PARAMS = [
 # ============================================================
 # LABELS + VERDICT + PUNCHLINE
 # Verdict framework (Arpit):
-#   >= 8.0  -> Strong Buy
-#   7.0-8.0 -> Buy
-#   6.0-7.0 -> Watch
-#   < 6.0   -> Exit
+#   >= 8.0  -> Excellent
+#   7.0-8.0 -> Good
+#   6.0-7.0 -> Average
+#   < 6.0   -> Weak
 # ============================================================
 def _label_growth(s):
     return "Excellent" if s >= 8 else "Healthy" if s >= 6.5 else "Average" if s >= 5 else "Weak"
@@ -137,14 +137,14 @@ def _label_gvm(s):
     return ("Excellent" if s >= 8 else "Good" if s >= 7 else "Average" if s >= 6 else "Poor")
 
 def _verdict(s):
-    return ("Strong Buy" if s >= 8 else "Buy" if s >= 7 else "Watch" if s >= 6 else "Exit")
+    return ("Excellent" if s >= 8 else "Good" if s >= 7 else "Average" if s >= 6 else "Weak")
 
 def _punchline(verd, g_lbl, v_lbl, m_lbl, gvm_lbl):
     action = {
-        "Strong Buy": "It is highly recommended to Buy",
-        "Buy":        "It is recommended to Buy",
-        "Watch":      "It is advisable to Watch and Accumulate on dips",
-        "Exit":       "It is advisable to Exit or Avoid",
+        "Excellent": "It is highly recommended to Buy",
+        "Good":      "It is recommended to Buy",
+        "Average":   "It is advisable to Watch and Accumulate on dips",
+        "Weak":      "It is advisable to Exit or Avoid",
     }[verd]
     return (f"{action} for medium to long term perspective, considering its "
             f"{g_lbl} Growth, {v_lbl} Valuation, {m_lbl} Momentum & {gvm_lbl} overall GVM Rating.")
