@@ -174,10 +174,8 @@ async def _bg_yahoo_daily(app=None):
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
-        # ydu exposes the async run_async() (no sync run_update). This wrapper is
-        # itself a coroutine on the live event loop (manual MCP trigger path), so
-        # await it directly — never block the loop or call asyncio.run() here.
-        result = await ydu.run_async()
+        with _conn() as conn:
+            result = ydu.run_update(conn)
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result}")
         return result
@@ -417,11 +415,8 @@ def _bg_yahoo_daily_sync():
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
-        # runs in the dedicated thread pool (no event loop here) → asyncio.run is
-        # safe. ydu.run_async manages its own connections; _check_universe_shrink
-        # (task #35) gets its own conn after the load completes.
-        result = asyncio.run(ydu.run_async())
         with _conn() as conn:
+            result = ydu.run_update(conn)
             _check_universe_shrink(conn)   # task #35: alert on silent coverage drop
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result}")
@@ -499,6 +494,29 @@ def _bg_fetch_global_intraday():
     except Exception as e: log.debug(f"global_intraday: {e}")
     finally: _global_intraday_fetching = False
 
+# ── news fetch (task #38) ───────────────────────────────────────────────────────
+
+def _bg_fetch_market_news():
+    try:
+        import news_fetcher
+        with _conn() as conn: res = news_fetcher.fetch_market_news(conn)
+        log.info(f"news_market: {res.get('inserted') if isinstance(res, dict) else res} new")
+    except Exception as e: log.error(f"news_market: {e}")
+
+def _bg_fetch_company_news():
+    try:
+        import news_fetcher
+        with _conn() as conn: res = news_fetcher.fetch_company_news(conn)
+        log.info(f"news_company: {res.get('inserted') if isinstance(res, dict) else res} new")
+    except Exception as e: log.error(f"news_company: {e}")
+
+def _bg_cleanup_news():
+    try:
+        import news_fetcher
+        with _conn() as conn: res = news_fetcher.cleanup_old_news(conn)
+        log.info(f"news_cleanup: {res.get('deleted') if isinstance(res, dict) else res} deleted")
+    except Exception as e: log.error(f"news_cleanup: {e}")
+
 # ── main loop ─────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
@@ -524,6 +542,9 @@ async def _scheduler_loop():
                 _spawn(_bg_signal_writer)
         if h == 6 and m == 0:
             _spawn(_bg_fetch_global)
+            _spawn(_bg_fetch_market_news)   # task #38: domestic + global RSS
+        if h == 6 and m == 30:
+            _spawn(_bg_fetch_company_news)  # task #38: top-500 Google News RSS
         if 6 <= h <= 23 and m % 5 == 0:
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
@@ -545,6 +566,7 @@ async def _scheduler_loop():
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 30:  _spawn(_bg_gvm)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
+        if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
 
 
 async def _supervisor():
