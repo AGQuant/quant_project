@@ -1,0 +1,120 @@
+"""
+News Endpoints — Scorr (task #38)
+=================================
+Read APIs over raw_news / polished_news + an admin refresh trigger.
+Backend only; no HTML page routes (frontend surfaces are a separate task).
+
+  GET  /api/news/market           — latest 20 polished domestic + 10 global
+  GET  /api/news/company/{symbol} — latest 10 polished for a symbol (raw fallback)
+  GET  /api/news/unpolished       — count + sample of raw_news awaiting polish
+  POST /api/admin/refresh_news    — background fetch (market + company), returns started
+"""
+
+import os
+import psycopg
+from fastapi import APIRouter, BackgroundTasks
+
+router = APIRouter()
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+
+def _conn():
+    return psycopg.connect(DATABASE_URL)
+
+
+def _rows(cur):
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _polished_by_type(cur, source_type: str, limit: int):
+    cur.execute("""
+        SELECT p.id AS polished_id, r.id AS raw_id,
+               COALESCE(p.headline_clean, r.headline) AS headline,
+               p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
+               r.symbol, r.source_type, r.source_name, r.url, r.published_at
+        FROM polished_news p
+        JOIN raw_news r ON r.id = p.raw_news_id
+        WHERE r.source_type = %s
+        ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+        LIMIT %s
+    """, (source_type, limit))
+    return _rows(cur)
+
+
+@router.get("/api/news/market")
+def news_market():
+    """Latest polished market news — 20 domestic + 10 global."""
+    with _conn() as conn, conn.cursor() as cur:
+        domestic = _polished_by_type(cur, "domestic", 20)
+        global_  = _polished_by_type(cur, "global", 10)
+    return {"domestic": domestic, "global": global_,
+            "count": len(domestic) + len(global_)}
+
+
+@router.get("/api/news/company/{symbol}")
+def news_company(symbol: str):
+    """Latest 10 polished articles for a symbol; falls back to raw if none polished yet."""
+    sym = symbol.upper()
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT p.id AS polished_id, r.id AS raw_id,
+                   COALESCE(p.headline_clean, r.headline) AS headline,
+                   p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
+                   r.symbol, r.source_name, r.url, r.published_at
+            FROM polished_news p
+            JOIN raw_news r ON r.id = p.raw_news_id
+            WHERE r.symbol = %s
+            ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+            LIMIT 10
+        """, (sym,))
+        polished = _rows(cur)
+        if polished:
+            return {"symbol": sym, "polished": True, "count": len(polished), "articles": polished}
+        # fallback: raw articles not yet polished
+        cur.execute("""
+            SELECT id AS raw_id, headline, description, symbol, source_name, url, published_at
+            FROM raw_news
+            WHERE symbol = %s
+            ORDER BY published_at DESC NULLS LAST, fetched_at DESC
+            LIMIT 10
+        """, (sym,))
+        raw = _rows(cur)
+    return {"symbol": sym, "polished": False, "count": len(raw), "articles": raw}
+
+
+@router.get("/api/news/unpolished")
+def news_unpolished(sample: int = 20):
+    """Count + sample of raw_news rows with no matching polished_news.
+    Used by the manual Claude.ai polish session to know what is pending."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(*) FROM raw_news r
+            WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
+        """)
+        pending = cur.fetchone()[0]
+        cur.execute("""
+            SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
+                   r.source_name, r.url, r.published_at
+            FROM raw_news r
+            WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
+            ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+            LIMIT %s
+        """, (sample,))
+        rows = _rows(cur)
+    return {"unpolished_count": pending, "sample_size": len(rows), "sample": rows}
+
+
+def _refresh_job():
+    """Runs both fetchers on its own connection (background thread)."""
+    import news_fetcher
+    with _conn() as conn:
+        news_fetcher.fetch_market_news(conn)
+        news_fetcher.fetch_company_news(conn)
+
+
+@router.post("/api/admin/refresh_news")
+def refresh_news(background_tasks: BackgroundTasks):
+    """Trigger market + company news fetch in the background."""
+    background_tasks.add_task(_refresh_job)
+    return {"status": "started", "jobs": ["fetch_market_news", "fetch_company_news"]}
