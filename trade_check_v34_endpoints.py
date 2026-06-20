@@ -303,6 +303,79 @@ def screen_cached(universe: str = "nifty50", side: Optional[str] = None, top: in
     return {"cached": True, "run_date": str(run_date), "universe": universe, "top": top, **result}
 
 
+@router.get("/api/trade-check/movers")
+def movers(universe: str = "futures", side: str = "LONG"):
+    """CC-48: diff today's tc_screener_cache vs the most recent prior run_date.
+    Categorizes each symbol into new_pass / dropped / score_up / score_down /
+    verdict_flip. Returns baseline_only=true until a 2nd snapshot exists.
+    Verdict rank: STRONG > VALID > WATCH (PASS = STRONG or VALID)."""
+    side = (side or "LONG").upper()
+    PASS = {"STRONG", "VALID"}
+    conn = psycopg.connect(_DB)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT run_date FROM tc_screener_cache ORDER BY run_date DESC LIMIT 2")
+            dates = [r[0] for r in cur.fetchall()]
+            if not dates:
+                return {"baseline_only": True, "universe": universe, "side": side,
+                        "message": "No screener cache yet — run the nightly TC screener first.",
+                        "new_pass": [], "dropped": [], "score_up": [], "score_down": [], "verdict_flip": []}
+            today = dates[0]
+            if len(dates) < 2:
+                return {"baseline_only": True, "run_date": str(today), "universe": universe, "side": side,
+                        "message": "Building baseline — movers available from tomorrow",
+                        "new_pass": [], "dropped": [], "score_up": [], "score_down": [], "verdict_flip": []}
+            prev = dates[1]
+            cur.execute("""SELECT symbol, score, verdict, cmp, pivot_zone
+                           FROM tc_screener_cache WHERE run_date=%s AND side=%s""", (today, side))
+            tcols = [d[0] for d in cur.description]
+            today_rows = {r[0]: dict(zip(tcols, r)) for r in cur.fetchall()}
+            cur.execute("""SELECT symbol, score, verdict FROM tc_screener_cache
+                           WHERE run_date=%s AND side=%s""", (prev, side))
+            prev_rows = {r[0]: {"score": _f(r[1]), "verdict": r[2]} for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+    new_pass, dropped, score_up, score_down, verdict_flip = [], [], [], [], []
+    for sym, t in today_rows.items():
+        tv, ts = t.get("verdict"), _f(t.get("score"))
+        row = {"symbol": sym, "score": ts, "verdict": tv,
+               "cmp": _f(t.get("cmp")), "pivot_zone": t.get("pivot_zone")}
+        p = prev_rows.get(sym)
+        if p is None:
+            if tv in PASS:
+                new_pass.append(row)
+            continue
+        pv, ps = p.get("verdict"), p.get("score")
+        row["prev_verdict"], row["prev_score"] = pv, ps
+        if tv != pv:
+            if tv in PASS and pv not in PASS:
+                new_pass.append(row)
+            elif pv in PASS and tv not in PASS:
+                dropped.append(row)
+            else:
+                verdict_flip.append(row)
+        elif ts is not None and ps is not None:
+            if ts > ps:
+                score_up.append(row)
+            elif ts < ps:
+                score_down.append(row)
+
+    # symbols that were PASS yesterday but absent from today's cache
+    for sym, p in prev_rows.items():
+        if sym not in today_rows and p.get("verdict") in PASS:
+            dropped.append({"symbol": sym, "score": None, "verdict": None,
+                            "prev_verdict": p.get("verdict"), "prev_score": p.get("score")})
+
+    new_pass.sort(key=lambda x: -(x["score"] or 0))
+    score_up.sort(key=lambda x: -((x.get("score") or 0) - (x.get("prev_score") or 0)))
+    score_down.sort(key=lambda x: (x.get("score") or 0) - (x.get("prev_score") or 0))
+    return {"baseline_only": False, "run_date": str(today), "prev_date": str(prev),
+            "universe": universe, "side": side,
+            "new_pass": new_pass, "dropped": dropped, "score_up": score_up,
+            "score_down": score_down, "verdict_flip": verdict_flip}
+
+
 @router.post("/api/admin/run-tc-screener")
 def run_tc_screener():
     """Manually seed today's tc_screener_cache (synchronous; off-hours use)."""
