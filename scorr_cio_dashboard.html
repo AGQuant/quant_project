@@ -1201,6 +1201,7 @@ function GvmModule() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const boxRef = useRef(null);
+  const inputRef = useRef(null);
   const debounce = useRef(null);
 
   useEffect(() => {
@@ -1222,7 +1223,8 @@ function GvmModule() {
   }, []);
 
   const loadReport = async (sym) => {
-    setSymbol(sym); setShowSug(false); setQuery(sym); setLoading(true); setErr(null); setReport(null); setHist(null);
+    setSymbol(sym); setShowSug(false); setSuggest([]); setQuery(sym); setLoading(true); setErr(null); setReport(null); setHist(null);
+    inputRef.current?.blur();
     try {
       const d = await apiGet(`/api/gvm/company/${encodeURIComponent(sym)}`);
       setReport(d);
@@ -1241,6 +1243,7 @@ function GvmModule() {
             <div style={{ position: "relative", flex: 1 }}>
               <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 15 }}>⌕</span>
               <input
+                ref={inputRef}
                 value={query}
                 onChange={e => setQuery(e.target.value.toUpperCase())}
                 onFocus={() => suggest.length && setShowSug(true)}
