@@ -99,6 +99,10 @@ canvas{display:block}
 .mnav-item.active{border-bottom-color:var(--accent);color:var(--accent)}
 .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
 .mnav-sep{width:1px;height:20px;background:var(--border);flex-shrink:0;margin:0 4px}
+@media(max-width:768px){
+  table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  svg,canvas{max-width:100%;height:auto}
+}
 </style>
 </head>
 <body>
