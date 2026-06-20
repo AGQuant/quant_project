@@ -201,7 +201,7 @@ function render(){
       </div>
       <div class="nc-head">${esc(a.headline)}</div>
       ${summary}
-      <div class="nc-foot"><b>${esc(a.source_name||"")}</b> &middot; ${timeAgo(a.published_at)}${a.category?` &middot; ${esc(a.category)}`:""}</div>
+      <div class="nc-foot"><b>&#10024; AI Generated</b> &middot; ${timeAgo(a.published_at)}${a.category?` &middot; ${esc(a.category)}`:""}</div>
     </a>`;
   }).join("");
 }
