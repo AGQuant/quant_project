@@ -364,6 +364,94 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
+# ── ADR/PCR watchdog + health (task #59) ────────────────────────────────────────
+def _log_health(conn, title: str, details: dict):
+    """Health ping → session_log (category=scheduler_health) so a stalled compute
+    job is visible after the fact (root cause of the silent 18-19 Jun ADR gap)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'scheduler_health', %s, %s)""",
+                        (title, Json(details)))
+        conn.commit()
+    except Exception as e:
+        log.error(f"_log_health {title}: {e}")
+
+
+def _backfill_adr_for_date(conn, target) -> bool:
+    """EOD-based ADR for a past day from raw_prices (day-over-day close), used to
+    heal a missed live (intraday-based) compute. Never overwrites a real row."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH cur AS (SELECT symbol, close FROM raw_prices WHERE price_date=%(t)s),
+            prev AS (SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                     WHERE price_date < %(t)s ORDER BY symbol, price_date DESC),
+            counts AS (
+                SELECT COUNT(*) FILTER (WHERE cur.close > prev.close) AS adv,
+                       COUNT(*) FILTER (WHERE cur.close < prev.close) AS dcl,
+                       COUNT(*) FILTER (WHERE cur.close = prev.close) AS unch,
+                       COUNT(*) AS total
+                FROM cur JOIN prev USING (symbol))
+            INSERT INTO adr_daily (price_date, advances, declines, unchanged, adr, universe_count)
+            SELECT %(t)s, adv, dcl, unch,
+                   CASE WHEN dcl>0 THEN ROUND(adv::numeric/dcl,3) ELSE adv END, total
+            FROM counts WHERE total > 0
+            ON CONFLICT (price_date) DO NOTHING
+        """, {"t": target})
+        n = cur.rowcount
+    conn.commit()
+    return n > 0
+
+
+def _backfill_pcr_for_date(conn, target) -> bool:
+    """Heal a missed PCR day from option_chain — only if that day's chain is still
+    retained (intraday option_chain is short-lived, so this is usually a no-op)."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO pcr_daily (price_date, symbol, pcr_total, pcr_atm5, computed_at)
+            SELECT %(t)s, symbol,
+                ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric /
+                      NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0),3),
+                ROUND(SUM(CASE WHEN option_type='PE' AND atm_distance<=5 THEN oi ELSE 0 END)::numeric /
+                      NULLIF(SUM(CASE WHEN option_type='CE' AND atm_distance<=5 THEN oi ELSE 0 END),0),3),
+                NOW()
+            FROM option_chain WHERE ts::date = %(t)s
+            GROUP BY symbol
+            ON CONFLICT (price_date, symbol) DO NOTHING
+        """, {"t": target})
+        n = cur.rowcount
+    conn.commit()
+    return n > 0
+
+
+def _backfill_missing_adr_pcr(conn, today):
+    """Watchdog auto-backfill: any recent weekday with raw_prices EOD data but no
+    adr_daily row gets recomputed (the 18-19 Jun stall went unnoticed for days)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT DISTINCT price_date FROM raw_prices
+                           WHERE price_date >= %s - INTERVAL '7 days' AND price_date < %s
+                             AND price_date NOT IN (SELECT price_date FROM adr_daily)
+                           ORDER BY price_date""", (today, today))
+            missing = [r[0] for r in cur.fetchall()]
+        for d in missing:
+            if _backfill_adr_for_date(conn, d):
+                _backfill_pcr_for_date(conn, d)
+                _log_health(conn, "adr_compute", {"date": str(d), "status": "backfilled", "source": "raw_prices"})
+                _log_alert("adr_backfill", f"ADR was missing for {d} — auto-backfilled from raw_prices EOD")
+    except Exception as e:
+        log.error(f"_backfill_missing_adr_pcr: {e}")
+
+
+def _read_adr_pcr_today(conn, today):
+    with conn.cursor() as cur:
+        cur.execute("SELECT adr FROM adr_daily WHERE price_date=%s", (today,))
+        r = cur.fetchone(); adr_val = float(r[0]) if r and r[0] is not None else None
+        cur.execute("SELECT COUNT(*) FROM pcr_daily WHERE price_date=%s", (today,))
+        pcr_rows = cur.fetchone()[0]
+    return adr_val, pcr_rows
+
+
 def _bg_adr_pcr():
     global _adr_pcr_ran_today
     today = _ist_now().date()
@@ -372,9 +460,29 @@ def _bg_adr_pcr():
         with _conn() as conn:
             _compute_and_store_adr(conn)
             _compute_and_store_pcr(conn)
-        _adr_pcr_ran_today = today
+            _backfill_missing_adr_pcr(conn, today)        # heal prior-day gaps
+            adr_val, pcr_rows = _read_adr_pcr_today(conn, today)
+            _log_health(conn, "adr_compute",
+                        {"date": str(today), "status": "ok" if adr_val is not None else "missing",
+                         "adr_value": adr_val})
+            _log_health(conn, "pcr_compute",
+                        {"date": str(today), "status": "ok" if pcr_rows else "missing",
+                         "pcr_rows": pcr_rows})
+        if adr_val is not None:
+            _adr_pcr_ran_today = today                    # lock the day only once ADR is present
+        else:
+            _log_alert("adr_missing", f"ADR not computed for {today} after 15:50 — retry scheduled 16:00")
         log.info("adr_pcr done")
     except Exception as e: log.error(f"adr_pcr: {e}")
+
+
+def _bg_adr_pcr_retry():
+    """task #59: 10-min retry — if the 15:50 run didn't produce today's ADR, redo
+    it once at 16:00 (covers a transient feed/scheduler hiccup)."""
+    today = _ist_now().date()
+    if _adr_pcr_ran_today == today: return                # already verified-complete
+    log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
+    _bg_adr_pcr()
 
 def _bg_tc_screener_precompute():
     # task #43: nightly TC screener cache @16:00 IST (after market close + ADR/PCR)
@@ -567,7 +675,9 @@ async def _scheduler_loop():
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
-        if h == 16 and m == 0:  _spawn(_bg_tc_screener_precompute)  # task #43: TC screener cache
+        if h == 16 and m == 0:
+            _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
+            _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
         # window collided with CC deploy pushes — a Railway redeploy kills the
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
