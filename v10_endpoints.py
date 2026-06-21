@@ -23,10 +23,10 @@ def _check_admin(token: Optional[str]):
 
 
 @router.get("/signal")
-def v10_signal():
-    """Current NIFTY signal from the latest CLOSED 10m bar."""
+def v10_signal(symbol: str = "NIFTY50"):
+    """Current signal from the latest CLOSED 10m bar. symbol: NIFTY50 | BANKNIFTY."""
     import v10_st_ema
-    return v10_st_ema.current_signal()
+    return v10_st_ema.current_signal(symbol)
 
 
 @router.post("/append")
@@ -88,3 +88,117 @@ def v10_vix():
                 "data": data, "source": "intraday INDIAVIX"}
     except Exception as e:
         raise HTTPException(500, f"v10_vix failed: {e}")
+
+
+# underlying tag -> spot symbol in raw_prices
+_MAXPAIN_SPOT = {"NIFTY": "NIFTY50", "BANKNIFTY": "BANKNIFTY"}
+
+
+@router.get("/maxpain")
+def v10_maxpain(symbol: str = "NIFTY"):
+    """Max-pain strike for the nearest expiry — the strike that minimises total
+    option-writer payout. Uses the LATEST OI snapshot per (strike, option_type)."""
+    underlying = (symbol or "NIFTY").upper()
+    if underlying in ("NIFTY50", "NIFTY 50"):
+        underlying = "NIFTY"
+    spot_sym = _MAXPAIN_SPOT.get(underlying, "NIFTY50")
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH exp AS (
+                    SELECT MIN(expiry) AS e FROM option_chain
+                    WHERE underlying=%s AND expiry >= CURRENT_DATE
+                ),
+                oc AS (
+                    SELECT DISTINCT ON (strike, option_type) strike, option_type, oi
+                    FROM option_chain
+                    WHERE underlying=%s AND expiry=(SELECT e FROM exp) AND oi IS NOT NULL
+                    ORDER BY strike, option_type, ts DESC
+                ),
+                spot AS (
+                    SELECT close AS s FROM raw_prices WHERE symbol=%s
+                    ORDER BY price_date DESC LIMIT 1
+                ),
+                pain AS (
+                    SELECT o.strike, SUM(CASE
+                        WHEN o.option_type='CE' THEN o.oi*GREATEST(o.strike-(SELECT s FROM spot),0)
+                        WHEN o.option_type='PE' THEN o.oi*GREATEST((SELECT s FROM spot)-o.strike,0)
+                        ELSE 0 END) AS total_pain
+                    FROM oc o GROUP BY o.strike
+                )
+                SELECT p.strike, (SELECT s FROM spot) AS spot, (SELECT e FROM exp) AS expiry
+                FROM pain p WHERE p.total_pain > 0
+                ORDER BY p.total_pain ASC LIMIT 1
+            """, (underlying, underlying, spot_sym))
+            r = cur.fetchone()
+        if not r or r[0] is None:
+            return {"status": "no_data", "symbol": underlying,
+                    "note": "Option chain data pending"}
+        strike = float(r[0]); spot = float(r[1]) if r[1] is not None else None
+        dist = (strike - spot) if spot is not None else None
+        dist_pct = round(dist / spot * 100, 2) if (spot and dist is not None) else None
+        return {"status": "ok", "symbol": underlying, "max_pain_strike": strike,
+                "spot": spot, "distance": dist, "distance_pct": dist_pct,
+                "expiry": str(r[2]) if r[2] is not None else None}
+    except Exception as e:
+        raise HTTPException(500, f"v10_maxpain failed: {e}")
+
+
+@router.get("/buildup")
+def v10_buildup(limit: int = 15):
+    """Futures buildup screen — top long (price up) and short (price down) movers
+    across stock futures, with OI/basis when the feed is available.
+    NOTE: oi/oi_chg/basis are NULL until the OI feed lands (feed pending)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH sess AS (
+                    SELECT MAX(ts::date) AS d FROM futures_basis
+                    WHERE ts::time BETWEEN '09:15' AND '15:30'
+                ),
+                f AS (
+                    SELECT DISTINCT ON (symbol) symbol, futures_close AS o
+                    FROM futures_basis, sess
+                    WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
+                    ORDER BY symbol, ts ASC
+                ),
+                l AS (
+                    SELECT DISTINCT ON (symbol) symbol, futures_close AS c, oi, oi_chg, basis
+                    FROM futures_basis, sess
+                    WHERE ts::date=sess.d AND ts::time BETWEEN '09:15' AND '15:30'
+                    ORDER BY symbol, ts DESC
+                )
+                SELECT f.symbol, l.c AS price,
+                       ROUND(((l.c-f.o)/NULLIF(f.o,0)*100)::numeric,2) AS day_1d,
+                       l.oi, l.oi_chg, l.basis
+                FROM f JOIN l USING(symbol)
+                WHERE f.o IS NOT NULL AND l.c IS NOT NULL
+            """)
+            rows = cur.fetchall()
+    except Exception as e:
+        raise HTTPException(500, f"v10_buildup failed: {e}")
+
+    def _row(r):
+        sym, price, day_1d, oi, oi_chg, basis = r
+        day_1d = float(day_1d) if day_1d is not None else None
+        oi_chg = int(oi_chg) if oi_chg is not None else None
+        # true buildup needs price + OI; classify only when oi_chg is present
+        sig = "NEUTRAL"
+        if day_1d is not None and oi_chg is not None:
+            up = day_1d > 0
+            if oi_chg > 0:
+                sig = "LONG_BUILD" if up else "SHORT_BUILD"
+            elif oi_chg < 0:
+                sig = "SHORT_COVER" if up else "LONG_UNWIND"
+        return {"symbol": sym, "price": float(price) if price is not None else None,
+                "day_1d": day_1d, "oi": int(oi) if oi is not None else None,
+                "oi_chg": oi_chg, "basis": float(basis) if basis is not None else None,
+                "vol_ratio": None, "signal": sig}
+
+    data = [_row(r) for r in rows if r[2] is not None]
+    longs = sorted(data, key=lambda x: x["day_1d"], reverse=True)[:limit]
+    shorts = sorted(data, key=lambda x: x["day_1d"])[:limit]
+    oi_pending = all(d["oi"] is None for d in data) if data else True
+    return {"status": "ok", "long_buildup": longs, "short_buildup": shorts,
+            "oi_feed_pending": oi_pending,
+            "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None}
