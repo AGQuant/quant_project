@@ -4,11 +4,16 @@ Mounted in main.py via: app.include_router(v10_router)
 Isolated from V8 / live feed writes. Paper + advisory only.
 """
 import os
+import psycopg
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 
 router = APIRouter(prefix="/api/v10", tags=["v10"])
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+
+def _conn():
+    return psycopg.connect(os.getenv("DATABASE_URL"))
 
 
 def _check_admin(token: Optional[str]):
@@ -61,3 +66,25 @@ def v10_summary():
     """Running settings + aggregate paper P&L summary."""
     import v10_st_ema
     return v10_st_ema.get_summary()
+
+
+@router.get("/vix")
+def v10_vix():
+    """India VIX — last 8 daily closes from the 5-min intraday feed (symbol INDIAVIX)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH d AS (
+                    SELECT DISTINCT ON (ts::date) ts::date AS dt, close
+                    FROM intraday_prices WHERE symbol='INDIAVIX'
+                    ORDER BY ts::date DESC, ts DESC LIMIT 8
+                )
+                SELECT close FROM d ORDER BY dt ASC
+            """)
+            data = [float(r[0]) for r in cur.fetchall() if r[0] is not None]
+        cur_v = data[-1] if data else 0.0
+        prev = data[-2] if len(data) > 1 else cur_v
+        return {"label": "India VIX", "cur": cur_v, "chg": cur_v - prev,
+                "data": data, "source": "intraday INDIAVIX"}
+    except Exception as e:
+        raise HTTPException(500, f"v10_vix failed: {e}")
