@@ -3,10 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Market Intelligence · Scorr</title>
+<title>Intelligence · Scorr</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
 <style>
   :root{
-    --bg:#f6f8fb; --card:#ffffff; --panel:#ffffff;
+    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe; --panel:#ffffff;
     --line:#e4e9f1; --line2:#d4dbe7;
     --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
     --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706; --purple:#7c3aed;
@@ -59,11 +60,37 @@
     border-radius:13px;padding:15px 16px;text-decoration:none;transition:.15s;box-shadow:0 1px 3px rgba(20,30,50,.04);cursor:pointer}
   .ncard:hover{border-color:var(--blu);transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.09)}
   .ncard.open{border-color:var(--blu)}
-  .nc-full{display:none;margin-top:12px;padding:12px 4px 2px;border-top:1px solid var(--line);
-    font-size:13px;line-height:1.7;color:var(--txt);white-space:pre-wrap}
-  .ncard.open .nc-full{display:block}
+  /* expandable article panel — animated, no clip on long reads */
+  .nc-full{max-height:0;overflow:hidden;transition:max-height .3s ease;
+    font-size:14px;line-height:1.7;color:var(--txt)}
+  .ncard.open .nc-full{max-height:16000px;margin-top:12px;padding:16px 20px;
+    border-top:1px solid var(--line)}
   .ncard.open .nc-summary{-webkit-line-clamp:unset;display:block}
+  .nc-inner{max-width:720px;margin:0 auto}
+  /* markdown render (marked.js output) */
+  .nc-full h1{font-size:17px;font-weight:800;margin:14px 0 8px;color:var(--txt)}
+  .nc-full h2{font-size:15px;font-weight:700;margin:16px 0 8px;color:var(--txt)}
+  .nc-full h3{font-size:13px;font-weight:700;margin:12px 0 6px;color:var(--txt)}
+  .nc-full p{margin:8px 0}
+  .nc-full ul,.nc-full ol{margin:8px 0 8px 20px}
+  .nc-full li{margin:3px 0}
+  .nc-full strong{font-weight:700;color:var(--txt)}
+  .nc-full em{font-style:italic}
+  .nc-full a{color:var(--blu);text-decoration:none}
+  .nc-full a:hover{text-decoration:underline}
+  .nc-full hr{border:none;border-top:1px solid var(--line);margin:14px 0}
+  .nc-full blockquote{margin:10px 0;padding:6px 12px;border-left:3px solid var(--line2);color:var(--mut)}
+  .nc-full pre,.nc-full code{background:var(--card2);padding:3px 6px;border-radius:4px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .nc-full pre{padding:10px 12px;overflow-x:auto}
+  .nc-full table{width:100%;border-collapse:collapse;margin:10px 0}
+  .nc-full th,.nc-full td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+  .nc-full th{font-weight:700;color:var(--mut);font-size:11px;text-transform:uppercase}
+  .nc-article-foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);
+    font-size:11px;color:var(--dim)}
   .nc-coming{margin-top:8px;font-size:11.5px;color:var(--dim);font-style:italic}
+  .nc-chev{margin-left:6px;font-size:11px;color:var(--dim);transition:transform .25s ease;flex-shrink:0}
+  .ncard.open .nc-chev{transform:rotate(180deg);color:var(--blu)}
   .nc-top{display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap}
   .nc-sym{font-size:10px;font-weight:800;color:var(--blu);background:rgba(37,99,235,.10);
     border:1px solid rgba(37,99,235,.25);border-radius:6px;padding:2px 7px;letter-spacing:.03em}
@@ -108,8 +135,8 @@
 <div class="wrap">
   <div class="ph">
     <div>
-      <div class="ph-title">Market Intelligence</div>
-      <div class="ph-sub">AI-Polished Market Intelligence</div>
+      <div class="ph-title">Intelligence</div>
+      <div class="ph-sub">AI-powered market analysis. Updated daily.</div>
       <div class="ph-meta" id="meta">Loading…</div>
     </div>
     <button class="refresh-btn" id="refreshBtn" onclick="load()">&#8635; Refresh</button>
@@ -142,7 +169,28 @@ let curCat = "domestic";
 let articles = [];
 
 const SENT = { positive:"#0fa968", negative:"#e23744", neutral:"#8a96ad", bullish:"#0fa968", bearish:"#e23744" };
-const IMPACT = { high:{bg:"rgba(226,55,68,.12)",fg:"#e23744"}, mid:{bg:"rgba(217,119,6,.14)",fg:"#d97706"}, low:{bg:"rgba(90,103,129,.12)",fg:"#5a6781"} };
+const IMPACT = {
+  high:{bg:"#e2374422",fg:"#e23744",bd:"#e2374444"},
+  mid: {bg:"#d9770622",fg:"#d97706",bd:"#d9770644"},
+  low: {bg:"#62778122",fg:"#627781",bd:"#62778144"},
+};
+
+// ~1500 chars/min; hidden for stubs (<200 chars) per spec
+function readTime(fs){
+  if(!fs || fs.length < 200) return "";
+  return Math.max(1, Math.round(fs.length / 1500)) + " min read";
+}
+function fmtDate(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  if(isNaN(d)) return "";
+  return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
+}
+// render markdown via marked.js; safe fallback to escaped text if CDN blocked
+function mdToHtml(src){
+  const s = String(src||"");
+  return (window.marked && window.marked.parse) ? window.marked.parse(s) : esc(s);
+}
 
 function timeAgo(iso){
   if(!iso) return "";
@@ -198,23 +246,33 @@ function render(){
     const dot = SENT[sent] || SENT.neutral;
     const imp = (a.impact||"").toLowerCase();
     const ib = IMPACT[imp];
+    const cat = a.category || "";
     const sym = (curCat === "company" && a.symbol) ? `<span class="nc-sym">${esc(a.symbol)}</span>` : "";
-    const badge = ib ? `<span class="nc-badge" style="background:${ib.bg};color:${ib.fg}">${esc(imp)} impact</span>` : "";
+    const badge = ib ? `<span class="nc-badge" style="background:${ib.bg};color:${ib.fg};border:1px solid ${ib.bd}">${esc(imp.toUpperCase())}</span>` : "";
     const summary = a.summary ? `<div class="nc-summary">${esc(a.summary)}</div>` : "";
     const fullText = (a.full_summary && String(a.full_summary).trim());
+    const rt = readTime(fullText || "");
+    const artFoot = `<div class="nc-article-foot">Scorr Intelligence${a.published_at?` &middot; Published ${esc(fmtDate(a.published_at))}`:""}${cat?` &middot; ${esc(cat)}`:""}${imp?` &middot; ${esc(imp)} impact`:""}</div>`;
     const full = fullText
-      ? `<div class="nc-full">${esc(a.full_summary)}</div>`
-      : `<div class="nc-full">${esc(a.summary||"")}<div class="nc-coming">Full analysis coming soon</div></div>`;
+      ? `<div class="nc-full"><div class="nc-inner">${mdToHtml(fullText)}${artFoot}</div></div>`
+      : `<div class="nc-full"><div class="nc-inner">${esc(a.summary||"")}<div class="nc-coming">Full analysis coming soon</div></div></div>`;
+    // foot: reading time (when available) · timestamp · category
+    const footBits = [];
+    if(a.source_name) footBits.push(`<b>${esc(a.source_name)}</b>`);
+    if(rt) footBits.push(rt);
+    const ago = timeAgo(a.published_at); if(ago) footBits.push(ago);
+    if(cat) footBits.push(esc(cat));
     return `<div class="ncard" onclick="this.classList.toggle('open')">
       <div class="nc-top">
         ${sym}
         <span class="nc-dot" style="background:${dot}" title="${esc(sent)}"></span>
         ${badge}
+        <span class="nc-chev">&#9660;</span>
       </div>
       <div class="nc-head">${esc(a.headline)}</div>
       ${summary}
       ${full}
-      <div class="nc-foot"><b>${esc(a.source_name||"")}</b> &middot; ${timeAgo(a.published_at)}${a.category?` &middot; ${esc(a.category)}`:""}</div>
+      <div class="nc-foot">${footBits.join(" &middot; ")}</div>
     </div>`;
   }).join("");
 }
