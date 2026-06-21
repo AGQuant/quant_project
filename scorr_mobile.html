@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>Scorr</title>
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<style>
+  :root{
+    --bg:#f6f8fb; --card:#ffffff; --line:#e4e9f1; --line2:#d4dbe7;
+    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
+    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706; --violet:#7c3aed;
+    --font:'Sora',system-ui,-apple-system,sans-serif;
+    --shadow:0 1px 4px rgba(20,35,70,.06);
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800;900&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:var(--font);font-size:15px;line-height:1.5}
+
+  .hdr{display:flex;align-items:center;justify-content:space-between;height:48px;
+    padding:0 16px;background:#fff;border-bottom:1px solid var(--line);
+    position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+  .hdr .brand{font-size:18px;font-weight:900;color:var(--blu);letter-spacing:-.4px}
+  .hdr .clock{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:11px;color:var(--mut)}
+
+  .wrap{max-width:560px;margin:0 auto;padding:18px 14px 80px}
+
+  .hero{margin-bottom:18px}
+  .hero .line{font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.3px}
+  .pills{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;
+    color:var(--mut);background:#fff;border:1px solid var(--line2);border-radius:20px;padding:5px 11px}
+  .pill b{color:var(--txt)}
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--blu)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .tile{display:block;text-decoration:none;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:15px 14px;transition:.15s;box-shadow:0 1px 3px rgba(20,30,50,.04)}
+  .tile:active{transform:scale(.98)}
+  .tile .ic{font-size:22px;display:block;margin-bottom:9px;color:var(--accent,var(--blu))}
+  .tile .nm{font-size:15px;font-weight:800;color:var(--txt)}
+  .tile .ds{font-size:11px;color:var(--mut);margin-top:4px;line-height:1.4}
+  .t-cio{--accent:var(--cyan)} .t-gvm{--accent:var(--cyan)} .t-check{--accent:var(--grn)}
+  .t-scr{--accent:var(--violet)} .t-intel{--accent:var(--amber)} .t-v10{--accent:#db2777}
+
+  .foot{text-align:center;font-size:9.5px;color:var(--dim);margin-top:22px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <span class="brand">SCORR</span>
+  <span class="clock" id="clock">—</span>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="line">Learn More. Score More.</div>
+    <div class="pills">
+      <span class="pill"><span class="dot"></span><b>GVM</b> 1,771 stocks</span>
+      <span class="pill"><span class="dot"></span><b>V8</b> 5 baskets</span>
+      <span class="pill"><span class="dot"></span><b>Intelligence</b> daily</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <a class="tile t-cio" href="/cio">
+      <span class="ic">&#129302;</span>
+      <div class="nm">AI CIO</div>
+      <div class="ds">Ask anything about markets</div>
+    </a>
+    <a class="tile t-gvm" href="/cio2?model=gvm">
+      <span class="ic">&#9678;</span>
+      <div class="nm">GVM Score</div>
+      <div class="ds">Quality score for any stock</div>
+    </a>
+    <a class="tile t-check" href="/check">
+      <span class="ic">&#10003;</span>
+      <div class="nm">Trade Check</div>
+      <div class="ds">Validate before you act</div>
+    </a>
+    <a class="tile t-scr" href="/scanners">
+      <span class="ic">&#8862;</span>
+      <div class="nm">Screener</div>
+      <div class="ds">Find stocks systematically</div>
+    </a>
+    <a class="tile t-intel" href="/news">
+      <span class="ic">&#9733;</span>
+      <div class="nm">Intelligence</div>
+      <div class="ds">AI-written market analysis</div>
+    </a>
+    <a class="tile t-v10" href="/v10">
+      <span class="ic">&#9651;</span>
+      <div class="nm">V10</div>
+      <div class="ds">NIFTY index strategy</div>
+    </a>
+  </div>
+
+  <div class="foot">
+    Scorr &middot; Invest like an institution &middot; Freedom by 2035
+  </div>
+</div>
+
+<script>
+function tick(){
+  var t = new Date().toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',
+    hour:'2-digit',minute:'2-digit',hour12:false});
+  var el = document.getElementById('clock'); if(el) el.textContent = t + ' IST';
+}
+tick(); setInterval(tick, 30000);
+</script>
+<script src="/pwa.js" defer></script>
+</body>
+</html>
