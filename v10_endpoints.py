@@ -70,22 +70,25 @@ def v10_summary():
 
 @router.get("/vix")
 def v10_vix():
-    """India VIX — last 8 daily closes from the 5-min intraday feed (symbol INDIAVIX)."""
+    """India VIX — live LTP (cmp_prices) + last ~7 trading-day closes from the
+    5-min intraday feed (symbol INDIAVIX, fed by Fyers INDEX_LTP_SYMBOLS).
+    NOT US VIX — global_indices only carries ^VIX which is the US index."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                WITH d AS (
-                    SELECT DISTINCT ON (ts::date) ts::date AS dt, close
-                    FROM intraday_prices WHERE symbol='INDIAVIX'
-                    ORDER BY ts::date DESC, ts DESC LIMIT 8
-                )
-                SELECT close FROM d ORDER BY dt ASC
+                SELECT DISTINCT ON (ts::date) ts::date AS day, close::numeric AS vix
+                FROM intraday_prices
+                WHERE symbol='INDIAVIX' AND ts >= NOW() - INTERVAL '8 days'
+                ORDER BY ts::date ASC, ts DESC
             """)
-            data = [float(r[0]) for r in cur.fetchall() if r[0] is not None]
-        cur_v = data[-1] if data else 0.0
-        prev = data[-2] if len(data) > 1 else cur_v
-        return {"label": "India VIX", "cur": cur_v, "chg": cur_v - prev,
-                "data": data, "source": "intraday INDIAVIX"}
+            data = [float(r[1]) for r in cur.fetchall() if r[1] is not None]
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol='INDIAVIX'")
+            lr = cur.fetchone()
+            live = float(lr[0]) if lr and lr[0] is not None else None
+        cur_v = live if live is not None else (data[-1] if data else 0.0)
+        prev = data[-2] if len(data) >= 2 else cur_v
+        return {"label": "India VIX", "cur": cur_v, "chg": round(cur_v - prev, 2),
+                "data": data, "source": "intraday INDIAVIX + cmp_prices live"}
     except Exception as e:
         raise HTTPException(500, f"v10_vix failed: {e}")
 
