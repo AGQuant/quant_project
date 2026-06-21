@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scorr News · AI-Polished Market Intelligence</title>
+<title>Market Intelligence · Scorr</title>
 <style>
   :root{
     --bg:#f6f8fb; --card:#ffffff; --panel:#ffffff;
@@ -56,8 +56,14 @@
   @media(max-width:760px){.grid{grid-template-columns:1fr}}
 
   .ncard{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);
-    border-radius:13px;padding:15px 16px;text-decoration:none;transition:.15s;box-shadow:0 1px 3px rgba(20,30,50,.04)}
+    border-radius:13px;padding:15px 16px;text-decoration:none;transition:.15s;box-shadow:0 1px 3px rgba(20,30,50,.04);cursor:pointer}
   .ncard:hover{border-color:var(--blu);transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.09)}
+  .ncard.open{border-color:var(--blu)}
+  .nc-full{display:none;margin-top:12px;padding:12px 4px 2px;border-top:1px solid var(--line);
+    font-size:13px;line-height:1.7;color:var(--txt);white-space:pre-wrap}
+  .ncard.open .nc-full{display:block}
+  .ncard.open .nc-summary{-webkit-line-clamp:unset;display:block}
+  .nc-coming{margin-top:8px;font-size:11.5px;color:var(--dim);font-style:italic}
   .nc-top{display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap}
   .nc-sym{font-size:10px;font-weight:800;color:var(--blu);background:rgba(37,99,235,.10);
     border:1px solid rgba(37,99,235,.25);border-radius:6px;padding:2px 7px;letter-spacing:.03em}
@@ -102,7 +108,7 @@
 <div class="wrap">
   <div class="ph">
     <div>
-      <div class="ph-title">Scorr News</div>
+      <div class="ph-title">Market Intelligence</div>
       <div class="ph-sub">AI-Polished Market Intelligence</div>
       <div class="ph-meta" id="meta">Loading…</div>
     </div>
@@ -120,7 +126,7 @@
   </div>
 
   <div class="foot">
-    Scorr News &middot; AI-polished market intelligence &middot; sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
+    AI-polished market intelligence &middot; sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
   </div>
 </div>
 
@@ -195,7 +201,11 @@ function render(){
     const sym = (curCat === "company" && a.symbol) ? `<span class="nc-sym">${esc(a.symbol)}</span>` : "";
     const badge = ib ? `<span class="nc-badge" style="background:${ib.bg};color:${ib.fg}">${esc(imp)} impact</span>` : "";
     const summary = a.summary ? `<div class="nc-summary">${esc(a.summary)}</div>` : "";
-    return `<a class="ncard" href="${esc(a.url||'#')}" target="_blank" rel="noopener noreferrer">
+    const fullText = (a.full_summary && String(a.full_summary).trim());
+    const full = fullText
+      ? `<div class="nc-full">${esc(a.full_summary)}</div>`
+      : `<div class="nc-full">${esc(a.summary||"")}<div class="nc-coming">Full analysis coming soon</div></div>`;
+    return `<div class="ncard" onclick="this.classList.toggle('open')">
       <div class="nc-top">
         ${sym}
         <span class="nc-dot" style="background:${dot}" title="${esc(sent)}"></span>
@@ -203,8 +213,9 @@ function render(){
       </div>
       <div class="nc-head">${esc(a.headline)}</div>
       ${summary}
+      ${full}
       <div class="nc-foot"><b>${esc(a.source_name||"")}</b> &middot; ${timeAgo(a.published_at)}${a.category?` &middot; ${esc(a.category)}`:""}</div>
-    </a>`;
+    </div>`;
   }).join("");
 }
 
