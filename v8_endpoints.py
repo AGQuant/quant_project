@@ -655,12 +655,143 @@ def filter_config(basket: str):
     return {"basket": basket, "filters": rows, "count": len(rows), **BASKET_META.get(basket, {})}
 
 
+# ── V10 ATM-option enrichment (task 51) ──────────────────────────────────────
+def _nearest_nse_expiry(today: date) -> date:
+    """Nearest NSE monthly expiry = last Tuesday of the month (next month if passed)."""
+    def last_tue(y: int, m: int) -> date:
+        nxt  = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+        last = nxt - timedelta(days=1)
+        return last - timedelta(days=(last.weekday() - 1) % 7)   # Tuesday == weekday 1
+    exp = last_tue(today.year, today.month)
+    if exp < today:
+        ny = today.year + (1 if today.month == 12 else 0)
+        nm = 1 if today.month == 12 else today.month + 1
+        exp = last_tue(ny, nm)
+    return exp
+
+
+def _enrich_atm_options(rows: list, cur) -> list:
+    """Add cPx, pPx, hVol, ivp, atm_strike, dte to each qualified row (task 51)."""
+    if not rows:
+        return rows
+    symbols = list({r["symbol"] for r in rows if r.get("symbol")})
+    if not symbols:
+        return rows
+
+    # 30-day annualized realized vol (hVol) -- sanity-clamped to [0.05, 2.0]
+    hvol_map = {}
+    cur.execute("""
+        WITH dr AS (
+            SELECT symbol,
+                   LN(close::numeric / LAG(close::numeric)
+                       OVER (PARTITION BY symbol ORDER BY price_date)) AS lr
+            FROM raw_prices
+            WHERE price_date >= CURRENT_DATE - 35 AND symbol = ANY(%s)
+        )
+        SELECT symbol, ROUND((STDDEV(lr) * SQRT(252))::numeric, 4) AS hvol
+        FROM dr WHERE lr IS NOT NULL GROUP BY symbol
+    """, (symbols,))
+    for sym, hv in cur.fetchall():
+        if hv is None:
+            continue
+        hv = float(hv)
+        if hv < 0.05 or hv > 2.0:
+            print(f"[v10] hVol out of range for {sym}: {hv} -- capping to [0.05, 2.0]")
+            hv = min(max(hv, 0.05), 2.0)
+        hvol_map[sym] = hv
+
+    # IV percentile -- rank of rolling 30d hVol over trailing window.
+    # NB: log-returns isolated in their own CTE -- Postgres forbids nested window fns.
+    ivp_map = {}
+    cur.execute("""
+        WITH lr AS (
+            SELECT symbol, price_date,
+                   LN(close::numeric / LAG(close::numeric)
+                       OVER (PARTITION BY symbol ORDER BY price_date)) AS lr
+            FROM raw_prices
+            WHERE price_date >= CURRENT_DATE - 270 AND symbol = ANY(%s)
+        ),
+        hv AS (
+            SELECT symbol, price_date,
+                   STDDEV(lr) OVER (PARTITION BY symbol ORDER BY price_date
+                         ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) * SQRT(252) AS hv
+            FROM lr WHERE lr IS NOT NULL
+        ),
+        ranked AS (
+            SELECT symbol, hv, price_date,
+                   PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY hv) AS pr
+            FROM hv WHERE hv IS NOT NULL
+        ),
+        latest AS (
+            SELECT DISTINCT ON (symbol) symbol, ROUND((pr * 100)::numeric) AS ivp
+            FROM ranked ORDER BY symbol, price_date DESC
+        )
+        SELECT symbol, ivp FROM latest
+    """, (symbols,))
+    for sym, ivp in cur.fetchall():
+        ivp_map[sym] = int(ivp) if ivp is not None else None
+
+    # Nearest expiry + dte (calendar days)
+    today       = _ist_now().date()
+    nearest_exp = _nearest_nse_expiry(today)
+    dte         = max((nearest_exp - today).days, 0)
+
+    # Actual listed expiry in option_chain (index options only: NIFTY / BANKNIFTY)
+    cur.execute("SELECT MIN(expiry) FROM option_chain WHERE expiry >= CURRENT_DATE")
+    oc_row = cur.fetchone()
+    oc_exp = oc_row[0] if oc_row else None
+
+    for r in rows:
+        sym  = r["symbol"]
+        r["hVol"] = hvol_map.get(sym)
+        r["ivp"]  = ivp_map.get(sym)
+        r["dte"]  = dte
+        r["cPx"]  = None
+        r["pPx"]  = None
+        try:
+            spot = float(r.get("cmp")) if r.get("cmp") is not None else None
+        except (TypeError, ValueError):
+            spot = None
+        r["atm_strike"] = round(spot / 50) * 50 if spot else None
+
+    # ATM call/put ltp -- only where option_chain has the underlying (NIFTY/BANKNIFTY)
+    if oc_exp:
+        for r in rows:
+            atm = r.get("atm_strike")
+            if atm is None:
+                continue
+            cur.execute("""
+                SELECT option_type, ltp FROM option_chain
+                WHERE underlying = %s AND strike = %s AND expiry = %s
+                  AND ts = (SELECT MAX(ts) FROM option_chain
+                            WHERE underlying = %s AND expiry = %s)
+            """, (r["symbol"], atm, oc_exp, r["symbol"], oc_exp))
+            for ot, ltp in cur.fetchall():
+                if ltp is None:
+                    continue
+                if ot == "CE":   r["cPx"] = float(ltp)
+                elif ot == "PE": r["pPx"] = float(ltp)
+    return rows
+
+
+def _enrich_qualified_result(res: dict) -> dict:
+    """Wrap any qualified-style result and enrich its 'stocks' with ATM option fields."""
+    try:
+        stocks = res.get("stocks") if isinstance(res, dict) else None
+        if stocks:
+            with _conn() as conn, conn.cursor() as cur:
+                _enrich_atm_options(stocks, cur)
+    except Exception as ex:
+        print(f"[v10] ATM enrichment failed: {ex}")
+    return res
+
+
 @router.get("/qualified/{basket}")
 def qualified(basket: str, response: Response, limit: int = 50):
     response.headers["Cache-Control"] = "max-age=300"   # 5-min — matches signal cadence
     basket = basket.lower()
-    if basket == "sell_overbought": return sell_overbought(limit=limit)
-    if basket == "buy_s1_bounce":   return buy_s1_bounce_qualified(limit=limit)
+    if basket == "sell_overbought": return _enrich_qualified_result(sell_overbought(limit=limit))
+    if basket == "buy_s1_bounce":   return _enrich_qualified_result(buy_s1_bounce_qualified(limit=limit))
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         open_pos  = _load_open_positions(basket)
@@ -728,8 +859,8 @@ def qualified(basket: str, response: Response, limit: int = 50):
         elif basket == "sell_momentum":
             extra = {"target": "S2", "target_formula": "S2 = PP - (H5 - L5)",
                      "stop_formula": f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)", "sl_mult": SELL_MOMENTUM_SL_MULT}
-        return {"basket": basket, "count": len(rows), "stocks": rows,
-                "source": source_note, **BASKET_META.get(basket, {}), **extra}
+        return _enrich_qualified_result({"basket": basket, "count": len(rows), "stocks": rows,
+                "source": source_note, **BASKET_META.get(basket, {}), **extra})
     except Exception as e:
         raise HTTPException(500, f"qualified failed: {e}")
 
