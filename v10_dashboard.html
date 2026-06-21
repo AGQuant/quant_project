@@ -361,6 +361,11 @@ async function loadADR(){
   const a = await getJSON('/api/v8/adr');
   D.adr = { adv:a.advances||0, dec:a.declines||0, unch:a.unchanged||0, ratio:Number(a.adr)||0 };
 }
+async function loadVix(){
+  const v = await getJSON('/api/v10/vix');
+  const data = Array.isArray(v.data)?v.data.map(Number):[];
+  D.vix = { cur:Number(v.cur)||0, chg:Number(v.chg)||0, data, label:v.label||'India VIX' };
+}
 function mkPcr(resp){
   const rows = rowsOf(resp).slice().reverse();
   const last8 = rows.slice(-8);
@@ -442,7 +447,7 @@ async function loadQual(){
 }
 
 async function loadLive(){
-  const tasks=[loadMood,loadV10,loadADR,loadPCR,loadPivots,loadOpen,loadClosed,loadQual];
+  const tasks=[loadMood,loadV10,loadVix,loadADR,loadPCR,loadPivots,loadOpen,loadClosed,loadQual];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
@@ -515,12 +520,12 @@ function rSignal(){
 }
 
 function rVix(){
-  const {cur,chg,data}=D.vix;
+  const {cur,chg,data,label}=D.vix;
   const has = data && data.length;
   const vc = cur<15?UP:cur<20?C.amber:DN;
   const vl = cur<15?'CALM':cur<20?'MODERATE':'ELEVATED';
   return `<div class="card">
-    <div class="card-hd"><div class="t">India VIX</div>${bdg(vl,vc)}</div>
+    <div class="card-hd"><div class="t">${esc(label||'India VIX')}</div>${bdg(vl,vc)}</div>
     <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">
       <span class="big-val" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
       <span class="big-chg" style="color:${cx(chg)}">${has?sgn(chg,2):''}</span></div>
@@ -709,7 +714,7 @@ function render(){
     rTopBar() + rMood() +
     `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
     `<div class="row r-3">${rADR()}${rPCR()}${rPivot()}</div>` +
-    rOI() + rOpen() + rClosed() + rSettings() + rQual() +
+    rOpen() + rClosed() + rSettings() + rQual() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
 }
 
