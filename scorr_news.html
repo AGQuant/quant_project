@@ -82,10 +82,12 @@
   .art-rt{color:var(--mut)}
   .art-expand{margin-left:auto;color:var(--blu);font-weight:600}
 
-  /* Expanded article — rendered Markdown typography */
-  .art-full{display:none;margin-top:16px;max-width:680px;font-size:15px;line-height:1.7;color:var(--txt)}
-  .art.open .art-full{display:block}
-  .art-full > :first-child{margin-top:0}
+  /* Expanded article — rendered Markdown typography (smooth grid-row reveal) */
+  .art-full{display:grid;grid-template-rows:0fr;margin-top:0;
+    transition:grid-template-rows .3s ease, margin-top .3s ease}
+  .art.open .art-full{grid-template-rows:1fr;margin-top:16px}
+  .art-fwrap{min-height:0;overflow:hidden;max-width:680px;font-size:15px;line-height:1.7;color:var(--txt)}
+  .art-fwrap > :first-child{margin-top:0}
   .art-full h1,.art-full h2,.art-full h3,.art-full h4{font-family:var(--serif);line-height:1.25;
     margin:24px 0 10px;font-weight:600;color:var(--txt)}
   .art-full h1{font-size:25px}
@@ -220,9 +222,25 @@ function pick(cat){
   load();
 }
 
-function toggle(id){
-  openId = (openId === id) ? null : id;
-  render();
+function setExpandLabel(art, isOpen){
+  const s = art.querySelector(".art-expand");
+  if(s) s.textContent = isOpen ? "Collapse ↑" : "Read analysis ↓";
+}
+function toggle(ev, id){
+  const art = ev.currentTarget;
+  const isOpen = art.classList.contains("open");
+  // clicks inside an already-open article (links, text select, tables) shouldn't collapse it
+  if(isOpen && ev.target.closest(".art-full")) return;
+  // accordion: collapse any other open card (no full re-render — just class toggles)
+  if(!isOpen){
+    document.querySelectorAll(".art.open").forEach(el => {
+      if(el !== art){ el.classList.remove("open"); setExpandLabel(el, false); }
+    });
+  }
+  art.classList.toggle("open");
+  const nowOpen = art.classList.contains("open");
+  setExpandLabel(art, nowOpen);
+  openId = nowOpen ? id : null;
 }
 
 async function load(){
@@ -257,7 +275,7 @@ function artHTML(a, idx, isLead){
   const fullHTML = (a.full_summary && String(a.full_summary).trim())
     ? renderMd(a.full_summary)
     : renderMd(a.summary||"") + `<p style="color:var(--dim);font-style:italic;font-size:13px">Full analysis coming soon.</p>`;
-  return `<div class="art ${impClass}${isLead?' lead':''}${open}" onclick="toggle(${JSON.stringify(id)})">
+  return `<div class="art ${impClass}${isLead?' lead':''}${open}" data-id="${esc(id)}" onclick="toggle(event, ${JSON.stringify(id)})">
     <div class="art-kicker">
       ${leadTag}
       <span>${esc(a.category||curCat)}</span>
@@ -266,7 +284,7 @@ function artHTML(a, idx, isLead){
     </div>
     <div class="art-head">${esc(a.headline)}</div>
     <div class="art-sum">${esc(a.summary||"")}</div>
-    <div class="art-full">${fullHTML}</div>
+    <div class="art-full"><div class="art-fwrap">${fullHTML}</div></div>
     <div class="art-foot">
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
       <span>·</span><b>${esc(a.source_name||"")}</b>
