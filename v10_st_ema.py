@@ -170,13 +170,14 @@ def _signal_for(table):
             "st_dir": direction, "flip": bool(flipped), "zone": int(zone[last]), "signal": signal}
 
 
-def current_signal():
-    s = _signal_for(TABLE)
+def current_signal(feed_symbol="NIFTY50"):
+    cfg = INDEX_CFG.get(feed_symbol, INDEX_CFG[FEED_SYMBOL])
+    s = _signal_for(cfg["table"])
     if s.get("status") != "ok":
-        return s
+        return {**s, "symbol": feed_symbol}
     px = s["price"]; signal = s["signal"]
     return {
-        "status": "ok", "as_of": s["as_of"], "price": round(px, 1),
+        "status": "ok", "symbol": feed_symbol, "as_of": s["as_of"], "price": round(px, 1),
         "st_dir": "up" if s["st_dir"] == 1 else "down", "st_flip": s["flip"],
         "gate_zone": "buy" if s["zone"] == 1 else "sell", "signal": signal,
         "stop": round(px - SL_PTS, 1) if signal == "BUY" else (round(px + SL_PTS, 1) if signal == "SELL" else None),
