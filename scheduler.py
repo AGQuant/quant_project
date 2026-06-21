@@ -122,15 +122,13 @@ def _compute_and_store_adr(conn=None):
                         COUNT(*) AS total
                     FROM li JOIN pc ON pc.symbol = li.symbol
                 )
-                INSERT INTO adr_daily (price_date, advances, declines, unchanged, adr, universe_count)
+                INSERT INTO adr_daily (price_date, advances, declines, unchanged, adr)
                 SELECT CURRENT_DATE, advances, declines, unchanged,
-                    CASE WHEN declines>0 THEN ROUND(advances::numeric/declines,3) ELSE advances END,
-                    total
+                    CASE WHEN declines>0 THEN ROUND(advances::numeric/declines,3) ELSE advances END
                 FROM counts
                 ON CONFLICT (price_date) DO UPDATE SET
                     advances=EXCLUDED.advances, declines=EXCLUDED.declines,
-                    unchanged=EXCLUDED.unchanged, adr=EXCLUDED.adr,
-                    universe_count=EXCLUDED.universe_count
+                    unchanged=EXCLUDED.unchanged, adr=EXCLUDED.adr
             """)
             conn.commit()
         log.info("ADR computed and stored")
@@ -392,9 +390,9 @@ def _backfill_adr_for_date(conn, target) -> bool:
                        COUNT(*) FILTER (WHERE cur.close = prev.close) AS unch,
                        COUNT(*) AS total
                 FROM cur JOIN prev USING (symbol))
-            INSERT INTO adr_daily (price_date, advances, declines, unchanged, adr, universe_count)
+            INSERT INTO adr_daily (price_date, advances, declines, unchanged, adr)
             SELECT %(t)s, adv, dcl, unch,
-                   CASE WHEN dcl>0 THEN ROUND(adv::numeric/dcl,3) ELSE adv END, total
+                   CASE WHEN dcl>0 THEN ROUND(adv::numeric/dcl,3) ELSE adv END
             FROM counts WHERE total > 0
             ON CONFLICT (price_date) DO NOTHING
         """, {"t": target})
