@@ -813,7 +813,6 @@ async function loadScreen(universe){
   const tk=setInterval(()=>{mi=(mi+1)%msgs.length;ld.textContent=msgs[mi];},1400);
   document.getElementById('screenBtn').disabled=true;
   document.getElementById('runBtn').disabled=true;
-  document.getElementById('scrResult').classList.remove('show');
   try{
     const r=await fetch('/api/trade-check/screen-nifty50?n='+n+'&top=10');
     clearInterval(tk);ld.classList.remove('show');
