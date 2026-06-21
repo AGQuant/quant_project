@@ -497,6 +497,10 @@ def quant_basket():
 def news_page():
     with open("scorr_news.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/v10", response_class=HTMLResponse)
+def v10_dashboard_page():
+    with open("v10_dashboard.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
 
