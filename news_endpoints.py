@@ -29,6 +29,20 @@ def _rows(cur):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+# Quality gate (task #54): exclude junk from the unpolished backlog count/sample so
+# the manual polish session sees only real articles (mirrors news_fetcher ingest filter).
+_QUALITY_CLAUSE = (
+    " AND LENGTH(COALESCE(r.description,'')) >= 80"
+    " AND r.description NOT LIKE '% &nbsp;%'"
+    " AND r.description NOT LIKE '%NSE/BSE%'"
+    " AND r.description NOT LIKE '%Share Price%'"
+    " AND r.description NOT LIKE '%Option Chain%'"
+    " AND r.headline NOT LIKE '%AD HOC%'"
+    " AND r.headline NOT LIKE '%Share Price%'"
+    " AND r.headline NOT LIKE '%Option Chain%'"
+)
+
+
 def _polished_by_type(cur, source_type: str, limit: int):
     cur.execute("""
         SELECT p.id AS polished_id, r.id AS raw_id,
@@ -88,18 +102,20 @@ def news_company(symbol: str):
 @router.get("/api/news/unpolished")
 def news_unpolished(sample: int = 20):
     """Count + sample of raw_news rows with no matching polished_news.
-    Used by the manual Claude.ai polish session to know what is pending."""
+    Used by the manual Claude.ai polish session to know what is pending.
+    Quality-filtered (task #54) so the count reflects real articles, not junk."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT COUNT(*) FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """)
+        """ + _QUALITY_CLAUSE)
         pending = cur.fetchone()[0]
         cur.execute("""
             SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
                    r.source_name, r.url, r.published_at
             FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
+        """ + _QUALITY_CLAUSE + """
             ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
             LIMIT %s
         """, (sample,))
