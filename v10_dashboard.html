@@ -6,27 +6,166 @@
 <title>Scorr · V10 Dashboard</title>
 <style>
   :root{
-    --bg:#050b18; --card:#0c1526; --dim:#0f1e33; --border:#1a2d45;
-    --teal:#00c4a3; --red:#f03e5c; --amber:#f0a500; --blue:#4895ef;
-    --text:#cdd9e8; --muted:#627d98;
+    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe; --panel:#ffffff;
+    --line:#e4e9f1; --line2:#d4dbe7;
+    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
+    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706; --violet:#7c3aed;
+    --font:'Sora',system-ui,-apple-system,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --shadow:0 1px 4px rgba(20,35,70,.06);
   }
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800;900&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{min-height:100%;background:var(--bg);color:var(--text);
-    font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px}
+  html,body{min-height:100%;background:var(--bg);color:var(--txt);
+    font-family:var(--font);font-size:14px;line-height:1.5}
 
-  /* shared Scorr model-nav (dark variant) */
-  .model-nav{display:flex;align-items:center;gap:2px;height:44px;background:var(--card);
-    border-bottom:1px solid var(--border);padding:0 14px;overflow-x:auto;scrollbar-width:none;
-    position:sticky;top:0;z-index:50}
+  /* shared Scorr model-nav (light) */
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
+    border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
+    position:sticky;top:0;z-index:50;box-shadow:var(--shadow)}
   .model-nav::-webkit-scrollbar{display:none}
-  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:44px;cursor:pointer;
+  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
     border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
-    color:var(--muted);font-size:11.5px;font-weight:600;transition:.12s}
-  .mnav-item:hover{color:var(--text)}
-  .mnav-item.active{border-bottom-color:var(--teal);color:var(--teal)}
-  .mnav-sep{width:1px;height:18px;background:var(--border);flex-shrink:0;margin:0 4px}
+    color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:var(--txt)}
+  .mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
+  .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
-  #root .loading{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
+  .wrap{max-width:1280px;margin:0 auto;padding:14px 16px 50px}
+
+  /* top bar */
+  .topbar{display:flex;align-items:center;justify-content:space-between;
+    padding:6px 0 12px;border-bottom:1px solid var(--line);margin-bottom:12px;flex-wrap:wrap;gap:10px}
+  .tb-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .brand{font-size:18px;font-weight:900;color:var(--blu);letter-spacing:-.4px}
+  .tb-pipe{color:var(--line2)}
+  .tb-title{font-size:13px;font-weight:700;color:var(--txt)}
+  .tb-meta{font-size:9px;color:var(--mut);background:var(--card2);border:1px solid var(--line);
+    padding:3px 8px;border-radius:5px;font-family:var(--mono)}
+  .tb-right{display:flex;align-items:center;gap:14px}
+  .tb-clock{font-family:var(--mono);font-size:11px;color:var(--mut)}
+  .tb-pnl{text-align:right}
+  .tb-pnl .lbl{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  .tb-pnl .val{font-family:var(--mono);font-size:15px;font-weight:800}
+
+  /* cards */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px;box-shadow:var(--shadow)}
+  .card-hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+  .card-hd .t{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.8px;font-weight:700}
+  .card-hd .s{font-size:8px;color:var(--dim);margin-top:2px}
+
+  .row{display:grid;gap:10px;margin-bottom:10px}
+  .r-2-16{grid-template-columns:3fr 1.6fr}
+  .r-3{grid-template-columns:1fr 1.4fr 1fr}
+  @media(max-width:900px){.r-2-16,.r-3{grid-template-columns:1fr}}
+
+  /* badges */
+  .bdg{display:inline-flex;align-items:center;border-radius:5px;padding:2px 8px;
+    font-size:10px;font-weight:700;font-family:var(--mono);white-space:nowrap;
+    border:1px solid;line-height:1.4}
+  .bdg.sm{padding:1px 6px;font-size:9px}
+
+  /* mood pulse */
+  .mood{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;
+    border-radius:12px;padding:12px 14px;border:1px solid;box-shadow:var(--shadow)}
+  .mood-dots{display:flex;gap:3px}
+  .pdot{width:6px;height:6px;border-radius:50%;animation:pdot 1.5s ease-in-out infinite}
+  .pdot:nth-child(2){animation-delay:.28s}.pdot:nth-child(3){animation-delay:.56s}
+  @keyframes pdot{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:.25;transform:scale(.55)}}
+  .mood-gate{font-weight:800;font-size:14px}
+  .mood-conds{display:flex;gap:6px;flex:1;flex-wrap:wrap}
+  .mc{background:var(--card2);border-radius:6px;padding:3px 9px;border:1px solid;
+    display:flex;gap:6px;align-items:center}
+  .mc .l{font-size:9px;color:var(--mut)}
+  .mc .v{font-family:var(--mono);font-size:11px;font-weight:700}
+  .mood-slots{display:flex;gap:6px}
+  .slot{border-radius:6px;padding:5px 13px;text-align:center;border:1px solid}
+  .slot .n{font-family:var(--mono);font-size:15px;font-weight:900}
+  .slot .l{font-size:8px;color:var(--mut);margin-top:1px}
+
+  /* signal */
+  .sig-grid{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .sig-sym{font-family:var(--mono);font-size:26px;font-weight:900;line-height:1}
+  .sig-tags{display:flex;gap:6px;margin-top:6px;align-items:center}
+  .sig-boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;flex:1}
+  .sbox{background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+  .sbox .l{font-size:8px;color:var(--dim);margin-bottom:2px}
+  .sbox .v{font-family:var(--mono);font-size:12px;font-weight:800}
+  .sig-pnl{text-align:center;min-width:70px}
+  .conf-bar{width:64px;height:4px;background:var(--line);border-radius:2px;margin:5px auto 2px;overflow:hidden}
+  .conf-fill{height:100%;border-radius:2px}
+
+  /* big metric */
+  .big-val{font-family:var(--mono);font-size:26px;font-weight:900}
+  .big-chg{font-family:var(--mono);font-size:12px}
+
+  /* ADR */
+  .adr-cells{display:flex;gap:6px;margin-bottom:8px}
+  .adr-cell{flex:1;border-radius:6px;padding:7px 6px;text-align:center;border:1px solid}
+  .adr-cell .n{font-family:var(--mono);font-size:20px;font-weight:900}
+  .adr-cell .l{font-size:8px;color:var(--mut);margin-top:3px}
+  .adr-bar{display:flex;height:6px;border-radius:3px;overflow:hidden}
+  .adr-pct{display:flex;justify-content:space-between;margin-top:3px;font-size:8px}
+
+  /* pivots */
+  .pvt-row{display:flex;justify-content:space-between;align-items:center;
+    padding:3px 5px;border-radius:4px;margin-bottom:2px}
+  .pvt-l{font-family:var(--mono);font-size:11px;font-weight:800;width:26px}
+  .pvt-v{font-family:var(--mono);font-size:11px;color:var(--txt)}
+  .pvt-d{font-family:var(--mono);font-size:9px;color:var(--mut)}
+  .pvt-cmp{display:flex;justify-content:space-between;padding:6px 5px 0;
+    border-top:1px solid var(--line);margin-top:4px}
+
+  /* OI */
+  .oi-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+  .oi-card{background:var(--card2);border-radius:8px;padding:10px;border:1px solid}
+  .oi-card .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .oi-card .nm{font-size:10px;color:var(--mut);font-weight:700}
+  .oi-val{font-family:var(--mono);font-size:15px;font-weight:800;color:var(--txt)}
+  .oi-sub{display:flex;gap:14px;margin-top:6px}
+  .oi-sub .l{font-size:8px;color:var(--dim)}
+  .oi-sub .v{font-family:var(--mono);font-size:12px;font-weight:700}
+  .oi-charts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .oi-chart-lbl{font-size:8px;color:var(--mut);margin-bottom:4px}
+
+  /* tables */
+  .tbl-scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  thead th{padding:5px 8px;color:var(--mut);font-weight:700;text-align:left;
+    font-size:9px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
+  tbody td{padding:6px 8px;border-bottom:1px solid var(--line)}
+  tbody tr:hover td{background:rgba(37,99,235,.03)}
+  .td-mono{font-family:var(--mono)}
+  .empty-row td{padding:14px 8px;text-align:center;color:var(--mut);font-size:10px}
+
+  /* IVP bar */
+  .ivp-wrap{display:flex;align-items:center;gap:7px}
+  .ivp-track{width:48px;height:5px;background:var(--line);border-radius:3px;overflow:hidden;flex-shrink:0}
+  .ivp-fill{height:100%;border-radius:3px}
+  .ivp-val{font-family:var(--mono);font-size:11px;font-weight:800}
+
+  /* settings */
+  .set-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  @media(max-width:760px){.set-grid{grid-template-columns:repeat(2,1fr)}}
+  .set-box{background:var(--card2);border-radius:6px;padding:6px 8px;border:1px solid var(--line)}
+  .set-box .k{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+  .set-box .v{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--txt)}
+
+  /* legend */
+  .legend{display:flex;gap:20px;margin-top:10px;padding:6px 10px;
+    background:var(--card2);border-radius:6px;flex-wrap:wrap}
+  .lg{display:flex;align-items:center;gap:5px}
+  .lg-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+  .lg .l{font-size:8px;color:var(--mut)}
+
+  .note{font-size:8px;color:var(--dim);margin-top:6px;text-align:right}
+  .foot{text-align:center;padding:16px 0 4px;font-size:8px;color:var(--dim);
+    border-top:1px solid var(--line);margin-top:8px}
+  .loading{padding:60px 20px;text-align:center;color:var(--mut);font-size:13px}
+
+  /* mini sparkline svg */
+  svg.spark{display:block;width:100%;height:auto}
 </style>
 </head>
 <body>
@@ -54,166 +193,180 @@
   <a class="mnav-item active" href="/v10"><span>&#9651;</span>V10</a>
 </nav>
 
-<div id="root"><div class="loading">Loading V10 Dashboard…</div></div>
+<div class="wrap" id="app">
+  <div class="loading">Loading V10 Dashboard…</div>
+</div>
 
-<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script>
+/* ════════════════════════════════════════════════════════════════
+   SCORR V10 DASHBOARD — vanilla JS, light theme, zero framework
+   No React, no Babel, no transpile. Cannot freeze on load.
+   Charts = hand-drawn inline SVG sparklines.
+════════════════════════════════════════════════════════════════ */
 
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useMemo } = React;
-const {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  Tooltip, ResponsiveContainer, ReferenceLine
-} = Recharts;
-
-/* ══════════════════════════════════════════════════════
-   BLACK-SCHOLES ENGINE   (r=0.065, T=dte/365, hVol direct)
-══════════════════════════════════════════════════════ */
-const ncdf = x => {
-  const a = [0.254829592,-0.284496736,1.421413741,-1.453152027,1.061405429];
-  const p = 0.3275911, s = x < 0 ? -1 : 1;
-  const ax = Math.abs(x) / Math.sqrt(2);
-  const t = 1 / (1 + p * ax);
-  return 0.5 * (1 + s * (1 - (((((a[4]*t+a[3])*t)+a[2])*t+a[1])*t+a[0])*t*Math.exp(-ax*ax)));
-};
-const bsCall = (S, K, T, r, v) => {
-  if (!T || !v || S <= 0) return 0;
-  const d1 = (Math.log(S/K) + (r + v*v/2)*T) / (v*Math.sqrt(T));
-  const d2 = d1 - v * Math.sqrt(T);
-  return S*ncdf(d1) - K*Math.exp(-r*T)*ncdf(d2);
-};
-const bsPut = (S, K, T, r, v) => {
-  if (!T || !v || S <= 0) return 0;
-  const d1 = (Math.log(S/K) + (r + v*v/2)*T) / (v*Math.sqrt(T));
-  const d2 = d1 - v * Math.sqrt(T);
-  return K*Math.exp(-r*T)*ncdf(-d2) - S*ncdf(-d1);
-};
-
-/* ══════════════════════════════════════════════════════
-   SCORR THEME  ─  single source
-══════════════════════════════════════════════════════ */
+/* ---- theme tokens (read from CSS vars for consistency) ---- */
+const CS = getComputedStyle(document.documentElement);
 const C = {
-  bg:     '#050b18',
-  card:   '#0c1526',
-  dim:    '#0f1e33',
-  border: '#1a2d45',
-  teal:   '#00c4a3',
-  red:    '#f03e5c',
-  amber:  '#f0a500',
-  blue:   '#4895ef',
-  text:   '#cdd9e8',
-  muted:  '#627d98',
+  grn:   CS.getPropertyValue('--grn').trim()   || '#0fa968',
+  red:   CS.getPropertyValue('--red').trim()   || '#e23744',
+  blu:   CS.getPropertyValue('--blu').trim()   || '#2563eb',
+  cyan:  CS.getPropertyValue('--cyan').trim()  || '#0891b2',
+  amber: CS.getPropertyValue('--amber').trim() || '#d97706',
+  violet:CS.getPropertyValue('--violet').trim()|| '#7c3aed',
+  txt:   CS.getPropertyValue('--txt').trim()   || '#1c2536',
+  mut:   CS.getPropertyValue('--mut').trim()   || '#5a6781',
+  line:  CS.getPropertyValue('--line').trim()  || '#e4e9f1',
+  card:  CS.getPropertyValue('--card').trim()  || '#ffffff',
 };
+/* semantic: green=up, red=down (light-theme palette) */
+const UP = C.grn, DN = C.red;
 
-const card  = (x={}) => ({ background:C.card, border:`1px solid ${C.border}`, borderRadius:'8px', padding:'14px', ...x });
-const mono  = { fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace' };
-const pct   = (n, d=2) => (n>=0?'+':'')+Number(n).toFixed(d)+'%';
-const sgn   = (n, d=2) => (n>=0?'+':'')+Number(n).toFixed(d);
-const cx    = n => n >= 0 ? C.teal : C.red;
-const fK    = n => Math.abs(n)>=1e7?`${(n/1e7).toFixed(2)}Cr`:Math.abs(n)>=1e5?`${(n/1e5).toFixed(1)}L`:n.toLocaleString('en-IN');
-const num   = (v, d=0) => (typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
+/* ---- Black-Scholes (r=0.065, T=dte/365, hVol direct) ---- */
+const ncdf = x => {
+  const a=[0.254829592,-0.284496736,1.421413741,-1.453152027,1.061405429];
+  const p=0.3275911, s=x<0?-1:1, ax=Math.abs(x)/Math.sqrt(2), t=1/(1+p*ax);
+  return 0.5*(1+s*(1-(((((a[4]*t+a[3])*t)+a[2])*t+a[1])*t+a[0])*t*Math.exp(-ax*ax)));
+};
+const bsCall=(S,K,T,r,v)=>{ if(!T||!v||S<=0)return 0;
+  const d1=(Math.log(S/K)+(r+v*v/2)*T)/(v*Math.sqrt(T)), d2=d1-v*Math.sqrt(T);
+  return S*ncdf(d1)-K*Math.exp(-r*T)*ncdf(d2); };
+const bsPut=(S,K,T,r,v)=>{ if(!T||!v||S<=0)return 0;
+  const d1=(Math.log(S/K)+(r+v*v/2)*T)/(v*Math.sqrt(T)), d2=d1-v*Math.sqrt(T);
+  return K*Math.exp(-r*T)*ncdf(-d2)-S*ncdf(-d1); };
 
-/* mini reusable atoms */
-const Bdg = ({ ch, cl=C.teal, sm }) => (
-  <span style={{
-    background:`${cl}22`, color:cl, border:`1px solid ${cl}44`,
-    borderRadius:'4px', padding:sm?'1px 5px':'2px 8px',
-    fontSize:sm?'9px':'10px', fontWeight:700, ...mono, whiteSpace:'nowrap',
-  }}>{ch}</span>
-);
-const Hdr = ({ title, sub, right }) => (
-  <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:'10px' }}>
-    <div>
-      <div style={{ fontSize:'10px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', fontWeight:700 }}>{title}</div>
-      {sub && <div style={{ fontSize:'8px', color:C.muted, marginTop:'2px' }}>{sub}</div>}
-    </div>
-    {right}
-  </div>
-);
-const TH = ({ cols }) => (
-  <tr style={{ borderBottom:`1px solid ${C.border}` }}>
-    {cols.map(h => (
-      <th key={h} style={{ padding:'4px 8px', color:C.muted, fontWeight:700, textAlign:'left', fontSize:'9px', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
-    ))}
-  </tr>
-);
+/* ---- format helpers ---- */
+const pct = (n,d=2)=>(n>=0?'+':'')+Number(n).toFixed(d)+'%';
+const sgn = (n,d=2)=>(n>=0?'+':'')+Number(n).toFixed(d);
+const cx  = n => n>=0 ? UP : DN;
+const num = (v,d=0)=>(typeof v==='number'?v:Number(v)||0).toLocaleString('en-IN',{maximumFractionDigits:d});
+const fK  = n => Math.abs(n)>=1e7?(n/1e7).toFixed(2)+'Cr':Math.abs(n)>=1e5?(n/1e5).toFixed(1)+'L':num(n);
+const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-/* ══════════════════════════════════════════════════════
-   DATA  —  D holds live values; seeded with safe defaults.
-   loadLive() overwrites each section behind its own try/catch,
-   so a failed/empty endpoint never blanks the whole page.
-══════════════════════════════════════════════════════ */
+/* badge html */
+function bdg(text, color, sm){
+  return `<span class="bdg${sm?' sm':''}" style="color:${color};background:${color}1f;border-color:${color}55">${esc(text)}</span>`;
+}
+
+/* ---- inline SVG sparkline ----
+   pts = array of numbers. liveLast highlights final point. refLine optional y-value. */
+function sparkline(pts, color, {w=180,h=55,liveLast=false,refLine=null,refMin=null}={}){
+  if(!pts || !pts.length) return `<svg class="spark" viewBox="0 0 ${w} ${h}"></svg>`;
+  const vals = pts.map(Number);
+  let mn = Math.min(...vals), mx = Math.max(...vals);
+  if(refLine!=null){ mn=Math.min(mn,refLine); mx=Math.max(mx,refLine); }
+  if(refMin!=null){ mn=Math.min(mn,refMin); }
+  if(mn===mx){ mn-=1; mx+=1; }
+  const pad=4, iw=w-pad*2, ih=h-pad*2;
+  const X = i => pad + (vals.length===1?iw/2:(i/(vals.length-1))*iw);
+  const Y = v => pad + ih - ((v-mn)/(mx-mn))*ih;
+  const d = vals.map((v,i)=>`${i===0?'M':'L'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ');
+  let svg = `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`;
+  if(refLine!=null){
+    const ry=Y(refLine).toFixed(1);
+    svg += `<line x1="${pad}" y1="${ry}" x2="${w-pad}" y2="${ry}" stroke="${C.line}" stroke-width="1" stroke-dasharray="3 2"/>`;
+  }
+  svg += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if(liveLast){
+    const lx=X(vals.length-1).toFixed(1), ly=Y(vals[vals.length-1]).toFixed(1);
+    svg += `<circle cx="${lx}" cy="${ly}" r="3.5" fill="${color}" stroke="${C.card}" stroke-width="1.5"/>`;
+  }
+  svg += `</svg>`;
+  return svg;
+}
+
+/* dual-line svg (NIFTY + BANKNIFTY on one chart) */
+function dualSpark(a, b, ca, cb, {w=200,h=72,refZero=false}={}){
+  const av=a.map(Number), bv=b.map(Number), all=av.concat(bv);
+  let mn=Math.min(...all), mx=Math.max(...all);
+  if(refZero){ mn=Math.min(mn,0); mx=Math.max(mx,0); }
+  if(mn===mx){mn-=1;mx+=1;}
+  const pad=4, iw=w-pad*2, ih=h-pad*2;
+  const X=(i,n)=>pad+(n===1?iw/2:(i/(n-1))*iw);
+  const Y=v=>pad+ih-((v-mn)/(mx-mn))*ih;
+  const path=(vv,col)=>`<path d="${vv.map((v,i)=>`${i===0?'M':'L'}${X(i,vv.length).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>`;
+  let svg=`<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`;
+  if(refZero){ const zy=Y(0).toFixed(1); svg+=`<line x1="${pad}" y1="${zy}" x2="${w-pad}" y2="${zy}" stroke="${C.line}" stroke-width="1" stroke-dasharray="3 2"/>`; }
+  svg+=path(av,ca)+path(bv,cb)+`</svg>`;
+  return svg;
+}
+
+/* mini bar chart (dual series) */
+function dualBars(a,b,ca,cb,{w=200,h=72}={}){
+  const av=a.map(Number), bv=b.map(Number), all=av.concat(bv);
+  const mx=Math.max(...all,1), n=av.length;
+  const pad=4, iw=w-pad*2, ih=h-pad*2, grp=iw/n, bw=grp*0.35;
+  let svg=`<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`;
+  for(let i=0;i<n;i++){
+    const x0=pad+i*grp+grp*0.1;
+    const ha=(av[i]/mx)*ih, hb=(bv[i]/mx)*ih;
+    svg+=`<rect x="${x0.toFixed(1)}" y="${(pad+ih-ha).toFixed(1)}" width="${bw.toFixed(1)}" height="${ha.toFixed(1)}" fill="${ca}" opacity="0.85"/>`;
+    svg+=`<rect x="${(x0+bw+1).toFixed(1)}" y="${(pad+ih-hb).toFixed(1)}" width="${bw.toFixed(1)}" height="${hb.toFixed(1)}" fill="${cb}" opacity="0.7"/>`;
+  }
+  svg+=`</svg>`;
+  return svg;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   DATA  (D holds live values; safe defaults until loadLive fills)
+════════════════════════════════════════════════════════════════ */
 const D = {
-  _updated: '—',
-  mood: { gate:'—', fails:0, adr:0, nD:0, nW:0, nM:0, bSlots:0, sSlots:0, soSlots:0 },
-  v10:  { dir:'FLAT', sym:'NIFTY', st:'—', ema:'—', entry:0, cmp:0, tgt:0, sl:0, pnl:0, pPct:0, str:0 },
-  vix:  { cur:13.42, chg:-0.68,
-          data:[{l:'D-7',v:16.1},{l:'D-6',v:15.4},{l:'D-5',v:15.2},{l:'D-4',v:14.8},{l:'D-3',v:14.1},{l:'D-2',v:13.9},{l:'D-1',v:13.6},{l:'●',v:13.42}] },
-  adr:  { adv:0, dec:0, unch:0, ratio:0 },
-  pcr: {
-    nifty: { cur:0, chg:0, data:[] },
-    bnk:   { cur:0, chg:0, data:[] },
-  },
-  pvt: { spot:0, pp:0, r1:0, r2:0, s1:0, s2:0 },
-  oi: {
-    nifty: { cur:182340000, pct:+2.39, basis:+28.5 },
-    bnk:   { cur:42180000,  pct:-2.83, basis:-12.3 },
-    trend:[{l:'D-4',n:176,b:432},{l:'D-3',n:178.5,b:438},{l:'D-2',n:179.2,b:431},{l:'D-1',n:178.1,b:434},{l:'Now',n:182.3,b:421.8}],
-    basis:[{l:'D-4',n:18.2,b:-8.4},{l:'D-3',n:22.1,b:-10.2},{l:'D-2',n:25.6,b:-9.8},{l:'D-1',n:24.3,b:-11.6},{l:'Now',n:28.5,b:-12.3}],
-  },
-  open: [],
-  closed: [],
-  cfg: { stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:50,lotB:15,legs:'FUT + ATM write',gapExit:'ON' },
-  v8q: [],
+  _updated:'—',
+  mood:{ gate:'—', fails:0, adr:0, nD:0, nW:0, nM:0, bSlots:0, sSlots:0, soSlots:0 },
+  v10:{ dir:'FLAT', sym:'NIFTY', st:'—', ema:'—', entry:0, cmp:0, tgt:0, sl:0, pnl:0, pPct:0, str:0 },
+  vix:{ cur:0, chg:0, data:[] },
+  adr:{ adv:0, dec:0, unch:0, ratio:0 },
+  pcr:{ nifty:{cur:0,chg:0,data:[]}, bnk:{cur:0,chg:0,data:[]} },
+  pvt:{ spot:0, pp:0, r1:0, r2:0, s1:0, s2:0 },
+  oi:{ nifty:{cur:182340000,pct:2.39,basis:28.5}, bnk:{cur:42180000,pct:-2.83,basis:-12.3},
+       trend:{n:[176,178.5,179.2,178.1,182.3], b:[432,438,431,434,421.8]},
+       basis:{n:[18.2,22.1,25.6,24.3,28.5], b:[-8.4,-10.2,-9.8,-11.6,-12.3]} },
+  open:[], closed:[],
+  cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:50,lotB:15,legs:'FUT + ATM write',gapExit:'ON' },
+  v8q:[],
 };
 
-/* ──────────────────────────────────────────────────────
-   LIVE WIRING
-────────────────────────────────────────────────────── */
-const API = "";
-async function getJSON(u){ const r = await fetch(API+u); if(!r.ok) throw new Error(u+" "+r.status); return r.json(); }
-const rowsOf = x => Array.isArray(x) ? x : (x && Array.isArray(x.rows)) ? x.rows
-                  : (x && Array.isArray(x.data)) ? x.data : (x && Array.isArray(x.stocks)) ? x.stocks : [];
-const istNow = () => new Date(new Date().toLocaleString('en-US',{ timeZone:'Asia/Kolkata' }));
+/* ════════════════════════════════════════════════════════════════
+   LIVE WIRING — each loader behind its own try/catch
+════════════════════════════════════════════════════════════════ */
+async function getJSON(u){ const r=await fetch(u); if(!r.ok) throw new Error(u+' '+r.status); return r.json(); }
+const rowsOf = x => Array.isArray(x)?x:(x&&Array.isArray(x.rows))?x.rows:(x&&Array.isArray(x.data))?x.data:(x&&Array.isArray(x.stocks))?x.stocks:(x&&Array.isArray(x.open_positions))?x.open_positions:(x&&Array.isArray(x.closed_trades))?x.closed_trades:[];
+const istNow = () => new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
 function isMarketHours(){
-  const d = istNow(); const day = d.getDay();
-  if (day === 0 || day === 6) return false;
-  const m = d.getHours()*60 + d.getMinutes();
-  return m >= 555 && m <= 935;            // 09:15 → 15:35 IST
+  const d=istNow(), day=d.getDay();
+  if(day===0||day===6) return false;
+  const m=d.getHours()*60+d.getMinutes();
+  return m>=555 && m<=935;   // 09:15–15:35 IST
 }
 
 async function loadMood(){
   const m = await getJSON('/api/v8/market_mood');
-  const cv = l => { const c = (m.checks||[]).find(x => x.filter === l); return c ? Number(c.value) : 0; };
-  D.mood = { gate:(m.mood||'—').toUpperCase(), fails:m.fails ?? 0, adr:cv('ADR'),
+  const cv = l => { const c=(m.checks||[]).find(x=>x.filter===l); return c?Number(c.value):0; };
+  D.mood = { gate:(m.mood||'—').toUpperCase(), fails:m.fails??0, adr:cv('ADR'),
              nD:cv('Nifty Day'), nW:cv('Nifty Week'), nM:cv('Nifty Month'),
-             bSlots:m.buy_slots ?? 0, sSlots:m.sell_slots ?? 0, soSlots:m.so_slots ?? 0 };
+             bSlots:m.buy_slots??0, sSlots:m.sell_slots??0, soSlots:m.so_slots??0 };
 }
 async function loadV10(){
   const s = await getJSON('/api/v10/signal');
-  if (s.status !== 'ok') return;
+  if(s.status!=='ok' && !s.signal) return;
   const sig = s.signal;
-  const dir = sig === 'BUY' ? 'LONG' : sig === 'SELL' ? 'SHORT' : 'FLAT';
+  const dir = sig==='BUY'?'LONG':sig==='SELL'?'SHORT':'FLAT';
   D.v10 = { dir, sym:'NIFTY',
-            st:  s.st_dir === 'up' ? 'BUY' : 'SELL',
-            ema: s.gate_zone === 'buy' ? 'BUY' : 'SELL',
+            st:  s.st_dir==='up'?'BUY':'SELL',
+            ema: s.gate_zone==='buy'?'BUY':'SELL',
             entry:Number(s.price)||0, cmp:Number(s.price)||0,
             tgt:Number(s.target)||Number(s.price)||0, sl:Number(s.stop)||Number(s.price)||0,
-            pnl:0, pPct:0, str: s.st_flip ? 85 : 60 };
+            pnl:0, pPct:0, str: s.st_flip?85:60 };
 }
 async function loadADR(){
   const a = await getJSON('/api/v8/adr');
   D.adr = { adv:a.advances||0, dec:a.declines||0, unch:a.unchanged||0, ratio:Number(a.adr)||0 };
 }
 function mkPcr(resp){
-  const rows = rowsOf(resp).slice().reverse();        // oldest → newest
+  const rows = rowsOf(resp).slice().reverse();
   const last8 = rows.slice(-8);
-  const data = last8.map((r,i) => ({ l: i === last8.length-1 ? '●' : ('D-'+(last8.length-1-i)), v:Number(r.pcr) }));
-  const cur = data.length ? data[data.length-1].v : 0;
-  const prev = data.length > 1 ? data[data.length-2].v : cur;
+  const data = last8.map(r=>Number(r.pcr));
+  const cur = data.length?data[data.length-1]:0;
+  const prev = data.length>1?data[data.length-2]:cur;
   return { cur, chg:cur-prev, data };
 }
 async function loadPCR(){
@@ -228,639 +381,354 @@ async function loadPivots(){
     getJSON('/api/paper/pivots?limit=300'),
     getJSON('/api/v8/domestic_live').catch(()=>null),
   ]);
-  const n = rowsOf(pv).find(r => r.symbol === 'NIFTY50');
-  if (!n) return;
+  const n = rowsOf(pv).find(r=>r.symbol==='NIFTY50');
+  if(!n) return;
   let spot = dl && dl.indices && dl.indices.NIFTY50 && dl.indices.NIFTY50.close;
   D.pvt = { spot:Number(spot)||Number(n.pp), pp:Number(n.pp), r1:Number(n.r1),
             r2:Number(n.r2), s1:Number(n.s1), s2:Number(n.s2) };
 }
+function normSide(s){ return (s||'').toUpperCase()==='SHORT'?'SHORT':'LONG'; }
 async function loadOpen(){
-  const p = await getJSON('/api/v8/positions');
-  D.open = rowsOf(p).map((x,i) => {
-    const entry = Number(x.entry_price)||0, cmp = Number(x.cmp)||entry;
-    const dir = (x.direction||'').toUpperCase();
-    const pPct = entry ? ((dir==='SHORT' ? entry-cmp : cmp-entry)/entry*100) : 0;
-    return { id:x.id||i, sym:x.symbol, side:dir==='SHORT'?'SHORT':'LONG',
+  /* V10 own positions first, fall back to V8 */
+  let rows=[];
+  try{ rows = rowsOf(await getJSON('/api/v10/positions')); }catch(e){}
+  if(!rows.length){ try{ rows = rowsOf(await getJSON('/api/v8/positions')); }catch(e){} }
+  D.open = rows.map((x,i)=>{
+    const entry=Number(x.entry_price)||0, cmp=Number(x.cmp||x.current_price)||entry;
+    const dir=normSide(x.direction||x.side);
+    const pPct=entry?((dir==='SHORT'?entry-cmp:cmp-entry)/entry*100):0;
+    return { id:x.id||i, sym:x.symbol, side:dir,
              type:x.opt_type?'OPT':'FUT', str:x.opt_strike||null, opt:x.opt_type||null,
-             entry, cmp, tgt:Number(x.target)||0, sl:Number(x.sl)||0, qty:Number(x.qty)||0,
-             pnl:Number(x.unrealised_pnl)||0, pPct,
-             eng:(x.strategy && /v10/i.test(x.strategy))?'V10':'V8' };
+             entry, cmp, tgt:Number(x.target)||0, sl:Number(x.sl||x.stop_loss)||0, qty:Number(x.qty)||0,
+             pnl:Number(x.unrealised_pnl||x.pnl)||0, pPct,
+             eng:(x.strategy&&/v10/i.test(x.strategy))?'V10':(x.basket?'V8':'V10') };
   });
 }
-function fmtDate(s){
-  if(!s) return '—';
-  const d = new Date(s); if (isNaN(d)) return String(s).slice(0,10);
-  return d.toLocaleDateString('en-IN',{ day:'2-digit', month:'short' });
-}
+function fmtDate(s){ if(!s)return '—'; const d=new Date(s); if(isNaN(d))return String(s).slice(0,10);
+  return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}); }
 async function loadClosed(){
-  const t = await getJSON('/api/v8/trades?limit=10');
-  D.closed = rowsOf(t).slice(0,10).map((x,i) => {
-    const entry = Number(x.entry)||0, ex = Number(x.exit)||0;
-    const dir = (x.direction||'').toUpperCase();
-    const pnl = Number(x.pnl)||0;
-    const pPct = entry ? ((dir==='SHORT' ? entry-ex : ex-entry)/entry*100) : 0;
-    return { id:x.id||i, sym:x.symbol, side:dir==='SHORT'?'SHORT':'LONG',
-             entry, exit:ex, pnl, pPct,
-             rsn:(x.result||'').toUpperCase() || (pnl>=0?'TGT':'SL'),
-             dt:fmtDate(x.trade_date || x.exit_time), eng:'V8' };
+  let rows=[];
+  try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=10')); }catch(e){}
+  if(!rows.length){ try{ rows = rowsOf(await getJSON('/api/v8/trades?limit=10')); }catch(e){} }
+  D.closed = rows.slice(0,10).map((x,i)=>{
+    const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
+    const dir=normSide(x.direction||x.side);
+    const pnl=Number(x.pnl)||0;
+    const pPct=entry?((dir==='SHORT'?entry-ex:ex-entry)/entry*100):0;
+    return { id:x.id||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct,
+             rsn:(x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
+             dt:fmtDate(x.trade_date||x.exit_time||x.exit_date),
+             eng:(x.strategy&&/v10/i.test(x.strategy))?'V10':(x.basket?'V8':'V10') };
   });
 }
-const BKT = [['buy_reversal','BUY_REV'],['buy_momentum','BUY_MOM'],
-             ['sell_reversal','SELL_REV'],['sell_momentum','SELL_MOM'],['sell_overbought','SELL_OB']];
+const BKT=[['buy_reversal','BUY_REV'],['buy_momentum','BUY_MOM'],
+           ['sell_reversal','SELL_REV'],['sell_momentum','SELL_MOM'],['sell_overbought','SELL_OB']];
 async function loadQual(){
-  const out = [];
-  for (const [b,lab] of BKT){
+  const out=[];
+  for(const [b,lab] of BKT){
     try{
-      const r = await getJSON('/api/v8/qualified/'+b+'?limit=4');
-      for (const s of rowsOf(r.stocks||r)){
-        if (out.length >= 14) break;
-        const spot = Number(s.cmp)||0;
+      const r=await getJSON('/api/v8/qualified/'+b+'?limit=4');
+      for(const s of rowsOf(r.stocks||r)){
+        if(out.length>=14) break;
+        const spot=Number(s.cmp)||0;
         out.push({ sym:s.symbol, bkt:lab, spot,
-                   atm:Number(s.atm_strike)|| (spot?Math.round(spot/50)*50:0),
+                   atm:Number(s.atm_strike)||(spot?Math.round(spot/50)*50:0),
                    cPx:s.cPx!=null?Number(s.cPx):null, pPx:s.pPx!=null?Number(s.pPx):null,
                    hVol:Number(s.hVol)||0, ivp:s.ivp!=null?Number(s.ivp):0, dte:Number(s.dte)||0 });
       }
-    }catch(e){ /* skip this basket */ }
+    }catch(e){}
   }
-  if (out.length) D.v8q = out;
+  if(out.length) D.v8q = out;
 }
 
-async function loadLive(done){
-  const tasks = [loadMood, loadV10, loadADR, loadPCR, loadPivots, loadOpen, loadClosed, loadQual];
-  await Promise.all(tasks.map(fn => fn().catch(e => console.warn('[v10]', fn.name, e.message))));
-  D._updated = istNow().toLocaleTimeString('en-IN',{ hour:'2-digit', minute:'2-digit' });
-  if (done) done();
+async function loadLive(){
+  const tasks=[loadMood,loadV10,loadADR,loadPCR,loadPivots,loadOpen,loadClosed,loadQual];
+  await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
+  D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
 
-/* ══════════════════════════════════════════════════════
-   TOP BAR
-══════════════════════════════════════════════════════ */
-function TopBar() {
-  const [t, setT] = useState(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setT(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const ist = t.toLocaleTimeString('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  const totalPnL = D.open.reduce((a,p) => a+p.pnl, 0) + D.closed.reduce((a,p) => a+p.pnl, 0);
-  return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 0 10px', borderBottom:`1px solid ${C.border}`, marginBottom:'10px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-        <span style={{ fontSize:'18px', fontWeight:900, color:C.teal, letterSpacing:'-0.04em' }}>SCORR</span>
-        <span style={{ color:C.border }}>|</span>
-        <span style={{ fontSize:'13px', fontWeight:600, color:C.text }}>V10 Dashboard</span>
-        <span style={{ fontSize:'9px', color:C.muted, background:C.dim, padding:'2px 7px', borderRadius:'3px', ...mono }}>ST150/3 · EMA3/10 · NIFTY+BNK</span>
-      </div>
-      <div style={{ display:'flex', alignItems:'center', gap:'14px' }}>
-        <span style={{ fontSize:'8px', color:C.muted }}>updated {D._updated}</span>
-        <span style={{ ...mono, fontSize:'11px', color:C.muted }}>{ist} IST</span>
-        <Bdg ch={isMarketHours() ? '● NSE LIVE' : '○ NSE CLOSED'} cl={isMarketHours() ? C.teal : C.muted} />
-        <div style={{ textAlign:'right' }}>
-          <div style={{ fontSize:'8px', color:C.muted }}>TOTAL P&amp;L</div>
-          <div style={{ ...mono, fontSize:'14px', fontWeight:900, color:cx(totalPnL) }}>₹{fK(totalPnL)}</div>
-        </div>
-      </div>
+/* ════════════════════════════════════════════════════════════════
+   RENDER  (string templating → innerHTML; re-render on each refresh)
+════════════════════════════════════════════════════════════════ */
+function rTopBar(){
+  const ist = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const tot = D.open.reduce((a,p)=>a+p.pnl,0)+D.closed.reduce((a,p)=>a+p.pnl,0);
+  const live = isMarketHours();
+  return `<div class="topbar">
+    <div class="tb-left">
+      <span class="brand">SCORR</span><span class="tb-pipe">|</span>
+      <span class="tb-title">V10 Dashboard</span>
+      <span class="tb-meta">ST150/3 · EMA3/10 · NIFTY+BNK</span>
     </div>
-  );
+    <div class="tb-right">
+      <span style="font-size:8px;color:var(--dim)">updated ${D._updated}</span>
+      <span class="tb-clock">${ist} IST</span>
+      ${bdg(live?'● NSE LIVE':'○ NSE CLOSED', live?UP:C.mut)}
+      <div class="tb-pnl"><div class="lbl">Total P&L</div>
+        <div class="val" style="color:${cx(tot)}">₹${fK(tot)}</div></div>
+    </div></div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   MOOD PULSE
-══════════════════════════════════════════════════════ */
-function MoodPulse() {
-  const { gate, fails, adr, nD, nW, nM, bSlots, sSlots, soSlots } = D.mood;
-  const mc = fails===0 ? C.teal : fails===1 ? C.amber : fails>=3 ? C.red : '#ff7043';
-  const conds = [
-    { l:'ADR',     v:adr.toFixed(2), pass:adr>=1.0 },
-    { l:'Nifty D', v:pct(nD),        pass:nD>=0 },
-    { l:'Nifty W', v:pct(nW),        pass:nW>=0 },
-    { l:'Nifty M', v:pct(nM),        pass:nM>=0 },
-  ];
-  return (
-    <div style={{ ...card({ borderColor:`${mc}66`, background:`linear-gradient(90deg,${C.card} 0%,${mc}0d 100%)` }), display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap', marginBottom:'10px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-        <div style={{ display:'flex', gap:'3px' }}>
-          {[0,1,2].map(i => <div key={i} className="pdot" style={{ width:'6px', height:'6px', borderRadius:'50%', background:mc }} />)}
-        </div>
-        <span style={{ fontWeight:800, fontSize:'13px', color:mc }}>{gate}</span>
-        <span style={{ fontSize:'9px', color:C.muted }}>({fails} fail)</span>
-      </div>
-      <div style={{ display:'flex', gap:'6px', flex:1, flexWrap:'wrap' }}>
-        {conds.map(c => (
-          <div key={c.l} style={{ background:C.dim, borderRadius:'4px', padding:'3px 9px', border:`1px solid ${c.pass?C.teal:C.red}33`, display:'flex', gap:'6px', alignItems:'center' }}>
-            <span style={{ fontSize:'9px', color:C.muted }}>{c.l}</span>
-            <span style={{ ...mono, fontSize:'11px', fontWeight:700, color:c.pass?C.teal:C.red }}>{c.v}</span>
-            <span style={{ fontSize:'10px', color:c.pass?C.teal:C.red }}>{c.pass?'✓':'✗'}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ display:'flex', gap:'6px' }}>
-        {[{n:`${bSlots}B`,c:C.teal,l:'BUY'},{n:`${sSlots}S`,c:C.red,l:'SELL'},{n:`${soSlots}SO`,c:C.amber,l:'OB POOL'}].map(s => (
-          <div key={s.l} style={{ background:`${s.c}18`, border:`1px solid ${s.c}44`, borderRadius:'5px', padding:'5px 12px', textAlign:'center' }}>
-            <div style={{ ...mono, fontSize:'15px', fontWeight:900, color:s.c }}>{s.n}</div>
-            <div style={{ fontSize:'8px', color:C.muted, marginTop:'1px' }}>{s.l}</div>
-          </div>
-        ))}
-      </div>
+function rMood(){
+  const {gate,fails,adr,nD,nW,nM,bSlots,sSlots,soSlots}=D.mood;
+  const mc = fails===0?UP:fails===1?C.amber:fails>=3?DN:'#ea580c';
+  const conds=[['ADR',adr.toFixed(2),adr>=1.0],['Nifty D',pct(nD),nD>=0],['Nifty W',pct(nW),nW>=0],['Nifty M',pct(nM),nM>=0]];
+  const condHtml = conds.map(([l,v,ok])=>{
+    const col=ok?UP:DN;
+    return `<div class="mc" style="border-color:${col}33"><span class="l">${l}</span>
+      <span class="v" style="color:${col}">${v}</span>
+      <span style="font-size:10px;color:${col}">${ok?'✓':'✗'}</span></div>`;
+  }).join('');
+  const slots=[[bSlots+'B',UP,'BUY'],[sSlots+'S',DN,'SELL'],[soSlots+'SO',C.amber,'OB POOL']];
+  const slotHtml=slots.map(([n,col,l])=>
+    `<div class="slot" style="background:${col}14;border-color:${col}44"><div class="n" style="color:${col}">${n}</div><div class="l">${l}</div></div>`).join('');
+  const dots=[0,1,2].map(()=>`<div class="pdot" style="background:${mc}"></div>`).join('');
+  return `<div class="mood" style="border-color:${mc}55;background:linear-gradient(90deg,var(--card) 0%,${mc}0a 100%)">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="mood-dots">${dots}</div>
+      <span class="mood-gate" style="color:${mc}">${esc(gate)}</span>
+      <span style="font-size:9px;color:var(--mut)">(${fails} fail)</span>
     </div>
-  );
+    <div class="mood-conds">${condHtml}</div>
+    <div class="mood-slots">${slotHtml}</div></div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   V10 SIGNAL
-══════════════════════════════════════════════════════ */
-function V10Signal() {
-  const { dir, sym, st, ema, entry, cmp, tgt, sl, pnl, pPct, str } = D.v10;
-  const c = dir === 'LONG' ? C.teal : dir === 'SHORT' ? C.red : C.muted;
-  return (
-    <div style={card({ borderColor:`${c}55`, background:`linear-gradient(135deg,${C.card},${c}09)` })}>
-      <Hdr title="V10 ACTIVE SIGNAL" sub="SuperTrend 150/3 (10m) · EMA 3/10 (30m)" right={<Bdg ch={dir==='LONG'?'▲ LONG':dir==='SHORT'?'▼ SHORT':'— FLAT'} cl={c}/>}/>
-      <div style={{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }}>
-        <div>
-          <div style={{ ...mono, fontSize:'26px', fontWeight:900, color:c, lineHeight:1 }}>{sym}</div>
-          <div style={{ display:'flex', gap:'6px', marginTop:'6px', alignItems:'center' }}>
-            <span style={{ fontSize:'9px', color:C.muted }}>ST</span><Bdg ch={st} cl={st==='BUY'?C.teal:C.red} sm/>
-            <span style={{ fontSize:'9px', color:C.muted }}>EMA</span><Bdg ch={ema} cl={ema==='BUY'?C.teal:C.red} sm/>
-          </div>
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'6px', flex:1 }}>
-          {[{l:'ENTRY',v:num(entry),c:C.text},{l:'CMP',v:num(cmp),c:C.blue},{l:'TARGET',v:num(tgt),c:C.teal},{l:'STOP',v:num(sl),c:C.red}].map(({l,v,c:vc})=>(
-            <div key={l} style={{ background:C.dim, borderRadius:'5px', padding:'6px 8px' }}>
-              <div style={{ fontSize:'8px', color:C.muted, marginBottom:'2px' }}>{l}</div>
-              <div style={{ ...mono, fontSize:'12px', fontWeight:800, color:vc }}>{v}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ textAlign:'center', minWidth:'70px' }}>
-          <div style={{ ...mono, fontSize:'14px', fontWeight:800, color:cx(pnl) }}>₹{fK(pnl)}</div>
-          <div style={{ ...mono, fontSize:'11px', color:cx(pPct) }}>{pct(pPct)}</div>
-          <div style={{ width:'64px', height:'4px', background:C.border, borderRadius:'2px', margin:'5px auto 2px', overflow:'hidden' }}>
-            <div style={{ width:`${str}%`, height:'100%', background:c, borderRadius:'2px' }}/>
-          </div>
-          <div style={{ fontSize:'8px', color:C.muted }}>{str}% conf</div>
-        </div>
-      </div>
-    </div>
-  );
+function rSignal(){
+  const {dir,sym,st,ema,entry,cmp,tgt,sl,pnl,pPct,str}=D.v10;
+  const c = dir==='LONG'?UP:dir==='SHORT'?DN:C.mut;
+  const tag = dir==='LONG'?'▲ LONG':dir==='SHORT'?'▼ SHORT':'— FLAT';
+  const boxes=[['ENTRY',num(entry),C.txt],['CMP',num(cmp),C.blu],['TARGET',num(tgt),UP],['STOP',num(sl),DN]];
+  const boxHtml=boxes.map(([l,v,col])=>`<div class="sbox"><div class="l">${l}</div><div class="v" style="color:${col}">${v}</div></div>`).join('');
+  return `<div class="card" style="border-color:${c}44;background:linear-gradient(135deg,var(--card),${c}07)">
+    <div class="card-hd"><div><div class="t">V10 Active Signal</div>
+      <div class="s">SuperTrend 150/3 (10m) · EMA 3/10 (30m)</div></div>${bdg(tag,c)}</div>
+    <div class="sig-grid">
+      <div><div class="sig-sym" style="color:${c}">${esc(sym)}</div>
+        <div class="sig-tags"><span style="font-size:9px;color:var(--mut)">ST</span>${bdg(st,st==='BUY'?UP:DN,true)}
+          <span style="font-size:9px;color:var(--mut)">EMA</span>${bdg(ema,ema==='BUY'?UP:DN,true)}</div></div>
+      <div class="sig-boxes">${boxHtml}</div>
+      <div class="sig-pnl"><div class="td-mono" style="font-size:14px;font-weight:800;color:${cx(pnl)}">₹${fK(pnl)}</div>
+        <div class="td-mono" style="font-size:11px;color:${cx(pPct)}">${pct(pPct)}</div>
+        <div class="conf-bar"><div class="conf-fill" style="width:${str}%;background:${c}"></div></div>
+        <div style="font-size:8px;color:var(--mut)">${str}% conf</div></div>
+    </div></div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   VIX  (7d + live)
-══════════════════════════════════════════════════════ */
-function VIXCard() {
-  const { cur, chg, data } = D.vix;
-  const vc = cur < 15 ? C.teal : cur < 20 ? C.amber : C.red;
-  const vl = cur < 15 ? 'CALM' : cur < 20 ? 'MODERATE' : 'ELEVATED';
-  return (
-    <div style={card()}>
-      <Hdr title="INDIA VIX" right={<Bdg ch={vl} cl={vc}/>}/>
-      <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'6px' }}>
-        <span style={{ ...mono, fontSize:'26px', fontWeight:900, color:vc }}>{cur.toFixed(2)}</span>
-        <span style={{ ...mono, fontSize:'12px', color:cx(chg) }}>{sgn(chg,2)}</span>
-      </div>
-      <ResponsiveContainer width="100%" height={60}>
-        <LineChart data={data}>
-          <Line dataKey="v" dot={(p) => p.index===data.length-1
-            ? <circle key="live" cx={p.cx} cy={p.cy} r={4} fill={vc} stroke={C.bg} strokeWidth={2}/>
-            : null} stroke={vc} strokeWidth={2}/>
-          <XAxis dataKey="l" tick={{fontSize:7,fill:C.muted}} axisLine={false} tickLine={false}/>
-          <Tooltip contentStyle={{background:C.card,border:`1px solid ${C.border}`,fontSize:'10px',color:C.text}} formatter={v=>[v.toFixed(2),'VIX']}/>
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
+function rVix(){
+  const {cur,chg,data}=D.vix;
+  const has = data && data.length;
+  const vc = cur<15?UP:cur<20?C.amber:DN;
+  const vl = cur<15?'CALM':cur<20?'MODERATE':'ELEVATED';
+  return `<div class="card">
+    <div class="card-hd"><div class="t">India VIX</div>${bdg(vl,vc)}</div>
+    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">
+      <span class="big-val" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
+      <span class="big-chg" style="color:${cx(chg)}">${has?sgn(chg,2):''}</span></div>
+    ${has?sparkline(data, vc, {liveLast:true,h:55}):'<div style="font-size:8px;color:var(--dim)">no VIX feed yet</div>'}
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   ADVANCE / DECLINE
-══════════════════════════════════════════════════════ */
-function ADRCard() {
-  const { adv, dec, unch, ratio } = D.adr;
-  const tot = adv + dec + unch;
-  const rc = ratio >= 2 ? C.teal : ratio >= 1 ? '#77d4b0' : ratio >= 0.5 ? C.amber : C.red;
-  return (
-    <div style={card()}>
-      <Hdr title="ADVANCE / DECLINE" sub="Nifty 500" right={<Bdg ch={`A/D ${ratio.toFixed(2)}`} cl={rc}/>}/>
-      <div style={{ display:'flex', gap:'6px', marginBottom:'8px' }}>
-        {[{l:'▲ ADV',v:adv,c:C.teal},{l:'▼ DEC',v:dec,c:C.red},{l:'— UNC',v:unch,c:C.muted}].map(s=>(
-          <div key={s.l} style={{ flex:1, background:`${s.c}12`, borderRadius:'5px', padding:'7px 6px', textAlign:'center', border:`1px solid ${s.c}22` }}>
-            <div style={{ ...mono, fontSize:'20px', fontWeight:900, color:s.c }}>{s.v}</div>
-            <div style={{ fontSize:'8px', color:C.muted, marginTop:'3px' }}>{s.l}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display:'flex', height:'5px', borderRadius:'3px', overflow:'hidden' }}>
-        <div style={{ flex:adv||1, background:C.teal }}/><div style={{ flex:dec||1, background:C.red }}/><div style={{ flex:unch||1, background:C.border }}/>
-      </div>
-      <div style={{ display:'flex', justifyContent:'space-between', marginTop:'3px' }}>
-        <span style={{ ...mono, fontSize:'8px', color:C.teal }}>{tot?(adv/tot*100).toFixed(0):0}%</span>
-        <span style={{ fontSize:'8px', color:C.muted }}>{tot} stocks</span>
-        <span style={{ ...mono, fontSize:'8px', color:C.red }}>{tot?(dec/tot*100).toFixed(0):0}%</span>
-      </div>
-    </div>
-  );
+function rADR(){
+  const {adv,dec,unch,ratio}=D.adr;
+  const tot=adv+dec+unch;
+  const rc = ratio>=2?UP:ratio>=1?'#10b981':ratio>=0.5?C.amber:DN;
+  const cells=[['▲ ADV',adv,UP],['▼ DEC',dec,DN],['— UNC',unch,C.mut]];
+  const cellHtml=cells.map(([l,v,col])=>`<div class="adr-cell" style="background:${col}12;border-color:${col}22"><div class="n" style="color:${col}">${v}</div><div class="l">${l}</div></div>`).join('');
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">Advance / Decline</div><div class="s">Nifty 500</div></div>${bdg('A/D '+ratio.toFixed(2),rc)}</div>
+    <div class="adr-cells">${cellHtml}</div>
+    <div class="adr-bar"><div style="flex:${adv||1};background:${UP}"></div><div style="flex:${dec||1};background:${DN}"></div><div style="flex:${unch||1};background:${C.line}"></div></div>
+    <div class="adr-pct"><span class="td-mono" style="color:${UP}">${tot?(adv/tot*100).toFixed(0):0}%</span>
+      <span style="color:var(--mut)">${tot} stocks</span>
+      <span class="td-mono" style="color:${DN}">${tot?(dec/tot*100).toFixed(0):0}%</span></div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   PCR TREND  —  7 historical days + live (●)
-══════════════════════════════════════════════════════ */
-function PCRCard() {
-  const { nifty, bnk } = D.pcr;
-  const pc = v => v < 0.7 ? C.red : v < 0.9 ? C.teal : v < 1.1 ? C.amber : C.red;
-  const pl = v => v < 0.7 ? 'BEARISH' : v < 0.9 ? 'BULLISH' : v < 1.1 ? 'NEUTRAL' : 'BEARISH';
-
-  const LiveDot = (col) => (props) => {
-    const { cx, cy, index, payload } = props;
-    if (payload.l !== '●') return null;
-    return <circle key={`dot-${index}`} cx={cx} cy={cy} r={4} fill={col} stroke={C.bg} strokeWidth={2}/>;
+function rPCR(){
+  const pc = v=>v<0.7?DN:v<0.9?UP:v<1.1?C.amber:DN;
+  const pl = v=>v<0.7?'BEARISH':v<0.9?'BULLISH':v<1.1?'NEUTRAL':'BEARISH';
+  const one=(name,d)=>{
+    const col=pc(d.cur);
+    const chart = d.data&&d.data.length ? sparkline(d.data,col,{liveLast:true,h:55,refLine:1.0}) : '<div style="font-size:8px;color:var(--dim)">no data</div>';
+    return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <span style="font-size:9px;color:var(--mut);font-weight:700">${name}</span>${bdg(pl(d.cur),col,true)}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">
+        <span class="td-mono" style="font-size:20px;font-weight:900;color:${col}">${d.cur.toFixed(2)}</span>
+        <span class="td-mono" style="font-size:10px;color:${cx(d.chg)}">${sgn(d.chg,2)}</span></div>
+      ${chart}</div>`;
   };
-
-  return (
-    <div style={card()}>
-      <Hdr title="PCR TREND" sub="7-day history · ● = live"/>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-        {[{l:'NIFTY',d:nifty},{l:'BANKNIFTY',d:bnk}].map(({l,d})=>(
-          <div key={l}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'3px' }}>
-              <span style={{ fontSize:'9px', color:C.muted, fontWeight:700 }}>{l}</span>
-              <Bdg ch={pl(d.cur)} cl={pc(d.cur)} sm/>
-            </div>
-            <div style={{ display:'flex', alignItems:'baseline', gap:'6px', marginBottom:'2px' }}>
-              <span style={{ ...mono, fontSize:'20px', fontWeight:900, color:pc(d.cur) }}>{d.cur.toFixed(2)}</span>
-              <span style={{ ...mono, fontSize:'10px', color:cx(d.chg) }}>{sgn(d.chg,2)}</span>
-            </div>
-            <ResponsiveContainer width="100%" height={55}>
-              <LineChart data={d.data}>
-                <Line dataKey="v" stroke={pc(d.cur)} strokeWidth={2} dot={LiveDot(pc(d.cur))}/>
-                <ReferenceLine y={1.0} stroke={C.border} strokeDasharray="3 2"/>
-                <ReferenceLine y={0.9} stroke={`${C.teal}33`} strokeDasharray="2 3"/>
-                <XAxis dataKey="l" tick={{fontSize:7,fill:C.muted}} axisLine={false} tickLine={false}/>
-                <Tooltip
-                  contentStyle={{background:C.card,border:`1px solid ${C.border}`,fontSize:'9px',color:C.text}}
-                  formatter={v=>[v.toFixed(2),'PCR']}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">PCR Trend</div><div class="s">7-day history · ● = live</div></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${one('NIFTY',D.pcr.nifty)}${one('BANKNIFTY',D.pcr.bnk)}</div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   PIVOT POINTS
-══════════════════════════════════════════════════════ */
-function PivotCard() {
-  const { spot, pp, r1, r2, s1, s2 } = D.pvt;
-  const zone = spot>r1?'ABOVE R1':spot>pp?'PP → R1':spot>s1?'S1 → PP':'BELOW S1';
-  const zc   = spot>r1?C.red:spot>pp?C.teal:spot>s1?C.amber:C.red;
-  const levels = [
-    {l:'R2',v:r2,c:'#f06070'},{l:'R1',v:r1,c:'#f08090'},
-    {l:'PP',v:pp,c:C.amber},
-    {l:'S1',v:s1,c:'#60d4b0'},{l:'S2',v:s2,c:C.teal},
-  ];
-  return (
-    <div style={card()}>
-      <Hdr title="NIFTY PIVOTS" sub="Rolling 5-day" right={<Bdg ch={zone} cl={zc}/>}/>
-      {levels.map(({l,v,c}) => (
-        <div key={l} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'3px 4px', borderRadius:'3px', marginBottom:'2px', background:(spot&&Math.abs(v-spot)/spot<0.003)?`${zc}14`:'transparent' }}>
-          <span style={{ ...mono, fontSize:'11px', fontWeight:800, color:c, width:'24px' }}>{l}</span>
-          <span style={{ ...mono, fontSize:'11px', color:C.text }}>{num(v)}</span>
-          <span style={{ ...mono, fontSize:'9px', color:C.muted }}>{spot?((v-spot)/spot*100).toFixed(2):'0.00'}%</span>
-        </div>
-      ))}
-      <div style={{ display:'flex', justifyContent:'space-between', padding:'5px 4px 0', borderTop:`1px solid ${C.border}`, marginTop:'4px' }}>
-        <span style={{ ...mono, fontSize:'10px', fontWeight:700, color:C.blue }}>● CMP</span>
-        <span style={{ ...mono, fontSize:'12px', fontWeight:900, color:C.blue }}>{num(spot)}</span>
-        <span style={{ fontSize:'8px', color:C.muted }}>live</span>
-      </div>
-    </div>
-  );
+function rPivot(){
+  const {spot,pp,r1,r2,s1,s2}=D.pvt;
+  const zone=spot>r1?'ABOVE R1':spot>pp?'PP → R1':spot>s1?'S1 → PP':'BELOW S1';
+  const zc=spot>r1?DN:spot>pp?UP:spot>s1?C.amber:DN;
+  const levels=[['R2',r2,'#dc2626'],['R1',r1,'#ef4444'],['PP',pp,C.amber],['S1',s1,'#10b981'],['S2',s2,UP]];
+  const rowsHtml=levels.map(([l,v,col])=>{
+    const near=(spot&&Math.abs(v-spot)/spot<0.003);
+    return `<div class="pvt-row" style="background:${near?zc+'14':'transparent'}">
+      <span class="pvt-l" style="color:${col}">${l}</span>
+      <span class="pvt-v">${num(v)}</span>
+      <span class="pvt-d">${spot?((v-spot)/spot*100).toFixed(2):'0.00'}%</span></div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">Nifty Pivots</div><div class="s">Rolling 5-day</div></div>${bdg(zone,zc)}</div>
+    ${rowsHtml}
+    <div class="pvt-cmp"><span class="td-mono" style="font-size:10px;font-weight:700;color:${C.blu}">● CMP</span>
+      <span class="td-mono" style="font-size:12px;font-weight:900;color:${C.blu}">${num(spot)}</span>
+      <span style="font-size:8px;color:var(--mut)">live</span></div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   FUTURES OI + BASIS
-══════════════════════════════════════════════════════ */
-function OISection() {
-  const { nifty, bnk, trend, basis } = D.oi;
-  const interp = (p, pr) => {
-    if (p>0&&pr>0) return {l:'LONG BUILD',  c:C.teal};
-    if (p<0&&pr<0) return {l:'SHORT COVER', c:C.amber};
-    if (p>0&&pr<0) return {l:'SHORT BUILD', c:C.red};
-    return               {l:'LONG UNWIND', c:'#ff8c00'};
-  };
-  const ni = interp(nifty.pct, D.mood.nD);
-  const bi = interp(bnk.pct,   D.mood.nD);
-  return (
-    <div style={{ ...card(), marginBottom:'10px' }}>
-      <Hdr title="FUTURES OI BUILD-UP + BASIS" sub="NIFTY · BANKNIFTY · 5-day rolling"/>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'10px' }}>
-        {[{l:'NIFTY',d:nifty,i:ni},{l:'BANKNIFTY',d:bnk,i:bi}].map(({l,d,i})=>(
-          <div key={l} style={{ background:C.dim, borderRadius:'6px', padding:'10px', border:`1px solid ${i.c}22` }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
-              <span style={{ fontSize:'10px', color:C.muted, fontWeight:700 }}>{l}</span>
-              <Bdg ch={i.l} cl={i.c} sm/>
-            </div>
-            <div style={{ ...mono, fontSize:'15px', fontWeight:800, color:C.text }}>{fK(d.cur)}</div>
-            <div style={{ display:'flex', gap:'12px', marginTop:'6px' }}>
-              <div><div style={{fontSize:'8px',color:C.muted}}>OI CHG</div><div style={{...mono,fontSize:'12px',fontWeight:700,color:cx(d.pct)}}>{sgn(d.pct,2)}%</div></div>
-              <div><div style={{fontSize:'8px',color:C.muted}}>BASIS</div><div style={{...mono,fontSize:'12px',fontWeight:700,color:cx(d.basis)}}>{d.basis>0?'+':''}{d.basis}</div></div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
-        <div>
-          <div style={{ fontSize:'8px', color:C.muted, marginBottom:'4px' }}>OI TREND (Cr contracts)</div>
-          <ResponsiveContainer width="100%" height={72}>
-            <BarChart data={trend} barGap={2}>
-              <Bar dataKey="n" name="NIFTY"     fill={C.teal} opacity={0.8}/>
-              <Bar dataKey="b" name="BANKNIFTY" fill={C.blue} opacity={0.7}/>
-              <XAxis dataKey="l" tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false}/>
-              <Tooltip contentStyle={{background:C.card,border:`1px solid ${C.border}`,fontSize:'10px',color:C.text}}/>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div>
-          <div style={{ fontSize:'8px', color:C.muted, marginBottom:'4px' }}>BASIS TREND (pts · fut − spot)</div>
-          <ResponsiveContainer width="100%" height={72}>
-            <LineChart data={basis}>
-              <Line dataKey="n" name="NIFTY"     dot={false} stroke={C.teal} strokeWidth={2}/>
-              <Line dataKey="b" name="BANKNIFTY" dot={false} stroke={C.blue} strokeWidth={2}/>
-              <XAxis dataKey="l" tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false}/>
-              <ReferenceLine y={0} stroke={C.border} strokeDasharray="3 2"/>
-              <Tooltip contentStyle={{background:C.card,border:`1px solid ${C.border}`,fontSize:'10px',color:C.text}}/>
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <div style={{ fontSize:'8px', color:C.muted, marginTop:'6px', textAlign:'right' }}>sample data — pending /api futures_basis feed</div>
+function rOI(){
+  const {nifty,bnk,trend,basis}=D.oi;
+  const interp=(p,pr)=>{ if(p>0&&pr>0)return['LONG BUILD',UP]; if(p<0&&pr<0)return['SHORT COVER',C.amber];
+    if(p>0&&pr<0)return['SHORT BUILD',DN]; return['LONG UNWIND','#ea580c']; };
+  const ni=interp(nifty.pct,D.mood.nD), bi=interp(bnk.pct,D.mood.nD);
+  const oiCard=(name,d,intr)=>`<div class="oi-card" style="border-color:${intr[1]}22">
+    <div class="hd"><span class="nm">${name}</span>${bdg(intr[0],intr[1],true)}</div>
+    <div class="oi-val">${fK(d.cur)}</div>
+    <div class="oi-sub">
+      <div><div class="l">OI CHG</div><div class="v" style="color:${cx(d.pct)}">${sgn(d.pct,2)}%</div></div>
+      <div><div class="l">BASIS</div><div class="v" style="color:${cx(d.basis)}">${d.basis>0?'+':''}${d.basis}</div></div>
+    </div></div>`;
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div><div class="t">Futures OI Build-up + Basis</div><div class="s">NIFTY · BANKNIFTY · 5-day rolling</div></div></div>
+    <div class="oi-cards">${oiCard('NIFTY',nifty,ni)}${oiCard('BANKNIFTY',bnk,bi)}</div>
+    <div class="oi-charts">
+      <div><div class="oi-chart-lbl">OI TREND (Cr contracts)</div>${dualBars(trend.n,trend.b,UP,C.blu,{h:72})}</div>
+      <div><div class="oi-chart-lbl">BASIS TREND (pts · fut − spot)</div>${dualSpark(basis.n,basis.b,UP,C.blu,{h:72,refZero:true})}</div>
     </div>
-  );
+    <div class="note">sample data — pending /api futures_basis feed</div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   OPEN POSITIONS
-══════════════════════════════════════════════════════ */
-function OpenPositions() {
-  const tot = D.open.reduce((a,p) => a+p.pnl, 0);
-  return (
-    <div style={{ ...card(), marginBottom:'10px' }}>
-      <Hdr title={`OPEN POSITIONS (${D.open.length})`} right={<span style={{...mono,fontSize:'13px',fontWeight:800,color:cx(tot)}}>₹{fK(tot)}</span>}/>
-      <div style={{ overflowX:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'11px' }}>
-          <thead><TH cols={'ENG,SYMBOL,SIDE,TYPE,ENTRY,CMP,TARGET,STOP,QTY,P&L,P&L%'.split(',')}/></thead>
-          <tbody>
-            {D.open.length===0 && <tr><td colSpan={11} style={{padding:'14px 8px',textAlign:'center',color:C.muted,fontSize:'10px'}}>No open positions</td></tr>}
-            {D.open.map(p=>(
-              <tr key={p.id} style={{ borderBottom:`1px solid ${C.border}22` }}>
-                <td style={{padding:'5px 8px'}}><Bdg ch={p.eng} cl={p.eng==='V10'?C.teal:C.amber} sm/></td>
-                <td style={{padding:'5px 8px',...mono,fontWeight:800,color:C.text}}>{p.sym}{p.str?<span style={{color:C.muted,fontSize:'9px'}}> {p.str}{p.opt}</span>:null}</td>
-                <td style={{padding:'5px 8px'}}><Bdg ch={p.side} cl={p.side==='LONG'?C.teal:C.red} sm/></td>
-                <td style={{padding:'5px 8px',...mono,fontSize:'10px',color:C.muted}}>{p.type}</td>
-                <td style={{padding:'5px 8px',...mono}}>{num(p.entry)}</td>
-                <td style={{padding:'5px 8px',...mono,fontWeight:700,color:C.blue}}>{num(p.cmp)}</td>
-                <td style={{padding:'5px 8px',...mono,color:C.teal}}>{num(p.tgt)}</td>
-                <td style={{padding:'5px 8px',...mono,color:C.red}}>{num(p.sl)}</td>
-                <td style={{padding:'5px 8px',...mono,color:C.muted}}>{p.qty}</td>
-                <td style={{padding:'5px 8px',...mono,fontWeight:800,color:cx(p.pnl)}}>₹{num(p.pnl)}</td>
-                <td style={{padding:'5px 8px',...mono,color:cx(p.pPct)}}>{pct(p.pPct)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+function rOpen(){
+  const tot=D.open.reduce((a,p)=>a+p.pnl,0);
+  const head=['ENG','SYMBOL','SIDE','TYPE','ENTRY','CMP','TARGET','STOP','QTY','P&L','P&L%'];
+  const body = D.open.length ? D.open.map(p=>`<tr>
+    <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
+    <td class="td-mono" style="font-weight:800">${esc(p.sym)}${p.str?`<span style="color:var(--mut);font-size:9px"> ${p.str}${p.opt}</span>`:''}</td>
+    <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
+    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.type}</td>
+    <td class="td-mono">${num(p.entry)}</td>
+    <td class="td-mono" style="font-weight:700;color:${C.blu}">${num(p.cmp)}</td>
+    <td class="td-mono" style="color:${UP}">${num(p.tgt)}</td>
+    <td class="td-mono" style="color:${DN}">${num(p.sl)}</td>
+    <td class="td-mono" style="color:var(--mut)">${p.qty}</td>
+    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
+    <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td></tr>`).join('')
+    : `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`;
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div class="t">Open Positions (${D.open.length})</div>
+      <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div>
+    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   CLOSED TRADES
-══════════════════════════════════════════════════════ */
-function ClosedTrades() {
-  const tot = D.closed.reduce((a,p) => a+p.pnl, 0);
-  const wr  = D.closed.length ? (D.closed.filter(p=>p.pnl>0).length / D.closed.length * 100).toFixed(0) : 0;
-  return (
-    <div style={{ ...card(), marginBottom:'10px' }}>
-      <Hdr title={`CLOSED TRADES (${D.closed.length})`} right={
-        <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
-          <Bdg ch={`WR ${wr}%`} cl={C.teal}/>
-          <span style={{...mono,fontSize:'13px',fontWeight:800,color:cx(tot)}}>₹{fK(tot)}</span>
-        </div>
-      }/>
-      <div style={{ overflowX:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'11px' }}>
-          <thead><TH cols={'DATE,ENG,SYMBOL,SIDE,ENTRY,EXIT,P&L,P&L%,EXIT REASON'.split(',')}/></thead>
-          <tbody>
-            {D.closed.length===0 && <tr><td colSpan={9} style={{padding:'14px 8px',textAlign:'center',color:C.muted,fontSize:'10px'}}>No closed trades</td></tr>}
-            {D.closed.map(p=>(
-              <tr key={p.id} style={{ borderBottom:`1px solid ${C.border}22` }}>
-                <td style={{padding:'5px 8px',...mono,fontSize:'10px',color:C.muted}}>{p.dt}</td>
-                <td style={{padding:'5px 8px'}}><Bdg ch={p.eng} cl={p.eng==='V10'?C.teal:C.amber} sm/></td>
-                <td style={{padding:'5px 8px',...mono,fontWeight:800,color:C.text}}>{p.sym}</td>
-                <td style={{padding:'5px 8px'}}><Bdg ch={p.side} cl={p.side==='LONG'?C.teal:C.red} sm/></td>
-                <td style={{padding:'5px 8px',...mono}}>{num(p.entry)}</td>
-                <td style={{padding:'5px 8px',...mono}}>{num(p.exit)}</td>
-                <td style={{padding:'5px 8px',...mono,fontWeight:800,color:cx(p.pnl)}}>₹{num(p.pnl)}</td>
-                <td style={{padding:'5px 8px',...mono,color:cx(p.pPct)}}>{pct(p.pPct)}</td>
-                <td style={{padding:'5px 8px'}}><Bdg ch={p.rsn} cl={p.pnl>=0?C.teal:C.red} sm/></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+function rClosed(){
+  const tot=D.closed.reduce((a,p)=>a+p.pnl,0);
+  const wr=D.closed.length?(D.closed.filter(p=>p.pnl>0).length/D.closed.length*100).toFixed(0):0;
+  const head=['DATE','ENG','SYMBOL','SIDE','ENTRY','EXIT','P&L','P&L%','EXIT REASON'];
+  const body = D.closed.length ? D.closed.map(p=>`<tr>
+    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.dt}</td>
+    <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
+    <td class="td-mono" style="font-weight:800">${esc(p.sym)}</td>
+    <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
+    <td class="td-mono">${num(p.entry)}</td>
+    <td class="td-mono">${num(p.exit)}</td>
+    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
+    <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td>
+    <td>${bdg(p.rsn,p.pnl>=0?UP:DN,true)}</td></tr>`).join('')
+    : `<tr class="empty-row"><td colspan="9">No closed trades</td></tr>`;
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div class="t">Closed Trades (${D.closed.length})</div>
+      <div style="display:flex;gap:8px;align-items:center">${bdg('WR '+wr+'%',UP)}
+        <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div></div>
+    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   TRADE SETTINGS
-══════════════════════════════════════════════════════ */
-function TradeSettings() {
-  const { stP,stM,stTf,emaF,emaS,emaTf,entry,cut,lotN,lotB,legs,gapExit } = D.cfg;
-  const params = [
-    ['Engine','V10 ST + EMA'],['Symbols','NIFTY · BANKNIFTY'],
+function rSettings(){
+  const {stP,stM,stTf,emaF,emaS,emaTf,entry,cut,lotN,lotB,legs,gapExit}=D.cfg;
+  const p=[['Engine','V10 ST + EMA'],['Symbols','NIFTY · BANKNIFTY'],
     ['SuperTrend',`${stP}/${stM} · ${stTf}`],['EMA Gate',`${emaF}/${emaS} · ${emaTf}`],
-    ['Trade Legs',legs],['Entry Window',`${entry} IST`],
-    ['Entry Cutoff',`${cut} IST`],['Gap Exit',gapExit],
-    ['Lot NIFTY',`${lotN} units`],['Lot BANKNIFTY',`${lotB} units`],
-  ];
-  return (
-    <div style={{ ...card(), marginBottom:'10px' }}>
-      <Hdr title="ENTRY / EXIT SETTINGS" sub="V10 Configuration · Locked 16-Jun-2026"/>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'6px' }}>
-        {params.map(([k,v])=>(
-          <div key={k} style={{ background:C.dim, borderRadius:'4px', padding:'6px 8px', border:`1px solid ${C.border}` }}>
-            <div style={{ fontSize:'8px', color:C.muted, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'3px' }}>{k}</div>
-            <div style={{ ...mono, fontSize:'10px', fontWeight:700, color:C.text }}>{v}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+    ['Trade Legs',legs],['Entry Window',`${entry} IST`],['Entry Cutoff',`${cut} IST`],
+    ['Gap Exit',gapExit],['Lot NIFTY',`${lotN} units`],['Lot BANKNIFTY',`${lotB} units`]];
+  const boxes=p.map(([k,v])=>`<div class="set-box"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('');
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div><div class="t">Entry / Exit Settings</div><div class="s">V10 Configuration · Locked 16-Jun-2026</div></div></div>
+    <div class="set-grid">${boxes}</div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   V8 QUALIFIED — ATM OPTIONS
-   BUY  → CE (call) price + BS call True Value (@ 30d hVol)
-   SELL → PE (put)  price + BS put  True Value (@ 30d hVol)
-══════════════════════════════════════════════════════ */
-function V8QualifiedTable() {
-  const RF = 0.065;
-  const ivpColor = ivp => ivp >= 70 ? C.red : ivp >= 30 ? C.amber : C.teal;
-  const ivpLabel = ivp => ivp >= 70 ? 'RICH' : ivp >= 30 ? 'MID'  : 'CHEAP';
-
-  const rows = useMemo(() => D.v8q.map(q => {
-    const isBuy  = q.bkt.startsWith('BUY');
-    const T      = q.dte / 365;
-    const optPx  = isBuy ? q.cPx : q.pPx;                         // CE for BUY, PE for SELL
-    const optTyp = isBuy ? 'CE'  : 'PE';
-    const sideC  = isBuy ? C.teal : C.red;
-    const tv = isBuy
-      ? bsCall(q.spot, q.atm, T, RF, q.hVol)                      // BS call @ hist vol
-      : bsPut (q.spot, q.atm, T, RF, q.hVol);                     // BS put  @ hist vol
-    return {
-      ...q,
-      optPx, optTyp, sideC,
-      side:     isBuy ? 'LONG'  : 'SHORT',
-      trueVal:  tv,
-      richness: optPx != null ? optPx - tv : null,
-    };
-  }), [D.v8q]);
-
-  return (
-    <div style={{ ...card(), marginBottom:'10px' }}>
-      <Hdr
-        title="V8 QUALIFIED — ATM OPTIONS"
-        sub="BUY → CE (call) · SELL → PE (put) · IVP = 1yr percentile · True Value = BS @ 30d realized vol"
-      />
-      <div style={{ overflowX:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'11px' }}>
-          <thead>
-            <tr style={{ borderBottom:`1px solid ${C.border}` }}>
-              {['SYMBOL','BASKET','STRIKE','CE / PE','OPTION VALUE','IVP','REGIME','TRUE VALUE','MKT vs BS'].map(h => (
-                <th key={h} style={{ padding:'5px 10px', color:C.muted, fontWeight:700, textAlign:'left', fontSize:'9px', textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length===0 && <tr><td colSpan={9} style={{padding:'14px 10px',textAlign:'center',color:C.muted,fontSize:'10px'}}>No qualified stocks right now</td></tr>}
-            {rows.map((r, i) => {
-              const ic   = ivpColor(r.ivp);
-              const rich = r.richness;
-              return (
-                <tr key={i} style={{ borderBottom:`1px solid ${C.border}22` }}>
-                  <td style={{ padding:'7px 10px', ...mono, fontWeight:800, color:C.text, fontSize:'12px' }}>{r.sym}</td>
-                  <td style={{ padding:'7px 10px' }}><Bdg ch={r.bkt} cl={r.sideC} sm/></td>
-                  <td style={{ padding:'7px 10px', ...mono, fontWeight:700, color:C.blue }}>{num(r.atm)}</td>
-                  <td style={{ padding:'7px 10px' }}><Bdg ch={r.optTyp} cl={r.sideC} sm/></td>
-                  <td style={{ padding:'7px 10px', ...mono, fontWeight:800, color:r.sideC, fontSize:'13px' }}>{r.optPx != null ? r.optPx.toFixed(2) : '—'}</td>
-                  <td style={{ padding:'7px 10px' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:'7px' }}>
-                      <div style={{ width:'48px', height:'4px', background:C.border, borderRadius:'2px', overflow:'hidden', flexShrink:0 }}>
-                        <div style={{ width:`${r.ivp}%`, height:'100%', background:ic, borderRadius:'2px' }}/>
-                      </div>
-                      <span style={{ ...mono, fontSize:'11px', fontWeight:800, color:ic }}>{r.ivp}%</span>
-                    </div>
-                  </td>
-                  <td style={{ padding:'7px 10px' }}><Bdg ch={ivpLabel(r.ivp)} cl={ic} sm/></td>
-                  <td style={{ padding:'7px 10px', ...mono, fontWeight:700, color:C.text }}>{r.trueVal.toFixed(2)}</td>
-                  <td style={{ padding:'7px 10px' }}>
-                    {rich != null ? (
-                      <>
-                        <span style={{ ...mono, fontSize:'11px', fontWeight:700, color: rich > 0 ? C.red : C.teal }}>
-                          {rich >= 0 ? '+' : ''}{rich.toFixed(2)}
-                        </span>
-                        <span style={{ fontSize:'8px', color:C.muted, marginLeft:'5px' }}>
-                          {rich > 0 ? '↑ rich' : '↓ cheap'}
-                        </span>
-                      </>
-                    ) : <span style={{ color:C.muted }}>—</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div style={{ display:'flex', gap:'20px', marginTop:'10px', padding:'6px 10px', background:C.dim, borderRadius:'5px', flexWrap:'wrap' }}>
-        {[
-          { c:C.red,   l:'IVP > 70 · Premium expensive → sell side' },
-          { c:C.amber, l:'IVP 30–70 · Normal range' },
-          { c:C.teal,  l:'IVP < 30 · Premium cheap → buy side' },
-        ].map(({ c, l }) => (
-          <div key={l} style={{ display:'flex', alignItems:'center', gap:'5px' }}>
-            <div style={{ width:'7px', height:'7px', borderRadius:'2px', background:c, flexShrink:0 }}/>
-            <span style={{ fontSize:'8px', color:C.muted }}>{l}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function rQual(){
+  const RF=0.065;
+  const ivpColor=v=>v>=70?DN:v>=30?C.amber:UP;
+  const ivpLabel=v=>v>=70?'RICH':v>=30?'MID':'CHEAP';
+  const head=['SYMBOL','BASKET','STRIKE','CE / PE','OPTION VALUE','IVP','REGIME','TRUE VALUE','MKT vs BS'];
+  const rows=D.v8q.map(q=>{
+    const isBuy=q.bkt.startsWith('BUY');
+    const T=q.dte/365, optPx=isBuy?q.cPx:q.pPx, optTyp=isBuy?'CE':'PE', sideC=isBuy?UP:DN;
+    const tv = isBuy?bsCall(q.spot,q.atm,T,RF,q.hVol):bsPut(q.spot,q.atm,T,RF,q.hVol);
+    return {...q, optPx, optTyp, sideC, trueVal:tv, richness:optPx!=null?optPx-tv:null};
+  });
+  const body = rows.length ? rows.map(r=>{
+    const ic=ivpColor(r.ivp), rich=r.richness;
+    const mktBs = rich!=null
+      ? `<span class="td-mono" style="font-size:11px;font-weight:700;color:${rich>0?DN:UP}">${rich>=0?'+':''}${rich.toFixed(2)}</span><span style="font-size:8px;color:var(--mut);margin-left:5px">${rich>0?'↑ rich':'↓ cheap'}</span>`
+      : `<span style="color:var(--mut)">—</span>`;
+    return `<tr>
+      <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
+      <td>${bdg(r.bkt,r.sideC,true)}</td>
+      <td class="td-mono" style="font-weight:700;color:${C.blu}">${num(r.atm)}</td>
+      <td>${bdg(r.optTyp,r.sideC,true)}</td>
+      <td class="td-mono" style="font-weight:800;font-size:13px;color:${r.sideC}">${r.optPx!=null?r.optPx.toFixed(2):'—'}</td>
+      <td><div class="ivp-wrap"><div class="ivp-track"><div class="ivp-fill" style="width:${r.ivp}%;background:${ic}"></div></div>
+        <span class="ivp-val" style="color:${ic}">${r.ivp}%</span></div></td>
+      <td>${bdg(ivpLabel(r.ivp),ic,true)}</td>
+      <td class="td-mono" style="font-weight:700">${r.trueVal.toFixed(2)}</td>
+      <td>${mktBs}</td></tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="9">No qualified stocks right now</td></tr>`;
+  const legend=[[DN,'IVP > 70 · Premium expensive → sell side'],[C.amber,'IVP 30–70 · Normal range'],[UP,'IVP < 30 · Premium cheap → buy side']]
+    .map(([c,l])=>`<div class="lg"><div class="lg-dot" style="background:${c}"></div><span class="l">${l}</span></div>`).join('');
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div><div class="t">V8 Qualified — ATM Options</div>
+      <div class="s">BUY → CE (call) · SELL → PE (put) · IVP = 1yr percentile · True Value = BS @ 30d realized vol</div></div></div>
+    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="legend">${legend}</div>
+  </div>`;
 }
 
-/* ══════════════════════════════════════════════════════
-   APP
-══════════════════════════════════════════════════════ */
-function App() {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => loadLive(() => { if (alive) setTick(t => t + 1); });
-    refresh();                                    // initial load (always)
-    const id = setInterval(() => { if (isMarketHours()) refresh(); }, 300000);  // 5-min, market hours only
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-
-  return (
-    <div style={{ background:C.bg, color:C.text, minHeight:'100vh', padding:'14px 16px', maxWidth:'1440px', margin:'0 auto' }}>
-      <style>{`
-        @keyframes pdot{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:.2;transform:scale(.5)}}
-        .pdot{animation:pdot 1.5s ease-in-out infinite}
-        .pdot:nth-child(2){animation-delay:.28s}
-        .pdot:nth-child(3){animation-delay:.56s}
-        table tr:hover td{background:rgba(0,196,163,.03)}
-        ::-webkit-scrollbar{width:4px;height:4px}
-        ::-webkit-scrollbar-track{background:#0c1526}
-        ::-webkit-scrollbar-thumb{background:#1a2d45;border-radius:2px}
-      `}</style>
-
-      <TopBar/>
-      <MoodPulse/>
-
-      <div style={{ display:'grid', gridTemplateColumns:'3fr 1.6fr', gap:'10px', marginBottom:'10px' }}>
-        <V10Signal/><VIXCard/>
-      </div>
-
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr 1fr', gap:'10px', marginBottom:'10px' }}>
-        <ADRCard/><PCRCard/><PivotCard/>
-      </div>
-
-      <OISection/>
-
-      <OpenPositions/>
-      <ClosedTrades/>
-
-      <TradeSettings/>
-
-      <V8QualifiedTable/>
-
-      <div style={{ textAlign:'center', padding:'14px 0 4px', fontSize:'8px', color:C.muted, borderTop:`1px solid ${C.border}`, marginTop:'6px' }}>
-        SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard
-      </div>
-    </div>
-  );
+function render(){
+  document.getElementById('app').innerHTML =
+    rTopBar() + rMood() +
+    `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
+    `<div class="row r-3">${rADR()}${rPCR()}${rPivot()}</div>` +
+    rOI() + rOpen() + rClosed() + rSettings() + rQual() +
+    `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
-</script>
+/* ════════════════════════════════════════════════════════════════
+   BOOT  +  clock tick  +  5-min market-hours refresh
+════════════════════════════════════════════════════════════════ */
+async function boot(){
+  await loadLive();
+  render();
+}
+boot();
+/* live clock — re-render topbar only every second (cheap) */
+setInterval(()=>{ const el=document.querySelector('.topbar'); if(el) el.outerHTML=rTopBar(); }, 1000);
+/* full refresh every 5 min, market hours only */
+setInterval(()=>{ if(isMarketHours()) loadLive().then(render); }, 300000);
 
-<script>
-// Hide own model-nav when embedded (iframe or ?embed=1) — shell renders its own nav.
-if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
-  var _mn=document.getElementById('scorr-nav'); if(_mn) _mn.style.display='none';
+/* hide own nav when embedded */
+if(window.self!==window.top || new URLSearchParams(location.search).has('embed')){
+  const mn=document.getElementById('scorr-nav'); if(mn) mn.style.display='none';
 }
 </script>
 </body>
