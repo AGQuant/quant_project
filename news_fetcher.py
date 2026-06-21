@@ -41,9 +41,11 @@ HTTP_TIMEOUT    = 12
 
 # RSS feeds — source_type drives downstream filtering (domestic | global | company)
 RSS_DOMESTIC = [
-    ("Economic Times", "https://economictimes.indiatimes.com/markets/rss.cms"),
-    ("Moneycontrol",   "https://www.moneycontrol.com/rss/MCtopnews.xml"),
-    ("LiveMint",       "https://www.livemint.com/rss/markets"),
+    ("Economic Times Markets",   "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+    ("Economic Times Industry",  "https://economictimes.indiatimes.com/industry/rssfeeds/13352306.cms"),
+    ("Moneycontrol",             "https://www.moneycontrol.com/rss/MCtopnews.xml"),
+    ("LiveMint",                 "https://www.livemint.com/rss/markets"),
+    ("Business Standard Markets", "https://www.business-standard.com/rss/markets-106.rss"),
 ]
 RSS_GLOBAL = [
     ("Reuters",   "https://feeds.reuters.com/reuters/businessNews"),
