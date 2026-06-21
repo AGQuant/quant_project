@@ -3,108 +3,119 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Intelligence · Scorr</title>
+<title>Market Intelligence · Source AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
 <style>
   :root{
-    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe; --panel:#ffffff;
-    --line:#e4e9f1; --line2:#d4dbe7;
+    --bg:#f6f8fb; --card:#fff; --line:#e4e9f1; --line2:#d4dbe7;
     --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
-    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706; --purple:#7c3aed;
-    --font:'Sora',system-ui,-apple-system,sans-serif;
-    --shadow:0 1px 4px rgba(20,35,70,.06);
+    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --amber:#d97706;
+    --sans:'Sora',system-ui,-apple-system,sans-serif;
+    --serif:'Newsreader',Georgia,serif;
   }
-  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{min-height:100%;background:var(--bg);color:var(--txt);
-    font-family:var(--font);font-size:14px;line-height:1.55}
+    font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
 
-  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--card);
     border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
-    position:sticky;top:0;z-index:20;box-shadow:var(--shadow)}
+    position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
   .model-nav::-webkit-scrollbar{display:none}
-  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
-    border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
-    color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;text-decoration:none;
+    white-space:nowrap;flex-shrink:0;color:var(--mut);font-size:11.5px;font-weight:600;
+    border-bottom:2px solid transparent;transition:.12s}
   .mnav-item:hover{color:var(--txt)}
   .mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
-  .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+  .mnav-item span{font-size:13px}
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
-  .wrap{max-width:1080px;margin:0 auto;padding:24px 16px 70px}
+  .wrap{max-width:760px;margin:0 auto;padding:34px 20px calc(90px + env(safe-area-inset-bottom))}
 
-  .ph{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:18px}
-  .ph-title{font-size:22px;font-weight:800;color:var(--txt)}
-  .ph-sub{font-size:12px;color:var(--mut);margin-top:3px}
-  .ph-meta{font-size:11.5px;color:var(--dim);margin-top:8px}
-  .refresh-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;font-size:12px;font-weight:700;
-    color:#fff;background:var(--blu);border:none;border-radius:9px;cursor:pointer;transition:.15s}
+  .masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;
+    padding-bottom:18px;border-bottom:2px solid var(--txt)}
+  .mast-title{font-family:var(--serif);font-size:34px;font-weight:700;letter-spacing:-.015em;line-height:1.05}
+  .mast-sub{font-size:12.5px;color:var(--mut);margin-top:7px}
+  .refresh-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;font-size:12px;font-weight:700;
+    color:#fff;background:var(--blu);border:none;border-radius:8px;cursor:pointer;transition:.15s}
   .refresh-btn:hover{filter:brightness(1.07)}
   .refresh-btn:disabled{opacity:.55;cursor:default}
+  .meta{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);margin-top:13px;font-weight:600}
 
-  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-  .tab{padding:7px 16px;border-radius:20px;border:1px solid var(--line2);background:var(--card);
-    color:var(--mut);font-size:12px;font-weight:600;cursor:pointer;transition:.12s}
+  .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-top:22px;overflow-x:auto;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:0 0 13px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap;
+    border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .12s;background:none;border-top:0;border-left:0;border-right:0;font-family:inherit}
   .tab:hover{color:var(--txt)}
-  .tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
+  .tab.active{color:var(--blu);border-bottom-color:var(--blu)}
 
-  .searchbar{margin-bottom:14px}
-  .searchbar input{width:100%;max-width:360px;padding:9px 13px;border-radius:9px;border:1px solid var(--line2);
-    background:var(--card);color:var(--txt);font-size:13px;font-family:inherit;outline:none}
+  .searchbar{margin-top:18px}
+  .searchbar input{width:100%;max-width:340px;padding:9px 13px;border-radius:8px;border:1px solid var(--line2);
+    background:var(--card);color:var(--txt);font-size:13px;font-family:var(--sans);outline:none}
   .searchbar input:focus{border-color:var(--blu)}
 
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  @media(max-width:760px){.grid{grid-template-columns:1fr}}
-
-  .ncard{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);
-    border-radius:13px;padding:15px 16px;text-decoration:none;transition:.15s;box-shadow:0 1px 3px rgba(20,30,50,.04);cursor:pointer}
-  .ncard:hover{border-color:var(--blu);transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.09)}
-  .ncard.open{border-color:var(--blu)}
-  /* expandable article panel — animated, no clip on long reads */
-  .nc-full{max-height:0;overflow:hidden;transition:max-height .3s ease;
-    font-size:14px;line-height:1.7;color:var(--txt)}
-  .ncard.open .nc-full{max-height:16000px;margin-top:12px;padding:16px 20px;
-    border-top:1px solid var(--line)}
-  .ncard.open .nc-summary{-webkit-line-clamp:unset;display:block}
-  .nc-inner{max-width:720px;margin:0 auto}
-  /* markdown render (marked.js output) */
-  .nc-full h1{font-size:17px;font-weight:800;margin:14px 0 8px;color:var(--txt)}
-  .nc-full h2{font-size:15px;font-weight:700;margin:16px 0 8px;color:var(--txt)}
-  .nc-full h3{font-size:13px;font-weight:700;margin:12px 0 6px;color:var(--txt)}
-  .nc-full p{margin:8px 0}
-  .nc-full ul,.nc-full ol{margin:8px 0 8px 20px}
-  .nc-full li{margin:3px 0}
-  .nc-full strong{font-weight:700;color:var(--txt)}
-  .nc-full em{font-style:italic}
-  .nc-full a{color:var(--blu);text-decoration:none}
-  .nc-full a:hover{text-decoration:underline}
-  .nc-full hr{border:none;border-top:1px solid var(--line);margin:14px 0}
-  .nc-full blockquote{margin:10px 0;padding:6px 12px;border-left:3px solid var(--line2);color:var(--mut)}
-  .nc-full pre,.nc-full code{background:var(--card2);padding:3px 6px;border-radius:4px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
-  .nc-full pre{padding:10px 12px;overflow-x:auto}
-  .nc-full table{width:100%;border-collapse:collapse;margin:10px 0}
-  .nc-full th,.nc-full td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
-  .nc-full th{font-weight:700;color:var(--mut);font-size:11px;text-transform:uppercase}
-  .nc-article-foot{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);
-    font-size:11px;color:var(--dim)}
-  .nc-coming{margin-top:8px;font-size:11.5px;color:var(--dim);font-style:italic}
-  .nc-chev{margin-left:6px;font-size:11px;color:var(--dim);transition:transform .25s ease;flex-shrink:0}
-  .ncard.open .nc-chev{transform:rotate(180deg);color:var(--blu)}
-  .nc-top{display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap}
-  .nc-sym{font-size:10px;font-weight:800;color:var(--blu);background:rgba(37,99,235,.10);
-    border:1px solid rgba(37,99,235,.25);border-radius:6px;padding:2px 7px;letter-spacing:.03em}
-  .nc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-  .nc-badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;
-    padding:2px 7px;border-radius:6px;margin-left:auto}
-  .nc-head{font-size:16px;font-weight:700;color:var(--txt);line-height:1.35}
-  .nc-summary{font-size:12.5px;color:var(--mut);margin-top:6px;line-height:1.5;
+  .art{padding:22px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .art.lead{padding:28px 0 26px}
+  .art-kicker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;font-weight:700;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:9px}
+  .art.lead .art-kicker{gap:11px;margin-bottom:12px}
+  .art-sym{color:var(--blu)}
+  .art-impact{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.04em;
+    padding:3px 8px;border-radius:5px}
+  .imp-high .art-impact{background:rgba(226,55,68,.12);color:var(--red)}
+  .imp-mid  .art-impact{background:rgba(217,119,6,.14);color:var(--amber)}
+  .imp-low  .art-impact{background:rgba(90,103,129,.10);color:var(--mut)}
+  .art-head{font-family:var(--serif);font-size:21px;font-weight:600;line-height:1.3;color:var(--txt);text-wrap:pretty}
+  .imp-high .art-head{font-size:24px}
+  .imp-low  .art-head{font-size:19px}
+  .art.lead .art-head{font-size:30px;line-height:1.18;letter-spacing:-.01em;text-wrap:balance}
+  .art-sum{font-size:13.5px;color:var(--mut);margin-top:8px;line-height:1.6;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .nc-foot{font-size:11px;color:var(--dim);margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-  .nc-foot b{color:var(--mut);font-weight:600}
+  .art.lead .art-sum{font-size:15px;margin-top:12px;line-height:1.65;max-width:62ch;-webkit-line-clamp:3}
+  .art.open .art-sum{-webkit-line-clamp:unset;display:block}
+  .art-foot{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:11.5px;color:var(--dim);flex-wrap:wrap}
+  .art.lead .art-foot{gap:9px;margin-top:16px}
+  .art-sent{font-weight:600}
+  .art-foot b{color:var(--mut);font-weight:600}
+  .art-rt{color:var(--mut)}
+  .art-expand{margin-left:auto;color:var(--blu);font-weight:600}
 
-  .msg{grid-column:1/-1;text-align:center;color:var(--mut);font-size:13px;padding:48px 20px}
-  .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:34px;line-height:1.8}
+  /* Expanded article — rendered Markdown typography */
+  .art-full{display:none;margin-top:16px;max-width:680px;font-size:15px;line-height:1.7;color:var(--txt)}
+  .art.open .art-full{display:block}
+  .art-full > :first-child{margin-top:0}
+  .art-full h1,.art-full h2,.art-full h3,.art-full h4{font-family:var(--serif);line-height:1.25;
+    margin:24px 0 10px;font-weight:600;color:var(--txt)}
+  .art-full h1{font-size:25px}
+  .art-full h2{font-size:21px}
+  .art-full h3{font-size:18px}
+  .art-full h4{font-size:16px}
+  .art-full p{margin:12px 0}
+  .art-full ul,.art-full ol{margin:12px 0 12px 22px}
+  .art-full li{margin:5px 0}
+  .art-full strong{font-weight:700}
+  .art-full em{font-style:italic}
+  .art-full a{color:var(--blu);text-decoration:underline}
+  .art-full blockquote{border-left:3px solid var(--line2);margin:14px 0;padding:2px 0 2px 14px;color:var(--mut)}
+  .art-full table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  .art-full th,.art-full td{border:1px solid var(--line);padding:7px 11px;text-align:left;vertical-align:top}
+  .art-full th{background:#f1f4f9;font-weight:700;color:var(--txt)}
+  .art-full tr:nth-child(even) td{background:#fafbfd}
+  .art-full code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  .art-full pre{background:#eef1f6;padding:12px 14px;border-radius:8px;overflow-x:auto;margin:14px 0}
+  .art-full pre code{background:none;padding:0}
+  .art-full hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+
+  .msg{text-align:center;color:var(--mut);font-size:13px;padding:60px 20px}
+  .foot{font-size:10.5px;color:#b3bccd;text-align:center;margin-top:46px;line-height:1.8}
+
+  @media(max-width:520px){
+    .mast-title{font-size:28px}
+    .art.lead .art-head{font-size:25px}
+    .imp-high .art-head{font-size:21px}
+  }
 </style>
 </head>
 <body>
@@ -133,74 +144,68 @@
 </nav>
 
 <div class="wrap">
-  <div class="ph">
+  <div class="masthead">
     <div>
-      <div class="ph-title">Intelligence</div>
-      <div class="ph-sub">AI-powered market analysis. Updated daily.</div>
-      <div class="ph-meta" id="meta">Loading…</div>
+      <div class="mast-title">Source AI Intelligence</div>
+      <div class="mast-sub">AI-polished market intelligence, updated daily</div>
     </div>
     <button class="refresh-btn" id="refreshBtn" onclick="load()">&#8635; Refresh</button>
   </div>
 
+  <div class="meta" id="meta">Loading…</div>
+
   <div class="tabs" id="tabs"></div>
 
   <div class="searchbar" id="searchbar" style="display:none">
-    <input id="symSearch" type="text" placeholder="Filter by stock symbol — e.g. RELIANCE" oninput="render()">
+    <input id="symSearch" type="text" placeholder="Filter by symbol — e.g. RELIANCE" oninput="render()">
   </div>
 
-  <div class="grid" id="grid">
-    <div class="msg">Loading…</div>
-  </div>
+  <div id="feed"><div class="msg">Loading…</div></div>
 
   <div class="foot">
-    AI-polished market intelligence &middot; sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
+    Source AI · polished market intelligence · sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
   </div>
 </div>
 
 <script>
 const API = "";
 const CATS = [
-  { id: "domestic", label: "Domestic" },
-  { id: "global",   label: "Global" },
-  { id: "ipo",      label: "IPO" },
-  { id: "company",  label: "Company" },
+  { id:"domestic", label:"Domestic" },
+  { id:"global",   label:"Global" },
+  { id:"ipo",      label:"IPO" },
+  { id:"company",  label:"Company" },
 ];
 let curCat = "domestic";
 let articles = [];
+let openId = null;
 
-const SENT = { positive:"#0fa968", negative:"#e23744", neutral:"#8a96ad", bullish:"#0fa968", bearish:"#e23744" };
-const IMPACT = {
-  high:{bg:"#e2374422",fg:"#e23744",bd:"#e2374444"},
-  mid: {bg:"#d9770622",fg:"#d97706",bd:"#d9770644"},
-  low: {bg:"#62778122",fg:"#627781",bd:"#62778144"},
+const SENT = {
+  positive:{c:"#0fa968",g:"▲",l:"Bullish"}, bullish:{c:"#0fa968",g:"▲",l:"Bullish"},
+  negative:{c:"#e23744",g:"▼",l:"Bearish"}, bearish:{c:"#e23744",g:"▼",l:"Bearish"},
+  neutral:{c:"#8a96ad",g:"●",l:"Neutral"},
 };
 
-// ~1500 chars/min; hidden for stubs (<200 chars) per spec
-function readTime(fs){
-  if(!fs || fs.length < 200) return "";
-  return Math.max(1, Math.round(fs.length / 1500)) + " min read";
-}
-function fmtDate(iso){
-  if(!iso) return "";
-  const d = new Date(iso);
-  if(isNaN(d)) return "";
-  return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-}
-// render markdown via marked.js; safe fallback to escaped text if CDN blocked
-function mdToHtml(src){
-  const s = String(src||"");
-  return (window.marked && window.marked.parse) ? window.marked.parse(s) : esc(s);
-}
+if(window.marked && marked.setOptions){ marked.setOptions({ breaks:true, gfm:true }); }
 
 function timeAgo(iso){
   if(!iso) return "";
   const s = Math.floor((Date.now() - new Date(iso).getTime())/1000);
   if(s < 60) return "just now";
-  const m = Math.floor(s/60); if(m < 60) return m+" min ago";
+  const m = Math.floor(s/60); if(m < 60) return m+"m ago";
   const h = Math.floor(m/60); if(h < 24) return h+"h ago";
   return Math.floor(h/24)+"d ago";
 }
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+function renderMd(t){
+  if(!t) return "";
+  if(window.marked && marked.parse){ try{ return marked.parse(String(t)); }catch(e){} }
+  return "<p>"+esc(t).replace(/\n{2,}/g,"</p><p>").replace(/\n/g,"<br>")+"</p>";
+}
+function readingTime(t){
+  const words = String(t||"").trim().split(/\s+/).filter(Boolean).length;
+  if(!words) return "";
+  return Math.max(1, Math.round(words/200)) + " min read";
+}
 
 function buildTabs(){
   document.getElementById("tabs").innerHTML = CATS.map(c =>
@@ -208,73 +213,84 @@ function buildTabs(){
   ).join("");
 }
 function pick(cat){
-  curCat = cat;
+  curCat = cat; openId = null;
   document.getElementById("searchbar").style.display = cat === "company" ? "block" : "none";
+  if(cat !== "company") document.getElementById("symSearch").value = "";
   buildTabs();
   load();
 }
 
+function toggle(id){
+  openId = (openId === id) ? null : id;
+  render();
+}
+
 async function load(){
   const btn = document.getElementById("refreshBtn");
-  btn.disabled = true;
-  document.getElementById("grid").innerHTML = '<div class="msg">Loading…</div>';
+  btn.disabled = true; openId = null;
+  document.getElementById("feed").innerHTML = '<div class="msg">Loading…</div>';
   try{
     const r = await fetch(`${API}/api/news/top?days=3&category=${curCat}&limit=60`);
     const d = await r.json();
     articles = d.articles || [];
-    const lp = d.last_polished ? new Date(d.last_polished).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:false}) : "—";
-    document.getElementById("meta").innerHTML = `Last polished: <b>${lp}</b> &middot; ${d.today_count||0} articles polished today`;
+    const lp = d.last_polished
+      ? new Date(d.last_polished).toLocaleString("en-IN",{weekday:"long",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:false})
+      : "—";
+    document.getElementById("meta").textContent = `${lp} · ${d.today_count||0} stories polished today`;
     render();
   }catch(e){
-    document.getElementById("grid").innerHTML = `<div class="msg">Could not load news (${esc(e.message)}).</div>`;
+    document.getElementById("feed").innerHTML = `<div class="msg">Could not load news (${esc(e.message)}).</div>`;
   }finally{ btn.disabled = false; }
 }
 
+function artHTML(a, idx, isLead){
+  const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
+  const imp = (a.impact||"").toLowerCase();
+  const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
+  const id = a.id != null ? a.id : idx;
+  const open = (openId === id) ? " open" : "";
+  const sym = a.symbol ? `<span class="art-sym">${esc(a.symbol)}</span>` : "";
+  const impact = imp ? `<span class="art-impact">${esc(imp)} impact</span>` : "";
+  const leadTag = isLead ? `<span style="color:var(--blu)">&#9679;&nbsp; Lead</span>` : "";
+  const fullText = (a.full_summary && String(a.full_summary).trim()) || a.summary || "";
+  const rt = readingTime(fullText);
+  const fullHTML = (a.full_summary && String(a.full_summary).trim())
+    ? renderMd(a.full_summary)
+    : renderMd(a.summary||"") + `<p style="color:var(--dim);font-style:italic;font-size:13px">Full analysis coming soon.</p>`;
+  return `<div class="art ${impClass}${isLead?' lead':''}${open}" onclick="toggle(${JSON.stringify(id)})">
+    <div class="art-kicker">
+      ${leadTag}
+      <span>${esc(a.category||curCat)}</span>
+      ${sym}
+      ${impact}
+    </div>
+    <div class="art-head">${esc(a.headline)}</div>
+    <div class="art-sum">${esc(a.summary||"")}</div>
+    <div class="art-full">${fullHTML}</div>
+    <div class="art-foot">
+      <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
+      <span>·</span><b>${esc(a.source_name||"")}</b>
+      <span>·</span><span>${timeAgo(a.published_at)}</span>
+      ${rt ? `<span>·</span><span class="art-rt">${rt}</span>` : ""}
+      <span class="art-expand">${open ? "Collapse ↑" : "Read analysis ↓"}</span>
+    </div>
+  </div>`;
+}
+
 function render(){
-  let rows = articles;
+  let rows = articles.slice();
   if(curCat === "company"){
     const q = (document.getElementById("symSearch").value || "").trim().toUpperCase();
     if(q) rows = rows.filter(a => (a.symbol||"").toUpperCase().includes(q));
   }
-  const grid = document.getElementById("grid");
+  const feed = document.getElementById("feed");
   if(!rows.length){
-    grid.innerHTML = '<div class="msg">No polished news yet for this category. Polished articles appear here after the daily polish run.</div>';
+    feed.innerHTML = '<div class="msg">No polished news for this filter yet. Polished articles appear here after the daily polish run.</div>';
     return;
   }
-  grid.innerHTML = rows.map(a => {
-    const sent = (a.sentiment||"neutral").toLowerCase();
-    const dot = SENT[sent] || SENT.neutral;
-    const imp = (a.impact||"").toLowerCase();
-    const ib = IMPACT[imp];
-    const cat = a.category || "";
-    const sym = (curCat === "company" && a.symbol) ? `<span class="nc-sym">${esc(a.symbol)}</span>` : "";
-    const badge = ib ? `<span class="nc-badge" style="background:${ib.bg};color:${ib.fg};border:1px solid ${ib.bd}">${esc(imp.toUpperCase())}</span>` : "";
-    const summary = a.summary ? `<div class="nc-summary">${esc(a.summary)}</div>` : "";
-    const fullText = (a.full_summary && String(a.full_summary).trim());
-    const rt = readTime(fullText || "");
-    const artFoot = `<div class="nc-article-foot">Scorr Intelligence${a.published_at?` &middot; Published ${esc(fmtDate(a.published_at))}`:""}${cat?` &middot; ${esc(cat)}`:""}${imp?` &middot; ${esc(imp)} impact`:""}</div>`;
-    const full = fullText
-      ? `<div class="nc-full"><div class="nc-inner">${mdToHtml(fullText)}${artFoot}</div></div>`
-      : `<div class="nc-full"><div class="nc-inner">${esc(a.summary||"")}<div class="nc-coming">Full analysis coming soon</div></div></div>`;
-    // foot: reading time (when available) · timestamp · category
-    const footBits = [];
-    if(a.source_name) footBits.push(`<b>${esc(a.source_name)}</b>`);
-    if(rt) footBits.push(rt);
-    const ago = timeAgo(a.published_at); if(ago) footBits.push(ago);
-    if(cat) footBits.push(esc(cat));
-    return `<div class="ncard" onclick="this.classList.toggle('open')">
-      <div class="nc-top">
-        ${sym}
-        <span class="nc-dot" style="background:${dot}" title="${esc(sent)}"></span>
-        ${badge}
-        <span class="nc-chev">&#9660;</span>
-      </div>
-      <div class="nc-head">${esc(a.headline)}</div>
-      ${summary}
-      ${full}
-      <div class="nc-foot">${footBits.join(" &middot; ")}</div>
-    </div>`;
-  }).join("");
+  let html = artHTML(rows[0], 0, true);
+  for(let i=1;i<rows.length;i++) html += artHTML(rows[i], i, false);
+  feed.innerHTML = html;
 }
 
 // Hide own model-nav when embedded (iframe or ?embed=1) — shell renders its own nav.
