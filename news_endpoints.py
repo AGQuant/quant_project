@@ -149,7 +149,7 @@ def news_top(days: int = 3, category: str = "domestic", limit: int = 50):
     sql = """
         SELECT p.id AS polished_id, r.id AS raw_id,
                COALESCE(p.headline_clean, r.headline) AS headline,
-               p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
+               p.summary, p.full_summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
                r.symbol, r.source_type, r.source_name, r.url, r.published_at
         FROM polished_news p
         JOIN raw_news r ON r.id = p.raw_news_id
