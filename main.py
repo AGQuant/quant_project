@@ -53,6 +53,7 @@ from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
 from scorr_authset_probe import router as authset_probe_router
+from pwa_endpoints import router as pwa_router
 from investment_check import router as investment_check_router
 from scanner_endpoints import router as scanner_router
 from intraday_scanner_endpoints import router as intraday_scanner_router
@@ -119,19 +120,31 @@ def _is_embedded(request: Request) -> bool:
         return True
     return False
 
+# Tier-2 pages that get the PWA bootstrap (<script src=/pwa.js>) injected on mobile.
+# pwa.js adds the manifest link, registers the service worker, renders the mobile
+# bottom-nav, and shows the install prompt — so no page file needs editing.
+_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10"}
+_PWA_TAG = b'<script src="/pwa.js" defer></script>'
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     if request.url.path in PROTECTED and not _is_authed(request):
         from fastapi.responses import RedirectResponse as _RR
         return _RR(url="/login")
     response = await call_next(request)
-    if request.url.path in PROTECTED and "text/html" in response.headers.get("content-type", ""):
+    path = request.url.path
+    do_logout = path in PROTECTED
+    do_pwa = path in _PWA_INJECT_PATHS
+    if (do_logout or do_pwa) and "text/html" in response.headers.get("content-type", ""):
         is_embed = _is_embedded(request)
         body = b""
         async for chunk in response.body_iterator:
             body += chunk
         if not is_embed:
-            body = body.replace(b"</body>", _LOGOUT_BTN + b"</body>", 1)
+            if do_logout:
+                body = body.replace(b"</body>", _LOGOUT_BTN + b"</body>", 1)
+            if do_pwa and b'src="/pwa.js"' not in body:
+                body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"
@@ -173,6 +186,7 @@ app.include_router(structure_router)
 app.include_router(performance_router)
 app.include_router(scheduler_health_router)
 app.include_router(news_router)
+app.include_router(pwa_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
