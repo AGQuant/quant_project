@@ -618,6 +618,18 @@ class BarAggregator:
                 """, (sym, ts, ts))
                 row       = cur.fetchone()
                 spot      = float(row[0]) if row else None
+                # Fallback: the equity bar for this 5-min bucket may not be flushed
+                # yet (eq/fut flush on the same boundary but not simultaneously), so
+                # the lookup above can miss → spot None → NULL basis. Fall back to
+                # the live CMP (refreshed every CMP_FLUSH_MINS), then prior EOD close.
+                if spot is None:
+                    cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
+                    r2 = cur.fetchone()
+                    spot = float(r2[0]) if r2 and r2[0] is not None else None
+                if spot is None:
+                    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1", (sym,))
+                    r3 = cur.fetchone()
+                    spot = float(r3[0]) if r3 and r3[0] is not None else None
                 basis     = round(fut_close - spot, 4) if spot is not None else None
                 basis_pct = round((fut_close - spot) / spot * 100, 4) if spot else None
                 # prior bar OI for this symbol (most recent non-null before this ts)
@@ -668,7 +680,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── option bar store ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 5-min option ticks into option_chain."""
