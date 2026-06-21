@@ -85,6 +85,39 @@ def _published_at(entry):
         return None
 
 
+# ── Quality gate (task #54) — keep junk out of raw_news at ingest time:
+#    share-price tracker pages, &nbsp; stubs, sub-80-char blurbs, headline-only
+#    repeats, AD HOC notices, and non-Latin (CJK/Arabic/etc) spam. ──────────────
+_JUNK_DESC = ("&nbsp;", "NSE/BSE", "Share Price", "Option Chain")
+_JUNK_HEAD = ("AD HOC", "Share Price", "Option Chain")
+
+
+def _non_latin_dominant(text: str) -> bool:
+    """True if >30% of the alphabetic chars are outside Latin (Unicode > U+024F)."""
+    letters = [c for c in (text or "") if c.isalpha()]
+    if not letters:
+        return False
+    non_latin = sum(1 for c in letters if ord(c) > 0x024F)
+    return non_latin / len(letters) > 0.30
+
+
+def _is_quality_article(headline: str, description: str) -> bool:
+    """Reject low-quality articles before they enter raw_news (task #54)."""
+    h = headline or ""
+    d = description or ""
+    if len(d) < 80:
+        return False
+    if any(j in d for j in _JUNK_DESC):
+        return False
+    if any(j in h for j in _JUNK_HEAD):
+        return False
+    if h and d[:len(h)] == h:          # description is just the headline repeated
+        return False
+    if _non_latin_dominant(h) or _non_latin_dominant(d):
+        return False
+    return True
+
+
 def ensure_schema(conn):
     """Defensive CREATE IF NOT EXISTS — mirrors the migration so the module is
     self-sufficient even on a fresh DB."""
@@ -125,12 +158,18 @@ def ensure_schema(conn):
 
 def _insert_rows(conn, rows) -> int:
     """rows = list of (source_type, symbol, headline, description, url, url_hash,
-    source_name, published_at). Dedups on url_hash. Returns inserted count."""
+    source_name, published_at). Dedups on url_hash. Returns inserted count.
+    Low-quality rows are skipped at ingest (task #54)."""
     if not rows:
         return 0
     inserted = 0
+    skipped = 0
     with conn.cursor() as cur:
         for r in rows:
+            if not _is_quality_article(r[2], r[3]):   # r[2]=headline, r[3]=description
+                skipped += 1
+                log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
+                continue
             cur.execute("""
                 INSERT INTO raw_news
                     (source_type, symbol, headline, description, url, url_hash, source_name, published_at)
@@ -139,6 +178,8 @@ def _insert_rows(conn, rows) -> int:
             """, r)
             inserted += cur.rowcount
     conn.commit()
+    if skipped:
+        log.info(f"_insert_rows: skipped {skipped} low-quality article(s)")
     return inserted
 
 
