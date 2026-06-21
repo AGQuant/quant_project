@@ -7,8 +7,8 @@ via Yahoo CHART API one-at-a-time (proven reliable; batch yfinance is BROKEN).
 Feeds Daily Digest section: OVERNIGHT SCORECARD.
 Table: global_indices (UPSERT on symbol, quote_date) — 5-year EOD rolling.
 
-EOD tickers (16): Dow, S&P, Nasdaq, VIX, Nikkei, FTSE, DAX, Shanghai,
-                  Brent, WTI, Gold, Silver, Natural Gas, Bitcoin, USDINR, DXY
+EOD tickers (17): Dow, S&P, Nasdaq, US VIX, India VIX, Nikkei, FTSE, DAX,
+                  Shanghai, Brent, WTI, Gold, Silver, Natural Gas, Bitcoin, USDINR, DXY
 
 Intraday tickers (6, 5-min, 7-day rolling):
   Gold, Silver, WTI, Brent, Natural Gas, Bitcoin
@@ -39,6 +39,7 @@ GLOBAL_TICKERS = [
     ("^GSPC",     "S&P 500",     "index"),
     ("^IXIC",     "Nasdaq",      "index"),
     ("^VIX",      "US VIX",      "volatility"),
+    ("^INDIAVIX", "India VIX",   "volatility", "INDIAVIX"),  # store as INDIAVIX (task #59)
     ("^N225",     "Nikkei",      "index"),
     ("^FTSE",     "FTSE",        "index"),
     ("^GDAXI",    "DAX",         "index"),
@@ -81,9 +82,12 @@ async def fetch_global_indices(conn) -> dict:
     """Yahoo chart API, one symbol at a time. UPSERT into global_indices.
     Returns {stored, errors, total}."""
     ensure_table(conn)
+    await ensure_india_vix_history(conn)   # task #59: seed 30d INDIAVIX EOD on first run
     rows, errors = [], 0
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        for symbol, name, cat in GLOBAL_TICKERS:
+        for entry in GLOBAL_TICKERS:
+            symbol, name, cat = entry[0], entry[1], entry[2]
+            store_sym = entry[3] if len(entry) > 3 else symbol   # decouple Yahoo ticker from stored symbol
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
                    f"{urllib.parse.quote(symbol)}?interval=1d&range=5d")
             try:
@@ -96,7 +100,7 @@ async def fetch_global_indices(conn) -> dict:
                 ts    = meta.get("regularMarketTime")
                 qdate = ((datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)).date()
                          if ts else (datetime.utcnow() + timedelta(hours=5, minutes=30)).date())
-                rows.append((symbol, name, cat, price, prev, chg, qdate))
+                rows.append((store_sym, name, cat, price, prev, chg, qdate))
             except Exception as e:
                 errors += 1
                 log.warning(f"global_indices {name}: {e}")
@@ -139,7 +143,9 @@ async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> d
     rng = f"{years}y"
     total, errors = 0, 0
     async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        for symbol, name, cat in GLOBAL_TICKERS:
+        for entry in GLOBAL_TICKERS:
+            symbol, name, cat = entry[0], entry[1], entry[2]
+            store_sym = entry[3] if len(entry) > 3 else symbol
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
                    f"{urllib.parse.quote(symbol)}?interval=1d&range={rng}")
             try:
@@ -156,7 +162,7 @@ async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> d
                         continue
                     qd  = (datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)).date()
                     chg = round((cl - prev) / prev * 100, 2) if prev else None
-                    rows.append((symbol, name, cat, cl, prev, chg, qd))
+                    rows.append((store_sym, name, cat, cl, prev, chg, qd))
                     prev = cl
                 if rows:
                     with conn.cursor() as cur:
@@ -177,6 +183,63 @@ async def backfill_global_indices(conn, years: int = 5, clean: bool = True) -> d
                 log.warning(f"backfill {name}: {e}")
             await asyncio.sleep(0.4)
     return {"backfilled": total, "errors": errors, "tickers": len(GLOBAL_TICKERS), "years": years}
+
+
+async def backfill_india_vix(conn, days: int = 30) -> dict:
+    """Targeted India VIX (Yahoo ^INDIAVIX) daily-close backfill, stored as
+    symbol=INDIAVIX. Non-destructive — touches only INDIAVIX rows (unlike the full
+    clean-replace backfill). Gives the V10 VIX chart cross-day EOD history (task #59)."""
+    ensure_table(conn)
+    rng = "3mo" if days > 30 else "1mo"
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote('^INDIAVIX')}?interval=1d&range={rng}")
+    stored = 0
+    try:
+        async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            res    = r.json()["chart"]["result"][0]
+            ts     = res.get("timestamp", []) or []
+            closes = (res.get("indicators", {}).get("quote", [{}])[0].get("close", []) or [])
+            rows, prev = [], None
+            for i, t in enumerate(ts):
+                cl = closes[i] if i < len(closes) else None
+                if cl is None:
+                    continue
+                qd  = (datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)).date()
+                chg = round((cl - prev) / prev * 100, 2) if prev else None
+                rows.append(("INDIAVIX", "India VIX", "volatility", cl, prev, chg, qd))
+                prev = cl
+            rows = rows[-days:]
+            if rows:
+                with conn.cursor() as cur:
+                    for sym, nm, cat, px, pv, chg, qd in rows:
+                        cur.execute(
+                            """INSERT INTO global_indices
+                               (symbol,name,category,price,prev_close,chg_pct,quote_date,updated_at,source)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),'yahoo_backfill')
+                               ON CONFLICT (symbol,quote_date) DO UPDATE SET
+                               price=EXCLUDED.price, prev_close=EXCLUDED.prev_close,
+                               chg_pct=EXCLUDED.chg_pct, updated_at=NOW()""",
+                            (sym, nm, cat, px, pv, chg, qd))
+                conn.commit()
+                stored = len(rows)
+        log.info(f"backfill_india_vix: {stored} daily rows")
+    except Exception as e:
+        log.warning(f"backfill_india_vix: {e}")
+    return {"stored": stored}
+
+
+async def ensure_india_vix_history(conn):
+    """First-run seed: run the 30-day India VIX backfill once, only when no INDIAVIX
+    EOD history exists yet. Idempotent — a no-op on every subsequent daily fetch."""
+    ensure_table(conn)
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM global_indices WHERE symbol='INDIAVIX'")
+        n = cur.fetchone()[0]
+    if n == 0:
+        log.info("global_indices: seeding India VIX 30-day history (first run)")
+        await backfill_india_vix(conn, days=30)
 
 
 def prune_global_indices(conn, years: int = 5) -> int:
