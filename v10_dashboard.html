@@ -17,7 +17,7 @@
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800;900&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{min-height:100%;background:var(--bg);color:var(--txt);
-    font-family:var(--font);font-size:14px;line-height:1.5}
+    font-family:var(--font);font-size:16px;line-height:1.5}
 
   /* shared Scorr model-nav (light) */
   .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
@@ -86,7 +86,7 @@
 
   /* signal */
   .sig-grid{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .sig-sym{font-family:var(--mono);font-size:26px;font-weight:900;line-height:1}
+  .sig-sym{font-family:var(--mono);font-size:22px;font-weight:900;line-height:1}
   .sig-tags{display:flex;gap:6px;margin-top:6px;align-items:center}
   .sig-boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;flex:1}
   .sbox{background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
@@ -95,6 +95,24 @@
   .sig-pnl{text-align:center;min-width:70px}
   .conf-bar{width:64px;height:4px;background:var(--line);border-radius:2px;margin:5px auto 2px;overflow:hidden}
   .conf-fill{height:100%;border-radius:2px}
+
+  /* dual signal (NIFTY + BANKNIFTY) */
+  .sig-dual{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.sig-dual{grid-template-columns:1fr}}
+  .sig-col{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--card2)}
+  .sig-col-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .sig3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+  .sig-ets{display:flex;gap:10px;font-family:var(--mono);font-size:10px;color:var(--mut)}
+  .sig-ets b{font-weight:800}
+
+  /* max pain */
+  .mp-big{font-family:var(--mono);font-size:30px;font-weight:900;line-height:1}
+  .mp-row{display:flex;justify-content:space-between;align-items:center;
+    padding:5px 0;border-bottom:1px solid var(--line);font-size:11px}
+  .mp-row:last-child{border-bottom:none}
+  .mp-l{color:var(--mut)}
+  .mp-v{font-family:var(--mono);font-weight:800}
+  .mp-pending{font-size:10px;color:var(--dim);padding:18px 4px;text-align:center}
 
   /* big metric */
   .big-val{font-family:var(--mono);font-size:26px;font-weight:900}
@@ -309,19 +327,19 @@ function dualBars(a,b,ca,cb,{w=200,h=72}={}){
 /* ════════════════════════════════════════════════════════════════
    DATA  (D holds live values; safe defaults until loadLive fills)
 ════════════════════════════════════════════════════════════════ */
+const SIG0 = { dir:'FLAT', st:'—', ema:'—', entry:0, cmp:0, chg:0, pp:0, tgt:0, sl:0, str:0 };
 const D = {
   _updated:'—',
   mood:{ gate:'—', fails:0, adr:0, nD:0, nW:0, nM:0, bSlots:0, sSlots:0, soSlots:0 },
-  v10:{ dir:'FLAT', sym:'NIFTY', st:'—', ema:'—', entry:0, cmp:0, tgt:0, sl:0, pnl:0, pPct:0, str:0 },
+  sig:{ NIFTY:{...SIG0}, BANKNIFTY:{...SIG0} },
+  idx:{ NIFTY:{cmp:0,chg:0,pp:0}, BANKNIFTY:{cmp:0,chg:0,pp:0} },
   vix:{ cur:0, chg:0, data:[] },
   adr:{ adv:0, dec:0, unch:0, ratio:0 },
   pcr:{ nifty:{cur:0,chg:0,data:[]}, bnk:{cur:0,chg:0,data:[]} },
-  pvt:{ spot:0, pp:0, r1:0, r2:0, s1:0, s2:0 },
-  oi:{ nifty:{cur:182340000,pct:2.39,basis:28.5}, bnk:{cur:42180000,pct:-2.83,basis:-12.3},
-       trend:{n:[176,178.5,179.2,178.1,182.3], b:[432,438,431,434,421.8]},
-       basis:{n:[18.2,22.1,25.6,24.3,28.5], b:[-8.4,-10.2,-9.8,-11.6,-12.3]} },
+  maxpain:{ status:'loading', strike:0, spot:0, distance:0, distance_pct:0, expiry:null },
+  buildup:{ long:[], short:[], pending:true },
   open:[], closed:[],
-  cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:50,lotB:15,legs:'FUT + ATM write',gapExit:'ON' },
+  cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:65,lotB:30,legs:'FUT + ATM write',gapExit:'ON' },
   v8q:[],
 };
 
@@ -345,17 +363,23 @@ async function loadMood(){
              nD:cv('Nifty Day'), nW:cv('Nifty Week'), nM:cv('Nifty Month'),
              bSlots:m.buy_slots??0, sSlots:m.sell_slots??0, soSlots:m.so_slots??0 };
 }
-async function loadV10(){
-  const s = await getJSON('/api/v10/signal');
-  if(s.status!=='ok' && !s.signal) return;
+function mapSig(s){
+  if(!s || (s.status!=='ok' && !s.signal)) return {...SIG0};
   const sig = s.signal;
   const dir = sig==='BUY'?'LONG':sig==='SELL'?'SHORT':'FLAT';
-  D.v10 = { dir, sym:'NIFTY',
-            st:  s.st_dir==='up'?'BUY':'SELL',
-            ema: s.gate_zone==='buy'?'BUY':'SELL',
-            entry:Number(s.price)||0, cmp:Number(s.price)||0,
-            tgt:Number(s.target)||Number(s.price)||0, sl:Number(s.stop)||Number(s.price)||0,
-            pnl:0, pPct:0, str: s.st_flip?85:60 };
+  return { dir,
+           st:  s.st_dir==='up'?'BUY':'SELL',
+           ema: s.gate_zone==='buy'?'BUY':'SELL',
+           entry:Number(s.price)||0, cmp:Number(s.price)||0, chg:0, pp:0,
+           tgt:Number(s.target)||0, sl:Number(s.stop)||0,
+           str: s.st_flip?85:60 };
+}
+async function loadSignals(){
+  const [n,b] = await Promise.all([
+    getJSON('/api/v10/signal?symbol=NIFTY50').catch(()=>null),
+    getJSON('/api/v10/signal?symbol=BANKNIFTY').catch(()=>null),
+  ]);
+  D.sig = { NIFTY:mapSig(n), BANKNIFTY:mapSig(b) };
 }
 async function loadADR(){
   const a = await getJSON('/api/v8/adr');
@@ -381,23 +405,55 @@ async function loadPCR(){
   ]);
   D.pcr = { nifty:mkPcr(n), bnk:mkPcr(b) };
 }
-async function loadPivots(){
+async function loadIdx(){
+  /* CMP + day change (domestic_live) and weekly pivot PP (paper pivots) per index,
+     merged into the signal boxes for NIFTY + BANKNIFTY. */
   const [pv,dl] = await Promise.all([
-    getJSON('/api/paper/pivots?limit=300'),
+    getJSON('/api/paper/pivots?limit=300').catch(()=>null),
     getJSON('/api/v8/domestic_live').catch(()=>null),
   ]);
-  const n = rowsOf(pv).find(r=>r.symbol==='NIFTY50');
-  if(!n) return;
-  let spot = dl && dl.indices && dl.indices.NIFTY50 && dl.indices.NIFTY50.close;
-  D.pvt = { spot:Number(spot)||Number(n.pp), pp:Number(n.pp), r1:Number(n.r1),
-            r2:Number(n.r2), s1:Number(n.s1), s2:Number(n.s2) };
+  const pvRows = rowsOf(pv);
+  const map = { NIFTY:'NIFTY50', BANKNIFTY:'BANKNIFTY' };
+  for(const k of ['NIFTY','BANKNIFTY']){
+    const feed = map[k];
+    const dlx = dl && dl[feed];
+    const pvx = pvRows.find(r=>r.symbol===feed);
+    D.idx[k] = { cmp: dlx?Number(dlx.close)||0:0, chg: dlx?Number(dlx.chg_pct)||0:0,
+                 pp: pvx?Number(pvx.pp)||0:0 };
+  }
+}
+async function loadMaxPain(){
+  const m = await getJSON('/api/v10/maxpain?symbol=NIFTY');
+  if(m.status==='ok'){
+    D.maxpain = { status:'ok', strike:Number(m.max_pain_strike)||0,
+                  spot:Number(m.spot)||0, distance:Number(m.distance)||0,
+                  distance_pct:Number(m.distance_pct)||0, expiry:m.expiry||null };
+  } else {
+    D.maxpain = { status:'no_data', strike:0, spot:0, distance:0, distance_pct:0, expiry:null };
+  }
+}
+function mapBuild(r){
+  return { sym:r.symbol, price:Number(r.price)||0, day:Number(r.day_1d)||0,
+           oi:r.oi!=null?Number(r.oi):null, oiChg:r.oi_chg!=null?Number(r.oi_chg):null,
+           basis:r.basis!=null?Number(r.basis):null,
+           volR:r.vol_ratio!=null?Number(r.vol_ratio):null, sig:r.signal||'NEUTRAL' };
+}
+async function loadBuildup(){
+  const b = await getJSON('/api/v10/buildup?limit=15');
+  D.buildup = { long:(b.long_buildup||[]).map(mapBuild),
+                short:(b.short_buildup||[]).map(mapBuild),
+                pending: !!b.oi_feed_pending };
 }
 function normSide(s){ return (s||'').toUpperCase()==='SHORT'?'SHORT':'LONG'; }
+/* V10 trades indices only — drop stray V8 stock-futures rows from fallback feeds */
+const IDX_SET = ['NIFTY','BANKNIFTY','NIFTY50','BANKNIFTY50'];
+function idxOnly(r){ return IDX_SET.includes((r.symbol||'').toUpperCase()) || !!r.opt_type; }
 async function loadOpen(){
   /* V10 own positions first, fall back to V8 */
   let rows=[];
   try{ rows = rowsOf(await getJSON('/api/v10/positions')); }catch(e){}
   if(!rows.length){ try{ rows = rowsOf(await getJSON('/api/v8/positions')); }catch(e){} }
+  rows = rows.filter(idxOnly);
   D.open = rows.map((x,i)=>{
     const entry=Number(x.entry_price)||0, cmp=Number(x.cmp||x.current_price)||entry;
     const dir=normSide(x.direction||x.side);
@@ -415,6 +471,7 @@ async function loadClosed(){
   let rows=[];
   try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=10')); }catch(e){}
   if(!rows.length){ try{ rows = rowsOf(await getJSON('/api/v8/trades?limit=10')); }catch(e){} }
+  rows = rows.filter(idxOnly);
   D.closed = rows.slice(0,10).map((x,i)=>{
     const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
     const dir=normSide(x.direction||x.side);
@@ -447,7 +504,7 @@ async function loadQual(){
 }
 
 async function loadLive(){
-  const tasks=[loadMood,loadV10,loadVix,loadADR,loadPCR,loadPivots,loadOpen,loadClosed,loadQual];
+  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadQual];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
@@ -498,24 +555,38 @@ function rMood(){
     <div class="mood-slots">${slotHtml}</div></div>`;
 }
 
-function rSignal(){
-  const {dir,sym,st,ema,entry,cmp,tgt,sl,pnl,pPct,str}=D.v10;
+function sigCol(sym, s, ix){
+  const dir=s.dir;
   const c = dir==='LONG'?UP:dir==='SHORT'?DN:C.mut;
   const tag = dir==='LONG'?'▲ LONG':dir==='SHORT'?'▼ SHORT':'— FLAT';
-  const boxes=[['ENTRY',num(entry),C.txt],['CMP',num(cmp),C.blu],['TARGET',num(tgt),UP],['STOP',num(sl),DN]];
+  const boxes=[
+    ['CMP', ix.cmp?num(ix.cmp):'—', C.blu],
+    ['DAY CHG', ix.cmp?pct(ix.chg):'—', cx(ix.chg)],
+    ['PIVOT PP', ix.pp?num(ix.pp):'—', C.amber],
+  ];
   const boxHtml=boxes.map(([l,v,col])=>`<div class="sbox"><div class="l">${l}</div><div class="v" style="color:${col}">${v}</div></div>`).join('');
-  return `<div class="card" style="border-color:${c}44;background:linear-gradient(135deg,var(--card),${c}07)">
-    <div class="card-hd"><div><div class="t">V10 Active Signal</div>
-      <div class="s">SuperTrend 150/3 (10m) · EMA 3/10 (30m)</div></div>${bdg(tag,c)}</div>
-    <div class="sig-grid">
-      <div><div class="sig-sym" style="color:${c}">${esc(sym)}</div>
-        <div class="sig-tags"><span style="font-size:9px;color:var(--mut)">ST</span>${bdg(st,st==='BUY'?UP:DN,true)}
-          <span style="font-size:9px;color:var(--mut)">EMA</span>${bdg(ema,ema==='BUY'?UP:DN,true)}</div></div>
-      <div class="sig-boxes">${boxHtml}</div>
-      <div class="sig-pnl"><div class="td-mono" style="font-size:14px;font-weight:800;color:${cx(pnl)}">₹${fK(pnl)}</div>
-        <div class="td-mono" style="font-size:11px;color:${cx(pPct)}">${pct(pPct)}</div>
-        <div class="conf-bar"><div class="conf-fill" style="width:${str}%;background:${c}"></div></div>
-        <div style="font-size:8px;color:var(--mut)">${str}% conf</div></div>
+  const ets = (dir==='FLAT')
+    ? `<span style="color:var(--mut)">No active trade — awaiting flip</span>`
+    : `<span>Entry <b style="color:var(--txt)">${num(s.entry)}</b></span>
+       <span>Tgt <b style="color:${UP}">${num(s.tgt)}</b></span>
+       <span>SL <b style="color:${DN}">${num(s.sl)}</b></span>`;
+  return `<div class="sig-col" style="border-color:${c}44">
+    <div class="sig-col-hd">
+      <div class="sig-sym" style="color:${c}">${esc(sym)}</div>${bdg(tag,c,true)}</div>
+    <div class="sig-tags" style="margin:0 0 8px">
+      <span style="font-size:9px;color:var(--mut)">ST</span>${bdg(s.st,s.st==='BUY'?UP:DN,true)}
+      <span style="font-size:9px;color:var(--mut)">EMA</span>${bdg(s.ema,s.ema==='BUY'?UP:DN,true)}</div>
+    <div class="sig3">${boxHtml}</div>
+    <div class="sig-ets">${ets}</div>
+  </div>`;
+}
+function rSignal(){
+  return `<div class="card">
+    <div class="card-hd"><div><div class="t">V10 Active Signals</div>
+      <div class="s">SuperTrend 150/3 (10m) · EMA 3/10 (30m) · NIFTY + BANKNIFTY</div></div></div>
+    <div class="sig-dual">
+      ${sigCol('NIFTY', D.sig.NIFTY, D.idx.NIFTY)}
+      ${sigCol('BANKNIFTY', D.sig.BANKNIFTY, D.idx.BANKNIFTY)}
     </div></div>`;
 }
 
@@ -568,47 +639,29 @@ function rPCR(){
   </div>`;
 }
 
-function rPivot(){
-  const {spot,pp,r1,r2,s1,s2}=D.pvt;
-  const zone=spot>r1?'ABOVE R1':spot>pp?'PP → R1':spot>s1?'S1 → PP':'BELOW S1';
-  const zc=spot>r1?DN:spot>pp?UP:spot>s1?C.amber:DN;
-  const levels=[['R2',r2,'#dc2626'],['R1',r1,'#ef4444'],['PP',pp,C.amber],['S1',s1,'#10b981'],['S2',s2,UP]];
-  const rowsHtml=levels.map(([l,v,col])=>{
-    const near=(spot&&Math.abs(v-spot)/spot<0.003);
-    return `<div class="pvt-row" style="background:${near?zc+'14':'transparent'}">
-      <span class="pvt-l" style="color:${col}">${l}</span>
-      <span class="pvt-v">${num(v)}</span>
-      <span class="pvt-d">${spot?((v-spot)/spot*100).toFixed(2):'0.00'}%</span></div>`;
-  }).join('');
+function rMaxPain(){
+  const m=D.maxpain;
+  if(m.status!=='ok' || !m.strike){
+    return `<div class="card">
+      <div class="card-hd"><div><div class="t">Nifty Max Pain</div>
+        <div class="s">Nearest expiry · latest OI</div></div></div>
+      <div class="mp-pending">Option chain data pending</div>
+    </div>`;
+  }
+  const above = m.distance>=0;            // strike above spot
+  const badge = above?'ABOVE SPOT':'BELOW SPOT';
+  const bc = above?DN:UP;                  // max pain above spot = bearish pull, below = bullish
   return `<div class="card">
-    <div class="card-hd"><div><div class="t">Nifty Pivots</div><div class="s">Rolling 5-day</div></div>${bdg(zone,zc)}</div>
-    ${rowsHtml}
-    <div class="pvt-cmp"><span class="td-mono" style="font-size:10px;font-weight:700;color:${C.blu}">● CMP</span>
-      <span class="td-mono" style="font-size:12px;font-weight:900;color:${C.blu}">${num(spot)}</span>
-      <span style="font-size:8px;color:var(--mut)">live</span></div>
-  </div>`;
-}
-
-function rOI(){
-  const {nifty,bnk,trend,basis}=D.oi;
-  const interp=(p,pr)=>{ if(p>0&&pr>0)return['LONG BUILD',UP]; if(p<0&&pr<0)return['SHORT COVER',C.amber];
-    if(p>0&&pr<0)return['SHORT BUILD',DN]; return['LONG UNWIND','#ea580c']; };
-  const ni=interp(nifty.pct,D.mood.nD), bi=interp(bnk.pct,D.mood.nD);
-  const oiCard=(name,d,intr)=>`<div class="oi-card" style="border-color:${intr[1]}22">
-    <div class="hd"><span class="nm">${name}</span>${bdg(intr[0],intr[1],true)}</div>
-    <div class="oi-val">${fK(d.cur)}</div>
-    <div class="oi-sub">
-      <div><div class="l">OI CHG</div><div class="v" style="color:${cx(d.pct)}">${sgn(d.pct,2)}%</div></div>
-      <div><div class="l">BASIS</div><div class="v" style="color:${cx(d.basis)}">${d.basis>0?'+':''}${d.basis}</div></div>
-    </div></div>`;
-  return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">Futures OI Build-up + Basis</div><div class="s">NIFTY · BANKNIFTY · 5-day rolling</div></div></div>
-    <div class="oi-cards">${oiCard('NIFTY',nifty,ni)}${oiCard('BANKNIFTY',bnk,bi)}</div>
-    <div class="oi-charts">
-      <div><div class="oi-chart-lbl">OI TREND (Cr contracts)</div>${dualBars(trend.n,trend.b,UP,C.blu,{h:72})}</div>
-      <div><div class="oi-chart-lbl">BASIS TREND (pts · fut − spot)</div>${dualSpark(basis.n,basis.b,UP,C.blu,{h:72,refZero:true})}</div>
-    </div>
-    <div class="note">sample data — pending /api futures_basis feed</div>
+    <div class="card-hd"><div><div class="t">Nifty Max Pain</div>
+      <div class="s">Nearest expiry · latest OI</div></div>${bdg(badge,bc)}</div>
+    <div style="display:flex;align-items:baseline;gap:8px;margin:2px 0 10px">
+      <span class="mp-big" style="color:${C.blu}">${num(m.strike)}</span>
+      <span style="font-size:9px;color:var(--mut)">max-pain strike</span></div>
+    <div class="mp-row"><span class="mp-l">Spot</span><span class="mp-v">${num(m.spot)}</span></div>
+    <div class="mp-row"><span class="mp-l">Distance</span>
+      <span class="mp-v" style="color:${bc}">${sgn(m.distance,0)} (${sgn(m.distance_pct,2)}%)</span></div>
+    <div class="mp-row"><span class="mp-l">Expiry</span>
+      <span class="mp-v">${m.expiry?esc(String(m.expiry)):'—'}</span></div>
   </div>`;
 }
 
@@ -686,13 +739,16 @@ function rQual(){
     const ic=ivpColor(r.ivp), rich=r.richness;
     const mktBs = rich!=null
       ? `<span class="td-mono" style="font-size:11px;font-weight:700;color:${rich>0?DN:UP}">${rich>=0?'+':''}${rich.toFixed(2)}</span><span style="font-size:8px;color:var(--mut);margin-left:5px">${rich>0?'↑ rich':'↓ cheap'}</span>`
-      : `<span style="color:var(--mut)">—</span>`;
+      : `<span class="td-mono" style="font-size:10px;color:var(--mut)" title="No live equity option chain — using BS theoretical">≈ fair</span>`;
+    const optCell = r.optPx!=null
+      ? `<span class="td-mono" style="font-weight:800;font-size:13px;color:${r.sideC}">${r.optPx.toFixed(2)}</span>`
+      : `<span class="td-mono" style="font-weight:700;font-size:12px;color:var(--mut)" title="BS theoretical estimate — live price requires equity option chain">~${r.trueVal.toFixed(2)}</span>`;
     return `<tr>
       <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
       <td>${bdg(r.bkt,r.sideC,true)}</td>
       <td class="td-mono" style="font-weight:700;color:${C.blu}">${num(r.atm)}</td>
       <td>${bdg(r.optTyp,r.sideC,true)}</td>
-      <td class="td-mono" style="font-weight:800;font-size:13px;color:${r.sideC}">${r.optPx!=null?r.optPx.toFixed(2):'—'}</td>
+      <td>${optCell}</td>
       <td><div class="ivp-wrap"><div class="ivp-track"><div class="ivp-fill" style="width:${r.ivp}%;background:${ic}"></div></div>
         <span class="ivp-val" style="color:${ic}">${r.ivp}%</span></div></td>
       <td>${bdg(ivpLabel(r.ivp),ic,true)}</td>
@@ -706,6 +762,42 @@ function rQual(){
       <div class="s">BUY → CE (call) · SELL → PE (put) · IVP = 1yr percentile · True Value = BS @ 30d realized vol</div></div></div>
     <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
     <div class="legend">${legend}</div>
+    <div class="note" style="text-align:left">~ = BS theoretical price (live equity option chain pending)</div>
+  </div>`;
+}
+
+function buildupTable(title, rows, accent){
+  const sigCol = s => s==='LONG_BUILD'?UP : s==='SHORT_BUILD'?DN
+                    : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?'#ea580c' : C.mut;
+  const head=['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL R','BASIS','SIGNAL'];
+  const body = rows.length ? rows.map(r=>`<tr>
+    <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
+    <td class="td-mono">${num(r.price,2)}</td>
+    <td class="td-mono" style="font-weight:700;color:${cx(r.day)}">${pct(r.day)}</td>
+    <td class="td-mono" style="color:${r.oi!=null?C.txt:'var(--dim)'}">${r.oi!=null?fK(r.oi):'—'}</td>
+    <td class="td-mono" style="color:${r.oiChg!=null?cx(r.oiChg):'var(--dim)'}">${r.oiChg!=null?sgn(r.oiChg/1e5,1)+'L':'—'}</td>
+    <td class="td-mono" style="color:var(--dim)">${r.volR!=null?r.volR.toFixed(2):'—'}</td>
+    <td class="td-mono" style="color:${r.basis!=null?cx(r.basis):'var(--dim)'}">${r.basis!=null?sgn(r.basis,1):'—'}</td>
+    <td>${bdg(r.sig.replace('_',' '),sigCol(r.sig),true)}</td></tr>`).join('')
+    : `<tr class="empty-row"><td colspan="8">No data</td></tr>`;
+  return `<div style="flex:1;min-width:300px">
+    <div style="font-size:10px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">${title}</div>
+    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+  </div>`;
+}
+function rBuildup(){
+  const b=D.buildup;
+  const note = b.pending
+    ? `<div class="note">OI · OI CHG · VOL R · BASIS feed pending — ranking by intraday price move</div>`
+    : '';
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div><div class="t">Futures Buildup — Stock F&O</div>
+      <div class="s">Top movers this session · long (price ↑) vs short (price ↓)</div></div></div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      ${buildupTable('▲ Long Buildup', b.long, UP)}
+      ${buildupTable('▼ Short Buildup', b.short, DN)}
+    </div>
+    ${note}
   </div>`;
 }
 
@@ -713,8 +805,8 @@ function render(){
   document.getElementById('app').innerHTML =
     rTopBar() + rMood() +
     `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
-    `<div class="row r-3">${rADR()}${rPCR()}${rPivot()}</div>` +
-    rOpen() + rClosed() + rSettings() + rQual() +
+    `<div class="row r-3">${rADR()}${rPCR()}${rMaxPain()}</div>` +
+    rOpen() + rClosed() + rSettings() + rQual() + rBuildup() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
 }
 
