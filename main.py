@@ -61,6 +61,7 @@ from structure_endpoints import structure_router
 from performance_endpoints import router as performance_router
 from scheduler_health_endpoints import router as scheduler_health_router
 from news_endpoints import router as news_router
+from admin_index_backfill import router as idx_backfill_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -72,14 +73,15 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.54
+# Scorr / Project Quant — main.py v2.9.55
+# v2.9.55: Wire admin_index_backfill router — SENSEX/FINNIFTY/MIDCAPNIFTY backfill endpoint.
 # v2.9.54: Added /quant-basket route (Quant Basket dashboard).
 # v2.9.53: Removed intraday_router (intraday_endpoints.py + intraday_engine.py retired).
 #   /api/intraday/* now served by trade_check_v34_router -> tci.intraday_dashboard().
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.54"
+VERSION = "2.9.55"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -187,6 +189,7 @@ app.include_router(performance_router)
 app.include_router(scheduler_health_router)
 app.include_router(news_router)
 app.include_router(pwa_router)
+app.include_router(idx_backfill_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -345,7 +348,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.54)")
+        log.info("Tables ready (v2.9.55)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
