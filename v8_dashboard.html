@@ -271,15 +271,9 @@ const BASKETS=[
   {id:"buy_s1_bounce",label:"Buy S1 Bounce"},
   {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
 ];
-const ALL5=[
-  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
-  {id:"buy_s1_bounce",label:"Buy S1 Bounce"},
-  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
-  {id:"sell_overbought",label:"Sell Overbought"},
-];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Filter Funnel","Live News"];
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11];
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Live News"];
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -657,7 +651,7 @@ function renderFunnel(b){
   const isSell=b.id.startsWith('sell');
   const meta=`<div class="ptitle">${b.label} <button class="info-btn" onclick="openInfo('${b.id}')" title="Strategy rules & filters">i</button> <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'--'}</span></div>`;
   const stocks=d.stocks||[];
-  if(!stocks.length)return meta+`<div class="empty">No qualified names -- gate may be closed for this side.</div>`;
+  if(!stocks.length)return meta+`<div class="empty">No qualified names -- gate may be closed for this side.</div>`+funnelSection(b.id);
   const statusOrder={OPEN:0,SLOT_FULL:1,QUALIFIED:2,NEAR_MISS:3};
   const sorted=[...stocks].sort((a,b)=>{const so=(statusOrder[a.status]??2)-(statusOrder[b.status]??2);if(so!==0)return so;return(b.gvm_score||0)-(a.gvm_score||0);});
   const legend=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
@@ -692,14 +686,14 @@ function renderFunnel(b){
       ${isOpen?`<span class="mob-chip">Entry ${num(x.entry_price,1)}</span><span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}
       <span class="mob-chip" style="color:var(--dim)">${fmtSince(x.signal_ts)}</span></div>
       <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div></div>`;}).join('')}</div>`;
-  return meta+legend+desktopTable+mobileCards;
+  return meta+legend+desktopTable+mobileCards+funnelSection(b.id);
 }
 
 function renderSellOB(){
   const d=cache.sellOB;if(!d)return'<div class="loading">...</div>';
   const stocks=d.stocks||[];
   const meta=`<div class="ptitle">Sell Overbought <button class="info-btn" onclick="openInfo('sell_overbought')" title="Strategy rules & filters">i</button> <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'--'}</span></div>`;
-  if(!stocks.length)return meta+`<div class="empty">No overbought signals</div>`;
+  if(!stocks.length)return meta+`<div class="empty">No overbought signals</div>`+funnelSection('sell_overbought');
   const statusOrder={OPEN:0,SLOT_FULL:1,QUALIFIED:2,NEAR_MISS:3};
   const sorted=[...stocks].sort((a,b)=>(statusOrder[a.status]??2)-(statusOrder[b.status]??2));
   const legend=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
@@ -726,7 +720,7 @@ function renderSellOB(){
       <span class="mob-chip">RSIm ${num(x.rsi_month,0)}</span><span class="mob-chip">DMA200 ${num(x.dma_200,0)}</span>
       <span class="mob-chip">GVM ${num(x.gvm_score,1)}</span>
       ${isOpen?`<span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}</div></div>`;}).join('')}</div>`;
-  return meta+legend+desktopTable+mobileCards;
+  return meta+legend+desktopTable+mobileCards+funnelSection('sell_overbought');
 }
 
 function renderTradeLog(){
@@ -758,7 +752,9 @@ function renderTradeLog(){
     <span class="mob-chip ${cls(x.return_pct)}">${sign(x.return_pct)}%</span><span class="mob-chip ${pnlCls(x.pnl)}">Gross ${inr(x.pnl)}</span>
     <span class="mob-chip ${pnlCls(np)}">Net ${inr(np)}</span><span class="mob-chip"><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></span>
     <span class="mob-chip" style="color:var(--dim)">${fmtTs(x.exit_ts)}</span></div></div>`;}).join('')}</div>`;
-  return summaryCards+desktopTable+mobileTradeCards;
+  return summaryCards+desktopTable+mobileTradeCards
+    +`<div style="margin-top:28px;border-top:2px solid var(--line2);padding-top:6px"></div>`
+    +renderMissed();
 }
 
 function renderRaw(){
@@ -792,35 +788,50 @@ function renderMissed(){
     {sortKey:'ts',dir:-1,empty:"No missed entries -- clean slate."});
 }
 
-let ffBasket='buy_reversal';
-function ffSet(b){ffBasket=b;loadFF();}
 function preFreezeBanner(){
   const ist=new Date(Date.now()+(5*60+30)*60000);
   const dow=ist.getUTCDay(),mins=ist.getUTCHours()*60+ist.getUTCMinutes();
   if(dow>=1&&dow<=5&&mins<945)return`<div class="err" style="margin-top:18px">Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed -- funnel may understate.</div>`;
   return'';}
-async function loadFF(){
-  const el=document.getElementById('panel10');if(!el)return;
-  const nav=ALL5.map(b=>`<button class="btn ${ffBasket===b.id?'on':''}" onclick="ffSet('${b.id}')">${b.label}</button>`).join('');
-  el.innerHTML=`<div class="subnav">${nav}</div><div class="loading">Loading funnel...</div>`;
-  let fd=null,pc=null;
-  try{fd=await getJSON(EP.funnelDetail(ffBasket));}catch(e){}
-  try{pc=await getJSON(EP.passCount(ffBasket));}catch(e){}
-  let html=`<div class="subnav">${nav}</div>`;
+
+// -- Embedded collapsible Filter Funnel (per strategy tab) -------------------
+const ffCache={};
+function funnelSection(bid){
+  return`<div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
+    <button class="btn" id="ffbtn_${bid}" onclick="toggleFunnel('${bid}')">&#128202; Filter Funnel &#9662;</button>
+    <div id="ffbox_${bid}" style="display:none;margin-top:12px"></div>
+  </div>`;
+}
+function renderFunnelData(fd,pc){
+  let html='';
   if(fd&&fd.stages){
     const maxSurv=Math.max(...fd.stages.map(s=>s.survivors||0),1);
     html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} -> final ${fd.final} · ${fd.filter_count} filters</span></div>`;
     html+=`<div class="funnel-stages">${fd.stages.map(s=>{const pct=Math.round((s.survivors/maxSurv)*100);const kc=s.killed>0?'var(--red)':'var(--dim)';const bc=s.killed>0?'var(--amber)':'var(--grn)';
       return`<div class="funnel-stage"><div class="fs-name">${s.metric.replace(/_/g,' ')}</div><div class="fs-cond">${s.condition_min||'-'}</div><div class="fs-cond">${s.condition_max||'-'}</div><div class="fs-bar"><div class="fs-bar-fill" style="width:${pct}%;background:${bc}"></div></div><div class="fs-surv">${s.survivors}</div><div class="fs-kill" style="color:${kc}">${s.killed>0?'-'+s.killed:''}</div></div>`;
     }).join('')}</div>`;
-  }else html+=`<div class="err">funnel_detail not available for ${ffBasket}</div>`;
+  }else html+=`<div class="err">funnel_detail not available for ${fd?fd.basket:'this basket'}</div>`;
   if(pc&&pc.stocks){
     html+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
     html+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
       return`<div class="pc-card"><div class="pc-sym">${x.symbol}</div><div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div><div class="pc-fail">${fails||'all pass'}</div></div>`;
     }).join('')}</div>`;}
-  html+=preFreezeBanner();el.innerHTML=html;
+  html+=preFreezeBanner();
+  return html;
+}
+async function toggleFunnel(bid){
+  const box=document.getElementById('ffbox_'+bid),btn=document.getElementById('ffbtn_'+bid);
+  if(!box)return;
+  if(box.style.display!=='none'){box.style.display='none';if(btn)btn.innerHTML='&#128202; Filter Funnel &#9662;';return;}
+  box.style.display='block';if(btn)btn.innerHTML='&#128202; Filter Funnel &#9652;';
+  if(ffCache[bid]!==undefined){box.innerHTML=ffCache[bid];return;}  // lazy: fetch once, cache
+  box.innerHTML='<div class="loading">Loading funnel...</div>';
+  let fd=null,pc=null;
+  try{fd=await getJSON(EP.funnelDetail(bid));}catch(e){}
+  try{pc=await getJSON(EP.passCount(bid));}catch(e){}
+  const html=renderFunnelData(fd,pc);
+  ffCache[bid]=html;box.innerHTML=html;
 }
 
 // ---- Live News tab (raw RSS headlines, task #46) ---------------------------
@@ -847,7 +858,7 @@ function newsList(){
 }
 function setNewsFilter(k){NEWS_FILTER=k;renderNews();}
 function renderNews(){
-  const el=document.getElementById('panel11');if(!el)return;
+  const el=document.getElementById('panel9');if(!el)return;
   const d=NEWS_DATA||{};
   const counts={domestic:(d.domestic||[]).length,global:(d.global||[]).length,company:(d.company||[]).length};
   counts.all=counts.domestic+counts.global+counts.company;
@@ -868,7 +879,7 @@ function renderNews(){
 }
 async function loadNews(){
   try{NEWS_DATA=await getJSON('/api/news/live?hours=72');NEWS_TS=new Date(Date.now()+(5*60+30)*60000);}
-  catch(e){const el=document.getElementById('panel11');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
+  catch(e){const el=document.getElementById('panel9');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
   renderNews();
 }
 
@@ -878,21 +889,19 @@ function paint(){
   document.getElementById('panel6').innerHTML=renderSellOB();
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel8').innerHTML=renderRaw();
-  document.getElementById('panel9').innerHTML=renderMissed();
-  loadFF();
 }
 
 function showSkeletons(){
-  for(let i=0;i<=10;i++){const el=document.getElementById('panel'+i);if(el)el.innerHTML='<div class="loading">Loading...</div>';}
+  for(let i=0;i<=8;i++){const el=document.getElementById('panel'+i);if(el)el.innerHTML='<div class="loading">Loading...</div>';}
 }
 function renderMasterPanels(){
   document.getElementById('panel0').innerHTML=renderMaster();
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel8').innerHTML=renderRaw();
-  document.getElementById('panel9').innerHTML=renderMissed();
 }
 async function loadAll(){
   document.getElementById('refreshBtn').textContent='Refresh...';
+  for(const k in ffCache)delete ffCache[k];      // invalidate embedded-funnel cache on each refresh
   if(!window._painted)showSkeletons();          // structure visible instantly on first load
   const errs=[];
   // progressive render: paint each panel as its data lands (not after all finish)
