@@ -14,6 +14,9 @@ POST /api/admin/backfill-indian-indices?lookback=5y&dry_run=false
   dry_run=true  -> test-fetch only, report per-symbol row counts, NO DB write.
   dry_run=false -> fetch + UPSERT into raw_prices.
 
+GET /api/admin/indices-excel
+  Public download of a 5-sheet 5yr daily-OHLC .xlsx straight from raw_prices.
+
 Per symbol it test-fetches first and logs the row count. FINNIFTY tries a
 candidate ticker list (^CNXFINANCE first per the task spec, falling back to
 NIFTY_FIN_SERVICE.NS) and reports which ticker actually returned data.
@@ -46,6 +49,68 @@ INDEX_TICKERS = {
     "FINNIFTY":    ["^CNXFINANCE", "NIFTY_FIN_SERVICE.NS"],
     "MIDCAPNIFTY": ["^NSEMDCP50"],
 }
+
+# Excel export: (sheet title, raw_prices symbol) in display order
+EXCEL_SHEETS = [
+    ("Nifty 50",     "NIFTY50"),
+    ("Bank Nifty",   "BANKNIFTY"),
+    ("FinNifty",     "FINNIFTY"),
+    ("Sensex",       "SENSEX"),
+    ("Midcap Nifty", "MIDCAPNIFTY"),
+]
+
+
+@router.get("/indices-excel")
+def indices_excel():
+    """Download a 5-sheet .xlsx of 5yr daily OHLC for all 5 indices straight
+    from raw_prices. Public (index OHLC is public market data) so it opens with
+    a plain browser click. openpyxl is imported lazily so a missing dep can
+    never break app boot."""
+    import io
+    from datetime import datetime
+    import psycopg
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    counts = {}
+    with psycopg.connect(ydu.DB_URL) as conn, conn.cursor() as cur:
+        for title, sym in EXCEL_SHEETS:
+            ws = wb.create_sheet(title=title)
+            ws.append(["Date", "Open", "High", "Low", "Close", "Volume"])
+            for c in ws[1]:
+                c.font = Font(bold=True)
+            cur.execute(
+                "SELECT price_date, open, high, low, close, volume "
+                "FROM raw_prices WHERE symbol=%s ORDER BY price_date", (sym,))
+            n = 0
+            for d, o, h, l, cl, v in cur.fetchall():
+                ws.append([
+                    d,
+                    float(o) if o is not None else None,
+                    float(h) if h is not None else None,
+                    float(l) if l is not None else None,
+                    float(cl) if cl is not None else None,
+                    int(v) if v is not None else None,
+                ])
+                n += 1
+            counts[sym] = n
+            ws.freeze_panes = "A2"
+            ws.column_dimensions["A"].width = 12
+            for col in ("B", "C", "D", "E", "F"):
+                ws.column_dimensions[col].width = 13
+            for (cell,) in ws.iter_rows(min_row=2, min_col=1, max_col=1):
+                cell.number_format = "yyyy-mm-dd"
+    log.info(f"indices_excel: {counts}")
+    buf = io.BytesIO()
+    wb.save(buf)
+    fn = f"Indices_5yr_OHLC_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    from fastapi.responses import Response
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 def run_backfill(lookback: str = "5y", dry_run: bool = False) -> dict:
