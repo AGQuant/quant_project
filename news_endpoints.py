@@ -42,6 +42,38 @@ _QUALITY_CLAUSE = (
     " AND r.headline NOT LIKE '%Option Chain%'"
 )
 
+# Live feed quality filter — strips low-value headlines from V8 live news tab.
+# Removes: daily tip articles, GMP/IPO subscription noise, circuit movers,
+# Bloomberg TV show blurbs, generic morning wraps.
+_LIVE_QUALITY_FILTER = """
+    AND LENGTH(COALESCE(headline, '')) > 80
+    AND headline NOT ILIKE '%share price%'
+    AND headline NOT ILIKE '%option chain%'
+    AND headline NOT ILIKE '% GMP%'
+    AND headline NOT ILIKE '%upper circuit%'
+    AND headline NOT ILIKE '%lower circuit%'
+    AND headline NOT ILIKE '%stocks to buy%'
+    AND headline NOT ILIKE '%stocks to sell%'
+    AND headline NOT ILIKE '%stocks to watch%'
+    AND headline NOT ILIKE '%buy or sell%'
+    AND headline NOT ILIKE '%breakout stocks%'
+    AND headline NOT ILIKE '%multibagger%'
+    AND headline NOT ILIKE '%penny stock%'
+    AND headline NOT ILIKE '%IPO allotment%'
+    AND headline NOT ILIKE '%IPO day 1%'
+    AND headline NOT ILIKE '%IPO day 2%'
+    AND headline NOT ILIKE '%IPO day 3%'
+    AND headline NOT ILIKE '%subscribed%'
+    AND headline NOT ILIKE '%grey market%'
+    AND headline NOT ILIKE '%Nifty 50 prediction%'
+    AND headline NOT ILIKE '%Sensex prediction%'
+    AND headline NOT ILIKE '%10 things%'
+    AND headline NOT ILIKE '%things to know%'
+    AND headline NOT ILIKE '%The Asia Trade%'
+    AND headline NOT ILIKE '%Insight with%'
+    AND LENGTH(COALESCE(description, '')) >= 100
+"""
+
 
 def _polished_by_type(cur, source_type: str, limit: int):
     cur.execute("""
@@ -125,9 +157,9 @@ def news_unpolished(sample: int = 20):
 
 @router.get("/api/news/live")
 def news_live(hours: int = 72, per_cat: int = 60):
-    """Raw unpolished headlines from the last N hours, grouped by source_type.
-    Powers the CIO Dashboard Top News tab — raw only, no polished join, fast.
-    Per-category cap (ROW_NUMBER) so domestic/global aren't drowned by company."""
+    """Filtered headlines from the last N hours, grouped by source_type.
+    Powers the V8 live news tab and CIO Top News. Quality-filtered to remove
+    daily tip articles, GMP noise, circuit movers, and TV show blurbs."""
     hours = max(1, min(hours, 168))
     per_cat = max(1, min(per_cat, 200))
     with _conn() as conn, conn.cursor() as cur:
@@ -138,6 +170,7 @@ def news_live(hours: int = 72, per_cat: int = 60):
                        ROW_NUMBER() OVER (PARTITION BY source_type ORDER BY published_at DESC NULLS LAST) AS rn
                 FROM raw_news
                 WHERE published_at >= NOW() - (%s || ' hours')::interval
+            """ + _LIVE_QUALITY_FILTER + """
             ) t
             WHERE rn <= %s
             ORDER BY source_type, published_at DESC NULLS LAST
