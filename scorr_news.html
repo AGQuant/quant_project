@@ -172,12 +172,11 @@
 <script>
 const API = "";
 const CATS = [
-  { id:"domestic", label:"Domestic" },
-  { id:"global",   label:"Global" },
-  { id:"ipo",      label:"IPO" },
-  { id:"company",  label:"Company" },
+  { id:"india",  label:"India" },
+  { id:"global", label:"Global" },
+  { id:"ipo",    label:"IPO" },
 ];
-let curCat = "domestic";
+let curCat = "india";
 let articles = [];
 let openId = null;
 
@@ -216,8 +215,8 @@ function buildTabs(){
 }
 function pick(cat){
   curCat = cat; openId = null;
-  document.getElementById("searchbar").style.display = cat === "company" ? "block" : "none";
-  if(cat !== "company") document.getElementById("symSearch").value = "";
+  document.getElementById("searchbar").style.display = cat === "india" ? "block" : "none";
+  if(cat !== "india") document.getElementById("symSearch").value = "";
   buildTabs();
   load();
 }
@@ -297,7 +296,7 @@ function artHTML(a, idx, isLead){
 
 function render(){
   let rows = articles.slice();
-  if(curCat === "company"){
+  if(curCat === "india"){
     const q = (document.getElementById("symSearch").value || "").trim().toUpperCase();
     if(q) rows = rows.filter(a => (a.symbol||"").toUpperCase().includes(q));
   }
@@ -317,6 +316,7 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 }
 
 buildTabs();
+document.getElementById("searchbar").style.display = curCat === "india" ? "block" : "none";
 load();
 </script>
 </body>
