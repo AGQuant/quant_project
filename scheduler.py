@@ -493,6 +493,52 @@ def _bg_adr_pcr_retry():
     log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
     _bg_adr_pcr()
 
+def _bg_pivots():
+    global _pivots_ran_today
+    today = _ist_now().date()
+    if _pivots_ran_today == today: return
+    try:
+        import v8_paper
+        with _conn() as conn:
+            res = v8_paper.compute_pivots(conn, today)   # was rebuild_pivots (did not exist -> silent AttributeError, cc_task #68 Bug 1)
+            built = res.get("built", 0) if isinstance(res, dict) else 0
+            _log_health(conn, "pivots_build",
+                        {"date": str(today), "status": "ok" if built else "empty",
+                         "built": built, "total": res.get("total") if isinstance(res, dict) else None})
+        if built:
+            _pivots_ran_today = today          # lock the day only once pivots are present
+        else:
+            _log_alert("pivots_missing", f"paper pivots built 0 rows for {today} at 01:45")
+        log.info(f"pivots built: {res}")
+    except Exception as e:
+        log.error(f"pivots: {e}")
+        _log_alert("pivots_error", f"paper pivot build failed for {today}: {e}")
+
+
+def _check_pivots_health():
+    """cc_task #68 Bug 1: 10-min pivot watchdog (mirrors _bg_adr_pcr_retry). If the
+    01:45 build produced no pivots for today, rebuild once at 01:55 + alert."""
+    global _pivots_ran_today
+    today = _ist_now().date()
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM v8_paper_pivots WHERE pivot_date=%s", (today,))
+                n = int(cur.fetchone()[0])
+            if n == 0:
+                import v8_paper
+                res = v8_paper.compute_pivots(conn, today)
+                built = res.get("built", 0) if isinstance(res, dict) else 0
+                _log_alert("pivots_watchdog", f"paper pivots missing for {today} at 01:55 — rebuilt {built}")
+                _log_health(conn, "pivots_build", {"date": str(today), "status": "watchdog_rebuilt", "built": built})
+                if built:
+                    _pivots_ran_today = today
+            else:
+                _log_health(conn, "pivots_build", {"date": str(today), "status": "ok", "rows": n})
+    except Exception as e:
+        log.error(f"pivots_watchdog: {e}")
+        _log_alert("pivots_watchdog_error", f"pivot watchdog failed for {today}: {e}")
+
 def _bg_tc_screener_precompute():
     # task #43: nightly TC screener cache @16:00 IST (after market close + ADR/PCR)
     try:
@@ -565,10 +611,45 @@ def _bg_pivots():
     if _pivots_ran_today == today: return
     try:
         import v8_paper
-        with _conn() as conn: v8_paper.rebuild_pivots(conn)
-        _pivots_ran_today = today
-        log.info("pivots rebuilt")
-    except Exception as e: log.error(f"pivots: {e}")
+        with _conn() as conn:
+            res = v8_paper.compute_pivots(conn, today)   # was rebuild_pivots (did not exist -> silent AttributeError, cc_task #68 Bug 1)
+            built = res.get("built", 0) if isinstance(res, dict) else 0
+            _log_health(conn, "pivots_build",
+                        {"date": str(today), "status": "ok" if built else "empty",
+                         "built": built, "total": res.get("total") if isinstance(res, dict) else None})
+        if built:
+            _pivots_ran_today = today          # lock the day only once pivots are present
+        else:
+            _log_alert("pivots_missing", f"paper pivots built 0 rows for {today} at 01:45")
+        log.info(f"pivots built: {res}")
+    except Exception as e:
+        log.error(f"pivots: {e}")
+        _log_alert("pivots_error", f"paper pivot build failed for {today}: {e}")
+
+
+def _check_pivots_health():
+    """cc_task #68 Bug 1: 10-min pivot watchdog (mirrors _bg_adr_pcr_retry). If the
+    01:45 build produced no pivots for today, rebuild once at 01:55 + alert."""
+    global _pivots_ran_today
+    today = _ist_now().date()
+    try:
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM v8_paper_pivots WHERE pivot_date=%s", (today,))
+                n = int(cur.fetchone()[0])
+            if n == 0:
+                import v8_paper
+                res = v8_paper.compute_pivots(conn, today)
+                built = res.get("built", 0) if isinstance(res, dict) else 0
+                _log_alert("pivots_watchdog", f"paper pivots missing for {today} at 01:55 — rebuilt {built}")
+                _log_health(conn, "pivots_build", {"date": str(today), "status": "watchdog_rebuilt", "built": built})
+                if built:
+                    _pivots_ran_today = today
+            else:
+                _log_health(conn, "pivots_build", {"date": str(today), "status": "ok", "rows": n})
+    except Exception as e:
+        log.error(f"pivots_watchdog: {e}")
+        _log_alert("pivots_watchdog_error", f"pivot watchdog failed for {today}: {e}")
 
 def _bg_qb_eod():
     global _qb_eod_ran_today, _qb_eod_running
@@ -695,6 +776,7 @@ async def _scheduler_loop():
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 30:  _spawn(_bg_gvm)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
+        if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
 
 
