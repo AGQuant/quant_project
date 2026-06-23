@@ -65,8 +65,8 @@ EXIT (close-based, multi-day, levels frozen at entry):
 SIZING : 1 lot (futures_universe.lot_size, default 1).
 GATE   : market-mood buy_slots/sell_slots (sum 15) cap concurrent open per side.
 MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff|
-         opposite_open|conflict|conflict_exit_blocked -> v8_paper_missed,
-         one row per (symbol, side, day).
+         opposite_open|conflict|conflict_exit_blocked|has_open|traded_today ->
+         v8_paper_missed, one row per (symbol, side, day).
 
 Price feed: intraday_prices (Fyers 5-min, NAIVE IST ts — read RAW, no TZ math).
 
@@ -93,10 +93,19 @@ qualified_set v2 (15-Jun-2026):
 """
 
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional, Dict, List
 
 log = logging.getLogger("scorr.v8paper")
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def _now_ist():
+    """Wall-clock now in IST as a NAIVE timestamp (matches the naive-IST convention
+    of v8_paper_* tables + intraday_prices). Used for LIVE entry_ts/exit_ts so they
+    carry the real fill / close-detection moment (fractional ms) instead of the bar
+    ts (cc_task #68 Bug 2 + Bug 3). Replay keeps the bar ts for date-consistent guards."""
+    return datetime.now(IST).replace(tzinfo=None)
 
 PIVOT_WINDOW   = 5
 PIVOT_MIN_DAYS = 3
@@ -216,13 +225,27 @@ def compute_pivots(conn, for_date: date = None) -> Dict:
 def _ensure_pivots_for(conn, d: date) -> int:
     """
     SELF-HEALING (12-Jun-2026): if no pivots exist for date d, compute them now.
+    cc_task #68 Bug 1b (founder-locked: include yesterday's EOD): ALSO rebuild if the
+    existing pivots' window_end is older than the latest available EOD (price_date < d)
+    — i.e. they were built before yesterday's EOD landed. Keeps the window current so
+    pivots always include the most recent close (e.g. Jun23 -> window_end Jun22).
+    The window formula itself (compute_pivots: price_date < for_date, DESC LIMIT 5)
+    already includes T-1; the only gap was stale pivots never being refreshed.
     Returns the count of pivot rows present for d after the check.
     """
     with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM v8_paper_pivots WHERE pivot_date=%s", (d,))
-        n = int(cur.fetchone()[0])
+        cur.execute("SELECT COUNT(*), MAX(window_end) FROM v8_paper_pivots WHERE pivot_date=%s", (d,))
+        row = cur.fetchone()
+        n = int(row[0]); wend = row[1]
+        cur.execute("SELECT MAX(price_date) FROM raw_prices WHERE price_date < %s", (d,))
+        latest_eod = cur.fetchone()[0]
     if n == 0:
         log.info(f"paper pivots missing for {d} — self-healing build")
+        res = compute_pivots(conn, d)
+        return int(res.get("built", 0))
+    if wend is not None and latest_eod is not None and wend < latest_eod:
+        log.info(f"paper pivots for {d} stale (window_end {wend} < latest EOD {latest_eod}) "
+                 f"— rebuilding to include latest close (cc_task #68 Bug 1b)")
         res = compute_pivots(conn, d)
         return int(res.get("built", 0))
     return n
@@ -480,7 +503,8 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
 
 
 def _open_short(conn, sym, basket, entry, cur_ts, target, stop, pp, d):
-    """Insert a SHORT paper position. Shared by zone-short and sell_overbought."""
+    """Insert a SHORT paper position. Shared by zone-short and sell_overbought.
+    cur_ts is the resolved entry timestamp (caller passes _now_ist() live, bar ts replay)."""
     qty = _lot(conn, sym)
     with conn.cursor() as cur:
         cur.execute("""INSERT INTO v8_paper_positions
@@ -498,6 +522,13 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     ensure_schema(conn)
     d = target_date or date.today()
     now_t = datetime.now().time() if target_date is None else None
+    live = target_date is None
+
+    def _ts(bar_ts):
+        """cc_task #68 Bug 2/3: LIVE entries/exits stamp the real wall-clock moment
+        (_now_ist, fractional ms); REPLAY (target_date set) keeps the bar ts so the
+        date-based guards (_traded_today, gap-exit, _opposite_open) stay correct."""
+        return _now_ist() if live else bar_ts
 
     # SELF-HEALING pivots (12-Jun-2026)
     _ensure_pivots_for(conn, d)
@@ -537,11 +568,11 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
         fb_open, fb_ts = _first_bar(conn, sym, d)
         if fb_open is not None and (ets is None or ets.date() < d):
             if side=="LONG":
-                if fb_open>=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
-                if fb_open<=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
+                if fb_open>=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_TARGET_EXIT")); continue
+                if fb_open<=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_SL_EXIT")); continue
             else:
-                if fb_open<=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_TARGET_EXIT")); continue
-                if fb_open>=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,fb_ts,"GAP_SL_EXIT")); continue
+                if fb_open<=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_TARGET_EXIT")); continue
+                if fb_open>=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_SL_EXIT")); continue
         tl = _two_latest_closes(conn, sym, d)
         if not tl: continue
         _, cur_close, cur_ts = tl
@@ -553,7 +584,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             if cur_close<=tgt: hit="TARGET"
             elif cur_close>=sl: hit="SL"
         if hit:
-            exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts,hit))
+            exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),hit))
 
     # ---- 2) GATE REBALANCE ----
     rebalanced = []
@@ -585,7 +616,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 else: wi+=1
                 if bi>=len(best) and wi>=len(worst): break
             for (upnl,pid,sym,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts) in order[:excess]:
-                rebalanced.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts,"GATE_EXIT"))
+                rebalanced.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),"GATE_EXIT"))
 
     # ---- 3) ENTRIES ----
     after_cutoff = (now_t is not None and now_t >= ENTRY_CUTOFF)
@@ -600,11 +631,13 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             prev_close, cur_close, cur_ts = tl
             if side=="LONG" and (r1 - cur_close) >= GAP_ROOM_FRAC * (r1 - pp):
                 entry=cur_close; target=r1; stop=entry-(r1-entry)
-                if _has_open(conn,sym,"LONG"): continue
-                if _traded_today(conn,sym,"LONG",d): continue
+                if _has_open(conn,sym,"LONG"):
+                    _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"has_open"); continue
+                if _traded_today(conn,sym,"LONG",d):
+                    _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"traded_today"); continue
                 if sym in _tick_conflict:
                     _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"conflict"); continue
-                if not _resolve_conflict(conn,sym,"LONG",basket,d,cur_close,cur_ts): continue
+                if not _resolve_conflict(conn,sym,"LONG",basket,d,cur_close,_ts(cur_ts)): continue
                 if _blackout(conn,sym):
                     _log_missed(conn,d,sym,"LONG",basket,entry,target,stop,"blackout"); continue
                 if buy_slots is not None and long_open >= buy_slots:
@@ -615,22 +648,24 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                         (symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pp,pivot_date,status)
                         VALUES (%s,'LONG',%s,%s,%s,%s,%s,%s,%s,%s,'OPEN')
                         ON CONFLICT (symbol,side,status) DO NOTHING""",
-                        (sym,basket,entry,cur_ts,qty,round(target,2),round(stop,2),pp,d))
+                        (sym,basket,entry,_ts(cur_ts),qty,round(target,2),round(stop,2),pp,d))
                     conn.commit()
                 long_open+=1
                 entries.append({"symbol":sym,"side":"LONG","basket":basket,"entry":entry,"target":round(target,2),"sl":round(stop,2)})
             elif side=="SHORT" and (cur_close - s1) >= GAP_ROOM_FRAC * (pp - s1):
                 entry=cur_close; target=s1; stop=entry+(entry-s1)
-                if _has_open(conn,sym,"SHORT"): continue
-                if _traded_today(conn,sym,"SHORT",d): continue
+                if _has_open(conn,sym,"SHORT"):
+                    _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"has_open"); continue
+                if _traded_today(conn,sym,"SHORT",d):
+                    _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"traded_today"); continue
                 if sym in _tick_conflict:
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"conflict"); continue
-                if not _resolve_conflict(conn,sym,"SHORT",basket,d,cur_close,cur_ts): continue
+                if not _resolve_conflict(conn,sym,"SHORT",basket,d,cur_close,_ts(cur_ts)): continue
                 if _blackout(conn,sym):
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"blackout"); continue
                 if sell_slots is not None and short_open >= sell_slots:
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"slot_full"); continue
-                entries.append(_open_short(conn,sym,basket,entry,cur_ts,target,stop,pp,d))
+                entries.append(_open_short(conn,sym,basket,entry,_ts(cur_ts),target,stop,pp,d))
                 short_open+=1
 
         # ---- 3b) SELL_OVERBOUGHT ENTRIES ----
@@ -643,16 +678,18 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 continue
             entry = cur_close
             stop  = entry + (entry - target)
-            if _has_open(conn,sym,"SHORT"): continue
-            if _traded_today(conn,sym,"SHORT",d): continue
+            if _has_open(conn,sym,"SHORT"):
+                _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"has_open"); continue
+            if _traded_today(conn,sym,"SHORT",d):
+                _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"traded_today"); continue
             if sym in _tick_conflict:
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"conflict"); continue
-            if not _resolve_conflict(conn,sym,"SHORT","sell_overbought",d,cur_close,cur_ts): continue
+            if not _resolve_conflict(conn,sym,"SHORT","sell_overbought",d,cur_close,_ts(cur_ts)): continue
             if _blackout(conn,sym):
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"blackout"); continue
             if sell_slots is not None and short_open >= sell_slots:
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"slot_full"); continue
-            entries.append(_open_short(conn,sym,"sell_overbought",entry,cur_ts,target,stop,None,d))
+            entries.append(_open_short(conn,sym,"sell_overbought",entry,_ts(cur_ts),target,stop,None,d))
             short_open+=1
     else:
         for sym, q in qual.items():
