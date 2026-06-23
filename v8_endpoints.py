@@ -5,6 +5,7 @@ ADR (14-Jun-2026): _read_adr gates the live tiers behind _market_open().
 ADR (11-Jun-2026): market_mood reads adr_intraday primary, falls back to adr_daily.
 buy_reversal V2 LOCKED (16-Jun-2026): RSI caps widened, dma_50 widened, mom_2d widened.
   rsiM[52-82] rsiW[57-73] dma50[2-12] mom2d[0-3] | 83 sigs/yr, 85.9% WR, EV +0.496%
+buy_reversal/buy_momentum GVM floor relaxed to 6.0 (23-Jun-2026) — was 6.5/7.0.
 sell_reversal V4 LOCKED (16-Jun-2026): 5 strict AND | 79.3% WR | EV +0.752%/trade.
   Mood relaxation (18-Jun-2026): 4/5 in Strong Bullish + Bullish | 5/5 in Neutral/Bear.
 sell_momentum V2 LOCKED (16-Jun-2026): 6 strict AND | 71.9% WR | EV +0.55%/trade.
@@ -50,7 +51,7 @@ def _market_open() -> bool:
 
 FILTER_CONFIG = {
     "buy_reversal": {
-        "gvm_score":    [6.5,  10.0],
+        "gvm_score":    [6.0,  10.0],  # relaxed from 6.5 (23-Jun-2026)
         "dma_200":      [1.5,  20.0],
         "dma_50":       [2.0,  12.0],
         "month_return": [-2.0,  7.2],
@@ -62,7 +63,7 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "buy_momentum": {
-        "gvm_score":    [7.0,  10.0],
+        "gvm_score":    [6.0,  10.0],  # relaxed from 7.0 (23-Jun-2026)
         "dma_50":       [8.0,  25.0],
         "dma_200":      [8.0,  40.0],
         "rsi_month":    [70.0, 100.0],
@@ -678,7 +679,6 @@ def _enrich_atm_options(rows: list, cur) -> list:
     if not symbols:
         return rows
 
-    # 30-day annualized realized vol (hVol) -- sanity-clamped to [0.05, 2.0]
     hvol_map = {}
     cur.execute("""
         WITH dr AS (
@@ -700,8 +700,6 @@ def _enrich_atm_options(rows: list, cur) -> list:
             hv = min(max(hv, 0.05), 2.0)
         hvol_map[sym] = hv
 
-    # IV percentile -- rank of rolling 30d hVol over trailing window.
-    # NB: log-returns isolated in their own CTE -- Postgres forbids nested window fns.
     ivp_map = {}
     cur.execute("""
         WITH lr AS (
@@ -731,12 +729,10 @@ def _enrich_atm_options(rows: list, cur) -> list:
     for sym, ivp in cur.fetchall():
         ivp_map[sym] = int(ivp) if ivp is not None else None
 
-    # Nearest expiry + dte (calendar days)
     today       = _ist_now().date()
     nearest_exp = _nearest_nse_expiry(today)
     dte         = max((nearest_exp - today).days, 0)
 
-    # Actual listed expiry in option_chain (index options only: NIFTY / BANKNIFTY)
     cur.execute("SELECT MIN(expiry) FROM option_chain WHERE expiry >= CURRENT_DATE")
     oc_row = cur.fetchone()
     oc_exp = oc_row[0] if oc_row else None
@@ -754,7 +750,6 @@ def _enrich_atm_options(rows: list, cur) -> list:
             spot = None
         r["atm_strike"] = round(spot / 50) * 50 if spot else None
 
-    # ATM call/put ltp -- only where option_chain has the underlying (NIFTY/BANKNIFTY)
     if oc_exp:
         for r in rows:
             atm = r.get("atm_strike")
