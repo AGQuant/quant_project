@@ -46,6 +46,24 @@ def v10_tick(x_admin_token: Optional[str] = Header(None)):
     return v10_st_ema.tick()
 
 
+@router.post("/backfill")
+def v10_backfill(days: int = 5, x_admin_token: Optional[str] = Header(None)):
+    """Repair the 5m tables from intraday_prices over the last N days (idempotent).
+    Use after a tick outage to fill gaps (e.g. the Jun 19-22 gap)."""
+    _check_admin(x_admin_token)
+    import v10_st_ema
+    return v10_st_ema._backfill_5m(days=days)
+
+
+@router.post("/gap-exit")
+def v10_gap_exit(x_admin_token: Optional[str] = Header(None)):
+    """Force-close any OPEN position stranded by a tick outage (exits at the first
+    bar open after entry date, reason GAP_EXIT). No-op when nothing is stranded."""
+    _check_admin(x_admin_token)
+    import v10_st_ema
+    return v10_st_ema.gap_exit()
+
+
 # ---- Dashboard reads (no auth — display only) ----
 @router.get("/positions")
 def v10_positions():
@@ -66,6 +84,15 @@ def v10_summary():
     """Running settings + aggregate paper P&L summary."""
     import v10_st_ema
     return v10_st_ema.get_summary()
+
+
+@router.get("/performance")
+def v10_performance():
+    """Full live-paper performance stats from v10_trades — total trades, win rate,
+    total P&L, avg win/loss pts, profit factor, max drawdown, last 7 days, and
+    by-symbol / by-leg breakdowns. Powers the dashboard performance panel."""
+    import v10_st_ema
+    return v10_st_ema.get_performance()
 
 
 @router.get("/vix")
