@@ -8,7 +8,7 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
   GET  /api/news/company/{symbol} — latest 10 polished for a symbol (raw fallback)
   GET  /api/news/unpolished       — count + sample of raw_news awaiting polish
   GET  /api/news/live             — raw headlines grouped by source_type (CIO tab, task #40)
-  GET  /api/news/top              — polished news by category for /news page (task #47)
+  GET  /api/news/top              — polished news by category for /news page (task #47, #66)
   POST /api/admin/refresh_news    — background fetch (market + company), returns started
 """
 
@@ -42,17 +42,48 @@ _QUALITY_CLAUSE = (
     " AND r.headline NOT LIKE '%Option Chain%'"
 )
 
+# Live feed quality filter — strips low-value headlines from V8 live news tab.
+_LIVE_QUALITY_FILTER = """
+    AND LENGTH(COALESCE(headline, '')) > 80
+    AND headline NOT ILIKE '%share price%'
+    AND headline NOT ILIKE '%option chain%'
+    AND headline NOT ILIKE '% GMP%'
+    AND headline NOT ILIKE '%upper circuit%'
+    AND headline NOT ILIKE '%lower circuit%'
+    AND headline NOT ILIKE '%stocks to buy%'
+    AND headline NOT ILIKE '%stocks to sell%'
+    AND headline NOT ILIKE '%stocks to watch%'
+    AND headline NOT ILIKE '%buy or sell%'
+    AND headline NOT ILIKE '%breakout stocks%'
+    AND headline NOT ILIKE '%multibagger%'
+    AND headline NOT ILIKE '%penny stock%'
+    AND headline NOT ILIKE '%IPO allotment%'
+    AND headline NOT ILIKE '%IPO day 1%'
+    AND headline NOT ILIKE '%IPO day 2%'
+    AND headline NOT ILIKE '%IPO day 3%'
+    AND headline NOT ILIKE '%subscribed%'
+    AND headline NOT ILIKE '%grey market%'
+    AND headline NOT ILIKE '%Nifty 50 prediction%'
+    AND headline NOT ILIKE '%Sensex prediction%'
+    AND headline NOT ILIKE '%10 things%'
+    AND headline NOT ILIKE '%things to know%'
+    AND headline NOT ILIKE '%The Asia Trade%'
+    AND headline NOT ILIKE '%Insight with%'
+    AND LENGTH(COALESCE(description, '')) >= 100
+"""
+
 
 def _polished_by_type(cur, source_type: str, limit: int):
     cur.execute("""
         SELECT p.id AS polished_id, r.id AS raw_id,
                COALESCE(p.headline_clean, r.headline) AS headline,
                p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
-               r.symbol, r.source_type, r.source_name, r.url, r.published_at
+               r.symbol, r.source_type, r.source_name, r.url, r.published_at,
+               p.polished_at
         FROM polished_news p
         JOIN raw_news r ON r.id = p.raw_news_id
         WHERE r.source_type = %s
-        ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+        ORDER BY p.polished_at DESC NULLS LAST
         LIMIT %s
     """, (source_type, limit))
     return _rows(cur)
@@ -77,17 +108,16 @@ def news_company(symbol: str):
             SELECT p.id AS polished_id, r.id AS raw_id,
                    COALESCE(p.headline_clean, r.headline) AS headline,
                    p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
-                   r.symbol, r.source_name, r.url, r.published_at
+                   r.symbol, r.source_name, r.url, r.published_at, p.polished_at
             FROM polished_news p
             JOIN raw_news r ON r.id = p.raw_news_id
             WHERE r.symbol = %s
-            ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+            ORDER BY p.polished_at DESC NULLS LAST
             LIMIT 10
         """, (sym,))
         polished = _rows(cur)
         if polished:
             return {"symbol": sym, "polished": True, "count": len(polished), "articles": polished}
-        # fallback: raw articles not yet polished
         cur.execute("""
             SELECT id AS raw_id, headline, description, symbol, source_name, url, published_at
             FROM raw_news
@@ -101,9 +131,7 @@ def news_company(symbol: str):
 
 @router.get("/api/news/unpolished")
 def news_unpolished(sample: int = 20):
-    """Count + sample of raw_news rows with no matching polished_news.
-    Used by the manual Claude.ai polish session to know what is pending.
-    Quality-filtered (task #54) so the count reflects real articles, not junk."""
+    """Count + sample of raw_news rows with no matching polished_news."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT COUNT(*) FROM raw_news r
@@ -125,9 +153,9 @@ def news_unpolished(sample: int = 20):
 
 @router.get("/api/news/live")
 def news_live(hours: int = 72, per_cat: int = 60):
-    """Raw unpolished headlines from the last N hours, grouped by source_type.
-    Powers the CIO Dashboard Top News tab — raw only, no polished join, fast.
-    Per-category cap (ROW_NUMBER) so domestic/global aren't drowned by company."""
+    """Filtered headlines from the last N hours, grouped by source_type.
+    Powers the V8 live news tab and CIO Top News. Quality-filtered to remove
+    daily tip articles, GMP noise, circuit movers, and TV show blurbs."""
     hours = max(1, min(hours, 168))
     per_cat = max(1, min(per_cat, 200))
     with _conn() as conn, conn.cursor() as cur:
@@ -138,6 +166,7 @@ def news_live(hours: int = 72, per_cat: int = 60):
                        ROW_NUMBER() OVER (PARTITION BY source_type ORDER BY published_at DESC NULLS LAST) AS rn
                 FROM raw_news
                 WHERE published_at >= NOW() - (%s || ' hours')::interval
+            """ + _LIVE_QUALITY_FILTER + """
             ) t
             WHERE rn <= %s
             ORDER BY source_type, published_at DESC NULLS LAST
@@ -154,37 +183,45 @@ def news_live(hours: int = 72, per_cat: int = 60):
 
 @router.get("/api/news/top")
 def news_top(days: int = 3, category: str = "india", limit: int = 50):
-    """Polished news for the dedicated /news page, by category (task #47, #66).
-      india    = source_type domestic OR company, polished category != 'ipo' (task #66)
+    """Polished news for the /news page, sorted by polished_at DESC so freshly
+    polished articles always appear at the top regardless of original publish date.
+
+    Categories (task #66 — Domestic + Company merged into India):
+      india    = domestic + company, excluding ipo (DEFAULT)
       global   = source_type global
-      ipo      = polished category = 'ipo' (any source)
-      domestic = source_type domestic (alias, kept for backward compatibility)
-      company  = source_type company (alias, kept for backward compatibility)"""
+      ipo      = polished category = 'ipo'
+      domestic = alias for backward compatibility
+      company  = alias for backward compatibility
+    """
     days = max(1, min(days, 30))
     limit = max(1, min(limit, 200))
     cat = (category or "india").lower()
     sql = """
         SELECT p.id AS polished_id, r.id AS raw_id,
                COALESCE(p.headline_clean, r.headline) AS headline,
-               p.summary, p.full_summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
+               p.summary, p.full_summary, p.category, p.sentiment, p.impact,
+               p.mentioned_symbols, p.polished_at,
                r.symbol, r.source_type, r.source_name, r.url, r.published_at
         FROM polished_news p
         JOIN raw_news r ON r.id = p.raw_news_id
-        WHERE r.published_at >= NOW() - (%s || ' days')::interval
+        WHERE p.polished_at >= NOW() - (%s || ' days')::interval
     """
     params = [days]
     if cat == "ipo":
         sql += " AND p.category = 'ipo'"
     elif cat == "global":
         sql += " AND r.source_type = 'global'"
-    elif cat == "company":  # alias kept for backward compatibility
+    elif cat == "company":
         sql += " AND r.source_type = 'company'"
-    elif cat == "domestic":  # alias kept for backward compatibility
+    elif cat == "domestic":
         sql += " AND r.source_type = 'domestic' AND (p.category IS NULL OR p.category <> 'ipo')"
-    else:  # india — domestic + company merged, excluding ipo (task #66)
+    else:  # india — domestic + company merged (task #66)
         cat = "india"
         sql += " AND r.source_type IN ('domestic','company') AND (p.category IS NULL OR p.category <> 'ipo')"
-    sql += " ORDER BY r.published_at DESC NULLS LAST LIMIT %s"
+    # Sort by polished_at DESC — freshly polished articles always surface first
+    # regardless of original published_at date. Fixes the issue where articles
+    # polished today (Jun 23) with pub_date Jun 22 were buried under yesterday's feed.
+    sql += " ORDER BY p.polished_at DESC NULLS LAST LIMIT %s"
     params.append(limit)
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
@@ -200,7 +237,6 @@ def news_top(days: int = 3, category: str = "india", limit: int = 50):
 
 
 def _refresh_job():
-    """Runs both fetchers on its own connection (background thread)."""
     import news_fetcher
     with _conn() as conn:
         news_fetcher.fetch_market_news(conn)
