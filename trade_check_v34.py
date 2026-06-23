@@ -1,5 +1,10 @@
 """
-Trade Check v3.4.1 — Weighted Tier-1 + Core-Gate scoring engine.
+Trade Check v3.5 — Weighted Tier-1 + Core-Gate scoring engine.
+UPDATE v3.5 (spec id=370): R4 GVM_MIN 7.0->6.6 | R9 week+month tri-state
+  (MODERATE when exactly one positive) | F2 pivot-room ratio gate (reads
+  v8_paper_pivots PP/R1/S1/R2/S2 — pivot levels only, authorised) | F3
+  dynamic fibonacci bounce from raw_prices | F7 reworked to basis+OI
+  (PASS basis-on-side+OI, MODERATE basis-on-side+no-OI, FAIL otherwise).
 UPDATE v3.4.1: 0.5 partial-pass rule for core gates.
 - Both conditions pass (1.0x) → advance, no cap
 - 1/2 pass (0.5x) → NEUTRAL, advance but weighted
@@ -11,7 +16,7 @@ spec at session_log id=143 + output format id=209).
 WHAT v3.4 CHANGES vs v3.3 (faithful re-weighting, NOT new rules):
   - Flat X/11 count  ->  core-gate + weighted score (fixes DIVISLAB 9/11
     outranking EICHERMOT 7/11 despite worse quality).
-  - CORE GATES (pass/fail/partial): GVM>=7 (LONG) + week&month direction.
+  - CORE GATES (pass/fail/partial): GVM>=6.6 (LONG, R4) + week&month (R9).
     Fail both => capped at WATCH. Fail one => 0.5x multiplier (neutral, advance).
   - OI/price quadrant (was Tier-2 F7 sub_A in v3.3) PROMOTED into Tier1
     as a weighted rule. basis-delta = strength grade. null-OI => abstain
@@ -22,26 +27,32 @@ HUMAN-IN-AI-LOOP: the 2 chart gates (5-min strength, 1-Day structure) are
 NOT machine-readable. Caller passes them as booleans ("you are the gate").
 Module auto-scores the 8 data-derivable rules from v8_metrics + futures_basis.
 
-HARD SEPARATION: This module NEVER reads v8_paper_*, v8_qualified, or any
-V8 engine table. Trade Check and the V8 paper engine are independent systems
+SEPARATION: This module does NOT read v8_qualified or V8 paper signal/journal
+tables. Trade Check and the V8 paper engine remain independent systems
 (session_log id=210). Reads ONLY: v8_metrics (metrics snapshot), gvm_scores
-(segment/peers), futures_basis (OI/basis). v8_metrics is a shared read-only
-metrics source, NOT a V8-engine coupling.
+(segment/peers), futures_basis (basis), raw_prices (F3 fibonacci), and
+v8_paper_pivots (F2 — pivot LEVELS ONLY, authorised per cc_task #64 / spec
+id=370; same pivot source the screener already uses). No V8-engine coupling.
 
 Runs SIDE-BY-SIDE with v3.3. Does not replace it. Replay-tunable weights.
 Optional personal_journal promote is manual-only (caller-triggered).
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 import psycopg
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
-VERSION = "v3.4.1"
-SPEC_PARENT = "session_log id=143 (v3.3) — v3.4 weighted re-implementation + v3.4.1 0.5 partial rule"
+VERSION = "v3.5"
+SPEC_PARENT = "session_log id=143 (v3.3) — v3.4 weighted re-impl + v3.4.1 0.5 partial + v3.5 spec id=370 (R4/R9/F2/F3/F7)"
+
+# ─── v3.5 RULE CONSTANTS (spec id=370) ───────────────────────────────────
+GVM_MIN_LONG    = 6.6    # R4: minimum GVM for LONG core gate (was 7.0)
+PIVOT_RATIO_MIN = 1.25   # F2: (R2-CMP)/(CMP-S2) must exceed this
+FIB_TOL         = 0.02   # F3: within 2% of a fib level = bounce
 
 # ─── WEIGHTS (starting values, replay-tunable — NOT locked) ──────────────
 # High = quality/trend/structure. Medium = environment. Low = confirmation.
@@ -55,10 +66,12 @@ W_MARKET_GATE   = 2   # market not extremely against side
 W_PEER          = 1   # peers confirming today
 W_VOLUME        = 1   # vol_ratio buying/selling conviction
 W_RSI_ROOM      = 1   # daily RSI not exhausted
+W_PIVOT_ROOM    = 2   # F2 (v3.5) — pivot-room ratio gate
+W_FIB           = 2   # F3 (v3.5) — fibonacci bounce
 
 MAX_WEIGHTED = (W_MA_STACK + W_RSI_MW + W_STRUCT_1D + W_OI_QUADRANT +
                 W_SECTOR_MONTH + W_5MIN + W_MARKET_GATE + W_PEER +
-                W_VOLUME + W_RSI_ROOM)  # = 21
+                W_VOLUME + W_RSI_ROOM + W_PIVOT_ROOM + W_FIB)  # = 25
 
 STRONG_MIN = 15   # core pass + >=15/21
 VALID_MIN  = 11   # core pass + >=11/21
@@ -120,77 +133,157 @@ def _peer_confirm(cur, symbol: str, segment: str, side: str) -> Optional[bool]:
     return sum(1 for r in rows if _f(r[0]) < 0) >= 2
 
 
-def _fetch_basis_oi(cur, symbol: str) -> Optional[Dict[str, Any]]:
-    """Latest + prior few futures_basis bars for OI-quadrant + basis-delta.
-    Returns None if no OI data (rule abstains — never false-fail)."""
+def _fetch_basis(cur, symbol: str) -> Optional[Dict[str, Any]]:
+    """F7 primary source — latest futures_basis row (basis, basis_pct),
+    regardless of whether OI is present. None if no row at all -> F7 FAIL."""
     cur.execute(
-        """SELECT ts, basis, basis_pct, oi, oi_chg, futures_close, spot_close
-           FROM futures_basis
-           WHERE symbol = %s AND oi IS NOT NULL
-           ORDER BY ts DESC LIMIT 5""",
+        """SELECT basis, basis_pct FROM futures_basis
+           WHERE symbol = %s ORDER BY ts DESC LIMIT 1""",
         (symbol.upper(),),
     )
-    rows = cur.fetchall()
-    if not rows:
+    r = cur.fetchone()
+    if not r:
         return None
-    latest = rows[0]
-    basis_series = [_f(r[1]) for r in rows][::-1]  # oldest->newest
-    return {
-        "ts": latest[0],
-        "basis": _f(latest[1]),
-        "basis_pct": _f(latest[2]),
-        "oi": latest[3],
-        "oi_chg": latest[4],
-        "basis_series": basis_series,
-        "fut": _f(latest[5]),
-        "spot": _f(latest[6]),
-    }
+    return {"basis": _f(r[0]), "basis_pct": _f(r[1])}
+
+
+def _has_oi(cur, symbol: str) -> bool:
+    """F7 — does option_chain carry any OI for this symbol? (Only top-mcap
+    names have option_chain rows; absence -> MODERATE, not FAIL.)"""
+    cur.execute(
+        """SELECT 1 FROM option_chain
+           WHERE (symbol = %s OR underlying = %s) AND oi IS NOT NULL LIMIT 1""",
+        (symbol.upper(), symbol.upper()),
+    )
+    return cur.fetchone() is not None
+
+
+def _fetch_cmp(cur, symbol: str) -> Optional[float]:
+    """Latest EOD close from raw_prices — used as CMP for F2 + F3."""
+    cur.execute(
+        """SELECT close FROM raw_prices WHERE symbol = %s
+           ORDER BY price_date DESC LIMIT 1""",
+        (symbol.upper(),),
+    )
+    r = cur.fetchone()
+    return _f(r[0]) if r and r[0] is not None else None
+
+
+def _fetch_pivots(cur, symbol: str) -> Optional[Dict[str, float]]:
+    """F2 — latest pivot LEVELS from v8_paper_pivots (PP/R1/S1/R2/S2).
+    Pivot levels only; no V8 signal/state coupling (cc_task #64 / spec id=370)."""
+    cur.execute(
+        """SELECT pp, r1, s1, r2, s2 FROM v8_paper_pivots
+           WHERE symbol = %s AND pivot_date = (
+               SELECT MAX(pivot_date) FROM v8_paper_pivots WHERE symbol = %s)
+           LIMIT 1""",
+        (symbol.upper(), symbol.upper()),
+    )
+    r = cur.fetchone()
+    if not r:
+        return None
+    return {"pp": _f(r[0]), "r1": _f(r[1]), "s1": _f(r[2]),
+            "r2": _f(r[3]), "s2": _f(r[4])}
 
 
 # ─── RULE EVALUATORS ─────────────────────────────────────────────────────
 
-def _eval_oi_quadrant(side: str, m: Dict, basis: Optional[Dict]) -> Dict:
-    """Promoted from v3.3 Tier2 F7. price+OI buildup = full weight.
-    basis widening = strength grade. null OI = abstain (neutral)."""
+def _eval_f7(side: str, basis: Optional[Dict], has_oi: bool) -> Dict:
+    """F7 — OI + basis confirmation (spec id=370 v3.5).
+      PASS:     basis on side AND OI signal present (option_chain has rows)
+      MODERATE: basis on side BUT no OI data (most non-top-mcap stocks)
+      FAIL:     basis against side, or no futures_basis row at all
+    LONG favours basis>0 (futures premium); SHORT mirrors (basis<0)."""
     if basis is None:
-        return {"weight": 0, "earned": 0, "status": "ABSTAIN",
-                "detail": "no OI data (futures_basis null) — neutral, not penalised",
-                "abstain": True}
+        return {"weight": W_OI_QUADRANT, "earned": 0, "status": "FAIL",
+                "detail": "no futures_basis data"}
+    b, bp = basis["basis"], basis["basis_pct"]
+    favourable = b > 0 if side == "LONG" else b < 0
+    want = ">0" if side == "LONG" else "<0"
+    if not favourable:
+        return {"weight": W_OI_QUADRANT, "earned": 0, "status": "FAIL",
+                "detail": f"basis {b:+.2f} ({bp:+.3f}%) not {want}"}
+    if has_oi:
+        return {"weight": W_OI_QUADRANT, "earned": W_OI_QUADRANT, "status": "PASS",
+                "detail": f"basis {b:+.2f} ({bp:+.3f}%) {want} + OI signal present"}
+    return {"weight": W_OI_QUADRANT, "earned": round(W_OI_QUADRANT * 0.5, 2),
+            "status": "MODERATE",
+            "detail": f"basis {b:+.2f} ({bp:+.3f}%) {want}, no OI data (option_chain empty)"}
 
-    price_up = _f(m.get("eod_chg")) > 0
-    oi_rising = (basis["oi_chg"] or 0) > 0
 
-    # Quadrant
+def _eval_pivot_room(side: str, cmp_v: Optional[float],
+                     piv: Optional[Dict]) -> Dict:
+    """F2 — pivot-room ratio gate (spec id=370 v3.5).
+      LONG: ratio = (R2-CMP)/(CMP-S2); PASS if ratio>1.25 AND CMP>PP.
+      SHORT: ratio = (CMP-S2)/(R2-CMP); PASS if ratio>1.25 AND CMP<PP.
+      MODERATE = exactly one condition true. FAIL = neither / no data."""
+    if piv is None or cmp_v is None:
+        return {"earned": 0, "status": "FAIL", "detail": "no pivot/CMP data"}
+    pp, r2, s2 = piv["pp"], piv["r2"], piv["s2"]
     if side == "LONG":
-        buildup = price_up and oi_rising          # fresh long buildup (strong)
-        covering = price_up and not oi_rising      # short covering (weak-ok)
-        veto = (not price_up) and oi_rising        # fresh SHORT buildup vs a long
-    else:  # SHORT
-        buildup = (not price_up) and oi_rising     # fresh short buildup (strong)
-        covering = (not price_up) and not oi_rising # long unwinding (weak-ok)
-        veto = price_up and oi_rising              # fresh LONG buildup vs a short
+        denom = cmp_v - s2
+        ratio = (r2 - cmp_v) / denom if denom > 0 else 0.0
+        cond_side = cmp_v > pp
+    else:
+        denom = r2 - cmp_v
+        ratio = (cmp_v - s2) / denom if denom > 0 else 0.0
+        cond_side = cmp_v < pp
+    hits = int(ratio > PIVOT_RATIO_MIN) + int(cond_side)
+    detail = (f"ratio={ratio:.2f} (need>{PIVOT_RATIO_MIN}); "
+              f"CMP {cmp_v:.1f} vs PP {pp:.1f}")
+    if hits == 2:
+        return {"earned": W_PIVOT_ROOM, "status": "PASS", "detail": detail}
+    if hits == 1:
+        return {"earned": round(W_PIVOT_ROOM * 0.5, 2), "status": "MODERATE",
+                "detail": detail}
+    return {"earned": 0, "status": "FAIL", "detail": detail}
 
-    # basis-delta strength grade
-    bs = basis["basis_series"]
-    basis_widening = len(bs) >= 2 and bs[-1] > bs[0]
 
-    if veto:
-        return {"weight": W_OI_QUADRANT, "earned": 0, "status": "VETO",
-                "detail": f"opposing buildup (price {'up' if price_up else 'dn'} + OI rising) — positioning AGAINST {side}",
-                "abstain": False}
-    if buildup:
-        earned = W_OI_QUADRANT
-        grade = "strong (buildup + basis widening)" if basis_widening else "buildup confirmed"
-        return {"weight": W_OI_QUADRANT, "earned": earned, "status": "PASS",
-                "detail": f"{side} {grade}; OI_chg={basis['oi_chg']:,} basis={basis['basis']:.2f}",
-                "abstain": False}
-    if covering:
-        earned = W_OI_QUADRANT - 1  # weak-acceptable, partial credit
-        return {"weight": W_OI_QUADRANT, "earned": earned, "status": "WEAK",
-                "detail": f"{'short covering' if side=='LONG' else 'long unwinding'} — move on exits not fresh positioning",
-                "abstain": False}
-    return {"weight": W_OI_QUADRANT, "earned": 0, "status": "FAIL",
-            "detail": "no clear OI buildup", "abstain": False}
+def _fib_bounce(cur, symbol: str, cmp_v: Optional[float]) -> Dict:
+    """F3 — dynamic swing fibonacci from raw_prices ONLY (spec id=370 v3.5).
+    Swing high = max(high) last 90d; swing low = min(low) in the 60d before it.
+    PASS = pullback low (after swing high) within 2% of a 38.2/50/61.8 level;
+    MODERATE = CMP within 2% of a level; FAIL = neither."""
+    cur.execute(
+        """SELECT price_date, high, low FROM raw_prices
+           WHERE symbol = %s AND price_date >= CURRENT_DATE - INTERVAL '90 days'
+           ORDER BY price_date""",
+        (symbol.upper(),),
+    )
+    rows = cur.fetchall()
+    if len(rows) < 10:
+        return {"earned": 0, "status": "FAIL", "detail": "insufficient price history"}
+    sh_i = max(range(len(rows)), key=lambda i: _f(rows[i][1]))
+    swing_high, sh_date = _f(rows[sh_i][1]), rows[sh_i][0]
+    lows_before = [_f(r[2]) for r in rows
+                   if r[0] < sh_date and r[0] >= sh_date - timedelta(days=60)]
+    if not lows_before:
+        return {"earned": 0, "status": "FAIL", "detail": "no swing low before swing high"}
+    swing_low = min(lows_before)
+    rng = swing_high - swing_low
+    if rng <= 0:
+        return {"earned": 0, "status": "FAIL", "detail": "degenerate swing"}
+    levels = {"38.2%": swing_high - rng * 0.382,
+              "50%":   swing_high - rng * 0.5,
+              "61.8%": swing_high - rng * 0.618}
+
+    def nearest(px):
+        return min(((abs(px - lv) / lv, name) for name, lv in levels.items()),
+                   key=lambda t: t[0])
+
+    lows_after = [_f(r[2]) for r in rows if r[0] > sh_date]
+    if lows_after:
+        pb = min(lows_after)
+        diff, lname = nearest(pb)
+        if diff <= FIB_TOL:
+            return {"earned": W_FIB, "status": "PASS",
+                    "detail": f"pullback {pb:.1f} bounced {lname} fib ({diff*100:.1f}% off)"}
+    if cmp_v:
+        diff, lname = nearest(cmp_v)
+        if diff <= FIB_TOL:
+            return {"earned": round(W_FIB * 0.5, 2), "status": "MODERATE",
+                    "detail": f"CMP {cmp_v:.1f} at {lname} fib ({diff*100:.1f}% off)"}
+    return {"earned": 0, "status": "FAIL", "detail": "no fib bounce (pullback/CMP not at level)"}
 
 
 def _score(symbol: str, side: str,
@@ -204,36 +297,46 @@ def _score(symbol: str, side: str,
             return {"error": f"No v8_metrics row for {symbol.upper()}"}
         segment = _fetch_segment(cur, symbol)
         peer_ok = _peer_confirm(cur, symbol, segment, side)
-        basis = _fetch_basis_oi(cur, symbol)
+        basis = _fetch_basis(cur, symbol)     # F7 primary source
+        has_oi = _has_oi(cur, symbol)         # F7 OI presence
+        cmp_v = _fetch_cmp(cur, symbol)       # latest close (F2 + F3)
+        piv = _fetch_pivots(cur, symbol)      # F2 pivot levels
+        f3 = _fib_bounce(cur, symbol, cmp_v)  # F3 fibonacci (raw_prices only)
 
     rows: List[Dict] = []
     abstain_weight = 0
 
-    # ── CORE GATES (pass/fail/partial; 0.5 for one fail) ──────────────────
-    core = []
+    # ── CORE GATES (R4 GVM + R9 direction; tri-state, 0.5 = MODERATE) ─────
+    # R4 (spec id=370 v3.5): GVM_MIN_LONG lowered 7.0 -> 6.6.
+    # R9 (spec id=370 v3.5): week+month is tri-state — both on side -> PASS(1.0),
+    #   exactly one -> MODERATE(0.5), neither -> FAIL(0).
+    core = []  # each: {"gate","value","score" in {0,0.5,1.0},"status"}
     if side == "LONG":
-        gvm_ok = _f(m["gvm_score"]) >= 7.0
-        core.append(("GVM >= 7.0", f"{_f(m['gvm_score']):.2f}", gvm_ok))
-    # week & month direction
+        g = _f(m["gvm_score"])
+        ok = g >= GVM_MIN_LONG
+        core.append({"gate": f"GVM >= {GVM_MIN_LONG} (R4)", "value": f"{g:.2f}",
+                     "score": 1.0 if ok else 0.0, "status": "PASS" if ok else "FAIL"})
     wk, mo = _f(m["week_return"]), _f(m["month_return"])
     if side == "LONG":
-        dir_ok = wk > 0 and mo > 0
-        core.append(("Week>0 AND Month>0", f"wk {wk:+.2f} / mo {mo:+.2f}", dir_ok))
+        pos = int(wk > 0) + int(mo > 0)
+        gate_name = "Week>0 AND Month>0 (R9)"
     else:
-        dir_ok = wk < 0 and mo < 0
-        core.append(("Week<0 AND Month<0", f"wk {wk:+.2f} / mo {mo:+.2f}", dir_ok))
-    
-    # Core gate: 0.5 for partial pass (1 of 2 conditions)
-    core_pass_count = sum(1 for c in core if c[2])
-    if core_pass_count == len(core):
-        core_pass = True
-        core_weight_multiplier = 1.0
-    elif core_pass_count == len(core) - 1:
-        core_pass = True  # advance, but weighted
-        core_weight_multiplier = 0.5  # partial pass = neutral
+        pos = int(wk < 0) + int(mo < 0)
+        gate_name = "Week<0 AND Month<0 (R9)"
+    r9_status = "PASS" if pos == 2 else ("MODERATE" if pos == 1 else "FAIL")
+    r9_score = 1.0 if pos == 2 else (0.5 if pos == 1 else 0.0)
+    core.append({"gate": gate_name, "value": f"wk {wk:+.2f} / mo {mo:+.2f}",
+                 "score": r9_score, "status": r9_status})
+
+    # Multiplier from total deficit (preserves old "one short -> 0.5x";
+    # a single MODERATE gate now yields 0.5 instead of a hard fail).
+    deficit = len(core) - sum(c["score"] for c in core)
+    if deficit == 0:
+        core_pass, core_weight_multiplier = True, 1.0
+    elif deficit <= 1.0:
+        core_pass, core_weight_multiplier = True, 0.5
     else:
-        core_pass = False
-        core_weight_multiplier = 0.0
+        core_pass, core_weight_multiplier = False, 0.0
 
     # ── WEIGHTED RULES ──────────────────────────────────────────────────
     def add(name, cond_txt, val_txt, passed, weight, abstain=False):
@@ -261,13 +364,25 @@ def _score(symbol: str, side: str,
     add("1D structure (gate)", "reversal/breakout (LONG) — your read",
         "YES" if gate_1day else "NO", gate_1day, W_STRUCT_1D)
 
-    # OI/price quadrant (promoted)
-    oi = _eval_oi_quadrant(side, m, basis)
-    rows.append({"rule": "OI/price quadrant", "cond": "price+OI buildup (basis grade)",
-                 "value": oi["detail"], "weight": oi["weight"],
-                 "earned": oi["earned"], "status": oi["status"]})
-    if oi.get("abstain"):
-        abstain_weight += oi["weight"]
+    # F7 — OI + basis confirmation (spec id=370 v3.5)
+    f7 = _eval_f7(side, basis, has_oi)
+    rows.append({"rule": "OI+basis (F7)",
+                 "cond": "basis on side (+OI = PASS, no OI = MODERATE)",
+                 "value": f7["detail"], "weight": f7["weight"],
+                 "earned": f7["earned"], "status": f7["status"]})
+
+    # F2 — pivot-room ratio gate (spec id=370 v3.5; reads v8_paper_pivots levels)
+    f2 = _eval_pivot_room(side, cmp_v, piv)
+    rows.append({"rule": "Pivot room (F2)",
+                 "cond": "(R2-CMP)/(CMP-S2) > 1.25 AND CMP > PP",
+                 "value": f2["detail"], "weight": W_PIVOT_ROOM,
+                 "earned": f2["earned"], "status": f2["status"]})
+
+    # F3 — fibonacci bounce (spec id=370 v3.5; raw_prices only, pre-computed)
+    rows.append({"rule": "Fibonacci bounce (F3)",
+                 "cond": "pullback/CMP within 2% of 38.2/50/61.8 fib",
+                 "value": f3["detail"], "weight": W_FIB,
+                 "earned": f3["earned"], "status": f3["status"]})
 
     # Sector month aligned
     sm = _f(m["sector_month"])
@@ -314,7 +429,7 @@ def _score(symbol: str, side: str,
     if core_weight_multiplier == 0.0:
         verdict = "WATCH"
         reason = "core gate failed — " + ", ".join(
-            f"{c[0]}={c[1]}" for c in core if not c[2])
+            f"{c['gate']}={c['value']}" for c in core if c["score"] < 1.0)
     elif veto_hit:
         verdict = "WATCH"
         reason = "OI veto — fresh opposing buildup"
@@ -333,7 +448,8 @@ def _score(symbol: str, side: str,
         "symbol": symbol.upper(),
         "side": side,
         "as_of": datetime.now().strftime("%d-%b-%Y %H:%M IST"),
-        "core_gates": [{"gate": c[0], "value": c[1], "pass": c[2]} for c in core],
+        "core_gates": [{"gate": c["gate"], "value": c["value"],
+                        "pass": c["score"] == 1.0, "status": c["status"]} for c in core],
         "core_pass": core_pass,
         "core_weight_multiplier": core_weight_multiplier,
         "rules": rows,
@@ -371,7 +487,8 @@ def render_table(result: Dict[str, Any]) -> str:
          f"_{result['as_of']}_", ""]
     L.append("**Core Gates:**")
     for c in result["core_gates"]:
-        L.append(f"  {'PASS' if c['pass'] else 'FAIL'} {c['gate']} = {c['value']}")
+        st = c.get("status", "PASS" if c["pass"] else "FAIL")
+        L.append(f"  {st} {c['gate']} = {c['value']}")
     if result.get("core_weight_multiplier") is not None:
         mult = result["core_weight_multiplier"]
         mult_txt = "1.0 (both pass)" if mult == 1.0 else "0.5 (1 pass, 1 fail — neutral)" if mult == 0.5 else "0.0 (both fail)"
