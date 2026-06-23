@@ -327,7 +327,7 @@ function dualBars(a,b,ca,cb,{w=200,h=72}={}){
 /* ════════════════════════════════════════════════════════════════
    DATA  (D holds live values; safe defaults until loadLive fills)
 ════════════════════════════════════════════════════════════════ */
-const SIG0 = { dir:'FLAT', st:'—', ema:'—', entry:0, cmp:0, chg:0, pp:0, tgt:0, sl:0, str:0 };
+const SIG0 = { dir:'FLAT', st:'—', ema:'—', entry:0, cmp:0, chg:0, pp:0, tgt:0, sl:0, str:0, stBand:0, flipTs:null };
 const D = {
   _updated:'—',
   mood:{ gate:'—', fails:0, adr:0, nD:0, nW:0, nM:0, bSlots:0, sSlots:0, soSlots:0 },
@@ -340,7 +340,7 @@ const D = {
   buildup:{ long:[], short:[], pending:true },
   open:[], closed:[],
   cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:65,lotB:30,legs:'FUT + ATM write',gapExit:'ON' },
-  v8q:[],
+  perf:{},
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -372,6 +372,7 @@ function mapSig(s){
            ema: s.gate_zone==='buy'?'BUY':'SELL',
            entry:Number(s.price)||0, cmp:Number(s.price)||0, chg:0, pp:0,
            tgt:Number(s.target)||0, sl:Number(s.stop)||0,
+           stBand:Number(s.st_band)||0, flipTs:s.flip_ts||null,
            str: s.st_flip?85:60 };
 }
 async function loadSignals(){
@@ -449,10 +450,9 @@ function normSide(s){ return (s||'').toUpperCase()==='SHORT'?'SHORT':'LONG'; }
 const IDX_SET = ['NIFTY','BANKNIFTY','NIFTY50','BANKNIFTY50'];
 function idxOnly(r){ return IDX_SET.includes((r.symbol||'').toUpperCase()) || !!r.opt_type; }
 async function loadOpen(){
-  /* V10 own positions first, fall back to V8 */
+  /* V10 own positions ONLY — no V8 fallback (V10 manages its own book now) */
   let rows=[];
   try{ rows = rowsOf(await getJSON('/api/v10/positions')); }catch(e){}
-  if(!rows.length){ try{ rows = rowsOf(await getJSON('/api/v8/positions')); }catch(e){} }
   rows = rows.filter(idxOnly);
   D.open = rows.map((x,i)=>{
     const entry=Number(x.entry_price)||0, cmp=Number(x.cmp||x.current_price)||entry;
@@ -460,17 +460,26 @@ async function loadOpen(){
     const pPct=entry?((dir==='SHORT'?entry-cmp:cmp-entry)/entry*100):0;
     return { id:x.id||i, sym:x.symbol, side:dir,
              type:x.opt_type?'OPT':'FUT', str:x.opt_strike||null, opt:x.opt_type||null,
-             entry, cmp, tgt:Number(x.target)||0, sl:Number(x.sl||x.stop_loss)||0, qty:Number(x.qty)||0,
+             entry, cmp, tgt:Number(x.target)||0, sl:Number(x.sl||x.stop_loss||x.stop)||0,
+             qty:Number(x.lot_size||x.qty)||0,
              pnl:Number(x.unrealised_pnl||x.pnl)||0, pPct,
-             eng:(x.strategy&&/v10/i.test(x.strategy))?'V10':(x.basket?'V8':'V10') };
+             entryTs:x.entry_ts||null, eng:'V10' };
   });
 }
 function fmtDate(s){ if(!s)return '—'; const d=new Date(s); if(isNaN(d))return String(s).slice(0,10);
   return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}); }
+function durSince(ts){
+  if(!ts) return '—';
+  const d=new Date(String(ts).replace(' ','T')); if(isNaN(d)) return '—';
+  let mins=Math.max(0,Math.floor((Date.now()-d.getTime())/60000));
+  const h=Math.floor(mins/60); mins%=60; const days=Math.floor(h/24);
+  if(days>0) return `${days}d ${h%24}h`;
+  return h>0?`${h}h ${mins}m`:`${mins}m`;
+}
 async function loadClosed(){
+  /* V10 trade log ONLY — no V8 fallback */
   let rows=[];
   try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=10')); }catch(e){}
-  if(!rows.length){ try{ rows = rowsOf(await getJSON('/api/v8/trades?limit=10')); }catch(e){} }
   rows = rows.filter(idxOnly);
   D.closed = rows.slice(0,10).map((x,i)=>{
     const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
@@ -478,33 +487,18 @@ async function loadClosed(){
     const pnl=Number(x.pnl)||0;
     const pPct=entry?((dir==='SHORT'?entry-ex:ex-entry)/entry*100):0;
     return { id:x.id||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct,
-             rsn:(x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
-             dt:fmtDate(x.trade_date||x.exit_time||x.exit_date),
-             eng:(x.strategy&&/v10/i.test(x.strategy))?'V10':(x.basket?'V8':'V10') };
+             rsn:(x.exit_reason||x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
+             dt:fmtDate(x.trade_date||x.exit_ts||x.exit_time||x.exit_date),
+             eng:'V10' };
   });
 }
-const BKT=[['buy_reversal','BUY_REV'],['buy_momentum','BUY_MOM'],
-           ['sell_reversal','SELL_REV'],['sell_momentum','SELL_MOM'],['sell_overbought','SELL_OB']];
-async function loadQual(){
-  const out=[];
-  for(const [b,lab] of BKT){
-    try{
-      const r=await getJSON('/api/v8/qualified/'+b+'?limit=4');
-      for(const s of rowsOf(r.stocks||r)){
-        if(out.length>=14) break;
-        const spot=Number(s.cmp)||0;
-        out.push({ sym:s.symbol, bkt:lab, spot,
-                   atm:Number(s.atm_strike)||(spot?Math.round(spot/50)*50:0),
-                   cPx:s.cPx!=null?Number(s.cPx):null, pPx:s.pPx!=null?Number(s.pPx):null,
-                   hVol:Number(s.hVol)||0, ivp:s.ivp!=null?Number(s.ivp):0, dte:Number(s.dte)||0 });
-      }
-    }catch(e){}
-  }
-  if(out.length) D.v8q = out;
+async function loadPerf(){
+  /* V10 own performance stats (replaces the old V8 qualified pull) */
+  try{ D.perf = await getJSON('/api/v10/performance'); }catch(e){}
 }
 
 async function loadLive(){
-  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadQual];
+  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadPerf];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
@@ -561,15 +555,25 @@ function sigCol(sym, s, ix){
   const tag = dir==='LONG'?'▲ LONG':dir==='SHORT'?'▼ SHORT':'— FLAT';
   const boxes=[
     ['CMP', ix.cmp?num(ix.cmp):'—', C.blu],
-    ['DAY CHG', ix.cmp?pct(ix.chg):'—', cx(ix.chg)],
-    ['PIVOT PP', ix.pp?num(ix.pp):'—', C.amber],
+    ['ST BAND', s.stBand?num(s.stBand):'—', C.amber],
+    ['SINCE FLIP', durSince(s.flipTs), C.mut],
   ];
   const boxHtml=boxes.map(([l,v,col])=>`<div class="sbox"><div class="l">${l}</div><div class="v" style="color:${col}">${v}</div></div>`).join('');
-  const ets = (dir==='FLAT')
-    ? `<span style="color:var(--mut)">No active trade — awaiting flip</span>`
-    : `<span>Entry <b style="color:var(--txt)">${num(s.entry)}</b></span>
+  // live position for this index (FUT leg) — engine manages its own book
+  const fullSym = sym==='NIFTY'?'NIFTY50':sym;
+  const pos = D.open.find(p=>(p.sym||'').toUpperCase()===fullSym && p.type==='FUT');
+  let ets;
+  if(pos){
+    ets = `<span>Pos <b style="color:${pos.side==='SHORT'?DN:UP}">${pos.side}</b> @ <b style="color:var(--txt)">${num(pos.entry)}</b></span>
+       <span>${fmtDate(pos.entryTs)} · ${durSince(pos.entryTs)}</span>
+       <span>uP&L <b style="color:${cx(pos.pnl)}">₹${num(pos.pnl)}</b></span>`;
+  } else if(dir==='FLAT'){
+    ets = `<span style="color:var(--mut)">No active trade — awaiting flip</span>`;
+  } else {
+    ets = `<span>Entry <b style="color:var(--txt)">${num(s.entry)}</b></span>
        <span>Tgt <b style="color:${UP}">${num(s.tgt)}</b></span>
        <span>SL <b style="color:${DN}">${num(s.sl)}</b></span>`;
+  }
   return `<div class="sig-col" style="border-color:${c}44">
     <div class="sig-col-hd">
       <div class="sig-sym" style="color:${c}">${esc(sym)}</div>${bdg(tag,c,true)}</div>
@@ -724,52 +728,50 @@ function rSettings(){
   </div>`;
 }
 
-function rQual(){
-  const RF=0.065;
-  const ivpColor=v=>v>=70?DN:v>=30?C.amber:UP;
-  const ivpLabel=v=>v>=70?'RICH':v>=30?'MID':'CHEAP';
-  const head=['SYMBOL','BASKET','STRIKE','CE / PE','OPTION VALUE','IVP','REGIME','TRUE VALUE','MKT vs BS'];
-  const rows=D.v8q.map(q=>{
-    const isBuy=q.bkt.startsWith('BUY');
-    const T=q.dte/365, optPx=isBuy?q.cPx:q.pPx, optTyp=isBuy?'CE':'PE', sideC=isBuy?UP:DN;
-    const tv = isBuy?bsCall(q.spot,q.atm,T,RF,q.hVol):bsPut(q.spot,q.atm,T,RF,q.hVol);
-    return {...q, optPx, optTyp, sideC, trueVal:tv, richness:optPx!=null?optPx-tv:null};
-  });
-  const body = rows.length ? rows.map(r=>{
-    const ic=ivpColor(r.ivp), rich=r.richness;
-    const mktBs = rich!=null
-      ? `<span class="td-mono" style="font-size:11px;font-weight:700;color:${rich>0?DN:UP}">${rich>=0?'+':''}${rich.toFixed(2)}</span><span style="font-size:8px;color:var(--mut);margin-left:5px">${rich>0?'↑ rich':'↓ cheap'}</span>`
-      : `<span class="td-mono" style="font-size:10px;color:var(--mut)" title="No live equity option chain — using BS theoretical">≈ fair</span>`;
-    const optCell = r.optPx!=null
-      ? `<span class="td-mono" style="font-weight:800;font-size:13px;color:${r.sideC}">${r.optPx.toFixed(2)}</span>`
-      : `<span class="td-mono" style="font-weight:700;font-size:12px;color:var(--mut)" title="BS theoretical estimate — live price requires equity option chain">~${r.trueVal.toFixed(2)}</span>`;
-    return `<tr>
-      <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
-      <td>${bdg(r.bkt,r.sideC,true)}</td>
-      <td class="td-mono" style="font-weight:700;color:${C.blu}">${num(r.atm)}</td>
-      <td>${bdg(r.optTyp,r.sideC,true)}</td>
-      <td>${optCell}</td>
-      <td><div class="ivp-wrap"><div class="ivp-track"><div class="ivp-fill" style="width:${r.ivp}%;background:${ic}"></div></div>
-        <span class="ivp-val" style="color:${ic}">${r.ivp}%</span></div></td>
-      <td>${bdg(ivpLabel(r.ivp),ic,true)}</td>
-      <td class="td-mono" style="font-weight:700">${r.trueVal.toFixed(2)}</td>
-      <td>${mktBs}</td></tr>`;
-  }).join('') : `<tr class="empty-row"><td colspan="9">No qualified stocks right now</td></tr>`;
-  const legend=[[DN,'IVP > 70 · Premium expensive → sell side'],[C.amber,'IVP 30–70 · Normal range'],[UP,'IVP < 30 · Premium cheap → buy side']]
-    .map(([c,l])=>`<div class="lg"><div class="lg-dot" style="background:${c}"></div><span class="l">${l}</span></div>`).join('');
+function rPerf(){
+  const p=D.perf||{};
+  const tot=p.total_trades||0;
+  const stat=(k,v,col)=>`<div class="set-box"><div class="k">${k}</div><div class="v" style="color:${col||'var(--txt)'}">${v}</div></div>`;
+  const pf=p.profit_factor!=null?Number(p.profit_factor).toFixed(2):'—';
+  const cards=[
+    stat('Total Trades', tot),
+    stat('Win Rate', (p.win_rate!=null?p.win_rate:0)+'%', p.win_rate>=50?UP:C.amber),
+    stat('Total P&L', '₹'+fK(p.total_pnl||0), cx(p.total_pnl||0)),
+    stat('Avg Win', (p.avg_win_pts!=null?p.avg_win_pts:0)+' pts', UP),
+    stat('Avg Loss', (p.avg_loss_pts!=null?p.avg_loss_pts:0)+' pts', DN),
+    stat('Profit Factor', pf, p.profit_factor>=1?UP:DN),
+    stat('Max Drawdown', (p.max_drawdown_pts!=null?p.max_drawdown_pts:0)+' pts', DN),
+  ].join('');
+  const seg=(obj,title,col1)=>{
+    const keys=Object.keys(obj||{});
+    if(!keys.length) return '';
+    const rows=keys.map(k=>{const v=obj[k]||{};const wr=v.trades?Math.round(100*v.wins/v.trades):0;
+      return `<tr><td class="td-mono" style="font-weight:700">${esc(k)}</td>
+        <td class="td-mono">${v.trades||0}</td><td class="td-mono">${wr}%</td>
+        <td class="td-mono" style="font-weight:800;color:${cx(v.pnl||0)}">₹${fK(v.pnl||0)}</td></tr>`;}).join('');
+    return `<div style="flex:1;min-width:240px">
+      <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">${title}</div>
+      <div class="tbl-scroll"><table><thead><tr><th>${col1}</th><th>TRADES</th><th>WR</th><th>P&L</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  };
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div><div class="t">V8 Qualified — ATM Options</div>
-      <div class="s">BUY → CE (call) · SELL → PE (put) · IVP = 1yr percentile · True Value = BS @ 30d realized vol</div></div></div>
-    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
-    <div class="legend">${legend}</div>
-    <div class="note" style="text-align:left">~ = BS theoretical price (live equity option chain pending)</div>
+    <div class="card-hd"><div><div class="t">V10 Performance</div>
+      <div class="s">Live paper stats from v10_trades · ${tot} closed trades</div></div></div>
+    <div class="set-grid">${cards}</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
+      ${seg(p.by_symbol,'By Symbol','SYMBOL')}${seg(p.by_leg,'By Leg','LEG')}
+    </div>
   </div>`;
 }
 
-function buildupTable(title, rows, accent){
-  const sigCol = s => s==='LONG_BUILD'?UP : s==='SHORT_BUILD'?DN
+function buildupTable(title, rows, accent, pending){
+  const sigClr = s => s==='LONG_BUILD'?UP : s==='SHORT_BUILD'?DN
                     : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?'#ea580c' : C.mut;
-  const head=['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL R','BASIS','SIGNAL'];
+  // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
+  // of NEUTRAL tags is misleading. Show price-direction columns only.
+  const head = pending
+    ? ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL R','BASIS']
+    : ['SYMBOL','PRICE','DAY %','OI (Cr)','OI CHG','VOL R','BASIS','SIGNAL'];
+  const colspan = pending?7:8;
   const body = rows.length ? rows.map(r=>`<tr>
     <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.sym)}</td>
     <td class="td-mono">${num(r.price,2)}</td>
@@ -778,8 +780,8 @@ function buildupTable(title, rows, accent){
     <td class="td-mono" style="color:${r.oiChg!=null?cx(r.oiChg):'var(--dim)'}">${r.oiChg!=null?sgn(r.oiChg/1e5,1)+'L':'—'}</td>
     <td class="td-mono" style="color:var(--dim)">${r.volR!=null?r.volR.toFixed(2):'—'}</td>
     <td class="td-mono" style="color:${r.basis!=null?cx(r.basis):'var(--dim)'}">${r.basis!=null?sgn(r.basis,1):'—'}</td>
-    <td>${bdg(r.sig.replace('_',' '),sigCol(r.sig),true)}</td></tr>`).join('')
-    : `<tr class="empty-row"><td colspan="8">No data</td></tr>`;
+    ${pending?'':`<td>${bdg(r.sig.replace('_',' '),sigClr(r.sig),true)}</td>`}</tr>`).join('')
+    : `<tr class="empty-row"><td colspan="${colspan}">No data</td></tr>`;
   return `<div style="flex:1;min-width:300px">
     <div style="font-size:10px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">${title}</div>
     <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
@@ -788,14 +790,14 @@ function buildupTable(title, rows, accent){
 function rBuildup(){
   const b=D.buildup;
   const note = b.pending
-    ? `<div class="note">OI · OI CHG · VOL R · BASIS feed pending — ranking by intraday price move</div>`
+    ? `<div class="note" style="color:var(--amber)">⚠ OI data not available — showing price direction only. Signal classification disabled.</div>`
     : '';
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div><div class="t">Futures Buildup — Stock F&O</div>
       <div class="s">Top movers this session · long (price ↑) vs short (price ↓)</div></div></div>
     <div style="display:flex;gap:16px;flex-wrap:wrap">
-      ${buildupTable('▲ Long Buildup', b.long, UP)}
-      ${buildupTable('▼ Short Buildup', b.short, DN)}
+      ${buildupTable('▲ Long Buildup', b.long, UP, b.pending)}
+      ${buildupTable('▼ Short Buildup', b.short, DN, b.pending)}
     </div>
     ${note}
   </div>`;
@@ -806,7 +808,7 @@ function render(){
     rTopBar() + rMood() +
     `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
     `<div class="row r-3">${rADR()}${rPCR()}${rMaxPain()}</div>` +
-    rOpen() + rClosed() + rSettings() + rQual() + rBuildup() +
+    rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
 }
 
