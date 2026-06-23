@@ -17,32 +17,17 @@ IST = timezone(timedelta(hours=5, minutes=30))
 _stop_event: Optional[asyncio.Event] = None
 _bg_tasks: set = set()
 
-# Dedicated, bounded pool for blocking jobs — isolated from the default loop
-# executor (which FastAPI's sync request handlers also use) so a request burst
-# can't starve the scheduler, and bounded so a hung job can't be masked by an
-# unbounded thread spawn. Root cause of the 19-Jun stall: blocked jobs piled up
-# on the small shared default pool until every to_thread dispatch silently
-# queued forever — so the watchdog's "restart" never got a worker to run on.
 _EXECUTOR = ThreadPoolExecutor(max_workers=12, thread_name_prefix="sched-job")
 
 def _ist_now():
     return datetime.now(IST).replace(tzinfo=None)
 
-# Socket-level safety applied to EVERY connection: a connect/socket that hangs in
-# a worker thread is uncancellable and silently holds the worker forever (root
-# cause of the 19-Jun stall). connect_timeout caps the TCP handshake (also guards
-# the watchdog, which connects on the event loop); keepalives detect dead sockets.
-# These never affect query logic, so they're safe for the heavy nightly jobs too.
 _BASE_CONNECT_KW = dict(
     connect_timeout=10,
     keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
 )
 
 def _conn(statement_timeout_ms: int = 0):
-    """statement_timeout_ms>0 also caps any single query + idle-in-transaction —
-    used by the live 5-min path + watchdog so a DB lock or runaway query can't pin
-    a worker thread. Left OFF (0) for nightly batch jobs (EOD/GVM/yahoo/pivots),
-    which legitimately compute in Python between statements within one txn."""
     kw = dict(_BASE_CONNECT_KW)
     if statement_timeout_ms > 0:
         kw["options"] = (f"-c statement_timeout={statement_timeout_ms} "
@@ -50,8 +35,6 @@ def _conn(statement_timeout_ms: int = 0):
     return psycopg.connect(DATABASE_URL, **kw)
 
 def _spawn(fn, *args):
-    """Dispatch a blocking job on the dedicated scheduler pool (never the shared
-    default executor) and keep a reference so the task isn't GC'd mid-flight."""
     loop = asyncio.get_running_loop()
     t = asyncio.ensure_future(loop.run_in_executor(_EXECUTOR, fn, *args))
     _bg_tasks.add(t); t.add_done_callback(_bg_tasks.discard)
@@ -63,16 +46,13 @@ def _is_market_hours(now):
     return (9,15) <= t <= (15,30)
 
 # ── run-guards ────────────────────────────────────────────────────────────────
-# signal_writer uses a started_at timestamp + token (not a bare bool) so a hung
-# tick can't permanently block future ticks — see _bg_signal_writer / _check_watchdog.
 _signal_writer_started_at: Optional[datetime] = None
 _signal_writer_token = 0
 _signal_writer_fail_streak = 0
 _last_signal_writer_ok: Optional[datetime] = None
-SIGNAL_WRITER_TIMEOUT = timedelta(minutes=4)   # spec #16: assume hung after ~4 min
-WATCHDOG_STALE_MIN = 10                          # spec #16: stale if no tick in 10 min
-WATCHDOG_RESTART_COOLDOWN = timedelta(minutes=5) # cap restart attempts (avoid storm if
-                                                 # the writer itself, not the loop, is broken)
+SIGNAL_WRITER_TIMEOUT = timedelta(minutes=4)
+WATCHDOG_STALE_MIN = 10
+WATCHDOG_RESTART_COOLDOWN = timedelta(minutes=5)
 _eod_running = False
 _eod_ran_today: Optional[date] = None
 _adr_pcr_ran_today: Optional[date] = None
@@ -90,11 +70,11 @@ _pcr_intraday_running = False
 _intraday_paper_running = False
 _fu_sync_ran_this_week: Optional[date] = None
 
-# ── health / watchdog state ────────────────────────────────────────────────────
+# ── health / watchdog state ───────────────────────────────────────────────────
 _restart_requested = False
 _watchdog_restarts = 0
 _last_restart_ts: Optional[datetime] = None
-_watchdog_alerted = False        # throttle: one alert per stall episode
+_watchdog_alerted = False
 
 # ── exported to main.py ───────────────────────────────────────────────────────
 
@@ -182,12 +162,9 @@ async def _bg_yahoo_daily(app=None):
     finally:
         _yahoo_daily_running = False
 
-# ── job wrappers ──────────────────────────────────────────────────────────────
-
-# ── health / watchdog helpers (spec #16) ───────────────────────────────────────
+# ── health / watchdog helpers (spec #16) ─────────────────────────────────────
 
 def _log_alert(kind: str, message: str):
-    """Write a visible alert to session_log (category=alert)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
@@ -200,14 +177,12 @@ def _log_alert(kind: str, message: str):
 
 
 def _reset_guards():
-    """Clear stuck run-guards so the next tick can proceed cleanly."""
     global _signal_writer_started_at, _signal_writer_token
     _signal_writer_started_at = None
-    _signal_writer_token += 1   # invalidate any in-flight (hung) tick's finally
+    _signal_writer_token += 1
 
 
 def _request_restart(reason: str):
-    """Reset guards and ask the scheduler loop to restart fresh (via supervisor)."""
     global _restart_requested, _watchdog_restarts, _last_restart_ts
     _reset_guards()
     _restart_requested = True
@@ -217,9 +192,7 @@ def _request_restart(reason: str):
 
 
 def _tick_age_minutes() -> Optional[float]:
-    """Minutes since the most recent v8_metrics computed_at (DB-clock consistent)."""
     try:
-        # tight cap: this runs on the event loop, so it must never block it for long.
         with _conn(statement_timeout_ms=8000) as conn, conn.cursor() as cur:
             cur.execute("SELECT EXTRACT(EPOCH FROM (NOW() - MAX(computed_at)))/60.0 FROM v8_metrics")
             r = cur.fetchone()
@@ -230,8 +203,6 @@ def _tick_age_minutes() -> Optional[float]:
 
 
 def _check_watchdog(now):
-    """During market hours, if no signal tick landed in WATCHDOG_STALE_MIN, the
-    writer has silently stalled — alert, reset guards, request restart."""
     global _watchdog_alerted
     if not _is_market_hours(now):
         _watchdog_alerted = False
@@ -244,8 +215,6 @@ def _check_watchdog(now):
             _log_alert("scheduler_stall",
                        f"v8_metrics stale {age:.1f} min during market hours — restarting live loop")
             _watchdog_alerted = True
-        # cooldown: if a restart didn't help (writer-logic bug, not a hung loop),
-        # don't hammer — retry at most once per cooldown window.
         if _last_restart_ts is None or (now - _last_restart_ts) >= WATCHDOG_RESTART_COOLDOWN:
             _request_restart(f"watchdog: tick stale {age:.1f} min")
     else:
@@ -253,7 +222,6 @@ def _check_watchdog(now):
 
 
 def health_state() -> dict:
-    """Snapshot for /api/health/scheduler."""
     return {
         "fail_streak": _signal_writer_fail_streak,
         "watchdog_restarts": _watchdog_restarts,
@@ -269,30 +237,24 @@ def _bg_signal_writer():
     global _signal_writer_started_at, _signal_writer_token
     global _signal_writer_fail_streak, _last_signal_writer_ok
     now = _ist_now()
-    # guard: skip only if a tick is genuinely in flight and within the timeout window
     if _signal_writer_started_at is not None:
         if (now - _signal_writer_started_at) < SIGNAL_WRITER_TIMEOUT:
             return
-        # exceeded timeout → previous tick is hung; abandon it and start fresh
         _log_alert("signal_writer_timeout",
                    f"previous tick hung >{SIGNAL_WRITER_TIMEOUT} (since {_signal_writer_started_at}) — starting fresh")
-        _signal_writer_token += 1   # invalidate the hung tick's finally
+        _signal_writer_token += 1
 
     my_token = _signal_writer_token + 1
     _signal_writer_token = my_token
     _signal_writer_started_at = now
     try:
         import v8_signal_writer
-        # 90s query cap: writer issues many small fast statements, so a 90s ceiling
-        # only ever trips on a genuine lock/hang — exactly what must not pin a thread.
         with _conn(statement_timeout_ms=90000) as conn:
             r = v8_signal_writer.run_live_signal_writer(conn)
         if isinstance(r, dict) and r.get("error"):
             raise RuntimeError(r["error"])
         _signal_writer_fail_streak = 0
         _last_signal_writer_ok = _ist_now()
-        # heartbeat (sched_writer_hb) now written inside run_live_signal_writer using
-        # the already-open conn — covers scheduler + MCP + API paths (task #18).
         log.info(f"signal_writer: {r.get('updated', 0) if isinstance(r, dict) else 0} updated")
     except Exception as e:
         _signal_writer_fail_streak += 1
@@ -300,7 +262,7 @@ def _bg_signal_writer():
         if _signal_writer_fail_streak >= 3:
             _request_restart(f"signal_writer 3 consecutive failures: {e}")
     finally:
-        if _signal_writer_token == my_token:   # only the latest run clears the marker
+        if _signal_writer_token == my_token:
             _signal_writer_started_at = None
 
 def _bg_v10_tick():
@@ -309,7 +271,7 @@ def _bg_v10_tick():
     _v10_running = True
     try:
         import v10_st_ema
-        with _conn() as conn: v10_st_ema.tick(conn)
+        v10_st_ema.tick()   # fix: tick() takes no conn arg — was TypeError every 5min
     except Exception as e: log.error(f"v10_tick: {e}")
     finally: _v10_running = False
 
@@ -362,10 +324,8 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
-# ── ADR/PCR watchdog + health (task #59) ────────────────────────────────────────
+# ── ADR/PCR watchdog + health (task #59) ─────────────────────────────────────
 def _log_health(conn, title: str, details: dict):
-    """Health ping → session_log (category=scheduler_health) so a stalled compute
-    job is visible after the fact (root cause of the silent 18-19 Jun ADR gap)."""
     try:
         with conn.cursor() as cur:
             cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
@@ -377,8 +337,6 @@ def _log_health(conn, title: str, details: dict):
 
 
 def _backfill_adr_for_date(conn, target) -> bool:
-    """EOD-based ADR for a past day from raw_prices (day-over-day close), used to
-    heal a missed live (intraday-based) compute. Never overwrites a real row."""
     with conn.cursor() as cur:
         cur.execute("""
             WITH cur AS (SELECT symbol, close FROM raw_prices WHERE price_date=%(t)s),
@@ -402,8 +360,6 @@ def _backfill_adr_for_date(conn, target) -> bool:
 
 
 def _backfill_pcr_for_date(conn, target) -> bool:
-    """Heal a missed PCR day from option_chain — only if that day's chain is still
-    retained (intraday option_chain is short-lived, so this is usually a no-op)."""
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO pcr_daily (price_date, symbol, pcr_total, pcr_atm5, computed_at)
@@ -423,8 +379,6 @@ def _backfill_pcr_for_date(conn, target) -> bool:
 
 
 def _backfill_missing_adr_pcr(conn, today):
-    """Watchdog auto-backfill: any recent weekday with raw_prices EOD data but no
-    adr_daily row gets recomputed (the 18-19 Jun stall went unnoticed for days)."""
     try:
         with conn.cursor() as cur:
             cur.execute("""SELECT DISTINCT price_date FROM raw_prices
@@ -458,7 +412,7 @@ def _bg_adr_pcr():
         with _conn() as conn:
             _compute_and_store_adr(conn)
             _compute_and_store_pcr(conn)
-            _backfill_missing_adr_pcr(conn, today)        # heal prior-day gaps
+            _backfill_missing_adr_pcr(conn, today)
             adr_val, pcr_rows = _read_adr_pcr_today(conn, today)
             _log_health(conn, "adr_compute",
                         {"date": str(today), "status": "ok" if adr_val is not None else "missing",
@@ -467,7 +421,7 @@ def _bg_adr_pcr():
                         {"date": str(today), "status": "ok" if pcr_rows else "missing",
                          "pcr_rows": pcr_rows})
         if adr_val is not None:
-            _adr_pcr_ran_today = today                    # lock the day only once ADR is present
+            _adr_pcr_ran_today = today
         else:
             _log_alert("adr_missing", f"ADR not computed for {today} after 15:50 — retry scheduled 16:00")
         log.info("adr_pcr done")
@@ -475,15 +429,12 @@ def _bg_adr_pcr():
 
 
 def _bg_adr_pcr_retry():
-    """task #59: 10-min retry — if the 15:50 run didn't produce today's ADR, redo
-    it once at 16:00 (covers a transient feed/scheduler hiccup)."""
     today = _ist_now().date()
-    if _adr_pcr_ran_today == today: return                # already verified-complete
+    if _adr_pcr_ran_today == today: return
     log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
     _bg_adr_pcr()
 
 def _bg_tc_screener_precompute():
-    # task #43: nightly TC screener cache @16:00 IST (after market close + ADR/PCR)
     try:
         import trade_check_v34_endpoints as tce
         res = tce.run_tc_screener_precompute()
@@ -491,9 +442,6 @@ def _bg_tc_screener_precompute():
     except Exception as e: log.error(f"tc_screener_precompute: {e}")
 
 def _check_universe_shrink(conn):
-    """Task #35: after the nightly EOD load, alert if raw_prices symbol coverage
-    dropped sharply vs the prior trading day — catches silent partial loads (the
-    17-Jun 1717→1676 drop went unnoticed). Threshold: >10 symbols."""
     try:
         with conn.cursor() as cur:
             cur.execute("""SELECT price_date, COUNT(DISTINCT symbol)
@@ -531,7 +479,7 @@ def _bg_yahoo_daily_sync():
         import yahoo_daily_update as ydu
         with _conn() as conn:
             result = ydu.run_update(conn)
-            _check_universe_shrink(conn)   # task #35: alert on silent coverage drop
+            _check_universe_shrink(conn)
         _yahoo_ran_today = _ist_now().date()
         log.info(f"yahoo_daily: {result}")
     except Exception as e: log.error(f"yahoo_daily: {e}")
@@ -608,7 +556,7 @@ def _bg_fetch_global_intraday():
     except Exception as e: log.debug(f"global_intraday: {e}")
     finally: _global_intraday_fetching = False
 
-# ── news fetch (task #38) ───────────────────────────────────────────────────────
+# ── news fetch (task #38) ─────────────────────────────────────────────────────
 
 def _bg_fetch_market_news():
     try:
@@ -640,25 +588,20 @@ async def _scheduler_loop():
         try: await asyncio.sleep(60)
         except asyncio.CancelledError: break
         now = _ist_now(); today = now.date(); h, m = now.hour, now.minute
-        # watchdog: detect a silently-stalled signal writer and recover.
-        # Called directly (NOT via to_thread): the check is light + thread-safe, and
-        # offloading it can block when the thread pool is saturated during market hours.
         try:
             _check_watchdog(now)
         except Exception as e:
             log.error(f"watchdog check error: {e}")
         if _restart_requested:
             _restart_requested = False
-            # guards already reset by _request_restart — fire an immediate recovery
-            # tick (don't wait up to 5 min for the next m%5 dispatch) and keep looping.
             log.warning("scheduler: guards reset by watchdog/fail-streak — firing recovery tick")
             if _is_market_hours(now):
                 _spawn(_bg_signal_writer)
         if h == 6 and m == 0:
             _spawn(_bg_fetch_global)
-            _spawn(_bg_fetch_market_news)   # task #38: domestic + global RSS
+            _spawn(_bg_fetch_market_news)
         if h == 6 and m == 30:
-            _spawn(_bg_fetch_company_news)  # task #38: top-500 Google News RSS
+            _spawn(_bg_fetch_company_news)
         if 6 <= h <= 23 and m % 5 == 0:
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
@@ -667,24 +610,20 @@ async def _scheduler_loop():
             _spawn(_bg_signal_writer)
             _spawn(_bg_v10_tick)
             _spawn(_bg_pcr_intraday)
-            # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
+            # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
-                _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
+                _spawn(_bg_fetch_market_news)
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         if h == 16 and m == 0:
-            _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
-            _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
-        # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
-        # window collided with CC deploy pushes — a Railway redeploy kills the
-        # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
-        # 15-min spacing gives each job runway; order preserves deps (prices→QB→GVM→pivots).
+            _spawn(_bg_adr_pcr_retry)
+            _spawn(_bg_tc_screener_precompute)
         if h == 1 and m == 0:   _spawn(_bg_yahoo_daily_sync)
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 30:  _spawn(_bg_gvm)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
-        if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
+        if h == 1 and m == 50:  _spawn(_bg_cleanup_news)
 
 
 async def _supervisor():
@@ -698,7 +637,6 @@ async def _supervisor():
 
 
 def start_background(app=None, base_url: str = "", admin_token: str = ""):
-    """Called from main.py startup."""
     global _stop_event
     _stop_event = asyncio.Event()
     t = asyncio.create_task(_supervisor())
