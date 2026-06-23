@@ -3,7 +3,7 @@ scorr_auth.py — Simple password gate for all HTML pages.
 
 Password: HARDCODED (env var was unreliable). Change _PASSWORD below to update.
 Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=none)
-Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /news
+Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /scanners, /fpc, /news
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status, /authdebug
 
 Fixes (v5):
@@ -46,7 +46,7 @@ def _clean(s: str) -> str:
     """Strip ASCII + unicode whitespace and zero-width / non-breaking chars."""
     if s is None:
         return ""
-    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"):
+    for ch in ("​", "‌", "‍", "﻿", "\xa0"):
         s = s.replace(ch, "")
     return s.strip()
 
