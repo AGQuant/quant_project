@@ -658,17 +658,36 @@ def _market_gate_fails(conn) -> int:
                 ORDER BY ts DESC LIMIT 1
             """)
             lv = cur.fetchone()
+            # cc_task #72 bug_3: reference closes must track ACTUAL trading-day
+            # positions (T-1/T-5/T-22), NOT "most recent raw_prices row" — which lags
+            # when the EOD load is late and made Nifty Day compare the live index vs a
+            # 3-day-old close (showed -0.03% when the real 1-day move was +0.89%).
+            # Merge intraday last-bar closes (fills the recent stale tail, incl. T-1)
+            # with raw_prices for depth (intraday retains only ~12 days). Never rely on
+            # raw_prices alone for the live mood gate.
             cur.execute("""
-                SELECT close FROM raw_prices
-                WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
-                ORDER BY price_date DESC LIMIT 30
+                WITH days AS (
+                    SELECT DISTINCT ON (ts::date) ts::date AS d, close::numeric AS c
+                    FROM intraday_prices WHERE symbol='NIFTY50' AND ts::date < CURRENT_DATE
+                    ORDER BY ts::date DESC, ts DESC
+                ),
+                eod AS (
+                    SELECT price_date AS d, close::numeric AS c
+                    FROM raw_prices WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                ),
+                merged AS (
+                    SELECT d, c FROM days
+                    UNION
+                    SELECT d, c FROM eod WHERE d NOT IN (SELECT d FROM days)
+                )
+                SELECT c FROM merged ORDER BY d DESC LIMIT 30
             """)
             hist = [float(x[0]) for x in cur.fetchall()]
             if lv and lv[0] is not None and len(hist) >= 22:
                 latest = float(lv[0])
-                nday   = (latest / hist[0]  - 1) * 100
-                nweek  = (latest / hist[4]  - 1) * 100
-                nmonth = (latest / hist[20] - 1) * 100
+                nday   = (latest / hist[0]  - 1) * 100   # T-1  (yesterday's last bar)
+                nweek  = (latest / hist[4]  - 1) * 100   # T-5  (5 trading days back)
+                nmonth = (latest / hist[21] - 1) * 100   # T-22 (22 trading days back)
             elif len(hist) >= 22:
                 latest = hist[0]
                 nday   = (latest / hist[1]  - 1) * 100
