@@ -88,6 +88,7 @@ _global_intraday_fetching = False
 _v10_running = False
 _pcr_intraday_running = False
 _intraday_paper_running = False
+_tc_lite_running = False                          # cc_task #77: TC Lite screener pass guard
 _fu_sync_ran_this_week: Optional[date] = None
 _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit pass guard
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
@@ -419,6 +420,24 @@ def _bg_intraday_paper():
         log.info(f"intraday_paper: cache={rc.get('written')} entered={en.get('entered')}")
     except Exception as e: log.error(f"intraday_paper: {e}")
     finally: _intraday_paper_running = False
+
+def _bg_tc_lite():
+    """cc_task #77: TC Lite intraday SCREENER — flag active futures passing the
+    5-check LONG/SHORT gate, save one signal per symbol/side/day. Screener only —
+    no P&L, no exit, no paper trade. Lightweight SQL on the existing 5-min tick
+    (09:30-15:15 IST gate lives inside scan_tc_lite)."""
+    global _tc_lite_running
+    if _tc_lite_running: return
+    _tc_lite_running = True
+    try:
+        import tc_lite_scanner
+        res = tc_lite_scanner.scan_tc_lite()
+        if isinstance(res, dict) and (res.get("new_long") or res.get("new_short")):
+            log.info(f"tc_lite: +{res.get('new_long')}L +{res.get('new_short')}S")
+    except Exception as e:
+        log.error(f"tc_lite: {e}")
+    finally:
+        _tc_lite_running = False
 
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
@@ -788,6 +807,7 @@ async def _scheduler_loop():
             _spawn(_bg_v8_paper_exit)         # cc_task #72 bug_0: live exit pass (primary)
             _spawn(_bg_v10_tick)
             _spawn(_bg_pcr_intraday)
+            _spawn(_bg_tc_lite)               # cc_task #77: TC Lite screener (09:30-15:15 gate inside)
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
