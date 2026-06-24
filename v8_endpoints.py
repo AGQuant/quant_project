@@ -63,14 +63,17 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "buy_momentum": {
-        "gvm_score":    [6.0,  10.0],  # relaxed from 7.0 (23-Jun-2026)
+        # V2 filter optimisation (cc_task #74, 24-Jun-2026): EOD backtest across 9
+        # scenarios -> rsi_weekly 60-85->62-82, mom_2d 0->0.5 min, gvm revert 6.0->7.0.
+        # WR 65.2->71.4%, EV +0.322->+0.517%, signals 288->~135/yr.
+        "gvm_score":    [7.0,  10.0],
         "dma_50":       [8.0,  25.0],
         "dma_200":      [8.0,  40.0],
         "rsi_month":    [70.0, 100.0],
-        "rsi_weekly":   [60.0, 85.0],
+        "rsi_weekly":   [62.0, 82.0],
         "month_return": [2.0,  30.0],
         "week_return":  [0.5,  12.0],
-        "mom_2d":       [0.0,   6.0],
+        "mom_2d":       [0.5,   6.0],
         "sector_week":  [0.0,   6.0],
         "sector_month": [0.0,   6.0],
     },
