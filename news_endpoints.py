@@ -154,10 +154,10 @@ def news_live(hours: int = 72, per_cat: int = 60):
 
 @router.get("/api/news/top")
 def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
-    """Polished news for /news page V2 tabs (cc_task #69). Filters by polished
+    """Polished news for /news page V2 tabs (cc_task #69, #70). Filters by polished
     category buckets (UPPER() so legacy lowercase global/ipo/company/domestic map too):
       ai_editorial = India editorial — any category NOT in global/ipo/company buckets
-                     AND read-time >= 2 min (founder-locked; legacy 'domestic' included)
+                     (cc_task #70: no read-time gate; legacy 'domestic' included)
       company_updates = COMPANY_UPDATES (+ legacy 'company')
       global          = GLOBAL / GLOBAL_MACRO / GLOBAL_TECH (+ legacy 'global')
       ipo             = IPO / STARTUP (+ legacy 'ipo')
@@ -168,7 +168,7 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
     GLOBAL_SET  = "('GLOBAL','GLOBAL_MACRO','GLOBAL_TECH')"
     IPO_SET     = "('IPO','STARTUP')"
     COMPANY_SET = "('COMPANY_UPDATES','COMPANY')"
-    # word count of full_summary (fallback summary) = spaces + 1 -> read-time gate
+    # word count of full_summary (fallback summary) = spaces + 1 -> read-time badge
     _wc = ("(LENGTH(TRIM(COALESCE(p.full_summary,p.summary,''))) "
            "- LENGTH(REPLACE(TRIM(COALESCE(p.full_summary,p.summary,'')),' ','')) + 1)")
     sql = f"""
@@ -189,12 +189,11 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
     elif cat in ("company_updates", "company"):
         cat = "company_updates"
         sql += f" AND UPPER(COALESCE(p.category,'')) IN {COMPANY_SET}"
-    else:  # ai_editorial — India editorial, >= 2 min read (cc_task #69)
-        cat = "ai_editorial"
+    else:  # ai_editorial — India editorial: all categories NOT in global/ipo/company
+        cat = "ai_editorial"            # cc_task #70: no read-time gate (supersedes #69 >=2min)
         sql += (f" AND UPPER(COALESCE(p.category,'')) NOT IN {GLOBAL_SET}"
                 f" AND UPPER(COALESCE(p.category,'')) NOT IN {IPO_SET}"
-                f" AND UPPER(COALESCE(p.category,'')) NOT IN {COMPANY_SET}"
-                f" AND {_wc} > 200")
+                f" AND UPPER(COALESCE(p.category,'')) NOT IN {COMPANY_SET}")
     sql += " ORDER BY r.published_at DESC NULLS LAST LIMIT %s"
     params.append(limit)
     with _conn() as conn, conn.cursor() as cur:
