@@ -265,6 +265,8 @@ function artHTML(a, idx, isLead){
     : (a.summary && String(a.summary).trim()
         ? renderMd(a.summary)
         : `<p class="art-soon">Full analysis coming soon.</p>`);
+  // AI Editorial is Claude-polished editorial -> byline "Source AI CIO" (not the raw publication)
+  const byline = (curCat === "ai_editorial") ? "Source AI CIO" : (a.source_name || "");
   return `<article class="art ${impClass}${isLead?' lead':''}">
     <div class="art-head">${esc(a.headline)}</div>
     <div class="art-metarow">
@@ -277,7 +279,7 @@ function artHTML(a, idx, isLead){
     <div class="art-body">${bodyHTML}</div>
     <div class="art-foot">
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
-      <span>·</span><b>${esc(a.source_name||"")}</b>
+      <span>·</span><b>${esc(byline)}</b>
       <span>·</span><span>${timeAgo(a.published_at)}</span>
     </div>
   </article>`;
