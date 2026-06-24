@@ -5,6 +5,7 @@ No new compute. Instant sub-second response.
 
   /api/scanners/positional — V8 qualified signals today (v8_qualified)
   /api/scanners/investment — GVM>=7 quality stocks (gvm_scores)
+  /api/scanners/tc_lite    — TC Lite intraday signal screener (cc_task #77)
 
   /api/scanners/intraday   — moved to intraday_scanner_endpoints.py (4-gate V1, 18-Jun-2026)
 """
@@ -14,7 +15,10 @@ from typing import Optional
 import psycopg
 from fastapi import APIRouter
 
+from tc_lite_scanner import router as tc_lite_router
+
 router = APIRouter()
+router.include_router(tc_lite_router)   # cc_task #77 — TC Lite screener (/api/scanners/tc_lite)
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 def _conn():
