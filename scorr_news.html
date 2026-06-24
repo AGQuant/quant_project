@@ -13,6 +13,7 @@
     --bg:#f6f8fb; --card:#fff; --line:#e4e9f1; --line2:#d4dbe7;
     --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
     --grn:#0fa968; --red:#e23744; --blu:#2563eb; --amber:#d97706;
+    --tag-bg:#F1F0EB; --tag-fg:#5F5E5A;
     --sans:'Sora',system-ui,-apple-system,sans-serif;
     --serif:'Newsreader',Georgia,serif;
   }
@@ -56,59 +57,55 @@
     background:var(--card);color:var(--txt);font-size:13px;font-family:var(--sans);outline:none}
   .searchbar input:focus{border-color:var(--blu)}
 
-  .art{padding:22px 0;border-bottom:1px solid var(--line);cursor:pointer}
-  .art.lead{padding:28px 0 26px}
-  .art-kicker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:10.5px;font-weight:700;
-    letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:9px}
-  .art.lead .art-kicker{gap:11px;margin-bottom:12px}
-  .art-sym{color:var(--blu)}
-  .art-impact{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.04em;
-    padding:3px 8px;border-radius:5px}
+  /* Article — full editorial, always expanded (cc_task #70, no truncation) */
+  .art{padding:26px 0;border-bottom:1px solid var(--line)}
+  .art.lead{padding:30px 0 28px}
+  .art-head{font-family:var(--serif);font-size:23px;font-weight:600;line-height:1.28;color:var(--txt);text-wrap:pretty}
+  .art.lead .art-head{font-size:30px;line-height:1.18;letter-spacing:-.01em;text-wrap:balance}
+  .imp-high .art-head{font-size:25px}
+
+  /* meta row: category tag • read time • symbol */
+  .art-metarow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px}
+  .art-tag{background:var(--tag-bg);color:var(--tag-fg);padding:2px 8px;font-size:11px;
+    font-weight:500;border-radius:20px;white-space:nowrap}
+  .art-dot{color:var(--dim);font-size:11px}
+  .art-rt{color:var(--mut);font-size:11.5px;font-weight:500}
+  .art-sym{color:var(--blu);font-size:11px;font-weight:700}
+  .art-impact{font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:3px 8px;border-radius:5px}
   .imp-high .art-impact{background:rgba(226,55,68,.12);color:var(--red)}
   .imp-mid  .art-impact{background:rgba(217,119,6,.14);color:var(--amber)}
   .imp-low  .art-impact{background:rgba(90,103,129,.10);color:var(--mut)}
-  .art-head{font-family:var(--serif);font-size:21px;font-weight:600;line-height:1.3;color:var(--txt);text-wrap:pretty}
-  .imp-high .art-head{font-size:24px}
-  .imp-low  .art-head{font-size:19px}
-  .art.lead .art-head{font-size:30px;line-height:1.18;letter-spacing:-.01em;text-wrap:balance}
-  .art-sum{font-size:13.5px;color:var(--mut);margin-top:8px;line-height:1.6;
-    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .art.lead .art-sum{font-size:15px;margin-top:12px;line-height:1.65;max-width:62ch;-webkit-line-clamp:3}
-  .art.open .art-sum{-webkit-line-clamp:unset;display:block}
-  .art-foot{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:11.5px;color:var(--dim);flex-wrap:wrap}
-  .art.lead .art-foot{gap:9px;margin-top:16px}
+
+  /* standfirst (short summary) + full body */
+  .art-stand{font-size:15px;color:var(--mut);margin-top:14px;line-height:1.6;max-width:64ch;font-weight:500}
+  .art-body{margin-top:14px;max-width:680px;font-size:15.5px;line-height:1.75;color:var(--txt)}
+  .art-body > :first-child{margin-top:0}
+  .art-body h1,.art-body h2,.art-body h3,.art-body h4{font-family:var(--serif);line-height:1.25;
+    margin:24px 0 10px;font-weight:600;color:var(--txt)}
+  .art-body h1{font-size:25px}
+  .art-body h2{font-size:21px}
+  .art-body h3{font-size:18px}
+  .art-body h4{font-size:16px}
+  .art-body p{margin:13px 0}
+  .art-body ul,.art-body ol{margin:13px 0 13px 22px}
+  .art-body li{margin:6px 0}
+  .art-body strong{font-weight:700}
+  .art-body em{font-style:italic}
+  .art-body a{color:var(--blu);text-decoration:underline}
+  .art-body blockquote{border-left:3px solid var(--line2);margin:14px 0;padding:2px 0 2px 14px;color:var(--mut)}
+  .art-body table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  .art-body th,.art-body td{border:1px solid var(--line);padding:7px 11px;text-align:left;vertical-align:top}
+  .art-body th{background:#f1f4f9;font-weight:700;color:var(--txt)}
+  .art-body tr:nth-child(even) td{background:#fafbfd}
+  .art-body code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  .art-body pre{background:#eef1f6;padding:12px 14px;border-radius:8px;overflow-x:auto;margin:14px 0}
+  .art-body pre code{background:none;padding:0}
+  .art-body hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+  .art-soon{color:var(--dim);font-style:italic;font-size:13px}
+
+  .art-foot{display:flex;align-items:center;gap:8px;margin-top:18px;font-size:11.5px;color:var(--dim);flex-wrap:wrap}
   .art-sent{font-weight:600}
   .art-foot b{color:var(--mut);font-weight:600}
-  .art-rt{color:var(--mut)}
-  .art-expand{margin-left:auto;color:var(--blu);font-weight:600}
-
-  /* Expanded article — rendered Markdown typography (smooth grid-row reveal) */
-  .art-full{display:grid;grid-template-rows:0fr;margin-top:0;
-    transition:grid-template-rows .3s ease, margin-top .3s ease}
-  .art.open .art-full{grid-template-rows:1fr;margin-top:16px}
-  .art-fwrap{min-height:0;overflow:hidden;max-width:680px;font-size:15px;line-height:1.7;color:var(--txt)}
-  .art-fwrap > :first-child{margin-top:0}
-  .art-full h1,.art-full h2,.art-full h3,.art-full h4{font-family:var(--serif);line-height:1.25;
-    margin:24px 0 10px;font-weight:600;color:var(--txt)}
-  .art-full h1{font-size:25px}
-  .art-full h2{font-size:21px}
-  .art-full h3{font-size:18px}
-  .art-full h4{font-size:16px}
-  .art-full p{margin:12px 0}
-  .art-full ul,.art-full ol{margin:12px 0 12px 22px}
-  .art-full li{margin:5px 0}
-  .art-full strong{font-weight:700}
-  .art-full em{font-style:italic}
-  .art-full a{color:var(--blu);text-decoration:underline}
-  .art-full blockquote{border-left:3px solid var(--line2);margin:14px 0;padding:2px 0 2px 14px;color:var(--mut)}
-  .art-full table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
-  .art-full th,.art-full td{border:1px solid var(--line);padding:7px 11px;text-align:left;vertical-align:top}
-  .art-full th{background:#f1f4f9;font-weight:700;color:var(--txt)}
-  .art-full tr:nth-child(even) td{background:#fafbfd}
-  .art-full code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
-  .art-full pre{background:#eef1f6;padding:12px 14px;border-radius:8px;overflow-x:auto;margin:14px 0}
-  .art-full pre code{background:none;padding:0}
-  .art-full hr{border:0;border-top:1px solid var(--line);margin:20px 0}
 
   .msg{text-align:center;color:var(--mut);font-size:13px;padding:60px 20px}
   .foot{font-size:10.5px;color:#b3bccd;text-align:center;margin-top:46px;line-height:1.8}
@@ -117,6 +114,7 @@
     .mast-title{font-size:28px}
     .art.lead .art-head{font-size:25px}
     .imp-high .art-head{font-size:21px}
+    .art-body{font-size:15px}
   }
 </style>
 </head>
@@ -180,7 +178,6 @@ const CATS = [
 let curCat = "ai_editorial";
 const SEARCH_TABS = ["ai_editorial","company_updates"];   // symbol search shown on these
 let articles = [];
-let openId = null;
 
 const SENT = {
   positive:{c:"#0fa968",g:"▲",l:"Bullish"}, bullish:{c:"#0fa968",g:"▲",l:"Bullish"},
@@ -204,10 +201,17 @@ function renderMd(t){
   if(window.marked && marked.parse){ try{ return marked.parse(String(t)); }catch(e){} }
   return "<p>"+esc(t).replace(/\n{2,}/g,"</p><p>").replace(/\n/g,"<br>")+"</p>";
 }
-function readingTime(t){
+// CEIL(words/200) per spec (cc_task #70 change_4)
+function readMin(t){
   const words = String(t||"").trim().split(/\s+/).filter(Boolean).length;
-  if(!words) return "";
-  return Math.max(1, Math.ceil(words/200)) + " min read";   // ceil per spec (cc_task #69)
+  return words ? Math.max(1, Math.ceil(words/200)) : 0;
+}
+// Category tag — legacy remap (cc_task #70 also_fix): company->COMPANY_UPDATES, domestic->MACRO
+function tagFor(a){
+  let c = String(a.category || curCat || "").trim().toUpperCase();
+  if(c === "COMPANY")  c = "COMPANY_UPDATES";
+  if(c === "DOMESTIC") c = "MACRO";
+  return c || (curCat || "").toUpperCase();
 }
 
 function buildTabs(){
@@ -216,7 +220,7 @@ function buildTabs(){
   ).join("");
 }
 function pick(cat){
-  curCat = cat; openId = null;
+  curCat = cat;
   const showSearch = SEARCH_TABS.includes(cat);
   document.getElementById("searchbar").style.display = showSearch ? "block" : "none";
   if(!showSearch) document.getElementById("symSearch").value = "";
@@ -224,30 +228,9 @@ function pick(cat){
   load();
 }
 
-function setExpandLabel(art, isOpen){
-  const s = art.querySelector(".art-expand");
-  if(s) s.textContent = isOpen ? "Collapse ↑" : "Read analysis ↓";
-}
-function toggle(ev, id){
-  const art = ev.currentTarget;
-  const isOpen = art.classList.contains("open");
-  // clicks inside an already-open article (links, text select, tables) shouldn't collapse it
-  if(isOpen && ev.target.closest(".art-full")) return;
-  // accordion: collapse any other open card (no full re-render — just class toggles)
-  if(!isOpen){
-    document.querySelectorAll(".art.open").forEach(el => {
-      if(el !== art){ el.classList.remove("open"); setExpandLabel(el, false); }
-    });
-  }
-  art.classList.toggle("open");
-  const nowOpen = art.classList.contains("open");
-  setExpandLabel(art, nowOpen);
-  openId = nowOpen ? id : null;
-}
-
 async function load(){
   const btn = document.getElementById("refreshBtn");
-  btn.disabled = true; openId = null;
+  btn.disabled = true;
   document.getElementById("feed").innerHTML = '<div class="msg">Loading…</div>';
   try{
     const r = await fetch(`${API}/api/news/top?days=3&category=${curCat}&limit=60`);
@@ -267,34 +250,37 @@ function artHTML(a, idx, isLead){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
   const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
-  const id = a.id != null ? a.id : idx;
-  const open = (openId === id) ? " open" : "";
+  const tag = tagFor(a);
   const sym = a.symbol ? `<span class="art-sym">${esc(a.symbol)}</span>` : "";
   const impact = imp ? `<span class="art-impact">${esc(imp)} impact</span>` : "";
-  const leadTag = isLead ? `<span style="color:var(--blu)">&#9679;&nbsp; Lead</span>` : "";
-  const fullText = (a.full_summary && String(a.full_summary).trim()) || a.summary || "";
-  const rt = readingTime(fullText);
-  const fullHTML = (a.full_summary && String(a.full_summary).trim())
+  const hasFull = a.full_summary && String(a.full_summary).trim();
+  const rmins = readMin(hasFull ? a.full_summary : (a.summary||""));
+  const rt = rmins ? `<span class="art-dot">•</span><span class="art-rt">${rmins} min read</span>` : "";
+  // standfirst = short summary above the full body (only when a full body exists)
+  const stand = (hasFull && a.summary && String(a.summary).trim())
+    ? `<div class="art-stand">${esc(a.summary)}</div>` : "";
+  // full body — rendered at FULL length, no truncation (cc_task #70 change_3)
+  const bodyHTML = hasFull
     ? renderMd(a.full_summary)
-    : renderMd(a.summary||"") + `<p style="color:var(--dim);font-style:italic;font-size:13px">Full analysis coming soon.</p>`;
-  return `<div class="art ${impClass}${isLead?' lead':''}${open}" data-id="${esc(id)}" onclick="toggle(event, ${JSON.stringify(id)})">
-    <div class="art-kicker">
-      ${leadTag}
-      <span>${esc(a.category||curCat)}</span>
+    : (a.summary && String(a.summary).trim()
+        ? renderMd(a.summary)
+        : `<p class="art-soon">Full analysis coming soon.</p>`);
+  return `<article class="art ${impClass}${isLead?' lead':''}">
+    <div class="art-head">${esc(a.headline)}</div>
+    <div class="art-metarow">
+      <span class="art-tag">${esc(tag)}</span>
+      ${rt}
       ${sym}
       ${impact}
     </div>
-    <div class="art-head">${esc(a.headline)}</div>
-    <div class="art-sum">${esc(a.summary||"")}</div>
-    <div class="art-full"><div class="art-fwrap">${fullHTML}</div></div>
+    ${stand}
+    <div class="art-body">${bodyHTML}</div>
     <div class="art-foot">
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
       <span>·</span><b>${esc(a.source_name||"")}</b>
       <span>·</span><span>${timeAgo(a.published_at)}</span>
-      ${rt ? `<span>·</span><span class="art-rt">${rt}</span>` : ""}
-      <span class="art-expand">${open ? "Collapse ↑" : "Read analysis ↓"}</span>
     </div>
-  </div>`;
+  </article>`;
 }
 
 function render(){
@@ -308,9 +294,7 @@ function render(){
     feed.innerHTML = '<div class="msg">No polished news for this filter yet. Polished articles appear here after the daily polish run.</div>';
     return;
   }
-  let html = artHTML(rows[0], 0, true);
-  for(let i=1;i<rows.length;i++) html += artHTML(rows[i], i, false);
-  feed.innerHTML = html;
+  feed.innerHTML = rows.map((a,i) => artHTML(a, i, i===0)).join("");
 }
 
 // Hide own model-nav when embedded (iframe or ?embed=1) — shell renders its own nav.
