@@ -265,6 +265,7 @@ const EP={
   paper:"/api/paper/status",
   funnelDetail:b=>`/api/v8/funnel_detail/${b}`,
   passCount:b=>`/api/v8/stock_passcount/${b}`,
+  tcLite:"/api/scanners/tc_lite",
 };
 const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
@@ -278,8 +279,8 @@ const ALL5=[
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Filter Funnel","Live News"];
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11];
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Filter Funnel","Live News","TC Lite"];
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11,12];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -923,6 +924,39 @@ async function loadNews(){
   renderNews();
 }
 
+// cc_task #77: TC Lite screener tab — signals passing the 5-check gate, with live
+// high/low/pivot/%-move tracking. Screener only: no P&L, no stop, no target.
+function renderTCLite(){
+  const d=cache.tcLite;if(!d)return'<div class="loading">...</div>';
+  const sigs=d.signals||[];
+  const meta=`<div class="ptitle">TC Lite Screener <span class="ct">${d.count||0} signals today</span></div>
+    <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Futures passing the 5-check TC gate intraday (one per stock/side/day). Screener only — no P&amp;L, stop or target. Tracks where price went after the flag.</div>`;
+  if(!sigs.length)return meta+`<div class="empty">No TC Lite signals yet today.</div>`;
+  const rowBg=s=>(s.direction==='LONG')?'background:#f0fdf4':'background:#fef2f2';
+  const desktop=`<div class="scroll desktop-only"><table>
+    <thead><tr><th>Symbol</th><th>Side</th><th>Signal Time</th><th>Entry</th><th>CMP</th><th>High%</th><th>Low%</th><th>PP</th><th>R1</th><th>S1</th><th>GVM</th></tr></thead>
+    <tbody>${sigs.map(s=>`<tr style="${rowBg(s)}">
+      <td class="sym">${s.symbol}</td>
+      <td><span class="badge ${s.direction==='SHORT'?'b-short':'b-long'}">${s.direction}</span></td>
+      <td style="color:var(--mut);font-size:11px">${s.signal_ts||'--'}</td>
+      <td>${num(s.entry_price)}</td>
+      <td class="${cls(s.cmp_chg_pct)}">${num(s.cmp)}${s.cmp_chg_pct!=null?` <span style="font-size:10px">(${sign(s.cmp_chg_pct,2)}%)</span>`:''}</td>
+      <td class="pos">${s.high_pct!=null?sign(s.high_pct,2)+'%':'--'}</td>
+      <td class="neg">${s.low_pct!=null?sign(s.low_pct,2)+'%':'--'}</td>
+      <td style="color:var(--mut)">${num(s.pp,0)}</td>
+      <td class="pos">${num(s.r1,0)}</td>
+      <td class="neg">${num(s.s1,0)}</td>
+      <td class="${Number(s.gvm_score)>=7?'pos':'score-mid'}">${num(s.gvm_score,1)}</td></tr>`).join('')}</tbody></table></div>`;
+  const mobile=`<div class="mob-cards">${sigs.map(s=>`
+    <div class="mob-card ${s.direction==='LONG'?'mob-open':'mob-nearmiss'}" style="${rowBg(s)}">
+      <div class="mob-card-header"><span class="mob-sym">${s.symbol}</span><span class="mob-badge ${s.direction==='SHORT'?'b-short':'b-long'}">${s.direction}</span></div>
+      <div class="mob-chips"><span class="mob-chip" style="color:var(--dim)">${s.signal_ts||''}</span><span class="mob-chip">Entry ${num(s.entry_price)}</span>
+      <span class="mob-chip ${cls(s.cmp_chg_pct)}">CMP ${num(s.cmp)} (${s.cmp_chg_pct!=null?sign(s.cmp_chg_pct,2)+'%':'--'})</span>
+      <span class="mob-chip pos">Hi ${s.high_pct!=null?sign(s.high_pct,2)+'%':'--'}</span><span class="mob-chip neg">Lo ${s.low_pct!=null?sign(s.low_pct,2)+'%':'--'}</span>
+      <span class="mob-chip">PP ${num(s.pp,0)} · R1 ${num(s.r1,0)} · S1 ${num(s.s1,0)}</span><span class="mob-chip">GVM ${num(s.gvm_score,1)}</span></div></div>`).join('')}</div>`;
+  return meta+desktop+mobile;
+}
+
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
@@ -930,6 +964,7 @@ function paint(){
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel8').innerHTML=renderRaw();
   document.getElementById('panel9').innerHTML=renderMissed();
+  {const _tc=document.getElementById('panel12');if(_tc)_tc.innerHTML=renderTCLite();}   // cc_task #77
   loadFF();
 }
 
@@ -956,6 +991,7 @@ async function loadAll(){
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();}),
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
+    run('tcLite',()=>getJSON(EP.tcLite),()=>{const el=document.getElementById('panel12');if(el)el.innerHTML=renderTCLite();}),   // cc_task #77
   ];
   await Promise.all(jobs);
   if(cache.mood)renderMood(cache.mood);
