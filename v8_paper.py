@@ -65,8 +65,8 @@ EXIT (close-based, multi-day, levels frozen at entry):
 SIZING : 1 lot (futures_universe.lot_size, default 1).
 GATE   : market-mood buy_slots/sell_slots (sum 15) cap concurrent open per side.
 MISSED : qualified + zone trigger but blocked by slot_full|blackout|after_cutoff|
-         opposite_open|conflict|conflict_exit_blocked|has_open|traded_today ->
-         v8_paper_missed, one row per (symbol, side, day).
+         opposite_open|conflict|conflict_exit_blocked -> v8_paper_missed,
+         one row per (symbol, side, day).
 
 Price feed: intraday_prices (Fyers 5-min, NAIVE IST ts — read RAW, no TZ math).
 
@@ -487,6 +487,7 @@ def _log_missed(conn, d, sym, side, basket, entry, target, sl, reason):
         """, (d, sym, side, basket, round(entry,2), round(target,2), round(sl,2), reason))
         conn.commit()
 
+
 def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt, exit_px, exit_ts, result):
     pnl = (exit_px-entry)*qty if side=="LONG" else (entry-exit_px)*qty
     ret = (exit_px/entry-1)*100 if side=="LONG" else (entry/exit_px-1)*100
@@ -503,8 +504,7 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
 
 
 def _open_short(conn, sym, basket, entry, cur_ts, target, stop, pp, d):
-    """Insert a SHORT paper position. Shared by zone-short and sell_overbought.
-    cur_ts is the resolved entry timestamp (caller passes _now_ist() live, bar ts replay)."""
+    """Insert a SHORT paper position. Shared by zone-short and sell_overbought."""
     qty = _lot(conn, sym)
     with conn.cursor() as cur:
         cur.execute("""INSERT INTO v8_paper_positions
@@ -667,7 +667,6 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"slot_full"); continue
                 entries.append(_open_short(conn,sym,basket,entry,_ts(cur_ts),target,stop,pp,d))
                 short_open+=1
-
         # ---- 3b) SELL_OVERBOUGHT ENTRIES ----
         for sym, sig in so_sig.items():
             target = sig["target"]
@@ -714,3 +713,79 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     return {"date":str(d),"qualified":len(qual),"sell_overbought":len(so_sig),"pivots":len(piv),
             "entries":entries,"exits":exits,"gate_exits":rebalanced,
             "open_long":long_open,"open_short":short_open}
+
+
+# ============================================================ EXIT-ONLY PASS
+def run_paper_exits(conn, target_date: date = None, mode: str = "live") -> Dict:
+    """cc_task #72 bug_0: EXIT-ONLY pass — NO entries, NO rebalance. Restores the
+    automated exit that was never wired into the scheduler (paper_tick, which holds
+    the exit logic, was only reachable on-demand via /api/paper/tick).
+
+      mode='live' : intraday 5-min close breach — rules lifted VERBATIM from
+                    paper_tick's EXIT section (gap-open exit + latest-close breach).
+                    Run every 5 min during market hours.
+      mode='eod'  : daily EOD close from raw_prices for target_date — the fall-back
+                    safety net for when the live loop was down. Closes at the EOD
+                    close; result TARGET/SL so it counts in the win/loss summary.
+
+    Exit comparison is identical to paper_tick — this changes no entry/exit RULE,
+    it only adds the missing automation (founder do_not_change respected)."""
+    ensure_schema(conn)
+    d = target_date or date.today()
+    live = target_date is None
+    def _ts(bar_ts):
+        return _now_ist() if live else bar_ts
+
+    with conn.cursor() as cur:
+        cur.execute("""SELECT id,symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pivot_date
+                       FROM v8_paper_positions WHERE status='OPEN'""")
+        open_rows = cur.fetchall()
+
+    exits = []
+
+    if mode == "eod":
+        for (pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt) in open_rows:
+            if ets is not None and ets.date() > d:        # position didn't exist on d yet
+                continue
+            entry=float(entry); tgt=float(tgt); sl=float(sl); qty=int(qty)
+            with conn.cursor() as cur:
+                cur.execute("SELECT close FROM raw_prices WHERE symbol=%s AND price_date=%s", (sym, d))
+                r = cur.fetchone()
+            if not r or r[0] is None:
+                continue
+            c = float(r[0]); hit = None
+            if side=="LONG":
+                if c>=tgt: hit="TARGET"
+                elif c<=sl: hit="SL"
+            else:
+                if c<=tgt: hit="TARGET"
+                elif c>=sl: hit="SL"
+            if hit:
+                exit_ts = datetime.combine(d, time(15, 30))
+                exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,c,exit_ts,hit))
+        return {"mode":"eod","date":str(d),"exits":exits,"closed":len(exits)}
+
+    # mode == "live" — mirrors paper_tick EXIT section exactly
+    for (pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt) in open_rows:
+        entry=float(entry); tgt=float(tgt); sl=float(sl); qty=int(qty)
+        fb_open, fb_ts = _first_bar(conn, sym, d)
+        if fb_open is not None and (ets is None or ets.date() < d):
+            if side=="LONG":
+                if fb_open>=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_TARGET_EXIT")); continue
+                if fb_open<=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_SL_EXIT")); continue
+            else:
+                if fb_open<=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_TARGET_EXIT")); continue
+                if fb_open>=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_SL_EXIT")); continue
+        tl = _two_latest_closes(conn, sym, d)
+        if not tl: continue
+        _, cur_close, cur_ts = tl
+        hit = None
+        if side=="LONG":
+            if cur_close>=tgt: hit="TARGET"
+            elif cur_close<=sl: hit="SL"
+        else:
+            if cur_close<=tgt: hit="TARGET"
+            elif cur_close>=sl: hit="SL"
+        if hit:
+            exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),hit))
+    return {"mode":"live","date":str(d),"exits":exits,"closed":len(exits)}
