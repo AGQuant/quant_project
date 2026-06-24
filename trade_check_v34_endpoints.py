@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 import trade_check_v34 as tc
+import trade_check_v36 as tc36
 import native_trade_check as ntc
 import tc_intraday as tci
 
@@ -72,6 +73,41 @@ def health():
         "max_weighted": tc.MAX_WEIGHTED,
         "thresholds": {"STRONG": tc.STRONG_MIN, "VALID": tc.VALID_MIN},
         "status": "ok",
+    }
+
+
+# ── Trade Check v3.6 (session_log id=600) — canonical /api/trade-check ─────────
+# New 11-rule (LONG) / 10-rule (SHORT) Tier-1 gate. Runs side-by-side with the
+# v34 weighted engine above; /api/trade-check/v34 is left unchanged.
+
+class CheckV36Request(BaseModel):
+    symbol: str
+    side: str = "LONG"
+    render: bool = True
+
+
+@router.post("/api/trade-check")
+def trade_check_v36_post(req: CheckV36Request):
+    result = tc36.trade_check_v36(req.symbol, req.side)
+    if req.render and "error" not in result:
+        result["table"] = tc36.render_table(result)
+    return result
+
+
+@router.get("/api/trade-check")
+def trade_check_v36_get(symbol: str, side: str = "LONG", render: bool = True):
+    result = tc36.trade_check_v36(symbol, side)
+    if render and "error" not in result:
+        result["table"] = tc36.render_table(result)
+    return result
+
+
+@router.get("/api/trade-check/v36/health")
+def health_v36():
+    return {
+        "version": tc36.VERSION, "spec_ref": tc36.SPEC_REF,
+        "max_score": {"LONG": tc36.MAX_LONG, "SHORT": tc36.MAX_SHORT},
+        "advance_threshold": tc36.ADVANCE_MIN, "status": "ok",
     }
 
 
@@ -202,7 +238,7 @@ def intraday_tick():
             "ts": en.get("ts") or ex.get("ts")}
 
 
-# ── TC screener nightly pre-compute cache (task #43) ──────────────────────────
+# ── TC screener nightly pre-compute cache (task #43) ───────────────────────────
 # Kills the 60-90s live-screen spinner: score the full futures universe once
 # after market close, store in tc_screener_cache, serve instantly from cache.
 
