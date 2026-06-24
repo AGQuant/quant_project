@@ -1204,7 +1204,7 @@ def _s1b_funnel_stages():
                         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
                       FROM raw_prices WHERE price_date < CURRENT_DATE) x WHERE rn<=5 GROUP BY symbol
             )
-            SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio,
+            SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio, m.gvm_score,
                    td.day_open, td.live_close, td.today_low,
                    h.lo_2d, h.lo_5d, p.s1
             FROM v8_metrics m
@@ -1255,6 +1255,7 @@ def _s1b_funnel_stages():
     stages.append({"metric": "nifty_rsi (market gate)",
                    "condition_min": ">= 55", "condition_max": f"OPEN ({nifty_rsi:.1f})",
                    "survivors": total, "killed": 0})
+    _stage("gvm_score",   lambda s: _passes_filter(s.get("gvm_score"), 7.0, None), ">= 7.0", "-")   # cc_task #76 4d
     _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 3.0), ">= 0%", "<= 3%")
     _stage("dma_50",      lambda s: _passes_filter(s.get("dma_50"), 0.0, None),     "> 0%",   "-")
     _stage("vol_ratio",   lambda s: _passes_filter(s.get("vol_ratio"), 1.5, None),  ">= 1.5x", "-")
@@ -1274,7 +1275,7 @@ def s1b_funnel_detail():
         return {
             "basket": "buy_s1_bounce", "score_date": str(date.today()),
             "universe": total, "final": final_qualified,
-            "filter_count": 7, "n_filters": 7,
+            "filter_count": 8, "n_filters": 8,
             "gate_type": "strict AND (all must pass)",
             "market_gate": {"metric": "nifty_rsi", "threshold": 55.0,
                             "value": round(nifty_rsi, 1) if nifty_rsi is not None else None,
@@ -1371,6 +1372,7 @@ def s1b_stock_passcount():
             s1 = _f(r.get("s1"))
             checks = {
                 "nifty_rsi":      gate_open,
+                "gvm_score":      _passes_filter(r.get("gvm_score"), 7.0, None),
                 "week_return":    _passes_filter(r.get("week_return"), 0.0, 3.0),
                 "dma_50":         _passes_filter(r.get("dma_50"), 0.0, None),
                 "vol_ratio":      _passes_filter(r.get("vol_ratio"), 1.5, None),
@@ -1380,14 +1382,14 @@ def s1b_stock_passcount():
             }
             passed = [k for k, ok in checks.items() if ok]
             failed = [k for k, ok in checks.items() if not ok]
-            out.append({"symbol": r["symbol"], "passed": len(passed), "total": 7,
+            out.append({"symbol": r["symbol"], "passed": len(passed), "total": 8,
                         "passed_filters": passed, "failed_filters": failed,
                         "gvm_score": r.get("gvm_score"),
                         "recovery_2d": round(rec2d, 2) if rec2d is not None else None,
                         "day_ret": round(dayret, 2) if dayret is not None else None})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_s1_bounce", "score_date": str(date.today()),
-                "universe": len(out), "filter_count": 7, "stocks": out,
+                "universe": len(out), "filter_count": 8, "stocks": out,
                 "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
                 "gate_open": gate_open,
                 **BASKET_META.get("buy_s1_bounce", {})}
@@ -1414,6 +1416,8 @@ def buy_s1_bounce_qualified(limit: int = 50):
                     q.source, q.signal_ts,
                     m.day_1d, g.segment,
                     p.pp, p.r1, p.s1,
+                    (q.metrics->>'filter_score')::numeric AS filter_score,
+                    (q.metrics->>'filter_total')::numeric AS filter_total,
                     q.metrics->>'status' AS stored_status
                 FROM v8_qualified q
                 LEFT JOIN v8_metrics m ON m.symbol=q.symbol
@@ -1429,6 +1433,7 @@ def buy_s1_bounce_qualified(limit: int = 50):
             """, (min(max(limit, 1), 200),))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        rows = [r for r in rows if (r.get('gvm_score') or 0) >= 7.0]   # cc_task #76 4d: S1B GVM>=7.0 hard gate
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
             r['status']  = r.pop('stored_status', None) or 'QUALIFIED'
