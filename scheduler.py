@@ -89,6 +89,9 @@ _v10_running = False
 _pcr_intraday_running = False
 _intraday_paper_running = False
 _fu_sync_ran_this_week: Optional[date] = None
+_v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit pass guard
+_v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
+_premarket_check_ran: Optional[date] = None      # cc_task #72 bug_1: 09:10 check day-lock
 
 # ── health / watchdog state ────────────────────────────────────────────────────
 _restart_requested = False
@@ -172,10 +175,11 @@ async def _bg_yahoo_daily(app=None):
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
+        result = await ydu.run_async()                 # cc_task #72 bug_2: was ydu.run_update(conn) — undefined -> silent AttributeError, nightly EOD never ran
         with _conn() as conn:
-            result = ydu.run_update(conn)
+            heal = ydu.heal_indices(conn)              # bug_2: verify + self-heal index symbols
         _yahoo_ran_today = _ist_now().date()
-        log.info(f"yahoo_daily: {result}")
+        log.info(f"yahoo_daily: {result} | index_heal: {heal}")
         return result
     except Exception as e:
         log.error(f"_bg_yahoo_daily: {e}"); return {"error": str(e)}
@@ -302,6 +306,73 @@ def _bg_signal_writer():
     finally:
         if _signal_writer_token == my_token:   # only the latest run clears the marker
             _signal_writer_started_at = None
+
+
+def _premarket_writer_check():
+    """cc_task #72 bug_1: 09:10 IST pre-market readiness. The existing _check_watchdog
+    only acts DURING market hours, so a live writer that died overnight isn't caught
+    until after the 09:15 open (stale metrics -> wrong mood/slots at open). At 09:10,
+    if v8_metrics is >60 min stale (or absent), force a fresh restart + fire a recovery
+    tick + alert (category=alert, title=scheduler_stall_9am) so the writer is primed."""
+    global _premarket_check_ran
+    today = _ist_now().date()
+    if _premarket_check_ran == today:
+        return
+    _premarket_check_ran = today
+    try:
+        age = _tick_age_minutes()
+        if age is None or age > 60:
+            _log_alert("scheduler_stall_9am",
+                       f"09:10 pre-market: v8_metrics stale "
+                       f"{f'{age:.0f}min' if age is not None else 'absent'} — forcing live-writer restart before open")
+            _request_restart("premarket 09:10 readiness: v8_metrics stale/absent")
+            _spawn(_bg_signal_writer)
+    except Exception as e:
+        log.error(f"_premarket_writer_check: {e}")
+
+
+def _bg_v8_paper_exit():
+    """cc_task #72 bug_0: EXIT-ONLY live pass every 5 min. paper_tick (which holds the
+    exit logic) was never scheduled — only entries (signal_writer) ran, so nothing
+    closed since 19-Jun. run_paper_exits applies the SAME target/stop rules, no entries."""
+    global _v8_paper_exit_running
+    if _v8_paper_exit_running: return
+    _v8_paper_exit_running = True
+    try:
+        import v8_paper
+        with _conn() as conn:
+            res = v8_paper.run_paper_exits(conn, mode="live")
+        if res.get("closed"):
+            log.info(f"v8_paper_exit live: closed {res['closed']}")
+    except Exception as e:
+        log.error(f"v8_paper_exit: {e}")
+    finally:
+        _v8_paper_exit_running = False
+
+
+def _bg_v8_paper_exit_eod():
+    """cc_task #72 bug_0: EOD fall-back. After the nightly EOD load, close any open
+    position whose OFFICIAL daily close (raw_prices) breached target/stop but the live
+    loop missed (e.g. the writer was down). Uses the latest completed trading day."""
+    global _v8_paper_exit_eod_ran
+    today = _ist_now().date()
+    if _v8_paper_exit_eod_ran == today: return
+    try:
+        import v8_paper
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(price_date) FROM raw_prices")
+                d = cur.fetchone()[0]
+            if d is None:
+                return
+            res = v8_paper.run_paper_exits(conn, target_date=d, mode="eod")
+        _v8_paper_exit_eod_ran = today
+        if res.get("closed"):
+            _log_alert("v8_paper_eod_exit",
+                       f"EOD fallback closed {res['closed']} position(s) on {d} daily close")
+        log.info(f"v8_paper_exit_eod: {res}")
+    except Exception as e:
+        log.error(f"v8_paper_exit_eod: {e}")
 
 def _bg_v10_tick():
     global _v10_running
@@ -540,11 +611,12 @@ def _bg_yahoo_daily_sync():
     _yahoo_daily_running = True
     try:
         import yahoo_daily_update as ydu
+        result = asyncio.run(ydu.run_async())          # cc_task #72 bug_2: was ydu.run_update(conn) — undefined -> silent AttributeError, nightly EOD never ran
         with _conn() as conn:
-            result = ydu.run_update(conn)
             _check_universe_shrink(conn)   # task #35: alert on silent coverage drop
+            heal = ydu.heal_indices(conn)  # cc_task #72 bug_2: verify + self-heal index symbols post-EOD
         _yahoo_ran_today = _ist_now().date()
-        log.info(f"yahoo_daily: {result}")
+        log.info(f"yahoo_daily: {result} | index_heal: {heal}")
     except Exception as e: log.error(f"yahoo_daily: {e}")
     finally: _yahoo_daily_running = False
 
@@ -709,8 +781,11 @@ async def _scheduler_loop():
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
             _spawn(_bg_fu_sync)
+        if h == 9 and m == 10:
+            _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
+            _spawn(_bg_v8_paper_exit)         # cc_task #72 bug_0: live exit pass (primary)
             _spawn(_bg_v10_tick)
             _spawn(_bg_pcr_intraday)
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
@@ -732,6 +807,7 @@ async def _scheduler_loop():
         if h == 1 and m == 45:  _spawn(_bg_pivots)
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
+        if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
 
 
 async def _supervisor():
