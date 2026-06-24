@@ -17,6 +17,7 @@ Tunables via run_async(sem=, sleep=, retry=): override defaults per call.
 
 import asyncio
 import os
+import json
 import datetime
 import psycopg
 import httpx
@@ -201,6 +202,55 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
     }
     log.info(f"yahoo_daily done: {summary}")
     return summary
+
+
+def heal_indices(conn=None, indices=("NIFTY50", "BANKNIFTY")):
+    """cc_task #72 bug_2: post-EOD verification + self-heal. After the nightly run,
+    if an index's raw_prices lags the freshest universe trading day, re-fetch JUST
+    that index (one symbol at a time, gentle) and UPSERT. Logs the outcome to
+    session_log (category=alert if still stale after heal, else scheduler_health).
+    Catches the silent index-symbol skips the bulk pass leaves behind."""
+    own = conn is None
+    if own:
+        conn = psycopg.connect(DB_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(price_date) FROM raw_prices")
+            target = cur.fetchone()[0]
+        if target is None:
+            return {"status": "no_data"}
+        stale = []
+        with conn.cursor() as cur:
+            for sym in indices:
+                cur.execute("SELECT MAX(price_date) FROM raw_prices WHERE symbol=%s", (sym,))
+                mx = cur.fetchone()[0]
+                if mx is None or mx < target:
+                    stale.append(sym)
+        healed = {}
+        for sym in stale:
+            got, _ = asyncio.run(_run_pass([sym], 1, 0.5))   # one at a time, gentle on Yahoo
+            healed[sym] = _commit_rows(got)
+        index_max = {}
+        with conn.cursor() as cur:
+            for sym in indices:
+                cur.execute("SELECT MAX(price_date) FROM raw_prices WHERE symbol=%s", (sym,))
+                r = cur.fetchone()[0]
+                index_max[sym] = str(r) if r else None
+        still_stale = [s for s in indices if index_max[s] is None or index_max[s] < str(target)]
+        details = {"target_day": str(target), "stale_before": stale,
+                   "rows_healed": healed, "index_max": index_max, "still_stale": still_stale}
+        category = "alert" if still_stale else "scheduler_health"
+        title = "index_backfill_failed" if still_stale else "index_backfill_ok"
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
+                        (category, title, json.dumps(details)))
+            conn.commit()
+        log.info(f"heal_indices: {details}")
+        return details
+    finally:
+        if own:
+            conn.close()
 
 
 def main():
