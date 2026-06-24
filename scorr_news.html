@@ -81,7 +81,6 @@
   .art-foot b{color:var(--mut);font-weight:600}
   .art-rt{color:var(--mut)}
   .art-expand{margin-left:auto;color:var(--blu);font-weight:600}
-  .art-fresh{color:var(--grn);font-weight:700;font-size:10.5px}
 
   /* Expanded article — rendered Markdown typography (smooth grid-row reveal) */
   .art-full{display:grid;grid-template-rows:0fr;margin-top:0;
@@ -173,11 +172,13 @@
 <script>
 const API = "";
 const CATS = [
-  { id:"india",  label:"India" },
-  { id:"global", label:"Global" },
-  { id:"ipo",    label:"IPO" },
+  { id:"ai_editorial",    label:"AI Editorial" },
+  { id:"company_updates", label:"Company Updates" },
+  { id:"global",          label:"Global" },
+  { id:"ipo",             label:"IPO" },
 ];
-let curCat = "india";
+let curCat = "ai_editorial";
+const SEARCH_TABS = ["ai_editorial","company_updates"];   // symbol search shown on these
 let articles = [];
 let openId = null;
 
@@ -197,11 +198,6 @@ function timeAgo(iso){
   const h = Math.floor(m/60); if(h < 24) return h+"h ago";
   return Math.floor(h/24)+"d ago";
 }
-function isFresh(iso){
-  // "fresh" = polished within the last 8 hours
-  if(!iso) return false;
-  return (Date.now() - new Date(iso).getTime()) < 8 * 3600 * 1000;
-}
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
 function renderMd(t){
   if(!t) return "";
@@ -211,7 +207,7 @@ function renderMd(t){
 function readingTime(t){
   const words = String(t||"").trim().split(/\s+/).filter(Boolean).length;
   if(!words) return "";
-  return Math.max(1, Math.round(words/200)) + " min read";
+  return Math.max(1, Math.ceil(words/200)) + " min read";   // ceil per spec (cc_task #69)
 }
 
 function buildTabs(){
@@ -221,8 +217,9 @@ function buildTabs(){
 }
 function pick(cat){
   curCat = cat; openId = null;
-  document.getElementById("searchbar").style.display = cat === "india" ? "block" : "none";
-  if(cat !== "india") document.getElementById("symSearch").value = "";
+  const showSearch = SEARCH_TABS.includes(cat);
+  document.getElementById("searchbar").style.display = showSearch ? "block" : "none";
+  if(!showSearch) document.getElementById("symSearch").value = "";
   buildTabs();
   load();
 }
@@ -234,7 +231,9 @@ function setExpandLabel(art, isOpen){
 function toggle(ev, id){
   const art = ev.currentTarget;
   const isOpen = art.classList.contains("open");
+  // clicks inside an already-open article (links, text select, tables) shouldn't collapse it
   if(isOpen && ev.target.closest(".art-full")) return;
+  // accordion: collapse any other open card (no full re-render — just class toggles)
   if(!isOpen){
     document.querySelectorAll(".art.open").forEach(el => {
       if(el !== art){ el.classList.remove("open"); setExpandLabel(el, false); }
@@ -268,23 +267,16 @@ function artHTML(a, idx, isLead){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
   const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
-  const id = a.polished_id != null ? a.polished_id : idx;
+  const id = a.id != null ? a.id : idx;
   const open = (openId === id) ? " open" : "";
   const sym = a.symbol ? `<span class="art-sym">${esc(a.symbol)}</span>` : "";
-  const impact = imp ? `<span class="art-impact">${esc(imp.toUpperCase())} IMPACT</span>` : "";
+  const impact = imp ? `<span class="art-impact">${esc(imp)} impact</span>` : "";
   const leadTag = isLead ? `<span style="color:var(--blu)">&#9679;&nbsp; Lead</span>` : "";
   const fullText = (a.full_summary && String(a.full_summary).trim()) || a.summary || "";
   const rt = readingTime(fullText);
   const fullHTML = (a.full_summary && String(a.full_summary).trim())
     ? renderMd(a.full_summary)
     : renderMd(a.summary||"") + `<p style="color:var(--dim);font-style:italic;font-size:13px">Full analysis coming soon.</p>`;
-
-  // Timestamp: use polished_at (when AI analysed it) — not published_at (when article was written).
-  // This ensures freshly polished articles show "2h ago" not "9h ago".
-  const tsIso = a.polished_at || a.published_at;
-  const tsLabel = timeAgo(tsIso);
-  const freshBadge = isFresh(a.polished_at) ? `<span class="art-fresh">✦ Fresh</span><span>·</span>` : "";
-
   return `<div class="art ${impClass}${isLead?' lead':''}${open}" data-id="${esc(id)}" onclick="toggle(event, ${JSON.stringify(id)})">
     <div class="art-kicker">
       ${leadTag}
@@ -298,7 +290,7 @@ function artHTML(a, idx, isLead){
     <div class="art-foot">
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
       <span>·</span><b>${esc(a.source_name||"")}</b>
-      <span>·</span>${freshBadge}<span>${tsLabel}</span>
+      <span>·</span><span>${timeAgo(a.published_at)}</span>
       ${rt ? `<span>·</span><span class="art-rt">${rt}</span>` : ""}
       <span class="art-expand">${open ? "Collapse ↑" : "Read analysis ↓"}</span>
     </div>
@@ -307,7 +299,7 @@ function artHTML(a, idx, isLead){
 
 function render(){
   let rows = articles.slice();
-  if(curCat === "india"){
+  if(SEARCH_TABS.includes(curCat)){
     const q = (document.getElementById("symSearch").value || "").trim().toUpperCase();
     if(q) rows = rows.filter(a => (a.symbol||"").toUpperCase().includes(q));
   }
@@ -327,7 +319,7 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 }
 
 buildTabs();
-document.getElementById("searchbar").style.display = curCat === "india" ? "block" : "none";
+document.getElementById("searchbar").style.display = SEARCH_TABS.includes(curCat) ? "block" : "none";
 load();
 </script>
 </body>
