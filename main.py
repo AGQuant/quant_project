@@ -124,8 +124,10 @@ def _is_embedded(request: Request) -> bool:
 
 # Tier-2 pages that get the PWA bootstrap (<script src=/pwa.js>) injected on mobile.
 # pwa.js adds the manifest link, registers the service worker, renders the mobile
-# bottom-nav, and shows the install prompt — so no page file needs editing.
-_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10"}
+# bottom-nav + normalizes the canonical desktop top-nav (cc_task #80), and shows the
+# install prompt — so no page file needs editing.
+_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
+                     "/dashboard", "/sector", "/fpc", "/quant-basket"}
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 @app.middleware("http")
