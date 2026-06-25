@@ -648,7 +648,15 @@ def _market_gate_fails(conn) -> int:
                     adv, dec = adv_row[0] or 0, adv_row[1] or 0
                     adr = (adv / dec) if dec else float(adv)
                 else:
-                    cur.execute("SELECT adr FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+                    # cc_task #82: never inherit a STALE prior-day ADR at the first
+                    # tick (09:15-09:16). adr_intraday and the live intraday/raw compute
+                    # above are both empty then, so this branch fires and yesterday's
+                    # adr_daily (e.g. Bearish -> 13 sell-slots) forced the wrong mood at
+                    # open (6 SHORTs entered under Bearish limits 25-Jun). Only trust
+                    # adr_daily when it is TODAY's row; otherwise default 1.0 (neutral --
+                    # passes adr>=1.0, adds no gate fail). Mood self-corrects as today's
+                    # ticks accumulate.
+                    cur.execute("SELECT adr FROM adr_daily WHERE price_date = CURRENT_DATE ORDER BY price_date DESC LIMIT 1")
                     r = cur.fetchone()
                     adr = float(r[0]) if r and r[0] is not None else 1.0
 
