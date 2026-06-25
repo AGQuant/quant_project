@@ -12,6 +12,13 @@ v3.4 (17-Jun-2026): MAJOR RESTRUCTURE — flattened from two-tier to ONE list.
                    SHORT PASS>=11 / WATCH 8-10 / FAIL <8.
   - R12 label: "none" -> "no setup" + closest-miss hint.
 
+v3.4.1 (25-Jun-2026, cc_task #83 — display fixes):
+  - Renumbered to sequential R1-R11 (was R1-R4,R6,R7,R9-R13 with R5/R8 gaps).
+    R6->R5 R7->R6 R9->R7 R10->R8 R11->R9 R12->R10 R13->R11. No new rules (15/14 unchanged).
+  - R8 (5-min): insufficient intraday bars now score WATCH (0.5), not a no-data void.
+  - F2 Pivot: tri-state — PASS (above PP, >1% room), WATCH (above PP, <=1% room),
+    FAIL (at/through PP); Room% always shown.
+
 Carried from v3.3.3:
   - R6+R8 merged trend rule, ceiling open.
   - R11 caps daily AND weekly RSI < 80.
@@ -109,7 +116,8 @@ def _r10_intraday(cur, symbol, side):
         ORDER BY ts""", (symbol, symbol))
     bars = cur.fetchall()
     if len(bars) < 8:
-        return None, f"{len(bars)} bars only"
+        # cc_task #83 FIX_2: insufficient intraday bars -> WATCH (0.5), not no-data.
+        return "watch", f"insufficient bars ({len(bars)} avail)"
     bar_date = bars[0][0].date()
     o0 = _f(bars[0][1]); cN = _f(bars[-1][4])
     hi = max(_f(b[2]) for b in bars); lo = min(_f(b[3]) for b in bars)
@@ -223,12 +231,15 @@ def _interpret_rulebased(d):
     rules = d["rules"]
     vclass = d["verdict_class"]
 
-    r6_s, r6_v = _istate(rules, "R6")
-    r7_s, _ = _istate(rules, "R7")
-    r9_s, _ = _istate(rules, "R9")
-    r11_s, r11_v = _istate(rules, "R11")
-    r12_s, r12_v = _istate(rules, "R12")
-    r13_s, _ = _istate(rules, "R13")
+    # cc_task #83: rules renumbered to sequential R1-R11. Local var names kept;
+    # prefixes point to the NEW labels — Trend=R5, Volume=R6, Returns=R7,
+    # RSI room=R9, Pattern=R10, ATR=R11 (R2/F2/F6 unchanged).
+    r6_s, r6_v = _istate(rules, "R5")    # Trend
+    r7_s, _ = _istate(rules, "R6")       # Volume
+    r9_s, _ = _istate(rules, "R7")       # Returns
+    r11_s, r11_v = _istate(rules, "R9")  # RSI room
+    r12_s, r12_v = _istate(rules, "R10") # Pattern
+    r13_s, _ = _istate(rules, "R11")     # ATR
     r2_s, r2_v = _istate(rules, "R2")
     f2_s, f2_v = _istate(rules, "F2")
     f6_s, _ = _istate(rules, "F6")
@@ -455,65 +466,70 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 rules.append(row("R4 GVM", ">=7.0", f"{_f(gvm):.2f}" if gvm is not None else "—",
                                  gvm is not None and float(gvm) >= 7.0))
 
-            # R6 Trend
+            # R5 Trend
             mas = [dma20, dma50, dma200]
             if side == "LONG":
                 n = sum(1 for x in mas if x is not None and float(x) > 0)
                 rsi_ok = (rsi_m is not None and rsi_w is not None and float(rsi_m) >= 50 and float(rsi_w) >= 50)
-                rules.append(row("R6 Trend", "2of3 MAs above + RSI M/W>=50",
+                rules.append(row("R5 Trend", "2of3 MAs above + RSI M/W>=50",
                                  f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}", n >= 2 and rsi_ok))
             else:
                 n = sum(1 for x in mas if x is not None and float(x) < 0)
                 rsi_ok = (rsi_m is not None and rsi_w is not None and float(rsi_m) <= 50 and float(rsi_w) <= 50)
-                rules.append(row("R6 Trend", "2of3 MAs below + RSI M/W<=50",
+                rules.append(row("R5 Trend", "2of3 MAs below + RSI M/W<=50",
                                  f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}", n >= 2 and rsi_ok))
 
-            # R7 Volume
-            rules.append(row("R7 Volume", f"1-mo {'buying' if side=='LONG' else 'selling'}", r7_val, r7_ok))
+            # R6 Volume
+            rules.append(row("R6 Volume", f"1-mo {'buying' if side=='LONG' else 'selling'}", r7_val, r7_ok))
 
-            # R9 Returns
+            # R7 Returns
             if side == "LONG":
-                rules.append(row("R9 Returns", "week>0 & month>0",
+                rules.append(row("R7 Returns", "week>0 & month>0",
                                  f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
                                  wk_ret is not None and mo_ret is not None and float(wk_ret) > 0 and float(mo_ret) > 0))
             else:
-                rules.append(row("R9 Returns", "week<0 & month<0",
+                rules.append(row("R7 Returns", "week<0 & month<0",
                                  f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
                                  wk_ret is not None and mo_ret is not None and float(wk_ret) < 0 and float(mo_ret) < 0))
 
-            # R10 5-min
-            rules.append(row("R10 5-min", "intraday strength (2/3 sub)", r10_val, r10_ok, r10_method))
+            # R8 5-min
+            rules.append(row("R8 5-min", "intraday strength (2/3 sub)", r10_val, r10_ok, r10_method))
 
-            # R11 RSI room
+            # R9 RSI room
             if side == "LONG":
-                rules.append(row("R11 RSI room", "daily<80 & weekly<80",
+                rules.append(row("R9 RSI room", "daily<80 & weekly<80",
                                  f"D {_f(rsi_d):.0f} / W {_f(rsi_w):.0f}",
                                  rsi_d is not None and rsi_w is not None and float(rsi_d) < 80 and float(rsi_w) < 80))
             else:
-                rules.append(row("R11 RSI room", "daily>20", f"{_f(rsi_d):.0f}",
+                rules.append(row("R9 RSI room", "daily>20", f"{_f(rsi_d):.0f}",
                                  rsi_d is not None and float(rsi_d) > 20))
 
-            # R12 Pattern
-            rules.append(row("R12 Pattern", "breakout OR HL+contraction" if side == "LONG"
+            # R10 Pattern
+            rules.append(row("R10 Pattern", "breakout OR HL+contraction" if side == "LONG"
                              else "breakdown OR LH+contraction", r12_val, r12_ok, r12_method))
 
-            # R13 ATR
-            rules.append(row("R13 ATR", "ignition ATR5/20>=1.05", r13_val, r13_ok))
+            # R11 ATR
+            rules.append(row("R11 ATR", "ignition ATR5/20>=1.05", r13_val, r13_ok))
 
             # F1 News (merged)
             rules.append(row("F1 News", "no blackout/ex-date", "blackout" if in_blackout else "clear", not in_blackout))
 
-            # F2 Pivot (merged)
+            # F2 Pivot (merged) — cc_task #83 FIX_3: tri-state with partial credit.
+            # Above the right side of PP with >1% room to the target = PASS; above PP
+            # but <=1% room (tight to R1/S1) = WATCH (0.5); at/through PP = FAIL.
+            # Room% is always shown.
             if piv and cmp:
                 pp, r1, s1 = _f(piv[0]), _f(piv[1]), _f(piv[2])
                 if side == "LONG" and pp and r1:
                     room = (r1 - cmp) / cmp * 100
+                    f2_state = True if (cmp > pp and room > 1.0) else ("watch" if cmp > pp else False)
                     rules.append(row("F2 Pivot", "above PP, room>1%",
-                                     f"CMP {cmp:.0f} PP {pp:.0f} R1 {r1:.0f}", cmp > pp and room > 1.0))
+                                     f"CMP {cmp:.0f} PP {pp:.0f} R1 {r1:.0f} · Room {room:.1f}%", f2_state))
                 elif side == "SHORT" and pp and s1:
                     room = (cmp - s1) / cmp * 100
+                    f2_state = True if (cmp < pp and room > 1.0) else ("watch" if cmp < pp else False)
                     rules.append(row("F2 Pivot", "below PP, room>1%",
-                                     f"CMP {cmp:.0f} PP {pp:.0f} S1 {s1:.0f}", cmp < pp and room > 1.0))
+                                     f"CMP {cmp:.0f} PP {pp:.0f} S1 {s1:.0f} · Room {room:.1f}%", f2_state))
                 else:
                     rules.append(row("F2 Pivot", "pivot room", "no pivot", None))
             else:
@@ -587,7 +603,7 @@ def compute_single_rule(symbol, side, rule):
     for r in d["rules"]:
         if r["rule"].upper().replace(" ", "").startswith(rule):
             return {"ok": True, "symbol": d["symbol"], "side": d["side"], **r}
-    return {"ok": False, "error": f"Unknown rule '{rule}'. v3.4 dropped F3/F4/F5; R8 merged into R6."}
+    return {"ok": False, "error": f"Unknown rule '{rule}'. Rules are R1-R11 + F1,F2,F6,F7 (cc_task #83 renumber; F3/F4/F5 dropped in v3.4)."}
 
 
 def native_trade_check(query, gate1=None, gate2=None, use_api=False):
