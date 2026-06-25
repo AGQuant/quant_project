@@ -202,6 +202,62 @@ PWA_JS = """
     document.body.appendChild(nav);
   }
 
+  // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637):
+  //    normalize #scorr-nav on every injected page to the same 11 items, Intel label,
+  //    active-by-path. Removes per-page nav drift. Hidden on mobile (bottom nav used).
+  if (!document.getElementById('scorr-cnav-style')) {
+    var ncss = ''
+      + '.scorr-cnav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;'
+      + '  border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;'
+      + '  position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(20,35,70,.06)}'
+      + '.scorr-cnav::-webkit-scrollbar{display:none}'
+      + '.scorr-cnav a{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;'
+      + '  text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;'
+      + '  font-weight:600;border-bottom:2px solid transparent;transition:.12s}'
+      + '.scorr-cnav a:hover{color:#1c2536}'
+      + '.scorr-cnav a.active{border-bottom-color:#2563eb;color:#2563eb}'
+      + '.scorr-cnav a .ic{font-size:13px}'
+      + '.scorr-cnav .sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}'
+      + '@media(max-width:767px){.scorr-cnav{display:none!important}}';
+    var nst = document.createElement('style');
+    nst.id = 'scorr-cnav-style'; nst.textContent = ncss;
+    document.head.appendChild(nst);
+  }
+  (function () {
+    var NAV = [
+      ['/', '\\u2302', 'Home'],
+      ['/dashboard', '\\u26a1', 'V8'],
+      ['/cio2?model=gvm', '\\u25c9', 'GVM'],
+      ['/sector', '\\u2297', 'Sector'],
+      ['/check', '\\u2713', 'Check'],
+      ['/news', '\\ud83d\\udcf0', 'Intel'],
+      ['/scanners', '\\u229e', 'Scanners'],
+      ['/cio', '\\u2299', 'Max'],
+      ['/fpc', '\\u25e7', 'FPC'],
+      ['/quant-basket', '\\u25eb', 'QB'],
+      ['/v10', '\\u25b3', 'V10']
+    ];
+    var p = location.pathname, qs = location.search;
+    function isActive(route) {
+      var base = route.split('?')[0];
+      if (route.indexOf('model=gvm') > -1) return p === '/cio2' && qs.indexOf('model=gvm') > -1;
+      if (base === '/') return p === '/';
+      return p === base || p.indexOf(base + '/') === 0;
+    }
+    var host = document.getElementById('scorr-nav');
+    if (!host) {
+      host = document.createElement('nav'); host.id = 'scorr-nav';
+      document.body.insertBefore(host, document.body.firstChild);
+    }
+    host.className = 'scorr-cnav';
+    host.innerHTML = NAV.map(function (it, i) {
+      var sep = i ? '<span class="sep"></span>' : '';
+      var act = isActive(it[0]);
+      return sep + '<a' + (act ? ' class="active"' : '') + ' href="' + it[0] + '">'
+        + '<span class="ic">' + it[1] + '</span>' + it[2] + '</a>';
+    }).join('');
+  })();
+
   // 5) install prompt
   if (localStorage.getItem('scorr_pwa_dismissed')) return;
 
