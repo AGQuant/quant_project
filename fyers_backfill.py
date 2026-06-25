@@ -21,7 +21,7 @@ Shared by fyers_feed.py (imported). Can also be run standalone:
 """
 
 import argparse, os, time, logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 import pytz, psycopg2, requests
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
@@ -33,6 +33,11 @@ RETENTION_DAYS  = 7
 HISTORY_RETRIES = 2
 SLEEP_BETWEEN   = 5  # seconds between symbol calls — avoids rate limit
 
+# cc_task #87 (canonical rule, locked): backfill is POST-MARKET / on-demand ONLY.
+# Never write history bars to intraday_prices during the live session.
+MARKET_OPEN     = dt_time(9, 15)
+MARKET_CLOSE    = dt_time(15, 30)
+
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
@@ -43,6 +48,17 @@ log = logging.getLogger('fyers_backfill')
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def hdr(token): return {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
 def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
+
+
+def _assert_not_market_hours(fn):
+    """cc_task #87: hard-block any backfill write during 09:15-15:30 IST. Stale
+    history bars written mid-session caused a wrong-price V8 paper entry. Backfill
+    is post-market / on-demand only — raise so no code path can violate this."""
+    now = datetime.now(IST)
+    if now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE:
+        raise RuntimeError(
+            f"{fn} blocked during market hours (09:15-15:30 IST) — "
+            "backfill is post-market/on-demand only")
 
 
 def get_universe(conn):
@@ -94,6 +110,7 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
 
 def backfill_7day(token, conn=None):
     """Sequential 7-day backfill for all futures. ~17 min. Called on worker boot."""
+    _assert_not_market_hours('backfill_7day')
     own = conn is None
     if own: conn = get_db()
 
@@ -130,6 +147,7 @@ def newest_ts(conn, symbol, timeframe):
 
 def heal_gap(token, conn, symbols):
     """On reconnect: pull only from newest stored candle -> now per symbol."""
+    _assert_not_market_hours('heal_gap')
     now    = datetime.now(IST)
     healed = 0
     for sym in symbols:
