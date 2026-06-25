@@ -62,6 +62,7 @@ from performance_endpoints import router as performance_router
 from scheduler_health_endpoints import router as scheduler_health_router
 from news_endpoints import router as news_router
 from admin_index_backfill import router as idx_backfill_router
+from feed_health_endpoints import router as feed_health_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -192,6 +193,7 @@ app.include_router(scheduler_health_router)
 app.include_router(news_router)
 app.include_router(pwa_router)
 app.include_router(idx_backfill_router)
+app.include_router(feed_health_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
