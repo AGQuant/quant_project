@@ -982,14 +982,23 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/paper/status")
 def paper_status():
+    # cc_task #82: CMP must track the LIVE intraday feed (Fyers 5-min, intraday_prices),
+    # not cmp_prices -- which lagged at yesterday's EOD close (15:26) so every open
+    # position read CMP == entry_price and showed Rs.0 P&L. Take each symbol's most
+    # recent intraday_prices bar (today's latest when present, else last known close).
+    # Only fall back to entry_price when the symbol has no intraday bar at all.
     open_positions = api_query("""
         SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
             p.target, p.stop_loss, p.qty, p.pivot_date,
-            COALESCE(c.cmp, p.entry_price) AS cmp,
-            ROUND(CASE p.side WHEN 'LONG' THEN (COALESCE(c.cmp, p.entry_price) - p.entry_price) * p.qty
-                WHEN 'SHORT' THEN (p.entry_price - COALESCE(c.cmp, p.entry_price)) * p.qty ELSE 0 END::numeric, 2) AS unrealised_pnl,
-            c.updated_at AS cmp_updated_at
-        FROM v8_paper_positions p LEFT JOIN cmp_prices c ON c.symbol = p.symbol
+            COALESCE(lp.cmp, p.entry_price) AS cmp,
+            ROUND(CASE p.side WHEN 'LONG' THEN (COALESCE(lp.cmp, p.entry_price) - p.entry_price) * p.qty
+                WHEN 'SHORT' THEN (p.entry_price - COALESCE(lp.cmp, p.entry_price)) * p.qty ELSE 0 END::numeric, 2) AS unrealised_pnl,
+            lp.ts AS cmp_updated_at
+        FROM v8_paper_positions p
+        LEFT JOIN LATERAL (
+            SELECT close AS cmp, ts FROM intraday_prices
+            WHERE symbol = p.symbol ORDER BY ts DESC LIMIT 1
+        ) lp ON true
         WHERE p.status = 'OPEN' ORDER BY p.entry_ts DESC
     """)
     return {
