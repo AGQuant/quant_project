@@ -107,6 +107,17 @@
   .art-sent{font-weight:600}
   .art-foot b{color:var(--mut);font-weight:600}
 
+  /* cc_task #79: compact cards (Company Updates / Global / IPO) + clickable category pills.
+     Placed AFTER .imp-high .art-head so compact headline size wins on equal specificity. */
+  .art-compact{padding:18px 0}
+  .art-compact .art-head{font-size:18px;line-height:1.32}
+  .art-compact .art-foot{margin-top:11px}
+  .art-stand-sm{margin-top:8px;font-size:14px;color:var(--mut);line-height:1.55;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .cat-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
+    font-size:10px;font-weight:700;cursor:pointer;border:1px solid transparent;letter-spacing:.02em}
+  .cat-pill:hover{filter:brightness(.97)}
+
   .msg{text-align:center;color:var(--mut);font-size:13px;padding:60px 20px}
   .foot{font-size:10.5px;color:#b3bccd;text-align:center;margin-top:46px;line-height:1.8}
 
@@ -115,6 +126,7 @@
     .art.lead .art-head{font-size:25px}
     .imp-high .art-head{font-size:21px}
     .art-body{font-size:15px}
+    .art-compact .art-head{font-size:17px}
   }
 </style>
 </head>
@@ -169,15 +181,25 @@
 
 <script>
 const API = "";
+// cc_task #79 (spec 636): All tab (default) + 4 canonical category tabs.
 const CATS = [
+  { id:"all",             label:"All" },
   { id:"ai_editorial",    label:"AI Editorial" },
   { id:"company_updates", label:"Company Updates" },
   { id:"global",          label:"Global" },
   { id:"ipo",             label:"IPO" },
 ];
-let curCat = "ai_editorial";
-const SEARCH_TABS = ["ai_editorial","company_updates"];   // symbol search shown on these
+let curCat = "all";
+const SEARCH_TABS = ["company_updates"];   // symbol search shown on this tab
 let articles = [];
+
+// Category pill design (spec 636): orange IPO, purple Global, blue Company Updates.
+// AI Editorial is hero content — no pill. Pill click switches tab (no new page).
+const PILL = {
+  "Company Updates": { id:"company_updates", label:"Company Updates", bg:"#e8f0fe", fg:"#1d4ed8", bd:"#c3d6fb" },
+  "Global":          { id:"global",          label:"Global",          bg:"#f3ecfd", fg:"#7c3aed", bd:"#ddc9fb" },
+  "IPO":             { id:"ipo",             label:"IPO",             bg:"#fdf0e1", fg:"#c2620a", bd:"#f6d4a8" },
+};
 
 const SENT = {
   positive:{c:"#0fa968",g:"▲",l:"Bullish"}, bullish:{c:"#0fa968",g:"▲",l:"Bullish"},
@@ -201,17 +223,13 @@ function renderMd(t){
   if(window.marked && marked.parse){ try{ return marked.parse(String(t)); }catch(e){} }
   return "<p>"+esc(t).replace(/\n{2,}/g,"</p><p>").replace(/\n/g,"<br>")+"</p>";
 }
-// CEIL(words/200) per spec (cc_task #70 change_4)
+// CEIL(words/200) read-time
 function readMin(t){
   const words = String(t||"").trim().split(/\s+/).filter(Boolean).length;
   return words ? Math.max(1, Math.ceil(words/200)) : 0;
 }
-// Category tag — legacy remap (cc_task #70 also_fix): company->COMPANY_UPDATES, domestic->MACRO
-function tagFor(a){
-  let c = String(a.category || curCat || "").trim().toUpperCase();
-  if(c === "COMPANY")  c = "COMPANY_UPDATES";
-  if(c === "DOMESTIC") c = "MACRO";
-  return c || (curCat || "").toUpperCase();
+function symStr(a){
+  return Array.isArray(a.mentioned_symbols) ? a.mentioned_symbols.filter(Boolean).join(", ") : "";
 }
 
 function buildTabs(){
@@ -233,54 +251,73 @@ async function load(){
   btn.disabled = true;
   document.getElementById("feed").innerHTML = '<div class="msg">Loading…</div>';
   try{
-    const r = await fetch(`${API}/api/news/top?days=3&category=${curCat}&limit=60`);
+    const r = await fetch(`${API}/api/news/polished?category=${curCat}&limit=60`);
     const d = await r.json();
     articles = d.articles || [];
-    const lp = d.last_polished
-      ? new Date(d.last_polished).toLocaleString("en-IN",{weekday:"long",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:false})
-      : "—";
-    document.getElementById("meta").textContent = `${lp} · ${d.today_count||0} stories polished today`;
+    const c = d.category_counts || {};
+    const total = Object.values(c).reduce((a,b)=>a+(b||0),0);
+    document.getElementById("meta").textContent =
+      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Company ${c["Company Updates"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
     render();
   }catch(e){
     document.getElementById("feed").innerHTML = `<div class="msg">Could not load news (${esc(e.message)}).</div>`;
   }finally{ btn.disabled = false; }
 }
 
-function artHTML(a, idx, isLead){
+// clickable category pill -> switch to that tab (no navigation)
+function pillHTML(cat){
+  const p = PILL[cat]; if(!p) return "";
+  return `<span class="cat-pill" style="background:${p.bg};color:${p.fg};border-color:${p.bd}" onclick="pick('${p.id}')">${esc(p.label)}</span>`;
+}
+
+// AI Editorial — full hero card (large headline + full_summary paragraphs, no pill).
+function artFull(a, isLead){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
   const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
-  const tag = tagFor(a);
-  const sym = a.symbol ? `<span class="art-sym">${esc(a.symbol)}</span>` : "";
   const impact = imp ? `<span class="art-impact">${esc(imp)} impact</span>` : "";
   const hasFull = a.full_summary && String(a.full_summary).trim();
   const rmins = readMin(hasFull ? a.full_summary : (a.summary||""));
-  const rt = rmins ? `<span class="art-dot">•</span><span class="art-rt">${rmins} min read</span>` : "";
-  // standfirst = short summary above the full body (only when a full body exists)
+  const rt = rmins ? `<span class="art-rt">${rmins} min read</span>` : "";
   const stand = (hasFull && a.summary && String(a.summary).trim())
     ? `<div class="art-stand">${esc(a.summary)}</div>` : "";
-  // full body — rendered at FULL length, no truncation (cc_task #70 change_3)
   const bodyHTML = hasFull
     ? renderMd(a.full_summary)
     : (a.summary && String(a.summary).trim()
         ? renderMd(a.summary)
         : `<p class="art-soon">Full analysis coming soon.</p>`);
-  // AI Editorial is Claude-polished editorial -> byline "Source AI CIO" (not the raw publication)
-  const byline = (curCat === "ai_editorial") ? "Source AI CIO" : (a.source_name || "");
   return `<article class="art ${impClass}${isLead?' lead':''}">
-    <div class="art-head">${esc(a.headline)}</div>
-    <div class="art-metarow">
-      <span class="art-tag">${esc(tag)}</span>
-      ${rt}
-      ${sym}
-      ${impact}
-    </div>
+    <div class="art-head">${esc(a.headline_clean)}</div>
+    <div class="art-metarow">${rt}${impact}</div>
     ${stand}
     <div class="art-body">${bodyHTML}</div>
     <div class="art-foot">
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
-      <span>·</span><b>${esc(byline)}</b>
-      <span>·</span><span>${timeAgo(a.published_at)}</span>
+      <span>·</span><b>Source AI CIO</b>
+      <span>·</span><span>${timeAgo(a.published_time)}</span>
+    </div>
+  </article>`;
+}
+
+// Company Updates / Global / IPO — compact card (headline + 2-3 line summary).
+// showPill = clickable category pill bottom-left (used on the All tab only).
+function artCompact(a, showPill){
+  const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
+  const imp = (a.impact||"").toLowerCase();
+  const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
+  const sy = symStr(a);
+  const sym = sy ? `<span class="art-sym">${esc(sy)}</span><span>·</span>` : "";
+  const pill = showPill ? pillHTML(a.category) : "";
+  const summ = (a.summary && String(a.summary).trim())
+    ? `<div class="art-stand-sm">${esc(a.summary)}</div>` : "";
+  return `<article class="art art-compact ${impClass}">
+    <div class="art-head">${esc(a.headline_clean)}</div>
+    ${summ}
+    <div class="art-foot">
+      ${pill}
+      <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
+      <span>·</span>${sym}<span>${esc(a.source||"")}</span>
+      <span>·</span><span>${timeAgo(a.published_time)}</span>
     </div>
   </article>`;
 }
@@ -289,14 +326,24 @@ function render(){
   let rows = articles.slice();
   if(SEARCH_TABS.includes(curCat)){
     const q = (document.getElementById("symSearch").value || "").trim().toUpperCase();
-    if(q) rows = rows.filter(a => (a.symbol||"").toUpperCase().includes(q));
+    if(q) rows = rows.filter(a => symStr(a).toUpperCase().includes(q));
   }
   const feed = document.getElementById("feed");
   if(!rows.length){
     feed.innerHTML = '<div class="msg">No polished news for this filter yet. Polished articles appear here after the daily polish run.</div>';
     return;
   }
-  feed.innerHTML = rows.map((a,i) => artHTML(a, i, i===0)).join("");
+  let html;
+  if(curCat === "all"){
+    // interleaved by time: AI Editorial = full hero, all others = compact + clickable pill
+    html = rows.map((a,i) => a.category === "AI Editorial" ? artFull(a, i===0) : artCompact(a, true)).join("");
+  } else if(curCat === "ai_editorial"){
+    html = rows.map((a,i) => artFull(a, i===0)).join("");
+  } else {
+    // Company Updates / Global / IPO tabs — compact list, summary only, no pill
+    html = rows.map(a => artCompact(a, false)).join("");
+  }
+  feed.innerHTML = html;
 }
 
 // Hide own model-nav when embedded (iframe or ?embed=1) — shell renders its own nav.
