@@ -110,6 +110,8 @@ TOTAL_FUTURES           = 212  # denominator for the N/212 health log
 RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
 STARTUP_GRACE_MINS      = 10   # suppress the watchdog this long after 09:15 (bars need time to form)
 OPEN_RACE_GUARD_SECS    = 60   # hold the first subscription until N s after 09:15 (NSE feed-init race)
+WS_SUB_BATCH            = 200  # cc_task #88: subscribe in 200-symbol batches (Fyers silently drops bulk subs at open)
+WS_SUB_BATCH_SLEEP_SEC  = 2    # seconds between subscription batches
 
 NIFTY_STEP   = 50
 BNIFTY_STEP  = 100
@@ -924,8 +926,11 @@ def run(auth_code=None):
     def _intraday_fresh():
         try:
             with conn.cursor() as c:
+                # cc_task #88 GAP_1: only count actual market-hours bars (ts::time >= 09:15)
+                # so a stale pre-market bar (e.g. 07:15) never makes the boot-backfill skip.
                 c.execute("SELECT COUNT(DISTINCT symbol) FROM intraday_prices "
-                          "WHERE ts::date = CURRENT_DATE AND timeframe='5m'")
+                          "WHERE ts::date = CURRENT_DATE AND timeframe='5m' "
+                          "AND ts::time >= '09:15:00'")
                 n = c.fetchone()[0] or 0
             return n >= 150   # most of universe already has today's bars
         except Exception:
@@ -1007,8 +1012,16 @@ def run(auth_code=None):
             if wait_s > 0:
                 log.info(f"on_connect: holding subscription {wait_s:.0f}s (NSE open-race guard)")
                 time.sleep(wait_s)
-        log.info(f"WS connected — subscribing {len(all_syms)} symbols")
-        fyers_ws.subscribe(symbols=all_syms, data_type="SymbolUpdate")
+        # cc_task #88 GAP_2: subscribe in WS_SUB_BATCH-sized chunks — a single bulk
+        # subscribe of ~1460 symbols was silently dropped by the Fyers server under
+        # open-load (212 futures got zero data on 25-Jun). Batch + sleep + per-batch log.
+        log.info(f"WS connected — subscribing {len(all_syms)} symbols in batches of {WS_SUB_BATCH}")
+        for i in range(0, len(all_syms), WS_SUB_BATCH):
+            batch = all_syms[i:i + WS_SUB_BATCH]
+            fyers_ws.subscribe(symbols=batch, data_type="SymbolUpdate")
+            log.info(f"Subscribed batch {i // WS_SUB_BATCH + 1}: {len(batch)} symbols "
+                     f"({min(i + WS_SUB_BATCH, len(all_syms))}/{len(all_syms)})")
+            time.sleep(WS_SUB_BATCH_SLEEP_SEC)
         fyers_ws.keep_running()
 
     def on_error(msg):  log.error(f"WS error: {msg}")
