@@ -38,6 +38,17 @@
   .btn:hover{border-color:var(--blu);color:var(--blu)}
   .btn.on{background:var(--grn-d);border-color:var(--grn);color:var(--grn)}
   .toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut)}
+  /* cc_task #85: Fyers feed health badge */
+  .feed-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;
+    color:var(--mut);padding:7px 9px;border:1px solid var(--line2);border-radius:8px;
+    cursor:default;letter-spacing:.02em;white-space:nowrap}
+  .feed-badge .fb-dot{width:8px;height:8px;border-radius:50%;background:var(--mut);flex-shrink:0;transition:.2s}
+  .feed-badge.fb-green .fb-dot{background:var(--grn);box-shadow:0 0 0 3px rgba(15,169,104,.16)}
+  .feed-badge.fb-yellow{color:#d97706;border-color:#d97706}
+  .feed-badge.fb-yellow .fb-dot{background:#d97706}
+  .feed-badge.fb-red{color:var(--red);border-color:var(--red);background:rgba(226,55,68,.07)}
+  .feed-badge.fb-red .fb-dot{background:var(--red);box-shadow:0 0 0 3px rgba(226,55,68,.16)}
+  .feed-badge .fb-txt:empty{display:none}
   .mood{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px 18px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;box-shadow:var(--shadow)}
   .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
   .mood .pill{font-size:11px;font-weight:700;padding:5px 12px;border-radius:30px;text-transform:uppercase;letter-spacing:1px}
@@ -225,6 +236,7 @@
     <div class="spacer"></div>
     <div class="clock" id="clock">&#8212;</div>
     <div class="toggle">
+      <span class="feed-badge fb-green" id="feedBadge" title="Feed status"><span class="fb-dot"></span><span class="fb-txt" id="feedBadgeTxt"></span></span>
       <button class="btn on" id="autoBtn" onclick="toggleAuto()">Auto 5m: ON</button>
       <button class="btn" id="refreshBtn" onclick="loadAll()">&#8635; Refresh</button>
     </div>
@@ -1014,6 +1026,33 @@ loadAll();
 autoTimer=setInterval(loadAll,5*60*1000);
 loadNews();
 setInterval(loadNews,15*60*1000);
+
+// cc_task #85: poll Fyers feed health every 60s -> GREEN/YELLOW/RED badge.
+async function pollFeedHealth(){
+  try{
+    const r=await fetch(API_BASE+'/api/health/feed',{headers:{'Accept':'application/json'}});
+    const d=await r.json();
+    const badge=document.getElementById('feedBadge');
+    const txt=document.getElementById('feedBadgeTxt');
+    if(!badge||!txt) return;
+    const st=(d.status||'GREEN').toUpperCase();
+    badge.classList.remove('fb-green','fb-yellow','fb-red');
+    if(st==='RED'){
+      badge.classList.add('fb-red'); txt.textContent='FEED RED';
+      const lb=(d.futures_feed&&d.futures_feed.last_bar_overall)||'';
+      badge.title='Feed issue — data may be stale. Last bar: '+(lb?lb.slice(11,16):'n/a');
+    }else if(st==='YELLOW'){
+      badge.classList.add('fb-yellow'); txt.textContent='FEED YELLOW';
+      const ss=(d.summary&&d.summary.symbols_stale)||0;
+      badge.title=ss+' symbol(s) stale — feed degraded.';
+    }else{
+      badge.classList.add('fb-green'); txt.textContent='';
+      badge.title='Feed healthy'+(d.note?(' — '+d.note):'');
+    }
+  }catch(e){ /* keep last known state on transient error */ }
+}
+pollFeedHealth();
+setInterval(pollFeedHealth,60*1000);
 </script>
 
 <script>
