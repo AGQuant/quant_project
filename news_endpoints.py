@@ -9,6 +9,7 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
   GET  /api/news/unpolished       — count + sample of raw_news awaiting polish
   GET  /api/news/live             — raw headlines grouped by source_type (CIO tab, task #40)
   GET  /api/news/top              — polished news by category for /news page (task #47)
+  GET  /api/news/polished         — polished news, strict canonical-category filter (cc_task #79)
   POST /api/admin/refresh_news    — background fetch (market + company), returns started
 """
 
@@ -207,6 +208,54 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
     return {"category": cat, "days": days, "count": len(articles),
             "last_polished": last.isoformat() if last else None,
             "today_count": today_count, "articles": articles}
+
+
+# Canonical category map (cc_task #79, spec id=636). polished_news.category is now
+# normalized to exactly these 4 values; the API filters on an EXACT match (no ILIKE,
+# no partial) so a tab never catches the wrong stories.
+_CANON_CAT = {
+    "ai_editorial":    "AI Editorial",
+    "company_updates": "Company Updates",
+    "global":          "Global",
+    "ipo":             "IPO",
+}
+
+
+@router.get("/api/news/polished")
+def news_polished(category: str = "all", limit: int = 20, offset: int = 0):
+    """Polished news for the /news redesign (cc_task #79, spec 636).
+    category = all | ai_editorial | company_updates | global | ipo (strict exact match).
+    Sorted polished_at DESC (newest first, all categories interleaved on 'all').
+    limit (default 20, max 100) + offset paginate. Returns category_counts for tab badges."""
+    cat = (category or "all").lower()
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    where, params = "", []
+    if cat in _CANON_CAT:
+        where = "WHERE p.category = %s"
+        params.append(_CANON_CAT[cat])
+    else:
+        cat = "all"   # unknown / 'all' -> no category filter
+    sql = f"""
+        SELECT p.id, p.raw_news_id,
+               COALESCE(p.headline_clean, r.headline) AS headline_clean,
+               p.summary, p.full_summary, p.category, p.sentiment, p.impact,
+               p.mentioned_symbols, r.source_name AS source,
+               r.published_at AS published_time, p.polished_at
+        FROM polished_news p
+        JOIN raw_news r ON r.id = p.raw_news_id
+        {where}
+        ORDER BY p.polished_at DESC NULLS LAST
+        LIMIT %s OFFSET %s
+    """
+    params.extend([limit, offset])
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        articles = _rows(cur)
+        cur.execute("SELECT category, COUNT(*) FROM polished_news GROUP BY category")
+        counts = {row[0]: row[1] for row in cur.fetchall()}
+    return {"category": cat, "limit": limit, "offset": offset,
+            "count": len(articles), "category_counts": counts, "articles": articles}
 
 
 def _refresh_job():
