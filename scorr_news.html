@@ -111,9 +111,9 @@
      Placed AFTER .imp-high .art-head so compact headline size wins on equal specificity. */
   .art-compact{padding:18px 0}
   .art-compact .art-head{font-size:18px;line-height:1.32}
+  .art-compact .art-body{font-size:14.5px;line-height:1.65}
   .art-compact .art-foot{margin-top:11px}
-  .art-stand-sm{margin-top:8px;font-size:14px;color:var(--mut);line-height:1.55;
-    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .art-stand-sm{margin-top:8px;font-size:14px;color:var(--mut);line-height:1.55}
   .cat-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
     font-size:10px;font-weight:700;cursor:pointer;border:1px solid transparent;letter-spacing:.02em}
   .cat-pill:hover{filter:brightness(.97)}
@@ -371,7 +371,7 @@ function artFull(a, isLead){
   </article>`;
 }
 
-// Company Updates / Global / IPO — compact card (headline + 2-3 line summary).
+// Company Updates / Global / IPO — card with FULL body (no truncation).
 // showPill = clickable category pill bottom-left (used on the All tab only).
 function artCompact(a, showPill){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
@@ -380,12 +380,16 @@ function artCompact(a, showPill){
   const sy = symStr(a);
   const sym = sy ? `<span class="art-sym">${esc(sy)}</span><span>·</span>` : "";
   const pill = showPill ? pillHTML(a.category) : "";
-  const summ = (a.summary && String(a.summary).trim())
-    ? `<div class="art-stand-sm">${esc(a.summary)}</div>` : "";
+  // cc_task #81b: show the FULL available body (full_summary if present, else summary)
+  // as readable paragraphs — no line-clamp, no truncation (Arpit reads the full piece).
+  const hasFull = !!(a.full_summary && String(a.full_summary).trim());
+  const bodyRaw = hasFull ? a.full_summary : (a.summary || "");
+  const body = String(bodyRaw).trim()
+    ? `<div class="art-body">${renderMd(bodyRaw)}</div>` : "";
   return `<article class="art art-compact ${impClass}">
-    ${copyBtn(a, false)}
+    ${copyBtn(a, hasFull)}
     <div class="art-head">${esc(a.headline_clean)}</div>
-    ${summ}
+    ${body}
     <div class="art-foot">
       ${pill}
       <span class="art-sent" style="color:${sent.c}">${sent.g} ${sent.l}</span>
@@ -408,12 +412,12 @@ function render(){
   }
   let html;
   if(curCat === "all"){
-    // interleaved by time: AI Editorial = full hero, all others = compact + clickable pill
+    // interleaved by time: AI Editorial = full hero, all others = full-body card + clickable pill
     html = rows.map((a,i) => a.category === "AI Editorial" ? artFull(a, i===0) : artCompact(a, true)).join("");
   } else if(curCat === "ai_editorial"){
     html = rows.map((a,i) => artFull(a, i===0)).join("");
   } else {
-    // Company Updates / Global / IPO tabs — compact list, summary only, no pill
+    // Company Updates / Global / IPO tabs — full body, no pill
     html = rows.map(a => artCompact(a, false)).join("");
   }
   feed.innerHTML = html;
