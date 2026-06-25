@@ -62,7 +62,7 @@ def _is_market_hours(now):
     t = (now.hour, now.minute)
     return (9,15) <= t <= (15,30)
 
-# ── run-guards ────────────────────────────────────────────────────────────────
+# ── run-guards ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # signal_writer uses a started_at timestamp + token (not a bare bool) so a hung
 # tick can't permanently block future ticks — see _bg_signal_writer / _check_watchdog.
 _signal_writer_started_at: Optional[datetime] = None
@@ -94,13 +94,13 @@ _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit 
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
 _premarket_check_ran: Optional[date] = None      # cc_task #72 bug_1: 09:10 check day-lock
 
-# ── health / watchdog state ────────────────────────────────────────────────────
+# ── health / watchdog state ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _restart_requested = False
 _watchdog_restarts = 0
 _last_restart_ts: Optional[datetime] = None
 _watchdog_alerted = False        # throttle: one alert per stall episode
 
-# ── exported to main.py ───────────────────────────────────────────────────────
+# ── exported to main.py ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _compute_and_store_adr(conn=None):
     close_conn = conn is None
@@ -187,9 +187,9 @@ async def _bg_yahoo_daily(app=None):
     finally:
         _yahoo_daily_running = False
 
-# ── job wrappers ──────────────────────────────────────────────────────────────
+# ── job wrappers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-# ── health / watchdog helpers (spec #16) ───────────────────────────────────────
+# ── health / watchdog helpers (spec #16) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _log_alert(kind: str, message: str):
     """Write a visible alert to session_log (category=alert)."""
@@ -268,7 +268,7 @@ def health_state() -> dict:
     }
 
 
-# ── job wrappers ──────────────────────────────────────────────────────────────
+# ── job wrappers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _bg_signal_writer():
     global _signal_writer_started_at, _signal_writer_token
@@ -463,7 +463,7 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
-# ── ADR/PCR watchdog + health (task #59) ────────────────────────────────────────
+# ── ADR/PCR watchdog + health (task #59) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _log_health(conn, title: str, details: dict):
     """Health ping → session_log (category=scheduler_health) so a stalled compute
     job is visible after the fact (root cause of the silent 18-19 Jun ADR gap)."""
@@ -745,7 +745,7 @@ def _bg_fetch_global_intraday():
     except Exception as e: log.debug(f"global_intraday: {e}")
     finally: _global_intraday_fetching = False
 
-# ── news fetch (task #38) ───────────────────────────────────────────────────────
+# ── news fetch (task #38) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _bg_fetch_market_news():
     try:
@@ -768,7 +768,7 @@ def _bg_cleanup_news():
         log.info(f"news_cleanup: {res.get('deleted') if isinstance(res, dict) else res} deleted")
     except Exception as e: log.error(f"news_cleanup: {e}")
 
-# ── main loop ─────────────────────────────────────────────────────────────────
+# ── main loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
     global _restart_requested
@@ -812,6 +812,11 @@ async def _scheduler_loop():
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
+        # cc_task #89: yahoo EOD raw_prices refresh at 15:35 IST (5 min after close) so
+        # v8_engine EOD (15:45) and the evening journal review see today's official closes
+        # ~5h sooner. The 01:00 IST run (below) stays as the nightly safety re-run.
+        # Weekday-only. NO GVM/QB cascade here — that stays in the 01:00-02:00 nightly chain.
+        if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         if h == 16 and m == 0:
