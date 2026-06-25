@@ -371,6 +371,7 @@ def _two_latest_closes(conn, sym, d):
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
+              AND timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
             ORDER BY ts DESC LIMIT 2
         """, (sym, d))
         rows = cur.fetchall()
@@ -383,6 +384,7 @@ def _latest_close(conn, sym, d):
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
+              AND timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
             ORDER BY ts DESC LIMIT 1
         """, (sym, d))
         r = cur.fetchone()
@@ -394,6 +396,7 @@ def _first_bar(conn, sym, d):
         cur.execute("""
             SELECT open, close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
+              AND timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
             ORDER BY ts ASC LIMIT 1
         """, (sym, d))
         r = cur.fetchone()
@@ -486,7 +489,6 @@ def _log_missed(conn, d, sym, side, basket, entry, target, sl, reason):
             ON CONFLICT (miss_date,symbol,side) DO NOTHING
         """, (d, sym, side, basket, round(entry,2), round(target,2), round(sl,2), reason))
         conn.commit()
-
 
 def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt, exit_px, exit_ts, result):
     pnl = (exit_px-entry)*qty if side=="LONG" else (entry-exit_px)*qty
@@ -667,6 +669,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                     _log_missed(conn,d,sym,"SHORT",basket,entry,target,stop,"slot_full"); continue
                 entries.append(_open_short(conn,sym,basket,entry,_ts(cur_ts),target,stop,pp,d))
                 short_open+=1
+
         # ---- 3b) SELL_OVERBOUGHT ENTRIES ----
         for sym, sig in so_sig.items():
             target = sig["target"]
