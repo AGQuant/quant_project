@@ -58,9 +58,9 @@
   .searchbar input:focus{border-color:var(--blu)}
 
   /* Article — full editorial, always expanded (cc_task #70, no truncation) */
-  .art{padding:26px 0;border-bottom:1px solid var(--line)}
+  .art{padding:26px 0;border-bottom:1px solid var(--line);position:relative}
   .art.lead{padding:30px 0 28px}
-  .art-head{font-family:var(--serif);font-size:23px;font-weight:600;line-height:1.28;color:var(--txt);text-wrap:pretty}
+  .art-head{font-family:var(--serif);font-size:23px;font-weight:600;line-height:1.28;color:var(--txt);text-wrap:pretty;padding-right:40px}
   .art.lead .art-head{font-size:30px;line-height:1.18;letter-spacing:-.01em;text-wrap:balance}
   .imp-high .art-head{font-size:25px}
 
@@ -117,6 +117,15 @@
   .cat-pill{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;
     font-size:10px;font-weight:700;cursor:pointer;border:1px solid transparent;letter-spacing:.02em}
   .cat-pill:hover{filter:brightness(.97)}
+
+  /* cc_task #81: copy-for-LinkedIn icon — top-right of every card, 32x32 tap target. */
+  .copy-btn{position:absolute;top:14px;right:0;width:32px;height:32px;display:inline-flex;
+    align-items:center;justify-content:center;padding:0;border:none;background:none;color:var(--dim);
+    cursor:pointer;border-radius:8px;transition:.15s;z-index:2;-webkit-tap-highlight-color:transparent}
+  .copy-btn:hover{color:var(--blu);background:rgba(37,99,235,.08)}
+  .copy-btn.copied{color:var(--grn)}
+  .copy-btn.failed{color:var(--red)}
+  .copy-btn svg{display:block;pointer-events:none}
 
   .msg{text-align:center;color:var(--mut);font-size:13px;padding:60px 20px}
   .foot{font-size:10.5px;color:#b3bccd;text-align:center;margin-top:46px;line-height:1.8}
@@ -207,6 +216,12 @@ const SENT = {
   neutral:{c:"#8a96ad",g:"●",l:"Neutral"},
 };
 
+// cc_task #81: copy-to-clipboard for LinkedIn. Clean SVG copy / check / x icons.
+const COPY_SVG  = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+const CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+const X_SVG     = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+const SHARE_SRC = "📊 via Scorr · scorr.in";
+
 if(window.marked && marked.setOptions){ marked.setOptions({ breaks:true, gfm:true }); }
 
 function timeAgo(iso){
@@ -230,6 +245,62 @@ function readMin(t){
 }
 function symStr(a){
   return Array.isArray(a.mentioned_symbols) ? a.mentioned_symbols.filter(Boolean).join(", ") : "";
+}
+
+// cc_task #81: markdown/HTML -> plain text, paragraph breaks preserved (for the copy payload).
+function plainText(t){
+  return String(t||"")
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+// LinkedIn-ready text: HEADLINE (caps) + body + Scorr attribution. No publication source.
+function shareText(a, useFull){
+  const head = String(a.headline_clean||"").toUpperCase();
+  const raw  = useFull ? (a.full_summary || a.summary || "") : (a.summary || "");
+  return head + "\n\n" + plainText(raw) + "\n\n" + SHARE_SRC;
+}
+// Copy button — payload stored in data-copy (newlines as &#10;, quotes esc'd).
+function copyBtn(a, useFull){
+  const attr = esc(shareText(a, useFull)).replace(/\n/g, "&#10;");
+  return `<button class="copy-btn" type="button" title="Copy for LinkedIn" aria-label="Copy for LinkedIn" data-copy="${attr}" onclick="copyStory(this,event)">${COPY_SVG}</button>`;
+}
+function fallbackCopy(text){
+  try{
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const okc = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return okc;
+  }catch(e){ return false; }
+}
+function copyStory(btn, ev){
+  if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+  const text = btn.getAttribute("data-copy") || "";
+  function ok(){
+    btn.classList.remove("failed"); btn.classList.add("copied"); btn.innerHTML = CHECK_SVG;
+    setTimeout(function(){ btn.classList.remove("copied"); btn.innerHTML = COPY_SVG; }, 1500);
+  }
+  function bad(){
+    btn.classList.remove("copied"); btn.classList.add("failed"); btn.innerHTML = X_SVG;
+    setTimeout(function(){ btn.classList.remove("failed"); btn.innerHTML = COPY_SVG; }, 1500);
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(ok).catch(function(){ if(fallbackCopy(text)) ok(); else bad(); });
+  } else {
+    if(fallbackCopy(text)) ok(); else bad();
+  }
 }
 
 function buildTabs(){
@@ -276,7 +347,7 @@ function artFull(a, isLead){
   const imp = (a.impact||"").toLowerCase();
   const impClass = (imp === "high" || imp === "mid" || imp === "low") ? "imp-"+imp : "imp-low";
   const impact = imp ? `<span class="art-impact">${esc(imp)} impact</span>` : "";
-  const hasFull = a.full_summary && String(a.full_summary).trim();
+  const hasFull = !!(a.full_summary && String(a.full_summary).trim());
   const rmins = readMin(hasFull ? a.full_summary : (a.summary||""));
   const rt = rmins ? `<span class="art-rt">${rmins} min read</span>` : "";
   const stand = (hasFull && a.summary && String(a.summary).trim())
@@ -287,6 +358,7 @@ function artFull(a, isLead){
         ? renderMd(a.summary)
         : `<p class="art-soon">Full analysis coming soon.</p>`);
   return `<article class="art ${impClass}${isLead?' lead':''}">
+    ${copyBtn(a, hasFull)}
     <div class="art-head">${esc(a.headline_clean)}</div>
     <div class="art-metarow">${rt}${impact}</div>
     ${stand}
@@ -311,6 +383,7 @@ function artCompact(a, showPill){
   const summ = (a.summary && String(a.summary).trim())
     ? `<div class="art-stand-sm">${esc(a.summary)}</div>` : "";
   return `<article class="art art-compact ${impClass}">
+    ${copyBtn(a, false)}
     <div class="art-head">${esc(a.headline_clean)}</div>
     ${summ}
     <div class="art-foot">
