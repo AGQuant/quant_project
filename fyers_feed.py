@@ -97,15 +97,18 @@ OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quo
 CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
 OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
-# ── feed heartbeat / health (cc_task #84) ─────────────────────────────────────
+# ── feed heartbeat / health / watchdog (cc_task #84 + #85) ────────────────────
 # The WS stream for the 212 stock futures crashed at the 09:15 open on 25-Jun and
 # did not auto-reconnect until ~11:25 — a 2h15m data gap that fed stale prices to
 # V8 paper, trade-check and the dashboard. These guard the live stream.
-HEARTBEAT_STALE_MINS    = 10   # if 0 symbols wrote a live bar in this window → reconnect
+HEARTBEAT_STALE_MINS    = 10   # window for "wrote a live bar recently"
 HEALTH_LOG_MINS         = 5    # log feed health every N min during market hours
-MIN_HEALTHY_SYMBOLS     = 50   # fewer symbols than this writing bars → alert in Railway logs
+FEED_CRITICAL_SYMBOLS   = 100  # cc_task #85 PART_3: < this writing in 10 min → log.error CRITICAL
+WATCHDOG_MIN_SYMBOLS    = 50   # cc_task #85 PART_4: < this sustained → force WS reconnect
+WATCHDOG_STALE_MINS     = 15   # consecutive minutes below WATCHDOG_MIN_SYMBOLS before reconnect
+TOTAL_FUTURES           = 212  # denominator for the N/212 health log
 RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
-STARTUP_GRACE_MINS      = 10   # suppress the heartbeat for this long after 09:15 (bars need time to form)
+STARTUP_GRACE_MINS      = 10   # suppress the watchdog this long after 09:15 (bars need time to form)
 OPEN_RACE_GUARD_SECS    = 60   # hold the first subscription until N s after 09:15 (NSE feed-init race)
 
 NIFTY_STEP   = 50
@@ -1055,8 +1058,9 @@ def run(auth_code=None):
         last_roll_check = None
         last_oi_poll    = None
         last_cmp_flush  = None
-        last_health_log = None   # cc_task #84
-        last_reconnect  = None   # cc_task #84
+        last_health_log = None        # cc_task #84
+        last_reconnect  = None        # cc_task #84
+        watchdog_stale_since = None   # cc_task #85: when coverage first dropped below WATCHDOG_MIN_SYMBOLS
 
         while True:
             now    = datetime.now(IST)
@@ -1105,29 +1109,39 @@ def run(auth_code=None):
                         log.warning(f"ATM drift check failed: {e}")
                     last_atm_check = now_dt
 
-                # ── feed heartbeat + health (cc_task #84) ─────────────────────
-                # change_4 health log every HEALTH_LOG_MINS; change_1 force a WS
-                # reconnect + REST gap-heal when 0 symbols have written a live bar
-                # in the last HEARTBEAT_STALE_MINS. Suppressed for STARTUP_GRACE_MINS
-                # after the open so the first bars have time to form.
+                # ── feed health + watchdog (cc_task #84 + #85) ────────────────
+                # PART_3: every HEALTH_LOG_MINS log how many symbols are writing;
+                #   < FEED_CRITICAL_SYMBOLS → log.error (visible in Railway logs).
+                # PART_4: if < WATCHDOG_MIN_SYMBOLS for WATCHDOG_STALE_MINS straight,
+                #   force a full WS reconnect (close_connection → SDK reconnect) + REST
+                #   gap-heal. Suppressed for STARTUP_GRACE_MINS after 09:15 so first
+                #   bars can form.
                 mins_open = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
                 if mins_open >= STARTUP_GRACE_MINS:
                     recent = _recent_symbol_count(HEARTBEAT_STALE_MINS)
                     if (last_health_log is None or
                             (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60):
-                        if 0 <= recent < MIN_HEALTHY_SYMBOLS:
-                            log.warning(f"FEED HEALTH ALERT: only {recent} symbols wrote a 5m bar in the "
-                                        f"last {HEARTBEAT_STALE_MINS} min (< {MIN_HEALTHY_SYMBOLS})")
+                        if 0 <= recent < FEED_CRITICAL_SYMBOLS:
+                            log.error(f"FEED CRITICAL: only {recent}/{TOTAL_FUTURES} symbols writing bars")
                         else:
                             log.info(f"Feed health: {recent} symbols wrote a 5m bar in last {HEARTBEAT_STALE_MINS} min")
                         last_health_log = now_dt
-                    if recent == 0 and (last_reconnect is None or
-                            (now_dt - last_reconnect).total_seconds() >= RECONNECT_COOLDOWN_MINS * 60):
-                        log.error(f"HEARTBEAT DEAD: 0 symbols wrote a bar in {HEARTBEAT_STALE_MINS} min — "
-                                  f"reconnecting WS + REST gap-heal")
-                        _force_reconnect()
-                        threading.Thread(target=_heal_gap_bg, daemon=True).start()
-                        last_reconnect = now_dt
+                    # PART_4 watchdog: sustained low coverage -> force reconnect + heal
+                    if 0 <= recent < WATCHDOG_MIN_SYMBOLS:
+                        if watchdog_stale_since is None:
+                            watchdog_stale_since = now_dt
+                        stale_mins = (now_dt - watchdog_stale_since).total_seconds() / 60
+                        if (stale_mins >= WATCHDOG_STALE_MINS and
+                                (last_reconnect is None or
+                                 (now_dt - last_reconnect).total_seconds() >= RECONNECT_COOLDOWN_MINS * 60)):
+                            log.error(f"FEED WATCHDOG: forcing reconnect after {stale_mins:.0f}min gap "
+                                      f"(<{WATCHDOG_MIN_SYMBOLS} symbols writing)")
+                            _force_reconnect()
+                            threading.Thread(target=_heal_gap_bg, daemon=True).start()
+                            last_reconnect = now_dt
+                            watchdog_stale_since = now_dt   # restart the window after acting
+                    else:
+                        watchdog_stale_since = None         # recovered -> reset the timer
 
             # Monthly roll — once per day
             if last_roll_check != today:
