@@ -97,6 +97,17 @@ OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quo
 CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
 OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
+# ── feed heartbeat / health (cc_task #84) ─────────────────────────────────────
+# The WS stream for the 212 stock futures crashed at the 09:15 open on 25-Jun and
+# did not auto-reconnect until ~11:25 — a 2h15m data gap that fed stale prices to
+# V8 paper, trade-check and the dashboard. These guard the live stream.
+HEARTBEAT_STALE_MINS    = 10   # if 0 symbols wrote a live bar in this window → reconnect
+HEALTH_LOG_MINS         = 5    # log feed health every N min during market hours
+MIN_HEALTHY_SYMBOLS     = 50   # fewer symbols than this writing bars → alert in Railway logs
+RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
+STARTUP_GRACE_MINS      = 10   # suppress the heartbeat for this long after 09:15 (bars need time to form)
+OPEN_RACE_GUARD_SECS    = 60   # hold the first subscription until N s after 09:15 (NSE feed-init race)
+
 NIFTY_STEP   = 50
 BNIFTY_STEP  = 100
 STOCK_STEPS  = {               # FALLBACK only (master-driven ladder is primary)
@@ -974,6 +985,16 @@ def run(auth_code=None):
             log.warning(f"on_message: {e}")
 
     def on_connect():
+        # cc_task #84 change_3: avoid the NSE-feed-init race at the open. When we
+        # connect inside the first OPEN_RACE_GUARD_SECS after 09:15, hold the first
+        # subscription until the exchange feed is fully up (prevents the open crash).
+        now_t   = datetime.now(IST)
+        open_dt = now_t.replace(hour=9, minute=15, second=0, microsecond=0)
+        if open_dt <= now_t < open_dt + timedelta(seconds=OPEN_RACE_GUARD_SECS):
+            wait_s = OPEN_RACE_GUARD_SECS - (now_t - open_dt).total_seconds()
+            if wait_s > 0:
+                log.info(f"on_connect: holding subscription {wait_s:.0f}s (NSE open-race guard)")
+                time.sleep(wait_s)
         log.info(f"WS connected — subscribing {len(all_syms)} symbols")
         fyers_ws.subscribe(symbols=all_syms, data_type="SymbolUpdate")
         fyers_ws.keep_running()
@@ -988,6 +1009,45 @@ def run(auth_code=None):
         on_error=on_error, on_message=on_message,
     )
 
+    # ── feed heartbeat helpers (cc_task #84) ──────────────────────────────────
+    def _recent_symbol_count(minutes=HEARTBEAT_STALE_MINS):
+        """Distinct symbols whose latest live 5-min bar bucket falls within the last
+        `minutes`. Read on the housekeeping thread's own conn (single-thread = safe).
+        Returns -1 on DB error so a failed read never triggers a false reconnect."""
+        try:
+            cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(DISTINCT symbol) FROM intraday_prices
+                    WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
+                      AND ts >= %s
+                """, (cutoff,))
+                return cur.fetchone()[0] or 0
+        except Exception as e:
+            log.warning(f"_recent_symbol_count: {e}")
+            return -1
+
+    def _heal_gap_bg():
+        """change_2: REST-backfill each symbol from its newest stored bar -> now, on a
+        FRESH connection (never share the worker conn across threads)."""
+        try:
+            hc = get_db()
+            try:
+                fyers_backfill.heal_gap(token, hc, symbols)
+            finally:
+                hc.close()
+        except Exception as e:
+            log.error(f"heartbeat heal_gap failed: {e}")
+
+    def _force_reconnect():
+        """change_1: drop the socket so the SDK (reconnect=True) re-establishes and
+        on_connect re-subscribes the full universe."""
+        try:
+            log.error("HEARTBEAT: forcing WebSocket reconnect (close_connection)")
+            fyers_ws.close_connection()
+        except Exception as e:
+            log.warning(f"force reconnect: {e}")
+
     def housekeeping():
         last_atm_check  = None
         last_purge_day  = None
@@ -995,6 +1055,8 @@ def run(auth_code=None):
         last_roll_check = None
         last_oi_poll    = None
         last_cmp_flush  = None
+        last_health_log = None   # cc_task #84
+        last_reconnect  = None   # cc_task #84
 
         while True:
             now    = datetime.now(IST)
@@ -1042,6 +1104,30 @@ def run(auth_code=None):
                     except Exception as e:
                         log.warning(f"ATM drift check failed: {e}")
                     last_atm_check = now_dt
+
+                # ── feed heartbeat + health (cc_task #84) ─────────────────────
+                # change_4 health log every HEALTH_LOG_MINS; change_1 force a WS
+                # reconnect + REST gap-heal when 0 symbols have written a live bar
+                # in the last HEARTBEAT_STALE_MINS. Suppressed for STARTUP_GRACE_MINS
+                # after the open so the first bars have time to form.
+                mins_open = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
+                if mins_open >= STARTUP_GRACE_MINS:
+                    recent = _recent_symbol_count(HEARTBEAT_STALE_MINS)
+                    if (last_health_log is None or
+                            (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60):
+                        if 0 <= recent < MIN_HEALTHY_SYMBOLS:
+                            log.warning(f"FEED HEALTH ALERT: only {recent} symbols wrote a 5m bar in the "
+                                        f"last {HEARTBEAT_STALE_MINS} min (< {MIN_HEALTHY_SYMBOLS})")
+                        else:
+                            log.info(f"Feed health: {recent} symbols wrote a 5m bar in last {HEARTBEAT_STALE_MINS} min")
+                        last_health_log = now_dt
+                    if recent == 0 and (last_reconnect is None or
+                            (now_dt - last_reconnect).total_seconds() >= RECONNECT_COOLDOWN_MINS * 60):
+                        log.error(f"HEARTBEAT DEAD: 0 symbols wrote a bar in {HEARTBEAT_STALE_MINS} min — "
+                                  f"reconnecting WS + REST gap-heal")
+                        _force_reconnect()
+                        threading.Thread(target=_heal_gap_bg, daemon=True).start()
+                        last_reconnect = now_dt
 
             # Monthly roll — once per day
             if last_roll_check != today:
