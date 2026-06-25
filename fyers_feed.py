@@ -167,6 +167,7 @@ log = logging.getLogger('fyers_feed')
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+to_db = None
 
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
@@ -405,7 +406,7 @@ def from_fyers_symbol(fsym):
     return fsym.replace('NSE:', '').replace('-EQ', '')
 
 
-# ── option symbol manager ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── option symbol manager ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionSymbolManager:
     """
@@ -694,7 +695,7 @@ class BarAggregator:
             log.warning(f"flush_cmp: {e}")
 
 
-# ── option bar store ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── option bar store ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 class OptionBarStore:
     """Stores 5-min option ticks into option_chain."""
@@ -936,6 +937,15 @@ def run(auth_code=None):
     else:
         # Defer backfill to a background thread so the live WS connects immediately.
         def _deferred_backfill():
+            # cc_task #87: Yahoo/REST backfill must NEVER write during market hours
+            # (09:15-15:30 IST) — stale history bars caused a wrong-price paper entry.
+            # If this thread wakes inside the live session, hold it until 15:35 IST.
+            now = datetime.now(IST)
+            if now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE:
+                run_at  = now.replace(hour=15, minute=35, second=0, microsecond=0)
+                wait_s  = max(0, (run_at - now).total_seconds())
+                log.info(f"Deferred backfill held to 15:35 IST (market open) — sleeping {wait_s/60:.0f} min")
+                time.sleep(wait_s)
             log.info("Deferred backfill (7-day equity, sequential, background)...")
             try:
                 fyers_backfill.backfill_7day(token, conn)
@@ -1137,7 +1147,11 @@ def run(auth_code=None):
                             log.error(f"FEED WATCHDOG: forcing reconnect after {stale_mins:.0f}min gap "
                                       f"(<{WATCHDOG_MIN_SYMBOLS} symbols writing)")
                             _force_reconnect()
-                            threading.Thread(target=_heal_gap_bg, daemon=True).start()
+                            # cc_task #87: heal_gap must NEVER run during market hours
+                            # (09:15-15:30 IST). The force-reconnect restores the live WS
+                            # feed immediately; the outage gap is backfilled by the 18:00
+                            # IST daily heal_gap (REST writes are post-market only).
+                            log.info("Watchdog: live feed reconnect issued; gap-heal deferred to 18:00 IST")
                             last_reconnect = now_dt
                             watchdog_stale_since = now_dt   # restart the window after acting
                     else:
