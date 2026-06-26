@@ -57,14 +57,12 @@
     background:var(--card);color:var(--txt);font-size:13px;font-family:var(--sans);outline:none}
   .searchbar input:focus{border-color:var(--blu)}
 
-  /* Article — full editorial, always expanded (cc_task #70, no truncation) */
   .art{padding:26px 0;border-bottom:1px solid var(--line);position:relative}
   .art.lead{padding:30px 0 28px}
   .art-head{font-family:var(--serif);font-size:23px;font-weight:600;line-height:1.28;color:var(--txt);text-wrap:pretty;padding-right:40px}
   .art.lead .art-head{font-size:30px;line-height:1.18;letter-spacing:-.01em;text-wrap:balance}
   .imp-high .art-head{font-size:25px}
 
-  /* meta row: category tag • read time • symbol */
   .art-metarow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px}
   .art-tag{background:var(--tag-bg);color:var(--tag-fg);padding:2px 8px;font-size:11px;
     font-weight:500;border-radius:20px;white-space:nowrap}
@@ -76,7 +74,6 @@
   .imp-mid  .art-impact{background:rgba(217,119,6,.14);color:var(--amber)}
   .imp-low  .art-impact{background:rgba(90,103,129,.10);color:var(--mut)}
 
-  /* standfirst (short summary) + full body */
   .art-stand{font-size:15px;color:var(--mut);margin-top:14px;line-height:1.6;max-width:64ch;font-weight:500}
   .art-body{margin-top:14px;max-width:680px;font-size:15.5px;line-height:1.75;color:var(--txt)}
   .art-body > :first-child{margin-top:0}
@@ -107,8 +104,6 @@
   .art-sent{font-weight:600}
   .art-foot b{color:var(--mut);font-weight:600}
 
-  /* cc_task #79: compact cards (Company Updates / Global / IPO) + clickable category pills.
-     Placed AFTER .imp-high .art-head so compact headline size wins on equal specificity. */
   .art-compact{padding:18px 0}
   .art-compact .art-head{font-size:18px;line-height:1.32}
   .art-compact .art-body{font-size:14.5px;line-height:1.65}
@@ -118,7 +113,6 @@
     font-size:10px;font-weight:700;cursor:pointer;border:1px solid transparent;letter-spacing:.02em}
   .cat-pill:hover{filter:brightness(.97)}
 
-  /* cc_task #81: copy-for-LinkedIn icon — top-right of every card, 32x32 tap target. */
   .copy-btn{position:absolute;top:14px;right:0;width:32px;height:32px;display:inline-flex;
     align-items:center;justify-content:center;padding:0;border:none;background:none;color:var(--dim);
     cursor:pointer;border-radius:8px;transition:.15s;z-index:2;-webkit-tap-highlight-color:transparent}
@@ -170,44 +164,43 @@
       <div class="mast-title">Source AI Intelligence</div>
       <div class="mast-sub">AI-polished market intelligence, updated daily</div>
     </div>
-    <button class="refresh-btn" id="refreshBtn" onclick="load()">&#8635; Refresh</button>
+    <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">&#8635; Refresh</button>
   </div>
 
-  <div class="meta" id="meta">Loading…</div>
-
+  <div class="meta" id="meta">Loading&hellip;</div>
   <div class="tabs" id="tabs"></div>
 
   <div class="searchbar" id="searchbar" style="display:none">
-    <input id="symSearch" type="text" placeholder="Filter by symbol — e.g. RELIANCE" oninput="render()">
+    <input id="symSearch" type="text" placeholder="Filter by symbol &mdash; e.g. RELIANCE" oninput="render()">
   </div>
 
-  <div id="feed"><div class="msg">Loading…</div></div>
+  <div id="feed"><div class="msg">Loading&hellip;</div></div>
 
   <div class="foot">
-    Source AI · polished market intelligence · sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
+    Source AI &middot; polished market intelligence &middot; sources: ET / Moneycontrol / LiveMint / Reuters / Bloomberg / Google News
   </div>
 </div>
 
 <script>
 const API = "";
-// cc_task #79 (spec 636): All tab (default) + 4 canonical category tabs.
 const CATS = [
-  { id:"all",             label:"All" },
-  { id:"ai_editorial",    label:"AI Editorial" },
-  { id:"domestic",        label:"Domestic" },
-  { id:"global",          label:"Global" },
-  { id:"ipo",             label:"IPO" },
+  { id:"all",          label:"All" },
+  { id:"ai_editorial", label:"AI Editorial" },
+  { id:"domestic",     label:"Domestic" },
+  { id:"global",       label:"Global" },
+  { id:"ipo",          label:"IPO" },
 ];
 let curCat = "all";
-const SEARCH_TABS = ["domestic"];   // symbol search shown on this tab
+const SEARCH_TABS = ["domestic"];
 let articles = [];
 
-// Category pill design (spec 636): orange IPO, purple Global, blue Company Updates.
-// AI Editorial is hero content — no pill. Pill click switches tab (no new page).
+// ── AbortController — cancel in-flight fetch on every new tab switch ──────────
+let _abortCtrl = null;
+
 const PILL = {
   "Domestic": { id:"domestic", label:"Domestic", bg:"#e8f0fe", fg:"#1d4ed8", bd:"#c3d6fb" },
-  "Global":          { id:"global",          label:"Global",          bg:"#f3ecfd", fg:"#7c3aed", bd:"#ddc9fb" },
-  "IPO":             { id:"ipo",             label:"IPO",             bg:"#fdf0e1", fg:"#c2620a", bd:"#f6d4a8" },
+  "Global":   { id:"global",   label:"Global",   bg:"#f3ecfd", fg:"#7c3aed", bd:"#ddc9fb" },
+  "IPO":      { id:"ipo",      label:"IPO",       bg:"#fdf0e1", fg:"#c2620a", bd:"#f6d4a8" },
 };
 
 const SENT = {
@@ -216,7 +209,6 @@ const SENT = {
   neutral:{c:"#8a96ad",g:"●",l:"Neutral"},
 };
 
-// cc_task #81: copy-to-clipboard for LinkedIn. Clean SVG copy / check / x icons.
 const COPY_SVG  = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
 const CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 const X_SVG     = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
@@ -238,7 +230,6 @@ function renderMd(t){
   if(window.marked && marked.parse){ try{ return marked.parse(String(t)); }catch(e){} }
   return "<p>"+esc(t).replace(/\n{2,}/g,"</p><p>").replace(/\n/g,"<br>")+"</p>";
 }
-// CEIL(words/200) read-time
 function readMin(t){
   const words = String(t||"").trim().split(/\s+/).filter(Boolean).length;
   return words ? Math.max(1, Math.ceil(words/200)) : 0;
@@ -246,8 +237,6 @@ function readMin(t){
 function symStr(a){
   return Array.isArray(a.mentioned_symbols) ? a.mentioned_symbols.filter(Boolean).join(", ") : "";
 }
-
-// cc_task #81: markdown/HTML -> plain text, paragraph breaks preserved (for the copy payload).
 function plainText(t){
   return String(t||"")
     .replace(/```[\s\S]*?```/g, "")
@@ -263,13 +252,11 @@ function plainText(t){
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
-// LinkedIn-ready text: HEADLINE (caps) + body + Scorr attribution. No publication source.
 function shareText(a, useFull){
   const head = String(a.headline_clean||"").toUpperCase();
   const raw  = useFull ? (a.full_summary || a.summary || "") : (a.summary || "");
   return head + "\n\n" + plainText(raw) + "\n\n" + SHARE_SRC;
 }
-// Copy button — payload stored in data-copy (newlines as &#10;, quotes esc'd).
 function copyBtn(a, useFull){
   const attr = esc(shareText(a, useFull)).replace(/\n/g, "&#10;");
   return `<button class="copy-btn" type="button" title="Copy for LinkedIn" aria-label="Copy for LinkedIn" data-copy="${attr}" onclick="copyStory(this,event)">${COPY_SVG}</button>`;
@@ -288,14 +275,8 @@ function fallbackCopy(text){
 function copyStory(btn, ev){
   if(ev){ ev.preventDefault(); ev.stopPropagation(); }
   const text = btn.getAttribute("data-copy") || "";
-  function ok(){
-    btn.classList.remove("failed"); btn.classList.add("copied"); btn.innerHTML = CHECK_SVG;
-    setTimeout(function(){ btn.classList.remove("copied"); btn.innerHTML = COPY_SVG; }, 1500);
-  }
-  function bad(){
-    btn.classList.remove("copied"); btn.classList.add("failed"); btn.innerHTML = X_SVG;
-    setTimeout(function(){ btn.classList.remove("failed"); btn.innerHTML = COPY_SVG; }, 1500);
-  }
+  function ok(){ btn.classList.remove("failed"); btn.classList.add("copied"); btn.innerHTML = CHECK_SVG; setTimeout(function(){ btn.classList.remove("copied"); btn.innerHTML = COPY_SVG; }, 1500); }
+  function bad(){ btn.classList.remove("copied"); btn.classList.add("failed"); btn.innerHTML = X_SVG; setTimeout(function(){ btn.classList.remove("failed"); btn.innerHTML = COPY_SVG; }, 1500); }
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(text).then(ok).catch(function(){ if(fallbackCopy(text)) ok(); else bad(); });
   } else {
@@ -308,7 +289,9 @@ function buildTabs(){
     `<button class="tab ${c.id===curCat?'active':''}" onclick="pick('${c.id}')">${c.label}</button>`
   ).join("");
 }
+
 function pick(cat){
+  if(cat === curCat) return; // no-op if same tab
   curCat = cat;
   const showSearch = SEARCH_TABS.includes(cat);
   document.getElementById("searchbar").style.display = showSearch ? "block" : "none";
@@ -318,30 +301,53 @@ function pick(cat){
 }
 
 async function load(){
+  // ── Cancel any previous in-flight request ────────────────────────────────
+  if(_abortCtrl){ _abortCtrl.abort(); }
+  _abortCtrl = new AbortController();
+  const signal = _abortCtrl.signal;
+  const activeCat = curCat; // capture at call time
+
   const btn = document.getElementById("refreshBtn");
   btn.disabled = true;
-  document.getElementById("feed").innerHTML = '<div class="msg">Loading…</div>';
+  document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
+
   try{
-    const r = await fetch(`${API}/api/news/polished?category=${curCat}&limit=60`);
+    const r = await fetch(`${API}/api/news/polished?category=${activeCat}&limit=60`, { signal });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
+
+    // Guard: if the user switched tab again while we were fetching, discard
+    if(curCat !== activeCat) return;
+
     articles = d.articles || [];
     const c = d.category_counts || {};
-    const total = Object.values(c).reduce((a,b)=>a+(b||0),0);
+    const total = (c["AI Editorial"]||0)+(c["Domestic"]||0)+(c["Global"]||0)+(c["IPO"]||0);
     document.getElementById("meta").textContent =
       `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
     render();
-  }catch(e){
-    document.getElementById("feed").innerHTML = `<div class="msg">Could not load news (${esc(e.message)}).</div>`;
-  }finally{ btn.disabled = false; }
+  } catch(e){
+    if(e.name === "AbortError") return; // tab switched — silently ignore
+    if(curCat !== activeCat) return;
+    document.getElementById("feed").innerHTML = `<div class="msg">Could not load (${esc(e.message)}). Tap Refresh to try again.</div>`;
+  } finally{
+    // Only re-enable if this is still the active load
+    if(curCat === activeCat) btn.disabled = false;
+  }
 }
 
-// clickable category pill -> switch to that tab (no navigation)
+function manualRefresh(){
+  // Force reload even if same tab
+  const saved = curCat;
+  curCat = "__force__";
+  curCat = saved;
+  load();
+}
+
 function pillHTML(cat){
   const p = PILL[cat]; if(!p) return "";
   return `<span class="cat-pill" style="background:${p.bg};color:${p.fg};border-color:${p.bd}" onclick="pick('${p.id}')">${esc(p.label)}</span>`;
 }
 
-// AI Editorial — full hero card (large headline + full_summary paragraphs, no pill).
 function artFull(a, isLead){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
@@ -371,8 +377,6 @@ function artFull(a, isLead){
   </article>`;
 }
 
-// Company Updates / Global / IPO — card with FULL body (no truncation).
-// showPill = clickable category pill bottom-left (used on the All tab only).
 function artCompact(a, showPill){
   const sent = SENT[(a.sentiment||"neutral").toLowerCase()] || SENT.neutral;
   const imp = (a.impact||"").toLowerCase();
@@ -380,8 +384,6 @@ function artCompact(a, showPill){
   const sy = symStr(a);
   const sym = sy ? `<span class="art-sym">${esc(sy)}</span><span>·</span>` : "";
   const pill = showPill ? pillHTML(a.category) : "";
-  // cc_task #81b: show the FULL available body (full_summary if present, else summary)
-  // as readable paragraphs — no line-clamp, no truncation (Arpit reads the full piece).
   const hasFull = !!(a.full_summary && String(a.full_summary).trim());
   const bodyRaw = hasFull ? a.full_summary : (a.summary || "");
   const body = String(bodyRaw).trim()
@@ -407,23 +409,20 @@ function render(){
   }
   const feed = document.getElementById("feed");
   if(!rows.length){
-    feed.innerHTML = '<div class="msg">No polished news for this filter yet. Polished articles appear here after the daily polish run.</div>';
+    feed.innerHTML = '<div class="msg">No articles for this filter yet.</div>';
     return;
   }
   let html;
   if(curCat === "all"){
-    // interleaved by time: AI Editorial = full hero, all others = full-body card + clickable pill
     html = rows.map((a,i) => a.category === "AI Editorial" ? artFull(a, i===0) : artCompact(a, true)).join("");
   } else if(curCat === "ai_editorial"){
     html = rows.map((a,i) => artFull(a, i===0)).join("");
   } else {
-    // Company Updates / Global / IPO tabs — full body, no pill
     html = rows.map(a => artCompact(a, false)).join("");
   }
   feed.innerHTML = html;
 }
 
-// Hide own model-nav when embedded (iframe or ?embed=1) — shell renders its own nav.
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
   var _mn=document.getElementById('scorr-nav'); if(_mn) _mn.style.display='none';
 }
