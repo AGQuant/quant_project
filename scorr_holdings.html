@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Holdings · MHK40</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#fff; --border:#e2e7ee;
+    --txt:#1c2536; --mut:#5a6781; --dim:#9aa4b5;
+    --grn:#0a9e63; --red:#dd3a4a; --blu:#2563eb; --amber:#d97706;
+    --font:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px}
+
+  .nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--card);
+    border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto;scrollbar-width:none;
+    position:sticky;top:0;z-index:20}
+  .nav::-webkit-scrollbar{display:none}
+  .nav a{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;text-decoration:none;
+    white-space:nowrap;color:var(--mut);font-size:11.5px;font-weight:600;border-bottom:2px solid transparent}
+  .nav a.active{color:var(--blu);border-bottom-color:var(--blu)}
+  .nav a:hover{color:var(--txt)}
+
+  .wrap{max-width:900px;margin:0 auto;padding:28px 16px 80px}
+
+  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+  .header-left{}
+  .header-title{font-size:20px;font-weight:800;color:var(--txt)}
+  .header-sub{font-size:12px;color:var(--mut);margin-top:3px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
+    letter-spacing:.04em;background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
+  .refresh-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;
+    background:var(--card);border:1px solid var(--border);border-radius:8px;
+    font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;transition:.15s}
+  .refresh-btn:hover{border-color:var(--blu);color:var(--blu)}
+
+  /* Total M2M hero */
+  .total-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  .total-label{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+  .total-val{font-size:38px;font-weight:900;font-family:monospace;line-height:1}
+  .total-meta{font-size:11px;color:var(--mut);margin-top:6px}
+  .total-right{text-align:right}
+  .pos-count{font-size:13px;font-weight:700;color:var(--txt)}
+
+  /* Table */
+  .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  thead tr{background:#f8fafc;border-bottom:2px solid var(--border)}
+  th{padding:11px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--mut);
+    text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+  th.num{text-align:right}
+  td{padding:13px 14px;border-bottom:1px solid #edf1f6;font-size:13.5px;vertical-align:middle}
+  td.num{text-align:right;font-family:monospace;font-weight:700}
+  tr:last-child td{border-bottom:none}
+  tr.total-row td{background:#f8fafc;border-top:2px solid var(--border);font-weight:800;font-size:14px}
+  tr:hover:not(.total-row) td{background:#f4f7fb}
+
+  .sym{font-weight:800;color:var(--txt);font-size:14px}
+  .dir-pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;letter-spacing:.04em}
+  .dir-long{background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
+  .dir-short{background:#fceaec;color:var(--red);border:1px solid #f5b8bd}
+  .grn{color:var(--grn)}
+  .red{color:var(--red)}
+  .mut{color:var(--mut)}
+
+  .empty{text-align:center;padding:60px 20px;color:var(--mut);font-size:13px}
+  .loading{text-align:center;padding:50px 20px;color:var(--mut)}
+
+  .updated{font-size:11px;color:var(--dim);margin-top:10px;text-align:right}
+
+  @media(max-width:600px){
+    th,td{padding:10px 10px}
+    .total-val{font-size:30px}
+    th:nth-child(4),td:nth-child(4){display:none} /* hide LTP on mobile */
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav" id="scorr-nav">
+  <a href="/"><span>&#8962;</span>Home</a>
+  <a href="/dashboard"><span>&#9889;</span>V8</a>
+  <a href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
+  <a href="/check"><span>&#10003;</span>Check</a>
+  <a href="/news"><span>&#128240;</span>Intel</a>
+  <a href="/cio2?model=qb"><span>&#9707;</span>QB</a>
+  <a class="active" href="/holdings"><span>&#9670;</span>Holdings</a>
+</nav>
+
+<div class="wrap">
+  <div class="header">
+    <div class="header-left">
+      <div class="header-title">SmartGain Holdings <span class="badge">MHK40</span></div>
+      <div class="header-sub">Live M2M simulator · Updated from screenshots · Weekly rollover Monday</div>
+    </div>
+    <button class="refresh-btn" onclick="load()">&#8635; Refresh</button>
+  </div>
+
+  <div id="total-card" class="total-card" style="display:none">
+    <div>
+      <div class="total-label">Week M2M</div>
+      <div class="total-val" id="total-val">—</div>
+      <div class="total-meta" id="total-meta"></div>
+    </div>
+    <div class="total-right">
+      <div class="pos-count" id="pos-count"></div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <div id="body"><div class="loading">Loading holdings…</div></div>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+
+<script>
+const API = "";
+const fmt = (n, d=2) => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:d, maximumFractionDigits:d});
+const sgn = (n, d=2) => n == null ? "—" : (n >= 0 ? "+" : "") + fmt(n, d);
+const timeAgo = ts => {
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s/60); if (m < 60) return m + "m ago";
+  const h = Math.floor(m/60); return h + "h ago";
+};
+
+async function load() {
+  try {
+    const r = await fetch(API + "/api/smartgain/m2m");
+    const d = await r.json();
+    if (d.error) { document.getElementById("body").innerHTML = `<div class="empty">Error: ${d.error}</div>`; return; }
+
+    const pos = d.positions || [];
+    const total = d.total_mtm || 0;
+
+    // Total card
+    const tc = document.getElementById("total-card");
+    tc.style.display = "flex";
+    const tv = document.getElementById("total-val");
+    tv.textContent = (total >= 0 ? "+" : "") + "₹" + fmt(total);
+    tv.style.color = total >= 0 ? "var(--grn)" : "var(--red)";
+    document.getElementById("pos-count").textContent = pos.length + " open position" + (pos.length !== 1 ? "s" : "");
+    document.getElementById("total-meta").textContent = "Account MHK40 · " + timeAgo(d.last_updated);
+
+    if (!pos.length) {
+      document.getElementById("body").innerHTML = '<div class="empty">No open positions — week starts Monday.</div>';
+      return;
+    }
+
+    let html = `<table>
+      <thead><tr>
+        <th>Symbol</th>
+        <th>Side</th>
+        <th class="num">Qty</th>
+        <th class="num">Entry</th>
+        <th class="num">LTP</th>
+        <th class="num">M2M ₹</th>
+      </tr></thead><tbody>`;
+
+    for (const p of pos) {
+      const mtmColor = p.mtm == null ? "mut" : p.mtm >= 0 ? "grn" : "red";
+      const dirClass = p.direction === "LONG" ? "dir-long" : "dir-short";
+      html += `<tr>
+        <td><span class="sym">${p.symbol}</span></td>
+        <td><span class="dir-pill ${dirClass}">${p.direction}</span></td>
+        <td class="num mut">${p.qty}</td>
+        <td class="num mut">${fmt(p.entry_price)}</td>
+        <td class="num">${fmt(p.ltp)}</td>
+        <td class="num ${mtmColor}">${p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + fmt(p.mtm)}</td>
+      </tr>`;
+    }
+
+    html += `<tr class="total-row">
+      <td colspan="5">Total M2M</td>
+      <td class="num ${total >= 0 ? "grn" : "red"}">${total >= 0 ? "+" : ""}₹${fmt(total)}</td>
+    </tr></tbody></table>`;
+
+    document.getElementById("body").innerHTML = html;
+    document.getElementById("updated").textContent = "Last updated " + timeAgo(d.last_updated);
+
+  } catch (e) {
+    document.getElementById("body").innerHTML = `<div class="empty">Could not load holdings.</div>`;
+  }
+}
+
+// Hide nav when embedded in CIO shell iframe
+if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
+  var n = document.getElementById("scorr-nav"); if (n) n.style.display = "none";
+}
+
+load();
+setInterval(load, 60000); // auto-refresh every 60s
+</script>
+</body>
+</html>
