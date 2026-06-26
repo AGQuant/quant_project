@@ -7,7 +7,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
-/* ── Canonical Scorr model-nav ── */
+/* -- Canonical Scorr model-nav -- */
 .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
 .model-nav::-webkit-scrollbar{display:none}
 .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
@@ -185,12 +185,12 @@ async function loadSide(side){
     window._nm[side]=data.near_misses||[];
     if(data.now)window._nmtime=hhmm(data.now);
     if(data.status==='outside_window'){
-      dot.className='dot y';st.textContent='Market closed &mdash; runs 09:30&ndash;15:15 IST &middot; '+(data.now||'');
-      tbl.innerHTML='<div class="empty">Intraday scanner active only during market hours (09:30&ndash;15:15 IST).</div>';
+      dot.className='dot y';st.textContent='Market closed — runs 09:30–15:15 IST · '+(data.now||'');
+      tbl.innerHTML='<div class="empty">Intraday scanner active only during market hours (09:30–15:15 IST).</div>';
     }else{
       dot.className='dot';
       const lbl=side.toUpperCase();
-      st.textContent=data.count+' '+lbl+' signals &middot; '+(data.near_miss_count||0)+' near-miss &middot; ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' &middot; NIFTY RSI '+num(data.nifty_rsi,1):'')+' &middot; universe '+data.universe;
+      st.textContent=data.count+' '+lbl+' signals · '+(data.near_miss_count||0)+' near-miss · ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' · NIFTY RSI '+num(data.nifty_rsi,1):'')+' · universe '+data.universe;
       const rows=data.signals||[];
       tbl.innerHTML=rows.length?('<div class="tw"><table><thead>'+SIG_HEAD+'</thead><tbody>'+
         rows.map(r=>sigRow(r,side)).join('')+'</tbody></table></div>')
@@ -226,7 +226,7 @@ function renderWatchlist(){
   const dot=document.getElementById('wl-dot'),st=document.getElementById('wl-st'),tbl=document.getElementById('wl-tbl');
   const rows=[].concat(window._nm.long||[],window._nm.short||[])
     .sort((a,b)=>(b.tier1_score||0)-(a.tier1_score||0));
-  if(dot)dot.className='dot';if(st)st.textContent=rows.length+' near-miss candidates'+(window._nmtime?' &middot; '+window._nmtime:'');
+  if(dot)dot.className='dot';if(st)st.textContent=rows.length+' near-miss candidates'+(window._nmtime?' · '+window._nmtime:'');
   tbl.innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Bucket Passed</th><th>Tier1</th><th>What Failed</th><th>CMP</th><th>2W High/Low</th><th>Room%</th><th>Time</th></tr></thead><tbody>'+
     rows.map(nmRow).join('')+'</tbody></table></div>')
     :'<div class="empty">No near-miss candidates right now (or market closed)</div>';
