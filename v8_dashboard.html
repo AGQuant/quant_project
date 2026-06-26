@@ -291,8 +291,8 @@ const ALL5=[
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Filter Funnel","Live News","TC Lite"];
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11,12];
+  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Live News"];
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -856,39 +856,43 @@ function renderMissed(){
     {sortKey:'ts',dir:-1,empty:"No missed entries -- clean slate."});
 }
 
-let ffBasket='buy_reversal';
-function ffSet(b){ffBasket=b;loadFF();}
 function preFreezeBanner(){
   const ist=new Date(Date.now()+(5*60+30)*60000);
   const dow=ist.getUTCDay(),mins=ist.getUTCHours()*60+ist.getUTCMinutes();
   if(dow>=1&&dow<=5&&mins<945)return`<div class="err" style="margin-top:18px">Pre-freeze (before 15:45 IST): GVM, RSI(m/w) & sector metrics not yet computed -- funnel may understate.</div>`;
   return'';}
-async function loadFF(){
-  const el=document.getElementById('panel10');if(!el)return;
-  const nav=ALL5.map(b=>`<button class="btn ${ffBasket===b.id?'on':''}" onclick="ffSet('${b.id}')">${b.label}</button>`).join('');
-  el.innerHTML=`<div class="subnav">${nav}</div><div class="loading">Loading funnel...</div>`;
+async function loadFunnelInline(basketId,panelIdx){
+  // cc_task #96: Filter Funnel is now embedded as a collapsible <details> below each
+  // basket's stocks table (the standalone Filter Funnel tab was removed). Fetches
+  // funnel_detail + stock_passcount for ONE basket and appends them into its panel.
+  const el=document.getElementById('panel'+panelIdx);if(!el)return;
   let fd=null,pc=null;
-  try{fd=await getJSON(EP.funnelDetail(ffBasket));}catch(e){}
-  try{pc=await getJSON(EP.passCount(ffBasket));}catch(e){}
-  let html=`<div class="subnav">${nav}</div>`;
+  try{fd=await getJSON(EP.funnelDetail(basketId));}catch(e){}
+  try{pc=await getJSON(EP.passCount(basketId));}catch(e){}
+  let inner='';
   if(fd&&fd.stages){
     const maxSurv=Math.max(...fd.stages.map(s=>s.survivors||0),1);
-    html+=`<div class="ptitle">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} -> final ${fd.final} · ${fd.filter_count} filters</span></div>`;
-    html+=`<div class="funnel-stages">${fd.stages.map(s=>{const pct=Math.round((s.survivors/maxSurv)*100);const kc=s.killed>0?'var(--red)':'var(--dim)';const bc=s.killed>0?'var(--amber)':'var(--grn)';
+    inner+=`<div class="ptitle" style="margin-top:4px">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} -> final ${fd.final} · ${fd.filter_count} filters</span></div>`;
+    inner+=`<div class="funnel-stages">${fd.stages.map(s=>{const pct=Math.round((s.survivors/maxSurv)*100);const kc=s.killed>0?'var(--red)':'var(--dim)';const bc=s.killed>0?'var(--amber)':'var(--grn)';
       return`<div class="funnel-stage"><div class="fs-name">${s.metric.replace(/_/g,' ')}</div><div class="fs-cond">${s.condition_min||'-'}</div><div class="fs-cond">${s.condition_max||'-'}</div><div class="fs-bar"><div class="fs-bar-fill" style="width:${pct}%;background:${bc}"></div></div><div class="fs-surv">${s.survivors}</div><div class="fs-kill" style="color:${kc}">${s.killed>0?'-'+s.killed:''}</div></div>`;
     }).join('')}</div>`;
-  }else html+=`<div class="err">funnel_detail not available for ${ffBasket}</div>`;
+  }else inner+=`<div class="err">funnel_detail not available for ${basketId}</div>`;
   if(pc&&pc.stocks){
-    html+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
+    inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
-    html+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
+    inner+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
       return`<div class="pc-card"><div class="pc-sym">${x.symbol}</div><div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div><div class="pc-fail">${fails||'all pass'}</div></div>`;
     }).join('')}</div>`;}
-  html+=preFreezeBanner();el.innerHTML=html;
+  inner+=preFreezeBanner();
+  el.querySelectorAll(':scope > details.funnel-inline').forEach(d=>d.remove());
+  const det=document.createElement('details');
+  det.className='funnel-inline';det.style.marginTop='18px';
+  det.innerHTML=`<summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:.5px;text-transform:uppercase;padding:8px 0">Filter Funnel · ${basketId.replace(/_/g,' ')}</summary><div style="margin-top:10px">${inner}</div>`;
+  el.appendChild(det);
 }
 
 // ---- Live News tab (raw RSS headlines, task #46) ---------------------------
-let NEWS_DATA=null, NEWS_FILTER='all', NEWS_TS=null;
+let NEWS_DATA=null, NEWS_FILTER='domestic', NEWS_TS=null;
 function newsEsc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function newsAgo(ts){
   if(!ts)return'';
@@ -901,21 +905,17 @@ function newsAgo(ts){
 }
 function newsList(){
   if(!NEWS_DATA)return[];
-  const d=NEWS_DATA;
-  let arr;
-  if(NEWS_FILTER==='domestic')arr=d.domestic||[];
-  else if(NEWS_FILTER==='global')arr=d.global||[];
-  else if(NEWS_FILTER==='company')arr=d.company||[];
-  else arr=[...(d.domestic||[]),...(d.global||[]),...(d.company||[])];
+  // cc_task #95: Live News is India/domestic only — global + company feeds dropped.
+  const arr=NEWS_DATA.domestic||[];
   return[...arr].sort((a,b)=>new Date(b.published_at||0)-new Date(a.published_at||0));
 }
 function setNewsFilter(k){NEWS_FILTER=k;renderNews();}
 function renderNews(){
-  const el=document.getElementById('panel11');if(!el)return;
+  const el=document.getElementById('panel10');if(!el)return;
   const d=NEWS_DATA||{};
-  const counts={domestic:(d.domestic||[]).length,global:(d.global||[]).length,company:(d.company||[]).length};
-  counts.all=counts.domestic+counts.global+counts.company;
-  const pills=[['all','All'],['domestic','Domestic'],['global','Global'],['company','Company']].map(([k,l])=>
+  // cc_task #95: single India Market (domestic) pill — no Global/Company.
+  const counts={domestic:(d.domestic||[]).length};
+  const pills=[['domestic','India Market']].map(([k,l])=>
     `<span class="news-pill${NEWS_FILTER===k?' on':''}" onclick="setNewsFilter('${k}')">${l} <b>${counts[k]}</b></span>`).join('');
   const ts=NEWS_TS?String(NEWS_TS.getUTCHours()).padStart(2,'0')+':'+String(NEWS_TS.getUTCMinutes()).padStart(2,'0'):'--:--';
   let body;
@@ -932,7 +932,7 @@ function renderNews(){
 }
 async function loadNews(){
   try{NEWS_DATA=await getJSON('/api/news/live?hours=72');NEWS_TS=new Date(Date.now()+(5*60+30)*60000);}
-  catch(e){const el=document.getElementById('panel11');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
+  catch(e){const el=document.getElementById('panel10');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
   renderNews();
 }
 
@@ -976,8 +976,9 @@ function paint(){
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel8').innerHTML=renderRaw();
   document.getElementById('panel9').innerHTML=renderMissed();
-  {const _tc=document.getElementById('panel12');if(_tc)_tc.innerHTML=renderTCLite();}   // cc_task #77
-  loadFF();
+  // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
+  BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
+  loadFunnelInline('sell_overbought',6);
 }
 
 function showSkeletons(){
@@ -1003,7 +1004,6 @@ async function loadAll(){
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();}),
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
-    run('tcLite',()=>getJSON(EP.tcLite),()=>{const el=document.getElementById('panel12');if(el)el.innerHTML=renderTCLite();}),   // cc_task #77
   ];
   await Promise.all(jobs);
   if(cache.mood)renderMood(cache.mood);
