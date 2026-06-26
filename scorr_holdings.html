@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Holdings · MHK40</title>
+<title>Holdings &#183; MHK40</title>
 <style>
   :root{
     --bg:#f4f6f9;--card:#fff;--border:#e2e7ee;
@@ -100,22 +100,27 @@
   <a href="/">&#8962; Home</a>
   <a href="/dashboard">&#9889; V8</a>
   <a href="/cio2?model=gvm">&#9702; GVM</a>
+  <a href="/sector">&#8855; Sector</a>
   <a href="/check">&#10003; Check</a>
   <a href="/news">&#128240; Intel</a>
+  <a href="/scanners">&#8862; Scanners</a>
+  <a href="/cio">&#9673; Max</a>
+  <a href="/fpc">&#9706; FPC</a>
   <a href="/quant-basket">&#9707; QB</a>
   <a class="active" href="/holdings">&#9670; Holdings</a>
+  <a href="/v10">&#9651; V10</a>
 </nav>
 
 <div class="wrap">
 
   <!-- Hero -->
   <div class="hero" id="hero" style="display:none">
-    <div class="hero-label">Week M2M · MHK40</div>
-    <div class="hero-val" id="hero-val">—</div>
+    <div class="hero-label">Week M2M &#183; MHK40</div>
+    <div class="hero-val" id="hero-val">&#8212;</div>
     <div class="hero-sub">
       <span class="hero-meta" id="hero-meta"></span>
       <div style="display:flex;align-items:center;gap:8px">
-        <span class="live-chip" id="live-chip" style="display:none"><span class="live-dot"></span>Live · Fyers 5-min</span>
+        <span class="live-chip" id="live-chip" style="display:none"><span class="live-dot"></span>Live &#183; Fyers 5-min</span>
         <button class="refresh-btn" id="rfbtn" onclick="refresh()"><span id="rficon">&#8635;</span> Refresh</button>
       </div>
     </div>
@@ -130,13 +135,13 @@
         <button class="ctab" id="tab-d" onclick="switchChart('daily')">Daily</button>
       </div>
     </div>
-    <div class="chart-box" id="chart-box"><div class="chart-msg">Loading…</div></div>
+    <div class="chart-box" id="chart-box"><div class="chart-msg">Loading&#8230;</div></div>
     <div class="chart-foot" id="chart-foot"></div>
   </div>
 
   <!-- Positions -->
   <div id="pos-wrap">
-    <div class="empty-msg">Loading positions…</div>
+    <div class="empty-msg">Loading positions&#8230;</div>
   </div>
   <div class="updated" id="updated"></div>
 
