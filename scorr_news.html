@@ -194,18 +194,18 @@ const API = "";
 const CATS = [
   { id:"all",             label:"All" },
   { id:"ai_editorial",    label:"AI Editorial" },
-  { id:"company_updates", label:"Company Updates" },
+  { id:"domestic",        label:"Domestic" },
   { id:"global",          label:"Global" },
   { id:"ipo",             label:"IPO" },
 ];
 let curCat = "all";
-const SEARCH_TABS = ["company_updates"];   // symbol search shown on this tab
+const SEARCH_TABS = ["domestic"];   // symbol search shown on this tab
 let articles = [];
 
 // Category pill design (spec 636): orange IPO, purple Global, blue Company Updates.
 // AI Editorial is hero content — no pill. Pill click switches tab (no new page).
 const PILL = {
-  "Company Updates": { id:"company_updates", label:"Company Updates", bg:"#e8f0fe", fg:"#1d4ed8", bd:"#c3d6fb" },
+  "Domestic": { id:"domestic", label:"Domestic", bg:"#e8f0fe", fg:"#1d4ed8", bd:"#c3d6fb" },
   "Global":          { id:"global",          label:"Global",          bg:"#f3ecfd", fg:"#7c3aed", bd:"#ddc9fb" },
   "IPO":             { id:"ipo",             label:"IPO",             bg:"#fdf0e1", fg:"#c2620a", bd:"#f6d4a8" },
 };
@@ -328,7 +328,7 @@ async function load(){
     const c = d.category_counts || {};
     const total = Object.values(c).reduce((a,b)=>a+(b||0),0);
     document.getElementById("meta").textContent =
-      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Company ${c["Company Updates"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
+      `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
     render();
   }catch(e){
     document.getElementById("feed").innerHTML = `<div class="msg">Could not load news (${esc(e.message)}).</div>`;
