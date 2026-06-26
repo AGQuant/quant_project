@@ -6,7 +6,7 @@
 <title>Scorr · Home</title>
 <style>
   :root{
-    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe; --panel:#ffffff;
+    --bg:#f6f8fb; --card:#ffffff; --panel:#ffffff;
     --line:#e4e9f1; --line2:#d4dbe7;
     --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
     --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706;
@@ -15,8 +15,7 @@
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{min-height:100%;background:var(--bg);color:var(--txt);
-    font-family:var(--font);font-size:14px;line-height:1.55}
+  html,body{min-height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px;line-height:1.55}
 
   .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
     border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
@@ -27,76 +26,80 @@
     color:var(--mut);font-size:11.5px;font-weight:600;transition:.12s}
   .mnav-item:hover{color:var(--txt)}
   .mnav-item.active{border-bottom-color:var(--blu);color:var(--blu)}
-  .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
-  .wrap{max-width:760px;margin:0 auto;padding:34px 16px 60px}
-  .brand{font-size:30px;font-weight:800;color:var(--blu);letter-spacing:.5px}
+  .wrap{max-width:760px;margin:0 auto;padding:28px 16px 60px}
   .tag{font-size:12px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
   .quote{font-size:12.5px;color:var(--mut);font-style:italic;margin-top:14px;
     padding-left:12px;border-left:3px solid var(--line2)}
 
-  .sec{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;
-    margin:30px 0 12px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .sec{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;margin:28px 0 12px}
+
+  /* SmartGain card */
+  .sg-card{background:var(--card);border:2px solid var(--line);border-radius:16px;
+    padding:18px 18px 14px;text-decoration:none;display:block;transition:.15s}
+  .sg-card:hover{border-color:var(--grn)}
+  .sg-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
+  .sg-label{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
+  .sg-badge{font-size:9px;font-weight:700;padding:2px 9px;border-radius:10px;background:#e3f6ed;color:var(--grn);letter-spacing:.5px}
+  .sg-total{font-size:32px;font-weight:900;font-family:monospace;line-height:1;margin-bottom:14px}
+
+  /* Position rows */
+  .sg-positions{display:flex;flex-direction:column;gap:6px}
+  .sg-row{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+    display:grid;grid-template-columns:1fr auto;gap:4px 8px;align-items:center}
+  .sg-row-top{display:flex;align-items:center;gap:8px}
+  .sg-sym{font-weight:800;color:var(--txt);font-size:13.5px}
+  .sg-dir{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
+  .sg-long{background:#e3f6ed;color:var(--grn)}
+  .sg-short{background:#fceaec;color:var(--red)}
+  .sg-mtm{font-weight:800;font-family:monospace;font-size:13.5px;text-align:right}
+  .sg-pos{color:var(--grn)} .sg-neg{color:var(--red)} .sg-neu{color:var(--mut)}
+
+  /* Sub-row: qty · value · %gain */
+  .sg-sub{display:flex;align-items:center;gap:10px;margin-top:3px;font-size:11px;color:var(--mut)}
+  .sg-sub-val{font-family:monospace;font-weight:600}
+  .sg-pct{font-weight:700;font-size:11px}
+  .sg-dot{color:var(--dim);font-size:9px}
+
+  .sg-meta{font-size:11px;color:var(--dim);margin-top:10px}
+  .sg-loading{color:var(--dim);font-size:12px;font-style:italic}
+
+  /* Tools toggle */
+  .tools-toggle{display:flex;align-items:center;justify-content:space-between;margin:28px 0 0}
+  .tools-toggle-label{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px}
+  .show-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;font-size:12px;font-weight:700;
+    color:var(--mut);background:var(--card);border:1px solid var(--line2);border-radius:8px;cursor:pointer;
+    font-family:inherit;transition:.15s}
+  .show-btn:hover{color:var(--blu);border-color:var(--blu)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
   @media(max-width:560px){.grid{grid-template-columns:1fr}}
 
   .tile{display:block;text-decoration:none;background:var(--card);border:1px solid var(--line);
-    border-radius:14px;padding:16px 16px 15px;transition:.15s;position:relative;overflow:hidden;
+    border-radius:14px;padding:16px 16px 15px;transition:.15s;position:relative;
     box-shadow:0 1px 3px rgba(20,30,50,.04)}
-  .tile:hover{border-color:var(--accent,var(--blu));transform:translateY(-2px);
-    box-shadow:0 6px 18px rgba(20,30,50,.09)}
-  .tile.soon{opacity:.6;pointer-events:none;box-shadow:none}
+  .tile:hover{border-color:var(--accent,var(--blu));transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.09)}
   .tile .ic{font-size:20px;margin-bottom:9px;display:block;color:var(--accent,var(--blu))}
   .tile .nm{font-size:16px;font-weight:700;color:var(--txt);display:flex;align-items:center;gap:8px}
   .tile .ds{font-size:11.5px;color:var(--mut);margin-top:5px;line-height:1.45}
-  .badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.5px;
+  .badge2{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.5px;
     background:var(--accent,var(--blu));color:#fff;text-transform:uppercase}
-  .badge.soon{background:var(--line2);color:var(--mut)}
-  .badge.new{background:var(--grn);color:#fff}
+  .badge2.new{background:var(--grn);color:#fff}
 
-  /* Tile accent colours */
   .t-v8{--accent:var(--amber)} .t-gvm{--accent:var(--cyan)} .t-check{--accent:var(--cyan)}
-  .t-max{--accent:var(--blu)} .t-cio{--accent:var(--cyan)} .t-sector{--accent:#7c3aed}
-  .t-fpc{--accent:#0891b2} .t-scanners{--accent:#7c3aed} .t-perf{--accent:#0fa968}
-  .t-qb{--accent:#2563eb} .t-v10{--accent:#db2777} .t-intel{--accent:var(--cyan)}
-  .t-holdings{--accent:var(--grn)}
+  .t-max{--accent:var(--blu)} .t-sector{--accent:#7c3aed} .t-fpc{--accent:#0891b2}
+  .t-scanners{--accent:#7c3aed} .t-qb{--accent:#2563eb} .t-v10{--accent:#db2777}
+  .t-intel{--accent:var(--cyan)} .t-holdings{--accent:var(--grn)}
 
-  /* SmartGain M2M card */
-  .sg-card{background:var(--card);border:1px solid var(--line);border-radius:14px;
-    padding:16px 20px;margin-bottom:4px;text-decoration:none;display:block;transition:.15s;
-    box-shadow:0 1px 3px rgba(20,30,50,.04)}
-  .sg-card:hover{border-color:var(--grn);transform:translateY(-1px);box-shadow:0 4px 14px rgba(10,158,99,.1)}
-  .sg-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-  .sg-title{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
-  .sg-badge{font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;
-    background:#e3f6ed;color:var(--grn);letter-spacing:.5px}
-  .sg-total{font-size:30px;font-weight:900;font-family:monospace;line-height:1}
-  .sg-rows{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .sg-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);
-    background:var(--bg);border-radius:8px;padding:5px 10px}
-  .sg-sym{font-weight:700;color:var(--txt)}
-  .sg-dir{font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px}
-  .sg-long{background:#e3f6ed;color:var(--grn)}
-  .sg-short{background:#fceaec;color:var(--red)}
-  .sg-mtm-pos{color:var(--grn);font-weight:700;font-family:monospace}
-  .sg-mtm-neg{color:var(--red);font-weight:700;font-family:monospace}
-  .sg-loading{color:var(--dim);font-size:12px;font-style:italic}
-  .sg-meta{font-size:11px;color:var(--dim);margin-top:8px}
-
-  /* Logout link */
-  .logout-wrap{margin-top:24px;text-align:center}
+  .logout-wrap{margin-top:28px;text-align:center}
   .logout-link{display:inline-block;padding:8px 22px;font-size:11.5px;font-weight:600;
     letter-spacing:.04em;color:var(--mut);text-decoration:none;
     border:1px solid var(--line2);border-radius:8px;transition:.15s}
-  .logout-link:hover{color:var(--red);border-color:var(--red);background:rgba(226,55,68,.05)}
+  .logout-link:hover{color:var(--red);border-color:var(--red)}
 
-  .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:34px;line-height:1.8}
-  @media(max-width:560px){
-    body{font-size:13px}
-    .wrap{padding:24px 14px 50px}
-    .sg-total{font-size:24px}
-  }
+  .foot{font-size:10.5px;color:var(--dim);text-align:center;margin-top:28px;line-height:1.8}
+  @media(max-width:560px){.wrap{padding:22px 14px 50px}}
 </style>
 </head>
 <body>
@@ -130,87 +133,96 @@
   <div class="tag">Learn More. Score More. &middot; Invest like an institution.</div>
   <div class="quote">&ldquo;Claude disrupted the world. Arpit disrupted how to use Claude.&rdquo;</div>
 
-  <!-- SmartGain M2M glance widget -->
-  <div class="sec">SmartGain · MHK40</div>
+  <!-- SmartGain M2M -->
+  <div class="sec">SmartGain &middot; MHK40</div>
   <a class="sg-card" href="/holdings" id="sg-card">
-    <div class="sg-header">
-      <span class="sg-title">Week M2M</span>
+    <div class="sg-top">
+      <div>
+        <div class="sg-label">Week M2M</div>
+      </div>
       <span class="sg-badge">MHK40</span>
     </div>
-    <div class="sg-total" id="sg-total"><span class="sg-loading">Loading…</span></div>
-    <div class="sg-rows" id="sg-rows"></div>
+    <div class="sg-total" id="sg-total"><span class="sg-loading">Loading&hellip;</span></div>
+    <div class="sg-positions" id="sg-positions"></div>
     <div class="sg-meta" id="sg-meta"></div>
   </a>
 
-  <div class="sec">Live Tools</div>
-  <div class="grid">
+  <!-- Live Tools — collapsed by default -->
+  <div class="tools-toggle">
+    <span class="tools-toggle-label">Live Tools</span>
+    <button class="show-btn" id="tools-btn" onclick="toggleTools()">&#9660; Show All</button>
+  </div>
 
-    <a class="tile t-v8" href="/dashboard">
-      <span class="ic">&#9889;</span>
-      <div class="nm">V8</div>
-      <div class="ds">Quant Long-Short &middot; 5 baskets &middot; live signals</div>
-    </a>
+  <div id="tools-grid" style="display:none">
+    <div class="grid">
 
-    <a class="tile t-gvm" href="/cio2?model=gvm">
-      <span class="ic">&#9702;</span>
-      <div class="nm">GVM</div>
-      <div class="ds">Growth + Value + Momentum &middot; 1,700+ stocks &middot; peer-relative</div>
-    </a>
+      <a class="tile t-v8" href="/dashboard">
+        <span class="ic">&#9889;</span>
+        <div class="nm">V8</div>
+        <div class="ds">Quant Long-Short &middot; 5 baskets &middot; live signals</div>
+      </a>
 
-    <a class="tile t-sector" href="/sector">
-      <span class="ic">&#8855;</span>
-      <div class="nm">Sector</div>
-      <div class="ds">Sector rotation &middot; weekly + monthly strength &middot; 129 segments</div>
-    </a>
+      <a class="tile t-gvm" href="/cio2?model=gvm">
+        <span class="ic">&#9702;</span>
+        <div class="nm">GVM</div>
+        <div class="ds">Growth + Value + Momentum &middot; 1,700+ stocks</div>
+      </a>
 
-    <a class="tile t-check" href="/check">
-      <span class="ic">&#10003;</span>
-      <div class="nm">Check</div>
-      <div class="ds">Trade Check &middot; v3.4 unified &middot; LONG / SHORT &middot; screener + intraday scan</div>
-    </a>
+      <a class="tile t-sector" href="/sector">
+        <span class="ic">&#8855;</span>
+        <div class="nm">Sector</div>
+        <div class="ds">Sector rotation &middot; weekly + monthly strength</div>
+      </a>
 
-    <a class="tile t-scanners" href="/scanners">
-      <span class="ic">&#8862;</span>
-      <div class="nm">Scanners</div>
-      <div class="ds">4-gate intraday scanner &middot; V8 pre-screen &middot; MA hierarchy &middot; TC score</div>
-    </a>
+      <a class="tile t-check" href="/check">
+        <span class="ic">&#10003;</span>
+        <div class="nm">Check</div>
+        <div class="ds">Trade Check &middot; LONG / SHORT &middot; screener + intraday</div>
+      </a>
 
-    <a class="tile t-max" href="/cio">
-      <span class="ic">&#9673;</span>
-      <div class="nm">Max</div>
-      <div class="ds">AI CIO Max &middot; conversational research &middot; on demand</div>
-    </a>
+      <a class="tile t-scanners" href="/scanners">
+        <span class="ic">&#8862;</span>
+        <div class="nm">Scanners</div>
+        <div class="ds">4-gate intraday scanner &middot; V8 pre-screen</div>
+      </a>
 
-    <a class="tile t-fpc" href="/fpc">
-      <span class="ic">&#9706;</span>
-      <div class="nm">FPC <span class="badge new">V11</span></div>
-      <div class="ds">Financial Planner &middot; Risk profile &middot; Goals &middot; SWP &middot; Monte Carlo</div>
-    </a>
+      <a class="tile t-max" href="/cio">
+        <span class="ic">&#9673;</span>
+        <div class="nm">Max</div>
+        <div class="ds">AI CIO Max &middot; conversational research</div>
+      </a>
 
-    <a class="tile t-qb" href="/quant-basket">
-      <span class="ic">&#9707;</span>
-      <div class="nm">QB <span class="badge new">Live</span></div>
-      <div class="ds">Quant Basket &middot; 4 GVM-screened equity baskets &middot; Alpha vs Nifty500</div>
-    </a>
+      <a class="tile t-fpc" href="/fpc">
+        <span class="ic">&#9706;</span>
+        <div class="nm">FPC <span class="badge2 new">V11</span></div>
+        <div class="ds">Financial Planner &middot; Goals &middot; SWP &middot; Monte Carlo</div>
+      </a>
 
-    <a class="tile t-intel" href="/news">
-      <span class="ic">&#128240;</span>
-      <div class="nm">Intel</div>
-      <div class="ds">AI-polished market intelligence &middot; updated daily</div>
-    </a>
+      <a class="tile t-qb" href="/quant-basket">
+        <span class="ic">&#9707;</span>
+        <div class="nm">QB <span class="badge2 new">Live</span></div>
+        <div class="ds">Quant Basket &middot; 4 GVM-screened equity baskets</div>
+      </a>
 
-    <a class="tile t-holdings" href="/holdings">
-      <span class="ic">&#9670;</span>
-      <div class="nm">Holdings <span class="badge new">Live</span></div>
-      <div class="ds">SmartGain MHK40 &middot; live M2M simulator &middot; weekly rollover</div>
-    </a>
+      <a class="tile t-intel" href="/news">
+        <span class="ic">&#128240;</span>
+        <div class="nm">Intel</div>
+        <div class="ds">AI-polished market intelligence &middot; daily</div>
+      </a>
 
-    <a class="tile t-v10" href="/v10">
-      <span class="ic">&#9651;</span>
-      <div class="nm">V10 <span class="badge new">Live</span></div>
-      <div class="ds">Nifty Options V10 &middot; ST+EMA &middot; index directional engine</div>
-    </a>
+      <a class="tile t-holdings" href="/holdings">
+        <span class="ic">&#9670;</span>
+        <div class="nm">Holdings <span class="badge2 new">Live</span></div>
+        <div class="ds">SmartGain MHK40 &middot; live M2M &middot; weekly rollover</div>
+      </a>
 
+      <a class="tile t-v10" href="/v10">
+        <span class="ic">&#9651;</span>
+        <div class="nm">V10 <span class="badge2 new">Live</span></div>
+        <div class="ds">Nifty Options &middot; ST+EMA &middot; index directional engine</div>
+      </a>
+
+    </div>
   </div>
 
   <div class="logout-wrap">
@@ -224,31 +236,82 @@
 </div>
 
 <script>
-// SmartGain M2M glance widget
+// Tools toggle
+let toolsOpen = false;
+function toggleTools() {
+  toolsOpen = !toolsOpen;
+  document.getElementById("tools-grid").style.display = toolsOpen ? "block" : "none";
+  document.getElementById("tools-btn").innerHTML = toolsOpen ? "&#9650; Hide All" : "&#9660; Show All";
+}
+
+// SmartGain card
+const f2 = n => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2});
+const f0 = n => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:0, maximumFractionDigits:0});
+const ago = ts => {
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s/60); return m < 60 ? m + "m ago" : Math.floor(m/60) + "h ago";
+};
+
 (async function loadSG() {
   try {
     const r = await fetch("/api/smartgain/m2m");
     const d = await r.json();
     if (d.error || !d.positions) return;
+
     const total = d.total_mtm || 0;
     const tv = document.getElementById("sg-total");
-    tv.innerHTML = `<span style="color:${total >= 0 ? 'var(--grn)' : 'var(--red)'}">${total >= 0 ? "+" : ""}&#8377;${total.toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2})}</span>`;
+    tv.textContent = (total >= 0 ? "+" : "") + "₹" + f2(total);
+    tv.style.color = total >= 0 ? "var(--grn)" : "var(--red)";
+
     const rows = d.positions || [];
-    document.getElementById("sg-rows").innerHTML = rows.map(p => {
-      const mc = p.mtm == null ? "" : p.mtm >= 0 ? "sg-mtm-pos" : "sg-mtm-neg";
-      const mtmTxt = p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + Math.abs(p.mtm).toLocaleString("en-IN", {minimumFractionDigits:0, maximumFractionDigits:0});
-      return `<div class="sg-row"><span class="sg-sym">${p.symbol}</span><span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span><span class="${mc}">${mtmTxt}</span></div>`;
+    document.getElementById("sg-positions").innerHTML = rows.map(p => {
+      // M2M color
+      const mc = p.mtm == null ? "sg-neu" : p.mtm >= 0 ? "sg-pos" : "sg-neg";
+      const mtmTxt = p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + f0(Math.abs(p.mtm));
+
+      // % gain
+      let pct = null;
+      if (p.ltp != null && p.entry_price != null && p.entry_price !== 0) {
+        if (p.direction === "LONG")  pct = (p.ltp - p.entry_price) / p.entry_price * 100;
+        if (p.direction === "SHORT") pct = (p.entry_price - p.ltp) / p.entry_price * 100;
+      }
+      const pctTxt = pct == null ? "" : (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+      const pctColor = pct == null ? "var(--mut)" : pct >= 0 ? "var(--grn)" : "var(--red)";
+
+      // Current value
+      const val = p.ltp != null && p.qty != null ? p.ltp * p.qty : null;
+      const valTxt = val != null ? "₹" + f0(val) : "";
+
+      return `<div class="sg-row">
+        <div class="sg-row-top">
+          <span class="sg-sym">${p.symbol}</span>
+          <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
+        </div>
+        <div class="sg-mtm ${mc}">${mtmTxt}</div>
+        <div class="sg-sub">
+          <span class="sg-sub-val">${p.qty} qty</span>
+          <span class="sg-dot">·</span>
+          <span class="sg-sub-val">${valTxt}</span>
+          <span class="sg-dot">·</span>
+          <span class="sg-pct" style="color:${pctColor}">${pctTxt}</span>
+        </div>
+        <div></div>
+      </div>`;
     }).join("");
-    const ago = ts => { if (!ts) return ""; const s = Math.floor((Date.now() - new Date(ts))/1000); if (s < 60) return "just now"; const m = Math.floor(s/60); return m < 60 ? m + "m ago" : Math.floor(m/60) + "h ago"; };
-    document.getElementById("sg-meta").textContent = rows.length + " positions · updated " + ago(d.last_updated) + " · tap for details";
+
+    document.getElementById("sg-meta").textContent =
+      rows.length + " positions · updated " + ago(d.last_updated) + " · tap for chart & details";
+
   } catch(e) {
     document.getElementById("sg-total").innerHTML = '<span class="sg-loading">Could not load</span>';
   }
 })();
 
-// Hide own model-nav when embedded in the CIO2 shell (iframe or ?embed=1)
-if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
-  var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
+// Hide nav when embedded
+if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
+  const n = document.getElementById("scorr-nav"); if (n) n.style.display = "none";
 }
 </script>
 </body>
