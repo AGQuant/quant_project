@@ -3,23 +3,8 @@ scorr_auth.py — Simple password gate for all HTML pages.
 
 Password: HARDCODED (env var was unreliable). Change _PASSWORD below to update.
 Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=none)
-Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /scanners, /fpc, /news
+Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /scanners, /fpc, /news, /holdings
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status, /authdebug
-
-Fixes (v5):
-  - SameSite Lax -> None (with Secure). The CIO Shell (/cio2) embeds module
-    pages (/dashboard, /check, /sector, /cio) as IFRAMES. With SameSite=Lax,
-    browsers WITHHOLD the auth cookie on iframe subrequests, so the gate saw
-    no cookie and redirected the iframe to /login — which manifested as
-    "login once, then auto-logout, then can't log in again." SameSite=None
-    (Secure) sends the cookie in embedded contexts. Same-origin only; safe.
-
-Fixes (v4):
-  - Password hardcoded to remove env-var dependency entirely.
-  - Login success returns 200 HTML + JS redirect (avoids browsers dropping
-    Set-Cookie on a cross-path 302).
-  - Logout overwrites cookie with expired empty value so it always clears.
-  - Branding: "V8 Dashboard" (Scorr name removed from login screen).
 """
 
 import hashlib
@@ -29,7 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 router = APIRouter()
 
 COOKIE_NAME = "scorr_auth"
-PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/fpc", "/news"}
+PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/fpc", "/news", "/holdings"}
 _SALT = "scorr2026"
 
 # Hardcoded password — change here to update.
@@ -37,22 +22,19 @@ _PASSWORD = "556700"
 
 
 def _js_str(s: str) -> str:
-    """Safely embed a string as a JS string literal."""
     import json
     return json.dumps(s)
 
 
 def _clean(s: str) -> str:
-    """Strip ASCII + unicode whitespace and zero-width / non-breaking chars."""
     if s is None:
         return ""
-    for ch in ("​", "‌", "‍", "﻿", "\xa0"):
+    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"):
         s = s.replace(ch, "")
     return s.strip()
 
 
 def _password() -> str:
-    """Hardcoded password (env ignored)."""
     return _PASSWORD
 
 
@@ -61,7 +43,6 @@ def _expected_token() -> str:
 
 
 def _is_authed(request: Request) -> bool:
-    """Return True if request has valid auth cookie."""
     return request.cookies.get(COOKIE_NAME, "") == _expected_token()
 
 
@@ -167,9 +148,6 @@ async def logout():
 
 @router.get("/authdebug", include_in_schema=False)
 async def authdebug(request: Request):
-    """Auth-exempt diagnostic. Echoes exactly what the server sees so we can
-    diagnose the login/cookie loop. Safe: reveals no secret beyond a token the
-    correct password already produces. Remove after debugging."""
     raw_cookie_header = request.headers.get("cookie", "")
     cookie_val = request.cookies.get(COOKIE_NAME, "")
     expected = _expected_token()
