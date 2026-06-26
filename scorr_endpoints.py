@@ -143,17 +143,12 @@ async def scorr_query(req: ScorrQueryRequest):
 
 @router.get("/api/smartgain/m2m")
 def smartgain_m2m():
-    """SmartGain MHK40 holdings — M2M with live LTP from Fyers intraday feed.
-    During market hours: pulls latest close from intraday_prices (5-min Fyers bars).
-    Outside market hours: falls back to stored LTP from last screenshot update.
-    Page auto-refreshes every 60s — effective 1-min live M2M during market hours."""
+    """SmartGain MHK40 holdings — M2M with live LTP from Fyers intraday feed."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    h.symbol,
-                    h.direction,
-                    h.qty,
+                    h.symbol, h.direction, h.qty,
                     ROUND(h.entry_price::numeric, 2)                         AS entry_price,
                     ROUND(COALESCE(lp.live_ltp, h.ltp)::numeric, 2)         AS ltp,
                     ROUND(
@@ -170,8 +165,7 @@ def smartgain_m2m():
                     SELECT close AS live_ltp, ts AS last_tick
                     FROM intraday_prices
                     WHERE symbol = h.symbol
-                    ORDER BY ts DESC
-                    LIMIT 1
+                    ORDER BY ts DESC LIMIT 1
                 ) lp ON true
                 WHERE h.account = 'MHK40'
                 ORDER BY h.id
@@ -186,19 +180,84 @@ def smartgain_m2m():
                 row["is_live"]     = bool(row["is_live"])
                 row["updated_at"]  = row["updated_at"].isoformat() if row["updated_at"] else None
                 rows.append(row)
-
             total_mtm    = round(sum(r["mtm"] or 0 for r in rows), 2)
             last_updated = max((r["updated_at"] for r in rows if r["updated_at"]), default=None)
             any_live     = any(r["is_live"] for r in rows)
-
             return {
-                "account":        "MHK40",
-                "positions":      rows,
-                "total_mtm":      total_mtm,
-                "position_count": len(rows),
-                "last_updated":   last_updated,
-                "data_source":    "live_fyers" if any_live else "manual_screenshot",
+                "account": "MHK40", "positions": rows, "total_mtm": total_mtm,
+                "position_count": len(rows), "last_updated": last_updated,
+                "data_source": "live_fyers" if any_live else "manual_screenshot",
             }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── SmartGain Chart — Intraday + Daily M2M timeseries ───────────────────────
+
+@router.get("/api/smartgain/chart")
+def smartgain_chart(view: str = "intraday"):
+    """SmartGain M2M performance chart.
+    view=intraday: 5-min M2M timeseries for today from Fyers intraday_prices.
+    view=daily:    Day-end M2M per date from smartgain_m2m snapshots.
+    """
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+
+            if view == "intraday":
+                # Compute total M2M at each 5-min bar today across all open positions
+                cur.execute("""
+                    SELECT
+                        ip.ts                                                       AS ts,
+                        TO_CHAR(ip.ts AT TIME ZONE 'Asia/Kolkata', 'HH24:MI')      AS label,
+                        ROUND(SUM(
+                            CASE h.direction
+                                WHEN 'LONG'  THEN (ip.close - h.entry_price) * h.qty
+                                WHEN 'SHORT' THEN (h.entry_price - ip.close) * h.qty
+                                ELSE 0
+                            END
+                        )::numeric, 2)                                              AS mtm
+                    FROM intraday_prices ip
+                    JOIN smartgain_holdings h ON h.symbol = ip.symbol AND h.account = 'MHK40'
+                    WHERE ip.ts::date = CURRENT_DATE
+                    GROUP BY ip.ts
+                    ORDER BY ip.ts
+                """)
+                rows = cur.fetchall()
+                points = [{"ts": str(r[0]), "label": r[1], "mtm": float(r[2]) if r[2] is not None else 0} for r in rows]
+                return {
+                    "view": "intraday",
+                    "date": str(__import__("datetime").date.today()),
+                    "points": points,
+                    "count": len(points),
+                    "data_source": "intraday_prices (Fyers 5-min)"
+                }
+
+            else:  # daily
+                # Latest snapshot per symbol per day → sum = total daily M2M
+                cur.execute("""
+                    SELECT
+                        snapshot_date,
+                        TO_CHAR(snapshot_date, 'DD Mon')   AS label,
+                        ROUND(SUM(mtm)::numeric, 2)        AS day_mtm
+                    FROM (
+                        SELECT DISTINCT ON (symbol, snapshot_date)
+                            symbol, snapshot_date, mtm
+                        FROM smartgain_m2m
+                        WHERE account = 'MHK40'
+                        ORDER BY symbol, snapshot_date, snapshot_time DESC
+                    ) latest
+                    GROUP BY snapshot_date
+                    ORDER BY snapshot_date
+                """)
+                rows = cur.fetchall()
+                points = [{"date": str(r[0]), "label": r[1], "mtm": float(r[2]) if r[2] is not None else 0} for r in rows]
+                return {
+                    "view": "daily",
+                    "points": points,
+                    "count": len(points),
+                    "data_source": "smartgain_m2m snapshots"
+                }
+
     except Exception as e:
         return {"error": str(e)}
 
@@ -213,6 +272,8 @@ def scorr_health():
             gvm_count = cur.fetchone()[0]
             cur.execute("SELECT last_sync, status FROM cache_metadata WHERE key = 'gvm_cache'")
             meta = cur.fetchone()
-        return {"status": "ok", "gvm_cache_count": gvm_count, "cache_last_sync": str(meta[0]) if meta else None, "cache_status": meta[1] if meta else "unknown", "cache_fresh": is_cache_fresh(), "anthropic_api_key_set": bool(ANTHROPIC_API_KEY)}
+        return {"status": "ok", "gvm_cache_count": gvm_count, "cache_last_sync": str(meta[0]) if meta else None,
+                "cache_status": meta[1] if meta else "unknown", "cache_fresh": is_cache_fresh(),
+                "anthropic_api_key_set": bool(ANTHROPIC_API_KEY)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
