@@ -79,7 +79,7 @@ td{padding:7px 10px;white-space:nowrap}
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/check"><span>&#10003;</span>Check</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item" href="/news"><span>&#128478;</span>News</a>
+  <a class="mnav-item" href="/news"><span>&#128240;</span>Intel</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item active" href="/scanners"><span>&#8862;</span>Scanners</a>
   <div class="mnav-sep"></div>
@@ -88,6 +88,8 @@ td{padding:7px 10px;white-space:nowrap}
   <a class="mnav-item" href="/fpc"><span>&#9706;</span>FPC</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/quant-basket"><span>&#9707;</span>QB</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/holdings"><span>&#9670;</span>Holdings</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/v10"><span>&#9651;</span>V10</a>
 </nav>
@@ -183,12 +185,12 @@ async function loadSide(side){
     window._nm[side]=data.near_misses||[];
     if(data.now)window._nmtime=hhmm(data.now);
     if(data.status==='outside_window'){
-      dot.className='dot y';st.textContent='Market closed — runs 09:30–15:15 IST · '+(data.now||'');
-      tbl.innerHTML='<div class="empty">Intraday scanner active only during market hours (09:30–15:15 IST).</div>';
+      dot.className='dot y';st.textContent='Market closed &mdash; runs 09:30&ndash;15:15 IST &middot; '+(data.now||'');
+      tbl.innerHTML='<div class="empty">Intraday scanner active only during market hours (09:30&ndash;15:15 IST).</div>';
     }else{
       dot.className='dot';
       const lbl=side.toUpperCase();
-      st.textContent=data.count+' '+lbl+' signals · '+(data.near_miss_count||0)+' near-miss · ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' · NIFTY RSI '+num(data.nifty_rsi,1):'')+' · universe '+data.universe;
+      st.textContent=data.count+' '+lbl+' signals &middot; '+(data.near_miss_count||0)+' near-miss &middot; ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' &middot; NIFTY RSI '+num(data.nifty_rsi,1):'')+' &middot; universe '+data.universe;
       const rows=data.signals||[];
       tbl.innerHTML=rows.length?('<div class="tw"><table><thead>'+SIG_HEAD+'</thead><tbody>'+
         rows.map(r=>sigRow(r,side)).join('')+'</tbody></table></div>')
@@ -224,7 +226,7 @@ function renderWatchlist(){
   const dot=document.getElementById('wl-dot'),st=document.getElementById('wl-st'),tbl=document.getElementById('wl-tbl');
   const rows=[].concat(window._nm.long||[],window._nm.short||[])
     .sort((a,b)=>(b.tier1_score||0)-(a.tier1_score||0));
-  if(dot)dot.className='dot';if(st)st.textContent=rows.length+' near-miss candidates'+(window._nmtime?' · '+window._nmtime:'');
+  if(dot)dot.className='dot';if(st)st.textContent=rows.length+' near-miss candidates'+(window._nmtime?' &middot; '+window._nmtime:'');
   tbl.innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Bucket Passed</th><th>Tier1</th><th>What Failed</th><th>CMP</th><th>2W High/Low</th><th>Room%</th><th>Time</th></tr></thead><tbody>'+
     rows.map(nmRow).join('')+'</tbody></table></div>')
     :'<div class="empty">No near-miss candidates right now (or market closed)</div>';
