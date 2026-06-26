@@ -71,17 +71,18 @@ const PILLAR_INFO = {
 };
 
 const MODELS = [
-  { id: "home",   icon: "⌂", label: "Home",   full: "Home",                  color: C.muted,    live: true },
-  { id: "news",   icon: "📰", label: "Top News", full: "Top News",            color: C.red,      live: true, link: "/news" },
-  { id: "v8",     icon: "⚡", label: "V8",     full: "V8 Long-Short",         color: C.accent,   live: true },
-  { id: "gvm",    icon: "◦", label: "GVM",    full: "GVM Scoring",           color: C.gold,     live: true },
-  { id: "sector", icon: "◷", label: "Sector", full: "Sector Rotation",       color: C.purple,   live: true },
-  { id: "check",  icon: "✓", label: "Check",  full: "Trade Check",           color: C.green,    live: true },
-  { id: "scanners", icon: "⊞", label: "Scanners", full: "Intraday Scanners", color: C.purple,   live: true },
-  { id: "max",    icon: "◉", label: "Max",    full: "Max Chat",              color: "#6d4fe0",  live: true },
-  { id: "fpc",    icon: "📊", label: "FPC",    full: "Financial Planner V11", color: "#0891b2",  live: true },
-  { id: "qb",     icon: "▦", label: "QB",     full: "Quant Basket",          color: C.green,    live: true },
-  { id: "v10",    icon: "⟁", label: "V10",   full: "Nifty Options V10",     color: "#db2777",  live: false },
+  { id: "home",     icon: "⌂",  label: "Home",     full: "Home",                  color: C.muted,   live: true },
+  { id: "news",     icon: "📰", label: "Top News",  full: "Top News",              color: C.red,     live: true, link: "/news" },
+  { id: "v8",       icon: "⚡",  label: "V8",       full: "V8 Long-Short",         color: C.accent,  live: true },
+  { id: "gvm",      icon: "◦",  label: "GVM",      full: "GVM Scoring",           color: C.gold,    live: true },
+  { id: "sector",   icon: "◷",  label: "Sector",   full: "Sector Rotation",       color: C.purple,  live: true },
+  { id: "check",    icon: "✓",  label: "Check",    full: "Trade Check",           color: C.green,   live: true },
+  { id: "scanners", icon: "⊞",  label: "Scanners", full: "Intraday Scanners",     color: C.purple,  live: true },
+  { id: "max",      icon: "◉",  label: "Max",      full: "Max Chat",              color: "#6d4fe0", live: true },
+  { id: "fpc",      icon: "📊", label: "FPC",      full: "Financial Planner V11", color: "#0891b2", live: true },
+  { id: "qb",       icon: "▦",  label: "QB",       full: "Quant Basket",          color: C.green,   live: true },
+  { id: "holdings", icon: "◈",  label: "Holdings", full: "SmartGain Holdings",    color: C.green,   live: true },
+  { id: "v10",      icon: "⟁",  label: "V10",     full: "Nifty Options V10",     color: "#db2777", live: false },
 ];
 
 const fmt = (n, d = 0) => n == null ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -112,8 +113,6 @@ function Tag({ children, color = C.accent }) {
 }
 
 function ShellNav({ current, onPick }) {
-  // Shell-level top model-nav — renders for ALL models (React + iframe).
-  // Iframe pages hide their own nav when embedded, so no double navbar.
   return (
     <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 2, height: 46, flexShrink: 0,
       background: "#fff", borderBottom: `1px solid ${C.border}`, padding: "0 14px", overflowX: "auto", whiteSpace: "nowrap" }}>
@@ -1099,8 +1098,6 @@ function _timeAgo(ts) {
   const mo = Math.floor(dd / 30); return `${mo}mo ago`;
 }
 
-// Polished company news (task #44). Endpoint returns {articles:[...]}; polished rows
-// carry sentiment/impact, raw fallback rows don't — badges render only when present.
 function NewsCard({ symbol }) {
   const [articles, setArticles] = useState(null);
   const [open, setOpen] = useState(true);
@@ -1364,9 +1361,6 @@ function GvmEmptyState({ onPick }) {
   );
 }
 
-// Top News merged into the dedicated /news page (cc_task #50) — NewsTab removed; the
-// Top News nav item now links straight to /news (see MODELS link + ShellNav).
-
 function ComingSoon({ mod }) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 20px" }}>
@@ -1379,7 +1373,7 @@ function ComingSoon({ mod }) {
 
 function App() {
   const urlModel = new URLSearchParams(window.location.search).get("model");
-  if (urlModel === "news") { window.location.replace("/news"); }   // cc_task #50: news merged into /news page
+  if (urlModel === "news") { window.location.replace("/news"); }
   const valid = MODELS.find(m => m.id === urlModel && m.live);
   const [page, setPageRaw] = useState(valid ? valid.id : "v8");
   const setPage = (id) => {
@@ -1389,15 +1383,16 @@ function App() {
   const mod = MODELS.find(m => m.id === page);
 
   let body;
-  if (page === "home")   body = <FrameModule src={`${API}/?embed=1`} />;
-  else if (page === "v8")     body = <FrameModule src={`${API}/dashboard?embed=1`} />;
-  else if (page === "sector") body = <FrameModule src={`${API}/sector?embed=1`} />;
-  else if (page === "max")    body = <FrameModule src={`${API}/cio?embed=1`} />;
-  else if (page === "check")  body = <FrameModule src={`${API}/check?embed=1`} />;
+  if (page === "home")       body = <FrameModule src={`${API}/?embed=1`} />;
+  else if (page === "v8")       body = <FrameModule src={`${API}/dashboard?embed=1`} />;
+  else if (page === "sector")   body = <FrameModule src={`${API}/sector?embed=1`} />;
+  else if (page === "max")      body = <FrameModule src={`${API}/cio?embed=1`} />;
+  else if (page === "check")    body = <FrameModule src={`${API}/check?embed=1`} />;
   else if (page === "scanners") body = <FrameModule src={`${API}/scanners?embed=1`} />;
-  else if (page === "fpc")    body = <FrameModule src={`${API}/fpc?embed=1`} />;
-  else if (page === "qb")     body = <FrameModule src={`${API}/quant-basket?embed=1`} />;
-  else if (page === "gvm")    body = <GvmModule />;
+  else if (page === "fpc")      body = <FrameModule src={`${API}/fpc?embed=1`} />;
+  else if (page === "qb")       body = <FrameModule src={`${API}/quant-basket?embed=1`} />;
+  else if (page === "holdings") body = <FrameModule src={`${API}/holdings?embed=1`} />;
+  else if (page === "gvm")      body = <GvmModule />;
   else body = <ComingSoon mod={mod} />;
 
   return (
@@ -1412,7 +1407,7 @@ function App() {
         ::-webkit-scrollbar-thumb { background: #cfd8e3; border-radius: 3px; }
         button { transition: all 0.15s ease; }
         input::placeholder { color: #9aa4b5; }
-        #scorr-lo { display: none !important; }   /* injected logout replaced by ShellNav Logout */
+        #scorr-lo { display: none !important; }
         @media (max-width: 768px) {
           table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
           svg { max-width: 100%; }
