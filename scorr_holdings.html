@@ -25,9 +25,8 @@
 
   .wrap{max-width:900px;margin:0 auto;padding:28px 16px 80px}
 
-  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
-  .header-left{}
-  .header-title{font-size:20px;font-weight:800;color:var(--txt)}
+  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+  .header-title{font-size:20px;font-weight:800}
   .header-sub{font-size:12px;color:var(--mut);margin-top:3px}
   .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
     letter-spacing:.04em;background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
@@ -38,15 +37,30 @@
 
   /* Total M2M hero */
   .total-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
-    padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+    padding:18px 22px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
   .total-label{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
-  .total-val{font-size:38px;font-weight:900;font-family:monospace;line-height:1}
-  .total-meta{font-size:11px;color:var(--mut);margin-top:6px}
-  .total-right{text-align:right}
-  .pos-count{font-size:13px;font-weight:700;color:var(--txt)}
+  .total-val{font-size:36px;font-weight:900;font-family:monospace;line-height:1}
+  .total-meta{font-size:11px;color:var(--mut);margin-top:5px}
+  .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--grn);
+    margin-right:5px;animation:blink 1.4s ease-in-out infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+  /* Chart card */
+  .chart-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:18px 20px;margin-bottom:16px}
+  .chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+  .chart-title{font-size:13px;font-weight:700;color:var(--txt)}
+  .chart-tabs{display:flex;gap:4px}
+  .chart-tab{padding:5px 14px;border-radius:7px;border:1px solid var(--border);
+    font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;background:transparent;font-family:inherit;transition:.12s}
+  .chart-tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
+  .chart-wrap{position:relative;width:100%;height:180px}
+  .chart-empty{display:flex;align-items:center;justify-content:center;height:180px;
+    color:var(--dim);font-size:12px;font-style:italic}
+  .chart-loading{display:flex;align-items:center;justify-content:center;height:180px;color:var(--mut);font-size:12px}
 
   /* Table */
-  .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:16px}
   table{width:100%;border-collapse:collapse}
   thead tr{background:#f8fafc;border-bottom:2px solid var(--border)}
   th{padding:11px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--mut);
@@ -62,116 +76,238 @@
   .dir-pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;letter-spacing:.04em}
   .dir-long{background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
   .dir-short{background:#fceaec;color:var(--red);border:1px solid #f5b8bd}
-  .grn{color:var(--grn)}
-  .red{color:var(--red)}
-  .mut{color:var(--mut)}
+  .grn{color:var(--grn)} .red{color:var(--red)} .mut{color:var(--mut)}
 
   .empty{text-align:center;padding:60px 20px;color:var(--mut);font-size:13px}
-  .loading{text-align:center;padding:50px 20px;color:var(--mut)}
-
-  .updated{font-size:11px;color:var(--dim);margin-top:10px;text-align:right}
+  .updated{font-size:11px;color:var(--dim);margin-top:8px;text-align:right}
 
   @media(max-width:600px){
     th,td{padding:10px 10px}
-    .total-val{font-size:30px}
-    th:nth-child(4),td:nth-child(4){display:none} /* hide LTP on mobile */
+    .total-val{font-size:28px}
+    th:nth-child(4),td:nth-child(4){display:none}
   }
 </style>
 </head>
 <body>
 
 <nav class="nav" id="scorr-nav">
-  <a href="/"><span>&#8962;</span>Home</a>
-  <a href="/dashboard"><span>&#9889;</span>V8</a>
-  <a href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
-  <a href="/check"><span>&#10003;</span>Check</a>
-  <a href="/news"><span>&#128240;</span>Intel</a>
-  <a href="/cio2?model=qb"><span>&#9707;</span>QB</a>
-  <a class="active" href="/holdings"><span>&#9670;</span>Holdings</a>
+  <a href="/">&#8962; Home</a>
+  <a href="/dashboard">&#9889; V8</a>
+  <a href="/cio2?model=gvm">&#9702; GVM</a>
+  <a href="/check">&#10003; Check</a>
+  <a href="/news">&#128240; Intel</a>
+  <a href="/quant-basket">&#9707; QB</a>
+  <a class="active" href="/holdings">&#9670; Holdings</a>
 </nav>
 
 <div class="wrap">
   <div class="header">
-    <div class="header-left">
+    <div>
       <div class="header-title">SmartGain Holdings <span class="badge">MHK40</span></div>
-      <div class="header-sub">Live M2M simulator · Updated from screenshots · Weekly rollover Monday</div>
+      <div class="header-sub">Live M2M · Weekly rollover Monday · 1-min refresh during market hours</div>
     </div>
-    <button class="refresh-btn" onclick="load()">&#8635; Refresh</button>
+    <button class="refresh-btn" onclick="loadAll()">&#8635; Refresh</button>
   </div>
 
+  <!-- Total M2M hero -->
   <div id="total-card" class="total-card" style="display:none">
     <div>
       <div class="total-label">Week M2M</div>
       <div class="total-val" id="total-val">—</div>
       <div class="total-meta" id="total-meta"></div>
     </div>
-    <div class="total-right">
-      <div class="pos-count" id="pos-count"></div>
+    <div style="text-align:right">
+      <div id="pos-count" style="font-size:13px;font-weight:700;color:var(--txt)"></div>
+      <div id="data-source" style="font-size:11px;color:var(--dim);margin-top:4px"></div>
     </div>
   </div>
 
-  <div class="table-wrap">
-    <div id="body"><div class="loading">Loading holdings…</div></div>
+  <!-- Performance chart -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <div class="chart-title">M2M Performance</div>
+      <div class="chart-tabs">
+        <button class="chart-tab active" id="tab-intraday" onclick="switchChart('intraday')">Intraday</button>
+        <button class="chart-tab" id="tab-daily" onclick="switchChart('daily')">Daily</button>
+      </div>
+    </div>
+    <div class="chart-wrap" id="chart-wrap">
+      <div class="chart-loading">Loading chart…</div>
+    </div>
+    <div id="chart-meta" style="font-size:10px;color:var(--dim);margin-top:8px;text-align:right"></div>
   </div>
 
+  <!-- Positions table -->
+  <div class="table-wrap">
+    <div id="body"><div style="padding:40px;text-align:center;color:var(--mut)">Loading…</div></div>
+  </div>
   <div class="updated" id="updated"></div>
 </div>
 
 <script>
 const API = "";
+let chartView = "intraday";
+
 const fmt = (n, d=2) => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:d, maximumFractionDigits:d});
-const sgn = (n, d=2) => n == null ? "—" : (n >= 0 ? "+" : "") + fmt(n, d);
+const sgn = n => n == null ? "—" : (n >= 0 ? "+" : "") + fmt(n);
 const timeAgo = ts => {
   if (!ts) return "";
   const s = Math.floor((Date.now() - new Date(ts)) / 1000);
   if (s < 60) return "just now";
   const m = Math.floor(s/60); if (m < 60) return m + "m ago";
-  const h = Math.floor(m/60); return h + "h ago";
+  return Math.floor(m/60) + "h ago";
 };
 
-async function load() {
+/* ── SVG Line Chart ── */
+function drawChart(points, labelKey, mtmKey) {
+  const wrap = document.getElementById("chart-wrap");
+  if (!points || !points.length) {
+    wrap.innerHTML = '<div class="chart-empty">No data yet — chart builds during market hours</div>';
+    return;
+  }
+
+  const W = wrap.clientWidth || 600, H = 180;
+  const PAD = { top: 28, right: 16, bottom: 36, left: 52 };
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top - PAD.bottom;
+
+  const vals = points.map(p => p[mtmKey]);
+  let minV = Math.min(...vals), maxV = Math.max(...vals);
+  // Ensure zero is always visible on axis
+  minV = Math.min(minV, 0); maxV = Math.max(maxV, 0);
+  const span = (maxV - minV) || 1;
+  // 10% padding top/bottom
+  const padV = span * 0.12;
+  const vMin = minV - padV, vMax = maxV + padV;
+  const vSpan = vMax - vMin;
+
+  const X = i => PAD.left + (i / Math.max(points.length - 1, 1)) * cW;
+  const Y = v => PAD.top + (1 - (v - vMin) / vSpan) * cH;
+  const Y0 = Y(0); // zero line
+
+  const lastVal = vals[vals.length - 1];
+  const firstVal = vals[0];
+  const trend = lastVal >= firstVal;
+  const lineColor = lastVal >= 0 ? "#0a9e63" : "#dd3a4a";
+  const fillColor = lastVal >= 0 ? "#0a9e6318" : "#dd3a4a14";
+
+  // Path
+  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(p[mtmKey]).toFixed(1)}`).join(" ");
+  const fillD = pathD + ` L${X(points.length-1).toFixed(1)},${Y0.toFixed(1)} L${X(0).toFixed(1)},${Y0.toFixed(1)} Z`;
+
+  // Axis labels — Y (4 ticks)
+  const ticks = 4;
+  let yLabels = "";
+  for (let i = 0; i <= ticks; i++) {
+    const v = vMin + (vSpan / ticks) * i;
+    const y = Y(v);
+    const label = Math.abs(v) >= 1000 ? (v/1000).toFixed(1)+"K" : v.toFixed(0);
+    yLabels += `<text x="${PAD.left - 6}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="#9aa4b5">${label}</text>`;
+    yLabels += `<line x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${W - PAD.right}" y2="${y.toFixed(1)}" stroke="#edf1f6" stroke-width="1"/>`;
+  }
+
+  // X labels — show max 6 evenly spaced
+  const maxLabels = Math.min(6, points.length);
+  let xLabels = "";
+  const step = Math.ceil(points.length / maxLabels);
+  for (let i = 0; i < points.length; i += step) {
+    const x = X(i);
+    xLabels += `<text x="${x.toFixed(1)}" y="${(H - PAD.bottom + 14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#9aa4b5">${points[i][labelKey]}</text>`;
+  }
+
+  // Zero line
+  const zeroLine = `<line x1="${PAD.left}" y1="${Y0.toFixed(1)}" x2="${W - PAD.right}" y2="${Y0.toFixed(1)}" stroke="#cfd8e3" stroke-width="1" stroke-dasharray="3,3"/>`;
+
+  // Last point dot + label
+  const lx = X(points.length - 1), ly = Y(lastVal);
+  const dotColor = lastVal >= 0 ? "#0a9e63" : "#dd3a4a";
+  const valLabel = (lastVal >= 0 ? "+" : "") + "₹" + fmt(lastVal, 0);
+  const labelAnchor = lx > W * 0.8 ? "end" : "start";
+  const labelX = lx > W * 0.8 ? lx - 8 : lx + 8;
+
+  const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+    ${yLabels}
+    ${zeroLine}
+    ${xLabels}
+    <path d="${fillD}" fill="${fillColor}" stroke="none"/>
+    <path d="${pathD}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="${dotColor}" stroke="#fff" stroke-width="1.5"/>
+    <text x="${labelX.toFixed(1)}" y="${(ly - 8).toFixed(1)}" text-anchor="${labelAnchor}" font-size="11" font-weight="800" fill="${dotColor}" font-family="monospace">${valLabel}</text>
+  </svg>`;
+
+  wrap.innerHTML = svg;
+}
+
+async function loadChart(view) {
+  const wrap = document.getElementById("chart-wrap");
+  const meta = document.getElementById("chart-meta");
+  wrap.innerHTML = '<div class="chart-loading">Loading…</div>';
+  try {
+    const r = await fetch(API + "/api/smartgain/chart?view=" + view);
+    const d = await r.json();
+    if (d.error || !d.points || !d.points.length) {
+      wrap.innerHTML = '<div class="chart-empty">No data yet' + (view === "intraday" ? " — chart builds during market hours (9:15 AM onwards)" : "") + '</div>';
+      return;
+    }
+    const labelKey = view === "intraday" ? "label" : "label";
+    drawChart(d.points, labelKey, "mtm");
+    meta.textContent = d.data_source + " · " + d.count + " points";
+  } catch(e) {
+    wrap.innerHTML = '<div class="chart-empty">Could not load chart</div>';
+  }
+}
+
+function switchChart(view) {
+  chartView = view;
+  document.getElementById("tab-intraday").classList.toggle("active", view === "intraday");
+  document.getElementById("tab-daily").classList.toggle("active", view === "daily");
+  loadChart(view);
+}
+
+/* ── Holdings table ── */
+async function loadHoldings() {
   try {
     const r = await fetch(API + "/api/smartgain/m2m");
     const d = await r.json();
-    if (d.error) { document.getElementById("body").innerHTML = `<div class="empty">Error: ${d.error}</div>`; return; }
+    if (d.error || !d.positions) return;
 
     const pos = d.positions || [];
     const total = d.total_mtm || 0;
+    const isLive = d.data_source === "live_fyers";
 
-    // Total card
+    // Hero card
     const tc = document.getElementById("total-card");
     tc.style.display = "flex";
     const tv = document.getElementById("total-val");
     tv.textContent = (total >= 0 ? "+" : "") + "₹" + fmt(total);
     tv.style.color = total >= 0 ? "var(--grn)" : "var(--red)";
     document.getElementById("pos-count").textContent = pos.length + " open position" + (pos.length !== 1 ? "s" : "");
-    document.getElementById("total-meta").textContent = "Account MHK40 · " + timeAgo(d.last_updated);
+    document.getElementById("data-source").innerHTML = isLive
+      ? '<span class="live-dot"></span>Live · Fyers 5-min feed'
+      : "Manual · last screenshot";
+    document.getElementById("total-meta").textContent = "MHK40 · updated " + timeAgo(d.last_updated);
 
     if (!pos.length) {
       document.getElementById("body").innerHTML = '<div class="empty">No open positions — week starts Monday.</div>';
       return;
     }
 
-    let html = `<table>
-      <thead><tr>
-        <th>Symbol</th>
-        <th>Side</th>
-        <th class="num">Qty</th>
-        <th class="num">Entry</th>
-        <th class="num">LTP</th>
-        <th class="num">M2M ₹</th>
-      </tr></thead><tbody>`;
+    let html = `<table><thead><tr>
+      <th>Symbol</th><th>Side</th><th class="num">Qty</th>
+      <th class="num">Entry</th><th class="num">LTP</th><th class="num">M2M ₹</th>
+    </tr></thead><tbody>`;
 
     for (const p of pos) {
-      const mtmColor = p.mtm == null ? "mut" : p.mtm >= 0 ? "grn" : "red";
+      const mtmClass = p.mtm == null ? "mut" : p.mtm >= 0 ? "grn" : "red";
       const dirClass = p.direction === "LONG" ? "dir-long" : "dir-short";
+      const liveIcon = p.is_live ? '<span title="Live price" style="color:var(--grn);font-size:9px;margin-left:4px">●</span>' : '';
       html += `<tr>
         <td><span class="sym">${p.symbol}</span></td>
         <td><span class="dir-pill ${dirClass}">${p.direction}</span></td>
         <td class="num mut">${p.qty}</td>
         <td class="num mut">${fmt(p.entry_price)}</td>
-        <td class="num">${fmt(p.ltp)}</td>
-        <td class="num ${mtmColor}">${p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + fmt(p.mtm)}</td>
+        <td class="num">${fmt(p.ltp)}${liveIcon}</td>
+        <td class="num ${mtmClass}">${p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + fmt(p.mtm)}</td>
       </tr>`;
     }
 
@@ -181,20 +317,27 @@ async function load() {
     </tr></tbody></table>`;
 
     document.getElementById("body").innerHTML = html;
-    document.getElementById("updated").textContent = "Last updated " + timeAgo(d.last_updated);
+    document.getElementById("updated").textContent = "Updated " + timeAgo(d.last_updated);
 
-  } catch (e) {
-    document.getElementById("body").innerHTML = `<div class="empty">Could not load holdings.</div>`;
+  } catch(e) {
+    document.getElementById("body").innerHTML = '<div class="empty">Could not load holdings.</div>';
   }
 }
 
-// Hide nav when embedded in CIO shell iframe
-if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
-  var n = document.getElementById("scorr-nav"); if (n) n.style.display = "none";
+async function loadAll() {
+  await Promise.all([loadHoldings(), loadChart(chartView)]);
 }
 
-load();
-setInterval(load, 60000); // auto-refresh every 60s
+// Hide nav when in CIO shell iframe
+if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
+  const n = document.getElementById("scorr-nav"); if (n) n.style.display = "none";
+}
+
+// Redraw chart on resize
+window.addEventListener("resize", () => loadChart(chartView));
+
+loadAll();
+setInterval(loadAll, 60000); // 1-min auto-refresh
 </script>
 </body>
 </html>
