@@ -74,7 +74,8 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.55
+# Scorr / Project Quant — main.py v2.9.56
+# v2.9.56: GET /holdings route + SmartGain M2M page (cc_task #94).
 # v2.9.55: Wire admin_index_backfill router — SENSEX/FINNIFTY/MIDCAPNIFTY backfill endpoint.
 # v2.9.54: Added /quant-basket route (Quant Basket dashboard).
 # v2.9.53: Removed intraday_router (intraday_endpoints.py + intraday_engine.py retired).
@@ -82,7 +83,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.55"
+VERSION = "2.9.56"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -123,12 +124,8 @@ def _is_embedded(request: Request) -> bool:
         return True
     return False
 
-# Tier-2 pages that get the PWA bootstrap (<script src=/pwa.js>) injected on mobile.
-# pwa.js adds the manifest link, registers the service worker, renders the mobile
-# bottom-nav + normalizes the canonical desktop top-nav (cc_task #80), and shows the
-# install prompt — so no page file needs editing.
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
-                     "/dashboard", "/sector", "/fpc", "/quant-basket"}
+                     "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings"}
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 @app.middleware("http")
@@ -352,7 +349,7 @@ def create_tables():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(sql); conn.commit()
-        log.info("Tables ready (v2.9.55)")
+        log.info("Tables ready (v2.9.56)")
     except Exception as e:
         log.error(f"create_tables failed: {e}")
 
@@ -521,6 +518,11 @@ def news_page():
 @app.get("/v10", response_class=HTMLResponse)
 def v10_dashboard_page():
     with open("v10_dashboard.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/holdings", response_class=HTMLResponse)
+def holdings_page():
+    """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
+    with open("scorr_holdings.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
@@ -984,11 +986,6 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/paper/status")
 def paper_status():
-    # cc_task #82: CMP must track the LIVE intraday feed (Fyers 5-min, intraday_prices),
-    # not cmp_prices -- which lagged at yesterday's EOD close (15:26) so every open
-    # position read CMP == entry_price and showed Rs.0 P&L. Take each symbol's most
-    # recent intraday_prices bar (today's latest when present, else last known close).
-    # Only fall back to entry_price when the symbol has no intraday bar at all.
     open_positions = api_query("""
         SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
             p.target, p.stop_loss, p.qty, p.pivot_date,
