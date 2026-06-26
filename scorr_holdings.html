@@ -6,9 +6,9 @@
 <title>Holdings · MHK40</title>
 <style>
   :root{
-    --bg:#f4f6f9; --card:#fff; --border:#e2e7ee;
-    --txt:#1c2536; --mut:#5a6781; --dim:#9aa4b5;
-    --grn:#0a9e63; --red:#dd3a4a; --blu:#2563eb; --amber:#d97706;
+    --bg:#f4f6f9;--card:#fff;--border:#e2e7ee;
+    --txt:#1c2536;--mut:#5a6781;--dim:#9aa4b5;
+    --grn:#0a9e63;--red:#dd3a4a;--blu:#2563eb;
     --font:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -23,69 +23,75 @@
   .nav a.active{color:var(--blu);border-bottom-color:var(--blu)}
   .nav a:hover{color:var(--txt)}
 
-  .wrap{max-width:900px;margin:0 auto;padding:28px 16px 80px}
+  .wrap{max-width:700px;margin:0 auto;padding:20px 14px 80px}
 
-  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
-  .header-title{font-size:20px;font-weight:800}
-  .header-sub{font-size:12px;color:var(--mut);margin-top:3px}
-  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
-    letter-spacing:.04em;background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
-  .refresh-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;
-    background:var(--card);border:1px solid var(--border);border-radius:8px;
-    font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;transition:.15s}
-  .refresh-btn:hover{border-color:var(--blu);color:var(--blu)}
+  /* Hero M2M */
+  .hero{background:var(--card);border:1px solid var(--border);border-radius:16px;
+    padding:18px 20px;margin-bottom:14px}
+  .hero-label{font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+  .hero-val{font-size:40px;font-weight:900;font-family:monospace;line-height:1;transition:color .3s}
+  .hero-sub{display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:6px}
+  .hero-meta{font-size:11.5px;color:var(--mut)}
+  .live-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--grn)}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);animation:blink 1.4s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  .refresh-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;
+    background:transparent;border:1px solid var(--border);border-radius:8px;
+    font-size:11.5px;font-weight:600;color:var(--mut);cursor:pointer;font-family:inherit;transition:.15s}
+  .refresh-btn:hover{color:var(--blu);border-color:var(--blu)}
+  .refresh-btn.spinning{animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* Total M2M hero */
-  .total-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
-    padding:18px 22px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-  .total-label{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
-  .total-val{font-size:36px;font-weight:900;font-family:monospace;line-height:1}
-  .total-meta{font-size:11px;color:var(--mut);margin-top:5px}
-  .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--grn);
-    margin-right:5px;animation:blink 1.4s ease-in-out infinite}
-  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-
-  /* Chart card */
+  /* Chart */
   .chart-card{background:var(--card);border:1px solid var(--border);border-radius:14px;
-    padding:18px 20px;margin-bottom:16px}
-  .chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
-  .chart-title{font-size:13px;font-weight:700;color:var(--txt)}
+    padding:16px 18px;margin-bottom:14px}
+  .chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .chart-title{font-size:13px;font-weight:700}
   .chart-tabs{display:flex;gap:4px}
-  .chart-tab{padding:5px 14px;border-radius:7px;border:1px solid var(--border);
+  .ctab{padding:5px 14px;border-radius:7px;border:1px solid var(--border);
     font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;background:transparent;font-family:inherit;transition:.12s}
-  .chart-tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
-  .chart-wrap{position:relative;width:100%;height:180px}
-  .chart-empty{display:flex;align-items:center;justify-content:center;height:180px;
+  .ctab.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  .chart-box{position:relative;width:100%;height:170px}
+  .chart-msg{display:flex;align-items:center;justify-content:center;height:170px;
     color:var(--dim);font-size:12px;font-style:italic}
-  .chart-loading{display:flex;align-items:center;justify-content:center;height:180px;color:var(--mut);font-size:12px}
+  .chart-foot{font-size:10px;color:var(--dim);margin-top:6px;text-align:right}
 
-  /* Table */
-  .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:16px}
-  table{width:100%;border-collapse:collapse}
-  thead tr{background:#f8fafc;border-bottom:2px solid var(--border)}
-  th{padding:11px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--mut);
-    text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
-  th.num{text-align:right}
-  td{padding:13px 14px;border-bottom:1px solid #edf1f6;font-size:13.5px;vertical-align:middle}
-  td.num{text-align:right;font-family:monospace;font-weight:700}
-  tr:last-child td{border-bottom:none}
-  tr.total-row td{background:#f8fafc;border-top:2px solid var(--border);font-weight:800;font-size:14px}
-  tr:hover:not(.total-row) td{background:#f4f7fb}
+  /* Position cards */
+  .pos-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
 
-  .sym{font-weight:800;color:var(--txt);font-size:14px}
-  .dir-pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;letter-spacing:.04em}
+  .pos-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;transition:border-color .2s}
+  .pos-card:hover{border-color:#c5cfe0}
+
+  .pos-row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .pos-sym{font-size:16px;font-weight:800;color:var(--txt)}
+  .pos-dir{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:.04em}
   .dir-long{background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
   .dir-short{background:#fceaec;color:var(--red);border:1px solid #f5b8bd}
-  .grn{color:var(--grn)} .red{color:var(--red)} .mut{color:var(--mut)}
+  .pos-mtm{font-size:20px;font-weight:900;font-family:monospace;line-height:1;transition:color .3s}
 
-  .empty{text-align:center;padding:60px 20px;color:var(--mut);font-size:13px}
-  .updated{font-size:11px;color:var(--dim);margin-top:8px;text-align:right}
+  .pos-row2{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
+  .pos-chip{font-size:11.5px;color:var(--mut);font-weight:500}
+  .pos-chip b{color:var(--txt);font-weight:700}
+  .pos-pct{font-size:12px;font-weight:700;font-family:monospace}
+  .pos-ltp{font-size:11.5px;color:var(--mut)}
+  .pos-sep{color:var(--dim);font-size:10px}
+  .live-pip{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);
+    margin-left:3px;vertical-align:middle;animation:blink 1.4s infinite}
 
-  @media(max-width:600px){
-    th,td{padding:10px 10px}
-    .total-val{font-size:28px}
-    th:nth-child(4),td:nth-child(4){display:none}
-  }
+  /* Total row */
+  .total-card{background:#f8fafc;border:1px solid var(--border);border-radius:12px;
+    padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
+  .total-label{font-size:12px;font-weight:700;color:var(--mut)}
+  .total-val{font-size:22px;font-weight:900;font-family:monospace}
+
+  /* Flash animation for value updates */
+  @keyframes flash-grn{0%{background:#e3f6ed}100%{background:transparent}}
+  @keyframes flash-red{0%{background:#fceaec}100%{background:transparent}}
+  .flash-grn{animation:flash-grn .6s ease}
+  .flash-red{animation:flash-red .6s ease}
+
+  .updated{font-size:11px;color:var(--dim);text-align:right;margin-top:6px}
+  .empty-msg{text-align:center;padding:50px 20px;color:var(--mut);font-size:13px}
 </style>
 </head>
 <body>
@@ -101,243 +107,282 @@
 </nav>
 
 <div class="wrap">
-  <div class="header">
-    <div>
-      <div class="header-title">SmartGain Holdings <span class="badge">MHK40</span></div>
-      <div class="header-sub">Live M2M · Weekly rollover Monday · 1-min refresh during market hours</div>
-    </div>
-    <button class="refresh-btn" onclick="loadAll()">&#8635; Refresh</button>
-  </div>
 
-  <!-- Total M2M hero -->
-  <div id="total-card" class="total-card" style="display:none">
-    <div>
-      <div class="total-label">Week M2M</div>
-      <div class="total-val" id="total-val">—</div>
-      <div class="total-meta" id="total-meta"></div>
-    </div>
-    <div style="text-align:right">
-      <div id="pos-count" style="font-size:13px;font-weight:700;color:var(--txt)"></div>
-      <div id="data-source" style="font-size:11px;color:var(--dim);margin-top:4px"></div>
+  <!-- Hero -->
+  <div class="hero" id="hero" style="display:none">
+    <div class="hero-label">Week M2M · MHK40</div>
+    <div class="hero-val" id="hero-val">—</div>
+    <div class="hero-sub">
+      <span class="hero-meta" id="hero-meta"></span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="live-chip" id="live-chip" style="display:none"><span class="live-dot"></span>Live · Fyers 5-min</span>
+        <button class="refresh-btn" id="rfbtn" onclick="refresh()"><span id="rficon">&#8635;</span> Refresh</button>
+      </div>
     </div>
   </div>
 
-  <!-- Performance chart -->
+  <!-- Chart -->
   <div class="chart-card">
     <div class="chart-header">
       <div class="chart-title">M2M Performance</div>
       <div class="chart-tabs">
-        <button class="chart-tab active" id="tab-intraday" onclick="switchChart('intraday')">Intraday</button>
-        <button class="chart-tab" id="tab-daily" onclick="switchChart('daily')">Daily</button>
+        <button class="ctab on" id="tab-i" onclick="switchChart('intraday')">Intraday</button>
+        <button class="ctab" id="tab-d" onclick="switchChart('daily')">Daily</button>
       </div>
     </div>
-    <div class="chart-wrap" id="chart-wrap">
-      <div class="chart-loading">Loading chart…</div>
-    </div>
-    <div id="chart-meta" style="font-size:10px;color:var(--dim);margin-top:8px;text-align:right"></div>
+    <div class="chart-box" id="chart-box"><div class="chart-msg">Loading…</div></div>
+    <div class="chart-foot" id="chart-foot"></div>
   </div>
 
-  <!-- Positions table -->
-  <div class="table-wrap">
-    <div id="body"><div style="padding:40px;text-align:center;color:var(--mut)">Loading…</div></div>
+  <!-- Positions -->
+  <div id="pos-wrap">
+    <div class="empty-msg">Loading positions…</div>
   </div>
   <div class="updated" id="updated"></div>
+
 </div>
 
 <script>
 const API = "";
 let chartView = "intraday";
+let lastPositions = {};   // symbol → {mtm, ltp} for smooth in-place update
+let firstLoad = true;
 
-const fmt = (n, d=2) => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:d, maximumFractionDigits:d});
-const sgn = n => n == null ? "—" : (n >= 0 ? "+" : "") + fmt(n);
-const timeAgo = ts => {
+/* ── Formatters ── */
+const f2 = n => n == null ? "—" : Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+const f0 = n => n == null ? "—" : Number(n).toLocaleString("en-IN",{maximumFractionDigits:0});
+const ago = ts => {
   if (!ts) return "";
-  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
-  if (s < 60) return "just now";
-  const m = Math.floor(s/60); if (m < 60) return m + "m ago";
-  return Math.floor(m/60) + "h ago";
+  const s = Math.floor((Date.now()-new Date(ts))/1000);
+  if (s<60) return "just now";
+  const m=Math.floor(s/60); return m<60?m+"m ago":Math.floor(m/60)+"h ago";
 };
+const mtmStr = (n, show_plus=true) => n==null?"—":(n>=0?(show_plus?"+":""):"")+"₹"+f2(Math.abs(n))*(n<0?-1:1);
+const colorOf = n => n==null?"var(--mut)":n>=0?"var(--grn)":"var(--red)";
 
-/* ── SVG Line Chart ── */
-function drawChart(points, labelKey, mtmKey) {
-  const wrap = document.getElementById("chart-wrap");
-  if (!points || !points.length) {
-    wrap.innerHTML = '<div class="chart-empty">No data yet — chart builds during market hours</div>';
-    return;
-  }
-
-  const W = wrap.clientWidth || 600, H = 180;
-  const PAD = { top: 28, right: 16, bottom: 36, left: 52 };
-  const cW = W - PAD.left - PAD.right;
-  const cH = H - PAD.top - PAD.bottom;
-
-  const vals = points.map(p => p[mtmKey]);
-  let minV = Math.min(...vals), maxV = Math.max(...vals);
-  // Ensure zero is always visible on axis
-  minV = Math.min(minV, 0); maxV = Math.max(maxV, 0);
-  const span = (maxV - minV) || 1;
-  // 10% padding top/bottom
-  const padV = span * 0.12;
-  const vMin = minV - padV, vMax = maxV + padV;
-  const vSpan = vMax - vMin;
-
-  const X = i => PAD.left + (i / Math.max(points.length - 1, 1)) * cW;
-  const Y = v => PAD.top + (1 - (v - vMin) / vSpan) * cH;
-  const Y0 = Y(0); // zero line
-
-  const lastVal = vals[vals.length - 1];
-  const firstVal = vals[0];
-  const trend = lastVal >= firstVal;
-  const lineColor = lastVal >= 0 ? "#0a9e63" : "#dd3a4a";
-  const fillColor = lastVal >= 0 ? "#0a9e6318" : "#dd3a4a14";
-
-  // Path
-  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${X(i).toFixed(1)},${Y(p[mtmKey]).toFixed(1)}`).join(" ");
-  const fillD = pathD + ` L${X(points.length-1).toFixed(1)},${Y0.toFixed(1)} L${X(0).toFixed(1)},${Y0.toFixed(1)} Z`;
-
-  // Axis labels — Y (4 ticks)
-  const ticks = 4;
-  let yLabels = "";
-  for (let i = 0; i <= ticks; i++) {
-    const v = vMin + (vSpan / ticks) * i;
-    const y = Y(v);
-    const label = Math.abs(v) >= 1000 ? (v/1000).toFixed(1)+"K" : v.toFixed(0);
-    yLabels += `<text x="${PAD.left - 6}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="#9aa4b5">${label}</text>`;
-    yLabels += `<line x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${W - PAD.right}" y2="${y.toFixed(1)}" stroke="#edf1f6" stroke-width="1"/>`;
-  }
-
-  // X labels — show max 6 evenly spaced
-  const maxLabels = Math.min(6, points.length);
-  let xLabels = "";
-  const step = Math.ceil(points.length / maxLabels);
-  for (let i = 0; i < points.length; i += step) {
-    const x = X(i);
-    xLabels += `<text x="${x.toFixed(1)}" y="${(H - PAD.bottom + 14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#9aa4b5">${points[i][labelKey]}</text>`;
-  }
-
-  // Zero line
-  const zeroLine = `<line x1="${PAD.left}" y1="${Y0.toFixed(1)}" x2="${W - PAD.right}" y2="${Y0.toFixed(1)}" stroke="#cfd8e3" stroke-width="1" stroke-dasharray="3,3"/>`;
-
-  // Last point dot + label
-  const lx = X(points.length - 1), ly = Y(lastVal);
-  const dotColor = lastVal >= 0 ? "#0a9e63" : "#dd3a4a";
-  const valLabel = (lastVal >= 0 ? "+" : "") + "₹" + fmt(lastVal, 0);
-  const labelAnchor = lx > W * 0.8 ? "end" : "start";
-  const labelX = lx > W * 0.8 ? lx - 8 : lx + 8;
-
-  const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
-    ${yLabels}
-    ${zeroLine}
-    ${xLabels}
-    <path d="${fillD}" fill="${fillColor}" stroke="none"/>
-    <path d="${pathD}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="${dotColor}" stroke="#fff" stroke-width="1.5"/>
-    <text x="${labelX.toFixed(1)}" y="${(ly - 8).toFixed(1)}" text-anchor="${labelAnchor}" font-size="11" font-weight="800" fill="${dotColor}" font-family="monospace">${valLabel}</text>
-  </svg>`;
-
-  wrap.innerHTML = svg;
-}
-
-async function loadChart(view) {
-  const wrap = document.getElementById("chart-wrap");
-  const meta = document.getElementById("chart-meta");
-  wrap.innerHTML = '<div class="chart-loading">Loading…</div>';
+/* ── Holdings ── */
+async function loadHoldings(smooth=false) {
   try {
-    const r = await fetch(API + "/api/smartgain/chart?view=" + view);
+    const r = await fetch(API+"/api/smartgain/m2m");
     const d = await r.json();
-    if (d.error || !d.points || !d.points.length) {
-      wrap.innerHTML = '<div class="chart-empty">No data yet' + (view === "intraday" ? " — chart builds during market hours (9:15 AM onwards)" : "") + '</div>';
-      return;
-    }
-    const labelKey = view === "intraday" ? "label" : "label";
-    drawChart(d.points, labelKey, "mtm");
-    meta.textContent = d.data_source + " · " + d.count + " points";
-  } catch(e) {
-    wrap.innerHTML = '<div class="chart-empty">Could not load chart</div>';
-  }
-}
+    if (d.error) return;
 
-function switchChart(view) {
-  chartView = view;
-  document.getElementById("tab-intraday").classList.toggle("active", view === "intraday");
-  document.getElementById("tab-daily").classList.toggle("active", view === "daily");
-  loadChart(view);
-}
+    const pos = d.positions||[];
+    const total = d.total_mtm||0;
+    const isLive = d.data_source==="live_fyers";
 
-/* ── Holdings table ── */
-async function loadHoldings() {
-  try {
-    const r = await fetch(API + "/api/smartgain/m2m");
-    const d = await r.json();
-    if (d.error || !d.positions) return;
+    /* Hero */
+    const hero = document.getElementById("hero");
+    hero.style.display="block";
+    const hv = document.getElementById("hero-val");
+    hv.textContent = (total>=0?"+":"")+"₹"+f2(Math.abs(total));
+    hv.style.color = colorOf(total);
+    document.getElementById("hero-meta").textContent = pos.length+" positions · "+ago(d.last_updated);
+    const lc = document.getElementById("live-chip");
+    lc.style.display = isLive?"inline-flex":"none";
 
-    const pos = d.positions || [];
-    const total = d.total_mtm || 0;
-    const isLive = d.data_source === "live_fyers";
-
-    // Hero card
-    const tc = document.getElementById("total-card");
-    tc.style.display = "flex";
-    const tv = document.getElementById("total-val");
-    tv.textContent = (total >= 0 ? "+" : "") + "₹" + fmt(total);
-    tv.style.color = total >= 0 ? "var(--grn)" : "var(--red)";
-    document.getElementById("pos-count").textContent = pos.length + " open position" + (pos.length !== 1 ? "s" : "");
-    document.getElementById("data-source").innerHTML = isLive
-      ? '<span class="live-dot"></span>Live · Fyers 5-min feed'
-      : "Manual · last screenshot";
-    document.getElementById("total-meta").textContent = "MHK40 · updated " + timeAgo(d.last_updated);
+    document.getElementById("updated").textContent = "Auto-refreshes every 60s · last updated "+ago(d.last_updated);
 
     if (!pos.length) {
-      document.getElementById("body").innerHTML = '<div class="empty">No open positions — week starts Monday.</div>';
+      document.getElementById("pos-wrap").innerHTML='<div class="empty-msg">No open positions — week starts Monday.</div>';
+      firstLoad=false; return;
+    }
+
+    /* Smooth in-place update (no flicker after first load) */
+    if (!firstLoad && smooth) {
+      pos.forEach(p => {
+        const card = document.getElementById("card-"+p.symbol);
+        if (!card) return;
+
+        const prev = lastPositions[p.symbol]||{};
+        const mtmEl = document.getElementById("mtm-"+p.symbol);
+        const ltpEl = document.getElementById("ltp-"+p.symbol);
+        const pctEl = document.getElementById("pct-"+p.symbol);
+        const valEl = document.getElementById("val-"+p.symbol);
+
+        const mtmTxt = (p.mtm>=0?"+":"")+"₹"+f2(Math.abs(p.mtm||0));
+        const prevMtm = prev.mtm||0;
+
+        if (mtmEl && p.mtm !== prev.mtm) {
+          mtmEl.textContent = mtmTxt;
+          mtmEl.style.color = colorOf(p.mtm);
+          const cls = (p.mtm||0) >= prevMtm ? "flash-grn":"flash-red";
+          card.classList.remove("flash-grn","flash-red");
+          void card.offsetWidth; // reflow
+          card.classList.add(cls);
+        }
+        if (ltpEl) ltpEl.textContent = f2(p.ltp);
+        if (pctEl) {
+          const pct = calcPct(p);
+          pctEl.textContent = pct==null?"":((pct>=0?"+":"")+pct.toFixed(2)+"%");
+          pctEl.style.color = colorOf(pct);
+        }
+        if (valEl && p.ltp!=null && p.qty!=null) {
+          valEl.textContent = "₹"+f0(p.ltp*p.qty);
+        }
+      });
+
+      /* Total */
+      const te = document.getElementById("total-el");
+      if (te) { te.textContent=(total>=0?"+":"")+"₹"+f2(Math.abs(total)); te.style.color=colorOf(total); }
+
+      lastPositions = {};
+      pos.forEach(p=>lastPositions[p.symbol]=p);
       return;
     }
 
-    let html = `<table><thead><tr>
-      <th>Symbol</th><th>Side</th><th class="num">Qty</th>
-      <th class="num">Entry</th><th class="num">LTP</th><th class="num">M2M ₹</th>
-    </tr></thead><tbody>`;
+    /* Full render */
+    lastPositions = {};
+    pos.forEach(p=>lastPositions[p.symbol]=p);
 
-    for (const p of pos) {
-      const mtmClass = p.mtm == null ? "mut" : p.mtm >= 0 ? "grn" : "red";
-      const dirClass = p.direction === "LONG" ? "dir-long" : "dir-short";
-      const liveIcon = p.is_live ? '<span title="Live price" style="color:var(--grn);font-size:9px;margin-left:4px">●</span>' : '';
-      html += `<tr>
-        <td><span class="sym">${p.symbol}</span></td>
-        <td><span class="dir-pill ${dirClass}">${p.direction}</span></td>
-        <td class="num mut">${p.qty}</td>
-        <td class="num mut">${fmt(p.entry_price)}</td>
-        <td class="num">${fmt(p.ltp)}${liveIcon}</td>
-        <td class="num ${mtmClass}">${p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + fmt(p.mtm)}</td>
-      </tr>`;
-    }
+    let html = '<div class="pos-list">';
+    pos.forEach(p => {
+      const pct = calcPct(p);
+      const pctTxt = pct==null?"":((pct>=0?"+":"")+pct.toFixed(2)+"%");
+      const val = p.ltp!=null&&p.qty!=null ? "₹"+f0(p.ltp*p.qty) : "";
+      const dirCls = p.direction==="LONG"?"dir-long":"dir-short";
+      const mtmTxt = p.mtm==null?"—":((p.mtm>=0?"+":"")+"₹"+f2(Math.abs(p.mtm)));
+      const livePip = p.is_live?'<span class="live-pip"></span>':"";
 
-    html += `<tr class="total-row">
-      <td colspan="5">Total M2M</td>
-      <td class="num ${total >= 0 ? "grn" : "red"}">${total >= 0 ? "+" : ""}₹${fmt(total)}</td>
-    </tr></tbody></table>`;
+      html+=`<div class="pos-card" id="card-${p.symbol}">
+        <div class="pos-row1">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="pos-sym">${p.symbol}</span>
+            <span class="pos-dir ${dirCls}">${p.direction}</span>
+          </div>
+          <span class="pos-mtm" id="mtm-${p.symbol}" style="color:${colorOf(p.mtm)}">${mtmTxt}</span>
+        </div>
+        <div class="pos-row2">
+          <span class="pos-chip"><b>${p.qty}</b> qty</span>
+          <span class="pos-sep">·</span>
+          <span class="pos-chip" id="val-${p.symbol}">${val}</span>
+          <span class="pos-sep">·</span>
+          <span class="pos-ltp">₹<span id="ltp-${p.symbol}">${f2(p.ltp)}</span>${livePip}</span>
+          <span class="pos-sep">·</span>
+          <span class="pos-pct" id="pct-${p.symbol}" style="color:${colorOf(pct)}">${pctTxt}</span>
+        </div>
+      </div>`;
+    });
+    html+="</div>";
 
-    document.getElementById("body").innerHTML = html;
-    document.getElementById("updated").textContent = "Updated " + timeAgo(d.last_updated);
+    html+=`<div class="total-card">
+      <span class="total-label">Total M2M</span>
+      <span class="total-val" id="total-el" style="color:${colorOf(total)}">${(total>=0?"+":"")+"₹"+f2(Math.abs(total))}</span>
+    </div>`;
 
+    document.getElementById("pos-wrap").innerHTML=html;
+    firstLoad=false;
+
+  } catch(e) { console.error(e); }
+}
+
+function calcPct(p) {
+  if (p.ltp==null||p.entry_price==null||p.entry_price===0) return null;
+  return p.direction==="LONG"
+    ? (p.ltp-p.entry_price)/p.entry_price*100
+    : (p.entry_price-p.ltp)/p.entry_price*100;
+}
+
+/* ── Chart ── */
+function drawChart(points, labelKey) {
+  const box = document.getElementById("chart-box");
+  if (!points||!points.length) {
+    box.innerHTML='<div class="chart-msg">No data yet'+(chartView==="intraday"?" — builds 9:15 AM market hours":"")+' </div>';
+    return;
+  }
+  const W=box.clientWidth||340, H=170;
+  const P={top:24,right:14,bottom:32,left:46};
+  const cW=W-P.left-P.right, cH=H-P.top-P.bottom;
+  const vals=points.map(p=>p.mtm);
+  let mn=Math.min(...vals,0), mx=Math.max(...vals,0);
+  const pad=(mx-mn)*0.12||5;
+  const vMin=mn-pad, vMax=mx+pad, vSpan=vMax-vMin;
+  const X=i=>P.left+(i/Math.max(points.length-1,1))*cW;
+  const Y=v=>P.top+(1-(v-vMin)/vSpan)*cH;
+  const Y0=Y(0);
+  const last=vals[vals.length-1];
+  const lc=last>=0?"#0a9e63":"#dd3a4a";
+  const fc=last>=0?"#0a9e6314":"#dd3a4a10";
+
+  // paths
+  const pd=points.map((p,i)=>`${i===0?"M":"L"}${X(i).toFixed(1)},${Y(p.mtm).toFixed(1)}`).join(" ");
+  const fd=pd+` L${X(points.length-1).toFixed(1)},${Y0.toFixed(1)} L${X(0).toFixed(1)},${Y0.toFixed(1)} Z`;
+
+  // y ticks
+  let yTicks="";
+  for(let i=0;i<=4;i++){
+    const v=vMin+vSpan/4*i, y=Y(v);
+    const lb=Math.abs(v)>=1000?(v/1000).toFixed(1)+"K":v.toFixed(0);
+    yTicks+=`<text x="${P.left-5}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" font-size="9" fill="#9aa4b5">${lb}</text>`;
+    yTicks+=`<line x1="${P.left}" y1="${y.toFixed(1)}" x2="${(W-P.right).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#edf1f6" stroke-width="1"/>`;
+  }
+
+  // x labels (max 5)
+  let xTicks="";
+  const step=Math.ceil(points.length/5);
+  for(let i=0;i<points.length;i+=step){
+    xTicks+=`<text x="${X(i).toFixed(1)}" y="${(H-P.bottom+14)}" text-anchor="middle" font-size="9" fill="#9aa4b5">${points[i][labelKey]}</text>`;
+  }
+
+  // zero line
+  const zl=`<line x1="${P.left}" y1="${Y0.toFixed(1)}" x2="${(W-P.right).toFixed(1)}" y2="${Y0.toFixed(1)}" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>`;
+
+  // last point
+  const lx=X(points.length-1), ly=Y(last);
+  const lbl=(last>=0?"+":"")+"₹"+f0(last);
+  const anchor=lx>W*0.75?"end":"start";
+  const lbx=lx>W*0.75?lx-8:lx+8;
+
+  box.innerHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+    ${yTicks}${zl}${xTicks}
+    <path d="${fd}" fill="${fc}"/>
+    <path d="${pd}" fill="none" stroke="${lc}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="${lc}" stroke="#fff" stroke-width="2"/>
+    <text x="${lbx.toFixed(1)}" y="${(ly-9).toFixed(1)}" text-anchor="${anchor}" font-size="11" font-weight="800" fill="${lc}" font-family="monospace">${lbl}</text>
+  </svg>`;
+}
+
+async function loadChart(view, silent=false) {
+  if (!silent) document.getElementById("chart-box").innerHTML='<div class="chart-msg">Loading…</div>';
+  try {
+    const r=await fetch(API+"/api/smartgain/chart?view="+view);
+    const d=await r.json();
+    drawChart(d.points||[], view==="intraday"?"label":"label");
+    document.getElementById("chart-foot").textContent=(d.data_source||"")+" · "+( d.count||0)+" points";
   } catch(e) {
-    document.getElementById("body").innerHTML = '<div class="empty">Could not load holdings.</div>';
+    document.getElementById("chart-box").innerHTML='<div class="chart-msg">Could not load chart</div>';
   }
 }
 
-async function loadAll() {
-  await Promise.all([loadHoldings(), loadChart(chartView)]);
+function switchChart(v) {
+  chartView=v;
+  document.getElementById("tab-i").classList.toggle("on",v==="intraday");
+  document.getElementById("tab-d").classList.toggle("on",v==="daily");
+  loadChart(v);
 }
 
-// Hide nav when in CIO shell iframe
-if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
-  const n = document.getElementById("scorr-nav"); if (n) n.style.display = "none";
+/* ── Refresh ── */
+async function refresh(smooth=false) {
+  const btn=document.getElementById("rfbtn");
+  const ic=document.getElementById("rficon");
+  ic.style.animation="spin .7s linear infinite";
+  btn.disabled=true;
+  await Promise.all([loadHoldings(smooth), loadChart(chartView, smooth)]);
+  ic.style.animation="";
+  btn.disabled=false;
 }
 
-// Redraw chart on resize
-window.addEventListener("resize", () => loadChart(chartView));
+/* ── Nav hide in iframe ── */
+if(window.self!==window.top||new URLSearchParams(location.search).has("embed")){
+  const n=document.getElementById("scorr-nav");if(n)n.style.display="none";
+}
 
-loadAll();
-setInterval(loadAll, 60000); // 1-min auto-refresh
+/* ── Resize chart ── */
+window.addEventListener("resize",()=>loadChart(chartView,true));
+
+/* ── Boot ── */
+refresh(false);
+setInterval(()=>refresh(true), 60000);
 </script>
 </body>
 </html>
