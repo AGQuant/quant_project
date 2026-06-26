@@ -211,11 +211,14 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
 
 
 # Canonical category map (cc_task #79, spec id=636). polished_news.category is now
-# normalized to exactly these 4 values; the API filters on an EXACT match (no ILIKE,
+# normalized to exactly these values; the API filters on an EXACT match (no ILIKE,
 # no partial) so a tab never catches the wrong stories.
+# cc_task #91: 'Company Updates' was renamed to 'Domestic' in polished_news.category.
+# Map both the new 'domestic' tab id and the legacy 'company_updates' id to "Domestic".
 _CANON_CAT = {
     "ai_editorial":    "AI Editorial",
-    "company_updates": "Company Updates",
+    "company_updates": "Domestic",
+    "domestic":        "Domestic",
     "global":          "Global",
     "ipo":             "IPO",
 }
