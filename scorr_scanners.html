@@ -98,8 +98,6 @@ td{padding:7px 10px;white-space:nowrap}
     <div class="tab on" onclick="sw('long')">LONG</div>
     <div class="tab" onclick="sw('short')">SHORT</div>
     <div class="tab" onclick="sw('watchlist')">Watchlist</div>
-    <div class="tab" onclick="sw('positional')">Positional</div>
-    <div class="tab" onclick="sw('investment')">Investment</div>
   </div>
 
   <!-- LONG -->
@@ -129,23 +127,6 @@ td{padding:7px 10px;white-space:nowrap}
     <div id="wl-tbl"><div class="empty">Loading...</div></div>
   </div>
 
-  <!-- POSITIONAL -->
-  <div class="panel" id="p-positional">
-    <div class="cs">
-      <big>&#8857;</big>
-      <b>Positional Scanner</b>
-      Coming soon — swing setups 1-5 days
-    </div>
-  </div>
-
-  <!-- INVESTMENT -->
-  <div class="panel" id="p-investment">
-    <div class="cs">
-      <big>&#9702;</big>
-      <b>Investment Scanner</b>
-      Coming soon — GVM quality stocks for buy-and-hold
-    </div>
-  </div>
 </div>
 <script>
 const pct=(v,d=2)=>v==null?'<span class="nt">--</span>':+v>=0?'<span class="up">+'+Math.abs(+v).toFixed(d)+'%</span>':'<span class="dn">'+((+v).toFixed(d))+'%</span>';
@@ -158,7 +139,7 @@ function basisCell(b,side){if(b==null)return'<td class="nt">--</td>';const good=
 const hhmm=s=>{if(!s)return'--';const m=String(s).match(/(\d{2}:\d{2})/);return m?m[1]:'--';};
 
 let at='long';
-const TABS=['long','short','watchlist','positional','investment'];
+const TABS=['long','short','watchlist'];
 const EP={long:'/api/scanners/intraday',short:'/api/scanners/intraday/short'};
 window._nm={};          // near-misses by side
 window._loaded={};      // which sides have loaded
