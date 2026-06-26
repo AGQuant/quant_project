@@ -1,5 +1,5 @@
 """
-V8 Signal Engine — Scorr
+V8 Signal Engine -- Scorr
 =========================
 Computes ~23 metrics per stock from raw_prices + gvm_scores,
 then writes pre-filtered signals to DB (compute-on-write architecture).
@@ -7,10 +7,10 @@ then writes pre-filtered signals to DB (compute-on-write architecture).
 Universe = futures_universe (is_active = TRUE)
 
 Tables written:
-  v8_metrics        — EOD metrics per symbol per day
-  v8_qualified      — stocks passing each basket's filters TODAY (live read source)
-  v8_signal_history — append-only archive of every signal ever generated (backtest source)
-  v8_funnel_counts  — waterfall step counts per basket per day (Sheet funnel display)
+  v8_metrics        -- EOD metrics per symbol per day
+  v8_qualified      -- stocks passing each basket's filters TODAY (live read source)
+  v8_signal_history -- append-only archive of every signal ever generated (backtest source)
+  v8_funnel_counts  -- waterfall step counts per basket per day (Sheet funnel display)
 
 Filter thresholds are CANONICAL in v8_endpoints.py (FILTER_CONFIG dict).
 This engine computes raw metrics + writes signals; v8_endpoints serves pure reads.
@@ -24,7 +24,7 @@ mom_2d formula (renamed from day_change 10-Jun-2026):
   NOTE: This is intentionally a 2-candle gap (T vs T-2), NOT a 1-day change.
         Renamed from 'day_change' to 'mom_2d' to remove naming confusion.
 
-day_1d / eod_chg (added 11-Jun-2026 — DISPLAY ONLY, never filters):
+day_1d / eod_chg (added 11-Jun-2026 -- DISPLAY ONLY, never filters):
   day_1d:  owned by v8_signal_writer. Live CMP vs yesterday's close = true intraday day change.
            EOD engine sets this to None (cannot compute today's return from raw_prices).
            Fix 18-Jun-2026: EOD must not overwrite signal_writer's live value.
@@ -38,9 +38,9 @@ store_metrics ON CONFLICT uses COALESCE for day_1d, mom_2d, sector_week, sector_
 SEGMENT_OVERRIDES (11-Jun-2026): symbols without a gvm_scores row get
   NIFTY50/BANKNIFTY -> 'Index', *BEES -> 'ETF'. Own bucket = no sector-average pollution.
 
-sector_week  = live avg week_return  of peers — computed by v8_signal_writer every 5-min
-sector_month = live avg month_return of peers — computed by v8_signal_writer every 5-min
-sector_day   = live avg mom_2d of peers      — computed by v8_signal_writer every 5-min
+sector_week  = live avg week_return  of peers -- computed by v8_signal_writer every 5-min
+sector_month = live avg month_return of peers -- computed by v8_signal_writer every 5-min
+sector_day   = live avg mom_2d of peers      -- computed by v8_signal_writer every 5-min
 """
 
 import logging
@@ -70,7 +70,7 @@ def _segment_override(symbol: str, segment: Optional[str]) -> Optional[str]:
     return segment
 
 # ============================================================
-# SCHEMA — V8-native (compute-on-write)
+# SCHEMA -- V8-native (compute-on-write)
 # ============================================================
 V8_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS v8_universe (
@@ -105,7 +105,7 @@ ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS day_1d NUMERIC;
 ALTER TABLE v8_metrics ADD COLUMN IF NOT EXISTS eod_chg NUMERIC;
 CREATE INDEX IF NOT EXISTS idx_v8_metrics_symbol_date ON v8_metrics(symbol, score_date DESC);
 
--- v8_qualified: live signals for today — overwritten on every engine run.
+-- v8_qualified: live signals for today -- overwritten on every engine run.
 -- API endpoints read this directly (pure SELECT). Never compute on read.
 CREATE TABLE IF NOT EXISTS v8_qualified (
     id SERIAL PRIMARY KEY,
@@ -251,7 +251,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if len(df) >= 21:  out["month_return"] = _safe_pct(latest_close, float(df["close"].iloc[-21]))
     if len(df) >= 5:   out["week_return"]  = _safe_pct(latest_close, float(df["close"].iloc[-5]))
 
-    # mom_2d: 2-day momentum (latest close vs close 2 days ago — iloc[-3])
+    # mom_2d: 2-day momentum (latest close vs close 2 days ago -- iloc[-3])
     if len(df) >= 3:
         base = float(df["close"].iloc[-3])
         if base > 0:
@@ -259,7 +259,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
 
     # day_1d / eod_chg: true 1-day change (latest close vs prior close).
     # EOD writes eod_chg only (frozen yesterday's return, correctly computable from raw_prices).
-    # day_1d is owned by signal_writer (live CMP vs yesterday) — EOD cannot compute today's return.
+    # day_1d is owned by signal_writer (live CMP vs yesterday) -- EOD cannot compute today's return.
     # Fix 18-Jun-2026: EOD must NOT set day_1d; signal_writer's value must survive the 15:45 run.
     if len(df) >= 2:
         base1 = float(df["close"].iloc[-2])
@@ -350,7 +350,7 @@ def store_metrics(conn, m: Dict):
 
 
 # ============================================================
-# SIGNAL WRITE — compute-on-write core
+# SIGNAL WRITE -- compute-on-write core
 # ============================================================
 
 def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source: str = 'eod'):
@@ -451,6 +451,32 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             except Exception as e:
                 log.warning(f"write_signals history {basket} {sym}: {e}")
 
+    # sell_overbought funnel (cc#98): SO is skipped in the loop above because its
+    # qualification uses pivot-based OR logic (5d high vs 0.9*R1/R2) that the simple
+    # FILTER_CONFIG funnel cannot express. Reuse the canonical, locked 5-stage helper
+    # in v8_endpoints (SO signal logic unchanged -- counting only) and write the same
+    # {metric: survivors} shape the other baskets store, so the dashboard SO tab renders.
+    # Gated to same-day EOD: the helper reads current-day metrics/pivots, so writing it
+    # under a historical replay date would be inaccurate -- skip in that case.
+    if target_date == date.today():
+        try:
+            from v8_endpoints import _so_funnel_stages
+            so_stages, _so_total = _so_funnel_stages()
+            so_counts = {st["metric"]: st["survivors"] for st in so_stages}
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                    VALUES ('sell_overbought', %s, %s)
+                    ON CONFLICT (basket, score_date) DO UPDATE SET
+                        counts=EXCLUDED.counts, computed_at=NOW()
+                """, (target_date, json.dumps(so_counts)))
+            conn.commit()
+            log.info(f"write_signals: sell_overbought funnel written {so_counts}")
+        except Exception as e:
+            log.warning(f"write_signals SO funnel: {e}")
+    else:
+        log.info(f"write_signals: skip SO funnel (target_date {target_date} != today)")
+
     log.info(f"write_signals done: date={target_date} source={source}")
 
 
@@ -495,7 +521,7 @@ def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> 
             results["errors"].append(f"{sym}: {str(e)[:80]}")
             log.warning(f"V8 engine error on {sym}: {e}")
 
-    # Pass 2: sector_week + sector_month — EOD peer avg by segment
+    # Pass 2: sector_week + sector_month -- EOD peer avg by segment
     # sector_week  = avg week_return  of peers in same segment
     # sector_month = avg month_return of peers in same segment
     # NOTE: These are also computed live by v8_signal_writer._update_sector_aggregates_sql.
