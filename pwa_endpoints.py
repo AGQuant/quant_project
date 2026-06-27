@@ -4,7 +4,7 @@ Mounted in main.py via: app.include_router(pwa_router)
 
 Serves everything the PWA needs from the app itself (no StaticFiles mount, no
 committed binary assets):
-  GET /app                    -> mobile home (scorr_mobile.html)
+  GET /app                    -> 302 redirect to / (canonical home; cc#100)
   GET /pwa.js                 -> client bootstrap: manifest link, SW register,
                                  mobile bottom-nav, install prompt
   GET /service_worker.js      -> service worker (served from ROOT so its scope is
@@ -20,7 +20,7 @@ HTML to add the logout button) — so no existing page file is edited.
 import zlib
 import struct
 from fastapi import APIRouter
-from fastapi.responses import Response, JSONResponse, HTMLResponse
+from fastapi.responses import Response, JSONResponse, HTMLResponse, RedirectResponse
 
 router = APIRouter(tags=["pwa"])
 
@@ -76,7 +76,7 @@ MANIFEST = {
     "name": "Scorr — Invest Like an Institution",
     "short_name": "Scorr",
     "description": "AI-powered market intelligence. GVM scores, V8 signals, Trade Check.",
-    "start_url": "/app",
+    "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
     "theme_color": "#2563eb",
@@ -90,8 +90,8 @@ MANIFEST = {
 
 # ── service worker (cache shell for offline /app; API always network-only) ──
 SW_JS = """
-const CACHE = 'scorr-pwa-v1';
-const SHELL = ['/app', '/pwa.js', '/static/manifest.json',
+const CACHE = 'scorr-pwa-v2';
+const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -115,7 +115,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/')) return;
   // Navigations: network-first, fall back to cached /app shell when offline.
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('/app')));
+    e.respondWith(fetch(req).catch(() => caches.match('/')));
     return;
   }
   // Static shell assets: cache-first.
@@ -185,7 +185,7 @@ PWA_JS = """
   if (!document.getElementById('pwa-mobile-nav')) {
     var path = location.pathname;
     var items = [
-      ['/app', '\\u2302', 'Home'],
+      ['/', '\\u2302', 'Home'],
       ['/cio2?model=gvm', '\\u25ce', 'GVM'],
       ['/check', '\\u2713', 'Check'],
       ['/news', '\\u2605', 'Intel'],
@@ -203,7 +203,7 @@ PWA_JS = """
   }
 
   // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637):
-  //    normalize #scorr-nav on every injected page to the same 11 items, Intel label,
+  //    normalize #scorr-nav on every injected page to the same 12 items, Intel label,
   //    active-by-path. Removes per-page nav drift. Hidden on mobile (bottom nav used).
   if (!document.getElementById('scorr-cnav-style')) {
     var ncss = ''
@@ -235,6 +235,7 @@ PWA_JS = """
       ['/cio', '\\u2299', 'Max'],
       ['/fpc', '\\u25e7', 'FPC'],
       ['/quant-basket', '\\u25eb', 'QB'],
+      ['/holdings', '\\u25c6', 'Holdings'],
       ['/v10', '\\u25b3', 'V10']
     ];
     var p = location.pathname, qs = location.search;
@@ -308,10 +309,11 @@ PWA_JS = """
 _NOCACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
-@router.get("/app", response_class=HTMLResponse)
+@router.get("/app")
 def pwa_home():
-    with open("scorr_mobile.html", "r", encoding="utf-8") as f:
-        return f.read()
+    # cc#100: canonical home unified to "/" (scorr_home.html). /app kept as a
+    # redirect so existing PWA installs / bookmarks land on the single home route.
+    return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/pwa.js")
