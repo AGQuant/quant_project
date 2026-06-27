@@ -93,6 +93,27 @@ def _published_at(entry):
 _JUNK_DESC = ("&nbsp;", "NSE/BSE", "Share Price", "Option Chain")
 _JUNK_HEAD = ("AD HOC", "Share Price", "Option Chain")
 
+# -- Bloomberg RSS relevance gate (task #101) -- Bloomberg's feed dumps TV-show
+#    clips, sports, lifestyle and food-brand pieces into raw_news. For Bloomberg
+#    sources only: reject known show/segment headlines, and require at least one
+#    market/financial keyword in headline+description. --------------------------
+_BLOOMBERG_NOISE_PATTERNS = (
+    "closing bell", "bloomberg money", "bloomberg surveillance",
+    "masters in business", "bloomberg quicktake", "odd lots",
+    "bloomberg businessweek", "bloomberg law", "bloomberg markets",
+    "bloomberg technology", "bloomberg open interest",
+)
+_BLOOMBERG_REQUIRED_KEYWORDS = (
+    "market", "stock", "equity", "index", "indices", "rate", "rates", "yield",
+    "fed", "federal reserve", "inflation", "gdp", "recession", "economy",
+    "economic", "india", "nifty", "sensex", "rbi", "rupee", "inr", "fpi", "fii",
+    "emerging market", "oil", "crude", "gold", "silver", "commodity", "bitcoin",
+    "fund", "etf", "ipo", "merger", "acquisition", "earnings", "profit",
+    "revenue", "bank", "hedge", "private equity", "venture", "valuation", "ai",
+    "chip", "semiconductor", "tech", "technology", "tariff", "trade", "sanction",
+    "supply chain", "wall street",
+)
+
 
 def _non_latin_dominant(text: str) -> bool:
     """True if >30% of the alphabetic chars are outside Latin (Unicode > U+024F)."""
@@ -103,7 +124,7 @@ def _non_latin_dominant(text: str) -> bool:
     return non_latin / len(letters) > 0.30
 
 
-def _is_quality_article(headline: str, description: str) -> bool:
+def _is_quality_article(headline: str, description: str, source_name: str = None) -> bool:
     """Reject low-quality articles before they enter raw_news (task #54)."""
     h = headline or ""
     d = description or ""
@@ -117,6 +138,14 @@ def _is_quality_article(headline: str, description: str) -> bool:
         return False
     if _non_latin_dominant(h) or _non_latin_dominant(d):
         return False
+    # task #101 -- Bloomberg-only relevance gate
+    if source_name and "bloomberg" in source_name.lower():
+        h_low = h.lower()
+        if any(p in h_low for p in _BLOOMBERG_NOISE_PATTERNS):
+            return False
+        combined = (h + d).lower()
+        if not any(kw in combined for kw in _BLOOMBERG_REQUIRED_KEYWORDS):
+            return False
     return True
 
 
@@ -168,7 +197,7 @@ def _insert_rows(conn, rows) -> int:
     skipped = 0
     with conn.cursor() as cur:
         for r in rows:
-            if not _is_quality_article(r[2], r[3]):   # r[2]=headline, r[3]=description
+            if not _is_quality_article(r[2], r[3], r[6]):   # r[2]=headline, r[3]=desc, r[6]=source_name
                 skipped += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
