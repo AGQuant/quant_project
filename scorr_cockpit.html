@@ -38,7 +38,32 @@
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
   .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
 
-  .app{display:flex;flex-direction:column;height:calc(100vh - 46px);max-width:880px;margin:0 auto}
+  .app{display:flex;flex-direction:column;height:calc(100vh - 46px);max-width:880px;margin:0 auto;width:100%;transition:max-width .2s}
+  .app.chatting{max-width:1180px}
+
+  /* split: left quick-access panel + right conversation (active only during chat) */
+  .content{flex:1;display:flex;min-height:0;overflow:hidden}
+  .conv{flex:1;display:flex;flex-direction:column;min-width:0}
+  .quickpanel{display:none;width:220px;flex-shrink:0;background:var(--panel);
+    border-right:1px solid var(--line);overflow-y:auto;padding:10px 10px 30px;scrollbar-width:thin}
+  .app.chatting .quickpanel{display:block}
+  .quickpanel::-webkit-scrollbar{width:4px}
+  .quickpanel::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  .qp-head{font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;
+    letter-spacing:1.5px;padding:12px 8px 5px}
+  .qp-head:first-child{padding-top:4px}
+  .qp-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;
+    cursor:pointer;transition:.1s;user-select:none}
+  .qp-item:hover{background:var(--cyan-d)}
+  .qp-ic{font-size:13px;color:var(--cyan);width:16px;text-align:center;flex-shrink:0;line-height:1}
+  .qp-lb{font-size:12px;font-weight:500;color:var(--txt);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .qp-item:hover .qp-lb{color:var(--cyan)}
+
+  @media(max-width:768px){
+    .app.chatting{max-width:880px}
+    .app.chatting .quickpanel{display:none}
+  }
 
   .head{display:flex;align-items:center;gap:12px;padding:14px 18px 10px;flex-shrink:0}
   .h-brand{display:flex;flex-direction:column}
@@ -64,17 +89,6 @@
   .mode-pill[data-mode="native"].on{background:#0a9e63}
   .mode-pill[data-mode="haiku"].on{background:#2563eb}
   .mode-pill[data-mode="gemini"].on{background:#b45309}
-
-  .recent{display:none;align-items:center;gap:6px;padding:0 18px 10px;flex-shrink:0;overflow-x:auto;scrollbar-width:none}
-  .recent::-webkit-scrollbar{display:none}
-  .recent.show{display:flex}
-  .recent-label{font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:1.5px;
-    flex-shrink:0;font-weight:700}
-  .recent-chip{padding:4px 10px;border-radius:14px;border:1px solid var(--line);
-    background:var(--panel);color:var(--mut);cursor:pointer;font-size:11px;
-    white-space:nowrap;transition:.12s;font-weight:500;max-width:200px;
-    overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
-  .recent-chip:hover{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-d)}
 
   .welcome{flex:1;overflow-y:auto;padding:8px 18px 20px;display:flex;flex-direction:column;gap:18px}
   .welcome::-webkit-scrollbar{width:4px}
@@ -170,31 +184,6 @@
 
   .input-wrap{border-top:1px solid var(--line);background:var(--panel);
     padding:10px 14px;flex-shrink:0;position:relative}
-  .suggest-drop{display:none;position:absolute;bottom:calc(100% + 6px);left:14px;right:14px;
-    background:var(--panel);border:1px solid var(--line2);border-radius:10px;
-    box-shadow:var(--shadow-md);overflow:hidden;z-index:20;max-height:280px;overflow-y:auto}
-  .suggest-drop.show{display:block}
-  .suggest-drop::-webkit-scrollbar{width:4px}
-  .suggest-drop::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
-  .sg-section{font-size:9px;font-weight:700;color:var(--dim);text-transform:uppercase;
-    letter-spacing:1.5px;padding:8px 14px 4px;background:var(--bg2);border-bottom:1px solid var(--line)}
-  .sg-item{display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;
-    border-bottom:1px solid var(--line);transition:.1s}
-  .sg-item:last-child{border-bottom:none}
-  .sg-item:hover,.sg-item.sel{background:var(--panel2)}
-  .sg-ic{width:24px;height:24px;background:var(--panel2);border-radius:6px;
-    display:flex;align-items:center;justify-content:center;font-size:12px;
-    color:var(--cyan);flex-shrink:0}
-  .sg-info{flex:1;min-width:0}
-  .sg-label{font-size:12px;font-weight:600;color:var(--txt);
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .sg-cat{font-size:9.5px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
-  .sg-stk{display:flex;align-items:baseline;gap:8px;flex:1;min-width:0}
-  .sg-sym{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--txt);min-width:70px}
-  .sg-name{font-size:10.5px;color:var(--mut);flex:1;overflow:hidden;
-    white-space:nowrap;text-overflow:ellipsis}
-  .sg-gvm{font-size:9.5px;font-weight:700;color:var(--cyan);background:var(--cyan-d);
-    padding:1px 6px;border-radius:4px;flex-shrink:0}
 
   .input-row{display:flex;gap:8px;align-items:flex-end}
   #q{flex:1;background:var(--bg);border:1.5px solid var(--line2);border-radius:9px;
@@ -236,7 +225,7 @@
   <a class="mnav-item" href="/v10"><span>&#9651;</span>V10</a>
 </nav>
 
-<div class="app">
+<div class="app" id="app">
   <div class="head">
     <div class="h-brand">
       <div class="h-title">
@@ -256,9 +245,9 @@
     </div>
   </div>
 
-  <div class="recent" id="recent">
-    <span class="recent-label">Recent</span>
-  </div>
+  <div class="content">
+  <aside class="quickpanel" id="quickPanel"></aside>
+  <div class="conv">
 
   <div class="welcome" id="welcome">
     <div class="w-hero">
@@ -286,23 +275,22 @@
   </div>
 
   <div class="input-wrap">
-    <div class="suggest-drop" id="suggestDrop"></div>
     <div class="input-row">
-      <textarea id="q" rows="1" placeholder="Type a stock, query, or question — Max suggests as you type…"></textarea>
+      <textarea id="q" rows="1" placeholder="Type a stock, query, or question…"></textarea>
       <button class="send-btn" id="sendBtn" onclick="send()">Send</button>
     </div>
   </div>
+
+  </div><!-- /.conv -->
+  </div><!-- /.content -->
 </div>
 
 <script>
 const API='/api/scorr/chat', USER_KEY='scorr_arpit', STORE='scorr_max_v9';
 const SONNET='claude-sonnet-4-6', MAX_TOKENS=3000, BUDGET=0.05;
-const MAX_RECENT=6;
 
 let mode='haiku', totalCost=0, busy=false, currentController=null;
 let history=[];
-let recentQueries=[];
-let sgSel=-1, sgItems=[], sgTimer=null, acAbort=null;
 
 const CARDS=[
   {id:'v8-dash', cat:'V8 Signals', icon:'⚡', label:'V8 Dashboard', desc:'Live signals, baskets, slot allocation',
@@ -454,6 +442,29 @@ function renderWelcome(){
   }
 }
 
+// Left quick-access panel (active chat only) — same cards as the home grid,
+// compact rows; clicking a row sends that query immediately (via runCard).
+function qpSection(title,items){
+  const wrap=document.createElement('div');
+  const h=document.createElement('div');h.className='qp-head';h.textContent=title;wrap.appendChild(h);
+  items.forEach(c=>{
+    const it=document.createElement('div');it.className='qp-item';it.title=c.desc||c.cat;
+    it.innerHTML=`<span class="qp-ic">${c.icon}</span><span class="qp-lb">${c.label}</span>`;
+    it.onclick=()=>runCard(c);
+    wrap.appendChild(it);
+  });
+  return wrap;
+}
+function renderQuickPanel(){
+  const root=document.getElementById('quickPanel');if(!root)return;root.innerHTML='';
+  const quick=MOST_USED.map(id=>CARDS.find(c=>c.id===id)).filter(Boolean);
+  if(quick.length)root.appendChild(qpSection('Quick Access',quick));
+  for(const cat of CAT_ORDER){
+    const items=CARDS.filter(c=>c.cat===cat);
+    if(items.length)root.appendChild(qpSection(cat,items));
+  }
+}
+
 function filterChips(q){
   const root=document.getElementById('catSections');
   q=(q||'').trim();
@@ -480,33 +491,7 @@ function runCard(c){
   send();
 }
 
-function searchCards(q){
-  if(!q||q.length<2)return[];
-  const ql=q.toLowerCase().trim().replace(/[^a-z0-9\s]/g,' ');
-  const words=ql.split(/\s+/).filter(w=>w.length>=2);
-  if(!words.length)return[];
-
-  const scored=CARDS.map(c=>{
-    const bag=(c.label+' '+c.desc+' '+c.kw.join(' ')+' '+c.cat).toLowerCase();
-    let s=0;
-    if(bag.includes(ql))s+=10;
-    for(const w of words){
-      if(bag.includes(w))s+=3;
-      else if(w.length>=4){
-        const stem=w.slice(0,4);
-        if(bag.includes(stem))s+=1;
-        const stem2=w.slice(-4);
-        if(bag.includes(stem2))s+=1;
-      } else if(w.length===3){
-        if(bag.includes(w.slice(0,3)))s+=1;
-      }
-    }
-    return {c,s};
-  }).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,6);
-  return scored.map(x=>x.c);
-}
-
-// Uncapped variant for the welcome chip filter (shows all matches, not just 6).
+// Card search for the welcome (home) chip filter — shows all matches.
 function searchCardsAll(q){
   if(!q||q.length<1)return[];
   const ql=q.toLowerCase().trim().replace(/[^a-z0-9\s]/g,' ');
@@ -525,101 +510,6 @@ function searchCardsAll(q){
   return scored.map(x=>x.c);
 }
 
-async function searchStocks(q){
-  if(acAbort)acAbort.abort();
-  acAbort=new AbortController();
-  try{
-    const r=await fetch(`/api/gvm/search?q=${encodeURIComponent(q)}&limit=4`,{signal:acAbort.signal});
-    if(!r.ok)return[];
-    const d=await r.json();
-    return(d.results||d||[]).slice(0,4);
-  }catch(e){return[];}
-}
-
-async function updateSuggest(){
-  const v=document.getElementById('q').value.trim();
-  const drop=document.getElementById('suggestDrop');
-  if(v.length<2){drop.classList.remove('show');sgItems=[];return;}
-
-  const cards=searchCards(v);
-  const stocks=await searchStocks(v);
-
-  sgItems=[];let html='';
-  if(cards.length){
-    html+='<div class="sg-section">Actions</div>';
-    cards.forEach(c=>{
-      sgItems.push({type:'card',data:c});
-      html+=`<div class="sg-item" data-idx="${sgItems.length-1}">
-        <div class="sg-ic">${c.icon}</div>
-        <div class="sg-info">
-          <div class="sg-label">${c.label}</div>
-          <div class="sg-cat">${c.cat}</div>
-        </div></div>`;
-    });
-  }
-  if(stocks.length){
-    html+='<div class="sg-section">Stocks</div>';
-    stocks.forEach(s=>{
-      sgItems.push({type:'stock',data:s});
-      const gvm=s.gvm_score!=null?parseFloat(s.gvm_score).toFixed(1):null;
-      html+=`<div class="sg-item" data-idx="${sgItems.length-1}">
-        <div class="sg-stk">
-          <span class="sg-sym">${s.symbol||s.nse_code||''}</span>
-          <span class="sg-name">${s.company_name||s.name||''}</span>
-        </div>
-        ${gvm?`<span class="sg-gvm">GVM ${gvm}</span>`:''}
-      </div>`;
-    });
-  }
-
-  if(!sgItems.length){drop.classList.remove('show');return;}
-  drop.innerHTML=html;drop.classList.add('show');sgSel=-1;
-  drop.querySelectorAll('.sg-item').forEach(el=>{
-    el.onmousedown=e=>{e.preventDefault();pickSg(parseInt(el.dataset.idx));};
-  });
-}
-
-function pickSg(idx){
-  const it=sgItems[idx];if(!it)return;
-  closeSuggest();
-  if(it.type==='card'){
-    runCard(it.data);
-  } else {
-    const sym=(it.data.symbol||it.data.nse_code||'').toUpperCase();
-    document.getElementById('q').value=`trade check ${sym} long`;
-    send();
-  }
-}
-function closeSuggest(){document.getElementById('suggestDrop').classList.remove('show');sgSel=-1;}
-function moveSg(dir){
-  const items=document.querySelectorAll('.sg-item');
-  if(!items.length)return;
-  if(sgSel>=0)items[sgSel].classList.remove('sel');
-  sgSel=Math.max(0,Math.min(items.length-1,(sgSel<0?-1:sgSel)+dir));
-  items[sgSel].classList.add('sel');
-  items[sgSel].scrollIntoView({block:'nearest'});
-}
-
-function pushRecent(text){
-  recentQueries=recentQueries.filter(t=>t!==text);
-  recentQueries.unshift(text);
-  recentQueries=recentQueries.slice(0,MAX_RECENT);
-  saveLocal();
-  renderRecent();
-}
-function renderRecent(){
-  const el=document.getElementById('recent');
-  if(!recentQueries.length){el.classList.remove('show');return;}
-  el.classList.add('show');
-  el.innerHTML='<span class="recent-label">Recent</span>';
-  recentQueries.forEach(t=>{
-    const b=document.createElement('button');b.className='recent-chip';
-    b.textContent=t.length>40?t.slice(0,40)+'…':t;b.title=t;
-    b.onclick=()=>{document.getElementById('q').value=t;send();};
-    el.appendChild(b);
-  });
-}
-
 const MODE_LABELS={native:'Native $0 · Native',haiku:'Native $0 · Haiku 4.5',gemini:'Native $0 · Gemini Flash'};
 function setMode(m){mode=m;applyMode();saveLocal();}
 function applyMode(){
@@ -632,6 +522,7 @@ function clearChat(){
   history=[];totalCost=0;
   document.getElementById('msgs').innerHTML='';
   document.getElementById('msgs').classList.remove('show');
+  document.getElementById('app').classList.remove('chatting');
   document.getElementById('welcome').style.display='flex';
   document.getElementById('costLabel').textContent='Session: $0.000000';
   saveLocal();
@@ -667,6 +558,7 @@ function fmt(text){const lines=text.split('\n');let html='',i=0,lt=null,lb=[];
 function addMsg(role,content,meta){
   const msgs=document.getElementById('msgs');msgs.classList.add('show');
   document.getElementById('welcome').style.display='none';
+  document.getElementById('app').classList.add('chatting');
   const d=document.createElement('div');d.className='msg '+role;
   const bc=role==='bot'?`<div class="md">${fmt(content)}</div>`:esc(content);
   const toolsHtml=meta?.tools?.length?`<div class="tools-used">${meta.tools.map(t=>`<span class="tool-badge">⚙ ${t.name}</span>`).join('')}</div>`:'';
@@ -677,11 +569,11 @@ function addMsg(role,content,meta){
 }
 
 function saveLocal(){try{localStorage.setItem(STORE,JSON.stringify({
-  history,recentQueries,mode,totalCost
+  history,mode,totalCost
 }));}catch(e){}}
 function loadLocal(){try{const r=localStorage.getItem(STORE);
   if(r){const s=JSON.parse(r);
-    history=s.history||[];recentQueries=s.recentQueries||[];
+    history=s.history||[];
     if(s.mode!==undefined)mode=s.mode;
     totalCost=s.totalCost||0;
   }}catch(e){}}
@@ -695,12 +587,10 @@ async function dbPersist(){
 }
 
 async function send(){
-  closeSuggest();
   const inp=document.getElementById('q'),text=inp.value.trim();
   if(!text||busy)return;busy=true;
   document.getElementById('sendBtn').disabled=true;
 
-  pushRecent(text);
   addMsg('user',text);
   history.push({role:'user',content:text});
   inp.value='';inp.style.height='auto';
@@ -736,20 +626,10 @@ async function send(){
 const qEl=document.getElementById('q');
 qEl.addEventListener('input',function(){
   this.style.height='auto';this.style.height=Math.min(this.scrollHeight,110)+'px';
-  clearTimeout(sgTimer);sgTimer=setTimeout(updateSuggest,180);
 });
 qEl.addEventListener('keydown',function(e){
-  const dropOpen=document.getElementById('suggestDrop').classList.contains('show');
-  if(e.key==='ArrowDown'&&dropOpen){e.preventDefault();moveSg(1);}
-  else if(e.key==='ArrowUp'&&dropOpen){e.preventDefault();moveSg(-1);}
-  else if(e.key==='Enter'&&!e.shiftKey){
-    e.preventDefault();
-    if(dropOpen&&sgSel>=0){pickSg(sgSel);}
-    else{send();}
-  }
-  else if(e.key==='Escape'){closeSuggest();}
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}
 });
-document.addEventListener('click',e=>{if(!e.target.closest('.input-wrap'))closeSuggest();});
 
 async function checkHealth(){
   try{const r=await fetch('/api/scorr/chat/health');const d=await r.json();
@@ -759,7 +639,7 @@ async function checkHealth(){
 }
 
 (async function(){
-  loadLocal();applyMode();renderWelcome();renderRecent();
+  loadLocal();applyMode();renderWelcome();renderQuickPanel();
   const csEl=document.getElementById('chipSearch');
   if(csEl){
     csEl.addEventListener('input',function(){filterChips(this.value);});
