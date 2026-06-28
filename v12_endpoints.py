@@ -16,6 +16,7 @@ import os
 from typing import Optional, List
 import psycopg
 from fastapi import APIRouter, Query
+from fastapi.responses import HTMLResponse
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -233,3 +234,10 @@ def v12_filters_meta():
     out["tc_verdicts"] = ["STRONG", "VALID", "WATCH"]
     out["tc_sides"] = ["LONG", "SHORT"]
     return out
+
+
+@router.get("/screener", response_class=HTMLResponse)
+def screener_page():
+    """V12 screener frontend (CC_TASK_106). Auth-gated via PROTECTED in main.py middleware."""
+    with open("screener.html", "r", encoding="utf-8") as f:
+        return f.read()
