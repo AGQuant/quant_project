@@ -12,14 +12,17 @@ from fastapi import APIRouter, HTTPException
 from native_router import route_native
 from pydantic import BaseModel
 from typing import Optional, List, Any
-import os, time, httpx, re
+import os, time, httpx, re, asyncio
+import psycopg
 
 router = APIRouter()
 
-APP_VERSION = "max-v6-2026-06-10"   # bump every push — instant deploy verification
+APP_VERSION = "max-v7-2026-06-28"   # bump every push — instant deploy verification (cc#108 mode selector)
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ADMIN_TOKEN       = os.getenv("ADMIN_TOKEN", "")
+GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY")
+DATABASE_URL      = os.getenv("DATABASE_URL", "")
 BASE_URL          = os.getenv("RAILWAY_PUBLIC_DOMAIN", "quantproject-production.up.railway.app")
 if not BASE_URL.startswith("http"):
     BASE_URL = f"https://{BASE_URL}"
@@ -27,6 +30,7 @@ MCP_URL = f"{BASE_URL}/mcp"
 
 SONNET_MODEL       = "claude-sonnet-4-6"
 HAIKU_MODEL        = "claude-haiku-4-5-20251001"
+GEMINI_MODEL       = "gemini-2.5-flash-lite"
 DEFAULT_MODEL      = SONNET_MODEL
 DEFAULT_MAX_TOKENS = 3000
 HARD_MAX_TOKENS    = 4096
@@ -94,6 +98,7 @@ class ScorrChatRequest(BaseModel):
     max_tokens:     Optional[int]   = DEFAULT_MAX_TOKENS
     use_tools:      Optional[bool]  = True
     claude_on:      Optional[bool]  = True
+    mode:           Optional[str]   = None   # cc#108: native | haiku | gemini
     budget_cap_usd: Optional[float] = BUDGET_CAP_DEFAULT
 
 
@@ -107,8 +112,163 @@ async def fetch_url(url: str) -> str:
         return f"Error fetching URL: {str(e)}"
 
 
+# ── cc#108: lightweight 3-mode selector (native | haiku | gemini) ──────────────
+LIGHT_SYSTEM = (
+    "You are Max, Arpit\'s AI Chief Investment Officer on Scorr. Answer using the DB "
+    "CONTEXT provided. Be concise, precise, analytical; use tables for data; all times IST. "
+    "Never fabricate numbers not in the context. If the context has no matching rows, say so "
+    "and answer from general knowledge only if clearly flagged."
+)
+
+
+def _q(sql, params=()):
+    with psycopg.connect(DATABASE_URL) as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _fmt(rows, title):
+    if not rows:
+        return ""
+    out = [title + ":"]
+    for r in rows:
+        out.append("  - " + ", ".join(f"{k}={v}" for k, v in r.items() if v is not None))
+    return "\n".join(out)
+
+
+def _db_context(query):
+    """Keyword-driven DB prefetch (mirrors /test-cio) -> plain-text context block."""
+    ql = (query or "").lower()
+    blocks = []
+    toks = re.findall(r"[A-Za-z]{3,}", query or "")
+    stop = {"the", "what", "show", "today", "todays", "which", "score", "gvm", "stock", "stocks",
+            "give", "tell", "about", "for", "and", "with", "sector", "strongest", "signals",
+            "market", "mood", "bank", "max", "cio", "give", "list"}
+    cand = [t for t in toks if t.lower() not in stop]
+    if cand:
+        try:
+            rows = _q("""SELECT symbol, company_name, gvm_score, verdict, g_score, v_score, m_score, segment
+                         FROM gvm_scores
+                         WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                           AND (UPPER(symbol)=ANY(%s) OR company_name ILIKE ANY(%s))
+                         ORDER BY gvm_score DESC NULLS LAST LIMIT 5""",
+                      ([t.upper() for t in cand], [f"%{t}%" for t in cand]))
+            b = _fmt(rows, "GVM data")
+            if b:
+                blocks.append(b)
+        except Exception:
+            pass
+    if any(k in ql for k in ("v8", "signal", "trade", "qualified", "today")):
+        try:
+            rows = _q("""SELECT symbol, basket, cmp, gvm_score, signal_ts FROM v8_qualified
+                         WHERE signal_date=CURRENT_DATE ORDER BY gvm_score DESC NULLS LAST LIMIT 10""")
+            b = _fmt(rows, "V8 qualified signals today")
+            if b:
+                blocks.append(b)
+        except Exception:
+            pass
+    if any(k in ql for k in ("sector", "strongest", "rotation", "industry")):
+        try:
+            rows = _q("""SELECT segment, mcap_weighted_gvm, verdict FROM sector_ratings
+                         WHERE score_date=(SELECT MAX(score_date) FROM sector_ratings)
+                         ORDER BY mcap_weighted_gvm DESC NULLS LAST LIMIT 10""")
+            b = _fmt(rows, "Sector ratings (mcap-weighted GVM)")
+            if b:
+                blocks.append(b)
+        except Exception:
+            pass
+    return "\n\n".join(blocks)
+
+
+async def _call_haiku(system, user):
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post("https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": HAIKU_MODEL, "max_tokens": 1200, "system": system,
+                  "messages": [{"role": "user", "content": user}]})
+        r.raise_for_status()
+        d = r.json()
+    text = "".join(b.get("text", "") for b in (d.get("content") or []) if b.get("type") == "text")
+    u = d.get("usage") or {}
+    return text, u.get("input_tokens", 0) or 0, u.get("output_tokens", 0) or 0
+
+
+async def _call_gemini(system, user, grounded=False):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    body = {"system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200}}
+    if grounded:
+        body["tools"] = [{"google_search": {}}]
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(url, json=body)
+        r.raise_for_status()
+        d = r.json()
+    text = ""
+    cand = d.get("candidates") or []
+    if cand:
+        parts = (cand[0].get("content") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts)
+    um = d.get("usageMetadata") or {}
+    return text, um.get("promptTokenCount", 0) or 0, um.get("candidatesTokenCount", 0) or 0
+
+
+async def _mode_route(mode, query_text):
+    t0 = time.time()
+    if mode == "native":
+        reply = await route_native(query_text)
+        return {"reply": reply, "tool_calls": [], "model": None, "stop_reason": "native",
+                "usage": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+                "duration_ms": round((time.time() - t0) * 1000, 1)}
+
+    context = await asyncio.to_thread(_db_context, query_text)
+    has_ctx = bool(context.strip())
+    user = (f"DB CONTEXT:\n{context}\n\n" if has_ctx else "DB CONTEXT: (no matching rows)\n\n") + f"USER QUESTION: {query_text}"
+    model_used = None
+    try:
+        if mode == "haiku":
+            if not ANTHROPIC_API_KEY:
+                raise RuntimeError("ANTHROPIC_API_KEY not set")
+            reply, tin, tout = await _call_haiku(LIGHT_SYSTEM, user)
+            cost = round((tin * 1.0 + tout * 5.0) / 1_000_000, 6)
+            model_used = HAIKU_MODEL
+        else:  # gemini
+            if not GEMINI_API_KEY:
+                raise RuntimeError("GEMINI_API_KEY not set")
+            reply, tin, tout = await _call_gemini(LIGHT_SYSTEM, user, grounded=not has_ctx)
+            cost = round((tin * 0.1 + tout * 0.4) / 1_000_000, 6)
+            model_used = GEMINI_MODEL
+    except Exception as e:
+        # cc#108: if gemini fails, silently fall back to haiku (UI keeps Gemini label)
+        if mode == "gemini" and ANTHROPIC_API_KEY:
+            try:
+                reply, tin, tout = await _call_haiku(LIGHT_SYSTEM, user)
+                cost = round((tin * 1.0 + tout * 5.0) / 1_000_000, 6)
+                model_used = HAIKU_MODEL + " (gemini-fallback)"
+            except Exception as e2:
+                return {"reply": f"Error ({mode}): {e2}", "tool_calls": [], "model": None,
+                        "stop_reason": "error", "usage": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+                        "duration_ms": round((time.time() - t0) * 1000, 1)}
+        else:
+            return {"reply": f"Error ({mode}): {e}", "tool_calls": [], "model": None,
+                    "stop_reason": "error", "usage": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+                    "duration_ms": round((time.time() - t0) * 1000, 1)}
+    return {"reply": reply, "tool_calls": [], "model": model_used, "stop_reason": mode,
+            "usage": {"input_tokens": tin, "output_tokens": tout, "cost_usd": cost},
+            "duration_ms": round((time.time() - t0) * 1000, 1)}
+
+
 @router.post("/api/scorr/chat")
 async def scorr_chat(req: ScorrChatRequest):
+
+    # ── cc#108: 3-mode selector — native | haiku | gemini ──
+    _mode = (req.mode or "").strip().lower()
+    if _mode in ("native", "haiku", "gemini"):
+        _last = req.messages[-1].content if req.messages else ""
+        _qt = _last if isinstance(_last, str) else str(_last)
+        return await _mode_route(_mode, _qt)
 
     # ── Native path: Claude OFF — real DB query, zero tokens ──────
     if not req.claude_on:
@@ -212,5 +372,5 @@ def scorr_chat_health():
         "budget_cap_usd":        BUDGET_CAP_DEFAULT,
         "max_tokens_default":    DEFAULT_MAX_TOKENS,
         "features": ["image_paste", "file_upload", "url_fetch", "claude_toggle",
-                     "budget_cap", "native_router", "stop_button", "localStorage_persistence"],
+                     "budget_cap", "native_router", "stop_button", "localStorage_persistence", "mode_selector"],
     }
