@@ -3,81 +3,94 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Scorr - Screener</title>
+<title>Scorr - V12 Screener</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
+:root{--green:#0a9e63;--blue:#2563eb;--gold:#b45309;--red:#dd3a4a;--bg:#f7f8fc;--ink:#1c2536;--grey:#8a94a6}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);font-size:13px;display:flex;flex-direction:column}
 /* -- Canonical Scorr model-nav -- */
-.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06);flex-shrink:0}
 .model-nav::-webkit-scrollbar{display:none}
 .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
 .mnav-item:hover{color:#1c2536}
-.mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+.mnav-item.active{border-bottom-color:var(--blue);color:var(--blue)}
 .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
-.page{max-width:1240px;margin:0 auto;padding:14px 12px}
-.h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
-.h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
-.filterbtn{display:none;width:100%;padding:11px;border:1px solid #e4e9f1;background:#fff;border-radius:8px;font-size:13px;font-weight:700;color:#2563eb;cursor:pointer;margin-bottom:12px;font-family:inherit}
-.panel{background:#fff;border:1px solid #e4e9f1;border-radius:10px;padding:14px;margin-bottom:14px}
-.frow{display:flex;flex-wrap:wrap;gap:14px}
-.fld{display:flex;flex-direction:column;gap:5px;min-width:150px}
-.fld>label{font-size:10.5px;font-weight:700;color:#5a6781;text-transform:uppercase;letter-spacing:.04em}
-.rng{display:flex;align-items:center;gap:6px}
-.rng input[type=range]{flex:1;accent-color:#2563eb}
-.rng .v{font-size:11px;font-weight:700;color:#1c2536;min-width:54px;text-align:right;font-variant-numeric:tabular-nums}
-input[type=number]{width:90px;padding:6px 8px;border:1px solid #d4dbe7;border-radius:6px;font-size:12px;font-family:inherit;outline:none}
-input[type=number]:focus{border-color:#2563eb}
-.nums{display:flex;align-items:center;gap:6px}
+
+/* -- two-column shell -- */
+.shell{flex:1;display:flex;min-height:0;overflow:hidden}
+.fpanel{width:280px;flex-shrink:0;background:#fff;border-right:1px solid #e9edf4;overflow-y:auto;padding:16px 16px 40px;scrollbar-width:thin}
+.rpanel{flex:1;min-width:0;overflow-y:auto;padding:20px 22px 60px;display:flex;flex-direction:column}
+
+/* filter panel head */
+.fhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.fhead .ttl{font-size:11px;font-weight:800;letter-spacing:.1em;color:var(--grey);text-transform:uppercase}
+.reset{font-size:11px;font-weight:700;color:var(--blue);cursor:pointer;text-decoration:none}
+.reset:hover{text-decoration:underline}
+
+/* each filter block */
+.fb{padding:13px 0;border-top:1px solid #f1f4f9}
+.fb:first-of-type{border-top:none}
+.fb>.lab{font-size:10px;font-weight:700;color:var(--grey);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:block}
+.rng{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.rng:last-child{margin-bottom:0}
+.rng input[type=range]{flex:1;accent-color:var(--blue);height:3px}
+.rng .v{font-size:11px;font-weight:700;color:var(--ink);min-width:38px;text-align:right;font-variant-numeric:tabular-nums}
+.rng .e{font-size:9.5px;color:var(--grey);width:26px;font-weight:600}
 .pills{display:flex;flex-wrap:wrap;gap:6px}
-.pill{padding:5px 11px;border:1px solid #d4dbe7;border-radius:14px;background:#fff;color:#5a6781;font-size:11px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
-.pill.on{background:#2563eb;border-color:#2563eb;color:#fff}
-.tog{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:600;color:#1c2536}
-.tog input{width:16px;height:16px;accent-color:#2563eb}
-.seg-dd{position:relative}
-.seg-btn{padding:6px 10px;border:1px solid #d4dbe7;border-radius:6px;background:#fff;font-size:12px;cursor:pointer;font-family:inherit;min-width:170px;text-align:left;color:#1c2536}
-.seg-list{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:30;background:#fff;border:1px solid #d4dbe7;border-radius:8px;box-shadow:0 6px 18px rgba(20,35,70,.12);max-height:260px;overflow-y:auto;min-width:240px;padding:6px}
-.seg-list.open{display:block}
-.seg-list label{display:flex;align-items:center;gap:8px;padding:5px 7px;font-size:12px;font-weight:500;border-radius:5px;cursor:pointer;white-space:nowrap}
-.seg-list label:hover{background:#f1f4f9}
-.acts{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
-.btn{padding:9px 18px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
-.btn.go{background:#2563eb;color:#fff}
-.btn.ghost{background:#fff;border:1px solid #d4dbe7;color:#5a6781}
-.st{font-size:11px;color:#8a94a6;margin-left:auto}
-.tw{overflow-x:auto;border-radius:8px;border:1px solid #e4e9f1;background:#fff}
-table{width:100%;border-collapse:collapse;font-size:12px}
-thead tr{background:#f8faff;border-bottom:1px solid #e4e9f1}
-th{padding:8px 10px;text-align:left;font-weight:700;font-size:11px;color:#5a6781;white-space:nowrap}
-tbody tr{border-bottom:1px solid #f1f4f9}
-tbody tr:hover{background:#f8faff}
-tbody tr:last-child{border-bottom:none}
-td{padding:7px 10px;white-space:nowrap}
-.sym{font-weight:700}
-.up{color:#059669;font-weight:600}.dn{color:#dc2626;font-weight:600}.nt{color:#5a6781}
-.gp{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:18px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:700}
-.g4{background:#d1fae5;color:#065f46}.g3{background:#dbeafe;color:#1e40af}.g2{background:#fef3c7;color:#92400e}.g1{background:#fee2e2;color:#991b1b}
-.empty{text-align:center;padding:40px 20px;color:#8a94a6}
-.pager{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:12px;font-size:12px;color:#5a6781}
-.pager button{padding:6px 12px;border:1px solid #d4dbe7;background:#fff;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px}
-.pager button:disabled{opacity:.4;cursor:not-allowed}
-.drawer-bk{display:none;position:fixed;inset:0;background:rgba(15,22,35,.4);z-index:50}
-.drawer-bk.open{display:block}
-.drawer{position:fixed;top:0;right:0;height:100%;width:340px;max-width:88vw;background:#fff;z-index:51;transform:translateX(100%);transition:transform .2s;overflow-y:auto;padding:18px;box-shadow:-4px 0 24px rgba(20,35,70,.18)}
-.drawer.open{transform:translateX(0)}
-.drawer h3{font-size:14px;font-weight:800;margin-bottom:4px}
-.dgrp{margin-top:16px}
-.dgrp .gt{font-size:10px;font-weight:700;color:#8a94a6;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
-.drawer .fld{margin-bottom:10px}
-.dclose{float:right;border:none;background:#f1f4f9;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:16px;color:#5a6781}
+.pill{padding:5px 10px;border:1px solid #dce2ec;border-radius:13px;background:#fff;color:#5a6781;font-size:10.5px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;transition:.1s}
+.pill:hover{border-color:#b9c4d6}
+.pill.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.nums{display:flex;align-items:center;gap:6px}
+input[type=number]{width:100%;padding:7px 8px;border:1px solid #dce2ec;border-radius:7px;font-size:12px;font-family:inherit;outline:none;background:#fff}
+input[type=number]:focus{border-color:var(--blue)}
+.nums .sepw{color:var(--grey);font-size:11px;flex-shrink:0}
+.tog{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--ink)}
+.tog input{width:15px;height:15px;accent-color:var(--green)}
+/* segment search dropdown */
+.segsearch input[type=text]{width:100%;padding:7px 9px;border:1px solid #dce2ec;border-radius:7px;font-size:12px;font-family:inherit;outline:none;margin-bottom:6px}
+.segsearch input[type=text]:focus{border-color:var(--blue)}
+.seglist{max-height:148px;overflow-y:auto;border:1px solid #eef1f6;border-radius:7px;padding:4px;scrollbar-width:thin}
+.seglist label{display:flex;align-items:center;gap:7px;padding:4px 6px;font-size:11.5px;font-weight:500;border-radius:5px;cursor:pointer;white-space:nowrap}
+.seglist label:hover{background:#f1f4f9}
+.seglist label.hide{display:none}
+.seglist input{width:14px;height:14px;accent-color:var(--blue);flex-shrink:0}
+.segcount{font-size:9.5px;color:var(--grey);margin-top:5px}
+
+/* results panel */
+.rhead{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+.rcount{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--green)}
+.rcount.zero{color:var(--grey)}
+.rcount .lbl{font-size:13px;font-weight:600;color:var(--grey);margin-left:4px}
+.rsub{font-size:11px;color:var(--grey);margin-bottom:16px}
+.list{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:96px 1fr auto auto;align-items:center;gap:14px;padding:11px 12px;border-radius:8px;cursor:pointer;text-decoration:none;color:inherit;transition:.08s}
+.row:nth-child(odd){background:#fbfcfe}
+.row:hover{background:#eef4ff}
+.row .sym{font-weight:800;color:var(--blue);font-size:13px}
+.row .nm{color:#3a4760;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .gvm{font-weight:800;font-size:13px;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+.gvm.g4{color:var(--green)}.gvm.g3{color:var(--blue)}.gvm.g2{color:var(--gold)}.gvm.g1{color:var(--red)}
+.vchip{display:inline-flex;align-items:center;justify-content:center;padding:3px 9px;border-radius:11px;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;white-space:nowrap}
+.vchip.g4{background:#d6f3e6;color:#066b46}.vchip.g3{background:#dbeafe;color:#1e40af}.vchip.g2{background:#fcefd9;color:#92510a}.vchip.g1{background:#fde0e3;color:#9f2230}
+.more{text-align:center;padding:16px 10px;color:var(--grey);font-size:11.5px}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--grey);font-size:13px;padding:60px 20px;line-height:1.6}
+/* skeleton */
+.skrow{height:42px;border-radius:8px;margin-bottom:6px;background:linear-gradient(90deg,#f1f4f9 25%,#e7ecf3 37%,#f1f4f9 63%);background-size:400% 100%;animation:sh 1.2s ease infinite}
+@keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.hint{font-size:10.5px;color:var(--blue);font-weight:700;margin-left:6px;opacity:0;transition:.15s}
+.hint.on{opacity:1}
+
+/* mobile filter toggle */
+.fbtn{display:none}
 @media(max-width:768px){
-  body{font-size:12px}
-  .page{padding:10px 8px}
-  .h1{font-size:16px}
-  .filterbtn{display:block}
-  .panel.filters{display:none}
-  .panel.filters.open{display:block}
-  .d{display:none}
-  th.d,td.d{display:none}
+  .shell{flex-direction:column;overflow:visible}
+  .fbtn{display:block;width:100%;padding:11px;border:none;border-bottom:1px solid #e4e9f1;background:#fff;font-size:13px;font-weight:700;color:var(--blue);cursor:pointer;font-family:inherit;flex-shrink:0}
+  .fpanel{width:100%;border-right:none;border-bottom:1px solid #e9edf4;max-height:none;overflow:visible;display:none;padding-bottom:18px}
+  .fpanel.open{display:block}
+  .rpanel{overflow:visible;padding:16px 14px 50px}
+  .row{grid-template-columns:80px 1fr auto auto;gap:10px}
+  .row .nm{font-size:12px}
 }
 </style>
 </head>
@@ -97,7 +110,7 @@ td{padding:7px 10px;white-space:nowrap}
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/scanners"><span>&#8862;</span>Scanners</a>
   <div class="mnav-sep"></div>
-  <a class="mnav-item active" href="/screener"><span>&#8863;</span>Screener</a>
+  <a class="mnav-item active" href="/screener"><span>&#8863;</span>V12</a>
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
   <div class="mnav-sep"></div>
@@ -109,106 +122,83 @@ td{padding:7px 10px;white-space:nowrap}
   <div class="mnav-sep"></div>
   <a class="mnav-item" href="/v10"><span>&#9651;</span>V10</a>
 </nav>
-<div class="page">
-  <div class="h1">Screener</div>
-  <div class="h2">V12 custom equity screener &middot; GVM + V8 + fundamentals + technicals &middot; 1,700+ stocks</div>
 
-  <button class="filterbtn" id="filterbtn" onclick="toggleFilters()">&#9776; Filters</button>
+<button class="fbtn" id="fbtn" onclick="document.getElementById('fpanel').classList.toggle('open')">&#9776; Filters</button>
 
-  <div class="panel filters" id="filters">
-    <div class="frow">
-      <div class="fld">
-        <label>GVM Score</label>
-        <div class="rng"><input type="range" id="gvm_min" min="0" max="10" step="0.1" value="6" oninput="lbl()"><span class="v" id="gvm_min_v">6.0</span></div>
-        <div class="rng"><input type="range" id="gvm_max" min="0" max="10" step="0.1" value="10" oninput="lbl()"><span class="v" id="gvm_max_v">10.0</span></div>
-      </div>
-      <div class="fld">
-        <label>Verdict</label>
-        <div class="pills" id="verdict"></div>
-      </div>
-      <div class="fld">
-        <label>V8 Basket</label>
-        <div class="pills" id="v8_basket"></div>
-      </div>
-      <div class="fld">
-        <label>Category</label>
-        <div class="pills" id="category"></div>
-      </div>
-      <div class="fld">
-        <label>Segment</label>
-        <div class="seg-dd">
-          <button type="button" class="seg-btn" id="seg_btn" onclick="toggleSeg()">All segments</button>
-          <div class="seg-list" id="seg_list"></div>
-        </div>
-      </div>
-      <div class="fld">
-        <label>RSI Weekly</label>
-        <div class="rng"><input type="range" id="rsi_weekly_min" min="0" max="100" step="1" value="0" oninput="lbl()"><span class="v" id="rsi_weekly_min_v">0</span></div>
-        <div class="rng"><input type="range" id="rsi_weekly_max" min="0" max="100" step="1" value="100" oninput="lbl()"><span class="v" id="rsi_weekly_max_v">100</span></div>
-      </div>
-      <div class="fld">
-        <label>DMA 50 % (min / max)</label>
-        <div class="nums"><input type="number" id="dma_50_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="dma_50_max" placeholder="max"></div>
-      </div>
-      <div class="fld">
-        <label>ROCE min %</label>
-        <input type="number" id="roce_min" placeholder="e.g. 15">
-      </div>
-      <div class="fld">
-        <label>Profit Growth 3Y min %</label>
-        <input type="number" id="profit_growth_3y_min" placeholder="e.g. 10">
-      </div>
-      <div class="fld">
-        <label>Blackout</label>
-        <label class="tog"><input type="checkbox" id="exclude_blackout" checked> Exclude blackout</label>
+<div class="shell">
+  <!-- LEFT: filters -->
+  <aside class="fpanel" id="fpanel">
+    <div class="fhead">
+      <span class="ttl">Filters</span>
+      <a class="reset" onclick="resetAll()">Reset</a>
+    </div>
+
+    <div class="fb">
+      <span class="lab">GVM Score</span>
+      <div class="rng"><span class="e">min</span><input type="range" id="gvm_min" min="0" max="10" step="0.5" value="6"><span class="v" id="gvm_min_v">6.0</span></div>
+      <div class="rng"><span class="e">max</span><input type="range" id="gvm_max" min="0" max="10" step="0.5" value="10"><span class="v" id="gvm_max_v">10.0</span></div>
+    </div>
+
+    <div class="fb">
+      <span class="lab">Verdict</span>
+      <div class="pills" id="verdict"></div>
+    </div>
+
+    <div class="fb">
+      <span class="lab">V8 Basket</span>
+      <div class="pills" id="v8_basket"></div>
+    </div>
+
+    <div class="fb">
+      <span class="lab">Category</span>
+      <div class="pills" id="category"></div>
+    </div>
+
+    <div class="fb">
+      <span class="lab">Segment</span>
+      <div class="segsearch">
+        <input type="text" id="seg_search" placeholder="Search segments..." oninput="filterSegs()">
+        <div class="seglist" id="seg_list"></div>
+        <div class="segcount" id="seg_count">All segments</div>
       </div>
     </div>
-    <div class="acts">
-      <button class="btn go" onclick="run(0)">Apply Filters</button>
-      <button class="btn ghost" onclick="resetAll()">Reset</button>
-      <button class="btn ghost" onclick="openDrawer()">+ Add filters</button>
-      <span class="st" id="st">Loading...</span>
+
+    <div class="fb">
+      <span class="lab">RSI Weekly</span>
+      <div class="rng"><span class="e">min</span><input type="range" id="rsi_weekly_min" min="0" max="100" step="1" value="0"><span class="v" id="rsi_weekly_min_v">0</span></div>
+      <div class="rng"><span class="e">max</span><input type="range" id="rsi_weekly_max" min="0" max="100" step="1" value="100"><span class="v" id="rsi_weekly_max_v">100</span></div>
     </div>
-  </div>
 
-  <div id="tbl"><div class="empty">Loading...</div></div>
-  <div class="pager" id="pager"></div>
-</div>
+    <div class="fb">
+      <span class="lab">DMA 50 % (min / max)</span>
+      <div class="nums"><input type="number" id="dma_50_min" placeholder="min"><span class="sepw">to</span><input type="number" id="dma_50_max" placeholder="max"></div>
+    </div>
 
-<!-- advanced filters drawer -->
-<div class="drawer-bk" id="drawer_bk" onclick="closeDrawer()"></div>
-<div class="drawer" id="drawer">
-  <button class="dclose" onclick="closeDrawer()">&times;</button>
-  <h3>More filters</h3>
-  <div class="h2">Set any; blanks are ignored.</div>
-  <div class="dgrp"><div class="gt">Valuation</div>
-    <div class="fld"><label>PE (min / max)</label><div class="nums"><input type="number" id="pe_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="pe_max" placeholder="max"></div></div>
-    <div class="fld"><label>Promoter holding min %</label><input type="number" id="promoter_min" placeholder="e.g. 50"></div>
-  </div>
-  <div class="dgrp"><div class="gt">Size</div>
-    <div class="fld"><label>Market Cap Cr (min / max)</label><div class="nums"><input type="number" id="market_cap_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="market_cap_max" placeholder="max"></div></div>
-  </div>
-  <div class="dgrp"><div class="gt">Quality / Sector</div>
-    <div class="fld"><label>Sector GVM min</label><input type="number" id="sector_gvm_min" placeholder="e.g. 6"></div>
-  </div>
-  <div class="dgrp"><div class="gt">Technicals</div>
-    <div class="fld"><label>RSI Month (min / max)</label><div class="nums"><input type="number" id="rsi_month_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="rsi_month_max" placeholder="max"></div></div>
-    <div class="fld"><label>DMA 200 % (min / max)</label><div class="nums"><input type="number" id="dma_200_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="dma_200_max" placeholder="max"></div></div>
-    <div class="fld"><label>52W index (min / max)</label><div class="nums"><input type="number" id="week_index_52_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="week_index_52_max" placeholder="max"></div></div>
-  </div>
-  <div class="dgrp"><div class="gt">Returns</div>
-    <div class="fld"><label>Week return % (min / max)</label><div class="nums"><input type="number" id="week_return_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="week_return_max" placeholder="max"></div></div>
-    <div class="fld"><label>Month return % (min / max)</label><div class="nums"><input type="number" id="month_return_min" placeholder="min"> <span class="nt">to</span> <input type="number" id="month_return_max" placeholder="max"></div></div>
-  </div>
-  <div class="dgrp"><div class="gt">Trade Check</div>
-    <div class="fld"><label>TC Side</label><div class="pills" id="tc_side"></div></div>
-    <div class="fld"><label>TC Verdict</label><div class="pills" id="tc_verdict"></div></div>
-  </div>
-  <div class="dgrp"><div class="gt">Flags</div>
-    <label class="tog" style="margin-bottom:8px"><input type="checkbox" id="v8_qualified_only"> V8 qualified today only</label><br>
-    <label class="tog"><input type="checkbox" id="futures_only"> Futures universe only</label>
-  </div>
-  <div class="acts"><button class="btn go" onclick="closeDrawer();run(0)">Apply</button></div>
+    <div class="fb">
+      <span class="lab">ROCE Min %</span>
+      <input type="number" id="roce_min" placeholder="e.g. 15">
+    </div>
+
+    <div class="fb">
+      <span class="lab">Profit Growth 3Y Min %</span>
+      <input type="number" id="profit_growth_3y_min" placeholder="e.g. 10">
+    </div>
+
+    <div class="fb">
+      <span class="lab">Blackout</span>
+      <label class="tog"><input type="checkbox" id="exclude_blackout" checked> Exclude blackout stocks</label>
+    </div>
+  </aside>
+
+  <!-- RIGHT: live results -->
+  <main class="rpanel">
+    <div class="rhead">
+      <span class="rcount zero" id="rcount">&mdash;</span>
+      <span class="hint" id="hint">updating&hellip;</span>
+    </div>
+    <div class="rsub" id="rsub">GVM + V8 + fundamentals + technicals &middot; live as you filter</div>
+    <div class="list" id="list"></div>
+  </main>
 </div>
 
 <script>
@@ -216,161 +206,182 @@ var SIZE = 50;
 var PILLS = {
   verdict: ["EXCELLENT","GOOD","AVERAGE","WEAK"],
   v8_basket: ["buy_reversal","buy_momentum","sell_reversal","sell_momentum","sell_overbought"],
-  category: ["Large","Mid","Small"],
-  tc_side: ["LONG","SHORT"],
-  tc_verdict: ["STRONG","VALID","WATCH"]
+  category: ["Large","Mid","Small"]
 };
-var sel = {verdict:[],v8_basket:[],category:[],tc_side:[],tc_verdict:[]};
+var sel = {verdict:[], v8_basket:[], category:[]};
 var segChecked = [];
+var DEF = {gvm_min:6, gvm_max:10, rsi_weekly_min:0, rsi_weekly_max:100};
+
+function $(id){ return document.getElementById(id); }
+var EMBED = (window.self !== window.top) || new URLSearchParams(location.search).has('embed');
 
 function lbl(){
-  ["gvm_min","gvm_max","rsi_weekly_min","rsi_weekly_max"].forEach(function(id){
-    var el=document.getElementById(id), v=document.getElementById(id+"_v");
-    if(el&&v) v.textContent = (id.indexOf("gvm")===0)? Number(el.value).toFixed(1) : el.value;
-  });
+  $("gvm_min_v").textContent  = Number($("gvm_min").value).toFixed(1);
+  $("gvm_max_v").textContent  = Number($("gvm_max").value).toFixed(1);
+  $("rsi_weekly_min_v").textContent = $("rsi_weekly_min").value;
+  $("rsi_weekly_max_v").textContent = $("rsi_weekly_max").value;
 }
+
 function buildPills(){
   Object.keys(PILLS).forEach(function(key){
-    var host=document.getElementById(key); if(!host) return;
-    host.innerHTML="";
+    var host=$(key); if(!host) return; host.innerHTML="";
     PILLS[key].forEach(function(val){
       var b=document.createElement("span"); b.className="pill"; b.textContent=val;
       b.onclick=function(){
         var i=sel[key].indexOf(val);
-        if(i>=0){sel[key].splice(i,1);b.classList.remove("on");}
-        else{sel[key].push(val);b.classList.add("on");}
+        if(i>=0){ sel[key].splice(i,1); b.classList.remove("on"); }
+        else { sel[key].push(val); b.classList.add("on"); }
+        schedule();
       };
       host.appendChild(b);
     });
   });
 }
-function toggleFilters(){ document.getElementById("filters").classList.toggle("open"); }
-function toggleSeg(){ document.getElementById("seg_list").classList.toggle("open"); }
-function openDrawer(){ document.getElementById("drawer_bk").classList.add("open"); document.getElementById("drawer").classList.add("open"); }
-function closeDrawer(){ document.getElementById("drawer_bk").classList.remove("open"); document.getElementById("drawer").classList.remove("open"); }
 
 async function loadMeta(){
   try{
     var d=await(await fetch("/api/v12/filters/meta")).json();
-    var list=document.getElementById("seg_list");
+    var list=$("seg_list");
     (d.segments||[]).forEach(function(s){
-      var l=document.createElement("label");
+      var l=document.createElement("label"); l.setAttribute("data-seg", s.segment.toLowerCase());
       var cb=document.createElement("input"); cb.type="checkbox"; cb.value=s.segment;
       cb.onchange=function(){
         var i=segChecked.indexOf(s.segment);
-        if(cb.checked&&i<0)segChecked.push(s.segment);
-        else if(!cb.checked&&i>=0)segChecked.splice(i,1);
-        document.getElementById("seg_btn").textContent = segChecked.length? (segChecked.length+" segment"+(segChecked.length>1?"s":"")) : "All segments";
+        if(cb.checked&&i<0) segChecked.push(s.segment);
+        else if(!cb.checked&&i>=0) segChecked.splice(i,1);
+        $("seg_count").textContent = segChecked.length ? (segChecked.length+" selected") : "All segments";
+        schedule();
       };
       l.appendChild(cb); l.appendChild(document.createTextNode(" "+s.segment+" ("+s.count+")"));
       list.appendChild(l);
     });
   }catch(e){}
 }
-
-function numVal(id){ var el=document.getElementById(id); if(!el) return null; var v=el.value.trim(); return v===""?null:v; }
-function addRange(p,id){ var v=numVal(id); if(v!==null) p.append(id, v); }
-
-function buildQuery(page){
-  var p=new URLSearchParams();
-  p.append("gvm_min", document.getElementById("gvm_min").value);
-  p.append("gvm_max", document.getElementById("gvm_max").value);
-  p.append("rsi_weekly_min", document.getElementById("rsi_weekly_min").value);
-  p.append("rsi_weekly_max", document.getElementById("rsi_weekly_max").value);
-  ["verdict","v8_basket","category","tc_side","tc_verdict"].forEach(function(k){
-    sel[k].forEach(function(v){ p.append(k, v); });
+function filterSegs(){
+  var q=$("seg_search").value.trim().toLowerCase();
+  $("seg_list").querySelectorAll("label").forEach(function(l){
+    var hit = !q || l.getAttribute("data-seg").indexOf(q)>-1;
+    l.classList.toggle("hide", !hit);
   });
+}
+
+function numVal(id){ var el=$(id); if(!el) return null; var v=el.value.trim(); return v===""?null:v; }
+function addNum(p,id){ var v=numVal(id); if(v!==null) p.append(id, v); }
+
+// only non-default values -> clean URL
+function buildQuery(){
+  var p=new URLSearchParams();
+  var gmn=Number($("gvm_min").value), gmx=Number($("gvm_max").value);
+  if(gmn!==DEF.gvm_min) p.append("gvm_min", gmn);
+  if(gmx!==DEF.gvm_max) p.append("gvm_max", gmx);
+  var rmn=Number($("rsi_weekly_min").value), rmx=Number($("rsi_weekly_max").value);
+  if(rmn!==DEF.rsi_weekly_min) p.append("rsi_weekly_min", rmn);
+  if(rmx!==DEF.rsi_weekly_max) p.append("rsi_weekly_max", rmx);
+  sel.verdict.forEach(function(v){ p.append("verdict", v); });
+  sel.v8_basket.forEach(function(v){ p.append("v8_basket", v); });
+  sel.category.forEach(function(v){ p.append("category", v); });
   segChecked.forEach(function(s){ p.append("segment", s); });
-  ["dma_50_min","dma_50_max","roce_min","profit_growth_3y_min",
-   "pe_min","pe_max","promoter_min","market_cap_min","market_cap_max","sector_gvm_min",
-   "rsi_month_min","rsi_month_max","dma_200_min","dma_200_max","week_index_52_min","week_index_52_max",
-   "week_return_min","week_return_max","month_return_min","month_return_max"].forEach(function(id){ addRange(p,id); });
-  p.append("exclude_blackout", document.getElementById("exclude_blackout").checked ? "true":"false");
-  if(document.getElementById("v8_qualified_only").checked) p.append("v8_qualified_only","true");
-  if(document.getElementById("futures_only").checked) p.append("futures_only","true");
+  addNum(p,"dma_50_min"); addNum(p,"dma_50_max");
+  addNum(p,"roce_min"); addNum(p,"profit_growth_3y_min");
+  if(!$("exclude_blackout").checked) p.append("exclude_blackout","false");
   p.append("size", SIZE);
-  p.append("page", page||0);
   return p;
 }
 
-var num=function(v,d){ return v==null?'<span class="nt">--</span>':Number(v).toFixed(d==null?1:d); };
-var pct=function(v){ if(v==null) return '<span class="nt">--</span>'; var n=Number(v); return '<span class="'+(n>=0?'up':'dn')+'">'+(n>=0?'+':'')+n.toFixed(2)+'%</span>'; };
-var pr=function(v){ return v==null?'<span class="nt">--</span>':'Rs.'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:1}); };
-var mcap=function(v){ return v==null?'<span class="nt">--</span>':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0})+' Cr'; };
-function verdictChip(v){
-  if(!v) return '<span class="nt">--</span>';
-  var c={excellent:'g4',good:'g3',average:'g2',weak:'g1'}[String(v).toLowerCase()]||'g3';
-  return '<span class="gp '+c+'">'+v+'</span>';
+function gvmClass(v){
+  if(v==null) return "g3";
+  v=Number(v);
+  if(v>=8) return "g4"; if(v>=6.5) return "g3"; if(v>=5) return "g2"; return "g1";
+}
+function vchipClass(v){
+  return {excellent:"g4",good:"g3",average:"g2",weak:"g1"}[String(v||"").toLowerCase()]||"g3";
+}
+function openGvm(sym){
+  var url="/cio2?model=gvm&symbol="+encodeURIComponent(sym);
+  (EMBED ? window.top : window).location.href = url;
 }
 
 function rowHtml(r){
-  return '<tr>'+
-    '<td class="sym">'+r.symbol+'</td>'+
-    '<td class="d nt">'+(r.company_name||'--')+'</td>'+
-    '<td class="d nt">'+(r.segment||'--')+'</td>'+
-    '<td>'+num(r.gvm_score,2)+'</td>'+
-    '<td>'+verdictChip(r.verdict)+'</td>'+
-    '<td class="nt">'+pr(r.price)+'</td>'+
-    '<td class="d nt">'+mcap(r.market_cap)+'</td>'+
-    '<td>'+num(r.rsi_weekly,1)+'</td>'+
-    '<td class="d">'+num(r.dma_50,1)+'</td>'+
-    '<td class="d">'+pct(r.week_return)+'</td>'+
-    '<td class="nt">'+(r.v8_basket||'--')+'</td>'+
-    '<td class="d nt">'+num(r.tc_score,0)+'</td></tr>';
+  var g=r.gvm_score;
+  return '<a class="row" onclick="openGvm(\''+r.symbol.replace(/'/g,"")+'\')">'+
+    '<span class="sym">'+r.symbol+'</span>'+
+    '<span class="nm">'+(r.company_name||"&mdash;")+'</span>'+
+    '<span class="gvm '+gvmClass(g)+'">'+(g==null?"&mdash;":Number(g).toFixed(1))+'</span>'+
+    (r.verdict?'<span class="vchip '+vchipClass(r.verdict)+'">'+r.verdict+'</span>':'<span class="vchip g3">&mdash;</span>')+
+  '</a>';
 }
-var HEAD='<tr><th>Symbol</th><th class="d">Company</th><th class="d">Segment</th><th>GVM</th><th>Verdict</th><th>CMP</th><th class="d">Mkt Cap</th><th>RSI W</th><th class="d">DMA50%</th><th class="d">Week%</th><th>V8</th><th class="d">TC</th></tr>';
 
-var curPage=0, curTotal=0;
-async function run(page){
-  page=page||0; curPage=page;
-  var st=document.getElementById("st"), tbl=document.getElementById("tbl");
-  st.textContent="Screening...";
-  try{
-    var p=buildQuery(page);
-    var d=await(await fetch("/api/v12/screen?"+p.toString())).json();
-    curTotal=d.total||0;
-    var rows=d.stocks||[];
-    st.textContent=curTotal+" matches"+(d.filters_applied&&d.filters_applied.length?(" · "+d.filters_applied.length+" filters"):"");
-    tbl.innerHTML=rows.length?('<div class="tw"><table><thead>'+HEAD+'</thead><tbody>'+rows.map(rowHtml).join('')+'</tbody></table></div>')
-      :'<div class="empty">No stocks match these filters.</div>';
-    renderPager();
-    if(window.innerWidth<=768) document.getElementById("filters").classList.remove("open");
-  }catch(e){ st.textContent="Error"; tbl.innerHTML='<div class="empty">'+e.message+'</div>'; }
+var seq=0;
+function showSkeleton(){
+  var rows=""; for(var i=0;i<8;i++) rows+='<div class="skrow"></div>';
+  $("list").innerHTML=rows;
 }
-function renderPager(){
-  var pg=document.getElementById("pager");
-  var pages=Math.ceil(curTotal/SIZE);
-  if(pages<=1){ pg.innerHTML=""; return; }
-  pg.innerHTML='';
-  var prev=document.createElement("button"); prev.textContent="Prev"; prev.disabled=curPage<=0; prev.onclick=function(){run(curPage-1);};
-  var info=document.createElement("span"); info.textContent="Page "+(curPage+1)+" / "+pages;
-  var next=document.createElement("button"); next.textContent="Next"; next.disabled=curPage>=pages-1; next.onclick=function(){run(curPage+1);};
-  pg.appendChild(prev); pg.appendChild(info); pg.appendChild(next);
+function setCount(n){
+  var c=$("rcount");
+  c.innerHTML = n + '<span class="lbl">'+(n===1?"company found":"companies found")+'</span>';
+  c.classList.toggle("zero", n===0);
+}
+
+async function run(){
+  var my=++seq;
+  $("hint").classList.add("on");
+  try{
+    var p=buildQuery();
+    var d=await(await fetch("/api/v12/screen?"+p.toString())).json();
+    if(my!==seq) return;                 // a newer request superseded this one
+    var rows=d.stocks||[], total=d.total||0;
+    setCount(total);
+    var nf=(d.filters_applied||[]).filter(function(x){return x!=="exclude_blackout";}).length;
+    $("rsub").textContent = nf ? (nf+" filter"+(nf>1?"s":"")+" active") : "No filters — full universe";
+    if(!rows.length){
+      $("list").innerHTML='<div class="empty">No stocks match these filters.<br>Try widening the GVM range or clearing some pills.</div>';
+    } else {
+      var html=rows.map(rowHtml).join("");
+      if(total>rows.length) html+='<div class="more">Showing '+rows.length+' of '+total+' — scroll the list or tighten filters to narrow down.</div>';
+      $("list").innerHTML=html;
+    }
+  }catch(e){
+    if(my!==seq) return;
+    setCount(0);
+    $("list").innerHTML='<div class="empty">Could not load results.<br>'+(e.message||"")+'</div>';
+  }finally{
+    if(my===seq) $("hint").classList.remove("on");
+  }
+}
+
+var deb;
+function schedule(){
+  $("hint").classList.add("on");
+  clearTimeout(deb);
+  deb=setTimeout(run, 300);
 }
 
 function resetAll(){
-  document.getElementById("gvm_min").value=6; document.getElementById("gvm_max").value=10;
-  document.getElementById("rsi_weekly_min").value=0; document.getElementById("rsi_weekly_max").value=100;
-  ["dma_50_min","dma_50_max","roce_min","profit_growth_3y_min","pe_min","pe_max","promoter_min","market_cap_min","market_cap_max","sector_gvm_min","rsi_month_min","rsi_month_max","dma_200_min","dma_200_max","week_index_52_min","week_index_52_max","week_return_min","week_return_max","month_return_min","month_return_max"].forEach(function(id){ var e=document.getElementById(id); if(e)e.value=""; });
-  document.getElementById("exclude_blackout").checked=true;
-  document.getElementById("v8_qualified_only").checked=false;
-  document.getElementById("futures_only").checked=false;
+  $("gvm_min").value=6; $("gvm_max").value=10;
+  $("rsi_weekly_min").value=0; $("rsi_weekly_max").value=100;
+  ["dma_50_min","dma_50_max","roce_min","profit_growth_3y_min"].forEach(function(id){ $(id).value=""; });
+  $("exclude_blackout").checked=true;
   Object.keys(sel).forEach(function(k){ sel[k]=[]; });
-  segChecked=[]; document.getElementById("seg_btn").textContent="All segments";
+  segChecked=[]; $("seg_count").textContent="All segments"; $("seg_search").value="";
   document.querySelectorAll(".pill.on").forEach(function(b){ b.classList.remove("on"); });
-  document.querySelectorAll("#seg_list input:checked").forEach(function(c){ c.checked=false; });
-  lbl(); run(0);
+  $("seg_list").querySelectorAll("input:checked").forEach(function(c){ c.checked=false; });
+  filterSegs(); lbl(); run();
 }
 
-document.addEventListener("click",function(e){
-  if(!e.target.closest(".seg-dd")) document.getElementById("seg_list").classList.remove("open");
+// wire reactivity: every change -> debounced run
+["gvm_min","gvm_max","rsi_weekly_min","rsi_weekly_max"].forEach(function(id){
+  $(id).addEventListener("input", function(){ lbl(); schedule(); });
 });
+["dma_50_min","dma_50_max","roce_min","profit_growth_3y_min"].forEach(function(id){
+  $(id).addEventListener("input", schedule);
+});
+$("exclude_blackout").addEventListener("change", schedule);
 
-lbl(); buildPills(); loadMeta(); run(0);
+lbl(); buildPills(); showSkeleton(); loadMeta(); run();
 </script>
 <script>
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
-  var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
+  var _mn=document.getElementById('scorr-nav'); if(_mn) _mn.style.display='none';
 }
 </script>
 </body>
