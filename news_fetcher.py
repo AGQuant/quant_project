@@ -115,6 +115,16 @@ _BLOOMBERG_REQUIRED_KEYWORDS = (
 )
 
 
+# -- Domestic noise filters (task #102) -- from manual audit of 780-article
+#    backlog. Source-agnostic headline gates (crypto, IPO grey-market premium,
+#    quote-of-the-day, broker-recommendation listicles, non-market obituaries).
+_DOM_CRYPTO_RE      = re.compile(r"bitcoin|crypto|ethereum|solana|xrp|nft|web3")
+_DOM_GMP_RE         = re.compile(r"gmp|grey market premium|grey market")
+_DOM_LISTICLE_RE    = re.compile(r"stocks to buy below|buy or sell:|f&o talk|concurrent gainers|multibagger stock")
+_DOM_OBIT_RE        = re.compile(r"dies at \d+|passes away|death of")
+_DOM_OBIT_MARKET_RE = re.compile(r"market|stock|equity|share|nse|bse|sensex|nifty")
+
+
 def _non_latin_dominant(text: str) -> bool:
     """True if >30% of the alphabetic chars are outside Latin (Unicode > U+024F)."""
     letters = [c for c in (text or "") if c.isalpha()]
@@ -137,6 +147,18 @@ def _is_quality_article(headline: str, description: str, source_name: str = None
     if h and d[:len(h)] == h:          # description is just the headline repeated
         return False
     if _non_latin_dominant(h) or _non_latin_dominant(d):
+        return False
+    # task #102 -- domestic source noise gates (headline-based, source-agnostic)
+    h_low = h.lower()
+    if _DOM_CRYPTO_RE.search(h_low):            # F1 crypto
+        return False
+    if _DOM_GMP_RE.search(h_low):               # F2 IPO grey-market premium
+        return False
+    if h_low.startswith("quote of the day"):    # F3 quote of the day
+        return False
+    if _DOM_LISTICLE_RE.search(h_low):          # F4 broker listicles / F&O tips
+        return False
+    if _DOM_OBIT_RE.search(h_low) and not _DOM_OBIT_MARKET_RE.search(d.lower()):  # F5 non-market obituary
         return False
     # task #101 -- Bloomberg-only relevance gate
     if source_name and "bloomberg" in source_name.lower():
