@@ -57,6 +57,13 @@
   .h-btn.reason.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .h-btn .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);transition:.15s}
   .h-btn.reason.on .dot{background:var(--grn)}
+  .mode-sel{display:inline-flex;gap:4px;background:var(--panel2);border:1px solid var(--line2);border-radius:9px;padding:3px}
+  .mode-pill{border:none;background:transparent;color:var(--mut);font-family:var(--font);font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;cursor:pointer;transition:.12s}
+  .mode-pill:hover{color:var(--txt)}
+  .mode-pill.on{color:#fff}
+  .mode-pill[data-mode="native"].on{background:#0a9e63}
+  .mode-pill[data-mode="haiku"].on{background:#2563eb}
+  .mode-pill[data-mode="gemini"].on{background:#b45309}
 
   .recent{display:none;align-items:center;gap:6px;padding:0 18px 10px;flex-shrink:0;overflow-x:auto;scrollbar-width:none}
   .recent::-webkit-scrollbar{display:none}
@@ -242,10 +249,11 @@
     <button class="h-btn" id="clearBtn" onclick="clearChat()" title="Clear conversation">
       <span style="font-size:13px">↻</span><span>Clear</span>
     </button>
-    <button class="h-btn reason" id="reasonBtn" onclick="toggleReason()"
-            title="Reasoning OFF = native DB, $0. ON = Sonnet, ~$0.05.">
-      <div class="dot"></div><span id="reasonLabel">Reasoning OFF</span>
-    </button>
+    <div class="mode-sel" id="modeSel" title="Native = DB only, $0  |  Haiku = Haiku 4.5  |  Gemini = Gemini Flash">
+      <button class="mode-pill" data-mode="native" onclick="setMode('native')">Native</button>
+      <button class="mode-pill" data-mode="haiku" onclick="setMode('haiku')">Haiku</button>
+      <button class="mode-pill" data-mode="gemini" onclick="setMode('gemini')">Gemini</button>
+    </div>
   </div>
 
   <div class="recent" id="recent">
@@ -291,7 +299,7 @@ const API='/api/scorr/chat', USER_KEY='scorr_arpit', STORE='scorr_max_v9';
 const SONNET='claude-sonnet-4-6', MAX_TOKENS=3000, BUDGET=0.05;
 const MAX_RECENT=6;
 
-let reasonOn=false, totalCost=0, busy=false, currentController=null;
+let mode='haiku', totalCost=0, busy=false, currentController=null;
 let history=[];
 let recentQueries=[];
 let sgSel=-1, sgItems=[], sgTimer=null, acAbort=null;
@@ -612,14 +620,11 @@ function renderRecent(){
   });
 }
 
-function toggleReason(){reasonOn=!reasonOn;applyReason();saveLocal();}
-function applyReason(){
-  const btn=document.getElementById('reasonBtn'),lab=document.getElementById('reasonLabel'),
-    ml=document.getElementById('modeLabel');
-  if(reasonOn){btn.className='h-btn reason on';lab.textContent='Reasoning ON';
-    ml.textContent='Sonnet reasoning · ~$0.05/query';}
-  else{btn.className='h-btn reason';lab.textContent='Reasoning OFF';
-    ml.textContent='Native mode · $0';}
+const MODE_LABELS={native:'Native $0 · Native',haiku:'Native $0 · Haiku 4.5',gemini:'Native $0 · Gemini Flash'};
+function setMode(m){mode=m;applyMode();saveLocal();}
+function applyMode(){
+  document.querySelectorAll('.mode-pill').forEach(function(p){p.classList.toggle('on',p.dataset.mode===mode);});
+  const ml=document.getElementById('modeLabel'); if(ml) ml.textContent=MODE_LABELS[mode]||('Native $0 · '+mode);
 }
 
 function clearChat(){
@@ -672,12 +677,12 @@ function addMsg(role,content,meta){
 }
 
 function saveLocal(){try{localStorage.setItem(STORE,JSON.stringify({
-  history,recentQueries,reasonOn,totalCost
+  history,recentQueries,mode,totalCost
 }));}catch(e){}}
 function loadLocal(){try{const r=localStorage.getItem(STORE);
   if(r){const s=JSON.parse(r);
     history=s.history||[];recentQueries=s.recentQueries||[];
-    if(s.reasonOn!==undefined)reasonOn=s.reasonOn;
+    if(s.mode!==undefined)mode=s.mode;
     totalCost=s.totalCost||0;
   }}catch(e){}}
 
@@ -707,17 +712,16 @@ async function send(){
     const t0=Date.now();
     const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},
       signal:currentController.signal,
-      body:JSON.stringify({messages:history,model:reasonOn?SONNET:null,
-        use_tools:true,max_tokens:reasonOn?MAX_TOKENS:0,claude_on:reasonOn,budget_cap_usd:BUDGET})});
+      body:JSON.stringify({messages:history,mode:mode,claude_on:(mode!=='native'),
+        use_tools:false,budget_cap_usd:BUDGET})});
     const d=await r.json();
     document.getElementById('typing').classList.remove('show');
     if(!r.ok){addMsg('bot',`Error: ${d.detail||('HTTP '+r.status)}`,{tag:'error'});}
     else{
       const reply=d.reply||'(no response)';
       history.push({role:'assistant',content:reply});
-      const native=!reasonOn||!d.model;
       const cost=d.usage?.cost_usd||0;totalCost+=cost;
-      const tag=native?`native · $0 · ${Date.now()-t0}ms`:`sonnet · $${cost.toFixed(6)} · ${Date.now()-t0}ms`;
+      const tag=`${mode} · $${cost.toFixed(6)} · ${Date.now()-t0}ms`;
       addMsg('bot',reply,{tag,tools:d.tool_calls||[]});
       document.getElementById('costLabel').textContent=`Session: $${totalCost.toFixed(6)}`;
       saveLocal();dbPersist();
@@ -755,7 +759,7 @@ async function checkHealth(){
 }
 
 (async function(){
-  loadLocal();applyReason();renderWelcome();renderRecent();
+  loadLocal();applyMode();renderWelcome();renderRecent();
   const csEl=document.getElementById('chipSearch');
   if(csEl){
     csEl.addEventListener('input',function(){filterChips(this.value);});
