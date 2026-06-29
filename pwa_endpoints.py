@@ -307,6 +307,101 @@ PWA_JS = """
 })();
 """
 
+# ── nav hide/show toggle (cc_task #118) — shared across all pages ──
+# Persists collapse state in localStorage (key: scorr_nav_hidden). Collapse is
+# driven by an attribute on <html> + head CSS rather than a class on the nav,
+# so it survives pwa.js rebuilding #scorr-nav (innerHTML + className overwrite).
+# A toggle "Hide" pill sits at the right of the nav; when hidden, a thin 20px
+# sticky strip with a "Show" pill stays at the top so the nav is always
+# recoverable. The button is re-added via MutationObserver if a rebuild wipes it.
+NAV_TOGGLE_JS = """
+(function () {
+  if (window.__scorrNavToggle) return; window.__scorrNavToggle = true;
+  var KEY = 'scorr_nav_hidden';
+  var HID = 'data-scorr-nav-hidden';
+  var root = document.documentElement;
+
+  function isHidden() { return localStorage.getItem(KEY) === 'true'; }
+
+  function injectStyle() {
+    if (document.getElementById('scorr-navtoggle-style')) return;
+    var css = ''
+      + '#scorr-nav, .model-nav{transition:max-height .2s ease, opacity .2s ease}'
+      + 'html[' + HID + '] #scorr-nav, html[' + HID + '] .model-nav{'
+      + '  max-height:0!important;opacity:0!important;overflow:hidden!important;'
+      + '  border:none!important}'
+      + '#scorr-nav-strip{position:sticky;top:0;z-index:20;display:none;height:20px;'
+      + '  align-items:center;justify-content:flex-end;padding:0 12px;background:#2563eb}'
+      + 'html[' + HID + '] #scorr-nav-strip{display:flex}'
+      + '.scorr-nav-btn{font-size:11px;padding:4px 10px;border-radius:10px;'
+      + '  background:rgba(255,255,255,0.15);color:inherit;cursor:pointer;border:none;'
+      + '  margin-left:auto;flex-shrink:0}'
+      + '#scorr-nav-strip .scorr-nav-btn{color:#fff}';
+    var st = document.createElement('style');
+    st.id = 'scorr-navtoggle-style'; st.textContent = css;
+    (document.head || root).appendChild(st);
+  }
+
+  injectStyle();
+  if (isHidden()) root.setAttribute(HID, '');   // apply immediately — no flash
+
+  function findNav() {
+    return document.getElementById('scorr-nav') || document.querySelector('.model-nav');
+  }
+
+  function sync() {
+    var b = document.getElementById('scorr-nav-toggle-btn');
+    if (b) b.textContent = isHidden() ? 'Show' : 'Hide';
+  }
+
+  function setHidden(h) {
+    localStorage.setItem(KEY, h ? 'true' : 'false');
+    if (h) root.setAttribute(HID, ''); else root.removeAttribute(HID);
+    sync();
+  }
+
+  function build() {
+    var nav = findNav();
+    if (!nav) return;
+    if (!document.getElementById('scorr-nav-toggle-btn')) {
+      var btn = document.createElement('button');
+      btn.id = 'scorr-nav-toggle-btn'; btn.className = 'scorr-nav-btn';
+      btn.type = 'button';
+      btn.addEventListener('click', function () { setHidden(!isHidden()); });
+      nav.appendChild(btn);
+    }
+    if (!document.getElementById('scorr-nav-strip')) {
+      var strip = document.createElement('div');
+      strip.id = 'scorr-nav-strip';
+      var sb = document.createElement('button');
+      sb.className = 'scorr-nav-btn'; sb.type = 'button'; sb.textContent = 'Show';
+      sb.addEventListener('click', function () { setHidden(false); });
+      strip.appendChild(sb);
+      nav.parentNode.insertBefore(strip, nav);
+    }
+    sync();
+  }
+
+  function boot() {
+    build();
+    var nav = findNav();
+    if (nav && window.MutationObserver) {
+      // pwa.js may rebuild #scorr-nav (innerHTML); re-add the toggle if wiped.
+      var mo = new MutationObserver(function () {
+        if (!document.getElementById('scorr-nav-toggle-btn')) build();
+      });
+      mo.observe(nav, {childList: true});
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+"""
+
 _NOCACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
@@ -320,6 +415,11 @@ def pwa_home():
 @router.get("/pwa.js")
 def pwa_js():
     return Response(PWA_JS, media_type="application/javascript", headers=_NOCACHE)
+
+
+@router.get("/nav_toggle.js")
+def pwa_nav_toggle_js():
+    return Response(NAV_TOGGLE_JS, media_type="application/javascript", headers=_NOCACHE)
 
 
 @router.get("/service_worker.js")
