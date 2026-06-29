@@ -42,7 +42,14 @@
   .sg-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
   .sg-label{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em}
   .sg-badge{font-size:9px;font-weight:700;padding:2px 9px;border-radius:10px;background:#e3f6ed;color:var(--grn);letter-spacing:.5px}
-  .sg-total{font-size:32px;font-weight:900;font-family:monospace;line-height:1;margin-bottom:14px}
+  .sg-total{font-size:32px;font-weight:900;font-family:monospace;line-height:1;margin-bottom:4px}
+  .sg-total-cap{font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+
+  /* Realised / Unrealised breakdown */
+  .sg-buckets{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+  .sg-bucket{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 11px}
+  .sg-bk-label{font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+  .sg-bk-val{font-size:16px;font-weight:800;font-family:monospace;line-height:1}
 
   /* Position rows */
   .sg-positions{display:flex;flex-direction:column;gap:6px}
@@ -143,6 +150,17 @@
       <span class="sg-badge">MHK40</span>
     </div>
     <div class="sg-total" id="sg-total"><span class="sg-loading">Loading&hellip;</span></div>
+    <div class="sg-total-cap" id="sg-total-cap" style="display:none">Total = Realised + Unrealised</div>
+    <div class="sg-buckets" id="sg-buckets" style="display:none">
+      <div class="sg-bucket">
+        <div class="sg-bk-label">Realised</div>
+        <div class="sg-bk-val" id="sg-realised">&mdash;</div>
+      </div>
+      <div class="sg-bucket">
+        <div class="sg-bk-label">Unrealised</div>
+        <div class="sg-bk-val" id="sg-unrealised">&mdash;</div>
+      </div>
+    </div>
     <div class="sg-positions" id="sg-positions"></div>
     <div class="sg-meta" id="sg-meta"></div>
   </a>
@@ -266,10 +284,23 @@ const ago = ts => {
     const d = await r.json();
     if (d.error || !d.positions) return;
 
-    const total = d.total_mtm || 0;
+    // Three buckets: Realised + Unrealised = Total (headline). cc#115
+    const realised   = d.realised   != null ? d.realised   : 0;
+    const unrealised = d.unrealised != null ? d.unrealised : (d.total_mtm || 0);
+    const total      = d.total      != null ? d.total      : (realised + unrealised);
+
     const tv = document.getElementById("sg-total");
     tv.textContent = (total >= 0 ? "+" : "") + "₹" + f2(total);
     tv.style.color = total >= 0 ? "var(--grn)" : "var(--red)";
+
+    const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
+    const col = n => n >= 0 ? "var(--grn)" : "var(--red)";
+    const rv = document.getElementById("sg-realised");
+    const uv = document.getElementById("sg-unrealised");
+    rv.textContent = sgn(realised);   rv.style.color = col(realised);
+    uv.textContent = sgn(unrealised); uv.style.color = col(unrealised);
+    document.getElementById("sg-total-cap").style.display = "block";
+    document.getElementById("sg-buckets").style.display = "grid";
 
     const rows = d.positions || [];
     document.getElementById("sg-positions").innerHTML = rows.map(p => {
