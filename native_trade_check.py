@@ -19,6 +19,20 @@ v3.4.1 (25-Jun-2026, cc_task #83 — display fixes):
   - F2 Pivot: tri-state — PASS (above PP, >1% room), WATCH (above PP, <=1% room),
     FAIL (at/through PP); Room% always shown.
 
+v3.4.2 (29-Jun-2026, cc_task #120 — spec id=959, graded scoring + display fixes):
+  - R1 Market: now a 4-condition graded gate (ADR>=1, Nifty day/week/month>=0),
+    IDENTICAL both sides. 0-2 fails=PASS(1.0), 3=AVERAGE/WATCH(0.5), 4=FAIL(0.0).
+    Replaces the old ADR-only binary. Shows each condition value + fail count.
+  - R3 Peers: graded — 2+ aligned=PASS(1.0), 1=AVERAGE(0.5), 0=FAIL(0.0). Value now
+    shows aligned/total peers + segment name (e.g. "1/4 peers · Castings & Forgings").
+  - R7 Returns: graded — both aligned=PASS(1.0), one=AVERAGE(0.5), none=FAIL(0.0).
+  - Display fixes: R11 ATR shows the threshold ("(need >=1.05)"); signed-percent
+    values render 0.00% (no sign) when within +/-0.005 to kill the "-0.0%" artefact.
+  - Total/bands unchanged (15 LONG / 14 SHORT; PASS>=12 / WATCH 9-11 / FAIL<9).
+    AVERAGE rows feed the weighted score (0.5) only — never counted as a binary pass.
+  - UI (scorr_check.html) already renders WATCH/AVERAGE rows (amber left border) and
+    the PASS/WATCH/FAIL verdict badge, so no frontend change was needed.
+
 Carried from v3.3.3:
   - R6+R8 merged trend rule, ceiling open.
   - R11 caps daily AND weekly RSI < 80.
@@ -41,6 +55,15 @@ def _f(v):
         return float(v) if v is not None else None
     except Exception:
         return None
+
+
+def _sp(v):
+    """Signed percent for display (cc#120 fix_9). v is already in percent units.
+    Shows 0.00% (no sign) when within +/-0.005 so a tiny negative never renders
+    as the misleading '-0.0%'. None -> em-dash."""
+    if v is None:
+        return "—"
+    return "0.00%" if abs(v) < 0.005 else f"{v:+.2f}%"
 
 
 def _ist_now():
@@ -199,7 +222,8 @@ def _r13_atr_ignition(cur, symbol):
     if not a5 or not a20:
         return None, "no ATR data"
     ratio = a5 / a20
-    return ratio >= 1.05, f"ATR5/20 {ratio:.2f}"
+    # cc#120 fix_8: always show the threshold so the gap is visible.
+    return ratio >= 1.05, f"ATR5/20 {ratio:.2f} (need >=1.05)"
 
 
 def _f6_dte():
@@ -379,6 +403,14 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 ar = cur.fetchone()
                 adr = _f(ar[0]) if ar else None
 
+            # cc#120 change_1: Nifty day/week/month returns for the R1 mood gate.
+            cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY50'
+                           ORDER BY price_date DESC LIMIT 23""")
+            nf = [_f(x[0]) for x in cur.fetchall()][::-1]
+            nf_day = (nf[-1] / nf[-2] - 1) * 100 if len(nf) >= 2 and nf[-2] else None
+            nf_wk = (nf[-1] / nf[-6] - 1) * 100 if len(nf) >= 6 and nf[-6] else None
+            nf_mo = (nf[-1] / nf[-23] - 1) * 100 if len(nf) >= 23 and nf[-23] else None
+
             op = ">" if side == "LONG" else "<"
             cur.execute(f"""
                 SELECT COUNT(*) FROM v8_metrics v JOIN gvm_scores g ON g.symbol=v.symbol
@@ -386,6 +418,14 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                   AND v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
                   AND v.day_1d {op} 0""", (segment, symbol))
             peers_n = cur.fetchone()[0] or 0
+
+            # cc#120 fix_7: total peers in segment (for "X/N peers" display).
+            cur.execute("""
+                SELECT COUNT(*) FROM v8_metrics v JOIN gvm_scores g ON g.symbol=v.symbol
+                WHERE g.segment=%s AND v.symbol<>%s
+                  AND v.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+                  AND v.day_1d IS NOT NULL""", (segment, symbol))
+            peers_total = cur.fetchone()[0] or 0
 
             cur.execute("""SELECT pp, r1, s1 FROM v8_paper_pivots WHERE symbol=%s
                            AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) LIMIT 1""", (symbol,))
@@ -433,15 +473,21 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
 
             rules = []
 
-            # R1 Market
-            if side == "LONG":
-                rules.append(row("R1 Market", "not extremely bearish",
-                                 f"ADR {adr:.2f}" if adr is not None else "—",
-                                 (adr is not None and adr >= 0.8) if adr is not None else None))
-            else:
-                rules.append(row("R1 Market", "not extremely bullish",
-                                 f"ADR {adr:.2f}" if adr is not None else "—",
-                                 (adr is not None and adr <= 1.2) if adr is not None else None))
+            # R1 Market — cc#120 change_1: 4-condition graded mood gate, IDENTICAL
+            # both sides. ADR>=1, Nifty day/week/month>=0. Count fails: 0-2=PASS(1.0),
+            # 3=AVERAGE/WATCH(0.5), 4=FAIL(0.0). A missing value counts as a fail.
+            r1_conds = [
+                adr is not None and adr >= 1.0,
+                nf_day is not None and nf_day >= 0,
+                nf_wk is not None and nf_wk >= 0,
+                nf_mo is not None and nf_mo >= 0,
+            ]
+            r1_fails = sum(1 for c in r1_conds if not c)
+            r1_state = True if r1_fails <= 2 else ("watch" if r1_fails == 3 else False)
+            r1_val = (f"ADR {adr:.2f}" if adr is not None else "ADR —") + \
+                     f" · Day {_sp(nf_day)} · Week {_sp(nf_wk)} · Month {_sp(nf_mo)}" + \
+                     f" · {r1_fails} fail{'s' if r1_fails != 1 else ''}"
+            rules.append(row("R1 Market", "ADR>=1 & Nifty D/W/M>=0", r1_val, r1_state))
 
             # R2 Sector — TRI-STATE (v3.4)
             sw, sm = _f(sec_w), _f(sec_m)
@@ -457,9 +503,12 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
             rules.append(row("R2 Sector", r2_cond,
                              f"W {sw:.1f} / M {sm:.1f}" if sw is not None else "—", r2_state))
 
-            # R3 Peers
+            # R3 Peers — cc#120 change_2 (graded) + fix_7 (segment context).
+            # 2+ aligned=PASS(1.0), 1=AVERAGE/WATCH(0.5), 0=FAIL(0.0). Value shows
+            # aligned/total peers + segment name.
+            r3_state = True if peers_n >= 2 else ("watch" if peers_n == 1 else False)
             rules.append(row("R3 Peers", f"2+ peers {'up' if side=='LONG' else 'down'}",
-                             f"{peers_n} aligned", peers_n >= 2))
+                             f"{peers_n}/{peers_total} peers · {segment}", r3_state))
 
             # R4 GVM (LONG only)
             if side == "LONG":
@@ -482,15 +531,18 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
             # R6 Volume
             rules.append(row("R6 Volume", f"1-mo {'buying' if side=='LONG' else 'selling'}", r7_val, r7_ok))
 
-            # R7 Returns
+            # R7 Returns — cc#120 change_3 (graded) + fix_9 (-0.0% display fix).
+            # LONG: both>0=PASS, one>0=AVERAGE, none=FAIL. SHORT mirrors with <0.
+            wkf, mof = _f(wk_ret), _f(mo_ret)
+            r7_val = f"W {_sp(wkf)} / M {_sp(mof)}"
             if side == "LONG":
-                rules.append(row("R7 Returns", "week>0 & month>0",
-                                 f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
-                                 wk_ret is not None and mo_ret is not None and float(wk_ret) > 0 and float(mo_ret) > 0))
+                aligned = (wkf is not None and wkf > 0) + (mof is not None and mof > 0)
+                r7_state = True if aligned == 2 else ("watch" if aligned == 1 else False)
+                rules.append(row("R7 Returns", "week>0 & month>0", r7_val, r7_state))
             else:
-                rules.append(row("R7 Returns", "week<0 & month<0",
-                                 f"W {_f(wk_ret):.1f}% / M {_f(mo_ret):.1f}%",
-                                 wk_ret is not None and mo_ret is not None and float(wk_ret) < 0 and float(mo_ret) < 0))
+                aligned = (wkf is not None and wkf < 0) + (mof is not None and mof < 0)
+                r7_state = True if aligned == 2 else ("watch" if aligned == 1 else False)
+                rules.append(row("R7 Returns", "week<0 & month<0", r7_val, r7_state))
 
             # R8 5-min
             rules.append(row("R8 5-min", "intraday strength (2/3 sub)", r10_val, r10_ok, r10_method))
