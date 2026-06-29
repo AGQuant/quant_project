@@ -4,7 +4,7 @@ Trade Check v4 — two-tier framework (session_log id=959, TC_CANONICAL_SPEC_V4)
 POST /api/trade-check/v4   body: {"symbol": "...", "direction": "LONG|SHORT"}
 
 Tier-1 = process gates  (LONG 12 rules / SHORT 11 rules, binary, advance >= 8)
-Tier-2 = entry filters  (6 effective rules, binary, enter >= 4)
+Tier-2 = entry filters  (8 filters F1-F8, binary, enter >= 5)
 
 Note: the canonical spec states SHORT denominator = 10, but the SHORT rule list
 is R1-R12 with only R4 (GVM gate) marked N/A = 11 scored rules. Resolved (Arpit,
@@ -14,9 +14,17 @@ affects the displayed denominator, not pass/fail.
 
 Verdict:
   FAIL   : Tier1 < 8
-  WATCH  : Tier1 >= 8 AND Tier2 < 4
-  VALID  : Tier1 >= 8 AND Tier2 >= 4
+  WATCH  : Tier1 >= 8 AND Tier2 below entry gate
+  VALID  : Tier1 >= 8 AND Tier2 >= 5
   STRONG : Tier1 >= 10 AND Tier2 >= 5
+
+cc#119: Tier-2 gains F8 (intraday volume confirmation). The deployed code already
+carried 7 filters (F1-F7) but mislabelled max as 6 (a cc#116 slip); the
+denominator is now the true scored count. With F8 that is 8 filters, ENTER gate
+5/8 (Arpit, 29-Jun: keep all filters, truthful denominator). If a symbol has < 3
+prior days of intraday history, F8 returns N/A and is excluded from BOTH the
+score and the denominator (never a FAIL); Tier-2 then reads 7 filters and the
+ENTER gate falls back to 4/7. STRONG keeps its Tier-2 bar at 5: only ENTER moved.
 
 Data rules (spec data_rule + critical_data_rules):
   * RSI (month/weekly) and week/month returns are recomputed LIVE from raw_prices
@@ -207,6 +215,44 @@ def _load(cur, symbol):
     cur.execute("""SELECT basis_pct, oi_chg FROM futures_basis WHERE symbol=%s
                    ORDER BY ts DESC LIMIT 3""", (symbol,))
     d["basis"] = [{"basis_pct": _f(r[0]), "oi_chg": _f(r[1])} for r in cur.fetchall()]
+
+    # F8 (cc#119) — intraday volume vs trailing 7-day avg over the SAME window.
+    # today_vol = SUM(volume) 09:15 -> latest bar; avg_7d = AVG of the same
+    # 09:15 -> window_end sum across the last up-to-7 trading days. If today has
+    # no bars, window_end is NULL and hist_vol yields zero rows -> days_found=0
+    # -> F8 is N/A (handled in _tier2). spec_id 959.
+    cur.execute("""
+        WITH today_vol AS (
+            SELECT COALESCE(SUM(volume), 0) AS vol, MAX(ts::time) AS window_end
+            FROM intraday_prices
+            WHERE symbol=%s AND source IN ('fyers_eq','fyers') AND timeframe='5m'
+              AND ts::date = CURRENT_DATE AND ts::time >= '09:15:00'
+        ),
+        hist_vol AS (
+            SELECT ts::date AS d, SUM(volume) AS day_vol
+            FROM intraday_prices
+            WHERE symbol=%s AND source IN ('fyers_eq','fyers') AND timeframe='5m'
+              AND ts::date >= CURRENT_DATE - INTERVAL '14 days'
+              AND ts::date < CURRENT_DATE
+              AND ts::time >= '09:15:00'
+              AND ts::time <= (SELECT window_end FROM today_vol)
+            GROUP BY ts::date
+            ORDER BY ts::date DESC
+            LIMIT 7
+        )
+        SELECT (SELECT vol FROM today_vol),
+               (SELECT window_end FROM today_vol),
+               ROUND(AVG(day_vol)),
+               COUNT(*)
+        FROM hist_vol
+    """, (symbol, symbol))
+    iv = cur.fetchone()
+    if iv:
+        d["intra_vol"] = {"today_vol": _f(iv[0]), "window_end": iv[1],
+                          "avg_7d": _f(iv[2]), "days_found": int(iv[3] or 0)}
+    else:
+        d["intra_vol"] = {"today_vol": None, "window_end": None,
+                          "avg_7d": None, "days_found": 0}
 
     return d
 
@@ -480,38 +526,74 @@ def _tier2(d, direction):
     rules.append(_rule("F7", "OI + basis aligned", "basis_pct>0 OR oi_chg>0",
                        f"basis {_r(bp)}% oi_chg {_r(oc, 0)}", f7))
 
-    score = sum(1 for r in rules if r["pass"])
-    return {"score": score, "max": 6, "enter": score >= 4, "rules": rules}
+    # F8 (cc#119) — Intraday volume confirmation (direction-neutral). Today's
+    # cumulative volume (09:15 -> latest bar) vs the trailing 7-day average over
+    # the SAME window. Graceful: < 3 prior days of intraday history -> N/A, which
+    # is excluded from both the score and the denominator (never a FAIL).
+    iv = d.get("intra_vol", {})
+    tv, a7, dfound = iv.get("today_vol"), iv.get("avg_7d"), iv.get("days_found", 0) or 0
+    we = iv.get("window_end")
+    we_str = we.strftime("%H:%M") if we is not None else "--:--"
+    if dfound >= 3 and a7 and a7 > 0 and tv is not None:
+        ratio = tv / a7
+        f8 = _rule("F8", "Intraday volume confirmation",
+                   "today vol > 7-day avg (same window)",
+                   f"{_r(ratio)}x avg · window 09:15-{we_str}", tv > a7)
+    else:
+        f8 = _rule("F8", "Intraday volume confirmation",
+                   "today vol > 7-day avg (same window)",
+                   f"N/A · only {dfound} prior day(s) of intraday history", False)
+        f8["na"] = True
+        f8["state"] = "N/A"
+    rules.append(f8)
+
+    # N/A rules (F8 with insufficient history) are excluded from BOTH score and
+    # denominator. ENTER gate steps up by one when F8 is actually scored (cc#119):
+    # F8 scored -> gate 5; F8 N/A -> gate falls back to 4 so the missing intraday
+    # history never penalises. STRONG keeps its Tier-2 bar at 5 (Arpit, 29-Jun).
+    scorable = [r for r in rules if not r.get("na")]
+    score = sum(1 for r in scorable if r["pass"])
+    mx = len(scorable)
+    f8_scored = not f8.get("na")
+    enter = score >= (5 if f8_scored else 4)
+    strong = score >= 5
+    return {"score": score, "max": mx, "enter": enter, "strong": strong,
+            "rules": rules}
 
 
 # ── verdict + interpretation ──────────────────────────────────────────────────
 
 def _verdict(t1, t2):
-    s1, s2 = t1["score"], t2["score"]
-    if s1 >= 10 and s2 >= 5:
+    s1 = t1["score"]
+    # cc#119: Tier-2 gates are dynamic (enter 5/8, or 4/7 when F8 is N/A);
+    # tier2 exposes pre-computed enter/strong flags. STRONG bar kept at 5.
+    if s1 >= 10 and t2.get("strong"):
         return "STRONG"
-    if s1 >= 8 and s2 >= 4:
+    if s1 >= 8 and t2.get("enter"):
         return "VALID"
-    if s1 >= 8 and s2 < 4:
+    if s1 >= 8:
         return "WATCH"
     return "FAIL"
 
 
 def _interpretation(symbol, direction, verdict, t1, t2, cmp_v):
     failed1 = [r["rule"] for r in t1["rules"] if not r["pass"]]
-    failed2 = [r["rule"] for r in t2["rules"] if not r["pass"]]
+    # N/A filters (F8 with insufficient history) are not "failed" entry filters.
+    failed2 = [r["rule"] for r in t2["rules"] if not r["pass"] and not r.get("na")]
+    # ENTER gate is 5 when F8 scored (max 8), else 4 (max 7, F8 N/A).
+    thr = 5 if t2["max"] >= 8 else 4
     head = f"{symbol} {direction} @ {_r(cmp_v)} — {verdict}."
     if verdict == "STRONG":
-        body = (f"Tier-1 {t1['score']}/{t1['max']} and Tier-2 {t2['score']}/6 both "
+        body = (f"Tier-1 {t1['score']}/{t1['max']} and Tier-2 {t2['score']}/{t2['max']} both "
                 f"clear the high bar — process and entry timing align. "
                 f"Highest-conviction {direction.lower()} setup.")
     elif verdict == "VALID":
         body = (f"Tier-1 {t1['score']}/{t1['max']} confirms the process is sound and "
-                f"Tier-2 {t2['score']}/6 clears entry filters. Tradeable now; "
+                f"Tier-2 {t2['score']}/{t2['max']} clears entry filters. Tradeable now; "
                 f"weak filters: {', '.join(failed2) or 'none'}.")
     elif verdict == "WATCH":
         body = (f"Tier-1 {t1['score']}/{t1['max']} qualifies the setup, but Tier-2 "
-                f"{t2['score']}/6 is below 4 — entry timing not ready "
+                f"{t2['score']}/{t2['max']} is below {thr} — entry timing not ready "
                 f"(missing: {', '.join(failed2) or 'none'}). Keep on watch.")
     else:
         body = (f"Tier-1 {t1['score']}/{t1['max']} is below the 8-gate threshold — "
@@ -592,8 +674,9 @@ def trade_check_v4_health():
     return {
         "version": VERSION, "spec_ref": SPEC_REF,
         "tier1": {"LONG": 12, "SHORT": 11, "advance": 8},
-        "tier2": {"max": 6, "enter": 4},
-        "verdict": {"FAIL": "T1<8", "WATCH": "T1>=8 & T2<4",
-                    "VALID": "T1>=8 & T2>=4", "STRONG": "T1>=10 & T2>=5"},
+        "tier2": {"max": 8, "enter": 5,
+                  "na_fallback": "F8 N/A (<3d intraday) -> 7 filters, enter 4"},
+        "verdict": {"FAIL": "T1<8", "WATCH": "T1>=8 & T2 below gate",
+                    "VALID": "T1>=8 & T2>=5", "STRONG": "T1>=10 & T2>=5"},
         "status": "ok",
     }
