@@ -180,11 +180,28 @@ def smartgain_m2m():
                 row["is_live"]     = bool(row["is_live"])
                 row["updated_at"]  = row["updated_at"].isoformat() if row["updated_at"] else None
                 rows.append(row)
-            total_mtm    = round(sum(r["mtm"] or 0 for r in rows), 2)
+            # ── UNREALISED: live MTM on open positions (existing computation) ──
+            unrealised   = round(sum(r["mtm"] or 0 for r in rows), 2)
             last_updated = max((r["updated_at"] for r in rows if r["updated_at"]), default=None)
             any_live     = any(r["is_live"] for r in rows)
+
+            # ── REALISED: closed-trade P&L this week (cc_task #115) ──
+            # Week = Monday-start (date_trunc('week') is ISO Monday in Postgres).
+            cur.execute("""
+                SELECT COALESCE(SUM(pnl), 0)
+                FROM personal_journal
+                WHERE result = 'CLOSED'
+                  AND trade_date >= date_trunc('week', CURRENT_DATE)
+            """)
+            realised = round(float(cur.fetchone()[0] or 0), 2)
+
+            # ── TOTAL: headline number = realised + unrealised ──
+            total = round(realised + unrealised, 2)
+
             return {
-                "account": "MHK40", "positions": rows, "total_mtm": total_mtm,
+                "account": "MHK40", "positions": rows,
+                "realised": realised, "unrealised": unrealised, "total": total,
+                "total_mtm": unrealised,  # back-compat: old field == unrealised bucket
                 "position_count": len(rows), "last_updated": last_updated,
                 "data_source": "live_fyers" if any_live else "manual_screenshot",
             }
