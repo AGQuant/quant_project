@@ -56,7 +56,7 @@ USAGE:
   Manual override:     python fyers_feed.py --auth-code <code>
 """
 
-import argparse, bisect, calendar, hashlib, os, time, logging, threading, re
+import argparse, bisect, calendar, hashlib, os, sys, json, time, logging, threading, re
 from datetime import datetime, timedelta, time as dt_time, date
 import pytz, psycopg2, requests
 
@@ -108,6 +108,13 @@ WATCHDOG_MIN_SYMBOLS    = 50   # cc_task #85 PART_4: < this sustained → force 
 WATCHDOG_STALE_MINS     = 15   # consecutive minutes below WATCHDOG_MIN_SYMBOLS before reconnect
 TOTAL_FUTURES           = 212  # denominator for the N/212 health log
 RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
+# cc_task #112: socket-reconnect-only is REJECTED. If N consecutive forced reconnects
+# fail to restore coverage, escalate to a HARD process restart (os.execv) so Railway
+# relaunches a clean worker that re-subscribes all 212 symbols from scratch. This is
+# the auto-restart that was the missing piece in the 4 prior recurrences.
+WATCHDOG_MAX_RECONNECTS = 2    # forced socket reconnects before escalating to hard restart
+CMP_STALE_GUARD_SECS    = 90   # cc_task #112: only (re)write a cmp_prices row when its tick is
+                               # newer than the last flush — no fresh tick => no timestamp update
 STARTUP_GRACE_MINS      = 10   # suppress the watchdog this long after 09:15 (bars need time to form)
 OPEN_RACE_GUARD_SECS    = 60   # hold the first subscription until N s after 09:15 (NSE feed-init race)
 WS_SUB_BATCH            = 200  # cc_task #88: subscribe in 200-symbol batches (Fyers silently drops bulk subs at open)
@@ -169,7 +176,6 @@ log = logging.getLogger('fyers_feed')
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def app_id_hash(): return hashlib.sha256(f'{FYERS_CLIENT_ID}:{FYERS_SECRET}'.encode()).hexdigest()
 
@@ -564,6 +570,11 @@ class BarAggregator:
         self.conn     = conn
         self.bars     = {}
         self.last_ltp = {}
+        # cc_task #112: per-symbol time of the LAST GENUINE tick + time of the last
+        # cmp flush. flush_cmp uses these so a symbol with no fresh tick is never
+        # re-stamped — stops the stale-write masking that made a dead feed look healthy.
+        self.last_ltp_ts        = {}   # symbol -> datetime of most recent real tick
+        self._last_cmp_flush_ts = None # datetime of the last successful cmp flush
         self.last_oi  = {}   # symbol -> latest OI from depth REST poll (futures)
         # RLock (re-entrant): flush_all holds it while _flush → _compute_basis
         # runs; a plain Lock here deadlocked the whole feed (v6.1 fix).
@@ -578,7 +589,8 @@ class BarAggregator:
         bkt = self._bucket(ts)
         key = (sym, source)
         with self.lock:
-            self.last_ltp[sym] = ltp
+            self.last_ltp[sym]    = ltp
+            self.last_ltp_ts[sym] = ts   # cc_task #112: mark when this genuine tick arrived
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
@@ -678,10 +690,27 @@ class BarAggregator:
                 self._flush(key, bar)
 
     def flush_cmp(self):
+        """cc_task #112 — STOP STALE-WRITE MASKING (most critical fix).
+        Only (re)write a cmp_prices row for a symbol that received a GENUINE tick
+        since the last flush. The updated_at stamped is the real tick time, never
+        a blanket now(). A symbol with no fresh tick is left untouched so its
+        updated_at ages truthfully. If the WS is dead, ZERO rows are written and
+        cmp_prices freshness goes stale on its own — so health checks finally see
+        the truth instead of a feed that lies while frozen."""
         _ist = datetime.now(IST).replace(tzinfo=None)
+        prev = self._last_cmp_flush_ts
+        # tolerate the very first flush (prev=None) with a short look-back window so a
+        # symbol that ticked just before boot is still written once.
+        cutoff = prev if prev is not None else (_ist - timedelta(seconds=CMP_STALE_GUARD_SECS))
         with self.lock:
-            rows = [(s, p, _ist) for s, p in self.last_ltp.items() if p]
-        if not rows: return
+            rows = [(s, p, self.last_ltp_ts.get(s))
+                    for s, p in self.last_ltp.items()
+                    if p and self.last_ltp_ts.get(s) is not None
+                    and self.last_ltp_ts[s] > cutoff]
+        if not rows:
+            log.warning("CMP flush SKIPPED — 0 fresh ticks since last flush "
+                        "(WS feed likely dead; NOT stamping stale prices)")
+            return
         try:
             with self.conn.cursor() as cur:
                 cur.executemany("""
@@ -691,7 +720,8 @@ class BarAggregator:
                         cmp=EXCLUDED.cmp, updated_at=EXCLUDED.updated_at, source='fyers'
                 """, rows)
             self.conn.commit()
-            log.info(f"CMP flushed: {len(rows)} symbols")
+            self._last_cmp_flush_ts = _ist
+            log.info(f"CMP flushed: {len(rows)} fresh symbols")
         except Exception as e:
             log.warning(f"flush_cmp: {e}")
 
@@ -1073,6 +1103,40 @@ def run(auth_code=None):
         except Exception as e:
             log.warning(f"force reconnect: {e}")
 
+    def _log_feed_incident(kind, detail):
+        """cc_task #112: record each watchdog action to session_log (category=alert)
+        so every recurrence is visible after the fact. Uses the housekeeping conn."""
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO session_log (session_date, session_ts, category, title, details) "
+                    "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)",
+                    (kind, json.dumps({"detail": detail, "ist": datetime.now(IST).isoformat()})))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"_log_feed_incident: {e}")
+
+    def _hard_restart(reason):
+        """cc_task #112 — the missing auto-restart. Socket-reconnect failed to revive
+        the feed (rejected as a fix on its own), so RE-EXEC the whole process: a clean
+        boot re-auths (same-day token reused), rebuilds the WS and re-subscribes all 212
+        symbols from scratch. Railway also relaunches the worker if execv ever fails."""
+        log.error(f"FEED WATCHDOG: HARD RESTART — {reason}")
+        _log_feed_incident("feed_hard_restart", reason)
+        try:
+            agg.flush_all(); opt_store.flush_all()   # persist whatever bars we hold
+        except Exception:
+            pass
+        try:
+            fyers_ws.close_connection()
+        except Exception:
+            pass
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            log.error(f"os.execv failed ({e}) — exiting for Railway to relaunch")
+            os._exit(1)
+
     def housekeeping():
         last_atm_check  = None
         last_purge_day  = None
@@ -1083,6 +1147,7 @@ def run(auth_code=None):
         last_health_log = None        # cc_task #84
         last_reconnect  = None        # cc_task #84
         watchdog_stale_since = None   # cc_task #85: when coverage first dropped below WATCHDOG_MIN_SYMBOLS
+        reconnect_attempts   = 0      # cc_task #112: forced reconnects since coverage last healthy
 
         while True:
             now    = datetime.now(IST)
@@ -1156,9 +1221,22 @@ def run(auth_code=None):
                         if (stale_mins >= WATCHDOG_STALE_MINS and
                                 (last_reconnect is None or
                                  (now_dt - last_reconnect).total_seconds() >= RECONNECT_COOLDOWN_MINS * 60)):
+                            # cc_task #112: escalate. The first WATCHDOG_MAX_RECONNECTS actions
+                            # try a socket reconnect; if coverage is STILL dead after that, a
+                            # reconnect clearly isn't fixing it (4 prior recurrences) -> hard
+                            # restart the whole process for a guaranteed clean re-subscribe.
+                            if reconnect_attempts >= WATCHDOG_MAX_RECONNECTS:
+                                _hard_restart(
+                                    f"{recent}/{TOTAL_FUTURES} symbols writing after "
+                                    f"{reconnect_attempts} reconnects, {stale_mins:.0f}min gap")
+                                # process is being replaced; nothing below runs
                             log.error(f"FEED WATCHDOG: forcing reconnect after {stale_mins:.0f}min gap "
-                                      f"(<{WATCHDOG_MIN_SYMBOLS} symbols writing)")
+                                      f"(<{WATCHDOG_MIN_SYMBOLS} symbols writing, "
+                                      f"attempt {reconnect_attempts + 1}/{WATCHDOG_MAX_RECONNECTS})")
                             _force_reconnect()
+                            _log_feed_incident("feed_watchdog_reconnect",
+                                               f"{recent}/{TOTAL_FUTURES} writing; {stale_mins:.0f}min gap")
+                            reconnect_attempts += 1
                             # cc_task #87: heal_gap must NEVER run during market hours
                             # (09:15-15:30 IST). The force-reconnect restores the live WS
                             # feed immediately; the outage gap is backfilled by the 18:00
@@ -1168,6 +1246,7 @@ def run(auth_code=None):
                             watchdog_stale_since = now_dt   # restart the window after acting
                     else:
                         watchdog_stale_since = None         # recovered -> reset the timer
+                        reconnect_attempts   = 0            # cc_task #112: clear escalation counter
 
             # Monthly roll — once per day
             if last_roll_check != today:
@@ -1201,7 +1280,23 @@ def run(auth_code=None):
 
             time.sleep(30)
 
-    threading.Thread(target=housekeeping, daemon=True).start()
+    # cc_task #112 — NEVER DIE SILENT. The watchdog lives inside housekeeping(); if that
+    # thread ever raises and dies, the feed loses its only auto-recovery and freezes
+    # unnoticed (the failure mode behind the 4 recurrences). Supervise it: any crash or
+    # unexpected return is logged and the loop is restarted after a short backoff.
+    def _housekeeping_supervised():
+        while True:
+            try:
+                housekeeping()   # normally an infinite loop — should never return
+                log.error("housekeeping() returned unexpectedly — restarting in 5s")
+            except Exception as e:
+                log.error(f"housekeeping THREAD crashed: {e} — restarting in 5s")
+                try:
+                    _log_feed_incident("housekeeping_crash", str(e))
+                except Exception:
+                    pass
+            time.sleep(5)
+    threading.Thread(target=_housekeeping_supervised, daemon=True).start()
     log.info("Connecting WebSocket (live)...")
     fyers_ws.connect()
 
