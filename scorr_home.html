@@ -278,7 +278,7 @@ const ago = ts => {
   const m = Math.floor(s/60); return m < 60 ? m + "m ago" : Math.floor(m/60) + "h ago";
 };
 
-(async function loadSG() {
+async function loadSG() {
   try {
     const r = await fetch("/api/smartgain/m2m");
     const d = await r.json();
@@ -338,13 +338,16 @@ const ago = ts => {
       </div>`;
     }).join("");
 
+    const nowIST = new Date().toLocaleTimeString("en-IN", {timeZone:"Asia/Kolkata", hour:"2-digit", minute:"2-digit", second:"2-digit"});
     document.getElementById("sg-meta").textContent =
-      rows.length + " positions · updated " + ago(d.last_updated) + " · tap for chart & details";
+      rows.length + " positions · " + nowIST + " IST · tap for chart & details";
 
   } catch(e) {
     document.getElementById("sg-total").innerHTML = '<span class="sg-loading">Could not load</span>';
   }
-})();
+}
+loadSG();
+setInterval(loadSG, 30000);
 
 // Hide nav when embedded
 if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
