@@ -89,6 +89,7 @@ _v10_running = False
 _pcr_intraday_running = False
 _intraday_paper_running = False
 _tc_lite_running = False                          # cc_task #77: TC Lite screener pass guard
+_smartgain_mtm_running = False                    # cc#123: SmartGain live MTM refresh guard
 _fu_sync_ran_this_week: Optional[date] = None
 _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit pass guard
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
@@ -454,6 +455,40 @@ def _bg_tc_lite():
         log.error(f"tc_lite: {e}")
     finally:
         _tc_lite_running = False
+
+def _bg_smartgain_mtm():
+    """cc#123 (P0): refresh smartgain_holdings.ltp/mtm/updated_at from the live CMP
+    feed (cmp_prices) every 5 min during market hours. The stored ltp was a manual
+    stamp that froze ~24h while the dashboard re-fetched the same stale row and
+    stamped it with the wall clock — stale data looking live on a real-money book.
+    Only touches a holding whose cmp_prices tick is fresh (<=10 min IST) so a dead
+    per-symbol feed can never overwrite good data with a stale price. LONG/SHORT MTM
+    computed live. Pairs with the live cmp_prices JOIN in /api/smartgain/m2m."""
+    global _smartgain_mtm_running
+    if _smartgain_mtm_running: return
+    _smartgain_mtm_running = True
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                UPDATE smartgain_holdings h
+                SET ltp = cp.cmp,
+                    mtm = ROUND((CASE h.direction
+                              WHEN 'LONG'  THEN (cp.cmp - h.entry_price) * h.qty
+                              WHEN 'SHORT' THEN (h.entry_price - cp.cmp) * h.qty
+                              ELSE 0 END)::numeric, 2),
+                    updated_at = NOW()
+                FROM cmp_prices cp
+                WHERE cp.symbol = h.symbol
+                  AND cp.cmp IS NOT NULL
+                  AND cp.updated_at >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '10 minutes'
+            """)
+            n = cur.rowcount
+            conn.commit()
+        log.info(f"smartgain_mtm: refreshed {n} holdings from live cmp_prices")
+    except Exception as e:
+        log.error(f"smartgain_mtm: {e}")
+    finally:
+        _smartgain_mtm_running = False
 
 def _bg_qb_intraday_mark():
     global _qb_intraday_mark_running
@@ -832,6 +867,7 @@ async def _scheduler_loop():
             _spawn(_bg_v10_tick)
             _spawn(_bg_pcr_intraday)
             _spawn(_bg_tc_lite)               # cc_task #77: TC Lite screener (09:30-15:15 gate inside)
+            _spawn(_bg_smartgain_mtm)         # cc#123: refresh SmartGain LTP/MTM from live cmp_prices
             # _spawn(_bg_intraday_paper)  # INACTIVE 18-Jun-2026 — on-demand only via /api/intraday/tick
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
