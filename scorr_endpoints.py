@@ -21,7 +21,7 @@ def get_conn():
     return psycopg.connect(DATABASE_URL)
 
 
-# ── Request Models ──────────────────────────────────────────────────────────
+# ── Request Models ───────────────────────────────────────────────────────────────────────────────
 
 class ScorrQueryRequest(BaseModel):
     type: str
@@ -32,7 +32,7 @@ class ScorrQueryRequest(BaseModel):
     include_explanation: Optional[bool] = False
 
 
-# ── Cache Helpers ────────────────────────────────────────────────────────────
+# ── Cache Helpers ───────────────────────────────────────────────────────────────────────────────
 
 def is_cache_fresh(max_age_minutes: int = 15) -> bool:
     try:
@@ -84,7 +84,7 @@ def get_peer_comparison_native(symbol: str, segment: str) -> dict:
         return {"symbol": symbol, "error": str(e)}
 
 
-# ── Anthropic API Call ───────────────────────────────────────────────────────
+# ── Anthropic API Call ───────────────────────────────────────────────────────────────────────────
 
 async def call_anthropic_api(prompt: str) -> dict:
     if not ANTHROPIC_API_KEY:
@@ -105,7 +105,7 @@ async def call_anthropic_api(prompt: str) -> dict:
         return {"error": str(e), "tokens_used": 0}
 
 
-# ── Main Endpoint ────────────────────────────────────────────────────────────
+# ── Main Endpoint ───────────────────────────────────────────────────────────────────────────
 
 @router.post("/api/scorr/query")
 async def scorr_query(req: ScorrQueryRequest):
@@ -143,18 +143,33 @@ async def scorr_query(req: ScorrQueryRequest):
 
 @router.get("/api/smartgain/m2m")
 def smartgain_m2m():
-    """SmartGain MHK40 holdings — M2M with live LTP from Fyers intraday feed."""
+    """SmartGain MHK40 holdings — M2M with live LTP from the live CMP feed.
+
+    cc#113 (option a): the open book is now derived from personal_journal
+    (result='OPEN') — the single source of truth Arpit reconciles to the broker.
+    DISTINCT ON (symbol) is the dedup guard (#4) so a symbol can never appear
+    twice. The standalone smartgain_holdings table is retired (it was a 2nd
+    source that drifted). LTP/MTM are computed live, never a stored manual stamp.
+    """
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
+                WITH open_book AS (
+                    -- single source of truth = personal_journal OPEN rows (cc#113a).
+                    -- DISTINCT ON (symbol) keeps one row per symbol = dedup guard (#4).
+                    SELECT DISTINCT ON (symbol) id, symbol, direction, qty, entry_price
+                    FROM personal_journal
+                    WHERE result = 'OPEN'
+                    ORDER BY symbol, id DESC
+                )
                 SELECT
                     h.symbol, h.direction, h.qty,
                     ROUND(h.entry_price::numeric, 2)                         AS entry_price,
-                    ROUND(COALESCE(lp.live_ltp, h.ltp)::numeric, 2)         AS ltp,
+                    ROUND(lp.live_ltp::numeric, 2)                          AS ltp,
                     ROUND(
                         CASE h.direction
-                            WHEN 'LONG'  THEN (COALESCE(lp.live_ltp, h.ltp) - h.entry_price) * h.qty
-                            WHEN 'SHORT' THEN (h.entry_price - COALESCE(lp.live_ltp, h.ltp)) * h.qty
+                            WHEN 'LONG'  THEN (lp.live_ltp - h.entry_price) * h.qty
+                            WHEN 'SHORT' THEN (h.entry_price - lp.live_ltp) * h.qty
                             ELSE 0
                         END::numeric, 2
                     )                                                         AS mtm,
@@ -163,7 +178,7 @@ def smartgain_m2m():
                     (lp.live_ltp IS NOT NULL AND lp.age_min IS NOT NULL AND lp.age_min <= 10) AS is_live,
                     ROUND(lp.age_min::numeric, 1)                            AS ltp_age_min,
                     lp.last_tick                                            AS last_tick
-                FROM smartgain_holdings h
+                FROM open_book h
                 LEFT JOIN LATERAL (
                     -- cc#123: drive LTP from the canonical live CMP first (cmp_prices is
                     -- refreshed continuously and stays fresh even when a symbol's fyers_eq/
@@ -183,7 +198,6 @@ def smartgain_m2m():
                     ORDER BY last_tick DESC NULLS LAST
                     LIMIT 1
                 ) lp ON true
-                WHERE h.account = 'MHK40'
                 ORDER BY h.id
             """)
             cols = [d[0] for d in cur.description]
@@ -223,7 +237,7 @@ def smartgain_m2m():
                 "realised": realised, "unrealised": unrealised, "total": total,
                 "total_mtm": unrealised,  # back-compat: old field == unrealised bucket
                 "position_count": len(rows), "last_updated": last_updated,
-                "data_source": "live_fyers" if any_live else "manual_screenshot",
+                "data_source": "live_fyers" if any_live else "journal_open",
             }
     except Exception as e:
         return {"error": str(e)}
@@ -241,8 +255,16 @@ def smartgain_chart(view: str = "intraday"):
         with get_conn() as conn, conn.cursor() as cur:
 
             if view == "intraday":
-                # Compute total M2M at each 5-min bar today across all open positions
+                # Compute total M2M at each 5-min bar today across all open positions.
+                # cc#113a: open book derived from personal_journal OPEN (single source),
+                # DISTINCT ON (symbol) dedup — matches /api/smartgain/m2m exactly.
                 cur.execute("""
+                    WITH open_book AS (
+                        SELECT DISTINCT ON (symbol) symbol, direction, qty, entry_price
+                        FROM personal_journal
+                        WHERE result = 'OPEN'
+                        ORDER BY symbol, id DESC
+                    )
                     SELECT
                         ip.ts                                                       AS ts,
                         TO_CHAR(ip.ts AT TIME ZONE 'Asia/Kolkata', 'HH24:MI')      AS label,
@@ -254,7 +276,7 @@ def smartgain_chart(view: str = "intraday"):
                             END
                         )::numeric, 2)                                              AS mtm
                     FROM intraday_prices ip
-                    JOIN smartgain_holdings h ON h.symbol = ip.symbol AND h.account = 'MHK40'
+                    JOIN open_book h ON h.symbol = ip.symbol
                     WHERE ip.ts::date = CURRENT_DATE
                     GROUP BY ip.ts
                     ORDER BY ip.ts
