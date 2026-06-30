@@ -63,7 +63,7 @@ def filter_by_threshold_native(segment: str, threshold: float) -> list:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT symbol, gvm_score, growth, value, momentum, segment FROM gvm_cache WHERE segment = %s AND gvm_score >= %s ORDER BY gvm_score DESC", (segment, threshold))
             cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+            return [dict(zip(cols, row)) for row in cu.fetchall()]
     except Exception as e:
         return {"error": str(e)}
 
@@ -264,8 +264,11 @@ def smartgain_chart(view: str = "rolling3d"):
                         WHERE account = 'MHK40'
                     ),
                     trading_days AS (
+                        -- cc#136: restrict to real NSE trading bars (09:15-15:30 IST)
+                        -- to exclude synthetic midnight bars (expiry/weekend artifacts).
                         SELECT DISTINCT ts::date AS tdate
                         FROM intraday_prices
+                        WHERE ts::time >= '09:15' AND ts::time <= '15:30'
                         ORDER BY tdate DESC
                         LIMIT 3
                     )
