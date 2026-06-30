@@ -121,6 +121,12 @@
   .copy-btn.failed{color:var(--red)}
   .copy-btn svg{display:block;pointer-events:none}
 
+  .kb-toggle{margin-top:14px;padding:7px 14px;font-size:12px;font-weight:700;color:var(--blu);
+    background:rgba(37,99,235,.07);border:1px solid var(--line2);border-radius:8px;cursor:pointer;
+    font-family:var(--sans);transition:.15s}
+  .kb-toggle:hover{background:rgba(37,99,235,.12)}
+  .kb-toggle:disabled{opacity:.55;cursor:default}
+
   .msg{text-align:center;color:var(--mut);font-size:13px;padding:60px 20px}
   .foot{font-size:10.5px;color:#b3bccd;text-align:center;margin-top:46px;line-height:1.8}
 
@@ -191,10 +197,14 @@ const CATS = [
   { id:"domestic",     label:"Domestic" },
   { id:"global",       label:"Global" },
   { id:"ipo",          label:"IPO" },
+  { id:"learn",        label:"Learn" },
 ];
 let curCat = "all";
 const SEARCH_TABS = ["domestic"];
 let articles = [];
+// cc_task #125: Knowledge Hub (Learn tab) — separate feed + lazy-loaded bodies
+let kbArticles = [];
+const _kbCache = {};
 
 // -- AbortController — cancel in-flight fetch on every new tab switch --
 let _abortCtrl = null;
@@ -303,6 +313,8 @@ function pick(cat){
 }
 
 async function load(){
+  // cc_task #125: Learn tab uses its own Knowledge Hub feed, not /api/news/polished
+  if(curCat === "learn"){ return loadKnowledge(); }
   // -- Cancel any previous in-flight request --
   if(_abortCtrl){ _abortCtrl.abort(); }
   _abortCtrl = new AbortController();
@@ -403,7 +415,94 @@ function artCompact(a, showPill){
   </article>`;
 }
 
+// ─────────── cc_task #125: Knowledge Hub (Learn tab) ───────────
+async function loadKnowledge(){
+  if(_abortCtrl){ _abortCtrl.abort(); }
+  _abortCtrl = new AbortController();
+  const signal = _abortCtrl.signal;
+  const btn = document.getElementById("refreshBtn");
+  btn.disabled = true;
+  document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
+  try{
+    const r = await fetch(`${API}/api/knowledge/articles?limit=100`, { signal });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if(curCat !== "learn") return; // tab switched mid-fetch
+    kbArticles = d.articles || [];
+    const total = d.total || kbArticles.length;
+    document.getElementById("meta").textContent = total
+      ? `${total} educational ${total===1?"article":"articles"} · evergreen Knowledge Hub`
+      : "Knowledge Hub · articles coming soon";
+    renderKnowledge();
+  } catch(e){
+    if(e.name === "AbortError") return;
+    if(curCat !== "learn") return;
+    document.getElementById("feed").innerHTML = `<div class="msg">Could not load (${esc(e.message)}). Tap Refresh to try again.</div>`;
+  } finally{
+    if(curCat === "learn") btn.disabled = false;
+  }
+}
+
+function kbPill(cat){
+  if(!cat) return "";
+  return `<span class="art-tag">${esc(cat)}</span>`;
+}
+
+function kbCard(a){
+  const rt = a.reading_time_min ? `<span class="art-rt">${a.reading_time_min} min read</span>` : "";
+  const stand = (a.summary && String(a.summary).trim())
+    ? `<div class="art-stand-sm">${esc(a.summary)}</div>` : "";
+  const sep = (rt && a.category) ? `<span class="art-dot">·</span>` : "";
+  return `<article class="art art-compact" id="kb-${esc(a.slug)}">
+    <div class="art-head">${esc(a.title)}</div>
+    <div class="art-metarow">${kbPill(a.category)}${sep}${rt}</div>
+    ${stand}
+    <div class="art-body kb-body" data-slug="${esc(a.slug)}" style="display:none"></div>
+    <button class="kb-toggle" type="button" onclick="toggleKb('${esc(a.slug)}',this)">Read article &#8595;</button>
+  </article>`;
+}
+
+function renderKnowledge(){
+  const feed = document.getElementById("feed");
+  if(!kbArticles.length){
+    feed.innerHTML = '<div class="msg">No articles yet — the Knowledge Hub is being written. Check back soon.</div>';
+    return;
+  }
+  feed.innerHTML = kbArticles.map(kbCard).join("");
+}
+
+async function toggleKb(slug, btn){
+  const card = document.getElementById("kb-"+slug);
+  if(!card) return;
+  const body = card.querySelector(".kb-body");
+  if(body.style.display !== "none"){          // collapse
+    body.style.display = "none";
+    btn.innerHTML = "Read article &#8595;";
+    return;
+  }
+  btn.disabled = true;
+  try{
+    let md = _kbCache[slug];
+    if(md == null){
+      const r = await fetch(`${API}/api/knowledge/articles/${encodeURIComponent(slug)}`);
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      md = d.content_md || "";
+      _kbCache[slug] = md;
+    }
+    body.innerHTML = md.trim() ? renderMd(md) : `<p class="art-soon">Full article coming soon.</p>`;
+    body.style.display = "block";
+    btn.innerHTML = "Collapse &#8593;";
+  }catch(e){
+    body.innerHTML = `<p class="art-soon">Could not load article (${esc(e.message)}).</p>`;
+    body.style.display = "block";
+  }finally{
+    btn.disabled = false;
+  }
+}
+
 function render(){
+  if(curCat === "learn"){ renderKnowledge(); return; }
   let rows = articles.slice();
   if(SEARCH_TABS.includes(curCat)){
     const q = (document.getElementById("symSearch").value || "").trim().toUpperCase();
