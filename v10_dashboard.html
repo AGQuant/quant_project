@@ -338,6 +338,7 @@ const D = {
   pcr:{ nifty:{cur:0,chg:0,data:[]}, bnk:{cur:0,chg:0,data:[]} },
   maxpain:{ status:'loading', strike:0, spot:0, distance:0, distance_pct:0, expiry:null },
   buildup:{ long:[], short:[], pending:true },
+  divergence:{ rows:[], market_hours:false, ts:'—', skipped_stale:0, threshold:1 },
   open:[], closed:[],
   cfg:{ stP:150,stM:3,stTf:'10m',emaF:3,emaS:10,emaTf:'30m',entry:'09:20–15:20',cut:'15:20',lotN:65,lotB:30,legs:'FUT + ATM write',gapExit:'ON' },
   perf:{},
@@ -445,6 +446,12 @@ async function loadBuildup(){
                 short:(b.short_buildup||[]).map(mapBuild),
                 pending: !!b.oi_feed_pending };
 }
+async function loadDivergence(){
+  const d = await getJSON('/api/v10/divergence');
+  D.divergence = { rows:(d.rows||[]), market_hours:!!d.market_hours,
+                   ts:d.ts||'—', skipped_stale:d.skipped_stale||0,
+                   threshold:d.threshold!=null?d.threshold:1 };
+}
 function normSide(s){ return (s||'').toUpperCase()==='SHORT'?'SHORT':'LONG'; }
 /* V10 trades indices only — drop stray V8 stock-futures rows from fallback feeds */
 const IDX_SET = ['NIFTY','BANKNIFTY','NIFTY50','BANKNIFTY50'];
@@ -498,7 +505,7 @@ async function loadPerf(){
 }
 
 async function loadLive(){
-  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadOpen,loadClosed,loadPerf];
+  const tasks=[loadMood,loadSignals,loadIdx,loadVix,loadADR,loadPCR,loadMaxPain,loadBuildup,loadDivergence,loadOpen,loadClosed,loadPerf];
   await Promise.all(tasks.map(fn=>fn().catch(e=>console.warn('[v10]',fn.name,e.message))));
   D._updated = istNow().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
 }
@@ -803,12 +810,40 @@ function rBuildup(){
   </div>`;
 }
 
+/* ── cc#124: Futures-vs-Equity Divergence scanner ── */
+function rDivergence(){
+  const d = D.divergence, rows = d.rows||[];
+  const sigClr = s => s==='BASIS'?C.violet : s==='1HR'?C.blu : s==='1D'?C.amber : C.mut;
+  const cell = v => v==null
+    ? `<td class="td-mono" style="color:var(--dim)">—</td>`
+    : `<td class="td-mono" style="font-weight:700;color:${cx(v)}">${sgn(v)}</td>`;
+  const head = ['SYMBOL','BASIS %','1HR DIV %','1D DIV %','SPOT LTP','FUT LTP','SIGNALS','UPDATED'];
+  const body = rows.length ? rows.map(r=>`<tr>
+    <td class="td-mono" style="font-weight:800;font-size:12px">${esc(r.symbol)}</td>
+    ${cell(r.basis_pct)}${cell(r.div_1hr)}${cell(r.div_1d)}
+    <td class="td-mono">${r.spot_ltp!=null?num(r.spot_ltp,2):'—'}</td>
+    <td class="td-mono">${r.futures_ltp!=null?num(r.futures_ltp,2):'—'}</td>
+    <td>${(r.signals||[]).map(s=>bdg(s,sigClr(s),true)).join(' ')}</td>
+    <td class="td-mono" style="color:var(--dim);font-size:10px">${r.age_min!=null?r.age_min+'m ago':esc(r.last_tick||'—')}</td>
+  </tr>`).join('')
+    : `<tr class="empty-row"><td colspan="8">No divergence signals above threshold</td></tr>`;
+  const note = d.skipped_stale
+    ? `<div class="note" style="color:var(--mut)">${d.skipped_stale} symbol(s) skipped (stale &gt;15 min)</div>` : '';
+  return `<div class="card" style="margin-bottom:10px">
+    <div class="card-hd"><div><div class="t">Futures ⇄ Equity Divergence — Stock F&O</div>
+      <div class="s">Flagged when basis %, 1hr divergence or 1D divergence exceeds ±${d.threshold}% · ${rows.length} of F&O universe · live 5-min</div></div>
+      <div class="hd-meta">${bdg(d.market_hours?'● LIVE':'○ CLOSED', d.market_hours?UP:C.mut)}</div></div>
+    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    ${note}
+  </div>`;
+}
+
 function render(){
   document.getElementById('app').innerHTML =
     rTopBar() + rMood() +
     `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
     `<div class="row r-3">${rADR()}${rPCR()}${rMaxPain()}</div>` +
-    rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() +
+    rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Learn More. Score More. · Invest like an institution. · V10 Dashboard</div>`;
 }
 
