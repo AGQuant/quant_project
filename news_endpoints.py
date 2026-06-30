@@ -20,6 +20,12 @@ from fastapi import APIRouter, BackgroundTasks
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
+# cc_task #125: Knowledge Hub (Learn tab) lives on the /news Intelligence surface.
+# Its routes stay in their own module (knowledge_endpoints.py) and are mounted by
+# nesting into news_router, which main.py already includes — main.py stays untouched.
+from knowledge_endpoints import router as knowledge_router
+router.include_router(knowledge_router)
+
 
 def _conn():
     return psycopg.connect(DATABASE_URL)
