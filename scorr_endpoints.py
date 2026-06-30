@@ -245,18 +245,57 @@ def smartgain_m2m():
 # ── SmartGain Chart — Intraday + Daily M2M timeseries ───────────────────────
 
 @router.get("/api/smartgain/chart")
-def smartgain_chart(view: str = "intraday"):
+def smartgain_chart(view: str = "rolling3d"):
     """SmartGain M2M performance chart.
-    view=intraday: 5-min M2M timeseries for today from Fyers intraday_prices.
-    view=daily:    Day-end M2M per date from smartgain_m2m snapshots.
+    view=rolling3d: 5-min M2M timeseries over the last 3 trading days (default).
+    view=intraday:  today only (legacy, kept for back-compat).
+    view=daily:     day-end M2M per date from smartgain_m2m snapshots.
     """
     try:
         with get_conn() as conn, conn.cursor() as cur:
 
-            if view == "intraday":
-                # Compute total M2M at each 5-min bar today across all open positions.
-                # cc#132: open book from smartgain_holdings (broker-reconciled entry_price)
-                # — matches /api/smartgain/m2m exactly.
+            if view == "rolling3d":
+                # cc#134: last 3 trading days of 5-min bars across all open positions.
+                # cc#132: open book from smartgain_holdings (broker-reconciled entry_price).
+                cur.execute("""
+                    WITH open_book AS (
+                        SELECT symbol, direction, qty, entry_price
+                        FROM smartgain_holdings
+                        WHERE account = 'MHK40'
+                    ),
+                    trading_days AS (
+                        SELECT DISTINCT ts::date AS tdate
+                        FROM intraday_prices
+                        ORDER BY tdate DESC
+                        LIMIT 3
+                    )
+                    SELECT
+                        ip.ts                                                       AS ts,
+                        TO_CHAR(ip.ts AT TIME ZONE 'Asia/Kolkata', 'Dy HH24:MI')  AS label,
+                        ROUND(SUM(
+                            CASE h.direction
+                                WHEN 'LONG'  THEN (ip.close - h.entry_price) * h.qty
+                                WHEN 'SHORT' THEN (h.entry_price - ip.close) * h.qty
+                                ELSE 0
+                            END
+                        )::numeric, 2)                                              AS mtm
+                    FROM intraday_prices ip
+                    JOIN open_book h ON h.symbol = ip.symbol
+                    JOIN trading_days td ON ip.ts::date = td.tdate
+                    GROUP BY ip.ts
+                    ORDER BY ip.ts
+                """)
+                rows = cur.fetchall()
+                points = [{"ts": str(r[0]), "label": r[1], "mtm": float(r[2]) if r[2] is not None else 0} for r in rows]
+                return {
+                    "view": "rolling3d",
+                    "points": points,
+                    "count": len(points),
+                    "data_source": "intraday_prices (Fyers 5-min, 3 days)"
+                }
+
+            elif view == "intraday":
+                # Legacy: today only (back-compat).
                 cur.execute("""
                     WITH open_book AS (
                         SELECT symbol, direction, qty, entry_price
@@ -283,7 +322,6 @@ def smartgain_chart(view: str = "intraday"):
                 points = [{"ts": str(r[0]), "label": r[1], "mtm": float(r[2]) if r[2] is not None else 0} for r in rows]
                 return {
                     "view": "intraday",
-                    "date": str(__import__("datetime").date.today()),
                     "points": points,
                     "count": len(points),
                     "data_source": "intraday_prices (Fyers 5-min)"
