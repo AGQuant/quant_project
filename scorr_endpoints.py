@@ -255,38 +255,54 @@ def smartgain_chart(view: str = "rolling3d"):
         with get_conn() as conn, conn.cursor() as cur:
 
             if view == "rolling3d":
-                # cc#134: last 3 trading days of 5-min bars across all open positions.
+                # cc#137: current SmartGain trading week (Mon-Fri), zero-anchored at
+                # Monday 09:15 open. Supersedes rolling-3-day window (cc#134/cc#136).
                 # cc#132: open book from smartgain_holdings (broker-reconciled entry_price).
                 cur.execute("""
-                    WITH open_book AS (
+                    WITH week_bounds AS (
+                        -- cc#137: use the active SmartGain week for account MHK40.
+                        -- window_end caps at today so we never peek into future days.
+                        SELECT week_start,
+                               LEAST(CURRENT_DATE, week_end::date) AS window_end
+                        FROM smartgain_weekly_pnl
+                        WHERE account = 'MHK40'
+                        ORDER BY week_start DESC
+                        LIMIT 1
+                    ),
+                    open_book AS (
                         SELECT symbol, direction, qty, entry_price
                         FROM smartgain_holdings
                         WHERE account = 'MHK40'
                     ),
-                    trading_days AS (
-                        -- cc#136: restrict to real NSE trading bars (09:15-15:30 IST)
-                        -- to exclude synthetic midnight bars (expiry/weekend artifacts).
-                        SELECT DISTINCT ts::date AS tdate
-                        FROM intraday_prices
-                        WHERE ts::time >= '09:15' AND ts::time <= '15:30'
-                        ORDER BY tdate DESC
-                        LIMIT 3
+                    raw_mtm AS (
+                        -- cc#136: ts::time filter keeps only real NSE bars (09:15-15:30 IST).
+                        SELECT ip.ts,
+                            ROUND(SUM(
+                                CASE h.direction
+                                    WHEN 'LONG'  THEN (ip.close - h.entry_price) * h.qty
+                                    WHEN 'SHORT' THEN (h.entry_price - ip.close) * h.qty
+                                    ELSE 0
+                                END
+                            )::numeric, 2) AS mtm
+                        FROM intraday_prices ip
+                        JOIN open_book h ON h.symbol = ip.symbol
+                        CROSS JOIN week_bounds wb
+                        WHERE ip.ts::date >= wb.week_start
+                          AND ip.ts::date <= wb.window_end
+                          AND ip.ts::time >= '09:15'
+                          AND ip.ts::time <= '15:30'
+                        GROUP BY ip.ts
+                    ),
+                    baseline AS (
+                        -- cc#137: subtract Monday-open MTM so the series starts at 0.
+                        SELECT mtm AS mon_open FROM raw_mtm ORDER BY ts ASC LIMIT 1
                     )
                     SELECT
-                        ip.ts                                                       AS ts,
-                        TO_CHAR(ip.ts AT TIME ZONE 'Asia/Kolkata', 'Dy HH24:MI')  AS label,
-                        ROUND(SUM(
-                            CASE h.direction
-                                WHEN 'LONG'  THEN (ip.close - h.entry_price) * h.qty
-                                WHEN 'SHORT' THEN (h.entry_price - ip.close) * h.qty
-                                ELSE 0
-                            END
-                        )::numeric, 2)                                              AS mtm
-                    FROM intraday_prices ip
-                    JOIN open_book h ON h.symbol = ip.symbol
-                    JOIN trading_days td ON ip.ts::date = td.tdate
-                    GROUP BY ip.ts
-                    ORDER BY ip.ts
+                        r.ts                                                        AS ts,
+                        TO_CHAR(r.ts, 'Dy HH24:MI')                               AS label,
+                        ROUND((r.mtm - b.mon_open)::numeric, 2)                    AS mtm
+                    FROM raw_mtm r CROSS JOIN baseline b
+                    ORDER BY r.ts
                 """)
                 rows = cur.fetchall()
                 points = [{"ts": str(r[0]), "label": r[1], "mtm": float(r[2]) if r[2] is not None else 0} for r in rows]
