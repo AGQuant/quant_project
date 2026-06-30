@@ -145,22 +145,21 @@ async def scorr_query(req: ScorrQueryRequest):
 def smartgain_m2m():
     """SmartGain MHK40 holdings — M2M with live LTP from the live CMP feed.
 
-    cc#113 (option a): the open book is now derived from personal_journal
-    (result='OPEN') — the single source of truth Arpit reconciles to the broker.
-    DISTINCT ON (symbol) is the dedup guard (#4) so a symbol can never appear
-    twice. The standalone smartgain_holdings table is retired (it was a 2nd
-    source that drifted). LTP/MTM are computed live, never a stored manual stamp.
+    cc#132: open book sourced from smartgain_holdings (broker-reconciled entry_price).
+    personal_journal entry_price can drift from the actual filled price; holdings
+    carries the correct cost basis. LTP is fetched live from cmp_prices/intraday
+    so MTM is always current, not a stored snapshot.
     """
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 WITH open_book AS (
-                    -- single source of truth = personal_journal OPEN rows (cc#113a).
-                    -- DISTINCT ON (symbol) keeps one row per symbol = dedup guard (#4).
-                    SELECT DISTINCT ON (symbol) id, symbol, direction, qty, entry_price
-                    FROM personal_journal
-                    WHERE result = 'OPEN'
-                    ORDER BY symbol, id DESC
+                    -- cc#132: use smartgain_holdings for broker-reconciled entry_price.
+                    -- personal_journal.entry_price can differ from the actual fill
+                    -- (e.g. SONACOMS 614.40 journal vs 614.63 broker) causing MTM drift.
+                    SELECT id, symbol, direction, qty, entry_price
+                    FROM smartgain_holdings
+                    WHERE account = 'MHK40'
                 )
                 SELECT
                     h.symbol, h.direction, h.qty,
@@ -237,7 +236,7 @@ def smartgain_m2m():
                 "realised": realised, "unrealised": unrealised, "total": total,
                 "total_mtm": unrealised,  # back-compat: old field == unrealised bucket
                 "position_count": len(rows), "last_updated": last_updated,
-                "data_source": "live_fyers" if any_live else "journal_open",
+                "data_source": "live_fyers" if any_live else "holdings",
             }
     except Exception as e:
         return {"error": str(e)}
@@ -256,14 +255,13 @@ def smartgain_chart(view: str = "intraday"):
 
             if view == "intraday":
                 # Compute total M2M at each 5-min bar today across all open positions.
-                # cc#113a: open book derived from personal_journal OPEN (single source),
-                # DISTINCT ON (symbol) dedup — matches /api/smartgain/m2m exactly.
+                # cc#132: open book from smartgain_holdings (broker-reconciled entry_price)
+                # — matches /api/smartgain/m2m exactly.
                 cur.execute("""
                     WITH open_book AS (
-                        SELECT DISTINCT ON (symbol) symbol, direction, qty, entry_price
-                        FROM personal_journal
-                        WHERE result = 'OPEN'
-                        ORDER BY symbol, id DESC
+                        SELECT symbol, direction, qty, entry_price
+                        FROM smartgain_holdings
+                        WHERE account = 'MHK40'
                     )
                     SELECT
                         ip.ts                                                       AS ts,
