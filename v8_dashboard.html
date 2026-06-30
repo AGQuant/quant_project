@@ -96,6 +96,10 @@
   th:first-child,td:first-child{text-align:left}
   th:hover{color:var(--txt)}
   td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  /* cc#129 bug_3: Open Positions (Master) table — bump cell text +3 notches (12->15px)
+     for readability; scoped to .mtbl so the dense funnel tables stay compact. */
+  .mtbl td{font-size:15px}
+  .mtbl th{font-size:12.5px}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:#f0f4f9}
   tr.row-open{background:#f0fdf4}
@@ -618,7 +622,10 @@ function renderMood(m){
   const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#fdf3df','var(--amber)'],Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
   const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
   const short=s=>String(s||'').replace(/^Nifty\s+/i,'');   // "Nifty Day" -> "Day"
-  const pills=(m.checks||[]).map(c=>`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)} ${c.pass?'Y':'N'}</div>`).join('');
+  // cc#129 bug_1: show the numeric value driving each gate, not just Y/N.
+  // ADR is a ratio (2dp); Day/Week/Month are signed percentages.
+  const gval=c=>{const v=Number(c.value);if(c.value==null||isNaN(v))return'';return short(c.filter)==='ADR'?v.toFixed(2):sign(v,2)+'%';};
+  const pills=(m.checks||[]).map(c=>`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)} ${gval(c)} ${c.pass?'Y':'N'}</div>`).join('');
   document.getElementById('mood').innerHTML=`
     <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div></div>
@@ -661,7 +668,18 @@ function renderMaster(){
     .slice().sort((a,b)=>(Number(b.unrealised_pnl||0))-(Number(a.unrealised_pnl||0)));
   const unreal=open.reduce((a,x)=>a+(x.unrealised_pnl||0),0);
   const netUnreal=unreal-open.length*BROKERAGE_PER_TRADE;
-  const totalClosedPnl=Number(sum.total_pnl||0);const netClosed=netPnl(totalClosedPnl,sum.trades||0);
+  // cc#129 bug_2: Realised + Win/Loss cards also cascade with the Long/Short filter.
+  // 'all' uses the authoritative summary totals; long/short recompute from the
+  // already-fetched recent_trades (closed) on that side.
+  let totalClosedPnl,netClosed,winsTxt,lossTxt;
+  if(MASTER_SIDE==='all'){
+    totalClosedPnl=Number(sum.total_pnl||0);netClosed=netPnl(totalClosedPnl,sum.trades||0);
+    winsTxt=sum.wins??'--';lossTxt=sum.losses??'--';
+  }else{
+    const cl=((p&&p.recent_trades)||[]).filter(x=>(x.side||'').toUpperCase()===MASTER_SIDE.toUpperCase());
+    totalClosedPnl=cl.reduce((a,x)=>a+Number(x.pnl||0),0);netClosed=netPnl(totalClosedPnl,cl.length);
+    winsTxt=cl.filter(x=>Number(x.pnl||0)>0).length;lossTxt=cl.filter(x=>Number(x.pnl||0)<=0).length;
+  }
   const secMap=(cache.metricsAll||[]).reduce((acc,x)=>{
     if(!x.segment)return acc;if(!acc[x.segment])acc[x.segment]={segment:x.segment,stocks:0,sum:0,top_stock:'',top_val:-999};
     acc[x.segment].stocks++;acc[x.segment].sum+=Number(x.day_1d||0);
@@ -669,13 +687,13 @@ function renderMaster(){
     return acc;},{});
   const secArr=Object.values(secMap).map(s=>({...s,avg_day_1d:s.sum/s.stocks})).sort((a,b)=>b.avg_day_1d-a.avg_day_1d);
   const top8=secArr.filter(s=>s.avg_day_1d>0).slice(0,8);const bot8=secArr.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
-  // 4 cards only — Open Positions | Unrealised PnL | Realised PnL | Win/Loss. Open + Unrealised
-  // reflect the active toggle; Realised + Win/Loss are overall closed totals (no per-side split).
+  // 4 cards — Open Positions | Unrealised PnL | Realised PnL | Win/Loss. cc#129 bug_2:
+  // ALL four now reflect the active Long/Short toggle (Realised/Win-Loss per-side via recent_trades).
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(totalClosedPnl)}">${inr(totalClosedPnl)}</div><div class="v-sub">Net ${inr(netClosed)}</div></div>
-    <div class="card"><div class="k">Win / Loss</div><div class="v">${sum.wins??'--'}/${sum.losses??'--'}</div></div>
+    <div class="card"><div class="k">Win / Loss</div><div class="v">${winsTxt}/${lossTxt}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
   const tgl=(key,label,cnt)=>{
@@ -690,7 +708,7 @@ function renderMaster(){
   const row=x=>{const np=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;const isShort=(x.side||'').toUpperCase()==='SHORT';
     const mv=isShort?((Number(x.entry_price)-Number(x.cmp))/Number(x.entry_price))*100:((Number(x.cmp)-Number(x.entry_price))/Number(x.entry_price))*100;
     return{np,isShort,mv};};
-  const openPosDesktop=`<div class="scroll desktop-only"><table>
+  const openPosDesktop=`<div class="scroll desktop-only"><table class="mtbl">
     <thead><tr><th>Symbol</th><th>Entry Time</th><th style="text-align:center">Days</th><th>Side</th><th>Entry</th><th>CMP</th><th style="text-align:center">Progress</th><th>Net P&L</th><th>% Move</th></tr></thead>
     <tbody>${open.length?open.map(x=>{const{np,isShort,mv}=row(x);return`<tr>
       <td class="sym">${x.symbol}<div style="margin-top:3px">${basketPill(x.basket)}</div></td>
