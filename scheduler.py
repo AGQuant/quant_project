@@ -148,18 +148,34 @@ def _compute_and_store_pcr(conn=None):
     if conn is None: conn = _conn()
     try:
         with conn.cursor() as cur:
+            # cc#121: rewritten to match the real pcr_daily schema
+            # (price_date, underlying, put_oi, call_oi, pcr). The old INSERT wrote
+            # non-existent columns (symbol/pcr_total/pcr_atm5) AND referenced a
+            # non-existent option_chain column (atm_distance) -> every run raised and
+            # was swallowed by the except below, so pcr_daily silently froze at Jun 19
+            # while ADR (a separate function) kept writing. Mirrors the proven
+            # pcr_backfill._recompute_pcr_daily_for_range query: last snapshot of the
+            # day per underlying, grouped by underlying so NIFTY and BANKNIFTY are
+            # independent rows. HAVING put-OI>0 skips a broken-feed underlying
+            # (BANKNIFTY currently reports put_oi=0) so it never writes a bogus pcr=0
+            # and never blocks NIFTY.
             cur.execute("""
-                INSERT INTO pcr_daily (price_date, symbol, pcr_total, pcr_atm5, computed_at)
-                SELECT CURRENT_DATE, symbol,
+                INSERT INTO pcr_daily (price_date, underlying, put_oi, call_oi, pcr)
+                SELECT DATE(ts), underlying,
+                    SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),
+                    SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),
                     ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric /
-                          NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0),3),
-                    ROUND(SUM(CASE WHEN option_type='PE' AND atm_distance<=5 THEN oi ELSE 0 END)::numeric /
-                          NULLIF(SUM(CASE WHEN option_type='CE' AND atm_distance<=5 THEN oi ELSE 0 END),0),3),
-                    NOW()
-                FROM option_chain WHERE ts::date = CURRENT_DATE
-                GROUP BY symbol
-                ON CONFLICT (price_date, symbol) DO UPDATE SET
-                    pcr_total=EXCLUDED.pcr_total, pcr_atm5=EXCLUDED.pcr_atm5, computed_at=NOW()
+                          NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3)
+                FROM option_chain
+                WHERE DATE(ts) = CURRENT_DATE
+                  AND underlying IN ('NIFTY','BANKNIFTY')
+                  AND ts = (SELECT MAX(oc2.ts) FROM option_chain oc2
+                            WHERE DATE(oc2.ts) = CURRENT_DATE AND oc2.underlying = option_chain.underlying)
+                GROUP BY DATE(ts), underlying
+                HAVING SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END) > 0
+                ON CONFLICT (price_date, underlying) DO UPDATE SET
+                    put_oi=EXCLUDED.put_oi, call_oi=EXCLUDED.call_oi,
+                    pcr=EXCLUDED.pcr, computed_at=NOW()
             """)
             conn.commit()
         log.info("PCR computed and stored")
@@ -506,17 +522,25 @@ def _backfill_pcr_for_date(conn, target) -> bool:
     """Heal a missed PCR day from option_chain — only if that day's chain is still
     retained (intraday option_chain is short-lived, so this is usually a no-op)."""
     with conn.cursor() as cur:
+        # cc#121: same fix as _compute_and_store_pcr — correct pcr_daily columns
+        # (underlying/put_oi/call_oi/pcr), last snapshot of the day per underlying,
+        # HAVING put-OI>0 to skip a broken-feed underlying. DO NOTHING preserves any
+        # existing good row (heal-only).
         cur.execute("""
-            INSERT INTO pcr_daily (price_date, symbol, pcr_total, pcr_atm5, computed_at)
-            SELECT %(t)s, symbol,
+            INSERT INTO pcr_daily (price_date, underlying, put_oi, call_oi, pcr)
+            SELECT DATE(ts), underlying,
+                SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END),
+                SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),
                 ROUND(SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END)::numeric /
-                      NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0),3),
-                ROUND(SUM(CASE WHEN option_type='PE' AND atm_distance<=5 THEN oi ELSE 0 END)::numeric /
-                      NULLIF(SUM(CASE WHEN option_type='CE' AND atm_distance<=5 THEN oi ELSE 0 END),0),3),
-                NOW()
-            FROM option_chain WHERE ts::date = %(t)s
-            GROUP BY symbol
-            ON CONFLICT (price_date, symbol) DO NOTHING
+                      NULLIF(SUM(CASE WHEN option_type='CE' THEN oi ELSE 0 END),0), 3)
+            FROM option_chain
+            WHERE DATE(ts) = %(t)s
+              AND underlying IN ('NIFTY','BANKNIFTY')
+              AND ts = (SELECT MAX(oc2.ts) FROM option_chain oc2
+                        WHERE DATE(oc2.ts) = %(t)s AND oc2.underlying = option_chain.underlying)
+            GROUP BY DATE(ts), underlying
+            HAVING SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END) > 0
+            ON CONFLICT (price_date, underlying) DO NOTHING
         """, {"t": target})
         n = cur.rowcount
     conn.commit()
