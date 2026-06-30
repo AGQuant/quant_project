@@ -336,7 +336,14 @@ NAV_TOGGLE_JS = """
       + '.scorr-nav-btn{font-size:11px;padding:4px 10px;border-radius:10px;'
       + '  background:rgba(255,255,255,0.15);color:inherit;cursor:pointer;border:none;'
       + '  margin-left:auto;flex-shrink:0}'
-      + '#scorr-nav-strip .scorr-nav-btn{color:#fff}';
+      + '#scorr-nav-strip .scorr-nav-btn{color:#fff}'
+      // cc#126: toggle button is fixed top-right (NOT inline in the nav) so it stays
+      // visible no matter how wide the nav grows or whether the nav is hidden.
+      + '#scorr-nav-toggle-btn{position:fixed;top:7px;right:10px;z-index:9999;'
+      + '  background:#2563eb;color:#fff;font-size:11px;font-weight:600;'
+      + '  padding:4px 12px;border-radius:12px;border:none;cursor:pointer;margin:0;'
+      + '  box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:.92}'
+      + '#scorr-nav-toggle-btn:hover{opacity:1}';
     var st = document.createElement('style');
     st.id = 'scorr-navtoggle-style'; st.textContent = css;
     (document.head || root).appendChild(st);
@@ -368,7 +375,8 @@ NAV_TOGGLE_JS = """
       btn.id = 'scorr-nav-toggle-btn'; btn.className = 'scorr-nav-btn';
       btn.type = 'button';
       btn.addEventListener('click', function () { setHidden(!isHidden()); });
-      nav.appendChild(btn);
+      // cc#126: append to body (fixed-positioned) so a wide/hidden nav can't bury it.
+      document.body.appendChild(btn);
     }
     if (!document.getElementById('scorr-nav-strip')) {
       var strip = document.createElement('div');
