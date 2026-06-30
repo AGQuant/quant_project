@@ -63,7 +63,7 @@ def filter_by_threshold_native(segment: str, threshold: float) -> list:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT symbol, gvm_score, growth, value, momentum, segment FROM gvm_cache WHERE segment = %s AND gvm_score >= %s ORDER BY gvm_score DESC", (segment, threshold))
             cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, row)) for row in cu.fetchall()]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
     except Exception as e:
         return {"error": str(e)}
 
