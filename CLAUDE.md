@@ -20,6 +20,9 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 6. Railway = truth. GitHub = code only. Never hardcode secrets.
 7. Context isolation: v8_paper_* NEVER mixes with tc_intraday_*
 
+## Reporting style (CC → Arpit)
+- After a push/deploy: keep the reply SHORT — confirm what was pushed (file + commit/sha) and state what's next (next pending task or remaining items). No long recaps or re-explanations.
+
 ## Key Files
 | File | Purpose | Size |
 |---|---|---|
