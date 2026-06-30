@@ -12,7 +12,7 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 - Timezone: always IST (Asia/Kolkata). NSE: Mon-Fri 09:15-15:30
 
 ## Critical Rules (never violate)
-1. ALWAYS ask before git push — no silent commits
+1. AUTO MODE (set 30-Jun-2026): always push, never ask. Run cc tasks end-to-end autonomously — claim → implement → ast.parse → push → verify SHA → finalize DB → claim next. No push-approval prompts.
 2. ALWAYS ast.parse() Python files before push
 3. NEVER push placeholder text as file content
 4. main.py = wiring only (imports + routes + include_router, no logic)
