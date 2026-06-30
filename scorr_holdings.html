@@ -97,6 +97,11 @@
 
   .updated{font-size:11px;color:var(--dim);text-align:right;margin-top:6px}
   .empty-msg{text-align:center;padding:50px 20px;color:var(--mut);font-size:13px}
+
+  /* cc#133 */
+  .hero-buckets-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+  .hero-bk-sub{font-size:10.5px;font-weight:700;margin-top:3px;font-family:monospace}
+  .pos-card.loss{border-color:#f5b8bd!important;border-width:1.5px!important}
 </style>
 </head>
 <body>
@@ -131,6 +136,18 @@
       <div class="hero-bucket">
         <div class="hero-bk-label">Unrealised</div>
         <div class="hero-bk-val" id="hero-unrealised">&#8212;</div>
+      </div>
+    </div>
+    <div class="hero-buckets-2">
+      <div class="hero-bucket">
+        <div class="hero-bk-label">Long Value</div>
+        <div class="hero-bk-val" id="hero-long-val">&#8212;</div>
+        <div class="hero-bk-sub" id="hero-long-pct"></div>
+      </div>
+      <div class="hero-bucket">
+        <div class="hero-bk-label">Short Value</div>
+        <div class="hero-bk-val" id="hero-short-val">&#8212;</div>
+        <div class="hero-bk-sub" id="hero-short-pct"></div>
       </div>
     </div>
     <div class="hero-sub">
@@ -207,6 +224,26 @@ async function loadHoldings(smooth=false) {
     rv.textContent = (realised>=0?"+":"−")+"₹"+f2(Math.abs(realised));   rv.style.color = colorOf(realised);
     uv.textContent = (unrealised>=0?"+":"−")+"₹"+f2(Math.abs(unrealised)); uv.style.color = colorOf(unrealised);
     document.getElementById("hero-meta").textContent = pos.length+" positions · "+ago(d.last_updated);
+
+    /* cc#133: Long/Short value tiles */
+    {
+      const lp = pos.filter(p=>p.direction==="LONG");
+      const sp = pos.filter(p=>p.direction==="SHORT");
+      const lVal  = lp.reduce((s,p)=>s+(p.ltp||0)*(p.qty||0),0);
+      const sVal  = sp.reduce((s,p)=>s+(p.ltp||0)*(p.qty||0),0);
+      const lMtm  = lp.reduce((s,p)=>s+(p.mtm||0),0);
+      const sMtm  = sp.reduce((s,p)=>s+(p.mtm||0),0);
+      const lEnt  = lp.reduce((s,p)=>s+(p.entry_price||0)*(p.qty||0),0);
+      const sEnt  = sp.reduce((s,p)=>s+(p.entry_price||0)*(p.qty||0),0);
+      const lPct  = lEnt>0 ? lMtm/lEnt*100 : null;
+      const sPct  = sEnt>0 ? sMtm/sEnt*100 : null;
+      const lvEl=document.getElementById("hero-long-val"), lpEl=document.getElementById("hero-long-pct");
+      const svEl=document.getElementById("hero-short-val"), spEl=document.getElementById("hero-short-pct");
+      if(lvEl){ lvEl.textContent=lp.length?"₹"+f0(lVal):"—"; lvEl.style.color=lp.length?"var(--txt)":"var(--mut)"; }
+      if(svEl){ svEl.textContent=sp.length?"₹"+f0(sVal):"—"; svEl.style.color=sp.length?"var(--txt)":"var(--mut)"; }
+      if(lpEl){ lpEl.textContent=lPct!=null?(lPct>=0?"+":"")+lPct.toFixed(2)+"% P&L":""; lpEl.style.color=colorOf(lPct); }
+      if(spEl){ spEl.textContent=sPct!=null?(sPct>=0?"+":"")+sPct.toFixed(2)+"% P&L":""; spEl.style.color=colorOf(sPct); }
+    }
     const lc = document.getElementById("live-chip");
     lc.style.display = isLive?"inline-flex":"none";
 
@@ -229,7 +266,7 @@ async function loadHoldings(smooth=false) {
         const pctEl = document.getElementById("pct-"+p.symbol);
         const valEl = document.getElementById("val-"+p.symbol);
 
-        const mtmTxt = (p.mtm>=0?"+":"")+"₹"+f2(Math.abs(p.mtm||0));
+        const mtmTxt = (p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm||0));
         const prevMtm = prev.mtm||0;
 
         if (mtmEl && p.mtm !== prev.mtm) {
@@ -240,6 +277,8 @@ async function loadHoldings(smooth=false) {
           void card.offsetWidth; // reflow
           card.classList.add(cls);
         }
+        /* cc#133: loss border on the card itself */
+        if((p.mtm||0)<0) card.classList.add("loss"); else card.classList.remove("loss");
         if (ltpEl) ltpEl.textContent = f2(p.ltp);
         if (pctEl) {
           const pct = calcPct(p);
@@ -270,10 +309,11 @@ async function loadHoldings(smooth=false) {
       const pctTxt = pct==null?"":((pct>=0?"+":"")+pct.toFixed(2)+"%");
       const val = p.ltp!=null&&p.qty!=null ? "₹"+f0(p.ltp*p.qty) : "";
       const dirCls = p.direction==="LONG"?"dir-long":"dir-short";
-      const mtmTxt = p.mtm==null?"—":((p.mtm>=0?"+":"")+"₹"+f2(Math.abs(p.mtm)));
+      const mtmTxt = p.mtm==null?"—":((p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm)));
       const livePip = p.is_live?'<span class="live-pip"></span>':"";
+      const lossCls = (p.mtm||0)<0?" loss":"";
 
-      html+=`<div class="pos-card" id="card-${p.symbol}">
+      html+=`<div class="pos-card${lossCls}" id="card-${p.symbol}">
         <div class="pos-row1">
           <div style="display:flex;align-items:center;gap:8px">
             <span class="pos-sym">${p.symbol}</span>
