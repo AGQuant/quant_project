@@ -232,3 +232,93 @@ def v10_buildup(limit: int = 15):
     return {"status": "ok", "long_buildup": longs, "short_buildup": shorts,
             "oi_feed_pending": oi_pending,
             "note": "OI / basis feed pending — classification limited to price move" if oi_pending else None}
+
+
+@router.get("/divergence")
+def v10_divergence(threshold: float = 1.0):
+    """cc#124: Futures-vs-Equity divergence scanner across the full F&O universe.
+    Flags a symbol when ANY of three live signals exceeds `threshold` (%):
+      - basis%        : live futures-vs-spot premium/discount
+      - 1hr divergence: futures %move minus spot %move over the last ~60 min
+      - 1D divergence : futures %move minus spot %move vs prior session's last bar
+    During market hours, symbols whose latest bar is stale (>15 min) or missing
+    are skipped. Source: futures_basis (sole feed). OR logic, no token cost."""
+    from datetime import datetime, timedelta
+    ist_now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    mins = ist_now.hour * 60 + ist_now.minute
+    market_hours = (ist_now.weekday() < 5) and (555 <= mins <= 930)
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH sess AS (
+                    SELECT MAX(ts::date) AS d FROM futures_basis
+                    WHERE ts::time BETWEEN '09:15' AND '15:30'
+                ),
+                latest AS (
+                    SELECT DISTINCT ON (symbol) symbol, ts, spot_close, futures_close, basis_pct
+                    FROM futures_basis, sess
+                    WHERE ts::date=sess.d
+                    ORDER BY symbol, ts DESC
+                ),
+                hr1 AS (
+                    SELECT DISTINCT ON (fb.symbol) fb.symbol,
+                           fb.spot_close AS spot_1h, fb.futures_close AS fut_1h
+                    FROM futures_basis fb JOIN latest l ON l.symbol=fb.symbol, sess
+                    WHERE fb.ts::date=sess.d AND fb.ts <= l.ts - INTERVAL '60 minutes'
+                    ORDER BY fb.symbol, fb.ts DESC
+                ),
+                prevday AS (
+                    SELECT DISTINCT ON (symbol) symbol,
+                           spot_close AS spot_pd, futures_close AS fut_pd
+                    FROM futures_basis, sess
+                    WHERE ts::date < sess.d AND ts::time BETWEEN '09:15' AND '15:30'
+                    ORDER BY symbol, ts DESC
+                )
+                SELECT l.symbol, l.basis_pct,
+                    ROUND((((l.futures_close-h.fut_1h)/NULLIF(h.fut_1h,0))
+                          -((l.spot_close-h.spot_1h)/NULLIF(h.spot_1h,0)))*100,2) AS div_1hr,
+                    ROUND((((l.futures_close-p.fut_pd)/NULLIF(p.fut_pd,0))
+                          -((l.spot_close-p.spot_pd)/NULLIF(p.spot_pd,0)))*100,2) AS div_1d,
+                    l.spot_close, l.futures_close, l.ts,
+                    ROUND(EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - l.ts))/60)::int AS age_min
+                FROM latest l
+                LEFT JOIN hr1 h ON h.symbol=l.symbol
+                LEFT JOIN prevday p ON p.symbol=l.symbol
+            """)
+            rows = cur.fetchall()
+    except Exception as e:
+        raise HTTPException(500, f"v10_divergence failed: {e}")
+
+    out, skipped_stale = [], 0
+    for r in rows:
+        sym, basis, d1h, d1d, spot, fut, ts, age = r
+        # NULL-safe staleness skip during market hours
+        if market_hours and (age is None or age > 15):
+            skipped_stale += 1
+            continue
+        basis = float(basis) if basis is not None else None
+        d1h = float(d1h) if d1h is not None else None
+        d1d = float(d1d) if d1d is not None else None
+        sigs = []
+        if basis is not None and abs(basis) > threshold:
+            sigs.append("BASIS")
+        if d1h is not None and abs(d1h) > threshold:
+            sigs.append("1HR")
+        if d1d is not None and abs(d1d) > threshold:
+            sigs.append("1D")
+        if not sigs:
+            continue
+        mag = max(abs(basis or 0), abs(d1h or 0), abs(d1d or 0))
+        out.append({"symbol": sym, "basis_pct": basis, "div_1hr": d1h,
+                    "div_1d": d1d, "spot_ltp": float(spot) if spot is not None else None,
+                    "futures_ltp": float(fut) if fut is not None else None,
+                    "last_tick": str(ts) if ts is not None else None,
+                    "age_min": int(age) if age is not None else None,
+                    "signals": sigs, "_mag": mag})
+    out.sort(key=lambda x: x["_mag"], reverse=True)
+    for d in out:
+        d.pop("_mag", None)
+    return {"status": "ok", "universe": "F&O", "count": len(out),
+            "threshold": threshold, "market_hours": market_hours,
+            "skipped_stale": skipped_stale,
+            "ts": ist_now.strftime("%Y-%m-%d %H:%M:%S"), "rows": out}
