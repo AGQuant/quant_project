@@ -158,14 +158,30 @@ def smartgain_m2m():
                             ELSE 0
                         END::numeric, 2
                     )                                                         AS mtm,
-                    (lp.live_ltp IS NOT NULL)                                AS is_live,
-                    GREATEST(h.updated_at, lp.last_tick)                    AS updated_at
+                    -- cc#123: "live" ONLY when the chosen tick is genuinely fresh
+                    -- (<=10 min). Stops a prior-day bar masquerading as live at the open.
+                    (lp.live_ltp IS NOT NULL AND lp.age_min IS NOT NULL AND lp.age_min <= 10) AS is_live,
+                    ROUND(lp.age_min::numeric, 1)                            AS ltp_age_min,
+                    lp.last_tick                                            AS last_tick
                 FROM smartgain_holdings h
                 LEFT JOIN LATERAL (
-                    SELECT close AS live_ltp, ts AS last_tick
-                    FROM intraday_prices
-                    WHERE symbol = h.symbol
-                    ORDER BY ts DESC LIMIT 1
+                    -- cc#123: drive LTP from the canonical live CMP first (cmp_prices is
+                    -- refreshed continuously and stays fresh even when a symbol's fyers_eq/
+                    -- fyers_fut intraday bar lags the 09:15 open), else the latest intraday
+                    -- tick; pick whichever is newest. Columns are IST-naive while NOW() is
+                    -- UTC, so age uses NOW() AT TIME ZONE 'Asia/Kolkata'.
+                    SELECT live_ltp, last_tick,
+                           EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - last_tick))/60.0 AS age_min
+                    FROM (
+                        (SELECT cp.cmp::numeric AS live_ltp, cp.updated_at AS last_tick
+                           FROM cmp_prices cp WHERE cp.symbol = h.symbol)
+                        UNION ALL
+                        (SELECT ip.close, ip.ts
+                           FROM intraday_prices ip WHERE ip.symbol = h.symbol
+                           ORDER BY ip.ts DESC LIMIT 1)
+                    ) src
+                    ORDER BY last_tick DESC NULLS LAST
+                    LIMIT 1
                 ) lp ON true
                 WHERE h.account = 'MHK40'
                 ORDER BY h.id
@@ -178,11 +194,15 @@ def smartgain_m2m():
                 row["ltp"]         = float(row["ltp"])         if row["ltp"]         is not None else None
                 row["mtm"]         = float(row["mtm"])         if row["mtm"]         is not None else None
                 row["is_live"]     = bool(row["is_live"])
-                row["updated_at"]  = row["updated_at"].isoformat() if row["updated_at"] else None
+                row["ltp_age_min"] = float(row["ltp_age_min"]) if row["ltp_age_min"] is not None else None
+                # cc#123: last_tick = the actual live-feed tick time (IST), so the UI can
+                # show real data age instead of a wall-clock that always reads "now".
+                row["last_tick"]   = row["last_tick"].isoformat() if row["last_tick"] else None
+                row["updated_at"]  = row["last_tick"]   # back-compat: old key now = live tick
                 rows.append(row)
             # ── UNREALISED: live MTM on open positions (existing computation) ──
             unrealised   = round(sum(r["mtm"] or 0 for r in rows), 2)
-            last_updated = max((r["updated_at"] for r in rows if r["updated_at"]), default=None)
+            last_updated = max((r["last_tick"] for r in rows if r["last_tick"]), default=None)
             any_live     = any(r["is_live"] for r in rows)
 
             # ── REALISED: closed-trade P&L this week (cc_task #115) ──
