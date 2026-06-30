@@ -52,10 +52,7 @@
     padding:16px 18px;margin-bottom:14px}
   .chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
   .chart-title{font-size:13px;font-weight:700}
-  .chart-tabs{display:flex;gap:4px}
-  .ctab{padding:5px 14px;border-radius:7px;border:1px solid var(--border);
-    font-size:12px;font-weight:600;color:var(--mut);cursor:pointer;background:transparent;font-family:inherit;transition:.12s}
-  .ctab.on{background:var(--blu);border-color:var(--blu);color:#fff}
+  .chart-sub{font-size:10px;color:var(--dim)}
   .chart-box{position:relative;width:100%;height:170px}
   .chart-msg{display:flex;align-items:center;justify-content:center;height:170px;
     color:var(--dim);font-size:12px;font-style:italic}
@@ -162,11 +159,7 @@
   <!-- Chart -->
   <div class="chart-card">
     <div class="chart-header">
-      <div class="chart-title">M2M Performance</div>
-      <div class="chart-tabs">
-        <button class="ctab on" id="tab-i" onclick="switchChart('intraday')">Intraday</button>
-        <button class="ctab" id="tab-d" onclick="switchChart('daily')">Daily</button>
-      </div>
+      <div class="chart-title">M2M Performance <span class="chart-sub">&middot; 3-day 5-min</span></div>
     </div>
     <div class="chart-box" id="chart-box"><div class="chart-msg">Loading&#8230;</div></div>
     <div class="chart-foot" id="chart-foot"></div>
@@ -182,7 +175,6 @@
 
 <script>
 const API = "";
-let chartView = "intraday";
 let lastPositions = {};   // symbol → {mtm, ltp} for smooth in-place update
 let firstLoad = true;
 
@@ -311,6 +303,7 @@ async function loadHoldings(smooth=false) {
       const dirCls = p.direction==="LONG"?"dir-long":"dir-short";
       const mtmTxt = p.mtm==null?"—":((p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm)));
       const livePip = p.is_live?'<span class="live-pip"></span>':"";
+
       const lossCls = (p.mtm||0)<0?" loss":"";
 
       html+=`<div class="pos-card${lossCls}" id="card-${p.symbol}">
@@ -356,7 +349,7 @@ function calcPct(p) {
 function drawChart(points, labelKey) {
   const box = document.getElementById("chart-box");
   if (!points||!points.length) {
-    box.innerHTML='<div class="chart-msg">No data yet'+(chartView==="intraday"?" — builds 9:15 AM market hours":"")+' </div>';
+    box.innerHTML='<div class="chart-msg">No data yet — builds during market hours</div>';
     return;
   }
   const W=box.clientWidth||340, H=170;
@@ -411,23 +404,16 @@ function drawChart(points, labelKey) {
   </svg>`;
 }
 
-async function loadChart(view, silent=false) {
+async function loadChart(silent=false) {
   if (!silent) document.getElementById("chart-box").innerHTML='<div class="chart-msg">Loading…</div>';
   try {
-    const r=await fetch(API+"/api/smartgain/chart?view="+view);
+    const r=await fetch(API+"/api/smartgain/chart?view=rolling3d");
     const d=await r.json();
-    drawChart(d.points||[], view==="intraday"?"label":"label");
-    document.getElementById("chart-foot").textContent=(d.data_source||"")+" · "+( d.count||0)+" points";
+    drawChart(d.points||[], "label");
+    document.getElementById("chart-foot").textContent=(d.data_source||"")+" · "+(d.count||0)+" points";
   } catch(e) {
     document.getElementById("chart-box").innerHTML='<div class="chart-msg">Could not load chart</div>';
   }
-}
-
-function switchChart(v) {
-  chartView=v;
-  document.getElementById("tab-i").classList.toggle("on",v==="intraday");
-  document.getElementById("tab-d").classList.toggle("on",v==="daily");
-  loadChart(v);
 }
 
 /* ── Refresh ── */
@@ -436,7 +422,7 @@ async function refresh(smooth=false) {
   const ic=document.getElementById("rficon");
   ic.style.animation="spin .7s linear infinite";
   btn.disabled=true;
-  await Promise.all([loadHoldings(smooth), loadChart(chartView, smooth)]);
+  await Promise.all([loadHoldings(smooth), loadChart(smooth)]);
   ic.style.animation="";
   btn.disabled=false;
 }
@@ -447,7 +433,7 @@ if(window.self!==window.top||new URLSearchParams(location.search).has("embed")){
 }
 
 /* ── Resize chart ── */
-window.addEventListener("resize",()=>loadChart(chartView,true));
+window.addEventListener("resize",()=>loadChart(true));
 
 /* ── Boot ── */
 refresh(false);
