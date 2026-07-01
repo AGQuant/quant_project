@@ -258,6 +258,11 @@ def smartgain_chart(view: str = "rolling3d"):
                 # cc#137: current SmartGain trading week (Mon-Fri), zero-anchored at
                 # Monday 09:15 open. Supersedes rolling-3-day window (cc#134/cc#136).
                 # cc#132: open book from smartgain_holdings (broker-reconciled entry_price).
+                # cc#142: truly cumulative -- each bar = (live unrealized MTM swing since
+                # Monday open) + (realized PnL from personal_journal for trades closed on
+                # or before that bar's date, cumulative within the week). Chart still
+                # starts at 0 at week open; from there it tracks both closed-trade gains
+                # and live swings on whatever remains open, instead of unrealized-only.
                 cur.execute("""
                     WITH week_bounds AS (
                         -- cc#137: use the active SmartGain week for account MHK40.
@@ -276,14 +281,14 @@ def smartgain_chart(view: str = "rolling3d"):
                     ),
                     raw_mtm AS (
                         -- cc#136: ts::time filter keeps only real NSE bars (09:15-15:30 IST).
-                        SELECT ip.ts,
+                        SELECT ip.ts, ip.ts::date AS d,
                             ROUND(SUM(
                                 CASE h.direction
                                     WHEN 'LONG'  THEN (ip.close - h.entry_price) * h.qty
                                     WHEN 'SHORT' THEN (h.entry_price - ip.close) * h.qty
                                     ELSE 0
                                 END
-                            )::numeric, 2) AS mtm
+                            )::numeric, 2) AS unrealized
                         FROM intraday_prices ip
                         JOIN open_book h ON h.symbol = ip.symbol
                         CROSS JOIN week_bounds wb
@@ -294,23 +299,47 @@ def smartgain_chart(view: str = "rolling3d"):
                         GROUP BY ip.ts
                     ),
                     baseline AS (
-                        -- cc#137: subtract Monday-open MTM so the series starts at 0.
-                        SELECT mtm AS mon_open FROM raw_mtm ORDER BY ts ASC LIMIT 1
+                        -- cc#137: subtract Monday-open unrealized MTM so the series starts at 0.
+                        SELECT unrealized AS mon_open FROM raw_mtm ORDER BY ts ASC LIMIT 1
+                    ),
+                    realized_daily AS (
+                        -- cc#142: realized PnL per calendar day within the current week.
+                        SELECT pj.trade_date AS d, SUM(pj.pnl) AS day_pnl
+                        FROM personal_journal pj
+                        CROSS JOIN week_bounds wb
+                        WHERE pj.result = 'CLOSED'
+                          AND pj.trade_date >= wb.week_start
+                          AND pj.trade_date <= wb.window_end
+                        GROUP BY pj.trade_date
+                    ),
+                    realized_cum AS (
+                        -- cumulative realized PnL as of each day (running total).
+                        SELECT d, SUM(day_pnl) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS cum_realized
+                        FROM realized_daily
                     )
                     SELECT
                         r.ts                                                        AS ts,
                         TO_CHAR(r.ts, 'Dy HH24:MI')                               AS label,
-                        ROUND((r.mtm - b.mon_open)::numeric, 2)                    AS mtm
+                        r.d::text                                                  AS day,
+                        TO_CHAR(r.ts, 'Dy DD Mon')                                AS day_label,
+                        ROUND((
+                            (r.unrealized - b.mon_open)
+                            + COALESCE(
+                                (SELECT rc.cum_realized FROM realized_cum rc
+                                 WHERE rc.d <= r.d ORDER BY rc.d DESC LIMIT 1),
+                                0)
+                        )::numeric, 2)                                             AS mtm
                     FROM raw_mtm r CROSS JOIN baseline b
                     ORDER BY r.ts
                 """)
                 rows = cur.fetchall()
-                points = [{"ts": str(r[0]), "label": r[1], "mtm": float(r[2]) if r[2] is not None else 0} for r in rows]
+                points = [{"ts": str(r[0]), "label": r[1], "day": r[2], "day_label": r[3],
+                           "mtm": float(r[4]) if r[4] is not None else 0} for r in rows]
                 return {
                     "view": "rolling3d",
                     "points": points,
                     "count": len(points),
-                    "data_source": "intraday_prices (Fyers 5-min, 3 days)"
+                    "data_source": "intraday_prices (unrealized) + personal_journal (realized)"
                 }
 
             elif view == "intraday":
