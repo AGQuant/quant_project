@@ -48,6 +48,7 @@ from datetime import datetime, date, timedelta
 import psycopg
 
 from nifty_dwm import live_nifty_dwm
+from r6_volume import volume_ratio, r6_state, r6_label
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -111,26 +112,6 @@ def _parse_side(q):
 
 
 # ─────────────────────────────────────────────── parameter computers ───────────────────────────────────
-
-def _r7_volume_pattern(cur, symbol, side):
-    cur.execute("""
-        WITH d AS (
-          SELECT close, volume, LAG(close) OVER (ORDER BY price_date) AS pc
-          FROM (SELECT price_date, close, volume FROM raw_prices
-                WHERE symbol=%s AND volume>0 ORDER BY price_date DESC LIMIT 31) s
-          ORDER BY price_date
-        )
-        SELECT AVG(volume) FILTER (WHERE close>pc),
-               AVG(volume) FILTER (WHERE close<pc)
-        FROM d WHERE pc IS NOT NULL""", (symbol,))
-    r = cur.fetchone()
-    up, dn = _f(r[0]) if r else None, _f(r[1]) if r else None
-    if not up or not dn:
-        return None, "no vol data"
-    ratio = up / dn
-    ok = ratio >= 1.1 if side == "LONG" else ratio <= 0.9
-    return ok, f"up/dn {ratio:.2f}"
-
 
 def _r10_intraday(cur, symbol, side):
     cur.execute("""
@@ -448,7 +429,10 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
             basis_rows = cur.fetchall()
             basis = [_f(r[0]) for r in basis_rows]
 
-            r7_ok, r7_val = _r7_volume_pattern(cur, symbol, side)
+            # cc#145: time-adjusted intraday volume ratio, replaces 30-day up/dn.
+            r6_vol = volume_ratio(cur, symbol)
+            r6_ok = r6_state(r6_vol["ratio"])
+            r6_val = r6_label(r6_vol["ratio"])
             r10_ok, r10_val = _r10_intraday(cur, symbol, side)
             r12_ok, r12_val = _r12_pattern(cur, symbol, side)
             r13_ok, r13_val = _r13_atr_ignition(cur, symbol)
@@ -528,8 +512,10 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 rules.append(row("R5 Trend", "2of3 MAs below + RSI M/W<=50",
                                  f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}", n >= 2 and rsi_ok))
 
-            # R6 Volume
-            rules.append(row("R6 Volume", f"1-mo {'buying' if side=='LONG' else 'selling'}", r7_val, r7_ok))
+            # R6 Volume — cc#145: time-adjusted intraday volume vs 5-day baseline,
+            # same threshold for LONG and SHORT (high volume confirms either direction).
+            rules.append(row("R6 Volume", "intraday vol/expected(5d,T-adj) >1.2 PASS / 1.0-1.2 WATCH",
+                             r6_val, r6_ok))
 
             # R7 Returns — cc#120 change_3 (graded) + fix_9 (-0.0% display fix).
             # LONG: both>0=PASS, one>0=AVERAGE, none=FAIL. SHORT mirrors with <0.
