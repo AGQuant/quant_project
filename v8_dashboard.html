@@ -282,6 +282,7 @@ const EP={
   funnelDetail:b=>`/api/v8/funnel_detail/${b}`,
   passCount:b=>`/api/v8/stock_passcount/${b}`,
   tcLite:"/api/scanners/tc_lite",
+  daylog:"/api/v8/daylog",
 };
 const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
@@ -295,8 +296,8 @@ const ALL5=[
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Raw Data","Paper Missed","Live News"];
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10];
+  "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News"];
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -567,6 +568,7 @@ TAB_ORDER.forEach(panelIdx=>{
 function selectTab(i){
   [...tabsEl.children].forEach(t=>t.classList.toggle('active',t.textContent===TAB_LABELS[i]));
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
+  if(i===8&&!DAYLOG_LOADED)loadDayLog();
 }
 
 const SORTREG={};
@@ -929,7 +931,7 @@ function newsList(){
 }
 function setNewsFilter(k){NEWS_FILTER=k;renderNews();}
 function renderNews(){
-  const el=document.getElementById('panel10');if(!el)return;
+  const el=document.getElementById('panel11');if(!el)return;
   const d=NEWS_DATA||{};
   // cc_task #95: single India Market (domestic) pill — no Global/Company.
   const counts={domestic:(d.domestic||[]).length};
@@ -950,7 +952,7 @@ function renderNews(){
 }
 async function loadNews(){
   try{NEWS_DATA=await getJSON('/api/news/live?hours=72');NEWS_TS=new Date(Date.now()+(5*60+30)*60000);}
-  catch(e){const el=document.getElementById('panel10');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
+  catch(e){const el=document.getElementById('panel11');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
   renderNews();
 }
 
@@ -987,26 +989,81 @@ function renderTCLite(){
   return meta+desktop+mobile;
 }
 
+// ---- Day Log tab (cc#139) — lazy load on tab click -------------------------
+let DAYLOG_LOADED=false;
+async function loadDayLog(){
+  const el=document.getElementById('panel8');if(!el)return;
+  el.innerHTML='<div class="loading">Loading Day Log...</div>';
+  try{
+    const d=await getJSON(EP.daylog);
+    DAYLOG_LOADED=true;
+    el.innerHTML=renderDayLog(d);
+  }catch(e){el.innerHTML=`<div class="err">Day Log failed: ${e.message}</div>`;}
+}
+function renderDayLog(data){
+  if(!data)return'<div class="loading">...</div>';
+  const days=data.days||[],s=data.summary||{};
+  const MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function fmtDate(d){if(!d)return'--';const p=String(d).split('-');return p.length<3?String(d):p[2]+'-'+MONS[parseInt(p[1],10)-1]+'-'+p[0];}
+  const cards=`<div class="cards">
+    <div class="card"><div class="k">Total Opened</div><div class="v">${s.total_opened??'--'}</div></div>
+    <div class="card"><div class="k">Total Closed</div><div class="v">${s.total_closed??'--'}</div></div>
+    <div class="card"><div class="k">Gross P&L</div><div class="v ${pnlCls(s.total_gross_pnl)}">${inr(s.total_gross_pnl)}</div></div>
+    <div class="card"><div class="k">Total Brokerage</div><div class="v neg">${inr(s.total_brokerage)}</div></div>
+    <div class="card"><div class="k">Net P&L</div><div class="v ${pnlCls(s.total_net_pnl)}">${inr(s.total_net_pnl)}</div></div>
+    <div class="card"><div class="k">Overall Return</div><div class="v ${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</div></div>
+  </div>`;
+  if(!days.length)return cards+'<div class="empty">No trading data yet.</div>';
+  const rowBg=r=>Number(r.net_pnl)>0?'background:#e6f9f0':Number(r.net_pnl)<0?'background:#fef0f0':'';
+  const trows=days.map(r=>`<tr style="${rowBg(r)}">
+    <td style="color:var(--mut);white-space:nowrap">${fmtDate(r.date)}</td>
+    <td>${r.opened??0}</td><td>${r.long_open??0}</td><td>${r.short_open??0}</td>
+    <td>${r.closed??0}</td><td>${r.long_closed??0}</td><td>${r.short_closed??0}</td>
+    <td class="${pnlCls(r.gross_pnl)}">${inr(r.gross_pnl)}</td>
+    <td class="${pnlCls(r.avg_pnl)}">${r.avg_pnl!=null?inr(r.avg_pnl):'--'}</td>
+    <td style="color:var(--dim)">${inr(r.brokerage)}</td>
+    <td class="${pnlCls(r.net_pnl)}">${inr(r.net_pnl)}</td>
+    <td>${r.net_open??0}</td>
+    <td class="${pnlCls(r.return_pct)}">${r.return_pct!=null?sign(r.return_pct,2)+'%':'--'}</td>
+  </tr>`).join('');
+  const totrow=`<tr style="font-weight:700;border-top:2px solid var(--line);background:#f8fafc">
+    <td style="white-space:nowrap">TOTAL</td>
+    <td>${s.total_opened??0}</td><td>-</td><td>-</td>
+    <td>${s.total_closed??0}</td><td>-</td><td>-</td>
+    <td class="${pnlCls(s.total_gross_pnl)}">${inr(s.total_gross_pnl)}</td><td>-</td>
+    <td style="color:var(--dim)">${inr(s.total_brokerage)}</td>
+    <td class="${pnlCls(s.total_net_pnl)}">${inr(s.total_net_pnl)}</td>
+    <td>${s.net_open??0}</td>
+    <td class="${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</td>
+  </tr>`;
+  return cards+`<div class="ptitle">Day Log <span class="ct">${days.length} trading days</span></div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Capital Rs.50,00,000 · Rs.500 brokerage/closed trade · Net Open = cumulative running total</div>
+    <div class="scroll desktop-only"><table>
+      <thead><tr><th>Date</th><th>Opened</th><th>L Open</th><th>S Open</th><th>Closed</th><th>L Cls</th><th>S Cls</th><th>Gross P&L</th><th>Avg P&L</th><th>Brokerage</th><th>Net P&L</th><th>Net Open</th><th>Return %</th></tr></thead>
+      <tbody>${trows}</tbody><tfoot>${totrow}</tfoot>
+    </table></div>`;
+}
+
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
   document.getElementById('panel6').innerHTML=renderSellOB();
   document.getElementById('panel7').innerHTML=renderTradeLog();
-  document.getElementById('panel8').innerHTML=renderRaw();
-  document.getElementById('panel9').innerHTML=renderMissed();
+  document.getElementById('panel9').innerHTML=renderRaw();
+  document.getElementById('panel10').innerHTML=renderMissed();
   // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
   BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
   loadFunnelInline('sell_overbought',6);
 }
 
 function showSkeletons(){
-  for(let i=0;i<=10;i++){const el=document.getElementById('panel'+i);if(el)el.innerHTML='<div class="loading">Loading...</div>';}
+  for(let i=0;i<=11;i++){const el=document.getElementById('panel'+i);if(el)el.innerHTML='<div class="loading">Loading...</div>';}
 }
 function renderMasterPanels(){
   document.getElementById('panel0').innerHTML=renderMaster();
   document.getElementById('panel7').innerHTML=renderTradeLog();
-  document.getElementById('panel8').innerHTML=renderRaw();
-  document.getElementById('panel9').innerHTML=renderMissed();
+  document.getElementById('panel9').innerHTML=renderRaw();
+  document.getElementById('panel10').innerHTML=renderMissed();
 }
 async function loadAll(){
   document.getElementById('refreshBtn').textContent='Refresh...';
