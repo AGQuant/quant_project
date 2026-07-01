@@ -61,7 +61,7 @@ Sector aggregates (18-Jun-2026):
 
 import logging
 import json
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Dict, List, Optional
 from collections import defaultdict
 import pandas as pd
@@ -316,22 +316,27 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
 # -- Step 3: Load today's intraday bars (bulk) ---------------------------------
 
 def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
+    """source='fyers_eq' pinned throughout (cc#140, 01-Jul-2026): intraday_prices
+    carries both fyers_eq (equity) and fyers_fut (futures contract) rows per
+    symbol/day. Without a source filter, MAX(volume) etc. silently pick
+    whichever series is numerically larger, mixing equity-scale price/volume
+    with futures-scale price/volume for the same symbol."""
     today = datetime.now(IST).date()
     with conn.cursor() as cur:
         cur.execute("""
             SELECT
                 symbol,
                 (SELECT close FROM intraday_prices i2
-                 WHERE i2.symbol = ip.symbol AND i2.ts::date = %s
+                 WHERE i2.symbol = ip.symbol AND i2.ts::date = %s AND i2.source = 'fyers_eq'
                  ORDER BY ts DESC LIMIT 1)                       AS live_close,
                 (SELECT open  FROM intraday_prices i3
-                 WHERE i3.symbol = ip.symbol AND i3.ts::date = %s
+                 WHERE i3.symbol = ip.symbol AND i3.ts::date = %s AND i3.source = 'fyers_eq'
                  ORDER BY ts ASC  LIMIT 1)                       AS day_open,
                 MAX(high)   FILTER (WHERE ts::date = %s)         AS day_high,
                 MIN(low)    FILTER (WHERE ts::date = %s)         AS day_low,
                 MAX(volume) FILTER (WHERE ts::date = %s)         AS day_vol
             FROM intraday_prices ip
-            WHERE symbol = ANY(%s) AND ts::date = %s
+            WHERE symbol = ANY(%s) AND ts::date = %s AND source = 'fyers_eq'
             GROUP BY symbol
         """, (today, today, today, today, today, symbols, today))
         bars = {}
@@ -348,6 +353,70 @@ def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
     return bars
 
 
+def _round_down_5min(ts: datetime) -> time:
+    """Round a naive IST datetime down to the nearest 5-min bar boundary,
+    matching the signal_writer's own tick cadence."""
+    minute = (ts.minute // 5) * 5
+    return ts.replace(minute=minute, second=0, microsecond=0).time()
+
+
+def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> Dict[str, dict]:
+    """Time-of-day matched pro-rata volume ratio (cc#140, 01-Jul-2026).
+    Replaces the old vol_now/full-day-10d-average formula, which mechanically
+    rises through the day regardless of real buying intensity (same stock at
+    identical pace reads ~0.4x at 11:00 IST vs ~1.0x+ at 15:15 IST -- effectively
+    a time-of-day filter, not a volume-surge detector). session_log id=395
+    (INTRADAY_SCANNER_SPEC_V1, 19-Jun-2026) spec, implemented here.
+
+    Denominator uses same-time-of-day cumulative volume over the last 10
+    calendar days (source='fyers_eq' only, matching numerator instrument).
+    intraday_prices retention is a 7-day rolling window (weekly Monday trim,
+    scorr_recurring_tasks id=34), so fewer than 10 trading days may be
+    available at any given time -- degrade gracefully on whatever exists,
+    NULL out below 3 days rather than fabricate a ratio.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH today AS (
+                SELECT symbol, MAX(volume) AS vol_today
+                FROM intraday_prices
+                WHERE source = 'fyers_eq' AND symbol = ANY(%s)
+                  AND ts::date = CURRENT_DATE AND ts::time <= %s
+                GROUP BY symbol
+            ),
+            hist_same_time AS (
+                SELECT symbol, ts::date AS d, MAX(volume) AS vol_at_t
+                FROM intraday_prices
+                WHERE source = 'fyers_eq' AND symbol = ANY(%s)
+                  AND ts::date <  CURRENT_DATE
+                  AND ts::date >= CURRENT_DATE - INTERVAL '10 days'
+                  AND ts::time <= %s
+                GROUP BY symbol, ts::date
+            ),
+            hist_avg AS (
+                SELECT symbol, AVG(vol_at_t) AS avg_vol_at_t, COUNT(*) AS days_available
+                FROM hist_same_time GROUP BY symbol
+            )
+            SELECT t.symbol, t.vol_today, h.avg_vol_at_t, h.days_available
+            FROM today t JOIN hist_avg h ON h.symbol = t.symbol
+        """, (symbols, cutoff, symbols, cutoff))
+        out = {}
+        for sym, vol_today, avg_vol_at_t, days_available in cur.fetchall():
+            vol_today    = _safe_float(vol_today)
+            avg_vol_at_t = _safe_float(avg_vol_at_t)
+            ratio = None
+            if days_available and days_available >= 3 and vol_today is not None \
+               and avg_vol_at_t and avg_vol_at_t > 0:
+                ratio = round(vol_today / avg_vol_at_t, 3)
+            out[sym] = {
+                "vol_today": vol_today,
+                "avg_vol_at_t": avg_vol_at_t,
+                "days_available": int(days_available) if days_available else 0,
+                "vol_ratio_time_normalized": ratio,
+            }
+    return out
+
+
 # -- Step 4: Load CMP ---------------------------------------------------------
 
 def _load_cmp(conn) -> Dict[str, float]:
@@ -359,7 +428,7 @@ def _load_cmp(conn) -> Dict[str, float]:
 # -- Step 5: Compute live metrics ---------------------------------------------
 
 def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
-                           eod: dict) -> dict:
+                           eod: dict, vol_tn: Optional[dict] = None) -> dict:
     closes = hist["closes"][:]
     highs  = hist["highs"][:]
     lows   = hist["lows"][:]
@@ -380,6 +449,8 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         "month_return": None, "week_return": None, "year_return": None,
         "mom_2d": None, "day_1d": None, "eod_chg": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
+        "vol_ratio_legacy": None, "vol_ratio_time_normalized": None,
+        "vol_ratio_days_available": 0,
         "week_index_52": None, "month_index": None,
         "range_1d": None, "range_3d": None,
         "upper_bb": None, "lower_bb": None,
@@ -413,10 +484,19 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         if ma21:
             out["ma9_vs_ma21"] = round((ma9 - ma21) / ma21 * 100, 2)
 
+    # vol_ratio_legacy: vol_now (any time-of-day) / 10-day FULL-DAY average (raw_prices
+    # EOD). Kept for audit only (cc#140, 01-Jul-2026) -- not time-of-day matched, so it
+    # mechanically rises through the day regardless of real buying intensity. Superseded
+    # by vol_ratio_time_normalized below, which is now the live-filter value.
     vol_now   = bar.get("volume")
     vol_avg10 = hist.get("vol_avg10")
     if vol_now and vol_avg10 and vol_avg10 > 0:
-        out["vol_ratio"] = round(vol_now / vol_avg10, 2)
+        out["vol_ratio_legacy"] = round(vol_now / vol_avg10, 2)
+
+    if vol_tn:
+        out["vol_ratio_time_normalized"] = vol_tn.get("vol_ratio_time_normalized")
+        out["vol_ratio_days_available"]  = vol_tn.get("days_available", 0)
+    out["vol_ratio"] = out["vol_ratio_time_normalized"]
 
     hi252 = max(x for x in [hist.get("hi_252"), bar.get("high"), live] if x)
     lo252 = min(x for x in [hist.get("lo_252"), bar.get("low"),  live] if x)
@@ -1174,6 +1254,9 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                 "week_index_52", "range_3d", "ma9_vs_ma21", "vol_ratio",
                 "sector_week", "sector_month", "sector_day",
             ]}
+            snap["vol_ratio_legacy"]          = s.get("vol_ratio_legacy")
+            snap["vol_ratio_time_normalized"] = s.get("vol_ratio_time_normalized")
+            snap["vol_ratio_days_available"]  = s.get("vol_ratio_days_available")
             snap["filter_score"] = s.get("_filter_score")
             snap["filter_total"] = n_filters
             if basket == "buy_reversal":
@@ -1264,6 +1347,9 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
             "vol_ratio": s.get("vol_ratio"), "recovery_2d": s.get("recovery_2d"),
             "day_ret": s.get("day_ret"), "week_low": s.get("week_low"),
             "nifty_rsi": round(nifty_rsi, 1), "filter_score": 7, "filter_total": 7,
+            "vol_ratio_legacy": s.get("vol_ratio_legacy"),
+            "vol_ratio_time_normalized": s.get("vol_ratio_time_normalized"),
+            "vol_ratio_days_available": s.get("vol_ratio_days_available"),
         }
         try:
             with conn.cursor() as cur:
@@ -1471,6 +1557,8 @@ def run_live_signal_writer(conn) -> dict:
     eod_history = _load_eod_history(conn, symbols)
     intraday    = _load_intraday_bars(conn, symbols)
     cmp_map     = _load_cmp(conn)
+    vol_cutoff  = _round_down_5min(datetime.now(IST).replace(tzinfo=None))
+    vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff)
 
     if not intraday:
         log.warning("signal_writer: no intraday bars -- fyers_feed not running, using EOD fallback")
@@ -1498,7 +1586,7 @@ def run_live_signal_writer(conn) -> dict:
             continue
         eod = eod_metrics.get(sym, {})
         cmp = cmp_map.get(sym)
-        m   = _compute_live_metrics(hist, bar, cmp, eod)
+        m   = _compute_live_metrics(hist, bar, cmp, eod, vol_tn_map.get(sym))
         m["symbol"] = sym
         m["_cmp"]   = cmp if cmp else bar["close"]
         computed[sym] = m
@@ -1512,6 +1600,18 @@ def run_live_signal_writer(conn) -> dict:
         except Exception as e:
             log.warning(f"upsert_metrics {sym}: {e}")
         all_metrics.append(m)
+
+    # cc#140 (01-Jul-2026): vol_ratio side-by-side visibility -- old (legacy, full-day
+    # avg) vs new (time-normalized, fyers_eq-only) formula, and NULL-state diagnosis
+    # per data_gap_resolution_01Jul2026 (no silent NULLs -- must be visible in logs).
+    insufficient_hist = sum(1 for m in all_metrics if (m.get("vol_ratio_days_available") or 0) < 3)
+    old_pass = sum(1 for m in all_metrics if (m.get("vol_ratio_legacy") or 0) >= 1.5)
+    new_pass = sum(1 for m in all_metrics if (m.get("vol_ratio_time_normalized") or 0) >= 1.5)
+    log.warning(
+        f"vol_ratio[cc#140]: cutoff={vol_cutoff} symbols={len(all_metrics)} "
+        f"insufficient_history(<3d)={insufficient_hist} "
+        f"gate>=1.5: legacy={old_pass} time_normalized={new_pass}"
+    )
 
     _write_qualified(conn, all_metrics, today)
 
