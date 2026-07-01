@@ -1616,3 +1616,89 @@ def v8_trades(limit: int = 200):
         return rows
     except Exception as e:
         raise HTTPException(500, f"v8_trades failed: {e}")
+
+
+@router.get("/daylog")
+def v8_daylog():
+    """Day-wise aggregated performance table. Capital base Rs.50,00,000. Brokerage Rs.500/closed trade."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH all_dates AS (
+                    SELECT DISTINCT entry_ts::date AS d FROM v8_paper_positions
+                    UNION SELECT DISTINCT entry_ts::date FROM v8_paper_trades
+                    UNION SELECT DISTINCT COALESCE(closed_at::date, exit_ts::date) FROM v8_paper_trades
+                ),
+                opened AS (
+                    SELECT entry_ts::date AS d,
+                        COUNT(*) FILTER (WHERE side='LONG') AS long_opened,
+                        COUNT(*) FILTER (WHERE side='SHORT') AS short_opened,
+                        COUNT(*) AS total_opened
+                    FROM (SELECT entry_ts, side FROM v8_paper_positions
+                          UNION ALL SELECT entry_ts, side FROM v8_paper_trades) e
+                    GROUP BY entry_ts::date
+                ),
+                closed AS (
+                    SELECT COALESCE(closed_at::date, exit_ts::date) AS d,
+                        COUNT(*) FILTER (WHERE side='LONG') AS long_closed,
+                        COUNT(*) FILTER (WHERE side='SHORT') AS short_closed,
+                        COUNT(*) AS total_closed,
+                        ROUND(SUM(pnl)::numeric,2) AS gross_pnl,
+                        ROUND(AVG(pnl)::numeric,2) AS avg_pnl,
+                        COUNT(*)*500 AS brokerage,
+                        ROUND((SUM(pnl)-COUNT(*)*500)::numeric,2) AS net_pnl
+                    FROM v8_paper_trades GROUP BY COALESCE(closed_at::date, exit_ts::date)
+                ),
+                cumulative AS (
+                    SELECT ad.d,
+                        COALESCE(o.total_opened,0) AS opened,
+                        COALESCE(o.long_opened,0) AS long_open,
+                        COALESCE(o.short_opened,0) AS short_open,
+                        COALESCE(c.total_closed,0) AS closed,
+                        COALESCE(c.long_closed,0) AS long_closed,
+                        COALESCE(c.short_closed,0) AS short_closed,
+                        COALESCE(c.gross_pnl,0) AS gross_pnl,
+                        c.avg_pnl,
+                        COALESCE(c.brokerage,0) AS brokerage,
+                        COALESCE(c.net_pnl,0) AS net_pnl
+                    FROM all_dates ad
+                    LEFT JOIN opened o ON o.d=ad.d
+                    LEFT JOIN closed c ON c.d=ad.d
+                )
+                SELECT d AS date, opened, long_open, short_open, closed, long_closed, short_closed,
+                    gross_pnl, avg_pnl, brokerage, net_pnl,
+                    SUM(opened) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING)
+                      - SUM(closed) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS net_open,
+                    ROUND((net_pnl/5000000.0*100)::numeric,2) AS return_pct
+                FROM cumulative ORDER BY d DESC
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = []
+            for r in cur.fetchall():
+                row = dict(zip(cols, r))
+                row['date']       = str(row['date'])
+                row['gross_pnl']  = float(row['gross_pnl'])  if row['gross_pnl']  is not None else 0.0
+                row['avg_pnl']    = float(row['avg_pnl'])    if row['avg_pnl']    is not None else None
+                row['net_pnl']    = float(row['net_pnl'])    if row['net_pnl']    is not None else 0.0
+                row['net_open']   = int(row['net_open'])     if row['net_open']   is not None else 0
+                row['return_pct'] = float(row['return_pct']) if row['return_pct'] is not None else 0.0
+                row['brokerage']  = int(row['brokerage'])    if row['brokerage']  is not None else 0
+                rows.append(row)
+        total_gross = sum(r['gross_pnl'] for r in rows)
+        total_brok  = sum(r['brokerage']  for r in rows)
+        total_net   = sum(r['net_pnl']    for r in rows)
+        return {
+            "days": rows,
+            "summary": {
+                "total_opened":       sum(r['opened'] for r in rows),
+                "total_closed":       sum(r['closed'] for r in rows),
+                "total_gross_pnl":    round(total_gross, 2),
+                "total_brokerage":    total_brok,
+                "total_net_pnl":      round(total_net, 2),
+                "net_open":           rows[0]['net_open'] if rows else 0,
+                "overall_return_pct": round(total_net / 5_000_000 * 100, 2),
+            },
+            "capital_base": 5_000_000,
+        }
+    except Exception as e:
+        raise HTTPException(500, f"v8_daylog failed: {e}")
