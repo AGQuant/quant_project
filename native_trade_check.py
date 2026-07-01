@@ -47,6 +47,8 @@ import calendar
 from datetime import datetime, date, timedelta
 import psycopg
 
+from nifty_dwm import live_nifty_dwm
+
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 
@@ -403,13 +405,11 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 ar = cur.fetchone()
                 adr = _f(ar[0]) if ar else None
 
-            # cc#120 change_1: Nifty day/week/month returns for the R1 mood gate.
-            cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY50'
-                           ORDER BY price_date DESC LIMIT 23""")
-            nf = [_f(x[0]) for x in cur.fetchall()][::-1]
-            nf_day = (nf[-1] / nf[-2] - 1) * 100 if len(nf) >= 2 and nf[-2] else None
-            nf_wk = (nf[-1] / nf[-6] - 1) * 100 if len(nf) >= 6 and nf[-6] else None
-            nf_mo = (nf[-1] / nf[-23] - 1) * 100 if len(nf) >= 23 and nf[-23] else None
+            # cc#120 change_1 / cc#143 fix: Nifty day/week/month returns for the R1
+            # mood gate. Live off intraday_prices during market hours (was always
+            # stale EOD raw_prices, showing yesterday's return as today's); falls
+            # back to the original EOD formula outside market hours.
+            nf_day, nf_wk, nf_mo, _nf_source = live_nifty_dwm(cur)
 
             op = ">" if side == "LONG" else "<"
             cur.execute(f"""
