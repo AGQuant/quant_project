@@ -48,6 +48,8 @@ import psycopg
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from nifty_dwm import live_nifty_dwm
+
 router = APIRouter()
 
 _DB = os.getenv("DATABASE_URL", "")
@@ -145,9 +147,10 @@ def _load(cur, symbol):
     rows.reverse()
     d["daily"] = rows
 
-    cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY50'
-                   ORDER BY price_date DESC LIMIT 23""")
-    d["nifty"] = [_f(r[0]) for r in cur.fetchall()][::-1]
+    # cc#143 fix: live off intraday_prices during market hours (was always stale
+    # EOD raw_prices, showing yesterday's return as today's); falls back to the
+    # original EOD formula outside market hours.
+    d["nifty_day"], d["nifty_wk"], d["nifty_mo"], d["nifty_source"] = live_nifty_dwm(cur)
 
     cur.execute("""SELECT dma_20, dma_50, dma_200, daily_rsi,
                           sector_week, sector_month, day_1d
@@ -268,19 +271,22 @@ def _tier1(d, direction):
     piv = d["pivots"]
     v8 = d["v8"]
 
-    # R1 — Market mood (same for both directions)
-    nf = d["nifty"]
+    # R1 — Market mood (same for both directions). cc#143: nifty_day/wk/mo are now
+    # live off intraday_prices during market hours (see live_nifty_dwm in _load).
+    nf_day, nf_wk, nf_mo = d["nifty_day"], d["nifty_wk"], d["nifty_mo"]
     fails = 0
     if d["adr"] is not None and d["adr"] < 1.0:
         fails += 1
-    if len(nf) >= 2 and nf[-1] / nf[-2] - 1 < 0:
+    if nf_day is None or nf_day < 0:
         fails += 1
-    if len(nf) >= 6 and nf[-1] / nf[-6] - 1 < 0:
+    if nf_wk is None or nf_wk < 0:
         fails += 1
-    if len(nf) >= 23 and nf[-1] / nf[-23] - 1 < 0:
+    if nf_mo is None or nf_mo < 0:
         fails += 1
     rules.append(_rule("R1", "Market mood", "Nifty mood fails <= 2",
-                       f"{fails} fails (ADR {_r(d['adr'])})", fails <= 2))
+                       f"{fails} fails (ADR {_r(d['adr'])} · Day {_r(nf_day)}% · "
+                       f"Week {_r(nf_wk)}% · Month {_r(nf_mo)}% · {d['nifty_source']})",
+                       fails <= 2))
 
     # R2 — Sector aligned
     sw, sm = v8.get("sector_week"), v8.get("sector_month")
