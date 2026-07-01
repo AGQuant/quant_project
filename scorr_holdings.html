@@ -362,7 +362,7 @@ function drawChart(points, labelKey) {
     return;
   }
   const W=box.clientWidth||340, H=170;
-  const P={top:24,right:14,bottom:32,left:46};
+  const P={top:24,right:14,bottom:34,left:46};
   const cW=W-P.left-P.right, cH=H-P.top-P.bottom;
   const vals=points.map(p=>p.mtm);
   let mn=Math.min(...vals,0), mx=Math.max(...vals,0);
@@ -375,9 +375,28 @@ function drawChart(points, labelKey) {
   const lc=last>=0?"#0a9e63":"#dd3a4a";
   const fc=last>=0?"#0a9e6314":"#dd3a4a10";
 
-  // paths
-  const pd=points.map((p,i)=>`${i===0?"M":"L"}${X(i).toFixed(1)},${Y(p.mtm).toFixed(1)}`).join(" ");
-  const fd=pd+` L${X(points.length-1).toFixed(1)},${Y0.toFixed(1)} L${X(0).toFixed(1)},${Y0.toFixed(1)} Z`;
+  // cc#142: group points by trading day so the line/fill never bridges the
+  // overnight gap (15:30 -> next day 09:15). Falls back to deriving the day
+  // from ts if the backend point is missing the "day" field.
+  const dayOf = p => p.day || (p.ts ? String(p.ts).slice(0,10) : "?");
+  const days = [];
+  points.forEach((p,i)=>{
+    const d = dayOf(p);
+    let seg = days[days.length-1];
+    if (!seg || seg.day !== d) { seg = {day:d, day_label:p.day_label||d, start:i, end:i}; days.push(seg); }
+    else seg.end = i;
+  });
+
+  // one path + one fill per day segment -- segments are never connected
+  let pd="", fd="";
+  days.forEach(seg=>{
+    let seg_pd="";
+    for(let i=seg.start;i<=seg.end;i++){
+      seg_pd+=`${i===seg.start?"M":"L"}${X(i).toFixed(1)},${Y(points[i].mtm).toFixed(1)} `;
+    }
+    pd+=seg_pd;
+    fd+=seg_pd+`L${X(seg.end).toFixed(1)},${Y0.toFixed(1)} L${X(seg.start).toFixed(1)},${Y0.toFixed(1)} Z `;
+  });
 
   // y ticks
   let yTicks="";
@@ -388,12 +407,23 @@ function drawChart(points, labelKey) {
     yTicks+=`<line x1="${P.left}" y1="${y.toFixed(1)}" x2="${(W-P.right).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#edf1f6" stroke-width="1"/>`;
   }
 
-  // x labels (max 5)
-  let xTicks="";
-  const step=Math.ceil(points.length/5);
-  for(let i=0;i<points.length;i+=step){
-    xTicks+=`<text x="${X(i).toFixed(1)}" y="${(H-P.bottom+14)}" text-anchor="middle" font-size="9" fill="#9aa4b5">${points[i][labelKey]}</text>`;
-  }
+  // day-separator lines (dashed, at each day's market-open bar) + two-tier x labels:
+  // bold day header (date) centered per day segment, small open/close time below it.
+  let daySep="", xTicks="";
+  days.forEach((seg,di)=>{
+    if (di>0) {
+      const sx=X(seg.start).toFixed(1);
+      daySep+=`<line x1="${sx}" y1="${P.top}" x2="${sx}" y2="${(H-P.bottom).toFixed(1)}" stroke="#cfd8e3" stroke-width="1" stroke-dasharray="3,3"/>`;
+    }
+    const midX=((X(seg.start)+X(seg.end))/2).toFixed(1);
+    xTicks+=`<text x="${midX}" y="${(H-P.bottom+13)}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#5a6781">${seg.day_label}</text>`;
+    const openT=(points[seg.start][labelKey]||"").split(" ").pop();
+    const closeT=(points[seg.end][labelKey]||"").split(" ").pop();
+    xTicks+=`<text x="${X(seg.start).toFixed(1)}" y="${(H-P.bottom+25)}" text-anchor="start" font-size="8" fill="#9aa4b5">${openT}</text>`;
+    if (seg.end>seg.start) {
+      xTicks+=`<text x="${X(seg.end).toFixed(1)}" y="${(H-P.bottom+25)}" text-anchor="end" font-size="8" fill="#9aa4b5">${closeT}</text>`;
+    }
+  });
 
   // zero line
   const zl=`<line x1="${P.left}" y1="${Y0.toFixed(1)}" x2="${(W-P.right).toFixed(1)}" y2="${Y0.toFixed(1)}" stroke="#ccc" stroke-width="1" stroke-dasharray="3,2"/>`;
@@ -405,7 +435,7 @@ function drawChart(points, labelKey) {
   const lbx=lx>W*0.75?lx-8:lx+8;
 
   box.innerHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
-    ${yTicks}${zl}${xTicks}
+    ${yTicks}${zl}${daySep}${xTicks}
     <path d="${fd}" fill="${fc}"/>
     <path d="${pd}" fill="none" stroke="${lc}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="${lc}" stroke="#fff" stroke-width="2"/>
