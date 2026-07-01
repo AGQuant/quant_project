@@ -99,6 +99,10 @@
   .hero-buckets-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
   .hero-bk-sub{font-size:10.5px;font-weight:700;margin-top:3px;font-family:monospace}
   .pos-card.loss{border-color:#f5b8bd!important;border-width:1.5px!important}
+
+  /* cc#138 */
+  .pos-row3{display:flex;align-items:center;gap:6px;margin-top:5px}
+  .pos-avgcmp{font-size:11px;color:var(--dim);font-family:monospace}
 </style>
 </head>
 <body>
@@ -272,6 +276,8 @@ async function loadHoldings(smooth=false) {
         /* cc#133: loss border on the card itself */
         if((p.mtm||0)<0) card.classList.add("loss"); else card.classList.remove("loss");
         if (ltpEl) ltpEl.textContent = f2(p.ltp);
+        const cmpEl = document.getElementById("cmp-"+p.symbol);
+        if (cmpEl) cmpEl.textContent = f2(p.ltp);
         if (pctEl) {
           const pct = calcPct(p);
           pctEl.textContent = pct==null?"":((pct>=0?"+":"")+pct.toFixed(2)+"%");
@@ -322,6 +328,9 @@ async function loadHoldings(smooth=false) {
           <span class="pos-ltp">₹<span id="ltp-${p.symbol}">${f2(p.ltp)}</span>${livePip}</span>
           <span class="pos-sep">·</span>
           <span class="pos-pct" id="pct-${p.symbol}" style="color:${colorOf(pct)}">${pctTxt}</span>
+        </div>
+        <div class="pos-row3">
+          <span class="pos-avgcmp">Avg ₹${f2(p.entry_price)} · CMP ₹<span id="cmp-${p.symbol}">${f2(p.ltp)}</span></span>
         </div>
       </div>`;
     });
