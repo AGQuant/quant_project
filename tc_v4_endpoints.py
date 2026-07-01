@@ -49,6 +49,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from nifty_dwm import live_nifty_dwm
+from r6_volume import volume_ratio, r6_state, r6_label
 
 router = APIRouter()
 
@@ -75,9 +76,15 @@ def _r(v, n=2):
     return round(v, n) if isinstance(v, (int, float)) else None
 
 
-def _rule(rid, label, condition, value, passed):
-    return {"rule": rid, "label": label, "condition": condition,
-            "value": value, "pass": bool(passed)}
+def _rule(rid, label, condition, value, passed, credit=None):
+    """credit: explicit fractional score contribution (e.g. 0.5 for a WATCH state).
+    Defaults to 1.0/0.0 derived from `passed` when not given (cc#145: needed for
+    R7 Volume's 3-tier PASS/WATCH/FAIL, since Tier-1 elsewhere is binary)."""
+    r = {"rule": rid, "label": label, "condition": condition,
+         "value": value, "pass": bool(passed)}
+    if credit is not None:
+        r["credit"] = credit
+    return r
 
 
 def _rsi(closes, period=14):
@@ -151,6 +158,12 @@ def _load(cur, symbol):
     # EOD raw_prices, showing yesterday's return as today's); falls back to the
     # original EOD formula outside market hours.
     d["nifty_day"], d["nifty_wk"], d["nifty_mo"], d["nifty_source"] = live_nifty_dwm(cur)
+
+    # cc#145: R7 Volume -- time-adjusted intraday volume vs 5-day baseline.
+    r7_vr = volume_ratio(cur, symbol)
+    d["r7_ratio"] = r7_vr["ratio"]
+    d["r7_state"] = r6_state(r7_vr["ratio"])
+    d["r7_source"] = r7_vr["source"]
 
     cur.execute("""SELECT dma_20, dma_50, dma_200, daily_rsi,
                           sector_week, sector_month, day_1d
@@ -339,22 +352,15 @@ def _tier1(d, direction):
                        f"{cnt}/3 (20:{_r(mas[0])} 50:{_r(mas[1])} 200:{_r(mas[2])})",
                        cnt >= 2))
 
-    # R7 — Volume pattern (last 22 sessions)
-    up_v, dn_v = [], []
-    for i in range(max(1, len(daily) - 22), len(daily)):
-        if daily[i]["close"] is None or daily[i - 1]["close"] is None or daily[i]["volume"] is None:
-            continue
-        (up_v if daily[i]["close"] > daily[i - 1]["close"] else dn_v).append(daily[i]["volume"])
-    au = sum(up_v) / len(up_v) if up_v else 0.0
-    ad = sum(dn_v) / len(dn_v) if dn_v else 0.0
-    if LONG:
-        r7 = au > ad and au > 0
-        cond = "avg vol up-days > down-days"
-    else:
-        r7 = ad > au and ad > 0
-        cond = "avg vol down-days > up-days"
-    rules.append(_rule("R7", "Volume pattern", cond,
-                       f"up {_r(au, 0)} vs down {_r(ad, 0)}", r7))
+    # R7 — Volume pattern. cc#145: time-adjusted intraday volume vs 5-day
+    # baseline, replaces the old 30-day up/down-day average comparison. Same
+    # threshold for LONG and SHORT (high volume confirms conviction either way).
+    # >1.2 PASS(1.0) / 1.0-1.2 WATCH(0.5) / <1.0 or no data FAIL(0.0).
+    r7_state = d.get("r7_state")
+    r7_ratio = d.get("r7_ratio")
+    r7_credit = 1.0 if r7_state is True else (0.5 if r7_state == "watch" else 0.0)
+    rules.append(_rule("R7", "Volume pattern", "intraday vol/expected(5d,T-adj) >1.2 PASS / 1.0-1.2 WATCH",
+                       r6_label(r7_ratio), r7_state is True, credit=r7_credit))
 
     # R8 — RSI month + weekly (LIVE from raw_prices)
     rsi_w = _rsi(closes)                       # "RSI weekly" = RSI14 on daily closes
@@ -439,7 +445,9 @@ def _tier1(d, direction):
     rules.append(_rule("R12", lbl, "higher/lower swing structure OR tight range",
                        detail, r12))
 
-    score = sum(1 for r in rules if r["pass"])
+    # cc#145: rules normally score 1.0/0.0 (binary); R7 Volume can carry an
+    # explicit fractional "credit" (0.5 for its WATCH state).
+    score = sum(r.get("credit", 1.0 if r["pass"] else 0.0) for r in rules)
     # LONG = 12 rules; SHORT = 11 (R4/GVM gate is N/A for shorts). Denominator
     # tracks the rules actually scored so the display can never read "11/10".
     mx = len(rules)
