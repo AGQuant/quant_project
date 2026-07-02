@@ -81,6 +81,7 @@ _yahoo_daily_running = False
 _gvm_ran_today: Optional[date] = None
 _pivots_ran_today: Optional[date] = None
 _qb_eod_ran_today: Optional[date] = None
+_ut_ran_today: Optional[date] = None   # cc#154: universe_technicals nightly guard
 _qb_eod_running = False
 _qb_intraday_mark_running = False
 _global_fetching = False
@@ -733,6 +734,26 @@ def _bg_pivots():
         log.error(f"pivots: {e}")
         _log_alert("pivots_error", f"paper pivot build failed for {today}: {e}")
 
+def _bg_universe_technicals():
+    """cc#154: nightly RSI/DMA/returns/pivots for the full ~1766 GVM universe
+    (not just the 209 futures_universe symbols v8_metrics covers). Scheduled
+    after GVM (01:30) since it reads gvm_scores for its symbol list.
+    NOTE: this tasks spec said "22:10 IST after GVM 22:00" but GVM was moved to
+    01:30 IST on 18-Jun-2026 (task #31, comment above _bg_gvm) - scheduled here
+    in the real 01:00-02:00 nightly chain instead, after the last existing job."""
+    global _ut_ran_today
+    today = _ist_now().date()
+    if _ut_ran_today == today: return
+    try:
+        import universe_technicals
+        with _conn() as conn:
+            res = universe_technicals.run_universe_technicals(conn, today)
+        _ut_ran_today = today
+        log.info(f"universe_technicals: {res}")
+    except Exception as e:
+        log.error(f"universe_technicals: {e}")
+        _log_alert("universe_technicals_error", f"nightly run failed for {today}: {e}")
+
 
 def _check_pivots_health():
     """cc_task #68 Bug 1: 10-min pivot watchdog (mirrors _bg_adr_pcr_retry). If the
@@ -896,6 +917,7 @@ async def _scheduler_loop():
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
+        if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
 
 
 async def _supervisor():
