@@ -14,7 +14,7 @@ Writes to intraday_prices with:
     ts        = naive IST (matches the Fyers futures rows — read RAW, no TZ math)
     timeframe = '1m'
     source    = 'yahoo'
-ON CONFLICT (symbol, ts, timeframe) DO NOTHING — safe to re-run.
+ON CONFLICT (symbol, ts, timeframe, source) DO NOTHING — safe to re-run.
 
 These index rows are intentionally OUTSIDE futures_universe, so they do NOT
 leak into /api/v8/raw, Filter_Scan, or the paper signal universe (those JOIN
@@ -38,7 +38,7 @@ INDEX_YSYM = {
 _INSERT_SQL = """
 INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume, timeframe, source)
 VALUES (%s, %s, %s, %s, %s, %s, %s, '1m', 'yahoo')
-ON CONFLICT (symbol, ts, timeframe) DO NOTHING
+ON CONFLICT (symbol, ts, timeframe, source) DO NOTHING
 """
 
 
