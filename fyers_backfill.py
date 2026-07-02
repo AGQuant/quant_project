@@ -108,21 +108,25 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
     return []
 
 
-def backfill_7day(token, conn=None):
-    """Sequential 7-day backfill for all futures. ~17 min. Called on worker boot."""
-    _assert_not_market_hours('backfill_7day')
+def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None):
+    """cc#159: sequential REST backfill for an explicit date range and/or symbol
+    subset (generalizes backfill_7day for on-demand admin/MCP-triggered runs).
+    Same pacing/rate-limit behavior (5s sleep between symbols), same fyers/5m
+    upsert target. Returns a summary dict instead of None."""
+    _assert_not_market_hours('backfill_range')
     own = conn is None
     if own: conn = get_db()
 
     now       = datetime.now(IST)
-    date_from = (now - timedelta(days=RETENTION_DAYS)).date()
-    date_to   = now.date()
-    symbols   = get_universe(conn)
+    date_from = date_from or (now - timedelta(days=RETENTION_DAYS)).date()
+    date_to   = date_to or now.date()
+    universe  = get_universe(conn)
+    syms      = sorted(set(symbols) & set(universe)) if symbols else universe
 
-    log.info(f"Backfill {date_from} -> {date_to}: {len(symbols)} futures, 5m, sequential 5s sleep")
+    log.info(f"Backfill {date_from} -> {date_to}: {len(syms)} futures, 5m, sequential 5s sleep")
 
     total, empty = 0, 0
-    for i, sym in enumerate(symbols, 1):
+    for i, sym in enumerate(syms, 1):
         rows = fetch_history(token, sym, '5', '5m', date_from, date_to)
         if rows:
             upsert_candles(conn, rows)
@@ -130,11 +134,22 @@ def backfill_7day(token, conn=None):
         else:
             empty += 1
         if i % 20 == 0:
-            log.info(f"  {i}/{len(symbols)} — {total} candles, {empty} empty")
+            log.info(f"  {i}/{len(syms)} — {total} candles, {empty} empty")
         time.sleep(SLEEP_BETWEEN)
 
-    log.info(f"Backfill complete: {total} candles, {empty} empty/skipped of {len(symbols)}")
+    log.info(f"Backfill complete: {total} candles, {empty} empty/skipped of {len(syms)}")
     if own: conn.close()
+    return {
+        "date_from": str(date_from), "date_to": str(date_to),
+        "symbols_processed": len(syms), "bars_written": total,
+        "gaps_remaining": empty,
+    }
+
+
+def backfill_7day(token, conn=None):
+    """Sequential 7-day backfill for all futures. ~17 min. Called on worker boot.
+    Thin wrapper over backfill_range (cc#159) — same behavior as before."""
+    return backfill_range(token, conn)
 
 
 def newest_ts(conn, symbol, timeframe):
