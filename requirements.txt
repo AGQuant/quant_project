@@ -22,5 +22,5 @@ numpy
 
 mcp
 httpx
-fyers-apiv3
+fyers-apiv3==3.1.13
 anthropic>=0.28.0
