@@ -214,7 +214,7 @@ def create_tables():
         id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, ts TIMESTAMP NOT NULL,
         open NUMERIC, high NUMERIC, low NUMERIC, close NUMERIC, volume BIGINT,
         timeframe TEXT DEFAULT '1m', source TEXT DEFAULT 'fyers',
-        UNIQUE(symbol, ts, timeframe)
+        UNIQUE(symbol, ts, timeframe, source)
     );
     CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_prices(symbol, ts DESC);
     ALTER TABLE intraday_prices ADD COLUMN IF NOT EXISTS timeframe TEXT DEFAULT '1m';
@@ -418,7 +418,7 @@ def _insert_intraday(candles):
     try:
         with get_conn() as conn, conn.cursor() as cur:
             for c in candles:
-                cur.execute("INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume) VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s) ON CONFLICT (symbol, ts, timeframe) DO NOTHING", c)
+                cur.execute("INSERT INTO intraday_prices (symbol, ts, open, high, low, close, volume) VALUES (%(symbol)s, %(ts)s, %(open)s, %(high)s, %(low)s, %(close)s, %(volume)s) ON CONFLICT (symbol, ts, timeframe, source) DO NOTHING", c)
             conn.commit()
     except Exception as e:
         log.error(f"_insert_intraday failed: {e}")
@@ -952,7 +952,7 @@ def _heal_morning_gaps(symbols=None):
                 rows.append((sym,ts,op,hi,lo,cl,vol,"1m","yahoo"))
             if rows:
                 with get_conn() as conn, conn.cursor() as cur:
-                    cur.executemany("INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol,ts,timeframe) DO NOTHING", rows)
+                    cur.executemany("INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol,ts,timeframe,source) DO NOTHING", rows)
                     conn.commit()
                 inserted+=len(rows); healed+=1
             else: skipped+=1
