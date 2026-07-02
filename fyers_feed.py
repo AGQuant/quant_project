@@ -620,9 +620,9 @@ class BarAggregator:
                 cur.execute("""
                     INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,'5m',%s)
-                    ON CONFLICT (symbol,ts,timeframe) DO UPDATE SET
+                    ON CONFLICT (symbol,ts,timeframe,source) DO UPDATE SET
                         open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
-                        close=EXCLUDED.close,volume=EXCLUDED.volume,source=EXCLUDED.source
+                        close=EXCLUDED.close,volume=EXCLUDED.volume
                 """, (sym, bar['ts'], bar['o'], bar['h'], bar['l'], bar['c'],
                       int(bar['v']), source))
             self.conn.commit()
