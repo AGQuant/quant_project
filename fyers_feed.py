@@ -813,7 +813,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     now          = datetime.now(IST).replace(tzinfo=None)
@@ -938,7 +938,29 @@ def poll_options_oi(token, opt_syms, opt_store):
         _OPT_OI_POLL_LOCK.release()
 
 
-# ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+def _batched_subscribe(ws, symbols, action='sub', label=''):
+    """cc#151: single batched code path for subscribe/unsubscribe (WS_SUB_BATCH chunks
+    + sleep + per-batch log). cc_task #88 batching was applied to on_connect only — the
+    monthly-roll path still fired one bulk call (fut+options combined) and Fyers
+    silently dropped symbols under that load (1-Jul roll: only 3/212 futures survived).
+    This is now the ONLY subscribe/unsubscribe path, used by both on_connect and roll."""
+    if not symbols:
+        return
+    verb = 'Subscribing' if action == 'sub' else 'Unsubscribing'
+    tag = f" ({label})" if label else ""
+    log.info(f"{verb} {len(symbols)} symbols{tag} in batches of {WS_SUB_BATCH}")
+    for i in range(0, len(symbols), WS_SUB_BATCH):
+        batch = symbols[i:i + WS_SUB_BATCH]
+        if action == 'sub':
+            ws.subscribe(symbols=batch, data_type="SymbolUpdate")
+        else:
+            ws.unsubscribe(symbols=batch)
+        log.info(f"{verb} batch {i // WS_SUB_BATCH + 1}: {len(batch)} symbols "
+                 f"({min(i + WS_SUB_BATCH, len(symbols))}/{len(symbols)})")
+        time.sleep(WS_SUB_BATCH_SLEEP_SEC)
+
+
+# ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
@@ -972,8 +994,8 @@ def run(auth_code=None):
         # Defer backfill to a background thread so the live WS connects immediately.
         def _deferred_backfill():
             # cc_task #87: Yahoo/REST backfill must NEVER write during market hours
-            # (09:15-15:30 IST). If this thread wakes inside the live session, hold it
-            # until 15:35 IST.
+            # (09:15-15:30 IST) — stale history bars caused a wrong-price paper entry.
+            # If this thread wakes inside the live session, hold it until 15:35 IST.
             now = datetime.now(IST)
             if now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE:
                 run_at  = now.replace(hour=15, minute=35, second=0, microsecond=0)
@@ -1042,16 +1064,13 @@ def run(auth_code=None):
             if wait_s > 0:
                 log.info(f"on_connect: holding subscription {wait_s:.0f}s (NSE open-race guard)")
                 time.sleep(wait_s)
-        # cc_task #88 GAP_2: subscribe in WS_SUB_BATCH-sized chunks — a single bulk
-        # subscribe of ~1460 symbols was silently dropped by the Fyers server under
-        # open-load (212 futures got zero data on 25-Jun). Batch + sleep + per-batch log.
-        log.info(f"WS connected — subscribing {len(all_syms)} symbols in batches of {WS_SUB_BATCH}")
-        for i in range(0, len(all_syms), WS_SUB_BATCH):
-            batch = all_syms[i:i + WS_SUB_BATCH]
-            fyers_ws.subscribe(symbols=batch, data_type="SymbolUpdate")
-            log.info(f"Subscribed batch {i // WS_SUB_BATCH + 1}: {len(batch)} symbols "
-                     f"({min(i + WS_SUB_BATCH, len(all_syms))}/{len(all_syms)})")
-            time.sleep(WS_SUB_BATCH_SLEEP_SEC)
+        # cc_task #88 GAP_2 / cc#151: subscribe in WS_SUB_BATCH-sized chunks via the
+        # shared _batched_subscribe helper — a single bulk subscribe of ~1460 symbols
+        # was silently dropped by the Fyers server under open-load (212 futures got
+        # zero data on 25-Jun).
+        log.info(f"WS connected — subscribing {len(all_syms)} symbols")
+        _batched_subscribe(fyers_ws, all_syms, action='sub', label='initial')
+        threading.Thread(target=_verify_subscribe_survivors, args=('connect',), daemon=True).start()
         fyers_ws.keep_running()
 
     def on_error(msg):  log.error(f"WS error: {msg}")
@@ -1116,6 +1135,19 @@ def run(auth_code=None):
             conn.commit()
         except Exception as e:
             log.warning(f"_log_feed_incident: {e}")
+
+    def _verify_subscribe_survivors(label):
+        """cc#151: after ANY batched (re)subscribe — on_connect boot/reconnect or the
+        monthly-roll path — confirm futures are actually ticking and log it to ops_log,
+        so every re-subscribe is auditable instead of just assumed. Acceptance:
+        >=205/212 futures ticking within 15min; this samples the last 15min window."""
+        time.sleep(120)
+        try:
+            recent = _recent_symbol_count(15)
+            _log_feed_incident("subscribe_verify", f"{label}: {recent}/{TOTAL_FUTURES} symbols writing bars")
+            log.info(f"Post-{label} verification: {recent}/{TOTAL_FUTURES} symbols ticking")
+        except Exception as e:
+            log.warning(f"post-{label} verify failed: {e}")
 
     def _hard_restart(reason):
         """cc_task #112 — the missing auto-restart. Socket-reconnect failed to revive
@@ -1256,12 +1288,18 @@ def run(auth_code=None):
                         new_expiry   = opt_mgr.expiry
                         new_fut_syms = [futures_fyers_symbol(s, new_expiry) for s in symbols]
                         new_opt_syms = opt_mgr.build_initial()
-                        fyers_ws.unsubscribe(symbols=futures_fyers_syms + option_syms)
-                        fyers_ws.subscribe(symbols=new_fut_syms + new_opt_syms, data_type="SymbolUpdate")
+                        # cc#151: batched unsub/sub (same helper as on_connect) — the old
+                        # single bulk unsubscribe+subscribe silently dropped symbols under
+                        # load (1-Jul roll: only 3/212 futures survived).
+                        _batched_subscribe(fyers_ws, futures_fyers_syms + option_syms,
+                                           action='unsub', label='roll-old')
+                        _batched_subscribe(fyers_ws, new_fut_syms + new_opt_syms,
+                                           action='sub', label='roll-new')
                         futures_fyers_syms.clear(); futures_fyers_syms.extend(new_fut_syms)
                         futures_set.clear();        futures_set.update(new_fut_syms)
                         option_syms.clear();        option_syms.extend(new_opt_syms)
                         log.info(f"Monthly roll complete: {new_expiry}")
+                        threading.Thread(target=_verify_subscribe_survivors, args=('roll',), daemon=True).start()
                 except Exception as e:
                     log.warning(f"Monthly roll check failed: {e}")
                 last_roll_check = today
