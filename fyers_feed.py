@@ -407,7 +407,11 @@ def from_fyers_symbol(fsym):
     if fsym == 'NSE:M&M-EQ': return 'M&M'
     if 'FUT' in fsym:
         inner = fsym.replace('NSE:', '')
-        m = re.match(r'^([A-Z&]+)\d{2}[A-Z]{3}FUT$', inner)
+        # cc#148: was ^([A-Z&]+)\d{2}[A-Z]{3}FUT$ — only [A-Z&], so digit/hyphen
+        # tickers (360ONE, BAJAJ-AUTO, NAM-INDIA) failed to match and the RAW
+        # contract name (e.g. "360ONE26JULFUT") leaked into intraday_prices.
+        # Non-greedy base group now allows digits/hyphens in the ticker itself.
+        m = re.match(r'^([A-Z0-9&-]+?)(\d{2}[A-Z]{3})FUT$', inner)
         if m: return m.group(1)
         return inner
     return fsym.replace('NSE:', '').replace('-EQ', '')
