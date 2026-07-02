@@ -813,7 +813,7 @@ def update_index_ltp(conn, token, agg=None):
         log.warning(f"Index LTP: {e}")
 
 
-# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── purge ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def purge_old_bars(conn):
     now          = datetime.now(IST).replace(tzinfo=None)
@@ -972,8 +972,8 @@ def run(auth_code=None):
         # Defer backfill to a background thread so the live WS connects immediately.
         def _deferred_backfill():
             # cc_task #87: Yahoo/REST backfill must NEVER write during market hours
-            # (09:15-15:30 IST) — stale history bars caused a wrong-price paper entry.
-            # If this thread wakes inside the live session, hold it until 15:35 IST.
+            # (09:15-15:30 IST). If this thread wakes inside the live session, hold it
+            # until 15:35 IST.
             now = datetime.now(IST)
             if now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE:
                 run_at  = now.replace(hour=15, minute=35, second=0, microsecond=0)
@@ -1104,12 +1104,13 @@ def run(auth_code=None):
             log.warning(f"force reconnect: {e}")
 
     def _log_feed_incident(kind, detail):
-        """cc_task #112: record each watchdog action to session_log (category=alert)
-        so every recurrence is visible after the fact. Uses the housekeeping conn."""
+        """cc_task #112: record each watchdog action to ops_log (category=alert)
+        so every recurrence is visible after the fact. Uses the housekeeping conn.
+        cc#156: telemetry categories moved off session_log to ops_log."""
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO session_log (session_date, session_ts, category, title, details) "
+                    "INSERT INTO ops_log (session_date, session_ts, category, title, details) "
                     "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)",
                     (kind, json.dumps({"detail": detail, "ist": datetime.now(IST).isoformat()})))
             conn.commit()
