@@ -74,9 +74,9 @@ def upsert_candles(conn, rows):
         cur.executemany("""
             INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (symbol,ts,timeframe) DO UPDATE SET
+            ON CONFLICT (symbol,ts,timeframe,source) DO UPDATE SET
                 open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
-                close=EXCLUDED.close,volume=EXCLUDED.volume,source=EXCLUDED.source
+                close=EXCLUDED.close,volume=EXCLUDED.volume
         """, rows)
     conn.commit()
 
