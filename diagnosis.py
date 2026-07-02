@@ -27,10 +27,39 @@ import psycopg
 import os
 import logging
 
+from nse_holidays import is_trading_day
+
 log = logging.getLogger("scorr.diagnosis")
 router = APIRouter(prefix="/api", tags=["diagnosis"])
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+# cc#146: market-hours gate shared by _section_data_feeds (was applying market-hours
+# thresholds unconditionally -> false RED on every pre-market/off-hours run).
+_GRACE_START      = 555   # 09:15 IST
+_GRACE_END        = 565   # 09:25 IST — feed still warming up right after open
+_MKT_END          = 930   # 15:30 IST
+_CLOSE_BAND_START = 920   # 15:20 IST
+_CLOSE_BAND_END   = 930   # 15:30 IST
+
+def _market_state(now: datetime) -> str:
+    """'market' | 'grace' | 'off'. NSE holidays (nse_holidays.py) count as off-hours."""
+    if not is_trading_day(now.date()):
+        return 'off'
+    mins = now.hour * 60 + now.minute
+    if _GRACE_START <= mins < _GRACE_END:
+        return 'grace'
+    if _GRACE_END <= mins <= _MKT_END:
+        return 'market'
+    return 'off'
+
+def _closed_cleanly(ts) -> bool:
+    """True if ts's time-of-day falls in the prior session's 15:20-15:30 close band —
+    distinguishes a feed that shut down normally from one that died mid-session."""
+    if ts is None:
+        return False
+    mins = ts.hour * 60 + ts.minute
+    return _CLOSE_BAND_START <= mins <= _CLOSE_BAND_END
 
 def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
@@ -70,26 +99,69 @@ def _chk(label: str, value: Any, ok: bool, warn: bool = True, detail: str = '') 
 
 def _section_data_feeds(cur) -> Dict:
     checks = []
+    now = _ist_now()
+    state = _market_state(now)   # cc#146: 'market' | 'grace' | 'off'
 
     # Fyers intraday
     # FIX (12-Jun-2026): Fyers writes 5-min bars (timeframe='5m'), not '1m'.
     # The old '1m' filter matched zero rows -> false "feed dead" red while the
     # 5m feed was healthy. Source tags are fyers_eq / fyers_fut.
-    cur.execute("""
-        SELECT COUNT(DISTINCT symbol) as syms, MAX(ts) as latest, COUNT(*) as rows
-        FROM intraday_prices WHERE ts::date = CURRENT_DATE AND timeframe='5m'
-    """)
-    r = cur.fetchone()
-    syms, latest_ts, rows = r[0] or 0, r[1], r[2] or 0
-    mins = _mins_ago(latest_ts)
-    checks.append(_chk('Fyers intraday symbols', syms,
-        ok=(syms >= 200), warn=(syms >= 150),
-        detail=f'Expected 208-211'))
-    checks.append(_chk('Fyers latest tick', f'{mins} min ago',
-        ok=(mins <= 10), warn=(mins <= 30),
-        detail=str(latest_ts)[:16] if latest_ts else 'no data'))
-    checks.append(_chk('Fyers intraday rows today', rows,
-        ok=(rows >= 1000), warn=(rows >= 100)))
+    if state == 'market':
+        cur.execute("""
+            SELECT COUNT(DISTINCT symbol) as syms, MAX(ts) as latest, COUNT(*) as rows
+            FROM intraday_prices WHERE ts::date = CURRENT_DATE AND timeframe='5m'
+        """)
+        r = cur.fetchone()
+        syms, latest_ts, rows = r[0] or 0, r[1], r[2] or 0
+        mins = _mins_ago(latest_ts)
+        checks.append(_chk('Fyers intraday symbols', syms,
+            ok=(syms >= 200), warn=(syms >= 150),
+            detail=f'Expected 208-211'))
+        checks.append(_chk('Fyers latest tick', f'{mins} min ago',
+            ok=(mins <= 10), warn=(mins <= 30),
+            detail=str(latest_ts)[:16] if latest_ts else 'no data'))
+        checks.append(_chk('Fyers intraday rows today', rows,
+            ok=(rows >= 1000), warn=(rows >= 100)))
+    elif state == 'grace':
+        # 09:15-09:25 IST: feed is still warming up right after open — thin/missing
+        # data here is expected, not a failure. YELLOW at worst, never RED.
+        cur.execute("""
+            SELECT COUNT(DISTINCT symbol) as syms, MAX(ts) as latest, COUNT(*) as rows
+            FROM intraday_prices WHERE ts::date = CURRENT_DATE AND timeframe='5m'
+        """)
+        r = cur.fetchone()
+        syms, latest_ts, rows = r[0] or 0, r[1], r[2] or 0
+        grace_detail = 'Grace window 09:15-09:25 IST — feed warming up'
+        checks.append(_chk('Fyers intraday symbols', syms,
+            ok=(syms >= 200), warn=True, detail=grace_detail))
+        checks.append(_chk('Fyers latest tick', str(latest_ts)[:16] if latest_ts else 'no data yet',
+            ok=(latest_ts is not None), warn=True, detail=grace_detail))
+        checks.append(_chk('Fyers intraday rows today', rows,
+            ok=(rows >= 1000), warn=True, detail=grace_detail))
+    else:
+        # Off-hours (pre-market / post-market / weekend / NSE holiday): today's
+        # intraday_prices is legitimately empty, so grade the PRIOR trading
+        # session's last bar instead. GREEN only if that last bar's time-of-day
+        # falls in the 15:20-15:30 close band (a clean shutdown) — a feed that
+        # died mid-session (e.g. last bar 14:00) still surfaces, just as YELLOW
+        # (not a false RED, since off-hours is never actionable at 3am).
+        cur.execute("""
+            SELECT COUNT(DISTINCT symbol) as syms, MAX(ts) as latest, COUNT(*) as rows
+            FROM intraday_prices
+            WHERE ts::date = (SELECT MAX(ts::date) FROM intraday_prices WHERE timeframe='5m')
+              AND timeframe='5m'
+        """)
+        r = cur.fetchone()
+        syms, latest_ts, rows = r[0] or 0, r[1], r[2] or 0
+        clean = _closed_cleanly(latest_ts)
+        off_detail = (f'GREEN — last bar {latest_ts} (prior session close)' if clean
+                      else f'off-hours — last bar {latest_ts or "none"} not in 15:20-15:30 close band')
+        checks.append(_chk('Fyers intraday symbols', syms,
+            ok=(clean and syms >= 200), warn=True, detail=off_detail))
+        checks.append(_chk('Fyers latest tick', str(latest_ts)[:16] if latest_ts else 'no data',
+            ok=clean, warn=True, detail=off_detail))
+        checks.append(_chk('Fyers intraday rows today', rows,
+            ok=(clean and rows >= 1000), warn=True, detail=off_detail))
 
     # raw_prices EOD
     cur.execute("SELECT MAX(price_date), COUNT(DISTINCT symbol) FROM raw_prices")
@@ -104,11 +176,26 @@ def _section_data_feeds(cur) -> Dict:
     cur.execute("SELECT COUNT(*), MAX(updated_at) FROM cmp_prices")
     r = cur.fetchone()
     cmp_cnt, cmp_ts = r[0] or 0, r[1]
-    cmp_mins = _mins_ago(cmp_ts)
-    checks.append(_chk('cmp_prices count', cmp_cnt,
-        ok=(cmp_cnt >= 200), warn=(cmp_cnt >= 150)))
-    checks.append(_chk('cmp_prices freshness', f'{cmp_mins} min ago',
-        ok=(cmp_mins <= 15), warn=(cmp_mins <= 60)))
+    if state == 'market':
+        cmp_mins = _mins_ago(cmp_ts)
+        checks.append(_chk('cmp_prices count', cmp_cnt,
+            ok=(cmp_cnt >= 200), warn=(cmp_cnt >= 150)))
+        checks.append(_chk('cmp_prices freshness', f'{cmp_mins} min ago',
+            ok=(cmp_mins <= 15), warn=(cmp_mins <= 60)))
+    elif state == 'grace':
+        grace_detail = 'Grace window 09:15-09:25 IST — feed warming up'
+        checks.append(_chk('cmp_prices count', cmp_cnt,
+            ok=(cmp_cnt >= 200), warn=True, detail=grace_detail))
+        checks.append(_chk('cmp_prices freshness', str(cmp_ts)[:16] if cmp_ts else 'no data',
+            ok=True, warn=True, detail=grace_detail))
+    else:
+        clean = _closed_cleanly(cmp_ts)
+        off_detail = (f'GREEN — last updated {cmp_ts} (prior session close)' if clean
+                      else f'off-hours — last updated {cmp_ts or "none"} not in 15:20-15:30 close band')
+        checks.append(_chk('cmp_prices count', cmp_cnt,
+            ok=(cmp_cnt >= 200), warn=True, detail=off_detail))
+        checks.append(_chk('cmp_prices freshness', str(cmp_ts)[:16] if cmp_ts else 'no data',
+            ok=clean, warn=True, detail=off_detail))
 
     # Global indices
     cur.execute("SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices")
