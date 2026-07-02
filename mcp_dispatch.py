@@ -108,6 +108,7 @@ MCP_TOOLS = [
     {"name":"sector_brief_batch","description":"Generate AI sector briefs for all 129 segments via Claude Haiku and cache in sector_briefs table. Runs in background. refresh=true regenerates all.","inputSchema":{"type":"object","properties":{"refresh":{"type":"boolean"}},"required":[]}},
     {"name":"sector_brief_status","description":"Check how many of the 129 sector briefs are cached in DB vs pending generation.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"anthropic_chat","description":"Call Claude via Anthropic API (bypasses chat limit). Returns response, tokens used, cost estimate. Use when chat is at 98%+ weekly limit.","inputSchema":{"type":"object","properties":{"prompt":{"type":"string"},"model":{"type":"string"},"max_tokens":{"type":"integer"}},"required":["prompt"]}},
+    {"name":"backfill_futures_fyers","description":"cc#159: on-demand Fyers REST 5-min futures backfill (fixes cc#152/153 fut/eq source-collision gap). start (YYYY-MM-DD, default 2026-06-26), end (default today), symbols (optional array, default all ~212 active futures). One-at-a-time REST pacing (5s/symbol) — runs ~15-20 min for the full universe, blocked automatically during market hours (09:15-15:30 IST). Returns symbols_processed, bars_written, gaps_remaining.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"symbols":{"type":"array","items":{"type":"string"}}},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -261,6 +262,13 @@ async def _call_tool(name, args):
                 f"{BASE_URL}/api/anthropic/chat",
                 json={"prompt": prompt, "model": model, "max_tokens": max_tokens}
             )
+            return r.json()
+        elif name == "backfill_futures_fyers":
+            # cc#159: full-universe run is ~15-20 min (sequential, 5s/symbol REST
+            # pacing) — well past the client's default 600s timeout, so this call
+            # gets its own longer budget instead of raising a premature ReadTimeout.
+            body = {"start": args.get("start"), "end": args.get("end"), "symbols": args.get("symbols")}
+            r = await client.post(f"{BASE_URL}/api/admin/backfill_futures_fyers", json=body, headers=h, timeout=1500)
             return r.json()
         return {"error": f"Unknown tool: {name}"}
 
