@@ -241,8 +241,9 @@ def heal_indices(conn=None, indices=("NIFTY50", "BANKNIFTY")):
                    "rows_healed": healed, "index_max": index_max, "still_stale": still_stale}
         category = "alert" if still_stale else "scheduler_health"
         title = "index_backfill_failed" if still_stale else "index_backfill_ok"
+        # cc#156: telemetry categories moved off session_log to ops_log.
         with conn.cursor() as cur:
-            cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
                            VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
                         (category, title, json.dumps(details)))
             conn.commit()
