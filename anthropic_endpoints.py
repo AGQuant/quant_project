@@ -81,7 +81,7 @@ async def anthropic_chat(request: MessageRequest, x_admin_token: Optional[str] =
         output_tokens = response.usage.output_tokens
         request_id = response.id
         
-        # Log to session_log
+        # Log to ops_log. cc#156: telemetry categories moved off session_log.
         conn = get_db_conn()
         if conn:
             try:
@@ -95,7 +95,7 @@ async def anthropic_chat(request: MessageRequest, x_admin_token: Optional[str] =
                 }
                 conn.execute(
                     """
-                    INSERT INTO session_log (session_date, session_ts, category, title, details)
+                    INSERT INTO ops_log (session_date, session_ts, category, title, details)
                     VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
@@ -108,7 +108,7 @@ async def anthropic_chat(request: MessageRequest, x_admin_token: Optional[str] =
                 )
                 conn.close()
             except Exception as e:
-                log.error(f"Failed to log to session_log: {e}")
+                log.error(f"Failed to log to ops_log: {e}")
         
         return MessageResponse(
             reply=reply,
@@ -135,13 +135,13 @@ async def get_usage(x_admin_token: Optional[str] = Header(None)):
         if not conn:
             raise HTTPException(status_code=500, detail="DB connection failed")
         
-        # Fetch last 50 API calls
+        # Fetch last 50 API calls. cc#156: writer moved to ops_log, reader follows.
         cursor = conn.execute(
             """
-            SELECT session_ts, title, details 
-            FROM session_log 
+            SELECT session_ts, title, details
+            FROM ops_log
             WHERE category = 'anthropic_api_call'
-            ORDER BY session_ts DESC 
+            ORDER BY session_ts DESC
             LIMIT 50
             """
         )
