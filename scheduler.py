@@ -209,10 +209,11 @@ async def _bg_yahoo_daily(app=None):
 # ── health / watchdog helpers (spec #16) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _log_alert(kind: str, message: str):
-    """Write a visible alert to session_log (category=alert)."""
+    """Write a visible alert to ops_log (category=alert). cc#156: telemetry
+    categories moved off session_log to ops_log per MEMORY_TAXONOMY_V1."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
                            VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s)""",
                         (kind, Json({"message": message, "ist": _ist_now().isoformat()})))
             conn.commit()
@@ -405,8 +406,9 @@ def _bg_v10_tick():
                         "events": len(p.get("events", []))}
                        for p in (res.get("paper") or [])]
             with conn.cursor() as cur:
+                # cc#156: telemetry categories moved off session_log to ops_log.
                 cur.execute(
-                    "INSERT INTO session_log (category, title, details) "
+                    "INSERT INTO ops_log (category, title, details) "
                     "VALUES ('v10_tick_hb', %s, %s)",
                     ("v10 tick", Json({"feeds": summary})))
             conn.commit()
@@ -516,11 +518,12 @@ def _bg_v8_eod():
 
 # ── ADR/PCR watchdog + health (task #59) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _log_health(conn, title: str, details: dict):
-    """Health ping → session_log (category=scheduler_health) so a stalled compute
-    job is visible after the fact (root cause of the silent 18-19 Jun ADR gap)."""
+    """Health ping → ops_log (category=scheduler_health) so a stalled compute
+    job is visible after the fact (root cause of the silent 18-19 Jun ADR gap).
+    cc#156: telemetry categories moved off session_log to ops_log."""
     try:
         with conn.cursor() as cur:
-            cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
                            VALUES (CURRENT_DATE, NOW(), 'scheduler_health', %s, %s)""",
                         (title, Json(details)))
         conn.commit()
