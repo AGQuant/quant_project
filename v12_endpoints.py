@@ -46,7 +46,13 @@ _SORTABLE = {
 }
 
 # Canonical 8-table join. Ends at "WHERE 1=1" so callers append " AND ...".
-_BASE_SQL = """SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, g.rank, g.market_cap, g.price, g.gvm_overall_label, m.rsi_weekly, m.rsi_month, m.daily_rsi, m.dma_50, m.dma_200, m.dma_20, m.week_return, m.month_return, m.year_return, m.mom_2d, m.week_index_52, m.sector_week, m.sector_month, m.sector_day, m.vol_ratio, m.ma9_vs_ma21, m.upper_bb, m.lower_bb, m.range_3d, m.eod_chg, s.pe, s.opm, s.roce, s."Debt to equity" as de_ratio, s."Promoter holding" as promoter_holding, s."Return on equity" as roe, s.profit_growth_3y, s.profit_growth_5y, s.sales_growth_3y, s.sales_growth_5y, s."Sales growth" as sales_growth_1y, s.dividend_yield, s.fii_change, s.dii_change, s."Price to book value" as pb_ratio, s.interest_coverage, s.fixed_asset_growth, s."EPS growth 5Years" as eps_growth_5y, s.opm_latest_q, s.qoq_profit_growth, s.qoq_sales_growth, v.basket as v8_basket, v.signal_date as v8_signal_date, p.pp, p.r1, p.r2, p.s1, p.s2, tc.score as tc_score, tc.verdict as tc_verdict, tc.side as tc_side, sr.mcap_weighted_gvm as sector_gvm, sr.verdict as sector_rating_verdict, CASE WHEN ec.ticker IS NOT NULL THEN true ELSE false END as in_blackout FROM gvm_scores g LEFT JOIN v8_metrics m ON g.symbol = m.symbol AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics) LEFT JOIN screener_raw s ON g.symbol = s.nse_code LEFT JOIN v8_qualified v ON g.symbol = v.symbol AND v.signal_date = CURRENT_DATE LEFT JOIN v8_paper_pivots p ON g.symbol = p.symbol AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots) LEFT JOIN tc_screener_cache tc ON g.symbol = tc.symbol AND tc.run_date = (SELECT MAX(run_date) FROM tc_screener_cache) LEFT JOIN sector_ratings sr ON g.segment = sr.segment AND sr.score_date = (SELECT MAX(score_date) FROM sector_ratings) LEFT JOIN earnings_calendar ec ON g.symbol = ec.ticker AND ec.ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' WHERE 1=1"""
+# cc#154: LEFT JOIN ut (universe_technicals, full ~1766-symbol GVM universe) and
+# COALESCE technicals+pivots -- v8_metrics/v8_paper_pivots (5-min-fresh,
+# futures-only) still wins when present; ut fills the ~1557-row gap for
+# non-futures stocks with EOD-frozen values. sector_week/month/day, vol_ratio,
+# ma9_vs_ma21, upper_bb/lower_bb, range_3d, eod_chg stay futures-only (not
+# computed by universe_technicals) -- unchanged from before.
+_BASE_SQL = """SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, g.m_score, g.verdict, g.rank, g.market_cap, g.price, g.gvm_overall_label, COALESCE(m.rsi_weekly, ut.rsi_weekly) as rsi_weekly, COALESCE(m.rsi_month, ut.rsi_month) as rsi_month, COALESCE(m.daily_rsi, ut.daily_rsi) as daily_rsi, COALESCE(m.dma_50, ut.dma_50) as dma_50, COALESCE(m.dma_200, ut.dma_200) as dma_200, COALESCE(m.dma_20, ut.dma_20) as dma_20, COALESCE(m.week_return, ut.week_return) as week_return, COALESCE(m.month_return, ut.month_return) as month_return, COALESCE(m.year_return, ut.year_return) as year_return, COALESCE(m.mom_2d, ut.mom_2d) as mom_2d, COALESCE(m.week_index_52, ut.week_index_52) as week_index_52, m.sector_week, m.sector_month, m.sector_day, m.vol_ratio, m.ma9_vs_ma21, m.upper_bb, m.lower_bb, m.range_3d, m.eod_chg, s.pe, s.opm, s.roce, s."Debt to equity" as de_ratio, s."Promoter holding" as promoter_holding, s."Return on equity" as roe, s.profit_growth_3y, s.profit_growth_5y, s.sales_growth_3y, s.sales_growth_5y, s."Sales growth" as sales_growth_1y, s.dividend_yield, s.fii_change, s.dii_change, s."Price to book value" as pb_ratio, s.interest_coverage, s.fixed_asset_growth, s."EPS growth 5Years" as eps_growth_5y, s.opm_latest_q, s.qoq_profit_growth, s.qoq_sales_growth, v.basket as v8_basket, v.signal_date as v8_signal_date, COALESCE(p.pp, ut.pp) as pp, COALESCE(p.r1, ut.r1) as r1, COALESCE(p.r2, ut.r2) as r2, COALESCE(p.s1, ut.s1) as s1, COALESCE(p.s2, ut.s2) as s2, tc.score as tc_score, tc.verdict as tc_verdict, tc.side as tc_side, sr.mcap_weighted_gvm as sector_gvm, sr.verdict as sector_rating_verdict, CASE WHEN ec.ticker IS NOT NULL THEN true ELSE false END as in_blackout FROM gvm_scores g LEFT JOIN v8_metrics m ON g.symbol = m.symbol AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics) LEFT JOIN universe_technicals ut ON g.symbol = ut.symbol AND ut.score_date = (SELECT MAX(score_date) FROM universe_technicals) LEFT JOIN screener_raw s ON g.symbol = s.nse_code LEFT JOIN v8_qualified v ON g.symbol = v.symbol AND v.signal_date = CURRENT_DATE LEFT JOIN v8_paper_pivots p ON g.symbol = p.symbol AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots) LEFT JOIN tc_screener_cache tc ON g.symbol = tc.symbol AND tc.run_date = (SELECT MAX(run_date) FROM tc_screener_cache) LEFT JOIN sector_ratings sr ON g.segment = sr.segment AND sr.score_date = (SELECT MAX(score_date) FROM sector_ratings) LEFT JOIN earnings_calendar ec ON g.symbol = ec.ticker AND ec.ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' WHERE 1=1"""
 
 
 @router.get("/api/v12/screen")
@@ -99,13 +105,16 @@ def v12_screen(
     rng("g.gvm_score", gvm_min, gvm_max, "gvm")
     rng("g.market_cap", market_cap_min, market_cap_max, "market_cap")
     rng("s.pe", pe_min, pe_max, "pe")
-    rng("m.rsi_weekly", rsi_weekly_min, rsi_weekly_max, "rsi_weekly")
-    rng("m.rsi_month", rsi_month_min, rsi_month_max, "rsi_month")
-    rng("m.dma_50", dma_50_min, dma_50_max, "dma_50")
-    rng("m.dma_200", dma_200_min, dma_200_max, "dma_200")
-    rng("m.week_index_52", week_index_52_min, week_index_52_max, "week_index_52")
-    rng("m.week_return", week_return_min, week_return_max, "week_return")
-    rng("m.month_return", month_return_min, month_return_max, "month_return")
+    # cc#154: filter conditions COALESCE the same way as the SELECT list, so a
+    # non-futures stock only visible via universe_technicals filters consistently
+    # with what it displays (was m.x-only, silently excluding ~1557 rows).
+    rng("COALESCE(m.rsi_weekly, ut.rsi_weekly)", rsi_weekly_min, rsi_weekly_max, "rsi_weekly")
+    rng("COALESCE(m.rsi_month, ut.rsi_month)", rsi_month_min, rsi_month_max, "rsi_month")
+    rng("COALESCE(m.dma_50, ut.dma_50)", dma_50_min, dma_50_max, "dma_50")
+    rng("COALESCE(m.dma_200, ut.dma_200)", dma_200_min, dma_200_max, "dma_200")
+    rng("COALESCE(m.week_index_52, ut.week_index_52)", week_index_52_min, week_index_52_max, "week_index_52")
+    rng("COALESCE(m.week_return, ut.week_return)", week_return_min, week_return_max, "week_return")
+    rng("COALESCE(m.month_return, ut.month_return)", month_return_min, month_return_max, "month_return")
 
     if roce_min is not None:
         conds.append("s.roce >= %s"); params.append(roce_min); applied.append("roce_min")
