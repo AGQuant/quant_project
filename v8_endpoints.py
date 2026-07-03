@@ -122,6 +122,76 @@ BASKET_META = {
     "buy_s1_bounce":   {"side": "BUY",  "target": "+1.5% fixed",               "win_pct": "73.9%", "signals_per_day": "~0.3/day"},
 }
 
+# ── cc#158 V2.1 candidate filters — hourly + w52 + fall_from_day_high ────────
+# Refinement layer over the LOCKED baskets (specs id 1263-1268). Applied as a
+# HARD GATE *after* the existing score-gate — NEVER folded into the score/
+# threshold math — so a disabled group reverts each basket to exact locked
+# behavior. Per-basket enable state lives in DB table v8_filter_state (read
+# live each tick); kill-switches (v8_filter_killswitch.py) flip enabled=false
+# and alert, never auto-re-enable.
+#
+# NULL-pass: a metric of None (hourly first hour / <12 fut bars, or missing
+# w52/fall) never blocks a signal the locked logic already approved.
+#
+# sell_momentum week_index_52 is a MODIFY of a locked score-gate filter
+# (<=20 -> <=30 when enabled), NOT a hard-gate add — keyed "_modify" and
+# handled in the score-gate, so it is skipped by the hard-gate pass below.
+V21_FILTERS = {
+    "buy_reversal":    {"hourly_pct": {"min": 0.2, "max": 1.0},
+                        "week_index_52": {"min": 40.0, "max": 80.0}},
+    "buy_momentum":    {"hourly_pct": {"min": 0.2, "max": 1.5},
+                        "week_index_52": {"min": 60.0, "max": 100.0}},
+    "buy_s1_bounce":   {"hourly_pct": {"min": 0.0, "min_excl": True, "max": 1.0},
+                        "week_index_52": {"min": 50.0, "max": 90.0}},
+    "sell_reversal":   {"hourly_pct": {"max": 0.0, "max_excl": True},
+                        "week_index_52": {"min": 20.0, "max": 60.0}},
+    "sell_momentum":   {"hourly_pct": {"max": 0.0, "max_excl": True},
+                        "week_index_52_modify": {"max": 30.0}},
+    "sell_overbought": {"fall_from_day_high": {"max": -1.5}},
+}
+
+# Locked-spec WR baselines (per specs 1263-1268) for the WR kill-switch.
+V21_BASELINE_WR = {
+    "buy_reversal": 85.9, "buy_momentum": 77.4, "buy_s1_bounce": 73.9,
+    "sell_reversal": 79.3, "sell_momentum": 71.9, "sell_overbought": 81.5,
+}
+
+
+def _v21_cond_pass(value, cond: dict) -> bool:
+    """One V2.1 band check. None value NULL-passes. Supports exclusive
+    floor/cap (min_excl / max_excl) for the strict >0 and <0 conditions."""
+    if value is None:
+        return True
+    v = float(value)
+    mn = cond.get("min"); mx = cond.get("max")
+    if mn is not None:
+        if cond.get("min_excl"):
+            if v <= mn: return False
+        elif v < mn:
+            return False
+    if mx is not None:
+        if cond.get("max_excl"):
+            if v >= mx: return False
+        elif v > mx:
+            return False
+    return True
+
+
+def v21_hard_gate_pass(basket: str, metrics: dict, enabled: bool) -> bool:
+    """cc#158 hard-gate layer. True if the stock passes this basket's ENABLED
+    V2.1 refinement bands. Disabled -> always True (no-op = locked behavior).
+    Keys ending in '_modify' are score-gate modifications, not hard gates, and
+    are skipped here."""
+    if not enabled:
+        return True
+    for metric, cond in V21_FILTERS.get(basket, {}).items():
+        if metric.endswith("_modify"):
+            continue
+        if not _v21_cond_pass(metrics.get(metric), cond):
+            return False
+    return True
+
+
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
 
 def _seg_override(symbol: str, segment):
