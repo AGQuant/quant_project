@@ -129,7 +129,7 @@ def _is_embedded(request: Request) -> bool:
     return False
 
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
-                     "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings"}
+                     "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters"}
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 @app.middleware("http")
@@ -506,6 +506,10 @@ def fpc():
 @app.get("/scanners", response_class=HTMLResponse)
 def scanners():
     with open("scorr_scanners.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/filters", response_class=HTMLResponse)
+def filters_page():
+    with open("scorr_filters.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/structure", response_class=HTMLResponse)
 def structure_page():
