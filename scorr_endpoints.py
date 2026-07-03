@@ -155,6 +155,17 @@ def smartgain_m2m():
     synthetic fut price (spot + latest futures_basis.basis), else spot alone,
     else the last intraday tick of any source. pricing_method on each row shows
     which path was used.
+
+    cc#161 (safety fix): the spot_only/eod fallback paths had NO staleness or
+    existence check -- confirmed live 03-Jul a NIFTY position showed CMP from a
+    cmp_prices row 35+ days old (root cause: NIFTY futures are never actually
+    subscribed on the live feed -- futures_basis has zero rows ever for
+    NIFTY/BANKNIFTY -- see cc#162) as if it were a real live price, producing a
+    wildly wrong MTM. Now: spot_only/eod are downgraded to pricing_method=
+    "unavailable" (ltp/mtm=null, reason set) when either (a) the candidate tick
+    is >24h old, or (b) this symbol has NEVER had a single fyers_fut row (a
+    structurally fut-less instrument, where spot is not a valid stand-in for
+    futures price regardless of freshness -- e.g. index futures pre-cc#162).
     """
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -184,7 +195,8 @@ def smartgain_m2m():
                     ROUND(lp.spot_ltp::numeric, 2)                          AS spot_ltp,
                     ROUND(lp.fut_ltp_synthetic::numeric, 2)                  AS fut_ltp_synthetic,
                     ROUND(lp.basis_age_min::numeric, 1)                      AS basis_age_min,
-                    lp.last_tick                                            AS last_tick
+                    lp.last_tick                                            AS last_tick,
+                    lp.fut_ever_existed                                     AS fut_ever_existed
                 FROM open_book h
                 LEFT JOIN LATERAL (
                     SELECT
@@ -236,7 +248,8 @@ def smartgain_m2m():
                             CASE WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN c.basis_ts END,
                             CASE WHEN c.spot_ltp IS NOT NULL THEN c.spot_ts END,
                             c.eod_ts
-                        ) AS last_tick
+                        ) AS last_tick,
+                        c.fut_ever_existed
                     FROM (
                         SELECT
                             (SELECT ip.close FROM intraday_prices ip
@@ -260,7 +273,16 @@ def smartgain_m2m():
                               ORDER BY ip.ts DESC LIMIT 1)                    AS eod_close,
                             (SELECT ip.ts FROM intraday_prices ip
                               WHERE ip.symbol = h.symbol
-                              ORDER BY ip.ts DESC LIMIT 1)                    AS eod_ts
+                              ORDER BY ip.ts DESC LIMIT 1)                    AS eod_ts,
+                            -- cc#161: existence check, NOT scoped to today/recency --
+                            -- distinguishes a structurally fut-less instrument (index
+                            -- futures never subscribed, e.g. NIFTY -- see cc#162) from
+                            -- a normal stock future momentarily missing a fresh tick.
+                            EXISTS(
+                                SELECT 1 FROM intraday_prices ip4
+                                WHERE ip4.symbol = h.symbol AND ip4.source = 'fyers_fut'
+                                LIMIT 1
+                            )                                                 AS fut_ever_existed
                     ) c
                 ) lp ON true
                 ORDER BY h.id
@@ -281,6 +303,30 @@ def smartgain_m2m():
                 # show real data age instead of a wall-clock that always reads "now".
                 row["last_tick"]   = row["last_tick"].isoformat() if row["last_tick"] else None
                 row["updated_at"]  = row["last_tick"]   # back-compat: old key now = live tick
+
+                # cc#161: safety downgrade -- spot_only/eod are the two paths with no
+                # built-in freshness/relevance guarantee. Never present a number derived
+                # from them as real MTM when (a) the tick is stale (>24h), or (b) this
+                # symbol has never had a single real futures tick (spot is not a valid
+                # stand-in for futures price for such an instrument, regardless of how
+                # fresh the spot number itself is -- e.g. NIFTY/BANKNIFTY pre-cc#162).
+                fut_ever = bool(row.pop("fut_ever_existed", False))
+                reason = None
+                if row["pricing_method"] in ("spot_only", "eod"):
+                    if not fut_ever:
+                        reason = "no_live_futures_feed"
+                    elif row["ltp_age_min"] is not None and row["ltp_age_min"] > 24 * 60:
+                        reason = f"stale_data_{round(row['ltp_age_min'] / 1440)}d"
+                    if reason:
+                        row["pricing_method"] = "unavailable"
+                        row["ltp"] = None
+                        row["mtm"] = None
+                        row["is_live"] = False
+                elif row["pricing_method"] is None:
+                    reason = "no_data"
+                    row["pricing_method"] = "unavailable"
+                    row["is_live"] = False
+                row["reason"] = reason
                 rows.append(row)
             # ── UNREALISED: live MTM on open positions (existing computation) ──
             unrealised   = round(sum(r["mtm"] or 0 for r in rows), 2)
