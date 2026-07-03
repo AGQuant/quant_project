@@ -51,7 +51,7 @@ SYM_MASTER_URL  = "https://public.fyers.in/sym_details/NSE_FO.csv"
 
 WORKERS      = 10          # fyers_options_feed.py production value, same endpoint
 ATM_EACH_SIDE = 3          # ATM +- 3 -> 7 strikes
-TRADING_DAYS  = 2
+TRADING_DAYS  = 2          # default; override via flag value 'pending:<days>'
 FLAG_KEY     = "cc175_options_backfill"
 MKT_OPEN, MKT_CLOSE = dt_time(9, 15), dt_time(15, 30)
 INDEX_SKIP   = {"NIFTY", "NIFTY50", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
@@ -206,13 +206,13 @@ def _last_n_trading_days(conn, n):
     return min(days), max(days)
 
 
-def run_backfill() -> dict:
+def run_backfill(days: int = TRADING_DAYS) -> dict:
     global _running
     today = date.today() + timedelta(hours=0)   # container UTC date is fine for expiry math
     conn = _conn()
     try:
         token = _load_token(conn)
-        start_d, end_d = _last_n_trading_days(conn, TRADING_DAYS)
+        start_d, end_d = _last_n_trading_days(conn, days)
         start, end = start_d.strftime("%Y-%m-%d"), end_d.strftime("%Y-%m-%d")
 
         with conn.cursor() as cur:
@@ -265,21 +265,36 @@ def run_backfill() -> dict:
         conn.close()
 
 
-def _claim_flag() -> bool:
-    """Atomically consume the pending flag so restarts never double-run."""
+def _claim_flag() -> int:
+    """Atomically consume the pending flag so restarts never double-run.
+    Flag value 'pending' = default window; 'pending:<n>' = n trading days.
+    Returns the claimed day-count, or 0 if nothing was pending."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("""UPDATE app_config SET value='claimed', updated_at=NOW()
-                           WHERE key=%s AND value='pending'""", (FLAG_KEY,))
-            n = cur.rowcount
+            # read old value + claim in one transaction (FOR UPDATE = atomic vs a
+            # second booting replica; a RETURNING subquery would see the NEW value)
+            cur.execute("SELECT value FROM app_config WHERE key=%s AND value LIKE 'pending%%' FOR UPDATE",
+                        (FLAG_KEY,))
+            r = cur.fetchone()
+            if r:
+                cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s",
+                            (FLAG_KEY,))
             conn.commit()
-        return n == 1
+        if r is None:
+            return 0
+        val = r[0] or "pending"
+        if ":" in val:
+            try:
+                return max(1, min(int(val.split(":", 1)[1]), 7))
+            except ValueError:
+                return TRADING_DAYS
+        return TRADING_DAYS
     except Exception as e:
         log.error(f"cc175 flag claim failed: {e}")
-        return False
+        return 0
 
 
-def _maybe_start(source: str):
+def _maybe_start(source: str, days: int = TRADING_DAYS):
     global _running
     if _running:
         return False
@@ -288,7 +303,8 @@ def _maybe_start(source: str):
         log.warning("cc175: market hours -- historical backfill deferred")
         return False
     _running = True
-    threading.Thread(target=run_backfill, name=f"cc175-backfill-{source}", daemon=True).start()
+    threading.Thread(target=run_backfill, args=(days,),
+                     name=f"cc175-backfill-{source}", daemon=True).start()
     return True
 
 
@@ -296,9 +312,10 @@ def _maybe_start(source: str):
 async def _startup_trigger():
     # CC sandbox has no HTTP path to prod; a DB flag set via MCP run_sql +
     # this hook = deploy-time self-trigger (runs once, atomic flag claim).
-    if _claim_flag():
-        log.info("cc175: pending flag claimed -- starting stock options backfill")
-        _maybe_start("startup")
+    days = _claim_flag()
+    if days:
+        log.info(f"cc175: pending flag claimed -- starting stock options backfill ({days} trading days)")
+        _maybe_start("startup", days)
 
 
 @router.post("/backfill_stock_options")
