@@ -206,7 +206,30 @@ def _last_n_trading_days(conn, n):
     return min(days), max(days)
 
 
+MAX_PASSES     = 4
+PASS_COOLDOWN  = 600   # seconds between passes -- lets the Fyers History rate window reset
+
+
 def run_backfill(days: int = TRADING_DAYS) -> dict:
+    """Multi-pass: Fyers History rate-limits after ~500-600 calls in a burst,
+    surfacing as s!=ok empties. Each pass re-derives the remaining gap set from
+    DB coverage (resume mode), so passes only spend budget on what is missing;
+    between passes the thread sleeps PASS_COOLDOWN to let the window reset."""
+    global _running
+    last = {}
+    for pass_no in range(1, MAX_PASSES + 1):
+        last = _run_one_pass(days, pass_no)
+        if last.get("status") != "complete" or not last.get("remaining"):
+            break
+        _log_progress(f"cc175 pass {pass_no} done - cooling down",
+                      {"remaining_stocks": last["remaining"], "cooldown_s": PASS_COOLDOWN})
+        import time as _time
+        _time.sleep(PASS_COOLDOWN)
+    _running = False
+    return last
+
+
+def _run_one_pass(days: int, pass_no: int) -> dict:
     global _running
     today = date.today() + timedelta(hours=0)   # container UTC date is fine for expiry math
     conn = _conn()
@@ -234,13 +257,13 @@ def run_backfill(days: int = TRADING_DAYS) -> dict:
             already = {r[0] for r in cur.fetchall()}
         todo = {s: v for s, v in spots.items() if s not in already}
 
-        _log_progress("cc175 backfill starting", {
+        _log_progress(f"cc175 backfill starting (pass {pass_no})", {
             "window": [start, end], "stocks": len(spots), "already_complete": len(already),
             "todo": len(todo), "workers": WORKERS})
         if not todo:
             _log_progress("cc175 backfill COMPLETE", {"window": [start, end],
                           "note": "all underlyings already covered - nothing to do"})
-            return {"status": "complete", "note": "already covered"}
+            return {"status": "complete", "remaining": 0, "note": "already covered"}
         master_text = _load_symbol_master()
 
         # ---- step 1: RELIANCE validation gate (spec) ----
@@ -275,18 +298,27 @@ def run_backfill(days: int = TRADING_DAYS) -> dict:
                 _log_progress(f"cc175 progress {i}/{len(todo)}",
                               {"stocks_done": summary["stocks_done"], "rows_total": summary["rows_total"],
                                "empty_stocks": summary["empty_stocks"], "errors": len(summary["errors"])})
-        _log_progress("cc175 backfill COMPLETE", {
+        # remaining gaps after this pass (drives the multi-pass loop)
+        with conn.cursor() as cur:
+            cur.execute("""SELECT COUNT(*) FROM (
+                             SELECT fu.symbol FROM futures_universe fu
+                             WHERE fu.is_active=TRUE AND fu.symbol != ALL(%s)
+                             EXCEPT
+                             SELECT underlying FROM option_chain WHERE ts >= %s
+                             GROUP BY underlying HAVING COUNT(DISTINCT ts::date) >= %s
+                           ) g""", (list(INDEX_SKIP), start_d, max(1, days - 1)))
+            remaining = int(cur.fetchone()[0])
+        _log_progress(f"cc175 pass {pass_no} COMPLETE", {
             "window": [start, end], "stocks_done": summary["stocks_done"],
             "rows_total": summary["rows_total"], "empty_stocks_ratelimit_suspect": summary["empty_stocks"],
-            "skipped_already_complete": len(already),
+            "skipped_already_complete": len(already), "remaining_gap_stocks": remaining,
             "errors": summary["errors"][:20], "error_count": len(summary["errors"])},
-            alert=(len(summary["errors"]) > len(todo) * 0.2) or (summary["empty_stocks"] > len(todo) * 0.3))
-        return {"status": "complete", **summary}
+            alert=(len(summary["errors"]) > len(todo) * 0.2))
+        return {"status": "complete", "remaining": remaining, **summary}
     except Exception as e:
         _log_progress("cc175 backfill CRASHED", {"error": str(e)}, alert=True)
         raise
     finally:
-        _running = False
         conn.close()
 
 
