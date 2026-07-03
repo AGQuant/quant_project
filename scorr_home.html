@@ -63,6 +63,12 @@
   .sg-mtm{font-weight:800;font-family:monospace;font-size:13.5px;text-align:right}
   .sg-pos{color:var(--grn)} .sg-neg{color:var(--red)} .sg-neu{color:var(--mut)}
 
+  /* cc#163: parity with scorr_holdings.html .pos-avgcmp -- Avg entry + CMP
+     sub-row per position. cc#161: distinct amber state when pricing is
+     withheld (unavailable), not a blank/wrong CMP. */
+  .sg-avgcmp{font-size:11px;color:var(--dim);font-family:monospace}
+  .sg-unavail{font-size:11px;font-weight:700;color:#b45309}
+
   /* Sub-row: qty · value · %gain */
   .sg-sub{display:flex;align-items:center;gap:10px;margin-top:3px;font-size:11px;color:var(--mut)}
   .sg-sub-val{font-family:monospace;font-weight:600}
@@ -304,9 +310,14 @@ async function loadSG() {
 
     const rows = d.positions || [];
     document.getElementById("sg-positions").innerHTML = rows.map(p => {
+      // cc#161: pricing_method="unavailable" means ltp/mtm were deliberately
+      // withheld (stale spot fallback or a structurally fut-less symbol, e.g.
+      // NIFTY pre-cc#162) -- never present a wrong/blank number, show why.
+      const unavail = p.pricing_method === "unavailable";
+
       // M2M color
-      const mc = p.mtm == null ? "sg-neu" : p.mtm >= 0 ? "sg-pos" : "sg-neg";
-      const mtmTxt = p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + f0(Math.abs(p.mtm));
+      const mc = unavail ? "sg-neu" : p.mtm == null ? "sg-neu" : p.mtm >= 0 ? "sg-pos" : "sg-neg";
+      const mtmTxt = unavail ? "No live price" : (p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + f0(Math.abs(p.mtm)));
 
       // % gain
       let pct = null;
@@ -334,7 +345,10 @@ async function loadSG() {
           <span class="sg-dot">·</span>
           <span class="sg-pct" style="color:${pctColor}">${pctTxt}</span>
         </div>
-        <div></div>
+        <div>${unavail
+          ? `<span class="sg-avgcmp">Avg ₹${f2(p.entry_price)} · <span class="sg-unavail">&#9888; ${p.reason === "no_live_futures_feed" ? "no futures feed" : "no live price"}</span></span>`
+          : `<span class="sg-avgcmp">Avg ₹${f2(p.entry_price)} · CMP ₹${f2(p.ltp)}</span>`
+        }</div>
       </div>`;
     }).join("");
 
