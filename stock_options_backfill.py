@@ -222,40 +222,65 @@ def run_backfill(days: int = TRADING_DAYS) -> dict:
                            WHERE fu.is_active=TRUE ORDER BY fu.symbol""")
             spots = {r[0]: float(r[1]) for r in cur.fetchall() if r[0] not in INDEX_SKIP and r[1]}
 
+        # RESUME MODE: skip underlyings already covered for this window (>= days-1
+        # distinct trading days present). A rerun after a rate-limited pass then
+        # only spends API budget on the gaps instead of re-fetching everything.
+        with conn.cursor() as cur:
+            cur.execute("""SELECT underlying FROM option_chain
+                           WHERE ts >= %s AND underlying != ALL(%s)
+                           GROUP BY underlying
+                           HAVING COUNT(DISTINCT ts::date) >= %s""",
+                        (start_d, list(INDEX_SKIP), max(1, days - 1)))
+            already = {r[0] for r in cur.fetchall()}
+        todo = {s: v for s, v in spots.items() if s not in already}
+
         _log_progress("cc175 backfill starting", {
-            "window": [start, end], "stocks": len(spots), "workers": WORKERS})
+            "window": [start, end], "stocks": len(spots), "already_complete": len(already),
+            "todo": len(todo), "workers": WORKERS})
+        if not todo:
+            _log_progress("cc175 backfill COMPLETE", {"window": [start, end],
+                          "note": "all underlyings already covered - nothing to do"})
+            return {"status": "complete", "note": "already covered"}
         master_text = _load_symbol_master()
 
         # ---- step 1: RELIANCE validation gate (spec) ----
-        rel = _backfill_underlying(conn, token, master_text, "RELIANCE",
-                                   spots.get("RELIANCE", 0), start, end, today)
-        _log_progress("cc175 RELIANCE validation", rel)
-        if rel.get("contracts", 0) < 10 or rel.get("rows", 0) < 100:
-            _log_progress("cc175 ABORTED - RELIANCE validation failed", rel, alert=True)
-            return {"status": "aborted_validation", "reliance": rel}
+        summary = {"stocks_done": 0, "rows_total": 0, "empty_stocks": 0, "errors": []}
+        if "RELIANCE" in todo:
+            rel = _backfill_underlying(conn, token, master_text, "RELIANCE",
+                                       spots.get("RELIANCE", 0), start, end, today)
+            _log_progress("cc175 RELIANCE validation", rel)
+            if rel.get("contracts", 0) < 10 or rel.get("rows", 0) < 100:
+                _log_progress("cc175 ABORTED - RELIANCE validation failed", rel, alert=True)
+                return {"status": "aborted_validation", "reliance": rel}
+            summary["stocks_done"] = 1
+            summary["rows_total"] = rel["rows"]
 
         # ---- step 2: full run ----
-        summary = {"stocks_done": 1, "rows_total": rel["rows"], "errors": []}
-        for i, (sym, spot) in enumerate(sorted(spots.items()), 1):
+        for i, (sym, spot) in enumerate(sorted(todo.items()), 1):
             if sym == "RELIANCE":
                 continue
             try:
                 res = _backfill_underlying(conn, token, master_text, sym, spot, start, end, today)
                 summary["rows_total"] += res.get("rows", 0)
                 summary["stocks_done"] += 1
+                # rate-limit visibility: Fyers returns s!=ok per contract which
+                # _fetch_contract maps to empty - an all-empty underlying is the signal
+                if res.get("rows", 0) == 0 and not res.get("error"):
+                    summary["empty_stocks"] += 1
                 if res.get("error"):
                     summary["errors"].append(f"{sym}: {res['error']}")
             except Exception as e:
                 summary["errors"].append(f"{sym}: {str(e)[:60]}")
             if i % 25 == 0:
-                _log_progress(f"cc175 progress {i}/{len(spots)}",
+                _log_progress(f"cc175 progress {i}/{len(todo)}",
                               {"stocks_done": summary["stocks_done"], "rows_total": summary["rows_total"],
-                               "errors": len(summary["errors"])})
+                               "empty_stocks": summary["empty_stocks"], "errors": len(summary["errors"])})
         _log_progress("cc175 backfill COMPLETE", {
             "window": [start, end], "stocks_done": summary["stocks_done"],
-            "rows_total": summary["rows_total"], "errors": summary["errors"][:20],
-            "error_count": len(summary["errors"])},
-            alert=len(summary["errors"]) > len(spots) * 0.2)
+            "rows_total": summary["rows_total"], "empty_stocks_ratelimit_suspect": summary["empty_stocks"],
+            "skipped_already_complete": len(already),
+            "errors": summary["errors"][:20], "error_count": len(summary["errors"])},
+            alert=(len(summary["errors"]) > len(todo) * 0.2) or (summary["empty_stocks"] > len(todo) * 0.3))
         return {"status": "complete", **summary}
     except Exception as e:
         _log_progress("cc175 backfill CRASHED", {"error": str(e)}, alert=True)
