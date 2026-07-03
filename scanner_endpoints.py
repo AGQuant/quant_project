@@ -117,3 +117,43 @@ def scanner_investment(
 
     return {"scanner": "investment", "count": len(rows),
             "filters": {"min_gvm": min_gvm, "verdict": verdict or "Excellent + Good"}, "rows": rows}
+
+
+@router.get("/api/scanners/day_range_oi")
+def scanner_day_range_oi(limit: int = 300):
+    """cc#165 — day range (high/low) + futures OI/basis change, for the /filters
+    unified screener. futures_basis is LEFT JOIN'd: symbols with no F&O contract
+    or no basis row today (thin/no-F&O names) return null for the 3 OI/basis
+    fields rather than being excluded or erroring."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            WITH day_range AS (
+                SELECT symbol, MAX(high) AS day_high, MIN(low) AS day_low
+                FROM intraday_prices
+                WHERE ts::date = CURRENT_DATE AND timeframe='5m' AND source IN ('fyers_eq','fyers')
+                GROUP BY symbol
+            ),
+            basis_ranked AS (
+                SELECT symbol, ts, basis_pct, oi_chg, oi_prev,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
+                FROM futures_basis WHERE ts::date = CURRENT_DATE
+            ),
+            basis_latest AS (
+                SELECT a.symbol, a.basis_pct AS basis_pct_now,
+                       ROUND(a.oi_chg::numeric / NULLIF(a.oi_prev,0) * 100, 3) AS oi_chg_pct,
+                       ROUND((a.basis_pct - b.basis_pct)::numeric, 4) AS basis_chg
+                FROM basis_ranked a
+                LEFT JOIN basis_ranked b ON a.symbol=b.symbol AND b.rn=2
+                WHERE a.rn=1
+            )
+            SELECT d.symbol, d.day_high, d.day_low,
+                   bl.basis_pct_now, bl.oi_chg_pct, bl.basis_chg
+            FROM day_range d
+            LEFT JOIN basis_latest bl ON d.symbol = bl.symbol
+            ORDER BY d.symbol
+            LIMIT %s
+        """, [limit])
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    return {"scanner": "day_range_oi", "count": len(rows), "rows": rows}
