@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scorr - Filters</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
+/* -- Canonical Scorr model-nav -- */
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.model-nav::-webkit-scrollbar{display:none}
+.mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
+.mnav-item:hover{color:#1c2536}
+.mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+.mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
+.mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+.page{max-width:980px;margin:0 auto;padding:14px 12px}
+.h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
+.h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
+.st{font-size:11px;color:#8a94a6;margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dot{width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0}
+.dot.y{background:#f59e0b}
+.dot.busy{background:#2563eb;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.autotoggle{display:flex;align-items:center;gap:4px;margin-left:auto;cursor:pointer;user-select:none}
+.autotoggle input{cursor:pointer}
+.screen{display:flex;gap:14px;align-items:flex-start}
+.fpanel{flex:0 0 320px;width:320px;background:#fff;border:1px solid #e4e9f1;border-radius:8px;padding:10px;max-height:calc(100vh - 140px);overflow-y:auto;position:sticky;top:60px}
+.fgroup{margin-bottom:12px}
+.fgroup-h{font-size:10.5px;font-weight:800;color:#8a94a6;text-transform:uppercase;letter-spacing:.4px;padding:6px 4px 4px;border-bottom:1px solid #f1f4f9;margin-bottom:4px}
+.frow{display:flex;align-items:center;gap:6px;padding:4px 4px;border-radius:5px}
+.frow:hover{background:#f8faff}
+.frow input[type=checkbox]{flex-shrink:0;cursor:pointer}
+.flabel{flex:1;font-size:11.5px;color:#1c2536;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.finputs{display:flex;gap:3px;flex-shrink:0}
+.fnum{width:52px;font-size:11px;padding:3px 4px;border:1px solid #e4e9f1;border-radius:4px;color:#1c2536;background:#fff}
+.fnum:disabled{background:#f7f8fc;color:#c2c9d6}
+.fresults{flex:1;min-width:0}
+.tw{overflow-x:auto;border-radius:8px;border:1px solid #e4e9f1;background:#fff}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:#f8faff;border-bottom:1px solid #e4e9f1}
+th{padding:8px 10px;text-align:left;font-weight:700;font-size:11px;color:#5a6781;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:#1c2536}
+th.sorted{color:#2563eb}
+th .arrow{font-size:9px;margin-left:2px;opacity:.6}
+tbody tr{border-bottom:1px solid #f1f4f9}
+tbody tr:hover{background:#f8faff}
+tbody tr:last-child{border-bottom:none}
+td{padding:7px 10px;white-space:nowrap}
+.sym{font-weight:700}
+.seg{font-size:10px;color:#8a94a6;margin-top:1px}
+.up{color:#059669;font-weight:600}
+.dn{color:#dc2626;font-weight:600}
+.nt{color:#5a6781}
+.muted{color:#8a94a6}
+.empty{text-align:center;padding:40px 20px;color:#8a94a6}
+.reset{font-size:10.5px;color:#2563eb;cursor:pointer;font-weight:700;padding:4px 4px 8px}
+.reset:hover{text-decoration:underline}
+@media(max-width:768px){
+  body{font-size:12px}
+  .page{padding:10px 8px}
+  .h1{font-size:16px}.h2{font-size:10px}
+  .model-nav{padding:0 8px}
+  th{padding:7px 7px}td{padding:6px 7px}
+  .screen{flex-direction:column}
+  .fpanel{flex:1 1 auto;width:100%;position:static;max-height:none}
+}
+</style>
+</head>
+<body>
+<nav class="model-nav" id="scorr-nav">
+  <a class="mnav-item" href="/"><span>&#8962;</span>Home</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/dashboard"><span>&#9889;</span>V8</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio2?model=gvm"><span>&#9702;</span>GVM</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/sector"><span>&#8855;</span>Sector</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/check"><span>&#10003;</span>Check</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/news"><span>&#128240;</span>Intel</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/scanners"><span>&#8862;</span>Scanners</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item active" href="/filters"><span>&#9661;</span>Filters</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/cio"><span>&#9673;</span>Max</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/fpc"><span>&#9706;</span>FPC</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/quant-basket"><span>&#9707;</span>QB</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/holdings"><span>&#9670;</span>Holdings</a>
+  <div class="mnav-sep"></div>
+  <a class="mnav-item" href="/v10"><span>&#9651;</span>V10</a>
+</nav>
+<div class="page">
+  <div class="h1">Filters</div>
+  <div class="h2">Unified screener &middot; V8 signal metrics + Intraday scanner + Trade check &middot; 27 range filters, AND logic, instant client-side re-filter</div>
+  <div class="st">
+    <span class="dot" id="f-dot"></span><span id="f-st">Loading...</span>
+    <label class="autotoggle"><input type="checkbox" id="f-auto" checked onchange="onAutoToggle()">Auto-refresh 30s</label>
+  </div>
+  <div class="screen">
+    <div class="fpanel" id="f-panel"></div>
+    <div class="fresults">
+      <div id="f-tbl"><div class="empty">Loading...</div></div>
+    </div>
+  </div>
+</div>
+<script>
+// ---- filter definitions (27 total, default UNCHECKED, sensible starting ranges) ----
+const GROUPS=[
+  {name:'V8 Signal Metrics',filters:[
+    {key:'gvm_score',    label:'GVM Score',      min:6,    max:10},
+    {key:'rsi_month',    label:'RSI Monthly',    min:30,   max:90},
+    {key:'rsi_weekly',   label:'RSI Weekly',     min:30,   max:90},
+    {key:'daily_rsi',    label:'RSI Daily',      min:30,   max:90},
+    {key:'dma_20',       label:'DMA 20 %',       min:-20,  max:20},
+    {key:'dma_50',       label:'DMA 50 %',       min:-20,  max:20},
+    {key:'dma_200',      label:'DMA 200 %',      min:-20,  max:20},
+    {key:'week_return',  label:'Week Return %',  min:-10,  max:10},
+    {key:'month_return', label:'Month Return %', min:-20,  max:20},
+    {key:'year_return',  label:'Year Return %',  min:-50,  max:100},
+    {key:'mom_2d',       label:'Momentum 2D %',  min:-10,  max:10},
+    {key:'sector_week',  label:'Sector Week %',  min:-10,  max:10},
+    {key:'sector_month', label:'Sector Month %', min:-10,  max:10},
+    {key:'week_index_52',label:'52W Index',      min:0,    max:100},
+  ]},
+  {name:'Intraday Scanner',filters:[
+    {key:'cmp',          label:'CMP',            min:0,    max:100000},
+    {key:'day_pct',      label:'Day Change %',   min:-10,  max:10},
+    {key:'hourly_pct',   label:'Hourly %',       min:-5,   max:5},
+    {key:'recovery_low', label:'Recovery-from-Low %', min:0, max:20, derived:true},
+    {key:'fall_high',    label:'Fall-from-High %',    min:0, max:20, derived:true},
+  ]},
+  {name:'Trade Check',filters:[
+    {key:'mas_above',    label:'MAs Above (0-3)',min:0,    max:3,  derived:true},
+    {key:'eod_chg',      label:'EOD Change %',   min:-10,  max:10},
+    {key:'vol_ratio',    label:'Vol Ratio',      min:0,    max:10},
+    {key:'room_r1',      label:'Room to R1 %',   min:0,    max:20, derived:true},
+    {key:'room_s1',      label:'Room from S1 %', min:0,    max:20, derived:true},
+    {key:'basis_pct_now',label:'Basis % (now)',  min:-5,   max:5},
+    {key:'basis_chg',    label:'Basis Change %', min:-2,   max:2},
+    {key:'oi_chg_pct',   label:'OI Change %',    min:-20,  max:20},
+  ]},
+];
+const ALL_FILTERS=GROUPS.flatMap(g=>g.filters);
+
+let ROWS=[];             // merged, derived rows
+let SORT_KEY='day_pct';
+let SORT_DIR=-1;         // -1 desc, 1 asc
+let autoTimer=null;
+
+function n(v){return v==null?null:(typeof v==='number'?v:parseFloat(v));}
+
+function buildPanel(){
+  const panel=document.getElementById('f-panel');
+  let html='<div class="reset" onclick="resetFilters()">Reset all filters</div>';
+  GROUPS.forEach(g=>{
+    html+='<div class="fgroup"><div class="fgroup-h">'+g.name+'</div>';
+    g.filters.forEach(f=>{
+      html+='<div class="frow">'+
+        '<input type="checkbox" id="chk-'+f.key+'" onchange="onFilterChange(\''+f.key+'\')">'+
+        '<label class="flabel" for="chk-'+f.key+'" title="'+f.label+'">'+f.label+'</label>'+
+        '<div class="finputs">'+
+          '<input type="number" class="fnum" id="min-'+f.key+'" value="'+f.min+'" disabled onchange="onFilterChange(\''+f.key+'\')">'+
+          '<input type="number" class="fnum" id="max-'+f.key+'" value="'+f.max+'" disabled onchange="onFilterChange(\''+f.key+'\')">'+
+        '</div></div>';
+    });
+    html+='</div>';
+  });
+  panel.innerHTML=html;
+}
+
+function onFilterChange(key){
+  const chk=document.getElementById('chk-'+key);
+  document.getElementById('min-'+key).disabled=!chk.checked;
+  document.getElementById('max-'+key).disabled=!chk.checked;
+  renderTable();
+}
+
+function resetFilters(){
+  ALL_FILTERS.forEach(f=>{
+    document.getElementById('chk-'+f.key).checked=false;
+    document.getElementById('min-'+f.key).value=f.min;
+    document.getElementById('min-'+f.key).disabled=true;
+    document.getElementById('max-'+f.key).value=f.max;
+    document.getElementById('max-'+f.key).disabled=true;
+  });
+  renderTable();
+}
+
+function passesActiveFilters(row){
+  for(const f of ALL_FILTERS){
+    const chk=document.getElementById('chk-'+f.key);
+    if(!chk || !chk.checked) continue;
+    const v=row[f.key];
+    if(v==null) return false;   // derived-null (e.g. room_r1 when cmp>=r1) excluded when filter active
+    const mn=parseFloat(document.getElementById('min-'+f.key).value);
+    const mx=parseFloat(document.getElementById('max-'+f.key).value);
+    if(!isNaN(mn) && v<mn) return false;
+    if(!isNaN(mx) && v>mx) return false;
+  }
+  return true;
+}
+
+function pctCell(v,d=2){
+  if(v==null) return '<span class="nt">--</span>';
+  return v>=0 ? '<span class="up">+'+Math.abs(v).toFixed(d)+'%</span>' : '<span class="dn">'+v.toFixed(d)+'%</span>';
+}
+function numCell(v,d=1){return v==null?'<span class="nt">--</span>':v.toFixed(d);}
+
+const HEAD_COLS=[
+  {key:'symbol',   label:'Stock'},
+  {key:'day_pct',  label:'Day Change%'},
+  {key:'cmp',      label:'CMP'},
+  {key:'gvm_score',label:'GVM'},
+  {key:'segment',  label:'Segment'},
+];
+
+function renderTable(){
+  const matched=ROWS.filter(passesActiveFilters);
+  matched.sort((a,b)=>{
+    const av=a[SORT_KEY], bv=b[SORT_KEY];
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    if(typeof av==='string') return SORT_DIR*av.localeCompare(bv);
+    return SORT_DIR*(av-bv);
+  });
+  const st=document.getElementById('f-st');
+  st.textContent=matched.length+' matched / '+ROWS.length+' universe';
+
+  let head='<tr>';
+  HEAD_COLS.forEach(c=>{
+    const sorted=c.key===SORT_KEY;
+    const arrow=sorted?(SORT_DIR===1?'&#9650;':'&#9660;'):'';
+    head+='<th class="'+(sorted?'sorted':'')+'" onclick="onSort(\''+c.key+'\')">'+c.label+'<span class="arrow">'+arrow+'</span></th>';
+  });
+  head+='</tr>';
+
+  const body=matched.map(r=>{
+    return '<tr>'+
+      '<td class="sym">'+r.symbol+'</td>'+
+      '<td>'+pctCell(r.day_pct)+'</td>'+
+      '<td class="muted">'+(r.cmp==null?'--':Number(r.cmp).toLocaleString('en-IN',{maximumFractionDigits:2}))+'</td>'+
+      '<td class="muted">'+numCell(r.gvm_score,2)+'</td>'+
+      '<td class="muted seg">'+(r.segment||'--')+'</td>'+
+      '</tr>';
+  }).join('');
+
+  document.getElementById('f-tbl').innerHTML = matched.length
+    ? ('<div class="tw"><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>')
+    : '<div class="empty">No stocks match the active filters</div>';
+}
+
+function onSort(key){
+  if(SORT_KEY===key) SORT_DIR=-SORT_DIR;
+  else { SORT_KEY=key; SORT_DIR=-1; }
+  renderTable();
+}
+
+async function loadData(){
+  const dot=document.getElementById('f-dot'),st=document.getElementById('f-st');
+  dot.className='dot busy';
+  try{
+    const [metrics,live,pivots,dayRange]=await Promise.all([
+      fetch('/api/v8/metrics/all').then(r=>r.json()),
+      fetch('/api/v8/live_metrics').then(r=>r.json()),
+      fetch('/api/paper/pivots?limit=300').then(r=>r.json()),
+      fetch('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
+    ]);
+
+    const liveMap={}; (live||[]).forEach(r=>liveMap[r.symbol]=r);
+    const pivMap={};  (pivots||[]).forEach(r=>pivMap[r.symbol]=r);
+    const drMap={};   (dayRange&&dayRange.rows||[]).forEach(r=>drMap[r.symbol]=r);
+
+    ROWS=(metrics||[]).map(m=>{
+      const sym=m.symbol;
+      const lv=liveMap[sym]||{};
+      const pv=pivMap[sym]||{};
+      const dr=drMap[sym]||{};
+      const cmp=n(lv.cmp), r1=n(pv.r1), s1=n(pv.s1), dayHigh=n(dr.day_high), dayLow=n(dr.day_low);
+
+      const dma20=n(m.dma_20), dma50=n(m.dma_50), dma200=n(m.dma_200);
+      const masAbove=[dma20,dma50,dma200].filter(v=>v!=null && v>0).length;
+
+      const roomR1 = (cmp!=null && r1!=null && cmp<r1) ? (r1-cmp)/cmp*100 : null;
+      const roomS1 = (cmp!=null && s1!=null && cmp>s1) ? (cmp-s1)/cmp*100 : null;
+      const fallHigh = (cmp!=null && dayHigh) ? (dayHigh-cmp)/dayHigh*100 : null;
+      const recoveryLow = (cmp!=null && dayLow) ? (cmp-dayLow)/dayLow*100 : null;
+
+      return {
+        symbol: sym, segment: m.segment,
+        gvm_score: n(m.gvm_score), rsi_month: n(m.rsi_month), rsi_weekly: n(m.rsi_weekly),
+        daily_rsi: n(m.daily_rsi), dma_20: dma20, dma_50: dma50, dma_200: dma200,
+        week_return: n(m.week_return), month_return: n(m.month_return), year_return: n(m.year_return),
+        mom_2d: n(m.mom_2d), sector_week: n(m.sector_week), sector_month: n(m.sector_month),
+        week_index_52: n(m.week_index_52), eod_chg: n(m.eod_chg), vol_ratio: n(m.vol_ratio),
+        cmp: cmp, day_pct: n(lv.day_pct), hourly_pct: n(lv.hourly_pct),
+        recovery_low: recoveryLow, fall_high: fallHigh, mas_above: masAbove,
+        room_r1: roomR1, room_s1: roomS1,
+        basis_pct_now: n(dr.basis_pct_now), basis_chg: n(dr.basis_chg), oi_chg_pct: n(dr.oi_chg_pct),
+      };
+    });
+
+    dot.className='dot';
+    renderTable();
+  }catch(e){
+    dot.className='dot y';
+    st.textContent='Error loading data: '+e.message;
+    document.getElementById('f-tbl').innerHTML='<div class="empty">'+e.message+'</div>';
+  }
+}
+
+function onAutoToggle(){
+  const on=document.getElementById('f-auto').checked;
+  if(autoTimer){clearInterval(autoTimer);autoTimer=null;}
+  if(on) autoTimer=setInterval(loadData,30000);
+}
+
+buildPanel();
+loadData();
+onAutoToggle();
+</script>
+<script>
+if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
+  var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
+}
+</script>
+<script src="/nav_toggle.js" defer></script>
+</body>
+</html>
