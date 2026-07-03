@@ -103,7 +103,7 @@ _watchdog_restarts = 0
 _last_restart_ts: Optional[datetime] = None
 _watchdog_alerted = False        # throttle: one alert per stall episode
 
-# ── exported to main.py ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── exported to main.py ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _compute_and_store_adr(conn=None):
     close_conn = conn is None
