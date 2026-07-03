@@ -1417,7 +1417,10 @@ function App() {
           .print-scroll { padding: 16px 12px 70px !important; }
         }
       `}</style>
-      <ShellNav current={page} onPick={setPage} />
+      {/* cc#174: ShellNav removed (founder decision) -- the pwa.js canonical shared
+          nav is the single nav on every page; it creates #scorr-nav as the first
+          body child here. Model switching = canonical nav route links
+          (/cio2?model=gvm etc.), which this page already reads from the URL. */}
       <div className="app-body" style={{ flex: 1, width: "100%", overflow: "hidden" }}>
         {body}
       </div>

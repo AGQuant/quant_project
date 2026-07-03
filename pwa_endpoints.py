@@ -129,7 +129,10 @@ self.addEventListener('fetch', (e) => {
 PWA_JS = """
 (function () {
   if (window.__scorrPwa) return; window.__scorrPwa = true;
-  var inIframe = (window.self !== window.top);
+  // cc#174: embedded contexts render NO nav/chrome of their own — same signals
+  // as main.py _is_embedded (iframe OR ?embed=1); only the parent shows a nav.
+  var inIframe = (window.self !== window.top)
+    || new URLSearchParams(location.search).get('embed') === '1';
 
   // 1) manifest link + theme-color (idempotent)
   if (!document.querySelector('link[rel="manifest"]')) {
