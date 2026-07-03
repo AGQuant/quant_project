@@ -100,6 +100,15 @@
      for readability; scoped to .mtbl so the dense funnel tables stay compact. */
   .mtbl td{font-size:15px}
   .mtbl th{font-size:12.5px}
+  /* cc#168: Raw Data — all 23 metric columns, horizontal scroll, pinned symbol col.
+     .scroll.rawscroll beats the mobile .scroll table{min-width:unset} on specificity
+     so the wide table always scrolls horizontally (touch scroll native on mobile). */
+  .scroll.rawscroll{-webkit-overflow-scrolling:touch;max-height:72vh}
+  .scroll.rawscroll table{min-width:1700px}
+  .rawscroll th:first-child,.rawscroll td:first-child{position:sticky;left:0;background:var(--panel);z-index:2}
+  .rawscroll th:first-child{background:var(--panel2);z-index:3}
+  .rawscroll tbody tr:hover td:first-child{background:#f0f4f9}
+  .rawscroll tr.row-idx td{background:var(--bg2)}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:#f0f4f9}
   tr.row-open{background:#f0fdf4}
@@ -575,16 +584,21 @@ function selectTab(i){
 
 const SORTREG={};
 function sortTbl(uid,cols,rows,rowFn,opts={}){
-  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows"};
-  return`<div id="tw_${uid}" class="desktop-only">${drawTbl(uid)}</div>`;
+  // cc#168: opts.pinned = rows always rendered first (unsorted, never dropped);
+  // opts.wrapClass overrides the desktop-only wrapper (''=visible on mobile too);
+  // opts.scrollCls adds a class to the .scroll container (e.g. rawscroll).
+  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows",pinned:opts.pinned||[],scrollCls:opts.scrollCls||''};
+  return`<div id="tw_${uid}" class="${opts.wrapClass!==undefined?opts.wrapClass:'desktop-only'}">${drawTbl(uid)}</div>`;
 }
 function drawTbl(uid){
   const t=SORTREG[uid];
-  if(!t||!t.rows||!t.rows.length)return`<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
+  const total=t?(t.rows.length+(t.pinned?t.pinned.length:0)):0;
+  if(!t||!total)return`<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
   let rows=t.rows;
   if(t.sortKey){rows=[...rows].sort((a,b)=>{const av=a[t.sortKey],bv=b[t.sortKey];if(typeof av==='string'||typeof bv==='string')return t.dir*String(av??'').localeCompare(String(bv??''));return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));});}
   const head=t.cols.map(([k,l])=>`<th onclick="tblSort('${uid}','${k}')">${l}${t.sortKey===k?(t.dir<0?' v':' ^'):''}</th>`).join('');
-  return`<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows.map(t.rowFn).join('')}</tbody></table></div>`;
+  const body=(t.pinned||[]).map(t.rowFn).join('')+rows.map(t.rowFn).join('');
+  return`<div class="scroll${t.scrollCls?' '+t.scrollCls:''}"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function tblSort(uid,k){
   const t=SORTREG[uid];if(!t)return;
@@ -849,15 +863,31 @@ function renderTradeLog(){
 
 function renderRaw(){
   const all=cache.metricsAll;if(!all)return'<div class="loading">...</div>';
-  return`<div class="ptitle">Raw Data <span class="ct">${all.length} symbols</span></div>`+
+  // cc#168: render ALL metrics columns from /api/v8/metrics/all (sector_week/month
+  // added to that endpoint in the same task). Horizontal scroll + sticky symbol col.
+  const METRIC_KEYS=['mom_2d','day_1d','eod_chg','week_return','month_return','year_return','dma_20','dma_50','dma_200','rsi_month','rsi_weekly','daily_rsi','week_index_52','month_index','range_1d','range_3d','upper_bb','lower_bb','ma9_vs_ma21','vol_ratio','sector_week','sector_month','gvm_score'];
+  const allNull=x=>METRIC_KEYS.every(k=>x[k]==null);
+  const IDX=new Set(['NIFTY50','BANKNIFTY']);
+  const pinned=all.filter(x=>IDX.has(x.symbol));                    // ADDITION_1: pinned on top, GVM shows --, never dropped
+  const rest=all.filter(x=>!IDX.has(x.symbol)&&!allNull(x));        // ADDITION_2: all-null junk rows (bare NIFTY alias) excluded
+  const hidden=all.length-pinned.length-rest.length;
+  const row=x=>`<tr${IDX.has(x.symbol)?' class="row-idx"':''}><td class="sym">${x.symbol}</td>
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td><td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td><td class="${cls(x.eod_chg)}">${sign(x.eod_chg)}%</td>
+      <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td><td class="${cls(x.month_return)}">${sign(x.month_return)}%</td><td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
+      <td class="${cls(x.dma_20)}">${num(x.dma_20,1)}</td><td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td><td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+      <td>${num(x.rsi_month,0)}</td><td>${num(x.rsi_weekly,0)}</td><td>${num(x.daily_rsi,0)}</td>
+      <td>${num(x.week_index_52,0)}</td><td>${num(x.month_index,0)}</td>
+      <td>${num(x.range_1d,2)}</td><td>${num(x.range_3d,2)}</td>
+      <td>${num(x.upper_bb,1)}</td><td>${num(x.lower_bb,1)}</td>
+      <td class="${cls(x.ma9_vs_ma21)}">${num(x.ma9_vs_ma21,2)}</td><td>${num(x.vol_ratio,2)}</td>
+      <td class="${cls(x.sector_week)}">${sign(x.sector_week)}%</td><td class="${cls(x.sector_month)}">${sign(x.sector_month)}%</td>
+      <td>${num(x.gvm_score,2)}</td></tr>`;
+  return`<div class="ptitle">Raw Data <span class="ct">${rest.length} symbols + ${pinned.length} indices${hidden>0?` · ${hidden} empty hidden`:''}</span></div>`+
+    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">Scroll sideways for all 23 metric columns — Symbol stays pinned. Indices (NIFTY50/BANKNIFTY) pinned on top.</div>`+
     sortTbl('raw',
-    [["symbol","Symbol"],["mom_2d","2D Mom%"],["week_return","Wk %"],["month_return","Mo %"],["year_return","Yr %"],["dma_50","DMA50"],["dma_200","DMA200"],["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["gvm_score","GVM"]],
-    all,x=>`<tr><td class="sym">${x.symbol}</td>
-      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td><td class="${cls(x.week_return)}">${sign(x.week_return)}%</td>
-      <td class="${cls(x.month_return)}">${sign(x.month_return)}%</td><td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
-      <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td><td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-      <td>${num(x.daily_rsi,0)}</td><td>${num(x.week_index_52,0)}</td><td>${num(x.vol_ratio,2)}</td><td>${num(x.gvm_score,2)}</td></tr>`,
-    {sortKey:'mom_2d',dir:-1,empty:"No metrics"});
+    [["symbol","Symbol"],["mom_2d","2D Mom%"],["day_1d","Day%"],["eod_chg","EOD%"],["week_return","Wk %"],["month_return","Mo %"],["year_return","Yr %"],["dma_20","DMA20"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["month_index","Mo idx"],["range_1d","Rng1D"],["range_3d","Rng3D"],["upper_bb","UpperBB"],["lower_bb","LowerBB"],["ma9_vs_ma21","MA9v21"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["gvm_score","GVM"]],
+    rest,row,
+    {sortKey:'mom_2d',dir:-1,empty:"No metrics",pinned,wrapClass:'',scrollCls:'rawscroll'});
 }
 
 function renderMissed(){
