@@ -96,13 +96,13 @@ _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit 
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
 _premarket_check_ran: Optional[date] = None      # cc_task #72 bug_1: 09:10 check day-lock
 
-# ── health / watchdog state ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── health / watchdog state ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 _restart_requested = False
 _watchdog_restarts = 0
 _last_restart_ts: Optional[datetime] = None
 _watchdog_alerted = False        # throttle: one alert per stall episode
 
-# ── exported to main.py ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── exported to main.py ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def _compute_and_store_adr(conn=None):
     close_conn = conn is None
@@ -460,13 +460,20 @@ def _bg_tc_lite():
         _tc_lite_running = False
 
 def _bg_smartgain_mtm():
-    """cc#123 (P0): refresh smartgain_holdings.ltp/mtm/updated_at from the live CMP
-    feed (cmp_prices) every 5 min during market hours. The stored ltp was a manual
-    stamp that froze ~24h while the dashboard re-fetched the same stale row and
-    stamped it with the wall clock — stale data looking live on a real-money book.
-    Only touches a holding whose cmp_prices tick is fresh (<=10 min IST) so a dead
-    per-symbol feed can never overwrite good data with a stale price. LONG/SHORT MTM
-    computed live. Pairs with the live cmp_prices JOIN in /api/smartgain/m2m."""
+    """cc#123 (P0): refresh smartgain_holdings.ltp/updated_at from the live feed
+    every 5 min during market hours. The stored ltp was a manual stamp that froze
+    ~24h while the dashboard re-fetched the same stale row and stamped it with the
+    wall clock — stale data looking live on a real-money book.
+
+    cc#147 (BUG-1): MHK40 trades FUTURES but this job priced ltp from cmp_prices
+    SPOT, drifting from broker MTM by basis*qty. Now FUT-LTP-FIRST: latest
+    fyers_fut 5m bar close when fresh (<=10 min), else spot + latest
+    futures_basis.basis. Only touches a holding whose chosen source tick is fresh
+    (<=10 min IST) so a dead per-symbol feed can never overwrite good data with a
+    stale price.
+
+    mtm is a GENERATED ALWAYS column (discovered 02-Jul) — it derives from ltp on
+    write, so this job must set ltp only. Pairs with /api/smartgain/m2m."""
     global _smartgain_mtm_running
     if _smartgain_mtm_running: return
     _smartgain_mtm_running = True
@@ -474,20 +481,29 @@ def _bg_smartgain_mtm():
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 UPDATE smartgain_holdings h
-                SET ltp = cp.cmp,
-                    mtm = ROUND((CASE h.direction
-                              WHEN 'LONG'  THEN (cp.cmp - h.entry_price) * h.qty
-                              WHEN 'SHORT' THEN (h.entry_price - cp.cmp) * h.qty
-                              ELSE 0 END)::numeric, 2),
+                SET ltp = COALESCE(fut.fut_close, cp.cmp + fb.basis, cp.cmp),
                     updated_at = NOW()
                 FROM cmp_prices cp
+                LEFT JOIN LATERAL (
+                    SELECT ip.close AS fut_close
+                    FROM intraday_prices ip
+                    WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
+                      AND ip.ts >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '10 minutes'
+                    ORDER BY ip.ts DESC LIMIT 1
+                ) fut ON true
+                LEFT JOIN LATERAL (
+                    SELECT fb2.basis
+                    FROM futures_basis fb2
+                    WHERE fb2.symbol = cp.symbol
+                    ORDER BY fb2.ts DESC LIMIT 1
+                ) fb ON true
                 WHERE cp.symbol = h.symbol
                   AND cp.cmp IS NOT NULL
                   AND cp.updated_at >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '10 minutes'
             """)
             n = cur.rowcount
             conn.commit()
-        log.info(f"smartgain_mtm: refreshed {n} holdings from live cmp_prices")
+        log.info(f"smartgain_mtm: refreshed {n} holdings (fut-ltp-first)")
     except Exception as e:
         log.error(f"smartgain_mtm: {e}")
     finally:
