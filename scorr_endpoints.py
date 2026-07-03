@@ -14,12 +14,6 @@ import httpx
 
 router = APIRouter()
 
-# cc#166: SmartGain daily M2M (orderbook FIFO replay) lives in its own module and
-# is nested here (same pattern as knowledge_endpoints into news_endpoints) so
-# main.py stays untouched.
-from smartgain_daily_m2m import router as daily_m2m_router
-router.include_router(daily_m2m_router)
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 

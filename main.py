@@ -67,6 +67,7 @@ from feed_health_endpoints import router as feed_health_router
 from v12_endpoints import router as v12_router
 from test_cio_endpoints import router as test_cio_router
 from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
+from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -78,7 +79,8 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.56
+# Scorr / Project Quant — main.py v2.9.57
+# v2.9.57: smartgain_daily_m2m router moved from scorr_endpoints nesting to explicit main.py wiring (cc#173).
 # v2.9.56: GET /holdings route + SmartGain M2M page (cc_task #94).
 # v2.9.55: Wire admin_index_backfill router — SENSEX/FINNIFTY/MIDCAPNIFTY backfill endpoint.
 # v2.9.54: Added /quant-basket route (Quant Basket dashboard).
@@ -87,7 +89,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.56"
+VERSION = "2.9.57"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -199,6 +201,7 @@ app.include_router(feed_health_router)
 app.include_router(v12_router)
 app.include_router(test_cio_router)
 app.include_router(fyers_range_backfill_router)
+app.include_router(smartgain_daily_m2m_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
