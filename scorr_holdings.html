@@ -92,6 +92,10 @@
   /* cc#138 */
   .pos-row3{display:flex;align-items:center;gap:6px;margin-top:5px}
   .pos-avgcmp{font-size:11px;color:var(--dim);font-family:monospace}
+
+  /* cc#161: explicit "no live price" state -- never blank/dash-only for a
+     position we deliberately withheld pricing on. */
+  .pos-unavail{font-size:11px;font-weight:700;color:#b45309}
 </style>
 </head>
 <body>
@@ -174,6 +178,17 @@ const ago = ts => {
 const mtmStr = (n, show_plus=true) => n==null?"—":(n>=0?(show_plus?"+":""):"")+"₹"+f2(Math.abs(n))*(n<0?-1:1);
 const colorOf = n => n==null?"var(--mut)":n>=0?"var(--grn)":"var(--red)";
 
+/* cc#161: pricing_method="unavailable" means we deliberately withheld a numeric
+   ltp/mtm (stale spot fallback or a structurally fut-less symbol, e.g. NIFTY
+   pre-cc#162) rather than present a wrong number as if it were real. */
+const reasonLabel = r => {
+  if (!r) return "no live price";
+  if (r === "no_live_futures_feed") return "no futures feed for this symbol";
+  if (r === "no_data") return "no price data";
+  const m = /^stale_data_(\d+)d$/.exec(r);
+  return m ? `data ${m[1]}d stale` : "no live price";
+};
+
 /* ── Holdings ── */
 async function loadHoldings(smooth=false) {
   try {
@@ -242,16 +257,23 @@ async function loadHoldings(smooth=false) {
         const pctEl = document.getElementById("pct-"+p.symbol);
         const valEl = document.getElementById("val-"+p.symbol);
 
-        const mtmTxt = (p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm||0));
+        // cc#161: unavailable positions render a distinct row2/row3 structure
+        // (no ltp-/pct-/val-/cmp- ids) -- a state flip only takes full effect
+        // on the next full render (manual Refresh), but mtmEl always exists so
+        // update it now rather than leave a stale numeric MTM on screen.
+        const unavail = p.pricing_method === "unavailable";
+        const mtmTxt = unavail ? "No live price" : (p.mtm==null?"—":(p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm||0)));
         const prevMtm = prev.mtm||0;
 
-        if (mtmEl && p.mtm !== prev.mtm) {
+        if (mtmEl && (unavail !== (prev.pricing_method === "unavailable") || p.mtm !== prev.mtm)) {
           mtmEl.textContent = mtmTxt;
-          mtmEl.style.color = colorOf(p.mtm);
-          const cls = (p.mtm||0) >= prevMtm ? "flash-grn":"flash-red";
-          card.classList.remove("flash-grn","flash-red");
-          void card.offsetWidth; // reflow
-          card.classList.add(cls);
+          mtmEl.style.color = unavail ? "#b45309" : colorOf(p.mtm);
+          if (!unavail) {
+            const cls = (p.mtm||0) >= prevMtm ? "flash-grn":"flash-red";
+            card.classList.remove("flash-grn","flash-red");
+            void card.offsetWidth; // reflow
+            card.classList.add(cls);
+          }
         }
         /* cc#133: loss border on the card itself */
         if((p.mtm||0)<0) card.classList.add("loss"); else card.classList.remove("loss");
@@ -283,14 +305,33 @@ async function loadHoldings(smooth=false) {
 
     let html = '<div class="pos-list">';
     pos.forEach(p => {
+      const unavail = p.pricing_method === "unavailable";
       const pct = calcPct(p);
       const pctTxt = pct==null?"":((pct>=0?"+":"")+pct.toFixed(2)+"%");
       const val = p.ltp!=null&&p.qty!=null ? "₹"+f0(p.ltp*p.qty) : "";
       const dirCls = p.direction==="LONG"?"dir-long":"dir-short";
-      const mtmTxt = p.mtm==null?"—":((p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm)));
+      const mtmTxt = unavail ? "No live price" : (p.mtm==null?"—":((p.mtm>=0?"+":"−")+"₹"+f2(Math.abs(p.mtm))));
       const livePip = p.is_live?'<span class="live-pip"></span>':"";
 
       const lossCls = (p.mtm||0)<0?" loss":"";
+
+      // cc#161: unavailable positions get an explicit warning row instead of
+      // ltp/%/CMP derived from a number we deliberately withheld.
+      const row2 = unavail
+        ? `<span class="pos-chip"><b>${p.qty}</b> qty</span>
+           <span class="pos-sep">·</span>
+           <span class="pos-unavail">&#9888; ${reasonLabel(p.reason)}</span>`
+        : `<span class="pos-chip"><b>${p.qty}</b> qty</span>
+           <span class="pos-sep">·</span>
+           <span class="pos-chip" id="val-${p.symbol}">${val}</span>
+           <span class="pos-sep">·</span>
+           <span class="pos-ltp">₹<span id="ltp-${p.symbol}">${f2(p.ltp)}</span>${livePip}</span>
+           <span class="pos-sep">·</span>
+           <span class="pos-pct" id="pct-${p.symbol}" style="color:${colorOf(pct)}">${pctTxt}</span>`;
+
+      const row3 = unavail
+        ? `<span class="pos-avgcmp">Avg ₹${f2(p.entry_price)} · <span class="pos-unavail">No live price</span></span>`
+        : `<span class="pos-avgcmp">Avg ₹${f2(p.entry_price)} · CMP ₹<span id="cmp-${p.symbol}">${f2(p.ltp)}</span></span>`;
 
       html+=`<div class="pos-card${lossCls}" id="card-${p.symbol}">
         <div class="pos-row1">
@@ -298,20 +339,10 @@ async function loadHoldings(smooth=false) {
             <span class="pos-sym">${p.symbol}</span>
             <span class="pos-dir ${dirCls}">${p.direction}</span>
           </div>
-          <span class="pos-mtm" id="mtm-${p.symbol}" style="color:${colorOf(p.mtm)}">${mtmTxt}</span>
+          <span class="pos-mtm" id="mtm-${p.symbol}" style="color:${unavail?'#b45309':colorOf(p.mtm)}">${mtmTxt}</span>
         </div>
-        <div class="pos-row2">
-          <span class="pos-chip"><b>${p.qty}</b> qty</span>
-          <span class="pos-sep">·</span>
-          <span class="pos-chip" id="val-${p.symbol}">${val}</span>
-          <span class="pos-sep">·</span>
-          <span class="pos-ltp">₹<span id="ltp-${p.symbol}">${f2(p.ltp)}</span>${livePip}</span>
-          <span class="pos-sep">·</span>
-          <span class="pos-pct" id="pct-${p.symbol}" style="color:${colorOf(pct)}">${pctTxt}</span>
-        </div>
-        <div class="pos-row3">
-          <span class="pos-avgcmp">Avg ₹${f2(p.entry_price)} · CMP ₹<span id="cmp-${p.symbol}">${f2(p.ltp)}</span></span>
-        </div>
+        <div class="pos-row2">${row2}</div>
+        <div class="pos-row3">${row3}</div>
       </div>`;
     });
     html+="</div>";
