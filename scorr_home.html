@@ -460,9 +460,12 @@ function renderM2MChart(days, weekStart) {
             (v >= 0 ? `<rect x="${cx - barW/2}" y="${Math.max(top, zeroY-3)}" width="${barW}" height="${Math.min(3,h)}" fill="${col}"></rect>`
                     : `<rect x="${cx - barW/2}" y="${top}" width="${barW}" height="${Math.min(3,h)}" fill="${col}"></rect>`) +
             `</g>`;
-    // data label at the bar's data end: above for gains, below for losses
-    const ly = v >= 0 ? Math.max(top - 3, 9) : Math.min(top + h + 9, H - padB - 3);
-    valLabels += `<text x="${cx}" y="${ly}" text-anchor="middle" font-size="8" font-weight="700" fill="${col}" font-family="monospace">${fk(v)}</text>`;
+    // data label at the bar's data end: above for gains, below for losses.
+    // If the bar reaches the plot edge, tuck the label inside the bar in white.
+    let ly, lfill = col;
+    if (v >= 0) { ly = top - 3; if (ly < 9) { ly = top + 9; lfill = "#fff"; } }
+    else { ly = top + h + 9; if (ly > H - padB - 3) { ly = top + h - 4; lfill = "#fff"; } }
+    valLabels += `<text x="${cx}" y="${ly}" text-anchor="middle" font-size="8" font-weight="700" fill="${lfill}" font-family="monospace">${fk(v)}</text>`;
     linePts.push([cx, y(d.cumulative)]);
     dots += `<circle cx="${cx}" cy="${y(d.cumulative)}" r="3.5" fill="var(--blu)" stroke="var(--card)" stroke-width="2"><title>${fmtD(slotIso)} cumulative: ${d.cumulative >= 0 ? "+" : ""}₹${f2(d.cumulative)}</title></circle>`;
   }
@@ -486,6 +489,13 @@ async function loadDailyM2M(weekStart) {
     if (!sgThisWeek && !weekStart) sgThisWeek = d.week_start;
 
     document.getElementById("sg-chart-wrap").style.display = "block";
+    // surface the week total on the collapsed tab so it's obvious data lives here
+    if (sgCurWeek === sgThisWeek && typeof d.week_m2m === "number") {
+      const hint = document.getElementById("sg-m2m-tab-hint");
+      if (hint && document.getElementById("sg-m2m-panel").style.display === "none") {
+        hint.textContent = (d.week_m2m >= 0 ? "+" : "−") + "₹" + f2(Math.abs(d.week_m2m)) + " · tap to expand";
+      }
+    }
     document.getElementById("sg-wk-label").textContent =
       sgCurWeek === sgThisWeek ? "This Week" : fmtD(d.week_start) + " – " + fmtD(d.week_end);
     const nextBtn = document.getElementById("sg-wk-next");
@@ -521,14 +531,18 @@ async function loadDailyM2M(weekStart) {
 
 // the SG card is an <a href="/holdings"> — every control inside must swallow the click
 function sgSwallow(e) { e.preventDefault(); e.stopPropagation(); }
+function sgSetPanel(open) {
+  document.getElementById("sg-m2m-panel").style.display = open ? "block" : "none";
+  document.getElementById("sg-m2m-tab-arrow").innerHTML = open ? "&#9662;" : "&#9656;";
+  document.getElementById("sg-m2m-tab-hint").textContent = open ? "tap to collapse" : "tap to expand";
+  try { localStorage.setItem("sg_m2m_open", open ? "1" : "0"); } catch (e) {}
+}
 document.getElementById("sg-m2m-tab").addEventListener("click", function (e) {
   sgSwallow(e);
-  const p = document.getElementById("sg-m2m-panel");
-  const open = p.style.display !== "none";
-  p.style.display = open ? "none" : "block";
-  document.getElementById("sg-m2m-tab-arrow").innerHTML = open ? "&#9656;" : "&#9662;";
-  document.getElementById("sg-m2m-tab-hint").textContent = open ? "tap to expand" : "tap to collapse";
+  sgSetPanel(document.getElementById("sg-m2m-panel").style.display === "none");
 });
+// persist expanded state across reloads (open once -> stays open)
+try { if (localStorage.getItem("sg_m2m_open") === "1") sgSetPanel(true); } catch (e) {}
 document.getElementById("sg-wk-prev").addEventListener("click", function (e) {
   sgSwallow(e);
   if (sgCurWeek) loadDailyM2M(addDays(sgCurWeek, -7));
