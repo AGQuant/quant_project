@@ -80,7 +80,8 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.58
+# Scorr / Project Quant — main.py v2.9.59
+# v2.9.59: PWA injection for /screener /intraday /structure /performance /ask (cc#176).
 # v2.9.58: stock_options_backfill router (cc#175 weekend options data).
 # v2.9.57: smartgain_daily_m2m router moved from scorr_endpoints nesting to explicit main.py wiring (cc#173).
 # v2.9.56: GET /holdings route + SmartGain M2M page (cc_task #94).
@@ -91,7 +92,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.58"
+VERSION = "2.9.59"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -132,8 +133,11 @@ def _is_embedded(request: Request) -> bool:
         return True
     return False
 
+# cc#176: /screener /intraday /structure /performance /ask were missing -- those
+# pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
-                     "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters"}
+                     "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
+                     "/screener", "/intraday", "/structure", "/performance", "/ask"}
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 @app.middleware("http")
