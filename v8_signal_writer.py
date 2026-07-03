@@ -360,60 +360,136 @@ def _round_down_5min(ts: datetime) -> time:
     return ts.replace(minute=minute, second=0, microsecond=0).time()
 
 
-def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> Dict[str, dict]:
-    """Time-of-day matched pro-rata volume ratio (cc#140, 01-Jul-2026).
-    Replaces the old vol_now/full-day-10d-average formula, which mechanically
-    rises through the day regardless of real buying intensity (same stock at
-    identical pace reads ~0.4x at 11:00 IST vs ~1.0x+ at 15:15 IST -- effectively
-    a time-of-day filter, not a volume-surge detector). session_log id=395
-    (INTRADAY_SCANNER_SPEC_V1, 19-Jun-2026) spec, implemented here.
+# cc#170 (VOL X v2): once-daily precomputed baseline curve. Keyed by IST date --
+# rebuilt lazily on the first tick of each day (spec: "09:00 IST daily or first
+# tick") instead of re-aggregating history on every 5-min tick.
+# Shape: {"date": date, "curve": {sym: {time: avg_cum_vol}}, "days": {sym: n},
+#         "full_day": {sym: avg_full_day_vol}}
+_VOL_BASELINE: dict = {"date": None, "curve": {}, "days": {}, "full_day": {}}
 
-    Denominator uses same-time-of-day cumulative volume over the last 10
-    calendar days (source='fyers_eq' only, matching numerator instrument).
-    intraday_prices retention is a 7-day rolling window (weekly Monday trim,
-    scorr_recurring_tasks id=34), so fewer than 10 trading days may be
-    available at any given time -- degrade gracefully on whatever exists,
-    NULL out below 3 days rather than fabricate a ratio.
-    """
+_VOL_BUCKETS = [time(9, 15)]
+while _VOL_BUCKETS[-1] < time(15, 25):
+    _m = _VOL_BUCKETS[-1].minute + 5
+    _VOL_BUCKETS.append(time(_VOL_BUCKETS[-1].hour + (_m // 60), _m % 60))
+
+_VOL_MIN_CLEAN_DAYS = 4     # spec: <4 clean baseline days -> fallback, never fabricate
+_VOL_BASELINE_DAYS  = 7     # spec: last 7 trading days
+_VOL_MIN_BARS_CLEAN = 60    # a baseline day needs >=60/75 bars to count as clean
+
+
+def _build_vol_baseline(conn, symbols: List[str]) -> None:
+    """cc#170: build the 7-trading-day same-time cumulative-volume baseline curve
+    for every symbol, once per day. For each symbol/day the best clean source is
+    used (fyers_eq WS > fyers REST > yahoo) with per-day SEMANTICS AUTO-DETECT
+    (cc#150 pattern): a monotonic non-decreasing volume series is a cumulative
+    day counter -> cum at t = latest value <= t; otherwise volumes are per-bar
+    -> cum at t = SUM(bars <= t). Never mixes the two interpretations."""
+    today = datetime.now(IST).date()
+    _VOL_BASELINE["date"] = today
+    _VOL_BASELINE["curve"] = {}
+    _VOL_BASELINE["days"] = {}
+    _VOL_BASELINE["full_day"] = {}
     with conn.cursor() as cur:
         cur.execute("""
-            WITH today AS (
-                SELECT symbol, MAX(volume) AS vol_today
-                FROM intraday_prices
-                WHERE source = 'fyers_eq' AND symbol = ANY(%s)
-                  AND ts::date = CURRENT_DATE AND ts::time <= %s
-                GROUP BY symbol
-            ),
-            hist_same_time AS (
-                SELECT symbol, ts::date AS d, MAX(volume) AS vol_at_t
-                FROM intraday_prices
-                WHERE source = 'fyers_eq' AND symbol = ANY(%s)
-                  AND ts::date <  CURRENT_DATE
-                  AND ts::date >= CURRENT_DATE - INTERVAL '10 days'
-                  AND ts::time <= %s
-                GROUP BY symbol, ts::date
-            ),
-            hist_avg AS (
-                SELECT symbol, AVG(vol_at_t) AS avg_vol_at_t, COUNT(*) AS days_available
-                FROM hist_same_time GROUP BY symbol
-            )
-            SELECT t.symbol, t.vol_today, h.avg_vol_at_t, h.days_available
-            FROM today t JOIN hist_avg h ON h.symbol = t.symbol
-        """, (symbols, cutoff, symbols, cutoff))
-        out = {}
-        for sym, vol_today, avg_vol_at_t, days_available in cur.fetchall():
-            vol_today    = _safe_float(vol_today)
-            avg_vol_at_t = _safe_float(avg_vol_at_t)
-            ratio = None
-            if days_available and days_available >= 3 and vol_today is not None \
-               and avg_vol_at_t and avg_vol_at_t > 0:
-                ratio = round(vol_today / avg_vol_at_t, 3)
-            out[sym] = {
-                "vol_today": vol_today,
-                "avg_vol_at_t": avg_vol_at_t,
-                "days_available": int(days_available) if days_available else 0,
-                "vol_ratio_time_normalized": ratio,
-            }
+            SELECT symbol, source, ts::date, ts::time, volume
+            FROM intraday_prices
+            WHERE symbol = ANY(%s) AND ts::date < CURRENT_DATE
+              AND ts::date >= CURRENT_DATE - INTERVAL '11 days'
+              AND source IN ('fyers_eq', 'fyers', 'yahoo')
+              AND volume IS NOT NULL
+              AND ts::time BETWEEN '09:15' AND '15:30'
+            ORDER BY symbol, source, ts
+        """, (symbols,))
+        rows = cur.fetchall()
+
+    groups: Dict[tuple, list] = {}
+    for sym, src, d, t, vol in rows:
+        groups.setdefault((sym, d, src), []).append((t, float(vol)))
+
+    SRC_PRIO = {"fyers_eq": 0, "fyers": 1, "yahoo": 2}
+    best: Dict[tuple, tuple] = {}   # (sym, day) -> (prio, cum_curve list[(time, cum)])
+    for (sym, d, src), bars in groups.items():
+        if len(bars) < _VOL_MIN_BARS_CLEAN:
+            continue
+        vols = [v for _, v in bars]
+        monotonic = all(b >= a for a, b in zip(vols, vols[1:]))
+        cum, run = [], 0.0
+        for t, v in bars:
+            run = v if monotonic else run + v
+            cum.append((t, run))
+        if cum[-1][1] <= 0:
+            continue
+        prio = SRC_PRIO[src]
+        cur_best = best.get((sym, d))
+        if cur_best is None or prio < cur_best[0]:
+            best[(sym, d)] = (prio, cum)
+
+    per_sym_days: Dict[str, list] = {}
+    for (sym, d), (_prio, cum) in best.items():
+        per_sym_days.setdefault(sym, []).append((d, cum))
+
+    for sym, days in per_sym_days.items():
+        days = sorted(days, key=lambda x: x[0], reverse=True)[:_VOL_BASELINE_DAYS]
+        # forward-fill each day's cumulative curve onto the canonical 5-min buckets
+        sums = [0.0] * len(_VOL_BUCKETS)
+        for _d, cum in days:
+            i, last = 0, 0.0
+            for bi, bt in enumerate(_VOL_BUCKETS):
+                while i < len(cum) and cum[i][0] <= bt:
+                    last = cum[i][1]; i += 1
+                sums[bi] += last
+        n = len(days)
+        _VOL_BASELINE["curve"][sym] = {bt: sums[bi] / n for bi, bt in enumerate(_VOL_BUCKETS)}
+        _VOL_BASELINE["days"][sym] = n
+        _VOL_BASELINE["full_day"][sym] = sums[-1] / n
+    log.info(f"vol_baseline built for {today}: {len(per_sym_days)} symbols, "
+             f"{sum(1 for v in _VOL_BASELINE['days'].values() if v >= _VOL_MIN_CLEAN_DAYS)} with >={_VOL_MIN_CLEAN_DAYS} clean days")
+
+
+def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> Dict[str, dict]:
+    """VOL X v2 (cc#170, supersedes cc#140 v1.5): today's cumulative volume at
+    time x vs AVG cumulative volume at the same time x over the last 7 clean
+    trading days (precomputed curve, source-semantics safe -- see
+    _build_vol_baseline). After close the comparison is full-day vs 7-day avg
+    full-day (cutoff clamps to the last bucket), so v2 stays consistent EOD.
+    <4 clean baseline days -> ratio None here; _compute_live_metrics falls back
+    to the v1 formula (cum / 10d full-day avg) and flags vol_ratio_fallback."""
+    if _VOL_BASELINE["date"] != datetime.now(IST).date():
+        try:
+            _build_vol_baseline(conn, symbols)
+        except Exception as e:
+            log.error(f"vol_baseline build failed: {e}")
+            _VOL_BASELINE["date"] = None
+    # clamp to the canonical bucket range: pre-open -> first bucket, post-close -> full day
+    bucket = _VOL_BUCKETS[0]
+    for bt in _VOL_BUCKETS:
+        if bt <= cutoff:
+            bucket = bt
+        else:
+            break
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT symbol, MAX(volume) AS vol_today
+            FROM intraday_prices
+            WHERE source = 'fyers_eq' AND symbol = ANY(%s)
+              AND ts::date = CURRENT_DATE AND ts::time <= %s
+            GROUP BY symbol
+        """, (symbols, cutoff))
+        today_map = {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
+    out = {}
+    for sym in symbols:
+        vol_today = today_map.get(sym)
+        n_days = _VOL_BASELINE["days"].get(sym, 0)
+        base = _VOL_BASELINE["curve"].get(sym, {}).get(bucket)
+        ratio = None
+        if n_days >= _VOL_MIN_CLEAN_DAYS and vol_today is not None and base and base > 0:
+            ratio = round(vol_today / base, 3)
+        out[sym] = {
+            "vol_today": vol_today,
+            "avg_vol_at_t": round(base, 0) if base else None,
+            "days_available": n_days,
+            "vol_ratio_time_normalized": ratio,
+        }
     return out
 
 
@@ -500,7 +576,7 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         "mom_2d": None, "day_1d": None, "eod_chg": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
         "vol_ratio_legacy": None, "vol_ratio_time_normalized": None,
-        "vol_ratio_days_available": 0,
+        "vol_ratio_days_available": 0, "vol_ratio_fallback": False,
         "week_index_52": None, "month_index": None,
         "range_1d": None, "range_3d": None,
         "upper_bb": None, "lower_bb": None,
@@ -546,7 +622,16 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     if vol_tn:
         out["vol_ratio_time_normalized"] = vol_tn.get("vol_ratio_time_normalized")
         out["vol_ratio_days_available"]  = vol_tn.get("days_available", 0)
-    out["vol_ratio"] = out["vol_ratio_time_normalized"]
+    # cc#170 (VOL X v2): v2 time-matched ratio is THE vol_ratio. When the 7-day
+    # baseline has <4 clean days for this symbol, fall back to the v1 formula
+    # (cumulative / 10d full-day avg) and FLAG it -- never fabricate, never blank
+    # a basket filter input just because baseline history is thin.
+    if out["vol_ratio_time_normalized"] is not None:
+        out["vol_ratio"] = out["vol_ratio_time_normalized"]
+        out["vol_ratio_fallback"] = False
+    else:
+        out["vol_ratio"] = out["vol_ratio_legacy"]
+        out["vol_ratio_fallback"] = out["vol_ratio_legacy"] is not None
 
     hi252 = max(x for x in [hist.get("hi_252"), bar.get("high"), live] if x)
     lo252 = min(x for x in [hist.get("lo_252"), bar.get("low"),  live] if x)
@@ -1336,6 +1421,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             snap["vol_ratio_legacy"]          = s.get("vol_ratio_legacy")
             snap["vol_ratio_time_normalized"] = s.get("vol_ratio_time_normalized")
             snap["vol_ratio_days_available"]  = s.get("vol_ratio_days_available")
+            snap["vol_ratio_fallback"]        = s.get("vol_ratio_fallback")     # cc#170
             snap["filter_score"] = s.get("_filter_score")
             snap["filter_total"] = n_filters
             snap["hourly_pct"]          = s.get("hourly_pct")           # cc#158
@@ -1444,6 +1530,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
             "vol_ratio_legacy": s.get("vol_ratio_legacy"),
             "vol_ratio_time_normalized": s.get("vol_ratio_time_normalized"),
             "vol_ratio_days_available": s.get("vol_ratio_days_available"),
+            "vol_ratio_fallback": s.get("vol_ratio_fallback"),   # cc#170
             "hourly_pct": s.get("hourly_pct"),            # cc#158
             "week_index_52": s.get("week_index_52"),      # cc#158
             "v21_enabled": s1b_on,                        # cc#158
@@ -1715,13 +1802,14 @@ def run_live_signal_writer(conn) -> dict:
     # cc#140 (01-Jul-2026): vol_ratio side-by-side visibility -- old (legacy, full-day
     # avg) vs new (time-normalized, fyers_eq-only) formula, and NULL-state diagnosis
     # per data_gap_resolution_01Jul2026 (no silent NULLs -- must be visible in logs).
-    insufficient_hist = sum(1 for m in all_metrics if (m.get("vol_ratio_days_available") or 0) < 3)
+    insufficient_hist = sum(1 for m in all_metrics if (m.get("vol_ratio_days_available") or 0) < _VOL_MIN_CLEAN_DAYS)
+    fallbacks = sum(1 for m in all_metrics if m.get("vol_ratio_fallback"))
     old_pass = sum(1 for m in all_metrics if (m.get("vol_ratio_legacy") or 0) >= 1.5)
     new_pass = sum(1 for m in all_metrics if (m.get("vol_ratio_time_normalized") or 0) >= 1.5)
     log.warning(
-        f"vol_ratio[cc#140]: cutoff={vol_cutoff} symbols={len(all_metrics)} "
-        f"insufficient_history(<3d)={insufficient_hist} "
-        f"gate>=1.5: legacy={old_pass} time_normalized={new_pass}"
+        f"vol_ratio[cc#170 v2]: cutoff={vol_cutoff} symbols={len(all_metrics)} "
+        f"insufficient_history(<{_VOL_MIN_CLEAN_DAYS}d)={insufficient_hist} fallback_to_v1={fallbacks} "
+        f"gate>=1.5: legacy={old_pass} time_matched_v2={new_pass}"
     )
 
     _write_qualified(conn, all_metrics, today)
