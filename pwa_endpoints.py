@@ -235,7 +235,7 @@ PWA_JS = """
       ['/check', '\\u2713', 'Check'],
       ['/news', '\\ud83d\\udcf0', 'Intel'],
       ['/scanners', '\\u229e', 'Scanners'],
-      ['/filters', '\\u25bd', 'Filters'],
+      ['/filters', '\\u25bd', 'V13'],
       ['/screener', '\\u229f', 'V12'],
       ['/cio', '\\u2299', 'Max'],
       ['/fpc', '\\u25e7', 'FPC'],
