@@ -143,12 +143,18 @@ async def scorr_query(req: ScorrQueryRequest):
 
 @router.get("/api/smartgain/m2m")
 def smartgain_m2m():
-    """SmartGain MHK40 holdings — M2M with live LTP from the live CMP feed.
+    """SmartGain MHK40 holdings — M2M with live LTP from the live futures feed.
 
     cc#132: open book sourced from smartgain_holdings (broker-reconciled entry_price).
     personal_journal entry_price can drift from the actual filled price; holdings
-    carries the correct cost basis. LTP is fetched live from cmp_prices/intraday
-    so MTM is always current, not a stored snapshot.
+    carries the correct cost basis.
+
+    cc#147 (BUG-1): MHK40 trades FUTURES but LTP was priced from cmp_prices SPOT,
+    causing a constant drift of basis*qty vs the broker MTM. Pricing is now
+    FUT-LTP-FIRST: latest fyers_fut 5m bar close when fresh (<=10 min), else a
+    synthetic fut price (spot + latest futures_basis.basis), else spot alone,
+    else the last intraday tick of any source. pricing_method on each row shows
+    which path was used.
     """
     try:
         with get_conn() as conn, conn.cursor() as cur:
@@ -172,30 +178,90 @@ def smartgain_m2m():
                             ELSE 0
                         END::numeric, 2
                     )                                                         AS mtm,
-                    -- cc#123: "live" ONLY when the chosen tick is genuinely fresh
-                    -- (<=10 min). Stops a prior-day bar masquerading as live at the open.
-                    (lp.live_ltp IS NOT NULL AND lp.age_min IS NOT NULL AND lp.age_min <= 10) AS is_live,
-                    ROUND(lp.age_min::numeric, 1)                            AS ltp_age_min,
+                    lp.pricing_method                                        AS pricing_method,
+                    lp.is_live                                              AS is_live,
+                    ROUND(lp.ltp_age_min::numeric, 1)                        AS ltp_age_min,
+                    ROUND(lp.spot_ltp::numeric, 2)                          AS spot_ltp,
+                    ROUND(lp.fut_ltp_synthetic::numeric, 2)                  AS fut_ltp_synthetic,
+                    ROUND(lp.basis_age_min::numeric, 1)                      AS basis_age_min,
                     lp.last_tick                                            AS last_tick
                 FROM open_book h
                 LEFT JOIN LATERAL (
-                    -- cc#123: drive LTP from the canonical live CMP first (cmp_prices is
-                    -- refreshed continuously and stays fresh even when a symbol's fyers_eq/
-                    -- fyers_fut intraday bar lags the 09:15 open), else the latest intraday
-                    -- tick; pick whichever is newest. Columns are IST-naive while NOW() is
-                    -- UTC, so age uses NOW() AT TIME ZONE 'Asia/Kolkata'.
-                    SELECT live_ltp, last_tick,
-                           EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - last_tick))/60.0 AS age_min
+                    SELECT
+                        c.spot_ltp, c.basis, c.fut_close,
+                        (c.spot_ltp + c.basis)                                          AS fut_ltp_synthetic,
+                        EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.basis_ts))/60.0   AS basis_age_min,
+                        CASE
+                            -- cc#123/cc#147: "live" fut bar within the last 10 min wins.
+                            WHEN c.fut_close IS NOT NULL
+                             AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
+                                THEN 'fut_live'
+                            WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN 'synthetic'
+                            WHEN c.spot_ltp IS NOT NULL THEN 'spot_only'
+                            WHEN c.eod_close IS NOT NULL THEN 'eod'
+                            ELSE NULL
+                        END AS pricing_method,
+                        CASE
+                            WHEN c.fut_close IS NOT NULL
+                             AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
+                                THEN c.fut_close
+                            WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN c.spot_ltp + c.basis
+                            WHEN c.spot_ltp IS NOT NULL THEN c.spot_ltp
+                            ELSE c.eod_close
+                        END AS live_ltp,
+                        CASE
+                            WHEN c.fut_close IS NOT NULL
+                             AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
+                                THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0
+                            WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL
+                                THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.basis_ts))/60.0
+                            WHEN c.spot_ltp IS NOT NULL
+                                THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.spot_ts))/60.0
+                            ELSE EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.eod_ts))/60.0
+                        END AS ltp_age_min,
+                        CASE
+                            -- cc#147: fut_live is always live; synthetic requires the
+                            -- basis itself to be fresh (<=30 min) or it's flagged stale.
+                            WHEN c.fut_close IS NOT NULL
+                             AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
+                                THEN true
+                            WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL
+                                THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.basis_ts))/60.0 <= 30
+                            ELSE false
+                        END AS is_live,
+                        COALESCE(
+                            CASE WHEN c.fut_close IS NOT NULL
+                             AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
+                                THEN c.fut_ts END,
+                            CASE WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN c.basis_ts END,
+                            CASE WHEN c.spot_ltp IS NOT NULL THEN c.spot_ts END,
+                            c.eod_ts
+                        ) AS last_tick
                     FROM (
-                        (SELECT cp.cmp::numeric AS live_ltp, cp.updated_at AS last_tick
-                           FROM cmp_prices cp WHERE cp.symbol = h.symbol)
-                        UNION ALL
-                        (SELECT ip.close, ip.ts
-                           FROM intraday_prices ip WHERE ip.symbol = h.symbol
-                           ORDER BY ip.ts DESC LIMIT 1)
-                    ) src
-                    ORDER BY last_tick DESC NULLS LAST
-                    LIMIT 1
+                        SELECT
+                            (SELECT ip.close FROM intraday_prices ip
+                              WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                              ORDER BY ip.ts DESC LIMIT 1)                    AS fut_close,
+                            (SELECT ip.ts FROM intraday_prices ip
+                              WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                              ORDER BY ip.ts DESC LIMIT 1)                    AS fut_ts,
+                            (SELECT cp.cmp::numeric FROM cmp_prices cp
+                              WHERE cp.symbol = h.symbol)                    AS spot_ltp,
+                            (SELECT cp.updated_at FROM cmp_prices cp
+                              WHERE cp.symbol = h.symbol)                    AS spot_ts,
+                            (SELECT fb.basis FROM futures_basis fb
+                              WHERE fb.symbol = h.symbol
+                              ORDER BY fb.ts DESC LIMIT 1)                    AS basis,
+                            (SELECT fb.ts FROM futures_basis fb
+                              WHERE fb.symbol = h.symbol
+                              ORDER BY fb.ts DESC LIMIT 1)                    AS basis_ts,
+                            (SELECT ip.close FROM intraday_prices ip
+                              WHERE ip.symbol = h.symbol
+                              ORDER BY ip.ts DESC LIMIT 1)                    AS eod_close,
+                            (SELECT ip.ts FROM intraday_prices ip
+                              WHERE ip.symbol = h.symbol
+                              ORDER BY ip.ts DESC LIMIT 1)                    AS eod_ts
+                    ) c
                 ) lp ON true
                 ORDER BY h.id
             """)
@@ -203,11 +269,14 @@ def smartgain_m2m():
             rows = []
             for r in cur.fetchall():
                 row = dict(zip(cols, r))
-                row["entry_price"] = float(row["entry_price"]) if row["entry_price"] is not None else None
-                row["ltp"]         = float(row["ltp"])         if row["ltp"]         is not None else None
-                row["mtm"]         = float(row["mtm"])         if row["mtm"]         is not None else None
-                row["is_live"]     = bool(row["is_live"])
-                row["ltp_age_min"] = float(row["ltp_age_min"]) if row["ltp_age_min"] is not None else None
+                row["entry_price"]        = float(row["entry_price"]) if row["entry_price"] is not None else None
+                row["ltp"]                = float(row["ltp"])         if row["ltp"]         is not None else None
+                row["mtm"]                = float(row["mtm"])         if row["mtm"]         is not None else None
+                row["is_live"]            = bool(row["is_live"])
+                row["ltp_age_min"]        = float(row["ltp_age_min"]) if row["ltp_age_min"] is not None else None
+                row["spot_ltp"]           = float(row["spot_ltp"]) if row["spot_ltp"] is not None else None
+                row["fut_ltp_synthetic"]  = float(row["fut_ltp_synthetic"]) if row["fut_ltp_synthetic"] is not None else None
+                row["basis_age_min"]      = float(row["basis_age_min"]) if row["basis_age_min"] is not None else None
                 # cc#123: last_tick = the actual live-feed tick time (IST), so the UI can
                 # show real data age instead of a wall-clock that always reads "now".
                 row["last_tick"]   = row["last_tick"].isoformat() if row["last_tick"] else None
