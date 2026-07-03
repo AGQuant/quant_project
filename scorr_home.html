@@ -91,6 +91,17 @@
   .sg-closed-left{display:flex;align-items:center;gap:8px;min-width:0}
   .sg-closed-detail{font-size:10.5px;color:var(--dim);font-family:monospace;white-space:nowrap}
   .sg-closed-pnl{font-weight:800;font-family:monospace;font-size:12.5px;white-space:nowrap}
+  /* rev-2 (Arpit 03-Jul): panel lives behind a click tab, with week navigation */
+  .sg-m2m-tab{width:100%;display:flex;align-items:center;justify-content:space-between;
+    background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+    font-family:inherit;font-size:11px;font-weight:700;color:var(--mut);cursor:pointer;
+    text-transform:uppercase;letter-spacing:.06em;transition:.15s}
+  .sg-m2m-tab:hover{color:var(--blu);border-color:var(--blu)}
+  .sg-wknav{display:flex;align-items:center;gap:6px}
+  .sg-wkbtn{background:#f8fafc;border:1px solid var(--line);border-radius:6px;width:20px;height:20px;
+    font-size:12px;line-height:1;color:var(--mut);cursor:pointer;padding:0}
+  .sg-wkbtn:hover{color:var(--blu);border-color:var(--blu)}
+  .sg-wkbtn:disabled{opacity:.35;cursor:default}
 
   /* Tools toggle */
   .tools-toggle{display:flex;align-items:center;justify-content:space-between;margin:28px 0 0}
@@ -185,22 +196,31 @@
     </div>
     <div class="sg-positions" id="sg-positions"></div>
 
-    <!-- cc#166: daily M2M bar chart Mon-Fri + cumulative overlay -->
+    <!-- cc#166 rev-2: daily M2M + closed trades live behind a click tab (not on
+         the card front), with prev/next week navigation for the recurring series -->
     <div class="sg-chart-wrap" id="sg-chart-wrap" style="display:none">
-      <div class="sg-chart-title">
-        <span>Daily M2M &middot; This Week</span>
-        <span class="sg-chart-legend">
-          <span><span class="sg-leg-dot" style="background:var(--grn)"></span>Daily M2M</span>
-          <span><span class="sg-leg-dot" style="background:var(--blu);border-radius:50%"></span>Cumulative</span>
-        </span>
+      <button class="sg-m2m-tab" id="sg-m2m-tab" type="button">
+        <span id="sg-m2m-tab-arrow">&#9656;</span>&nbsp;Daily M2M &amp; Closed Trades
+        <span style="margin-left:auto" id="sg-m2m-tab-hint">tap to expand</span>
+      </button>
+      <div id="sg-m2m-panel" style="display:none;margin-top:10px">
+        <div class="sg-chart-title">
+          <span class="sg-wknav">
+            <button class="sg-wkbtn" id="sg-wk-prev" type="button" title="Previous week">&#8249;</button>
+            <span id="sg-wk-label">This Week</span>
+            <button class="sg-wkbtn" id="sg-wk-next" type="button" title="Next week">&#8250;</button>
+          </span>
+          <span class="sg-chart-legend">
+            <span><span class="sg-leg-dot" style="background:var(--grn)"></span>Daily M2M</span>
+            <span><span class="sg-leg-dot" style="background:var(--blu);border-radius:50%"></span>Cumulative</span>
+          </span>
+        </div>
+        <div id="sg-chart"></div>
+        <div id="sg-closed-wrap" style="display:none">
+          <div class="sg-closed-head">Closed This Week</div>
+          <div id="sg-closed"></div>
+        </div>
       </div>
-      <div id="sg-chart"></div>
-    </div>
-
-    <!-- cc#166: closed positions this week (orderbook FIFO round-trips) -->
-    <div id="sg-closed-wrap" style="display:none">
-      <div class="sg-closed-head">Closed This Week</div>
-      <div id="sg-closed"></div>
     </div>
 
     <div class="sg-meta" id="sg-meta"></div>
@@ -400,10 +420,23 @@ setInterval(loadSG, 30000);
 
 // cc#166: daily M2M chart + closed positions from /api/smartgain/daily_m2m
 // (orderbook FIFO replay — recomputed server-side on every call, no snapshots).
-function renderM2MChart(days) {
-  const W = 320, H = 110, padL = 6, padR = 6, padT = 12, padB = 16;
-  const slots = ["Mon","Tue","Wed","Thu","Fri"];
-  const byDay = {}; days.forEach(d => byDay[d.day] = d);
+// rev-2 (Arpit 03-Jul): date x-labels, value labels on bars, panel behind a
+// click tab, and prev/next week navigation (the series recurs week over week).
+const MON3 = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtD = iso => (+iso.slice(8,10)) + " " + MON3[+iso.slice(5,7) - 1];
+const addDays = (iso, n) => {
+  const t = new Date(iso + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+};
+// compact value label: ±1.2k / ±234
+const fk = v => {
+  const a = Math.abs(v), s = v >= 0 ? "+" : "−";
+  return s + (a >= 1000 ? (a/1000).toFixed(1).replace(/\.0$/,"") + "k" : Math.round(a));
+};
+
+function renderM2MChart(days, weekStart) {
+  const W = 320, H = 118, padL = 6, padR = 6, padT = 14, padB = 16;
+  const byDate = {}; days.forEach(d => byDate[d.date] = d);
   const vals = days.flatMap(d => [d.m2m, d.cumulative]);
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
   if (hi === lo) { hi += 1; lo -= 1; }
@@ -412,49 +445,64 @@ function renderM2MChart(days) {
   const y = v => padT + (hi - v) / span * plotH;
   const slotW = plotW / 5, barW = Math.min(26, slotW * 0.5);
   const zeroY = y(0);
-  let bars = "", linePts = [], dots = "", labels = "";
-  slots.forEach((s, i) => {
+  let bars = "", linePts = [], dots = "", labels = "", valLabels = "";
+  for (let i = 0; i < 5; i++) {
+    const slotIso = addDays(weekStart, i);
     const cx = padL + slotW * i + slotW / 2;
-    labels += `<text x="${cx}" y="${H-4}" text-anchor="middle" font-size="8.5" fill="var(--dim)" font-family="var(--font)">${s}</text>`;
-    const d = byDay[s];
-    if (!d) return;
+    labels += `<text x="${cx}" y="${H-4}" text-anchor="middle" font-size="8.5" fill="var(--dim)" font-family="var(--font)">${fmtD(slotIso)}</text>`;
+    const d = byDate[slotIso];
+    if (!d) continue;
     const v = d.m2m, yv = y(v);
     const top = Math.min(yv, zeroY), h = Math.max(2, Math.abs(zeroY - yv));
     const col = v >= 0 ? "var(--grn)" : "var(--red)";
-    // 3px rounded corner on the data end only: clip a rounded rect against the baseline
-    bars += `<g><title>${s}: ${v >= 0 ? "+" : ""}₹${f2(v)} (cum ${d.cumulative >= 0 ? "+" : ""}₹${f2(d.cumulative)})</title>` +
+    bars += `<g><title>${fmtD(slotIso)}: ${v >= 0 ? "+" : ""}₹${f2(v)} (cum ${d.cumulative >= 0 ? "+" : ""}₹${f2(d.cumulative)})</title>` +
             `<rect x="${cx - barW/2}" y="${top}" width="${barW}" height="${h}" rx="3" fill="${col}"></rect>` +
             (v >= 0 ? `<rect x="${cx - barW/2}" y="${Math.max(top, zeroY-3)}" width="${barW}" height="${Math.min(3,h)}" fill="${col}"></rect>`
                     : `<rect x="${cx - barW/2}" y="${top}" width="${barW}" height="${Math.min(3,h)}" fill="${col}"></rect>`) +
             `</g>`;
+    // data label at the bar's data end: above for gains, below for losses
+    const ly = v >= 0 ? Math.max(top - 3, 9) : Math.min(top + h + 9, H - padB - 3);
+    valLabels += `<text x="${cx}" y="${ly}" text-anchor="middle" font-size="8" font-weight="700" fill="${col}" font-family="monospace">${fk(v)}</text>`;
     linePts.push([cx, y(d.cumulative)]);
-    dots += `<circle cx="${cx}" cy="${y(d.cumulative)}" r="3.5" fill="var(--blu)" stroke="var(--card)" stroke-width="2"><title>${s} cumulative: ${d.cumulative >= 0 ? "+" : ""}₹${f2(d.cumulative)}</title></circle>`;
-  });
+    dots += `<circle cx="${cx}" cy="${y(d.cumulative)}" r="3.5" fill="var(--blu)" stroke="var(--card)" stroke-width="2"><title>${fmtD(slotIso)} cumulative: ${d.cumulative >= 0 ? "+" : ""}₹${f2(d.cumulative)}</title></circle>`;
+  }
   const poly = linePts.length > 1
     ? `<polyline points="${linePts.map(p => p.join(",")).join(" ")}" fill="none" stroke="var(--blu)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>` : "";
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Daily M2M bar chart with cumulative line">
     <line x1="${padL}" y1="${zeroY}" x2="${W-padR}" y2="${zeroY}" stroke="var(--line2)" stroke-width="1"></line>
-    ${bars}${poly}${dots}${labels}</svg>`;
+    ${bars}${poly}${dots}${valLabels}${labels}</svg>`;
 }
 
-async function loadDailyM2M() {
+let sgCurWeek = null;    // week currently shown (ISO Monday)
+let sgThisWeek = null;   // the real current week (nav upper bound)
+
+async function loadDailyM2M(weekStart) {
   try {
-    const r = await fetch("/api/smartgain/daily_m2m");
+    const url = "/api/smartgain/daily_m2m" + (weekStart ? "?week_start=" + weekStart : "");
+    const r = await fetch(url);
     const d = await r.json();
     if (d.error) return;
+    sgCurWeek = d.week_start;
+    if (!sgThisWeek && !weekStart) sgThisWeek = d.week_start;
 
-    if (d.days && d.days.length) {
-      document.getElementById("sg-chart").innerHTML = renderM2MChart(d.days);
-      document.getElementById("sg-chart-wrap").style.display = "block";
-    }
+    document.getElementById("sg-chart-wrap").style.display = "block";
+    document.getElementById("sg-wk-label").textContent =
+      sgCurWeek === sgThisWeek ? "This Week" : fmtD(d.week_start) + " – " + fmtD(d.week_end);
+    const nextBtn = document.getElementById("sg-wk-next");
+    if (nextBtn) nextBtn.disabled = (sgCurWeek === sgThisWeek);
+
+    document.getElementById("sg-chart").innerHTML =
+      (d.days && d.days.length) ? renderM2MChart(d.days, d.week_start)
+                                : '<div class="sg-loading">No data for this week</div>';
 
     const closed = d.closed_positions || [];
+    const cw = document.getElementById("sg-closed-wrap");
     if (closed.length) {
       // newest close first; show entry -> exit and realised P&L per FIFO round-trip
       document.getElementById("sg-closed").innerHTML = closed.slice().reverse().map(c => {
         const pc = c.pnl >= 0 ? "sg-pos" : "sg-neg";
         const pnlTxt = (c.pnl >= 0 ? "+" : "−") + "₹" + f2(Math.abs(c.pnl));
-        const dt = c.close_date ? c.close_date.slice(5) : "";
+        const dt = c.close_date ? fmtD(c.close_date) : "";
         return `<div class="sg-closed-row">
           <div class="sg-closed-left">
             <span class="sg-sym" style="font-size:12.5px">${c.symbol}</span>
@@ -464,12 +512,37 @@ async function loadDailyM2M() {
           <span class="sg-closed-pnl ${pc}">${pnlTxt}</span>
         </div>`;
       }).join("");
-      document.getElementById("sg-closed-wrap").style.display = "block";
+      cw.style.display = "block";
+    } else {
+      cw.style.display = "none";
     }
   } catch(e) { /* chart is additive — never break the card */ }
 }
+
+// the SG card is an <a href="/holdings"> — every control inside must swallow the click
+function sgSwallow(e) { e.preventDefault(); e.stopPropagation(); }
+document.getElementById("sg-m2m-tab").addEventListener("click", function (e) {
+  sgSwallow(e);
+  const p = document.getElementById("sg-m2m-panel");
+  const open = p.style.display !== "none";
+  p.style.display = open ? "none" : "block";
+  document.getElementById("sg-m2m-tab-arrow").innerHTML = open ? "&#9656;" : "&#9662;";
+  document.getElementById("sg-m2m-tab-hint").textContent = open ? "tap to expand" : "tap to collapse";
+});
+document.getElementById("sg-wk-prev").addEventListener("click", function (e) {
+  sgSwallow(e);
+  if (sgCurWeek) loadDailyM2M(addDays(sgCurWeek, -7));
+});
+document.getElementById("sg-wk-next").addEventListener("click", function (e) {
+  sgSwallow(e);
+  if (sgCurWeek && sgCurWeek !== sgThisWeek) loadDailyM2M(addDays(sgCurWeek, 7));
+});
+
 loadDailyM2M();
-setInterval(loadDailyM2M, 120000);
+setInterval(function () {
+  // auto-refresh only while viewing the live (current) week
+  if (!sgCurWeek || sgCurWeek === sgThisWeek) loadDailyM2M();
+}, 120000);
 
 // Hide nav when embedded
 if (window.self !== window.top || new URLSearchParams(location.search).has("embed")) {
