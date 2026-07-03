@@ -15,7 +15,10 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
 
 import os
 import psycopg
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi.responses import JSONResponse
+
+from scorr_auth import _is_authed
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -231,11 +234,15 @@ _CANON_CAT = {
 
 
 @router.get("/api/news/polished")
-def news_polished(category: str = "all", limit: int = 20, offset: int = 0):
+def news_polished(request: Request, category: str = "all", limit: int = 20, offset: int = 0):
     """Polished news for the /news redesign (cc_task #79, spec 636).
     category = all | ai_editorial | company_updates | global | ipo (strict exact match).
     Sorted polished_at DESC (newest first, all categories interleaved on 'all').
-    limit (default 20, max 100) + offset paginate. Returns category_counts for tab badges."""
+    limit (default 20, max 100) + offset paginate. Returns category_counts for tab badges.
+    cc#160: endpoint-level auth (this route was reachable with no cookie, bypassing
+    the /news page's login gate) — same _is_authed() check as the page, 401 not redirect."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     cat = (category or "all").lower()
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
