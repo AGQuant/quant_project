@@ -474,7 +474,16 @@ def _bg_smartgain_mtm():
     stale price.
 
     mtm is a GENERATED ALWAYS column (discovered 02-Jul) — it derives from ltp on
-    write, so this job must set ltp only. Pairs with /api/smartgain/m2m."""
+    write, so this job must set ltp only. Pairs with /api/smartgain/m2m.
+
+    cc#161 (safety fix): the pure-spot-only fallback (no fresh fut tick, no
+    basis) had no check for whether this symbol has EVER had real futures data.
+    A structurally fut-less instrument (e.g. NIFTY -- index futures are never
+    subscribed on the live feed, see cc#162) would silently get holdings.ltp
+    set from spot alone forever. Now that fallback only fires for symbols that
+    have at least once had a real fyers_fut tick (a normal stock future
+    momentarily missing a fresh one) -- never for an instrument with zero
+    futures history."""
     global _smartgain_mtm_running
     if _smartgain_mtm_running: return
     _smartgain_mtm_running = True
@@ -498,9 +507,17 @@ def _bg_smartgain_mtm():
                     WHERE fb2.symbol = cp.symbol
                     ORDER BY fb2.ts DESC LIMIT 1
                 ) fb ON true
+                LEFT JOIN LATERAL (
+                    SELECT EXISTS(
+                        SELECT 1 FROM intraday_prices ip2
+                        WHERE ip2.symbol = cp.symbol AND ip2.source = 'fyers_fut'
+                        LIMIT 1
+                    ) AS ever
+                ) fev ON true
                 WHERE cp.symbol = h.symbol
                   AND cp.cmp IS NOT NULL
                   AND cp.updated_at >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '10 minutes'
+                  AND (fut.fut_close IS NOT NULL OR fb.basis IS NOT NULL OR fev.ever)
             """)
             n = cur.rowcount
             conn.commit()
