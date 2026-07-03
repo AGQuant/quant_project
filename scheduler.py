@@ -95,6 +95,7 @@ _fu_sync_ran_this_week: Optional[date] = None
 _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit pass guard
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
 _premarket_check_ran: Optional[date] = None      # cc_task #72 bug_1: 09:10 check day-lock
+_v21_ks_ran_today: Optional[date] = None         # cc#158: V2.1 kill-switch day-lock
 
 # ── health / watchdog state ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 _restart_requested = False
@@ -520,6 +521,24 @@ def _bg_qb_intraday_mark():
     except Exception as e: log.error(f"qb_intraday_mark: {e}")
     finally: _qb_intraday_mark_running = False
 
+def _bg_v21_killswitch():
+    """cc#158: nightly V2.1 candidate-filter kill-switch check (16:10 IST, after
+    close + ADR/TC). Auto-disables a basket's V2.1 filters + alerts if signal
+    count starves or rolling WR decays >10pp below baseline (respecting the
+    20-trading-day / 15-signal sample-discipline warmup). Never auto-re-enables."""
+    global _v21_ks_ran_today
+    today = _ist_now().date()
+    if _v21_ks_ran_today == today: return
+    try:
+        import v8_filter_killswitch
+        with _conn() as conn: res = v8_filter_killswitch.run_killswitch_check(conn)
+        _v21_ks_ran_today = today
+        tripped = [b for b, r in res.items() if r.get("status") == "TRIPPED_DISABLED"]
+        log.info(f"v21_killswitch: {len(tripped)} tripped {tripped or ''}")
+    except Exception as e:
+        log.error(f"v21_killswitch: {e}")
+
+
 def _bg_v8_eod():
     global _eod_running, _eod_ran_today
     today = _ist_now().date()
@@ -922,6 +941,8 @@ async def _scheduler_loop():
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
             _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
+        if now.weekday() < 5 and h == 16 and m == 10:
+            _spawn(_bg_v21_killswitch)           # cc#158: V2.1 filter kill-switch check
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
         # window collided with CC deploy pushes — a Railway redeploy kills the
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
