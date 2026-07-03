@@ -224,7 +224,7 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
 
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT price_date, close, high, low, volume FROM raw_prices
+            SELECT price_date, close, high, low, volume, open FROM raw_prices
             WHERE symbol = %s AND price_date <= %s
             ORDER BY price_date DESC LIMIT 400
         """, (symbol, target_date))
@@ -232,11 +232,12 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
     if not rows:
         return out
 
-    df = pd.DataFrame(rows, columns=["date", "close", "high", "low", "volume"])
+    df = pd.DataFrame(rows, columns=["date", "close", "high", "low", "volume", "open"])
     df["close"]  = pd.to_numeric(df["close"])
     df["high"]   = pd.to_numeric(df["high"])
     df["low"]    = pd.to_numeric(df["low"])
     df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+    df["open"]   = pd.to_numeric(df["open"], errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
     if len(df) < 5:
         return out
@@ -300,6 +301,17 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
             raw = (h3 - l3) / base * 100
             out["range_3d"] = raw if latest_close >= base else -raw
 
+    # cc#172: range_1d was NEVER computed on the EOD path (only initialized None),
+    # so the 15:45 upsert nulled the live writer's value for all 212 symbols every
+    # day. Same formula as the live writer: (high-low)/open * 100, signed by
+    # close>=open, from the latest raw_prices day.
+    last = df.iloc[-1]
+    if pd.notna(last["open"]) and float(last["open"]) > 0 \
+       and pd.notna(last["high"]) and pd.notna(last["low"]):
+        op = float(last["open"])
+        raw = (float(last["high"]) - float(last["low"])) / op * 100
+        out["range_1d"] = raw if latest_close >= op else -raw
+
     if len(df) >= 20:
         last20 = df["close"].tail(20)
         ma, sd = float(last20.mean()), float(last20.std())
@@ -342,7 +354,7 @@ def store_metrics(conn, m: Dict):
                 sector_week=COALESCE(v8_metrics.sector_week, EXCLUDED.sector_week),
                 sector_month=COALESCE(v8_metrics.sector_month, EXCLUDED.sector_month),
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
-                range_1d=EXCLUDED.range_1d, range_3d=EXCLUDED.range_3d,
+                range_1d=COALESCE(EXCLUDED.range_1d, v8_metrics.range_1d), range_3d=EXCLUDED.range_3d,
                 upper_bb=EXCLUDED.upper_bb, lower_bb=EXCLUDED.lower_bb,
                 ma9_vs_ma21=EXCLUDED.ma9_vs_ma21, vol_ratio=EXCLUDED.vol_ratio
         """, m)
