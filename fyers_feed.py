@@ -383,6 +383,28 @@ def get_universe(conn):
     return sorted(futures - SKIP_SYMBOLS)
 
 
+# cc#162: NIFTY/BANKNIFTY index futures — index futures were never subscribed
+# on the live feed (SKIP_SYMBOLS excludes them from get_universe(), which feeds
+# BOTH the equity leg -- correctly, no -EQ instrument exists for an index --
+# AND the futures leg -- incorrectly, silently dropping real futures contracts
+# that should be subscribed). This is a SEPARATE list, added ONLY to the
+# futures leg, never the equity leg. Scope is intentionally just these two
+# (task cc#162) -- SKIP_SYMBOLS also lists FINNIFTY/MIDCPNIFTY/SENSEX/BANKEX
+# but none of those are actually present in futures_universe.
+INDEX_FUTURES_UNIVERSE = ('NIFTY', 'BANKNIFTY')
+
+def get_index_futures_universe(conn):
+    """Read live from futures_universe (same is_active pattern as get_universe)
+    rather than hardcoding a blind subscribe, so an ops-side deactivation of
+    either symbol is honored automatically, same as it already is for the 209
+    stock futures."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT symbol FROM futures_universe WHERE is_active = TRUE "
+            "AND symbol = ANY(%s)", (list(INDEX_FUTURES_UNIVERSE),))
+        return sorted(r[0] for r in cur.fetchall())
+
+
 def get_top50_option_underlyings(conn):
     """Top 50 futures stocks by mcap rank from input_raw."""
     try:
@@ -639,6 +661,15 @@ class BarAggregator:
             # (flush_all path) and CPython dict .get is GIL-atomic anyway.
             if oi is None:
                 oi = self.last_oi.get(sym)
+            # cc#162: NIFTY the futures-contract root symbol differs from
+            # NIFTY50, the canonical spot index symbol used everywhere else in
+            # this codebase (market_mood, v8, cmp_prices, raw_prices all key
+            # off NIFTY50). Without this alias every spot lookup below misses
+            # and basis stays permanently NULL. BANKNIFTY needs no alias — its
+            # futures root already matches the spot key used system-wide.
+            # futures_basis.symbol itself still stores `sym` (the contract
+            # identity), only the SPOT lookups use the alias.
+            spot_sym = 'NIFTY50' if sym == 'NIFTY' else sym
             with self.conn.cursor() as cur:
                 # Spot = nearest non-futures intraday bar for this symbol at/before ts.
                 # (exact ts + source='fyers_eq' missed: eq feed is sparse & ts-misaligned;
@@ -647,7 +678,7 @@ class BarAggregator:
                     SELECT close FROM intraday_prices
                     WHERE symbol=%s AND ts::date=%s::date AND ts<=%s AND source<>'fyers_fut'
                     ORDER BY ts DESC LIMIT 1
-                """, (sym, ts, ts))
+                """, (spot_sym, ts, ts))
                 row       = cur.fetchone()
                 spot      = float(row[0]) if row else None
                 # Fallback: the equity bar for this 5-min bucket may not be flushed
@@ -655,11 +686,11 @@ class BarAggregator:
                 # the lookup above can miss → spot None → NULL basis. Fall back to
                 # the live CMP (refreshed every CMP_FLUSH_MINS), then prior EOD close.
                 if spot is None:
-                    cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (sym,))
+                    cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s", (spot_sym,))
                     r2 = cur.fetchone()
                     spot = float(r2[0]) if r2 and r2[0] is not None else None
                 if spot is None:
-                    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1", (sym,))
+                    cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1", (spot_sym,))
                     r3 = cur.fetchone()
                     spot = float(r3[0]) if r3 and r3[0] is not None else None
                 basis     = round(fut_close - spot, 4) if spot is not None else None
@@ -964,7 +995,7 @@ def _batched_subscribe(ws, symbols, action='sub', label=''):
         time.sleep(WS_SUB_BATCH_SLEEP_SEC)
 
 
-# ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
     import fyers_backfill
@@ -974,8 +1005,15 @@ def run(auth_code=None):
     token   = get_valid_token(conn, auth_code)
     symbols = get_universe(conn)
 
+    # cc#162: futures leg = stocks + confirmed-active index futures (NIFTY/
+    # BANKNIFTY). Equity leg stays `symbols`-only -- no -EQ instrument exists
+    # for an index, so it must never be added there.
+    index_fut_codes = get_index_futures_universe(conn)
+    fut_codes       = symbols + index_fut_codes
+
     ensure_schemas(conn)
-    log.info(f"Universe: {len(symbols)} equity + {len(symbols)} futures + options")
+    log.info(f"Universe: {len(symbols)} equity + {len(fut_codes)} futures "
+             f"({len(index_fut_codes)} index: {index_fut_codes}) + options")
 
     # Skip-if-fresh: only backfill when today's intraday data is missing.
     # When fresh, skip the ~40-min sequential backfill entirely (instant restart).
@@ -1018,7 +1056,7 @@ def run(auth_code=None):
     log.info(f"Active expiry: {expiry}")
 
     equity_fyers_syms  = [fyers_eq_symbol(s) for s in symbols]
-    futures_fyers_syms = [futures_fyers_symbol(s, expiry) for s in symbols]
+    futures_fyers_syms = [futures_fyers_symbol(s, expiry) for s in fut_codes]   # cc#162: + index futures
 
     master = OptionMaster()
     master.load()
@@ -1290,7 +1328,7 @@ def run(auth_code=None):
                 try:
                     if opt_mgr.check_monthly_roll():
                         new_expiry   = opt_mgr.expiry
-                        new_fut_syms = [futures_fyers_symbol(s, new_expiry) for s in symbols]
+                        new_fut_syms = [futures_fyers_symbol(s, new_expiry) for s in fut_codes]   # cc#162: + index futures
                         new_opt_syms = opt_mgr.build_initial()
                         # cc#151: batched unsub/sub (same helper as on_connect) — the old
                         # single bulk unsubscribe+subscribe silently dropped symbols under
