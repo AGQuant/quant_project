@@ -356,6 +356,15 @@ def store_metrics(conn, m: Dict):
 def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source: str = 'eod'):
     from v8_endpoints import FILTER_CONFIG
 
+    # cc#171 fix 2: EOD qual-writes are gated to trading days. The 15:45 scheduler
+    # trigger has no weekday guard, so this ran on Sat 27-Jun + Sun 28-Jun and wrote
+    # weekend qual rows. Gating here (not in the scheduler) also covers manual
+    # MCP/endpoint triggers of run_v8_engine on non-trading days.
+    from nse_holidays import is_trading_day
+    if not is_trading_day(target_date):
+        log.warning(f"write_signals: {target_date} is not a trading day -- skipping qual writes")
+        return
+
     cmp_map = {}
     try:
         with conn.cursor() as cur:
@@ -390,13 +399,12 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
         except Exception as e:
             log.warning(f"write_signals funnel {basket}: {e}")
 
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM v8_qualified WHERE basket=%s AND signal_date=%s",
-                            (basket, target_date))
-            conn.commit()
-        except Exception as e:
-            log.warning(f"write_signals clear qualified {basket}: {e}")
+        # cc#171 fix 1: the DELETE-and-rewrite here erased the intraday audit trail --
+        # live-writer qual rows (with their real qualification signal_ts) were wiped at
+        # 15:45 whenever the EOD pass didn't re-qualify them (03-Jul: INDHOTEL+DIVISLAB
+        # entered paper positions, zero qual trail left). Per spec 1403 the EOD run is a
+        # BACKSTOP: it now only ADDS quals the live writer missed (DO NOTHING below),
+        # never deletes or overwrites a live row.
 
         for s in qualified_symbols:
             sym = s['symbol']
@@ -416,10 +424,7 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
                          rsi_month, rsi_weekly, sector_week, sector_day, month_index,
                          week_index_52, daily_rsi, range_3d, metrics, source)
                         VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (symbol, basket, signal_date) DO UPDATE SET
-                            signal_ts=NOW(), gvm_score=EXCLUDED.gvm_score, cmp=EXCLUDED.cmp,
-                            mom_2d=EXCLUDED.mom_2d, metrics=EXCLUDED.metrics,
-                            source=EXCLUDED.source
+                        ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date, s.get('gvm_score'), cmp,
                         s.get('mom_2d'), s.get('week_return'), s.get('month_return'),
