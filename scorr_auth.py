@@ -3,7 +3,7 @@ scorr_auth.py — Simple password gate for all HTML pages.
 
 Password: HARDCODED (env var was unreliable). Change _PASSWORD below to update.
 Cookie: scorr_auth (7-day, httponly, path=/, secure, samesite=none)
-Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /scanners, /screener, /fpc, /news, /holdings
+Protected: /, /dashboard, /cio, /cio2, /ask, /check, /sector, /scanners, /screener, /fpc, /news, /holdings, /filters
 Exempt: /api/*, /mcp, /oauth/*, /.well-known/*, /login, /logout, /status, /authdebug
 """
 
@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 router = APIRouter()
 
 COOKIE_NAME = "scorr_auth"
-PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/screener", "/fpc", "/news", "/holdings"}
+PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/screener", "/fpc", "/news", "/holdings", "/filters"}
 _SALT = "scorr2026"
 
 # Hardcoded password — change here to update.
