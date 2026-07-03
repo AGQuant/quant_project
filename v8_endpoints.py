@@ -192,6 +192,69 @@ def v21_hard_gate_pass(basket: str, metrics: dict, enabled: bool) -> bool:
     return True
 
 
+def _load_filter_state(conn) -> dict:
+    """cc#164: per-basket V2.1 enable state (v8_filter_state), read live so the
+    dashboard reflects a kill-switch trip immediately -- same fail-safe pattern
+    as v8_signal_writer.py's _load_filter_state. On any error, return {} so
+    every basket's hard gate displays as DISABLED (locked behavior), never
+    accidentally-on."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT basket, enabled FROM v8_filter_state")
+            return {b: bool(e) for b, e in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+def _load_v21_live_metrics(conn, symbols: list) -> dict:
+    """cc#164: hourly_pct (fyers_fut 5m: last close vs 12-bars-ago) + fall_from_day_high
+    (fyers_eq: live close vs today's high) -- read-only reproduction of the same live
+    computation v8_signal_writer.py feeds into v21_hard_gate_pass, for dashboard display
+    only. Returns {symbol: {"hourly_pct": float|None, "fall_from_day_high": float|None}}."""
+    out = {s: {"hourly_pct": None, "fall_from_day_high": None} for s in symbols}
+    if not symbols:
+        return out
+    today = date.today()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT symbol, close,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
+                    FROM intraday_prices
+                    WHERE source = 'fyers_fut' AND timeframe = '5m'
+                      AND ts::date = %s AND symbol = ANY(%s)
+                )
+                SELECT symbol,
+                       MAX(close) FILTER (WHERE rn = 1)  AS last_close,
+                       MAX(close) FILTER (WHERE rn = 13) AS close_12_ago
+                FROM ranked WHERE rn IN (1, 13) GROUP BY symbol
+            """, (today, symbols))
+            for sym, last_close, close_12_ago in cur.fetchall():
+                if last_close is not None and close_12_ago and float(close_12_ago) > 0:
+                    out[sym]["hourly_pct"] = (float(last_close) / float(close_12_ago) - 1) * 100
+    except Exception:
+        pass
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol,
+                       (SELECT close FROM intraday_prices i2
+                        WHERE i2.symbol = ip.symbol AND i2.ts::date = %s AND i2.source = 'fyers_eq'
+                        ORDER BY ts DESC LIMIT 1)              AS live_close,
+                       MAX(high) FILTER (WHERE ts::date = %s) AS day_high
+                FROM intraday_prices ip
+                WHERE symbol = ANY(%s) AND ts::date = %s AND source = 'fyers_eq'
+                GROUP BY symbol
+            """, (today, today, symbols, today))
+            for sym, live_close, day_high in cur.fetchall():
+                if live_close is not None and day_high and float(day_high) > 0:
+                    out[sym]["fall_from_day_high"] = (float(live_close) - float(day_high)) / float(day_high) * 100
+    except Exception:
+        pass
+    return out
+
+
 INDEX_SYMBOLS = {"NIFTY50", "BANKNIFTY"}
 
 def _seg_override(symbol: str, segment):
@@ -946,11 +1009,6 @@ def funnel_counts(basket: str):
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket=%s AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1", (basket,))
-            row = cur.fetchone()
-        if row:
-            return {"basket": basket, "score_date": str(date.today()), "counts": row[0] if isinstance(row[0], dict) else {}, "source": "precomputed"}
-        with _conn() as conn, conn.cursor() as cur:
             cur.execute("""SELECT symbol, gvm_score, dma_50, dma_200, dma_20,
                        rsi_month, rsi_weekly, daily_rsi, month_return, week_return,
                        year_return, mom_2d, week_index_52, ma9_vs_ma21, vol_ratio,
@@ -958,11 +1016,29 @@ def funnel_counts(basket: str):
                        WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics)""")
             cols = [d[0] for d in cur.description]
             all_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            # cc#164: V2.1 enable state + live hourly/fall metrics, read fresh on every
+            # call regardless of the precomputed/live-fallback branch below -- display
+            # only, never written back to v8_funnel_counts (that write stays inside
+            # v8_signal_writer.py, untouched).
+            v21_enabled = _load_filter_state(conn).get(basket, False)
+            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in all_rows])
+            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket=%s AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1", (basket,))
+            row = cur.fetchone()
+        v21_pass = None
+        if basket in V21_FILTERS:
+            v21_pass = sum(1 for s in all_rows
+                           if v21_hard_gate_pass(basket, {**s, **v21_metrics.get(s["symbol"], {})}, v21_enabled))
+        if row:
+            counts = row[0] if isinstance(row[0], dict) else {}
+            counts = {**counts, "_v21_enabled": v21_enabled, "_v21_pass": v21_pass}
+            return {"basket": basket, "score_date": str(date.today()), "counts": counts, "source": "precomputed"}
         filters = FILTER_CONFIG[basket]; universe = all_rows[:]; counts = {}
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             universe = [s for s in universe if _passes_filter(s.get(metric), mn, mx)]
             counts[metric] = len(universe)
+        counts["_v21_enabled"] = v21_enabled
+        counts["_v21_pass"] = v21_pass
         return {"basket": basket, "score_date": str(date.today()), "counts": counts, "source": "live_fallback"}
     except Exception as e:
         raise HTTPException(500, f"funnel failed: {e}")
@@ -1003,6 +1079,10 @@ def funnel_detail(basket: str):
                 WHERE basket=%s AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1""", (basket,))
             fc = cur.fetchone()
             score_threshold = int(fc[0]) if fc and fc[0] else None
+            # cc#164: V2.1 hard-gate visibility -- read-only, computed against this
+            # SAME loaded universe. Never touches _write_qualified / the signal engine.
+            v21_enabled = _load_filter_state(conn).get(basket, False)
+            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in all_rows])
         total   = len(all_rows)
         filters = _get_buy_reversal_live_filters()[0] if basket == "buy_reversal" else FILTER_CONFIG[basket]
         n       = len(filters)
@@ -1011,11 +1091,46 @@ def funnel_detail(basket: str):
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             passes = sum(1 for s in all_rows if _passes_filter(s.get(metric), mn, mx))
-            stages.append({"metric": metric, "min": mn, "max": mx,
+            stage = {"metric": metric, "min": mn, "max": mx,
                            "passes": passes, "fails": total - passes,
                            "survivors": passes, "killed": total - passes,
                            "pass_pct": round(passes / total * 100, 1) if total else 0,
-                           "dynamic": basket == "buy_reversal" and metric in ("week_return", "rsi_month", "sector_week")})
+                           "dynamic": basket == "buy_reversal" and metric in ("week_return", "rsi_month", "sector_week")}
+            # cc#164: sell_momentum's V2.1 change is a score-gate MODIFY of this exact
+            # stage (week_index_52 <=20 -> <=30 when enabled), not a hard-gate add --
+            # shown here on the existing stage rather than as a separate one.
+            if basket == "sell_momentum" and metric == "week_index_52":
+                stage["v21_enabled"] = v21_enabled
+                if v21_enabled:
+                    eff_mx = V21_FILTERS["sell_momentum"]["week_index_52_modify"]["max"]
+                    eff_passes = sum(1 for s in all_rows if _passes_filter(s.get(metric), mn, eff_mx))
+                    stage["v21_modified_max"] = eff_mx
+                    stage["v21_passes"] = eff_passes
+                    stage["v21_note"] = f"V2.1 enabled: threshold relaxed {mx} -> {eff_mx}"
+                else:
+                    stage["v21_note"] = "V2.1 disabled (locked threshold in effect)"
+            stages.append(stage)
+        # cc#164: V2.1 hard-gate stage -- buy_reversal / buy_momentum / sell_reversal
+        # only (sell_momentum's V2.1 is the MODIFY handled above, not a hard-gate add).
+        # v21_hard_gate_pass() itself returns True unconditionally when disabled, so
+        # survivors==total automatically when off -- same fail-open behavior as the
+        # live signal engine.
+        if basket in V21_FILTERS and basket != "sell_momentum":
+            v21_pass = sum(1 for s in all_rows
+                           if v21_hard_gate_pass(basket, {**s, **v21_metrics.get(s["symbol"], {})}, v21_enabled))
+            band = V21_FILTERS[basket]
+            cond_desc = ", ".join(f"{k}[{c.get('min', '-')}..{c.get('max', '-')}]" for k, c in band.items())
+            stages.append({
+                "metric": "v2.1_hard_gate", "min": None, "max": None,
+                "condition_min": cond_desc,
+                "condition_max": "enabled" if v21_enabled else "disabled",
+                "passes": v21_pass, "fails": total - v21_pass,
+                "survivors": v21_pass, "killed": total - v21_pass,
+                "pass_pct": round(v21_pass / total * 100, 1) if total else 0,
+                "v21_enabled": v21_enabled,
+                "v21_note": "V2.1 hard gate (hourly_pct + week_index_52)" if v21_enabled
+                            else "V2.1 hard gate DISABLED (locked behavior in effect)",
+            })
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT q.symbol, p.pp, p.r1, p.s1, c.cmp FROM v8_qualified q
@@ -1027,13 +1142,15 @@ def funnel_detail(basket: str):
             sq_rows = cur.fetchall()
         pivot_pass = sum(1 for _, pp, r1, s1, cmp in sq_rows if pp and _pivot_room_ok(side, cmp, pp, r1, s1))
         for st in stages:
+            if "condition_min" in st:
+                continue
             mn, mx = st.get("min"), st.get("max")
             st["condition_min"] = f">= {mn}" if mn is not None else "-"
             st["condition_max"] = f"<= {mx}" if mx is not None else "-"
         return {"basket": basket, "score_date": str(date.today()),
                 "universe": total, "n_filters": n, "filter_count": n, "final": pivot_pass,
                 "score_threshold": score_threshold, "score_qualified": score_qualified,
-                "pivot_pass": pivot_pass, "stages": stages,
+                "pivot_pass": pivot_pass, "stages": stages, "v21_enabled": v21_enabled,
                 **BASKET_META.get(basket, {})}
     except Exception as e:
         raise HTTPException(500, f"funnel_detail failed: {e}")
@@ -1048,6 +1165,8 @@ def stock_passcount(basket: str):
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
+            v21_enabled = _load_filter_state(conn).get(basket, False)
+            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in all_rows])
         filters = _get_buy_reversal_live_filters()[0] if basket == "buy_reversal" else FILTER_CONFIG[basket]
         n_filters = len(filters); out = []
         for s in all_rows:
@@ -1056,12 +1175,17 @@ def stock_passcount(basket: str):
                 mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
                 if _passes_filter(s.get(metric), mn, mx): passed_list.append(metric)
                 else: failed_list.append(metric)
+            # cc#164: V2.1 hard-gate pass/fail per stock, display only.
+            v21_pass = (v21_hard_gate_pass(basket, {**s, **v21_metrics.get(s["symbol"], {})}, v21_enabled)
+                        if basket in V21_FILTERS else None)
             out.append({"symbol": s["symbol"], "passed": len(passed_list), "total": n_filters,
                         "passed_filters": passed_list, "failed_filters": failed_list,
-                        "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d")})
+                        "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                        "v21_pass": v21_pass})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": basket, "score_date": str(date.today()),
                 "universe": len(out), "filter_count": n_filters, "stocks": out,
+                "v21_enabled": v21_enabled,
                 **BASKET_META.get(basket, {})}
     except Exception as e:
         raise HTTPException(500, f"stock_passcount failed: {e}")
@@ -1174,6 +1298,30 @@ def _so_funnel_stages():
     _stage("rsi_weekly", lambda s: _passes_filter(s.get("rsi_weekly"), 80.0, None), ">= 80", "-")
     _stage("rsi_month",  lambda s: _passes_filter(s.get("rsi_month"), 70.0, None),  ">= 70", "-")
     _stage("sector_week", lambda s: s.get("sector_week") is not None and float(s["sector_week"]) < 0, "< 0", "-")
+
+    # cc#164: V2.1 hard-gate stage (fall_from_day_high <= -1.5), chained onto the
+    # survivors of the 5 locked filters above -- this dedicated funnel has no
+    # separate v8_qualified read, so "final" below must include this gate to
+    # accurately reflect what the live engine (v8_signal_writer.py) qualifies.
+    v21_enabled = False
+    try:
+        with _conn() as conn:
+            v21_enabled = _load_filter_state(conn).get("sell_overbought", False)
+            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in rows])
+    except Exception:
+        v21_metrics = {}
+    for r in rows:
+        r["fall_from_day_high"] = v21_metrics.get(r["symbol"], {}).get("fall_from_day_high")
+    n_before = len(survivors_list)
+    survivors_list = [s for s in survivors_list
+                      if v21_hard_gate_pass("sell_overbought", s, v21_enabled)]
+    stages.append({
+        "metric": "v2.1_hard_gate", "condition_min": "fall_from_day_high", "condition_max": "<= -1.5",
+        "survivors": len(survivors_list), "killed": n_before - len(survivors_list),
+        "v21_enabled": v21_enabled,
+        "v21_note": "V2.1 hard gate (fall_from_day_high)" if v21_enabled
+                    else "V2.1 hard gate DISABLED (locked behavior in effect)",
+    })
     return stages, total
 
 
@@ -1181,11 +1329,13 @@ def so_funnel_detail():
     try:
         stages, total = _so_funnel_stages()
         final = stages[-1]["survivors"] if stages else 0
+        v21_enabled = stages[-1].get("v21_enabled", False) if stages else False
         return {
             "basket": "sell_overbought", "score_date": str(date.today()),
             "universe": total, "final": final, "filter_count": 5, "n_filters": 5,
             "gate_type": "strict AND (all must pass)",
             "score_qualified": final, "pivot_pass": final, "stages": stages,
+            "v21_enabled": v21_enabled,
             **BASKET_META.get("sell_overbought", {})
         }
     except Exception as e:
@@ -1197,6 +1347,7 @@ def so_funnel_counts():
         stages, total = _so_funnel_stages()
         counts = {st["metric"]: st["survivors"] for st in stages}
         counts["_final_qualified"] = stages[-1]["survivors"] if stages else 0
+        counts["_v21_enabled"] = stages[-1].get("v21_enabled", False) if stages else False
         return {"basket": "sell_overbought", "score_date": str(date.today()),
                 "counts": counts, "source": "live_5filter"}
     except Exception as e:
@@ -1209,9 +1360,12 @@ def so_stock_passcount():
             cur.execute(_SO_COMMON_SQL)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            v21_enabled = _load_filter_state(conn).get("sell_overbought", False)
+            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in rows])
         rows = _so_enrich(rows)
         out = []
         for r in rows:
+            r["fall_from_day_high"] = v21_metrics.get(r["symbol"], {}).get("fall_from_day_high")
             checks = {
                 "week_high_vs_pivot": r.get("week_high_vs_pivot") is True,
                 "fall_3d":     r.get("fall_3d") is not None and float(r["fall_3d"]) < -3.0,
@@ -1221,13 +1375,16 @@ def so_stock_passcount():
             }
             passed = [k for k, ok in checks.items() if ok]
             failed = [k for k, ok in checks.items() if not ok]
+            v21_pass = v21_hard_gate_pass("sell_overbought", r, v21_enabled)
             out.append({"symbol": r["symbol"], "passed": len(passed), "total": 5,
                         "passed_filters": passed, "failed_filters": failed,
                         "gvm_score": r.get("gvm_score"),
-                        "fall_3d": round(float(r["fall_3d"]), 2) if r.get("fall_3d") is not None else None})
+                        "fall_3d": round(float(r["fall_3d"]), 2) if r.get("fall_3d") is not None else None,
+                        "v21_pass": v21_pass})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_overbought", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 5, "stocks": out,
+                "v21_enabled": v21_enabled,
                 **BASKET_META.get("sell_overbought", {})}
     except Exception as e:
         raise HTTPException(500, f"so_stock_passcount failed: {e}")
@@ -1274,7 +1431,7 @@ def _s1b_funnel_stages():
                         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
                       FROM raw_prices WHERE price_date < CURRENT_DATE) x WHERE rn<=5 GROUP BY symbol
             )
-            SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio, m.gvm_score,
+            SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio, m.gvm_score, m.week_index_52,
                    td.day_open, td.live_close, td.today_low,
                    h.lo_2d, h.lo_5d, p.s1
             FROM v8_metrics m
@@ -1287,6 +1444,11 @@ def _s1b_funnel_stages():
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # cc#164: V2.1 hard-gate inputs (hourly_pct is live-only, not in v8_metrics).
+        v21_enabled = _load_filter_state(conn).get("buy_s1_bounce", False)
+        v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in rows])
+        for r in rows:
+            r["hourly_pct"] = v21_metrics.get(r["symbol"], {}).get("hourly_pct")
 
     total = len(rows)
     gate_open = nifty_rsi is not None and nifty_rsi >= 55.0
@@ -1335,6 +1497,22 @@ def _s1b_funnel_stages():
            lambda s: s.get("week_low") is not None and s.get("s1") is not None
                      and float(s["week_low"]) <= float(s["s1"]),
            "week_low", "<= S1")
+
+    # cc#164: V2.1 hard-gate stage (hourly_pct >0..1.0 + week_index_52 50..90),
+    # chained onto the survivors above -- this dedicated funnel has no separate
+    # v8_qualified read, so "final" must include this gate to accurately reflect
+    # what the live engine (v8_signal_writer.py) qualifies.
+    n_before = len(survivors_list)
+    survivors_list = [s for s in survivors_list
+                      if v21_hard_gate_pass("buy_s1_bounce", s, v21_enabled)]
+    stages.append({
+        "metric": "v2.1_hard_gate", "condition_min": "hourly_pct(0..1.0) + week_index_52(50..90)",
+        "condition_max": "enabled" if v21_enabled else "disabled",
+        "survivors": len(survivors_list), "killed": n_before - len(survivors_list),
+        "v21_enabled": v21_enabled,
+        "v21_note": "V2.1 hard gate (hourly_pct + week_index_52)" if v21_enabled
+                    else "V2.1 hard gate DISABLED (locked behavior in effect)",
+    })
     return stages, nifty_rsi, gate_open, total
 
 
@@ -1342,6 +1520,7 @@ def s1b_funnel_detail():
     try:
         stages, nifty_rsi, gate_open, total = _s1b_funnel_stages()
         final_qualified = stages[-1]["survivors"] if stages else 0
+        v21_enabled = stages[-1].get("v21_enabled", False) if stages else False
         return {
             "basket": "buy_s1_bounce", "score_date": str(date.today()),
             "universe": total, "final": final_qualified,
@@ -1351,7 +1530,7 @@ def s1b_funnel_detail():
                             "value": round(nifty_rsi, 1) if nifty_rsi is not None else None,
                             "open": gate_open},
             "score_qualified": final_qualified, "pivot_pass": final_qualified,
-            "stages": stages,
+            "stages": stages, "v21_enabled": v21_enabled,
             **BASKET_META.get("buy_s1_bounce", {})
         }
     except Exception as e:
@@ -1365,6 +1544,7 @@ def s1b_funnel_counts():
         counts["_market_gate_open"] = gate_open
         counts["_nifty_rsi"] = round(nifty_rsi, 1) if nifty_rsi is not None else None
         counts["_final_qualified"] = stages[-1]["survivors"] if stages else 0
+        counts["_v21_enabled"] = stages[-1].get("v21_enabled", False) if stages else False
         return {"basket": "buy_s1_bounce", "score_date": str(date.today()),
                 "counts": counts, "source": "live_7filter"}
     except Exception as e:
@@ -1414,7 +1594,7 @@ def s1b_stock_passcount():
                           FROM raw_prices WHERE price_date < CURRENT_DATE) x
                     WHERE rn<=5 GROUP BY symbol
                 )
-                SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio, m.gvm_score,
+                SELECT m.symbol, m.week_return, m.dma_50, m.vol_ratio, m.gvm_score, m.week_index_52,
                        td.day_open, td.live_close, td.today_low, h.lo_2d, h.lo_5d, p.s1
                 FROM v8_metrics m
                 JOIN futures_universe f ON f.symbol=m.symbol AND f.is_active=TRUE
@@ -1426,6 +1606,8 @@ def s1b_stock_passcount():
             """)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            v21_enabled = _load_filter_state(conn).get("buy_s1_bounce", False)
+            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in rows])
 
         def _f(v):
             try: return float(v) if v is not None else None
@@ -1440,6 +1622,7 @@ def s1b_stock_passcount():
             wl_cand = [x for x in (lo5, tlow) if x is not None]
             week_low = min(wl_cand) if wl_cand else None
             s1 = _f(r.get("s1"))
+            r["hourly_pct"] = v21_metrics.get(r["symbol"], {}).get("hourly_pct")
             checks = {
                 "nifty_rsi":      gate_open,
                 "gvm_score":      _passes_filter(r.get("gvm_score"), 7.0, None),
@@ -1452,16 +1635,18 @@ def s1b_stock_passcount():
             }
             passed = [k for k, ok in checks.items() if ok]
             failed = [k for k, ok in checks.items() if not ok]
+            v21_pass = v21_hard_gate_pass("buy_s1_bounce", r, v21_enabled)
             out.append({"symbol": r["symbol"], "passed": len(passed), "total": 8,
                         "passed_filters": passed, "failed_filters": failed,
                         "gvm_score": r.get("gvm_score"),
                         "recovery_2d": round(rec2d, 2) if rec2d is not None else None,
-                        "day_ret": round(dayret, 2) if dayret is not None else None})
+                        "day_ret": round(dayret, 2) if dayret is not None else None,
+                        "v21_pass": v21_pass})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_s1_bounce", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 8, "stocks": out,
                 "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
-                "gate_open": gate_open,
+                "gate_open": gate_open, "v21_enabled": v21_enabled,
                 **BASKET_META.get("buy_s1_bounce", {})}
     except Exception as e:
         raise HTTPException(500, f"s1b_stock_passcount failed: {e}")
