@@ -425,6 +425,56 @@ def _load_cmp(conn) -> Dict[str, float]:
         return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
 
 
+def _load_hourly_fut(conn, symbols: List[str]) -> Dict[str, Optional[float]]:
+    """cc#158: hourly momentum on the FUTURES series (spec id 1263-1267).
+    (last 5m close - close 12 bars ago)/close_12_ago * 100, from
+    intraday_prices source='fyers_fut' timeframe='5m', single tick at
+    qualification. 12 bars * 5min = 60min = "hourly". NULL when the 12-bars-ago
+    bar does not exist yet (first ~hour of the session) so the hard gate
+    NULL-passes rather than blocking early signals."""
+    today = datetime.now(IST).date()
+    out: Dict[str, Optional[float]] = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT symbol, close,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
+                    FROM intraday_prices
+                    WHERE source = 'fyers_fut' AND timeframe = '5m'
+                      AND ts::date = %s AND symbol = ANY(%s)
+                )
+                SELECT symbol,
+                       MAX(close) FILTER (WHERE rn = 1)  AS last_close,
+                       MAX(close) FILTER (WHERE rn = 13) AS close_12_ago
+                FROM ranked
+                WHERE rn IN (1, 13)
+                GROUP BY symbol
+            """, (today, symbols))
+            for sym, last_close, close_12_ago in cur.fetchall():
+                if last_close is not None and close_12_ago and float(close_12_ago) > 0:
+                    out[sym] = (float(last_close) / float(close_12_ago) - 1) * 100
+                else:
+                    out[sym] = None
+    except Exception as e:
+        log.warning(f"_load_hourly_fut: {e} -- hourly NULL-passes this tick")
+    return out
+
+
+def _load_filter_state(conn) -> Dict[str, bool]:
+    """cc#158: per-basket V2.1 enable state (v8_filter_state). Read live each
+    tick so a kill-switch disable takes effect on the next signal pass. FAIL-SAFE:
+    on any error, return {} -> every basket's hard gate treats itself as DISABLED
+    (exact locked behavior), never accidentally-on."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT basket, enabled FROM v8_filter_state")
+            return {b: bool(e) for b, e in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"_load_filter_state: {e} -- V2.1 hard gates OFF (locked behavior)")
+        return {}
+
+
 # -- Step 5: Compute live metrics ---------------------------------------------
 
 def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
@@ -557,6 +607,18 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         out["week_low"] = float(today_bar_low)
     else:
         out["week_low"] = None
+
+    # cc#158: fall_from_day_high — (live - today high)/today high * 100, always
+    # <= 0. today high = fyers_eq day high (bar["high"]), same source as live.
+    # Sell Overbought V2.1 trigger-timing filter (spec id=1268). NULL if no
+    # intraday high yet.
+    day_high = bar.get("high")
+    if day_high and float(day_high) > 0:
+        out["fall_from_day_high"] = (live - float(day_high)) / float(day_high) * 100
+
+    # cc#158: hourly_pct is injected in run_live_signal_writer from the fyers_fut
+    # 5m loader (single tick at qualification, NULL first hour / <12 bars).
+    out["hourly_pct"] = None
 
     out["_live"] = live
     return out
@@ -1172,10 +1234,11 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
 # -- Step 8: Write v8_qualified + funnel --------------------------------------
 
 def _write_qualified(conn, all_metrics: List[dict], target_date: date):
-    from v8_endpoints import FILTER_CONFIG
+    from v8_endpoints import FILTER_CONFIG, v21_hard_gate_pass
 
     gate_fails = _market_gate_fails(conn)
     pivots     = _load_pivots(conn)
+    enabled_v21 = _load_filter_state(conn)   # cc#158: per-basket V2.1 enable state
 
     nifty_1m   = _get_nifty_1m_return(conn)
     dyn_br     = _get_dynamic_buy_reversal_overrides(nifty_1m)
@@ -1194,6 +1257,14 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             active_filters["sector_week"] = list(dyn_br["sector_week"])
         else:
             active_filters = filters
+
+        # cc#158: sell_momentum V2.1 w52 is a MODIFY of a locked score-gate
+        # filter (<=20 -> <=30), not a hard-gate add. Swap the bound in-place
+        # only when enabled; n_filters (and thus the gate threshold) is
+        # unchanged. Old <=20 path stays until enable (spec id=1267).
+        if basket == "sell_momentum" and enabled_v21.get("sell_momentum"):
+            active_filters = dict(active_filters)
+            active_filters["week_index_52"] = [None, 30.0]
 
         n_filters = len(active_filters)
         side      = BASKET_SIDE.get(basket, "BUY")
@@ -1224,6 +1295,14 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
 
         log.info(f"{basket}: score-gate need={need}/{n_filters} "
                  f"gate_fails={gate_fails} -> {len(universe)} score-qualified")
+
+        # cc#158: V2.1 hard-gate layer — applied AFTER the score-gate, never
+        # counted into the threshold. Disabled basket -> no-op (locked behavior).
+        v21_on = enabled_v21.get(basket, False)
+        if v21_on:
+            before = len(universe)
+            universe = [s for s in universe if v21_hard_gate_pass(basket, s, True)]
+            log.info(f"{basket}: V2.1 hard-gate ON -> {len(universe)}/{before} pass")
 
         universe = [
             s for s in universe
@@ -1259,6 +1338,9 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
             snap["vol_ratio_days_available"]  = s.get("vol_ratio_days_available")
             snap["filter_score"] = s.get("_filter_score")
             snap["filter_total"] = n_filters
+            snap["hourly_pct"]          = s.get("hourly_pct")           # cc#158
+            snap["fall_from_day_high"]  = s.get("fall_from_day_high")   # cc#158
+            snap["v21_enabled"]         = v21_on                        # cc#158
             if basket == "buy_reversal":
                 snap["regime"] = dyn_br["_regime"]
             try:
@@ -1294,17 +1376,23 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
-                                    gate_fails, pivots, signal_ts_ist)
+                                    gate_fails, pivots, signal_ts_ist, enabled_v21)
     _write_sell_overbought_qualified(conn, all_metrics, target_date,
-                                      gate_fails, pivots, signal_ts_ist)
+                                      gate_fails, pivots, signal_ts_ist, enabled_v21)
 
 
 def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: date,
-                                    gate_fails: int, pivots: dict, signal_ts_ist):
+                                    gate_fails: int, pivots: dict, signal_ts_ist,
+                                    enabled_v21: Optional[dict] = None):
     """
     Buy S1 Bounce V1 (17-Jun-2026). 7 strict filters (1 gate + 6 stages).
     Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR.
+    cc#158: V2.1 hard gate (hourly_pct >0..1.0, week_index_52 50..90) layered
+    as extra strict-AND conditions when enabled (spec id=1265).
     """
+    from v8_endpoints import v21_hard_gate_pass
+    enabled_v21 = enabled_v21 or {}
+    s1b_on = enabled_v21.get("buy_s1_bounce", False)
     nifty_rsi = _get_nifty_rsi(conn)
     if nifty_rsi is None or nifty_rsi < 55.0:
         log.debug(f"buy_s1_bounce: Nifty RSI={nifty_rsi} < 55 -- gated OFF")
@@ -1340,6 +1428,12 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
 
     log.info(f"buy_s1_bounce: {len(qualified)} qualified after week_low<=S1")
 
+    # cc#158: V2.1 hard-gate layer (strict-AND) — hourly_pct + week_index_52.
+    if s1b_on:
+        before = len(qualified)
+        qualified = [s for s in qualified if v21_hard_gate_pass("buy_s1_bounce", s, True)]
+        log.info(f"buy_s1_bounce: V2.1 hard-gate ON -> {len(qualified)}/{before} pass")
+
     for s in qualified:
         sym  = s["symbol"]
         snap = {
@@ -1350,6 +1444,9 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
             "vol_ratio_legacy": s.get("vol_ratio_legacy"),
             "vol_ratio_time_normalized": s.get("vol_ratio_time_normalized"),
             "vol_ratio_days_available": s.get("vol_ratio_days_available"),
+            "hourly_pct": s.get("hourly_pct"),            # cc#158
+            "week_index_52": s.get("week_index_52"),      # cc#158
+            "v21_enabled": s1b_on,                        # cc#158
         }
         try:
             with conn.cursor() as cur:
@@ -1383,7 +1480,11 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
 
 
 def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date: date,
-                                      gate_fails: int, pivots: dict, signal_ts_ist):
+                                      gate_fails: int, pivots: dict, signal_ts_ist,
+                                      enabled_v21: Optional[dict] = None):
+    from v8_endpoints import v21_hard_gate_pass
+    enabled_v21 = enabled_v21 or {}
+    so_v21_on = enabled_v21.get("sell_overbought", False)
     so_cap = _so_slots(gate_fails)
     log.info(f"sell_overbought: SO slots={so_cap} gate_fails={gate_fails}")
 
@@ -1476,9 +1577,14 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
             continue
         if (pr["fall_3d_pct"] or 0) >= -3.0:
             continue
+        # cc#158: V2.1 hard gate (strict-AND) — fall_from_day_high <= -1.5.
+        # NULL-passes if no intraday high yet (spec id=1268).
+        if so_v21_on and not v21_hard_gate_pass("sell_overbought", s, True):
+            continue
         qualified_so.append((s, pr))
 
-    log.info(f"sell_overbought: {len(qualified_so)} qualified after pivot filters")
+    log.info(f"sell_overbought: {len(qualified_so)} qualified after pivot filters"
+             f"{' (V2.1 hard-gate ON)' if so_v21_on else ''}")
 
     for s, pr in qualified_so:
         sym = s["symbol"]
@@ -1488,6 +1594,8 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
             "near_r1": float(pr["max_h5d"] or 0) > 0.9 * float(pr["r1"] or 0),
             "near_r2": float(pr["max_h5d"] or 0) > 0.9 * float(pr["r2"] or 0),
             "filter_score": 5, "filter_total": 5, "so_slots": so_cap,
+            "fall_from_day_high": s.get("fall_from_day_high"),   # cc#158
+            "v21_enabled": so_v21_on,                            # cc#158
         }
         try:
             with conn.cursor() as cur:
@@ -1559,6 +1667,7 @@ def run_live_signal_writer(conn) -> dict:
     cmp_map     = _load_cmp(conn)
     vol_cutoff  = _round_down_5min(datetime.now(IST).replace(tzinfo=None))
     vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff)
+    hourly_map  = _load_hourly_fut(conn, symbols)   # cc#158: fyers_fut 5m hourly
 
     if not intraday:
         log.warning("signal_writer: no intraday bars -- fyers_feed not running, using EOD fallback")
@@ -1571,6 +1680,7 @@ def run_live_signal_writer(conn) -> dict:
             row["symbol"]  = sym
             row["mom_2d"]  = (cmp / c2d - 1) * 100 if (cmp and c2d and c2d > 0) else eod.get("eod_mom_2d")
             row["_cmp"]    = cmp
+            row["hourly_pct"] = hourly_map.get(sym)   # cc#158 (NULL in EOD fallback)
             all_metrics.append(row)
         _write_qualified(conn, all_metrics, today)
         _write_heartbeat(conn)
@@ -1589,6 +1699,7 @@ def run_live_signal_writer(conn) -> dict:
         m   = _compute_live_metrics(hist, bar, cmp, eod, vol_tn_map.get(sym))
         m["symbol"] = sym
         m["_cmp"]   = cmp if cmp else bar["close"]
+        m["hourly_pct"] = hourly_map.get(sym)   # cc#158: fyers_fut 5m hourly
         computed[sym] = m
 
     _add_sector_aggregates(computed, eod_metrics)
