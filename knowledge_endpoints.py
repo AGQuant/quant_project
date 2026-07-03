@@ -13,7 +13,10 @@ time when the stored column is NULL, so the badge is always populated.
 
 import os
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from scorr_auth import _is_authed
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -34,10 +37,14 @@ _READ_MIN = ("COALESCE(reading_time_min, "
 
 
 @router.get("/api/knowledge/articles")
-def knowledge_articles(category: str = "all", limit: int = 100, offset: int = 0):
+def knowledge_articles(request: Request, category: str = "all", limit: int = 100, offset: int = 0):
     """List Knowledge Hub articles (metadata only — no content_md for a light list).
     category = all | exact category string (e.g. 'Taxation'). Newest published first.
-    Returns category_counts for tab/pill badges."""
+    Returns category_counts for tab/pill badges.
+    cc#160: endpoint-level auth (this route was reachable with no cookie, bypassing
+    the /news page's login gate) — same _is_authed() check as the page, 401 not redirect."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     cat = (category or "all").strip()
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
@@ -68,8 +75,11 @@ def knowledge_articles(category: str = "all", limit: int = 100, offset: int = 0)
 
 
 @router.get("/api/knowledge/articles/{slug}")
-def knowledge_article(slug: str):
-    """Single Knowledge Hub article with full content_md (for the expand view)."""
+def knowledge_article(slug: str, request: Request):
+    """Single Knowledge Hub article with full content_md (for the expand view).
+    cc#160: endpoint-level auth — same _is_authed() check as the page, 401 not redirect."""
+    if not _is_authed(request):
+        return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"""
             SELECT id, slug, title, summary, category, content_md, batch_number,
