@@ -193,8 +193,16 @@
 .galaxy-overlay{position:fixed;inset:0;z-index:1000;background:#070b1a;display:none}
 .galaxy-overlay.on{display:block}
 .galaxy-canvas{position:absolute;inset:0}
-.galaxy-topbar{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(180deg,rgba(7,11,26,.92),rgba(7,11,26,0))}
-.galaxy-title{color:#e8eefc;font-size:13px;font-weight:800;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* cc#203: reserve the top-right corner (104px) for the server-injected global
+   Logout pill (#scorr-lo, position:fixed z-index:9999) so galaxy controls never
+   sit under it; wrap to extra rows on tight widths. */
+.galaxy-topbar{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 104px 10px 12px;background:linear-gradient(180deg,rgba(7,11,26,.94),rgba(7,11,26,0))}
+.galaxy-title{color:#e8eefc;font-size:13px;font-weight:800;flex:1;min-width:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* cc#203: back-to-Intel control (top-left), dark pill matching galaxy UI, ≥40px touch target */
+.galaxy-back{display:inline-flex;align-items:center;gap:5px;height:40px;padding:0 14px 0 10px;border-radius:20px;border:1px solid #29406e;background:rgba(13,20,40,.9);color:#cdd8f2;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);font-family:inherit;flex-shrink:0}
+.galaxy-back:hover{border-color:#2563eb;color:#fff}
+.galaxy-back .ga-arrow{font-size:17px;line-height:1;margin-top:-1px}
+@media(max-width:560px){.galaxy-gsearch{flex:1 1 auto;max-width:none}}
 .galaxy-gsearch{width:150px;max-width:38vw;padding:7px 10px;border-radius:8px;border:1px solid #29406e;background:#0d1428;color:#e8eefc;font-size:12px;outline:none;font-family:inherit}
 .galaxy-gpill{padding:6px 10px;border-radius:14px;border:1px solid #29406e;background:#0d1428;color:#9fb0d6;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap}
 .galaxy-gpill.on{background:#2563eb;border-color:#2563eb;color:#fff}
@@ -796,6 +804,7 @@ function ensureGalaxyOverlay(){
   o.innerHTML =
     '<div class="galaxy-canvas" id="galaxyCanvas"></div>'+
     '<div class="galaxy-topbar">'+
+      '<button class="galaxy-back" onclick="closeGalaxy()" aria-label="Back to Intel"><span class="ga-arrow">‹</span>Intel</button>'+
       '<div class="galaxy-title">✦ Knowledge Galaxy</div>'+
       '<input class="galaxy-gsearch" id="galaxySearch" type="text" placeholder="Search…" autocomplete="off">'+
       '<span class="galaxy-gpill" id="gpAll" onclick="galaxySetDiff(\'all\')">All</span>'+
