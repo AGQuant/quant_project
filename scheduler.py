@@ -83,6 +83,9 @@ _pivots_ran_today: Optional[date] = None
 _qb_eod_ran_today: Optional[date] = None
 _ut_ran_today: Optional[date] = None   # cc#154: universe_technicals nightly guard
 _qb_eod_running = False
+# cc#186: company-news two-wave day-lock + wave-1 result (for wave-2 branching)
+_company_news_ran_today: Optional[date] = None
+_company_news_wave1_inserted: Optional[int] = None
 _qb_intraday_mark_running = False
 _global_fetching = False
 _global_intraday_fetching = False
@@ -889,12 +892,38 @@ def _bg_fetch_market_news():
         log.info(f"news_market: {res.get('inserted') if isinstance(res, dict) else res} new")
     except Exception as e: log.error(f"news_market: {e}")
 
-def _bg_fetch_company_news():
+def _bg_fetch_company_news(rank_from=1, rank_to=500, wave=None):
+    """cc#186: fetch one mcap-rank window of company news. Tracks the wave-1
+    result (so wave 2 can branch) and sets the day-lock once any rows land."""
+    global _company_news_ran_today, _company_news_wave1_inserted
     try:
         import news_fetcher
-        with _conn() as conn: res = news_fetcher.fetch_company_news(conn)
-        log.info(f"news_company: {res.get('inserted') if isinstance(res, dict) else res} new")
-    except Exception as e: log.error(f"news_company: {e}")
+        with _conn() as conn:
+            res = news_fetcher.fetch_company_news(conn, rank_from=rank_from, rank_to=rank_to)
+        ins = res.get("inserted", 0) if isinstance(res, dict) else 0
+        if wave == 1:
+            _company_news_wave1_inserted = ins
+        if ins > 0:
+            _company_news_ran_today = _ist_now().date()
+        log.info(f"news_company wave={wave} [{rank_from}-{rank_to}]: {ins} new")
+    except Exception as e:
+        log.error(f"news_company: {e}")
+
+def _bg_company_news_wave2():
+    """cc#186 07:15 wave 2. If wave 1 landed nothing (or never ran), re-attempt
+    the top 250 first (wave 2 doubles as the wave-1 retry); else fetch 251-500."""
+    if not _company_news_wave1_inserted:      # None or 0
+        _bg_fetch_company_news(1, 250, wave=2)
+    else:
+        _bg_fetch_company_news(251, 500, wave=2)
+
+def _bg_company_news_retry():
+    """cc#186 07:30 safety retry (mirrors the ADR 16:00 watchdog). If no company
+    rows landed today at all, re-run the top 250 — covers drift-missed minutes."""
+    if _company_news_ran_today == _ist_now().date():
+        return
+    log.warning("news_company: zero company rows inserted by 07:30 — retry top 250")
+    _bg_fetch_company_news(1, 250, wave="retry")
 
 def _bg_cleanup_news():
     try:
@@ -930,7 +959,11 @@ async def _scheduler_loop():
             _spawn(_bg_fetch_global)
             _spawn(_bg_fetch_market_news)   # task #38: domestic + global RSS
         if h == 6 and m == 30:
-            _spawn(_bg_fetch_company_news)  # task #38: top-500 Google News RSS
+            _spawn(_bg_fetch_company_news, 1, 250, 1)  # cc#186 wave 1: top 250 by mcap
+        if h == 7 and m == 15:
+            _spawn(_bg_company_news_wave2)             # cc#186 wave 2: 251-500 (or retry top 250)
+        if h == 7 and m == 30:
+            _spawn(_bg_company_news_retry)             # cc#186: zero-insert safety retry
         if 6 <= h <= 23 and m % 5 == 0:
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:

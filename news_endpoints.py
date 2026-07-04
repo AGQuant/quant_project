@@ -14,6 +14,7 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
 """
 
 import os
+from typing import Optional
 import psycopg
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
@@ -137,9 +138,11 @@ def news_unpolished(sample: int = 20):
 def news_live(hours: int = 72, per_cat: int = 60):
     """Raw unpolished headlines from the last N hours, grouped by source_type.
     Powers the CIO Dashboard Top News tab — raw only, no polished join, fast.
-    Per-category cap (ROW_NUMBER) so domestic/global aren't drowned by company."""
+    Per-category cap (ROW_NUMBER) so domestic/global aren't drowned by company.
+    cc#186: per_cat max raised 200->300 — domestic runs ~259 items/48h and the
+    old 60-default (and 200 cap) truncated coverage to ~14h."""
     hours = max(1, min(hours, 168))
-    per_cat = max(1, min(per_cat, 200))
+    per_cat = max(1, min(per_cat, 300))
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT id, headline, description, source_name, source_type, symbol, published_at
@@ -274,16 +277,22 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
             "count": len(articles), "category_counts": counts, "articles": articles}
 
 
-def _refresh_job():
+def _refresh_job(rank_from: int, rank_to: int, symbols):
     """Runs both fetchers on its own connection (background thread)."""
     import news_fetcher
     with _conn() as conn:
         news_fetcher.fetch_market_news(conn)
-        news_fetcher.fetch_company_news(conn)
+        news_fetcher.fetch_company_news(conn, symbols=symbols, rank_from=rank_from, rank_to=rank_to)
 
 
 @router.post("/api/admin/refresh_news")
-def refresh_news(background_tasks: BackgroundTasks):
-    """Trigger market + company news fetch in the background."""
-    background_tasks.add_task(_refresh_job)
-    return {"status": "started", "jobs": ["fetch_market_news", "fetch_company_news"]}
+def refresh_news(background_tasks: BackgroundTasks,
+                 rank_from: int = 1, rank_to: int = 500, symbols: Optional[str] = None):
+    """Trigger market + company news fetch in the background. cc#186: rank_from/
+    rank_to bound the company mcap window, or pass a comma-separated `symbols`
+    list — e.g. ?symbols=RELIANCE,TCS,INFY,HDFCBANK,SBIN for a quick 5-company
+    429-mitigation probe. Result lands in ops_log (category=news_fetch)."""
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] if symbols else None
+    background_tasks.add_task(_refresh_job, rank_from, rank_to, syms)
+    return {"status": "started", "jobs": ["fetch_market_news", "fetch_company_news"],
+            "company_window": {"rank_from": rank_from, "rank_to": rank_to, "symbols": syms}}

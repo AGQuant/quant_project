@@ -945,6 +945,8 @@ async function loadFunnelInline(basketId,panelIdx){
 
 // ---- Live News tab (raw RSS headlines, task #46) ---------------------------
 let NEWS_DATA=null, NEWS_FILTER='domestic', NEWS_TS=null;
+const NEWS_CHUNK=40; let NEWS_SHOWN=NEWS_CHUNK;   // cc#186: lazy reveal, 48h can be ~260 rows
+function newsShowMore(){NEWS_SHOWN+=NEWS_CHUNK;renderNews();}
 function newsEsc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function newsAgo(ts){
   if(!ts)return'';
@@ -961,7 +963,7 @@ function newsList(){
   const arr=NEWS_DATA.domestic||[];
   return[...arr].sort((a,b)=>new Date(b.published_at||0)-new Date(a.published_at||0));
 }
-function setNewsFilter(k){NEWS_FILTER=k;renderNews();}
+function setNewsFilter(k){NEWS_FILTER=k;NEWS_SHOWN=NEWS_CHUNK;renderNews();}
 function renderNews(){
   const el=document.getElementById('panel11');if(!el)return;
   const d=NEWS_DATA||{};
@@ -974,16 +976,27 @@ function renderNews(){
   if(!NEWS_DATA)body='<div class="loading">Loading headlines...</div>';
   else{
     const rows=newsList();
-    body=rows.length?'<div class="news-list">'+rows.map(a=>
-      `<div class="news-row"><span class="news-hl">${newsEsc(a.headline)}</span>`+
-      `<span class="news-meta">${newsEsc(a.source_name||'')}${a.published_at?' · '+newsAgo(a.published_at):''}</span></div>`).join('')+'</div>'
-      :'<div class="empty">No headlines available</div>';
+    if(!rows.length)body='<div class="empty">No headlines available</div>';
+    else{
+      const shown=rows.slice(0,NEWS_SHOWN);
+      const oldest=rows[rows.length-1];
+      const list='<div class="news-list">'+shown.map(a=>
+        `<div class="news-row"><span class="news-hl">${newsEsc(a.headline)}</span>`+
+        `<span class="news-meta">${newsEsc(a.source_name||'')}${a.published_at?' · '+newsAgo(a.published_at):''}</span></div>`).join('')+'</div>';
+      // cc#186: chunked reveal + always-visible coverage footer so truncation is never silent
+      const more=rows.length>NEWS_SHOWN
+        ? `<div onclick="newsShowMore()" style="text-align:center;padding:10px;margin-top:6px;cursor:pointer;font-size:12px;font-weight:700;color:var(--cyan);border:1px solid var(--line);border-radius:6px">Show more (${rows.length-NEWS_SHOWN} older) ▾</div>`
+        : '';
+      const oldestAge=(oldest&&oldest.published_at)?newsAgo(oldest.published_at):'--';
+      const footer=`<div style="text-align:center;padding:8px 4px;font-size:10.5px;color:var(--dim)">Showing ${shown.length} of ${rows.length} · oldest ${oldestAge}</div>`;
+      body=list+more+footer;
+    }
   }
   el.innerHTML=`<div class="news-head"><span class="news-live">🔴 LIVE</span> · Last refreshed ${ts} IST</div>`+
     `<div class="news-pills">${pills}</div>${body}`;
 }
 async function loadNews(){
-  try{NEWS_DATA=await getJSON('/api/news/live?hours=72');NEWS_TS=new Date(Date.now()+(5*60+30)*60000);}
+  try{NEWS_DATA=await getJSON('/api/news/live?hours=48&per_cat=300');NEWS_TS=new Date(Date.now()+(5*60+30)*60000);NEWS_SHOWN=NEWS_CHUNK;}
   catch(e){const el=document.getElementById('panel11');if(el&&!NEWS_DATA)el.innerHTML='<div class="empty">News unavailable</div>';return;}
   renderNews();
 }

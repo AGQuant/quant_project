@@ -21,11 +21,11 @@ NOT built here.
 import os
 import re
 import time
+import random
 import hashlib
 import logging
 import calendar
 from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psycopg
 
@@ -34,10 +34,20 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 DESC_MAX        = 1000     # raw_news.description is VARCHAR(1000)
 RETENTION_DAYS  = 30
-COMPANY_LIMIT   = 500      # top-N stocks by mcap
+COMPANY_LIMIT   = 500      # top-N stocks by mcap (founder call: coverage over caution)
 PER_COMPANY_MAX = 10       # cap entries stored per company (volume control)
-FETCH_WORKERS   = 5        # spec: concurrency 5 for company Google-News fan-out
 HTTP_TIMEOUT    = 12
+
+# cc#186: Google News RSS 429-rate-limited the Railway datacenter IP (500 cos x
+# 5 concurrent workers/day = classic flag). Mitigation: sequential (concurrency
+# 1), 2-4s jitter between companies, a browser User-Agent, honor Retry-After,
+# and abort a run early once the IP is clearly flagged (10 consecutive 429s).
+BROWSER_UA          = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+COMPANY_SLEEP_MIN   = 2.0
+COMPANY_SLEEP_MAX   = 4.0
+MAX_CONSECUTIVE_429 = 10
+RETRY_AFTER_CAP     = 30    # seconds — never sleep longer than this on Retry-After
 
 # RSS feeds — source_type drives downstream filtering (domestic | global | company)
 RSS_DOMESTIC = [
@@ -236,15 +246,43 @@ def _insert_rows(conn, rows) -> int:
     return inserted
 
 
-def _parse_feed(url: str):
-    """Fetch + parse one RSS feed. Returns feedparser entries ([] on failure)."""
+def _fetch_feed(url: str, agent: str = None):
+    """cc#186: fetch + parse one RSS feed, FAIL-LOUD. Returns
+    (entries, http_status, bozo, retry_after). feedparser swallows HTTP status
+    into d.status; a 429 comes back as status=429 with empty entries, which the
+    old code silently treated as 'ok, 0 new' — that hid 13 days of company-news
+    outage. Callers inspect status to count 429s and honor Retry-After."""
     import feedparser  # lazy: never break module import if dep not yet installed
     try:
-        d = feedparser.parse(url)
-        return d.entries or []
+        d = feedparser.parse(url, agent=agent) if agent else feedparser.parse(url)
+        status = getattr(d, "status", None)
+        bozo = 1 if getattr(d, "bozo", 0) else 0
+        headers = getattr(d, "headers", {}) or {}
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        return (d.entries or []), status, bozo, retry_after
     except Exception as e:
-        log.warning(f"feed parse failed {url}: {e}")
-        return []
+        log.warning(f"feed fetch failed {url}: {e}")
+        return [], None, 1, None
+
+
+def _parse_feed(url: str):
+    """Entries-only wrapper (market-news path, unchanged behaviour)."""
+    entries, _s, _b, _r = _fetch_feed(url)
+    return entries
+
+
+def _write_ops_log(conn, category: str, title: str, details: dict):
+    """cc#186: visible per-run telemetry to ops_log (mirrors scheduler._log_alert
+    shape). Used for both the every-run news_fetch record and zero-insert alerts."""
+    try:
+        from psycopg.types.json import Json
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), %s, %s, %s)""",
+                        (category, title, Json(details)))
+        conn.commit()
+    except Exception as e:
+        log.error(f"_write_ops_log failed ({category}/{title}): {e}")
 
 
 def _rows_from_entries(entries, source_type, source_name, symbol=None, cap=None):
@@ -288,15 +326,19 @@ def fetch_market_news(conn=None):
             conn.close()
 
 
-def _top_companies(conn, limit: int):
+def _companies_ranked(conn, rank_from: int, rank_to: int):
+    """Companies ranked [rank_from, rank_to] by mcap (1-indexed, inclusive).
+    cc#186: supports the two-wave split (1-250 @ 06:30, 251-500 @ 07:15)."""
+    offset = max(0, rank_from - 1)
+    limit = max(0, rank_to - rank_from + 1)
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, company_name FROM gvm_scores
             WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
               AND company_name IS NOT NULL AND market_cap IS NOT NULL
             ORDER BY market_cap DESC NULLS LAST
-            LIMIT %s
-        """, (limit,))
+            OFFSET %s LIMIT %s
+        """, (offset, limit))
         return cur.fetchall()
 
 
@@ -306,10 +348,14 @@ def _google_news_url(company_name: str) -> str:
     return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 
-def fetch_company_news(conn=None, symbols=None, limit: int = COMPANY_LIMIT):
-    """Google News RSS per company (top-N by mcap, or an explicit symbol list).
-    Network fan-out is concurrent (FETCH_WORKERS); all DB writes stay on this
-    thread (psycopg connections are not thread-safe)."""
+def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int = COMPANY_LIMIT):
+    """Google News RSS per company (mcap rank window, or an explicit symbol list).
+
+    cc#186: SEQUENTIAL (concurrency 1) with a browser UA + 2-4s jitter to stay
+    under Google News' datacenter-IP rate limit. FAIL-LOUD: counts 429/other/
+    empty responses, writes a per-run ops_log record EVERY run, alerts on a
+    weekday zero-insert, honors Retry-After, and aborts early once the IP is
+    clearly flagged (10 consecutive 429s) rather than hammering on."""
     own = conn is None
     if own:
         conn = _conn()
@@ -322,28 +368,62 @@ def fetch_company_news(conn=None, symbols=None, limit: int = COMPANY_LIMIT):
                                  AND symbol = ANY(%s)""", (list(symbols),))
                 companies = cur.fetchall()
         else:
-            companies = _top_companies(conn, limit)
+            companies = _companies_ranked(conn, rank_from, rank_to)
 
         if not companies:
-            return {"ok": True, "inserted": 0, "companies": 0, "note": "no companies"}
+            return {"ok": True, "inserted": 0, "companies_done": 0, "note": "no companies"}
 
-        def _work(item):
-            sym, name = item
-            entries = _parse_feed(_google_news_url(name or sym))
-            return _rows_from_entries(entries, "company", "Google News",
-                                      symbol=sym, cap=PER_COMPANY_MAX)
+        total = done = http_429 = http_other = empty = 0
+        consec_429 = 0
+        aborted = False
+        for sym, name in companies:
+            entries, status, bozo, retry_after = _fetch_feed(_google_news_url(name or sym), agent=BROWSER_UA)
+            if status == 429:
+                http_429 += 1
+                consec_429 += 1
+                if retry_after:
+                    try:
+                        time.sleep(min(float(retry_after), RETRY_AFTER_CAP))
+                    except (TypeError, ValueError):
+                        pass
+                if consec_429 >= MAX_CONSECUTIVE_429:
+                    aborted = True
+                    log.error(f"fetch_company_news: IP flagged — aborting after "
+                              f"{consec_429} consecutive 429s at {done}/{len(companies)}")
+                    done += 1
+                    break
+            else:
+                consec_429 = 0
+                if status is not None and status >= 400:
+                    http_other += 1
+                elif not entries:
+                    empty += 1
+                else:
+                    try:
+                        total += _insert_rows(conn, _rows_from_entries(
+                            entries, "company", "Google News", symbol=sym, cap=PER_COMPANY_MAX))
+                    except Exception as e:
+                        log.warning(f"company news {sym}: {e}")
+            done += 1
+            time.sleep(random.uniform(COMPANY_SLEEP_MIN, COMPANY_SLEEP_MAX))
 
-        total, done = 0, 0
-        with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
-            futures = {ex.submit(_work, c): c for c in companies}
-            for fut in as_completed(futures):
-                try:
-                    total += _insert_rows(conn, fut.result())
-                except Exception as e:
-                    log.warning(f"company news {futures[fut][0]}: {e}")
-                done += 1
-        log.info(f"fetch_company_news: {total} new across {done} companies")
-        return {"ok": True, "inserted": total, "companies": done}
+        stats = {"inserted": total, "companies_done": done, "companies_total": len(companies),
+                 "rank_from": rank_from, "rank_to": rank_to, "http_429": http_429,
+                 "http_other": http_other, "empty": empty, "aborted": aborted}
+        _write_ops_log(conn, "news_fetch", "fetch_company_news", stats)
+
+        # fail-loud: a weekday run that inserts nothing is an outage, not a no-op.
+        ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        if total == 0 and ist.weekday() < 5:
+            _write_ops_log(conn, "alert", "company_news_zero",
+                           {"message": f"company news inserted 0 rows "
+                                       f"(429={http_429}, empty={empty}, other={http_other}, aborted={aborted})",
+                            "rank_from": rank_from, "rank_to": rank_to,
+                            "ist": ist.isoformat()})
+
+        log.info(f"fetch_company_news[{rank_from}-{rank_to}]: {total} new across {done} companies "
+                 f"| 429={http_429} empty={empty} other={http_other} aborted={aborted}")
+        return {"ok": True, **stats}
     except Exception as e:
         log.error(f"fetch_company_news: {e}")
         return {"ok": False, "error": str(e)}
