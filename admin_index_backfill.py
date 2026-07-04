@@ -171,7 +171,7 @@ def _fetch_rows(store_as: str, ticker: str):
     prev = ydu.INDICES.get(store_as)
     ydu.INDICES[store_as] = ticker
     try:
-        got, _failed = asyncio.run(
+        got, _failed, _reasons = asyncio.run(         # cc#188: _run_pass now returns (got, failed, reasons)
             ydu._run_pass([store_as], ydu.RETRY_SEMAPHORE, ydu.RETRY_SLEEP)
         )
     finally:

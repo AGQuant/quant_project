@@ -59,6 +59,7 @@ USAGE:
 import argparse, bisect, calendar, hashlib, os, sys, json, time, logging, threading, re
 from datetime import datetime, timedelta, time as dt_time, date
 import pytz, psycopg2, requests
+from nse_holidays import is_trading_day   # cc#188: market-hours gate for subscribe_verify
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
 FYERS_SECRET    = os.environ.get('FYERS_SECRET',    '')
@@ -1182,11 +1183,23 @@ def run(auth_code=None):
         """cc#151: after ANY batched (re)subscribe — on_connect boot/reconnect or the
         monthly-roll path — confirm futures are actually ticking and log it to ops_log,
         so every re-subscribe is auditable instead of just assumed. Acceptance:
-        >=205/212 futures ticking within 15min; this samples the last 15min window."""
+        >=205/212 futures ticking within 15min; this samples the last 15min window.
+
+        cc#188: only raise the ops_log alert during market hours (09:15-15:30 IST)
+        on a trading day — same gate pattern as the ADR fix. A (re)subscribe
+        off-hours (e.g. an evening reconnect) naturally shows ~0 ticking because
+        the feed is idle; that is NOT an incident, so it must not fire a
+        0/212 alert. Off-hours we log at info level only."""
         time.sleep(120)
         try:
             recent = _recent_symbol_count(15)
-            _log_feed_incident("subscribe_verify", f"{label}: {recent}/{TOTAL_FUTURES} symbols writing bars")
+            now = datetime.now(IST)
+            in_market = is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= MARKET_CLOSE
+            msg = f"{label}: {recent}/{TOTAL_FUTURES} symbols writing bars"
+            if in_market:
+                _log_feed_incident("subscribe_verify", msg)
+            else:
+                log.info(f"Post-{label} verification (off-hours — no alert): {msg}")
             log.info(f"Post-{label} verification: {recent}/{TOTAL_FUTURES} symbols ticking")
         except Exception as e:
             log.warning(f"post-{label} verify failed: {e}")

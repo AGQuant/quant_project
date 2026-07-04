@@ -75,7 +75,11 @@ async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbo
             data = r.json()
             chart = data.get("chart", {}).get("result", [])
             if not chart:
-                return symbol, []
+                # cc#188: surface Yahoo's own error code (e.g. "Not Found" for
+                # delisted REITs/InvITs/SME) instead of a bare empty result.
+                err = (data.get("chart", {}) or {}).get("error")
+                reason = f"empty_chart:{err.get('code') if isinstance(err, dict) else err}" if err else "empty_chart"
+                return symbol, [], reason
             result   = chart[0]
             tss      = result.get("timestamp", [])
             q        = result.get("indicators", {}).get("quote", [{}])[0]
@@ -108,10 +112,12 @@ async def _fetch_symbol(client: httpx.AsyncClient, sem: asyncio.Semaphore, symbo
                     round(float(ac), 2) if ac is not None else None,
                     int(v) if v is not None else 0,
                 ))
-            return symbol, rows
+            if not rows:
+                return symbol, [], "no_valid_bars"      # cc#188: chart present but all closes null
+            return symbol, rows, None
         except Exception as e:
             log.warning(f"yahoo_daily {symbol}: {e}")
-            return symbol, []
+            return symbol, [], f"{type(e).__name__}: {str(e)[:200]}"   # cc#188: capture class+msg
         finally:
             await asyncio.sleep(sleep_s)
 
@@ -129,12 +135,44 @@ async def _run_pass(symbols, sem_size: int, sleep_s: float):
 
     got = {}
     failed = []
-    for symbol, rows in results:
+    reasons = {}                                    # cc#188: {symbol: drop reason}
+    for symbol, rows, reason in results:
         if rows:
             got[symbol] = rows
         else:
             failed.append(symbol)
-    return got, failed
+            reasons[symbol] = reason or "unknown"
+    return got, failed, reasons
+
+
+def _log_drops_and_heal(drops, attempted):
+    """cc#188: write the full EOD drop list to ops_log(category=yahoo_eod_drops),
+    ONE row per run (symbol + reason each), and compute how many symbols dropped by
+    the PREVIOUS run were healed by this one — i.e. the 15:35 -> 21:00/01:00 safety
+    re-run relationship. Returns (heal_count, healed_symbols)."""
+    dropped_syms = {d["symbol"] for d in drops}
+    healed = []
+    try:
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            cur.execute("""SELECT details FROM ops_log WHERE category='yahoo_eod_drops'
+                           ORDER BY session_ts DESC LIMIT 1""")
+            r = cur.fetchone()
+            prev = set()
+            if r and r[0]:
+                d = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+                prev = {x.get("symbol") for x in (d.get("drops") or [])}
+            healed = sorted(prev - dropped_syms)     # in prev drop list, not in this one -> healed
+            details = {
+                "attempted": attempted, "drop_count": len(drops), "drops": drops,
+                "healed_from_prev": len(healed), "healed_symbols": healed[:200],
+            }
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'yahoo_eod_drops', %s, %s::jsonb)""",
+                        (f"{len(drops)} dropped, {len(healed)} healed vs prev run", json.dumps(details)))
+            conn.commit()
+    except Exception as e:
+        log.error(f"_log_drops_and_heal: {e}")
+    return len(healed), healed
 
 
 def _commit_rows(results_map):
@@ -176,7 +214,7 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
     pass_log = []
 
     # Pass 1 — gentle main pass
-    got, failed = await _run_pass(symbols, sem_size, sleep_s)
+    got, failed, last_reasons = await _run_pass(symbols, sem_size, sleep_s)
     total_rows += _commit_rows(got)
     pass_log.append({"pass": 1, "ok": len(got), "failed": len(failed), "sem": sem_size, "sleep": sleep_s})
 
@@ -188,9 +226,13 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
         r_sem = max(1, RETRY_SEMAPHORE - (pass_num - 2))
         r_sleep = RETRY_SLEEP + 0.4 * (pass_num - 2)
         log.info(f"yahoo_daily retry pass {pass_num}: {len(failed)} symbols (sem={r_sem}, sleep={r_sleep})")
-        got_r, failed = await _run_pass(failed, r_sem, r_sleep)
+        got_r, failed, last_reasons = await _run_pass(failed, r_sem, r_sleep)
         total_rows += _commit_rows(got_r)
         pass_log.append({"pass": pass_num, "ok": len(got_r), "failed": len(failed), "sem": r_sem, "sleep": r_sleep})
+
+    # cc#188: per-symbol drop capture + heal count vs the previous run
+    drops = [{"symbol": s, "reason": last_reasons.get(s, "unknown")} for s in sorted(failed)]
+    heal_count, _healed = _log_drops_and_heal(drops, total_attempted)
 
     summary = {
         "symbols_attempted": total_attempted,
@@ -199,6 +241,8 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
         "rows_upserted":     total_rows,
         "passes":            pass_log,
         "failed_symbols":    failed[:20],
+        "drop_count":        len(failed),
+        "healed_from_prev":  heal_count,
     }
     log.info(f"yahoo_daily done: {summary}")
     return summary
@@ -228,7 +272,7 @@ def heal_indices(conn=None, indices=("NIFTY50", "BANKNIFTY")):
                     stale.append(sym)
         healed = {}
         for sym in stale:
-            got, _ = asyncio.run(_run_pass([sym], 1, 0.5))   # one at a time, gentle on Yahoo
+            got, _, _ = asyncio.run(_run_pass([sym], 1, 0.5))   # cc#188: _run_pass now returns (got, failed, reasons)
             healed[sym] = _commit_rows(got)
         index_max = {}
         with conn.cursor() as cur:
