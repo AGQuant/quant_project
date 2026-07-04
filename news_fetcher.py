@@ -34,6 +34,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 DESC_MAX        = 1000     # raw_news.description is VARCHAR(1000)
 RETENTION_DAYS  = 30
+# cc#192: two-tier news retention — unpolished raw_news dies at 48h, polished
+# (and its raw parent) lives 30 days. Backlog above the alert threshold means
+# ingest or the polish step broke upstream.
+UNPOLISHED_MAX_HOURS       = 48
+POLISHED_MAX_DAYS          = 30
+UNPOLISHED_ALERT_THRESHOLD = 800
 COMPANY_LIMIT   = 500      # top-N stocks by mcap (founder call: coverage over caution)
 PER_COMPANY_MAX = 10       # cap entries stored per company (volume control)
 HTTP_TIMEOUT    = 12
@@ -433,7 +439,9 @@ def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int
 
 
 def cleanup_old_news(conn=None):
-    """30-day rolling delete on raw_news (CASCADE removes matching polished_news)."""
+    """30-day rolling delete on raw_news (CASCADE removes matching polished_news).
+    cc#192: superseded in the scheduler by news_retention(); kept for any manual/
+    admin use."""
     own = conn is None
     if own:
         conn = _conn()
@@ -447,6 +455,69 @@ def cleanup_old_news(conn=None):
         return {"ok": True, "deleted": deleted}
     except Exception as e:
         log.error(f"cleanup_old_news: {e}")
+        return {"ok": False, "error": str(e)}
+    finally:
+        if own:
+            conn.close()
+
+
+def news_retention(conn=None):
+    """cc#192: daily two-tier news retention (scheduled 01:50 IST). Makes the
+    04-Jul one-time backlog cleanup permanent so unpolished news never piles up.
+
+      (1) UNPOLISHED: delete raw_news with NO polished_news child once it is older
+          than 48h (by COALESCE(published_at, fetched_at) — publish time when
+          known, else ingest time).
+      (2) POLISHED: delete polished_news older than 30 days AND its raw_news parent
+          (delete the parent; the FK CASCADE removes the polished child).
+
+    Writes an ops_log(category=news_retention) record every run with both counts,
+    and alerts if the surviving unpolished backlog is implausibly large (>800 =>
+    ingest or the polish step broke upstream)."""
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            # (1) unpolished older than 48h, no polished child
+            cur.execute(
+                "DELETE FROM raw_news r "
+                "WHERE COALESCE(r.published_at, r.fetched_at) < NOW() - INTERVAL '%s hours' "
+                "  AND NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)"
+                % int(UNPOLISHED_MAX_HOURS))
+            deleted_unpolished = cur.rowcount
+
+            # (2) polished older than 30 days -> count, then delete raw parent (CASCADE)
+            cur.execute("SELECT COUNT(*) FROM polished_news WHERE polished_at < NOW() - INTERVAL '%s days'"
+                        % int(POLISHED_MAX_DAYS))
+            deleted_polished = cur.fetchone()[0] or 0
+            cur.execute(
+                "DELETE FROM raw_news r WHERE EXISTS ("
+                "  SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id "
+                "    AND p.polished_at < NOW() - INTERVAL '%s days')"
+                % int(POLISHED_MAX_DAYS))
+
+            # (3) surviving unpolished backlog — the health signal
+            cur.execute("SELECT COUNT(*) FROM raw_news r "
+                        "WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)")
+            unpolished_remaining = cur.fetchone()[0] or 0
+        conn.commit()
+
+        stats = {"deleted_unpolished_48h": deleted_unpolished,
+                 "deleted_polished_30d": deleted_polished,
+                 "unpolished_remaining": unpolished_remaining}
+        _write_ops_log(conn, "news_retention", "news_retention", stats)
+        if unpolished_remaining > UNPOLISHED_ALERT_THRESHOLD:
+            _write_ops_log(conn, "alert", "news_backlog_high",
+                           {"message": f"unpolished raw_news backlog {unpolished_remaining} > "
+                                       f"{UNPOLISHED_ALERT_THRESHOLD} after retention — upstream ingest/"
+                                       f"polish likely broke",
+                            "unpolished_remaining": unpolished_remaining})
+        log.info(f"news_retention: -{deleted_unpolished} unpolished(48h), "
+                 f"-{deleted_polished} polished(30d), {unpolished_remaining} unpolished remain")
+        return {"ok": True, **stats}
+    except Exception as e:
+        log.error(f"news_retention: {e}")
         return {"ok": False, "error": str(e)}
     finally:
         if own:

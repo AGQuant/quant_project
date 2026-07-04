@@ -980,11 +980,15 @@ def _bg_company_news_retry():
     _bg_fetch_company_news(1, 250, wave="retry")
 
 def _bg_cleanup_news():
+    """cc#192: daily news retention — unpolished raw_news dies at 48h, polished
+    (and its raw parent) lives 30 days. Replaces the old blanket 30-day raw_news
+    purge; news_retention() logs both counts to ops_log(category=news_retention)
+    and alerts on an implausible unpolished backlog."""
     try:
         import news_fetcher
-        with _conn() as conn: res = news_fetcher.cleanup_old_news(conn)
-        log.info(f"news_cleanup: {res.get('deleted') if isinstance(res, dict) else res} deleted")
-    except Exception as e: log.error(f"news_cleanup: {e}")
+        with _conn() as conn: res = news_fetcher.news_retention(conn)
+        log.info(f"news_retention: {res}")
+    except Exception as e: log.error(f"news_retention: {e}")
 
 # ── main loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
