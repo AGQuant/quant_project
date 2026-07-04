@@ -127,16 +127,19 @@ def scanner_day_range_oi(limit: int = 300):
     fields rather than being excluded or erroring."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            WITH day_range AS (
+            WITH asof AS (
+                SELECT MAX(ts::date) AS d FROM intraday_prices WHERE timeframe='5m'
+            ),
+            day_range AS (
                 SELECT symbol, MAX(high) AS day_high, MIN(low) AS day_low
                 FROM intraday_prices
-                WHERE ts::date = CURRENT_DATE AND timeframe='5m' AND source IN ('fyers_eq','fyers')
+                WHERE ts::date = (SELECT d FROM asof) AND timeframe='5m' AND source IN ('fyers_eq','fyers')
                 GROUP BY symbol
             ),
             basis_ranked AS (
                 SELECT symbol, ts, basis_pct, oi_chg, oi_prev,
                        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
-                FROM futures_basis WHERE ts::date = CURRENT_DATE
+                FROM futures_basis WHERE ts::date = (SELECT d FROM asof)
             ),
             basis_latest AS (
                 SELECT a.symbol, a.basis_pct AS basis_pct_now,

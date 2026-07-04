@@ -69,6 +69,7 @@ from test_cio_endpoints import router as test_cio_router
 from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
 from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 from stock_options_backfill import router as stock_options_backfill_router
+from v13_presets_endpoints import router as v13_presets_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -80,7 +81,8 @@ import scheduler
 from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 
 # ============================================================
-# Scorr / Project Quant — main.py v2.9.59
+# Scorr / Project Quant — main.py v2.9.60
+# v2.9.60: v13_presets router (cc#182 saveable filter themes) + live_metrics as-of fallback.
 # v2.9.59: PWA injection for /screener /intraday /structure /performance /ask (cc#176).
 # v2.9.58: stock_options_backfill router (cc#175 weekend options data).
 # v2.9.57: smartgain_daily_m2m router moved from scorr_endpoints nesting to explicit main.py wiring (cc#173).
@@ -209,6 +211,7 @@ app.include_router(test_cio_router)
 app.include_router(fyers_range_backfill_router)
 app.include_router(smartgain_daily_m2m_router)
 app.include_router(stock_options_backfill_router)
+app.include_router(v13_presets_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -890,17 +893,25 @@ def v8_metrics_single(symbol: str, score_date: Optional[str] = None):
 
 @app.get("/api/v8/live_metrics")
 def v8_live_metrics():
-    return api_query("""
+    # cc#182: anchor to the last available 5m trading day instead of CURRENT_DATE so
+    # CMP / Day Change / Hourly keep serving Friday's values on weekends & holidays.
+    # Hourly is anchored to the latest bar (lc.ts) rather than NOW(): on a live day
+    # that IS "~65 min ago"; off-hours it becomes the last 65-min window of that day.
+    as_of = api_query("SELECT MAX(ts::date) AS d FROM intraday_prices WHERE timeframe='5m'", single=True)
+    as_of_date = (as_of or {}).get("d")
+    rows = api_query("""
+        WITH asof AS (SELECT %s::date AS d)
         SELECT s.symbol, lc.close AS cmp, fc.open AS day_open,
             CASE WHEN fc.open>0 THEN ROUND(((lc.close/fc.open-1)*100)::numeric,2) END AS day_pct,
             hc.close AS hour_ago_close,
             CASE WHEN hc.close>0 THEN ROUND(((lc.close/hc.close-1)*100)::numeric,2) END AS hourly_pct
         FROM (SELECT symbol FROM futures_universe WHERE is_active=TRUE) s
-        JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1) lc ON true
-        JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=CURRENT_DATE ORDER BY ts ASC LIMIT 1) fc ON true
-        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts>=NOW()-INTERVAL '65 minutes' ORDER BY ts ASC LIMIT 1) hc ON true
+        JOIN LATERAL (SELECT close, ts FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) ORDER BY ts DESC LIMIT 1) lc ON true
+        JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) ORDER BY ts ASC LIMIT 1) fc ON true
+        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND ts <= lc.ts - INTERVAL '65 minutes' ORDER BY ts DESC LIMIT 1) hc ON true
         ORDER BY s.symbol
-    """)
+    """, (str(as_of_date) if as_of_date else None,))
+    return {"as_of": str(as_of_date) if as_of_date else None, "rows": rows}
 
 @app.post("/api/admin/backfill_intraday")
 async def backfill_intraday(x_admin_token: Optional[str] = Header(None)):

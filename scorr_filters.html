@@ -71,6 +71,24 @@ td{padding:7px 10px;white-space:nowrap}
   .fnum{padding:8px 4px}
   .autotoggle{padding:8px 0}
 }
+/* cc#182 — saveable filter themes (presets) */
+.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}
+.psave{height:30px;padding:0 12px;border:1px dashed #2563eb;border-radius:15px;background:#eef4ff;color:#2563eb;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.psave:hover{background:#2563eb;color:#fff}
+.pchip{display:inline-flex;align-items:center;gap:2px;height:30px;padding:0 4px 0 11px;border:1px solid #e4e9f1;border-radius:15px;background:#fff;font-size:11.5px;font-weight:600;color:#5a6781;user-select:none}
+.pchip .pname{cursor:pointer;padding:0 2px}
+.pchip:hover{border-color:#2563eb}
+.pchip.active{background:#2563eb;border-color:#2563eb;color:#fff}
+.pchip .picon{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:11px;opacity:.55;cursor:pointer;color:inherit}
+.pchip .picon:hover{opacity:1;background:rgba(20,35,70,.10)}
+.pchip.active .picon:hover{background:rgba(255,255,255,.28)}
+.pempty{font-size:10.5px;color:#8a94a6;font-style:italic}
+.asof-tag{display:inline-block;padding:1px 7px;border-radius:9px;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700}
+@media(max-width:768px){
+  .pchip{height:40px;border-radius:20px;font-size:12px;padding:0 4px 0 13px}
+  .pchip .picon{width:30px;height:30px;font-size:14px}
+  .psave{height:40px;border-radius:20px}
+}
 </style>
 </head>
 <body>
@@ -108,6 +126,7 @@ td{padding:7px 10px;white-space:nowrap}
     <span class="dot" id="f-dot"></span><span id="f-st">Loading...</span>
     <label class="autotoggle"><input type="checkbox" id="f-auto" checked onchange="onAutoToggle()">Auto-refresh 30s</label>
   </div>
+  <div class="presets" id="f-presets"></div>
   <div class="screen">
     <div class="fpanel" id="f-panel"></div>
     <div class="fresults">
@@ -158,6 +177,17 @@ let ROWS=[];             // merged, derived rows
 let SORT_KEY='day_pct';
 let SORT_DIR=-1;         // -1 desc, 1 asc
 let autoTimer=null;
+let AS_OF=null;          // cc#182 last trading day served by live_metrics (YYYY-MM-DD)
+let PRESETS=[];          // cc#182 saved filter themes
+let ACTIVE_PRESET=null;  // id of currently-loaded preset
+
+function istToday(){ return new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'}); }
+function asOfTag(){
+  if(!AS_OF || AS_OF===istToday()) return '';
+  const [y,m,d]=AS_OF.split('-');
+  const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10)-1];
+  return ' <span class="asof-tag" title="Non-trading day — showing last available session">as of '+parseInt(d,10)+' '+mon+'</span>';
+}
 
 function n(v){return v==null?null:(typeof v==='number'?v:parseFloat(v));}
 
@@ -237,7 +267,7 @@ function renderTable(){
     return SORT_DIR*(av-bv);
   });
   const st=document.getElementById('f-st');
-  st.textContent=matched.length+' matched / '+ROWS.length+' universe';
+  st.innerHTML=matched.length+' matched / '+ROWS.length+' universe'+asOfTag();
 
   let head='<tr>';
   HEAD_COLS.forEach(c=>{
@@ -268,6 +298,119 @@ function onSort(key){
   renderTable();
 }
 
+// ---- cc#182 saveable filter themes ----
+function gatherState(){
+  const filters=ALL_FILTERS.map(f=>{
+    const chk=document.getElementById('chk-'+f.key);
+    return {
+      key:f.key,
+      checked:!!(chk && chk.checked),
+      min:parseFloat(document.getElementById('min-'+f.key).value),
+      max:parseFloat(document.getElementById('max-'+f.key).value),
+    };
+  });
+  return {filters, sort_key:SORT_KEY, sort_dir:SORT_DIR};
+}
+
+function applyState(st){
+  const byKey={}; (st.filters||[]).forEach(x=>byKey[x.key]=x);
+  ALL_FILTERS.forEach(f=>{
+    const s=byKey[f.key];
+    const chk=document.getElementById('chk-'+f.key);
+    const mn=document.getElementById('min-'+f.key);
+    const mx=document.getElementById('max-'+f.key);
+    if(s){
+      chk.checked=!!s.checked;
+      if(s.min!=null && !isNaN(s.min)) mn.value=s.min;
+      if(s.max!=null && !isNaN(s.max)) mx.value=s.max;
+    } else {
+      chk.checked=false; mn.value=f.min; mx.value=f.max;
+    }
+    mn.disabled=!chk.checked; mx.disabled=!chk.checked;
+  });
+  if(st.sort_key){ SORT_KEY=st.sort_key; SORT_DIR=(st.sort_dir===1?1:-1); }
+  renderTable();
+}
+
+async function loadPresets(){
+  try{
+    const r=await fetch('/api/v13/presets');
+    if(!r.ok) return;   // 401 when not authed — silently skip
+    const j=await r.json();
+    PRESETS=j.presets||[];
+    if(ACTIVE_PRESET!=null && !PRESETS.some(p=>p.id===ACTIVE_PRESET)) ACTIVE_PRESET=null;
+    renderPresets();
+  }catch(e){/* offline — leave presets bar empty */}
+}
+
+function renderPresets(){
+  const el=document.getElementById('f-presets');
+  let html='<button class="psave" onclick="savePreset()">&#43; Save theme</button>';
+  if(!PRESETS.length){
+    html+='<span class="pempty">No saved themes yet</span>';
+  } else {
+    PRESETS.forEach(p=>{
+      const act=p.id===ACTIVE_PRESET?' active':'';
+      const nm=p.name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+      html+='<span class="pchip'+act+'">'+
+        '<span class="pname" onclick="applyPreset('+p.id+')" title="Load theme">'+nm+'</span>'+
+        '<span class="picon" onclick="renamePreset('+p.id+',event)" title="Rename">&#9998;</span>'+
+        '<span class="picon" onclick="deletePreset('+p.id+',event)" title="Delete">&times;</span>'+
+        '</span>';
+    });
+  }
+  el.innerHTML=html;
+}
+
+async function savePreset(){
+  const active=PRESETS.find(p=>p.id===ACTIVE_PRESET);
+  const dflt=active?active.name:'';
+  const name=(prompt('Save current filters as theme:', dflt)||'').trim();
+  if(!name) return;
+  const st=gatherState();
+  try{
+    const r=await fetch('/api/v13/presets',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name, filters:st.filters, sort_key:st.sort_key, sort_dir:st.sort_dir})});
+    if(!r.ok){ alert('Could not save theme ('+r.status+')'); return; }
+    const j=await r.json();
+    ACTIVE_PRESET=j.preset&&j.preset.id;
+    await loadPresets();
+  }catch(e){ alert('Could not save theme: '+e.message); }
+}
+
+function applyPreset(id){
+  const p=PRESETS.find(x=>x.id===id);
+  if(!p) return;
+  ACTIVE_PRESET=id;
+  applyState({filters:p.filters, sort_key:p.sort_key, sort_dir:p.sort_dir});
+  renderPresets();
+}
+
+async function renamePreset(id,ev){
+  if(ev) ev.stopPropagation();
+  const p=PRESETS.find(x=>x.id===id); if(!p) return;
+  const name=(prompt('Rename theme:', p.name)||'').trim();
+  if(!name || name===p.name) return;
+  try{
+    const r=await fetch('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name})});
+    if(!r.ok){ alert(r.status===409?'That name is already taken':'Rename failed ('+r.status+')'); return; }
+    await loadPresets();
+  }catch(e){ alert('Rename failed: '+e.message); }
+}
+
+async function deletePreset(id,ev){
+  if(ev) ev.stopPropagation();
+  const p=PRESETS.find(x=>x.id===id); if(!p) return;
+  if(!confirm('Delete theme "'+p.name+'"?')) return;
+  try{
+    const r=await fetch('/api/v13/presets/'+id,{method:'DELETE'});
+    if(!r.ok){ alert('Delete failed ('+r.status+')'); return; }
+    if(ACTIVE_PRESET===id) ACTIVE_PRESET=null;
+    await loadPresets();
+  }catch(e){ alert('Delete failed: '+e.message); }
+}
+
 async function loadData(){
   const dot=document.getElementById('f-dot'),st=document.getElementById('f-st');
   dot.className='dot busy';
@@ -279,7 +422,9 @@ async function loadData(){
       fetch('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
     ]);
 
-    const liveMap={}; (live||[]).forEach(r=>liveMap[r.symbol]=r);
+    const liveArr = (live && Array.isArray(live.rows)) ? live.rows : (Array.isArray(live)?live:[]);
+    AS_OF = (live && live.as_of) ? live.as_of : null;
+    const liveMap={}; liveArr.forEach(r=>liveMap[r.symbol]=r);
     const pivMap={};  (pivots||[]).forEach(r=>pivMap[r.symbol]=r);
     const drMap={};   (dayRange&&dayRange.rows||[]).forEach(r=>drMap[r.symbol]=r);
 
@@ -329,6 +474,7 @@ function onAutoToggle(){
 
 buildPanel();
 loadData();
+loadPresets();
 onAutoToggle();
 </script>
 <script>
