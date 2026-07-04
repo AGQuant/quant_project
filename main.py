@@ -70,6 +70,7 @@ from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
 from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 from stock_options_backfill import router as stock_options_backfill_router
 from v13_presets_endpoints import router as v13_presets_router
+from galaxy_endpoints import router as galaxy_router
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -212,6 +213,7 @@ app.include_router(fyers_range_backfill_router)
 app.include_router(smartgain_daily_m2m_router)
 app.include_router(stock_options_backfill_router)
 app.include_router(v13_presets_router)
+app.include_router(galaxy_router)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)

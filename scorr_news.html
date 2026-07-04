@@ -183,6 +183,35 @@
 .kb-chip{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9.5px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;vertical-align:middle}
 .kb-chip.beg{background:#d6f3e6;color:#066b46}
 .kb-chip.pro{background:#fcefd9;color:#92510a}
+/* cc#196 — Knowledge Galaxy preview card + full-screen overlay */
+.kb-galaxy{position:relative;margin-bottom:16px;border-radius:12px;overflow:hidden;border:1px solid #1c2b52;cursor:pointer;background:#070b1a}
+.kb-galaxy canvas{display:block;width:100%;height:120px}
+.kb-galaxy .kb-galaxy-ov{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;padding:12px 14px;background:linear-gradient(180deg,rgba(7,11,26,0) 30%,rgba(7,11,26,.72))}
+.kb-galaxy .kb-galaxy-ttl{color:#e8eefc;font-size:13px;font-weight:800}
+.kb-galaxy .kb-galaxy-sub{color:#9fb0d6;font-size:11px;margin-top:1px}
+.kb-galaxy .kb-galaxy-btn{align-self:flex-start;margin-top:8px;padding:6px 12px;border-radius:16px;background:#2563eb;color:#fff;font-size:11.5px;font-weight:700;border:none;cursor:pointer}
+.galaxy-overlay{position:fixed;inset:0;z-index:1000;background:#070b1a;display:none}
+.galaxy-overlay.on{display:block}
+.galaxy-canvas{position:absolute;inset:0}
+.galaxy-topbar{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(180deg,rgba(7,11,26,.92),rgba(7,11,26,0))}
+.galaxy-title{color:#e8eefc;font-size:13px;font-weight:800;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.galaxy-gsearch{width:150px;max-width:38vw;padding:7px 10px;border-radius:8px;border:1px solid #29406e;background:#0d1428;color:#e8eefc;font-size:12px;outline:none;font-family:inherit}
+.galaxy-gpill{padding:6px 10px;border-radius:14px;border:1px solid #29406e;background:#0d1428;color:#9fb0d6;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.galaxy-gpill.on{background:#2563eb;border-color:#2563eb;color:#fff}
+.galaxy-gpill.beg.on{background:#0a9e63;border-color:#0a9e63}
+.galaxy-gpill.pro.on{background:#b45309;border-color:#b45309}
+.galaxy-close{width:34px;height:34px;flex-shrink:0;border-radius:50%;border:1px solid #29406e;background:#0d1428;color:#e8eefc;font-size:18px;cursor:pointer;line-height:1}
+.galaxy-hint{position:absolute;left:0;right:0;bottom:calc(12px + env(safe-area-inset-bottom));text-align:center;color:#6d80ab;font-size:10.5px;pointer-events:none;z-index:2}
+.galaxy-drawer{position:absolute;left:0;right:0;bottom:0;z-index:3;background:#0d1428;border-top:1px solid #1c2b52;border-radius:16px 16px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom));transform:translateY(115%);transition:transform .22s ease;box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+.galaxy-drawer.on{transform:translateY(0)}
+.galaxy-drawer .gd-cat{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#9fb0d6}
+.galaxy-drawer .gd-ttl{color:#e8eefc;font-size:17px;font-weight:800;margin:5px 40px 8px 0;line-height:1.3}
+.galaxy-drawer .gd-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.galaxy-drawer .gd-sum{color:#b9c6e4;font-size:13px;line-height:1.55;margin-bottom:14px}
+.galaxy-drawer .gd-rt{color:#7f92bd;font-size:11px;font-weight:600}
+.galaxy-drawer .gd-read{padding:9px 16px;border-radius:9px;background:#2563eb;color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer}
+.galaxy-drawer .gd-x{position:absolute;top:12px;right:14px;width:26px;height:26px;border:none;background:transparent;color:#7f92bd;font-size:18px;cursor:pointer}
+@media(max-width:767px){ .galaxy-gsearch{display:none} }
 @media(max-width:767px){
   .kb-shell{flex-direction:column;gap:12px;align-items:stretch}
   .kb-sidebar{width:100%;position:static;flex-direction:column;gap:10px}
@@ -573,8 +602,19 @@ function renderKnowledge(){
         '<div class="kb-sgroup"><div class="kb-slabel">Level</div><div class="kb-diff">'+diffPills+'</div></div>'+
         (cats.length>1 ? '<div class="kb-sgroup"><div class="kb-slabel">Topics</div><div class="kb-topics">'+topics+'</div></div>' : '')+
       '</aside>'+
-      '<div class="kb-main"><div class="kb-count" id="kbCount"></div><div id="kb-list"></div></div>'+
+      '<div class="kb-main">'+
+        '<div class="kb-galaxy" onclick="openGalaxy()">'+
+          '<canvas id="kbGalaxyThumb"></canvas>'+
+          '<div class="kb-galaxy-ov">'+
+            '<div class="kb-galaxy-ttl">✦ Knowledge Galaxy</div>'+
+            '<div class="kb-galaxy-sub">'+kbArticles.length+' articles · '+cats.length+' topics · explore the learning map</div>'+
+            '<button class="kb-galaxy-btn" type="button" onclick="event.stopPropagation();openGalaxy()">View Learning Map</button>'+
+          '</div>'+
+        '</div>'+
+        '<div class="kb-count" id="kbCount"></div><div id="kb-list"></div>'+
+      '</div>'+
     '</div>';
+  drawGalaxyThumb();
   const si = document.getElementById("kbSearch");
   si.addEventListener("input", function(){
     kbSearch = si.value;
@@ -678,6 +718,130 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 buildTabs();
 document.getElementById("searchbar").style.display = SEARCH_TABS.includes(curCat) ? "block" : "none";
 load();
+</script>
+<script>
+/* cc#196 — Knowledge Galaxy wiring (Knowledge Hub = instance #1 of galaxy_map.js) */
+var CAT_COLORS = {"Basics":"#60a5fa","Investing Styles":"#a78bfa","Market Mechanics":"#22d3ee","Instruments":"#f472b6","Macro & Policy":"#fbbf24","Analysis":"#34d399","Alternative Assets":"#fb7185","Planning & Tax":"#c084fc"};
+var _galaxy = null, _galaxyCur = null;
+
+function drawGalaxyThumb(){
+  var cv = document.getElementById("kbGalaxyThumb"); if(!cv || !kbArticles.length) return;
+  var w = cv.clientWidth||300, h=120, dpr=Math.min(window.devicePixelRatio||1,2);
+  cv.width=w*dpr; cv.height=h*dpr; var g=cv.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0);
+  g.fillStyle="#070b1a"; g.fillRect(0,0,w,h);
+  var rg=g.createRadialGradient(w/2,h*0.4,0,w/2,h*0.4,w*0.7); rg.addColorStop(0,"rgba(30,45,90,.5)"); rg.addColorStop(1,"rgba(7,11,26,0)");
+  g.fillStyle=rg; g.fillRect(0,0,w,h);
+  var n=Math.min(kbArticles.length,60);
+  for(var i=0;i<n;i++){ var a=kbArticles[i]; var seed=(i*2654435761+101)>>>0;
+    var cx=(seed%1000)/1000*w, cy=((seed>>>10)%1000)/1000*h;
+    var col=CAT_COLORS[a.category]||"#60a5fa"; var r=a.difficulty==="Pro"?2.6:1.7;
+    g.globalAlpha=.85; g.fillStyle=col; g.beginPath(); g.arc(cx,cy,r,0,6.283); g.fill(); }
+  g.globalAlpha=1;
+}
+
+function buildGalaxyConfig(){
+  var cats=Object.keys(kbCatCounts).sort().map(function(c){ return {name:c,color:CAT_COLORS[c]||"#60a5fa"}; });
+  var nodes=kbArticles.map(function(a){ return {id:a.slug,label:a.title,category:a.category,tier:(a.difficulty==="Pro"?"pro":"beginner"),payload:a}; });
+  return {nodes:nodes, categories:cats, cacheKey:"knowledge", layout:"force"};
+}
+
+function galaxyDimPred(){
+  var q=(kbSearch||"").trim().toLowerCase();
+  if(kbDiff==="all" && kbCat==="all" && !q) return null;
+  return function(nd){ var a=nd.payload;
+    if(kbDiff!=="all" && a.difficulty!==kbDiff) return false;
+    if(kbCat!=="all" && a.category!==kbCat) return false;
+    if(q){ var hay=((a.title||"")+" "+(a.summary||"")).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+    return true; };
+}
+
+function ensureGalaxyOverlay(){
+  if(document.getElementById("galaxyOverlay")) return;
+  var o=document.createElement("div"); o.className="galaxy-overlay"; o.id="galaxyOverlay";
+  o.innerHTML =
+    '<div class="galaxy-canvas" id="galaxyCanvas"></div>'+
+    '<div class="galaxy-topbar">'+
+      '<div class="galaxy-title">✦ Knowledge Galaxy</div>'+
+      '<input class="galaxy-gsearch" id="galaxySearch" type="text" placeholder="Search…" autocomplete="off">'+
+      '<span class="galaxy-gpill" id="gpAll" onclick="galaxySetDiff(\'all\')">All</span>'+
+      '<span class="galaxy-gpill beg" id="gpBeg" onclick="galaxySetDiff(\'Beginner\')">Beg</span>'+
+      '<span class="galaxy-gpill pro" id="gpPro" onclick="galaxySetDiff(\'Pro\')">Pro</span>'+
+      '<button class="galaxy-close" onclick="closeGalaxy()" aria-label="Close">&times;</button>'+
+    '</div>'+
+    '<div class="galaxy-hint">drag to pan · scroll / pinch to zoom · tap a star</div>'+
+    '<div class="galaxy-drawer" id="galaxyDrawer"></div>';
+  document.body.appendChild(o);
+  document.getElementById("galaxySearch").addEventListener("input", function(){ kbSearch=this.value; galaxyRefreshDim(); });
+}
+
+function galaxySetDiff(d){ kbDiff=(kbDiff===d?"all":d); galaxyRefreshDim(); }
+function galaxyRefreshDim(){
+  var a=document.getElementById("gpAll"), be=document.getElementById("gpBeg"), pr=document.getElementById("gpPro");
+  if(a) a.classList.toggle("on", kbDiff==="all");
+  if(be) be.classList.toggle("on", kbDiff==="Beginner");
+  if(pr) pr.classList.toggle("on", kbDiff==="Pro");
+  if(_galaxy) _galaxy.setDim(galaxyDimPred());
+}
+
+function loadGalaxyScript(cb){
+  if(window.GalaxyMap){ cb(); return; }
+  var s=document.createElement("script"); s.src="/galaxy_map.js"; s.onload=cb;
+  s.onerror=function(){ alert("Could not load the galaxy map."); };
+  document.head.appendChild(s);
+}
+
+function openGalaxy(){
+  if(!kbArticles.length) return;
+  ensureGalaxyOverlay();
+  document.getElementById("galaxyOverlay").classList.add("on");
+  document.documentElement.style.overflow="hidden";
+  var gs=document.getElementById("galaxySearch"); if(gs) gs.value=kbSearch||"";
+  galaxyRefreshDim();
+  loadGalaxyScript(function(){
+    var host=document.getElementById("galaxyCanvas");
+    if(_galaxy){ _galaxy.destroy(); _galaxy=null; }
+    host.innerHTML="";
+    _galaxy = GalaxyMap.create(host, buildGalaxyConfig(), {
+      onTap: function(nd){ showGalaxyDrawer(nd.payload); },
+      onCategoryTap: function(){}
+    });
+    _galaxy.setDim(galaxyDimPred());
+  });
+}
+
+function closeGalaxy(){
+  var ov=document.getElementById("galaxyOverlay"); if(ov) ov.classList.remove("on");
+  document.documentElement.style.overflow="";
+  hideGalaxyDrawer();
+  if(typeof curCat!=="undefined" && curCat==="learn") renderKnowledge();   // resync sidebar + list with shared filter state
+}
+
+function showGalaxyDrawer(a){
+  _galaxyCur=a;
+  var d=document.getElementById("galaxyDrawer"); if(!d) return;
+  var chip = a.difficulty==="Pro" ? '<span class="kb-chip pro">Pro</span>' : (a.difficulty==="Beginner"?'<span class="kb-chip beg">Beginner</span>':"");
+  var rt = a.reading_time_min ? '<span class="gd-rt">'+a.reading_time_min+' min read</span>' : "";
+  d.innerHTML =
+    '<button class="gd-x" onclick="hideGalaxyDrawer()" aria-label="Close">&times;</button>'+
+    '<div class="gd-cat">'+esc(a.category||"")+'</div>'+
+    '<div class="gd-ttl">'+esc(a.title||"")+'</div>'+
+    '<div class="gd-meta">'+chip+rt+'</div>'+
+    (a.summary?'<div class="gd-sum">'+esc(a.summary)+'</div>':'')+
+    '<button class="gd-read" onclick="galaxyReadArticle()">Read article →</button>';
+  d.classList.add("on");
+}
+function hideGalaxyDrawer(){ var d=document.getElementById("galaxyDrawer"); if(d) d.classList.remove("on"); }
+
+function galaxyReadArticle(){
+  var slug=_galaxyCur && _galaxyCur.slug; if(!slug) return;
+  closeGalaxy();
+  setTimeout(function(){
+    var card=document.getElementById("kb-"+slug);
+    if(card){ card.scrollIntoView({behavior:"smooth",block:"center"});
+      var btn=card.querySelector(".kb-toggle"), body=card.querySelector(".kb-body");
+      if(btn && body && body.style.display==="none") toggleKb(slug, btn); }
+  }, 60);
+}
 </script>
 <script src="/nav_toggle.js" defer></script>
 </body>
