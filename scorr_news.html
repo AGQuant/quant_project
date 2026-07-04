@@ -145,6 +145,30 @@
     .art-body{font-size:15px}
     .art-compact .art-head{font-size:17px}
   }
+/* cc#194 — Knowledge Hub filters (mobile-first, no break at 360px) */
+.kb-filters{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.kb-search-wrap{position:relative}
+.kb-search{width:100%;padding:10px 34px 10px 12px;border:1px solid #d9dee7;border-radius:9px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:#1c2536}
+.kb-search:focus{border-color:#2563eb}
+.kb-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:24px;height:24px;border:none;background:transparent;color:#8a94a6;font-size:18px;cursor:pointer;display:none;line-height:1;border-radius:50%}
+.kb-clear:hover{background:#eef1f6;color:#1c2536}
+.kb-clear.on{display:block}
+.kb-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.kb-catrow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.kb-catrow::-webkit-scrollbar{display:none}
+.kb-pill{flex-shrink:0;padding:7px 12px;border:1px solid #d9dee7;border-radius:16px;background:#fff;color:#5a6781;font-size:12px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;transition:.1s}
+.kb-pill:hover{border-color:#b9c4d6}
+.kb-pill.on{background:#2563eb;border-color:#2563eb;color:#fff}
+.kb-pill.beg.on{background:#0a9e63;border-color:#0a9e63}
+.kb-pill.pro.on{background:#b45309;border-color:#b45309}
+.kb-count{font-size:11.5px;color:#8a94a6;font-weight:600}
+.kb-chip{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9.5px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;vertical-align:middle}
+.kb-chip.beg{background:#d6f3e6;color:#066b46}
+.kb-chip.pro{background:#fcefd9;color:#92510a}
+@media(min-width:560px){
+  .kb-filters{gap:12px}
+  .kb-search{max-width:360px}
+}
 </style>
 </head>
 <body>
@@ -215,6 +239,10 @@ let articles = [];
 // cc_task #125: Knowledge Hub (Learn tab) — separate feed + lazy-loaded bodies
 let kbArticles = [];
 const _kbCache = {};
+// cc#194: Knowledge Hub client-side filters (difficulty + category + search)
+let kbDiff = "all", kbCat = "all", kbSearch = "";
+let kbCatCounts = {}, kbDiffCounts = {}, _kbCats = [];
+let _kbSearchDeb = null;
 
 // -- AbortController — cancel in-flight fetch on every new tab switch --
 let _abortCtrl = null;
@@ -447,6 +475,9 @@ async function loadKnowledge(){
     const d = await r.json();
     if(curCat !== "learn") return; // tab switched mid-fetch
     kbArticles = d.articles || [];
+    kbCatCounts = d.category_counts || {};
+    kbDiffCounts = d.difficulty_counts || {};
+    kbDiff = "all"; kbCat = "all"; kbSearch = "";   // cc#194: reset filters on (re)load
     const total = d.total || kbArticles.length;
     document.getElementById("meta").textContent = total
       ? `${total} educational ${total===1?"article":"articles"} · evergreen Knowledge Hub`
@@ -466,27 +497,99 @@ function kbPill(cat){
   return `<span class="art-tag">${esc(cat)}</span>`;
 }
 
+function kbDiffChip(d){                          // cc#194: green Beginner / amber Pro chip
+  if(d === "Beginner") return '<span class="kb-chip beg">Beginner</span>';
+  if(d === "Pro")      return '<span class="kb-chip pro">Pro</span>';
+  return "";
+}
+
 function kbCard(a){
   const rt = a.reading_time_min ? `<span class="art-rt">${a.reading_time_min} min read</span>` : "";
   const stand = (a.summary && String(a.summary).trim())
     ? `<div class="art-stand-sm">${esc(a.summary)}</div>` : "";
+  const chip = kbDiffChip(a.difficulty);
+  const chipSep = (chip && a.category) ? `<span class="art-dot">·</span>` : "";
   const sep = (rt && a.category) ? `<span class="art-dot">·</span>` : "";
   return `<article class="art art-compact" id="kb-${esc(a.slug)}">
     <div class="art-head">${esc(a.title)}</div>
-    <div class="art-metarow">${kbPill(a.category)}${sep}${rt}</div>
+    <div class="art-metarow">${chip}${chipSep}${kbPill(a.category)}${sep}${rt}</div>
     ${stand}
     <div class="art-body kb-body" data-slug="${esc(a.slug)}" style="display:none"></div>
     <button class="kb-toggle" type="button" onclick="toggleKb('${esc(a.slug)}',this)">Read article &#8595;</button>
   </article>`;
 }
 
+// cc#194: build the filter shell once (search + difficulty + category), then
+// filter into #kb-list so typing in the search box never loses focus.
 function renderKnowledge(){
   const feed = document.getElementById("feed");
   if(!kbArticles.length){
     feed.innerHTML = '<div class="msg">No articles yet — the Knowledge Hub is being written. Check back soon.</div>';
     return;
   }
-  feed.innerHTML = kbArticles.map(kbCard).join("");
+  const cats = Object.keys(kbCatCounts).sort();
+  _kbCats = cats;   // referenced by index from the chip onclicks (avoids string-escaping bugs, e.g. "Macro & Policy")
+  const catPills = ['<span class="kb-pill'+(kbCat==="all"?" on":"")+'" onclick="setKbCatIdx(-1)">All</span>']
+    .concat(cats.map(function(c,i){
+      return '<span class="kb-pill'+(kbCat===c?" on":"")+'" onclick="setKbCatIdx('+i+')">'+esc(c)+'</span>';
+    })).join("");
+  const begN = kbDiffCounts["Beginner"]||0, proN = kbDiffCounts["Pro"]||0;
+  feed.innerHTML =
+    '<div class="kb-filters">'+
+      '<div class="kb-search-wrap">'+
+        '<input class="kb-search" id="kbSearch" type="text" placeholder="Search articles…" autocomplete="off" value="'+esc(kbSearch)+'">'+
+        '<button class="kb-clear'+(kbSearch?" on":"")+'" id="kbClear" type="button" aria-label="Clear search" onclick="clearKbSearch()">&times;</button>'+
+      '</div>'+
+      '<div class="kb-row">'+
+        '<span class="kb-pill'+(kbDiff==="all"?" on":"")+'" onclick="setKbDiff(\'all\')">All</span>'+
+        '<span class="kb-pill beg'+(kbDiff==="Beginner"?" on":"")+'" onclick="setKbDiff(\'Beginner\')">Beginner'+(begN?' ('+begN+')':'')+'</span>'+
+        '<span class="kb-pill pro'+(kbDiff==="Pro"?" on":"")+'" onclick="setKbDiff(\'Pro\')">Pro'+(proN?' ('+proN+')':'')+'</span>'+
+      '</div>'+
+      (cats.length>1 ? '<div class="kb-catrow">'+catPills+'</div>' : '')+
+      '<div class="kb-count" id="kbCount"></div>'+
+    '</div>'+
+    '<div id="kb-list"></div>';
+  const si = document.getElementById("kbSearch");
+  si.addEventListener("input", function(){
+    kbSearch = si.value;
+    document.getElementById("kbClear").classList.toggle("on", !!kbSearch);
+    clearTimeout(_kbSearchDeb);
+    _kbSearchDeb = setTimeout(applyKbFilters, 180);
+  });
+  applyKbFilters();
+}
+
+function applyKbFilters(){
+  const list = document.getElementById("kb-list");
+  if(!list) return;
+  const q = kbSearch.trim().toLowerCase();
+  const rows = kbArticles.filter(function(a){
+    if(kbDiff !== "all" && a.difficulty !== kbDiff) return false;
+    if(kbCat  !== "all" && a.category   !== kbCat)  return false;
+    if(q){
+      const hay = ((a.title||"")+" "+(a.summary||"")).toLowerCase();
+      if(hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+  const filtered = (kbDiff!=="all" || kbCat!=="all" || q);
+  const cnt = document.getElementById("kbCount");
+  if(cnt) cnt.textContent = rows.length + (rows.length===1?" article":" articles") + (filtered?" match":"");
+  if(!rows.length){
+    list.innerHTML = '<div class="msg">No articles match these filters. Clear the search or pick a different category.</div>';
+    return;
+  }
+  list.innerHTML = rows.map(kbCard).join("");
+}
+
+function setKbDiff(d){ kbDiff = d; renderKnowledge(); }
+function setKbCatIdx(i){ kbCat = (i < 0 ? "all" : _kbCats[i]); renderKnowledge(); }
+function clearKbSearch(){
+  kbSearch = "";
+  const si = document.getElementById("kbSearch");
+  if(si){ si.value = ""; si.focus(); }
+  const cl = document.getElementById("kbClear"); if(cl) cl.classList.remove("on");
+  applyKbFilters();
 }
 
 async function toggleKb(slug, btn){

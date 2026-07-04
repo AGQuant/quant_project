@@ -53,7 +53,7 @@ def knowledge_articles(request: Request, category: str = "all", limit: int = 100
         where = "WHERE category = %s"
         params.append(cat)
     sql = f"""
-        SELECT id, slug, title, summary, category, batch_number, published_at,
+        SELECT id, slug, title, summary, category, difficulty, batch_number, published_at,
                {_READ_MIN} AS reading_time_min
         FROM knowledge_hub_articles
         {where}
@@ -67,11 +67,16 @@ def knowledge_articles(request: Request, category: str = "all", limit: int = 100
         cur.execute("""SELECT category, COUNT(*) FROM knowledge_hub_articles
                        GROUP BY category""")
         counts = {row[0]: row[1] for row in cur.fetchall()}
+        # cc#194: difficulty counts for the Beginner/Pro pill badges
+        cur.execute("""SELECT difficulty, COUNT(*) FROM knowledge_hub_articles
+                       GROUP BY difficulty""")
+        diff_counts = {row[0]: row[1] for row in cur.fetchall()}
         cur.execute("SELECT COUNT(*) FROM knowledge_hub_articles")
         total = cur.fetchone()[0]
     return {"category": cat, "limit": limit, "offset": offset,
             "count": len(articles), "total": total,
-            "category_counts": counts, "articles": articles}
+            "category_counts": counts, "difficulty_counts": diff_counts,
+            "articles": articles}
 
 
 @router.get("/api/knowledge/articles/{slug}")
