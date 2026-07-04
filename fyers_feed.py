@@ -93,6 +93,12 @@ OPTION_RETENTION_DAYS = 7      # option_chain stays lean (heaviest churn, not us
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
 N_STRIKES             = 10     # ATM ± 10
+# cc#189 (founder redesign 04-Jul): options subscribe ONLY when live prices are
+# fresh. No boot/REST hydration — a cold-boot/pre-market restart just waits for
+# the market + a fresh cmp_prices tick set, then computes ATM from LIVE prices.
+OPT_FRESH_MIN_FRAC    = 0.80          # >=80% of option underlyings must have a fresh tick
+OPT_FRESH_WINDOW_MIN  = 10           # "fresh" = cmp_prices tick within the last N minutes
+OPT_SUB_DEADLINE      = dt_time(9, 30)  # still unsubscribed by this IST time -> CRITICAL alert
 BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
 OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quotes has NO OI)
 CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
@@ -424,6 +430,30 @@ def get_top50_option_underlyings(conn):
         return []
 
 
+def _cmp_fresh_fraction(conn, opt_mgr):
+    """cc#189: fraction of option underlyings whose cmp_prices row was updated
+    within the last OPT_FRESH_WINDOW_MIN minutes. Drives the 'subscribe options
+    ONLY when live prices are fresh' gate. cmp_prices.updated_at and NOW() are
+    both the DB clock, so the window is timezone-agnostic."""
+    if not opt_mgr._underlyings:
+        opt_mgr._build_underlyings()
+    syms = [u['cmp_sym'] for u in opt_mgr._underlyings]
+    if not syms:
+        return 0.0
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(DISTINCT symbol) FROM cmp_prices "
+                "WHERE symbol = ANY(%s) AND updated_at >= NOW() - INTERVAL '"
+                + str(int(OPT_FRESH_WINDOW_MIN)) + " minutes'",
+                (syms,))
+            fresh = cur.fetchone()[0] or 0
+    except Exception as e:
+        log.warning(f"_cmp_fresh_fraction: {e}")
+        return 0.0
+    return fresh / len(syms)
+
+
 def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
 
 def from_fyers_symbol(fsym):
@@ -470,8 +500,12 @@ class OptionSymbolManager:
         self._underlyings = out
         log.info(f"OptionSymbolManager: {len(out)} underlyings (index-only)")
 
-    def _get_cmp(self, cmp_sym):
-        # 1) table first (warm path)
+    def _get_cmp(self, cmp_sym, allow_rest=False):
+        # cc#189: the AUTOMATIC subscribe path uses LIVE cmp_prices only (allow_rest
+        # defaults False) — the housekeeping gate only calls build_initial once
+        # cmp_prices is fresh, so ATM strikes come from live prices. The Fyers REST
+        # quotes fallback is RETAINED (founder 04-Jul: keep REST for on-demand
+        # fallback) and used only when a caller explicitly passes allow_rest=True.
         try:
             with self.conn.cursor() as cur:
                 cur.execute("SELECT cmp FROM cmp_prices WHERE symbol = %s", (cmp_sym,))
@@ -480,9 +514,9 @@ class OptionSymbolManager:
                     return float(r[0])
         except Exception:
             pass
-        # 2) cold-boot fallback: pull live CMP straight from Fyers quotes API
-        if not self.token:
+        if not allow_rest or not self.token:
             return None
+        # on-demand REST fallback: pull live CMP straight from the Fyers quotes API
         try:
             meta = INDEX_OPTION_UNDERLYINGS.get(cmp_sym)
             fsym = meta['fyers_index'] if meta else fyers_eq_symbol(cmp_sym)
@@ -496,7 +530,7 @@ class OptionSymbolManager:
                     if lp:
                         return float(lp)
         except Exception as e:
-            log.warning(f"_get_cmp Fyers fallback {cmp_sym}: {e}")
+            log.warning(f"_get_cmp Fyers REST fallback {cmp_sym}: {e}")
         return None
 
     def _ladder(self, u, cmp):
@@ -523,30 +557,48 @@ class OptionSymbolManager:
             pairs.append((strike, 'PE'))
         return pairs
 
-    def build_initial(self):
-        """Returns list of Fyers option symbols to subscribe."""
+    def build_initial(self, allow_rest=False):
+        """Returns list of Fyers option symbols to subscribe. cc#189: the automatic
+        live-price gate calls this with allow_rest=False (cmp_prices only); an
+        on-demand caller may pass allow_rest=True to use the Fyers REST CMP
+        fallback (retained per founder 04-Jul)."""
         self._build_underlyings()
         self.expiry = current_expiry()
         symbols = []
+        self.built_per_underlying = {}   # cc#189: per-underlying contract count for the verify
         with self.lock:
             self.sym_map = {}
             self.atm_map = {}
             for u in self._underlyings:
-                cmp = self._get_cmp(u['cmp_sym'])
+                cmp = self._get_cmp(u['cmp_sym'], allow_rest=allow_rest)
                 if not cmp:
+                    self.built_per_underlying[u['name']] = 0
                     log.warning(f"No CMP for {u['cmp_sym']} — skipping options")
                     continue
                 step = u['step'] or auto_step(cmp)
                 self.atm_map[u['name']] = atm_strike(cmp, step)
+                before = len(symbols)
                 for strike, otype in self._ladder(u, cmp):
                     fsym = option_fyers_symbol(u['name'], strike, otype, self.expiry)
                     if self.master and not self.master.is_valid(fsym):
                         continue
                     self.sym_map[fsym] = (u['name'], strike, otype, self.expiry)
                     symbols.append(fsym)
+                self.built_per_underlying[u['name']] = len(symbols) - before
         log.info(f"OptionSymbolManager: built {len(symbols)} option symbols "
                  f"({'master' if self.master and self.master.loaded else 'step-fallback'})")
         return symbols
+
+    def subscribe_health(self):
+        """cc#189: (underlyings_total, underlyings_ok, missing_names, contracts)
+        from the last build_initial — drives the subscribed-vs-expected CRITICAL
+        alert (an underlying with 0 contracts = a miss)."""
+        per = getattr(self, 'built_per_underlying', {})
+        total = len(self._underlyings) or len(per)
+        ok = sum(1 for c in per.values() if c > 0)
+        missing = sorted(n for n, c in per.items() if c == 0)
+        contracts = sum(per.values())
+        return total, ok, missing, contracts
 
     def check_atm_drift(self):
         """Returns (add_syms, remove_syms) if any ATM has drifted >= ATM_DRIFT_STRIKES."""
@@ -1063,10 +1115,15 @@ def run(auth_code=None):
     master.load()
 
     opt_mgr     = OptionSymbolManager(conn, token=token, master=master)
-    option_syms = opt_mgr.build_initial()
+    # cc#189 (founder redesign): options are NOT built/subscribed at boot. They
+    # subscribe later — only once the market is open AND cmp_prices is fresh — via
+    # the gate in housekeeping(). This eliminates the cold-boot bug where an empty
+    # cmp_prices silently produced zero option subscriptions on a pre-market restart.
+    option_syms = []
 
-    all_syms    = equity_fyers_syms + futures_fyers_syms + option_syms
-    log.info(f"WS: {len(equity_fyers_syms)} eq + {len(futures_fyers_syms)} fut + {len(option_syms)} opt = {len(all_syms)} total")
+    all_syms    = equity_fyers_syms + futures_fyers_syms
+    log.info(f"WS: {len(equity_fyers_syms)} eq + {len(futures_fyers_syms)} fut + "
+             f"0 opt (options deferred to live-price gate) = {len(all_syms)} total")
 
     equity_set  = set(equity_fyers_syms)
     futures_set = set(futures_fyers_syms)
@@ -1111,8 +1168,12 @@ def run(auth_code=None):
         # shared _batched_subscribe helper — a single bulk subscribe of ~1460 symbols
         # was silently dropped by the Fyers server under open-load (212 futures got
         # zero data on 25-Jun).
-        log.info(f"WS connected — subscribing {len(all_syms)} symbols")
-        _batched_subscribe(fyers_ws, all_syms, action='sub', label='initial')
+        # cc#189: subscribe eq + fut + ANY already-live-gated options (option_syms
+        # is empty on a cold boot, populated after the gate fires — so a reconnect
+        # re-subscribes the live options too instead of dropping them).
+        sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
+        log.info(f"WS connected — subscribing {len(sub_list)} symbols ({len(option_syms)} options)")
+        _batched_subscribe(fyers_ws, sub_list, action='sub', label='initial')
         threading.Thread(target=_verify_subscribe_survivors, args=('connect',), daemon=True).start()
         fyers_ws.keep_running()
 
@@ -1236,12 +1297,20 @@ def run(auth_code=None):
         last_reconnect  = None        # cc_task #84
         watchdog_stale_since = None   # cc_task #85: when coverage first dropped below WATCHDOG_MIN_SYMBOLS
         reconnect_attempts   = 0      # cc_task #112: forced reconnects since coverage last healthy
+        opt_subscribed       = False  # cc#189: options subscribed once live prices went fresh
+        opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
+        opt_gate_day         = None   # cc#189: reset the gate each trading day
 
         while True:
             now    = datetime.now(IST)
             today  = now.date()
             now_dt = now.replace(tzinfo=None)
             in_market = (now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE)
+
+            # cc#189: reset the once-per-day 09:30 deadline alert each trading day.
+            if opt_gate_day != today:
+                opt_gate_day = today
+                opt_deadline_alerted = False
 
             if in_market:
                 update_index_ltp(conn, token, agg)
@@ -1256,6 +1325,38 @@ def run(auth_code=None):
                     last_cmp_flush = now_dt
                 opt_store.flush_all()
                 # Index option OI poll added alongside the futures OI poll below.
+
+                # ── cc#189: options subscribe ONLY when live prices are fresh ──
+                # Founder redesign: no boot/REST hydration. Once the market is open
+                # and >=80% of option underlyings have a cmp_prices tick in the last
+                # 10 min, compute ATM strikes from LIVE prices and subscribe. Retries
+                # every loop (30s); a CRITICAL alert fires if still unsubscribed by
+                # 09:30. On a gap day live prices beat yesterday-close for ATM too.
+                if not opt_subscribed:
+                    fresh = _cmp_fresh_fraction(conn, opt_mgr)
+                    if fresh >= OPT_FRESH_MIN_FRAC:
+                        try:
+                            new_opts = opt_mgr.build_initial()   # ATM from LIVE cmp_prices
+                            if new_opts:
+                                _batched_subscribe(fyers_ws, new_opts, action='sub', label='options-live')
+                                option_syms.clear(); option_syms.extend(new_opts)
+                                opt_subscribed = True
+                                total, ok, missing, contracts = opt_mgr.subscribe_health()
+                                log.info(f"cc#189 options subscribed LIVE at {now.time().strftime('%H:%M')}: "
+                                         f"{contracts} contracts, {ok}/{total} underlyings (cmp fresh {fresh:.0%})")
+                                if total and ok < OPT_FRESH_MIN_FRAC * total:
+                                    _log_feed_incident("options_subscribe_critical",
+                                        f"CRITICAL: only {ok}/{total} option underlyings subscribed "
+                                        f"({contracts} contracts); missing: {', '.join(missing) or 'none'}")
+                            else:
+                                log.warning("cc#189 gate: cmp fresh but build produced 0 option symbols")
+                        except Exception as e:
+                            log.warning(f"cc#189 options live-subscribe failed: {e}")
+                    elif now.time() >= OPT_SUB_DEADLINE and not opt_deadline_alerted:
+                        _log_feed_incident("options_not_subscribed_0930",
+                            f"CRITICAL: options unsubscribed at {now.time().strftime('%H:%M')} — cmp_prices "
+                            f"fresh for only {fresh:.0%} of underlyings (need {OPT_FRESH_MIN_FRAC:.0%})")
+                        opt_deadline_alerted = True
 
                 # Futures OI poll every OI_POLL_MINS via DEPTH API (quotes has NO OI).
                 # Background thread: 208 depth calls ≈ 75s — must not block flushes.
