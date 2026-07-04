@@ -86,6 +86,8 @@ _qb_eod_running = False
 # cc#186: company-news two-wave day-lock + wave-1 result (for wave-2 branching)
 _company_news_ran_today: Optional[date] = None
 _company_news_wave1_inserted: Optional[int] = None
+# cc#190: 15:20 gate-rebalance day-lock
+_gate_rebalance_ran_today: Optional[date] = None
 _qb_intraday_mark_running = False
 _global_fetching = False
 _global_intraday_fetching = False
@@ -572,6 +574,58 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
+def _bg_gate_rebalance():
+    """cc#190: 15:20 IST auto-close of over-slot paper positions (GATE_EXIT).
+    Wires v8_paper.run_gate_rebalance (exit-only) into the scheduler — previously
+    the gate rebalance only ran if someone manually hit /api/paper/tick.
+
+    SAFETY: if market-mood breadth is stale (no adr_intraday bar in the last
+    30 min, IST) we SKIP and alert rather than rebalance on bad data. Writes an
+    ops_log(category=gate_rebalance) record on every completed run — even zero
+    closes — so the 15:20 pass is always auditable."""
+    global _gate_rebalance_ran_today
+    today = _ist_now().date()
+    if _gate_rebalance_ran_today == today:
+        return
+    try:
+        # stale-mood guard — compute age in IST (adr_intraday.ts is naive IST)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT MAX(ts),
+                                  EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - MAX(ts)))/60
+                           FROM adr_intraday
+                           WHERE ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date""")
+            row = cur.fetchone()
+        last_ts = row[0] if row else None
+        age_min = float(row[1]) if row and row[1] is not None else None
+        if last_ts is None or age_min is None or age_min > 30:
+            _log_alert("gate_rebalance_stale_mood",
+                       f"skipped 15:20 gate rebalance — adr_intraday stale "
+                       f"(last={last_ts}, age={round(age_min,1) if age_min is not None else 'n/a'} min)")
+            return
+
+        import v8_endpoints, v8_paper
+        mood = v8_endpoints.market_mood()
+        buy_slots, sell_slots = mood.get("buy_slots"), mood.get("sell_slots")
+        if buy_slots is None or sell_slots is None:
+            _log_alert("gate_rebalance_no_mood",
+                       f"skipped 15:20 gate rebalance — mood missing slots (mood={mood.get('mood')})")
+            return
+
+        with _conn() as conn:
+            res = v8_paper.run_gate_rebalance(conn, buy_slots, sell_slots)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'gate_rebalance', %s, %s)""",
+                        ("gate_rebalance_15_20",
+                         Json({"mood": mood.get("mood"), "buy_slots": buy_slots, "sell_slots": sell_slots,
+                               "closed": res.get("closed"), "slot_math": res.get("slot_math"),
+                               "gate_exits": res.get("gate_exits"), "ist": _ist_now().isoformat()})))
+            conn.commit()
+        _gate_rebalance_ran_today = today
+        log.info(f"gate_rebalance: closed {res.get('closed')} | {res.get('slot_math')}")
+    except Exception as e:
+        log.error(f"gate_rebalance: {e}")
+
 # ── ADR/PCR watchdog + health (task #59) ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _log_health(conn, title: str, details: dict):
     """Health ping → ops_log (category=scheduler_health) so a stalled compute
@@ -985,6 +1039,7 @@ async def _scheduler_loop():
         # v8_engine EOD (15:45) and the evening journal review see today's official closes
         # ~5h sooner. The 01:00 IST run (below) stays as the nightly safety re-run.
         # Weekday-only. NO GVM/QB cascade here — that stays in the 01:00-02:00 nightly chain.
+        if now.weekday() < 5 and h == 15 and m == 20: _spawn(_bg_gate_rebalance)  # cc#190: auto-close over-slot paper positions
         if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)

@@ -718,6 +718,73 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
             "open_long":long_open,"open_short":short_open}
 
 
+def run_gate_rebalance(conn, buy_slots: int, sell_slots: int, target_date: date = None) -> Dict:
+    """cc#190: EXIT-ONLY gate rebalance — the GATE REBALANCE section of paper_tick,
+    lifted VERBATIM (same founder-locked 12-Jun policy, same close order). When the
+    market-mood slot cap for a side is below the number of open positions on that
+    side, close the excess — chosen best-profit, worst-loss, 2nd-best, 2nd-worst …
+    until at cap (result GATE_EXIT). This function NEVER evaluates or places
+    entries and never touches the entry code path.
+
+    Scheduled at 15:20 IST on trading days (see scheduler._bg_gate_rebalance).
+    Returns per-side slot math (open_before / cap / excess / closed / open_after)
+    for ops_log, plus the closed-position dicts.
+
+    NOTE (cc#190 scope): CONFLICT_EXIT is intentionally NOT run here. In the
+    founder-locked paper_tick it is a PRE-cutoff, entry-evaluation side effect
+    (_resolve_conflict, only reached from the entry loop, which 15:20==ENTRY_CUTOFF
+    disables). Triggering it at the cutoff minute would change which/when positions
+    close and would require guarding the entry INSERTs — the exact 'could fire
+    entries' risk this task warns against. Flagged for founder: if conflict-exit
+    should also be auto-wired it belongs on a pre-cutoff cadence, separately."""
+    ensure_schema(conn)
+    d = target_date or date.today()
+    live = target_date is None
+    def _ts(bar_ts):
+        return _now_ist() if live else bar_ts
+
+    rebalanced = []
+    slot_math = {}
+    # ---- VERBATIM from paper_tick §2 GATE REBALANCE (do not redesign) ----
+    for side, cap in (("LONG", buy_slots), ("SHORT", sell_slots)):
+        with conn.cursor() as cur:
+            cur.execute("""SELECT id,symbol,basket,entry_price,entry_ts,qty,target,stop_loss,pivot_date
+                           FROM v8_paper_positions WHERE status='OPEN' AND side=%s""", (side,))
+            pos = cur.fetchall()
+        before = len(pos)
+        excess = before - cap
+        slot_math[side] = {"open_before": before, "cap": cap, "excess": max(0, excess),
+                           "closed": 0, "open_after": before}
+        if excess <= 0: continue
+        scored = []
+        for (pid,sym,basket,entry,ets,qty,tgt,sl,pdt) in pos:
+            tl = _two_latest_closes(conn, sym, d)
+            if not tl: continue
+            _, cur_close, cur_ts = tl
+            entry=float(entry); qty=int(qty)
+            upnl = (cur_close-entry)*qty if side=="LONG" else (entry-cur_close)*qty
+            scored.append((upnl,pid,sym,basket,entry,ets,qty,float(tgt),float(sl),pdt,cur_close,cur_ts))
+        best=sorted(scored,key=lambda x:-x[0]); worst=sorted(scored,key=lambda x:x[0])
+        order,bi,wi,picked=[],0,0,set()
+        while len(order)<excess and (bi<len(best) or wi<len(worst)):
+            if bi<len(best) and best[bi][1] not in picked:
+                order.append(best[bi]); picked.add(best[bi][1]); bi+=1
+                if len(order)>=excess: break
+            if wi<len(worst) and worst[wi][1] not in picked:
+                order.append(worst[wi]); picked.add(worst[wi][1]); wi+=1
+            else: wi+=1
+            if bi>=len(best) and wi>=len(worst): break
+        side_closes = []
+        for (upnl,pid,sym,basket,entry,ets,qty,tgt,sl,pdt,cur_close,cur_ts) in order[:excess]:
+            side_closes.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,cur_close,_ts(cur_ts),"GATE_EXIT"))
+        rebalanced.extend(side_closes)
+        slot_math[side]["closed"] = len(side_closes)
+        slot_math[side]["open_after"] = before - len(side_closes)
+
+    return {"date": str(d), "buy_slots": buy_slots, "sell_slots": sell_slots,
+            "gate_exits": rebalanced, "closed": len(rebalanced), "slot_math": slot_math}
+
+
 # ============================================================ EXIT-ONLY PASS
 def run_paper_exits(conn, target_date: date = None, mode: str = "live") -> Dict:
     """cc_task #72 bug_0: EXIT-ONLY pass — NO entries, NO rebalance. Restores the
