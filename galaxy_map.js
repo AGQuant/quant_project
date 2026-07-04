@@ -218,9 +218,10 @@
     function toWorld(px, py) { var ux = (px - view.tx) / view.s, uy = (py - view.ty) / view.s; return rot(ux, uy, -gPhase); }
 
     // ── view helpers (fit to bounding CIRCLE so rotation never clips corners) ──
+    var FIT_BOOST = 1.35;   // cc#203: founder wants default ~2 notches bigger
     function fitView() {
       var pad = 70, s = Math.min((W - pad) / (2 * Rmax || 1), (H - pad) / (2 * Rmax || 1));
-      s = Math.max(0.12, Math.min(s, 2.2));
+      s = Math.max(0.12, Math.min(s * FIT_BOOST, 2.6));
       view.s = s; view.tx = W / 2; view.ty = H / 2;
     }
     function resetView() { fitView(); markInput(); schedule(); }
