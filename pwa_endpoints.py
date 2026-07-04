@@ -89,8 +89,14 @@ MANIFEST = {
 }
 
 # ── service worker (cache shell for offline /app; API always network-only) ──
+# !! RULE (cc#178): ANY change to PWA_JS or SW_JS content REQUIRES bumping CACHE
+#    (scorr-pwa-vN -> vN+1) in the SAME commit. The activate handler deletes every
+#    cache != CACHE, so a bump is what forces installed clients (phone + desktop)
+#    to drop stale shell assets on their next visit. Skipping the bump = installed
+#    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
+#    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v2';
+const CACHE = 'scorr-pwa-v3';
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -118,7 +124,27 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(fetch(req).catch(() => caches.match('/')));
     return;
   }
-  // Static shell assets: cache-first.
+  // cc#178: /pwa.js is NETWORK-FIRST (not cache-first). It changes often — nav
+  // labels/items (e.g. Filters -> V13) — and must propagate on the next normal
+  // page load, not only after a cache bump. On a successful (ok) fetch we refresh
+  // the cached copy so the offline fallback stays current; a non-ok response is
+  // never cached (avoids pinning a bad-deploy 5xx). Offline -> serve the cache.
+  if (url.pathname === '/pwa.js') {
+    e.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          // waitUntil keeps the SW alive until the refresh write lands; the catch
+          // swallows QuotaExceeded/put rejections so they never surface as
+          // unhandled rejections (cc#178 review).
+          e.waitUntil(caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {}));
+        }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+  // Other static shell assets (icons, manifest): cache-first.
   if (SHELL.includes(url.pathname)) {
     e.respondWith(caches.match(req).then((r) => r || fetch(req)));
   }
