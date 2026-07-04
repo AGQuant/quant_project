@@ -13,11 +13,16 @@ MCP tool: fyers_quote
 """
 
 from fastapi import APIRouter, HTTPException
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, time as dt_time
 import os
+import json
 import psycopg
 import requests
 import calendar
+
+from nse_holidays import is_trading_day   # cc#193: market-hours gate for live quotes
+
+CLAMP_MAX_DEV_PCT = 5.0   # cc#193: reject a live quote >5% off the latest DB session bar
 
 router = APIRouter(prefix="/api/fyers", tags=["fyers"])
 
@@ -92,16 +97,82 @@ def _fetch_quote(fyers_symbol: str, token: str) -> dict:
 
 
 @router.get("/quote/{symbol}")
+def _ist_now():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
+def _market_open_ist() -> bool:
+    """cc#193: True only during a real NSE session — trading day + 09:15-15:30 IST."""
+    n = _ist_now()
+    return is_trading_day(n.date()) and dt_time(9, 15) <= n.time() <= dt_time(15, 30)
+
+
+def _latest_session_fut(symbol: str):
+    """cc#193: latest TRADING-SESSION fyers_fut 5m bar (weekday + 09:15-15:30 IST)
+    from intraday_prices. Returns (close, ts) or (None, None) — never a phantom
+    off-hours tick."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT close, ts FROM intraday_prices
+                WHERE symbol=%s AND source='fyers_fut' AND timeframe='5m'
+                  AND EXTRACT(DOW FROM ts) BETWEEN 1 AND 5
+                  AND ts::time >= TIME '09:15' AND ts::time < TIME '15:30'
+                ORDER BY ts DESC LIMIT 1
+            """, (symbol,))
+            r = cur.fetchone()
+            if r and r[0] is not None:
+                return float(r[0]), r[1]
+    except Exception:
+        pass
+    return None, None
+
+
+def _log_quote_rejected(symbol, quote, db_val, dev_pct):
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'quote_rejected', %s, %s::jsonb)""",
+                        (f"{symbol} live quote rejected",
+                         json.dumps({"symbol": symbol, "quote": quote,
+                                     "db_bar_close": db_val, "deviation_pct": dev_pct})))
+        conn.commit()
+    except Exception:
+        pass
+
+
 def fyers_quote(symbol: str):
     """
-    Fetch live futures quote for a symbol.
-    Returns LTP, open, high, low, prev_close, day_change%, OI, volume.
-    Used for trade card population — on-demand only, no storage.
+    Live futures quote for a symbol — LTP, open, high, low, prev_close,
+    day_change%, OI, volume. On-demand only, no storage.
+
+    cc#193: (1) MARKET-HOURS GATE — outside a real NSE session we NEVER call the
+    live quote (Fyers streams phantom garbage on non-trading days, e.g. Sat 04-Jul
+    BANKNIFTY 64,043 vs the real 58,255); we serve the last futures session bar
+    close from intraday_prices instead, with as_of = that bar's time. (2) SANITY
+    CLAMP during market hours — a live quote deviating >5% from the latest DB
+    session bar is rejected (garbage can spike any day), the DB bar is served, and
+    the rejection is logged to ops_log(category=quote_rejected).
     """
     symbol    = symbol.upper().strip()
-    token     = _get_token()
     fyers_sym = _futures_symbol(symbol)
 
+    # (1) off-hours: never call live — serve the last futures session bar
+    if not _market_open_ist():
+        db_close, db_ts = _latest_session_fut(symbol)
+        if db_close is not None:
+            return {
+                "symbol": symbol, "fyers_symbol": fyers_sym, "ltp": db_close,
+                "open": None, "high": None, "low": None, "prev_close": None,
+                "day_chg_pct": None, "volume": None, "oi": None,
+                "source": "db_fut_bar", "is_live": False,
+                "as_of": db_ts.strftime("%Y-%m-%d %H:%M:%S IST") if db_ts else None,
+                "fetched_at": _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"),
+            }
+        raise HTTPException(503, f"Market closed and no futures session bar for {symbol}")
+
+    # market hours: fetch live, then sanity-clamp against the latest DB session bar
+    token = _get_token()
     try:
         v = _fetch_quote(fyers_sym, token)
     except HTTPException:
@@ -116,6 +187,16 @@ def fyers_quote(symbol: str):
     prev_close = v.get("prev_close_price")
     volume     = v.get("volume")
     oi         = v.get("oi")
+
+    source, is_live, as_of = "fyers_live", True, None
+    db_close, db_ts = _latest_session_fut(symbol)
+    if ltp is not None and db_close and float(db_close) > 0:
+        dev = abs(float(ltp) / float(db_close) - 1) * 100
+        if dev > CLAMP_MAX_DEV_PCT:
+            _log_quote_rejected(symbol, float(ltp), float(db_close), round(dev, 2))
+            ltp = db_close
+            source, is_live = "db_fut_bar_clamped", False
+            as_of = db_ts.strftime("%Y-%m-%d %H:%M:%S IST") if db_ts else None
 
     day_chg_pct = None
     if ltp and prev_close and float(prev_close) > 0:
@@ -132,5 +213,8 @@ def fyers_quote(symbol: str):
         "day_chg_pct":  day_chg_pct,
         "volume":       volume,
         "oi":           oi,
-        "fetched_at":   datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
+        "source":       source,
+        "is_live":      is_live,
+        "as_of":        as_of,
+        "fetched_at":   _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"),
     }

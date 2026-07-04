@@ -686,7 +686,13 @@ class BarAggregator:
     def _flush(self, key, bar):
         sym, source = key
         try:
-            if bar['ts'].time() >= MARKET_CLOSE:
+            # cc#193: NEVER persist an off-hours bar. Fyers streams phantom ticks
+            # on non-trading days and outside 09:15-15:30 (garbage levels — e.g.
+            # Sat 04-Jul BANKNIFTY 64,043 while the real Friday close was 58,255).
+            # Only bars inside a real trading session are real data. Was: only
+            # ts.time() >= MARKET_CLOSE rejected (no trading-day/pre-open guard).
+            bt = bar['ts']
+            if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= MARKET_CLOSE:
                 return
         except Exception:
             pass
@@ -848,6 +854,15 @@ class OptionBarStore:
                 if ask is not None: existing['ask'] = ask
 
     def _flush(self, fsym, bar):
+        # cc#193: same off-hours guard as the equity/futures aggregator — never
+        # persist an option bar outside a real trading session (phantom weekend
+        # ticks are garbage).
+        try:
+            bt = bar['bkt']
+            if (not is_trading_day(bt.date())) or bt.time() < MARKET_OPEN or bt.time() >= MARKET_CLOSE:
+                return
+        except Exception:
+            pass
         meta = self.opt_mgr.lookup(fsym)
         if not meta: return
         underlying, strike, otype, expiry = meta

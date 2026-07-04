@@ -7,10 +7,21 @@ Monthly cost: $2-3 (vs $100 Max plan)
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import datetime, timedelta, time as dt_time
 import os
 import time
 import psycopg
 import httpx
+
+from nse_holidays import is_trading_day   # cc#193: market-hours gate for live-LTP
+
+
+def _market_open_ist() -> bool:
+    """cc#193: True only during a real NSE session — trading day + 09:15-15:30 IST.
+    Off-hours the M2M card must serve the last futures session bar, never treat a
+    stale/phantom tick as live."""
+    now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    return is_trading_day(now.date()) and dt_time(9, 15) <= now.time() <= dt_time(15, 30)
 
 router = APIRouter()
 
@@ -168,6 +179,7 @@ def smartgain_m2m():
     futures price regardless of freshness -- e.g. index futures pre-cc#162).
     """
     try:
+        mkt_open = _market_open_ist()   # cc#193: off-hours -> fut_eod (last session close)
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 WITH open_book AS (
@@ -208,6 +220,8 @@ def smartgain_m2m():
                             WHEN c.fut_close IS NOT NULL
                              AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
                                 THEN 'fut_live'
+                            -- cc#193: OFF-HOURS -> last futures session close (not spot).
+                            WHEN c.fut_close IS NOT NULL AND NOT %(mkt_open)s THEN 'fut_eod'
                             WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN 'synthetic'
                             WHEN c.spot_ltp IS NOT NULL THEN 'spot_only'
                             WHEN c.eod_close IS NOT NULL THEN 'eod'
@@ -217,6 +231,7 @@ def smartgain_m2m():
                             WHEN c.fut_close IS NOT NULL
                              AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
                                 THEN c.fut_close
+                            WHEN c.fut_close IS NOT NULL AND NOT %(mkt_open)s THEN c.fut_close   -- cc#193 off-hours
                             WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN c.spot_ltp + c.basis
                             WHEN c.spot_ltp IS NOT NULL THEN c.spot_ltp
                             ELSE c.eod_close
@@ -224,6 +239,8 @@ def smartgain_m2m():
                         CASE
                             WHEN c.fut_close IS NOT NULL
                              AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
+                                THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0
+                            WHEN c.fut_close IS NOT NULL AND NOT %(mkt_open)s
                                 THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0
                             WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL
                                 THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.basis_ts))/60.0
@@ -237,6 +254,7 @@ def smartgain_m2m():
                             WHEN c.fut_close IS NOT NULL
                              AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
                                 THEN true
+                            WHEN c.fut_close IS NOT NULL AND NOT %(mkt_open)s THEN false   -- cc#193 fut_eod is real but not "live"
                             WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL
                                 THEN EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.basis_ts))/60.0 <= 30
                             ELSE false
@@ -245,6 +263,7 @@ def smartgain_m2m():
                             CASE WHEN c.fut_close IS NOT NULL
                              AND EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Kolkata') - c.fut_ts))/60.0 <= 10
                                 THEN c.fut_ts END,
+                            CASE WHEN c.fut_close IS NOT NULL AND NOT %(mkt_open)s THEN c.fut_ts END,   -- cc#193 off-hours as-of = bar time
                             CASE WHEN c.spot_ltp IS NOT NULL AND c.basis IS NOT NULL THEN c.basis_ts END,
                             CASE WHEN c.spot_ltp IS NOT NULL THEN c.spot_ts END,
                             c.eod_ts
@@ -252,11 +271,17 @@ def smartgain_m2m():
                         c.fut_ever_existed
                     FROM (
                         SELECT
+                            -- cc#193: only TRADING-SESSION fut bars (weekday +
+                            -- 09:15-15:30 IST) — never a phantom off-hours tick.
                             (SELECT ip.close FROM intraday_prices ip
                               WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                                AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                                AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
                               ORDER BY ip.ts DESC LIMIT 1)                    AS fut_close,
                             (SELECT ip.ts FROM intraday_prices ip
                               WHERE ip.symbol = h.symbol AND ip.source = 'fyers_fut'
+                                AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                                AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
                               ORDER BY ip.ts DESC LIMIT 1)                    AS fut_ts,
                             (SELECT cp.cmp::numeric FROM cmp_prices cp
                               WHERE cp.symbol = h.symbol)                    AS spot_ltp,
@@ -286,7 +311,7 @@ def smartgain_m2m():
                     ) c
                 ) lp ON true
                 ORDER BY h.id
-            """)
+            """, {"mkt_open": mkt_open})
             cols = [d[0] for d in cur.description]
             rows = []
             for r in cur.fetchall():
