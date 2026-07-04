@@ -153,29 +153,44 @@
     .art-body{font-size:15px}
     .art-compact .art-head{font-size:17px}
   }
-/* cc#194 — Knowledge Hub filters (mobile-first, no break at 360px) */
-.kb-filters{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+/* cc#194/#195 — Knowledge Hub: filters in a LEFT SIDEBAR on desktop, collapsing
+   to horizontal chip rows above the list on mobile. Controls are compact (they
+   are controls, not content); the article list uses the full widened frame. */
+.kb-shell{display:flex;gap:22px;align-items:flex-start}
+.kb-sidebar{width:210px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;position:sticky;top:96px}
+.kb-main{flex:1;min-width:0}
 .kb-search-wrap{position:relative}
-.kb-search{width:100%;padding:10px 34px 10px 12px;border:1px solid #d9dee7;border-radius:9px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:#1c2536}
+.kb-search{width:100%;padding:9px 32px 9px 11px;border:1px solid #d9dee7;border-radius:9px;font-size:13px;font-family:inherit;outline:none;background:#fff;color:#1c2536}
 .kb-search:focus{border-color:#2563eb}
-.kb-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:24px;height:24px;border:none;background:transparent;color:#8a94a6;font-size:18px;cursor:pointer;display:none;line-height:1;border-radius:50%}
+.kb-clear{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:22px;height:22px;border:none;background:transparent;color:#8a94a6;font-size:17px;cursor:pointer;display:none;line-height:1;border-radius:50%}
 .kb-clear:hover{background:#eef1f6;color:#1c2536}
 .kb-clear.on{display:block}
-.kb-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.kb-catrow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
-.kb-catrow::-webkit-scrollbar{display:none}
-.kb-pill{flex-shrink:0;padding:7px 12px;border:1px solid #d9dee7;border-radius:16px;background:#fff;color:#5a6781;font-size:12px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;transition:.1s}
+.kb-sgroup{display:flex;flex-direction:column;gap:7px}
+.kb-slabel{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#8a94a6}
+.kb-diff{display:flex;flex-wrap:wrap;gap:5px}
+.kb-pill{flex-shrink:0;padding:5px 11px;border:1px solid #d9dee7;border-radius:15px;background:#fff;color:#5a6781;font-size:12px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;transition:.1s}
 .kb-pill:hover{border-color:#b9c4d6}
 .kb-pill.on{background:#2563eb;border-color:#2563eb;color:#fff}
 .kb-pill.beg.on{background:#0a9e63;border-color:#0a9e63}
 .kb-pill.pro.on{background:#b45309;border-color:#b45309}
-.kb-count{font-size:11.5px;color:#8a94a6;font-weight:600}
+.kb-topics{display:flex;flex-direction:column;gap:1px}
+.kb-topic{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12.5px;font-weight:600;color:#5a6781;padding:6px 9px;border-radius:7px;cursor:pointer;white-space:nowrap;overflow:hidden}
+.kb-topic>b{font-weight:600;color:#b3bccb;font-size:11px;flex-shrink:0}
+.kb-topic:hover{background:#f1f4f9;color:#1c2536}
+.kb-topic.on{background:#eaf1ff;color:#2563eb}
+.kb-topic.on>b{color:#2563eb}
+.kb-count{font-size:11.5px;color:#8a94a6;font-weight:600;margin-bottom:12px}
 .kb-chip{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9.5px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;vertical-align:middle}
 .kb-chip.beg{background:#d6f3e6;color:#066b46}
 .kb-chip.pro{background:#fcefd9;color:#92510a}
-@media(min-width:560px){
-  .kb-filters{gap:12px}
-  .kb-search{max-width:360px}
+@media(max-width:767px){
+  .kb-shell{flex-direction:column;gap:12px;align-items:stretch}
+  .kb-sidebar{width:100%;position:static;flex-direction:column;gap:10px}
+  .kb-topics{flex-direction:row;overflow-x:auto;gap:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .kb-topics::-webkit-scrollbar{display:none}
+  .kb-topic{flex-shrink:0;border:1px solid #d9dee7;border-radius:16px;padding:7px 12px;justify-content:flex-start}
+  .kb-topic>b{display:none}
+  .kb-topic.on{background:#2563eb;color:#fff;border-color:#2563eb}
 }
 </style>
 </head>
@@ -537,26 +552,29 @@ function renderKnowledge(){
   }
   const cats = Object.keys(kbCatCounts).sort();
   _kbCats = cats;   // referenced by index from the chip onclicks (avoids string-escaping bugs, e.g. "Macro & Policy")
-  const catPills = ['<span class="kb-pill'+(kbCat==="all"?" on":"")+'" onclick="setKbCatIdx(-1)">All</span>']
-    .concat(cats.map(function(c,i){
-      return '<span class="kb-pill'+(kbCat===c?" on":"")+'" onclick="setKbCatIdx('+i+')">'+esc(c)+'</span>';
-    })).join("");
   const begN = kbDiffCounts["Beginner"]||0, proN = kbDiffCounts["Pro"]||0;
+  const diffPills =
+    '<span class="kb-pill'+(kbDiff==="all"?" on":"")+'" onclick="setKbDiff(\'all\')">All</span>'+
+    '<span class="kb-pill beg'+(kbDiff==="Beginner"?" on":"")+'" onclick="setKbDiff(\'Beginner\')">Beginner'+(begN?' ('+begN+')':'')+'</span>'+
+    '<span class="kb-pill pro'+(kbDiff==="Pro"?" on":"")+'" onclick="setKbDiff(\'Pro\')">Pro'+(proN?' ('+proN+')':'')+'</span>';
+  // cc#195: Topics as a vertical list on desktop (left sidebar), horizontal
+  // scroll chips on mobile — same elements, CSS switches the layout.
+  const topics = ['<span class="kb-topic'+(kbCat==="all"?" on":"")+'" onclick="setKbCatIdx(-1)">All topics</span>']
+    .concat(cats.map(function(c,i){
+      return '<span class="kb-topic'+(kbCat===c?" on":"")+'" onclick="setKbCatIdx('+i+')">'+esc(c)+' <b>'+(kbCatCounts[c]||0)+'</b></span>';
+    })).join("");
   feed.innerHTML =
-    '<div class="kb-filters">'+
-      '<div class="kb-search-wrap">'+
-        '<input class="kb-search" id="kbSearch" type="text" placeholder="Search articles…" autocomplete="off" value="'+esc(kbSearch)+'">'+
-        '<button class="kb-clear'+(kbSearch?" on":"")+'" id="kbClear" type="button" aria-label="Clear search" onclick="clearKbSearch()">&times;</button>'+
-      '</div>'+
-      '<div class="kb-row">'+
-        '<span class="kb-pill'+(kbDiff==="all"?" on":"")+'" onclick="setKbDiff(\'all\')">All</span>'+
-        '<span class="kb-pill beg'+(kbDiff==="Beginner"?" on":"")+'" onclick="setKbDiff(\'Beginner\')">Beginner'+(begN?' ('+begN+')':'')+'</span>'+
-        '<span class="kb-pill pro'+(kbDiff==="Pro"?" on":"")+'" onclick="setKbDiff(\'Pro\')">Pro'+(proN?' ('+proN+')':'')+'</span>'+
-      '</div>'+
-      (cats.length>1 ? '<div class="kb-catrow">'+catPills+'</div>' : '')+
-      '<div class="kb-count" id="kbCount"></div>'+
-    '</div>'+
-    '<div id="kb-list"></div>';
+    '<div class="kb-shell">'+
+      '<aside class="kb-sidebar">'+
+        '<div class="kb-search-wrap">'+
+          '<input class="kb-search" id="kbSearch" type="text" placeholder="Search…" autocomplete="off" value="'+esc(kbSearch)+'">'+
+          '<button class="kb-clear'+(kbSearch?" on":"")+'" id="kbClear" type="button" aria-label="Clear search" onclick="clearKbSearch()">&times;</button>'+
+        '</div>'+
+        '<div class="kb-sgroup"><div class="kb-slabel">Level</div><div class="kb-diff">'+diffPills+'</div></div>'+
+        (cats.length>1 ? '<div class="kb-sgroup"><div class="kb-slabel">Topics</div><div class="kb-topics">'+topics+'</div></div>' : '')+
+      '</aside>'+
+      '<div class="kb-main"><div class="kb-count" id="kbCount"></div><div id="kb-list"></div></div>'+
+    '</div>';
   const si = document.getElementById("kbSearch");
   si.addEventListener("input", function(){
     kbSearch = si.value;
