@@ -198,6 +198,7 @@
    sit under it; wrap to extra rows on tight widths. */
 .galaxy-topbar{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 104px 10px 12px;background:linear-gradient(180deg,rgba(7,11,26,.94),rgba(7,11,26,0))}
 .galaxy-title{color:#e8eefc;font-size:13px;font-weight:800;flex:1;min-width:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.galaxy-count{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:11px;background:rgba(37,99,235,.22);border:1px solid #2a4d8f;color:#9fc0ff;font-size:10.5px;font-weight:700;vertical-align:middle}
 /* cc#203: back-to-Intel control (top-left), dark pill matching galaxy UI, ≥40px touch target */
 .galaxy-back{display:inline-flex;align-items:center;gap:5px;height:40px;padding:0 14px 0 10px;border-radius:20px;border:1px solid #29406e;background:rgba(13,20,40,.9);color:#cdd8f2;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);font-family:inherit;flex-shrink:0}
 .galaxy-back:hover{border-color:#2563eb;color:#fff}
@@ -326,6 +327,7 @@ const SEARCH_TABS = ["domestic"];
 let articles = [];
 // cc_task #125: Knowledge Hub (Learn tab) — separate feed + lazy-loaded bodies
 let kbArticles = [];
+let kbTotal = 0;                 // cc#204: api.total — source of truth for count assertion + badge
 const _kbCache = {};
 // cc#194: Knowledge Hub client-side filters (difficulty + category + search)
 let kbDiff = "all", kbCat = "all", kbSearch = "";
@@ -558,7 +560,7 @@ async function loadKnowledge(){
   btn.disabled = true;
   document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
   try{
-    const r = await fetch(`${API}/api/knowledge/articles?limit=100`, { signal });
+    const r = await fetch(`${API}/api/knowledge/articles?limit=500`, { signal });   // cc#204: was 100 → dropped the 20 oldest (Basics core)
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     if(curCat !== "learn") return; // tab switched mid-fetch
@@ -566,7 +568,10 @@ async function loadKnowledge(){
     kbCatCounts = d.category_counts || {};
     kbDiffCounts = d.difficulty_counts || {};
     kbDiff = "all"; kbCat = "all"; kbSearch = "";   // cc#194: reset filters on (re)load
-    const total = d.total || kbArticles.length;
+    kbTotal = d.total || kbArticles.length;
+    // cc#204: assert every article is present — founder had to count stars manually
+    console.assert(kbArticles.length === kbTotal, "Knowledge Hub: fetched "+kbArticles.length+" of "+kbTotal+" articles");
+    const total = kbTotal;
     document.getElementById("meta").textContent = total
       ? `${total} educational ${total===1?"article":"articles"} · evergreen Knowledge Hub`
       : "Knowledge Hub · articles coming soon";
@@ -805,7 +810,7 @@ function ensureGalaxyOverlay(){
     '<div class="galaxy-canvas" id="galaxyCanvas"></div>'+
     '<div class="galaxy-topbar">'+
       '<button class="galaxy-back" onclick="closeGalaxy()" aria-label="Back to Intel"><span class="ga-arrow">‹</span>Intel</button>'+
-      '<div class="galaxy-title">✦ Knowledge Galaxy</div>'+
+      '<div class="galaxy-title">✦ Knowledge Galaxy <span class="galaxy-count" id="galaxyCount"></span></div>'+
       '<input class="galaxy-gsearch" id="galaxySearch" type="text" placeholder="Search…" autocomplete="off">'+
       '<span class="galaxy-gpill" id="gpAll" onclick="galaxySetDiff(\'all\')">All</span>'+
       '<span class="galaxy-gpill beg" id="gpBeg" onclick="galaxySetDiff(\'Beginner\')">Beg</span>'+
@@ -854,11 +859,15 @@ function openGalaxy(){
       onCategoryTap: function(){}
     });
     _galaxy.setDim(galaxyDimPred());
-    // cc#197 fix_1: assert every article rendered as a node
+    // cc#204: assert every article in the DB is a star (was silently dropping 20)
+    console.assert(_galaxy._nodes.length === kbTotal,
+      "Knowledge Galaxy: "+_galaxy._nodes.length+" stars vs api.total "+kbTotal);
     if(_galaxy._nodes.length !== kbArticles.length)
       console.warn("Knowledge Galaxy: node/article mismatch "+_galaxy._nodes.length+" vs "+kbArticles.length);
     else
       console.log("Knowledge Galaxy: "+_galaxy._nodes.length+" nodes across "+Object.keys(kbCatCounts).length+" constellations");
+    // cc#204: visible count badge sourced from api.total — drift is self-evident forever
+    var gb=document.getElementById("galaxyCount"); if(gb) gb.textContent=kbTotal+" topics";
   });
 }
 

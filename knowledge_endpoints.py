@@ -46,7 +46,7 @@ def knowledge_articles(request: Request, category: str = "all", limit: int = 100
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     cat = (category or "all").strip()
-    limit = max(1, min(limit, 200))
+    limit = max(1, min(limit, 500))   # cc#204: raised from 200 (50-article era cap); now 120 articles
     offset = max(0, offset)
     where, params = "", []
     if cat and cat.lower() != "all":
