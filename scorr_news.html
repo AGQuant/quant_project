@@ -34,6 +34,11 @@
   .mnav-sep{width:1px;height:20px;background:var(--line);flex-shrink:0;margin:0 4px}
 
   .wrap{max-width:760px;margin:0 auto;padding:34px 20px calc(90px + env(safe-area-inset-bottom))}
+  /* cc#195: widen the center frame so the list fills the screen with small
+     margins. Mobile (<768px) keeps the 760px cap = full-width with side padding;
+     the sticky tab bar lives inside .wrap so it widens + stays aligned too. */
+  @media(min-width:768px){ .wrap{max-width:90vw;padding-left:24px;padding-right:24px} }
+  @media(min-width:1200px){ .wrap{max-width:1140px} }
 
   .masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;
     padding-bottom:18px;border-bottom:2px solid var(--txt)}
@@ -83,7 +88,10 @@
   .imp-low  .art-impact{background:rgba(90,103,129,.10);color:var(--mut)}
 
   .art-stand{font-size:15px;color:var(--mut);margin-top:14px;line-height:1.6;max-width:64ch;font-weight:500}
-  .art-body{margin-top:14px;max-width:680px;font-size:15.5px;line-height:1.75;color:var(--txt)}
+  /* cc#195: list rows go full frame-width, but the READING column stays a
+     comfortable ~860px (left-aligned with the headings above it) so long lines
+     don't hurt readability in the wider frame. */
+  .art-body{margin-top:14px;max-width:860px;font-size:15.5px;line-height:1.75;color:var(--txt)}
   .art-body > :first-child{margin-top:0}
   .art-body h1,.art-body h2,.art-body h3,.art-body h4{font-family:var(--serif);line-height:1.25;
     margin:24px 0 10px;font-weight:600;color:var(--txt)}
