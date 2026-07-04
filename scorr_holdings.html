@@ -126,7 +126,22 @@
   .cl-tbl tbody tr:last-child td{border-bottom:none}
   .cl-tbl tfoot td{border-top:2px solid var(--border);padding:11px 10px;font-size:12.5px}
   .cl-tbl .pos-dir{font-size:9px;padding:2px 7px}
+
+  /* cc#181: TradingView Lightweight Charts container + crosshair tooltip + mismatch banner */
+  #m2m-chart{position:relative;min-height:200px}
+  .m2m-tip{position:absolute;z-index:5;pointer-events:none;background:#fff;border:1px solid var(--border);
+    border-radius:8px;box-shadow:0 4px 14px rgba(20,35,70,.12);padding:7px 9px;font-size:11px;min-width:122px}
+  .m2m-tip .tip-h{font-weight:800;font-size:11px;margin-bottom:4px;color:var(--txt)}
+  .m2m-tip .tip-row{display:flex;justify-content:space-between;gap:14px;line-height:1.55}
+  .m2m-tip .tip-row span{color:var(--mut)}
+  .m2m-tip .tip-row b{font-family:monospace}
+  .m2m-mismatch{display:none;align-items:flex-start;gap:8px;background:#fff8ec;border:1px solid #f4d79a;
+    border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11.5px;color:#8a5a00;line-height:1.5}
+  .m2m-mismatch .mm-ic{font-size:15px;flex-shrink:0}
+  .m2m-mismatch b{color:#7a4f00}
+  .m2m-mismatch .mm-list{font-family:monospace;font-size:10.5px;margin-top:3px;color:#a06a00;word-break:break-word}
 </style>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -202,6 +217,7 @@
         <button class="range-btn" data-r="1m" onclick="setRange('1m')">1M</button>
         <button class="range-btn" data-r="1y" onclick="setRange('1y')">1Y</button>
       </div>
+      <div class="m2m-mismatch" id="m2m-mismatch"></div>
       <div class="m2m-head">
         <span id="m2m-total">&#8212;</span>
         <span class="m2m-legend" id="m2m-legend"></span>
@@ -479,6 +495,94 @@ function chartLegend(range){
     `<span class="m2m-lg"><i style="background:var(--blu);border-radius:50%"></i>${lineLbl}</span>`;
 }
 
+/* cc#181: interactive chart via TradingView Lightweight Charts v4 (crosshair +
+   custom tooltip, touch). Falls back to the SVG renderer if the CDN lib is
+   unavailable (offline). Home card SVG (cc#166) is untouched. */
+const GRN="#0a9e63", RED="#dd3a4a", BLU="#2563eb";
+let _lw=null, _lwRO=null;
+const keyStr=t=> t==null?"":(typeof t==="object"
+  ? t.year+"-"+String(t.month).padStart(2,"0")+"-"+String(t.day).padStart(2,"0")
+  : String(t));
+function _tkey(d,p){                     // LWC time value for a point
+  if(d.range!=="1d") return p.date.slice(0,10);        // business-day string
+  const dd=d.target_day;                               // fake-UTC so axis shows IST HH:MM
+  return Math.floor(Date.UTC(+dd.slice(0,4),+dd.slice(5,7)-1,+dd.slice(8,10),
+                             +p.label.slice(0,2),+p.label.slice(3,5))/1000);
+}
+function tipHTML(range,p){
+  const row=(l,v,c)=>`<div class="tip-row"><span>${l}</span><b style="color:${c||"var(--txt)"}">${sgn(v)}</b></div>`;
+  if(range==="1d") return `<div class="tip-h">${p.label} IST</div>`+
+    row("M2M",p.m2m,p.m2m>=0?GRN:RED)+row("Realised",p.realised)+row("Unrealised",p.unrealised);
+  if(range==="1y") return `<div class="tip-h">${fmtDate(p.date)}</div>`+
+    row("Cumulative",p.cumulative,p.cumulative>=0?GRN:RED);
+  return `<div class="tip-h">${fmtDate(p.date)}</div>`+
+    row("Day M2M",p.m2m,p.m2m>=0?GRN:RED)+row("Cumulative",p.cumulative);
+}
+function renderLWChart(d){
+  const el=document.getElementById("m2m-chart");
+  const S=d.series||[];
+  if(!S.length){ el.innerHTML='<div class="empty-msg">No data for this range.</div>'; return; }
+  if(!window.LightweightCharts){ el.innerHTML=renderChart(d); return; }   // CDN offline -> SVG fallback
+  if(_lw){ try{_lw.remove();}catch(e){} _lw=null; }
+  if(_lwRO){ _lwRO.disconnect(); _lwRO=null; }
+  el.innerHTML="";
+  const H=window.matchMedia("(max-width:560px)").matches?240:260;
+  const w=el.clientWidth||320, range=d.range;
+  const chart=LightweightCharts.createChart(el,{
+    width:w, height:H,
+    layout:{ background:{type:"solid",color:"#ffffff"}, textColor:"#5a6781", fontSize:11,
+             fontFamily:"-apple-system,BlinkMacSystemFont,Inter,sans-serif" },
+    grid:{ vertLines:{visible:false}, horzLines:{color:"#eef1f6"} },
+    rightPriceScale:{ borderVisible:false },
+    timeScale:{ borderVisible:false, timeVisible:range==="1d", secondsVisible:false, fixLeftEdge:true, fixRightEdge:true },
+    crosshair:{ mode:LightweightCharts.CrosshairMode.Normal,
+      vertLine:{ width:1, color:"#c5cfe0", labelBackgroundColor:BLU },
+      horzLine:{ color:"#c5cfe0", labelBackgroundColor:BLU } },
+    // horzTouchDrag on => LWC handles the horizontal touch as a crosshair track
+    // (data fills the viewport with fixLeftEdge/fixRightEdge so nothing scrolls);
+    // vertTouchDrag off => vertical swipes pass through to the page scroll.
+    handleScroll:{ mouseWheel:false, pressedMouseMove:true, horzTouchDrag:true, vertTouchDrag:false },
+    handleScale:{ mouseWheel:false, pinch:false, axisPressedMouseMove:false, axisDoubleClickReset:false },
+  });
+  _lw=chart;
+  const byKey={};
+  if(range==="1w"||range==="1m"){
+    const hist=chart.addHistogramSeries({ base:0, priceLineVisible:false, lastValueVisible:false });
+    hist.setData(S.map(p=>{ const t=_tkey(d,p); byKey[keyStr(t)]=p;
+      return { time:t, value:p.m2m, color:p.m2m>=0?GRN:RED }; }));
+    const line=chart.addLineSeries({ color:BLU, lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:true });
+    line.setData(S.map(p=>({ time:_tkey(d,p), value:p.cumulative })));
+  } else {
+    const vk=(range==="1d")?"m2m":"cumulative";
+    const area=chart.addAreaSeries({ lineColor:BLU, topColor:"rgba(37,99,235,0.18)", bottomColor:"rgba(37,99,235,0.02)",
+      lineWidth:2, priceLineVisible:false, lastValueVisible:false });
+    area.setData(S.map(p=>{ const t=_tkey(d,p); byKey[keyStr(t)]=p; return { time:t, value:p[vk] }; }));
+  }
+  chart.timeScale().fitContent();
+  const tip=document.createElement("div"); tip.className="m2m-tip"; tip.style.display="none"; el.appendChild(tip);
+  chart.subscribeCrosshairMove(param=>{
+    if(!param.time||!param.point||param.point.x<0||param.point.y<0){ tip.style.display="none"; return; }
+    const p=byKey[keyStr(param.time)];
+    if(!p){ tip.style.display="none"; return; }
+    tip.innerHTML=tipHTML(range,p);
+    tip.style.display="block";
+    const cw=el.clientWidth, tw=tip.offsetWidth||130;
+    let x=param.point.x+14; if(x+tw>cw) x=param.point.x-tw-14; if(x<0)x=4;
+    tip.style.left=x+"px"; tip.style.top=Math.max(4,param.point.y-10)+"px";
+  });
+  _lwRO=new ResizeObserver(()=>{ if(_lw) _lw.applyOptions({width:el.clientWidth}); });
+  _lwRO.observe(el);
+}
+
+function renderMismatchBanner(d){
+  const el=document.getElementById("m2m-mismatch");
+  const mm=d.holdings_mismatch||[];
+  if(!mm.length){ el.style.display="none"; el.innerHTML=""; return; }
+  const list=mm.map(m=>`${m.symbol} ${m.direction}: broker ${m.holdings_qty} vs replay ${m.replay_qty}`).join(" · ");
+  el.innerHTML=`<span class="mm-ic">&#9888;</span><div><b>Replay vs broker holdings mismatch</b> — latest orderbook batch missing, values may be stale.<div class="mm-list">${list}</div></div>`;
+  el.style.display="flex";
+}
+
 function renderClosed(d){
   const C=d.closed_all||[];
   if(!C.length) return '<div class="empty-msg">No closed trades yet.</div>';
@@ -501,15 +605,21 @@ async function loadM2M(range){
     const r=await fetch(API+"/api/smartgain/daily_m2m?range="+range);
     const d=await r.json();
     document.getElementById("m2m-card").style.display="block";
+    // cc#181: checksum banner rides on every range response — wrong data can never
+    // render silently. Update whenever the key is present.
+    if(Array.isArray(d.holdings_mismatch)) renderMismatchBanner(d);
     if(range===curRange && document.querySelector(".m2m-tab.active").dataset.tab==="chart"){
-      document.getElementById("m2m-chart").innerHTML=renderChart(d);
+      renderLWChart(d);                                   // cc#181: interactive chart (SVG fallback inside)
       const t=d.total_m2m||0;
       document.getElementById("m2m-total").innerHTML=`<b style="font-size:20px;font-family:monospace;color:${t>=0?"var(--grn)":"var(--red)"}">${sgn(t)}</b> <span style="color:var(--mut);font-size:11px">${rangeCap[range]||""}</span>`;
       document.getElementById("m2m-legend").innerHTML=chartLegend(range);
-      const cap=(range==="1m"||range==="1y")&&d.from_date?"Orderbook history from "+fmtDate(d.from_date)+" — earlier data accrues over time.":
+      let cap=(range==="1m"||range==="1y")&&d.from_date?"Orderbook history from "+fmtDate(d.from_date)+" — earlier data accrues over time.":
                 (range==="1d"&&d.target_day?"Intraday replay for "+fmtDate(d.target_day):"");
+      (d.notes||[]).forEach(nn=>{ if(nn.indexOf("partial")>-1) cap+=(cap?" · ":"")+nn; });
+      // cc#181: chart-tab freshness from computed_at (recompute-on-call, never
+      // the weekend-stale smartgain_holdings.updated_at).
+      if(d.computed_at) cap+=(cap?" · ":"")+"recomputed "+ago(d.computed_at);
       document.getElementById("m2m-cap").textContent=cap;
-      (d.notes||[]).forEach(nn=>{ if(nn.indexOf("partial")>-1) document.getElementById("m2m-cap").textContent+=" · "+nn; });
     }
     // closed_all is range-independent full history (absent only for 1d) — render once.
     if(d.closed_all && !closedRendered){

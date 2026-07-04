@@ -366,11 +366,14 @@ def _intraday_1d(cur, account, today):
     if partial_syms:
         notes.append(f"intraday feed partial for {', '.join(sorted(partial_syms))} — "
                      f"pre-feed buckets carried at entry")
+    open_pos = _open_positions(cur, books, target)   # end-of-day book
     return {
         "account": account, "range": "1d", "mode": "line", "x_type": "time",
         "target_day": str(target), "from_date": str(inception),
         "series": series,
         "total_m2m": series[-1]["m2m"] if series else 0.0,
+        "open_positions": open_pos,
+        "holdings_mismatch": _holdings_mismatch(cur, account, open_pos),   # cc#181 banner
         "notes": notes, "computed_at": datetime.utcnow().isoformat() + "Z",
     }
 
