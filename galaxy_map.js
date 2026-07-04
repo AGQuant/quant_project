@@ -233,34 +233,29 @@
       ctx.globalAlpha = 1;
     }
 
+    function toScreen(wx, wy) { return { x: wx * view.s + view.tx, y: wy * view.s + view.ty }; }
+
     function draw() {
       raf = null;
       drawBg();
+
+      // ── WORLD PASS: hulls, links, node glow + core ──
       ctx.save();
       ctx.translate(view.tx, view.ty); ctx.scale(view.s, view.s);
 
-      // category hulls + labels
+      var clusters = [];
       Object.keys(byCat).forEach(function (cat) {
         var arr = byCat[cat]; if (!arr.length) return;
-        var col = catColor[cat] || "#60a5fa";
         var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
         arr.forEach(function (nd) { x0 = Math.min(x0, nd.x); y0 = Math.min(y0, nd.y); x1 = Math.max(x1, nd.x); y1 = Math.max(y1, nd.y); });
-        var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-        var rw = (x1 - x0) / 2 + 34, rh = (y1 - y0) / 2 + 34;
-        ctx.globalAlpha = 0.10;
-        ctx.fillStyle = col;
-        ctx.beginPath(); ctx.ellipse(cx, cy, Math.max(rw, 30), Math.max(rh, 30), 0, 0, 6.283); ctx.fill();
-        ctx.globalAlpha = 0.9;
-        ctx.fillStyle = col;
-        ctx.font = "700 " + (11 / view.s) + "px ui-monospace,Menlo,monospace";
-        ctx.textAlign = "center";
-        ctx.fillText((cat || "").toUpperCase() + " · " + arr.length, cx, y0 - 16);
-        ctx.globalAlpha = 1;
+        var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rw = Math.max((x1 - x0) / 2 + 34, 30), rh = Math.max((y1 - y0) / 2 + 34, 30);
+        clusters.push({ cat: cat, arr: arr, col: catColor[cat] || "#60a5fa", cx: cx, cy: cy, rw: rw, rh: rh, R: Math.max(rw, rh) });
+        ctx.globalAlpha = 0.10; ctx.fillStyle = catColor[cat] || "#60a5fa";
+        ctx.beginPath(); ctx.ellipse(cx, cy, rw, rh, 0, 0, 6.283); ctx.fill();
       });
+      ctx.globalAlpha = 1;
 
-      // links — cc#197: visible tinted constellation lines (were near-invisible)
-      ctx.lineWidth = 1.1 / view.s;
-      ctx.lineCap = "round";
+      ctx.lineWidth = 1.1 / view.s; ctx.lineCap = "round";
       links.forEach(function (l) {
         var a = l[0], b = l[1];
         var al = (a.dim && b.dim) ? 0.05 : (a.dim || b.dim ? 0.10 : 0.30);
@@ -268,63 +263,106 @@
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       });
 
-      // nodes — cc#197: every star has a soft glow (brighter on hover)
       nodes.forEach(function (nd) {
         var t = TIER[nd.tier], r = (nd.size || t.r), isH = hover === nd;
-        var a = nd.dim ? 0.15 : 1;
-        var grad = r * (isH ? 5.5 : 3.4);
+        var a = nd.dim ? 0.15 : 1, grad = r * (isH ? 5.5 : 3.4);
         ctx.globalAlpha = (isH ? 1 : 0.7) * (nd.dim ? 0.22 : 1);
         var gr = ctx.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, grad);
         gr.addColorStop(0, t.glow); gr.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = gr;
-        ctx.beginPath(); ctx.arc(nd.x, nd.y, grad, 0, 6.283); ctx.fill();
-        ctx.globalAlpha = a;
-        ctx.fillStyle = t.core;
+        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(nd.x, nd.y, grad, 0, 6.283); ctx.fill();
+        ctx.globalAlpha = a; ctx.fillStyle = t.core;
         ctx.beginPath(); ctx.arc(nd.x, nd.y, r + (isH ? 1.6 : 0), 0, 6.283); ctx.fill();
-        ctx.globalAlpha = a * 0.9;
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.globalAlpha = a * 0.9; ctx.fillStyle = "rgba(255,255,255,0.85)";
         ctx.beginPath(); ctx.arc(nd.x - r * 0.3, nd.y - r * 0.3, r * 0.35, 0, 6.283); ctx.fill();
       });
       ctx.globalAlpha = 1;
+      ctx.restore();
 
-      // cc#197: node labels — Pro (anchor) stars at default zoom; ALL past a
-      // zoom threshold. Small, so they don't clutter the constellations.
-      var showAll = view.s > 1.35;
-      ctx.textAlign = "center"; ctx.textBaseline = "top";
-      ctx.font = "600 " + (9 / view.s) + "px -apple-system,Segoe UI,sans-serif";
-      nodes.forEach(function (nd) {
-        if (hover === nd) return;               // hovered gets the richer tooltip
-        if (nd.dim) return;
-        if (!showAll && !nd.anchor) return;     // default zoom: one anchor label per cluster
-        var r = (nd.size || TIER[nd.tier].r);
-        ctx.globalAlpha = 0.8;
-        ctx.fillStyle = "rgba(6,10,22,0.85)";   // legibility backing
-        ctx.fillText(clip(nd.label, 22), nd.x + 0.6 / view.s, nd.y + r + 3.6 / view.s);
-        ctx.fillStyle = "rgba(214,225,250,0.92)";
-        ctx.fillText(clip(nd.label, 22), nd.x, nd.y + r + 3 / view.s);
+      // ── SCREEN PASS: labels OUTSIDE clusters, collision-free, edge-safe (cc#198) ──
+      var M = 10, placed = [];
+      function hit(b) { return placed.some(function (p) { return b.x < p.x + p.w && b.x + b.w > p.x && b.y < p.y + p.h && b.y + b.h > p.y; }); }
+
+      // (a) category header — above its cluster, flips BELOW if it would clip the
+      //     top edge; x-clamped so border clusters never clip sideways; never on dots.
+      ctx.font = "700 11px ui-monospace,Menlo,monospace"; ctx.textBaseline = "middle";
+      clusters.forEach(function (c) {
+        var s = toScreen(c.cx, c.cy), R = c.R * view.s;
+        if (s.x < -R - 60 || s.x > W + R + 60 || s.y < -R - 60 || s.y > H + R + 60) return;  // cull off-screen cluster
+        var txt = (c.cat || "").toUpperCase() + " · " + c.arr.length, tw = ctx.measureText(txt).width;
+        var above = (s.y - R - 16) > (M + 8);
+        var ly = above ? (s.y - R - 12) : (s.y + R + 14);
+        ly = Math.max(M + 8, Math.min(H - M, ly));
+        var cx = Math.max(tw / 2 + M, Math.min(W - tw / 2 - M, s.x));
+        ctx.textAlign = "center";
+        ctx.globalAlpha = 0.75; ctx.fillStyle = "rgba(7,11,26,0.85)"; ctx.fillText(txt, cx + 0.6, ly + 0.6);
+        ctx.globalAlpha = 0.96; ctx.fillStyle = c.col; ctx.fillText(txt, cx, ly);
+        placed.push({ x: cx - tw / 2 - 4, y: ly - 9, w: tw + 8, h: 18 });
       });
       ctx.globalAlpha = 1;
 
-      // cc#197: hover/long-press tooltip — title + sublabel (reading time)
-      if (hover) drawTooltip(hover);
-      ctx.restore();
+      // (b) node labels — only when zoomed in. Each label sits OUTSIDE the cluster
+      //     circle, radially outward from the node's direction, with a thin leader
+      //     line; collision nudge + edge clamp guarantee no overlap / no clipping.
+      if (view.s > 1.35) {
+        ctx.font = "600 10px -apple-system,Segoe UI,sans-serif";
+        clusters.forEach(function (c) {
+          var sC = toScreen(c.cx, c.cy), R = c.R * view.s;
+          c.arr.forEach(function (nd) {
+            if (nd.dim || hover === nd) return;
+            var sN = toScreen(nd.x, nd.y);
+            if (sN.x < -30 || sN.x > W + 30 || sN.y < -30 || sN.y > H + 30) return;   // cull off-screen node
+            var dx = sN.x - sC.x, dy = sN.y - sC.y, dd = Math.sqrt(dx * dx + dy * dy) || 0.01, ux = dx / dd, uy = dy / dd;
+            var lx = sC.x + ux * (R + 14), ly = sC.y + uy * (R + 14);
+            var txt = clip(nd.label, 26), tw = ctx.measureText(txt).width;
+            var align = ux > 0.25 ? "left" : (ux < -0.25 ? "right" : "center");
+            var bx = align === "left" ? lx : (align === "right" ? lx - tw : lx - tw / 2);
+            bx = Math.max(M, Math.min(W - M - tw, bx));
+            ly = Math.max(M + 8, Math.min(H - M, ly));
+            var box = { x: bx - 3, y: ly - 8, w: tw + 6, h: 16 }, tries = 0;
+            // collision: nudge vertically; if pinned to a top/bottom edge, slide horizontally instead
+            while (tries < 12 && hit(box)) {
+              if (ly <= M + 9 || ly >= H - M - 1) { bx += (ux >= 0 ? 1 : -1) * (tw * 0.4 + 12); bx = Math.max(M, Math.min(W - M - tw, bx)); box.x = bx - 3; }
+              else { ly += (uy >= 0 ? 1 : -1) * 15; ly = Math.max(M + 8, Math.min(H - M, ly)); box.y = ly - 8; }
+              tries++;
+            }
+            placed.push(box);
+            var drawX = align === "left" ? bx : (align === "right" ? bx + tw : bx + tw / 2);
+            var er = (nd.size || TIER[nd.tier].r) * view.s;
+            ctx.globalAlpha = 0.45; ctx.strokeStyle = hexA(c.col, 0.5); ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.moveTo(sN.x + ux * er, sN.y + uy * er);
+            ctx.lineTo(align === "left" ? bx - 3 : (align === "right" ? bx + tw + 3 : drawX), ly); ctx.stroke();
+            ctx.textAlign = align; ctx.globalAlpha = 0.9;
+            ctx.fillStyle = "rgba(6,10,22,0.85)"; ctx.fillText(txt, drawX + 0.6, ly + 0.6);
+            ctx.fillStyle = "rgba(222,231,252,0.96)"; ctx.fillText(txt, drawX, ly);
+          });
+        });
+        ctx.globalAlpha = 1;
+      }
+
+      if (hover) drawTooltip(hover);   // screen-space tooltip
     }
 
     function drawTooltip(nd) {
-      var r = (nd.size || TIER[nd.tier].r);
-      var pad = 6 / view.s, fs = 11 / view.s, sf = 9 / view.s;
+      // cc#198: drawn in SCREEN space (called after the world transform is
+      // restored) so it is crisp and edge-safe regardless of zoom.
+      var s = toScreen(nd.x, nd.y), r = (nd.size || TIER[nd.tier].r) * view.s;
+      var pad = 6, fs = 12, sf = 10;
       ctx.font = "700 " + fs + "px -apple-system,Segoe UI,sans-serif";
-      var t1 = clip(nd.label, 42), w1 = ctx.measureText(t1).width;
+      var t1 = clip(nd.label, 46), w1 = ctx.measureText(t1).width;
       var t2 = nd.sublabel || "";
       ctx.font = "600 " + sf + "px -apple-system,Segoe UI,sans-serif";
       var w2 = t2 ? ctx.measureText(t2).width : 0;
-      var w = Math.max(w1, w2) + pad * 2, h = (t2 ? fs + sf + 5 / view.s : fs) + pad * 2;
-      var bx = nd.x + r + 6 / view.s, by = nd.y - h - 4 / view.s;
-      ctx.globalAlpha = 0.96;
-      ctx.fillStyle = "rgba(13,20,40,0.96)";
-      roundRect(bx, by, w, h, 5 / view.s); ctx.fill();
-      ctx.strokeStyle = "rgba(120,150,220,0.5)"; ctx.lineWidth = 0.8 / view.s;
-      roundRect(bx, by, w, h, 5 / view.s); ctx.stroke();
+      var w = Math.max(w1, w2) + pad * 2, h = (t2 ? fs + sf + 5 : fs) + pad * 2;
+      var bx = s.x + r + 8, by = s.y - h - 4;
+      if (bx + w > W - 6) bx = s.x - r - 8 - w;     // flip left near right edge
+      if (bx < 6) bx = 6;
+      if (by < 6) by = s.y + r + 8;                 // flip below near top edge
+      if (by + h > H - 6) by = H - 6 - h;
+      ctx.globalAlpha = 0.97;
+      ctx.fillStyle = "rgba(13,20,40,0.97)";
+      roundRect(bx, by, w, h, 6); ctx.fill();
+      ctx.strokeStyle = "rgba(120,150,220,0.55)"; ctx.lineWidth = 1;
+      roundRect(bx, by, w, h, 6); ctx.stroke();
       ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.globalAlpha = 1;
       ctx.fillStyle = "#eaf0ff";
       ctx.font = "700 " + fs + "px -apple-system,Segoe UI,sans-serif";
@@ -332,7 +370,7 @@
       if (t2) {
         ctx.fillStyle = "#95a8d6";
         ctx.font = "600 " + sf + "px -apple-system,Segoe UI,sans-serif";
-        ctx.fillText(t2, bx + pad, by + pad + fs + 3 / view.s);
+        ctx.fillText(t2, bx + pad, by + pad + fs + 3);
       }
       ctx.globalAlpha = 1;
     }
