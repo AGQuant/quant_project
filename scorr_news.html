@@ -211,7 +211,35 @@
 .galaxy-drawer .gd-rt{color:#7f92bd;font-size:11px;font-weight:600}
 .galaxy-drawer .gd-read{padding:9px 16px;border-radius:9px;background:#2563eb;color:#fff;font-size:13px;font-weight:700;border:none;cursor:pointer}
 .galaxy-drawer .gd-x{position:absolute;top:12px;right:14px;width:26px;height:26px;border:none;background:transparent;color:#7f92bd;font-size:18px;cursor:pointer}
-@media(max-width:767px){ .galaxy-gsearch{display:none} }
+/* cc#197 fix_3 — in-page full-article overlay (no navigation) */
+.galaxy-article{position:absolute;left:0;right:0;bottom:0;height:86vh;z-index:4;background:#0d1428;border-top:1px solid #1c2b52;border-radius:18px 18px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.55);transform:translateY(104%);transition:transform .26s ease;display:flex;flex-direction:column}
+.galaxy-article.on{transform:translateY(0)}
+.ga-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid #16223f;flex-shrink:0}
+.ga-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1;min-width:0}
+.ga-chips .gd-cat{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#9fb0d6}
+.ga-chips .gd-rt{color:#7f92bd;font-size:11px;font-weight:600}
+.ga-x{width:32px;height:32px;flex-shrink:0;border-radius:50%;border:1px solid #29406e;background:#0d1428;color:#e8eefc;font-size:18px;cursor:pointer;line-height:1}
+.ga-grab{width:38px;height:4px;border-radius:2px;background:#29406e;margin:8px auto 0;flex-shrink:0}
+.ga-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 18px calc(28px + env(safe-area-inset-bottom))}
+.ga-title{color:#eef3ff;font-size:22px;font-weight:800;line-height:1.25;margin-bottom:8px}
+.ga-sum{color:#aebbdd;font-size:14px;line-height:1.6;margin-bottom:16px}
+.ga-body{color:#d3ddf3;font-size:15px;line-height:1.75;max-width:720px}
+.ga-body>:first-child{margin-top:0}
+.ga-body h1,.ga-body h2,.ga-body h3,.ga-body h4{color:#eef3ff;line-height:1.3;margin:20px 0 8px}
+.ga-body h1{font-size:21px}.ga-body h2{font-size:18px}.ga-body h3{font-size:16px}
+.ga-body p{margin:12px 0}
+.ga-body ul,.ga-body ol{margin:12px 0 12px 22px}.ga-body li{margin:6px 0}
+.ga-body strong{color:#eef3ff;font-weight:700}
+.ga-body a{color:#7fb0ff;text-decoration:underline}
+.ga-body blockquote{border-left:3px solid #2b3d66;margin:14px 0;padding:2px 0 2px 14px;color:#9fb0d6}
+.ga-body code{background:#16223f;padding:1px 5px;border-radius:4px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+.ga-body pre{background:#0a1226;border:1px solid #16223f;padding:12px 14px;border-radius:8px;overflow-x:auto;margin:14px 0}
+.ga-body pre code{background:none;padding:0}
+.ga-body table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+.ga-body th,.ga-body td{border:1px solid #23345c;padding:7px 10px;text-align:left}
+.ga-body th{background:#16223f;color:#eef3ff}
+.ga-soon{color:#8095bd;font-style:italic}
+@media(max-width:767px){ .galaxy-gsearch{display:none} .ga-title{font-size:20px} }
 @media(max-width:767px){
   .kb-shell{flex-direction:column;gap:12px;align-items:stretch}
   .kb-sidebar{width:100%;position:static;flex-direction:column;gap:10px}
@@ -740,8 +768,15 @@ function drawGalaxyThumb(){
 }
 
 function buildGalaxyConfig(){
-  var cats=Object.keys(kbCatCounts).sort().map(function(c){ return {name:c,color:CAT_COLORS[c]||"#60a5fa"}; });
-  var nodes=kbArticles.map(function(a){ return {id:a.slug,label:a.title,category:a.category,tier:(a.difficulty==="Pro"?"pro":"beginner"),payload:a}; });
+  // cc#197 fix_1: derive categories from the ACTUAL articles (union) so no
+  // category is ever dropped by a hardcoded map — every value gets its cluster.
+  var seen={}; kbArticles.forEach(function(a){ if(a.category) seen[a.category]=1; });
+  var cats=Object.keys(seen).sort().map(function(c){ return {name:c,color:CAT_COLORS[c]||"#8ca6e6"}; });
+  var nodes=kbArticles.map(function(a){ return {
+    id:a.slug, label:a.title, category:a.category,
+    tier:(a.difficulty==="Pro"?"pro":"beginner"),
+    sublabel:(a.reading_time_min?a.reading_time_min+" min read":""),
+    payload:a }; });
   return {nodes:nodes, categories:cats, cacheKey:"knowledge", layout:"force"};
 }
 
@@ -768,8 +803,12 @@ function ensureGalaxyOverlay(){
       '<span class="galaxy-gpill pro" id="gpPro" onclick="galaxySetDiff(\'Pro\')">Pro</span>'+
       '<button class="galaxy-close" onclick="closeGalaxy()" aria-label="Close">&times;</button>'+
     '</div>'+
-    '<div class="galaxy-hint">drag to pan · scroll / pinch to zoom · tap a star</div>'+
-    '<div class="galaxy-drawer" id="galaxyDrawer"></div>';
+    '<div class="galaxy-hint">drag to pan · scroll / pinch to zoom · tap a star to read · long-press for title</div>'+
+    '<div class="galaxy-article" id="galaxyArticle">'+
+      '<div class="ga-grab"></div>'+
+      '<div class="ga-head"><div class="ga-chips" id="gaChips"></div><button class="ga-x" onclick="hideGalaxyArticle()" aria-label="Close">&times;</button></div>'+
+      '<div class="ga-scroll" id="gaScroll"></div>'+
+    '</div>';
   document.body.appendChild(o);
   document.getElementById("galaxySearch").addEventListener("input", function(){ kbSearch=this.value; galaxyRefreshDim(); });
 }
@@ -785,7 +824,7 @@ function galaxyRefreshDim(){
 
 function loadGalaxyScript(cb){
   if(window.GalaxyMap){ cb(); return; }
-  var s=document.createElement("script"); s.src="/galaxy_map.js"; s.onload=cb;
+  var s=document.createElement("script"); s.src="/galaxy_map.js?v=197"; s.onload=cb;
   s.onerror=function(){ alert("Could not load the galaxy map."); };
   document.head.appendChild(s);
 }
@@ -802,46 +841,48 @@ function openGalaxy(){
     if(_galaxy){ _galaxy.destroy(); _galaxy=null; }
     host.innerHTML="";
     _galaxy = GalaxyMap.create(host, buildGalaxyConfig(), {
-      onTap: function(nd){ showGalaxyDrawer(nd.payload); },
+      onTap: function(nd){ openGalaxyArticle(nd.payload); },   // cc#197 fix_3: open article in-page
       onCategoryTap: function(){}
     });
     _galaxy.setDim(galaxyDimPred());
+    // cc#197 fix_1: assert every article rendered as a node
+    if(_galaxy._nodes.length !== kbArticles.length)
+      console.warn("Knowledge Galaxy: node/article mismatch "+_galaxy._nodes.length+" vs "+kbArticles.length);
+    else
+      console.log("Knowledge Galaxy: "+_galaxy._nodes.length+" nodes across "+Object.keys(kbCatCounts).length+" constellations");
   });
 }
 
 function closeGalaxy(){
+  if(document.getElementById("galaxyArticle") && document.getElementById("galaxyArticle").classList.contains("on")){ hideGalaxyArticle(); return; }
   var ov=document.getElementById("galaxyOverlay"); if(ov) ov.classList.remove("on");
   document.documentElement.style.overflow="";
-  hideGalaxyDrawer();
   if(typeof curCat!=="undefined" && curCat==="learn") renderKnowledge();   // resync sidebar + list with shared filter state
 }
 
-function showGalaxyDrawer(a){
+// cc#197 fix_3: tapping a star opens the FULL article in-page (no navigation).
+// The galaxy instance is never destroyed, so zoom/pan is preserved on close.
+function openGalaxyArticle(a){
   _galaxyCur=a;
-  var d=document.getElementById("galaxyDrawer"); if(!d) return;
+  var panel=document.getElementById("galaxyArticle"); if(!panel) return;
   var chip = a.difficulty==="Pro" ? '<span class="kb-chip pro">Pro</span>' : (a.difficulty==="Beginner"?'<span class="kb-chip beg">Beginner</span>':"");
   var rt = a.reading_time_min ? '<span class="gd-rt">'+a.reading_time_min+' min read</span>' : "";
-  d.innerHTML =
-    '<button class="gd-x" onclick="hideGalaxyDrawer()" aria-label="Close">&times;</button>'+
-    '<div class="gd-cat">'+esc(a.category||"")+'</div>'+
-    '<div class="gd-ttl">'+esc(a.title||"")+'</div>'+
-    '<div class="gd-meta">'+chip+rt+'</div>'+
-    (a.summary?'<div class="gd-sum">'+esc(a.summary)+'</div>':'')+
-    '<button class="gd-read" onclick="galaxyReadArticle()">Read article →</button>';
-  d.classList.add("on");
+  document.getElementById("gaChips").innerHTML = '<span class="gd-cat">'+esc(a.category||"")+'</span>'+chip+rt;
+  var sc=document.getElementById("gaScroll");
+  sc.innerHTML = '<h1 class="ga-title">'+esc(a.title||"")+'</h1>'+
+                 (a.summary?'<p class="ga-sum">'+esc(a.summary)+'</p>':'')+
+                 '<div class="ga-body">Loading…</div>';
+  sc.scrollTop=0;
+  panel.classList.add("on");
+  var slug=a.slug;
+  function render(md){ var body=sc.querySelector(".ga-body"); if(!body) return;
+    body.innerHTML = (md && md.trim()) ? renderMd(md) : '<p class="ga-soon">Full article coming soon.</p>'; }
+  if(_kbCache[slug]!=null){ render(_kbCache[slug]); return; }   // lazy fetch, cache per slug
+  fetch(API+"/api/knowledge/articles/"+encodeURIComponent(slug)).then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function(d){ _kbCache[slug]=d.content_md||""; render(_kbCache[slug]); })
+    .catch(function(){ render(""); });
 }
-function hideGalaxyDrawer(){ var d=document.getElementById("galaxyDrawer"); if(d) d.classList.remove("on"); }
-
-function galaxyReadArticle(){
-  var slug=_galaxyCur && _galaxyCur.slug; if(!slug) return;
-  closeGalaxy();
-  setTimeout(function(){
-    var card=document.getElementById("kb-"+slug);
-    if(card){ card.scrollIntoView({behavior:"smooth",block:"center"});
-      var btn=card.querySelector(".kb-toggle"), body=card.querySelector(".kb-body");
-      if(btn && body && body.style.display==="none") toggleKb(slug, btn); }
-  }, 60);
-}
+function hideGalaxyArticle(){ var p=document.getElementById("galaxyArticle"); if(p) p.classList.remove("on"); }
 </script>
 <script src="/nav_toggle.js" defer></script>
 </body>

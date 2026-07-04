@@ -33,7 +33,7 @@
       return {
         id: n.id, label: n.label || "", category: n.category || "",
         tier: (n.tier === "pro" ? "pro" : "beginner"),
-        size: n.size, payload: n.payload, _i: i,
+        size: n.size, sublabel: n.sublabel || "", payload: n.payload, _i: i,
         x: 0, y: 0, vx: 0, vy: 0, dim: false,
       };
     });
@@ -131,17 +131,25 @@
     }
 
     function buildLinks() {
-      // thin lines: each node to its 2-4 nearest SAME-category neighbours
+      // thin lines: each node to its 2-3 nearest SAME-category neighbours,
+      // + flag ONE anchor per category (nearest the cluster centroid) so we can
+      // show a single label per constellation at default zoom (cc#197 fix_4c).
       links = [];
       Object.keys(byCat).forEach(function (cat) {
         var arr = byCat[cat];
+        if (arr.length) {
+          var mx = 0, my = 0; arr.forEach(function (n) { mx += n.x; my += n.y; }); mx /= arr.length; my /= arr.length;
+          var anchor = null, ad = 1e18;
+          arr.forEach(function (n) { n.anchor = false; var d = (n.x - mx) * (n.x - mx) + (n.y - my) * (n.y - my); if (d < ad) { ad = d; anchor = n; } });
+          if (anchor) anchor.anchor = true;
+        }
         arr.forEach(function (na) {
           var near = arr.filter(function (nb) { return nb !== na; })
             .map(function (nb) { var dx = na.x - nb.x, dy = na.y - nb.y; return { nb: nb, d: dx * dx + dy * dy }; })
             .sort(function (p, q) { return p.d - q.d; })
-            .slice(0, na.tier === "pro" ? 4 : 2);
+            .slice(0, 3);   // cc#197: 2-3 nearest same-category neighbours
           near.forEach(function (p) {
-            if (na._i < p.nb._i) links.push([na, p.nb]);   // dedupe
+            if (na._i < p.nb._i) links.push([na, p.nb, catColor[cat] || "#8ca6e6"]);   // dedupe + tint
           });
         });
       });
@@ -250,35 +258,95 @@
         ctx.globalAlpha = 1;
       });
 
-      // links
-      ctx.lineWidth = 0.6 / view.s;
+      // links — cc#197: visible tinted constellation lines (were near-invisible)
+      ctx.lineWidth = 1.1 / view.s;
+      ctx.lineCap = "round";
       links.forEach(function (l) {
         var a = l[0], b = l[1];
-        var al = (a.dim && b.dim) ? 0.04 : (a.dim || b.dim ? 0.06 : 0.16);
-        ctx.strokeStyle = "rgba(140,170,230," + al + ")";
+        var al = (a.dim && b.dim) ? 0.05 : (a.dim || b.dim ? 0.10 : 0.30);
+        ctx.strokeStyle = hexA(l[2] || "#8ca6e6", al);
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       });
 
-      // nodes
+      // nodes — cc#197: every star has a soft glow (brighter on hover)
       nodes.forEach(function (nd) {
-        var t = TIER[nd.tier], r = (nd.size || t.r);
+        var t = TIER[nd.tier], r = (nd.size || t.r), isH = hover === nd;
         var a = nd.dim ? 0.15 : 1;
-        if (!nd.dim || hover === nd) {
-          ctx.globalAlpha = (hover === nd ? 0.9 : 0.5) * (nd.dim ? 0.3 : 1);
-          var gr = ctx.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, r * (hover === nd ? 5 : 3.2));
-          gr.addColorStop(0, t.glow); gr.addColorStop(1, "rgba(0,0,0,0)");
-          ctx.fillStyle = gr;
-          ctx.beginPath(); ctx.arc(nd.x, nd.y, r * (hover === nd ? 5 : 3.2), 0, 6.283); ctx.fill();
-        }
+        var grad = r * (isH ? 5.5 : 3.4);
+        ctx.globalAlpha = (isH ? 1 : 0.7) * (nd.dim ? 0.22 : 1);
+        var gr = ctx.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, grad);
+        gr.addColorStop(0, t.glow); gr.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = gr;
+        ctx.beginPath(); ctx.arc(nd.x, nd.y, grad, 0, 6.283); ctx.fill();
         ctx.globalAlpha = a;
         ctx.fillStyle = t.core;
-        ctx.beginPath(); ctx.arc(nd.x, nd.y, r + (hover === nd ? 1.4 : 0), 0, 6.283); ctx.fill();
+        ctx.beginPath(); ctx.arc(nd.x, nd.y, r + (isH ? 1.6 : 0), 0, 6.283); ctx.fill();
         ctx.globalAlpha = a * 0.9;
         ctx.fillStyle = "rgba(255,255,255,0.85)";
         ctx.beginPath(); ctx.arc(nd.x - r * 0.3, nd.y - r * 0.3, r * 0.35, 0, 6.283); ctx.fill();
       });
       ctx.globalAlpha = 1;
+
+      // cc#197: node labels — Pro (anchor) stars at default zoom; ALL past a
+      // zoom threshold. Small, so they don't clutter the constellations.
+      var showAll = view.s > 1.35;
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.font = "600 " + (9 / view.s) + "px -apple-system,Segoe UI,sans-serif";
+      nodes.forEach(function (nd) {
+        if (hover === nd) return;               // hovered gets the richer tooltip
+        if (nd.dim) return;
+        if (!showAll && !nd.anchor) return;     // default zoom: one anchor label per cluster
+        var r = (nd.size || TIER[nd.tier].r);
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = "rgba(6,10,22,0.85)";   // legibility backing
+        ctx.fillText(clip(nd.label, 22), nd.x + 0.6 / view.s, nd.y + r + 3.6 / view.s);
+        ctx.fillStyle = "rgba(214,225,250,0.92)";
+        ctx.fillText(clip(nd.label, 22), nd.x, nd.y + r + 3 / view.s);
+      });
+      ctx.globalAlpha = 1;
+
+      // cc#197: hover/long-press tooltip — title + sublabel (reading time)
+      if (hover) drawTooltip(hover);
       ctx.restore();
+    }
+
+    function drawTooltip(nd) {
+      var r = (nd.size || TIER[nd.tier].r);
+      var pad = 6 / view.s, fs = 11 / view.s, sf = 9 / view.s;
+      ctx.font = "700 " + fs + "px -apple-system,Segoe UI,sans-serif";
+      var t1 = clip(nd.label, 42), w1 = ctx.measureText(t1).width;
+      var t2 = nd.sublabel || "";
+      ctx.font = "600 " + sf + "px -apple-system,Segoe UI,sans-serif";
+      var w2 = t2 ? ctx.measureText(t2).width : 0;
+      var w = Math.max(w1, w2) + pad * 2, h = (t2 ? fs + sf + 5 / view.s : fs) + pad * 2;
+      var bx = nd.x + r + 6 / view.s, by = nd.y - h - 4 / view.s;
+      ctx.globalAlpha = 0.96;
+      ctx.fillStyle = "rgba(13,20,40,0.96)";
+      roundRect(bx, by, w, h, 5 / view.s); ctx.fill();
+      ctx.strokeStyle = "rgba(120,150,220,0.5)"; ctx.lineWidth = 0.8 / view.s;
+      roundRect(bx, by, w, h, 5 / view.s); ctx.stroke();
+      ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.globalAlpha = 1;
+      ctx.fillStyle = "#eaf0ff";
+      ctx.font = "700 " + fs + "px -apple-system,Segoe UI,sans-serif";
+      ctx.fillText(t1, bx + pad, by + pad);
+      if (t2) {
+        ctx.fillStyle = "#95a8d6";
+        ctx.font = "600 " + sf + "px -apple-system,Segoe UI,sans-serif";
+        ctx.fillText(t2, bx + pad, by + pad + fs + 3 / view.s);
+      }
+      ctx.globalAlpha = 1;
+    }
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    }
+    function clip(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+    function hexA(hex, a) {
+      var h = hex.replace("#", "");
+      if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+      return "rgba(" + r + "," + g + "," + b + "," + a + ")";
     }
     function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
 
@@ -307,12 +375,20 @@
       return hit;
     }
 
+    var lpTimer = null, lpFired = false;
+    function clearLP() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
     function onDown(e) {
       canvas.setPointerCapture(e.pointerId);
       ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
       var n = Object.keys(ptrs).length;
-      if (n === 1) { dragging = true; moved = false; downXY = rel(e); }
-      else if (n === 2) { var d = pinchDist(); pinchD0 = d.d; pinchS0 = view.s; }
+      if (n === 1) {
+        dragging = true; moved = false; lpFired = false; downXY = rel(e);
+        // cc#197: long-press (mobile) shows the same title tooltip as desktop hover
+        clearLP();
+        lpTimer = setTimeout(function () {
+          if (!moved) { var nd = nodeAt(downXY.x, downXY.y); if (nd) { hover = nd; lpFired = true; schedule(); } }
+        }, 380);
+      } else if (n === 2) { clearLP(); var d = pinchDist(); pinchD0 = d.d; pinchS0 = view.s; }
     }
     function onMove(e) {
       if (!(e.pointerId in ptrs)) {
@@ -332,12 +408,13 @@
       }
       if (dragging) {
         var dx = e.clientX - prev.x, dy = e.clientY - prev.y;
-        if (Math.abs(e.clientX - (downXY.gx)) + Math.abs(e.clientY - (downXY.gy)) > 6) moved = true;
+        if (Math.abs(e.clientX - (downXY.gx)) + Math.abs(e.clientY - (downXY.gy)) > 6) { moved = true; clearLP(); }
         view.tx += dx; view.ty += dy; schedule();
       }
     }
     function onUp(e) {
-      var wasTap = dragging && !moved;
+      clearLP();
+      var wasTap = dragging && !moved && !lpFired;   // long-press = tooltip only, not a tap
       var r = downXY;
       delete ptrs[e.pointerId];
       try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
@@ -348,6 +425,7 @@
         var cat = catLabelAt(r.x, r.y);
         if (cat) { zoomToCategory(cat); if (opts.onCategoryTap) opts.onCategoryTap(cat); }
       }
+      lpFired = false;
     }
     function onWheel(e) {
       e.preventDefault();
