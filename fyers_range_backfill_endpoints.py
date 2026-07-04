@@ -36,6 +36,7 @@ class BackfillRangeRequest(BaseModel):
     start: Optional[str] = None
     end: Optional[str] = None
     symbols: Optional[List[str]] = None
+    contract: Optional[str] = None   # cc#184: explicit 'YYMMM' futures contract (e.g. '26JUL')
 
 
 def _check_admin(token):
@@ -46,7 +47,8 @@ def _check_admin(token):
     return True
 
 
-def _run_backfill_sync(start: Optional[str], end: Optional[str], symbols: Optional[List[str]]):
+def _run_backfill_sync(start: Optional[str], end: Optional[str],
+                       symbols: Optional[List[str]], contract: Optional[str]):
     import fyers_backfill
     import fyers_feed
     conn = fyers_feed.get_db()
@@ -54,7 +56,11 @@ def _run_backfill_sync(start: Optional[str], end: Optional[str], symbols: Option
         token = fyers_feed.get_valid_token(conn)
         date_from = datetime.strptime(start or DEFAULT_START, "%Y-%m-%d").date()
         date_to = datetime.strptime(end, "%Y-%m-%d").date() if end else date.today()
-        return fyers_backfill.backfill_range(token, conn, date_from, date_to, symbols)
+        # cc#184: this endpoint is the TRUE FUTURES backfill — resolve explicit
+        # monthly contracts (fyers_fut, DO NOTHING) instead of the old spot -EQ
+        # collision. contract defaults to the current active month if omitted.
+        return fyers_backfill.backfill_range(token, conn, date_from, date_to, symbols,
+                                             futures=True, contract=contract)
     finally:
         conn.close()
 
@@ -73,7 +79,7 @@ async def backfill_futures_fyers_now(body: BackfillRangeRequest = BackfillRangeR
         return {"status": "already_running"}
     _running = True
     try:
-        result = await asyncio.to_thread(_run_backfill_sync, body.start, body.end, body.symbols)
+        result = await asyncio.to_thread(_run_backfill_sync, body.start, body.end, body.symbols, body.contract)
         log.info(f"fyers_range_backfill: {result}")
         return {"status": "complete", **result}
     except Exception as e:

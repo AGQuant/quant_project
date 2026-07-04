@@ -39,6 +39,11 @@ MARKET_OPEN     = dt_time(9, 15)
 MARKET_CLOSE    = dt_time(15, 30)
 
 SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
+# cc#184: the FUTURES path keeps NIFTY + BANKNIFTY (index futures are real,
+# native WS subscribes them under those exact symbols) but drops NIFTY50
+# (that is the SPOT index — futures live under 'NIFTY'). FINNIFTY/MIDCPNIFTY/
+# SENSEX/BANKEX have no stock-futures rows to backfill here.
+FUT_SKIP        = {'NIFTY50', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -48,6 +53,27 @@ log = logging.getLogger('fyers_backfill')
 def get_db(): return psycopg2.connect(DATABASE_URL)
 def hdr(token): return {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
 def fyers_eq_symbol(sym): return SPECIAL_SYMBOLS.get(sym, f'NSE:{sym}-EQ')
+
+
+def fyers_fut_symbol(sym, contract):
+    """cc#184: Fyers monthly-futures ticker, e.g.
+        fyers_fut_symbol('SBIN', '26JUL')      -> 'NSE:SBIN26JULFUT'
+        fyers_fut_symbol('NIFTY', '26JUL')     -> 'NSE:NIFTY26JULFUT'
+        fyers_fut_symbol('BANKNIFTY', '26JUL') -> 'NSE:BANKNIFTY26JULFUT'
+    `contract` is the 'YYMMM' expiry code. Format mirrors
+    fyers_feed.futures_fyers_symbol EXACTLY so REST-backfilled bars land on the
+    same instrument the live WS writes (one symbol format, one source of truth)."""
+    return f'NSE:{sym}{contract}FUT'
+
+
+def default_contract():
+    """Current active monthly contract code 'YYMMM' from the live expiry rule
+    (fyers_feed.current_expiry — last Tuesday of month, rolls to next month after
+    expiry). Lazy import avoids the fyers_feed<->fyers_backfill circular import at
+    module load; by call time both modules are fully initialised."""
+    import fyers_feed
+    exp = fyers_feed.current_expiry()
+    return f"{exp.strftime('%y')}{exp.strftime('%b').upper()}"
 
 
 def _assert_not_market_hours(fn):
@@ -61,34 +87,40 @@ def _assert_not_market_hours(fn):
             "backfill is post-market/on-demand only")
 
 
-def get_universe(conn):
+def get_universe(conn, futures=False):
     with conn.cursor() as cur:
         cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE")
-        futures = {r[0] for r in cur.fetchall()}
-    return sorted(futures - SKIP_SYMBOLS)
+        syms = {r[0] for r in cur.fetchall()}
+    # cc#184: futures path keeps NIFTY/BANKNIFTY, drops NIFTY50; equity path
+    # (boot/heal spot healer) keeps the original SKIP_SYMBOLS behaviour.
+    return sorted(syms - (FUT_SKIP if futures else SKIP_SYMBOLS))
 
 
-def upsert_candles(conn, rows):
+def upsert_candles(conn, rows, on_conflict='update'):
     if not rows: return
+    # cc#184: futures backfill uses DO NOTHING so it never overwrites native
+    # WebSocket fut bars (e.g. 03-Jul). Equity healer keeps DO UPDATE.
+    action = ("DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,"
+              "close=EXCLUDED.close,volume=EXCLUDED.volume"
+              if on_conflict == 'update' else "DO NOTHING")
     with conn.cursor() as cur:
-        cur.executemany("""
+        cur.executemany(f"""
             INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (symbol,ts,timeframe,source) DO UPDATE SET
-                open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,
-                close=EXCLUDED.close,volume=EXCLUDED.volume
+            ON CONFLICT (symbol,ts,timeframe,source) {action}
         """, rows)
     conn.commit()
 
 
-def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
+def fetch_history(token, sym, resolution, timeframe, date_from, date_to,
+                  fyers_symbol=None, source='fyers', cont_flag='1'):
     params = {
-        'symbol':      fyers_eq_symbol(sym),
+        'symbol':      fyers_symbol or fyers_eq_symbol(sym),
         'resolution':  resolution,
         'date_format': '1',
         'range_from':  date_from.strftime('%Y-%m-%d'),
         'range_to':    date_to.strftime('%Y-%m-%d'),
-        'cont_flag':   '1',
+        'cont_flag':   cont_flag,
     }
     for attempt in range(HISTORY_RETRIES + 1):
         try:
@@ -101,18 +133,26 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to):
             rows = []
             for c in candles:
                 ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
-                rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, 'fyers'))
+                rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, source))
             return rows
         if attempt < HISTORY_RETRIES:
             time.sleep(1 + attempt)
     return []
 
 
-def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None):
+def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None,
+                   futures=False, contract=None):
     """cc#159: sequential REST backfill for an explicit date range and/or symbol
-    subset (generalizes backfill_7day for on-demand admin/MCP-triggered runs).
-    Same pacing/rate-limit behavior (5s sleep between symbols), same fyers/5m
-    upsert target. Returns a summary dict instead of None."""
+    subset. Same pacing/rate-limit behavior (5s sleep between symbols).
+
+    cc#184: `futures=True` makes this a TRUE futures backfill — it resolves each
+    symbol to its explicit monthly contract (NSE:{sym}{contract}FUT, cont_flag=0
+    so there is NO continuous-series splice across the expiry rollover), writes
+    source='fyers_fut', and upserts DO NOTHING (never clobbers native WS bars).
+    `contract` defaults to the current active monthly ('YYMMM'); pass it
+    explicitly (e.g. '26JUL') to mark a whole window against one held contract
+    regardless of run date. The default (futures=False) path is the legacy
+    equity/spot healer (source='fyers', -EQ symbol) used by boot/heal callers."""
     _assert_not_market_hours('backfill_range')
     own = conn is None
     if own: conn = get_db()
@@ -120,16 +160,25 @@ def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None)
     now       = datetime.now(IST)
     date_from = date_from or (now - timedelta(days=RETENTION_DAYS)).date()
     date_to   = date_to or now.date()
-    universe  = get_universe(conn)
+    universe  = get_universe(conn, futures=futures)
     syms      = sorted(set(symbols) & set(universe)) if symbols else universe
 
-    log.info(f"Backfill {date_from} -> {date_to}: {len(syms)} futures, 5m, sequential 5s sleep")
+    if futures:
+        contract = contract or default_contract()
+        source, cont_flag, on_conflict = 'fyers_fut', '0', 'nothing'
+        log.info(f"FUTURES backfill {date_from} -> {date_to}: {len(syms)} symbols, "
+                 f"explicit {contract} contract, 5m, DO NOTHING, 5s sleep")
+    else:
+        source, cont_flag, on_conflict = 'fyers', '1', 'update'
+        log.info(f"Backfill {date_from} -> {date_to}: {len(syms)} symbols, 5m, sequential 5s sleep")
 
     total, empty = 0, 0
     for i, sym in enumerate(syms, 1):
-        rows = fetch_history(token, sym, '5', '5m', date_from, date_to)
+        fsym = fyers_fut_symbol(sym, contract) if futures else None
+        rows = fetch_history(token, sym, '5', '5m', date_from, date_to,
+                             fyers_symbol=fsym, source=source, cont_flag=cont_flag)
         if rows:
-            upsert_candles(conn, rows)
+            upsert_candles(conn, rows, on_conflict=on_conflict)
             total += len(rows)
         else:
             empty += 1
@@ -142,7 +191,8 @@ def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None)
     return {
         "date_from": str(date_from), "date_to": str(date_to),
         "symbols_processed": len(syms), "bars_written": total,
-        "gaps_remaining": empty,
+        "gaps_remaining": empty, "source": source,
+        "contract": contract if futures else None,
     }
 
 
