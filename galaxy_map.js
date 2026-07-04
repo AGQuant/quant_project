@@ -21,8 +21,8 @@
   "use strict";
 
   var TIER = {
-    beginner: { r: 3.4, core: "#34d399", glow: "rgba(52,211,153,0.55)" },
-    pro:      { r: 5.2, core: "#fbbf24", glow: "rgba(251,191,36,0.55)" },
+    beginner: { r: 4.4, core: "#34d399", glow: "rgba(52,211,153,0.6)" },   // cc#199: bigger dots
+    pro:      { r: 6.8, core: "#fbbf24", glow: "rgba(251,191,36,0.6)" },
   };
   var CAT_FALLBACK = ["#60a5fa","#f472b6","#34d399","#fbbf24","#a78bfa",
                       "#22d3ee","#fb7185","#c084fc","#4ade80","#facc15"];
@@ -34,6 +34,7 @@
         id: n.id, label: n.label || "", category: n.category || "",
         tier: (n.tier === "pro" ? "pro" : "beginner"),
         size: n.size, sublabel: n.sublabel || "", payload: n.payload, _i: i,
+        _tp: (i * 137) % 628 / 100,                 // cc#199: twinkle phase (deterministic)
         x: 0, y: 0, vx: 0, vy: 0, dim: false,
       };
     });
@@ -55,13 +56,32 @@
     // world transform
     var view = { s: 1, tx: 0, ty: 0 };
     var links = [];
-    var hover = null;
+    var hover = null, hoverCat = null;
     var raf = null, dirty = true;
 
-    // ── layout ────────────────────────────────────────────────────────────────
-    var LKEY = "galaxy_pos_" + (config.cacheKey || "default") + "_v2_" + nodes.length;
+    // ── cc#199: living-universe animation state ──────────────────────────────
+    var mq = window.matchMedia || function () { return { matches: false }; };
+    var reduceMotion = mq("(prefers-reduced-motion: reduce)").matches;
+    var isTouch = mq("(pointer: coarse)").matches;
+    var MOTION = !reduceMotion;                 // any ambient animation at all
+    var DO_ROTATE = MOTION && !isTouch;         // per-cluster orbit — desktop only
+    var DO_PARALLAX = MOTION && !isTouch;       // star parallax — desktop only
+    var _t = 0, _t0 = null, _loop = null;
+    var rotMeta = {};                           // cat -> {cx,cy,omega,phase}
+    var mouseNX = 0, mouseNY = 0;               // normalized mouse (-0.5..0.5) for parallax
+    // pre-rendered glow sprites (avoid 82 createRadialGradient per frame → 60fps)
+    function makeGlow(color) {
+      var S = 128, c = document.createElement("canvas"); c.width = S; c.height = S;
+      var g = c.getContext("2d"), gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+      gr.addColorStop(0, color); gr.addColorStop(0.5, color.replace(/0?\.\d+\)$/, "0.18)")); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, S, S); return c;
+    }
+    var GLOW = { beginner: makeGlow(TIER.beginner.glow), pro: makeGlow(TIER.pro.glow) };
 
-    function ringR() { return 200 + nodes.length * 3.2; }
+    // ── layout ────────────────────────────────────────────────────────────────
+    var LKEY = "galaxy_pos_" + (config.cacheKey || "default") + "_v3_" + nodes.length;
+
+    function ringR() { return 240 + nodes.length * 4.0; }   // cc#199: bigger, more breathing room
     function catCenters() {
       // arrange category centers evenly on a ring (well separated so hulls +
       // labels don't overlap); radius grows with the node count.
@@ -110,7 +130,7 @@
           for (var b = a + 1; b < nodes.length; b++) {
             var nb = nodes[b], dx = na.x - nb.x, dy = na.y - nb.y;
             var d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-            var min = (na.category === nb.category) ? 20 : 46;
+            var min = (na.category === nb.category) ? 30 : 58;   // cc#199: more spacing between dots
             if (d < min) {
               var f = (min - d) * 0.5, ux = dx / d, uy = dy / d;
               na.vx += ux * f; na.vy += uy * f;
@@ -174,8 +194,29 @@
     function layout() {
       if ((config.layout || "force") === "honeycomb") { honeycomb(); }
       else if (!loadPositions()) { simulate(); savePositions(); }   // cache once, stable across visits
+      // cc#199: freeze base positions + per-cluster orbit params (deterministic
+      // via hash so every visit rotates identically; center is the fixed centroid).
+      nodes.forEach(function (nd) { nd.bx = nd.x; nd.by = nd.y; });
+      rotMeta = {};
+      Object.keys(byCat).forEach(function (cat) {
+        var arr = byCat[cat]; if (!arr.length) return;
+        var mx = 0, my = 0; arr.forEach(function (n) { mx += n.bx; my += n.by; }); mx /= arr.length; my /= arr.length;
+        var h = hash(cat), period = 75 + (h % 46);          // 75-120s / revolution
+        rotMeta[cat] = { cx: mx, cy: my, omega: ((h & 1) ? 1 : -1) * 2 * Math.PI / period, phase: (h % 628) / 100 };
+      });
       buildLinks();
       fitView();
+    }
+
+    function applyRotation(t) {
+      if (!DO_ROTATE) { nodes.forEach(function (nd) { nd.x = nd.bx; nd.y = nd.by; }); return; }
+      nodes.forEach(function (nd) {
+        var m = rotMeta[nd.category]; if (!m) { nd.x = nd.bx; nd.y = nd.by; return; }
+        var a = m.phase + t * m.omega, ca = Math.cos(a), sa = Math.sin(a);
+        var dx = nd.bx - m.cx, dy = nd.by - m.cy;
+        nd.x = m.cx + dx * ca - dy * sa;
+        nd.y = m.cy + dx * sa + dy * ca;
+      });
     }
 
     // ── view helpers ────────────────────────────────────────────────────────
@@ -223,12 +264,17 @@
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
       if (!bgStars) {
         bgStars = [];
-        for (var i = 0; i < 70; i++) bgStars.push([hash("bx" + i) % 1000 / 1000, hash("by" + i) % 1000 / 1000, (hash("br" + i) % 100) / 100]);
+        // [nx, ny, bright, twinklePhase, depth] — depth drives parallax amount
+        for (var i = 0; i < 70; i++) bgStars.push([hash("bx" + i) % 1000 / 1000, hash("by" + i) % 1000 / 1000, (hash("br" + i) % 100) / 100, (hash("bp" + i) % 628) / 100, 0.4 + (hash("bd" + i) % 60) / 100]);
       }
+      // cc#199: desktop parallax — far stars drift opposite the cursor, subtly
+      var px = DO_PARALLAX ? mouseNX * 26 : 0, py = DO_PARALLAX ? mouseNY * 18 : 0;
       ctx.fillStyle = "rgba(255,255,255,0.5)";
       bgStars.forEach(function (s) {
-        ctx.globalAlpha = 0.12 + s[2] * 0.22;
-        ctx.beginPath(); ctx.arc(s[0] * W, s[1] * H, 0.6 + s[2] * 0.8, 0, 6.283); ctx.fill();
+        // cc#199: gentle opacity twinkle, phase-staggered per star
+        var tw = MOTION ? (0.6 + 0.4 * Math.sin(_t * 0.9 + s[3])) : 1;
+        ctx.globalAlpha = (0.12 + s[2] * 0.22) * tw;
+        ctx.beginPath(); ctx.arc(s[0] * W - px * s[4], s[1] * H - py * s[4], 0.6 + s[2] * 0.8, 0, 6.283); ctx.fill();
       });
       ctx.globalAlpha = 1;
     }
@@ -236,7 +282,6 @@
     function toScreen(wx, wy) { return { x: wx * view.s + view.tx, y: wy * view.s + view.ty }; }
 
     function draw() {
-      raf = null;
       drawBg();
 
       // ── WORLD PASS: hulls, links, node glow + core ──
@@ -248,12 +293,20 @@
         var arr = byCat[cat]; if (!arr.length) return;
         var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
         arr.forEach(function (nd) { x0 = Math.min(x0, nd.x); y0 = Math.min(y0, nd.y); x1 = Math.max(x1, nd.x); y1 = Math.max(y1, nd.y); });
-        var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rw = Math.max((x1 - x0) / 2 + 34, 30), rh = Math.max((y1 - y0) / 2 + 34, 30);
+        var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rw = Math.max((x1 - x0) / 2 + 46, 44), rh = Math.max((y1 - y0) / 2 + 46, 44);
         clusters.push({ cat: cat, arr: arr, col: catColor[cat] || "#60a5fa", cx: cx, cy: cy, rw: rw, rh: rh, R: Math.max(rw, rh) });
-        ctx.globalAlpha = 0.10; ctx.fillStyle = catColor[cat] || "#60a5fa";
-        ctx.beginPath(); ctx.ellipse(cx, cy, rw, rh, 0, 0, 6.283); ctx.fill();
       });
-      ctx.globalAlpha = 1;
+      // cc#199: ambient radial glow behind each cluster (category tint), then hull
+      clusters.forEach(function (c) {
+        var pulse = (hoverCat === c.cat) ? (0.5 + 0.5 * Math.sin(_t * 3.2)) : 0;
+        var R2 = c.R * (1.35 + pulse * 0.10);
+        var ag = ctx.createRadialGradient(c.cx, c.cy, 0, c.cx, c.cy, R2);
+        ag.addColorStop(0, hexA(c.col, 0.14 + pulse * 0.06)); ag.addColorStop(1, hexA(c.col, 0));
+        ctx.fillStyle = ag; ctx.beginPath(); ctx.arc(c.cx, c.cy, R2, 0, 6.283); ctx.fill();
+        ctx.globalAlpha = 0.10 + pulse * 0.05; ctx.fillStyle = c.col;
+        ctx.beginPath(); ctx.ellipse(c.cx, c.cy, c.rw, c.rh, 0, 0, 6.283); ctx.fill();
+        ctx.globalAlpha = 1;
+      });
 
       ctx.lineWidth = 1.1 / view.s; ctx.lineCap = "round";
       links.forEach(function (l) {
@@ -265,11 +318,12 @@
 
       nodes.forEach(function (nd) {
         var t = TIER[nd.tier], r = (nd.size || t.r), isH = hover === nd;
+        // cc#199: per-node twinkle — deterministic phase so each star breathes
+        // out of sync; hover overrides to a steady bright pulse.
+        var tw = isH ? 1 : (0.72 + 0.28 * Math.sin(_t * (1.4 + (nd._i % 5) * 0.35) + nd._tp));
         var a = nd.dim ? 0.15 : 1, grad = r * (isH ? 5.5 : 3.4);
-        ctx.globalAlpha = (isH ? 1 : 0.7) * (nd.dim ? 0.22 : 1);
-        var gr = ctx.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, grad);
-        gr.addColorStop(0, t.glow); gr.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(nd.x, nd.y, grad, 0, 6.283); ctx.fill();
+        ctx.globalAlpha = (isH ? 1 : 0.62 * tw) * (nd.dim ? 0.22 : 1);
+        ctx.drawImage(GLOW[nd.tier], nd.x - grad, nd.y - grad, grad * 2, grad * 2);
         ctx.globalAlpha = a; ctx.fillStyle = t.core;
         ctx.beginPath(); ctx.arc(nd.x, nd.y, r + (isH ? 1.6 : 0), 0, 6.283); ctx.fill();
         ctx.globalAlpha = a * 0.9; ctx.fillStyle = "rgba(255,255,255,0.85)";
@@ -386,7 +440,23 @@
       var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
       return "rgba(" + r + "," + g + "," + b + "," + a + ")";
     }
-    function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
+    // cc#199: living-universe loop. When MOTION is on we run a continuous RAF
+    // loop (rotation + twinkle + parallax); it pauses when the tab is hidden.
+    // When MOTION is off (reduced-motion) we fall back to on-demand single frames.
+    function frame(now) {
+      _loop = null;
+      if (_t0 == null) _t0 = now;
+      _t = (now - _t0) / 1000;
+      applyRotation(_t);
+      draw();
+      if (MOTION && !document.hidden) _loop = requestAnimationFrame(frame);
+    }
+    function startLoop() { if (MOTION && _loop == null && !document.hidden) _loop = requestAnimationFrame(frame); }
+    function stopLoop() { if (_loop != null) { cancelAnimationFrame(_loop); _loop = null; } }
+    function schedule() {
+      if (MOTION) { startLoop(); return; }
+      if (!raf) raf = requestAnimationFrame(function () { raf = null; applyRotation(0); draw(); });
+    }
 
     // ── interactions ─────────────────────────────────────────────────────────
     var ptrs = {}, dragging = false, moved = false, downXY = null, pinchD0 = 0, pinchS0 = 1;
@@ -424,14 +494,18 @@
         // cc#197: long-press (mobile) shows the same title tooltip as desktop hover
         clearLP();
         lpTimer = setTimeout(function () {
-          if (!moved) { var nd = nodeAt(downXY.x, downXY.y); if (nd) { hover = nd; lpFired = true; schedule(); } }
+          if (!moved) { var nd = nodeAt(downXY.x, downXY.y); if (nd) { hover = nd; hoverCat = nd.category; lpFired = true; schedule(); } }
         }, 380);
       } else if (n === 2) { clearLP(); var d = pinchDist(); pinchD0 = d.d; pinchS0 = view.s; }
     }
     function onMove(e) {
       if (!(e.pointerId in ptrs)) {
         var r = rel(e), nd = nodeAt(r.x, r.y);
-        if (nd !== hover) { hover = nd; canvas.style.cursor = nd ? "pointer" : "grab"; schedule(); }
+        if (DO_PARALLAX) { mouseNX = W ? (r.x / W - 0.5) : 0; mouseNY = H ? (r.y / H - 0.5) : 0; }  // cc#199
+        if (nd !== hover) {
+          hover = nd; hoverCat = nd ? nd.category : null;   // cc#199: cluster glow-pulse target
+          canvas.style.cursor = nd ? "pointer" : "grab"; schedule();
+        }
         return;
       }
       var prev = ptrs[e.pointerId]; ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
@@ -488,6 +562,9 @@
     canvas.addEventListener("wheel", onWheel, { passive: false });
     var ro = null;
     if (window.ResizeObserver) { ro = new ResizeObserver(function () { resize(); fitView(); schedule(); }); ro.observe(container); }
+    // cc#199: pause the RAF loop while the tab is hidden (save battery/CPU), resume on return
+    function onVis() { if (document.hidden) stopLoop(); else schedule(); }
+    document.addEventListener("visibilitychange", onVis);
 
     // ── public API ─────────────────────────────────────────────────────────────
     function setDim(pred) {
@@ -497,7 +574,9 @@
     }
     function destroy() {
       if (ro) ro.disconnect();
+      stopLoop();
       if (raf) cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVis);
       canvas.remove();
     }
 
