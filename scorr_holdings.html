@@ -96,6 +96,36 @@
   /* cc#161: explicit "no live price" state -- never blank/dash-only for a
      position we deliberately withheld pricing on. */
   .pos-unavail{font-size:11px;font-weight:700;color:#b45309}
+
+  /* cc#179: M2M Chart V2 (1D/1W/1M/1Y) + Closed Positions tabbed section.
+     Range/tab buttons are >=40px touch targets; chart SVG scales via viewBox;
+     closed table scrolls horizontally. All data orderbook-native (SPEC_V1). */
+  .m2m-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px 14px 16px;margin-top:14px}
+  .m2m-tabs{display:flex;gap:6px;margin-bottom:12px}
+  .m2m-tab{flex:1;height:42px;border:1px solid var(--border);background:#f8fafc;border-radius:10px;
+    font-family:inherit;font-size:13px;font-weight:700;color:var(--mut);cursor:pointer;transition:.15s}
+  .m2m-tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
+  .range-sel{display:flex;gap:6px;margin-bottom:10px}
+  .range-btn{flex:1;height:40px;border:1px solid var(--border);background:#f8fafc;border-radius:9px;
+    font-family:inherit;font-size:12.5px;font-weight:700;color:var(--mut);cursor:pointer;transition:.15s}
+  .range-btn.active{background:#e8effe;border-color:var(--blu);color:var(--blu)}
+  .range-btn:hover{border-color:var(--blu)}
+  .m2m-head{display:flex;align-items:baseline;justify-content:space-between;margin:2px 2px 8px;flex-wrap:wrap;gap:4px}
+  .m2m-legend{font-size:9.5px;color:var(--dim);display:flex;gap:9px}
+  .m2m-lg{display:inline-flex;align-items:center;gap:3px}
+  .m2m-lg i{width:8px;height:8px;border-radius:2px;display:inline-block}
+  #m2m-chart svg{display:block}
+  .m2m-cap{font-size:10.5px;color:var(--dim)}
+  .cl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:10px}
+  .cl-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:460px}
+  .cl-tbl th{background:#f8fafc;color:var(--mut);font-weight:700;font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.04em;padding:9px 10px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)}
+  .cl-tbl td{padding:9px 10px;border-bottom:1px solid #f1f4f9;white-space:nowrap}
+  .cl-tbl td.num,.cl-tbl th.num{text-align:right;font-family:monospace}
+  .cl-tbl .cl-sym{font-weight:800}
+  .cl-tbl tbody tr:last-child td{border-bottom:none}
+  .cl-tbl tfoot td{border-top:2px solid var(--border);padding:11px 10px;font-size:12.5px}
+  .cl-tbl .pos-dir{font-size:9px;padding:2px 7px}
 </style>
 </head>
 <body>
@@ -158,6 +188,30 @@
   <div id="pos-wrap">
     <div class="empty-msg">Loading positions&#8230;</div>
   </div>
+
+  <!-- cc#179: M2M Chart V2 + Closed Positions (orderbook-native) -->
+  <div class="m2m-card" id="m2m-card" style="display:none">
+    <div class="m2m-tabs">
+      <button class="m2m-tab active" data-tab="chart" onclick="m2mTab('chart')">M2M Chart</button>
+      <button class="m2m-tab" data-tab="closed" onclick="m2mTab('closed')">Closed Positions</button>
+    </div>
+    <div id="m2m-chart-pane">
+      <div class="range-sel">
+        <button class="range-btn" data-r="1d" onclick="setRange('1d')">1D</button>
+        <button class="range-btn active" data-r="1w" onclick="setRange('1w')">1W</button>
+        <button class="range-btn" data-r="1m" onclick="setRange('1m')">1M</button>
+        <button class="range-btn" data-r="1y" onclick="setRange('1y')">1Y</button>
+      </div>
+      <div class="m2m-head">
+        <span id="m2m-total">&#8212;</span>
+        <span class="m2m-legend" id="m2m-legend"></span>
+      </div>
+      <div id="m2m-chart"><div class="empty-msg">Loading&#8230;</div></div>
+      <div class="m2m-cap" id="m2m-cap" style="margin-top:6px"></div>
+    </div>
+    <div id="m2m-closed-pane" style="display:none"></div>
+  </div>
+
   <div class="updated" id="updated"></div>
 
 </div>
@@ -377,6 +431,109 @@ async function refresh(smooth=false) {
   btn.disabled=false;
 }
 
+/* ══ cc#179: M2M Chart V2 (1D/1W/1M/1Y) + Closed Positions ══
+   All series come from /api/smartgain/daily_m2m?range=... which replays
+   smartgain_orders (FIFO) + smartgain_opening_positions — never snapshots. */
+const MON3=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const sgn=n=>n==null?"—":(n>=0?"+":"−")+"₹"+f2(Math.abs(n));
+const fmtDate=iso=>{ if(!iso)return""; const p=iso.slice(0,10).split("-"); return (+p[2])+" "+MON3[+p[1]-1]; };
+const rangeCap={"1d":"today (5-min)","1w":"this week","1m":"last 30d","1y":"last 365d"};
+let curRange="1w", closedRendered=false;
+
+function renderChart(d){
+  const S=d.series||[];
+  if(!S.length) return '<div class="empty-msg">No data for this range.</div>';
+  const range=d.range;
+  const bars=(range==="1w"||range==="1m");
+  const lineKey=(range==="1d")?"m2m":"cumulative";
+  const W=680,H=200,padL=10,padR=10,padT=18,padB=26;
+  let vals=[]; S.forEach(p=>{ if(bars) vals.push(p.m2m); vals.push(p[lineKey]); });
+  let lo=Math.min(0,...vals), hi=Math.max(0,...vals);
+  if(hi===lo){hi+=1;lo-=1;}
+  const span=hi-lo, plotW=W-padL-padR, plotH=H-padT-padB, n=S.length;
+  const y=v=>padT+(hi-v)/span*plotH, zeroY=y(0);
+  const slotW=plotW/n;
+  const cx=i=> bars ? padL+slotW*(i+0.5) : padL+(n===1?plotW/2:plotW*i/(n-1));
+  let barsSvg="";
+  if(bars){
+    const bw=Math.max(2,Math.min(22,slotW*0.55));
+    S.forEach((p,i)=>{ const yv=y(p.m2m),top=Math.min(yv,zeroY),h=Math.max(1.5,Math.abs(zeroY-yv));
+      const col=p.m2m>=0?"var(--grn)":"var(--red)";
+      barsSvg+=`<rect x="${cx(i)-bw/2}" y="${top}" width="${bw}" height="${h}" rx="2" fill="${col}" opacity="0.85"><title>${p.label}: ${sgn(p.m2m)}</title></rect>`;
+    });
+  }
+  const pts=S.map((p,i)=>[cx(i),y(p[lineKey])]);
+  const poly=pts.length>1?`<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="var(--blu)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`:"";
+  const dots=(n<=40)?S.map((p,i)=>`<circle cx="${cx(i)}" cy="${y(p[lineKey])}" r="2.6" fill="var(--blu)" stroke="#fff" stroke-width="1"><title>${p.label}: ${sgn(p[lineKey])}</title></circle>`).join(""):"";
+  const step=Math.max(1,Math.ceil(n/6)); let labels="";
+  S.forEach((p,i)=>{ if(i%step===0||i===n-1) labels+=`<text x="${cx(i)}" y="${H-6}" text-anchor="middle" font-size="8.5" fill="var(--dim)">${p.label}</text>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="M2M ${range} chart">
+    <line x1="${padL}" y1="${zeroY}" x2="${W-padR}" y2="${zeroY}" stroke="var(--border)" stroke-width="1"/>
+    ${barsSvg}${poly}${dots}${labels}</svg>`;
+}
+
+function chartLegend(range){
+  const bars=(range==="1w"||range==="1m");
+  const lineLbl=(range==="1d")?"Intraday M2M":"Cumulative";
+  return (bars?'<span class="m2m-lg"><i style="background:var(--grn)"></i>Daily M2M</span>':"")+
+    `<span class="m2m-lg"><i style="background:var(--blu);border-radius:50%"></i>${lineLbl}</span>`;
+}
+
+function renderClosed(d){
+  const C=d.closed_all||[];
+  if(!C.length) return '<div class="empty-msg">No closed trades yet.</div>';
+  const rows=C.map(c=>{ const pc=c.pnl>=0?"var(--grn)":"var(--red)";
+    return `<tr><td>${fmtDate(c.close_date)}</td><td class="cl-sym">${c.symbol}</td>
+      <td><span class="pos-dir ${c.direction==="LONG"?"dir-long":"dir-short"}">${c.direction}</span></td>
+      <td class="num">${c.qty}</td><td class="num">${f2(c.entry)}</td><td class="num">${f2(c.exit)}</td>
+      <td class="num" style="color:${pc};font-weight:700">${sgn(c.pnl)}</td></tr>`; }).join("");
+  const total=C[0].running_total;   // newest-first list -> [0] carries the grand total
+  return `<div class="cl-wrap"><table class="cl-tbl">
+    <thead><tr><th>Date</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Realised</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total Realised</td>
+      <td class="num" style="color:${total>=0?"var(--grn)":"var(--red)"};font-weight:800">${sgn(total)}</td></tr></tfoot>
+  </table></div>`;
+}
+
+async function loadM2M(range){
+  try{
+    const r=await fetch(API+"/api/smartgain/daily_m2m?range="+range);
+    const d=await r.json();
+    document.getElementById("m2m-card").style.display="block";
+    if(range===curRange && document.querySelector(".m2m-tab.active").dataset.tab==="chart"){
+      document.getElementById("m2m-chart").innerHTML=renderChart(d);
+      const t=d.total_m2m||0;
+      document.getElementById("m2m-total").innerHTML=`<b style="font-size:20px;font-family:monospace;color:${t>=0?"var(--grn)":"var(--red)"}">${sgn(t)}</b> <span style="color:var(--mut);font-size:11px">${rangeCap[range]||""}</span>`;
+      document.getElementById("m2m-legend").innerHTML=chartLegend(range);
+      const cap=(range==="1m"||range==="1y")&&d.from_date?"Orderbook history from "+fmtDate(d.from_date)+" — earlier data accrues over time.":
+                (range==="1d"&&d.target_day?"Intraday replay for "+fmtDate(d.target_day):"");
+      document.getElementById("m2m-cap").textContent=cap;
+      (d.notes||[]).forEach(nn=>{ if(nn.indexOf("partial")>-1) document.getElementById("m2m-cap").textContent+=" · "+nn; });
+    }
+    // closed_all is range-independent full history (absent only for 1d) — render once.
+    if(d.closed_all && !closedRendered){
+      document.getElementById("m2m-closed-pane").innerHTML=renderClosed(d);
+      closedRendered=true;
+    }
+  }catch(e){ console.error("m2m",e); document.getElementById("m2m-chart").innerHTML='<div class="empty-msg">Could not load chart.</div>'; }
+}
+
+function setRange(range){
+  curRange=range;
+  document.querySelectorAll(".range-btn").forEach(b=>b.classList.toggle("active",b.dataset.r===range));
+  document.getElementById("m2m-chart").innerHTML='<div class="empty-msg">Loading&#8230;</div>';
+  loadM2M(range);
+}
+
+function m2mTab(tab){
+  document.querySelectorAll(".m2m-tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  document.getElementById("m2m-chart-pane").style.display=tab==="chart"?"block":"none";
+  document.getElementById("m2m-closed-pane").style.display=tab==="closed"?"block":"none";
+  if(tab==="closed" && !closedRendered) loadM2M("1w");   // ensure closed_all is fetched
+  if(tab==="chart") loadM2M(curRange);
+}
+
 /* ── Nav hide in iframe ── */
 if(window.self!==window.top||new URLSearchParams(location.search).has("embed")){
   const n=document.getElementById("scorr-nav");if(n)n.style.display="none";
@@ -385,6 +542,7 @@ if(window.self!==window.top||new URLSearchParams(location.search).has("embed")){
 /* ── Boot ── */
 refresh(false);
 setInterval(()=>refresh(true), 60000);
+loadM2M("1w");                       // cc#179: default range + populates Closed tab
 </script>
 <script src="/nav_toggle.js" defer></script>
 </body>
