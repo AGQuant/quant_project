@@ -64,10 +64,11 @@
     var reduceMotion = mq("(prefers-reduced-motion: reduce)").matches;
     var isTouch = mq("(pointer: coarse)").matches;
     var MOTION = !reduceMotion;                 // any ambient animation at all
-    var DO_ROTATE = MOTION && !isTouch;         // per-cluster orbit — desktop only
     var DO_PARALLAX = MOTION && !isTouch;       // star parallax — desktop only
     var _t = 0, _t0 = null, _loop = null;
-    var rotMeta = {};                           // cat -> {cx,cy,omega,phase}
+    // cc#201: dots stay STATIC (no per-node orbit). The only per-cluster motion is
+    // a single dashed boundary RING that spins clockwise + one tiny satellite dot.
+    var ringMeta = {};                          // cat -> {omega, phase}
     var mouseNX = 0, mouseNY = 0;               // normalized mouse (-0.5..0.5) for parallax
     // pre-rendered glow sprites (avoid 82 createRadialGradient per frame → 60fps)
     function makeGlow(color) {
@@ -194,29 +195,16 @@
     function layout() {
       if ((config.layout || "force") === "honeycomb") { honeycomb(); }
       else if (!loadPositions()) { simulate(); savePositions(); }   // cache once, stable across visits
-      // cc#199: freeze base positions + per-cluster orbit params (deterministic
-      // via hash so every visit rotates identically; center is the fixed centroid).
-      nodes.forEach(function (nd) { nd.bx = nd.x; nd.by = nd.y; });
-      rotMeta = {};
+      // cc#201: per-cluster dashed-ring spin params (deterministic via hash so
+      // every visit spins identically). Dots themselves never move.
+      ringMeta = {};
       Object.keys(byCat).forEach(function (cat) {
         var arr = byCat[cat]; if (!arr.length) return;
-        var mx = 0, my = 0; arr.forEach(function (n) { mx += n.bx; my += n.by; }); mx /= arr.length; my /= arr.length;
-        var h = hash(cat), period = 75 + (h % 46);          // 75-120s / revolution
-        rotMeta[cat] = { cx: mx, cy: my, omega: ((h & 1) ? 1 : -1) * 2 * Math.PI / period, phase: (h % 628) / 100 };
+        var h = hash("ring" + cat), period = 20 + (h % 21);   // 20-40s / clockwise revolution
+        ringMeta[cat] = { omega: 2 * Math.PI / period, phase: (h % 628) / 100 };
       });
       buildLinks();
       fitView();
-    }
-
-    function applyRotation(t) {
-      if (!DO_ROTATE) { nodes.forEach(function (nd) { nd.x = nd.bx; nd.y = nd.by; }); return; }
-      nodes.forEach(function (nd) {
-        var m = rotMeta[nd.category]; if (!m) { nd.x = nd.bx; nd.y = nd.by; return; }
-        var a = m.phase + t * m.omega, ca = Math.cos(a), sa = Math.sin(a);
-        var dx = nd.bx - m.cx, dy = nd.by - m.cy;
-        nd.x = m.cx + dx * ca - dy * sa;
-        nd.y = m.cy + dx * sa + dy * ca;
-      });
     }
 
     // ── view helpers ────────────────────────────────────────────────────────
@@ -296,15 +284,30 @@
         var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rw = Math.max((x1 - x0) / 2 + 46, 44), rh = Math.max((y1 - y0) / 2 + 46, 44);
         clusters.push({ cat: cat, arr: arr, col: catColor[cat] || "#60a5fa", cx: cx, cy: cy, rw: rw, rh: rh, R: Math.max(rw, rh) });
       });
-      // cc#199: ambient radial glow behind each cluster (category tint), then hull
+      // cc#201: soft CIRCULAR glow behind each cluster (category tint) — NO ellipse
+      // blobs. Then a single dashed boundary ring spinning clockwise + satellite dot.
       clusters.forEach(function (c) {
         var pulse = (hoverCat === c.cat) ? (0.5 + 0.5 * Math.sin(_t * 3.2)) : 0;
-        var R2 = c.R * (1.35 + pulse * 0.10);
-        var ag = ctx.createRadialGradient(c.cx, c.cy, 0, c.cx, c.cy, R2);
-        ag.addColorStop(0, hexA(c.col, 0.14 + pulse * 0.06)); ag.addColorStop(1, hexA(c.col, 0));
-        ctx.fillStyle = ag; ctx.beginPath(); ctx.arc(c.cx, c.cy, R2, 0, 6.283); ctx.fill();
-        ctx.globalAlpha = 0.10 + pulse * 0.05; ctx.fillStyle = c.col;
-        ctx.beginPath(); ctx.ellipse(c.cx, c.cy, c.rw, c.rh, 0, 0, 6.283); ctx.fill();
+        var GRr = c.R * (1.16 + pulse * 0.10);
+        var ag = ctx.createRadialGradient(c.cx, c.cy, c.R * 0.15, c.cx, c.cy, GRr);
+        ag.addColorStop(0, hexA(c.col, 0.16 + pulse * 0.06)); ag.addColorStop(1, hexA(c.col, 0));
+        ctx.fillStyle = ag; ctx.beginPath(); ctx.arc(c.cx, c.cy, GRr, 0, 6.283); ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+      // dashed boundary ring — clockwise (dash travels along path); tiny satellite dot
+      clusters.forEach(function (c) {
+        var m = ringMeta[c.cat] || { omega: 0.25, phase: 0 }, rr = c.R + 10;
+        var spin = MOTION ? _t : 0;
+        ctx.save();
+        ctx.strokeStyle = hexA(c.col, 0.30 + (hoverCat === c.cat ? 0.20 : 0));
+        ctx.lineWidth = 1.1 / view.s;
+        ctx.setLineDash([5 / view.s, 7 / view.s]);
+        ctx.lineDashOffset = -spin * m.omega * rr;         // clockwise travel
+        ctx.beginPath(); ctx.arc(c.cx, c.cy, rr, 0, 6.283); ctx.stroke();
+        ctx.restore();
+        var a = m.phase + spin * m.omega;                   // satellite angle (clockwise, y-down)
+        ctx.globalAlpha = 0.95; ctx.fillStyle = c.col;
+        ctx.beginPath(); ctx.arc(c.cx + Math.cos(a) * rr, c.cy + Math.sin(a) * rr, 2.6 / view.s, 0, 6.283); ctx.fill();
         ctx.globalAlpha = 1;
       });
 
@@ -446,8 +449,7 @@
     function frame(now) {
       _loop = null;
       if (_t0 == null) _t0 = now;
-      _t = (now - _t0) / 1000;
-      applyRotation(_t);
+      _t = (now - _t0) / 1000;                   // drives ring spin + twinkle only (dots static)
       draw();
       if (MOTION && !document.hidden) _loop = requestAnimationFrame(frame);
     }
@@ -455,7 +457,7 @@
     function stopLoop() { if (_loop != null) { cancelAnimationFrame(_loop); _loop = null; } }
     function schedule() {
       if (MOTION) { startLoop(); return; }
-      if (!raf) raf = requestAnimationFrame(function () { raf = null; applyRotation(0); draw(); });
+      if (!raf) raf = requestAnimationFrame(function () { raf = null; draw(); });
     }
 
     // ── interactions ─────────────────────────────────────────────────────────
