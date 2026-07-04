@@ -151,16 +151,12 @@ def _replay_full(cur, account, end_date):
     books = _fresh_books(opening)
     closed = []
 
-    baseline_day = _prev_trading_day(cur, inception)
+    # cc#185: opening positions are valued at AVG ENTRY, so the inception
+    # baseline unrealised is 0. Broker convention: window M2M = realised (vs
+    # entry) + current unrealised (vs entry). Marking the open book at the
+    # prior-trading-day close subtracted the already-carried move, so the chart
+    # total under-reported by exactly that carried amount vs the card/broker.
     inception_baseline = 0.0
-    for op in opening:
-        close = None
-        if baseline_day:
-            close, _s = _day_close(cur, op["symbol"], baseline_day)
-        if close is None:
-            close = op["avg_price"]
-        inception_baseline += _lot_unreal(
-            {"direction": op["direction"], "qty": op["qty"], "price": op["avg_price"]}, close)
 
     tdays = _trading_days(cur, inception, end_date)
     per_day, fi = {}, 0
@@ -400,17 +396,12 @@ def _week_response(week_start, account):
         fills = cur.fetchall()
         books = _fresh_books(opening)
         closed = []
-        baseline_day = _prev_trading_day(cur, ws)
+        # cc#185: baseline unrealised = 0 — opening lots valued at avg entry, not
+        # the prior-day close. Monday's m2m then includes the carried move, so
+        # the week total = realised + current unrealised (broker/card convention;
+        # was under-reporting by the carried amount, e.g. chart 1W +1,096 vs card
+        # +2,174.25 with realised +1,951.25 matching on both sides).
         prev_unreal = 0.0
-        for op in opening:
-            close = None
-            if baseline_day:
-                close, _s = _day_close(cur, op["symbol"], baseline_day)
-            if close is None:
-                notes.append(f"baseline close missing for {op['symbol']} — Monday absorbs its carried move")
-                close = op["avg_price"]
-            prev_unreal += _lot_unreal({"direction": op["direction"], "qty": op["qty"],
-                                        "price": op["avg_price"]}, close)
         days_out, fill_idx, cumulative = [], 0, 0.0
         for d in week_days:
             if d > today:
