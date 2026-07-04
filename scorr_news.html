@@ -45,7 +45,15 @@
   .refresh-btn:disabled{opacity:.55;cursor:default}
   .meta{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);margin-top:13px;font-weight:600}
 
-  .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-top:22px;overflow-x:auto;scrollbar-width:none}
+  /* cc#180: category tab bar stays visible while scrolling long articles (esp.
+     Learn). Sticks BELOW the 46px canonical nav on desktop; at top:0 on mobile
+     where that nav is hidden (<768px). Solid page-bg + border + z-index 30
+     (below nav's 40) so article text never bleeds through. nav_toggle hidden
+     state -> stick at the 20px strip height. */
+  .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-top:12px;padding-top:10px;
+    overflow-x:auto;scrollbar-width:none;position:sticky;top:46px;z-index:30;background:var(--bg)}
+  @media(max-width:767px){ .tabs{top:0} }
+  html[data-scorr-nav-hidden] .tabs{top:20px}
   .tabs::-webkit-scrollbar{display:none}
   .tab{padding:0 0 13px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap;
     border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .12s;background:none;border-top:0;border-left:0;border-right:0;font-family:inherit}
