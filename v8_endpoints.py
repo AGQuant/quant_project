@@ -565,11 +565,22 @@ def market_mood():
             so_slots  = 3 if fails >= 3 else 4
             s1b_slots = 2 if fails >= 3 else 3
             total_slots = buy_slots + sell_slots + so_slots + s1b_slots
+            # cc#221 (display-only): live used-count for each ring-fenced pool so the Market
+            # Gate card can show Sell Overbought + Buy S1 Bounce as used/cap. Each pool is
+            # single-sided (SO=SHORT, S1B=LONG), so basket-only count == the engine's count.
+            cur.execute("""SELECT basket, COUNT(*) FROM v8_paper_positions
+                           WHERE status='OPEN' AND basket IN ('sell_overbought','buy_s1_bounce')
+                           GROUP BY basket""")
+            _pool_used = {r[0]: int(r[1]) for r in cur.fetchall()}
+            so_used  = _pool_used.get("sell_overbought", 0)
+            s1b_used = _pool_used.get("buy_s1_bounce", 0)
             return {
                 "checked_at": str(date.today()), "checks": checks,
                 "fails": fails, "mood": mood,
                 "buy_slots": buy_slots, "sell_slots": sell_slots,
                 "so_slots": so_slots, "s1b_slots": s1b_slots, "total_slots": total_slots,
+                "so_pool":  {"cap": so_slots,  "used": so_used},    # cc#221 display-only
+                "s1b_pool": {"cap": s1b_slots, "used": s1b_used},   # cc#221 display-only
                 "slot_note": "so_slots ring-fenced for sell_overbought; s1b_slots ring-fenced for buy_s1_bounce -- never compete with standard pools",
                 "breadth_source": breadth_source, "nifty_source": nifty_source,
                 "adr_detail": {"advances": advances, "declines": declines,

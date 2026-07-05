@@ -644,11 +644,14 @@ function renderMood(m){
   // ADR is a ratio (2dp); Day/Week/Month are signed percentages.
   const gval=c=>{const v=Number(c.value);if(c.value==null||isNaN(v))return'';return short(c.filter)==='ADR'?v.toFixed(2):sign(v,2)+'%';};
   const pills=(m.checks||[]).map(c=>`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)} ${gval(c)} ${c.pass?'Y':'N'}</div>`).join('');
+  // cc#221: ring-fenced pools (used/cap) from market_mood — SO is a short basket, S1B a long one
+  const soP=m.so_pool||{cap:m.so_slots,used:0};
+  const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
   document.getElementById('mood').innerHTML=`
     <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div></div>
     <div class="moodChecks">${pills}</div>
-    <div class="slots" style="margin-left:auto"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span></div>`;
+    <div class="slots" style="margin-left:auto"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>`;
 }
 
 function sectorCards(sectors,title,label){
