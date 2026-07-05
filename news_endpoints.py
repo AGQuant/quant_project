@@ -81,14 +81,18 @@ def news_market():
 
 @router.get("/api/news/company/{symbol}")
 def news_company(symbol: str):
-    """Latest 10 polished articles for a symbol; falls back to raw if none polished yet."""
+    """cc#209: DB-ONLY latest polished news for a symbol — sourced strictly from
+    polished_news matched by the symbol tag (mentioned_symbols @> ARRAY[symbol]) or a
+    legacy per-company row (r.symbol). NO raw/unpolished fallback and NO web/external
+    source: if there is no polished news, return an empty list so the page shows a clean
+    empty state with zero web calls. Single query = the data source stays swappable."""
     sym = symbol.upper()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT p.id AS polished_id, r.id AS raw_id,
                    COALESCE(p.headline_clean, r.headline) AS headline,
                    p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
-                   r.symbol, r.source_name, r.url, r.published_at
+                   r.symbol, r.source_name, r.published_at
             FROM polished_news p
             JOIN raw_news r ON r.id = p.raw_news_id
             WHERE r.symbol = %s OR p.mentioned_symbols @> ARRAY[%s]::text[]
@@ -96,18 +100,7 @@ def news_company(symbol: str):
             LIMIT 10
         """, (sym, sym))
         polished = _rows(cur)
-        if polished:
-            return {"symbol": sym, "polished": True, "count": len(polished), "articles": polished}
-        # fallback: raw articles not yet polished
-        cur.execute("""
-            SELECT id AS raw_id, headline, description, symbol, source_name, url, published_at
-            FROM raw_news
-            WHERE symbol = %s
-            ORDER BY published_at DESC NULLS LAST, fetched_at DESC
-            LIMIT 10
-        """, (sym,))
-        raw = _rows(cur)
-    return {"symbol": sym, "polished": False, "count": len(raw), "articles": raw}
+    return {"symbol": sym, "polished": True, "count": len(polished), "articles": polished}
 
 
 @router.get("/api/news/unpolished")
