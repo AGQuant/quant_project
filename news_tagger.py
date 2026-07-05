@@ -127,6 +127,57 @@ def _match(text_lower, text_upper, index):
     return hits
 
 
+def headline_identity(conn, symbol):
+    """cc#210: patterns to decide if a headline is ABOUT `symbol` (PRIMARY) vs merely
+    mentions it in the body (MENTIONED). Tuned per-symbol and slightly more lenient than
+    the cross-universe tagger: because the page context is a single known symbol, the
+    company's leading word (e.g. 'HDFC' from 'HDFC Bank') is a safe PRIMARY signal here
+    even though it is too collision-prone for the global tagger."""
+    sym = (symbol or "").upper()
+    cname = None; nse = sym
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT company_name, nse_code FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1", (sym,))
+            row = cur.fetchone()
+        if row:
+            cname, nse = row[0], (row[1] or sym)
+    except Exception as e:
+        log.warning(f"headline_identity({sym}): {e}")
+    pats = []
+    code = (nse or sym).strip().upper()
+    if code and len(code) >= 3 and re.match(r"^[A-Z0-9&]+$", code):
+        pats.append(re.compile(r"(?<![A-Za-z0-9])" + re.escape(code) + r"(?![A-Za-z0-9])"))
+    literals = set(a.lower() for a in _ALIAS.get(sym, []))
+    if sym not in _ALIAS:
+        full = re.sub(r"\b(ltd|limited)\.?\s*$", "", (cname or "").lower()).strip()
+        full = re.sub(r"[.,]", " ", full); full = re.sub(r"\s+", " ", full).strip()
+        if " " in full and len(full) >= 8 and full not in _STOP_CORE:
+            literals.add(full)
+        core = _core(cname); multiword = " " in core
+        if core and core not in _STOP_CORE and ((multiword and len(core) >= 5) or (not multiword and len(core) >= 7)):
+            literals.add(core)
+        # lenient leading word (page-scoped): first significant token of the name
+        first = (re.sub(r"[.,]", " ", (cname or "")).split() or [""])[0].lower()
+        if len(first) >= 3 and first not in _STOP_CORE and re.match(r"^[a-z0-9&]+$", first):
+            literals.add(first)
+    for lit in literals:
+        pats.append(re.compile(r"\b" + re.escape(lit) + r"\b", re.I))
+    return pats
+
+
+def is_primary(pats, headline):
+    """True if any identity pattern matches the headline (word-boundary; NSE-code patterns
+    are case-sensitive upper, name patterns are case-insensitive)."""
+    if not headline or not pats:
+        return False
+    low, up = headline.lower(), headline.upper()
+    for p in pats:
+        target = up if (p.flags & re.IGNORECASE) == 0 else low
+        if p.search(target):
+            return True
+    return False
+
+
 def tag_untagged(conn=None, days=30, max_rows=8000):
     """Tag every still-untagged polished_news row within `days`. First run backfills."""
     own = conn is None

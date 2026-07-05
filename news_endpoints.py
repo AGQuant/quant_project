@@ -81,26 +81,47 @@ def news_market():
 
 @router.get("/api/news/company/{symbol}")
 def news_company(symbol: str):
-    """cc#209: DB-ONLY latest polished news for a symbol — sourced strictly from
+    """cc#209/#210: DB-ONLY two-tier polished news for a symbol. Source is strictly
     polished_news matched by the symbol tag (mentioned_symbols @> ARRAY[symbol]) or a
-    legacy per-company row (r.symbol). NO raw/unpolished fallback and NO web/external
-    source: if there is no polished news, return an empty list so the page shows a clean
-    empty state with zero web calls. Single query = the data source stays swappable."""
+    legacy per-company row (r.symbol) — NO raw/unpolished fallback, NO web/external source.
+
+    cc#210: each item is tiered at query time (no schema change):
+      • PRIMARY   — the company name / NSE code appears in the headline (word-boundary).
+                    Listed first, newest first, up to 6.
+      • MENTIONED — tagged in the body but NOT the headline (sector/peer editorials).
+                    Listed after all primary, newest first, up to 4, badged in the UI.
+    Each row carries full_summary (the complete polished article, markdown for AI
+    Editorials) for the inline expand. Empty → clean empty state, zero web calls."""
     sym = symbol.upper()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT p.id AS polished_id, r.id AS raw_id,
                    COALESCE(p.headline_clean, r.headline) AS headline,
-                   p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
-                   r.symbol, r.source_name, r.published_at
+                   p.full_summary, p.summary, p.category, p.sentiment, p.impact,
+                   p.mentioned_symbols, r.symbol,
+                   COALESCE(p.source, r.source_name) AS source_name,
+                   COALESCE(p.published_time, r.published_at) AS published_at
             FROM polished_news p
             JOIN raw_news r ON r.id = p.raw_news_id
             WHERE r.symbol = %s OR p.mentioned_symbols @> ARRAY[%s]::text[]
-            ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
-            LIMIT 10
+            ORDER BY COALESCE(p.published_time, r.published_at) DESC NULLS LAST, r.fetched_at DESC
+            LIMIT 30
         """, (sym, sym))
-        polished = _rows(cur)
-    return {"symbol": sym, "polished": True, "count": len(polished), "articles": polished}
+        rows = _rows(cur)
+        try:
+            import news_tagger
+            pats = news_tagger.headline_identity(conn, sym)
+        except Exception:
+            pats = []
+    import news_tagger as _nt
+    primary, mentioned = [], []
+    for a in rows:
+        a["tier"] = "primary" if _nt.is_primary(pats, a.get("headline")) else "mentioned"
+        (primary if a["tier"] == "primary" else mentioned).append(a)
+    articles = primary[:6] + mentioned[:4]           # already newest-first from SQL
+    return {"symbol": sym, "polished": True,
+            "count": len(articles), "primary_count": len(primary[:6]),
+            "mentioned_count": len(mentioned[:4]), "articles": articles}
 
 
 @router.get("/api/news/unpolished")

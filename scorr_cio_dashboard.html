@@ -1100,6 +1100,34 @@ function _timeAgo(ts) {
   const mo = Math.floor(dd / 30); return `${mo}mo ago`;
 }
 
+// cc#210: minimal, XSS-safe markdown renderer (AI Editorials use ### headers, bullets,
+// **bold**). Builds React elements — never dangerouslySetInnerHTML.
+function _mdInline(text) {
+  return String(text).split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+    /^\*\*[^*]+\*\*$/.test(p) ? <strong key={i}>{p.slice(2, -2)}</strong> : p);
+}
+function renderMd(text, C) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
+  const out = []; let list = null; let k = 0;
+  const flush = () => { if (list) { out.push(<ul key={"u" + k++} style={{ margin: "6px 0 6px 18px", padding: 0 }}>{list}</ul>); list = null; } };
+  lines.forEach(raw => {
+    const line = raw.trim();
+    if (!line) { flush(); return; }
+    let m;
+    if ((m = line.match(/^(#{1,4})\s+(.*)$/))) {
+      flush(); const lvl = m[1].length, fs = lvl <= 1 ? 15.5 : lvl === 2 ? 14.5 : 13.5;
+      out.push(<div key={k++} style={{ fontSize: fs, fontWeight: 800, color: C.text, margin: "11px 0 4px" }}>{_mdInline(m[2])}</div>);
+    } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
+      if (!list) list = [];
+      list.push(<li key={"li" + k++} style={{ marginBottom: 3, lineHeight: 1.55 }}>{_mdInline(m[1])}</li>);
+    } else {
+      flush(); out.push(<p key={k++} style={{ margin: "6px 0", lineHeight: 1.6 }}>{_mdInline(line)}</p>);
+    }
+  });
+  flush();
+  return out;
+}
+
 function NewsCard({ symbol }) {
   const [articles, setArticles] = useState(null);
   const [open, setOpen] = useState(true);
@@ -1113,13 +1141,19 @@ function NewsCard({ symbol }) {
       .catch(() => setArticles([]));
   }, [symbol]);
 
+  // cc#210: DB stores sentiment as Bullish/Bearish/Neutral and impact as High/Medium/Low
+  // (capitalized) — normalize so the chips are actually coloured, not all-grey.
+  const _sentCol = (s) => { const v = String(s || "").toLowerCase();
+    return (v === "positive" || v === "bullish") ? C.green : (v === "negative" || v === "bearish") ? C.red : C.muted; };
+  const _impCol = (im) => { const v = String(im || "").toLowerCase();
+    return v === "high" ? C.red : (v === "mid" || v === "medium") ? C.gold : C.muted; };
   const sentDot = (s) => {
-    const col = s === "positive" ? C.green : s === "negative" ? C.red : C.muted;
+    const col = _sentCol(s);
     return <span title={s || "no sentiment"} style={{ width: 8, height: 8, borderRadius: "50%", background: col, display: "inline-block", flexShrink: 0 }} />;
   };
   const impactTag = (im) => {
     if (!im) return null;
-    const col = im === "high" ? C.red : im === "mid" ? C.gold : C.muted;
+    const col = _impCol(im);
     return <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase",
       color: col, background: col + "18", border: `1px solid ${col}33`, borderRadius: 5, padding: "1px 6px", flexShrink: 0 }}>{im}</span>;
   };
@@ -1139,39 +1173,53 @@ function NewsCard({ symbol }) {
             <div style={{ fontSize: 12, color: C.muted }}>No recent news available</div>
           ) : articles.map((a, i) => {
             const isOpen = rowOpen === i;
+            const isMentioned = a.tier === "mentioned";
+            // cc#210: header before the first mentioned item. "In sector coverage" when
+            // there is NO primary at all; a subtle divider otherwise.
+            const firstMentioned = isMentioned && (i === 0 || articles[i - 1].tier !== "mentioned");
+            const noPrimary = firstMentioned && i === 0;
+            const body = a.full_summary || a.summary;   // cc#210: FULL article, never the one-liner
             return (
-            <div key={a.polished_id || a.raw_id || i}
-              style={{ borderBottom: i < articles.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
-              {/* cc#209: tapping a headline expands the polished text INLINE — no new tab, no URL */}
-              <div onClick={() => setRowOpen(isOpen ? -1 : i)}
-                style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 0", cursor: "pointer" }}>
-                <div style={{ marginTop: 5 }}>{sentDot(a.sentiment)}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, lineHeight: 1.4 }}>{a.headline}</div>
-                  <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span>{a.source_name || "—"}</span>
-                    {a.published_at && <><span>·</span><span>{_timeAgo(a.published_at)}</span></>}
-                    {a.category && <><span>·</span><span style={{ textTransform: "capitalize" }}>{a.category}</span></>}
-                  </div>
+            <div key={a.polished_id || a.raw_id || i}>
+              {firstMentioned && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 2px", paddingTop: 8, borderTop: `1px solid ${C.gridLine}` }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase", color: C.muted }}>
+                    {noPrimary ? "In sector coverage" : "Mentioned"}
+                  </span>
                 </div>
-                {impactTag(a.impact)}
-                <span style={{ fontSize: 11, color: C.muted, marginTop: 3, flexShrink: 0,
-                  transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .18s" }}>▸</span>
-              </div>
-              <div style={{ maxHeight: isOpen ? 1200 : 0, overflow: "hidden", transition: "max-height .28s ease" }}>
-                <div style={{ padding: "2px 0 12px 17px", fontSize: 12.5, lineHeight: 1.6, color: C.text,
-                  overflowWrap: "break-word", wordBreak: "break-word" }}>
-                  {a.summary
-                    ? <div style={{ opacity: .92 }}>{a.summary}</div>
-                    : <div style={{ color: C.muted, fontStyle: "italic" }}>No summary available.</div>}
-                  <div style={{ marginTop: 9, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                    {a.sentiment && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase",
-                      color: a.sentiment === "positive" ? C.green : a.sentiment === "negative" ? C.red : C.muted,
-                      background: (a.sentiment === "positive" ? C.green : a.sentiment === "negative" ? C.red : C.muted) + "18",
-                      border: `1px solid ${(a.sentiment === "positive" ? C.green : a.sentiment === "negative" ? C.red : C.muted)}33`,
-                      borderRadius: 5, padding: "1px 6px" }}>{a.sentiment}</span>}
-                    {impactTag(a.impact)}
-                    {a.category && <span style={{ fontSize: 9.5, color: C.muted, textTransform: "capitalize" }}>{a.category}</span>}
+              )}
+              <div style={{ borderBottom: i < articles.length - 1 ? `1px solid ${C.gridLine}` : "none" }}>
+                {/* cc#209/#210: tap expands the FULL polished article inline — no new tab, no URL */}
+                <div onClick={() => setRowOpen(isOpen ? -1 : i)}
+                  style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 0", cursor: "pointer" }}>
+                  <div style={{ marginTop: 5 }}>{sentDot(a.sentiment)}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, lineHeight: 1.4 }}>{a.headline}</div>
+                    <div style={{ fontSize: 10.5, color: C.muted, marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {isMentioned && <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: ".05em", textTransform: "uppercase",
+                        color: C.muted, background: C.muted + "1f", border: `1px solid ${C.muted}44`, borderRadius: 4, padding: "1px 5px" }}>Mentioned</span>}
+                      <span>{a.source_name || "—"}</span>
+                      {a.published_at && <><span>·</span><span>{_timeAgo(a.published_at)}</span></>}
+                      {a.category && <><span>·</span><span style={{ textTransform: "capitalize" }}>{a.category}</span></>}
+                    </div>
+                  </div>
+                  {impactTag(a.impact)}
+                  <span style={{ fontSize: 11, color: C.muted, marginTop: 3, flexShrink: 0,
+                    transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .18s" }}>▸</span>
+                </div>
+                <div style={{ maxHeight: isOpen ? 4000 : 0, overflow: "hidden", transition: "max-height .3s ease" }}>
+                  <div style={{ padding: "2px 0 14px 17px", fontSize: 12.5, color: C.text,
+                    overflowWrap: "break-word", wordBreak: "break-word" }}>
+                    {body
+                      ? <div style={{ opacity: .95 }}>{renderMd(body, C)}</div>
+                      : <div style={{ color: C.muted, fontStyle: "italic" }}>No article text available.</div>}
+                    <div style={{ marginTop: 10, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      {a.sentiment && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase",
+                        color: _sentCol(a.sentiment), background: _sentCol(a.sentiment) + "18",
+                        border: `1px solid ${_sentCol(a.sentiment)}33`, borderRadius: 5, padding: "1px 6px" }}>{a.sentiment}</span>}
+                      {impactTag(a.impact)}
+                      {a.category && <span style={{ fontSize: 9.5, color: C.muted, textTransform: "capitalize" }}>{a.category}</span>}
+                    </div>
                   </div>
                 </div>
               </div>
