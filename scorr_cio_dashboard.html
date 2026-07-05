@@ -550,11 +550,9 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
     { key: "rank",   lbl: "#",    w: 28,  align: "left"  },
     { key: "sym",    lbl: "Symbol", w: 92, align: "left" },
     { key: "gvm",    lbl: "GVM",  w: 50,  align: "right" },
-    { key: "gvm_pillars", lbl: "G·V·M", w: 76, align: "right" },
     { key: "d13",    lbl: "Δ13D", w: 54,  align: "right" },
     { key: "mcap",   lbl: "MCap", w: 72,  align: "right" },
     { key: "pe",     lbl: "PE",   w: 52,  align: "right" },
-    { key: "pb",     lbl: "P/B",  w: 46,  align: "right" },
     { key: "roe",    lbl: "ROE%", w: 54,  align: "right" },
     { key: "opm",    lbl: "OPM%", w: 54,  align: "right" },
     { key: "rsi_m",  lbl: "RSIm", w: 46,  align: "right" },
@@ -563,17 +561,16 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
     { key: "yr",     lbl: "1Y%",  w: 58,  align: "right" },
     { key: "up",     lbl: "Upsd%",w: 56,  align: "right" },
     { key: "divy",   lbl: "DivY", w: 48,  align: "right" },
-    { key: "t1",     lbl: "T1",   w: 42,  align: "right" },
     { key: "verd",   lbl: "Verdict", w: 78, align: "right" },
   ];
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 16 }}>
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Segment Rank Ladder</div>
-        <div style={{ fontSize: 13, color: C.muted }}>{segment} · ranked by GVM · T1 = price-action auto-checks passed</div>
+        <div style={{ fontSize: 13, color: C.muted }}>{segment} · ranked by GVM</div>
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5, minWidth: 1100 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5, minWidth: 940 }}>
           <thead>
             <tr style={{ borderBottom: `2px solid ${C.border}` }}>
               {cols.map(c => (
@@ -588,7 +585,6 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
           <tbody>
             {(ladder || []).map((row, i) => {
               const d13 = row.gvm_d13;
-              const t1ok = row.tier1_passed != null && row.tier1_total ? row.tier1_passed / row.tier1_total : null;
               const isSelf = row.is_self;
               const td = (txt, color = null, weight = 600) => (
                 <td style={{ padding: "7px 6px", fontSize: 13.5, fontFamily: "monospace",
@@ -604,18 +600,10 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
                     color: isSelf ? C.accent : C.text, textAlign: "left", whiteSpace: "nowrap" }}>{row.symbol}</td>
                   <td style={{ padding: "7px 6px", fontSize: 14, fontFamily: "monospace", fontWeight: 800,
                     color: gvmColor(row.gvm), textAlign: "right" }}>{row.gvm != null ? row.gvm.toFixed(2) : "—"}</td>
-                  <td style={{ padding: "7px 6px", fontSize: 13, fontFamily: "monospace", textAlign: "right", whiteSpace: "nowrap" }}>
-                    <span style={{ color: C.gPillar, fontWeight: 700 }}>{row.g != null ? row.g.toFixed(1) : "—"}</span>
-                    <span style={{ color: C.muted, margin: "0 2px" }}>·</span>
-                    <span style={{ color: C.vPillar, fontWeight: 700 }}>{row.v != null ? row.v.toFixed(1) : "—"}</span>
-                    <span style={{ color: C.muted, margin: "0 2px" }}>·</span>
-                    <span style={{ color: C.mPillar, fontWeight: 700 }}>{row.m != null ? row.m.toFixed(1) : "—"}</span>
-                  </td>
                   <td style={{ padding: "7px 6px", fontSize: 13.5, fontFamily: "monospace", fontWeight: 700,
                     color: deltaColor(d13, 0.02), textAlign: "right" }}>{d13 != null ? signFmt(d13) : "—"}</td>
                   {td(fmtMcap(row.market_cap), C.muted)}
                   {td(row.pe != null ? row.pe + "x" : "—", C.text)}
-                  {td(row.pb != null ? row.pb + "x" : "—", C.text)}
                   {td(row.roe != null ? row.roe + "%" : "—",
                     row.roe == null ? C.muted : row.roe >= 15 ? C.green : row.roe >= 10 ? C.gold : C.red)}
                   {td(row.opm != null ? row.opm + "%" : "—",
@@ -629,9 +617,6 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
                   {td(row.upside != null ? signFmt(row.upside, 1) + "%" : "—",
                     row.upside == null ? C.muted : row.upside >= 15 ? C.green : row.upside >= 0 ? C.gold : C.red)}
                   {td(row.div_yield != null ? row.div_yield + "%" : "—", C.muted)}
-                  <td style={{ padding: "7px 6px", fontSize: 13.5, fontFamily: "monospace", fontWeight: 800,
-                    color: t1ok == null ? C.muted : t1ok >= 0.7 ? C.green : t1ok >= 0.5 ? C.gold : C.red,
-                    textAlign: "right" }}>{row.tier1_passed != null ? `${row.tier1_passed}/${row.tier1_total}` : "—"}</td>
                   <td style={{ padding: "7px 6px", textAlign: "right" }}><Tag color={verdictColor(row.verdict)}>{row.verdict}</Tag></td>
                 </tr>
               );

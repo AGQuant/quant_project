@@ -420,7 +420,8 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                     ladder_extra.setdefault(s, {})
                     ladder_extra[s]["tier1_passed"] = t1["passed"]
                     ladder_extra[s]["tier1_total"] = t1["total"]
-                    ladder_extra[s]["rsi_month"] = _r(m.get("rsi_month"), 0)
+                    # cc#224: RSIM no longer sourced from v8_metrics (futures-only ~212) —
+                    # see section 8c (universe_technicals, full universe).
                     # v8_metrics returns are point-in-time EOD-frozen; prefer
                     # these when available, fallback below fills the rest.
                     if m.get("week_return") is not None:
@@ -450,6 +451,25 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                                 ladder_extra[s][k] = vals[k]
             except Exception as e:
                 log.warning(f"returns fallback failed: {e}")
+
+            # ── 8c. RSIM from universe_technicals (full universe, cc#224) ──
+            # v8_metrics only populates ~212 futures stocks, so its rsi_month left RSIM blank
+            # for ~80% of ladder rows (all non-futures). universe_technicals.rsi_month covers
+            # the full ~1766-stock universe; take the latest computed_at per symbol. A dash
+            # remains ONLY where genuinely null (per-stock data gap, e.g. MONOLITH).
+            try:
+                cur.execute("""
+                    SELECT DISTINCT ON (symbol) symbol, rsi_month
+                    FROM universe_technicals
+                    WHERE symbol = ANY(%s)
+                    ORDER BY symbol, computed_at DESC
+                """, (syms,))
+                for s, rm in cur.fetchall():
+                    if rm is not None:
+                        ladder_extra.setdefault(s, {})
+                        ladder_extra[s]["rsi_month"] = _r(rm, 0)
+            except Exception as e:
+                log.warning(f"ladder rsi_month (universe_technicals) failed: {e}")
 
             # ── 9. Pull G/V/M components + mcap per ladder ────────────────
             try:
