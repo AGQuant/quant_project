@@ -267,6 +267,14 @@ def _write_adr_intraday(conn, sim_ts=None):
         conn.commit()
         log.debug(f"adr_intraday: {adv}A/{dec}D adr={adr} universe={tot}")
     except Exception as e:
+        # cc#218 hotfix: a failed INSERT aborts the transaction; without a rollback the
+        # aborted state persists and silently kills _update_sector_aggregates / heartbeat
+        # that run after this. Prior work is already committed, so rollback discards only
+        # this failed statement. (live + sim — same code both modes.)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         log.warning(f"_write_adr_intraday: {e}")
 
 
@@ -527,6 +535,12 @@ def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time, sim_
         try:
             _build_vol_baseline(conn, symbols, sim_ts=sim_ts)
         except Exception as e:
+            # cc#218 hotfix: a failed baseline SELECT aborts the transaction; clear it so
+            # the reads/writes that follow this tick don't silently die on aborted state.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             log.error(f"vol_baseline build failed: {e}")
             _VOL_BASELINE["date"] = None
     # clamp to the canonical bucket range: pre-open -> first bucket, post-close -> full day
@@ -618,6 +632,12 @@ def _load_hourly_fut(conn, symbols: List[str], sim_ts=None) -> Dict[str, Optiona
                 else:
                     out[sym] = None
     except Exception as e:
+        # cc#218 hotfix: failed SELECT aborts the transaction — clear it so the compute +
+        # write phase after this load doesn't die silently on aborted state.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         log.warning(f"_load_hourly_fut: {e} -- hourly NULL-passes this tick")
     return out
 
@@ -632,6 +652,12 @@ def _load_filter_state(conn) -> Dict[str, bool]:
             cur.execute("SELECT basket, enabled FROM v8_filter_state")
             return {b: bool(e) for b, e in cur.fetchall()}
     except Exception as e:
+        # cc#218 hotfix: failed SELECT aborts the transaction — clear it so the per-basket
+        # qualified inserts that follow in _write_qualified don't die silently.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         log.warning(f"_load_filter_state: {e} -- V2.1 hard gates OFF (locked behavior)")
         return {}
 
@@ -1948,9 +1974,22 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
 
     all_metrics = []
     for sym, m in computed.items():
+        # SAVEPOINT per symbol: in transaction mode a single bad upsert aborts the whole
+        # transaction, silently killing every subsequent statement. ROLLBACK TO SAVEPOINT
+        # in the except un-aborts the transaction so "skip bad symbol, keep the rest"
+        # actually holds. (live + sim — same code both modes, Rule 2.)
+        # No RELEASE on success: _upsert_metrics commits per symbol (line ~880), and a
+        # COMMIT already discards the savepoint, so the next iteration's SAVEPOINT is fresh.
         try:
+            with conn.cursor() as _sp:
+                _sp.execute("SAVEPOINT sp_upsert")
             _upsert_metrics(conn, sym, m, today, sim_ts=sim_ts)
         except Exception as e:
+            try:
+                with conn.cursor() as _sp:
+                    _sp.execute("ROLLBACK TO SAVEPOINT sp_upsert")
+            except Exception:
+                pass
             log.warning(f"upsert_metrics {sym}: {e}")
         all_metrics.append(m)
 

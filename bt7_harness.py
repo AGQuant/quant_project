@@ -46,6 +46,37 @@ def _conn():
     return psycopg.connect(DATABASE_URL)
 
 
+def _ensure_bt7_runs_cols(conn):
+    """Idempotently guarantee the status/error_detail columns exist (a bt7_runs created
+    before the cc#218 hotfix would lack them). Runs as the app superuser/owner."""
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE harness.bt7_runs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ok'")
+        cur.execute("ALTER TABLE harness.bt7_runs ADD COLUMN IF NOT EXISTS error_detail TEXT")
+    conn.commit()
+
+
+def _write_error(conn, label, target_date, ticks, detail):
+    """Persist a run's true first exception into harness.bt7_runs. Railway stdout is
+    invisible to the ops desk; the DB is not — so the next failure names itself."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO harness.bt7_runs
+                           (run_label, target_date, ticks, source, status, error_detail, ran_at)
+                           VALUES (%s,%s,%s,%s,'error',%s,NOW())
+                           ON CONFLICT (run_label) DO UPDATE SET
+                             target_date=EXCLUDED.target_date, ticks=EXCLUDED.ticks,
+                             source=EXCLUDED.source, status='error',
+                             error_detail=EXCLUDED.error_detail, ran_at=NOW()""",
+                        (label, target_date, ticks, "bt7", detail))
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        log.error(f"_write_error '{label}': {e}")
+
+
 def _regclass(cur, qualified_name):
     cur.execute("SELECT to_regclass(%s)", (qualified_name,))
     return cur.fetchone()[0] is not None
@@ -133,12 +164,14 @@ def _archive(conn, label, target_date, ticks, src):
         exits, gate_exits = cur.fetchone()
         from psycopg.types.json import Json
         cur.execute("""INSERT INTO harness.bt7_runs
-                       (run_label, target_date, ticks, quals, entries, exits, gate_exits, source, notes)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       (run_label, target_date, ticks, quals, entries, exits, gate_exits, source, notes,
+                        status, error_detail)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ok',NULL)
                        ON CONFLICT (run_label) DO UPDATE SET
                          target_date=EXCLUDED.target_date, ticks=EXCLUDED.ticks, quals=EXCLUDED.quals,
                          entries=EXCLUDED.entries, exits=EXCLUDED.exits, gate_exits=EXCLUDED.gate_exits,
-                         ran_at=NOW(), source=EXCLUDED.source, notes=EXCLUDED.notes""",
+                         ran_at=NOW(), source=EXCLUDED.source, notes=EXCLUDED.notes,
+                         status='ok', error_detail=NULL""",
                     (label, target_date, ticks, quals, entries, exits, gate_exits, "bt7", Json(src)))
     conn.commit()
     return {"quals": quals, "entries": entries, "exits": exits, "gate_exits": gate_exits}
@@ -150,14 +183,16 @@ def run_bt7(target_date, label):
     if isinstance(target_date, str):
         target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
     conn = _conn()
+    ticks = 0
+    detail = None   # repr() of the first exception — surfaced to harness.bt7_runs on failure
     try:
+        _ensure_bt7_runs_cols(conn)
         src = _materialize(conn, target_date)
         import v8_signal_writer, v8_paper
         with conn.cursor() as cur:
             cur.execute("SET search_path TO harness, public")
             cur.execute("SET ROLE bt7_sim")       # session-level: persists across the driven commits
         conn.commit()
-        ticks = 0
         t = datetime.combine(target_date, time(9, 15))
         end = datetime.combine(target_date, time(15, 30))
         while t <= end:
@@ -166,6 +201,7 @@ def run_bt7(target_date, label):
                 v8_paper.run_paper_exits(conn, target_date=target_date, mode="live", sim_ts=t)  # exits
             except Exception as e:
                 conn.rollback()
+                detail = f"tick {t.isoformat()}: {e!r}"
                 log.error(f"bt7 tick {t}: {e}")
                 raise
             ticks += 1
@@ -178,14 +214,23 @@ def run_bt7(target_date, label):
         return {"ok": True, "label": label, "date": str(target_date), "ticks": ticks,
                 "source": src, **summ}
     except Exception as e:
+        # RESET ROLE back to the app superuser, then record the true first exception into
+        # harness.bt7_runs (status='error') — the ops desk reads the DB, not Railway stdout.
+        if detail is None:
+            detail = repr(e)
         try:
             with conn.cursor() as cur:
                 cur.execute("RESET ROLE")
             conn.commit()
         except Exception:
-            pass
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        _write_error(conn, label, target_date, ticks, detail)
         log.error(f"run_bt7 '{label}': {e}")
-        return {"ok": False, "label": label, "error": str(e)}
+        return {"ok": False, "label": label, "date": str(target_date), "ticks": ticks,
+                "status": "error", "error": str(e), "error_detail": detail}
     finally:
         conn.close()
 

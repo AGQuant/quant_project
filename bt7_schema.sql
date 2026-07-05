@@ -47,7 +47,13 @@ CREATE TABLE IF NOT EXISTS harness.bt7_trades    AS SELECT ''::text AS run_label
 CREATE TABLE IF NOT EXISTS harness.bt7_missed    AS SELECT ''::text AS run_label, * FROM harness.v8_paper_missed WITH NO DATA;
 CREATE TABLE IF NOT EXISTS harness.bt7_runs (
     run_label TEXT PRIMARY KEY, target_date DATE, ticks INT, quals INT, entries INT,
-    exits INT, gate_exits INT, ran_at TIMESTAMPTZ DEFAULT NOW(), source TEXT, notes JSONB);
+    exits INT, gate_exits INT, ran_at TIMESTAMPTZ DEFAULT NOW(), source TEXT, notes JSONB,
+    -- cc#218 hotfix: Railway stdout is invisible to the ops desk; the DB is not. A failed
+    -- run records its true first exception here so bt7_diff never certifies a silent error.
+    status TEXT DEFAULT 'ok', error_detail TEXT);
+-- idempotent for a bt7_runs that predates the two columns above (also enforced in code at run start)
+ALTER TABLE harness.bt7_runs ADD COLUMN IF NOT EXISTS status       TEXT DEFAULT 'ok';
+ALTER TABLE harness.bt7_runs ADD COLUMN IF NOT EXISTS error_detail TEXT;
 
 -- role + grants
 DO $r$ BEGIN
