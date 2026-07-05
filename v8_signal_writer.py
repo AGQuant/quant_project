@@ -967,8 +967,17 @@ def _market_gate_fails(conn) -> int:
             checks = [adr >= 1.0, nday >= 0, nweek >= 0, nmonth >= 0]
             return sum(1 for c in checks if not c)
     except Exception as e:
-        log.warning(f"_market_gate_fails: {e}")
-        return 0
+        # cc#216: fail CONSERVATIVE, never aggressive. Returning 0 fails = Strong Bullish
+        # = max buy aggression (15B/5S) on an ERROR — exactly backwards. Return 2 (Neutral,
+        # 12B/8S) and make the degraded mood loud in ops_log.
+        log.warning(f"_market_gate_fails: {e} — defaulting to Neutral (2 fails), not Strong Bullish")
+        try:
+            _ops_log(conn, "alert", "market_gate_fails_error",
+                     {"message": f"market-mood gate errored ({e}) — defaulted to Neutral (2 fails) "
+                                 f"to avoid max-aggression buying on a compute failure"})
+        except Exception:
+            pass
+        return 2
 
 
 def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
@@ -1150,9 +1159,10 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT side, COUNT(*) FROM v8_paper_positions
-                WHERE status='OPEN' AND basket != 'sell_overbought'
+                WHERE status='OPEN' AND basket NOT IN ('sell_overbought','buy_s1_bounce')
                 GROUP BY side
-            """)
+            """)   # cc#216: both dedicated pools (SO + S1B) are ring-fenced — was excluding
+                   # only sell_overbought, so buy_s1_bounce positions inflated standard slots
             counts = {r[0]: int(r[1]) for r in cur.fetchall()}
         long_open  = counts.get("LONG",  0)
         short_open = counts.get("SHORT", 0)

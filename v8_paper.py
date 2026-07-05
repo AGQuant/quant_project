@@ -419,8 +419,14 @@ def _first_bar(conn, sym, d):
             r[2] if r else None)
 
 def _open_counts(conn):
+    # cc#216: standard-pool counts must EXCLUDE the ring-fenced dedicated pools
+    # (sell_overbought + buy_s1_bounce), else those positions inflate the standard
+    # buy/sell slot caps. (Defense-in-depth: paper_tick is unscheduled, but keep the
+    # count semantics identical to the live writer's standard slot query.)
     with conn.cursor() as cur:
-        cur.execute("SELECT side, COUNT(*) FROM v8_paper_positions WHERE status='OPEN' GROUP BY side")
+        cur.execute("SELECT side, COUNT(*) FROM v8_paper_positions "
+                    "WHERE status='OPEN' AND basket NOT IN ('sell_overbought','buy_s1_bounce') "
+                    "GROUP BY side")
         d = {r[0]: int(r[1]) for r in cur.fetchall()}
     return d.get("LONG", 0), d.get("SHORT", 0)
 
@@ -638,7 +644,15 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
     # ---- 3) ENTRIES ----
     after_cutoff = (now_t is not None and now_t >= ENTRY_CUTOFF)
     long_open, short_open = _open_counts(conn)
-    if not after_cutoff:
+    # cc#216: with no slot caps, paper_tick would open UNLIMITED entries (the per-side cap
+    # checks are guarded by `is not None`, so None => no cap). Fail-safe: skip ALL entry
+    # generation when either cap is missing — exits + rebalance above still ran. paper_tick
+    # is NOT the entry engine (the live writer is); this removes the second-engine footgun.
+    _slots_ok = (buy_slots is not None and sell_slots is not None)
+    if not _slots_ok:
+        log.warning("paper_tick: buy_slots/sell_slots not provided — SKIPPING entries "
+                    "(exits + rebalance still ran); paper_tick is not the entry engine")
+    if _slots_ok and not after_cutoff:
         for sym, q in qual.items():
             if sym not in piv: continue
             side = q["side"]; basket = q["basket"]
@@ -708,7 +722,7 @@ def paper_tick(conn, target_date: date = None, buy_slots: int = None, sell_slots
                 _log_missed(conn,d,sym,"SHORT","sell_overbought",entry,target,stop,"slot_full"); continue
             entries.append(_open_short(conn,sym,"sell_overbought",entry,_ts(cur_ts),target,stop,None,d))
             short_open+=1
-    else:
+    elif _slots_ok:   # cc#216: after-cutoff missed-logging only runs when slots were provided
         for sym, q in qual.items():
             if sym not in piv: continue
             side=q["side"]; pv=piv[sym]; pp,r1,s1=pv["pp"],pv["r1"],pv["s1"]
