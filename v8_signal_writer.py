@@ -69,6 +69,7 @@ import numpy as np
 import psycopg
 import os
 import guards          # cc#217 P2: canonical trading-day gate + entry-gate + guard primitives (sim-aware)
+from time import perf_counter   # cc#217 P3: tick wall-time (distinct from datetime.time)
 from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
 
 log = logging.getLogger("scorr.signal_writer")
@@ -409,22 +410,22 @@ def _load_intraday_bars(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict
     today = _today(sim_ts)
     cut = _bar_cutoff(sim_ts)   # cc#218 D6: bars close at ts+5min -> sim sees ts<=sim_ts-5min
     with conn.cursor() as cur:
+        # cc#217 P3: single GROUP BY pass (was 2 correlated per-symbol subqueries + 3 FILTER
+        # aggregates). The outer WHERE already restricts to today/fyers_eq/ts<=cut, so the old
+        # FILTERs were redundant; live_close/day_open come from array_agg ordered by ts (last
+        # close / first open) — byte-identical to the old ORDER BY ts DESC/ASC LIMIT 1.
         cur.execute("""
             SELECT
                 symbol,
-                (SELECT close FROM intraday_prices i2
-                 WHERE i2.symbol = ip.symbol AND i2.ts::date = %s AND i2.source = 'fyers_eq' AND i2.ts <= %s
-                 ORDER BY ts DESC LIMIT 1)                       AS live_close,
-                (SELECT open  FROM intraday_prices i3
-                 WHERE i3.symbol = ip.symbol AND i3.ts::date = %s AND i3.source = 'fyers_eq' AND i3.ts <= %s
-                 ORDER BY ts ASC  LIMIT 1)                       AS day_open,
-                MAX(high)   FILTER (WHERE ts::date = %s AND ts <= %s)  AS day_high,
-                MIN(low)    FILTER (WHERE ts::date = %s AND ts <= %s)  AS day_low,
-                MAX(volume) FILTER (WHERE ts::date = %s AND ts <= %s)  AS day_vol
-            FROM intraday_prices ip
+                (array_agg(close ORDER BY ts DESC))[1]  AS live_close,
+                (array_agg(open  ORDER BY ts ASC ))[1]  AS day_open,
+                MAX(high)   AS day_high,
+                MIN(low)    AS day_low,
+                MAX(volume) AS day_vol
+            FROM intraday_prices
             WHERE symbol = ANY(%s) AND ts::date = %s AND source = 'fyers_eq' AND ts <= %s
             GROUP BY symbol
-        """, (today, cut, today, cut, today, cut, today, cut, today, cut, symbols, today, cut))
+        """, (symbols, today, cut))
         bars = {}
         for sym, lc, op, hi, lo, vol in cur.fetchall():
             if lc is None:
@@ -859,62 +860,115 @@ def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dic
 
 # -- Step 7: Upsert v8_metrics ------------------------------------------------
 
+# cc#217 P3: single source for the v8_metrics upsert SQL + row builder, shared by the batch
+# path (one executemany + one commit per tick) and the per-symbol fallback. Byte-identical to
+# the pre-P3 per-symbol INSERT (cc#218: score_date=target_date; computed_at=NOW() is
+# write-metadata, never parity-compared).
+_UPSERT_METRICS_SQL = """
+    INSERT INTO v8_metrics
+    (symbol, score_date, gvm_score,
+     dma_20, dma_50, dma_200, daily_rsi,
+     rsi_month, rsi_weekly,
+     month_return, week_return, year_return, mom_2d,
+     day_1d, eod_chg,
+     sector_day, sector_week, sector_month,
+     month_index, week_index_52,
+     range_1d, range_3d, upper_bb, lower_bb,
+     ma9_vs_ma21, vol_ratio)
+    VALUES (%s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s,
+            %s,%s, %s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s)
+    ON CONFLICT (symbol, score_date) DO UPDATE SET
+        gvm_score     = EXCLUDED.gvm_score,
+        dma_20        = EXCLUDED.dma_20,
+        dma_50        = EXCLUDED.dma_50,
+        dma_200       = EXCLUDED.dma_200,
+        daily_rsi     = EXCLUDED.daily_rsi,
+        rsi_month     = EXCLUDED.rsi_month,
+        rsi_weekly    = EXCLUDED.rsi_weekly,
+        month_return  = EXCLUDED.month_return,
+        week_return   = EXCLUDED.week_return,
+        year_return   = EXCLUDED.year_return,
+        mom_2d        = EXCLUDED.mom_2d,
+        day_1d        = EXCLUDED.day_1d,
+        eod_chg       = EXCLUDED.eod_chg,
+        sector_day    = EXCLUDED.sector_day,
+        sector_week   = EXCLUDED.sector_week,
+        sector_month  = EXCLUDED.sector_month,
+        month_index   = EXCLUDED.month_index,
+        week_index_52 = EXCLUDED.week_index_52,
+        range_1d      = EXCLUDED.range_1d,
+        range_3d      = EXCLUDED.range_3d,
+        upper_bb      = EXCLUDED.upper_bb,
+        lower_bb      = EXCLUDED.lower_bb,
+        ma9_vs_ma21   = EXCLUDED.ma9_vs_ma21,
+        vol_ratio     = EXCLUDED.vol_ratio,
+        computed_at   = NOW()
+"""
+
+
+def _metrics_row(sym: str, m: dict, target_date: date) -> tuple:
+    """The v8_metrics upsert param tuple for one symbol."""
+    return (
+        sym, target_date, m.get("gvm_score"),
+        m.get("dma_20"), m.get("dma_50"), m.get("dma_200"), m.get("daily_rsi"),
+        m.get("rsi_month"), m.get("rsi_weekly"),
+        m.get("month_return"), m.get("week_return"), m.get("year_return"), m.get("mom_2d"),
+        m.get("day_1d"), m.get("eod_chg"),
+        m.get("sector_day"), m.get("sector_week"), m.get("sector_month"),
+        m.get("month_index"), m.get("week_index_52"),
+        m.get("range_1d"), m.get("range_3d"), m.get("upper_bb"), m.get("lower_bb"),
+        m.get("ma9_vs_ma21"), m.get("vol_ratio"),
+    )
+
+
 def _upsert_metrics(conn, sym: str, m: dict, target_date: date, sim_ts=None):
-    # cc#218: score_date is target_date (already sim-derived by the caller). computed_at
-    # stays NOW() — it is write-metadata (tick-age watchdog only), never a parity-compared
-    # field, so it is harmless in sim and needs no sim_ts routing.
+    """Single-symbol upsert + commit (retained for the batch's per-symbol fallback path)."""
     with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO v8_metrics
-            (symbol, score_date, gvm_score,
-             dma_20, dma_50, dma_200, daily_rsi,
-             rsi_month, rsi_weekly,
-             month_return, week_return, year_return, mom_2d,
-             day_1d, eod_chg,
-             sector_day, sector_week, sector_month,
-             month_index, week_index_52,
-             range_1d, range_3d, upper_bb, lower_bb,
-             ma9_vs_ma21, vol_ratio)
-            VALUES (%s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s,
-                    %s,%s, %s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s)
-            ON CONFLICT (symbol, score_date) DO UPDATE SET
-                gvm_score     = EXCLUDED.gvm_score,
-                dma_20        = EXCLUDED.dma_20,
-                dma_50        = EXCLUDED.dma_50,
-                dma_200       = EXCLUDED.dma_200,
-                daily_rsi     = EXCLUDED.daily_rsi,
-                rsi_month     = EXCLUDED.rsi_month,
-                rsi_weekly    = EXCLUDED.rsi_weekly,
-                month_return  = EXCLUDED.month_return,
-                week_return   = EXCLUDED.week_return,
-                year_return   = EXCLUDED.year_return,
-                mom_2d        = EXCLUDED.mom_2d,
-                day_1d        = EXCLUDED.day_1d,
-                eod_chg       = EXCLUDED.eod_chg,
-                sector_day    = EXCLUDED.sector_day,
-                sector_week   = EXCLUDED.sector_week,
-                sector_month  = EXCLUDED.sector_month,
-                month_index   = EXCLUDED.month_index,
-                week_index_52 = EXCLUDED.week_index_52,
-                range_1d      = EXCLUDED.range_1d,
-                range_3d      = EXCLUDED.range_3d,
-                upper_bb      = EXCLUDED.upper_bb,
-                lower_bb      = EXCLUDED.lower_bb,
-                ma9_vs_ma21   = EXCLUDED.ma9_vs_ma21,
-                vol_ratio     = EXCLUDED.vol_ratio,
-                computed_at   = NOW()
-        """, (
-            sym, target_date, m.get("gvm_score"),
-            m.get("dma_20"), m.get("dma_50"), m.get("dma_200"), m.get("daily_rsi"),
-            m.get("rsi_month"), m.get("rsi_weekly"),
-            m.get("month_return"), m.get("week_return"), m.get("year_return"), m.get("mom_2d"),
-            m.get("day_1d"), m.get("eod_chg"),
-            m.get("sector_day"), m.get("sector_week"), m.get("sector_month"),
-            m.get("month_index"), m.get("week_index_52"),
-            m.get("range_1d"), m.get("range_3d"), m.get("upper_bb"), m.get("lower_bb"),
-            m.get("ma9_vs_ma21"), m.get("vol_ratio"),
-        ))
+        cur.execute(_UPSERT_METRICS_SQL, _metrics_row(sym, m, target_date))
     conn.commit()
+
+
+def _upsert_metrics_batch(conn, computed: dict, target_date: date, sim_ts=None) -> int:
+    """cc#217 P3: upsert the whole tick's metrics in ONE executemany + ONE commit — was 212
+    sequential INSERT+COMMIT, the biggest tick-latency cost.
+
+    Preserves the cc#218 SAVEPOINT intent ('one bad symbol must not kill the rest'). psycopg
+    executemany is all-or-nothing — one bad row aborts the batch — so on batch failure we
+    ROLLBACK TO SAVEPOINT and FALL BACK to per-symbol upserts (each in its own savepoint), so
+    exactly the offending symbol is skipped and every good row still lands. Returns #written."""
+    syms = list(computed.keys())
+    if not syms:
+        return 0
+    rows = [_metrics_row(sym, computed[sym], target_date) for sym in syms]
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SAVEPOINT sp_batch")
+            cur.executemany(_UPSERT_METRICS_SQL, rows)
+        conn.commit()
+        return len(rows)
+    except Exception as e:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("ROLLBACK TO SAVEPOINT sp_batch")
+        except Exception:
+            pass
+        log.warning(f"upsert_metrics batch failed ({e}) — per-symbol fallback")
+    ok = 0
+    for sym in syms:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SAVEPOINT sp_upsert")
+                cur.execute(_UPSERT_METRICS_SQL, _metrics_row(sym, computed[sym], target_date))
+            conn.commit()
+            ok += 1
+        except Exception as e2:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("ROLLBACK TO SAVEPOINT sp_upsert")
+            except Exception:
+                pass
+            log.warning(f"upsert_metrics {sym}: {e2}")
+    return ok
 
 
 # -- Step 7b: Bulk sector aggregates SQL update (18-Jun-2026) ------------------
@@ -1871,9 +1925,12 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
     if not symbols:
         return {"qualified": {}, "msg": "no symbols"}
 
+    _t_tick = perf_counter()   # cc#217 P3: tick wall-time instrumentation
     eod_metrics = _load_eod_metrics(conn, sim_ts=sim_ts)
     eod_history = _load_eod_history(conn, symbols, sim_ts=sim_ts)
+    _t_intr = perf_counter()
     intraday    = _load_intraday_bars(conn, symbols, sim_ts=sim_ts)
+    _intr_ms = (perf_counter() - _t_intr) * 1000.0   # cc#217 P3: single-query load time
     cmp_map     = _load_cmp(conn, sim_ts=sim_ts)
     vol_cutoff  = _round_down_5min(_bar_cutoff(sim_ts))   # cc#218 D6: today's cum-vol only up to last CLOSED bar
     vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff, sim_ts=sim_ts)
@@ -1916,26 +1973,13 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
 
     _add_sector_aggregates(computed, eod_metrics)
 
-    all_metrics = []
-    for sym, m in computed.items():
-        # SAVEPOINT per symbol: in transaction mode a single bad upsert aborts the whole
-        # transaction, silently killing every subsequent statement. ROLLBACK TO SAVEPOINT
-        # in the except un-aborts the transaction so "skip bad symbol, keep the rest"
-        # actually holds. (live + sim — same code both modes, Rule 2.)
-        # No RELEASE on success: _upsert_metrics commits per symbol (line ~880), and a
-        # COMMIT already discards the savepoint, so the next iteration's SAVEPOINT is fresh.
-        try:
-            with conn.cursor() as _sp:
-                _sp.execute("SAVEPOINT sp_upsert")
-            _upsert_metrics(conn, sym, m, today, sim_ts=sim_ts)
-        except Exception as e:
-            try:
-                with conn.cursor() as _sp:
-                    _sp.execute("ROLLBACK TO SAVEPOINT sp_upsert")
-            except Exception:
-                pass
-            log.warning(f"upsert_metrics {sym}: {e}")
-        all_metrics.append(m)
+    # cc#217 P3: one batched upsert + one commit for the whole tick (was 212 sequential
+    # INSERT+COMMIT). _upsert_metrics_batch preserves the cc#218 skip-bad-symbol guarantee via
+    # a batch savepoint + per-symbol fallback on batch failure.
+    _t_upsert = perf_counter()
+    _upsert_metrics_batch(conn, computed, today, sim_ts=sim_ts)
+    _upsert_ms = (perf_counter() - _t_upsert) * 1000.0
+    all_metrics = list(computed.values())
 
     # cc#140 (01-Jul-2026): vol_ratio side-by-side visibility -- old (legacy, full-day
     # avg) vs new (time-normalized, fyers_eq-only) formula, and NULL-state diagnosis
@@ -1958,6 +2002,16 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
     _write_heartbeat(conn, sim_ts=sim_ts)
     _assert_no_nontrading_metrics(conn)   # cc#211: loud on any bypassed non-trading write
+
+    # cc#217 P3: tick wall-time to ops_log — before/after numbers for the batch-upsert +
+    # single-query-load win (biggest levers: upsert_ms was ~212 sequential commits).
+    _tick_ms = (perf_counter() - _t_tick) * 1000.0
+    _ops_log(conn, "info", "tick_perf",
+             {"tick_ms": round(_tick_ms, 1), "upsert_ms": round(_upsert_ms, 1),
+              "load_intraday_ms": round(_intr_ms, 1), "symbols": len(computed),
+              "date": str(today)})
+    log.info(f"signal_writer perf: tick={_tick_ms:.0f}ms upsert={_upsert_ms:.0f}ms "
+             f"load_intraday={_intr_ms:.0f}ms symbols={len(computed)}")
     return {
         "date":    str(today),
         "updated": len(computed),
