@@ -25,6 +25,7 @@ RULE 1/6: v8_intra_backtest.py (EOD system) and v8_paper_replay.py are never tou
 
 import os
 import logging
+import threading
 from datetime import datetime, date, time, timedelta, timezone
 
 import psycopg
@@ -32,6 +33,10 @@ import psycopg
 log = logging.getLogger("scorr.bt7")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 IST = timezone(timedelta(hours=5, minutes=30))
+
+# cc#220 single-run advisory-lock key (session-scoped: auto-released when the walk's
+# connection closes/dies, so a zombie can never permanently wedge the harness).
+_LOCK_KEY = 7220218
 
 # tables the harness truncates to a clean slate before each run (write shadows)
 _SCRATCH = ["v8_qualified", "v8_paper_positions", "v8_paper_trades", "v8_paper_missed",
@@ -43,7 +48,44 @@ _RESULT_SRC = {"bt7_qualified": "v8_qualified", "bt7_positions": "v8_paper_posit
 
 
 def _conn():
-    return psycopg.connect(DATABASE_URL)
+    # cc#220 self-cleaning: cap any single statement at 90s and auto-kill a connection left
+    # idle-in-transaction for >120s (mirrors scheduler._conn). An abandoned run — e.g. an MCP
+    # request that timed out mid-walk in the OLD sync design — self-destructs instead of
+    # zombieing idle-in-transaction on locks and deadlocking the next run's TRUNCATE. Healthy
+    # runs never trip these: no single statement is that slow, and the walk commits per tick
+    # (never idle inside an open txn between ticks).
+    opts = "-c statement_timeout=90000 -c idle_in_transaction_session_timeout=120000"
+    return psycopg.connect(DATABASE_URL, options=opts)
+
+
+def _mark_running(conn, label, target_date):
+    """Write/reset the run row to status='running' BEFORE the walk starts, so a poller sees
+    the run the instant bt7_run returns. Runs as the app superuser (before SET ROLE)."""
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO harness.bt7_runs
+                       (run_label, target_date, ticks, source, status, error_detail, ran_at)
+                       VALUES (%s,%s,0,'bt7','running',NULL,NOW())
+                       ON CONFLICT (run_label) DO UPDATE SET
+                         target_date=EXCLUDED.target_date, ticks=0, source='bt7',
+                         status='running', error_detail=NULL, ran_at=NOW()""",
+                    (label, target_date))
+    conn.commit()
+
+
+def _progress(conn, label, ticks):
+    """Publish walk progress to harness.bt7_runs (best-effort; runs under SET ROLE bt7_sim,
+    which owns the harness tables). A tick has fully completed+committed before this is
+    called, so a rollback-on-failure here can never lose driven-path work."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE harness.bt7_runs SET ticks=%s, ran_at=NOW() WHERE run_label=%s",
+                        (ticks, label))
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
 
 def _ensure_bt7_runs_cols(conn):
@@ -178,15 +220,57 @@ def _archive(conn, label, target_date, ticks, src):
 
 
 def run_bt7(target_date, label):
-    """Walk `target_date` 09:15->15:30 in 5-min steps, driving the real writer + exits under
-    the bt7_sim sandbox. Returns a summary; writes labeled results to the harness schema."""
+    """cc#220 ASYNC entry. The 09:15->15:30 walk takes ~2min — far longer than an MCP/HTTP
+    request tolerates — so instead of blocking (the old zombie/deadlock cycle), this:
+      1. grabs the single-run advisory lock (a 2nd concurrent run returns {busy:true},
+         never deadlocks on TRUNCATE),
+      2. marks the run 'running' so a poller sees it immediately,
+      3. hands the LOCKED connection to a daemon walker thread, and returns at once.
+    Poll harness.bt7_runs (or bt7_status) for status running -> ok/error + the summary."""
     if isinstance(target_date, str):
         target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
     conn = _conn()
+    # single-run lock on THIS connection (held for the whole walk, auto-released on close/death)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_try_advisory_lock(%s)", (_LOCK_KEY,))
+            got = cur.fetchone()[0]
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return {"ok": False, "label": label, "error": f"lock: {e!r}"}
+    if not got:
+        conn.close()
+        return {"ok": True, "busy": True, "label": label,
+                "msg": "another bt7 run is already walking — try again after it finishes"}
+    try:
+        _ensure_bt7_runs_cols(conn)
+        _mark_running(conn, label, target_date)
+    except Exception as e:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (_LOCK_KEY,))
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+        return {"ok": False, "label": label, "error": f"pre-walk: {e!r}"}
+    threading.Thread(target=_walk, args=(conn, target_date, label),
+                     name=f"bt7-{label}", daemon=True).start()
+    return {"ok": True, "started": True, "label": label, "date": str(target_date),
+            "msg": "walk started in background — poll harness.bt7_runs / bt7_status"}
+
+
+def _walk(conn, target_date, label):
+    """The actual walk, on the locked connection handed over by run_bt7. Owns `conn` for its
+    whole life and releases the advisory lock + closes it in finally. Terminal status lands
+    in harness.bt7_runs via _archive (ok) / _write_error (error)."""
     ticks = 0
     detail = None   # repr() of the first exception — surfaced to harness.bt7_runs on failure
     try:
-        _ensure_bt7_runs_cols(conn)
         src = _materialize(conn, target_date)
         import v8_signal_writer, v8_paper
         with conn.cursor() as cur:
@@ -205,14 +289,14 @@ def run_bt7(target_date, label):
                 log.error(f"bt7 tick {t}: {e}")
                 raise
             ticks += 1
+            if ticks % 10 == 0:
+                _progress(conn, label, ticks)
             t += timedelta(minutes=5)
         with conn.cursor() as cur:
             cur.execute("RESET ROLE")
         conn.commit()
         summ = _archive(conn, label, target_date, ticks, src)
         log.info(f"bt7 run '{label}' {target_date}: ticks={ticks} {summ}")
-        return {"ok": True, "label": label, "date": str(target_date), "ticks": ticks,
-                "source": src, **summ}
     except Exception as e:
         # RESET ROLE back to the app superuser, then record the true first exception into
         # harness.bt7_runs (status='error') — the ops desk reads the DB, not Railway stdout.
@@ -228,9 +312,34 @@ def run_bt7(target_date, label):
             except Exception:
                 pass
         _write_error(conn, label, target_date, ticks, detail)
-        log.error(f"run_bt7 '{label}': {e}")
-        return {"ok": False, "label": label, "date": str(target_date), "ticks": ticks,
-                "status": "error", "error": str(e), "error_detail": detail}
+        log.error(f"_walk '{label}': {e}")
+    finally:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (_LOCK_KEY,))
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+
+
+def bt7_status(label):
+    """cc#220: one-shot poll of a run's row (status running/ok/error + summary counts)."""
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT run_label, target_date, ticks, quals, entries, exits,
+                                  gate_exits, status, error_detail, ran_at, source
+                           FROM harness.bt7_runs WHERE run_label=%s""", (label,))
+            r = cur.fetchone()
+        if not r:
+            return {"ok": True, "found": False, "label": label}
+        cols = ["run_label", "target_date", "ticks", "quals", "entries", "exits",
+                "gate_exits", "status", "error_detail", "ran_at", "source"]
+        return {"ok": True, "found": True,
+                **{c: (str(v) if v is not None else None) for c, v in zip(cols, r)}}
+    except Exception as e:
+        return {"ok": False, "label": label, "error": str(e)}
     finally:
         conn.close()
 

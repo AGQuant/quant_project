@@ -829,6 +829,11 @@ def v8_bt7_diff(label_a: str, label_b: str, x_admin_token: Optional[str] = Heade
     _check_admin(x_admin_token)
     import bt7_harness; return bt7_harness.bt7_diff(label_a, label_b)
 
+@app.get("/api/v8/bt7_status")        # cc#220: poll a run (status running/ok/error + summary)
+def v8_bt7_status(label: str, x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    import bt7_harness; return bt7_harness.bt7_status(label)
+
 @app.post("/api/momentum/run")
 def momentum_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
