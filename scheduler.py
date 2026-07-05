@@ -272,7 +272,10 @@ def _check_watchdog(now):
     """During market hours, if no signal tick landed in WATCHDOG_STALE_MIN, the
     writer has silently stalled — alert, reset guards, request restart."""
     global _watchdog_alerted
-    if not _is_market_hours(now):
+    # cc#211: also skip NSE holidays. _is_market_hours is weekday+time only, so on a
+    # weekday holiday (writer correctly gated → tick never advances) the watchdog would
+    # otherwise restart-storm chasing a "stale" tick that will never move. Canonical guard.
+    if not _is_market_hours(now) or not _is_trading_day(now.date()):
         _watchdog_alerted = False
         return
     age = _tick_age_minutes()
@@ -354,17 +357,13 @@ def _premarket_writer_check():
     if _premarket_check_ran == today:
         return
     _premarket_check_ran = today
-    # cc#206: trading-day guard. The 09:10 readiness restart fired on SAT 04-Jul
+    # cc#206/#211: canonical trading-day guard (single _is_trading_day helper, nse_holidays
+    # based — no duplicate inline check). The 09:10 readiness restart fired on SAT 04-Jul
     # (v8_metrics "stale" 1045 min → forced restart on a non-trading day) — needless
-    # cold-boot risk (id=166 class). No live writer runs off-session, so skip
-    # weekends + NSE holidays entirely.
-    try:
-        import nse_holidays
-        if not nse_holidays.is_trading_day(today):
-            return
-    except Exception:
-        if _ist_now().weekday() >= 5:   # fallback: at least skip weekends
-            return
+    # cold-boot risk (id=166 class). No live writer runs off-session, so skip weekends +
+    # NSE holidays entirely. (Writes are also gated at the writer choke point in cc#211.)
+    if not _is_trading_day(today):
+        return
     try:
         age = _tick_age_minutes()
         if age is None or age > 60:

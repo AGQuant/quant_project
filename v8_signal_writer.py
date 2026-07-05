@@ -68,10 +68,43 @@ import pandas as pd
 import numpy as np
 import psycopg
 import os
+import nse_holidays   # cc#211: canonical trading-day guard (weekday + NSE holiday list)
 
 log = logging.getLogger("scorr.signal_writer")
 
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _ops_log(conn, category: str, title: str, details: dict) -> None:
+    """cc#211: lightweight ops_log writer (mirrors news_fetcher._write_ops_log). Used for
+    the non-trading-day skip note and the self-defense corruption alert."""
+    try:
+        from psycopg.types.json import Json
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), %s, %s, %s)""",
+                        (category, title, Json(details)))
+        conn.commit()
+    except Exception as e:
+        log.error(f"_ops_log failed ({category}/{title}): {e}")
+
+
+def _assert_no_nontrading_metrics(conn) -> None:
+    """cc#211 self-defense: if the latest v8_metrics row is dated a non-trading day,
+    something bypassed the write gate — make the silent corruption LOUD."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(score_date) FROM v8_metrics")
+            row = cur.fetchone()
+        latest = row[0] if row else None
+        if latest and not nse_holidays.is_trading_day(latest):
+            _ops_log(conn, "alert", "nontrading_metrics_row",
+                     {"message": f"v8_metrics has rows dated {latest} which is NOT a trading day "
+                                 f"(weekend/holiday) — write gate bypassed somewhere",
+                      "score_date": str(latest)})
+            log.error(f"signal_writer SELF-DEFENSE: v8_metrics latest score_date {latest} is non-trading")
+    except Exception as e:
+        log.error(f"_assert_no_nontrading_metrics: {e}")
 
 RSI_DAILY_PERIOD = 14
 
@@ -1737,6 +1770,19 @@ def _write_heartbeat(conn):
 def run_live_signal_writer(conn) -> dict:
     today = datetime.now(IST).date()
 
+    # cc#211: HARD trading-day gate — the SINGLE write-layer choke point. Every caller
+    # funnels through here (5-min tick, watchdog/forced-restart recovery tick, 09:10
+    # stall-check recovery, MCP, API), and the restart/recovery paths BYPASS the
+    # scheduler's market-hours wrapper — that is exactly how Sat 04-Jul wrote 212 junk
+    # v8_metrics rows. Gating LINE 1 stops non-trading-day writes for ALL present and
+    # future callers, without patching each one. No EOD fallback on weekends either.
+    if not nse_holidays.is_trading_day(today):
+        log.info(f"signal_writer: {today} is not a trading day — skipping (no v8_metrics write)")
+        _ops_log(conn, "info", "signal_writer_skip_nontrading",
+                 {"message": f"signal writer invoked on non-trading day {today} — skipped",
+                  "date": str(today)})
+        return {"skipped": "nontrading_day", "date": str(today)}
+
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE ORDER BY symbol")
@@ -1771,6 +1817,7 @@ def run_live_signal_writer(conn) -> dict:
             all_metrics.append(row)
         _write_qualified(conn, all_metrics, today)
         _write_heartbeat(conn)
+        _assert_no_nontrading_metrics(conn)   # cc#211
         return {"source": "eod_fallback", "msg": "no intraday bars"}
 
     computed: Dict[str, dict] = {}
@@ -1819,6 +1866,7 @@ def run_live_signal_writer(conn) -> dict:
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
     _write_heartbeat(conn)
+    _assert_no_nontrading_metrics(conn)   # cc#211: loud on any bypassed non-trading write
     return {
         "date":    str(today),
         "updated": len(computed),

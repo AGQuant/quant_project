@@ -514,6 +514,16 @@ def _passes(value, mn, mx) -> bool:
 
 def run_v8_engine(conn, symbols: List[str] = None, target_date: date = None) -> Dict:
     target_date = target_date or date.today()
+    # cc#211: gate the EOD METRICS store too. cc#171 only gated the QUAL writes inside
+    # write_signals(), leaving store_metrics free to write v8_metrics rows on a non-trading
+    # day (the 15:45 trigger + MCP/endpoint run_v8_engine have no weekday guard). Same
+    # canonical is_trading_day (weekday + NSE holidays) as the live writer.
+    from nse_holidays import is_trading_day
+    if not is_trading_day(target_date):
+        log.warning(f"run_v8_engine: {target_date} is not a trading day -- skipping (no v8_metrics/qual writes)")
+        return {"date": str(target_date), "skipped": "nontrading_day",
+                "universe": "futures_universe", "symbols_processed": 0,
+                "signals_written": 0, "errors": []}
     if symbols is None:
         with conn.cursor() as cur:
             cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE ORDER BY symbol")
