@@ -157,7 +157,13 @@
    to horizontal chip rows above the list on mobile. Controls are compact (they
    are controls, not content); the article list uses the full widened frame. */
 .kb-shell{display:flex;gap:22px;align-items:flex-start}
-.kb-sidebar{width:210px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;position:sticky;top:96px}
+/* cc#205: sidebar taller than the viewport was clipping topics below Taxation.
+   Cap it to the visible height and let it scroll independently (thin themed bar). */
+.kb-sidebar{width:210px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;position:sticky;top:96px;max-height:calc(100vh - 108px);overflow-y:auto;overflow-x:hidden;padding-right:5px;scrollbar-width:thin;scrollbar-color:#cbd3e0 transparent}
+.kb-sidebar::-webkit-scrollbar{width:6px}
+.kb-sidebar::-webkit-scrollbar-thumb{background:#cbd3e0;border-radius:3px}
+.kb-sidebar::-webkit-scrollbar-thumb:hover{background:#aeb9cc}
+.kb-sidebar::-webkit-scrollbar-track{background:transparent}
 .kb-main{flex:1;min-width:0}
 .kb-search-wrap{position:relative}
 .kb-search{width:100%;padding:9px 32px 9px 11px;border:1px solid #d9dee7;border-radius:9px;font-size:13px;font-family:inherit;outline:none;background:#fff;color:#1c2536}
@@ -251,7 +257,7 @@
 @media(max-width:767px){ .galaxy-gsearch{display:none} .ga-title{font-size:20px} }
 @media(max-width:767px){
   .kb-shell{flex-direction:column;gap:12px;align-items:stretch}
-  .kb-sidebar{width:100%;position:static;flex-direction:column;gap:10px}
+  .kb-sidebar{width:100%;position:static;flex-direction:column;gap:10px;max-height:none;overflow:visible;padding-right:0}
   .kb-topics{flex-direction:row;overflow-x:auto;gap:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding-bottom:2px}
   .kb-topics::-webkit-scrollbar{display:none}
   .kb-topic{flex-shrink:0;border:1px solid #d9dee7;border-radius:16px;padding:7px 12px;justify-content:flex-start}
