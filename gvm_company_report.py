@@ -45,12 +45,26 @@ PARAMS = [
     ("div_yield",  "Dividend Yield",         "Reliability", "dividend_yield",         True,  "div_yield",  "%"),
     ("roce",       "Return on Capital (ROCE)","Reliability","roce",                   True,  "roce",       "%"),
     ("int_cov",    "Interest Coverage",      "Reliability", "interest_coverage",      True,  "int_cov",    "x"),
-    ("promoter",   "Promoter Holding",       "Reliability", "Unpledged promoter holding", True, "promoter","%"),
-    ("inst_change","Change in FII Holding",  "Reliability", "fii_change",             True,  "inst_change","%"),
+    # cc#223: Promoter Holding is NOT a G/V/M engine metric (was a phantom scored row) -> removed.
+    # G scores TWO institutional metrics, both Net (FII+DII); their source columns are computed
+    # inline (screener_raw stores fii/dii separately; the net cols live only in loader memory).
+    ("inst_abs",   "Institutional Holding (FII+DII)", "Reliability", "inst_holding_abs",    True, "inst_abs",    "%"),
+    ("inst_chg",   "Change in Net Instl (FII+DII)",   "Reliability", "inst_holding_change", True, "inst_change", "%"),
     ("ret_1y",     "Return over 1 Year",     "Technicals",  "return_1y",              True,  "ret_1y",     "%"),
     ("ret_3y",     "Return over 3 Years",    "Technicals",  "return_3y",              True,  "ret_3y",     "%"),
     ("ret_52w_idx","52W vs Index",           "Technicals",  "return_52w_vs_index",    True,  "ret_52w_idx","%"),
 ]
+
+# cc#223: Net (FII+DII) institutional source columns. screener_raw stores fii_holding/
+# dii_holding and fii_change/dii_change SEPARATELY; the net values (inst_holding_abs /
+# inst_holding_change) live only in screener_loader's in-memory df, never persisted. Compute
+# them inline for the peer query, mirroring the loader's both-null -> NULL semantics.
+_COMPUTED_COLS = {
+    "inst_holding_abs":    ('CASE WHEN s."fii_holding" IS NULL AND s."dii_holding" IS NULL THEN NULL '
+                            'ELSE COALESCE(s."fii_holding",0)+COALESCE(s."dii_holding",0) END'),
+    "inst_holding_change": ('CASE WHEN s."fii_change" IS NULL AND s."dii_change" IS NULL THEN NULL '
+                            'ELSE COALESCE(s."fii_change",0)+COALESCE(s."dii_change",0) END'),
+}
 
 # 5 additional M metrics sourced from momentum_scores (not screener_raw)
 _M_EXTRA = [
@@ -135,9 +149,13 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         segment = head["segment"]
         bfsi = _is_bfsi(segment)
 
-        # Pull every peer in the same segment + raw fundamentals
+        # Pull every peer in the same segment + raw fundamentals. cc#223: the two Net
+        # institutional columns are computed inline (screener_raw only stores fii/dii apart).
         screener_cols = list({p[3] for p in PARAMS})
-        col_sql = ", ".join(f's."{c}" AS "{c}"' for c in screener_cols)
+        col_sql = ", ".join(
+            (f'{_COMPUTED_COLS[c]} AS "{c}"' if c in _COMPUTED_COLS else f's."{c}" AS "{c}"')
+            for c in screener_cols
+        )
         cur.execute(f"""
             SELECT g.symbol, g.company_name, g.gvm_score, g.market_cap, {col_sql}
             FROM gvm_scores g
