@@ -819,6 +819,16 @@ def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
     with get_conn() as conn: return v8_signal_writer.run_live_signal_writer(conn)
 
+@app.post("/api/v8/bt7_run")          # cc#218: BT7 parity harness — walk a day into the sandbox
+def v8_bt7_run(date: str, label: str, x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    import bt7_harness; return bt7_harness.run_bt7(date, label)
+
+@app.get("/api/v8/bt7_diff")          # cc#218: zero-diff report between two runs (or vs golden_YYYYMMDD)
+def v8_bt7_diff(label_a: str, label_b: str, x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    import bt7_harness; return bt7_harness.bt7_diff(label_a, label_b)
+
 @app.post("/api/momentum/run")
 def momentum_run(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)

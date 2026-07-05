@@ -60,6 +60,8 @@ MCP_TOOLS = [
     {"name":"get_v8_metrics_all","description":"Get all metrics for the full universe (latest date).","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"get_v8_live_metrics","description":"Get real-time CMP, day%, hourly gain for the universe.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"v8_run_signal_writer","description":"V8: manually trigger live signal writer (19 metrics + qualified).","inputSchema":{"type":"object","properties":{},"required":[]}},
+    {"name":"bt7_run","description":"BT7 parity harness (cc#218): walk a trading day 09:15-15:30 in 5-min steps, driving the REAL writer+exits under the bt7_sim sandbox into harness_* shadow tables. Args: date (YYYY-MM-DD), label.","inputSchema":{"type":"object","properties":{"date":{"type":"string"},"label":{"type":"string"}},"required":["date","label"]}},
+    {"name":"bt7_diff","description":"BT7 zero-diff report (cc#218) between two run labels on quals+trades (symbol/side/basket). label_b may be 'golden_YYYYMMDD' to compare against the archived live-latched quals (D6).","inputSchema":{"type":"object","properties":{"label_a":{"type":"string"},"label_b":{"type":"string"}},"required":["label_a","label_b"]}},
     {"name":"health_feeds","description":"Status dashboard for all data feeds.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"env_check","description":"Diagnostic: which env vars are visible.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"run_sql","description":"Run any SQL query on Railway PostgreSQL.","inputSchema":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}},
@@ -158,6 +160,8 @@ async def _call_tool(name, args):
         elif name == "get_v8_metrics_all": r = await client.get(f"{BASE_URL}/api/v8/metrics/all"); return r.json()
         elif name == "get_v8_live_metrics": r = await client.get(f"{BASE_URL}/api/v8/live_metrics"); return r.json()
         elif name == "v8_run_signal_writer": r = await client.post(f"{BASE_URL}/api/v8/run_signal_writer", headers=h); return r.json()
+        elif name == "bt7_run": r = await client.post(f"{BASE_URL}/api/v8/bt7_run", headers=h, params={"date": args["date"], "label": args["label"]}); return r.json()
+        elif name == "bt7_diff": r = await client.get(f"{BASE_URL}/api/v8/bt7_diff", headers=h, params={"label_a": args["label_a"], "label_b": args["label_b"]}); return r.json()
         elif name == "health_feeds": r = await client.get(f"{BASE_URL}/api/health/feeds"); return r.json()
         elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers=h); return r.json()
         elif name == "run_sql":
