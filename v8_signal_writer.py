@@ -69,6 +69,7 @@ import numpy as np
 import psycopg
 import os
 import nse_holidays   # cc#211: canonical trading-day guard (weekday + NSE holiday list)
+from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
 
 log = logging.getLogger("scorr.signal_writer")
 
@@ -161,9 +162,10 @@ def _passes(value, mn, mx) -> bool:
         return False
     return True
 
-def _now_ist() -> datetime:
-    """Current datetime in IST as a naive datetime (for DB storage)."""
-    return datetime.now(IST).replace(tzinfo=None)
+def _now_ist(sim_ts=None) -> datetime:
+    """Current datetime in IST as a naive datetime (for DB storage). cc#218: routes
+    through the injectable clock — sim_ts=None is exactly datetime.now(IST) (live)."""
+    return _now(sim_ts)
 
 
 # -- Pivot-room gate ----------------------------------------------------------
@@ -176,14 +178,25 @@ BASKET_SIDE = {
 }
 
 
-def _load_pivots(conn) -> Dict[str, dict]:
+def _load_pivots(conn, sim_ts=None) -> Dict[str, dict]:
+    # cc#218: live uses the latest pivot set (today's, computed pre-open). In sim, pin to
+    # the sim day's pivots (pivot_date = sim_date) — a belt in case the harness schema does
+    # not materialize v8_paper_pivots and the read falls through to public (latest != sim).
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT symbol, pp, r1, s1
-            FROM v8_paper_pivots
-            WHERE pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
-              AND pp IS NOT NULL AND r1 IS NOT NULL AND s1 IS NOT NULL
-        """)
+        if sim_ts is None:
+            cur.execute("""
+                SELECT symbol, pp, r1, s1
+                FROM v8_paper_pivots
+                WHERE pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                  AND pp IS NOT NULL AND r1 IS NOT NULL AND s1 IS NOT NULL
+            """)
+        else:
+            cur.execute("""
+                SELECT symbol, pp, r1, s1
+                FROM v8_paper_pivots
+                WHERE pivot_date = %s
+                  AND pp IS NOT NULL AND r1 IS NOT NULL AND s1 IS NOT NULL
+            """, (_today(sim_ts),))
         return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3])}
                 for r in cur.fetchall()}
 
@@ -207,18 +220,22 @@ def _pivot_room_ok(side: str, cmp: Optional[float],
 
 # -- ADR intraday write -------------------------------------------------------
 
-def _write_adr_intraday(conn):
+def _write_adr_intraday(conn, sim_ts=None):
+    # cc#218: point-in-time A/D — intraday cmp is the last fyers-any bar <= _now(sim_ts)
+    # on the (sim or live) date; prior close from raw_prices < that date. sim_ts=None is live.
+    _d = _today(sim_ts)
+    _cut = _now(sim_ts)
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 WITH li AS (
                     SELECT DISTINCT ON (symbol) symbol, close AS cmp
-                    FROM intraday_prices WHERE ts::date = CURRENT_DATE
+                    FROM intraday_prices WHERE ts::date = %s AND ts <= %s
                     ORDER BY symbol, ts DESC
                 ),
                 pc AS (
                     SELECT DISTINCT ON (symbol) symbol, close AS pclose
-                    FROM raw_prices WHERE price_date < CURRENT_DATE
+                    FROM raw_prices WHERE price_date < %s
                     ORDER BY symbol, price_date DESC
                 )
                 SELECT
@@ -227,13 +244,13 @@ def _write_adr_intraday(conn):
                     COUNT(*) FILTER (WHERE li.cmp = pc.pclose) AS unchanged,
                     COUNT(*) AS total
                 FROM li JOIN pc ON pc.symbol = li.symbol
-            """)
+            """, (_d, _cut, _d))
             row = cur.fetchone()
             if not row or (row[3] or 0) < 50:
                 return
             adv, dec, unc, tot = row[0] or 0, row[1] or 0, row[2] or 0, row[3] or 0
             adr = round(adv / dec, 3) if dec else float(adv)
-            now_ist = _now_ist()
+            now_ist = _now_ist(sim_ts)
             ts_5m = now_ist.replace(second=0, microsecond=0)
             ts_5m = ts_5m.replace(minute=(ts_5m.minute // 5) * 5)
             cur.execute("""
@@ -255,14 +272,25 @@ def _write_adr_intraday(conn):
 
 # -- Step 1: Load EOD metrics snapshot ----------------------------------------
 
-def _load_eod_metrics(conn) -> Dict[str, dict]:
+def _load_eod_metrics(conn, sim_ts=None) -> Dict[str, dict]:
+    # cc#218: the EOD baseline a live tick sees at start-of-day is the latest EOD row.
+    # In sim (replaying a past day) that must be the latest EOD row DATED BEFORE the sim
+    # day — else we'd leak future EOD values. sim_ts=None keeps the exact live queries.
+    _asof = _today(sim_ts) if sim_ts is not None else None
     gvm_map: Dict[str, dict] = {}
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT symbol, gvm_score, segment
-            FROM gvm_scores
-            WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
-        """)
+        if sim_ts is None:
+            cur.execute("""
+                SELECT symbol, gvm_score, segment
+                FROM gvm_scores
+                WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            """)
+        else:
+            cur.execute("""
+                SELECT symbol, gvm_score, segment
+                FROM gvm_scores
+                WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores WHERE score_date < %s)
+            """, (_asof,))
         for sym, gvm, seg in cur.fetchall():
             gvm_map[sym] = {"gvm_score": _safe_float(gvm), "segment": seg}
 
@@ -273,12 +301,13 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
                 symbol, rsi_month, rsi_weekly, sector_week, sector_month,
                 mom_2d AS eod_mom_2d
             FROM v8_metrics
-            WHERE rsi_month   IS NOT NULL
+            WHERE (rsi_month   IS NOT NULL
                OR rsi_weekly  IS NOT NULL
                OR sector_week IS NOT NULL
-               OR sector_month IS NOT NULL
+               OR sector_month IS NOT NULL)
+              AND (%s IS NULL OR score_date < %s)
             ORDER BY symbol, score_date DESC
-        """)
+        """, (_asof, _asof))
         cols = [d[0] for d in cur.description]
         for r in cur.fetchall():
             d = dict(zip(cols, r))
@@ -303,8 +332,8 @@ def _load_eod_metrics(conn) -> Dict[str, dict]:
 
 # -- Step 2: Load EOD history per symbol (bulk) --------------------------------
 
-def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
-    today = datetime.now(IST).date()
+def _load_eod_history(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict]:
+    today = _today(sim_ts)   # cc#218: history strictly before the (sim or live) day
     with conn.cursor() as cur:
         cur.execute("""
             SELECT symbol, close, high, low, volume
@@ -348,30 +377,35 @@ def _load_eod_history(conn, symbols: List[str]) -> Dict[str, dict]:
 
 # -- Step 3: Load today's intraday bars (bulk) ---------------------------------
 
-def _load_intraday_bars(conn, symbols: List[str]) -> Dict[str, dict]:
+def _load_intraday_bars(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict]:
     """source='fyers_eq' pinned throughout (cc#140, 01-Jul-2026): intraday_prices
     carries both fyers_eq (equity) and fyers_fut (futures contract) rows per
     symbol/day. Without a source filter, MAX(volume) etc. silently pick
     whichever series is numerically larger, mixing equity-scale price/volume
-    with futures-scale price/volume for the same symbol."""
-    today = datetime.now(IST).date()
+    with futures-scale price/volume for the same symbol.
+
+    cc#218: point-in-time — `AND ts <= cut` where cut=_now(sim_ts). In live cut is the
+    real now, so `ts <= now` is a no-op (bars only exist up to now); in sim it is the
+    as-of cutoff so the tick only sees bars up to the frozen clock. `today`=_today(sim_ts)."""
+    today = _today(sim_ts)
+    cut = _now(sim_ts)
     with conn.cursor() as cur:
         cur.execute("""
             SELECT
                 symbol,
                 (SELECT close FROM intraday_prices i2
-                 WHERE i2.symbol = ip.symbol AND i2.ts::date = %s AND i2.source = 'fyers_eq'
+                 WHERE i2.symbol = ip.symbol AND i2.ts::date = %s AND i2.source = 'fyers_eq' AND i2.ts <= %s
                  ORDER BY ts DESC LIMIT 1)                       AS live_close,
                 (SELECT open  FROM intraday_prices i3
-                 WHERE i3.symbol = ip.symbol AND i3.ts::date = %s AND i3.source = 'fyers_eq'
+                 WHERE i3.symbol = ip.symbol AND i3.ts::date = %s AND i3.source = 'fyers_eq' AND i3.ts <= %s
                  ORDER BY ts ASC  LIMIT 1)                       AS day_open,
-                MAX(high)   FILTER (WHERE ts::date = %s)         AS day_high,
-                MIN(low)    FILTER (WHERE ts::date = %s)         AS day_low,
-                MAX(volume) FILTER (WHERE ts::date = %s)         AS day_vol
+                MAX(high)   FILTER (WHERE ts::date = %s AND ts <= %s)  AS day_high,
+                MIN(low)    FILTER (WHERE ts::date = %s AND ts <= %s)  AS day_low,
+                MAX(volume) FILTER (WHERE ts::date = %s AND ts <= %s)  AS day_vol
             FROM intraday_prices ip
-            WHERE symbol = ANY(%s) AND ts::date = %s AND source = 'fyers_eq'
+            WHERE symbol = ANY(%s) AND ts::date = %s AND source = 'fyers_eq' AND ts <= %s
             GROUP BY symbol
-        """, (today, today, today, today, today, symbols, today))
+        """, (today, cut, today, cut, today, cut, today, cut, today, cut, symbols, today, cut))
         bars = {}
         for sym, lc, op, hi, lo, vol in cur.fetchall():
             if lc is None:
@@ -410,14 +444,16 @@ _VOL_BASELINE_DAYS  = 7     # spec: last 7 trading days
 _VOL_MIN_BARS_CLEAN = 60    # a baseline day needs >=60/75 bars to count as clean
 
 
-def _build_vol_baseline(conn, symbols: List[str]) -> None:
+def _build_vol_baseline(conn, symbols: List[str], sim_ts=None) -> None:
     """cc#170: build the 7-trading-day same-time cumulative-volume baseline curve
     for every symbol, once per day. For each symbol/day the best clean source is
     used (fyers_eq WS > fyers REST > yahoo) with per-day SEMANTICS AUTO-DETECT
     (cc#150 pattern): a monotonic non-decreasing volume series is a cumulative
     day counter -> cum at t = latest value <= t; otherwise volumes are per-bar
-    -> cum at t = SUM(bars <= t). Never mixes the two interpretations."""
-    today = datetime.now(IST).date()
+    -> cum at t = SUM(bars <= t). Never mixes the two interpretations.
+    cc#218: baseline reconstructs from days STRICTLY BEFORE the (sim or live) day
+    (RULING_B: score/vol baseline is prior-day data the live tick sees at start-of-day)."""
+    today = _today(sim_ts)
     _VOL_BASELINE["date"] = today
     _VOL_BASELINE["curve"] = {}
     _VOL_BASELINE["days"] = {}
@@ -426,13 +462,13 @@ def _build_vol_baseline(conn, symbols: List[str]) -> None:
         cur.execute("""
             SELECT symbol, source, ts::date, ts::time, volume
             FROM intraday_prices
-            WHERE symbol = ANY(%s) AND ts::date < CURRENT_DATE
-              AND ts::date >= CURRENT_DATE - INTERVAL '11 days'
+            WHERE symbol = ANY(%s) AND ts::date < %s
+              AND ts::date >= %s - INTERVAL '11 days'
               AND source IN ('fyers_eq', 'fyers', 'yahoo')
               AND volume IS NOT NULL
               AND ts::time BETWEEN '09:15' AND '15:30'
             ORDER BY symbol, source, ts
-        """, (symbols,))
+        """, (symbols, today, today))
         rows = cur.fetchall()
 
     groups: Dict[tuple, list] = {}
@@ -479,7 +515,7 @@ def _build_vol_baseline(conn, symbols: List[str]) -> None:
              f"{sum(1 for v in _VOL_BASELINE['days'].values() if v >= _VOL_MIN_CLEAN_DAYS)} with >={_VOL_MIN_CLEAN_DAYS} clean days")
 
 
-def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> Dict[str, dict]:
+def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time, sim_ts=None) -> Dict[str, dict]:
     """VOL X v2 (cc#170, supersedes cc#140 v1.5): today's cumulative volume at
     time x vs AVG cumulative volume at the same time x over the last 7 clean
     trading days (precomputed curve, source-semantics safe -- see
@@ -487,9 +523,9 @@ def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> D
     full-day (cutoff clamps to the last bucket), so v2 stays consistent EOD.
     <4 clean baseline days -> ratio None here; _compute_live_metrics falls back
     to the v1 formula (cum / 10d full-day avg) and flags vol_ratio_fallback."""
-    if _VOL_BASELINE["date"] != datetime.now(IST).date():
+    if _VOL_BASELINE["date"] != _today(sim_ts):   # cc#218
         try:
-            _build_vol_baseline(conn, symbols)
+            _build_vol_baseline(conn, symbols, sim_ts=sim_ts)
         except Exception as e:
             log.error(f"vol_baseline build failed: {e}")
             _VOL_BASELINE["date"] = None
@@ -505,9 +541,9 @@ def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> D
             SELECT symbol, MAX(volume) AS vol_today
             FROM intraday_prices
             WHERE source = 'fyers_eq' AND symbol = ANY(%s)
-              AND ts::date = CURRENT_DATE AND ts::time <= %s
+              AND ts::date = %s AND ts::time <= %s
             GROUP BY symbol
-        """, (symbols, cutoff))
+        """, (symbols, _today(sim_ts), cutoff))   # cc#218: CURRENT_DATE -> sim/live date
         today_map = {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
     out = {}
     for sym in symbols:
@@ -528,20 +564,36 @@ def _load_vol_ratio_time_normalized(conn, symbols: List[str], cutoff: time) -> D
 
 # -- Step 4: Load CMP ---------------------------------------------------------
 
-def _load_cmp(conn) -> Dict[str, float]:
+def _load_cmp(conn, sim_ts=None) -> Dict[str, float]:
+    # cc#218: LIVE reads the cmp_prices snapshot (latest LTP per symbol). That table is a
+    # single-row-per-symbol live snapshot and CANNOT be rewound, so in SIM we reconstruct
+    # CMP as the latest fyers_eq bar close <= sim_ts (same series the writer's _cmp
+    # fallback uses). sim_ts=None keeps the exact live query.
+    if sim_ts is None:
+        with conn.cursor() as cur:
+            cur.execute("SELECT symbol, cmp FROM cmp_prices")
+            return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
     with conn.cursor() as cur:
-        cur.execute("SELECT symbol, cmp FROM cmp_prices")
+        cur.execute("""
+            SELECT DISTINCT ON (symbol) symbol, close
+            FROM intraday_prices
+            WHERE source = 'fyers_eq' AND ts::date = %s AND ts <= %s
+            ORDER BY symbol, ts DESC
+        """, (_today(sim_ts), _now(sim_ts)))
         return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
 
 
-def _load_hourly_fut(conn, symbols: List[str]) -> Dict[str, Optional[float]]:
+def _load_hourly_fut(conn, symbols: List[str], sim_ts=None) -> Dict[str, Optional[float]]:
     """cc#158: hourly momentum on the FUTURES series (spec id 1263-1267).
     (last 5m close - close 12 bars ago)/close_12_ago * 100, from
     intraday_prices source='fyers_fut' timeframe='5m', single tick at
     qualification. 12 bars * 5min = 60min = "hourly". NULL when the 12-bars-ago
     bar does not exist yet (first ~hour of the session) so the hard gate
-    NULL-passes rather than blocking early signals."""
-    today = datetime.now(IST).date()
+    NULL-passes rather than blocking early signals.
+    cc#218: point-in-time `AND ts <= cut` (no-op in live) so the ROW_NUMBER window ranks
+    only bars up to the frozen clock; today=_today(sim_ts)."""
+    today = _today(sim_ts)
+    cut = _now(sim_ts)
     out: Dict[str, Optional[float]] = {}
     try:
         with conn.cursor() as cur:
@@ -551,7 +603,7 @@ def _load_hourly_fut(conn, symbols: List[str]) -> Dict[str, Optional[float]]:
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn
                     FROM intraday_prices
                     WHERE source = 'fyers_fut' AND timeframe = '5m'
-                      AND ts::date = %s AND symbol = ANY(%s)
+                      AND ts::date = %s AND symbol = ANY(%s) AND ts <= %s
                 )
                 SELECT symbol,
                        MAX(close) FILTER (WHERE rn = 1)  AS last_close,
@@ -559,7 +611,7 @@ def _load_hourly_fut(conn, symbols: List[str]) -> Dict[str, Optional[float]]:
                 FROM ranked
                 WHERE rn IN (1, 13)
                 GROUP BY symbol
-            """, (today, symbols))
+            """, (today, symbols, cut))
             for sym, last_close, close_12_ago in cur.fetchall():
                 if last_close is not None and close_12_ago and float(close_12_ago) > 0:
                     out[sym] = (float(last_close) / float(close_12_ago) - 1) * 100
@@ -770,7 +822,10 @@ def _add_sector_aggregates(computed: Dict[str, dict], eod_metrics: Dict[str, dic
 
 # -- Step 7: Upsert v8_metrics ------------------------------------------------
 
-def _upsert_metrics(conn, sym: str, m: dict, target_date: date):
+def _upsert_metrics(conn, sym: str, m: dict, target_date: date, sim_ts=None):
+    # cc#218: score_date is target_date (already sim-derived by the caller). computed_at
+    # stays NOW() — it is write-metadata (tick-age watchdog only), never a parity-compared
+    # field, so it is harmless in sim and needs no sim_ts routing.
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO v8_metrics
@@ -873,15 +928,20 @@ def _update_sector_aggregates_sql(conn, target_date) -> int:
 
 # -- Market gate --------------------------------------------------------------
 
-def _market_gate_fails(conn) -> int:
+def _market_gate_fails(conn, sim_ts=None) -> int:
+    # cc#218: point-in-time mood gate. _d = the (sim or live) date == CURRENT_DATE in live
+    # (UTC session, market hours); _cut = _now(sim_ts) so intraday reads stop at the frozen
+    # clock (no-op in live). Every CURRENT_DATE below routes through these.
+    _d = _today(sim_ts)
+    _cut = _now(sim_ts)
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT advances, declines, universe_count
                 FROM adr_intraday
-                WHERE ts::date = CURRENT_DATE
+                WHERE ts::date = %s AND ts <= %s
                 ORDER BY ts DESC LIMIT 1
-            """)
+            """, (_d, _cut))
             row = cur.fetchone()
             if row and (row[2] or 0) >= 50:
                 adv, dec = row[0] or 0, row[1] or 0
@@ -890,19 +950,19 @@ def _market_gate_fails(conn) -> int:
                 cur.execute("""
                     WITH li AS (
                         SELECT DISTINCT ON (symbol) symbol, close AS cmp
-                        FROM intraday_prices WHERE ts::date = CURRENT_DATE
+                        FROM intraday_prices WHERE ts::date = %s AND ts <= %s
                         ORDER BY symbol, ts DESC
                     ),
                     pc AS (
                         SELECT DISTINCT ON (symbol) symbol, close AS pclose
-                        FROM raw_prices WHERE price_date < CURRENT_DATE
+                        FROM raw_prices WHERE price_date < %s
                         ORDER BY symbol, price_date DESC
                     )
                     SELECT COUNT(*) FILTER (WHERE li.cmp > pc.pclose),
                            COUNT(*) FILTER (WHERE li.cmp < pc.pclose),
                            COUNT(*)
                     FROM li JOIN pc ON pc.symbol = li.symbol
-                """)
+                """, (_d, _cut, _d))
                 adv_row = cur.fetchone()
                 if adv_row and (adv_row[2] or 0) >= 50:
                     adv, dec = adv_row[0] or 0, adv_row[1] or 0
@@ -916,15 +976,15 @@ def _market_gate_fails(conn) -> int:
                     # adr_daily when it is TODAY's row; otherwise default 1.0 (neutral --
                     # passes adr>=1.0, adds no gate fail). Mood self-corrects as today's
                     # ticks accumulate.
-                    cur.execute("SELECT adr FROM adr_daily WHERE price_date = CURRENT_DATE ORDER BY price_date DESC LIMIT 1")
+                    cur.execute("SELECT adr FROM adr_daily WHERE price_date = %s ORDER BY price_date DESC LIMIT 1", (_d,))
                     r = cur.fetchone()
                     adr = float(r[0]) if r and r[0] is not None else 1.0
 
             cur.execute("""
                 SELECT close FROM intraday_prices
-                WHERE symbol='NIFTY50' AND ts::date=CURRENT_DATE
+                WHERE symbol='NIFTY50' AND ts::date=%s AND ts <= %s
                 ORDER BY ts DESC LIMIT 1
-            """)
+            """, (_d, _cut))
             lv = cur.fetchone()
             # cc_task #72 bug_3: reference closes must track ACTUAL trading-day
             # positions (T-1/T-5/T-22), NOT "most recent raw_prices row" — which lags
@@ -936,12 +996,12 @@ def _market_gate_fails(conn) -> int:
             cur.execute("""
                 WITH days AS (
                     SELECT DISTINCT ON (ts::date) ts::date AS d, close::numeric AS c
-                    FROM intraday_prices WHERE symbol='NIFTY50' AND ts::date < CURRENT_DATE
+                    FROM intraday_prices WHERE symbol='NIFTY50' AND ts::date < %s
                     ORDER BY ts::date DESC, ts DESC
                 ),
                 eod AS (
                     SELECT price_date AS d, close::numeric AS c
-                    FROM raw_prices WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                    FROM raw_prices WHERE symbol='NIFTY50' AND price_date < %s
                 ),
                 merged AS (
                     SELECT d, c FROM days
@@ -949,7 +1009,7 @@ def _market_gate_fails(conn) -> int:
                     SELECT d, c FROM eod WHERE d NOT IN (SELECT d FROM days)
                 )
                 SELECT c FROM merged ORDER BY d DESC LIMIT 30
-            """)
+            """, (_d, _d))
             hist = [float(x[0]) for x in cur.fetchall()]
             if lv and lv[0] is not None and len(hist) >= 22:
                 latest = float(lv[0])
@@ -1025,7 +1085,7 @@ def _s1b_slots(gate_fails: int) -> int:
 
 # -- Dynamic buy_reversal Nifty-linked filters --------------------------------
 
-def _get_nifty_1m_return(conn) -> float:
+def _get_nifty_1m_return(conn, sim_ts=None) -> float:
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1033,13 +1093,13 @@ def _get_nifty_1m_return(conn) -> float:
                     SELECT close,
                            ROW_NUMBER() OVER (ORDER BY price_date DESC) AS rn
                     FROM raw_prices
-                    WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                    WHERE symbol='NIFTY50' AND price_date < %s
                     LIMIT 25
                 )
                 SELECT
                     (SELECT close FROM ranked WHERE rn=1)  AS latest,
                     (SELECT close FROM ranked WHERE rn=22) AS month_ago
-            """)
+            """, (_today(sim_ts),))
             row = cur.fetchone()
             if row and row[0] and row[1] and float(row[1]) > 0:
                 return (float(row[0]) / float(row[1]) - 1) * 100
@@ -1048,15 +1108,15 @@ def _get_nifty_1m_return(conn) -> float:
     return 0.0
 
 
-def _get_nifty_rsi(conn) -> Optional[float]:
+def _get_nifty_rsi(conn, sim_ts=None) -> Optional[float]:
     """Wilder RSI(14) on NIFTY50 daily closes -- market health gate for buy_s1_bounce."""
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT close FROM raw_prices
-                WHERE symbol='NIFTY50' AND price_date < CURRENT_DATE
+                WHERE symbol='NIFTY50' AND price_date < %s
                 ORDER BY price_date DESC LIMIT 30
-            """)
+            """, (_today(sim_ts),))
             closes = [float(r[0]) for r in cur.fetchall()]
         if len(closes) < 15:
             return None
@@ -1083,7 +1143,7 @@ def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
 
 _PAPER_SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
 
-def _conflict_ok(conn, sym: str, paper_side: str, basket: str, d: date, cmp: float) -> bool:
+def _conflict_ok(conn, sym: str, paper_side: str, basket: str, d: date, cmp: float, sim_ts=None) -> bool:
     """cc#214: enforce the founder-locked conflict policy (12-Jun) on the LIVE entry path.
 
     The live auto-entry functions only checked the SAME side open — so a next-day OPPOSITE
@@ -1098,18 +1158,18 @@ def _conflict_ok(conn, sym: str, paper_side: str, basket: str, d: date, cmp: flo
     exit price = the live equity CMP (cc#215: cmp is equity-priced), exit_ts = now IST."""
     try:
         import v8_paper
-        return v8_paper._resolve_conflict(conn, sym, paper_side, basket, d, round(cmp, 2), _now_ist())
+        return v8_paper._resolve_conflict(conn, sym, paper_side, basket, d, round(cmp, 2), _now_ist(sim_ts))
     except Exception as e:
         log.warning(f"conflict check {sym} {paper_side}: {e} — skipping entry (fail-closed, never hedge)")
         return False
 
 
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
-                       pv: Optional[dict], d: date, gate_fails: int):
+                       pv: Optional[dict], d: date, gate_fails: int, sim_ts=None):
     if not cmp or not pv:
         return
 
-    now_ist  = datetime.now(IST)
+    now_ist  = _now(sim_ts)   # cc#218: sim_ts=None => naive datetime.now(IST); gate logic identical
     mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
     mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
     if not (mkt_open <= now_ist <= mkt_cut):
@@ -1124,9 +1184,9 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
             cur.execute("""
                 SELECT 1 FROM earnings_calendar
                 WHERE UPPER(ticker)=%s
-                  AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                  AND ex_date IN (%s, %s + INTERVAL '1 day')
                 LIMIT 1
-            """, (sym.upper(),))
+            """, (sym.upper(), _today(sim_ts), _today(sim_ts)))
             if cur.fetchone():
                 log.debug(f"auto_paper {sym}: skipped -- blackout")
                 return
@@ -1151,7 +1211,7 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         log.warning(f"auto_paper guard check {sym}: {e}"); return
 
     # cc#214: opposite-side conflict policy (block same-day / CONFLICT_EXIT next-day)
-    if not _conflict_ok(conn, sym, paper_side, basket, d, cmp):
+    if not _conflict_ok(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts):
         return
 
     try:
@@ -1189,7 +1249,7 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     except Exception:
         qty = 1
 
-    entry_ts_ist = _now_ist()
+    entry_ts_ist = _now_ist(sim_ts)   # cc#218
 
     try:
         with conn.cursor() as cur:
@@ -1212,11 +1272,11 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
 # -- Auto paper entry (sell_overbought) ----------------------------------------
 
 def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
-                          pv: Optional[dict], d: date, gate_fails: int):
+                          pv: Optional[dict], d: date, gate_fails: int, sim_ts=None):
     if not cmp or not pv:
         return
 
-    now_ist  = datetime.now(IST)
+    now_ist  = _now(sim_ts)   # cc#218
     mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
     mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
     if not (mkt_open <= now_ist <= mkt_cut):
@@ -1227,9 +1287,9 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
             cur.execute("""
                 SELECT 1 FROM earnings_calendar
                 WHERE UPPER(ticker)=%s
-                  AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                  AND ex_date IN (%s, %s + INTERVAL '1 day')
                 LIMIT 1
-            """, (sym.upper(),))
+            """, (sym.upper(), _today(sim_ts), _today(sim_ts)))
             if cur.fetchone():
                 return
     except Exception as e:
@@ -1249,7 +1309,7 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
         log.warning(f"auto_paper_so guard {sym}: {e}"); return
 
     # cc#214: opposite-side conflict policy (an open LONG blocks/flattens before a SHORT)
-    if not _conflict_ok(conn, sym, "SHORT", "sell_overbought", d, cmp):
+    if not _conflict_ok(conn, sym, "SHORT", "sell_overbought", d, cmp, sim_ts=sim_ts):
         return
 
     so_cap = _so_slots(gate_fails)
@@ -1284,7 +1344,7 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
     except Exception:
         qty = 1
 
-    entry_ts_ist = _now_ist()
+    entry_ts_ist = _now_ist(sim_ts)   # cc#218
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1305,12 +1365,12 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
 
 # -- Auto paper entry (buy_s1_bounce) -----------------------------------------
 
-def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fails: int):
+def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fails: int, sim_ts=None):
     """Fixed +1.5% target / -1.5% stop. Dedicated ring-fenced slots 3/3/3/2."""
     if not cmp:
         return
 
-    now_ist  = datetime.now(IST)
+    now_ist  = _now(sim_ts)   # cc#218
     mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
     mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
     if not (mkt_open <= now_ist <= mkt_cut):
@@ -1321,9 +1381,9 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
             cur.execute("""
                 SELECT 1 FROM earnings_calendar
                 WHERE UPPER(ticker)=%s
-                  AND ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day')
+                  AND ex_date IN (%s, %s + INTERVAL '1 day')
                 LIMIT 1
-            """, (sym.upper(),))
+            """, (sym.upper(), _today(sim_ts), _today(sim_ts)))
             if cur.fetchone():
                 return
     except Exception as e:
@@ -1343,7 +1403,7 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
         log.warning(f"auto_paper_s1b guard {sym}: {e}"); return
 
     # cc#214: opposite-side conflict policy (an open SHORT blocks/flattens before a LONG)
-    if not _conflict_ok(conn, sym, "LONG", "buy_s1_bounce", d, cmp):
+    if not _conflict_ok(conn, sym, "LONG", "buy_s1_bounce", d, cmp, sim_ts=sim_ts):
         return
 
     s1b_cap = _s1b_slots(gate_fails)
@@ -1372,7 +1432,7 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
     except Exception:
         qty = 1
 
-    entry_ts_ist = _now_ist()
+    entry_ts_ist = _now_ist(sim_ts)   # cc#218
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1394,18 +1454,18 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
 
 # -- Step 8: Write v8_qualified + funnel --------------------------------------
 
-def _write_qualified(conn, all_metrics: List[dict], target_date: date):
+def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None):
     from v8_endpoints import FILTER_CONFIG, v21_hard_gate_pass
 
-    gate_fails = _market_gate_fails(conn)
-    pivots     = _load_pivots(conn)
-    enabled_v21 = _load_filter_state(conn)   # cc#158: per-basket V2.1 enable state
+    gate_fails = _market_gate_fails(conn, sim_ts=sim_ts)
+    pivots     = _load_pivots(conn, sim_ts=sim_ts)
+    enabled_v21 = _load_filter_state(conn)   # cc#158: per-basket V2.1 enable state (config, not time)
 
-    nifty_1m   = _get_nifty_1m_return(conn)
+    nifty_1m   = _get_nifty_1m_return(conn, sim_ts=sim_ts)
     dyn_br     = _get_dynamic_buy_reversal_overrides(nifty_1m)
     log.info(f"Nifty 1M={nifty_1m:+.2f}% -> buy_reversal regime={dyn_br['_regime']}")
 
-    signal_ts_ist = _now_ist()
+    signal_ts_ist = _now_ist(sim_ts)   # cc#218
 
     for basket, filters in FILTER_CONFIG.items():
         if basket in ("sell_overbought", "buy_s1_bounce"):
@@ -1533,19 +1593,19 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date):
                 if first_qualification:
                     _auto_paper_entry(conn, sym, basket, side,
                                       s.get("_cmp"), pivots.get(sym),
-                                      target_date, gate_fails)
+                                      target_date, gate_fails, sim_ts=sim_ts)
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
-                                    gate_fails, pivots, signal_ts_ist, enabled_v21)
+                                    gate_fails, pivots, signal_ts_ist, enabled_v21, sim_ts=sim_ts)
     _write_sell_overbought_qualified(conn, all_metrics, target_date,
-                                      gate_fails, pivots, signal_ts_ist, enabled_v21)
+                                      gate_fails, pivots, signal_ts_ist, enabled_v21, sim_ts=sim_ts)
 
 
 def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: date,
                                     gate_fails: int, pivots: dict, signal_ts_ist,
-                                    enabled_v21: Optional[dict] = None):
+                                    enabled_v21: Optional[dict] = None, sim_ts=None):
     """
     Buy S1 Bounce V1 (17-Jun-2026). 7 strict filters (1 gate + 6 stages).
     Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR.
@@ -1555,7 +1615,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
     from v8_endpoints import v21_hard_gate_pass
     enabled_v21 = enabled_v21 or {}
     s1b_on = enabled_v21.get("buy_s1_bounce", False)
-    nifty_rsi = _get_nifty_rsi(conn)
+    nifty_rsi = _get_nifty_rsi(conn, sim_ts=sim_ts)
     if nifty_rsi is None or nifty_rsi < 55.0:
         log.debug(f"buy_s1_bounce: Nifty RSI={nifty_rsi} < 55 -- gated OFF")
         return
@@ -1637,14 +1697,14 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                 first_qual = cur.rowcount > 0
             conn.commit()
             if first_qual:
-                _auto_paper_entry_s1b(conn, sym, s.get("_cmp"), target_date, gate_fails)
+                _auto_paper_entry_s1b(conn, sym, s.get("_cmp"), target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
             log.warning(f"buy_s1_bounce insert {sym}: {e}")
 
 
 def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date: date,
                                       gate_fails: int, pivots: dict, signal_ts_ist,
-                                      enabled_v21: Optional[dict] = None):
+                                      enabled_v21: Optional[dict] = None, sim_ts=None):
     from v8_endpoints import v21_hard_gate_pass
     enabled_v21 = enabled_v21 or {}
     so_v21_on = enabled_v21.get("sell_overbought", False)
@@ -1788,30 +1848,34 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
             if first_qualification:
                 pv = pivots.get(sym)
                 _auto_paper_entry_so(conn, sym, s.get("_cmp"), pv,
-                                     target_date, gate_fails)
+                                     target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
             log.warning(f"sell_overbought qualified insert {sym}: {e}")
 
 
 # -- Main entry point ---------------------------------------------------------
 
-def _write_heartbeat(conn):
+def _write_heartbeat(conn, sim_ts=None):
     """Stamp app_config.sched_writer_hb on a successful tick so run_diagnosis sees
     the writer is alive. Uses the already-open conn (a 2nd psycopg3 connection in the
-    scheduler thread fails silently — task #18). Covers scheduler + MCP + API paths."""
+    scheduler thread fails silently — task #18). Covers scheduler + MCP + API paths.
+    cc#218: heartbeat value routes through _now_ist(sim_ts) — sim_ts=None is live."""
     try:
         with conn.cursor() as _hb:
             _hb.execute(
                 "INSERT INTO app_config(key,value) VALUES('sched_writer_hb',%s) "
                 "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
-                (_now_ist().isoformat(),))
+                (_now_ist(sim_ts).isoformat(),))
         conn.commit()
     except Exception as _hbe:
         log.warning(f"sched_writer_hb write failed: {_hbe}")
 
 
-def run_live_signal_writer(conn) -> dict:
-    today = datetime.now(IST).date()
+def run_live_signal_writer(conn, sim_ts=None) -> dict:
+    # cc#218: sim_ts=None => live (datetime.now(IST)); sim_ts set => frozen clock for the
+    # BT7 harness. Every time read below routes through _now/_today(sim_ts) or is threaded
+    # into the callee, so this whole tick is point-in-time when replaying a golden day.
+    today = _today(sim_ts)
 
     # cc#211: HARD trading-day gate — the SINGLE write-layer choke point. Every caller
     # funnels through here (5-min tick, watchdog/forced-restart recovery tick, 09:10
@@ -1837,13 +1901,13 @@ def run_live_signal_writer(conn) -> dict:
     if not symbols:
         return {"qualified": {}, "msg": "no symbols"}
 
-    eod_metrics = _load_eod_metrics(conn)
-    eod_history = _load_eod_history(conn, symbols)
-    intraday    = _load_intraday_bars(conn, symbols)
-    cmp_map     = _load_cmp(conn)
-    vol_cutoff  = _round_down_5min(datetime.now(IST).replace(tzinfo=None))
-    vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff)
-    hourly_map  = _load_hourly_fut(conn, symbols)   # cc#158: fyers_fut 5m hourly
+    eod_metrics = _load_eod_metrics(conn, sim_ts=sim_ts)
+    eod_history = _load_eod_history(conn, symbols, sim_ts=sim_ts)
+    intraday    = _load_intraday_bars(conn, symbols, sim_ts=sim_ts)
+    cmp_map     = _load_cmp(conn, sim_ts=sim_ts)
+    vol_cutoff  = _round_down_5min(_now(sim_ts))
+    vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff, sim_ts=sim_ts)
+    hourly_map  = _load_hourly_fut(conn, symbols, sim_ts=sim_ts)   # cc#158: fyers_fut 5m hourly
 
     if not intraday:
         # cc#212: FAIL LOUD — the old eod_fallback branch synthesized signals from frozen
@@ -1861,7 +1925,7 @@ def run_live_signal_writer(conn) -> dict:
                              "fyers_feed likely down; signal generation skipped to avoid "
                              "stale-price paper entries",
                   "date": str(today)})
-        _write_heartbeat(conn)
+        _write_heartbeat(conn, sim_ts=sim_ts)
         return {"skipped": "no_intraday_bars", "date": str(today)}
 
     computed: Dict[str, dict] = {}
@@ -1885,7 +1949,7 @@ def run_live_signal_writer(conn) -> dict:
     all_metrics = []
     for sym, m in computed.items():
         try:
-            _upsert_metrics(conn, sym, m, today)
+            _upsert_metrics(conn, sym, m, today, sim_ts=sim_ts)
         except Exception as e:
             log.warning(f"upsert_metrics {sym}: {e}")
         all_metrics.append(m)
@@ -1903,13 +1967,13 @@ def run_live_signal_writer(conn) -> dict:
         f"gate>=1.5: legacy={old_pass} time_matched_v2={new_pass}"
     )
 
-    _write_qualified(conn, all_metrics, today)
+    _write_qualified(conn, all_metrics, today, sim_ts=sim_ts)
 
-    _write_adr_intraday(conn)
+    _write_adr_intraday(conn, sim_ts=sim_ts)
     _update_sector_aggregates_sql(conn, today)
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
-    _write_heartbeat(conn)
+    _write_heartbeat(conn, sim_ts=sim_ts)
     _assert_no_nontrading_metrics(conn)   # cc#211: loud on any bypassed non-trading write
     return {
         "date":    str(today),

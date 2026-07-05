@@ -100,12 +100,15 @@ log = logging.getLogger("scorr.v8paper")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-def _now_ist():
+from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
+
+def _now_ist(sim_ts=None):
     """Wall-clock now in IST as a NAIVE timestamp (matches the naive-IST convention
     of v8_paper_* tables + intraday_prices). Used for LIVE entry_ts/exit_ts so they
     carry the real fill / close-detection moment (fractional ms) instead of the bar
-    ts (cc_task #68 Bug 2 + Bug 3). Replay keeps the bar ts for date-consistent guards."""
-    return datetime.now(IST).replace(tzinfo=None)
+    ts (cc_task #68 Bug 2 + Bug 3). Replay keeps the bar ts for date-consistent guards.
+    cc#218: routes through the injectable clock — sim_ts=None is exactly the old behavior."""
+    return _now(sim_ts)
 
 PIVOT_WINDOW   = 5
 PIVOT_MIN_DAYS = 3
@@ -372,14 +375,16 @@ def _sell_overbought_signals_raw(conn) -> Dict[str, Dict]:
 # exits near target/SL (cc#140 class bug; the writer's _load_intraday_bars was already
 # eq-pinned). If a symbol has zero fyers_eq bars for the day we return None → caller skips
 # that symbol this pass (fail-safe: never cross-series compare — FALLBACK_ARCHITECTURE_PRINCIPLE_V1).
-def _two_latest_closes(conn, sym, d):
+def _two_latest_closes(conn, sym, d, sim_ts=None):
+    # cc#218: `(%s IS NULL OR ts <= %s)` — a tautology in live (sim_ts=None), the intra-day
+    # as-of cutoff in sim so an exit tick only sees bars up to the frozen clock.
     with conn.cursor() as cur:
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source='fyers_eq'
+              AND timeframe='5m' AND source='fyers_eq' AND (%s IS NULL OR ts <= %s)
             ORDER BY ts DESC LIMIT 2
-        """, (sym, d))
+        """, (sym, d, sim_ts, sim_ts))
         rows = cur.fetchall()
     if len(rows) < 2:
         if not rows:
@@ -387,31 +392,34 @@ def _two_latest_closes(conn, sym, d):
         return None
     return float(rows[1][0]), float(rows[0][0]), rows[0][1]
 
-def _latest_close(conn, sym, d):
+def _latest_close(conn, sym, d, sim_ts=None):
     """Single most-recent 5-min close for d (used by sell_overbought entry).
-    PRICING: equity only (founder 05-Jul) — fyers_eq source only."""
+    PRICING: equity only (founder 05-Jul) — fyers_eq source only.
+    cc#218: `(%s IS NULL OR ts <= %s)` = live no-op / sim as-of cutoff."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source='fyers_eq'
+              AND timeframe='5m' AND source='fyers_eq' AND (%s IS NULL OR ts <= %s)
             ORDER BY ts DESC LIMIT 1
-        """, (sym, d))
+        """, (sym, d, sim_ts, sim_ts))
         r = cur.fetchone()
     if not r:
         log.warning(f"_latest_close: no fyers_eq bars for {sym} on {d} — skipping (no cross-series fallback)")
         return None
     return float(r[0]), r[1]
 
-def _first_bar(conn, sym, d):
-    """PRICING: equity only (founder 05-Jul) — fyers_eq source only."""
+def _first_bar(conn, sym, d, sim_ts=None):
+    """PRICING: equity only (founder 05-Jul) — fyers_eq source only.
+    cc#218: `(%s IS NULL OR ts <= %s)` = live no-op / sim as-of cutoff (the first bar is
+    unaffected until the clock passes 09:15, so this is inert at the open, correct after)."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT open, close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source='fyers_eq'
+              AND timeframe='5m' AND source='fyers_eq' AND (%s IS NULL OR ts <= %s)
             ORDER BY ts ASC LIMIT 1
-        """, (sym, d))
+        """, (sym, d, sim_ts, sim_ts))
         r = cur.fetchone()
     if not r:
         log.warning(f"_first_bar: no fyers_eq bars for {sym} on {d} — skipping (no cross-series fallback)")
@@ -815,7 +823,7 @@ def run_gate_rebalance(conn, buy_slots: int, sell_slots: int, target_date: date 
 
 
 # ============================================================ EXIT-ONLY PASS
-def run_paper_exits(conn, target_date: date = None, mode: str = "live") -> Dict:
+def run_paper_exits(conn, target_date: date = None, mode: str = "live", sim_ts=None) -> Dict:
     """cc_task #72 bug_0: EXIT-ONLY pass — NO entries, NO rebalance. Restores the
     automated exit that was never wired into the scheduler (paper_tick, which holds
     the exit logic, was only reachable on-demand via /api/paper/tick).
@@ -830,10 +838,12 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live") -> Dict:
     Exit comparison is identical to paper_tick — this changes no entry/exit RULE,
     it only adds the missing automation (founder do_not_change respected)."""
     ensure_schema(conn)
-    d = target_date or date.today()
-    live = target_date is None
+    # cc#218: sim_ts threads the intra-day as-of cutoff for the BT7 harness. d/live keep
+    # their exact live meaning when sim_ts=None (d=today, live=True, _ts=_now_ist()).
+    d = target_date or _today(sim_ts)
+    live = target_date is None and sim_ts is None
     def _ts(bar_ts):
-        return _now_ist() if live else bar_ts
+        return _now_ist(sim_ts) if live else bar_ts
 
     with conn.cursor() as cur:
         cur.execute("""SELECT id,symbol,side,basket,entry_price,entry_ts,qty,target,stop_loss,pivot_date
@@ -867,7 +877,7 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live") -> Dict:
     # mode == "live" — mirrors paper_tick EXIT section exactly
     for (pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt) in open_rows:
         entry=float(entry); tgt=float(tgt); sl=float(sl); qty=int(qty)
-        fb_open, fb_ts = _first_bar(conn, sym, d)
+        fb_open, fb_ts = _first_bar(conn, sym, d, sim_ts=sim_ts)   # cc#218
         if fb_open is not None and (ets is None or ets.date() < d):
             if side=="LONG":
                 if fb_open>=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_TARGET_EXIT")); continue
@@ -875,7 +885,7 @@ def run_paper_exits(conn, target_date: date = None, mode: str = "live") -> Dict:
             else:
                 if fb_open<=tgt: exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_TARGET_EXIT")); continue
                 if fb_open>=sl:  exits.append(_close_position(conn,pid,sym,side,basket,entry,ets,qty,tgt,sl,pdt,fb_open,_ts(fb_ts),"GAP_SL_EXIT")); continue
-        tl = _two_latest_closes(conn, sym, d)
+        tl = _two_latest_closes(conn, sym, d, sim_ts=sim_ts)   # cc#218
         if not tl: continue
         _, cur_close, cur_ts = tl
         hit = None
