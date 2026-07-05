@@ -1074,6 +1074,27 @@ def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
 
 _PAPER_SIDE_MAP = {"BUY": "LONG", "SELL": "SHORT"}
 
+def _conflict_ok(conn, sym: str, paper_side: str, basket: str, d: date, cmp: float) -> bool:
+    """cc#214: enforce the founder-locked conflict policy (12-Jun) on the LIVE entry path.
+
+    The live auto-entry functions only checked the SAME side open — so a next-day OPPOSITE
+    qualification would open the opposite side = a simultaneous LONG+SHORT hedge (policy
+    violation). This reuses v8_paper._resolve_conflict (the SAME helper paper_tick uses —
+    never duplicate the policy):
+      • same-day opposite open  -> BLOCK new entry, log missed 'opposite_open' (existing holds)
+      • next-day opposite open   -> CONFLICT_EXIT flatten existing @ the live equity CMP, log
+                                    missed 'conflict_exit_blocked', do NOT open new (never
+                                    reverse, never hedge; may re-enter opposite a later day)
+    Returns True to PROCEED, False to SKIP. Fail-closed on error (never risk a hedge).
+    exit price = the live equity CMP (cc#215: cmp is equity-priced), exit_ts = now IST."""
+    try:
+        import v8_paper
+        return v8_paper._resolve_conflict(conn, sym, paper_side, basket, d, round(cmp, 2), _now_ist())
+    except Exception as e:
+        log.warning(f"conflict check {sym} {paper_side}: {e} — skipping entry (fail-closed, never hedge)")
+        return False
+
+
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
                        pv: Optional[dict], d: date, gate_fails: int):
     if not cmp or not pv:
@@ -1119,6 +1140,10 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
                 return
     except Exception as e:
         log.warning(f"auto_paper guard check {sym}: {e}"); return
+
+    # cc#214: opposite-side conflict policy (block same-day / CONFLICT_EXIT next-day)
+    if not _conflict_ok(conn, sym, paper_side, basket, d, cmp):
+        return
 
     try:
         buy_slots, sell_slots = _mood_slots(gate_fails)
@@ -1213,6 +1238,10 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
     except Exception as e:
         log.warning(f"auto_paper_so guard {sym}: {e}"); return
 
+    # cc#214: opposite-side conflict policy (an open LONG blocks/flattens before a SHORT)
+    if not _conflict_ok(conn, sym, "SHORT", "sell_overbought", d, cmp):
+        return
+
     so_cap = _so_slots(gate_fails)
     try:
         with conn.cursor() as cur:
@@ -1302,6 +1331,10 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
                 return
     except Exception as e:
         log.warning(f"auto_paper_s1b guard {sym}: {e}"); return
+
+    # cc#214: opposite-side conflict policy (an open SHORT blocks/flattens before a LONG)
+    if not _conflict_ok(conn, sym, "LONG", "buy_s1_bounce", d, cmp):
+        return
 
     s1b_cap = _s1b_slots(gate_fails)
     try:
