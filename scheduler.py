@@ -62,6 +62,15 @@ def _is_market_hours(now):
     t = (now.hour, now.minute)
     return (9,15) <= t <= (15,30)
 
+def _is_trading_day(d):
+    """cc#207: weekend + NSE-holiday aware. Weekend-only fallback if the holiday
+    module is unavailable so we never crash the loop."""
+    try:
+        import nse_holidays
+        return nse_holidays.is_trading_day(d)
+    except Exception:
+        return d.weekday() < 5
+
 # ── run-guards ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # signal_writer uses a started_at timestamp + token (not a bare bool) so a hung
 # tick can't permanently block future ticks — see _bg_signal_writer / _check_watchdog.
@@ -994,12 +1003,40 @@ def _bg_cleanup_news():
     """cc#192: daily news retention — unpolished raw_news dies at 48h, polished
     (and its raw parent) lives 30 days. Replaces the old blanket 30-day raw_news
     purge; news_retention() logs both counts to ops_log(category=news_retention)
-    and alerts on an implausible unpolished backlog."""
+    and alerts on an implausible unpolished backlog.
+    cc#207: also purge the Position News trial table (7-day retention)."""
     try:
         import news_fetcher
         with _conn() as conn: res = news_fetcher.news_retention(conn)
         log.info(f"news_retention: {res}")
     except Exception as e: log.error(f"news_retention: {e}")
+    try:
+        import position_news
+        with _conn() as conn: pres = position_news.purge_position_news(conn)
+        log.info(f"position_news retention: {pres}")
+    except Exception as e: log.error(f"position_news retention: {e}")
+
+def _bg_fetch_position_news():
+    """cc#207: Position News trial — Google News for open V8 + SmartGain symbols into
+    the quarantined position_news table (3x/day on trading days: 08:30/12:30/16:30)."""
+    try:
+        import position_news
+        with _conn() as conn:
+            res = position_news.fetch_position_news(conn)
+        log.info(f"position_news: {res}")
+    except Exception as e:
+        log.error(f"position_news: {e}")
+
+def _bg_tag_news():
+    """cc#207 Part C: tag untagged polished_news with universe symbols so company pages
+    populate without per-company Google waves. First run backfills 30 days."""
+    try:
+        import news_tagger
+        with _conn() as conn:
+            res = news_tagger.tag_untagged(conn)
+        log.info(f"news_tagger: {res}")
+    except Exception as e:
+        log.error(f"news_tagger: {e}")
 
 # ── main loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1027,12 +1064,13 @@ async def _scheduler_loop():
         if h == 6 and m == 0:
             _spawn(_bg_fetch_global)
             _spawn(_bg_fetch_market_news)   # task #38: domestic + global RSS
-        if h == 6 and m == 30:
-            _spawn(_bg_fetch_company_news, 1, 250, 1)  # cc#186 wave 1: top 250 by mcap
-        if h == 7 and m == 15:
-            _spawn(_bg_company_news_wave2)             # cc#186 wave 2: 251-500 (or retry top 250)
-        if h == 7 and m == 30:
-            _spawn(_bg_company_news_retry)             # cc#186: zero-insert safety retry
+        # cc#207: 500-company waves (06:30 / 07:15 / 07:30) RETIRED 05-Jul
+        # (inactive_superseded). _bg_fetch_company_news + wave2/retry kept UNWIRED for
+        # possible manual/admin use. Replaced by the Position News trial below.
+        if _is_trading_day(today) and m == 30 and h in (8, 12, 16):
+            _spawn(_bg_fetch_position_news)            # cc#207: 08:30 / 12:30 / 16:30 IST
+        if _is_trading_day(today) and m == 20 and h in (7, 16, 22):
+            _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger — off-session (backfills on first run)
         if 6 <= h <= 23 and m % 5 == 0:
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:

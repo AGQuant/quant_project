@@ -91,10 +91,10 @@ def news_company(symbol: str):
                    r.symbol, r.source_name, r.url, r.published_at
             FROM polished_news p
             JOIN raw_news r ON r.id = p.raw_news_id
-            WHERE r.symbol = %s
+            WHERE r.symbol = %s OR p.mentioned_symbols @> ARRAY[%s]::text[]
             ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
             LIMIT 10
-        """, (sym,))
+        """, (sym, sym))
         polished = _rows(cur)
         if polished:
             return {"symbol": sym, "polished": True, "count": len(polished), "articles": polished}
