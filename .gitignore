@@ -8,3 +8,10 @@ node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+# cc#217 Phase 4: bulk source CSVs kept OUT of git. Live runtime loads screener/input
+# data from Google Drive -> screener_raw/input_raw via /api/admin/load_{screener,input}_from_drive
+# (admin_data.py, MCP load_screener_from_drive). input.csv/screener.csv are only local
+# defaults for the manual CLI tools gvm_analytics.py + screener_loader.py — fetch from Drive
+# when running those by hand.
+input.csv
+screener.csv
