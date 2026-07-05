@@ -236,15 +236,33 @@ def run_bt7(target_date, label):
 
 
 # ── diff ─────────────────────────────────────────────────────────────────────────
-# key columns compared (symbol/side/basket/entry-bar/price) — the parity contract.
-_QUAL_KEY = ["symbol", "side", "basket"]
+# key columns compared — the parity contract. cc#218 D6 fix: v8_qualified has NO `side`
+# column (side is a pure function of basket), so the qualified diff keys on (symbol, basket)
+# and DERIVES side from BASKET_META for display. v8_paper_trades DOES carry a real `side`
+# column, so the trade key uses it directly.
 _TRADE_KEY = ["symbol", "side", "basket", "result"]
+
+
+def _side_for(basket):
+    """BUY/SELL for a basket via BASKET_META — v8_qualified stores no side column."""
+    try:
+        from v8_endpoints import BASKET_META
+        return (BASKET_META.get(basket) or {}).get("side", "?")
+    except Exception:
+        return "?"
 
 
 def _rows(cur, table, label, keycols):
     cur.execute(f"SELECT {', '.join(keycols)} FROM harness.{table} WHERE run_label=%s "
                 f"ORDER BY {', '.join(keycols)}", (label,))
     return [tuple(str(x) for x in r) for r in cur.fetchall()]
+
+
+def _qual_rows(cur, table, label):
+    """(symbol, side, basket) for a harness bt7_qualified run — side derived from basket."""
+    cur.execute(f"SELECT symbol, basket FROM harness.{table} WHERE run_label=%s "
+                f"ORDER BY symbol, basket", (label,))
+    return set((str(sym), _side_for(bk), str(bk)) for sym, bk in cur.fetchall())
 
 
 def bt7_diff(label_a, label_b):
@@ -254,20 +272,18 @@ def bt7_diff(label_a, label_b):
     try:
         with conn.cursor() as cur:
             out = {"label_a": label_a, "label_b": label_b, "zero_diff": True, "sections": {}}
-            # qualified
-            a = set(_rows(cur, "bt7_qualified", label_a, _QUAL_KEY))
+            # qualified — key on (symbol, basket), side DERIVED from basket (no `side` col)
+            a = _qual_rows(cur, "bt7_qualified", label_a)
             if label_b.startswith("golden_"):
                 ymd = label_b.split("_", 1)[1]
                 gt = f"golden_qualified_{ymd}"
                 if _regclass(cur, "public." + gt):
-                    gcols = set(_cols(cur, "public", gt))
-                    keys = [c for c in _QUAL_KEY if c in gcols]
-                    cur.execute(f"SELECT {', '.join(keys)} FROM public.\"{gt}\" ORDER BY {', '.join(keys)}")
-                    b = set(tuple(str(x) for x in r) for r in cur.fetchall())
+                    cur.execute(f'SELECT symbol, basket FROM public."{gt}" ORDER BY symbol, basket')
+                    b = set((str(sym), _side_for(bk), str(bk)) for sym, bk in cur.fetchall())
                 else:
                     return {"ok": False, "error": f"{gt} not found"}
             else:
-                b = set(_rows(cur, "bt7_qualified", label_b, _QUAL_KEY))
+                b = _qual_rows(cur, "bt7_qualified", label_b)
             only_a = sorted(a - b); only_b = sorted(b - a)
             out["sections"]["qualified"] = {"count_a": len(a), "count_b": len(b),
                                             "only_in_a": only_a, "only_in_b": only_b,

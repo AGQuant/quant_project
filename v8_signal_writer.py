@@ -168,6 +168,16 @@ def _now_ist(sim_ts=None) -> datetime:
     return _now(sim_ts)
 
 
+def _bar_cutoff(sim_ts=None) -> datetime:
+    """As-of cutoff for reading intraday BARS (cc#218 D6 fix). A 5-min bar stamped T only
+    finishes and lands in the DB at T+5min, so at sim tick T the sim may see ONLY bars that
+    had already closed by then — ts <= T-5min. Reading ts <= T would give a one-bar (5-min)
+    LOOKAHEAD and diverge from the live signals. LIVE (sim_ts=None) is untouched: unfinished
+    bars never exist in the DB, so `ts <= now` is already correct — no shift applied."""
+    n = _now(sim_ts)
+    return n - timedelta(minutes=5) if sim_ts is not None else n
+
+
 # -- Pivot-room gate ----------------------------------------------------------
 
 BASKET_SIDE = {
@@ -221,10 +231,11 @@ def _pivot_room_ok(side: str, cmp: Optional[float],
 # -- ADR intraday write -------------------------------------------------------
 
 def _write_adr_intraday(conn, sim_ts=None):
-    # cc#218: point-in-time A/D — intraday cmp is the last fyers-any bar <= _now(sim_ts)
-    # on the (sim or live) date; prior close from raw_prices < that date. sim_ts=None is live.
+    # cc#218: point-in-time A/D — intraday cmp is the last CLOSED fyers-any bar (<= sim_ts-5min
+    # in sim, D6 fix) on the (sim or live) date; prior close from raw_prices < that date.
+    # sim_ts=None is live (no shift — unfinished bars aren't in the DB).
     _d = _today(sim_ts)
-    _cut = _now(sim_ts)
+    _cut = _bar_cutoff(sim_ts)
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -396,7 +407,7 @@ def _load_intraday_bars(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict
     real now, so `ts <= now` is a no-op (bars only exist up to now); in sim it is the
     as-of cutoff so the tick only sees bars up to the frozen clock. `today`=_today(sim_ts)."""
     today = _today(sim_ts)
-    cut = _now(sim_ts)
+    cut = _bar_cutoff(sim_ts)   # cc#218 D6: bars close at ts+5min -> sim sees ts<=sim_ts-5min
     with conn.cursor() as cur:
         cur.execute("""
             SELECT
@@ -593,7 +604,7 @@ def _load_cmp(conn, sim_ts=None) -> Dict[str, float]:
             FROM intraday_prices
             WHERE source = 'fyers_eq' AND ts::date = %s AND ts <= %s
             ORDER BY symbol, ts DESC
-        """, (_today(sim_ts), _now(sim_ts)))
+        """, (_today(sim_ts), _bar_cutoff(sim_ts)))   # cc#218 D6: no bar lookahead
         return {r[0]: _safe_float(r[1]) for r in cur.fetchall()}
 
 
@@ -607,7 +618,7 @@ def _load_hourly_fut(conn, symbols: List[str], sim_ts=None) -> Dict[str, Optiona
     cc#218: point-in-time `AND ts <= cut` (no-op in live) so the ROW_NUMBER window ranks
     only bars up to the frozen clock; today=_today(sim_ts)."""
     today = _today(sim_ts)
-    cut = _now(sim_ts)
+    cut = _bar_cutoff(sim_ts)   # cc#218 D6: bars close at ts+5min -> sim sees ts<=sim_ts-5min
     out: Dict[str, Optional[float]] = {}
     try:
         with conn.cursor() as cur:
@@ -959,7 +970,7 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
     # (UTC session, market hours); _cut = _now(sim_ts) so intraday reads stop at the frozen
     # clock (no-op in live). Every CURRENT_DATE below routes through these.
     _d = _today(sim_ts)
-    _cut = _now(sim_ts)
+    _cut = _bar_cutoff(sim_ts)   # cc#218 D6: intraday reads stop at last CLOSED bar (sim_ts-5min)
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1931,7 +1942,7 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
     eod_history = _load_eod_history(conn, symbols, sim_ts=sim_ts)
     intraday    = _load_intraday_bars(conn, symbols, sim_ts=sim_ts)
     cmp_map     = _load_cmp(conn, sim_ts=sim_ts)
-    vol_cutoff  = _round_down_5min(_now(sim_ts))
+    vol_cutoff  = _round_down_5min(_bar_cutoff(sim_ts))   # cc#218 D6: today's cum-vol only up to last CLOSED bar
     vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff, sim_ts=sim_ts)
     hourly_map  = _load_hourly_fut(conn, symbols, sim_ts=sim_ts)   # cc#158: fyers_fut 5m hourly
 
