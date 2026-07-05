@@ -5,8 +5,11 @@ Layer-1 (raw) automated news ingestion. Backend only — no frontend surfaces.
 
   fetch_market_news(conn)   — domestic (ET/Moneycontrol/LiveMint) + global
                               (Reuters/Bloomberg) RSS → raw_news.
-  fetch_company_news(conn)  — Google News RSS for top-500 stocks by mcap
-                              (company_name from gvm_scores) → raw_news.
+
+Company-news Google fetch retired (cc#207 → cc#217): superseded by position_news.py
+(open V8 + SmartGain symbols only). The Google-News politeness helpers below
+(_google_news_url, _fetch_feed, BROWSER_UA, COMPANY_SLEEP*, RETRY_AFTER_CAP,
+MAX_CONSECUTIVE_429) are retained — position_news.py imports them.
 
 Dedup: url_hash = MD5(url), UNIQUE → INSERT ... ON CONFLICT DO NOTHING.
 description is hard-capped at 1000 chars (raw_news.description is VARCHAR(1000)).
@@ -39,14 +42,12 @@ DESC_MAX        = 1000     # raw_news.description is VARCHAR(1000)
 UNPOLISHED_MAX_HOURS       = 48
 POLISHED_MAX_DAYS          = 90     # cc#208: founder ask — store polished news 90 days
 UNPOLISHED_ALERT_THRESHOLD = 800
-COMPANY_LIMIT   = 500      # top-N stocks by mcap (founder call: coverage over caution)
-PER_COMPANY_MAX = 10       # cap entries stored per company (volume control)
 HTTP_TIMEOUT    = 12
 
-# cc#186: Google News RSS 429-rate-limited the Railway datacenter IP (500 cos x
-# 5 concurrent workers/day = classic flag). Mitigation: sequential (concurrency
-# 1), 2-4s jitter between companies, a browser User-Agent, honor Retry-After,
-# and abort a run early once the IP is clearly flagged (10 consecutive 429s).
+# cc#186: Google News RSS 429-rate-limited the Railway datacenter IP. Mitigation:
+# sequential (concurrency 1), 2-4s jitter, a browser User-Agent, honor Retry-After,
+# abort early once flagged (10 consecutive 429s). cc#217: the company-news fetch is
+# retired, but these politeness helpers live on for position_news.py.
 BROWSER_UA          = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 COMPANY_SLEEP_MIN   = 2.0
@@ -149,25 +150,19 @@ def _non_latin_dominant(text: str) -> bool:
     return non_latin / len(letters) > 0.30
 
 
-def _is_quality_article(headline: str, description: str, source_name: str = None,
-                        source_type: str = None) -> bool:
-    """Reject low-quality articles before they enter raw_news (task #54).
-
-    cc#206: Google News company RSS summaries are short (often a headline-repeat),
-    so the 80-char floor + 'desc == headline' gate rejected ~every company entry
-    (0/250 inserted). For source_type='company' the floor drops to 40 chars and a
-    headline-as-description is allowed (the caller falls back to the headline). All
-    the noise gates (junk/crypto/GMP/listicle/obituary/non-latin) still apply."""
+def _is_quality_article(headline: str, description: str, source_name: str = None) -> bool:
+    """Reject low-quality articles before they enter raw_news (task #54). cc#217: the
+    company-source relaxation (cc#206) is gone with the retired company fetch — only
+    domestic/global RSS reach this now."""
     h = headline or ""
     d = description or ""
-    is_company = (source_type == "company")
-    if len(d) < (40 if is_company else 80):
+    if len(d) < 80:
         return False
     if any(j in d for j in _JUNK_DESC):
         return False
     if any(j in h for j in _JUNK_HEAD):
         return False
-    if not is_company and h and d[:len(h)] == h:   # description is just the headline repeated
+    if h and d[:len(h)] == h:   # description is just the headline repeated
         return False
     if _non_latin_dominant(h) or _non_latin_dominant(d):
         return False
@@ -246,7 +241,7 @@ def _insert_rows(conn, rows):
         return stats
     with conn.cursor() as cur:
         for r in rows:
-            if not _is_quality_article(r[2], r[3], r[6], source_type=r[0]):   # r[0]=source_type r[2]=headline r[3]=desc r[6]=source_name
+            if not _is_quality_article(r[2], r[3], r[6]):   # r[2]=headline r[3]=desc r[6]=source_name
                 stats["quality_rejected"] += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
@@ -317,10 +312,6 @@ def _rows_from_entries(entries, source_type, source_name, symbol=None, cap=None)
             continue
         seen.add(h)
         desc = _truncate(e.get("summary") or e.get("description") or "")
-        # cc#206: company RSS summaries are frequently empty/short — fall back to the
-        # headline as the description so the entry clears the (relaxed) quality floor.
-        if source_type == "company" and len(desc) < 40:
-            desc = _truncate(title)
         rows.append((source_type, symbol, title[:2000],
                      desc, link, h, source_name[:50], _published_at(e)))
     return rows
@@ -350,118 +341,10 @@ def fetch_market_news(conn=None):
             conn.close()
 
 
-def _companies_ranked(conn, rank_from: int, rank_to: int):
-    """Companies ranked [rank_from, rank_to] by mcap (1-indexed, inclusive).
-    cc#186: supports the two-wave split (1-250 @ 06:30, 251-500 @ 07:15)."""
-    offset = max(0, rank_from - 1)
-    limit = max(0, rank_to - rank_from + 1)
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT symbol, company_name FROM gvm_scores
-            WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
-              AND company_name IS NOT NULL AND market_cap IS NOT NULL
-            ORDER BY market_cap DESC NULLS LAST
-            OFFSET %s LIMIT %s
-        """, (offset, limit))
-        return cur.fetchall()
-
-
 def _google_news_url(company_name: str) -> str:
     from urllib.parse import quote
     q = quote(f"{company_name} NSE stock")
     return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
-
-
-def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int = COMPANY_LIMIT):
-    """Google News RSS per company (mcap rank window, or an explicit symbol list).
-
-    cc#186: SEQUENTIAL (concurrency 1) with a browser UA + 2-4s jitter to stay
-    under Google News' datacenter-IP rate limit. FAIL-LOUD: counts 429/other/
-    empty responses, writes a per-run ops_log record EVERY run, alerts on a
-    weekday zero-insert, honors Retry-After, and aborts early once the IP is
-    clearly flagged (10 consecutive 429s) rather than hammering on."""
-    own = conn is None
-    if own:
-        conn = _conn()
-    try:
-        ensure_schema(conn)
-        if symbols:
-            with conn.cursor() as cur:
-                cur.execute("""SELECT symbol, company_name FROM gvm_scores
-                               WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)
-                                 AND symbol = ANY(%s)""", (list(symbols),))
-                companies = cur.fetchall()
-        else:
-            companies = _companies_ranked(conn, rank_from, rank_to)
-
-        if not companies:
-            return {"ok": True, "inserted": 0, "companies_done": 0, "note": "no companies"}
-
-        total = done = http_429 = http_other = empty = 0
-        parsed_entries = quality_rejected = dup_skipped = 0   # cc#206: per-wave funnel
-        consec_429 = 0
-        aborted = False
-        for sym, name in companies:
-            entries, status, bozo, retry_after = _fetch_feed(_google_news_url(name or sym), agent=BROWSER_UA)
-            if status == 429:
-                http_429 += 1
-                consec_429 += 1
-                if retry_after:
-                    try:
-                        time.sleep(min(float(retry_after), RETRY_AFTER_CAP))
-                    except (TypeError, ValueError):
-                        pass
-                if consec_429 >= MAX_CONSECUTIVE_429:
-                    aborted = True
-                    log.error(f"fetch_company_news: IP flagged — aborting after "
-                              f"{consec_429} consecutive 429s at {done}/{len(companies)}")
-                    done += 1
-                    break
-            else:
-                consec_429 = 0
-                if status is not None and status >= 400:
-                    http_other += 1
-                elif not entries:
-                    empty += 1
-                else:
-                    try:
-                        fs = _insert_rows(conn, _rows_from_entries(
-                            entries, "company", "Google News", symbol=sym, cap=PER_COMPANY_MAX))
-                        total += fs["inserted"]
-                        parsed_entries += fs["parsed"]
-                        quality_rejected += fs["quality_rejected"]
-                        dup_skipped += fs["dup_skipped"]
-                    except Exception as e:
-                        log.warning(f"company news {sym}: {e}")
-            done += 1
-            time.sleep(random.uniform(COMPANY_SLEEP_MIN, COMPANY_SLEEP_MAX))
-
-        # cc#206: full funnel so parse→insert is never a silent stage again.
-        stats = {"inserted": total, "companies_done": done, "companies_total": len(companies),
-                 "rank_from": rank_from, "rank_to": rank_to, "http_429": http_429,
-                 "http_other": http_other, "empty": empty, "aborted": aborted,
-                 "parsed_entries": parsed_entries, "quality_rejected": quality_rejected,
-                 "dup_skipped": dup_skipped}
-        _write_ops_log(conn, "news_fetch", "fetch_company_news", stats)
-
-        # fail-loud: a weekday run that inserts nothing is an outage, not a no-op.
-        ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
-        if total == 0 and ist.weekday() < 5:
-            _write_ops_log(conn, "alert", "company_news_zero",
-                           {"message": f"company news inserted 0 rows "
-                                       f"(429={http_429}, empty={empty}, other={http_other}, aborted={aborted})",
-                            "rank_from": rank_from, "rank_to": rank_to,
-                            "ist": ist.isoformat()})
-
-        log.info(f"fetch_company_news[{rank_from}-{rank_to}]: {total} new across {done} companies "
-                 f"| 429={http_429} empty={empty} other={http_other} aborted={aborted}")
-        return {"ok": True, **stats}
-    except Exception as e:
-        log.error(f"fetch_company_news: {e}")
-        return {"ok": False, "error": str(e)}
-    finally:
-        if own:
-            conn.close()
 
 
 def news_retention(conn=None):

@@ -10,13 +10,11 @@ Backend only; no HTML page routes (frontend surfaces are a separate task).
   GET  /api/news/live             — raw headlines grouped by source_type (CIO tab, task #40)
   GET  /api/news/top              — polished news by category for /news page (task #47)
   GET  /api/news/polished         — polished news, strict canonical-category filter (cc_task #79)
-  POST /api/admin/refresh_news    — background fetch (market + company), returns started
 """
 
 import os
-from typing import Optional
 import psycopg
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from scorr_auth import _is_authed
@@ -291,22 +289,5 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
             "count": len(articles), "category_counts": counts, "articles": articles}
 
 
-def _refresh_job(rank_from: int, rank_to: int, symbols):
-    """Runs both fetchers on its own connection (background thread)."""
-    import news_fetcher
-    with _conn() as conn:
-        news_fetcher.fetch_market_news(conn)
-        news_fetcher.fetch_company_news(conn, symbols=symbols, rank_from=rank_from, rank_to=rank_to)
-
-
-@router.post("/api/admin/refresh_news")
-def refresh_news(background_tasks: BackgroundTasks,
-                 rank_from: int = 1, rank_to: int = 500, symbols: Optional[str] = None):
-    """Trigger market + company news fetch in the background. cc#186: rank_from/
-    rank_to bound the company mcap window, or pass a comma-separated `symbols`
-    list — e.g. ?symbols=RELIANCE,TCS,INFY,HDFCBANK,SBIN for a quick 5-company
-    429-mitigation probe. Result lands in ops_log (category=news_fetch)."""
-    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] if symbols else None
-    background_tasks.add_task(_refresh_job, rank_from, rank_to, syms)
-    return {"status": "started", "jobs": ["fetch_market_news", "fetch_company_news"],
-            "company_window": {"rank_from": rank_from, "rank_to": rank_to, "symbols": syms}}
+# cc#217: /api/admin/refresh_news retired — its company-news fetch is superseded by
+# position_news.py (cc#207); market/global RSS runs scheduled at 06:00 IST (scheduler).
