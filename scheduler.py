@@ -345,6 +345,17 @@ def _premarket_writer_check():
     if _premarket_check_ran == today:
         return
     _premarket_check_ran = today
+    # cc#206: trading-day guard. The 09:10 readiness restart fired on SAT 04-Jul
+    # (v8_metrics "stale" 1045 min → forced restart on a non-trading day) — needless
+    # cold-boot risk (id=166 class). No live writer runs off-session, so skip
+    # weekends + NSE holidays entirely.
+    try:
+        import nse_holidays
+        if not nse_holidays.is_trading_day(today):
+            return
+    except Exception:
+        if _ist_now().weekday() >= 5:   # fallback: at least skip weekends
+            return
     try:
         age = _tick_age_minutes()
         if age is None or age > 60:

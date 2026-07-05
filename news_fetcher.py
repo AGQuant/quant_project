@@ -150,17 +150,25 @@ def _non_latin_dominant(text: str) -> bool:
     return non_latin / len(letters) > 0.30
 
 
-def _is_quality_article(headline: str, description: str, source_name: str = None) -> bool:
-    """Reject low-quality articles before they enter raw_news (task #54)."""
+def _is_quality_article(headline: str, description: str, source_name: str = None,
+                        source_type: str = None) -> bool:
+    """Reject low-quality articles before they enter raw_news (task #54).
+
+    cc#206: Google News company RSS summaries are short (often a headline-repeat),
+    so the 80-char floor + 'desc == headline' gate rejected ~every company entry
+    (0/250 inserted). For source_type='company' the floor drops to 40 chars and a
+    headline-as-description is allowed (the caller falls back to the headline). All
+    the noise gates (junk/crypto/GMP/listicle/obituary/non-latin) still apply."""
     h = headline or ""
     d = description or ""
-    if len(d) < 80:
+    is_company = (source_type == "company")
+    if len(d) < (40 if is_company else 80):
         return False
     if any(j in d for j in _JUNK_DESC):
         return False
     if any(j in h for j in _JUNK_HEAD):
         return False
-    if h and d[:len(h)] == h:          # description is just the headline repeated
+    if not is_company and h and d[:len(h)] == h:   # description is just the headline repeated
         return False
     if _non_latin_dominant(h) or _non_latin_dominant(d):
         return False
@@ -225,18 +233,22 @@ def ensure_schema(conn):
     conn.commit()
 
 
-def _insert_rows(conn, rows) -> int:
+def _insert_rows(conn, rows):
     """rows = list of (source_type, symbol, headline, description, url, url_hash,
-    source_name, published_at). Dedups on url_hash. Returns inserted count.
-    Low-quality rows are skipped at ingest (task #54)."""
+    source_name, published_at). Dedups on url_hash. Low-quality rows are skipped at
+    ingest (task #54).
+
+    cc#206: returns a FUNNEL dict {parsed, quality_rejected, dup_skipped, inserted}
+    so no stage is ever silent again. url_hash is globally UNIQUE, so dup_skipped
+    counts BOTH intra-source repeats and cross-source-type collisions (a company URL
+    already present as a domestic row) — the counter tells us which stage kills rows."""
+    stats = {"parsed": len(rows), "quality_rejected": 0, "dup_skipped": 0, "inserted": 0}
     if not rows:
-        return 0
-    inserted = 0
-    skipped = 0
+        return stats
     with conn.cursor() as cur:
         for r in rows:
-            if not _is_quality_article(r[2], r[3], r[6]):   # r[2]=headline, r[3]=desc, r[6]=source_name
-                skipped += 1
+            if not _is_quality_article(r[2], r[3], r[6], source_type=r[0]):   # r[0]=source_type r[2]=headline r[3]=desc r[6]=source_name
+                stats["quality_rejected"] += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
             cur.execute("""
@@ -245,11 +257,14 @@ def _insert_rows(conn, rows) -> int:
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (url_hash) DO NOTHING
             """, r)
-            inserted += cur.rowcount
+            if cur.rowcount:
+                stats["inserted"] += 1
+            else:
+                stats["dup_skipped"] += 1
     conn.commit()
-    if skipped:
-        log.info(f"_insert_rows: skipped {skipped} low-quality article(s)")
-    return inserted
+    if stats["quality_rejected"]:
+        log.info(f"_insert_rows: skipped {stats['quality_rejected']} low-quality article(s)")
+    return stats
 
 
 def _fetch_feed(url: str, agent: str = None):
@@ -302,9 +317,13 @@ def _rows_from_entries(entries, source_type, source_name, symbol=None, cap=None)
         if h in seen:
             continue
         seen.add(h)
+        desc = _truncate(e.get("summary") or e.get("description") or "")
+        # cc#206: company RSS summaries are frequently empty/short — fall back to the
+        # headline as the description so the entry clears the (relaxed) quality floor.
+        if source_type == "company" and len(desc) < 40:
+            desc = _truncate(title)
         rows.append((source_type, symbol, title[:2000],
-                     _truncate(e.get("summary") or e.get("description") or ""),
-                     link, h, source_name[:50], _published_at(e)))
+                     desc, link, h, source_name[:50], _published_at(e)))
     return rows
 
 
@@ -319,7 +338,7 @@ def fetch_market_news(conn=None):
         for source_type, feeds in (("domestic", RSS_DOMESTIC), ("global", RSS_GLOBAL)):
             for name, url in feeds:
                 rows = _rows_from_entries(_parse_feed(url), source_type, name)
-                n = _insert_rows(conn, rows)
+                n = _insert_rows(conn, rows)["inserted"]
                 total += n
                 by_src[name] = n
         log.info(f"fetch_market_news: {total} new | {by_src}")
@@ -380,6 +399,7 @@ def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int
             return {"ok": True, "inserted": 0, "companies_done": 0, "note": "no companies"}
 
         total = done = http_429 = http_other = empty = 0
+        parsed_entries = quality_rejected = dup_skipped = 0   # cc#206: per-wave funnel
         consec_429 = 0
         aborted = False
         for sym, name in companies:
@@ -406,16 +426,23 @@ def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int
                     empty += 1
                 else:
                     try:
-                        total += _insert_rows(conn, _rows_from_entries(
+                        fs = _insert_rows(conn, _rows_from_entries(
                             entries, "company", "Google News", symbol=sym, cap=PER_COMPANY_MAX))
+                        total += fs["inserted"]
+                        parsed_entries += fs["parsed"]
+                        quality_rejected += fs["quality_rejected"]
+                        dup_skipped += fs["dup_skipped"]
                     except Exception as e:
                         log.warning(f"company news {sym}: {e}")
             done += 1
             time.sleep(random.uniform(COMPANY_SLEEP_MIN, COMPANY_SLEEP_MAX))
 
+        # cc#206: full funnel so parse→insert is never a silent stage again.
         stats = {"inserted": total, "companies_done": done, "companies_total": len(companies),
                  "rank_from": rank_from, "rank_to": rank_to, "http_429": http_429,
-                 "http_other": http_other, "empty": empty, "aborted": aborted}
+                 "http_other": http_other, "empty": empty, "aborted": aborted,
+                 "parsed_entries": parsed_entries, "quality_rejected": quality_rejected,
+                 "dup_skipped": dup_skipped}
         _write_ops_log(conn, "news_fetch", "fetch_company_news", stats)
 
         # fail-loud: a weekday run that inserts nothing is an outage, not a no-op.
