@@ -366,40 +366,55 @@ def _sell_overbought_signals_raw(conn) -> Dict[str, Dict]:
 
 
 # ============================================================ HELPERS
+# cc#215 / PRICING: equity only (founder 05-Jul). V8 paper entries are equity/CMP-priced,
+# so every exit-comparison close MUST come from the SAME series — fyers_eq ONLY. Mixing
+# fyers_fut (a futures close carries a basis offset vs the equity entry) produced wrong
+# exits near target/SL (cc#140 class bug; the writer's _load_intraday_bars was already
+# eq-pinned). If a symbol has zero fyers_eq bars for the day we return None → caller skips
+# that symbol this pass (fail-safe: never cross-series compare — FALLBACK_ARCHITECTURE_PRINCIPLE_V1).
 def _two_latest_closes(conn, sym, d):
     with conn.cursor() as cur:
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
+              AND timeframe='5m' AND source='fyers_eq'
             ORDER BY ts DESC LIMIT 2
         """, (sym, d))
         rows = cur.fetchall()
-    if len(rows) < 2: return None
+    if len(rows) < 2:
+        if not rows:
+            log.warning(f"_two_latest_closes: no fyers_eq bars for {sym} on {d} — skipping (no cross-series fallback)")
+        return None
     return float(rows[1][0]), float(rows[0][0]), rows[0][1]
 
 def _latest_close(conn, sym, d):
-    """Single most-recent 5-min close for d (used by sell_overbought entry)."""
+    """Single most-recent 5-min close for d (used by sell_overbought entry).
+    PRICING: equity only (founder 05-Jul) — fyers_eq source only."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
+              AND timeframe='5m' AND source='fyers_eq'
             ORDER BY ts DESC LIMIT 1
         """, (sym, d))
         r = cur.fetchone()
-    if not r: return None
+    if not r:
+        log.warning(f"_latest_close: no fyers_eq bars for {sym} on {d} — skipping (no cross-series fallback)")
+        return None
     return float(r[0]), r[1]
 
 def _first_bar(conn, sym, d):
+    """PRICING: equity only (founder 05-Jul) — fyers_eq source only."""
     with conn.cursor() as cur:
         cur.execute("""
             SELECT open, close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
+              AND timeframe='5m' AND source='fyers_eq'
             ORDER BY ts ASC LIMIT 1
         """, (sym, d))
         r = cur.fetchone()
+    if not r:
+        log.warning(f"_first_bar: no fyers_eq bars for {sym} on {d} — skipping (no cross-series fallback)")
     return (float(r[0]) if r and r[0] is not None else (float(r[1]) if r else None),
             r[2] if r else None)
 
