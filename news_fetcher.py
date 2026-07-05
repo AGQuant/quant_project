@@ -7,7 +7,8 @@ Layer-1 (raw) automated news ingestion. Backend only — no frontend surfaces.
                               (Reuters/Bloomberg) RSS → raw_news.
   fetch_company_news(conn)  — Google News RSS for top-500 stocks by mcap
                               (company_name from gvm_scores) → raw_news.
-  cleanup_old_news(conn)    — 30-day rolling delete (CASCADEs polished_news).
+  cleanup_old_news(conn)    — legacy blanket rolling delete (dormant; news_retention
+                              is the live 01:50 job). cc#208: 90-day (was 30).
 
 Dedup: url_hash = MD5(url), UNIQUE → INSERT ... ON CONFLICT DO NOTHING.
 description is hard-capped at 1000 chars (raw_news.description is VARCHAR(1000)).
@@ -33,12 +34,13 @@ log = logging.getLogger("scorr.news")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 DESC_MAX        = 1000     # raw_news.description is VARCHAR(1000)
-RETENTION_DAYS  = 30
+RETENTION_DAYS  = 90       # cc#208: legacy blanket purge kept in sync (dormant; news_retention is the live job)
 # cc#192: two-tier news retention — unpolished raw_news dies at 48h, polished
-# (and its raw parent) lives 30 days. Backlog above the alert threshold means
-# ingest or the polish step broke upstream.
+# (and its raw parent) lives 90 days (cc#208: 30 -> 90, all categories incl AI
+# Editorial). Backlog above the alert threshold means ingest or the polish step
+# broke upstream.
 UNPOLISHED_MAX_HOURS       = 48
-POLISHED_MAX_DAYS          = 30
+POLISHED_MAX_DAYS          = 90     # cc#208: founder ask — store polished news 90 days
 UNPOLISHED_ALERT_THRESHOLD = 800
 COMPANY_LIMIT   = 500      # top-N stocks by mcap (founder call: coverage over caution)
 PER_COMPANY_MAX = 10       # cap entries stored per company (volume control)
@@ -466,7 +468,8 @@ def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int
 
 
 def cleanup_old_news(conn=None):
-    """30-day rolling delete on raw_news (CASCADE removes matching polished_news).
+    """Blanket rolling delete on raw_news (CASCADE removes matching polished_news).
+    cc#208: RETENTION_DAYS now 90 (was 30).
     cc#192: superseded in the scheduler by news_retention(); kept for any manual/
     admin use."""
     own = conn is None
@@ -495,8 +498,9 @@ def news_retention(conn=None):
       (1) UNPOLISHED: delete raw_news with NO polished_news child once it is older
           than 48h (by COALESCE(published_at, fetched_at) — publish time when
           known, else ingest time).
-      (2) POLISHED: delete polished_news older than 30 days AND its raw_news parent
-          (delete the parent; the FK CASCADE removes the polished child).
+      (2) POLISHED: delete polished_news older than 90 days (cc#208: 30 -> 90, all
+          categories incl AI Editorial) AND its raw_news parent (delete the parent;
+          the FK CASCADE removes the polished child).
 
     Writes an ops_log(category=news_retention) record every run with both counts,
     and alerts if the surviving unpolished backlog is implausibly large (>800 =>
@@ -514,7 +518,7 @@ def news_retention(conn=None):
                 % int(UNPOLISHED_MAX_HOURS))
             deleted_unpolished = cur.rowcount
 
-            # (2) polished older than 30 days -> count, then delete raw parent (CASCADE)
+            # (2) polished older than 90 days -> count, then delete raw parent (CASCADE)
             cur.execute("SELECT COUNT(*) FROM polished_news WHERE polished_at < NOW() - INTERVAL '%s days'"
                         % int(POLISHED_MAX_DAYS))
             deleted_polished = cur.fetchone()[0] or 0
@@ -531,7 +535,7 @@ def news_retention(conn=None):
         conn.commit()
 
         stats = {"deleted_unpolished_48h": deleted_unpolished,
-                 "deleted_polished_30d": deleted_polished,
+                 "deleted_polished_90d": deleted_polished,   # cc#208: 30 -> 90
                  "unpolished_remaining": unpolished_remaining}
         _write_ops_log(conn, "news_retention", "news_retention", stats)
         if unpolished_remaining > UNPOLISHED_ALERT_THRESHOLD:
@@ -541,7 +545,7 @@ def news_retention(conn=None):
                                        f"polish likely broke",
                             "unpolished_remaining": unpolished_remaining})
         log.info(f"news_retention: -{deleted_unpolished} unpolished(48h), "
-                 f"-{deleted_polished} polished(30d), {unpolished_remaining} unpolished remain")
+                 f"-{deleted_polished} polished(90d), {unpolished_remaining} unpolished remain")
         return {"ok": True, **stats}
     except Exception as e:
         log.error(f"news_retention: {e}")
