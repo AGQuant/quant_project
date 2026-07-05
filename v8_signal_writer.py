@@ -68,7 +68,7 @@ import pandas as pd
 import numpy as np
 import psycopg
 import os
-import nse_holidays   # cc#211: canonical trading-day guard (weekday + NSE holiday list)
+import guards          # cc#217 P2: canonical trading-day gate + entry-gate + guard primitives (sim-aware)
 from sim_clock import _now, _today   # cc#218: injectable clock (sim_ts=None => live)
 
 log = logging.getLogger("scorr.signal_writer")
@@ -98,7 +98,7 @@ def _assert_no_nontrading_metrics(conn) -> None:
             cur.execute("SELECT MAX(score_date) FROM v8_metrics")
             row = cur.fetchone()
         latest = row[0] if row else None
-        if latest and not nse_holidays.is_trading_day(latest):
+        if latest and not guards.is_trading_day(latest):
             _ops_log(conn, "alert", "nontrading_metrics_row",
                      {"message": f"v8_metrics has rows dated {latest} which is NOT a trading day "
                                  f"(weekend/holiday) — write gate bypassed somewhere",
@@ -1201,54 +1201,43 @@ def _conflict_ok(conn, sym: str, paper_side: str, basket: str, d: date, cmp: flo
         return False
 
 
+def _entry_guards(conn, sym: str, paper_side: str, basket: str, d: date, cmp: float,
+                  sim_ts=None, basket_scoped: bool = False) -> bool:
+    """cc#217 P2: shared pre-entry gate for all three auto-entry fns — the ~70%-duplicated
+    guard block. In order (identical to the old inline sequence): earnings blackout ->
+    same-side OPEN -> traded-today (basket-scoped for the SO/S1B dedicated pools, generic
+    trades+positions for standard baskets) -> founder-locked opposite-side conflict policy.
+    Returns True to PROCEED, False to SKIP. Fail-closed (any guard-query error => SKIP)."""
+    try:
+        if guards.blackout(conn, sym, _today(sim_ts)):
+            log.debug(f"auto_paper {sym}: skipped -- blackout")
+            return False
+        if guards.has_open(conn, sym, paper_side):
+            return False
+        if guards.traded_today(conn, sym, paper_side, d, basket=(basket if basket_scoped else None)):
+            return False
+    except Exception as e:
+        log.warning(f"entry guards {sym} {paper_side}: {e} — skipping entry (fail-closed)")
+        return False
+    # opposite-side conflict policy (block same-day / CONFLICT_EXIT next-day); own try inside
+    return _conflict_ok(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts)
+
+
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
                        pv: Optional[dict], d: date, gate_fails: int, sim_ts=None):
     if not cmp or not pv:
         return
 
-    now_ist  = _now(sim_ts)   # cc#218: sim_ts=None => naive datetime.now(IST); gate logic identical
-    mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
-    mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
-    if not (mkt_open <= now_ist <= mkt_cut):
+    now_ist = _now(sim_ts)   # cc#218: sim_ts=None => naive datetime.now(IST); gate logic identical
+    if not guards.in_entry_window(now_ist):   # cc#217 P2: was inline 09:15-15:20 block
         log.debug(f"auto_paper {sym}: skipped -- outside market hours {now_ist.strftime('%H:%M')} IST")
         return
 
     paper_side = _PAPER_SIDE_MAP.get(side, "LONG")
     pp, r1, s1 = pv["pp"], pv["r1"], pv["s1"]
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT 1 FROM earnings_calendar
-                WHERE UPPER(ticker)=%s
-                  AND ex_date IN (%s, %s + INTERVAL '1 day')
-                LIMIT 1
-            """, (sym.upper(), _today(sim_ts), _today(sim_ts)))
-            if cur.fetchone():
-                log.debug(f"auto_paper {sym}: skipped -- blackout")
-                return
-    except Exception as e:
-        log.warning(f"auto_paper blackout check {sym}: {e}"); return
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND status='OPEN'",
-                        (sym, paper_side))
-            if cur.fetchone():
-                return
-            cur.execute("SELECT 1 FROM v8_paper_trades WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1",
-                        (sym, paper_side, d))
-            if cur.fetchone():
-                return
-            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side=%s AND entry_ts::date=%s LIMIT 1",
-                        (sym, paper_side, d))
-            if cur.fetchone():
-                return
-    except Exception as e:
-        log.warning(f"auto_paper guard check {sym}: {e}"); return
-
-    # cc#214: opposite-side conflict policy (block same-day / CONFLICT_EXIT next-day)
-    if not _conflict_ok(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts):
+    # cc#217 P2: shared blackout + same-side-open + traded-today (generic) + conflict policy
+    if not _entry_guards(conn, sym, paper_side, basket, d, cmp, sim_ts=sim_ts):
         return
 
     try:
@@ -1313,40 +1302,12 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
     if not cmp or not pv:
         return
 
-    now_ist  = _now(sim_ts)   # cc#218
-    mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
-    mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
-    if not (mkt_open <= now_ist <= mkt_cut):
+    now_ist = _now(sim_ts)   # cc#218
+    if not guards.in_entry_window(now_ist):   # cc#217 P2
         return
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT 1 FROM earnings_calendar
-                WHERE UPPER(ticker)=%s
-                  AND ex_date IN (%s, %s + INTERVAL '1 day')
-                LIMIT 1
-            """, (sym.upper(), _today(sim_ts), _today(sim_ts)))
-            if cur.fetchone():
-                return
-    except Exception as e:
-        log.warning(f"auto_paper_so blackout {sym}: {e}"); return
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side='SHORT' AND status='OPEN'",
-                        (sym,))
-            if cur.fetchone():
-                return
-            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side='SHORT' AND basket='sell_overbought' AND entry_ts::date=%s LIMIT 1",
-                        (sym, d))
-            if cur.fetchone():
-                return
-    except Exception as e:
-        log.warning(f"auto_paper_so guard {sym}: {e}"); return
-
-    # cc#214: opposite-side conflict policy (an open LONG blocks/flattens before a SHORT)
-    if not _conflict_ok(conn, sym, "SHORT", "sell_overbought", d, cmp, sim_ts=sim_ts):
+    # cc#217 P2: shared blackout + same-side-open + traded-today (SO pool) + conflict policy
+    if not _entry_guards(conn, sym, "SHORT", "sell_overbought", d, cmp, sim_ts=sim_ts, basket_scoped=True):
         return
 
     so_cap = _so_slots(gate_fails)
@@ -1407,40 +1368,12 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
     if not cmp:
         return
 
-    now_ist  = _now(sim_ts)   # cc#218
-    mkt_open = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
-    mkt_cut  = now_ist.replace(hour=15, minute=20, second=0, microsecond=0)
-    if not (mkt_open <= now_ist <= mkt_cut):
+    now_ist = _now(sim_ts)   # cc#218
+    if not guards.in_entry_window(now_ist):   # cc#217 P2
         return
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT 1 FROM earnings_calendar
-                WHERE UPPER(ticker)=%s
-                  AND ex_date IN (%s, %s + INTERVAL '1 day')
-                LIMIT 1
-            """, (sym.upper(), _today(sim_ts), _today(sim_ts)))
-            if cur.fetchone():
-                return
-    except Exception as e:
-        log.warning(f"auto_paper_s1b blackout {sym}: {e}"); return
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM v8_paper_positions WHERE symbol=%s AND side='LONG' AND status='OPEN'", (sym,))
-            if cur.fetchone():
-                return
-            cur.execute("""SELECT 1 FROM v8_paper_positions
-                WHERE symbol=%s AND side='LONG' AND basket='buy_s1_bounce'
-                AND entry_ts::date=%s LIMIT 1""", (sym, d))
-            if cur.fetchone():
-                return
-    except Exception as e:
-        log.warning(f"auto_paper_s1b guard {sym}: {e}"); return
-
-    # cc#214: opposite-side conflict policy (an open SHORT blocks/flattens before a LONG)
-    if not _conflict_ok(conn, sym, "LONG", "buy_s1_bounce", d, cmp, sim_ts=sim_ts):
+    # cc#217 P2: shared blackout + same-side-open + traded-today (S1B pool) + conflict policy
+    if not _entry_guards(conn, sym, "LONG", "buy_s1_bounce", d, cmp, sim_ts=sim_ts, basket_scoped=True):
         return
 
     s1b_cap = _s1b_slots(gate_fails)
@@ -1920,7 +1853,7 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
     # scheduler's market-hours wrapper — that is exactly how Sat 04-Jul wrote 212 junk
     # v8_metrics rows. Gating LINE 1 stops non-trading-day writes for ALL present and
     # future callers, without patching each one. No EOD fallback on weekends either.
-    if not nse_holidays.is_trading_day(today):
+    if not guards.is_trading_day(today):
         log.info(f"signal_writer: {today} is not a trading day — skipping (no v8_metrics write)")
         _ops_log(conn, "info", "signal_writer_skip_nontrading",
                  {"message": f"signal writer invoked on non-trading day {today} — skipped",
