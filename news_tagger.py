@@ -74,10 +74,13 @@ def _core(name):
 def build_index(conn):
     """Return [(symbol, [compiled_regex, ...])] for every universe symbol with a usable
     name/code signature. Built from screener_raw (company_name + nse_code)."""
+    # screener_raw keys on nse_code (the NSE ticker == the symbol company pages query);
+    # it carries the full equity universe's company_name. (futures_universe is a subset
+    # of the same tickers, so nse_code coverage already spans it.)
     rows = []
     with conn.cursor() as cur:
-        cur.execute("""SELECT DISTINCT ON (symbol) symbol, company_name, nse_code
-                       FROM screener_raw WHERE symbol IS NOT NULL""")
+        cur.execute("""SELECT DISTINCT ON (nse_code) nse_code AS symbol, company_name, nse_code
+                       FROM screener_raw WHERE nse_code IS NOT NULL AND nse_code <> ''""")
         rows = cur.fetchall()
     index = []
     for sym, cname, nse in rows:
