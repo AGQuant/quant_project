@@ -1803,22 +1803,23 @@ def run_live_signal_writer(conn) -> dict:
     hourly_map  = _load_hourly_fut(conn, symbols)   # cc#158: fyers_fut 5m hourly
 
     if not intraday:
-        log.warning("signal_writer: no intraday bars -- fyers_feed not running, using EOD fallback")
-        all_metrics = []
-        for sym in symbols:
-            eod  = eod_metrics.get(sym, {})
-            cmp  = cmp_map.get(sym)
-            c2d  = eod_history.get(sym, {}).get("close_2d_ago")
-            row  = dict(eod)
-            row["symbol"]  = sym
-            row["mom_2d"]  = (cmp / c2d - 1) * 100 if (cmp and c2d and c2d > 0) else eod.get("eod_mom_2d")
-            row["_cmp"]    = cmp
-            row["hourly_pct"] = hourly_map.get(sym)   # cc#158 (NULL in EOD fallback)
-            all_metrics.append(row)
-        _write_qualified(conn, all_metrics, today)
+        # cc#212: FAIL LOUD — the old eod_fallback branch synthesized signals from frozen
+        # EOD metrics + cmp_prices and ran _write_qualified (incl auto paper entries). But
+        # when the feed is down cmp_prices is ALSO stale, so entries could fire at
+        # yesterday's prices and poison the paper track record. Founder decision (05-Jul):
+        # stop + alert on missing live data, never silently degrade to stale. cc#211's
+        # line-1 gate guarantees we only reach here on a genuine trading day, so this alert
+        # is a clean feed-outage signal. Recovery = the feed watchdogs + 09:10 stall-check.
+        # Heartbeat is still written so the watchdog can see the writer itself is alive.
+        log.error("signal_writer: no intraday bars on a trading day — feed down; SKIPPING "
+                  "(no metrics upsert, no quals, no paper entries)")
+        _ops_log(conn, "alert", "writer_no_intraday_bars",
+                 {"message": "signal writer found zero intraday bars on a trading day — "
+                             "fyers_feed likely down; signal generation skipped to avoid "
+                             "stale-price paper entries",
+                  "date": str(today)})
         _write_heartbeat(conn)
-        _assert_no_nontrading_metrics(conn)   # cc#211
-        return {"source": "eod_fallback", "msg": "no intraday bars"}
+        return {"skipped": "no_intraday_bars", "date": str(today)}
 
     computed: Dict[str, dict] = {}
     no_bar = 0
