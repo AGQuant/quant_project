@@ -7,8 +7,6 @@ Layer-1 (raw) automated news ingestion. Backend only — no frontend surfaces.
                               (Reuters/Bloomberg) RSS → raw_news.
   fetch_company_news(conn)  — Google News RSS for top-500 stocks by mcap
                               (company_name from gvm_scores) → raw_news.
-  cleanup_old_news(conn)    — legacy blanket rolling delete (dormant; news_retention
-                              is the live 01:50 job). cc#208: 90-day (was 30).
 
 Dedup: url_hash = MD5(url), UNIQUE → INSERT ... ON CONFLICT DO NOTHING.
 description is hard-capped at 1000 chars (raw_news.description is VARCHAR(1000)).
@@ -34,7 +32,6 @@ log = logging.getLogger("scorr.news")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 DESC_MAX        = 1000     # raw_news.description is VARCHAR(1000)
-RETENTION_DAYS  = 90       # cc#208: legacy blanket purge kept in sync (dormant; news_retention is the live job)
 # cc#192: two-tier news retention — unpolished raw_news dies at 48h, polished
 # (and its raw parent) lives 90 days (cc#208: 30 -> 90, all categories incl AI
 # Editorial). Backlog above the alert threshold means ingest or the polish step
@@ -461,30 +458,6 @@ def fetch_company_news(conn=None, symbols=None, rank_from: int = 1, rank_to: int
         return {"ok": True, **stats}
     except Exception as e:
         log.error(f"fetch_company_news: {e}")
-        return {"ok": False, "error": str(e)}
-    finally:
-        if own:
-            conn.close()
-
-
-def cleanup_old_news(conn=None):
-    """Blanket rolling delete on raw_news (CASCADE removes matching polished_news).
-    cc#208: RETENTION_DAYS now 90 (was 30).
-    cc#192: superseded in the scheduler by news_retention(); kept for any manual/
-    admin use."""
-    own = conn is None
-    if own:
-        conn = _conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM raw_news WHERE fetched_at < NOW() - INTERVAL '%s days'"
-                        % int(RETENTION_DAYS))
-            deleted = cur.rowcount
-        conn.commit()
-        log.info(f"cleanup_old_news: deleted {deleted} rows (>{RETENTION_DAYS}d)")
-        return {"ok": True, "deleted": deleted}
-    except Exception as e:
-        log.error(f"cleanup_old_news: {e}")
         return {"ok": False, "error": str(e)}
     finally:
         if own:
