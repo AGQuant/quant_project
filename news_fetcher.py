@@ -136,7 +136,10 @@ _BLOOMBERG_REQUIRED_KEYWORDS = (
 #    quote-of-the-day, broker-recommendation listicles, non-market obituaries).
 _DOM_CRYPTO_RE      = re.compile(r"bitcoin|crypto|ethereum|solana|xrp|nft|web3")
 _DOM_GMP_RE         = re.compile(r"gmp|grey market premium|grey market")
-_DOM_LISTICLE_RE    = re.compile(r"stocks to buy below|buy or sell:|f&o talk|concurrent gainers|multibagger stock")
+# cc#217: 'multibagger stock' intentionally NOT blocked — founder ruling (05-Jul): multibagger
+# idea-listicles are useful signal for a research platform, not junk. Other broker-tip listicle
+# formats stay blocked.
+_DOM_LISTICLE_RE    = re.compile(r"stocks to buy below|buy or sell:|f&o talk|concurrent gainers")
 _DOM_OBIT_RE        = re.compile(r"dies at \d+|passes away|death of")
 _DOM_OBIT_MARKET_RE = re.compile(r"market|stock|equity|share|nse|bse|sensex|nifty")
 
