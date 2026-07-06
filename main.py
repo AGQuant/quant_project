@@ -817,7 +817,22 @@ def env_check(x_admin_token: Optional[str] = Header(None)):
 @app.post("/api/v8/run_signal_writer")
 def v8_run_signal_writer(x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token)
-    with get_conn() as conn: return v8_signal_writer.run_live_signal_writer(conn)
+    # cc#230 hotfix: capture the traceback instead of letting it escape as a non-JSON 500
+    # (writer dead since 03-Jul with an unhandled exception; Railway logs not queryable).
+    try:
+        with get_conn() as conn: return v8_signal_writer.run_live_signal_writer(conn)
+    except Exception as e:
+        import traceback as _tb
+        tb = _tb.format_exc()
+        try:
+            with get_conn() as _c, _c.cursor() as _cur:
+                _cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                             "VALUES (CURRENT_DATE, NOW(), 'alert', 'signal_writer_crash', %s::jsonb)",
+                             (json.dumps({"error": str(e), "tb": tb.splitlines()[-12:]}),))
+                _c.commit()
+        except Exception:
+            pass
+        return {"error": str(e), "traceback": tb.splitlines()[-12:]}
 
 @app.post("/api/v8/bt7_run")          # cc#218: BT7 parity harness — walk a day into the sandbox
 def v8_bt7_run(date: str, label: str, x_admin_token: Optional[str] = Header(None)):

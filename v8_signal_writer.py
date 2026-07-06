@@ -1957,19 +1957,37 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
 
     computed: Dict[str, dict] = {}
     no_bar = 0
+    compute_err = 0
+    err_sample = None
     for sym in symbols:
         bar  = intraday.get(sym)
         hist = eod_history.get(sym)
         if not bar or not hist or len(hist["closes"]) < 5:
             no_bar += 1
             continue
-        eod = eod_metrics.get(sym, {})
-        cmp = cmp_map.get(sym)
-        m   = _compute_live_metrics(hist, bar, cmp, eod, vol_tn_map.get(sym))
-        m["symbol"] = sym
-        m["_cmp"]   = cmp if cmp else bar["close"]
-        m["hourly_pct"] = hourly_map.get(sym)   # cc#158: fyers_fut 5m hourly
-        computed[sym] = m
+        # cc#230: per-symbol guard — one bad symbol must NOT crash the whole writer (the
+        # 03-Jul outage: an unhandled exception here left v8_metrics dead for 3 days).
+        try:
+            eod = eod_metrics.get(sym, {})
+            cmp = cmp_map.get(sym)
+            m   = _compute_live_metrics(hist, bar, cmp, eod, vol_tn_map.get(sym))
+            m["symbol"] = sym
+            m["_cmp"]   = cmp if cmp else bar["close"]
+            m["hourly_pct"] = hourly_map.get(sym)   # cc#158: fyers_fut 5m hourly
+            computed[sym] = m
+        except Exception as _ce:
+            compute_err += 1
+            if err_sample is None:
+                err_sample = f"{sym}: {_ce!r}"
+            if compute_err <= 3:
+                log.error(f"compute_live_metrics {sym}: {_ce}", exc_info=True)
+    if compute_err:
+        log.error(f"signal_writer: {compute_err} symbols failed compute (sample {err_sample})")
+        try:
+            _ops_log(conn, "alert", "signal_writer_compute_errors",
+                     {"count": compute_err, "sample": err_sample, "date": str(today)})
+        except Exception:
+            pass
 
     _add_sector_aggregates(computed, eod_metrics)
 
