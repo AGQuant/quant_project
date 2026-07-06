@@ -1480,14 +1480,13 @@ def _s1b_funnel_stages():
         cur.execute("""
             WITH td AS (
                 SELECT symbol,
-                    (SELECT open  FROM intraday_prices i2
-                     WHERE i2.symbol=ip.symbol AND i2.ts::date=CURRENT_DATE
-                     ORDER BY ts ASC LIMIT 1)  AS day_open,
-                    (SELECT close FROM intraday_prices i3
-                     WHERE i3.symbol=ip.symbol AND i3.ts::date=CURRENT_DATE
-                     ORDER BY ts DESC LIMIT 1) AS live_close,
-                    MIN(low) FILTER (WHERE ts::date=CURRENT_DATE) AS today_low
-                FROM intraday_prices ip WHERE ts::date=CURRENT_DATE GROUP BY symbol
+                    -- cc#236: fyers_eq pinned + array_agg first/last, mirroring the engine
+                    -- (_load_intraday_bars, cc#140). Was source-UNFILTERED -> mixed eq/fut/yahoo,
+                    -- so the funnel disagreed with what the writer actually qualified.
+                    (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
+                    (array_agg(close ORDER BY ts DESC))[1] AS live_close,
+                    MIN(low) AS today_low
+                FROM intraday_prices WHERE ts::date=CURRENT_DATE AND source='fyers_eq' GROUP BY symbol
             ),
             hist AS (
                 SELECT symbol,
@@ -1642,14 +1641,12 @@ def s1b_stock_passcount():
             cur.execute("""
                 WITH td AS (
                     SELECT symbol,
-                        (SELECT open  FROM intraday_prices i2
-                         WHERE i2.symbol=ip.symbol AND i2.ts::date=CURRENT_DATE
-                         ORDER BY ts ASC LIMIT 1)  AS day_open,
-                        (SELECT close FROM intraday_prices i3
-                         WHERE i3.symbol=ip.symbol AND i3.ts::date=CURRENT_DATE
-                         ORDER BY ts DESC LIMIT 1) AS live_close,
-                        MIN(low) FILTER (WHERE ts::date=CURRENT_DATE) AS today_low
-                    FROM intraday_prices ip WHERE ts::date=CURRENT_DATE GROUP BY symbol
+                        -- cc#236: fyers_eq pinned + array_agg first/last (engine parity,
+                        -- mirrors _load_intraday_bars cc#140). Was source-UNFILTERED.
+                        (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
+                        (array_agg(close ORDER BY ts DESC))[1] AS live_close,
+                        MIN(low) AS today_low
+                    FROM intraday_prices WHERE ts::date=CURRENT_DATE AND source='fyers_eq' GROUP BY symbol
                 ),
                 hist AS (
                     SELECT symbol,
