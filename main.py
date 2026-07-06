@@ -1019,18 +1019,34 @@ def _heal_morning_gaps(symbols=None):
     healed,skipped,empties,errors,inserted = 0,0,0,[],0
     for sym in syms:
         try:
-            row = api_query("SELECT MIN(ts) AS mn, COUNT(*) AS cnt FROM intraday_prices WHERE symbol=%s AND ts::date=%s AND timeframe='5m' AND source='fyers_eq'", (sym,today), single=True)   # cc#229: heal the 5m fyers_eq series (V8-read), not legacy 1m
-            earliest = row.get("mn") if isinstance(row,dict) else None; cnt = row.get("cnt",0) if isinstance(row,dict) else 0
-            if cnt==0: gap_from = open_dt.replace(tzinfo=None)
-            elif earliest is not None and earliest>open_dt.replace(tzinfo=None)+timedelta(minutes=1): gap_from = open_dt.replace(tzinfo=None)
-            else: skipped+=1; continue
+            # cc#238 (Branch B, addendum 1652): detect ANY missing 5-min tick across the FULL
+            # 09:15-15:30 session (was leading-gap-only). One LAG query flags leading/interior/
+            # trailing gaps; heal ONLY when a real gap exists so a clean session makes zero
+            # Yahoo calls. Reuses the same Yahoo-1m->5m->fyers_eq point-in-time pattern — this
+            # is data-completion, never a v8_qualified re-score (GVM stays last-frozen).
+            row = api_query("""SELECT COUNT(*) AS cnt, MIN(ts) AS mn, MAX(ts) AS mx,
+                       COALESCE(MAX(EXTRACT(EPOCH FROM (ts - prev_ts))/60), 0) AS max_gap_min
+                FROM (SELECT ts, LAG(ts) OVER (ORDER BY ts) AS prev_ts FROM intraday_prices
+                      WHERE symbol=%s AND ts::date=%s AND timeframe='5m' AND source='fyers_eq') x""",
+                (sym, today), single=True)
+            cnt = row.get("cnt",0) if isinstance(row,dict) else 0
+            mn = row.get("mn") if isinstance(row,dict) else None
+            mx = row.get("mx") if isinstance(row,dict) else None
+            max_gap = float(row.get("max_gap_min") or 0) if isinstance(row,dict) else 0
+            od = open_dt.replace(tzinfo=None); hu = heal_until.replace(tzinfo=None)
+            last_expected = hu - timedelta(minutes=5)   # last definitely-closed 5m bar
+            has_gap = (cnt == 0
+                       or (mn is not None and mn > od + timedelta(minutes=6))              # leading gap
+                       or max_gap > 6.0                                                     # interior gap
+                       or (mx is not None and mx < last_expected - timedelta(minutes=1)))   # trailing gap
+            if not has_gap: skipped+=1; continue
+            gap_from = od
             candles = _yahoo_1m_today(sym)
             if not candles: empties+=1; time.sleep(_HEAL_SLEEP); continue
-            hu = heal_until.replace(tzinfo=None)
-            # cc#229: window-filter the 1m candles, then resample to NATIVE 5m (1m deprecated).
+            # resample the full session window; ON CONFLICT DO NOTHING fills ONLY the missing 5m
+            # slots (never clobbers a real WS bar), so interior gaps heal without re-scoring.
             windowed = [(ts,op,hi,lo,cl,vol) for (ts,op,hi,lo,cl,vol) in candles
-                        if ts.date()==today and gap_from<=ts<=hu
-                        and (earliest is None or ts<earliest)]
+                        if ts.date()==today and gap_from<=ts<=hu]
             # write as source='fyers_eq' 5m so the V8 engine (fyers_eq-only, cc#228) actually
             # reads the healed gap; ON CONFLICT DO NOTHING never clobbers real WS bars.
             rows = [(sym,b,o,h,l,c,v,"5m","fyers_eq") for (b,o,h,l,c,v) in _resample_1m_to_5m(windowed)]

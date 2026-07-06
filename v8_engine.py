@@ -335,6 +335,19 @@ def store_metrics(conn, m: Dict):
 # SIGNAL WRITE -- compute-on-write core
 # ============================================================
 
+# cc#238 (V8_EOD_NO_REQUALIFICATION_V1, session_log 1651 + addendum 1652): the EOD backstop
+# pass must NEVER write a new v8_qualified row via re-scoring after 15:30 IST. A qualification
+# is only real if the LIVE 5-min writer (source=live_5min) found it during 09:15-15:30 on that
+# day's live-ticking metrics; a symbol that would ONLY qualify because of the overnight/EOD GVM
+# refresh the live writer never saw is a ghost/optic signal (06-Jul FORTIS+BIOCON). Applies to
+# ALL SIX baskets (incl. SO/S1B strict-AND handlers). Branch A (clean session) = zero EOD quals
+# (this flag off). Branch B (any missing 5-min tick) = _heal_morning_gaps backfills the missing
+# bar/metric completion data only (main.py, full-session), NEVER a v8_qualified re-score.
+# The cc#171 persistence-safety guard (trading-day gate + ON CONFLICT DO NOTHING, never
+# delete/overwrite a live row) below stays intact — it simply now has nothing to act on.
+_EOD_REQUALIFICATION_WRITES = False
+
+
 def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source: str = 'eod'):
     from v8_endpoints import FILTER_CONFIG
 
@@ -388,7 +401,10 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
         # BACKSTOP: it now only ADDS quals the live writer missed (DO NOTHING below),
         # never deletes or overwrites a live row.
 
-        for s in qualified_symbols:
+        # cc#238: EOD re-qualification writes are disabled (Branch A). The iterable is emptied
+        # so the cc#171-guarded v8_qualified/v8_signal_history INSERTs below stay physically
+        # present (persistence-safety guard preserved) but never execute — zero EOD quals.
+        for s in (qualified_symbols if _EOD_REQUALIFICATION_WRITES else []):
             sym = s['symbol']
             cmp = cmp_map.get(sym)
             metrics_snap = {k: s.get(k) for k in [

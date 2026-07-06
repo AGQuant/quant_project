@@ -604,6 +604,27 @@ def _bg_v8_eod():
     except Exception as e: log.error(f"v8_eod: {e}")
     finally: _eod_running = False
 
+_heal_ran_today = None
+def _bg_heal_intraday():
+    """cc#238 Branch B (addendum 1652): at session end heal any missing 5-min tick across the
+    full 09:15-15:30 session, so a live-writer hiccup doesn't silently lose data. Reuses
+    main._heal_morning_gaps (now full-session). Data-completion ONLY — never a v8_qualified
+    re-score (EOD qual writes are disabled per V8_EOD_NO_REQUALIFICATION_V1). Deferred import
+    of main to avoid the scheduler<->main circular at module load."""
+    global _heal_ran_today
+    today = _ist_now().date()
+    if _heal_ran_today == today:
+        return
+    try:
+        import main
+        res = main._heal_morning_gaps()
+        log.info(f"heal_intraday(EOD Branch B): healed={res.get('symbols_healed')} "
+                 f"bars={res.get('bars_inserted')} window={res.get('window')}")
+        _heal_ran_today = today
+    except Exception as e:
+        log.error(f"heal_intraday(EOD Branch B): {e}")
+
+
 def _bg_gate_rebalance():
     """cc#190: 15:20 IST auto-close of over-slot paper positions (GATE_EXIT).
     Wires v8_paper.run_gate_rebalance (exit-only) into the scheduler — previously
@@ -1124,6 +1145,7 @@ async def _scheduler_loop():
         # Weekday-only. NO GVM/QB cascade here — that stays in the 01:00-02:00 nightly chain.
         if now.weekday() < 5 and h == 15 and m == 20: _spawn(_bg_gate_rebalance)  # cc#190: auto-close over-slot paper positions
         if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
+        if now.weekday() < 5 and h == 15 and m == 40: _spawn(_bg_heal_intraday)  # cc#238 Branch B: heal session gaps before EOD
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)
         if h == 16 and m == 0:

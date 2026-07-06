@@ -257,6 +257,14 @@
     </div>
   </header>
 
+  <!-- cc#238 (V8_EOD_NO_REQUALIFICATION_V1): frozen-status banner. Shows when IST >= 15:30 on a
+       trading day (or anytime market is closed), so a post-close signal never reads as live. -->
+  <div id="frozenBanner" style="display:none;margin:0 0 12px;padding:10px 14px;border-radius:10px;
+       background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.45);color:#b45309;
+       font-size:12px;font-weight:700;text-align:center;letter-spacing:.02em">
+    &#128274; Market Closed &mdash; Final as of 15:30 IST &middot; figures frozen until 09:15 next trading day
+  </div>
+
   <div class="mood" id="mood"><div class="loading">Loading market gate&#8230;</div></div>
   <div class="tabs" id="tabs"></div>
   <div id="panels"></div>
@@ -563,6 +571,12 @@ function tick(){
   const mins=ist.getUTCHours()*60+ist.getUTCMinutes(),dow=ist.getUTCDay();
   const open=dow>=1&&dow<=5&&mins>=555&&mins<=930;
   document.getElementById('clock').innerHTML=`<b>${hh}:${mm}:${ss}</b> IST &nbsp;·&nbsp; <span style="color:${open?'var(--grn)':'var(--dim)'}">NSE ${open?'OPEN':'CLOSED'}</span>`;
+  // cc#238: frozen-status banner supersedes live/auto-refresh language once market closes,
+  // reverting at 09:15 next trading day. Matches the dashboard's existing OPEN/CLOSED logic.
+  const fb=document.getElementById('frozenBanner'); if(fb) fb.style.display=open?'none':'';
+  const ab=document.getElementById('autoBtn');
+  if(ab){ if(open){ ab.textContent='Auto 5m: '+(AUTO?'ON':'OFF'); ab.classList.toggle('on',AUTO); }
+          else { ab.textContent='Frozen · 15:30'; ab.classList.remove('on'); } }
 }
 setInterval(tick,1000);tick();
 
