@@ -80,6 +80,9 @@ _signal_writer_fail_streak = 0
 _last_signal_writer_ok: Optional[datetime] = None
 SIGNAL_WRITER_TIMEOUT = timedelta(minutes=4)   # spec #16: assume hung after ~4 min
 WATCHDOG_STALE_MIN = 10                          # spec #16: stale if no tick in 10 min
+WATCHDOG_REALERT   = timedelta(minutes=15)       # cc#230: re-alert every 15 min while STILL stale
+                                                 # (was one-and-done -> a persistent code-level
+                                                 # crash went silent after the first alert)
 WATCHDOG_RESTART_COOLDOWN = timedelta(minutes=5) # cap restart attempts (avoid storm if
                                                  # the writer itself, not the loop, is broken)
 _eod_running = False
@@ -113,6 +116,7 @@ _restart_requested = False
 _watchdog_restarts = 0
 _last_restart_ts: Optional[datetime] = None
 _watchdog_alerted = False        # throttle: one alert per stall episode
+_watchdog_last_alert: Optional[datetime] = None   # cc#230: last re-alert time within a stall
 
 # ── exported to main.py ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -268,7 +272,7 @@ def _tick_age_minutes() -> Optional[float]:
 def _check_watchdog(now):
     """During market hours, if no signal tick landed in WATCHDOG_STALE_MIN, the
     writer has silently stalled — alert, reset guards, request restart."""
-    global _watchdog_alerted
+    global _watchdog_alerted, _watchdog_last_alert
     # cc#211: also skip NSE holidays. _is_market_hours is weekday+time only, so on a
     # weekday holiday (writer correctly gated → tick never advances) the watchdog would
     # otherwise restart-storm chasing a "stale" tick that will never move. Canonical guard.
@@ -279,9 +283,18 @@ def _check_watchdog(now):
     if age is None:
         return
     if age > WATCHDOG_STALE_MIN:
-        if not _watchdog_alerted:
+        # cc#230: RE-ALERT every WATCHDOG_REALERT while STILL stale (was one-and-done, so a
+        # persistent CODE-level crash — which a loop restart can NOT fix — went silent after
+        # the first alert). Once a restart has already fired and the tick is still climbing,
+        # escalate the message: a human needs to look at the writer traceback.
+        if _watchdog_last_alert is None or (now - _watchdog_last_alert) >= WATCHDOG_REALERT:
+            escalate = (_last_restart_ts is not None and age > WATCHDOG_STALE_MIN + 6)
             _log_alert("scheduler_stall",
-                       f"v8_metrics stale {age:.1f} min during market hours — restarting live loop")
+                       f"v8_metrics stale {age:.1f} min during market hours" +
+                       (" — restart did NOT recover it; likely a writer CODE bug needing a manual "
+                        "fix (check signal_writer_crash / POST /api/v8/run_signal_writer traceback)"
+                        if escalate else " — restarting live loop"))
+            _watchdog_last_alert = now
             _watchdog_alerted = True
         # cooldown: if a restart didn't help (writer-logic bug, not a hung loop),
         # don't hammer — retry at most once per cooldown window.
@@ -289,6 +302,7 @@ def _check_watchdog(now):
             _request_restart(f"watchdog: tick stale {age:.1f} min")
     else:
         _watchdog_alerted = False
+        _watchdog_last_alert = None
 
 
 def health_state() -> dict:
