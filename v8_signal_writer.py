@@ -1608,8 +1608,9 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                                     gate_fails: int, pivots: dict, signal_ts_ist,
                                     enabled_v21: Optional[dict] = None, sim_ts=None):
     """
-    Buy S1 Bounce V1 (17-Jun-2026). 7 strict filters (1 gate + 6 stages).
-    Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR.
+    Buy S1 Bounce V1 (17-Jun-2026). 8 strict filters (nifty_rsi gate + gvm>=7 + 6 stages).
+    Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR (predates gvm>=7
+    gate — cc#234; live-with-gvm>=7 is tighter, Claude web re-backtests to confirm WR).
     cc#158: V2.1 hard gate (hourly_pct >0..1.0, week_index_52 50..90) layered
     as extra strict-AND conditions when enabled (spec id=1265).
     """
@@ -1626,7 +1627,11 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
 
     candidates = [
         s for s in all_metrics
-        if _passes(s.get("week_return"),  0.0, 3.0)
+        # cc#234: gvm>=7.0 hard gate (filter #0). cc#76 added this to the /buy_s1_bounce
+        # endpoint + funnel but NOT the writer, so the writer auto-entered paper for
+        # gvm<7 stocks the qualified list then hid (ghost entries). Now writer==funnel==endpoint.
+        if _passes(s.get("gvm_score"),    7.0, None)
+        and _passes(s.get("week_return"),  0.0, 3.0)
         and _passes(s.get("dma_50"),      0.0, None)
         and _passes(s.get("vol_ratio"),   1.5, None)
         and _passes(s.get("recovery_2d"), 2.0, 8.0)
@@ -1663,7 +1668,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
             "week_return": s.get("week_return"), "dma_50": s.get("dma_50"),
             "vol_ratio": s.get("vol_ratio"), "recovery_2d": s.get("recovery_2d"),
             "day_ret": s.get("day_ret"), "week_low": s.get("week_low"),
-            "nifty_rsi": round(nifty_rsi, 1), "filter_score": 7, "filter_total": 7,
+            "nifty_rsi": round(nifty_rsi, 1), "filter_score": 8, "filter_total": 8,
             "vol_ratio_legacy": s.get("vol_ratio_legacy"),
             "vol_ratio_time_normalized": s.get("vol_ratio_time_normalized"),
             "vol_ratio_days_available": s.get("vol_ratio_days_available"),
