@@ -614,12 +614,57 @@ def metrics_all():
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        # cc#233: live-join hourly_pct (fyers_fut path, not a v8_metrics column) so the
-        # Raw Data tab can show HOUR% as a signal-driving column. NULL before ~10:15 IST
-        # (needs 12 fut bars) is expected, not an error.
+        # cc#233: live-join hourly_pct + cc#235 fall_from_day_high (fyers_fut path, not
+        # v8_metrics columns). NULL before ~10:15 IST (needs 12 fut bars), not an error.
         v21 = _load_v21_live_metrics(conn, [s["symbol"] for s in rows])
         for s in rows:
-            s["hourly_pct"] = v21.get(s["symbol"], {}).get("hourly_pct")
+            s["hourly_pct"]         = v21.get(s["symbol"], {}).get("hourly_pct")
+            s["fall_from_day_high"] = v21.get(s["symbol"], {}).get("fall_from_day_high")  # cc#235: free
+        # cc#235: recovery_2d / day_ret / week_low_pct — S1B/SO filter inputs. Single-pass
+        # CTE + formulas copied from the ENGINE (_load_intraday_bars: fyers_eq pinned per
+        # cc#140, array_agg first/last; writer recovery/day_ret/week_low math) for
+        # tab==engine parity. NOTE: _s1b_funnel_stages' td CTE is source-UNFILTERED (mixes
+        # eq/fut/yahoo) — a latent funnel bug; the tab intentionally matches the engine.
+        cur.execute("""
+            WITH td AS (
+                SELECT symbol,
+                    (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
+                    (array_agg(close ORDER BY ts DESC))[1] AS live_close,
+                    MIN(low) AS today_low
+                FROM intraday_prices
+                WHERE ts::date = CURRENT_DATE AND source = 'fyers_eq'
+                GROUP BY symbol
+            ),
+            hist AS (
+                SELECT symbol,
+                    MIN(low) FILTER (WHERE rn<=2) AS lo_2d,
+                    MIN(low) FILTER (WHERE rn<=5) AS lo_5d
+                FROM (SELECT symbol, low,
+                        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                      FROM raw_prices WHERE price_date < CURRENT_DATE) x
+                WHERE rn<=5 GROUP BY symbol
+            )
+            SELECT td.symbol, td.day_open, td.live_close, td.today_low, h.lo_2d, h.lo_5d
+            FROM td LEFT JOIN hist h ON h.symbol = td.symbol
+        """)
+        s1b_live = {r[0]: r for r in cur.fetchall()}
+
+    def _f(v):
+        try: return float(v) if v is not None else None
+        except (TypeError, ValueError): return None
+    for s in rows:
+        d = s1b_live.get(s["symbol"])
+        cmpv = _f(d[1]) if d else None   # live_close
+        op   = _f(d[2]) if d else None   # day_open
+        tlow = _f(d[3]) if d else None   # today_low
+        lo2  = _f(d[4]) if d else None   # lo_2d (raw_prices daily)
+        lo5  = _f(d[5]) if d else None   # lo_5d (raw_prices daily)
+        s["recovery_2d"] = ((cmpv - lo2) / lo2 * 100) if (cmpv and lo2 and lo2 > 0) else None
+        s["day_ret"]     = ((cmpv - op) / op * 100)   if (cmpv and op and op > 0)   else None
+        wl_cand = [x for x in (lo5, tlow) if x is not None]
+        week_low = min(wl_cand) if wl_cand else None
+        s["week_low_pct"] = ((cmpv - week_low) / week_low * 100) if (cmpv and week_low and week_low > 0) else None
+
     for s in rows:
         s["segment"] = _seg_override(s["symbol"], s.get("segment"))
         for k, v in list(s.items()):
