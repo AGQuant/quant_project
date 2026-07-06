@@ -431,6 +431,52 @@ def get_top50_option_underlyings(conn):
         return []
 
 
+STOCK_N_STRIKES = 3   # cc#155: stock options subscribe ATM±3 (index stays N_STRIKES=±10)
+
+
+def get_all_option_underlyings(conn):
+    """cc#155 (STOCK_OPTIONS_CHAIN_SPEC_V1, session_log 1173): ALL active futures-universe
+    stock underlyings for stock options, excluding indices/SKIP_SYMBOLS (+NIFTY50). Ordered
+    by mcap rank so a pilot/limit takes the most-liquid names first. Distinct from
+    get_top50_option_underlyings (hard-capped at 50)."""
+    try:
+        excl = list(SKIP_SYMBOLS | {'NIFTY50'})
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT fu.symbol
+                FROM futures_universe fu
+                LEFT JOIN input_raw ir ON ir.nse_code = fu.symbol
+                WHERE fu.is_active = TRUE
+                  AND fu.symbol <> ALL(%s)
+                ORDER BY COALESCE(ir.mcap_rank, 999999), fu.symbol
+            """, (excl,))
+            return [r[0] for r in cur.fetchall()]
+    except Exception as e:
+        log.warning(f"get_all_option_underlyings: {e}")
+        return []
+
+
+def _stock_options_config(conn):
+    """cc#155: runtime gate for stock options, read from app_config so scope can be scaled or
+    killed LIVE (no redeploy) — the phased rollout + kill-switch the spec's HARD 8/10 design
+    requires. Defaults DISABLED => index-only feed unchanged (14-Jun lock preserved).
+      stock_options_enabled = 'true'|'false'  (default false)
+      stock_options_limit   = int underlyings  (default 20 pilot; <=0 = all 209)
+      stock_options_n       = ATM± strikes     (default 3)"""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM app_config WHERE key = ANY(%s)",
+                        (['stock_options_enabled', 'stock_options_limit', 'stock_options_n'],))
+            cfg = {k: v for k, v in cur.fetchall()}
+        enabled = str(cfg.get('stock_options_enabled', 'false')).strip().lower() == 'true'
+        limit = int(cfg.get('stock_options_limit') or 20)
+        n = int(cfg.get('stock_options_n') or STOCK_N_STRIKES)
+        return enabled, limit, n
+    except Exception as e:
+        log.warning(f"_stock_options_config: {e} — defaulting to index-only")
+        return False, 20, STOCK_N_STRIKES
+
+
 def _cmp_fresh_fraction(conn, opt_mgr):
     """cc#189: fraction of option underlyings whose cmp_prices row was updated
     within the last OPT_FRESH_WINDOW_MIN minutes. Drives the 'subscribe options
@@ -491,15 +537,31 @@ class OptionSymbolManager:
         self._underlyings = []
 
     def _build_underlyings(self):
-        # INDEX-ONLY (locked 14-Jun-2026): NIFTY + BANKNIFTY options only.
-        # Stock options dropped from live WS to save DB + Fyers load; the stock
-        # helpers (get_top50_option_underlyings / STOCK_STEPS) are intentionally
-        # retained for future on-demand revival.
+        # cc#155 (STOCK_OPTIONS_CHAIN_SPEC_V1, session_log 1173): index underlyings are ALWAYS
+        # present at ATM±N_STRIKES (±10). Stock underlyings (ATM±stock_n, default ±3) are
+        # ADDITIVE and config-gated via app_config (_stock_options_config). Default OFF keeps
+        # the 14-Jun INDEX-ONLY lock intact; an operator enables + scales the pilot LIVE (no
+        # redeploy) and can kill it instantly. Additive-only: stock options never displace the
+        # index/eq/fut subscription (the 06-Jul regression that zeroed index ATM±10).
         out = []
         for name, meta in INDEX_OPTION_UNDERLYINGS.items():
-            out.append({'name': name, 'step': meta['step'], 'cmp_sym': meta['cmp_sym']})
+            out.append({'name': name, 'step': meta['step'], 'cmp_sym': meta['cmp_sym'],
+                        'n': N_STRIKES, 'kind': 'index'})
+        enabled, limit, stock_n = _stock_options_config(self.conn)
+        n_stock = 0
+        if enabled:
+            index_names = set(INDEX_OPTION_UNDERLYINGS)
+            stocks = [s for s in get_all_option_underlyings(self.conn) if s not in index_names]
+            if limit and limit > 0:
+                stocks = stocks[:limit]
+            for s in stocks:
+                out.append({'name': s, 'step': None, 'cmp_sym': s, 'n': stock_n, 'kind': 'stock'})
+            n_stock = len(stocks)
         self._underlyings = out
-        log.info(f"OptionSymbolManager: {len(out)} underlyings (index-only)")
+        log.info(f"OptionSymbolManager: {len(out)} underlyings "
+                 f"({len(INDEX_OPTION_UNDERLYINGS)} index"
+                 + (f" + {n_stock} stock ATM±{stock_n}, limit={limit}" if enabled
+                    else "-only; stock options disabled") + ")")
 
     def _get_cmp(self, cmp_sym, allow_rest=False):
         # cc#189: the AUTOMATIC subscribe path uses LIVE cmp_prices only (allow_rest
@@ -557,9 +619,10 @@ class OptionSymbolManager:
         Fallback: step-based generation (pre-v6).
         """
         pairs = []
+        n = u.get('n', N_STRIKES)   # cc#155: per-underlying window (index ±10, stock ±3)
         if self.master and self.master.loaded:
-            ce = self.master.atm_window(u['name'], self.expiry, 'CE', cmp)
-            pe = self.master.atm_window(u['name'], self.expiry, 'PE', cmp)
+            ce = self.master.atm_window(u['name'], self.expiry, 'CE', cmp, n=n)
+            pe = self.master.atm_window(u['name'], self.expiry, 'PE', cmp, n=n)
             if ce or pe:
                 for s in (ce or []): pairs.append((s, 'CE'))
                 for s in (pe or []): pairs.append((s, 'PE'))
@@ -567,7 +630,7 @@ class OptionSymbolManager:
             log.warning(f"_ladder: no master chain for {u['name']} {self.expiry} — step fallback")
         step = u['step'] or auto_step(cmp)
         atm  = atm_strike(cmp, step)
-        for i in range(-N_STRIKES, N_STRIKES + 1):
+        for i in range(-n, n + 1):
             strike = atm + i * step
             if strike <= 0: continue
             pairs.append((strike, 'CE'))
@@ -629,6 +692,13 @@ class OptionSymbolManager:
         missing = sorted(n for n, c in per.items() if c == 0)
         contracts = sum(per.values())
         return total, ok, missing, contracts
+
+    def index_option_syms(self, syms):
+        """cc#155: index-only subset of the given option syms — for OI depth polling. Stock
+        options are WS-ONLY, NO REST OI (spec 1173): ~2912 stock depth calls = ~27min, which
+        would blow the 5-min bar cadence. Index OI poll (~136 syms) stays unchanged."""
+        idx = set(INDEX_OPTION_UNDERLYINGS)
+        return [s for s in syms if (self.sym_map.get(s) or ('',))[0] in idx]
 
     def check_atm_drift(self):
         """Returns (add_syms, remove_syms) if any ATM has drifted >= ATM_DRIFT_STRIKES."""
@@ -1450,7 +1520,7 @@ def run(auth_code=None):
                                      args=(token, list(futures_fyers_syms), agg),
                                      daemon=True).start()
                     threading.Thread(target=poll_options_oi,
-                                     args=(token, list(option_syms), opt_store),
+                                     args=(token, opt_mgr.index_option_syms(list(option_syms)), opt_store),
                                      daemon=True).start()
                     last_oi_poll = now_dt
 
