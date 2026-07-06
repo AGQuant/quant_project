@@ -452,6 +452,49 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
     return stocks
 
 
+def _inject_open_positions(cur, rows: list, basket: str, open_pos: dict) -> list:
+    """cc#240: every OPEN v8_paper_positions row must render on its basket tab, ALWAYS —
+    even if it qualified on a prior day (its v8_qualified row is dated to entry day, so the
+    signal_date=CURRENT_DATE endpoints never select it). For each open symbol not already in
+    today's set, inject a DISPLAY row built from TODAY's live data: CMP from cmp_prices, pivots
+    pp/r1/s1 from the latest v8_paper_pivots, technicals from v8_metrics at MAX(score_date).
+    entry_price / open_pnl / target / stop are filled by _enrich_with_status from the position.
+    Purely additive + read-only — never writes a v8_qualified row (EOD no-requal rule intact).
+    Dedup: a symbol that also qualifies today stays as its today row (that row wins)."""
+    present = {r.get("symbol") for r in rows}
+    missing = [s for s in open_pos if s not in present]
+    if not missing:
+        return rows
+    cur.execute("""
+        SELECT u.symbol, m.gvm_score, m.day_1d, m.dma_50, m.dma_200,
+               m.rsi_month, m.rsi_weekly, m.week_return, m.month_return, m.mom_2d,
+               m.week_index_52, m.vol_ratio, m.sector_week, m.sector_month,
+               g.segment, c.cmp, p.pp, p.r1, p.s1, fs.first_seen
+        FROM unnest(%s::text[]) AS u(symbol)
+        LEFT JOIN v8_metrics m ON m.symbol=u.symbol
+            AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
+        LEFT JOIN gvm_scores g ON g.symbol=u.symbol
+        LEFT JOIN cmp_prices c ON c.symbol=u.symbol
+        LEFT JOIN v8_paper_pivots p ON p.symbol=u.symbol
+            AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+        LEFT JOIN (SELECT symbol, MIN(signal_ts) AS first_seen
+                   FROM v8_qualified WHERE basket=%s GROUP BY symbol) fs ON fs.symbol=u.symbol
+    """, (missing, basket))
+    cols = [d[0] for d in cur.description]
+    for r in cur.fetchall():
+        row = dict(zip(cols, r))
+        pos = open_pos.get(row["symbol"], {})
+        if row.get("cmp") is None and pos.get("cmp") is not None:
+            row["cmp"] = pos["cmp"]
+        row["entry"]     = row.get("cmp")          # sell_overbought renderer keys on 'entry'
+        row["source"]    = "open_position"         # cc#240: held position, not a fresh qual
+        row["signal_ts"] = row.get("first_seen")   # show original entry-day timestamp
+        row["status"]    = "OPEN"
+        row["segment"]   = _seg_override(row["symbol"], row.get("segment"))
+        rows.append(row)
+    return rows
+
+
 def _read_adr(cur):
     if _market_open():
         cur.execute("""
@@ -1044,6 +1087,8 @@ def qualified(basket: str, response: Response, limit: int = 50):
                 r["status"] = r.pop("stored_status", None) or "QUALIFIED"
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
+        with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
+            rows = _inject_open_positions(cur, rows, basket, open_pos)
         rows = _enrich_with_status(rows, basket, open_pos, slot_full)
         extra = {}
         if basket == "buy_momentum":
@@ -1755,6 +1800,8 @@ def buy_s1_bounce_qualified(limit: int = 50):
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
             r['status']  = r.pop('stored_status', None) or 'QUALIFIED'
+        with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
+            rows = _inject_open_positions(cur, rows, "buy_s1_bounce", open_pos)
         rows = _enrich_with_status(rows, "buy_s1_bounce", open_pos, slot_full)
         return {
             "basket": "buy_s1_bounce", "count": len(rows),
@@ -1825,6 +1872,8 @@ def sell_overbought(limit: int = 50):
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows: r["status"] = "QUALIFIED"
+        with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
+            rows = _inject_open_positions(cur, rows, "sell_overbought", open_pos)
         rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full)
         return {"basket": "sell_overbought", "count": len(rows),
                 "target": "S1", "stop": "R2",
