@@ -654,8 +654,9 @@ def metrics_all():
         except (TypeError, ValueError): return None
     for s in rows:
         d = s1b_live.get(s["symbol"])
-        cmpv = _f(d[1]) if d else None   # live_close
-        op   = _f(d[2]) if d else None   # day_open
+        # SELECT order: symbol[0], day_open[1], live_close[2], today_low[3], lo_2d[4], lo_5d[5]
+        op   = _f(d[1]) if d else None   # day_open
+        cmpv = _f(d[2]) if d else None   # live_close (this is the live cmp)
         tlow = _f(d[3]) if d else None   # today_low
         lo2  = _f(d[4]) if d else None   # lo_2d (raw_prices daily)
         lo5  = _f(d[5]) if d else None   # lo_5d (raw_prices daily)
