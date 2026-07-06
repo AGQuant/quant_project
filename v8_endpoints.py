@@ -1782,6 +1782,50 @@ def sell_overbought(limit: int = 50):
         raise HTTPException(500, f"sell_overbought failed: {e}")
 
 
+@router.get("/forthcoming-results")
+def forthcoming_results():
+    """cc#226: upcoming quarterly results for tradeable NSE stocks — cap-tiered, with V8-universe
+    + blackout flags. Read-only calendar view (earnings_calendar JOIN screener_raw, NSE-only);
+    NOT coupled to the paper engine. Cap tier = global market_cap rank (<=100 Large / <=250 Mid /
+    else Small, same as Quant Basket). Blackout = in active futures_universe AND ex_date within the
+    engine window (today / today+1). Sorted ex_date ASC, market_cap DESC."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT nse_code,
+                           ROW_NUMBER() OVER (ORDER BY market_cap DESC NULLS LAST) AS mc_rank
+                    FROM screener_raw WHERE nse_code IS NOT NULL AND nse_code <> ''
+                )
+                SELECT ec.ticker, ec.company_name, ec.ex_date,
+                       CASE WHEN r.mc_rank <= 100 THEN 'Large'
+                            WHEN r.mc_rank <= 250 THEN 'Mid' ELSE 'Small' END AS cap_tier,
+                       ROUND(sr.market_cap::numeric, 0) AS market_cap_cr,
+                       (fu.symbol IS NOT NULL) AS in_v8_universe,
+                       (fu.symbol IS NOT NULL AND ec.ex_date IN (CURRENT_DATE, CURRENT_DATE + 1)) AS blackout
+                FROM earnings_calendar ec
+                JOIN screener_raw sr ON UPPER(sr.nse_code) = UPPER(ec.ticker)   -- NSE-only: BSE-only tickers have no nse_code match
+                JOIN ranked r ON r.nse_code = sr.nse_code
+                LEFT JOIN futures_universe fu ON UPPER(fu.symbol) = UPPER(ec.ticker) AND fu.is_active = TRUE
+                WHERE ec.ex_date >= CURRENT_DATE
+                ORDER BY ec.ex_date ASC, sr.market_cap DESC NULLS LAST
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        results = [{
+            "symbol":         r["ticker"],
+            "company":        r["company_name"],
+            "result_date":    str(r["ex_date"]) if r["ex_date"] else None,
+            "cap_tier":       r["cap_tier"],
+            "market_cap_cr":  float(r["market_cap_cr"]) if r["market_cap_cr"] is not None else None,
+            "in_v8_universe": bool(r["in_v8_universe"]),
+            "blackout":       bool(r["blackout"]),
+        } for r in rows]
+        return {"count": len(results), "results": results}
+    except Exception as e:
+        raise HTTPException(500, f"forthcoming_results failed: {e}")
+
+
 @router.get("/adr")
 def adr_only():
     try:

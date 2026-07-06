@@ -294,6 +294,7 @@ const EP={
   passCount:b=>`/api/v8/stock_passcount/${b}`,
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
+  forthcoming:"/api/v8/forthcoming-results",   // cc#226
 };
 const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
@@ -307,8 +308,9 @@ const ALL5=[
   {id:"sell_overbought",label:"Sell Overbought"},
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
-  "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News"];
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11];
+  "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
+  "Forthcoming Results"];   // cc#226: index 12
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11,12];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -580,6 +582,7 @@ function selectTab(i){
   [...tabsEl.children].forEach(t=>t.classList.toggle('active',t.textContent===TAB_LABELS[i]));
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
   if(i===8&&!DAYLOG_LOADED)loadDayLog();
+  if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
 }
 
 const SORTREG={};
@@ -1038,6 +1041,34 @@ function renderTCLite(){
 }
 
 // ---- Day Log tab (cc#139) — lazy load on tab click -------------------------
+// cc#226: Forthcoming Results — upcoming NSE quarterly results, cap-tiered, V8/blackout flags
+let FR_LOADED=false;
+async function loadForthcoming(){
+  const el=document.getElementById('panel12');if(!el)return;
+  el.innerHTML='<div class="loading">Loading Forthcoming Results...</div>';
+  try{
+    const d=await getJSON(EP.forthcoming);
+    FR_LOADED=true;
+    el.innerHTML=renderForthcoming(d);
+  }catch(e){el.innerHTML=`<div class="err">Forthcoming Results failed: ${e.message}</div>`;}
+}
+function renderForthcoming(data){
+  const rows=(data&&data.results)||[];
+  if(!rows.length)return'<div class="empty">No upcoming results in calendar window.</div>';
+  const MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtDate=d=>{if(!d)return'--';const p=String(d).split('-');return p.length<3?String(d):p[2]+'-'+MONS[parseInt(p[1],10)-1]+'-'+p[0];};
+  const fmtCr=v=>v==null?'--':(v>=100000?(v/100000).toFixed(2)+'L Cr':Math.round(v).toLocaleString('en-IN')+' Cr');
+  const cols=[['symbol','NSE Symbol'],['company','Company'],['result_date','Result Date'],['cap_tier','Cap Tier'],['market_cap_cr','Market Cap (Cr)'],['in_v8_universe','In V8 Universe'],['blackout','Blackout']];
+  // cc#226: highlight In-V8-Universe=Yes rows (actionable / blackout names)
+  const rowFn=r=>`<tr style="${r.in_v8_universe?'background:rgba(56,132,255,.10);font-weight:600':''}">`+
+    `<td>${r.symbol||''}</td><td>${r.company||''}</td><td>${fmtDate(r.result_date)}</td>`+
+    `<td>${r.cap_tier||''}</td><td style="text-align:right">${fmtCr(r.market_cap_cr)}</td>`+
+    `<td>${r.in_v8_universe?'Yes':'No'}</td>`+
+    `<td>${r.blackout?'<span style="color:var(--red)">Yes</span>':'No'}</td></tr>`;
+  const n=rows.length,inv8=rows.filter(r=>r.in_v8_universe).length;
+  return`<div style="padding:4px 2px 8px;color:var(--dim);font-size:12px">${n} upcoming NSE results · ${inv8} in V8 universe (highlighted)</div>`+
+    sortTbl('fr',cols,rows,rowFn,{empty:'No upcoming results in calendar window.',wrapClass:''});
+}
 let DAYLOG_LOADED=false;
 async function loadDayLog(){
   const el=document.getElementById('panel8');if(!el)return;
