@@ -925,9 +925,9 @@ def v8_live_metrics():
             hc.close AS hour_ago_close,
             CASE WHEN hc.close>0 THEN ROUND(((lc.close/hc.close-1)*100)::numeric,2) END AS hourly_pct
         FROM (SELECT symbol FROM futures_universe WHERE is_active=TRUE) s
-        JOIN LATERAL (SELECT close, ts FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) ORDER BY ts DESC LIMIT 1) lc ON true
-        JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) ORDER BY ts ASC LIMIT 1) fc ON true
-        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND ts <= lc.ts - INTERVAL '65 minutes' ORDER BY ts DESC LIMIT 1) hc ON true
+        JOIN LATERAL (SELECT close, ts FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' ORDER BY ts DESC LIMIT 1) lc ON true
+        JOIN LATERAL (SELECT open FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' ORDER BY ts ASC LIMIT 1) fc ON true
+        LEFT JOIN LATERAL (SELECT close FROM intraday_prices WHERE symbol=s.symbol AND ts::date=(SELECT d FROM asof) AND source='fyers_eq' AND ts <= lc.ts - INTERVAL '65 minutes' ORDER BY ts DESC LIMIT 1) hc ON true
         ORDER BY s.symbol
     """, (str(as_of_date) if as_of_date else None,))
     return {"as_of": str(as_of_date) if as_of_date else None, "rows": rows}
