@@ -974,6 +974,23 @@ def _yahoo_1m_today(symbol: str):
             log.warning(f"yahoo_1m_today {symbol}: {e}"); return []
     return []
 
+def _resample_1m_to_5m(candles):
+    """cc#229: aggregate yahoo 1-min OHLCV -> native 5-min buckets (5m system, spec id=167;
+    1-min deprecated). O=first, H=max, L=min, C=last, V=sum per 5-min bucket. candles are
+    (ts, o, h, l, c, v)."""
+    buckets = {}
+    for (ts, o, h, l, c, v) in candles:
+        b = ts.replace(minute=(ts.minute // 5) * 5, second=0, microsecond=0)
+        bk = buckets.get(b)
+        if bk is None:
+            buckets[b] = {"o": o, "h": h, "l": l, "c": c, "v": v or 0, "first": ts, "last": ts}
+        else:
+            bk["h"] = max(bk["h"], h); bk["l"] = min(bk["l"], l); bk["v"] += (v or 0)
+            if ts < bk["first"]: bk["first"] = ts; bk["o"] = o
+            if ts > bk["last"]:  bk["last"]  = ts; bk["c"] = c
+    return [(b, buckets[b]["o"], buckets[b]["h"], buckets[b]["l"], buckets[b]["c"], buckets[b]["v"])
+            for b in sorted(buckets)]
+
 def _heal_morning_gaps(symbols=None):
     now = _ist_now(); today = now.date()
     open_dt = now.replace(hour=9,minute=15,second=0,microsecond=0); close_dt = now.replace(hour=15,minute=30,second=0,microsecond=0)
@@ -985,18 +1002,21 @@ def _heal_morning_gaps(symbols=None):
     healed,skipped,empties,errors,inserted = 0,0,0,[],0
     for sym in syms:
         try:
-            row = api_query("SELECT MIN(ts) AS mn, COUNT(*) AS cnt FROM intraday_prices WHERE symbol=%s AND ts::date=%s AND timeframe='1m'", (sym,today), single=True)
+            row = api_query("SELECT MIN(ts) AS mn, COUNT(*) AS cnt FROM intraday_prices WHERE symbol=%s AND ts::date=%s AND timeframe='5m' AND source='fyers_eq'", (sym,today), single=True)   # cc#229: heal the 5m fyers_eq series (V8-read), not legacy 1m
             earliest = row.get("mn") if isinstance(row,dict) else None; cnt = row.get("cnt",0) if isinstance(row,dict) else 0
             if cnt==0: gap_from = open_dt.replace(tzinfo=None)
             elif earliest is not None and earliest>open_dt.replace(tzinfo=None)+timedelta(minutes=1): gap_from = open_dt.replace(tzinfo=None)
             else: skipped+=1; continue
             candles = _yahoo_1m_today(sym)
             if not candles: empties+=1; time.sleep(_HEAL_SLEEP); continue
-            hu = heal_until.replace(tzinfo=None); rows = []
-            for (ts,op,hi,lo,cl,vol) in candles:
-                if ts.date()!=today or ts<gap_from or ts>hu: continue
-                if earliest is not None and ts>=earliest: continue
-                rows.append((sym,ts,op,hi,lo,cl,vol,"1m","yahoo"))
+            hu = heal_until.replace(tzinfo=None)
+            # cc#229: window-filter the 1m candles, then resample to NATIVE 5m (1m deprecated).
+            windowed = [(ts,op,hi,lo,cl,vol) for (ts,op,hi,lo,cl,vol) in candles
+                        if ts.date()==today and gap_from<=ts<=hu
+                        and (earliest is None or ts<earliest)]
+            # write as source='fyers_eq' 5m so the V8 engine (fyers_eq-only, cc#228) actually
+            # reads the healed gap; ON CONFLICT DO NOTHING never clobbers real WS bars.
+            rows = [(sym,b,o,h,l,c,v,"5m","fyers_eq") for (b,o,h,l,c,v) in _resample_1m_to_5m(windowed)]
             if rows:
                 with get_conn() as conn, conn.cursor() as cur:
                     cur.executemany("INSERT INTO intraday_prices (symbol,ts,open,high,low,close,volume,timeframe,source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol,ts,timeframe,source) DO NOTHING", rows)

@@ -529,6 +529,22 @@ class OptionSymbolManager:
                 for item in d.get('d', []):
                     lp = item.get('v', {}).get('lp')
                     if lp:
+                        # cc#229 (id166 permanent fix): seed cmp_prices with the REST CMP so a
+                        # cold-boot EMPTY table gets populated -> the option/ATM build never
+                        # silently skips and any-time restart is safe.
+                        try:
+                            with self.conn.cursor() as _c:
+                                _c.execute(
+                                    "INSERT INTO cmp_prices (symbol, cmp, updated_at, source) "
+                                    "VALUES (%s,%s,NOW(),'fyers_rest') "
+                                    "ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, "
+                                    "updated_at=EXCLUDED.updated_at, source='fyers_rest'",
+                                    (cmp_sym, float(lp)))
+                            self.conn.commit()
+                        except Exception as _se:
+                            try: self.conn.rollback()
+                            except Exception: pass
+                            log.warning(f"_get_cmp seed cmp_prices {cmp_sym}: {_se}")
                         return float(lp)
         except Exception as e:
             log.warning(f"_get_cmp Fyers REST fallback {cmp_sym}: {e}")
@@ -563,6 +579,19 @@ class OptionSymbolManager:
         live-price gate calls this with allow_rest=False (cmp_prices only); an
         on-demand caller may pass allow_rest=True to use the Fyers REST CMP
         fallback (retained per founder 04-Jul)."""
+        # cc#229 (id166 permanent fix): on a cold boot cmp_prices can be EMPTY (worker
+        # restarted pre-open or after downtime). Empty cmp_prices -> zero underlyings resolve
+        # a CMP -> zero option subscriptions (the known zombie). Detect empty and force the
+        # Fyers REST CMP path so prices are fetched + seeded and subscriptions never skip.
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM cmp_prices")
+                if (cur.fetchone()[0] or 0) == 0 and self.token:
+                    allow_rest = True
+                    log.warning("build_initial: cmp_prices EMPTY (cold boot) — forcing Fyers REST "
+                                "CMP fetch to seed prices before subscribe (cc#229/id166)")
+        except Exception:
+            pass
         self._build_underlyings()
         self.expiry = current_expiry()
         symbols = []

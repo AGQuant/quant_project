@@ -981,6 +981,33 @@ def _bg_earnings_refresh():
                    f"06:15 earnings_calendar refresh raised (prior data kept): {e}")
         log.error(f"earnings_refresh: {e}")
 
+def _bg_open_bars_alarm():
+    """cc#229: 09:25 IST trading-day feed-silence alarm. If almost no intraday bars landed
+    since 09:15, the live feed is silent at open (cold-boot zombie / dead worker) — fire a
+    feed_silent_at_open alert. Independent of subscribe_verify (which can pass while bars are
+    still zero, so it must NOT suppress this).
+    Threshold: spec said <1000, but at 09:25 a healthy feed has only ~2 five-min buckets
+    (~420 eq+fut symbols x 2 ≈ 840 bars), so 1000 would false-alarm daily. Using <400 catches
+    genuine silence (~0) with margin below the healthy floor — founder can retune."""
+    try:
+        now = _ist_now()
+        if not _is_trading_day(now.date()):
+            return
+        open_ts = now.replace(hour=9, minute=15, second=0, microsecond=0).replace(tzinfo=None)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM intraday_prices WHERE ts >= %s AND timeframe='5m'",
+                        (open_ts,))
+            bars = cur.fetchone()[0]
+        if bars < 400:
+            _log_alert("feed_silent_at_open",
+                       f"09:25 IST: only {bars} intraday 5m bars since 09:15 — live feed appears "
+                       f"SILENT at open (cold-boot zombie / dead worker). Manual restart may be needed.")
+            log.error(f"FEED SILENT AT OPEN: {bars} 5m bars since 09:15 (<400)")
+        else:
+            log.info(f"open-bars alarm OK: {bars} 5m bars since 09:15")
+    except Exception as e:
+        log.error(f"open_bars_alarm: {e}")
+
 # cc#217: _bg_fetch_company_news / _bg_company_news_wave2 / _bg_company_news_retry
 # removed — the 500-company Google waves were retired (cc#207) and fully deleted here.
 # Position News (open V8 + SmartGain symbols) is the successor: _bg_fetch_position_news.
@@ -1064,6 +1091,8 @@ async def _scheduler_loop():
             _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar BEFORE the 09:10 pre-market check
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
+        if h == 9 and m == 25:
+            _spawn(_bg_open_bars_alarm)       # cc#229: 09:25 feed-silent-at-open alarm
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
             _spawn(_bg_v8_paper_exit)         # cc_task #72 bug_0: live exit pass (primary)
