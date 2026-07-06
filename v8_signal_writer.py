@@ -325,7 +325,7 @@ def _load_eod_metrics(conn, sim_ts=None) -> Dict[str, dict]:
                OR rsi_weekly  IS NOT NULL
                OR sector_week IS NOT NULL
                OR sector_month IS NOT NULL)
-              AND (%s IS NULL OR score_date < %s)
+              AND (%s::date IS NULL OR score_date < %s::date)
             ORDER BY symbol, score_date DESC
         """, (_asof, _asof))
         cols = [d[0] for d in cur.description]

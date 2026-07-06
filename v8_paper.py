@@ -390,7 +390,7 @@ def _two_latest_closes(conn, sym, d, sim_ts=None):
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source='fyers_eq' AND (%s IS NULL OR ts <= %s)
+              AND timeframe='5m' AND source='fyers_eq' AND (%s::timestamp IS NULL OR ts <= %s)
             ORDER BY ts DESC LIMIT 2
         """, (sym, d, sim_ts, _bar_cutoff(sim_ts)))   # cc#218 D6: 2nd param = last CLOSED bar (sim_ts-5min); live no-op
         rows = cur.fetchall()
@@ -408,7 +408,7 @@ def _latest_close(conn, sym, d, sim_ts=None):
         cur.execute("""
             SELECT close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source='fyers_eq' AND (%s IS NULL OR ts <= %s)
+              AND timeframe='5m' AND source='fyers_eq' AND (%s::timestamp IS NULL OR ts <= %s)
             ORDER BY ts DESC LIMIT 1
         """, (sym, d, sim_ts, _bar_cutoff(sim_ts)))   # cc#218 D6: 2nd param = last CLOSED bar (sim_ts-5min); live no-op
         r = cur.fetchone()
@@ -425,7 +425,7 @@ def _first_bar(conn, sym, d, sim_ts=None):
         cur.execute("""
             SELECT open, close, ts FROM intraday_prices
             WHERE symbol=%s AND ts::date=%s AND ts::time BETWEEN '09:15' AND '15:30'
-              AND timeframe='5m' AND source='fyers_eq' AND (%s IS NULL OR ts <= %s)
+              AND timeframe='5m' AND source='fyers_eq' AND (%s::timestamp IS NULL OR ts <= %s)
             ORDER BY ts ASC LIMIT 1
         """, (sym, d, sim_ts, _bar_cutoff(sim_ts)))   # cc#218 D6: 2nd param = last CLOSED bar (sim_ts-5min); live no-op
         r = cur.fetchone()
