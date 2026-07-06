@@ -220,22 +220,39 @@ def _daily_range(cur, account, rng, today):
         return {"error": "no opening positions", "notes": notes}
 
     if rng == "1w":
-        start, mode = _monday(today), "bar"
+        start, end, mode = _monday(today), _monday(today) + timedelta(days=4), "bar"
     elif rng == "1m":
-        start, mode = today - timedelta(days=30), "bar"
+        start, end, mode = today - timedelta(days=30), today, "bar"
     elif rng == "1y":
-        start, mode = today - timedelta(days=365), "line"
+        start, end, mode = today - timedelta(days=365), today, "line"
     else:
         return {"error": f"bad range '{rng}'"}
     start = max(start, inception)
 
-    window = [d for d in tdays if start <= d <= today]
+    # cc#239: bar-mode ranges (1w/1m) render EVERY trading weekday in the window (via
+    # is_trading_day), not only days present in raw_prices (tdays). A sparse-activity week then
+    # shows the full weekday frame — up to 5 Mon-Fri bars, with a zero bar + carried unrealised
+    # on days with no activity (incl. not-yet-occurred days this week) — instead of a single
+    # bar. 1y (line mode) keeps the tdays-only cumulative series, unchanged. FIFO/realised
+    # untouched: per_day comes straight from _replay_full; missing days just carry forward.
+    if mode == "bar":
+        from nse_holidays import is_trading_day
+        window, d = [], start
+        while d <= end:
+            if is_trading_day(d):
+                window.append(d)
+            d += timedelta(days=1)
+    else:
+        window = [d for d in tdays if start <= d <= end]
     prior = [d for d in tdays if d < (window[0] if window else start)]
     prev_unreal = per_day[prior[-1]][1] if prior else inception_baseline
 
     series, cum = [], 0.0
     for d in window:
-        realised, unreal = per_day[d]
+        if d in per_day:
+            realised, unreal = per_day[d]
+        else:
+            realised, unreal = 0.0, prev_unreal   # cc#239: no data/activity -> zero bar, carry unrealised
         m2m = realised + (unreal - prev_unreal)
         cum += m2m
         series.append({"date": str(d), "label": d.strftime("%d %b"), "day": d.strftime("%a"),

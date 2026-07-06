@@ -504,7 +504,11 @@ const keyStr=t=> t==null?"":(typeof t==="object"
   ? t.year+"-"+String(t.month).padStart(2,"0")+"-"+String(t.day).padStart(2,"0")
   : String(t));
 function _tkey(d,p){                     // LWC time value for a point
-  if(d.range!=="1d") return p.date.slice(0,10);        // business-day string
+  if(d.range==="1w"||d.range==="1m"){    // cc#239: LWC business-day series needs an OBJECT
+    const iso=p.date.slice(0,10);        // {year,month(1-idx),day}; a raw string degenerates
+    return {year:+iso.slice(0,4), month:+iso.slice(5,7), day:+iso.slice(8,10)};  // to a bare day digit
+  }
+  if(d.range!=="1d") return p.date.slice(0,10);        // 1y business-day string (unchanged)
   const dd=d.target_day;                               // fake-UTC so axis shows IST HH:MM
   return Math.floor(Date.UTC(+dd.slice(0,4),+dd.slice(5,7)-1,+dd.slice(8,10),
                              +p.label.slice(0,2),+p.label.slice(3,5))/1000);
