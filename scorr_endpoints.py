@@ -358,15 +358,14 @@ def smartgain_m2m():
             last_updated = max((r["last_tick"] for r in rows if r["last_tick"]), default=None)
             any_live     = any(r["is_live"] for r in rows)
 
-            # ── REALISED: closed-trade P&L this week (cc_task #115) ──
-            # Week = Monday-start (date_trunc('week') is ISO Monday in Postgres).
-            cur.execute("""
-                SELECT COALESCE(SUM(pnl), 0)
-                FROM personal_journal
-                WHERE result = 'CLOSED'
-                  AND trade_date >= date_trunc('week', CURRENT_DATE)
-            """)
-            realised = round(float(cur.fetchone()[0] or 0), 2)
+            # ── REALISED: closed-trade P&L this week ──
+            # cc#237: derive from the FIFO replay (smartgain_orders + opening), NOT a raw
+            # personal_journal SUM. personal_journal has no account column and mixes SmartGain
+            # closes with Arpit's other trades (cross-contamination), and BUG C left it empty
+            # so this tile read +0.00 all session. All three realised endpoints (/m2m,
+            # /daily_m2m week card, /daily_m2m?range=1w) now read this same replay -> identical.
+            from smartgain_daily_m2m import current_week_realised
+            realised = current_week_realised("MHK40")
 
             # ── TOTAL: headline number = realised + unrealised ──
             total = round(realised + unrealised, 2)

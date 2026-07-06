@@ -69,6 +69,7 @@ from v12_endpoints import router as v12_router
 from test_cio_endpoints import router as test_cio_router
 from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
 from smartgain_daily_m2m import router as smartgain_daily_m2m_router
+from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
 from v13_presets_endpoints import router as v13_presets_router
 from galaxy_endpoints import router as galaxy_router
@@ -213,6 +214,7 @@ app.include_router(v12_router)
 app.include_router(test_cio_router)
 app.include_router(fyers_range_backfill_router)
 app.include_router(smartgain_daily_m2m_router)
+app.include_router(smartgain_reconcile_router)
 app.include_router(stock_options_backfill_router)
 app.include_router(v13_presets_router)
 app.include_router(galaxy_router)

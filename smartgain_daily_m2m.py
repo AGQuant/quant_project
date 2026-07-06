@@ -442,6 +442,27 @@ def _week_response(week_start, account):
     }
 
 
+def current_week_realised(account: str = DEFAULT_ACCOUNT) -> float:
+    """Realised P&L for the current ISO week, from the FIFO replay of inception opening + all
+    FILLED fills. cc#237 part 2: the SINGLE source every SmartGain 'realised this week' number
+    reads (was: /m2m summed personal_journal, /daily_m2m replayed — they could disagree). By
+    construction identical to _week_response()['week_realised'] and _daily_range 1w."""
+    today = _ist_today()
+    ws = _monday(today)
+    with _conn() as conn, conn.cursor() as cur:
+        inception, opening = _load_inception(cur, account)
+        if not inception:
+            return 0.0
+        cur.execute("""SELECT trade_date, order_ts, symbol, side, qty, price FROM smartgain_orders
+                       WHERE account=%s AND status='FILLED' AND trade_date <= %s
+                       ORDER BY order_ts, id""", (account, today))
+        books, closed = _fresh_books(opening), []
+        for _td, _ts, sym, side, qty, price in cur.fetchall():
+            _apply_fill(books, closed, sym, side, int(qty), float(price), _td)
+        return round(sum(c["pnl"] for c in closed
+                         if date.fromisoformat(str(c["close_date"])[:10]) >= ws), 2)
+
+
 @router.get("/api/smartgain/daily_m2m")
 def smartgain_daily_m2m(week_start: Optional[str] = None,
                         range: Optional[str] = Query(None),
