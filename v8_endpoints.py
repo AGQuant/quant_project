@@ -603,6 +603,9 @@ def metrics_all():
                    m.dma_20, m.dma_50, m.dma_200,
                    m.rsi_weekly, m.rsi_month, m.daily_rsi,
                    m.vol_ratio, m.week_index_52,
+                   -- cc#231: these 6 were absent from THIS (served) /metrics/all route, so the
+                   -- Raw Data tab rendered -- for them despite v8_metrics having values.
+                   m.month_index, m.range_1d, m.range_3d, m.upper_bb, m.lower_bb, m.ma9_vs_ma21,
                    m.sector_week, m.sector_month,
                    g.segment
             FROM v8_metrics m
