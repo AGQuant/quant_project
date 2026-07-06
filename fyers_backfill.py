@@ -33,6 +33,14 @@ RETENTION_DAYS  = 7
 HISTORY_RETRIES = 2
 SLEEP_BETWEEN   = 5  # seconds between symbol calls — avoids rate limit
 
+# cc#228: fyers_eq (live WS) is the SOLE canonical equity source. The legacy REST equity
+# backfill/heal path below wrote source='fyers' — a 100% duplicate of fyers_eq, and the V8
+# engine reads ONLY fyers_eq (cc#140), so those rows were unread dead weight (legacy also
+# wrote on the closed Sat 04-Jul). This EQUITY path is now DORMANT: skipped unless explicitly
+# forced (force=True, or flip LEGACY_EQUITY_BACKFILL=True) — kept present as an emergency
+# MANUAL fallback only. The FUTURES path (source='fyers_fut') is UNAFFECTED.
+LEGACY_EQUITY_BACKFILL = False
+
 # cc_task #87 (canonical rule, locked): backfill is POST-MARKET / on-demand ONLY.
 # Never write history bars to intraday_prices during the live session.
 MARKET_OPEN     = dt_time(9, 15)
@@ -141,7 +149,7 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to,
 
 
 def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None,
-                   futures=False, contract=None):
+                   futures=False, contract=None, force=False):
     """cc#159: sequential REST backfill for an explicit date range and/or symbol
     subset. Same pacing/rate-limit behavior (5s sleep between symbols).
 
@@ -154,6 +162,13 @@ def backfill_range(token, conn=None, date_from=None, date_to=None, symbols=None,
     regardless of run date. The default (futures=False) path is the legacy
     equity/spot healer (source='fyers', -EQ symbol) used by boot/heal callers."""
     _assert_not_market_hours('backfill_range')
+    # cc#228: legacy equity backfill (source='fyers') is dormant — fyers_eq WS is the sole
+    # equity source. Futures is exempt (never a duplicate). Manual fallback: force=True.
+    if not futures and not (force or LEGACY_EQUITY_BACKFILL):
+        log.warning("backfill_range: legacy EQUITY backfill (source='fyers') is DORMANT (cc#228) "
+                    "— fyers_eq WS is the sole equity source; skipped (force=True for manual use).")
+        return {"skipped": "legacy_equity_backfill_dormant", "source": "fyers",
+                "symbols_processed": 0, "bars_written": 0}
     own = conn is None
     if own: conn = get_db()
 
@@ -210,9 +225,16 @@ def newest_ts(conn, symbol, timeframe):
     return r[0] if r and r[0] else None
 
 
-def heal_gap(token, conn, symbols):
-    """On reconnect: pull only from newest stored candle -> now per symbol."""
+def heal_gap(token, conn, symbols, force=False):
+    """On reconnect: pull only from newest stored candle -> now per symbol.
+    cc#228: this heals EQUITY into source='fyers' (via fetch_history default, -EQ symbol),
+    which the V8 engine never reads (fyers_eq only) — so it is dormant now; fyers_eq WS is the
+    sole equity source. Kept present as a manual fallback (force=True)."""
     _assert_not_market_hours('heal_gap')
+    if not (force or LEGACY_EQUITY_BACKFILL):
+        log.warning("heal_gap: legacy EQUITY gap-heal (source='fyers') is DORMANT (cc#228) — "
+                    "fyers_eq WS is the sole equity source; skipped (force=True for manual use).")
+        return 0
     now    = datetime.now(IST)
     healed = 0
     for sym in symbols:

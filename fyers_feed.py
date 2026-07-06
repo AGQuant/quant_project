@@ -1315,6 +1315,7 @@ def run(auth_code=None):
         opt_subscribed       = False  # cc#189: options subscribed once live prices went fresh
         opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
         opt_gate_day         = None   # cc#189: reset the gate each trading day
+        starvation_day       = None   # cc#228: fyers_eq starvation check fired once per trading day
 
         while True:
             now    = datetime.now(IST)
@@ -1326,6 +1327,33 @@ def run(auth_code=None):
             if opt_gate_day != today:
                 opt_gate_day = today
                 opt_deadline_alerted = False
+
+            # cc#228: fyers_eq starvation watchdog. fyers_eq (live WS) is now the SOLE equity
+            # source (legacy fyers backfill is dormant), and it is new — only 03-Jul is proven
+            # full (~15,700 bars/day). If it wrote < 10,000 5m bars by 11:00 IST on a trading
+            # day, the equity feed is starving -> fire a one-per-day ops_log alert so the
+            # dormant legacy path can be manually re-armed if needed.
+            if (starvation_day != today and now.time() >= dt_time(11, 0)
+                    and is_trading_day(today)):
+                starvation_day = today
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT COUNT(*) FROM intraday_prices "
+                                    "WHERE source='fyers_eq' AND timeframe='5m' "
+                                    "AND ts >= %s AND ts < %s",
+                                    (today, today + timedelta(days=1)))
+                        eq_bars = cur.fetchone()[0]
+                    if eq_bars < 10000:
+                        _log_feed_incident("fyers_eq_starvation",
+                            f"fyers_eq wrote only {eq_bars} 5m bars by 11:00 IST (<10000; ~15700 "
+                            f"expected) — equity feed may be starving. Legacy fyers backfill is "
+                            f"dormant (cc#228); re-arm manually (force=True / LEGACY_EQUITY_BACKFILL) "
+                            f"if the WS cannot recover.")
+                        log.error(f"FYERS_EQ STARVATION: only {eq_bars} 5m bars by 11:00 IST (<10000)")
+                    else:
+                        log.info(f"fyers_eq starvation check OK: {eq_bars} 5m bars by 11:00 IST")
+                except Exception as _sv:
+                    log.warning(f"fyers_eq starvation watchdog: {_sv}")
 
             if in_market:
                 update_index_ltp(conn, token, agg)
