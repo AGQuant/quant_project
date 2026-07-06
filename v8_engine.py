@@ -93,8 +93,6 @@ CREATE TABLE IF NOT EXISTS v8_metrics (
     day_1d NUMERIC, eod_chg NUMERIC,
     sector_day NUMERIC, sector_week NUMERIC, sector_month NUMERIC,
     month_index NUMERIC, week_index_52 NUMERIC,
-    range_1d NUMERIC, range_3d NUMERIC,
-    upper_bb NUMERIC, lower_bb NUMERIC,
     ma9_vs_ma21 NUMERIC, vol_ratio NUMERIC,
     computed_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(symbol, score_date)
@@ -127,7 +125,6 @@ CREATE TABLE IF NOT EXISTS v8_qualified (
     month_index NUMERIC,
     week_index_52 NUMERIC,
     daily_rsi NUMERIC,
-    range_3d NUMERIC,
     metrics JSONB,
     source TEXT DEFAULT 'eod',
     UNIQUE(symbol, basket, signal_date)
@@ -205,10 +202,10 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         "rsi_month": None, "rsi_weekly": None,
         "month_return": None, "week_return": None, "year_return": None,
         "sector_day": None, "sector_week": None, "sector_month": None,
-        "month_index": None, "week_index_52": None, "range_1d": None,
-        "dma_20": None, "range_3d": None, "mom_2d": None,
+        "month_index": None, "week_index_52": None,
+        "dma_20": None, "mom_2d": None,
         "day_1d": None, "eod_chg": None,
-        "daily_rsi": None, "upper_bb": None, "lower_bb": None,
+        "daily_rsi": None,
         "ma9_vs_ma21": None, "vol_ratio": None,
     }
 
@@ -293,31 +290,8 @@ def compute_metrics_for_symbol(conn, symbol: str, target_date: date = None) -> D
         hi, lo = float(r21["high"].max()), float(r21["low"].min())
         if hi > lo: out["month_index"] = (latest_close - lo) / (hi - lo) * 100
 
-    if len(df) >= 4:
-        r3 = df.tail(3)
-        h3, l3 = float(r3["high"].max()), float(r3["low"].min())
-        base = float(df["close"].iloc[-4])
-        if base > 0:
-            raw = (h3 - l3) / base * 100
-            out["range_3d"] = raw if latest_close >= base else -raw
-
-    # cc#172: range_1d was NEVER computed on the EOD path (only initialized None),
-    # so the 15:45 upsert nulled the live writer's value for all 212 symbols every
-    # day. Same formula as the live writer: (high-low)/open * 100, signed by
-    # close>=open, from the latest raw_prices day.
-    last = df.iloc[-1]
-    if pd.notna(last["open"]) and float(last["open"]) > 0 \
-       and pd.notna(last["high"]) and pd.notna(last["low"]):
-        op = float(last["open"])
-        raw = (float(last["high"]) - float(last["low"])) / op * 100
-        out["range_1d"] = raw if latest_close >= op else -raw
-
-    if len(df) >= 20:
-        last20 = df["close"].tail(20)
-        ma, sd = float(last20.mean()), float(last20.std())
-        if latest_close > 0:
-            out["upper_bb"] = (latest_close - (ma + 2*sd)) / latest_close * 100
-            out["lower_bb"] = (latest_close - (ma - 2*sd)) / latest_close * 100
+    # cc#232: 4 dead range/BB metrics removed (0 readers, gated nothing, display-only).
+    # daily_rsi + ma9_vs_ma21 KEPT (active external readers — trade-check, GVM, paper).
 
     return out
 
@@ -332,7 +306,6 @@ def store_metrics(conn, m: Dict):
              day_1d, eod_chg,
              sector_day, sector_week, sector_month,
              month_index, week_index_52,
-             range_1d, range_3d, upper_bb, lower_bb,
              ma9_vs_ma21, vol_ratio)
             VALUES
             (%(symbol)s, %(score_date)s, %(gvm_score)s, %(dma_50)s, %(dma_200)s, %(dma_20)s,
@@ -341,7 +314,6 @@ def store_metrics(conn, m: Dict):
              %(day_1d)s, %(eod_chg)s,
              %(sector_day)s, %(sector_week)s, %(sector_month)s,
              %(month_index)s, %(week_index_52)s,
-             %(range_1d)s, %(range_3d)s, %(upper_bb)s, %(lower_bb)s,
              %(ma9_vs_ma21)s, %(vol_ratio)s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
                 gvm_score=EXCLUDED.gvm_score, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200, dma_20=EXCLUDED.dma_20,
@@ -354,8 +326,6 @@ def store_metrics(conn, m: Dict):
                 sector_week=COALESCE(v8_metrics.sector_week, EXCLUDED.sector_week),
                 sector_month=COALESCE(v8_metrics.sector_month, EXCLUDED.sector_month),
                 month_index=EXCLUDED.month_index, week_index_52=EXCLUDED.week_index_52,
-                range_1d=COALESCE(EXCLUDED.range_1d, v8_metrics.range_1d), range_3d=EXCLUDED.range_3d,
-                upper_bb=EXCLUDED.upper_bb, lower_bb=EXCLUDED.lower_bb,
                 ma9_vs_ma21=EXCLUDED.ma9_vs_ma21, vol_ratio=EXCLUDED.vol_ratio
         """, m)
         conn.commit()
@@ -424,7 +394,7 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
             metrics_snap = {k: s.get(k) for k in [
                 'gvm_score','dma_50','dma_200','dma_20','rsi_month','rsi_weekly',
                 'daily_rsi','month_return','week_return','year_return','mom_2d',
-                'week_index_52','range_3d','ma9_vs_ma21','vol_ratio',
+                'week_index_52','ma9_vs_ma21','vol_ratio',
                 'sector_week','sector_month',
             ]}
             try:
@@ -434,15 +404,15 @@ def write_signals_to_db(conn, all_metrics: List[Dict], target_date: date, source
                         (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
                          mom_2d, week_return, month_return, dma_200, dma_50,
                          rsi_month, rsi_weekly, sector_week, sector_day, month_index,
-                         week_index_52, daily_rsi, range_3d, metrics, source)
-                        VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         week_index_52, daily_rsi, metrics, source)
+                        VALUES (%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date, s.get('gvm_score'), cmp,
                         s.get('mom_2d'), s.get('week_return'), s.get('month_return'),
                         s.get('dma_200'), s.get('dma_50'), s.get('rsi_month'), s.get('rsi_weekly'),
                         s.get('sector_week'), s.get('sector_day'), s.get('month_index'),
-                        s.get('week_index_52'), s.get('daily_rsi'), s.get('range_3d'),
+                        s.get('week_index_52'), s.get('daily_rsi'),
                         json.dumps(metrics_snap), source
                     ))
                 conn.commit()

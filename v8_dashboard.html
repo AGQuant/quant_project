@@ -871,27 +871,30 @@ function renderRaw(){
   const all=cache.metricsAll;if(!all)return'<div class="loading">...</div>';
   // cc#168: render ALL metrics columns from /api/v8/metrics/all (sector_week/month
   // added to that endpoint in the same task). Horizontal scroll + sticky symbol col.
-  const METRIC_KEYS=['mom_2d','day_1d','eod_chg','week_return','month_return','year_return','dma_20','dma_50','dma_200','rsi_month','rsi_weekly','daily_rsi','week_index_52','month_index','range_1d','range_3d','upper_bb','lower_bb','ma9_vs_ma21','vol_ratio','sector_week','sector_month','gvm_score'];
+  // cc#233: Raw Data tab shows ONLY signal-driving columns (15). Display-only noise
+  // hidden: eod_chg, year_return, dma_20, daily_rsi, month_index, ma9_vs_ma21 (still in
+  // DB, just not rendered). 4 dead range/BB metrics dropped by cc#232.
+  const METRIC_KEYS=['gvm_score','day_1d','week_return','month_return','dma_50','dma_200','rsi_month','rsi_weekly','week_index_52','vol_ratio','sector_week','sector_month','mom_2d'];
   const allNull=x=>METRIC_KEYS.every(k=>x[k]==null);
   const IDX=new Set(['NIFTY50','BANKNIFTY']);
   const pinned=all.filter(x=>IDX.has(x.symbol));                    // ADDITION_1: pinned on top, GVM shows --, never dropped
   const rest=all.filter(x=>!IDX.has(x.symbol)&&!allNull(x));        // ADDITION_2: all-null junk rows (bare NIFTY alias) excluded
   const hidden=all.length-pinned.length-rest.length;
   const row=x=>`<tr${IDX.has(x.symbol)?' class="row-idx"':''}><td class="sym">${x.symbol}</td>
-      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td><td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td><td class="${cls(x.eod_chg)}">${sign(x.eod_chg)}%</td>
-      <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td><td class="${cls(x.month_return)}">${sign(x.month_return)}%</td><td class="${cls(x.year_return)}">${sign(x.year_return)}%</td>
-      <td class="${cls(x.dma_20)}">${num(x.dma_20,1)}</td><td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td><td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
-      <td>${num(x.rsi_month,0)}</td><td>${num(x.rsi_weekly,0)}</td><td>${num(x.daily_rsi,0)}</td>
-      <td>${num(x.week_index_52,0)}</td><td>${num(x.month_index,0)}</td>
-      <td>${num(x.range_1d,2)}</td><td>${num(x.range_3d,2)}</td>
-      <td>${num(x.upper_bb,1)}</td><td>${num(x.lower_bb,1)}</td>
-      <td class="${cls(x.ma9_vs_ma21)}">${num(x.ma9_vs_ma21,2)}</td><td>${num(x.vol_ratio,2)}</td>
+      <td>${num(x.gvm_score,2)}</td>
+      <td class="${cls(x.day_1d)}">${sign(x.day_1d)}%</td>
+      <td class="${cls(x.hourly_pct)}">${sign(x.hourly_pct)}%</td>
+      <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td><td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
+      <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td><td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
+      <td>${num(x.rsi_month,0)}</td><td>${num(x.rsi_weekly,0)}</td>
+      <td>${num(x.week_index_52,0)}</td>
+      <td>${num(x.vol_ratio,2)}</td>
       <td class="${cls(x.sector_week)}">${sign(x.sector_week)}%</td><td class="${cls(x.sector_month)}">${sign(x.sector_month)}%</td>
-      <td>${num(x.gvm_score,2)}</td></tr>`;
+      <td class="${cls(x.mom_2d)}">${sign(x.mom_2d)}%</td></tr>`;
   return`<div class="ptitle">Raw Data <span class="ct">${rest.length} symbols + ${pinned.length} indices${hidden>0?` · ${hidden} empty hidden`:''}</span></div>`+
-    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">Scroll sideways for all 23 metric columns — Symbol stays pinned. Indices (NIFTY50/BANKNIFTY) pinned on top.</div>`+
+    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">15 signal-driving columns (display-only metrics hidden) — Symbol stays pinned. Indices (NIFTY50/BANKNIFTY) pinned on top. HOUR% is -- before ~10:15 IST (needs 12 futures bars).</div>`+
     sortTbl('raw',
-    [["symbol","Symbol"],["mom_2d","2D Mom%"],["day_1d","Day%"],["eod_chg","EOD%"],["week_return","Wk %"],["month_return","Mo %"],["year_return","Yr %"],["dma_20","DMA20"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["daily_rsi","RSI(d)"],["week_index_52","52W idx"],["month_index","Mo idx"],["range_1d","Rng1D"],["range_3d","Rng3D"],["upper_bb","UpperBB"],["lower_bb","LowerBB"],["ma9_vs_ma21","MA9v21"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["gvm_score","GVM"]],
+    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"]],
     rest,row,
     {sortKey:'mom_2d',dir:-1,empty:"No metrics",pinned,wrapClass:'',scrollCls:'rawscroll'});
 }

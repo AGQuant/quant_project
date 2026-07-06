@@ -701,8 +701,6 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         "vol_ratio_legacy": None, "vol_ratio_time_normalized": None,
         "vol_ratio_days_available": 0, "vol_ratio_fallback": False,
         "week_index_52": None, "month_index": None,
-        "range_1d": None, "range_3d": None,
-        "upper_bb": None, "lower_bb": None,
         "sector_day": None,
     }
 
@@ -766,23 +764,8 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     if hi21 > lo21:
         out["month_index"] = (live - lo21) / (hi21 - lo21) * 100
 
-    op = bar.get("open")
-    if op and bar.get("high") is not None and bar.get("low") is not None and op > 0:
-        raw = (bar["high"] - bar["low"]) / op * 100
-        out["range_1d"] = raw if live >= op else -raw
-
-    if len(c) >= 4:
-        h3 = max(h[-3:]); l3 = min(l[-3:]); base3 = c[-4]
-        if base3 > 0:
-            raw = (h3 - l3) / base3 * 100
-            out["range_3d"] = raw if live >= base3 else -raw
-
-    if len(c) >= 20:
-        last20 = c[-20:]
-        ma, sd = float(np.mean(last20)), float(np.std(last20, ddof=1))
-        if live > 0:
-            out["upper_bb"] = (live - (ma + 2*sd)) / live * 100
-            out["lower_bb"] = (live - (ma - 2*sd)) / live * 100
+    # cc#232: 4 dead range/BB metrics removed (0 readers, gated nothing, display-only).
+    # daily_rsi + ma9_vs_ma21 KEPT (active external readers — trade-check, GVM, paper).
 
     MONTH_BARS, WEEK_BARS = 22, 5
     if len(c) >= MONTH_BARS * 7:
@@ -873,10 +856,9 @@ _UPSERT_METRICS_SQL = """
      day_1d, eod_chg,
      sector_day, sector_week, sector_month,
      month_index, week_index_52,
-     range_1d, range_3d, upper_bb, lower_bb,
      ma9_vs_ma21, vol_ratio)
     VALUES (%s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s,
-            %s,%s, %s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s)
+            %s,%s, %s,%s,%s, %s,%s, %s,%s)
     ON CONFLICT (symbol, score_date) DO UPDATE SET
         gvm_score     = EXCLUDED.gvm_score,
         dma_20        = EXCLUDED.dma_20,
@@ -896,10 +878,6 @@ _UPSERT_METRICS_SQL = """
         sector_month  = EXCLUDED.sector_month,
         month_index   = EXCLUDED.month_index,
         week_index_52 = EXCLUDED.week_index_52,
-        range_1d      = EXCLUDED.range_1d,
-        range_3d      = EXCLUDED.range_3d,
-        upper_bb      = EXCLUDED.upper_bb,
-        lower_bb      = EXCLUDED.lower_bb,
         ma9_vs_ma21   = EXCLUDED.ma9_vs_ma21,
         vol_ratio     = EXCLUDED.vol_ratio,
         computed_at   = NOW()
@@ -916,7 +894,6 @@ def _metrics_row(sym: str, m: dict, target_date: date) -> tuple:
         m.get("day_1d"), m.get("eod_chg"),
         m.get("sector_day"), m.get("sector_week"), m.get("sector_month"),
         m.get("month_index"), m.get("week_index_52"),
-        m.get("range_1d"), m.get("range_3d"), m.get("upper_bb"), m.get("lower_bb"),
         m.get("ma9_vs_ma21"), m.get("vol_ratio"),
     )
 
@@ -1575,7 +1552,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
                 "gvm_score", "dma_50", "dma_200", "dma_20",
                 "rsi_month", "rsi_weekly", "daily_rsi",
                 "month_return", "week_return", "year_return", "mom_2d",
-                "week_index_52", "range_3d", "ma9_vs_ma21", "vol_ratio",
+                "week_index_52", "ma9_vs_ma21", "vol_ratio",
                 "sector_week", "sector_month", "sector_day",
             ]}
             snap["vol_ratio_legacy"]          = s.get("vol_ratio_legacy")
@@ -1596,9 +1573,9 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
                         (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
                          mom_2d, week_return, month_return, dma_200, dma_50,
                          rsi_month, rsi_weekly, sector_week, sector_day,
-                         month_index, week_index_52, daily_rsi, range_3d,
+                         month_index, week_index_52, daily_rsi,
                          metrics, source)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                     """, (
                         sym, basket, target_date,
@@ -1609,7 +1586,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
                         s.get("rsi_month"), s.get("rsi_weekly"),
                         s.get("sector_week"), s.get("sector_day"),
                         s.get("month_index"), s.get("week_index_52"),
-                        s.get("daily_rsi"), s.get("range_3d"),
+                        s.get("daily_rsi"),
                         json.dumps(snap), "live_5min",
                     ))
                     first_qualification = cur.rowcount > 0
@@ -1702,10 +1679,10 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                     (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
                      mom_2d, week_return, month_return, dma_200, dma_50,
                      rsi_month, rsi_weekly, sector_week, sector_day,
-                     month_index, week_index_52, daily_rsi, range_3d,
+                     month_index, week_index_52, daily_rsi,
                      metrics, source)
                     VALUES
-                    (%s,'buy_s1_bounce',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (%s,'buy_s1_bounce',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                 """, (
                     sym, target_date, signal_ts_ist,
@@ -1715,7 +1692,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                     s.get("rsi_month"), s.get("rsi_weekly"),
                     s.get("sector_week"), s.get("sector_day"),
                     s.get("month_index"), s.get("week_index_52"),
-                    s.get("daily_rsi"), s.get("range_3d"),
+                    s.get("daily_rsi"),
                     json.dumps(snap), "live_5min",
                 ))
                 first_qual = cur.rowcount > 0
@@ -1851,9 +1828,9 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
                     (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
                      mom_2d, week_return, month_return, dma_200, dma_50,
                      rsi_month, rsi_weekly, sector_week, sector_day,
-                     month_index, week_index_52, daily_rsi, range_3d,
+                     month_index, week_index_52, daily_rsi,
                      metrics, source)
-                    VALUES (%s,'sell_overbought',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,'sell_overbought',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                 """, (
                     sym, target_date, signal_ts_ist,
@@ -1863,7 +1840,7 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
                     s.get("rsi_month"), s.get("rsi_weekly"),
                     s.get("sector_week"), s.get("sector_day"),
                     s.get("month_index"), s.get("week_index_52"),
-                    s.get("daily_rsi"), s.get("range_3d"),
+                    s.get("daily_rsi"),
                     json.dumps(snap), "live_5min",
                 ))
                 first_qualification = cur.rowcount > 0

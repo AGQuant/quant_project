@@ -603,9 +603,9 @@ def metrics_all():
                    m.dma_20, m.dma_50, m.dma_200,
                    m.rsi_weekly, m.rsi_month, m.daily_rsi,
                    m.vol_ratio, m.week_index_52,
-                   -- cc#231: these 6 were absent from THIS (served) /metrics/all route, so the
-                   -- Raw Data tab rendered -- for them despite v8_metrics having values.
-                   m.month_index, m.range_1d, m.range_3d, m.upper_bb, m.lower_bb, m.ma9_vs_ma21,
+                   -- cc#231/#232: month_index + ma9_vs_ma21 kept; 4 dead range/BB
+                   -- metrics dropped (cc#232).
+                   m.month_index, m.ma9_vs_ma21,
                    m.sector_week, m.sector_month,
                    g.segment
             FROM v8_metrics m
@@ -614,6 +614,12 @@ def metrics_all():
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # cc#233: live-join hourly_pct (fyers_fut path, not a v8_metrics column) so the
+        # Raw Data tab can show HOUR% as a signal-driving column. NULL before ~10:15 IST
+        # (needs 12 fut bars) is expected, not an error.
+        v21 = _load_v21_live_metrics(conn, [s["symbol"] for s in rows])
+        for s in rows:
+            s["hourly_pct"] = v21.get(s["symbol"], {}).get("hourly_pct")
     for s in rows:
         s["segment"] = _seg_override(s["symbol"], s.get("segment"))
         for k, v in list(s.items()):

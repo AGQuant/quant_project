@@ -1361,8 +1361,6 @@ function humanLogic(metric) {
     'sector_day': 'Sector today',
     'month_index': 'Market breadth',
     'week_index_52': '52-week position',
-    'range_1d': 'Today\'s candle',
-    'range_3d': '3-day move',
     'ma9_vs_ma21': 'Short-term stretch',
     'vol_ratio': 'Volume drying',
     'prev_day_change': 'Previous day change',

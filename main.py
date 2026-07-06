@@ -912,7 +912,7 @@ def v8_metrics_all():
     return api_query("""
         SELECT symbol, score_date, gvm_score, dma_50, dma_200, dma_20, rsi_month, rsi_weekly, daily_rsi,
                month_return, week_return, year_return, mom_2d, day_1d, eod_chg,
-               month_index, week_index_52, range_1d, range_3d, upper_bb, lower_bb, ma9_vs_ma21, vol_ratio,
+               month_index, week_index_52, ma9_vs_ma21, vol_ratio,
                sector_week, sector_month
         FROM v8_metrics WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics) ORDER BY symbol
     """)
