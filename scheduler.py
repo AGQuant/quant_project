@@ -962,6 +962,25 @@ def _bg_fetch_market_news():
         log.info(f"news_market: {res.get('inserted') if isinstance(res, dict) else res} new")
     except Exception as e: log.error(f"news_market: {e}")
 
+def _bg_earnings_refresh():
+    """cc#225: daily 06:15 IST earnings_calendar refresh (runs BEFORE the 09:10 pre-market
+    readiness check), so the blackout logic sees a fresh calendar at open. Reuses the same
+    code path as the load_earnings_from_screener MCP tool via admin_data.refresh_earnings_calendar,
+    which NEVER wipes the table on a scrape error / 0 rows (prior data kept). Fires an alert on
+    failure or empty load (same pattern as the ADR gate)."""
+    try:
+        import admin_data
+        res = asyncio.run(admin_data.refresh_earnings_calendar())
+        if not isinstance(res, dict) or res.get("status") != "ok" or not res.get("rows_inserted"):
+            _log_alert("earnings_refresh_failed",
+                       f"06:15 earnings_calendar refresh loaded no rows — prior data kept: {res}")
+        else:
+            log.info(f"earnings_refresh: {res.get('rows_inserted')} rows loaded (loaded_at=today)")
+    except Exception as e:
+        _log_alert("earnings_refresh_failed",
+                   f"06:15 earnings_calendar refresh raised (prior data kept): {e}")
+        log.error(f"earnings_refresh: {e}")
+
 # cc#217: _bg_fetch_company_news / _bg_company_news_wave2 / _bg_company_news_retry
 # removed — the 500-company Google waves were retired (cc#207) and fully deleted here.
 # Position News (open V8 + SmartGain symbols) is the successor: _bg_fetch_position_news.
@@ -1041,6 +1060,8 @@ async def _scheduler_loop():
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
             _spawn(_bg_fu_sync)
+        if now.weekday() < 5 and h == 6 and m == 15:
+            _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar BEFORE the 09:10 pre-market check
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         if _is_market_hours(now) and m % 5 == 0:

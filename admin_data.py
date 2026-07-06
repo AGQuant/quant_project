@@ -152,9 +152,13 @@ async def _scrape_upcoming_results(client):
     return rows_out
 
 
-@router.post("/api/admin/load_earnings_from_screener")
-async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None)):
-    _check_admin(x_admin_token); client = await _screener_login_session()
+async def refresh_earnings_calendar():
+    """Scrape Screener.in upcoming results -> refresh earnings_calendar. Shared code path for
+    the admin endpoint AND the cc#225 daily 06:15 IST scheduler job.
+    GUARD: the scrape runs BEFORE any write; on scrape error it raises before the DELETE, and
+    on 0 rows it returns early — so the existing table is NEVER wiped on failure (prior data
+    kept). loaded_at auto-updates via its DEFAULT NOW() on the fresh inserts."""
+    client = await _screener_login_session()
     try:
         rows = await _scrape_upcoming_results(client)
     finally:
@@ -169,3 +173,9 @@ async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None
                 log.warning(f"row skip: {e}")
         conn.commit()
     return {"status": "ok", "rows_scraped": len(rows), "rows_inserted": inserted}
+
+
+@router.post("/api/admin/load_earnings_from_screener")
+async def load_earnings_from_screener(x_admin_token: Optional[str] = Header(None)):
+    _check_admin(x_admin_token)
+    return await refresh_earnings_calendar()
