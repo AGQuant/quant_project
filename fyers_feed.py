@@ -72,7 +72,8 @@ DEPTH_URL         = 'https://api-t1.fyers.in/data/depth'
 OPTION_MASTER_URL = 'https://public.fyers.in/sym_details/NSE_FO.csv'
 IST               = pytz.timezone('Asia/Kolkata')
 
-RETENTION_DAYS = 30   # intraday_prices + futures_basis (extended 7→30 on 15-Jun-2026 for sim history)
+RETENTION_DAYS = 30   # intraday_prices fyers_eq + futures_basis (extended 7→30 on 15-Jun-2026 for sim history)
+INTRADAY_FUT_RETENTION_DAYS = 7   # cc#227: fyers_fut + residual legacy fyers/yahoo intraday bars (7d)
 MARKET_OPEN    = dt_time(9, 15)
 MARKET_CLOSE   = dt_time(15, 30)
 
@@ -920,19 +921,30 @@ def update_index_ltp(conn, token, agg=None):
 
 def purge_old_bars(conn):
     now          = datetime.now(IST).replace(tzinfo=None)
-    cutoff       = now - timedelta(days=RETENTION_DAYS)         # intraday_prices + futures_basis (30d)
-    opt_cutoff   = now - timedelta(days=OPTION_RETENTION_DAYS)  # option_chain (7d, leaner)
+    cutoff       = now - timedelta(days=RETENTION_DAYS)                    # futures_basis (30d)
+    eq_cutoff    = now - timedelta(days=RETENTION_DAYS)                    # intraday fyers_eq (30d, sim history)
+    fut_cutoff   = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # intraday fyers_fut + legacy (7d)
+    opt_cutoff   = now - timedelta(days=OPTION_RETENTION_DAYS)            # option_chain (7d, leaner)
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m'", (cutoff,))
+            # cc#227: SOURCE-AWARE intraday retention. fyers_eq (canonical equity, cc#228) keeps
+            # 30d for BT7/sim history; fyers_fut keeps 7d; residual legacy fyers/yahoo keep 7d
+            # (shrinking once the cc#228 relabel/dedupe lands). IS DISTINCT FROM handles any NULL.
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
+                        "AND source='fyers_eq'", (eq_cutoff,))
             eq_del = cur.rowcount
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
+                        "AND source IS DISTINCT FROM 'fyers_eq'", (fut_cutoff,))
+            other_del = cur.rowcount
             cur.execute("DELETE FROM option_chain WHERE ts < %s", (opt_cutoff,))
             opt_del = cur.rowcount
             cur.execute("DELETE FROM futures_basis WHERE ts < %s", (cutoff,))
             basis_del = cur.rowcount
         conn.commit()
-        log.info(f"Purged: intraday={eq_del} (>{RETENTION_DAYS}d), "
-                 f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), futures_basis={basis_del} (>{RETENTION_DAYS}d)")
+        log.info(f"Purged intraday: fyers_eq={eq_del} (>{RETENTION_DAYS}d), "
+                 f"fut/legacy={other_del} (>{INTRADAY_FUT_RETENTION_DAYS}d); "
+                 f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), "
+                 f"futures_basis={basis_del} (>{RETENTION_DAYS}d)")
     except Exception as e:
         log.warning(f"purge_old_bars: {e}")
 
