@@ -112,6 +112,8 @@ MCP_TOOLS = [
     {"name":"sector_brief_status","description":"Check how many of the 129 sector briefs are cached in DB vs pending generation.","inputSchema":{"type":"object","properties":{},"required":[]}},
     {"name":"anthropic_chat","description":"Call Claude via Anthropic API (bypasses chat limit). Returns response, tokens used, cost estimate. Use when chat is at 98%+ weekly limit.","inputSchema":{"type":"object","properties":{"prompt":{"type":"string"},"model":{"type":"string"},"max_tokens":{"type":"integer"}},"required":["prompt"]}},
     {"name":"backfill_futures_fyers","description":"cc#159: on-demand Fyers REST 5-min futures backfill (fixes cc#152/153 fut/eq source-collision gap). start (YYYY-MM-DD, default 2026-06-26), end (default today), symbols (optional array, default all ~212 active futures). One-at-a-time REST pacing (5s/symbol) — runs ~15-20 min for the full universe, blocked automatically during market hours (09:15-15:30 IST). Returns symbols_processed, bars_written, gaps_remaining.","inputSchema":{"type":"object","properties":{"start":{"type":"string"},"end":{"type":"string"},"symbols":{"type":"array","items":{"type":"string"}}},"required":[]}},
+    {"name":"smartgain_reconcile","description":"cc#237/247: atomic FIFO reconcile of ONE SmartGain orderbook batch (orders + journal + holdings + round-trips) in a single transaction — dedup + broker checksum. Never hand-write orderbook SQL. account default MHK40. batch_id required (unique per orderbook upload). rows = list of {symbol, side (BUY/SELL), qty, price, trade_date?, order_ts?, order_id?, instrument?, expiry?}. Empty rows + an existing batch_id runs a dedup-safe self-check. Returns the cc#237 self-check dict (matches_broker_checksum, counts, residual).","inputSchema":{"type":"object","properties":{"account":{"type":"string"},"batch_id":{"type":"string"},"rows":{"type":"array","items":{"type":"object","properties":{"symbol":{"type":"string"},"side":{"type":"string"},"qty":{"type":"number"},"price":{"type":"number"},"trade_date":{"type":"string"},"order_ts":{"type":"string"},"order_id":{"type":"string"},"instrument":{"type":"string"},"expiry":{"type":"string"}},"required":["symbol","side","qty","price"]}}},"required":["batch_id"]}},
+    {"name":"smartgain_backfill","description":"cc#237/247: idempotent re-reconcile of EVERY SmartGain batch since inception (FIFO cascade, dedup-safe). Re-aggregates split closes into round-trip rows. account default MHK40. Returns per-batch self-check summary.","inputSchema":{"type":"object","properties":{"account":{"type":"string"}},"required":[]}},
 ]
 
 async def _call_tool(name, args):
@@ -276,6 +278,23 @@ async def _call_tool(name, args):
             body = {"start": args.get("start"), "end": args.get("end"), "symbols": args.get("symbols")}
             r = await client.post(f"{BASE_URL}/api/admin/backfill_futures_fyers", json=body, headers=h, timeout=1500)
             return r.json()
+        elif name == "smartgain_reconcile":
+            # cc#247: call the canonical FIFO cascade IN-PROCESS (it opens its own DB
+            # conn). Deliberately NOT via HTTP — the Railway host is not in the egress
+            # allowlist, so curl fails; in-process sidesteps that entirely.
+            import smartgain_reconcile
+            return await asyncio.to_thread(
+                smartgain_reconcile.reconcile_smartgain_batch,
+                args.get("account", "MHK40"),
+                args.get("rows") or [],
+                args["batch_id"],
+            )
+        elif name == "smartgain_backfill":
+            import smartgain_reconcile
+            return await asyncio.to_thread(
+                smartgain_reconcile.backfill_all_batches,
+                args.get("account", "MHK40"),
+            )
         return {"error": f"Unknown tool: {name}"}
 
 @router.post("/mcp")
