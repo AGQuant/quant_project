@@ -22,10 +22,11 @@ def _conn():
 
 @router.get("/api/news/position")
 def position_news_feed(request: Request):
-    """cc#242 (POSITION_NEWS_PIPELINE_V1, id=1660): pure lookup — POLISHED news whose
-    mentioned_symbols overlaps an OPEN position (V8 paper OR SmartGain holdings), grouped by
-    symbol, newest first. Polished summaries only (Domestic-News card format); NO raw items,
-    NO detail page. Supersedes the position_news quarantine table (id=402). Founder-only."""
+    """cc#243 (delta on cc#242, POSITION_NEWS_PIPELINE_V1 id=1660): CANONICAL lookup — polished
+    COMPANY news for OPEN positions, last 7 days. Match on rn.symbol (exact, ingest-set), NOT
+    mentioned_symbols. Excludes AI Editorials and RSS market news (source_type='company' only).
+    Card = headline_clean + full_summary body + meta(source, time, symbol). DB retention stays
+    90d; this is a 7-day DISPLAY cap. Grouped by symbol, newest first. Founder-only."""
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     groups = {}
@@ -36,26 +37,28 @@ def position_news_feed(request: Request):
                     SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
                     UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL
                 )
-                SELECT p.id, p.headline_clean,
-                       COALESCE(p.summary, p.full_summary) AS summary,
-                       p.category, p.sentiment, p.impact, p.source,
-                       COALESCE(p.published_time, p.polished_at) AS published_at,
-                       s.symbol AS pos_symbol
-                FROM polished_news p
-                JOIN pos s ON s.symbol = ANY(p.mentioned_symbols)
-                WHERE COALESCE(p.published_time, p.polished_at) >= NOW() - INTERVAL '90 days'
-                ORDER BY s.symbol ASC,
-                         COALESCE(p.published_time, p.polished_at) DESC NULLS LAST, p.id DESC
+                SELECT pn.id, pn.headline_clean, pn.full_summary,
+                       pn.category, pn.sentiment, pn.impact, pn.source,
+                       COALESCE(pn.published_time, pn.polished_at) AS published_at,
+                       rn.symbol
+                FROM polished_news pn
+                JOIN raw_news rn ON rn.id = pn.raw_news_id
+                JOIN pos ON pos.symbol = rn.symbol
+                WHERE rn.source_type = 'company'
+                  AND COALESCE(pn.published_time, pn.polished_at) >= NOW() - INTERVAL '7 days'
+                ORDER BY rn.symbol ASC,
+                         COALESCE(pn.published_time, pn.polished_at) DESC NULLS LAST, pn.id DESC
             """)
-            for pid, headline, summary, category, sentiment, impact, source, pub, sym in cur.fetchall():
+            for pid, headline, body, category, sentiment, impact, source, pub, sym in cur.fetchall():
                 g = groups.get(sym)
                 if g is None:
                     g = {"symbol": sym, "count": 0, "items": []}
                     groups[sym] = g
                 g["count"] += 1
                 g["items"].append({
-                    "headline": headline, "summary": summary, "category": category,
+                    "headline": headline, "body": body, "category": category,
                     "sentiment": sentiment, "impact": impact, "source": source,
+                    "symbol": sym,
                     "published_at": pub.isoformat() if pub else None,
                 })
     except Exception as e:

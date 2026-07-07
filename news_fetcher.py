@@ -350,27 +350,31 @@ def _google_news_url(company_name: str) -> str:
     return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 
-def _stock_universe(conn):
-    """cc#242: stock universe for Google-News ingest = active futures-universe stocks (the
-    tradeable set, excl. indices). Returns [(symbol, company_name)] — company_name from
-    gvm_scores for a richer query, falling back to the symbol."""
-    excl = ('NIFTY', 'NIFTY50', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX')
+def _position_universe(conn):
+    """cc#243 (delta on cc#242): stock-news ingest universe = OPEN positions ONLY (V8 paper
+    OPEN UNION SmartGain holdings), resolved fresh each fetch run — NOT the full 209 futures
+    universe. Returns [(symbol, company_name)] — company_name from gvm_scores, else the symbol."""
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT fu.symbol, COALESCE(g.company_name, fu.symbol)
-            FROM futures_universe fu
-            LEFT JOIN gvm_scores g ON g.symbol = fu.symbol
+            WITH pos AS (
+                SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
+                UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL
+            )
+            SELECT p.symbol, COALESCE(g.company_name, p.symbol)
+            FROM pos p
+            LEFT JOIN gvm_scores g ON g.symbol = p.symbol
                 AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-            WHERE fu.is_active = TRUE AND fu.symbol <> ALL(%s)
-            ORDER BY fu.symbol
-        """, (list(excl),))
+            ORDER BY p.symbol
+        """)
         return [(r[0], r[1]) for r in cur.fetchall()]
 
 
 def fetch_stock_news(conn=None, symbols=None):
-    """cc#242 (POSITION_NEWS_PIPELINE_V1, session_log 1660): per-stock Google News for the full
-    active futures universe -> raw_news with source_type='company' + symbol tag. Single funnel
-    with market news (supersedes the position_news quarantine table, id=402). An ALIAS-MATCH
+    """cc#242 (POSITION_NEWS_PIPELINE_V1, session_log 1660) + cc#243 delta: per-stock Google News
+    for OPEN positions only (V8 paper OPEN UNION SmartGain holdings, resolved fresh each run —
+    cc#243 narrowed this from the full 209 futures universe) -> raw_news with source_type='company'
+    + symbol tag. Single funnel with market news (supersedes the position_news quarantine table,
+    id=402). An ALIAS-MATCH
     filter at ingest (news_tagger.headline_identity / is_primary) keeps junk out — only articles
     whose headline/description actually name the stock are stored. Polish selectivity happens at
     batch time (position symbols only), NOT ingest — the full universe stays visible raw in the
@@ -382,9 +386,9 @@ def fetch_stock_news(conn=None, symbols=None):
     try:
         ensure_schema(conn)
         import news_tagger
-        universe = symbols if symbols else _stock_universe(conn)
+        universe = symbols if symbols else _position_universe(conn)   # cc#243: open positions only
         if not universe:
-            return {"ok": True, "note": "empty universe", "inserted": 0}
+            return {"ok": True, "note": "no open positions", "inserted": 0}
         parsed = alias_filtered = inserted = dup_skipped = quality_rejected = 0
         http_429 = http_other = empty = 0
         consec_429 = 0

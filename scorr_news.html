@@ -606,16 +606,18 @@ function renderPositionNews(groups){
     feed.innerHTML = '<div class="msg">No open positions, or no polished news yet.<br><span style="color:#8a94a6;font-size:12px">Polished summaries for open V8 &amp; SmartGain positions appear here.</span></div>';
     return;
   }
-  // cc#242: pure lookup of POLISHED news for open positions — Domestic-News card format,
-  // short summary inline, 13px headline / 11px meta. No detail page, no nav link (plain div).
+  // cc#243: polished COMPANY news for open positions (last 7 days) — Domestic-News card:
+  // bold headline + full_summary body (3-4 sentences) + meta(source · time · symbol). The
+  // one-line deck was dropped (it duplicated the headline). No detail page, no nav link.
   feed.innerHTML = groups.map(function(g){
     const items = (g.items||[]).map(function(it){
       const age = it.published_at ? timeAgo(it.published_at) : "";
       return `<div class="pn-item">`+
-        `<div class="pn-hl" style="font-size:13px">${esc(it.headline||'')}</div>`+
-        (it.summary?`<div class="pn-sum" style="font-size:12px;color:#5a6781;margin:3px 0 4px;line-height:1.45">${esc(it.summary)}</div>`:``)+
+        `<div class="pn-hl" style="font-size:13px;font-weight:700">${esc(it.headline||'')}</div>`+
+        (it.body?`<div class="pn-sum" style="font-size:12px;color:#5a6781;margin:3px 0 4px;line-height:1.5">${esc(it.body)}</div>`:``)+
         `<div class="pn-meta" style="font-size:11px"><span class="pn-src">${esc(it.source||'')}</span>`+
-        (age?`<span>·</span><span>${esc(age)}</span>`:``)+`</div></div>`;
+        (age?`<span>·</span><span>${esc(age)}</span>`:``)+
+        (it.symbol?`<span>·</span><span>${esc(it.symbol)}</span>`:``)+`</div></div>`;
     }).join("");
     return `<div class="pn-group"><div class="pn-head">`+
       `<span class="pn-sym">${esc(g.symbol)}</span>`+
