@@ -1072,6 +1072,50 @@ def _bg_fetch_stock_news():
     except Exception as e:
         log.error(f"fetch_stock_news: {e}")
 
+def _bg_stock_news_watchdog():
+    """cc#245: staleness / all-blocked watchdog for the per-stock Google News fetch. Piggybacks
+    the 16:00 IST retry slot (no new slot). Reads the latest ops_log title='fetch_stock_news';
+    fires ops_log(category='alert', title='stock_news_stale') if (a) no run in the last 24h, OR
+    (b) inserted=0 AND every parsed item was gate-killed/blocked
+    (alias_filtered+quality_rejected==parsed) AND symbols_count>0 — the breakage/IP-block
+    signature. NEVER alerts on inserted=0 alone (a genuinely quiet news day, or all-dups, is
+    fine — dup_skipped keeps alias_filtered+quality_rejected < parsed)."""
+    try:
+        from psycopg.types.json import Json
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT details, session_ts FROM ops_log
+                           WHERE title='fetch_stock_news' ORDER BY session_ts DESC LIMIT 1""")
+            row = cur.fetchone()
+            alert = None
+            if not row:
+                alert = "no fetch_stock_news run on record"
+            else:
+                details, ts = row
+                cur.execute("SELECT (NOW() - %s) > INTERVAL '24 hours'", (ts,))
+                stale = cur.fetchone()[0]
+                d = details or {}
+                parsed  = int(d.get('parsed') or 0)
+                inserted = int(d.get('inserted') or 0)
+                alias_f = int(d.get('alias_filtered') or 0)
+                qrej    = int(d.get('quality_rejected') or 0)
+                symc    = int(d.get('symbols_count') or 0)
+                if stale:
+                    alert = f"no fetch_stock_news run in >24h (last {ts})"
+                elif inserted == 0 and symc > 0 and (alias_f + qrej) == parsed:
+                    alert = (f"fetch_stock_news inserted=0 with all {parsed} parsed items "
+                             f"gate-killed/blocked (alias_filtered={alias_f}, quality_rejected={qrej}, "
+                             f"symbols={symc}) — breakage / IP-block signature, not a quiet day")
+            if alert:
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'alert', 'stock_news_stale', %s)""",
+                            (Json({"message": alert}),))
+                conn.commit()
+                log.error(f"stock_news_stale: {alert}")
+            else:
+                log.info("stock_news watchdog: OK")
+    except Exception as e:
+        log.error(f"_bg_stock_news_watchdog: {e}")
+
 def _bg_tag_news():
     """cc#207 Part C: tag untagged polished_news with universe symbols so company pages
     populate without per-company Google waves. First run backfills 30 days."""
@@ -1149,6 +1193,7 @@ async def _scheduler_loop():
         if h == 16 and m == 0:
             _spawn(_bg_adr_pcr_retry)            # task #59: 10-min ADR/PCR watchdog retry
             _spawn(_bg_tc_screener_precompute)   # task #43: TC screener cache
+            _spawn(_bg_stock_news_watchdog)      # cc#245: stock-news staleness/all-blocked alert
         if now.weekday() < 5 and h == 16 and m == 10:
             _spawn(_bg_v21_killswitch)           # cc#158: V2.1 filter kill-switch check
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05

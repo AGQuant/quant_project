@@ -192,6 +192,24 @@ def _is_quality_article(headline: str, description: str, source_name: str = None
     return True
 
 
+def _is_company_quality(headline: str, description: str) -> bool:
+    """cc#245: quality signal for source_type='company' (per-stock Google News) rows. The
+    alias-match filter (news_tagger.is_primary) has ALREADY vouched that the article names the
+    held stock, so the market-news keyword blocks (Share Price / Option Chain / NSE-BSE /
+    <80-char description) are NOT applied — a position headline naming the stock is relevant even
+    if it reads 'Share Price', and Google per-stock RSS descriptions are legitimately short.
+    Only genuine-junk guards that still make sense remain: non-Latin-dominant + a description
+    that is merely the headline repeated. (cc#245 root cause: _is_quality_article rejected
+    449/677 company rows -> inserted=0 -> tab permanently empty.)"""
+    h = headline or ""
+    d = description or ""
+    if h and d and d[:len(h)] == h:                       # description == headline repeated
+        return False
+    if _non_latin_dominant(h) or _non_latin_dominant(d):
+        return False
+    return True
+
+
 def ensure_schema(conn):
     """Defensive CREATE IF NOT EXISTS — mirrors the migration so the module is
     self-sufficient even on a fresh DB."""
@@ -244,7 +262,12 @@ def _insert_rows(conn, rows):
         return stats
     with conn.cursor() as cur:
         for r in rows:
-            if not _is_quality_article(r[2], r[3], r[6]):   # r[2]=headline r[3]=desc r[6]=source_name
+            # cc#245: source_type-aware quality gate. r[0]=source_type. Company (per-stock
+            # Google News) rows use the lighter _is_company_quality (alias filter already ran
+            # at ingest); RSS market/domestic/global rows keep _is_quality_article UNCHANGED.
+            ok = (_is_company_quality(r[2], r[3]) if r[0] == 'company'
+                  else _is_quality_article(r[2], r[3], r[6]))   # r[2]=headline r[3]=desc r[6]=source_name
+            if not ok:
                 stats["quality_rejected"] += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
