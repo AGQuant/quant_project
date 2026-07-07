@@ -62,8 +62,8 @@ GLOBAL_TICKERS = [
     # Commodities
     ("BZ=F",      "Brent",       "commodity"),
     ("CL=F",      "WTI",         "commodity"),
-    ("GC=F",      "Gold",        "commodity"),
-    ("SI=F",      "Silver",      "commodity"),
+    ("XAUUSD=X",  "Gold",        "commodity"),   # spot gold (was GC=F COMEX futures) — founder switch
+    ("XAGUSD=X",  "Silver",      "commodity"),   # spot silver (was SI=F COMEX futures)
     ("NG=F",      "Natural Gas", "commodity"),
     # Crypto
     ("BTC-USD",   "Bitcoin",     "crypto"),
@@ -274,8 +274,8 @@ def prune_global_indices(conn, years: int = 5) -> int:
 # Commodities + Crypto that trade outside NSE hours (24x5 or 24x7).
 # Separate table — never leaks into NSE futures universe scans.
 GLOBAL_INTRADAY_TICKERS = [
-    ("GC=F",    "GOLD"),
-    ("SI=F",    "SILVER"),
+    ("XAUUSD=X", "GOLD"),     # spot gold (was GC=F COMEX futures) — founder switch to match live spot
+    ("XAGUSD=X", "SILVER"),   # spot silver (was SI=F COMEX futures)
     ("CL=F",    "WTI"),
     ("BZ=F",    "BRENT"),
     ("NG=F",    "NATURAL_GAS"),
