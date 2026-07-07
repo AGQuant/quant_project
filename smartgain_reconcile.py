@@ -19,9 +19,13 @@ skipped journal / holdings / weekly-opening, each leaving a different UI number 
      journal rows -> the /m2m home headline, which SUMs personal_journal, showed +0.00).
   e. UPSERT smartgain_holdings with the full-replay residual; DELETE zero residuals.
 
-Idempotent by construction: orders dedup on the natural key, journal dedup on
-(batch_id-tagged notes + symbol + qty + pnl), holdings/opening are upserts. Re-running a
-batch — or the backfill over every batch since inception (2026-06-29) — never double-writes.
+Idempotent by construction: orders dedup on the natural key; journal dedup on the STABLE lot
+identity (symbol, direction, entry) within the batch's trade-date window, account-scoped —
+shape-independent, so re-backfill AND differently-split hand-written rows never double-write
+(cc#248 hardening; the old qty/pnl-shape dedup silently doubled the journal on 07-Jul).
+holdings/opening are upserts. A second self-check (matches_journal_sum, cc#248) compares the
+full FIFO-replay realised P&L against the SUM of DB journal rows — catching a journal drift
+that matches_broker_checksum (holdings-only) cannot see.
 
 NO brokerage is ever applied to this account (cc#237 confirmed 06-Jul-2026): realised is raw
 (exit-entry)*qty. Matching algorithm (spec 1170 STEP 2) is unchanged — this module only
@@ -216,13 +220,21 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
                 batch_fill_tuples = [(r["trade_date"], r["order_ts"], r["symbol"], r["side"],
                                       r["qty"], r["price"]) for r in rows]
                 _, batch_closed = _replay_onto(pre_books, batch_fill_tuples)
+                # cc#248: dedup on the STABLE lot identity (symbol, direction, entry) within the
+                # batch's trade-date window, account-scoped — NOT the qty/pnl shape. This survives
+                # re-backfill AND pre-existing hand-written rows split differently (e.g. 10/10/5 vs
+                # the aggregated 20/5), which the old qty/pnl-shape dedup silently double-counted.
+                sg_close_tag = f"{account} dabba FIFO close%"
+                batch_tds = [r["trade_date"] for r in rows]
+                td_lo, td_hi = min(batch_tds), max(batch_tds)
                 for rt in _roundtrips(batch_closed):
-                    # dedup: a CLOSED row tagged with this batch_id for the same lot already there?
                     cur.execute("""SELECT 1 FROM personal_journal
-                                   WHERE result='CLOSED' AND symbol=%s AND direction=%s AND qty=%s
-                                     AND ROUND(pnl,2)=%s AND notes LIKE %s""",
-                                (rt["symbol"], rt["direction"], rt["qty"], round(rt["pnl"], 2),
-                                 f"%{batch_id}%"))
+                                   WHERE result='CLOSED' AND symbol=%s AND direction=%s
+                                     AND ROUND(entry_price,4)=%s
+                                     AND trade_date BETWEEN %s AND %s
+                                     AND notes LIKE %s""",
+                                (rt["symbol"], rt["direction"], round(rt["entry"], 4),
+                                 td_lo, td_hi, sg_close_tag))
                     if cur.fetchone():
                         continue
                     notes = f"{account} dabba FIFO close {batch_id}"
@@ -239,7 +251,7 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
             # Manual upsert keyed on (account, symbol) — smartgain_holdings has no unique
             # constraint (only PK id), so ON CONFLICT is unavailable. One row per symbol.
             all_fills = _all_fills(cur, account)
-            full_books, _ = _replay(inc_opening, all_fills)
+            full_books, full_closed = _replay(inc_opening, all_fills)
             residual = _residual(full_books)
             cur.execute("SELECT symbol FROM smartgain_holdings WHERE account=%s", (account,))
             existing_syms = {r[0] for r in cur.fetchall()}
@@ -263,6 +275,17 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
 
             checksum = _broker_checksum_ok(cur, account, residual)
 
+            # cc#248: second checksum — total realised P&L from the full FIFO replay vs the
+            # SUM of SmartGain CLOSED journal rows in the DB. matches_broker_checksum only
+            # validates net HOLDINGS; it stayed true through the 07-Jul journal double-count
+            # (8553.40 vs true 3340.90) because holdings were correct. This catches that.
+            journal_sum_replay = round(sum(c["pnl"] for c in full_closed), 2)
+            cur.execute("""SELECT COALESCE(SUM(pnl),0) FROM personal_journal
+                           WHERE result='CLOSED' AND notes LIKE %s""",
+                        (f"{account} dabba FIFO close%",))
+            journal_sum_db = round(float(cur.fetchone()[0]), 2)
+            journal_sum_ok = abs(journal_sum_replay - journal_sum_db) < 0.01
+
         conn.commit()
     except Exception:
         conn.rollback()
@@ -279,6 +302,9 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
         "opening_position_row_created": opening_created,
         "realised_this_week_computed": realised_week,
         "matches_broker_checksum": checksum,
+        "matches_journal_sum": journal_sum_ok,
+        "journal_sum_replay": journal_sum_replay,
+        "journal_sum_db": journal_sum_db,
     }
     _log_ops(result)
     return result
@@ -319,7 +345,8 @@ def _log_ops(result: Dict[str, Any]):
                        ", ".join(f"{k}={result[k]}" for k in
                                  ("orders_inserted", "journal_rows_inserted", "holdings_rows_upserted",
                                   "holdings_rows_deleted", "opening_position_row_created",
-                                  "realised_this_week_computed", "matches_broker_checksum")))
+                                  "realised_this_week_computed", "matches_broker_checksum",
+                                  "matches_journal_sum")))
                 if "message" in cols:
                     cur.execute("INSERT INTO ops_log (message) VALUES (%s)", (msg,))
                     conn.commit()
