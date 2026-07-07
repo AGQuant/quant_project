@@ -20,6 +20,9 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 6. Railway = truth. GitHub = code only. Never hardcode secrets.
 7. Context isolation: v8_paper_* NEVER mixes with tc_intraday_*
 
+## Deploy policy
+- RULE_7 (deploy-window "no deploy 09:00–15:35 IST", referenced in cc_task specs) is **SUSPENDED as of 07-Jul-2026** — dev-stage, product NOT live (policy id=1713). Deploy anytime, including market hours; task specs that reassert RULE_7 are overridden while in dev mode. Re-instate this window only when the product goes live.
+
 ## Reporting style (CC → Arpit)
 - After a push/deploy: keep the reply SHORT — confirm what was pushed (file + commit/sha) and state what's next (next pending task or remaining items). No long recaps or re-explanations.
 
