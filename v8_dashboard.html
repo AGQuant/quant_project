@@ -742,23 +742,19 @@ function renderMood(m){
 
 function sectorCards(sectors,title,label){
   if(!sectors||!sectors.length)return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;font-size:12px">No data</div>`;
-  const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;const color=pct>=0?'var(--grn)':'var(--red)';
-    // cc#261: 1W/1M stat block, each coloured by its OWN sign. cc#273: value bumped to 14px
-    // (label stays ~10px) — 1D(16px) > 1W/1M(14px) > label/count(~10px) hierarchy.
-    const stat=(lbl,v)=>`<div style="color:var(--dim);white-space:nowrap">${lbl} <b style="font-size:14px;color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
-    // cc#273: ticker (sc-top) removed; card is now click-through — opens a modal listing every
-    // stock in the sector. Segment passed via data-seg (robust to quotes/&). Layout otherwise
-    // per cc#270 (name+1D% top full-width; 1W/1M bottom-right, reserved flex-shrink:0 space).
+  const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;
+    // cc#279: metric area redesigned to a VERTICAL STACK of 1D/1W/1M rows (label left, value
+    // right-aligned), replacing the cc#273/276 top-1D + side-by-side-1W/1M layout. Founder-locked
+    // sizes: 1D value 14px, 1W/1M values 12px. sc-stocks (N stocks) removed entirely — redundant,
+    // and its removal frees the width that was clipping long values (e.g. 1M -19.21%). Each value
+    // coloured by its own sign. Click-through (openSectorDetail) unchanged.
+    const mrow=(lbl,v,vSize)=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">`+
+      `<span style="color:var(--dim);font-size:10.5px">${lbl}</span>`+
+      `<b style="font-family:'Space Mono';font-size:${vSize}px;color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
     return`<div class="sec-card" style="cursor:pointer" data-seg="${s.segment}" onclick="openSectorDetail(this.dataset.seg)"><div class="sc-num">${i+1}</div>`+
-      `<div style="margin-top:14px">`+
-        `<div class="sc-name">${s.segment}</div>`+
-        `<div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>`+
-      `</div>`+
-      `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:3px">`+
-        `<div class="sc-stocks" style="color:var(--dim);min-width:0">${s.stocks} stocks</div>`+
-        // cc#276: 1W & 1M SIDE-BY-SIDE on one line (was two stacked divs, which flex-end-aligned
-        // against the single-line stocks count and looked staggered). flex row + gap.
-        `<div style="flex-shrink:0;display:flex;gap:12px;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
+      `<div class="sc-name" style="margin-top:14px">${s.segment}</div>`+
+      `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px">`+
+        mrow('1D',pct,14)+mrow('1W',s.sector_week,12)+mrow('1M',s.sector_month,12)+
       `</div></div>`;
   }).join('');
   return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
@@ -883,7 +879,7 @@ function renderMaster(){
   const openPosTable=sortTbl('openpos',
     [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
     openRows,x=>`<tr>
-      <td class="sym">${x.symbol}<div style="margin-top:3px;display:inline-block">${basketPill(x.basket)}</div></td>
+      <td class="sym">${x.symbol}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
       <td style="text-align:center">${x.days}</td>
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
