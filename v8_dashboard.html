@@ -734,7 +734,8 @@ function renderMood(m){
   const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
   document.getElementById('mood').innerHTML=`
     <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
-      <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span><button class="info-btn" onclick="openVix()" title="India VIX chart" style="margin-left:8px">&#128200;</button></div></div>
+      <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
+      <div style="margin-top:6px"><span onclick="openVix()" title="India VIX chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">India VIX <span class="info-btn">&#128200;</span></span></div></div>
     <div class="moodChecks">${pills}</div>
     <div class="slots" style="margin-left:auto"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>`;
 }
