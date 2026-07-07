@@ -753,9 +753,11 @@ function sectorCards(sectors,title,label){
         `<div class="sc-name">${s.segment}</div>`+
         `<div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>`+
       `</div>`+
-      `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:3px">`+
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:3px">`+
         `<div class="sc-stocks" style="color:var(--dim);min-width:0">${s.stocks} stocks</div>`+
-        `<div style="flex-shrink:0;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
+        // cc#276: 1W & 1M SIDE-BY-SIDE on one line (was two stacked divs, which flex-end-aligned
+        // against the single-line stocks count and looked staggered). flex row + gap.
+        `<div style="flex-shrink:0;display:flex;gap:12px;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
       `</div></div>`;
   }).join('');
   return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
