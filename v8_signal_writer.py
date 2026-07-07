@@ -476,13 +476,14 @@ def _load_intraday_bars(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict
                 (array_agg(open  ORDER BY ts ASC ))[1]  AS day_open,
                 MAX(high)   AS day_high,
                 MIN(low)    AS day_low,
-                MAX(volume) AS day_vol
+                MAX(volume) AS day_vol,
+                MAX(ts)     AS bar_ts        -- cc#259: latest bar timestamp for the freshness gate
             FROM intraday_prices
             WHERE symbol = ANY(%s) AND ts::date = %s AND source = 'fyers_eq' AND ts <= %s
             GROUP BY symbol
         """, (symbols, today, cut))
         bars = {}
-        for sym, lc, op, hi, lo, vol in cur.fetchall():
+        for sym, lc, op, hi, lo, vol, bts in cur.fetchall():
             if lc is None:
                 continue
             bars[sym] = {
@@ -491,6 +492,7 @@ def _load_intraday_bars(conn, symbols: List[str], sim_ts=None) -> Dict[str, dict
                 "high":   _safe_float(hi),
                 "low":    _safe_float(lo),
                 "volume": _safe_float(vol),
+                "bar_ts": bts,               # cc#259: naive IST bar timestamp (freshness check)
             }
     return bars
 
@@ -1990,6 +1992,36 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
     vol_cutoff  = _round_down_5min(_bar_cutoff(sim_ts))   # cc#218 D6: today's cum-vol only up to last CLOSED bar
     vol_tn_map  = _load_vol_ratio_time_normalized(conn, symbols, vol_cutoff, sim_ts=sim_ts)
     hourly_map  = _load_hourly_fut(conn, symbols, sim_ts=sim_ts)   # cc#158: fyers_fut 5m hourly
+
+    # cc#259: bar-FRESHNESS gate. _load_intraday_bars returns MAX(ts) rows but had NO check that
+    # the bar is RECENT — only that one EXISTS. When the fyers_feed bar writer froze at 14:00
+    # (07-Jul), every later tick re-fetched the same 14:00 bar and recomputed plausible-looking
+    # quals/entries off dead prices with healthy-looking tick_perf and zero alerts — worse than a
+    # clean outage. A frozen-but-present bar is now treated the SAME as a missing bar: drop it,
+    # and if a large fraction of symbols are stale, fail loud like cc#212 instead of computing.
+    _now_tick = _now_ist(sim_ts)
+    _STALE_BAR_MIN = 12                      # ~2 tick intervals + buffer (live tick = 5 min)
+    _stale = {s: b for s, b in intraday.items()
+              if b.get("bar_ts") is None
+              or (_now_tick - b["bar_ts"]).total_seconds() > _STALE_BAR_MIN * 60}
+    _n_had = len(intraday)
+    for s in _stale:
+        intraday.pop(s, None)                # frozen bar == missing bar (cc#259)
+    if _stale and _n_had and len(_stale) >= 0.5 * _n_had:
+        _newest = max((b["bar_ts"] for b in _stale.values() if b.get("bar_ts")), default=None)
+        _age = round((_now_tick - _newest).total_seconds() / 60, 1) if _newest else None
+        log.error(f"signal_writer: {len(_stale)}/{_n_had} intraday bars STALE (newest {_newest}, "
+                  f"~{_age} min old) at tick {_now_tick:%H:%M} — fyers_feed bar writer frozen; "
+                  f"SKIPPING (no quals, no paper entries)")
+        _ops_log(conn, "alert", "writer_stale_intraday_bars",
+                 {"message": "signal writer found a large fraction of intraday bars STALE "
+                             "(frozen-not-missing) — fyers_feed bar writer likely frozen; signal "
+                             "generation skipped to avoid recomputing quals/entries off dead prices",
+                  "stale": len(_stale), "total": _n_had, "newest_bar_ts": str(_newest),
+                  "stale_age_min": _age, "date": str(today)})
+        _write_heartbeat(conn, sim_ts=sim_ts)
+        return {"skipped": "stale_intraday_bars", "stale": len(_stale), "total": _n_had,
+                "newest_bar_ts": str(_newest), "date": str(today)}
 
     if not intraday:
         # cc#212: FAIL LOUD — the old eod_fallback branch synthesized signals from frozen
