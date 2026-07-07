@@ -654,7 +654,10 @@ function selectTab(i){
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
   if(i===8&&!DAYLOG_LOADED)loadDayLog();
   if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
-  if(i===13&&!GI_LOADED)loadGlobalIndices(); // cc#264
+  // cc#281: Global Indices polls every 5 min WHILE its tab is active; the timer is cleared when
+  // any other tab is selected so it never polls in the background.
+  if(i===13){loadGlobalIndices();if(!GI_TIMER)GI_TIMER=setInterval(loadGlobalIndices,5*60*1000);}
+  else if(GI_TIMER){clearInterval(GI_TIMER);GI_TIMER=null;}
   // cc#275: VIX is now a popout overlay (openVix/closeVix), no longer tab-toggled here.
 }
 
@@ -1310,12 +1313,14 @@ function renderDayLog(data){
 }
 
 // ---- Global Indices tab (cc#264) — lazy load on tab click ------------------
-let GI_LOADED=false;
+let GI_LOADED=false, GI_TIMER=null;   // cc#281: GI_TIMER = 5-min poll while the tab is active
 async function loadGlobalIndices(){
   const el=document.getElementById('panel13');if(!el)return;
-  el.innerHTML='<div class="loading">Loading Global Indices...</div>';
+  if(!GI_LOADED)el.innerHTML='<div class="loading">Loading Global Indices...</div>';   // flash only on first load
   try{const d=await getJSON(EP.globalIndices);GI_LOADED=true;el.innerHTML=renderGlobalIndices(d);}
-  catch(e){el.innerHTML=`<div class="err">Global Indices failed: ${e.message}</div>`;}
+  // cc#281: on a poll failure keep the last-good render (and its now-stale Last-updated time) —
+  // do not blank the tab; the honest timestamp shows the data has stopped advancing.
+  catch(e){if(!GI_LOADED)el.innerHTML=`<div class="err">Global Indices failed: ${e.message}</div>`;}
 }
 function renderGlobalIndices(data){
   const rows=(data&&data.instruments)||[];
@@ -1326,16 +1331,22 @@ function renderGlobalIndices(data){
   const inGroup=(r,key)=>key==='__volx'?(r.category==='volatility'||r.category==='crypto'):r.category===key;
   const fmtPrice=v=>v==null?'--':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
   const tile=r=>{const clr=Number(r.chg_pct)>=0?'var(--grn)':'var(--red)';
+    // cc#281: green dot = tile is on the live 5-min feed; absent = still the daily snapshot.
+    const liveDot=r.live?` <span title="Live 5-min feed" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);vertical-align:middle"></span>`:'';
     return`<div style="background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px">
-      <div style="font-size:12px;color:var(--dim);font-family:Sora;margin-bottom:6px">${r.name}</div>
+      <div style="font-size:12px;color:var(--dim);font-family:Sora;margin-bottom:6px">${r.name}${liveDot}</div>
       <div style="font-size:20px;font-weight:700;font-family:'Space Mono'">${fmtPrice(r.price)}</div>
       <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px">${sign(r.chg_pct,2)}%</div></div>`;};
   const sections=GROUPS.map(([key,label])=>{
     const items=rows.filter(r=>inGroup(r,key));if(!items.length)return'';
     return`<div class="ptitle" style="margin-top:14px">${label} <span class="ct">${items.length}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${items.map(tile).join('')}</div>`;}).join('');
-  return`<div class="ptitle">Global Indices <span class="ct">${data.quote_date||''}</span></div>
-    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Latest snapshot · refresh 06:00-23:30 IST · US VIX here is CBOE ^VIX, not the India VIX market gate</div>`+sections;
+  // cc#281: "Last updated" reflects the endpoint's data_ts (freshest live bar), NOT render time,
+  // so a stalled feed reads as an old time. Commodities/crypto are live now; the rest stay daily
+  // until the cc#282 intraday feed ships (do not imply uniform freshness).
+  const upd=data.data_ts?String(data.data_ts).slice(11,19)+' IST':'daily only';
+  return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Space Mono'">Last updated ${upd}</span></div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Commodities &amp; crypto <span style="color:var(--grn)">●</span> live 5-min · Indices / Currency / Volatility daily snapshot (intraday feed pending) · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
 }
 
 // ---- India VIX chart (cc#266) — Chart.js line, refreshes on the market-gate cadence -------

@@ -2124,9 +2124,13 @@ def v8_daylog():
 
 @router.get("/global_indices")
 def v8_global_indices():
-    """cc#264: latest global_indices snapshot (MAX quote_date), grouped by category for the
-    Global Indices tab. Pure read of the already-live global_indices table (06:00-23:30
-    refresh) — no new data pipeline."""
+    """cc#264: Global Indices tab data (grouped by category). cc#281: any symbol present in
+    global_intraday is overlaid with its latest live 5-min close (chg_pct recomputed vs the
+    daily prev_close); symbols absent from global_intraday keep the once-daily global_indices
+    snapshot. Today only the 6 commodity/crypto symbols are live there; cc#282 adds the 7
+    index/currency/VIX symbols to the same feed, at which point they overlay automatically —
+    no further endpoint change. `data_ts` = the freshest underlying live data timestamp (IST),
+    so a stalled feed is honestly reflected in the tab's Last-updated label rather than masked."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -2136,17 +2140,39 @@ def v8_global_indices():
                 ORDER BY category, symbol
             """)
             cols = [d[0] for d in cur.description]
-            qd = None
-            rows = []
-            for r in cur.fetchall():
-                row = dict(zip(cols, r))
-                qd = str(row['quote_date'])
-                row['quote_date'] = str(row['quote_date'])
-                row['price']      = float(row['price'])      if row['price']      is not None else None
-                row['prev_close'] = float(row['prev_close']) if row['prev_close'] is not None else None
-                row['chg_pct']    = float(row['chg_pct'])    if row['chg_pct']    is not None else None
-                rows.append(row)
-        return {"quote_date": qd, "instruments": rows, "count": len(rows)}
+            base = [dict(zip(cols, r)) for r in cur.fetchall()]
+            # cc#281: latest live intraday close per symbol (today), if present.
+            cur.execute("""
+                SELECT DISTINCT ON (symbol) symbol, close, ts
+                FROM global_intraday
+                WHERE ts::date = CURRENT_DATE
+                ORDER BY symbol, ts DESC
+            """)
+            live = {r[0]: (float(r[1]) if r[1] is not None else None, r[2]) for r in cur.fetchall()}
+        qd = None
+        latest_ts = None
+        rows = []
+        for row in base:
+            qd = str(row['quote_date'])
+            row['quote_date'] = str(row['quote_date'])
+            row['price']      = float(row['price'])      if row['price']      is not None else None
+            row['prev_close'] = float(row['prev_close']) if row['prev_close'] is not None else None
+            row['chg_pct']    = float(row['chg_pct'])    if row['chg_pct']    is not None else None
+            lv = live.get(row['symbol'])
+            if lv and lv[0] is not None:
+                row['price'] = lv[0]
+                row['ts']    = str(lv[1])
+                row['live']  = True
+                pc = row['prev_close']
+                row['chg_pct'] = round((lv[0] - pc) / pc * 100, 2) if pc else row['chg_pct']
+                if latest_ts is None or lv[1] > latest_ts:
+                    latest_ts = lv[1]
+            else:
+                row['ts']   = None
+                row['live'] = False
+            rows.append(row)
+        return {"quote_date": qd, "data_ts": (str(latest_ts) if latest_ts else None),
+                "instruments": rows, "count": len(rows)}
     except Exception as e:
         raise HTTPException(500, f"v8_global_indices failed: {e}")
 
