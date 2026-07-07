@@ -74,22 +74,30 @@ def _ist_market_hours():
     return (ist.weekday() < 5) and (555 <= mins <= 930)
 
 
+# cc#269: horizon selector — calendar-day windows (NOT bar-count LIMITs), consistent with
+# the 52w calendar-not-barcount principle for this feature. 3m is the default.
+_FIB_HORIZONS = {"1w": 7, "1m": 30, "3m": 90, "5m": 150, "12m": 365}
+
+
 @router.get("/api/trade-check/fibcheck")
-def api_fibcheck(symbol: str, entry_price: Optional[float] = None):
+def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str = "3m"):
     sym = (symbol or "").upper().strip()
     if not sym:
         return {"error": "symbol required"}
+    # cc#269: map the horizon to a calendar-day window; anything unrecognised defaults to 3m.
+    days = _FIB_HORIZONS.get((lookback or "3m").lower().strip(), _FIB_HORIZONS["3m"])
     try:
         with _fib_conn() as conn, conn.cursor() as cur:
-            # last 120 EOD bars, oldest->newest
+            # EOD bars within the selected calendar-day window, oldest->newest. The date filter
+            # bounds the set (no LIMIT); everything downstream is window-size-agnostic.
             cur.execute("""
                 SELECT price_date, high, low, close
                 FROM raw_prices
                 WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL
-                ORDER BY price_date DESC
-                LIMIT 120
-            """, (sym,))
-            rows = cur.fetchall()[::-1]
+                  AND price_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+                ORDER BY price_date ASC
+            """, (sym, days))
+            rows = cur.fetchall()
             if len(rows) < 2:
                 return {"error": f"Not enough price history for {sym}"}
 
@@ -153,6 +161,7 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None):
 
         return {
             "symbol": sym,
+            "lookback": (lookback or "3m").lower().strip() if (lookback or "3m").lower().strip() in _FIB_HORIZONS else "3m",  # cc#269: echo the resolved horizon
             "lookback_days": len(rows),
             "swing_high": {"price": swing_high, "date": swing_high_date},
             "swing_low": {"price": swing_low, "date": swing_low_date},

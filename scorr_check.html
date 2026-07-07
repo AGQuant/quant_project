@@ -368,6 +368,14 @@
       <button class="side-btn fib"      id="btnFib"    onclick="setMode('FIBCHECK')">&#9651; FIBCHECK</button>
     </div>
     <input id="fibEntry" class="sym-input" style="display:none;margin-top:9px" placeholder="Reference entry price (optional)" inputmode="decimal" autocomplete="off">
+    <!-- cc#269: Fibcheck horizon selector (replaces the old 120d/52w toggle). Default 3M. -->
+    <div id="fibHorizon" class="scr-tabs" style="display:none;margin-top:9px">
+      <button class="scr-tab"    id="fh1w"  onclick="setFibHorizon('1w')">1W</button>
+      <button class="scr-tab"    id="fh1m"  onclick="setFibHorizon('1m')">1M</button>
+      <button class="scr-tab on" id="fh3m"  onclick="setFibHorizon('3m')">3M</button>
+      <button class="scr-tab"    id="fh5m"  onclick="setFibHorizon('5m')">5M</button>
+      <button class="scr-tab"    id="fh12m" onclick="setFibHorizon('12m')">12M</button>
+    </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <button class="run-btn" id="screenBtn" onclick="runScreen()" style="margin-top:9px;background:var(--cyan);box-shadow:0 2px 8px rgba(8,145,178,.25)">&#8862; Future Scans</button>
     <div class="chips" id="chips"></div>
@@ -424,7 +432,7 @@
     <div id="fibChart"></div>
     <div class="fib-stats" id="fibStats"></div>
     <div class="fib-comment" id="fibComment"></div>
-    <div class="foot">On-demand Fibonacci retracement &middot; 120-day swing &middot; spot EOD/live close &middot; cc#131</div>
+    <div class="foot">On-demand Fibonacci retracement &middot; selectable swing horizon &middot; spot EOD/live close &middot; cc#131</div>
   </div>
 
   <!-- Room Left (task #12) — 1D structure room from /api/structure -->
@@ -575,6 +583,7 @@ function setMode(m){
   const pageTitle=document.getElementById('pageTitle');
   const pageSub=document.getElementById('pageSub');
   document.getElementById('fibEntry').style.display=fib?'block':'none';
+  document.getElementById('fibHorizon').style.display=fib?'flex':'none';   // cc#269
   if(inv){
     runBtn.textContent='Run Investment Check';
     runBtn.classList.remove('invest-mode');runBtn.classList.add('invest-mode');
@@ -584,7 +593,8 @@ function setMode(m){
     runBtn.textContent='Run Fibcheck';
     runBtn.classList.remove('invest-mode');
     pageTitle.innerHTML='Fib<span>check</span>';
-    pageSub.textContent='ON-DEMAND · FIBONACCI RETRACEMENT · 120-DAY SWING';
+    // cc#269: reflect the selected horizon instead of hardcoding "120-DAY SWING".
+    pageSub.textContent='ON-DEMAND · FIBONACCI RETRACEMENT · '+fibHorizon.toUpperCase()+' SWING';
   } else {
     runBtn.textContent='Run Trade Check';
     runBtn.classList.remove('invest-mode');
@@ -720,10 +730,20 @@ async function runInvestCheck(sym){
 }
 
 // ── Fibcheck (cc_task #131): on-demand Fibonacci retracement ──
+// cc#269: horizon selector — 1W/1M/3M/5M/12M, default 3M. Clicking a horizon re-fetches
+// the current symbol; renderFib()/drawFibSvg() consume the response unchanged.
+let fibHorizon='3m';
+function setFibHorizon(h){
+  fibHorizon=h;
+  ['1w','1m','3m','5m','12m'].forEach(k=>{const b=document.getElementById('fh'+k);if(b)b.className='scr-tab'+(k===h?' on':'');});
+  if(mode==='FIBCHECK'){const ps=document.getElementById('pageSub');if(ps)ps.textContent='ON-DEMAND · FIBONACCI RETRACEMENT · '+h.toUpperCase()+' SWING';}
+  // re-fetch only when a report is already on screen (run() reads the symbol + dispatches to fib)
+  if(document.getElementById('fibResult').classList.contains('show'))run();
+}
 async function runFibcheck(sym){
   const epRaw=(document.getElementById('fibEntry').value||'').trim();
   const ep=epRaw?parseFloat(epRaw.replace(/[^0-9.]/g,'')):null;
-  let url='/api/trade-check/fibcheck?symbol='+encodeURIComponent(sym);
+  let url='/api/trade-check/fibcheck?symbol='+encodeURIComponent(sym)+'&lookback='+fibHorizon;   // cc#269
   if(ep!=null&&!isNaN(ep)&&ep>0)url+='&entry_price='+ep;
   const r=await fetch(url);
   document.getElementById('loading').classList.remove('show');
