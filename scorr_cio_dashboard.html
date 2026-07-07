@@ -39,8 +39,10 @@ async function mcpCall(tool, args = {}) {
   try { return JSON.parse(raw); } catch { return raw; }
 }
 
-async function apiGet(path) {
-  const r = await fetch(`${API}${path}`);
+async function apiGet(path, opts) {
+  // cc#268: optional fetch opts (e.g. { signal }) so callers can cancel in-flight requests.
+  // Backward-compatible — existing single-arg callers pass opts=undefined (a no-op for fetch).
+  const r = await fetch(`${API}${path}`, opts);
   if (!r.ok) throw new Error(`${r.status}`);
   return r.json();
 }
@@ -1318,15 +1320,30 @@ function GvmModule() {
   const boxRef = useRef(null);
   const inputRef = useRef(null);
   const debounce = useRef(null);
+  const searchAbort = useRef(null);   // cc#268: cancels the in-flight suggestion fetch
 
   useEffect(() => {
-    if (!query || query.length < 1) { setSuggest([]); return; }
+    if (!query || query.length < 1) {
+      // cc#268: also cancel any in-flight fetch when the query empties, else its late
+      // response could re-open the dropdown after the field was cleared.
+      if (searchAbort.current) searchAbort.current.abort();
+      setSuggest([]); return;
+    }
     clearTimeout(debounce.current);
     debounce.current = setTimeout(async () => {
+      // cc#268: abort the prior in-flight suggestion fetch so an out-of-order (stale)
+      // response can never win and re-open the dropdown. Each cycle gets its own controller.
+      if (searchAbort.current) searchAbort.current.abort();
+      const ac = new AbortController();
+      searchAbort.current = ac;
       try {
-        const d = await apiGet(`/api/gvm/search?q=${encodeURIComponent(query)}&limit=8`);
+        const d = await apiGet(`/api/gvm/search?q=${encodeURIComponent(query)}&limit=8`, { signal: ac.signal });
+        if (ac.signal.aborted) return;               // superseded mid-flight — ignore
         setSuggest(d.results || []); setShowSug(true);
-      } catch { setSuggest([]); }
+      } catch (e) {
+        if (e && e.name === "AbortError") return;     // cancelled — leave state untouched
+        setSuggest([]);
+      }
     }, 180);
     return () => clearTimeout(debounce.current);
   }, [query]);
@@ -1338,6 +1355,11 @@ function GvmModule() {
   }, []);
 
   const loadReport = async (sym) => {
+    // cc#268: kill any in-flight suggestion fetch BEFORE loading — this is the actual bug fix.
+    // Without this, a suggestion request still in flight when the user clicks Search / hits Enter
+    // / clicks a suggestion resolves later and unconditionally re-opens the dropdown over the
+    // now-loaded report. Aborting it means its .then/.catch bails out (AbortError) and touches no state.
+    if (searchAbort.current) searchAbort.current.abort();
     setSymbol(sym); setShowSug(false); setSuggest([]); setQuery(sym); setLoading(true); setErr(null); setReport(null); setHist(null);
     inputRef.current?.blur();
     try {
