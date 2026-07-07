@@ -350,10 +350,11 @@ def _google_news_url(company_name: str) -> str:
     return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 
-def _position_universe(conn):
-    """cc#243 (delta on cc#242): stock-news ingest universe = OPEN positions ONLY (V8 paper
-    OPEN UNION SmartGain holdings), resolved fresh each fetch run — NOT the full 209 futures
-    universe. Returns [(symbol, company_name)] — company_name from gvm_scores, else the symbol."""
+def _stock_universe(conn):
+    """cc#243/#244: stock-news ingest universe = OPEN positions ONLY (V8 paper OPEN UNION
+    SmartGain holdings), resolved fresh each fetch run — NOT the full 209 futures universe
+    (cc#244 path-1 FINAL). Returns [(symbol, company_name)] — company_name from gvm_scores,
+    else the symbol."""
     with conn.cursor() as cur:
         cur.execute("""
             WITH pos AS (
@@ -386,7 +387,7 @@ def fetch_stock_news(conn=None, symbols=None):
     try:
         ensure_schema(conn)
         import news_tagger
-        universe = symbols if symbols else _position_universe(conn)   # cc#243: open positions only
+        universe = symbols if symbols else _stock_universe(conn)   # cc#243/#244: open positions only
         if not universe:
             return {"ok": True, "note": "no open positions", "inserted": 0}
         parsed = alias_filtered = inserted = dup_skipped = quality_rejected = 0

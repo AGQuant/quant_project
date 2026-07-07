@@ -1048,21 +1048,16 @@ def _bg_open_bars_alarm():
 # Position News (open V8 + SmartGain symbols) is the successor: _bg_fetch_position_news.
 
 def _bg_cleanup_news():
-    """cc#192: daily news retention — unpolished raw_news dies at 48h, polished
-    (and its raw parent) lives 30 days. Replaces the old blanket 30-day raw_news
-    purge; news_retention() logs both counts to ops_log(category=news_retention)
-    and alerts on an implausible unpolished backlog.
-    cc#207: also purge the Position News trial table (7-day retention)."""
+    """cc#192: daily news retention — unpolished raw_news dies at 48h, polished (and its raw
+    parent) lives 90 days (cc#208). news_retention() logs both counts to
+    ops_log(category=news_retention) and alerts on an implausible unpolished backlog.
+    cc#244: retired the position_news quarantine purge — that table is superseded by the
+    single raw_news/polished_news funnel (id=1660); position_news.py is left unwired in-repo."""
     try:
         import news_fetcher
         with _conn() as conn: res = news_fetcher.news_retention(conn)
         log.info(f"news_retention: {res}")
     except Exception as e: log.error(f"news_retention: {e}")
-    try:
-        import position_news
-        with _conn() as conn: pres = position_news.purge_position_news(conn)
-        log.info(f"position_news retention: {pres}")
-    except Exception as e: log.error(f"position_news retention: {e}")
 
 def _bg_fetch_stock_news():
     """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
