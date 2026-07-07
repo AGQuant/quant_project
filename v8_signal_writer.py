@@ -781,6 +781,7 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
         out["rsi_weekly"] = _safe_float(eod.get("rsi_weekly"))
 
     # -- New metrics for buy_s1_bounce (v2.4.0) --------------------------------
+    op = bar.get("open")
     if op and op > 0:
         out["day_ret"] = round((live - op) / op * 100, 3)
 
@@ -1970,6 +1971,21 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
                      {"count": compute_err, "sample": err_sample, "date": str(today)})
         except Exception:
             pass
+        # cc#246: 100%-failure escalation — every attempted symbol failing means a
+        # systemic bug (e.g. a NameError in _compute_live_metrics), not one bad symbol.
+        # The per-symbol guard swallows these into warnings, so the writer looks alive
+        # (heartbeat fine) while writing nothing. Page loudly instead of running dark.
+        attempted = len(symbols) - no_bar
+        if attempted > 0 and compute_err >= attempted:
+            log.critical(
+                f"signal_writer: TOTAL COMPUTE FAILURE — {compute_err}/{attempted} symbols "
+                f"failed, 0 computed (systemic bug). sample={err_sample}")
+            try:
+                _ops_log(conn, "critical", "signal_writer_total_failure",
+                         {"count": compute_err, "attempted": attempted,
+                          "sample": err_sample, "date": str(today)})
+            except Exception:
+                pass
 
     _add_sector_aggregates(computed, eod_metrics)
 
