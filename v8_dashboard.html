@@ -266,6 +266,16 @@
   </div>
 
   <div class="mood" id="mood"><div class="loading">Loading market gate&#8230;</div></div>
+  <!-- cc#266: India VIX 5-day rolling hourly line chart, sitting directly under the ADR/market
+       gate. Master-Dashboard only (selectTab toggles display). Lives outside #panels so
+       renderMaster()'s innerHTML rewrites never destroy the Chart.js canvas. -->
+  <div id="vixCard" style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:0 0 14px">
+    <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+      <span style="font-size:12px;font-weight:700;letter-spacing:.02em">India VIX</span>
+      <span style="font-size:10px;color:var(--dim)">5-day hourly · <b id="vixLast" style="font-family:'Space Mono'">--</b></span>
+    </div>
+    <div style="height:150px;position:relative"><canvas id="vixChart"></canvas></div>
+  </div>
   <div class="tabs" id="tabs"></div>
   <div id="panels"></div>
 
@@ -289,6 +299,9 @@
   </footer>
 </div>
 
+<!-- cc#266: Chart.js for the India VIX 5-day hourly line chart on the Master Dashboard.
+     Guarded at render time (if(!window.Chart)) so a CDN hiccup never breaks the dashboard. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 const API_BASE="";
 const BROKERAGE_PER_TRADE=500;
@@ -303,6 +316,8 @@ const EP={
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
+  globalIndices:"/api/v8/global_indices",      // cc#264
+  vixIntraday:"/api/v8/indiavix_intraday",     // cc#266
 };
 const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
@@ -317,8 +332,13 @@ const ALL5=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Forthcoming Results"];   // cc#226: index 12
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,10,11,12];
+  "Forthcoming Results","Global Indices"];   // cc#226: index 12 · cc#264: index 13
+// cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
+// ops_log alert now surfaces slot exhaustion proactively, making this passive tab redundant.
+// Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
+// Live News(11)/Forthcoming(12) stay stable so their hardcoded panel ids are untouched.
+// cc#264: "Global Indices" appended as index 13.
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,11,12,13];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -597,6 +617,9 @@ function selectTab(i){
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
   if(i===8&&!DAYLOG_LOADED)loadDayLog();
   if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
+  if(i===13&&!GI_LOADED)loadGlobalIndices(); // cc#264
+  // cc#266: VIX chart is Master-Dashboard-only — show on tab 0, hide elsewhere.
+  const vc=document.getElementById('vixCard');if(vc)vc.style.display=(i===0)?'':'none';
 }
 
 const SORTREG={};
@@ -681,11 +704,22 @@ function renderMood(m){
 function sectorCards(sectors,title,label){
   if(!sectors||!sectors.length)return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;font-size:12px">No data</div>`;
   const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;const color=pct>=0?'var(--grn)':'var(--red)';
-    // cc#261: right-side 1W/1M stat block, each colored by its OWN sign (independent of the
-    // card's 1D sign — a sector can be red 1D but green 1W/1M).
-    const stat=(lbl,v)=>`<div style="color:var(--dim)">${lbl} <b style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
-    return`<div class="sec-card" style="position:relative"><div class="sc-num">${i+1}</div><div class="sc-name" style="margin-top:14px">${s.segment}</div><div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div><div class="sc-top">${s.top_stock||''}</div><div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>`+
-      `<div style="position:absolute;top:10px;right:12px;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div></div>`;
+    // cc#261: 1W/1M stat block, each coloured by its OWN sign (a sector can be red 1D but green 1W/1M).
+    const stat=(lbl,v)=>`<div style="color:var(--dim);white-space:nowrap">${lbl} <b style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
+    // cc#267: two-column flex (was absolute-positioned 1W/1M, which floated on top of the sector
+    // name and overlapped on long/2-line names). Left = name+1D%+ticker in a shrinking, min-width:0
+    // line-clamped column; right = fixed-shrink stat column that reserves its own space — no overlap
+    // regardless of name length or % width (e.g. -19.21%).
+    return`<div class="sec-card"><div class="sc-num">${i+1}</div>`+
+      `<div style="display:flex;gap:8px;align-items:flex-start">`+
+        `<div style="flex:1;min-width:0;margin-top:14px">`+
+          `<div class="sc-name">${s.segment}</div>`+
+          `<div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>`+
+          `<div class="sc-top">${s.top_stock||''}</div>`+
+          `<div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>`+
+        `</div>`+
+        `<div style="flex-shrink:0;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7;margin-top:14px">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
+      `</div></div>`;
   }).join('');
   return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
 }
@@ -987,23 +1021,7 @@ function renderRaw(){
     {sortKey:'mom_2d',dir:-1,empty:"No metrics",pinned,wrapClass:'',scrollCls:'rawscroll'});
 }
 
-function renderMissed(){
-  const p=cache.paper;if(!p)return'<div class="loading">...</div>';
-  const missed=p.missed||[];
-  return`<div class="ptitle">Paper Missed <span class="ct">${missed.length} entries</span></div>`+
-    `<div style="font-size:11px;color:var(--dim);margin-bottom:12px">Signals that qualified but were not entered -- slot exhaustion, conflict, or timing gate.</div>`+
-    sortTbl('missed',
-    [["miss_date","Date"],["symbol","Symbol"],["side","Side"],["basket","Basket"],["expected_entry","Expected Entry"],["reason","Reason"],["ts","Logged At"]],
-    missed,x=>`<tr>
-      <td style="color:var(--mut);font-family:Sora">${x.miss_date||'--'}</td>
-      <td class="sym">${x.symbol}</td>
-      <td><span class="badge ${(x.side||'')==='SHORT'?'b-short':'b-long'}">${x.side||'--'}</span></td>
-      <td style="font-family:Sora;color:var(--mut)">${(x.basket||'').replace(/_/g,' ')}</td>
-      <td>${num(x.expected_entry)}</td>
-      <td style="text-align:left;color:var(--dim);font-family:Sora;font-size:11px;white-space:normal;max-width:220px">${x.reason||'--'}</td>
-      <td style="color:var(--dim)">${fmtTs(x.ts)}</td></tr>`,
-    {sortKey:'ts',dir:-1,empty:"No missed entries -- clean slate."});
-}
+// cc#263: renderMissed() removed — the Paper Missed tab was dropped from the nav.
 
 function preFreezeBanner(){
   const ist=new Date(Date.now()+(5*60+30)*60000);
@@ -1220,13 +1238,74 @@ function renderDayLog(data){
     <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Capital Rs.50,00,000 · Rs.500 brokerage/closed trade · Net Open = cumulative running total</div>`+table;
 }
 
+// ---- Global Indices tab (cc#264) — lazy load on tab click ------------------
+let GI_LOADED=false;
+async function loadGlobalIndices(){
+  const el=document.getElementById('panel13');if(!el)return;
+  el.innerHTML='<div class="loading">Loading Global Indices...</div>';
+  try{const d=await getJSON(EP.globalIndices);GI_LOADED=true;el.innerHTML=renderGlobalIndices(d);}
+  catch(e){el.innerHTML=`<div class="err">Global Indices failed: ${e.message}</div>`;}
+}
+function renderGlobalIndices(data){
+  const rows=(data&&data.instruments)||[];
+  if(!rows.length)return'<div class="empty">No global indices data.</div>';
+  // Founder-specified grouping/order: Indices, Commodities, Currencies, then Volatility & Crypto
+  // (US VIX + Bitcoin) merged into one section. US VIX here is CBOE ^VIX — NOT the India VIX gate.
+  const GROUPS=[['index','Indices'],['commodity','Commodities'],['currency','Currencies'],['__volx','Volatility & Crypto']];
+  const inGroup=(r,key)=>key==='__volx'?(r.category==='volatility'||r.category==='crypto'):r.category===key;
+  const fmtPrice=v=>v==null?'--':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
+  const tile=r=>{const clr=Number(r.chg_pct)>=0?'var(--grn)':'var(--red)';
+    return`<div style="background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px">
+      <div style="font-size:12px;color:var(--dim);font-family:Sora;margin-bottom:6px">${r.name}</div>
+      <div style="font-size:20px;font-weight:700;font-family:'Space Mono'">${fmtPrice(r.price)}</div>
+      <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px">${sign(r.chg_pct,2)}%</div></div>`;};
+  const sections=GROUPS.map(([key,label])=>{
+    const items=rows.filter(r=>inGroup(r,key));if(!items.length)return'';
+    return`<div class="ptitle" style="margin-top:14px">${label} <span class="ct">${items.length}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${items.map(tile).join('')}</div>`;}).join('');
+  return`<div class="ptitle">Global Indices <span class="ct">${data.quote_date||''}</span></div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Latest snapshot · refresh 06:00-23:30 IST · US VIX here is CBOE ^VIX, not the India VIX market gate</div>`+sections;
+}
+
+// ---- India VIX chart (cc#266) — Chart.js line, refreshes on the market-gate cadence -------
+let VIX_CHART=null;
+async function loadVixChart(){
+  if(!window.Chart)return;   // CDN not ready/blocked — dashboard stays fully functional without it
+  let d;try{d=await getJSON(EP.vixIntraday);}catch(e){return;}
+  const pts=(d&&d.points)||[];
+  const cv=document.getElementById('vixChart');if(!cv)return;
+  const labels=pts.map(p=>fmtTs(p.ts));       // e.g. "07 Jul 15:15"
+  const vals=pts.map(p=>p.vix);
+  const last=vals.length?vals[vals.length-1]:null;
+  const lastEl=document.getElementById('vixLast');if(lastEl)lastEl.textContent=last==null?'--':last.toFixed(2);
+  const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
+  const line=dark?'#3987e5':'#2a78d6';
+  // Only the last (current) point gets a visible marker — a current-reading indicator.
+  const radii=vals.map((_,i)=>i===vals.length-1?5:0);
+  if(VIX_CHART){
+    VIX_CHART.data.labels=labels;VIX_CHART.data.datasets[0].data=vals;
+    VIX_CHART.data.datasets[0].pointRadius=radii;VIX_CHART.update('none');return;
+  }
+  VIX_CHART=new Chart(cv.getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[{data:vals,borderColor:line,borderWidth:2,
+      backgroundColor:line+'1a',fill:true,tension:.25,
+      pointRadius:radii,pointBackgroundColor:line,pointBorderColor:'#fff',pointBorderWidth:2,
+      spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index'}},
+      scales:{
+        x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,color:'#8a94a6',font:{size:9}}},
+        y:{grid:{color:'rgba(138,148,166,.15)'},ticks:{color:'#8a94a6',font:{size:9}}}
+      }}});
+}
+
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
   document.getElementById('panel6').innerHTML=renderSellOB();
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel9').innerHTML=renderRaw();
-  document.getElementById('panel10').innerHTML=renderMissed();
   // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
   BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
   loadFunnelInline('sell_overbought',6);
@@ -1239,7 +1318,6 @@ function renderMasterPanels(){
   document.getElementById('panel0').innerHTML=renderMaster();
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel9').innerHTML=renderRaw();
-  document.getElementById('panel10').innerHTML=renderMissed();
 }
 async function loadAll(){
   document.getElementById('refreshBtn').textContent='Refresh...';
@@ -1249,7 +1327,7 @@ async function loadAll(){
   const run=(k,fn,after)=>fn().then(d=>{cache[k]=d;if(after){try{after();}catch(e){}}})
                               .catch(e=>{errs.push(e.message);cache[k]=cache[k]||null;});
   const jobs=[
-    run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);}),
+    run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);loadVixChart();}),   // cc#266: VIX chart on the gate cadence
     run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();}),

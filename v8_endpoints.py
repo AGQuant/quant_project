@@ -2120,3 +2120,64 @@ def v8_daylog():
         }
     except Exception as e:
         raise HTTPException(500, f"v8_daylog failed: {e}")
+
+
+@router.get("/global_indices")
+def v8_global_indices():
+    """cc#264: latest global_indices snapshot (MAX quote_date), grouped by category for the
+    Global Indices tab. Pure read of the already-live global_indices table (06:00-23:30
+    refresh) — no new data pipeline."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT symbol, name, category, price, prev_close, chg_pct, quote_date
+                FROM global_indices
+                WHERE quote_date = (SELECT MAX(quote_date) FROM global_indices)
+                ORDER BY category, symbol
+            """)
+            cols = [d[0] for d in cur.description]
+            qd = None
+            rows = []
+            for r in cur.fetchall():
+                row = dict(zip(cols, r))
+                qd = str(row['quote_date'])
+                row['quote_date'] = str(row['quote_date'])
+                row['price']      = float(row['price'])      if row['price']      is not None else None
+                row['prev_close'] = float(row['prev_close']) if row['prev_close'] is not None else None
+                row['chg_pct']    = float(row['chg_pct'])    if row['chg_pct']    is not None else None
+                rows.append(row)
+        return {"quote_date": qd, "instruments": rows, "count": len(rows)}
+    except Exception as e:
+        raise HTTPException(500, f"v8_global_indices failed: {e}")
+
+
+@router.get("/indiavix_intraday")
+def v8_indiavix_intraday():
+    """cc#266: INDIAVIX hourly points (xx:15, 09:15-15:15) across the most recent 5 TRADING
+    days (rolling window, auto-advances daily) for the Master Dashboard VIX line chart.
+    Missing marks are skipped, never interpolated."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH days AS (
+                    SELECT DISTINCT ts::date AS d
+                    FROM intraday_prices
+                    WHERE symbol='INDIAVIX' AND source='fyers_eq'
+                    ORDER BY d DESC LIMIT 5
+                )
+                SELECT ts, close
+                FROM intraday_prices
+                WHERE symbol='INDIAVIX' AND source='fyers_eq'
+                  AND ts::date IN (SELECT d FROM days)
+                  AND EXTRACT(MINUTE FROM ts) = 15
+                  AND EXTRACT(HOUR FROM ts) BETWEEN 9 AND 15
+                ORDER BY ts ASC
+            """)
+            points = []
+            for ts, close in cur.fetchall():
+                if close is None:
+                    continue
+                points.append({"ts": str(ts), "vix": float(close)})
+        return {"points": points, "count": len(points)}
+    except Exception as e:
+        raise HTTPException(500, f"v8_indiavix_intraday failed: {e}")
