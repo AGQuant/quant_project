@@ -22,25 +22,40 @@ def _conn():
 
 @router.get("/api/news/position")
 def position_news_feed(request: Request):
-    """Position News grouped by symbol (V8 open + SmartGain holdings). Founder-only."""
+    """cc#242 (POSITION_NEWS_PIPELINE_V1, id=1660): pure lookup — POLISHED news whose
+    mentioned_symbols overlaps an OPEN position (V8 paper OR SmartGain holdings), grouped by
+    symbol, newest first. Polished summaries only (Domestic-News card format); NO raw items,
+    NO detail page. Supersedes the position_news quarantine table (id=402). Founder-only."""
     if not _is_authed(request):
         return JSONResponse({"error": "unauthorized", "login_url": "/login"}, status_code=401)
     groups = {}
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT symbol, origin, headline, source_name, url, published_at
-                FROM position_news
-                ORDER BY symbol ASC, published_at DESC NULLS LAST, id DESC
+                WITH pos AS (
+                    SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
+                    UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL
+                )
+                SELECT p.id, p.headline_clean,
+                       COALESCE(p.summary, p.full_summary) AS summary,
+                       p.category, p.sentiment, p.impact, p.source,
+                       COALESCE(p.published_time, p.polished_at) AS published_at,
+                       s.symbol AS pos_symbol
+                FROM polished_news p
+                JOIN pos s ON s.symbol = ANY(p.mentioned_symbols)
+                WHERE COALESCE(p.published_time, p.polished_at) >= NOW() - INTERVAL '90 days'
+                ORDER BY s.symbol ASC,
+                         COALESCE(p.published_time, p.polished_at) DESC NULLS LAST, p.id DESC
             """)
-            for sym, origin, headline, source, url, pub in cur.fetchall():
+            for pid, headline, summary, category, sentiment, impact, source, pub, sym in cur.fetchall():
                 g = groups.get(sym)
                 if g is None:
-                    g = {"symbol": sym, "origin": origin, "count": 0, "items": []}
+                    g = {"symbol": sym, "count": 0, "items": []}
                     groups[sym] = g
                 g["count"] += 1
                 g["items"].append({
-                    "headline": headline, "source": source, "url": url,
+                    "headline": headline, "summary": summary, "category": category,
+                    "sentiment": sentiment, "impact": impact, "source": source,
                     "published_at": pub.isoformat() if pub else None,
                 })
     except Exception as e:

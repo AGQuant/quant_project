@@ -1064,16 +1064,18 @@ def _bg_cleanup_news():
         log.info(f"position_news retention: {pres}")
     except Exception as e: log.error(f"position_news retention: {e}")
 
-def _bg_fetch_position_news():
-    """cc#207: Position News trial — Google News for open V8 + SmartGain symbols into
-    the quarantined position_news table (3x/day on trading days: 08:30/12:30/16:30)."""
+def _bg_fetch_stock_news():
+    """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
+    universe -> raw_news (source_type='company' + symbol), alias-filtered at ingest. Single
+    funnel with market news; supersedes the position_news quarantine fetch (cc#207/id=402).
+    3x/day on trading days: 08:30/12:30/16:30."""
     try:
-        import position_news
+        import news_fetcher
         with _conn() as conn:
-            res = position_news.fetch_position_news(conn)
-        log.info(f"position_news: {res}")
+            res = news_fetcher.fetch_stock_news(conn)
+        log.info(f"fetch_stock_news: {res}")
     except Exception as e:
-        log.error(f"position_news: {e}")
+        log.error(f"fetch_stock_news: {e}")
 
 def _bg_tag_news():
     """cc#207 Part C: tag untagged polished_news with universe symbols so company pages
@@ -1112,10 +1114,11 @@ async def _scheduler_loop():
         if h == 6 and m == 0:
             _spawn(_bg_fetch_global)
             _spawn(_bg_fetch_market_news)   # task #38: domestic + global RSS
-        # cc#207/#217: 500-company Google waves fully retired + deleted. Position News
-        # (open V8 + SmartGain symbols) is the successor:
+        # cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
+        # universe -> raw_news (source_type='company', alias-filtered). Supersedes the cc#207
+        # position_news quarantine fetch.
         if _is_trading_day(today) and m == 30 and h in (8, 12, 16):
-            _spawn(_bg_fetch_position_news)            # cc#207: 08:30 / 12:30 / 16:30 IST
+            _spawn(_bg_fetch_stock_news)               # cc#242: 08:30 / 12:30 / 16:30 IST
         if _is_trading_day(today) and m == 20 and h in (7, 16, 22):
             _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger — off-session (backfills on first run)
         if 6 <= h <= 23 and m % 5 == 0:

@@ -989,8 +989,9 @@ function newsAgo(ts){
 }
 function newsList(){
   if(!NEWS_DATA)return[];
-  // cc_task #95: Live News is India/domestic only — global + company feeds dropped.
-  const arr=NEWS_DATA.domestic||[];
+  // cc#242 (POSITION_NEWS_PIPELINE_V1): merge stock-tagged (company) unpolished items into the
+  // domestic market feed, one chronological stream. Stock rows carry a symbol badge (below).
+  const arr=[...(NEWS_DATA.domestic||[]),...(NEWS_DATA.company||[])];
   return[...arr].sort((a,b)=>new Date(b.published_at||0)-new Date(a.published_at||0));
 }
 function setNewsFilter(k){NEWS_FILTER=k;NEWS_SHOWN=NEWS_CHUNK;renderNews();}
@@ -998,8 +999,8 @@ function renderNews(){
   const el=document.getElementById('panel11');if(!el)return;
   const d=NEWS_DATA||{};
   // cc_task #95: single India Market (domestic) pill — no Global/Company.
-  const counts={domestic:(d.domestic||[]).length};
-  const pills=[['domestic','India Market']].map(([k,l])=>
+  const counts={domestic:(d.domestic||[]).length+(d.company||[]).length};   // cc#242: market + stocks
+  const pills=[['domestic','Market + Stocks']].map(([k,l])=>
     `<span class="news-pill${NEWS_FILTER===k?' on':''}" onclick="setNewsFilter('${k}')">${l} <b>${counts[k]}</b></span>`).join('');
   const ts=NEWS_TS?String(NEWS_TS.getUTCHours()).padStart(2,'0')+':'+String(NEWS_TS.getUTCMinutes()).padStart(2,'0'):'--:--';
   let body;
@@ -1011,7 +1012,9 @@ function renderNews(){
       const shown=rows.slice(0,NEWS_SHOWN);
       const oldest=rows[rows.length-1];
       const list='<div class="news-list">'+shown.map(a=>
-        `<div class="news-row"><span class="news-hl">${newsEsc(a.headline)}</span>`+
+        `<div class="news-row"><span class="news-hl">`+
+        (a.symbol?`<span style="display:inline-block;font-size:9px;font-weight:800;letter-spacing:.03em;color:var(--cyan);border:1px solid var(--line);border-radius:4px;padding:1px 4px;margin-right:6px;vertical-align:middle">${newsEsc(a.symbol)}</span>`:'')+
+        `${newsEsc(a.headline)}</span>`+
         `<span class="news-meta">${newsEsc(a.source_name||'')}${a.published_at?' · '+newsAgo(a.published_at):''}</span></div>`).join('')+'</div>';
       // cc#186: chunked reveal + always-visible coverage footer so truncation is never silent
       const more=rows.length>NEWS_SHOWN

@@ -122,23 +122,35 @@ def news_company(symbol: str):
             "mentioned_count": len(mentioned[:4]), "articles": articles}
 
 
+# cc#242 (POSITION_NEWS_PIPELINE_V1, id=1660): stock-tagged (source_type='company') rows are
+# polish candidates ONLY when the symbol is an OPEN position (V8 paper OR SmartGain holdings) —
+# non-position stock news stays raw forever, never polished. Market rows (domestic/global) are
+# always candidates. Polish generation itself stays Claude-web manual; this only scopes the
+# candidate query/endpoint.
+_POSITION_POLISH_CLAUSE = (
+    " AND (r.source_type <> 'company' OR r.symbol IN ("
+    "   SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL"
+    "   UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL))"
+)
+
+
 @router.get("/api/news/unpolished")
 def news_unpolished(sample: int = 20):
-    """Count + sample of raw_news rows with no matching polished_news.
-    Used by the manual Claude.ai polish session to know what is pending.
-    Quality-filtered (task #54) so the count reflects real articles, not junk."""
+    """Count + sample of raw_news rows with no matching polished_news that are eligible for
+    polish. Used by the manual Claude.ai polish session to know what is pending. Quality-filtered
+    (task #54) + cc#242 position gate: market news always, stock-tagged only for open positions."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
             SELECT COUNT(*) FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _QUALITY_CLAUSE)
+        """ + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE)
         pending = cur.fetchone()[0]
         cur.execute("""
             SELECT r.id AS raw_id, r.source_type, r.symbol, r.headline, r.description,
                    r.source_name, r.url, r.published_at
             FROM raw_news r
             WHERE NOT EXISTS (SELECT 1 FROM polished_news p WHERE p.raw_news_id = r.id)
-        """ + _QUALITY_CLAUSE + """
+        """ + _QUALITY_CLAUSE + _POSITION_POLISH_CLAUSE + """
             ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
             LIMIT %s
         """, (sample,))

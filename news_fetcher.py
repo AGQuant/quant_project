@@ -350,6 +350,92 @@ def _google_news_url(company_name: str) -> str:
     return f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
 
 
+def _stock_universe(conn):
+    """cc#242: stock universe for Google-News ingest = active futures-universe stocks (the
+    tradeable set, excl. indices). Returns [(symbol, company_name)] — company_name from
+    gvm_scores for a richer query, falling back to the symbol."""
+    excl = ('NIFTY', 'NIFTY50', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX')
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT fu.symbol, COALESCE(g.company_name, fu.symbol)
+            FROM futures_universe fu
+            LEFT JOIN gvm_scores g ON g.symbol = fu.symbol
+                AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+            WHERE fu.is_active = TRUE AND fu.symbol <> ALL(%s)
+            ORDER BY fu.symbol
+        """, (list(excl),))
+        return [(r[0], r[1]) for r in cur.fetchall()]
+
+
+def fetch_stock_news(conn=None, symbols=None):
+    """cc#242 (POSITION_NEWS_PIPELINE_V1, session_log 1660): per-stock Google News for the full
+    active futures universe -> raw_news with source_type='company' + symbol tag. Single funnel
+    with market news (supersedes the position_news quarantine table, id=402). An ALIAS-MATCH
+    filter at ingest (news_tagger.headline_identity / is_primary) keeps junk out — only articles
+    whose headline/description actually name the stock are stored. Polish selectivity happens at
+    batch time (position symbols only), NOT ingest — the full universe stays visible raw in the
+    V8 Live News tab. Politeness (sequential, browser UA, 2-4s jitter, Retry-After, 10x-429
+    abort) is reused from the market path to stay under Google News' datacenter-IP limit."""
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        ensure_schema(conn)
+        import news_tagger
+        universe = symbols if symbols else _stock_universe(conn)
+        if not universe:
+            return {"ok": True, "note": "empty universe", "inserted": 0}
+        parsed = alias_filtered = inserted = dup_skipped = quality_rejected = 0
+        http_429 = http_other = empty = 0
+        consec_429 = 0
+        aborted = False
+        for sym, cname in universe:
+            pats = news_tagger.headline_identity(conn, sym)   # per-stock alias/code identity
+            entries, status, bozo, retry_after = _fetch_feed(_google_news_url(cname or sym), agent=BROWSER_UA)
+            if status == 429:
+                http_429 += 1; consec_429 += 1
+                if retry_after:
+                    try: time.sleep(min(float(retry_after), RETRY_AFTER_CAP))
+                    except (TypeError, ValueError): pass
+                if consec_429 >= MAX_CONSECUTIVE_429:
+                    aborted = True
+                    log.error(f"fetch_stock_news: IP flagged — aborting after {consec_429} consecutive 429s")
+                    break
+            else:
+                consec_429 = 0
+                if status is not None and status >= 400:
+                    http_other += 1
+                elif not entries:
+                    empty += 1
+                else:
+                    kept = []
+                    for e in entries:
+                        parsed += 1
+                        head = _clean(e.get("title") or "")
+                        desc = _clean(e.get("summary") or e.get("description") or "")
+                        # alias filter at INGEST: keep ONLY entries that actually name the stock
+                        if pats and news_tagger.is_primary(pats, head + " . " + desc):
+                            kept.append(e)
+                        else:
+                            alias_filtered += 1
+                    st = _insert_rows(conn, _rows_from_entries(kept, "company", "Google News", symbol=sym))
+                    inserted += st["inserted"]; dup_skipped += st["dup_skipped"]
+                    quality_rejected += st["quality_rejected"]
+            time.sleep(random.uniform(COMPANY_SLEEP_MIN, COMPANY_SLEEP_MAX))
+        stats = {"symbols_count": len(universe), "parsed": parsed, "alias_filtered": alias_filtered,
+                 "quality_rejected": quality_rejected, "dup_skipped": dup_skipped, "inserted": inserted,
+                 "http_429": http_429, "http_other": http_other, "empty": empty, "aborted": aborted}
+        _write_ops_log(conn, "news_fetch", "fetch_stock_news", stats)
+        log.info(f"fetch_stock_news: {stats}")
+        return {"ok": True, **stats}
+    except Exception as e:
+        log.error(f"fetch_stock_news: {e}")
+        return {"ok": False, "error": str(e)}
+    finally:
+        if own:
+            conn.close()
+
+
 def news_retention(conn=None):
     """cc#192: daily two-tier news retention (scheduled 01:50 IST). Makes the
     04-Jul one-time backlog cleanup permanent so unpolished news never piles up.
