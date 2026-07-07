@@ -91,6 +91,61 @@ def _ops_log(conn, category: str, title: str, details: dict) -> None:
         log.error(f"_ops_log failed ({category}/{title}): {e}")
 
 
+# cc#256: per-tick slot_full accumulator. signal_ts_ist is one shared value per
+# _write_qualified() tick, so that call IS the natural tick boundary — reset here at its
+# start, the 4 auto-entry slot_full branches append, and _flush_slot_blocks emits a single
+# ops_log alert at tick end when any pool's blocked count exceeds the app_config threshold.
+# (07-Jul recovery tick silently slot_full-blocked 10 SHORT candidates with zero visibility.)
+_slot_full_blocks: Dict[str, list] = {}
+
+
+def _reset_slot_blocks() -> None:
+    global _slot_full_blocks
+    _slot_full_blocks = {"LONG": [], "SHORT": [], "SO": [], "S1B": []}
+
+
+def _record_slot_block(pool: str, sym: str, open_cnt: int, cap: int) -> None:
+    try:
+        _slot_full_blocks.setdefault(pool, []).append(
+            {"symbol": sym, "open": open_cnt, "cap": cap})
+    except Exception:
+        pass
+
+
+def _slot_full_threshold(conn) -> int:
+    """app_config-driven burst threshold (default 3), tunable live without redeploy. Alert
+    fires when a pool's same-tick blocked count EXCEEDS this — routine 1-2 slot-full touches
+    are normal operation and never alert."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='slot_full_burst_threshold'")
+            r = cur.fetchone()
+        if r and r[0] is not None:
+            return int(str(r[0]).strip())
+    except Exception as e:
+        log.warning(f"slot_full_threshold read: {e}")
+    return 3
+
+
+def _flush_slot_blocks(conn, signal_ts_ist) -> None:
+    """cc#256: at tick end, alert loudly if a burst of same-tick slot_full blocks piled up on
+    any pool (LONG/SHORT standard, SO, S1B) — so a recovery-tick or volatile-market pileup is
+    logged immediately, not discovered later by screenshot + manual SQL."""
+    threshold = _slot_full_threshold(conn)
+    for pool, blocks in _slot_full_blocks.items():
+        if len(blocks) <= threshold:
+            continue
+        syms = [b["symbol"] for b in blocks]
+        cap = blocks[0]["cap"]
+        open_cnt = max((b["open"] for b in blocks), default=None)
+        _ops_log(conn, "alert", "slot_full_burst", {
+            "pool": pool, "cap": cap, "current_open_count": open_cnt,
+            "blocked_count": len(blocks), "blocked_symbols": syms,
+            "threshold": threshold, "signal_ts": str(signal_ts_ist),
+        })
+        log.warning(f"slot_full_burst {pool}: {len(blocks)} blocked (cap={cap}) {syms}")
+
+
 def _assert_no_nontrading_metrics(conn) -> None:
     """cc#211 self-defense: if the latest v8_metrics row is dated a non-trading day,
     something bypassed the write gate — make the silent corruption LOUD."""
@@ -1285,9 +1340,11 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         long_open  = counts.get("LONG",  0)
         short_open = counts.get("SHORT", 0)
         if paper_side == "LONG"  and long_open  >= buy_slots:
-            log.info(f"auto_paper {sym}: slot_full LONG ({long_open}/{buy_slots})"); return
+            log.info(f"auto_paper {sym}: slot_full LONG ({long_open}/{buy_slots})")
+            _record_slot_block("LONG", sym, long_open, buy_slots); return   # cc#256
         if paper_side == "SHORT" and short_open >= sell_slots:
-            log.info(f"auto_paper {sym}: slot_full SHORT ({short_open}/{sell_slots})"); return
+            log.info(f"auto_paper {sym}: slot_full SHORT ({short_open}/{sell_slots})")
+            _record_slot_block("SHORT", sym, short_open, sell_slots); return   # cc#256
     except Exception as e:
         log.warning(f"auto_paper slot check {sym}: {e}"); return
 
@@ -1352,6 +1409,7 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
             so_open = int(cur.fetchone()[0])
         if so_open >= so_cap:
             log.info(f"auto_paper_so {sym}: SO slot_full ({so_open}/{so_cap})")
+            _record_slot_block("SO", sym, so_open, so_cap)   # cc#256
             return
     except Exception as e:
         log.warning(f"auto_paper_so slot check {sym}: {e}"); return
@@ -1418,6 +1476,7 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
             s1b_open = int(cur.fetchone()[0])
         if s1b_open >= s1b_cap:
             log.info(f"auto_paper_s1b {sym}: slot_full ({s1b_open}/{s1b_cap})")
+            _record_slot_block("S1B", sym, s1b_open, s1b_cap)   # cc#256
             return
     except Exception as e:
         log.warning(f"auto_paper_s1b slot check {sym}: {e}"); return
@@ -1468,6 +1527,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     log.info(f"Nifty 1M={nifty_1m:+.2f}% -> buy_reversal regime={dyn_br['_regime']}")
 
     signal_ts_ist = _now_ist(sim_ts)   # cc#218
+    _reset_slot_blocks()   # cc#256: fresh per-tick slot_full accumulator
 
     for basket, filters in FILTER_CONFIG.items():
         if basket in ("sell_overbought", "buy_s1_bounce"):
@@ -1603,6 +1663,11 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
                                     gate_fails, pivots, signal_ts_ist, enabled_v21, sim_ts=sim_ts)
     _write_sell_overbought_qualified(conn, all_metrics, target_date,
                                       gate_fails, pivots, signal_ts_ist, enabled_v21, sim_ts=sim_ts)
+
+    # cc#256: tick complete — flush a slot_full_burst alert if any pool piled up. Live only
+    # (sim_ts is None); replay/bt7 ticks accumulate harmlessly but never emit alerts.
+    if sim_ts is None:
+        _flush_slot_blocks(conn, signal_ts_ist)
 
 
 def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: date,
