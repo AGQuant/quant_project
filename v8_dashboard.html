@@ -88,7 +88,7 @@
   .sec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:4px}
   .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;position:relative;cursor:default}
   .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Space Mono';font-size:10px;color:var(--dim)}
-  .sec-card .sc-name{font-size:11px;font-weight:600;color:var(--txt);margin-top:2px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .sec-card .sc-name{font-size:11px;font-weight:600;color:var(--txt);margin-top:2px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:2.6em}   /* cc#283: reserve 2 lines (2*1.3em) so the 1D/1W/1M stack starts at the same y on every card */
   .sec-card .sc-pct{font-family:'Space Mono';font-size:16px;font-weight:700;margin-top:6px}   /* cc#273: 1D dominant (13->16px) */
   .sec-card .sc-top{font-size:10px;color:var(--mut);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
