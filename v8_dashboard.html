@@ -268,15 +268,23 @@
   </div>
 
   <div class="mood" id="mood"><div class="loading">Loading market gate&#8230;</div></div>
-  <!-- cc#266: India VIX 5-day rolling hourly line chart, sitting directly under the ADR/market
-       gate. Master-Dashboard only (selectTab toggles display). Lives outside #panels so
-       renderMaster()'s innerHTML rewrites never destroy the Chart.js canvas. -->
-  <div id="vixCard" style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:0 0 14px">
-    <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
-      <span style="font-size:12px;font-weight:700;letter-spacing:.02em">India VIX</span>
-      <span style="font-size:10px;color:var(--dim)">5-day hourly · <b id="vixLast" style="font-family:'Space Mono'">--</b></span>
+  <!-- cc#266: India VIX 5-day hourly line chart. cc#275: was an always-visible card; now a
+       popout overlay triggered by the small chart button next to the mood FAILS pill. The
+       #vixCard element (and its <canvas id="vixChart">) is NEVER removed/rebuilt — it just
+       gets the .modal-overlay/.open show-hide treatment — so the Chart.js instance stays
+       alive and keeps refreshing on the market-gate cadence whether the popout is open or not.
+       Lives outside #panels so renderMaster()'s innerHTML rewrites can't touch the canvas. -->
+  <div class="modal-overlay" id="vixCard" onclick="if(event.target===this)closeVix()">
+    <div class="modal-box" style="max-width:680px;width:94%">
+      <div class="modal-head">
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:800;color:var(--txt)">India VIX</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="vixLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+        </div>
+        <button onclick="closeVix()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
+      </div>
+      <div class="modal-body"><div style="height:280px;position:relative"><canvas id="vixChart"></canvas></div></div>
     </div>
-    <div style="height:150px;position:relative"><canvas id="vixChart"></canvas></div>
   </div>
   <div class="tabs" id="tabs"></div>
   <div id="panels"></div>
@@ -546,7 +554,12 @@ function openInfo(basket){
   document.getElementById('infoModal').classList.add('open');
 }
 function closeInfo(){document.getElementById('infoModal').classList.remove('open');}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeInfo();});
+// cc#275: VIX popout open/close. Chart.js instance is never rebuilt — opening just reveals the
+// live canvas and resizes it (it was 0-sized while the overlay was display:none), so the current
+// chart shows instantly with no fetch/spinner. Background refresh (loadVixChart) is unchanged.
+function openVix(){const el=document.getElementById('vixCard');if(!el)return;el.classList.add('open');if(typeof VIX_CHART!=='undefined'&&VIX_CHART&&VIX_CHART.resize)VIX_CHART.resize();}
+function closeVix(){const el=document.getElementById('vixCard');if(el)el.classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();}});
 
 // cc#273: sector card click-through — reuse the infoModal to list every stock in the clicked
 // sector with its own 1D/1W/1M returns, from cache.metricsAll (NO new fetch). sortTbl-driven,
@@ -642,8 +655,7 @@ function selectTab(i){
   if(i===8&&!DAYLOG_LOADED)loadDayLog();
   if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
   if(i===13&&!GI_LOADED)loadGlobalIndices(); // cc#264
-  // cc#266: VIX chart is Master-Dashboard-only — show on tab 0, hide elsewhere.
-  const vc=document.getElementById('vixCard');if(vc)vc.style.display=(i===0)?'':'none';
+  // cc#275: VIX is now a popout overlay (openVix/closeVix), no longer tab-toggled here.
 }
 
 const SORTREG={};
@@ -722,7 +734,7 @@ function renderMood(m){
   const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
   document.getElementById('mood').innerHTML=`
     <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
-      <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div></div>
+      <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span><button class="info-btn" onclick="openVix()" title="India VIX chart" style="margin-left:8px">&#128200;</button></div></div>
     <div class="moodChecks">${pills}</div>
     <div class="slots" style="margin-left:auto"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>`;
 }
