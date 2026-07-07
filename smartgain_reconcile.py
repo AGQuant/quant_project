@@ -19,10 +19,11 @@ skipped journal / holdings / weekly-opening, each leaving a different UI number 
      journal rows -> the /m2m home headline, which SUMs personal_journal, showed +0.00).
   e. UPSERT smartgain_holdings with the full-replay residual; DELETE zero residuals.
 
-Idempotent by construction: orders dedup on the natural key; journal dedup on the STABLE lot
-identity (symbol, direction, entry) within the batch's trade-date window, account-scoped —
+Idempotent by construction: orders dedup on the natural key; journal dedup on the round-trip's
+STABLE identity within its batch — (symbol, direction, entry) tagged with the batch_id —
 shape-independent, so re-backfill AND differently-split hand-written rows never double-write
-(cc#248 hardening; the old qty/pnl-shape dedup silently doubled the journal on 07-Jul).
+(cc#248 hardening; the old qty/pnl-shape dedup silently doubled the journal on 07-Jul), yet
+batch-scoped so a distinct close of the SAME opening lot in another batch is still booked.
 holdings/opening are upserts. A second self-check (matches_journal_sum, cc#248) compares the
 full FIFO-replay realised P&L against the SUM of DB journal rows — catching a journal drift
 that matches_broker_checksum (holdings-only) cannot see.
@@ -220,21 +221,21 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
                 batch_fill_tuples = [(r["trade_date"], r["order_ts"], r["symbol"], r["side"],
                                       r["qty"], r["price"]) for r in rows]
                 _, batch_closed = _replay_onto(pre_books, batch_fill_tuples)
-                # cc#248: dedup on the STABLE lot identity (symbol, direction, entry) within the
-                # batch's trade-date window, account-scoped — NOT the qty/pnl shape. This survives
-                # re-backfill AND pre-existing hand-written rows split differently (e.g. 10/10/5 vs
-                # the aggregated 20/5), which the old qty/pnl-shape dedup silently double-counted.
-                sg_close_tag = f"{account} dabba FIFO close%"
-                batch_tds = [r["trade_date"] for r in rows]
-                td_lo, td_hi = min(batch_tds), max(batch_tds)
+                # cc#248: dedup on the round-trip's STABLE identity WITHIN THIS BATCH —
+                # (symbol, direction, entry) tagged with this batch_id — NOT the qty/pnl shape.
+                # _roundtrips emits at most one rt per (symbol,direction,entry) per batch, so this
+                # key is exactly one row per canonical close. Being entry-based (not qty/pnl) it
+                # survives pre-existing hand-written rows split differently (e.g. 10/10/5 vs the
+                # aggregated 20/5), which the old qty/pnl-shape dedup silently double-counted; being
+                # batch-scoped (not a shared date window) it does NOT suppress a distinct close of
+                # the SAME opening lot booked in a different batch on the same day (e.g. DIVISLAB
+                # lot 6828 closed 20 in OB_..._01 and the remaining 5 in OB_..._02).
                 for rt in _roundtrips(batch_closed):
                     cur.execute("""SELECT 1 FROM personal_journal
                                    WHERE result='CLOSED' AND symbol=%s AND direction=%s
-                                     AND ROUND(entry_price,4)=%s
-                                     AND trade_date BETWEEN %s AND %s
-                                     AND notes LIKE %s""",
+                                     AND ROUND(entry_price,4)=%s AND notes LIKE %s""",
                                 (rt["symbol"], rt["direction"], round(rt["entry"], 4),
-                                 td_lo, td_hi, sg_close_tag))
+                                 f"%{batch_id}%"))
                     if cur.fetchone():
                         continue
                     notes = f"{account} dabba FIFO close {batch_id}"
