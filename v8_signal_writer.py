@@ -1650,12 +1650,17 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
                         s.get("daily_rsi"),
                         json.dumps(snap), "live_5min",
                     ))
-                    first_qualification = cur.rowcount > 0
+                    first_qualification = cur.rowcount > 0   # v8_qualified daily latch (display)
                 conn.commit()
-                if first_qualification:
-                    _auto_paper_entry(conn, sym, basket, side,
-                                      s.get("_cmp"), pivots.get(sym),
-                                      target_date, gate_fails, sim_ts=sim_ts)
+                # cc#254: attempt entry on EVERY tick the symbol is in `universe` (i.e. it passes
+                # the live score-gate + V2.1 + pivot-room right NOW), not only its FIRST
+                # qualification of the day — so a symbol blocked purely by slot_full earlier enters
+                # when a slot frees later the same day. _auto_paper_entry re-checks entry window,
+                # blackout, same-side-open, traded_today and slot live, so re-calling is idempotent
+                # (already-open / already-traded-today symbols are skipped).
+                _auto_paper_entry(conn, sym, basket, side,
+                                  s.get("_cmp"), pivots.get(sym),
+                                  target_date, gate_fails, sim_ts=sim_ts)
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
@@ -1766,10 +1771,11 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                     s.get("daily_rsi"),
                     json.dumps(snap), "live_5min",
                 ))
-                first_qual = cur.rowcount > 0
+                first_qual = cur.rowcount > 0   # daily latch (display)
             conn.commit()
-            if first_qual:
-                _auto_paper_entry_s1b(conn, sym, s.get("_cmp"), target_date, gate_fails, sim_ts=sim_ts)
+            # cc#254: retry entry every tick it still passes the s1b strict gate, not just first
+            # qualification — _auto_paper_entry_s1b re-checks window/guards/slot live (idempotent).
+            _auto_paper_entry_s1b(conn, sym, s.get("_cmp"), target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
             log.warning(f"buy_s1_bounce insert {sym}: {e}")
 
@@ -1914,13 +1920,14 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
                     s.get("daily_rsi"),
                     json.dumps(snap), "live_5min",
                 ))
-                first_qualification = cur.rowcount > 0
+                first_qualification = cur.rowcount > 0   # daily latch (display)
             conn.commit()
 
-            if first_qualification:
-                pv = pivots.get(sym)
-                _auto_paper_entry_so(conn, sym, s.get("_cmp"), pv,
-                                     target_date, gate_fails, sim_ts=sim_ts)
+            # cc#254: retry entry every tick it still passes the SO gate, not just first
+            # qualification — _auto_paper_entry_so re-checks window/guards/slot live (idempotent).
+            pv = pivots.get(sym)
+            _auto_paper_entry_so(conn, sym, s.get("_cmp"), pv,
+                                 target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
             log.warning(f"sell_overbought qualified insert {sym}: {e}")
 
