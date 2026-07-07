@@ -47,8 +47,12 @@ def _monday(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
+def _ist_now() -> datetime:
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
+
 def _ist_today() -> date:
-    return (datetime.utcnow() + timedelta(hours=5, minutes=30)).date()
+    return _ist_now().date()
 
 
 def _day_close(cur, symbol: str, d: date):
@@ -158,7 +162,19 @@ def _replay_full(cur, account, end_date):
     # total under-reported by exactly that carried amount vs the card/broker.
     inception_baseline = 0.0
 
-    tdays = _trading_days(cur, inception, end_date)
+    # cc#250: day list from the trading CALENDAR (is_trading_day), NOT raw_prices —
+    # raw_prices is EOD-only, so TODAY has no row until the 15:35 IST Yahoo write and every
+    # one of today's FILLED fills was silently skipped from books/closed/per_day while the
+    # market is open (weekly total understated, holdings_mismatch spurious). Today's
+    # unrealised is valued by _day_close, which already prefers the live fyers_fut 5m close
+    # before falling back to raw_prices. A PAST day is unchanged (still uses its EOD close).
+    from nse_holidays import is_trading_day
+    last_day = min(end_date, _ist_today())
+    tdays, _d = [], inception
+    while _d <= last_day:
+        if is_trading_day(_d):
+            tdays.append(_d)
+        _d += timedelta(days=1)
     per_day, fi = {}, 0
     for d in tdays:
         nb = len(closed)
@@ -220,7 +236,16 @@ def _daily_range(cur, account, rng, today):
         return {"error": "no opening positions", "notes": notes}
 
     if rng == "1w":
-        start, end, mode = _monday(today), _monday(today) + timedelta(days=4), "bar"
+        # cc#251: trailing 5 TRADING days ending today (rolling window, may dip into last
+        # week), NOT the fixed Mon-Fri of the current calendar week. Walk back counting
+        # is_trading_day until 5 are collected (today is day 1 when it is a trading day).
+        from nse_holidays import is_trading_day
+        _back, _d = [], today
+        while len(_back) < 5:
+            if is_trading_day(_d):
+                _back.append(_d)
+            _d -= timedelta(days=1)
+        start, end, mode = _back[-1], today, "bar"
     elif rng == "1m":
         start, end, mode = today - timedelta(days=30), today, "bar"
     elif rng == "1y":
@@ -341,9 +366,18 @@ def _intraday_1d(cur, account, today):
     syms = set(books) | {f[1] for f in today_fills}
     bars = _load_fut_5m(cur, syms, target)
 
-    # 5-min grid 09:15..15:30
+    # 5-min grid 09:15..15:30. cc#249: on the LIVE day, truncate to the last completed
+    # 5-min boundary <= now (IST) — do NOT emit buckets for times that have not happened
+    # yet, else _ffill_price carries the last real price forward into a flat phantom line
+    # with fake tooltip values. A PAST (already-closed) day keeps the full grid unchanged.
     grid, t = [], datetime.combine(target, MKT_OPEN)
     end = datetime.combine(target, MKT_CLOSE)
+    if target == _ist_today():
+        now_ist = _ist_now()
+        if now_ist < end:
+            floored = now_ist.replace(second=0, microsecond=0)
+            floored -= timedelta(minutes=floored.minute % 5)
+            end = min(end, floored)
     while t <= end:
         grid.append(t.time())
         t += timedelta(minutes=5)
