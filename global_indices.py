@@ -62,8 +62,8 @@ GLOBAL_TICKERS = [
     # Commodities
     ("BZ=F",      "Brent",       "commodity"),
     ("CL=F",      "WTI",         "commodity"),
-    ("XAUUSD=X",  "Gold",        "commodity"),   # spot gold (was GC=F COMEX futures) — founder switch
-    ("XAGUSD=X",  "Silver",      "commodity"),   # spot silver (was SI=F COMEX futures)
+    ("GC=F",      "Gold",        "commodity"),   # COMEX futures — Yahoo has NO XAUUSD=X spot chart data (verified)
+    ("SI=F",      "Silver",      "commodity"),   # COMEX futures — Yahoo has NO XAGUSD=X spot chart data (verified)
     ("NG=F",      "Natural Gas", "commodity"),
     # Crypto
     ("BTC-USD",   "Bitcoin",     "crypto"),
@@ -274,8 +274,8 @@ def prune_global_indices(conn, years: int = 5) -> int:
 # Commodities + Crypto that trade outside NSE hours (24x5 or 24x7).
 # Separate table — never leaks into NSE futures universe scans.
 GLOBAL_INTRADAY_TICKERS = [
-    ("XAUUSD=X", "GOLD"),     # spot gold (was GC=F COMEX futures) — founder switch to match live spot
-    ("XAGUSD=X", "SILVER"),   # spot silver (was SI=F COMEX futures)
+    ("GC=F",    "GOLD"),      # COMEX futures — Yahoo has NO XAUUSD=X spot 5m chart data (verified)
+    ("SI=F",    "SILVER"),    # COMEX futures — Yahoo has NO XAGUSD=X spot 5m chart data (verified)
     ("CL=F",    "WTI"),
     ("BZ=F",    "BRENT"),
     ("NG=F",    "NATURAL_GAS"),
