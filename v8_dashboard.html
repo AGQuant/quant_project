@@ -89,7 +89,7 @@
   .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;position:relative;cursor:default}
   .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Space Mono';font-size:10px;color:var(--dim)}
   .sec-card .sc-name{font-size:11px;font-weight:600;color:var(--txt);margin-top:2px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .sec-card .sc-pct{font-family:'Space Mono';font-size:13px;font-weight:700;margin-top:6px}
+  .sec-card .sc-pct{font-family:'Space Mono';font-size:16px;font-weight:700;margin-top:6px}   /* cc#273: 1D dominant (13->16px) */
   .sec-card .sc-top{font-size:10px;color:var(--mut);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
@@ -548,6 +548,26 @@ function openInfo(basket){
 function closeInfo(){document.getElementById('infoModal').classList.remove('open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeInfo();});
 
+// cc#273: sector card click-through — reuse the infoModal to list every stock in the clicked
+// sector with its own 1D/1W/1M returns, from cache.metricsAll (NO new fetch). sortTbl-driven,
+// default 1D% desc, all 4 columns sortable (matches every other table).
+function openSectorDetail(segment){
+  if(!segment)return;
+  const rows=(cache.metricsAll||[]).filter(x=>x.segment===segment);
+  document.getElementById('mTitle').textContent=segment;
+  document.getElementById('mSub').textContent=`${rows.length} stock${rows.length===1?'':'s'} · 1D / 1W / 1M returns`;
+  const body=sortTbl('secdetail',
+    [["symbol","Symbol"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
+    rows,x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
+      <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
+      <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this sector",wrapClass:''});
+  document.getElementById('mBody').innerHTML=body;
+  document.getElementById('infoModal').classList.add('open');
+}
+
 // -- Core utils --------------------------------------------------------------
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
@@ -708,22 +728,19 @@ function renderMood(m){
 function sectorCards(sectors,title,label){
   if(!sectors||!sectors.length)return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;font-size:12px">No data</div>`;
   const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;const color=pct>=0?'var(--grn)':'var(--red)';
-    // cc#261: 1W/1M stat block, each coloured by its OWN sign (a sector can be red 1D but green 1W/1M).
-    const stat=(lbl,v)=>`<div style="color:var(--dim);white-space:nowrap">${lbl} <b style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
-    // cc#267 fixed the overlap via a flex two-column layout. cc#270: pure placement change —
-    // name + 1D% now sit full-width at the TOP; the 1W/1M block moves to the BOTTOM-RIGHT, in a
-    // space-between row next to top_stock/stocks. The stat block stays flex-shrink:0 (reserved
-    // space) and the left column min-width:0 (ellipsis), so there is still zero overlap risk.
-    return`<div class="sec-card"><div class="sc-num">${i+1}</div>`+
+    // cc#261: 1W/1M stat block, each coloured by its OWN sign. cc#273: value bumped to 14px
+    // (label stays ~10px) — 1D(16px) > 1W/1M(14px) > label/count(~10px) hierarchy.
+    const stat=(lbl,v)=>`<div style="color:var(--dim);white-space:nowrap">${lbl} <b style="font-size:14px;color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
+    // cc#273: ticker (sc-top) removed; card is now click-through — opens a modal listing every
+    // stock in the sector. Segment passed via data-seg (robust to quotes/&). Layout otherwise
+    // per cc#270 (name+1D% top full-width; 1W/1M bottom-right, reserved flex-shrink:0 space).
+    return`<div class="sec-card" style="cursor:pointer" data-seg="${s.segment}" onclick="openSectorDetail(this.dataset.seg)"><div class="sc-num">${i+1}</div>`+
       `<div style="margin-top:14px">`+
         `<div class="sc-name">${s.segment}</div>`+
         `<div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>`+
       `</div>`+
       `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:3px">`+
-        `<div style="min-width:0">`+
-          `<div class="sc-top">${s.top_stock||''}</div>`+
-          `<div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>`+
-        `</div>`+
+        `<div class="sc-stocks" style="color:var(--dim);min-width:0">${s.stocks} stocks</div>`+
         `<div style="flex-shrink:0;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
       `</div></div>`;
   }).join('');
