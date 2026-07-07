@@ -374,99 +374,170 @@ def _section_quant_basket(cur) -> Dict:
     return {'name': 'Quant Basket', 'checks': checks, 'status': _status(checks)}
 
 
+def _ops_age_min(cur, title, category=None):
+    """(minutes_since_newest, last_ts) for the newest ops_log row matching title (and
+    category if given). Age is computed in SQL (NOW() - session_ts) so it is DB-clock
+    consistent and immune to the UTC/IST skew that plagues Python-side ts math.
+    Returns (None, None) when no such row exists."""
+    if category is None:
+        cur.execute("""SELECT EXTRACT(EPOCH FROM (NOW()-MAX(session_ts)))/60.0, MAX(session_ts)
+                       FROM ops_log WHERE title=%s""", (title,))
+    else:
+        cur.execute("""SELECT EXTRACT(EPOCH FROM (NOW()-MAX(session_ts)))/60.0, MAX(session_ts)
+                       FROM ops_log WHERE title=%s AND category=%s""", (title, category))
+    r = cur.fetchone()
+    if not r or r[0] is None:
+        return None, None
+    return float(r[0]), r[1]
+
+
+def _alert_age_min(cur, title):
+    """Minutes since the newest category='alert' ops_log row for title (None if never)."""
+    cur.execute("""SELECT EXTRACT(EPOCH FROM (NOW()-MAX(session_ts)))/60.0
+                   FROM ops_log WHERE category='alert' AND title=%s""", (title,))
+    r = cur.fetchone()
+    return float(r[0]) if r and r[0] is not None else None
+
+
+def _sched_row(label, age_min, last_ts, expected, green_h=26.0, yellow_h=50.0):
+    """Traffic-light for a job whose last successful run is age_min minutes ago
+    (green=on-time, yellow=late/recovered, red=missing)."""
+    if age_min is None:
+        return _chk(label, 'no run recorded', ok=False, warn=False,
+                    detail=f'Expected {expected} · no ops_log/proxy row yet')
+    disp = f'{int(age_min)} min ago' if age_min < 180 else f'{age_min/60.0:.1f}h ago'
+    return _chk(label, disp, ok=(age_min <= green_h*60), warn=(age_min <= yellow_h*60),
+                detail=f'Expected {expected} · last {str(last_ts)[:16]}')
+
+
+def _alert_absence_row(cur, label, alert_title, expected, window_min=1200.0):
+    """green when NO alert of alert_title fired within window_min (default ~20h)."""
+    age = _alert_age_min(cur, alert_title)
+    if age is None or age > window_min:
+        return _chk(label, 'OK — no alert', ok=True,
+                    detail=f'Expected {expected} · alert-absence ({alert_title})')
+    return _chk(label, f'ALERT {int(age)} min ago', ok=False, warn=False,
+                detail=f'Expected {expected} · {alert_title} fired')
+
+
 def _section_scheduler(cur) -> Dict:
-    """
-    Check each scheduled job against expected run window (IST).
-    Uses latest data timestamps as proxy for job completion.
-    """
+    """Every scheduled job vs its expected IST window + last actual successful run
+    (ops_log scheduler_health / rich telemetry rows, or a direct table proxy) + traffic
+    light. cc#255 rebuild: (a) the live-engine heartbeat now reads v8_metrics computed_at
+    age (the same proxy scheduler.py's own watchdog trusts) instead of the dead
+    app_config heartbeat key; (b) stale nightly labels fixed to the real 01:00-02:05 chain
+    (the old late-evening window was retired on task #31); (c) coverage extended from 6 to
+    the full job set, grouped where jobs genuinely share a fate to stay glanceable."""
     checks = []
     now = _ist_now()
-    today = now.date()
+    mkt = _market_state(now) == 'market'
 
-    # 07:00 — Global indices fetch
-    cur.execute("SELECT MAX(quote_date) FROM global_indices")
+    # ── Live market-hours engine — 6 jobs share ONE 5-min dispatch block, so
+    #    v8_metrics freshness is a faithful umbrella proxy (avoid 6 duplicate rows).
+    cur.execute("SELECT EXTRACT(EPOCH FROM (NOW()-MAX(computed_at)))/60.0, MAX(computed_at) FROM v8_metrics")
     r = cur.fetchone()
-    gi_date = r[0]
-    gi_ok = gi_date == today or (gi_date == today - timedelta(days=1) and now.hour < 8)
-    checks.append(_chk('07:00 Global indices fetch', str(gi_date),
-        ok=gi_ok, warn=(gi_date is not None),
-        detail='Expected: daily 07:00 IST'))
-
-    # 09:00 — V8 history cache: RETIRED 06-Jun-2026 (v8_live removed, single engine
-    # = v8_signal_writer). The v8_history_cache table is no longer written, so the
-    # old check was permanently red on a dead artifact. Replaced with the live
-    # signal-writer heartbeat (sched_writer_hb) which proves the 5-min engine is
-    # firing. FIX (12-Jun-2026).
-    cur.execute("SELECT value FROM app_config WHERE key='sched_writer_hb'")
-    r = cur.fetchone()
-    hb_ts = None
-    if r and r[0]:
-        try:
-            hb_ts = datetime.strptime(r[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=IST)
-        except Exception:
-            hb_ts = None
-    hb_mins = _mins_ago(hb_ts)
-    # During market hours expect a tick within ~10 min; off-hours just report last.
-    mkt = (now.weekday() < 5 and (now.hour*60+now.minute) >= 555 and (now.hour*60+now.minute) <= 930)
-    checks.append(_chk('Live signal writer (5-min)', f'{hb_mins} min ago',
-        ok=(not mkt) or (hb_mins <= 10),
-        warn=(not mkt) or (hb_mins <= 30),
-        detail='heartbeat sched_writer_hb' + ('' if mkt else ' (off-hours)')))
-
-    # 15:45 — V8 EOD engine
-    cur.execute("SELECT MAX(score_date) FROM v8_metrics")
-    r = cur.fetchone()
-    vm_date = r[0]
-    # After 15:45 today it should be today; before that yesterday is fine
-    if now.hour >= 16:
-        vm_ok = vm_date == today
-        vm_warn = vm_date == today - timedelta(days=1)
+    sw_age, sw_ts = (float(r[0]), r[1]) if r and r[0] is not None else (None, None)
+    if sw_age is None:
+        checks.append(_chk('Live engine (5-min ×6 jobs)', 'no v8_metrics', ok=False, warn=False,
+                           detail='signal_writer/paper_exit/v10/pcr/tc_lite/smartgain_mtm'))
+    elif mkt:
+        checks.append(_chk('Live engine (5-min ×6 jobs)', f'{int(sw_age)} min ago',
+            ok=(sw_age <= 10), warn=(sw_age <= 20),
+            detail='v8_metrics computed_at age (umbrella for the 6 shared live jobs)'))
     else:
-        vm_ok = vm_date >= today - timedelta(days=1)
-        vm_warn = True
-    checks.append(_chk('15:45 V8 EOD engine', str(vm_date),
-        ok=vm_ok, warn=vm_warn,
-        detail='Runs after market close'))
+        checks.append(_chk('Live engine (5-min ×6 jobs)', f'{int(sw_age)} min ago (off-hours)',
+            ok=True, warn=True, detail='off-hours — last live tick; strict only 09:15-15:30'))
 
-    # 21:00 — Yahoo daily OHLC
+    # ── Nightly chain (01:00-02:05 IST, runs every calendar day) ──────────────────
     cur.execute("SELECT MAX(price_date) FROM raw_prices")
-    r = cur.fetchone()
-    rp_date = r[0]
-    # After 21:00 today's close should be in; before that yesterday is fine
-    if now.hour >= 21:
-        rp_ok = rp_date == today
-        rp_warn = rp_date == today - timedelta(days=1)
-    else:
-        rp_ok = rp_date >= today - timedelta(days=1)
-        rp_warn = True
-    checks.append(_chk('21:00 Yahoo daily OHLC', str(rp_date),
-        ok=rp_ok, warn=rp_warn))
+    rp_date = cur.fetchone()[0]
+    rp_days = _days_old(rp_date)
+    checks.append(_chk('Yahoo EOD (15:35 + 01:00 safety)', str(rp_date),
+        ok=(rp_days <= 1), warn=(rp_days <= 3),
+        detail='raw_prices freshness — one merged check for both runs'))
 
-    # 21:05 — QB EOD checker
-    cur.execute("SELECT MAX(updated_at)::date FROM quant_paper_positions WHERE status='open'")
-    r = cur.fetchone()
-    qb_date = r[0]
-    if now.hour >= 21:
-        qb_ok = qb_date == today
-        qb_warn = qb_date == today - timedelta(days=1)
-    else:
-        qb_ok = qb_date >= today - timedelta(days=1)
-        qb_warn = True
-    checks.append(_chk('21:05 QB EOD checker', str(qb_date),
-        ok=qb_ok, warn=qb_warn))
+    age, ts = _ops_age_min(cur, 'qb_eod', 'scheduler_health')
+    if age is None:
+        cur.execute("""SELECT EXTRACT(EPOCH FROM (NOW()-MAX(updated_at)))/60.0, MAX(updated_at)
+                       FROM quant_paper_positions WHERE status='open'""")
+        r = cur.fetchone(); age, ts = (float(r[0]), r[1]) if r and r[0] is not None else (None, None)
+    checks.append(_sched_row('QB EOD checker (01:15)', age, ts, 'daily 01:15 IST'))
 
-    # 22:00 — GVM recompute
-    cur.execute("SELECT MAX(score_date) FROM gvm_scores")
-    r = cur.fetchone()
-    gvm_date = r[0]
-    if now.hour >= 22:
-        gvm_ok = gvm_date == today
-        gvm_warn = gvm_date == today - timedelta(days=1)
+    age, ts = _ops_age_min(cur, 'gvm_recompute', 'scheduler_health')
+    if age is not None:
+        checks.append(_sched_row('GVM recompute (01:30)', age, ts, 'daily 01:30 IST'))
     else:
-        gvm_ok = gvm_date >= today - timedelta(days=1)
-        gvm_warn = True
-    checks.append(_chk('22:00 GVM recompute', str(gvm_date),
-        ok=gvm_ok, warn=gvm_warn))
+        cur.execute("SELECT MAX(score_date) FROM gvm_scores")
+        gd = cur.fetchone()[0]; gdd = _days_old(gd)
+        checks.append(_chk('GVM recompute (01:30)', str(gd),
+            ok=(gdd <= 1), warn=(gdd <= 3), detail='daily 01:30 IST · gvm_scores date'))
+
+    age, ts = _ops_age_min(cur, 'pivots_build', 'scheduler_health')
+    checks.append(_sched_row('Paper pivots build (01:45)', age, ts, 'daily 01:45 IST'))
+
+    age, ts = _ops_age_min(cur, 'cleanup_news', 'scheduler_health')
+    if age is None:
+        age, ts = _ops_age_min(cur, 'news_retention', 'news_retention')
+    checks.append(_sched_row('News retention purge (01:50)', age, ts, 'daily 01:50 IST'))
+
+    age, ts = _ops_age_min(cur, 'v8_paper_exit_eod', 'scheduler_health')
+    checks.append(_sched_row('Paper EOD exit fallback (02:00)', age, ts, 'daily 02:00 IST'))
+
+    age, ts = _ops_age_min(cur, 'universe_technicals', 'scheduler_health')
+    checks.append(_sched_row('Universe technicals (02:05)', age, ts, 'daily 02:05 IST'))
+
+    # ── Pre-market cluster ────────────────────────────────────────────────────────
+    cur.execute("SELECT MAX(quote_date) FROM global_indices")
+    gi_date = cur.fetchone()[0]; gi_days = _days_old(gi_date)
+    checks.append(_chk('Global indices fetch (06:00)', str(gi_date),
+        ok=(gi_days <= 1), warn=(gi_days <= 3), detail='daily 06:00 IST'))
+
+    age, ts = _ops_age_min(cur, 'earnings_refresh', 'info')
+    if age is None:
+        cur.execute("SELECT EXTRACT(EPOCH FROM (NOW()-MAX(loaded_at)))/60.0, MAX(loaded_at) FROM earnings_calendar")
+        r = cur.fetchone(); age, ts = (float(r[0]), r[1]) if r and r[0] is not None else (None, None)
+    checks.append(_sched_row('Earnings refresh (06:15)', age, ts, 'weekdays 06:15 IST', yellow_h=74.0))
+
+    age, ts = _ops_age_min(cur, 'fetch_stock_news')
+    checks.append(_sched_row('Stock-news fetch (08:30/12:30/16:30)', age, ts,
+                             '3× trading day', yellow_h=74.0))
+
+    checks.append(_alert_absence_row(cur, 'Pre-market writer check (09:10)',
+                                     'scheduler_stall_9am', 'weekdays 09:10 IST'))
+    checks.append(_alert_absence_row(cur, 'Open-bars feed alarm (09:25)',
+                                     'feed_silent_at_open', 'trading days 09:25 IST'))
+
+    age, ts = _ops_age_min(cur, 'fu_sync', 'scheduler_health')
+    checks.append(_sched_row('Futures universe sync (Mon 08:00)', age, ts,
+                             'weekly Mon 08:00 IST', green_h=192.0, yellow_h=384.0))
+
+    # ── Post-close chain ──────────────────────────────────────────────────────────
+    age, ts = _ops_age_min(cur, 'gate_rebalance_15_20', 'gate_rebalance')
+    checks.append(_sched_row('Gate rebalance (15:20)', age, ts, 'weekdays 15:20 IST', yellow_h=74.0))
+
+    age, ts = _ops_age_min(cur, 'heal_intraday', 'scheduler_health')
+    checks.append(_sched_row('Session-gap heal (15:40)', age, ts, 'weekdays 15:40 IST', yellow_h=74.0))
+
+    age, ts = _ops_age_min(cur, 'v8_eod', 'scheduler_health')
+    if age is None:
+        cur.execute("SELECT MAX(score_date) FROM v8_metrics")
+        vd = cur.fetchone()[0]; vdd = _days_old(vd)
+        checks.append(_chk('V8 EOD engine (15:45)', str(vd),
+            ok=(vdd == 0), warn=(vdd <= 1), detail='weekdays 15:45 IST · v8_metrics date'))
+    else:
+        checks.append(_sched_row('V8 EOD engine (15:45)', age, ts, 'weekdays 15:45 IST', yellow_h=74.0))
+
+    age, ts = _ops_age_min(cur, 'adr_compute', 'scheduler_health')
+    checks.append(_sched_row('ADR/PCR compute (15:50)', age, ts, 'weekdays 15:50 IST', yellow_h=74.0))
+
+    age, ts = _ops_age_min(cur, 'tc_screener_precompute', 'scheduler_health')
+    checks.append(_sched_row('TC screener precompute (16:00)', age, ts, 'weekdays 16:00 IST', yellow_h=74.0))
+
+    checks.append(_alert_absence_row(cur, 'Stock-news watchdog (16:00)',
+                                     'stock_news_stale', 'trading days 16:00 IST', window_min=1500.0))
+
+    age, ts = _ops_age_min(cur, 'v21_killswitch', 'scheduler_health')
+    checks.append(_sched_row('V2.1 kill-switch (16:10)', age, ts, 'weekdays 16:10 IST', yellow_h=74.0))
 
     return {'name': 'Scheduler', 'checks': checks, 'status': _status(checks)}
 
