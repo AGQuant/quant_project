@@ -53,9 +53,11 @@
   .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
   .mood .pill{font-size:11px;font-weight:700;padding:5px 12px;border-radius:30px;text-transform:uppercase;letter-spacing:1px}
   .moodChecks{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
-  .chk{font-size:11px;font-family:'Space Mono';padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--bg2)}
+  .chk{font-size:12px;font-family:'Space Mono';padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--bg2)}
   .chk.pass{color:var(--grn);border-color:var(--grn-d)}
   .chk.fail{color:var(--red);border-color:var(--red-d)}
+  /* cc#271: mirror the two-tier .slots pattern — value big (18px), label/Y-N stay small */
+  .chk .chk-val{font-size:18px;font-weight:700}
   .slots{display:flex;gap:14px;font-size:12px;color:var(--mut)}
   .slots b{font-size:18px;font-family:'Space Mono'}
   .slots .buy b{color:var(--grn)}.slots .sell b{color:var(--red)}
@@ -690,7 +692,9 @@ function renderMood(m){
   // cc#129 bug_1: show the numeric value driving each gate, not just Y/N.
   // ADR is a ratio (2dp); Day/Week/Month are signed percentages.
   const gval=c=>{const v=Number(c.value);if(c.value==null||isNaN(v))return'';return short(c.filter)==='ADR'?v.toFixed(2):sign(v,2)+'%';};
-  const pills=(m.checks||[]).map(c=>`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)} ${gval(c)} ${c.pass?'Y':'N'}</div>`).join('');
+  // cc#271: value (ADR ratio / signed %) rendered big in its own <b class="chk-val">, matching
+  // the Buy/Sell slot number size; the ADR/Day/Week/Month label and the Y/N suffix stay small.
+  const pills=(m.checks||[]).map(c=>{const v=gval(c);return`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)}${v?` <b class="chk-val">${v}</b>`:''} ${c.pass?'Y':'N'}</div>`;}).join('');
   // cc#221: ring-fenced pools (used/cap) from market_mood — SO is a short basket, S1B a long one
   const soP=m.so_pool||{cap:m.so_slots,used:0};
   const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
