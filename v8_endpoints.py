@@ -406,7 +406,7 @@ def _load_open_positions(basket: str) -> dict:
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT p.symbol, p.entry_price, p.target, p.stop_loss, p.qty,
+                SELECT p.symbol, p.entry_price, p.target, p.stop_loss, p.qty, p.entry_ts,
                        COALESCE(c.cmp, p.entry_price) AS cmp,
                        CASE WHEN p.side='LONG'
                             THEN ROUND(((COALESCE(c.cmp,p.entry_price)-p.entry_price)/p.entry_price*100)::numeric,2)
@@ -441,6 +441,11 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
         pos = open_pos.get(sym)
         if pos:
             s["status"]       = "OPEN"
+            # cc#253: SINCE for an OPEN row is the position's real entry time, NOT a
+            # v8_qualified.signal_ts — a held position re-qualifies every day it still passes
+            # the gate, so signal_ts drifts to the latest/first qual day, not the entry moment.
+            if pos.get("entry_ts") is not None:
+                s["signal_ts"] = pos["entry_ts"]
             s["entry_price"]  = float(pos["entry_price"]) if pos.get("entry_price") else None
             s["open_pnl_pct"] = float(pos["pnl_pct"])    if pos.get("pnl_pct")     else None
             s["open_target"]  = float(pos["target"])      if pos.get("target")      else None
@@ -488,7 +493,9 @@ def _inject_open_positions(cur, rows: list, basket: str, open_pos: dict) -> list
             row["cmp"] = pos["cmp"]
         row["entry"]     = row.get("cmp")          # sell_overbought renderer keys on 'entry'
         row["source"]    = "open_position"         # cc#240: held position, not a fresh qual
-        row["signal_ts"] = row.get("first_seen")   # show original entry-day timestamp
+        # cc#253: SINCE = real entry_ts (fallback first_seen if somehow missing). _enrich_with_status
+        # re-affirms this, but set it here too so the injected row is correct independent of order.
+        row["signal_ts"] = pos.get("entry_ts") or row.get("first_seen")
         row["status"]    = "OPEN"
         row["segment"]   = _seg_override(row["symbol"], row.get("segment"))
         rows.append(row)
