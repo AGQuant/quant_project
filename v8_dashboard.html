@@ -604,7 +604,9 @@ function sortTbl(uid,cols,rows,rowFn,opts={}){
   // cc#168: opts.pinned = rows always rendered first (unsorted, never dropped);
   // opts.wrapClass overrides the desktop-only wrapper (''=visible on mobile too);
   // opts.scrollCls adds a class to the .scroll container (e.g. rawscroll).
-  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows",pinned:opts.pinned||[],scrollCls:opts.scrollCls||''};
+  // cc#262: opts.footer = pre-rendered <tr> HTML rendered in <tfoot>, always at the bottom
+  // and never sorted (e.g. a TOTAL row on the Day Log table).
+  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows",pinned:opts.pinned||[],scrollCls:opts.scrollCls||'',footer:opts.footer||''};
   return`<div id="tw_${uid}" class="${opts.wrapClass!==undefined?opts.wrapClass:'desktop-only'}">${drawTbl(uid)}</div>`;
 }
 function drawTbl(uid){
@@ -613,13 +615,18 @@ function drawTbl(uid){
   if(!t||!total)return`<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
   let rows=t.rows;
   if(t.sortKey){rows=[...rows].sort((a,b)=>{const av=a[t.sortKey],bv=b[t.sortKey];if(typeof av==='string'||typeof bv==='string')return t.dir*String(av??'').localeCompare(String(bv??''));return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));});}
-  const head=t.cols.map(([k,l])=>`<th onclick="tblSort('${uid}','${k}')">${l}${t.sortKey===k?(t.dir<0?' v':' ^'):''}</th>`).join('');
+  // cc#262: every column header is click-sortable — pointer cursor + a ▲/▼ triangle on the
+  // active column, a faint ⇅ affordance on the rest so sortability is discoverable.
+  const head=t.cols.map(([k,l])=>`<th onclick="tblSort('${uid}','${k}')" style="cursor:pointer;user-select:none;white-space:nowrap">${l}${t.sortKey===k?(t.dir<0?' <span style="color:var(--cyan)">▼</span>':' <span style="color:var(--cyan)">▲</span>'):' <span style="opacity:.25;font-size:9px">⇅</span>'}</th>`).join('');
   const body=(t.pinned||[]).map(t.rowFn).join('')+rows.map(t.rowFn).join('');
-  return`<div class="scroll${t.scrollCls?' '+t.scrollCls:''}"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const foot=t.footer?`<tfoot>${t.footer}</tfoot>`:'';
+  return`<div class="scroll${t.scrollCls?' '+t.scrollCls:''}"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot}</table></div>`;
 }
 function tblSort(uid,k){
   const t=SORTREG[uid];if(!t)return;
-  t.dir=(t.sortKey===k)?-t.dir:-1;t.sortKey=k;
+  // cc#262: repeat-click on the SAME column toggles direction; a NEW column resets to
+  // ASCENDING (dir=+1) — matches the founder-approved demo interaction.
+  t.dir=(t.sortKey===k)?-t.dir:1;t.sortKey=k;
   const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
 }
 
@@ -674,7 +681,11 @@ function renderMood(m){
 function sectorCards(sectors,title,label){
   if(!sectors||!sectors.length)return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;font-size:12px">No data</div>`;
   const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;const color=pct>=0?'var(--grn)':'var(--red)';
-    return`<div class="sec-card"><div class="sc-num">${i+1}</div><div class="sc-name" style="margin-top:14px">${s.segment}</div><div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div><div class="sc-top">${s.top_stock||''}</div><div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div></div>`;
+    // cc#261: right-side 1W/1M stat block, each colored by its OWN sign (independent of the
+    // card's 1D sign — a sector can be red 1D but green 1W/1M).
+    const stat=(lbl,v)=>`<div style="color:var(--dim)">${lbl} <b style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
+    return`<div class="sec-card" style="position:relative"><div class="sc-num">${i+1}</div><div class="sc-name" style="margin-top:14px">${s.segment}</div><div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div><div class="sc-top">${s.top_stock||''}</div><div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>`+
+      `<div style="position:absolute;top:10px;right:12px;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div></div>`;
   }).join('');
   return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
 }
@@ -695,6 +706,43 @@ function posBar(x){
       <div style="position:absolute;left:0;top:0;height:100%;width:${prog}%;background:${fill};border-radius:4px;transition:width .4s ease"></div></div>
     <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';color:var(--dim);margin-top:2px">
       <span>${num(leftLbl,0)}</span><span>${num(rightLbl,0)}</span></div></div>`;
+}
+
+// cc#260: expanded SL/ENTRY/TGT bar shown on row-click. Direction-aware — for a LONG the
+// scale runs SL(left,red) -> TGT(right,green); for a SHORT it runs TGT(left,green) ->
+// SL(right,red) so "further right = closer to target profit" holds for both sides. CMP
+// arrow is positioned by the same progress math as posBar().
+function posBarDetail(x){
+  const isShort=(x.side||'').toUpperCase()==='SHORT';
+  const cmp=Number(x.cmp),stop=Number(x.stop_loss),tgt=Number(x.target),entry=Number(x.entry_price),qty=Number(x.qty||0);
+  let prog=isShort?((stop-cmp)/(stop-tgt))*100:((cmp-stop)/(tgt-stop))*100;
+  if(!isFinite(prog)||isNaN(prog))prog=0;prog=Math.max(0,Math.min(100,prog));
+  const fill=Number(x.unrealised_pnl||0)>=0?'#639922':'#E24B4A';
+  const leftLbl=isShort?tgt:stop, rightLbl=isShort?stop:tgt;
+  const leftClr=isShort?'var(--grn)':'var(--red)', rightClr=isShort?'var(--red)':'var(--grn)';
+  const potLeft=isShort?(cmp-tgt)*qty:(tgt-cmp)*qty;
+  const potPct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
+  return`<div style="padding:10px 4px 4px">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-family:'Space Mono';font-size:11px;margin-bottom:8px">
+      <span style="color:var(--dim)">Entry <b style="color:var(--txt)">${num(entry)}</b></span>
+      <span style="color:var(--dim)">CMP <b style="color:var(--txt)">${num(cmp)}</b></span>
+      <span style="color:var(--dim)">SL <b style="color:var(--red)">${num(stop)}</b></span>
+      <span style="color:var(--dim)">Target <b style="color:var(--grn)">${num(tgt)}</b></span>
+      <span style="color:var(--dim)">Qty <b style="color:var(--txt)">${qty||'--'}</b></span>
+      <span style="color:var(--dim)">Potential left <b class="${cls(potLeft)}">${inr(potLeft)} (${sign(potPct,2)}%)</b></span>
+    </div>
+    <div style="max-width:420px">
+      <div style="position:relative;height:10px;background:var(--line2);border-radius:5px;overflow:hidden">
+        <div style="position:absolute;left:0;top:0;height:100%;width:${prog}%;background:${fill};border-radius:5px;transition:width .4s ease"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;font-family:'Space Mono';margin-top:3px">
+        <span style="color:${leftClr}">${num(leftLbl,0)}</span>
+        <span style="color:var(--dim)">${prog.toFixed(0)}% to target</span>
+        <span style="color:${rightClr}">${num(rightLbl,0)}</span></div></div></div>`;
+}
+function togglePos(uid){
+  const det=document.getElementById('det_'+uid);const arw=document.getElementById('arw_'+uid);
+  if(!det)return;const show=det.style.display==='none';
+  det.style.display=show?'':'none';if(arw)arw.textContent=show?'▾':'▸';
 }
 
 function renderMaster(){
@@ -719,11 +767,15 @@ function renderMaster(){
     winsTxt=cl.filter(x=>Number(x.pnl||0)>0).length;lossTxt=cl.filter(x=>Number(x.pnl||0)<=0).length;
   }
   const secMap=(cache.metricsAll||[]).reduce((acc,x)=>{
-    if(!x.segment)return acc;if(!acc[x.segment])acc[x.segment]={segment:x.segment,stocks:0,sum:0,top_stock:'',top_val:-999};
+    if(!x.segment)return acc;if(!acc[x.segment])acc[x.segment]={segment:x.segment,stocks:0,sum:0,top_stock:'',top_val:-999,sw:null,sm:null};
     acc[x.segment].stocks++;acc[x.segment].sum+=Number(x.day_1d||0);
+    // cc#261: sector_week/sector_month are SEGMENT-level (same peer-average for every stock in
+    // the segment) — capture the first non-null so the card can show 1W%/1M% alongside 1D%.
+    if(acc[x.segment].sw===null&&x.sector_week!=null)acc[x.segment].sw=Number(x.sector_week);
+    if(acc[x.segment].sm===null&&x.sector_month!=null)acc[x.segment].sm=Number(x.sector_month);
     if(Number(x.day_1d||0)>acc[x.segment].top_val){acc[x.segment].top_val=Number(x.day_1d);acc[x.segment].top_stock=x.symbol;}
     return acc;},{});
-  const secArr=Object.values(secMap).map(s=>({...s,avg_day_1d:s.sum/s.stocks})).sort((a,b)=>b.avg_day_1d-a.avg_day_1d);
+  const secArr=Object.values(secMap).map(s=>({...s,avg_day_1d:s.sum/s.stocks,sector_week:s.sw,sector_month:s.sm})).sort((a,b)=>b.avg_day_1d-a.avg_day_1d);
   const top8=secArr.filter(s=>s.avg_day_1d>0).slice(0,8);const bot8=secArr.filter(s=>s.avg_day_1d<0).slice(-8).reverse();
   // 4 cards — Open Positions | Unrealised PnL | Realised PnL | Win/Loss. cc#129 bug_2:
   // ALL four now reflect the active Long/Short toggle (Realised/Win-Loss per-side via recent_trades).
@@ -743,28 +795,43 @@ function renderMaster(){
     return`<button onclick="setMasterSide('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s">${label} <b style="font-family:'Space Mono'">${cnt}</b></button>`;
   };
   const toggle=`<div style="display:flex;gap:6px;margin-bottom:12px">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}</div>`;
-  const row=x=>{const np=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;const isShort=(x.side||'').toUpperCase()==='SHORT';
-    const mv=isShort?((Number(x.entry_price)-Number(x.cmp))/Number(x.entry_price))*100:((Number(x.cmp)-Number(x.entry_price))/Number(x.entry_price))*100;
-    return{np,isShort,mv};};
-  const openPosDesktop=`<div class="scroll desktop-only"><table class="mtbl">
-    <thead><tr><th>Symbol</th><th>Entry Time</th><th style="text-align:center">Days</th><th>Side</th><th>Entry</th><th>CMP</th><th style="text-align:center">Progress</th><th>Net P&L</th><th>% Move</th></tr></thead>
-    <tbody>${open.length?open.map(x=>{const{np,isShort,mv}=row(x);return`<tr>
-      <td class="sym">${x.symbol}<div style="margin-top:3px">${basketPill(x.basket)}</div></td>
-      <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
-      <td style="text-align:center">${holdDays(x.entry_ts)}</td>
-      <td><span class="badge ${isShort?'b-short':'b-long'}">${x.side}</span></td>
-      <td>${num(x.entry_price)}</td><td>${num(x.cmp)}</td>
-      <td><div style="display:flex;justify-content:center">${posBar(x)}</div></td>
-      <td class="${pnlCls(np)}">${inr(np)}</td>
-      <td class="${cls(mv)}">${sign(mv,2)}%</td></tr>`;}).join(''):'<tr><td colspan="9" class="empty">No open positions</td></tr>'}</tbody>
-    </table></div>`;
-  const openPosMobile=`<div class="mob-cards">${open.length?open.map(x=>{const{np,isShort,mv}=row(x);return`
-    <div class="mob-card"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span><span class="mob-badge ${isShort?'b-short':'b-long'}">${x.side}</span></div>
-    <div class="mob-chips"><span class="mob-chip" style="padding:0;border:none;background:none">${basketPill(x.basket)}</span><span class="mob-chip" style="color:var(--dim)">${fmtTs(x.entry_ts)} · D${holdDays(x.entry_ts)}</span><span class="mob-chip">Entry ${num(x.entry_price)}</span><span class="mob-chip">CMP ${num(x.cmp)}</span>
-    <span class="mob-chip ${pnlCls(np)}">Net ${inr(np)}</span><span class="mob-chip ${cls(mv)}">${sign(mv,2)}%</span></div>
-    <div style="margin-top:6px">${posBar(x)}</div></div>`;}).join(''):'<div class="empty">No open positions</div>'}</div>`;
+  // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
+  // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
+  // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
+  const openRows=open.map(x=>{
+    const isShort=(x.side||'').toUpperCase()==='SHORT';
+    const cmp=Number(x.cmp),tgt=Number(x.target),qty=Number(x.qty||0);
+    const net_pnl=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;
+    const potential_left=isShort?(cmp-tgt)*qty:(tgt-cmp)*qty;
+    const pot_pct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
+    return{...x,isShort,net_pnl,potential_left,pot_pct,days:holdDays(x.entry_ts)};
+  });
+  // cc#260: 6-column sortable table — Symbol, Entry Time, Days, Side, Net P&L, Potential Left.
+  // Entry/CMP/old progress bar are removed as standing columns; the SL/ENTRY/TGT bar moves to
+  // a per-row expand-on-click detail (togglePos). Potential-Left cell carries SL/TGT pills and
+  // a CMP tooltip. Default sort: Net P&L desc (winners first).
+  const openPosDesktop=sortTbl('openpos',
+    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
+    openRows,x=>{const uid='openpos_'+x.symbol;
+      return`<tr onclick="togglePos('${uid}')" style="cursor:pointer">
+        <td class="sym"><span id="arw_${uid}" style="color:var(--dim);font-size:10px;margin-right:4px">▸</span>${x.symbol}<div style="margin-top:3px;display:inline-block">${basketPill(x.basket)}</div></td>
+        <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
+        <td style="text-align:center">${x.days}</td>
+        <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
+        <td class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
+        <td class="${cls(x.potential_left)}" title="CMP ${num(x.cmp)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>
+          <div style="margin-top:3px;display:flex;gap:4px;font-family:'Space Mono';font-size:9px">
+            <span style="background:var(--red-d);color:var(--red);padding:1px 5px;border-radius:4px">SL ${num(x.stop_loss,0)}</span>
+            <span style="background:var(--grn-d);color:var(--grn);padding:1px 5px;border-radius:4px">TGT ${num(x.target,0)}</span></div></td></tr>
+      <tr id="det_${uid}" style="display:none"><td colspan="6" style="background:var(--panel2)">${posBarDetail(x)}</td></tr>`;},
+    {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
+  const openPosMobile=`<div class="mob-cards">${openRows.length?openRows.map(x=>`
+    <div class="mob-card"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span><span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
+    <div class="mob-chips"><span class="mob-chip" style="padding:0;border:none;background:none">${basketPill(x.basket)}</span><span class="mob-chip" style="color:var(--dim)">${fmtTs(x.entry_ts)} · D${x.days}</span>
+    <span class="mob-chip ${pnlCls(x.net_pnl)}">Net ${inr(x.net_pnl)}</span><span class="mob-chip ${cls(x.potential_left)}">Left ${inr(x.potential_left)} (${sign(x.pot_pct,1)}%)</span></div>
+    ${posBarDetail(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
   return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
-    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · sorted by Net P&L</div>`+
+    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · click a row for the SL/entry/target bar · sorted by Net P&L</div>`+
     openPosDesktop+openPosMobile+
     `<div class="funnelGrid" style="margin-top:16px">
       <div>${sectorCards(top8,'Top Sectors','1D positive')}</div>
@@ -1043,9 +1110,10 @@ function renderTCLite(){
     <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Futures passing the 5-check TC gate intraday (one per stock/side/day). Screener only — no P&amp;L, stop or target. Tracks where price went after the flag.</div>`;
   if(!sigs.length)return meta+`<div class="empty">No TC Lite signals yet today.</div>`;
   const rowBg=s=>(s.direction==='LONG')?'background:#f0fdf4':'background:#fef2f2';
-  const desktop=`<div class="scroll desktop-only"><table>
-    <thead><tr><th>Symbol</th><th>Side</th><th>Signal Time</th><th>Entry</th><th>CMP</th><th>High%</th><th>Low%</th><th>PP</th><th>R1</th><th>S1</th><th>GVM</th></tr></thead>
-    <tbody>${sigs.map(s=>`<tr style="${rowBg(s)}">
+  // cc#262: sortable-header pattern applied to TC Lite too. Default sort by signal time desc.
+  const desktop=sortTbl('tclite',
+    [["symbol","Symbol"],["direction","Side"],["signal_ts","Signal Time"],["entry_price","Entry"],["cmp","CMP"],["high_pct","High%"],["low_pct","Low%"],["pp","PP"],["r1","R1"],["s1","S1"],["gvm_score","GVM"]],
+    sigs,s=>`<tr style="${rowBg(s)}">
       <td class="sym">${s.symbol}</td>
       <td><span class="badge ${s.direction==='SHORT'?'b-short':'b-long'}">${s.direction}</span></td>
       <td style="color:var(--mut);font-size:11px">${s.signal_ts||'--'}</td>
@@ -1056,7 +1124,8 @@ function renderTCLite(){
       <td style="color:var(--mut)">${num(s.pp,0)}</td>
       <td class="pos">${num(s.r1,0)}</td>
       <td class="neg">${num(s.s1,0)}</td>
-      <td class="${Number(s.gvm_score)>=7?'pos':'score-mid'}">${num(s.gvm_score,1)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td class="${Number(s.gvm_score)>=7?'pos':'score-mid'}">${num(s.gvm_score,1)}</td></tr>`,
+    {sortKey:'signal_ts',dir:-1,empty:"No TC Lite signals yet today."});
   const mobile=`<div class="mob-cards">${sigs.map(s=>`
     <div class="mob-card ${s.direction==='LONG'?'mob-open':'mob-nearmiss'}" style="${rowBg(s)}">
       <div class="mob-card-header"><span class="mob-sym">${s.symbol}</span><span class="mob-badge ${s.direction==='SHORT'?'b-short':'b-long'}">${s.direction}</span></div>
@@ -1121,17 +1190,6 @@ function renderDayLog(data){
   </div>`;
   if(!days.length)return cards+'<div class="empty">No trading data yet.</div>';
   const rowBg=r=>Number(r.net_pnl)>0?'background:#e6f9f0':Number(r.net_pnl)<0?'background:#fef0f0':'';
-  const trows=days.map(r=>`<tr style="${rowBg(r)}">
-    <td style="color:var(--mut);white-space:nowrap">${fmtDate(r.date)}</td>
-    <td>${r.opened??0}</td><td>${r.long_open??0}</td><td>${r.short_open??0}</td>
-    <td>${r.closed??0}</td><td>${r.long_closed??0}</td><td>${r.short_closed??0}</td>
-    <td class="${pnlCls(r.gross_pnl)}">${inr(r.gross_pnl)}</td>
-    <td class="${pnlCls(r.avg_pnl)}">${r.avg_pnl!=null?inr(r.avg_pnl):'--'}</td>
-    <td style="color:var(--dim)">${inr(r.brokerage)}</td>
-    <td class="${pnlCls(r.net_pnl)}">${inr(r.net_pnl)}</td>
-    <td>${r.net_open??0}</td>
-    <td class="${pnlCls(r.return_pct)}">${r.return_pct!=null?sign(r.return_pct,2)+'%':'--'}</td>
-  </tr>`).join('');
   const totrow=`<tr style="font-weight:700;border-top:2px solid var(--line);background:#f8fafc">
     <td style="white-space:nowrap">TOTAL</td>
     <td>${s.total_opened??0}</td><td>-</td><td>-</td>
@@ -1142,12 +1200,24 @@ function renderDayLog(data){
     <td>${s.net_open??0}</td>
     <td class="${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</td>
   </tr>`;
+  // cc#262: sortable-header pattern applied to Day Log. `date` is ISO (YYYY-MM-DD) so string
+  // sort is chronological; default newest-first. TOTAL stays pinned in <tfoot> via opts.footer.
+  const table=sortTbl('daylog',
+    [["date","Date"],["opened","Opened"],["long_open","L Open"],["short_open","S Open"],["closed","Closed"],["long_closed","L Cls"],["short_closed","S Cls"],["gross_pnl","Gross P&L"],["avg_pnl","Avg P&L"],["brokerage","Brokerage"],["net_pnl","Net P&L"],["net_open","Net Open"],["return_pct","Return %"]],
+    days,r=>`<tr style="${rowBg(r)}">
+      <td style="color:var(--mut);white-space:nowrap">${fmtDate(r.date)}</td>
+      <td>${r.opened??0}</td><td>${r.long_open??0}</td><td>${r.short_open??0}</td>
+      <td>${r.closed??0}</td><td>${r.long_closed??0}</td><td>${r.short_closed??0}</td>
+      <td class="${pnlCls(r.gross_pnl)}">${inr(r.gross_pnl)}</td>
+      <td class="${pnlCls(r.avg_pnl)}">${r.avg_pnl!=null?inr(r.avg_pnl):'--'}</td>
+      <td style="color:var(--dim)">${inr(r.brokerage)}</td>
+      <td class="${pnlCls(r.net_pnl)}">${inr(r.net_pnl)}</td>
+      <td>${r.net_open??0}</td>
+      <td class="${pnlCls(r.return_pct)}">${r.return_pct!=null?sign(r.return_pct,2)+'%':'--'}</td>
+    </tr>`,
+    {sortKey:'date',dir:-1,empty:"No trading data yet.",footer:totrow});
   return cards+`<div class="ptitle">Day Log <span class="ct">${days.length} trading days</span></div>
-    <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Capital Rs.50,00,000 · Rs.500 brokerage/closed trade · Net Open = cumulative running total</div>
-    <div class="scroll desktop-only"><table>
-      <thead><tr><th>Date</th><th>Opened</th><th>L Open</th><th>S Open</th><th>Closed</th><th>L Cls</th><th>S Cls</th><th>Gross P&L</th><th>Avg P&L</th><th>Brokerage</th><th>Net P&L</th><th>Net Open</th><th>Return %</th></tr></thead>
-      <tbody>${trows}</tbody><tfoot>${totrow}</tfoot>
-    </table></div>`;
+    <div style="font-size:10px;color:var(--dim);margin-bottom:10px">Capital Rs.50,00,000 · Rs.500 brokerage/closed trade · Net Open = cumulative running total</div>`+table;
 }
 
 function paint(){
