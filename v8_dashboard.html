@@ -572,6 +572,8 @@ function openSectorDetail(segment){
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
 function setMasterSide(s){MASTER_SIDE=s;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+let OPENPOS_VIEW='table';              // cc#274: Open Positions Table View / Ladder View toggle
+function setOpenPosView(v){OPENPOS_VIEW=v;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
 const cache={};
 async function getJSON(path){
   const r=await fetch(API_BASE+path,{headers:{'Accept':'application/json'}});
@@ -796,11 +798,8 @@ function posBarDetail(x){
         <span style="color:var(--dim)">${prog.toFixed(0)}% to target</span>
         <span style="color:${rightClr}">${num(rightLbl,0)}</span></div></div></div>`;
 }
-function togglePos(uid){
-  const det=document.getElementById('det_'+uid);const arw=document.getElementById('arw_'+uid);
-  if(!det)return;const show=det.style.display==='none';
-  det.style.display=show?'':'none';if(arw)arw.textContent=show?'▾':'▸';
-}
+// cc#274: togglePos removed — Table View now shows Entry/CMP/Target/SL as standing columns
+// and Ladder View carries the posBarDetail bar, so the row-expand is no longer needed.
 
 function renderMaster(){
   const p=cache.paper,allOpen=(p&&p.open_positions)||[],sum=(p&&p.summary)||{};
@@ -863,33 +862,51 @@ function renderMaster(){
     const pot_pct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
     return{...x,isShort,net_pnl,potential_left,pot_pct,days:holdDays(x.entry_ts)};
   });
-  // cc#260: 6-column sortable table — Symbol, Entry Time, Days, Side, Net P&L, Potential Left.
-  // Entry/CMP/old progress bar are removed as standing columns; the SL/ENTRY/TGT bar moves to
-  // a per-row expand-on-click detail (togglePos). Potential-Left cell carries SL/TGT pills and
-  // a CMP tooltip. Default sort: Net P&L desc (winners first).
-  const openPosDesktop=sortTbl('openpos',
-    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
-    openRows,x=>{const uid='openpos_'+x.symbol;
-      return`<tr onclick="togglePos('${uid}')" style="cursor:pointer">
-        <td class="sym"><span id="arw_${uid}" style="color:var(--dim);font-size:10px;margin-right:4px">▸</span>${x.symbol}<div style="margin-top:3px;display:inline-block">${basketPill(x.basket)}</div></td>
-        <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
-        <td style="text-align:center">${x.days}</td>
-        <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
-        <td class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
-        <td class="${cls(x.potential_left)}" title="CMP ${num(x.cmp)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span>
-          <div style="margin-top:3px;display:flex;gap:4px;font-family:'Space Mono';font-size:9px">
-            <span style="background:var(--red-d);color:var(--red);padding:1px 5px;border-radius:4px">SL ${num(x.stop_loss,0)}</span>
-            <span style="background:var(--grn-d);color:var(--grn);padding:1px 5px;border-radius:4px">TGT ${num(x.target,0)}</span></div></td></tr>
-      <tr id="det_${uid}" style="display:none"><td colspan="6" style="background:var(--panel2)">${posBarDetail(x)}</td></tr>`;},
+  // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
+  // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
+  // to the compact mob-cards below.
+  const openPosTable=sortTbl('openpos',
+    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
+    openRows,x=>`<tr>
+      <td class="sym">${x.symbol}<div style="margin-top:3px;display:inline-block">${basketPill(x.basket)}</div></td>
+      <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
+      <td style="text-align:center">${x.days}</td>
+      <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
+      <td style="text-align:right;font-family:'Space Mono'">${num(x.entry_price)}</td>
+      <td style="text-align:right;font-family:'Space Mono'">${num(x.cmp)}</td>
+      <td style="text-align:right;font-family:'Space Mono';color:var(--grn)">${num(x.target)}</td>
+      <td style="text-align:right;font-family:'Space Mono';color:var(--red)">${num(x.stop_loss)}</td>
+      <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
+      <td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td></tr>`,
     {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
   const openPosMobile=`<div class="mob-cards">${openRows.length?openRows.map(x=>`
     <div class="mob-card"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span><span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
     <div class="mob-chips"><span class="mob-chip" style="padding:0;border:none;background:none">${basketPill(x.basket)}</span><span class="mob-chip" style="color:var(--dim)">${fmtTs(x.entry_ts)} · D${x.days}</span>
     <span class="mob-chip ${pnlCls(x.net_pnl)}">Net ${inr(x.net_pnl)}</span><span class="mob-chip ${cls(x.potential_left)}">Left ${inr(x.potential_left)} (${sign(x.pot_pct,1)}%)</span></div>
     ${posBarDetail(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
+  // cc#274: Ladder View — 2-column card grid, one per position. Symbol+Side, basket, Net P&L +
+  // Potential Left call-outs, then the direction-aware SL/entry/target bar (reuses posBarDetail).
+  // Left-border accent = green if net_pnl>=0 else red.
+  const ladderCard=x=>{const accent=x.net_pnl>=0?'var(--grn)':'var(--red)';
+    return`<div style="background:var(--panel);border:1px solid var(--line);border-left:3px solid ${accent};border-radius:12px;padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="font-size:16px;font-weight:800">${x.symbol}</span>
+        <span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
+      <div style="margin-top:4px">${basketPill(x.basket)} <span style="color:var(--dim);font-size:10px;font-family:'Space Mono'">${fmtTs(x.entry_ts)} · D${x.days}</span></div>
+      <div style="display:flex;gap:24px;margin:12px 0 6px">
+        <div><div style="color:var(--dim);font-size:10px">NET P&L</div><div style="font-size:18px;font-weight:700;font-family:'Space Mono'" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</div></div>
+        <div><div style="color:var(--dim);font-size:10px">POTENTIAL LEFT</div><div style="font-size:18px;font-weight:700;font-family:'Space Mono'" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:11px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></div></div>
+      </div>${posBarDetail(x)}</div>`;};
+  const openPosLadder=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">${openRows.length?openRows.map(ladderCard).join(''):'<div class="empty">No open positions</div>'}</div>`;
+  // cc#274: Table View / Ladder View toggle (default Table). Both read the same openRows — no refetch.
+  const vtgl=(key,label)=>{const on=OPENPOS_VIEW===key;
+    const s=on?'background:var(--panel2);color:var(--txt);border:1px solid var(--cyan)':'background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
+    return`<button onclick="setOpenPosView('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:6px 14px;border-radius:8px;transition:.15s">${label}</button>`;};
+  const viewToggle=`<div style="display:flex;gap:6px;margin-bottom:10px">${vtgl('table','Table View')}${vtgl('ladder','Ladder View')}</div>`;
+  const posBody=OPENPOS_VIEW==='ladder'?openPosLadder:(openPosTable+openPosMobile);
   return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
-    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · click a row for the SL/entry/target bar · sorted by Net P&L</div>`+
-    openPosDesktop+openPosMobile+
+    <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · sorted by Net P&L</div>`+
+    viewToggle+posBody+
     `<div class="funnelGrid" style="margin-top:16px">
       <div>${sectorCards(top8,'Top Sectors','1D positive')}</div>
       <div>${sectorCards(bot8,'Bottom Sectors','1D negative')}</div>
