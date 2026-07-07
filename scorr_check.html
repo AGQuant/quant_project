@@ -370,10 +370,9 @@
     <input id="fibEntry" class="sym-input" style="display:none;margin-top:9px" placeholder="Reference entry price (optional)" inputmode="decimal" autocomplete="off">
     <!-- cc#269: Fibcheck horizon selector (replaces the old 120d/52w toggle). Default 3M. -->
     <div id="fibHorizon" class="scr-tabs" style="display:none;margin-top:9px">
-      <button class="scr-tab"    id="fh1w"  onclick="setFibHorizon('1w')">1W</button>
       <button class="scr-tab"    id="fh1m"  onclick="setFibHorizon('1m')">1M</button>
       <button class="scr-tab on" id="fh3m"  onclick="setFibHorizon('3m')">3M</button>
-      <button class="scr-tab"    id="fh5m"  onclick="setFibHorizon('5m')">5M</button>
+      <button class="scr-tab"    id="fh6m"  onclick="setFibHorizon('6m')">6M</button>
       <button class="scr-tab"    id="fh12m" onclick="setFibHorizon('12m')">12M</button>
     </div>
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
@@ -735,7 +734,7 @@ async function runInvestCheck(sym){
 let fibHorizon='3m';
 function setFibHorizon(h){
   fibHorizon=h;
-  ['1w','1m','3m','5m','12m'].forEach(k=>{const b=document.getElementById('fh'+k);if(b)b.className='scr-tab'+(k===h?' on':'');});
+  ['1m','3m','6m','12m'].forEach(k=>{const b=document.getElementById('fh'+k);if(b)b.className='scr-tab'+(k===h?' on':'');});
   if(mode==='FIBCHECK'){const ps=document.getElementById('pageSub');if(ps)ps.textContent='ON-DEMAND · FIBONACCI RETRACEMENT · '+h.toUpperCase()+' SWING';}
   // re-fetch only when a report is already on screen (run() reads the symbol + dispatches to fib)
   if(document.getElementById('fibResult').classList.contains('show'))run();

@@ -76,7 +76,7 @@ def _ist_market_hours():
 
 # cc#269: horizon selector — calendar-day windows (NOT bar-count LIMITs), consistent with
 # the 52w calendar-not-barcount principle for this feature. 3m is the default.
-_FIB_HORIZONS = {"1w": 7, "1m": 30, "3m": 90, "5m": 150, "12m": 365}
+_FIB_HORIZONS = {"1m": 30, "3m": 90, "6m": 180, "12m": 365}   # cc#272: dropped 1w, 5m->6m
 
 
 @router.get("/api/trade-check/fibcheck")
@@ -107,9 +107,11 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
             # swing high = max(high); swing low = min(low) on/after the high's date
             hi_i = max(range(len(rows)), key=lambda i: float(rows[i][1]))
             swing_high = float(rows[hi_i][1]); swing_high_date = str(rows[hi_i][0])
-            tail = rows[hi_i:]  # high bar onward (the down-leg)
-            lo_j = min(range(len(tail)), key=lambda j: float(tail[j][2]))
-            swing_low = float(tail[lo_j][2]); swing_low_date = str(tail[lo_j][0])
+            # cc#272: absolute swing low over the WHOLE window (was down-leg-only, i.e. min after
+            # the high). In a short window the true low can precede the high; the old restriction
+            # missed it. Applies to all horizons — everything downstream is price-based math only.
+            lo_i = min(range(len(rows)), key=lambda i: float(rows[i][2]))
+            swing_low = float(rows[lo_i][2]); swing_low_date = str(rows[lo_i][0])
 
             span = swing_high - swing_low
             fib_levels = [{"pct": p,
@@ -185,8 +187,10 @@ def _fib_commentary(sym, hi, hi_d, lo, lo_d, cmp_val, cmp_retr, nearest_above,
                     entry_price, dist, tech):
     """3-5 plain sentences, same tone as the manual HDFCBANK fib review."""
     parts = []
-    parts.append(f"{sym} swung from a high of {hi:.2f} on {hi_d} down to a low of "
-                 f"{lo:.2f} on {lo_d}, and the Fibonacci ladder is drawn across that leg.")
+    # cc#272: neutral range framing — swing low can now be EARLIER than the high (absolute
+    # extremes), so do not assert a high-then-low sequence.
+    parts.append(f"{sym}'s range spans a high of {hi:.2f} on {hi_d} and a low of {lo:.2f} "
+                 f"on {lo_d}, and the Fibonacci ladder is drawn across that range.")
     if cmp_val is not None and cmp_retr is not None:
         parts.append(f"CMP {cmp_val:.2f} sits at the {cmp_retr:.1f}% retracement of that move.")
         if nearest_above:
