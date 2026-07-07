@@ -10,9 +10,10 @@ Table: global_indices (UPSERT on symbol, quote_date) — 5-year EOD rolling.
 EOD tickers (17): Dow, S&P, Nasdaq, US VIX, India VIX, Nikkei, FTSE, DAX,
                   Shanghai, Brent, WTI, Gold, Silver, Natural Gas, Bitcoin, USDINR, DXY
 
-Intraday tickers (6, 5-min, 7-day rolling):
-  Gold, Silver, WTI, Brent, Natural Gas, Bitcoin
-  (all trade 24x5 or 24x7 — need live data outside NSE hours)
+Intraday tickers (13, 5-min, 7-day rolling):
+  Gold, Silver, WTI, Brent, Natural Gas, Bitcoin (commodities/crypto, 24x5/7)
+  + cc#282: Dow, S&P 500, Nasdaq, Nikkei, DXY, USDINR, US VIX (index/currency/volatility)
+  (all trade outside NSE hours — need live data across Asian/European/US sessions)
 
 Wired into scheduler.py:
   - EOD fetch: 06:00 IST daily (incl weekends — commodities/crypto trade 24x5/7)
@@ -31,6 +32,20 @@ import httpx
 import psycopg
 
 log = logging.getLogger("scorr.global_indices")
+
+
+def _ops_log(conn, category: str, title: str, details: dict) -> None:
+    """cc#282: lightweight ops_log writer (mirrors v8_signal_writer._ops_log) for the
+    intraday-fetch skip warnings and the total-failure alert."""
+    try:
+        from psycopg.types.json import Json
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), %s, %s, %s)""",
+                        (category, title, Json(details)))
+        conn.commit()
+    except Exception as e:
+        log.error(f"_ops_log failed ({category}/{title}): {e}")
 
 # ── EOD tickers — 5yr history + daily close ───────────────────────────────────
 GLOBAL_TICKERS = [
@@ -265,6 +280,16 @@ GLOBAL_INTRADAY_TICKERS = [
     ("BZ=F",    "BRENT"),
     ("NG=F",    "NATURAL_GAS"),
     ("BTC-USD", "BITCOIN"),
+    # cc#282: index / currency / volatility — same Yahoo 5m fetch, same table (schema fits), so
+    # /api/v8/global_indices overlays them live automatically (cc#281's generic overlay). These
+    # are non-Indian instruments; the 06:00-23:30 IST window covers Asian/European/US hours.
+    ("^DJI",     "DOW"),
+    ("^GSPC",    "SP500"),
+    ("^IXIC",    "NASDAQ"),
+    ("^N225",    "NIKKEI"),
+    ("DX-Y.NYB", "DXY"),
+    ("INR=X",    "USDINR"),
+    ("^VIX",     "US_VIX"),
 ]
 
 INTRADAY_DDL = """
@@ -292,6 +317,7 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
     ts stored in IST. 7-day rolling window. Returns {stored, errors, symbols}."""
     ensure_intraday_table(conn)
     total, errors = 0, 0
+    failed = []
     async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
         for symbol, name in GLOBAL_INTRADAY_TICKERS:
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
@@ -335,10 +361,24 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
                     total += len(rows)
                     log.info(f"global_intraday {name}: {len(rows)} 5m bars")
             except Exception as e:
+                # cc#282: graceful skip — a per-symbol failure never crashes the cycle and never
+                # overwrites the last-known-good rows (nothing is written for this symbol); it just
+                # retries on the next 5-min run. Log a warning-level ops_log note for visibility.
                 errors += 1
+                failed.append(name)
                 log.warning(f"global_intraday {name}: {e}")
+                _ops_log(conn, "warning", "global_intraday_symbol_skip",
+                         {"symbol": symbol, "name": name, "error": str(e)[:200]})
             await asyncio.sleep(0.4)
-    return {"stored": total, "errors": errors, "symbols": len(GLOBAL_INTRADAY_TICKERS)}
+    # cc#282: if EVERY symbol failed this cycle, Yahoo itself is likely down — raise ONE louder
+    # alert (not one per symbol), mirroring the total-failure escalation used elsewhere (cc#246).
+    if failed and len(failed) == len(GLOBAL_INTRADAY_TICKERS):
+        _ops_log(conn, "alert", "global_intraday_total_failure",
+                 {"failed": len(failed),
+                  "message": "all global_intraday symbols failed this cycle — Yahoo likely "
+                             "unreachable; last-known-good values retained, retrying next run"})
+    return {"stored": total, "errors": errors, "failed": failed,
+            "symbols": len(GLOBAL_INTRADAY_TICKERS)}
 
 
 def prune_global_intraday(conn, days: int = 7) -> int:

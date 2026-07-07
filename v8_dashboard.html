@@ -1342,11 +1342,12 @@ function renderGlobalIndices(data){
     return`<div class="ptitle" style="margin-top:14px">${label} <span class="ct">${items.length}</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${items.map(tile).join('')}</div>`;}).join('');
   // cc#281: "Last updated" reflects the endpoint's data_ts (freshest live bar), NOT render time,
-  // so a stalled feed reads as an old time. Commodities/crypto are live now; the rest stay daily
-  // until the cc#282 intraday feed ships (do not imply uniform freshness).
+  // so a stalled feed reads as an old time. cc#282: all categories are now on the live 5-min feed;
+  // the per-tile green dot honestly marks which tiles are actually receiving live ticks (a symbol
+  // still shows as daily until its first intraday tick lands after deploy).
   const upd=data.data_ts?String(data.data_ts).slice(11,19)+' IST':'daily only';
   return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Space Mono'">Last updated ${upd}</span></div>
-    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Commodities &amp; crypto <span style="color:var(--grn)">●</span> live 5-min · Indices / Currency / Volatility daily snapshot (intraday feed pending) · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
+    <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Live 5-min feed · 06:00-23:30 IST · <span style="color:var(--grn)">●</span> = tile receiving live ticks · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
 }
 
 // ---- India VIX chart (cc#266) — Chart.js line, refreshes on the market-gate cadence -------
