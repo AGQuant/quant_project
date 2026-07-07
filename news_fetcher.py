@@ -257,11 +257,26 @@ def _insert_rows(conn, rows):
     so no stage is ever silent again. url_hash is globally UNIQUE, so dup_skipped
     counts BOTH intra-source repeats and cross-source-type collisions (a company URL
     already present as a domestic row) — the counter tells us which stage kills rows."""
-    stats = {"parsed": len(rows), "quality_rejected": 0, "dup_skipped": 0, "inserted": 0}
+    stats = {"parsed": len(rows), "stale_rejected": 0, "quality_rejected": 0, "dup_skipped": 0, "inserted": 0}
     if not rows:
         return stats
+    # cc#289: reuse the retention window (UNPOLISHED_MAX_HOURS) as an INGEST age gate. Anything
+    # already older than that at insert time is evergreen churn — 2017-dated TradingView/
+    # Investing.com "Share Price" tracker pages Google resurfaces once the 48h retention sweep
+    # frees their url_hash, which would otherwise re-insert forever. No new magic number.
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=UNPOLISHED_MAX_HOURS)
     with conn.cursor() as cur:
         for r in rows:
+            # cc#289: age gate BEFORE the quality gate. r[7]=published_at (aware UTC, or None).
+            # NULL published_at passes through unchanged — news_retention() COALESCEs to
+            # fetched_at, so an unparseable date still gets the standard 48h grace from ingest.
+            pub = r[7]
+            if pub is not None:
+                if pub.tzinfo is None:
+                    pub = pub.replace(tzinfo=timezone.utc)
+                if pub < stale_cutoff:
+                    stats["stale_rejected"] += 1
+                    continue
             # cc#245: source_type-aware quality gate. r[0]=source_type. Company (per-stock
             # Google News) rows use the lighter _is_company_quality (alias filter already ran
             # at ingest); RSS market/domestic/global rows keep _is_quality_article UNCHANGED.
@@ -282,6 +297,8 @@ def _insert_rows(conn, rows):
             else:
                 stats["dup_skipped"] += 1
     conn.commit()
+    if stats["stale_rejected"]:
+        log.info(f"_insert_rows: rejected {stats['stale_rejected']} stale (>{UNPOLISHED_MAX_HOURS}h) article(s)")
     if stats["quality_rejected"]:
         log.info(f"_insert_rows: skipped {stats['quality_rejected']} low-quality article(s)")
     return stats
@@ -413,7 +430,7 @@ def fetch_stock_news(conn=None, symbols=None):
         universe = symbols if symbols else _stock_universe(conn)   # cc#243/#244: open positions only
         if not universe:
             return {"ok": True, "note": "no open positions", "inserted": 0}
-        parsed = alias_filtered = inserted = dup_skipped = quality_rejected = 0
+        parsed = alias_filtered = inserted = dup_skipped = quality_rejected = stale_rejected = 0
         http_429 = http_other = empty = 0
         consec_429 = 0
         aborted = False
@@ -449,8 +466,10 @@ def fetch_stock_news(conn=None, symbols=None):
                     st = _insert_rows(conn, _rows_from_entries(kept, "company", "Google News", symbol=sym))
                     inserted += st["inserted"]; dup_skipped += st["dup_skipped"]
                     quality_rejected += st["quality_rejected"]
+                    stale_rejected += st["stale_rejected"]   # cc#289
             time.sleep(random.uniform(COMPANY_SLEEP_MIN, COMPANY_SLEEP_MAX))
         stats = {"symbols_count": len(universe), "parsed": parsed, "alias_filtered": alias_filtered,
+                 "stale_rejected": stale_rejected,   # cc#289: age-gate rejections (evergreen tracker pages)
                  "quality_rejected": quality_rejected, "dup_skipped": dup_skipped, "inserted": inserted,
                  "http_429": http_429, "http_other": http_other, "empty": empty, "aborted": aborted}
         _write_ops_log(conn, "news_fetch", "fetch_stock_news", stats)
