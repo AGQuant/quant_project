@@ -152,27 +152,115 @@ async def _scrape_upcoming_results(client):
     return rows_out
 
 
+def _ensure_earnings_schema(cur):
+    """cc#252 (spec 1770): idempotent V2 migration — unique key + lifecycle columns. Safe to
+    run on every load (all IF-NOT-EXISTS / guarded). The unique (ticker, ex_date) key is what
+    makes the upsert possible, so this MUST run before the loop."""
+    cur.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'upcoming'")
+    cur.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS verified TEXT DEFAULT 'estimated'")
+    cur.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS first_seen TIMESTAMP DEFAULT NOW()")
+    cur.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS last_updated TIMESTAMP")
+    cur.execute("ALTER TABLE earnings_calendar ADD COLUMN IF NOT EXISTS reschedule_log JSONB DEFAULT '[]'::jsonb")
+    cur.execute("""DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='uq_ticker_exdate') THEN
+            ALTER TABLE earnings_calendar ADD CONSTRAINT uq_ticker_exdate UNIQUE (ticker, ex_date);
+        END IF;
+    END $$;""")
+
+
+def _oplog(cur, category, title, details):
+    """Best-effort ops_log write (never fails the loader)."""
+    try:
+        cur.execute("INSERT INTO ops_log (category, title, details) VALUES (%s,%s,%s::jsonb)",
+                    (category, title, json.dumps(details)))
+    except Exception as e:
+        log.warning(f"ops_log {title}: {e}")
+
+
+def _earnings_lifecycle(cur):
+    """cc#252: after each scrape — age past-date 'upcoming' rows to 'reported', then purge
+    'reported'/'analyzed' older than 60 days. 'upcoming' rows are NEVER purged."""
+    cur.execute("""UPDATE earnings_calendar SET status='reported', last_updated=NOW()
+                   WHERE status='upcoming' AND ex_date < CURRENT_DATE""")
+    reported = cur.rowcount
+    cur.execute("""DELETE FROM earnings_calendar
+                   WHERE status IN ('reported','analyzed')
+                     AND ex_date < CURRENT_DATE - INTERVAL '60 days'""")
+    purged = cur.rowcount
+    return reported, purged
+
+
 async def refresh_earnings_calendar():
-    """Scrape Screener.in upcoming results -> refresh earnings_calendar. Shared code path for
-    the admin endpoint AND the cc#225 daily 06:15 IST scheduler job.
-    GUARD: the scrape runs BEFORE any write; on scrape error it raises before the DELETE, and
-    on 0 rows it returns early — so the existing table is NEVER wiped on failure (prior data
-    kept). loaded_at auto-updates via its DEFAULT NOW() on the fresh inserts."""
+    """cc#252 (spec 1770): scrape Screener.in upcoming results and ACCUMULATE into
+    earnings_calendar via UPSERT — never wipe (the old DELETE+INSERT orphaned today's results
+    and kept no history). Adds new rows, refreshes changed ones, logs reschedules, ages past
+    events to 'reported', purges reported/analyzed >60d, and writes an ops_log
+    (title=earnings_refresh) on EVERY run — success included. Shared by the admin endpoint AND
+    the cc#225 daily 06:15 IST scheduler job.
+    GUARD: the scrape runs BEFORE any write; on scrape error it raises before touching the
+    table, and on 0 rows it returns early — the existing table is NEVER wiped on failure."""
     client = await _screener_login_session()
     try:
         rows = await _scrape_upcoming_results(client)
     finally:
         await client.aclose()
-    if not rows: return {"status": "warn", "rows_scraped": 0}
+    if not rows:
+        return {"status": "warn", "rows_scraped": 0}
+    scraped = len(rows)
+    inserted = updated = rescheduled = skipped = 0
+    changed_at = datetime.utcnow().isoformat() + "Z"
     with _conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM earnings_calendar"); inserted = 0
+        _ensure_earnings_schema(cur)
         for r in rows:
-            try:
-                cur.execute("INSERT INTO earnings_calendar (company_name,ticker,ex_date,record_date,event_type) VALUES (%(company_name)s,%(ticker)s,%(ex_date)s,%(record_date)s,%(event_type)s)", r); inserted += 1
-            except Exception as e:
-                log.warning(f"row skip: {e}")
+            if r["ex_date"] is None:
+                skipped += 1                      # undated scrape row can't be deduped — skip
+                continue
+            cur.execute("SELECT 1 FROM earnings_calendar WHERE ticker=%s AND ex_date=%s",
+                        (r["ticker"], r["ex_date"]))
+            new_date_exists = cur.fetchone() is not None
+            prior = None
+            if not new_date_exists:
+                # same ticker+event still 'upcoming' but at a DIFFERENT date => a reschedule
+                cur.execute("""SELECT id, ex_date FROM earnings_calendar
+                               WHERE ticker=%s AND event_type=%s AND status='upcoming'
+                                 AND ex_date <> %s ORDER BY ex_date DESC LIMIT 1""",
+                            (r["ticker"], r["event_type"], r["ex_date"]))
+                prior = cur.fetchone()
+            if prior:
+                prior_id, old_date = prior
+                entry = {"old_date": str(old_date), "new_date": str(r["ex_date"]),
+                         "changed_at": changed_at}
+                cur.execute("""UPDATE earnings_calendar
+                    SET ex_date=%s, event_type=%s, company_name=%s, last_updated=NOW(),
+                        reschedule_log = COALESCE(reschedule_log,'[]'::jsonb) || %s::jsonb
+                    WHERE id=%s""",
+                    (r["ex_date"], r["event_type"], r["company_name"], json.dumps([entry]), prior_id))
+                rescheduled += 1
+                _oplog(cur, "alert", "earnings_reschedule", {"ticker": r["ticker"], **entry})
+                continue
+            cur.execute("""INSERT INTO earnings_calendar
+                (company_name, ticker, ex_date, record_date, event_type, status, verified,
+                 first_seen, last_updated)
+                VALUES (%(company_name)s,%(ticker)s,%(ex_date)s,%(record_date)s,%(event_type)s,
+                        'upcoming','estimated',NOW(),NOW())
+                ON CONFLICT (ticker, ex_date) DO UPDATE SET
+                    event_type=EXCLUDED.event_type,
+                    company_name=EXCLUDED.company_name,
+                    last_updated=NOW()
+                RETURNING (xmax=0) AS was_insert""", r)
+            if cur.fetchone()[0]:
+                inserted += 1
+            else:
+                updated += 1
+        reported, purged = _earnings_lifecycle(cur)
+        summary = {"scraped": scraped, "inserted": inserted, "updated": updated,
+                   "rescheduled": rescheduled, "reported": reported, "purged": purged,
+                   "skipped_no_date": skipped}
+        _oplog(cur, "info", "earnings_refresh", summary)
         conn.commit()
-    return {"status": "ok", "rows_scraped": len(rows), "rows_inserted": inserted}
+    return {"status": "ok", "rows_scraped": scraped, "rows_inserted": inserted,
+            "rows_updated": updated, "rescheduled": rescheduled,
+            "reported": reported, "purged": purged, "skipped_no_date": skipped}
 
 
 @router.post("/api/admin/load_earnings_from_screener")

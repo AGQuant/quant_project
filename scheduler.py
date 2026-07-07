@@ -423,6 +423,8 @@ def _bg_v8_paper_exit_eod():
                 return
             res = v8_paper.run_paper_exits(conn, target_date=d, mode="eod")
         _v8_paper_exit_eod_ran = today
+        with _conn() as _c:   # cc#255: write a ran-ok health row regardless of close count
+            _log_health(_c, "v8_paper_exit_eod", {"date": str(d), "closed": res.get("closed", 0)})
         if res.get("closed"):
             _log_alert("v8_paper_eod_exit",
                        f"EOD fallback closed {res['closed']} position(s) on {d} daily close")
@@ -586,6 +588,8 @@ def _bg_v21_killswitch():
         with _conn() as conn: res = v8_filter_killswitch.run_killswitch_check(conn)
         _v21_ks_ran_today = today
         tripped = [b for b, r in res.items() if r.get("status") == "TRIPPED_DISABLED"]
+        with _conn() as _c:   # cc#255
+            _log_health(_c, "v21_killswitch", {"tripped": tripped, "count": len(tripped)})
         log.info(f"v21_killswitch: {len(tripped)} tripped {tripped or ''}")
     except Exception as e:
         log.error(f"v21_killswitch: {e}")
@@ -598,7 +602,9 @@ def _bg_v8_eod():
     _eod_running = True
     try:
         import v8_engine
-        with _conn() as conn: result = v8_engine.run_v8_engine(conn)
+        with _conn() as conn:
+            result = v8_engine.run_v8_engine(conn)
+            _log_health(conn, "v8_eod", {"symbols": result.get("symbols_processed")})  # cc#255
         log.info(f"v8_eod: {result.get('symbols_processed')} syms")
         _eod_ran_today = today
     except Exception as e: log.error(f"v8_eod: {e}")
@@ -618,6 +624,9 @@ def _bg_heal_intraday():
     try:
         import main
         res = main._heal_morning_gaps()
+        with _conn() as _c:   # cc#255
+            _log_health(_c, "heal_intraday",
+                        {"healed": res.get("symbols_healed"), "bars": res.get("bars_inserted")})
         log.info(f"heal_intraday(EOD Branch B): healed={res.get('symbols_healed')} "
                  f"bars={res.get('bars_inserted')} window={res.get('window')}")
         _heal_ran_today = today
@@ -811,6 +820,9 @@ def _bg_tc_screener_precompute():
     try:
         import trade_check_v34_endpoints as tce
         res = tce.run_tc_screener_precompute()
+        with _conn() as _c:   # cc#255
+            _log_health(_c, "tc_screener_precompute",
+                        {"rows": res.get("rows") if isinstance(res, dict) else res})
         log.info(f"tc_screener_precompute: {res.get('rows') if isinstance(res, dict) else res} rows")
     except Exception as e: log.error(f"tc_screener_precompute: {e}")
 
@@ -868,7 +880,9 @@ def _bg_gvm():
     if _gvm_ran_today == today: return
     try:
         import gvm_nightly
-        with _conn() as conn: gvm_nightly.gvm_recompute(conn)
+        with _conn() as conn:
+            gvm_nightly.gvm_recompute(conn)
+            _log_health(conn, "gvm_recompute", {"date": str(today)})  # cc#255
         _gvm_ran_today = today
         log.info("gvm_recompute done")
     except Exception as e: log.error(f"gvm: {e}")
@@ -908,6 +922,8 @@ def _bg_universe_technicals():
         import universe_technicals
         with _conn() as conn:
             res = universe_technicals.run_universe_technicals(conn, today)
+            _log_health(conn, "universe_technicals",  # cc#255: success-path health write
+                        {"date": str(today), "rows": res.get("rows") if isinstance(res, dict) else None})
         _ut_ran_today = today
         log.info(f"universe_technicals: {res}")
     except Exception as e:
@@ -946,7 +962,9 @@ def _bg_qb_eod():
     _qb_eod_running = True
     try:
         import qb_eod_checker
-        with _conn() as conn: result = qb_eod_checker.run_eod_check(conn)
+        with _conn() as conn:
+            result = qb_eod_checker.run_eod_check(conn)
+            _log_health(conn, "qb_eod", {"checked": result.get("checked")})  # cc#255
         log.info(f"qb_eod: {result.get('checked')} checked")
         _qb_eod_ran_today = today
     except Exception as e: log.error(f"qb_eod: {e}")
@@ -958,7 +976,9 @@ def _bg_fu_sync():
     if _fu_sync_ran_this_week == today: return
     try:
         import fyers_sync
-        with _conn() as conn: fyers_sync.sync_futures_universe(conn)
+        with _conn() as conn:
+            fyers_sync.sync_futures_universe(conn)
+            _log_health(conn, "fu_sync", {"date": str(today)})  # cc#255
         _fu_sync_ran_this_week = today
         log.info("fu_sync done")
     except Exception as e: log.error(f"fu_sync: {e}")
@@ -1055,7 +1075,10 @@ def _bg_cleanup_news():
     single raw_news/polished_news funnel (id=1660); position_news.py is left unwired in-repo."""
     try:
         import news_fetcher
-        with _conn() as conn: res = news_fetcher.news_retention(conn)
+        with _conn() as conn:
+            res = news_fetcher.news_retention(conn)
+            _log_health(conn, "cleanup_news",  # cc#255
+                        {"result": res if isinstance(res, dict) else str(res)})
         log.info(f"news_retention: {res}")
     except Exception as e: log.error(f"news_retention: {e}")
 
