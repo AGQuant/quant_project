@@ -706,19 +706,21 @@ function sectorCards(sectors,title,label){
   const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;const color=pct>=0?'var(--grn)':'var(--red)';
     // cc#261: 1W/1M stat block, each coloured by its OWN sign (a sector can be red 1D but green 1W/1M).
     const stat=(lbl,v)=>`<div style="color:var(--dim);white-space:nowrap">${lbl} <b style="color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
-    // cc#267: two-column flex (was absolute-positioned 1W/1M, which floated on top of the sector
-    // name and overlapped on long/2-line names). Left = name+1D%+ticker in a shrinking, min-width:0
-    // line-clamped column; right = fixed-shrink stat column that reserves its own space — no overlap
-    // regardless of name length or % width (e.g. -19.21%).
+    // cc#267 fixed the overlap via a flex two-column layout. cc#270: pure placement change —
+    // name + 1D% now sit full-width at the TOP; the 1W/1M block moves to the BOTTOM-RIGHT, in a
+    // space-between row next to top_stock/stocks. The stat block stays flex-shrink:0 (reserved
+    // space) and the left column min-width:0 (ellipsis), so there is still zero overlap risk.
     return`<div class="sec-card"><div class="sc-num">${i+1}</div>`+
-      `<div style="display:flex;gap:8px;align-items:flex-start">`+
-        `<div style="flex:1;min-width:0;margin-top:14px">`+
-          `<div class="sc-name">${s.segment}</div>`+
-          `<div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>`+
+      `<div style="margin-top:14px">`+
+        `<div class="sc-name">${s.segment}</div>`+
+        `<div class="sc-pct" style="color:${color}">${sign(pct,2)}%</div>`+
+      `</div>`+
+      `<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:3px">`+
+        `<div style="min-width:0">`+
           `<div class="sc-top">${s.top_stock||''}</div>`+
           `<div class="sc-stocks" style="color:var(--dim)">${s.stocks} stocks</div>`+
         `</div>`+
-        `<div style="flex-shrink:0;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7;margin-top:14px">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
+        `<div style="flex-shrink:0;text-align:right;font-family:'Space Mono';font-size:10px;line-height:1.7">${stat('1W',s.sector_week)}${stat('1M',s.sector_month)}</div>`+
       `</div></div>`;
   }).join('');
   return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="sec-cards">${cards}</div>`;
