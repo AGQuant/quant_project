@@ -1629,6 +1629,11 @@ function App() {
           table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
           svg { max-width: 100%; }
           .print-scroll { padding: 16px 12px 70px !important; }
+          /* cc#333 P7: per-parameter + peer tables keep their metric/name column
+             pinned while the table scrolls horizontally (identity persists). */
+          table th:first-child, table td:first-child {
+            position: sticky; left: 0; background: #fff; z-index: 1;
+          }
         }
       `}</style>
       {/* cc#174: ShellNav removed (founder decision) -- the pwa.js canonical shared
