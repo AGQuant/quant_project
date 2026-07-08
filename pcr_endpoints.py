@@ -24,6 +24,14 @@ def pcr_intraday_trend(underlying: str = "NIFTY", days: int = 2):
     return pcr_intraday.get_pcr_intraday(underlying=underlying, days=days)
 
 
+@router.get("/intraday_hourly")
+def pcr_intraday_hourly(underlying: str = "NIFTY"):
+    """cc#290: 5-day rolling hourly (xx:15) total-PCR trend for the Master Dashboard PCR trend
+    charts. Mirrors /api/v8/indiavix_intraday's rollup, applied to pcr_intraday.pcr_total."""
+    import pcr_intraday
+    return pcr_intraday.get_pcr_intraday_hourly(underlying=underlying)
+
+
 @router.post("/intraday/compute")
 def pcr_intraday_compute(ts: Optional[str] = None, x_admin_token: Optional[str] = Header(None)):
     """Compute 5-min PCR. No ts = self-heal all missing bars; ts = recompute one bar."""

@@ -221,5 +221,42 @@ def get_pcr_intraday(underlying="NIFTY", days=2, conn=None):
             conn.close()
 
 
+def get_pcr_intraday_hourly(underlying="NIFTY", conn=None):
+    """cc#290: total PCR (pcr_total) at the xx:15 hourly mark (09:15-15:15) across the most
+    recent 5 TRADING days (rolling window, auto-advances daily). Mirrors the
+    /api/v8/indiavix_intraday 5-day/hourly rollup exactly, applied to pcr_intraday. Missing
+    marks are skipped, never interpolated. Single series (total PCR, not the ATM±5 breakdown)."""
+    own = conn is None
+    if own:
+        conn = get_conn()
+    try:
+        ul = underlying.upper()
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH days AS (
+                    SELECT DISTINCT ts::date AS d
+                    FROM pcr_intraday
+                    WHERE underlying = %s
+                    ORDER BY d DESC LIMIT 5
+                )
+                SELECT ts, pcr_total
+                FROM pcr_intraday
+                WHERE underlying = %s
+                  AND ts::date IN (SELECT d FROM days)
+                  AND EXTRACT(MINUTE FROM ts) = 15
+                  AND EXTRACT(HOUR FROM ts) BETWEEN 9 AND 15
+                ORDER BY ts ASC
+            """, (ul, ul))
+            points = []
+            for ts, pcr in cur.fetchall():
+                if pcr is None:
+                    continue
+                points.append({"ts": str(ts), "pcr": float(pcr)})
+        return {"underlying": ul, "points": points, "count": len(points)}
+    finally:
+        if own:
+            conn.close()
+
+
 if __name__ == "__main__":
     print(compute_pcr_intraday())

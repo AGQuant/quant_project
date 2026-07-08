@@ -286,6 +286,32 @@
       <div class="modal-body"><div style="height:280px;position:relative"><canvas id="vixChart"></canvas></div></div>
     </div>
   </div>
+  <!-- cc#290: NIFTY PCR + BankNifty PCR popouts — copy the #vixCard pattern exactly (persistent
+       canvas, .modal-overlay/.open show-hide, refreshed on the mood-gate cadence). -->
+  <div class="modal-overlay" id="niftyPcrCard" onclick="if(event.target===this)closeNiftyPcr()">
+    <div class="modal-box" style="max-width:680px;width:94%">
+      <div class="modal-head">
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:800;color:var(--txt)">NIFTY PCR</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="niftyPcrLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+        </div>
+        <button onclick="closeNiftyPcr()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
+      </div>
+      <div class="modal-body"><div style="height:280px;position:relative"><canvas id="niftyPcrChart"></canvas></div></div>
+    </div>
+  </div>
+  <div class="modal-overlay" id="bankniftyPcrCard" onclick="if(event.target===this)closeBankniftyPcr()">
+    <div class="modal-box" style="max-width:680px;width:94%">
+      <div class="modal-head">
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:800;color:var(--txt)">BankNifty PCR</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="bankniftyPcrLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+        </div>
+        <button onclick="closeBankniftyPcr()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
+      </div>
+      <div class="modal-body"><div style="height:280px;position:relative"><canvas id="bankniftyPcrChart"></canvas></div></div>
+    </div>
+  </div>
   <div class="tabs" id="tabs"></div>
   <div id="panels"></div>
 
@@ -328,6 +354,8 @@ const EP={
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
   globalIndices:"/api/v8/global_indices",      // cc#264
   vixIntraday:"/api/v8/indiavix_intraday",     // cc#266
+  niftyPcr:"/api/pcr/intraday_hourly?underlying=NIFTY",         // cc#290
+  bankniftyPcr:"/api/pcr/intraday_hourly?underlying=BANKNIFTY", // cc#290
 };
 const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
@@ -559,7 +587,13 @@ function closeInfo(){document.getElementById('infoModal').classList.remove('open
 // chart shows instantly with no fetch/spinner. Background refresh (loadVixChart) is unchanged.
 function openVix(){const el=document.getElementById('vixCard');if(!el)return;el.classList.add('open');if(typeof VIX_CHART!=='undefined'&&VIX_CHART&&VIX_CHART.resize)VIX_CHART.resize();}
 function closeVix(){const el=document.getElementById('vixCard');if(el)el.classList.remove('open');}
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();}});
+// cc#290: NIFTY / BankNifty PCR popouts — mirror openVix()/closeVix() exactly (never rebuild the
+// Chart.js instance; just show/hide + resize on open so the current chart shows instantly).
+function openNiftyPcr(){const el=document.getElementById('niftyPcrCard');if(!el)return;el.classList.add('open');if(typeof NIFTY_PCR_CHART!=='undefined'&&NIFTY_PCR_CHART&&NIFTY_PCR_CHART.resize)NIFTY_PCR_CHART.resize();}
+function closeNiftyPcr(){const el=document.getElementById('niftyPcrCard');if(el)el.classList.remove('open');}
+function openBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard');if(!el)return;el.classList.add('open');if(typeof BANKNIFTY_PCR_CHART!=='undefined'&&BANKNIFTY_PCR_CHART&&BANKNIFTY_PCR_CHART.resize)BANKNIFTY_PCR_CHART.resize();}
+function closeBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard');if(el)el.classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();closeNiftyPcr();closeBankniftyPcr();}});
 
 // cc#273: sector card click-through — reuse the infoModal to list every stock in the clicked
 // sector with its own 1D/1W/1M returns, from cache.metricsAll (NO new fetch). sortTbl-driven,
@@ -738,7 +772,9 @@ function renderMood(m){
   document.getElementById('mood').innerHTML=`
     <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
-      <div style="margin-top:6px"><span onclick="openVix()" title="India VIX chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">India VIX <span class="info-btn">&#128200;</span></span></div></div>
+      <div style="margin-top:6px"><span onclick="openVix()" title="India VIX chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">India VIX <span class="info-btn">&#128200;</span></span></div>
+      <div style="margin-top:6px"><span onclick="openNiftyPcr()" title="NIFTY PCR trend" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">NIFTY PCR <span class="info-btn">&#128200;</span></span></div>
+      <div style="margin-top:6px"><span onclick="openBankniftyPcr()" title="BankNifty PCR trend" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">BankNifty PCR <span class="info-btn">&#128200;</span></span></div></div>
     <div class="moodChecks">${pills}</div>
     <div class="slots" style="margin-left:auto"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>`;
 }
@@ -1422,6 +1458,44 @@ async function loadVixChart(){
       }}});
 }
 
+// cc#290: NIFTY / BankNifty PCR trend charts — mirror loadVixChart() exactly (same Chart.js
+// styling: 2px line, area fill, single current-point marker; instance created once then updated
+// in place, never rebuilt). Fed by the new hourly PCR endpoint; value field is p.pcr (total PCR).
+let NIFTY_PCR_CHART=null, BANKNIFTY_PCR_CHART=null;
+async function _loadPcrChart(ep,canvasId,lastId,getChart,setChart){
+  if(!window.Chart)return;
+  let d;try{d=await getJSON(ep);}catch(e){return;}
+  const pts=(d&&d.points)||[];
+  const cv=document.getElementById(canvasId);if(!cv)return;
+  const labels=pts.map(p=>fmtTs(p.ts));
+  const vals=pts.map(p=>p.pcr);
+  const last=vals.length?vals[vals.length-1]:null;
+  const lastEl=document.getElementById(lastId);if(lastEl)lastEl.textContent=last==null?'--':last.toFixed(2);
+  const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
+  const line=dark?'#3987e5':'#2a78d6';
+  const radii=vals.map((_,i)=>i===vals.length-1?5:0);
+  let ch=getChart();
+  if(ch){
+    ch.data.labels=labels;ch.data.datasets[0].data=vals;
+    ch.data.datasets[0].pointRadius=radii;ch.update('none');return;
+  }
+  ch=new Chart(cv.getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[{data:vals,borderColor:line,borderWidth:2,
+      backgroundColor:line+'1a',fill:true,tension:.25,
+      pointRadius:radii,pointBackgroundColor:line,pointBorderColor:'#fff',pointBorderWidth:2,
+      spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index'}},
+      scales:{
+        x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,color:'#8a94a6',font:{size:9}}},
+        y:{grid:{color:'rgba(138,148,166,.15)'},ticks:{color:'#8a94a6',font:{size:9}}}
+      }}});
+  setChart(ch);
+}
+function loadNiftyPcrChart(){return _loadPcrChart(EP.niftyPcr,'niftyPcrChart','niftyPcrLast',()=>NIFTY_PCR_CHART,c=>{NIFTY_PCR_CHART=c;});}
+function loadBankniftyPcrChart(){return _loadPcrChart(EP.bankniftyPcr,'bankniftyPcrChart','bankniftyPcrLast',()=>BANKNIFTY_PCR_CHART,c=>{BANKNIFTY_PCR_CHART=c;});}
+
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
@@ -1449,7 +1523,7 @@ async function loadAll(){
   const run=(k,fn,after)=>fn().then(d=>{cache[k]=d;if(after){try{after();}catch(e){}}})
                               .catch(e=>{errs.push(e.message);cache[k]=cache[k]||null;});
   const jobs=[
-    run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);loadVixChart();}),   // cc#266: VIX chart on the gate cadence
+    run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);loadVixChart();loadNiftyPcrChart();loadBankniftyPcrChart();}),   // cc#266/#290: VIX + PCR charts on the gate cadence
     run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();}),
