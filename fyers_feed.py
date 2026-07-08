@@ -17,8 +17,10 @@ Architecture (v6 — 5-MIN SYSTEM, equity + futures + options on single WS):
   6. ATM ROLL  - every 15 min during market hours: recheck ATM per option symbol,
                  re-subscribe if drifted ±2 strikes.
   7. MONTHLY ROLL - on expiry day (last Tuesday): rebuild futures + option symbol lists.
-  8. PURGE     - rolling: intraday_prices + futures_basis at RETENTION_DAYS (30d),
-                 option_chain at OPTION_RETENTION_DAYS (7d). Rows older deleted daily.
+  8. PURGE     - rolling (cc#297): intraday_prices source='fyers_eq' at EQUITY_RETENTION_DAYS
+                 (365d, long sim/BT7 history); fyers_fut/legacy AND futures_basis at
+                 INTRADAY_FUT_RETENTION_DAYS (7d); option_chain at OPTION_RETENTION_DAYS (7d).
+                 Rows older deleted daily. Equity and futures_basis no longer share a constant.
 
 v6.1 (10-Jun-2026):
   * CRITICAL DEADLOCK FIX: flush_all() holds agg.lock while _flush → _compute_basis
@@ -36,6 +38,10 @@ v6.2 (15-Jun-2026):
     real 5-min history for the intraday filter optimizer. option_chain stays 7d
     (heaviest churn, not used by the sim) via OPTION_RETENTION_DAYS. purge_old_bars
     now uses two cutoffs.
+  * cc#297 (08-Jul-2026): retention DECOUPLED. fyers_eq extended 30d → 365d via its own
+    EQUITY_RETENTION_DAYS; futures_basis moved back to the 7d INTRADAY_FUT_RETENTION_DAYS
+    window (it had been dragged to 30d by the shared constant). fyers_fut/option_chain/
+    global_intraday unchanged at 7d. Equity and futures_basis no longer share a constant.
 
 5-MIN SYSTEM (canonical spec session_log id=167):
   All rolling intraday feeds store at 5-min granularity. NOT a flash/1-min system.
@@ -72,8 +78,12 @@ DEPTH_URL         = 'https://api-t1.fyers.in/data/depth'
 OPTION_MASTER_URL = 'https://public.fyers.in/sym_details/NSE_FO.csv'
 IST               = pytz.timezone('Asia/Kolkata')
 
-RETENTION_DAYS = 30   # intraday_prices fyers_eq + futures_basis (extended 7→30 on 15-Jun-2026 for sim history)
-INTRADAY_FUT_RETENTION_DAYS = 7   # cc#227: fyers_fut + residual legacy fyers/yahoo intraday bars (7d)
+# cc#297: retention constants DECOUPLED. fyers_eq (equity) gets its OWN 365d constant; every other
+# intraday store — fyers_fut, residual legacy bars, AND futures_basis — uses the 7d futures window.
+# The old shared RETENTION_DAYS (=30, drove BOTH fyers_eq and futures_basis) is removed so an equity
+# bump can never silently drag futures_basis along again.
+EQUITY_RETENTION_DAYS = 365   # intraday_prices source='fyers_eq' ONLY (30→365 on 08-Jul-2026 for long sim/BT7 history)
+INTRADAY_FUT_RETENTION_DAYS = 7   # cc#227: fyers_fut + residual legacy fyers/yahoo intraday bars — AND futures_basis (cc#297)
 MARKET_OPEN    = dt_time(9, 15)
 MARKET_CLOSE   = dt_time(15, 30)
 
@@ -1036,15 +1046,17 @@ def update_index_ltp(conn, token, agg=None):
 
 def purge_old_bars(conn):
     now          = datetime.now(IST).replace(tzinfo=None)
-    cutoff       = now - timedelta(days=RETENTION_DAYS)                    # futures_basis (30d)
-    eq_cutoff    = now - timedelta(days=RETENTION_DAYS)                    # intraday fyers_eq (30d, sim history)
+    # cc#297: fyers_eq → 365d (long sim/BT7 history); futures_basis → 7d (the INTRADAY_FUT window,
+    # NOT the equity constant — decoupled so a future equity bump can't silently drag it along).
+    eq_cutoff    = now - timedelta(days=EQUITY_RETENTION_DAYS)             # intraday fyers_eq (365d, sim history)
+    basis_cutoff = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # futures_basis (7d, matches fyers_fut)
     fut_cutoff   = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # intraday fyers_fut + legacy (7d)
     opt_cutoff   = now - timedelta(days=OPTION_RETENTION_DAYS)            # option_chain (7d, leaner)
     try:
         with conn.cursor() as cur:
             # cc#227: SOURCE-AWARE intraday retention. fyers_eq (canonical equity, cc#228) keeps
-            # 30d for BT7/sim history; fyers_fut keeps 7d; residual legacy fyers/yahoo keep 7d
-            # (shrinking once the cc#228 relabel/dedupe lands). IS DISTINCT FROM handles any NULL.
+            # 365d (cc#297) for BT7/sim history; fyers_fut keeps 7d; residual legacy fyers/yahoo keep
+            # 7d (shrinking once the cc#228 relabel/dedupe lands). IS DISTINCT FROM handles any NULL.
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source='fyers_eq'", (eq_cutoff,))
             eq_del = cur.rowcount
@@ -1053,13 +1065,13 @@ def purge_old_bars(conn):
             other_del = cur.rowcount
             cur.execute("DELETE FROM option_chain WHERE ts < %s", (opt_cutoff,))
             opt_del = cur.rowcount
-            cur.execute("DELETE FROM futures_basis WHERE ts < %s", (cutoff,))
+            cur.execute("DELETE FROM futures_basis WHERE ts < %s", (basis_cutoff,))
             basis_del = cur.rowcount
         conn.commit()
-        log.info(f"Purged intraday: fyers_eq={eq_del} (>{RETENTION_DAYS}d), "
+        log.info(f"Purged intraday: fyers_eq={eq_del} (>{EQUITY_RETENTION_DAYS}d), "
                  f"fut/legacy={other_del} (>{INTRADAY_FUT_RETENTION_DAYS}d); "
                  f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), "
-                 f"futures_basis={basis_del} (>{RETENTION_DAYS}d)")
+                 f"futures_basis={basis_del} (>{INTRADAY_FUT_RETENTION_DAYS}d)")
     except Exception as e:
         log.warning(f"purge_old_bars: {e}")
 
