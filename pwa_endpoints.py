@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v4';   // cc#328: pwa.js nav rebuilt (bottom nav + More sheet)
+const CACHE = 'scorr-pwa-v5';   // cc#336: pwa.js gained the ?uxdebug=1 overflow detector
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -176,6 +176,26 @@ PWA_JS = """
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('/service_worker.js').catch(function () {});
+    });
+  }
+
+  // cc#336 P10: dev-only overflow detector. ?uxdebug=1 outlines every element wider
+  // than the viewport in red and console.lists the offenders — makes any future mobile
+  // regression one-tap visible. No-op unless the flag is present.
+  if (new URLSearchParams(location.search).get('uxdebug') === '1') {
+    window.addEventListener('load', function () {
+      var vw = document.documentElement.clientWidth, bad = [];
+      [].forEach.call(document.querySelectorAll('*'), function (el) {
+        var r = el.getBoundingClientRect();
+        if (r.width > vw + 1 || r.right > vw + 1) {
+          el.style.outline = '2px solid red';
+          bad.push((el.tagName + (el.id ? '#' + el.id : '') +
+            (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '')) +
+            ' ' + Math.round(r.width) + 'px');
+        }
+      });
+      if (bad.length) { console.warn('[uxdebug] ' + bad.length + ' element(s) exceed viewport ' + vw + 'px:'); bad.forEach(function (b) { console.warn('  ' + b); }); }
+      else console.log('[uxdebug] clean — no horizontal overflow at ' + vw + 'px');
     });
   }
 
@@ -509,6 +529,16 @@ MOBILE_CSS = """/* =============================================================
    SAFE AREAS  : body reserves bottom-nav height (56px) + env(safe-area-inset-*)
    FONT        : one canonical stack site-wide — Sora + system fallback
    UTILITIES   : .hscroll  .hscroll-fade  .sticky-col  .tap44  .stack-480
+   TABLE       : .mtable pattern (cc#330 P4) — .mtable-wrap edge fades + sticky first
+                 column + data-pri 1|2|3 column priority; mobile_tables.js wires the
+                 fade toggling and row-tap expand-all-fields
+   DRAWER      : mobile filter panels collapse behind a 44px summary bar (cc#335 P9)
+   OVERFLOW    : append ?uxdebug=1 to any URL to outline elements wider than the
+                 viewport in red + console-list them (cc#336 P10 guardrail)
+   ------------------------------------------------------------------------------
+   LOCKED CONTRACT (MOBILE_UX_STANDARD_V1, cc#336 final): every future UI task MUST
+   satisfy the above — breakpoints, 44px tap targets, 11px/16px type floors,
+   safe-area insets, the .mtable table pattern, and zero horizontal body overflow.
    ========================================================================== */
 :root{
   --mux-bp-phone:480px;
