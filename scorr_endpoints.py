@@ -754,6 +754,142 @@ def test_set_source_tag(payload: dict = Body(...)):
         return {"error": str(e)}
 
 
+# ── cc#316: unified position open/close (Client + Test books) ──────────────────
+# ONE tested code path for what Claude web used to hand-compute in freehand SQL: account-type
+# (dabba vs lot-based), qty math (lots*lot_size from LIVE futures_universe, or raw dabba qty),
+# and price (live fyers_fut LTP the same way the positions endpoints read it). Fails CLOSED —
+# never guesses 1 lot, never falls back to a stale/spot price. SmartGain MHK40 broker fills stay
+# on smartgain_reconcile (NOT routed here) per ACCOUNT_TYPE_QTY_RULE_V1 (session_log id=2169).
+
+DABBA_CLIENTS = {"Trade Karo"}   # dabba client accounts; all others (+ every Test entity) are lot-based
+
+
+def _book_tables(book):
+    if book == "client": return "client_positions", "client_closed", "client"
+    if book == "test":   return "test_positions", "test_closed", "entity"
+    return None
+
+
+def _is_dabba_account(book, who):
+    # Test entities are ALWAYS lot-based; among clients only DABBA_CLIENTS are dabba.
+    return book == "client" and who in DABBA_CLIENTS
+
+
+def _live_fut_ltp(cur, symbol):
+    """Latest fyers_fut 5m trading-session close (same basis as /api/*/positions). None if no
+    fresh tick — callers fail closed rather than substitute a stale/spot price (cc#161 pattern)."""
+    cur.execute("""SELECT ip.close FROM intraday_prices ip
+                   WHERE ip.symbol=%s AND ip.source='fyers_fut'
+                     AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                     AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
+                   ORDER BY ip.ts DESC LIMIT 1""", (symbol,))
+    r = cur.fetchone()
+    return float(r[0]) if r and r[0] is not None else None
+
+
+@router.post("/api/position/open")
+def position_open(payload: dict = Body(...)):
+    """Open a Client/Test position. Body: {book: client|test, who, symbol, direction,
+    lots|qty, price?}. Server resolves is_dabba + qty + live fut LTP. Returns the full echo."""
+    book = (payload.get("book") or "").lower().strip()
+    tables = _book_tables(book)
+    if not tables:
+        return {"error": "book must be 'client' or 'test'"}
+    pos_table, _closed, name_col = tables
+    who = (payload.get("who") or "").strip()
+    symbol = (payload.get("symbol") or "").upper().strip()
+    direction = (payload.get("direction") or "").upper().strip()
+    if not who or not symbol or direction not in ("LONG", "SHORT"):
+        return {"error": "who, symbol, direction (LONG/SHORT) required"}
+    dabba = _is_dabba_account(book, who)
+    lots, qty, price = payload.get("lots"), payload.get("qty"), payload.get("price")
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            lot_size = None
+            if dabba:
+                if qty is None:
+                    return {"error": f"{who} is a dabba account — provide raw qty, not lots"}
+                qty, lots = int(qty), None
+            else:
+                if lots is None:
+                    return {"error": f"{who} is lot-based — provide lots, not raw qty"}
+                if qty is not None:
+                    return {"error": f"{who} is lot-based — pass lots only; qty is derived (lots*lot_size)"}
+                cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (symbol,))
+                lr = cur.fetchone()
+                lot_size = int(lr[0]) if lr and lr[0] is not None else None
+                if not lot_size:
+                    return {"error": f"no lot_size for {symbol} in futures_universe — refusing to guess"}
+                lots = int(lots); qty = lots * lot_size
+            if price is None:
+                price = _live_fut_ltp(cur, symbol)
+                if price is None:
+                    return {"error": f"no fresh fyers_fut LTP for {symbol} — refusing a stale/spot price"}
+                price_source = "live_fut_ltp"
+            else:
+                price = float(price); price_source = "provided"
+            cur.execute(f"""INSERT INTO {pos_table}
+                ({name_col}, symbol, direction, lots, qty, is_dabba, entry_price, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,'OPEN') RETURNING id""",
+                (who, symbol, direction, lots, qty, dabba, round(price, 4)))
+            new_id = cur.fetchone()[0]
+            conn.commit()
+        return {"ok": True, "book": book, "who": who, "symbol": symbol, "direction": direction,
+                "is_dabba": dabba, "lots": lots, "lot_size": lot_size, "qty": qty,
+                "price": round(price, 2), "price_source": price_source, "id": new_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/api/position/close")
+def position_close(payload: dict = Body(...)):
+    """Close a Client/Test position (full close). Body: {book, who, symbol, direction, price?}.
+    Reads qty/entry from the OPEN row, resolves live fut LTP if price omitted, books pnl into
+    *_closed and removes the open row. Returns the full echo (qty, entry, exit, pnl)."""
+    book = (payload.get("book") or "").lower().strip()
+    tables = _book_tables(book)
+    if not tables:
+        return {"error": "book must be 'client' or 'test'"}
+    pos_table, closed_table, name_col = tables
+    who = (payload.get("who") or "").strip()
+    symbol = (payload.get("symbol") or "").upper().strip()
+    direction = (payload.get("direction") or "").upper().strip()
+    price = payload.get("price")
+    if not who or not symbol or direction not in ("LONG", "SHORT"):
+        return {"error": "who, symbol, direction (LONG/SHORT) required"}
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"""SELECT id, lots, qty, entry_price, source_tag FROM {pos_table}
+                            WHERE {name_col}=%s AND symbol=%s AND direction=%s AND status='OPEN'
+                            ORDER BY id LIMIT 1""", (who, symbol, direction))
+            row = cur.fetchone()
+            if not row:
+                return {"error": f"no OPEN {book} position for {who} {symbol} {direction}"}
+            pid, lots, qty, entry, source_tag = row
+            entry, qty = float(entry), int(qty)
+            if price is None:
+                price = _live_fut_ltp(cur, symbol)
+                if price is None:
+                    return {"error": f"no fresh fyers_fut LTP for {symbol} — refusing a stale/spot price"}
+                price_source = "live_fut_ltp"
+            else:
+                price = float(price); price_source = "provided"
+            pnl = round(((price - entry) if direction == "LONG" else (entry - price)) * qty, 2)
+            cur.execute(f"""INSERT INTO {closed_table}
+                ({name_col}, symbol, direction, lots, qty, entry_price, exit_price, pnl, source_tag, notes)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (who, symbol, direction, lots, qty, round(entry, 4), round(price, 4), pnl,
+                 source_tag, "closed via /api/position/close"))
+            closed_id = cur.fetchone()[0]
+            cur.execute(f"DELETE FROM {pos_table} WHERE id=%s", (pid,))
+            conn.commit()
+        return {"ok": True, "book": book, "who": who, "symbol": symbol, "direction": direction,
+                "qty": qty, "entry_price": round(entry, 2), "exit_price": round(price, 2),
+                "price_source": price_source, "pnl": pnl, "closed_id": closed_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/scorr/health")
