@@ -347,15 +347,19 @@ PWA_JS = """
 NAV_TOGGLE_JS = """
 (function () {
   if (window.__scorrNavToggle) return; window.__scorrNavToggle = true;
-  var KEY = 'scorr_nav_hidden';
+  // cc#311: model-nav is HIDDEN BY DEFAULT on every browser open / login. "Show" is remembered
+  // only for the CURRENT tab session (sessionStorage) — so a fresh browser or new tab always
+  // starts hidden and the user reveals the nav via the button when needed; the choice still
+  // persists across in-session page navigations and reloads. The old localStorage flag (which
+  // wrongly kept the nav shown across browser restarts) is retired on load.
+  var SKEY = 'scorr_nav_shown';
   var HID = 'data-scorr-nav-hidden';
   var root = document.documentElement;
+  try { localStorage.removeItem('scorr_nav_hidden'); } catch (e) {}
 
-  // cc#311: model-nav is HIDDEN BY DEFAULT now. Hidden unless the user explicitly chose Show
-  // (localStorage 'false'); no stored pref -> hidden. setHidden() still writes 'true'/'false',
-  // so a Show choice persists across pages/reloads until the user Hides again. Clearing storage
-  // returns to the hidden default. The fixed top-right toggle + sticky Show strip stay reachable.
-  function isHidden() { return localStorage.getItem(KEY) !== 'false'; }
+  function isHidden() {
+    try { return sessionStorage.getItem(SKEY) !== '1'; } catch (e) { return true; }
+  }
 
   function injectStyle() {
     if (document.getElementById('scorr-navtoggle-style')) return;
@@ -396,7 +400,7 @@ NAV_TOGGLE_JS = """
   }
 
   function setHidden(h) {
-    localStorage.setItem(KEY, h ? 'true' : 'false');
+    try { if (h) sessionStorage.removeItem(SKEY); else sessionStorage.setItem(SKEY, '1'); } catch (e) {}
     if (h) root.setAttribute(HID, ''); else root.removeAttribute(HID);
     sync();
   }
