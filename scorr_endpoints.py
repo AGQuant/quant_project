@@ -486,6 +486,70 @@ def clients_positions():
         return {"error": str(e)}
 
 
+@router.get("/api/clients/realised")
+def clients_realised():
+    """cc#306: booked client P&L from client_closed. pnl is precomputed by Claude web —
+    we only SUM/group. Returns per-client total + date-wise breakup (each close_date ->
+    date_total + the individual closes under it) + grand total. Every in-scope client
+    appears even with zero realised; an empty table yields all-0.00 + total_closed=0."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT client, close_date, symbol, direction, lots, qty,
+                       ROUND(entry_price::numeric, 2), ROUND(exit_price::numeric, 2),
+                       ROUND(pnl::numeric, 2)
+                FROM client_closed
+                ORDER BY client, close_date DESC, id
+            """)
+            rows = cur.fetchall()
+
+        clients_map = {}
+        for client, close_date, symbol, direction, lots, qty, entry, exit_, pnl in rows:
+            pv = float(pnl) if pnl is not None else 0.0
+            cm = clients_map.setdefault(client, {"total": 0.0, "count": 0, "dates": {}})
+            cm["total"] += pv
+            cm["count"] += 1
+            dm = cm["dates"].setdefault(str(close_date), {"date_total": 0.0, "closes": []})
+            dm["date_total"] += pv
+            dm["closes"].append({
+                "symbol": symbol, "direction": direction,
+                "lots": int(lots) if lots is not None else None,
+                "qty": int(qty) if qty is not None else None,
+                "entry_price": float(entry) if entry is not None else None,
+                "exit_price": float(exit_) if exit_ is not None else None,
+                "pnl": round(pv, 2),
+            })
+
+        order = list(CLIENT_SCOPE)
+        for c in clients_map:
+            if c not in order:
+                order.append(c)
+
+        by_client = []
+        for c in order:
+            cm = clients_map.get(c)
+            if not cm:
+                by_client.append({"client": c, "total_realised": 0.0, "position_count": 0, "dates": []})
+                continue
+            dates = [{"close_date": dk, "date_total": round(cm["dates"][dk]["date_total"], 2),
+                      "closes": cm["dates"][dk]["closes"]}
+                     for dk in sorted(cm["dates"].keys(), reverse=True)]   # newest date first
+            by_client.append({
+                "client": c, "total_realised": round(cm["total"], 2),
+                "position_count": cm["count"], "dates": dates,
+            })
+
+        grand = round(sum(cm["total"] for cm in clients_map.values()), 2)
+        return {
+            "clients": order,
+            "by_client": by_client,
+            "grand_total_realised": grand,
+            "total_closed": len(rows),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/scorr/health")

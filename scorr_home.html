@@ -102,6 +102,18 @@
   .cl-pnl-val{font-weight:800;font-family:monospace;font-size:14px;min-width:92px;text-align:right}
   .cl-pnl-foot{border-top:2px solid var(--line);border-bottom:none;margin-top:4px}
   .cl-pnl-foot .cl-pnl-name{text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:var(--mut)}
+  /* cc#306: Realised P&L tab — client rows (expandable) + date breakup */
+  .clr-cli{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line)}
+  .clr-exp{cursor:pointer}
+  .clr-name{font-weight:800;color:var(--txt);font-size:13px;flex:1}
+  .clr-arw{color:var(--dim);font-size:10px}
+  .clr-detail{padding:2px 2px 8px 10px;background:#fafbfc;border-bottom:1px solid var(--line)}
+  .clr-date{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;
+    margin:8px 0 4px;padding-bottom:2px;border-bottom:1px dashed var(--line)}
+  .clr-close{display:flex;align-items:center;gap:8px;padding:5px 0}
+  .clr-cl-sym{font-size:12px;font-weight:700;color:var(--txt);flex:1;display:flex;align-items:center;gap:6px}
+  .clr-cl-px{font-size:10.5px;color:var(--dim);font-family:monospace}
 
   .sg-meta{font-size:11px;color:var(--dim);margin-top:10px}
   .sg-loading{color:var(--dim);font-size:12px;font-style:italic}
@@ -282,9 +294,11 @@
     <div class="cl-tabs">
       <button class="cl-tab on" id="cl-tab-pos" type="button" onclick="setClientTab('pos')">Positions</button>
       <button class="cl-tab" id="cl-tab-pnl" type="button" onclick="setClientTab('pnl')">P&amp;L Summary</button>
+      <button class="cl-tab" id="cl-tab-real" type="button" onclick="setClientTab('real')">Realised P&amp;L</button>
     </div>
     <div id="cl-pos"><span class="sg-loading">Loading&hellip;</span></div>
     <div id="cl-pnl" style="display:none"></div>
+    <div id="cl-real" style="display:none"></div>
     <div class="sg-meta" id="cl-meta"></div>
   </div>
 
@@ -557,16 +571,16 @@ function setSGView(v) {
   document.getElementById("seg-sg").className = "sg-seg-btn" + (sg ? " on" : "");
   document.getElementById("seg-client").className = "sg-seg-btn" + (sg ? "" : " on");
   if (!sg) {
-    loadClients();
-    if (!clientTimer) clientTimer = setInterval(loadClients, 30000);   // poll like SmartGain
+    refreshClients();
+    if (!clientTimer) clientTimer = setInterval(refreshClients, 30000);   // poll like SmartGain
   }
 }
+function refreshClients() { loadClients(); loadClientRealised(); }   // cc#306: both panes stay fresh
 function setClientTab(t) {
-  const pos = t === "pos";
-  document.getElementById("cl-pos").style.display = pos ? "block" : "none";
-  document.getElementById("cl-pnl").style.display = pos ? "none" : "block";
-  document.getElementById("cl-tab-pos").className = "cl-tab" + (pos ? " on" : "");
-  document.getElementById("cl-tab-pnl").className = "cl-tab" + (pos ? "" : " on");
+  ["pos", "pnl", "real"].forEach(k => {
+    document.getElementById("cl-" + k).style.display = (k === t) ? "block" : "none";
+    document.getElementById("cl-tab-" + k).className = "cl-tab" + (k === t ? " on" : "");
+  });
 }
 function renderClientPositions(d) {
   const order = d.clients || [];
@@ -640,6 +654,63 @@ async function loadClients() {
       (d.total_positions || 0) + " open · " + nowIST + " IST · live (futures LTP)";
   } catch (e) {
     document.getElementById("cl-pos").innerHTML = '<div class="cl-flat">Could not load</div>';
+  }
+}
+
+// cc#306: Realised P&L tab — client-wise total + expandable date-wise breakup.
+function toggleRealised(id) {
+  const el = document.getElementById(id), arw = document.getElementById(id + "-arw");
+  const open = el.style.display === "none";
+  el.style.display = open ? "block" : "none";
+  if (arw) arw.textContent = open ? "▾" : "▸";
+}
+function renderClientRealised(d) {
+  const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
+  let html = "";
+  if ((d.total_closed || 0) === 0) html += '<div class="cl-flat">No realised trades yet.</div>';
+  (d.by_client || []).forEach((c, ci) => {
+    const has = c.position_count > 0;
+    const col = has ? (c.total_realised >= 0 ? "var(--grn)" : "var(--red)") : "var(--mut)";
+    const rid = "clr-" + ci;
+    html += `<div class="clr-cli${has ? ' clr-exp' : ''}"${has ? ` onclick="toggleRealised('${rid}')"` : ""}>
+      <span class="clr-name">${has ? `<span class="clr-arw" id="${rid}-arw">▸</span> ` : ""}${c.client}</span>
+      <span class="cl-pnl-cnt">${c.position_count} closed</span>
+      <span class="cl-pnl-val" style="color:${col}">${sgn(c.total_realised)}</span>
+    </div>`;
+    if (has) {
+      let det = `<div class="clr-detail" id="${rid}" style="display:none">`;
+      (c.dates || []).forEach(dt => {
+        det += `<div class="clr-date">
+          <span>${fmtD(dt.close_date)}</span>
+          <span class="cl-pnl-val" style="color:${dt.date_total >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(dt.date_total)}</span>
+        </div>`;
+        (dt.closes || []).forEach(x => {
+          det += `<div class="clr-close">
+            <span class="clr-cl-sym">${x.symbol} <span class="sg-dir ${x.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${x.direction}</span></span>
+            <span class="clr-cl-px">${x.qty} · ₹${f2(x.entry_price)}→₹${f2(x.exit_price)}</span>
+            <span class="cl-pnl-val" style="color:${x.pnl >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(x.pnl)}</span>
+          </div>`;
+        });
+      });
+      html += det + `</div>`;
+    }
+  });
+  const g = d.grand_total_realised || 0;
+  html += `<div class="cl-pnl-row cl-pnl-foot">
+    <span class="cl-pnl-name">Grand Total</span>
+    <span class="cl-pnl-cnt">${d.total_closed || 0} closed</span>
+    <span class="cl-pnl-val" style="color:${g >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(g)}</span>
+  </div>`;
+  document.getElementById("cl-real").innerHTML = html;
+}
+async function loadClientRealised() {
+  try {
+    const r = await fetch("/api/clients/realised");
+    const d = await r.json();
+    if (d.error) { document.getElementById("cl-real").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
+    renderClientRealised(d);
+  } catch (e) {
+    document.getElementById("cl-real").innerHTML = '<div class="cl-flat">Could not load</div>';
   }
 }
 
