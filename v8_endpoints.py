@@ -2161,13 +2161,16 @@ def v8_global_indices():
             lv = live.get(row['symbol'])
             if lv and lv[0] is not None:
                 row['price'] = lv[0]
-                row['ts']    = str(lv[1])
+                row['ts']    = str(lv[1])                          # cc#291: live tile → latest intraday bar time
                 row['live']  = True
                 pc = row['prev_close']
                 row['chg_pct'] = round((lv[0] - pc) / pc * 100, 2) if pc else row['chg_pct']
                 if latest_ts is None or lv[1] > latest_ts:
                     latest_ts = lv[1]
             else:
+                # cc#291: daily tile has no intraday bar — frontend shows its trading date
+                # (row['quote_date']) instead of a misleading time, so live vs daily freshness is
+                # visually obvious per tile.
                 row['ts']   = None
                 row['live'] = False
             rows.append(row)

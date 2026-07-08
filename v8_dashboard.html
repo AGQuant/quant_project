@@ -1405,13 +1405,26 @@ function renderGlobalIndices(data){
   const GROUPS=[['index','Indices'],['commodity','Commodities'],['currency','Currencies'],['__volx','Volatility & Crypto']];
   const inGroup=(r,key)=>key==='__volx'?(r.category==='volatility'||r.category==='crypto'):r.category===key;
   const fmtPrice=v=>v==null?'--':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
+  // cc#291: per-tile freshness. Live tiles (r.ts = latest intraday bar, IST-naive) show relative
+  // "Xm ago" then "HH:MM" once older than an hour; daily tiles (no intraday bar) show their trading
+  // date from quote_date — so live vs daily freshness is honestly visible on every tile.
+  const giAgo=(ts,qd)=>{
+    if(ts){const t=Date.parse(String(ts).replace(' ','T')+'Z');
+      if(!isNaN(t)){const m=Math.floor((Date.now()+(5*60+30)*60000-t)/60000);const p=_parseISTNaive(ts);
+        if(m<1)return'just now';if(m<60)return m+'m ago';
+        if(m<1440&&p)return String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');
+        if(p)return String(p.day).padStart(2,'0')+' '+MON[p.mon];}}
+    if(qd){const q=String(qd).split('-');if(q.length===3)return q[2]+' '+MON[parseInt(q[1],10)-1];}
+    return'';
+  };
   const tile=r=>{const clr=Number(r.chg_pct)>=0?'var(--grn)':'var(--red)';
     // cc#281: green dot = tile is on the live 5-min feed; absent = still the daily snapshot.
     const liveDot=r.live?` <span title="Live 5-min feed" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);vertical-align:middle"></span>`:'';
     return`<div style="background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px">
       <div style="font-size:12px;color:var(--dim);font-family:Sora;margin-bottom:6px">${r.name}${liveDot}</div>
       <div style="font-size:20px;font-weight:700;font-family:'Space Mono'">${fmtPrice(r.price)}</div>
-      <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px">${sign(r.chg_pct,2)}%</div></div>`;};
+      <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px">${sign(r.chg_pct,2)}%</div>
+      <div style="font-size:9px;color:var(--dim);font-family:'Space Mono';margin-top:4px">${giAgo(r.ts,r.quote_date)}</div></div>`;};
   const sections=GROUPS.map(([key,label])=>{
     const items=rows.filter(r=>inGroup(r,key));if(!items.length)return'';
     return`<div class="ptitle" style="margin-top:14px">${label} <span class="ct">${items.length}</span></div>

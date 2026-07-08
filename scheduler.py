@@ -1183,7 +1183,9 @@ async def _scheduler_loop():
             _spawn(_bg_fetch_stock_news)               # cc#242: 08:30 / 12:30 / 16:30 IST
         if _is_trading_day(today) and m == 20 and h in (7, 16, 22):
             _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger — off-session (backfills on first run)
-        if 6 <= h <= 23 and m % 5 == 0:
+        # cc#291: global intraday now runs 24x7 (was 06:00-23:30) — its symbols are commodities/
+        # crypto/forex that trade near-continuously, so refresh them outside NSE hours too.
+        if m % 5 == 0:
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
             _spawn(_bg_fu_sync)

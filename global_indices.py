@@ -110,12 +110,13 @@ async def fetch_global_indices(conn) -> dict:
                 r.raise_for_status()
                 meta = r.json()["chart"]["result"][0]["meta"]
                 price = meta.get("regularMarketPrice")
-                prev  = meta.get("chartPreviousClose") or meta.get("previousClose")
-                chg   = round((price - prev) / prev * 100, 2) if (price and prev) else None
+                prev  = meta.get("chartPreviousClose") or meta.get("previousClose")  # cc#291: Yahoo fallback only
                 ts    = meta.get("regularMarketTime")
                 qdate = ((datetime.utcfromtimestamp(ts) + timedelta(hours=5, minutes=30)).date()
                          if ts else (datetime.utcnow() + timedelta(hours=5, minutes=30)).date())
-                rows.append((store_sym, name, cat, price, prev, chg, qdate))
+                # prev_close is finalised at upsert (from THIS table's own prior close); carry the
+                # Yahoo prev only as the first-ingest fallback. chg recomputed there too.
+                rows.append((store_sym, name, cat, price, prev, None, qdate))
             except Exception as e:
                 errors += 1
                 log.warning(f"global_indices {name}: {e}")
@@ -123,7 +124,19 @@ async def fetch_global_indices(conn) -> dict:
     if rows:
         try:
             with conn.cursor() as cur:
-                for sym, nm, cat, px, pv, chg, qd in rows:
+                for sym, nm, cat, px, pv_yahoo, _unused, qd in rows:
+                    # cc#291 BUG FIX: prev_close MUST be this symbol's OWN most recent prior
+                    # quote_date close FROM THIS TABLE — not Yahoo's chartPreviousClose/previousClose,
+                    # which references a different session boundary and produced e.g. Silver
+                    # chg_pct=+4.76% when the table's own prior close (63.09) vs price (62.31) is
+                    # really -1.24%. Yahoo's field is used ONLY as the first-ingest fallback (no
+                    # prior row yet). chg_pct is recomputed from the resolved prev_close.
+                    cur.execute(
+                        "SELECT price FROM global_indices WHERE symbol=%s AND quote_date < %s "
+                        "ORDER BY quote_date DESC LIMIT 1", (sym, qd))
+                    prow = cur.fetchone()
+                    pv = float(prow[0]) if (prow and prow[0] is not None) else pv_yahoo
+                    chg = round((px - pv) / pv * 100, 2) if (px is not None and pv) else None
                     cur.execute(
                         """INSERT INTO global_indices
                            (symbol,name,category,price,prev_close,chg_pct,quote_date,updated_at,source)
@@ -270,26 +283,24 @@ def prune_global_indices(conn, years: int = 5) -> int:
     return n
 
 
-# ── Global intraday (5-min, 7-day rolling) ────────────────────────────────────
-# Commodities + Crypto that trade outside NSE hours (24x5 or 24x7).
-# Separate table — never leaks into NSE futures universe scans.
+# ── Global intraday (5-min, rolling) ──────────────────────────────────────────
+# cc#291: CONTINUOUS instruments ONLY — commodities/crypto trade near-continuously (COMEX/NYMEX
+# ~Sun 6pm-Fri 5pm ET; Bitcoin 24x7) and forex ~24x5. The scheduler now polls these 24h (no
+# 06:00-23:30 box) so they refresh outside NSE hours. Equity indices (Dow/S&P/Nasdaq/Nikkei) and
+# US VIX were DELIBERATELY REMOVED here (they were on this feed 2026-07 via cc#282): their
+# exchanges are closed most hours, so continuous polling would only re-fetch a stale unchanged
+# close — they stay on the once-daily global_indices snapshot instead (cc#291 scope 3). The
+# generic /api/v8/global_indices overlay reverts them to daily automatically once their
+# global_intraday rows age out (or are cleaned up). Separate table — never leaks into NSE scans.
 GLOBAL_INTRADAY_TICKERS = [
     ("GC=F",    "GOLD"),      # COMEX futures — Yahoo has NO XAUUSD=X spot 5m chart data (verified)
     ("SI=F",    "SILVER"),    # COMEX futures — Yahoo has NO XAGUSD=X spot 5m chart data (verified)
     ("CL=F",    "WTI"),
     ("BZ=F",    "BRENT"),
     ("NG=F",    "NATURAL_GAS"),
-    ("BTC-USD", "BITCOIN"),
-    # cc#282: index / currency / volatility — same Yahoo 5m fetch, same table (schema fits), so
-    # /api/v8/global_indices overlays them live automatically (cc#281's generic overlay). These
-    # are non-Indian instruments; the 06:00-23:30 IST window covers Asian/European/US hours.
-    ("^DJI",     "DOW"),
-    ("^GSPC",    "SP500"),
-    ("^IXIC",    "NASDAQ"),
-    ("^N225",    "NIKKEI"),
-    ("DX-Y.NYB", "DXY"),
+    ("BTC-USD", "BITCOIN"),   # true 24x7
+    ("DX-Y.NYB", "DXY"),      # forex — near-continuous Sun 5pm-Fri 5pm ET
     ("INR=X",    "USDINR"),
-    ("^VIX",     "US_VIX"),
 ]
 
 INTRADAY_DDL = """
