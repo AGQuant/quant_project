@@ -410,6 +410,27 @@ def _stock_universe(conn):
         return [(r[0], r[1]) for r in cur.fetchall()]
 
 
+def _catchup_symbols(conn):
+    """cc#295: catch-up set — currently-open positions (V8 paper OPEN UNION SmartGain holdings)
+    with NO source_type='company' news fetched in the last 12h. One predicate covers BOTH the
+    never-fetched case (a position opened between the 3 fixed daily slots and never captured) and
+    the stale case (>12h old), closing the coverage gap regardless of position churn speed."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH pos AS (
+                SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
+                UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL
+            )
+            SELECT p.symbol FROM pos p
+            WHERE NOT EXISTS (
+                SELECT 1 FROM raw_news r
+                WHERE r.symbol = p.symbol AND r.source_type='company'
+                  AND r.fetched_at > NOW() - INTERVAL '12 hours'
+            )
+        """)
+        return {r[0] for r in cur.fetchall()}
+
+
 def fetch_stock_news(conn=None, symbols=None):
     """cc#242 (POSITION_NEWS_PIPELINE_V1, session_log 1660) + cc#243 delta: per-stock Google News
     for OPEN positions only (V8 paper OPEN UNION SmartGain holdings, resolved fresh each run —
@@ -430,11 +451,20 @@ def fetch_stock_news(conn=None, symbols=None):
         universe = symbols if symbols else _stock_universe(conn)   # cc#243/#244: open positions only
         if not universe:
             return {"ok": True, "note": "no open positions", "inserted": 0}
+        # cc#295: catch-up — any currently-open position with no company news in the last 12h joins
+        # THIS run's batch regardless of the 3 fixed daily slots. The base universe already returns
+        # all open positions, so the merge below is a safety net if that ever narrows; catchup is
+        # also used to label per-symbol rows and to report catchup_symbols_count.
+        catchup = _catchup_symbols(conn) if not symbols else set()
+        _have = {s for s, _ in universe}
+        universe = list(universe) + [(s, s) for s in catchup if s not in _have]
         parsed = alias_filtered = inserted = dup_skipped = quality_rejected = stale_rejected = 0
         http_429 = http_other = empty = 0
         consec_429 = 0
         aborted = False
+        per_symbol = []   # cc#295: per-symbol evidence (entries/alias_filtered/inserted/catchup)
         for sym, cname in universe:
+            s_entries = s_alias = s_inserted = 0   # cc#295: per-symbol counters (scope 0 instrumentation)
             pats = news_tagger.headline_identity(conn, sym)   # per-stock alias/code identity
             entries, status, bozo, retry_after = _fetch_feed(_google_news_url(cname or sym), agent=BROWSER_UA)
             if status == 429:
@@ -453,6 +483,7 @@ def fetch_stock_news(conn=None, symbols=None):
                 elif not entries:
                     empty += 1
                 else:
+                    s_entries = len(entries)
                     kept = []
                     for e in entries:
                         parsed += 1
@@ -462,16 +493,26 @@ def fetch_stock_news(conn=None, symbols=None):
                         if pats and news_tagger.is_primary(pats, head + " . " + desc):
                             kept.append(e)
                         else:
-                            alias_filtered += 1
+                            alias_filtered += 1; s_alias += 1
                     st = _insert_rows(conn, _rows_from_entries(kept, "company", "Google News", symbol=sym))
                     inserted += st["inserted"]; dup_skipped += st["dup_skipped"]
                     quality_rejected += st["quality_rejected"]
                     stale_rejected += st["stale_rejected"]   # cc#289
+                    s_inserted = st["inserted"]
+            # cc#295 (scope 0): per-symbol evidence so the NEXT scheduled run gives definitive proof
+            # of whether is_primary() alias-match is the culprit for specific symbols (entries came
+            # back but all got alias_filtered) vs an upstream empty/429 — not just run-wide aggregates.
+            per_symbol.append({"symbol": sym, "entries": s_entries, "alias_filtered": s_alias,
+                               "inserted": s_inserted, "catchup": sym in catchup})
             time.sleep(random.uniform(COMPANY_SLEEP_MIN, COMPANY_SLEEP_MAX))
-        stats = {"symbols_count": len(universe), "parsed": parsed, "alias_filtered": alias_filtered,
+        catchup_hits = len(catchup & {s for s, _ in universe})
+        stats = {"symbols_count": len(universe),
+                 "catchup_symbols_count": catchup_hits,   # cc#295 (scope 2): fetched via catch-up vs normal schedule
+                 "parsed": parsed, "alias_filtered": alias_filtered,
                  "stale_rejected": stale_rejected,   # cc#289: age-gate rejections (evergreen tracker pages)
                  "quality_rejected": quality_rejected, "dup_skipped": dup_skipped, "inserted": inserted,
-                 "http_429": http_429, "http_other": http_other, "empty": empty, "aborted": aborted}
+                 "http_429": http_429, "http_other": http_other, "empty": empty, "aborted": aborted,
+                 "per_symbol": per_symbol}   # cc#295 (scope 0): per-symbol entries/alias_filtered/inserted/catchup
         _write_ops_log(conn, "news_fetch", "fetch_stock_news", stats)
         log.info(f"fetch_stock_news: {stats}")
         return {"ok": True, **stats}
