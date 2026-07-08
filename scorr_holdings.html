@@ -58,7 +58,7 @@
   .pos-dir{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:.04em}
   .dir-long{background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
   .dir-short{background:#fceaec;color:var(--red);border:1px solid #f5b8bd}
-  .pos-mtm{font-size:20px;font-weight:900;font-family:monospace;line-height:1;transition:color .3s}
+  .pos-mtm{font-size:20px;font-weight:900;font-family:monospace;line-height:1;transition:color .3s;white-space:nowrap;flex-shrink:0}
 
   .pos-row2{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
   .pos-chip{font-size:11.5px;color:var(--mut);font-weight:500}
@@ -90,8 +90,8 @@
   .pos-card.loss{border-color:#f5b8bd!important;border-width:1.5px!important}
 
   /* cc#138 */
-  .pos-row3{display:flex;align-items:center;gap:6px;margin-top:5px}
-  .pos-avgcmp{font-size:11px;color:var(--dim);font-family:monospace}
+  .pos-row3{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0}
+  .pos-avgcmp{font-size:11px;color:var(--dim);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 
   /* cc#161: explicit "no live price" state -- never blank/dash-only for a
      position we deliberately withheld pricing on. */
@@ -102,11 +102,11 @@
      closed table scrolls horizontally. All data orderbook-native (SPEC_V1). */
   .m2m-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px 14px 16px;margin-top:14px}
   .m2m-tabs{display:flex;gap:6px;margin-bottom:12px}
-  .m2m-tab{flex:1;height:42px;border:1px solid var(--border);background:#f8fafc;border-radius:10px;
+  .m2m-tab{flex:1;height:44px;border:1px solid var(--border);background:#f8fafc;border-radius:10px;
     font-family:inherit;font-size:13px;font-weight:700;color:var(--mut);cursor:pointer;transition:.15s}
   .m2m-tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
   .range-sel{display:flex;gap:6px;margin-bottom:10px}
-  .range-btn{flex:1;height:40px;border:1px solid var(--border);background:#f8fafc;border-radius:9px;
+  .range-btn{flex:1;height:44px;border:1px solid var(--border);background:#f8fafc;border-radius:9px;
     font-family:inherit;font-size:12.5px;font-weight:700;color:var(--mut);cursor:pointer;transition:.15s}
   .range-btn.active{background:#e8effe;border-color:var(--blu);color:var(--blu)}
   .range-btn:hover{border-color:var(--blu)}
@@ -132,6 +132,14 @@
   .m2m-tip{position:absolute;z-index:5;pointer-events:none;background:#fff;border:1px solid var(--border);
     border-radius:8px;box-shadow:0 4px 14px rgba(20,35,70,.12);padding:7px 9px;font-size:11px;min-width:122px}
   .m2m-tip .tip-h{font-weight:800;font-size:11px;margin-bottom:4px;color:var(--txt)}
+
+  /* cc#332 P6: holdings mobile pass (daily driver). Shared table/affordance
+     rules come from mobile.css (.mtable-wrap on the closed table). */
+  @media(max-width:767px){ .m2m-tab,.range-btn{min-height:44px} }
+  @media(max-width:480px){
+    .hero-buckets{grid-template-columns:1fr 1fr}
+    .hero-buckets>.hero-bucket:nth-child(3){grid-column:1 / -1}
+  }
   .m2m-tip .tip-row{display:flex;justify-content:space-between;gap:14px;line-height:1.55}
   .m2m-tip .tip-row span{color:var(--mut)}
   .m2m-tip .tip-row b{font-family:monospace}
@@ -491,7 +499,7 @@ function renderChart(d){
   const poly=pts.length>1?`<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="var(--blu)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`:"";
   const dots=(n<=40)?S.map((p,i)=>`<circle cx="${cx(i)}" cy="${y(p[lineKey])}" r="2.6" fill="var(--blu)" stroke="#fff" stroke-width="1"><title>${p.label}: ${sgn(p[lineKey])}</title></circle>`).join(""):"";
   const step=Math.max(1,Math.ceil(n/6)); let labels="";
-  S.forEach((p,i)=>{ if(i%step===0||i===n-1) labels+=`<text x="${cx(i)}" y="${H-6}" text-anchor="middle" font-size="8.5" fill="var(--dim)">${p.label}</text>`; });
+  S.forEach((p,i)=>{ if(i%step===0||i===n-1) labels+=`<text x="${cx(i)}" y="${H-6}" text-anchor="middle" font-size="10" fill="var(--dim)">${p.label}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="M2M ${range} chart">
     <line x1="${padL}" y1="${zeroY}" x2="${W-padR}" y2="${zeroY}" stroke="var(--border)" stroke-width="1"/>
     ${barsSvg}${poly}${dots}${labels}</svg>`;
@@ -605,7 +613,7 @@ function renderClosed(d){
       <td class="num">${c.qty}</td><td class="num">${f2(c.entry)}</td><td class="num">${f2(c.exit)}</td>
       <td class="num" style="color:${pc};font-weight:700">${sgn(c.pnl)}</td></tr>`; }).join("");
   const total=C[0].running_total;   // newest-first list -> [0] carries the grand total
-  return `<div class="cl-wrap"><table class="cl-tbl">
+  return `<div class="cl-wrap mtable-wrap"><table class="cl-tbl">
     <thead><tr><th>Date</th><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Realised</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700">Total Realised</td>
