@@ -55,11 +55,14 @@
   .sg-positions{display:flex;flex-direction:column;gap:6px}
   .sg-row{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:9px 12px;
     display:grid;grid-template-columns:1fr auto;gap:4px 8px;align-items:center}
-  .sg-row-top{display:flex;align-items:center;gap:8px}
+  .sg-row-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .sg-sym{font-weight:800;color:var(--txt);font-size:13.5px}
   .sg-dir{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
   .sg-long{background:#e3f6ed;color:var(--grn)}
   .sg-short{background:#fceaec;color:var(--red)}
+  /* cc#304: V8 basket tag — same pill shape as sg-dir, neutral slate/indigo so basket != direction */
+  .sg-basket{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;
+    background:#eef1f8;color:#4a5578;border:1px solid #dfe4f0}
   .sg-mtm{font-weight:800;font-family:monospace;font-size:13.5px;text-align:right}
   .sg-pos{color:var(--grn)} .sg-neg{color:var(--red)} .sg-neu{color:var(--mut)}
 
@@ -360,6 +363,14 @@ function toggleTools() {
 }
 
 // SmartGain card
+// cc#304: V8 basket snake_case id -> human label (same 6 baskets as the V8 engine).
+// Unknown ids fall back to Title Case so a new basket never renders as raw snake_case.
+const V8_BASKET_LABELS = {
+  buy_reversal: "Buy Reversal", buy_momentum: "Buy Momentum", buy_s1_bounce: "Buy S1 Bounce",
+  sell_reversal: "Sell Reversal", sell_momentum: "Sell Momentum", sell_overbought: "Sell Overbought",
+};
+const v8BasketLabel = id => V8_BASKET_LABELS[id]
+  || String(id).split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 const f2 = n => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2});
 const f0 = n => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:0, maximumFractionDigits:0});
 const ago = ts => {
@@ -465,10 +476,15 @@ async function loadSG() {
       const wt = (val != null && sideTot > 0) ? (val / sideTot * 100) : null;
       const wtTxt = wt != null ? "Wt " + wt.toFixed(1) + "%" : "";
 
+      // cc#304: auto-derived V8 basket tag (blank when V8 not currently in this symbol+side)
+      const basketTag = p.v8_basket
+        ? `<span class="sg-basket">${v8BasketLabel(p.v8_basket)}</span>` : "";
+
       return grpHdr + `<div class="sg-row">
         <div class="sg-row-top">
           <span class="sg-sym">${p.symbol}</span>
           <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
+          ${basketTag}
         </div>
         <div class="sg-mtm ${mc}">${mtmTxt}</div>
         <div class="sg-sub">

@@ -208,7 +208,14 @@ def smartgain_m2m():
                     ROUND(lp.fut_ltp_synthetic::numeric, 2)                  AS fut_ltp_synthetic,
                     ROUND(lp.basis_age_min::numeric, 1)                      AS basis_age_min,
                     lp.last_tick                                            AS last_tick,
-                    lp.fut_ever_existed                                     AS fut_ever_existed
+                    lp.fut_ever_existed                                     AS fut_ever_existed,
+                    -- cc#304: auto-derived V8 basket tag. LIVE VLOOKUP to V8 open paper
+                    -- positions (symbol + side match, status=OPEN). NULL when V8 is not
+                    -- currently in this symbol+side -> card shows no tag (blank on no-match,
+                    -- Arpit's choice). Dynamic: disappears if V8 later closes its paper leg.
+                    (SELECT vp.basket FROM v8_paper_positions vp
+                      WHERE vp.symbol = h.symbol AND vp.side = h.direction
+                        AND vp.status = 'OPEN' LIMIT 1)                      AS v8_basket
                 FROM open_book h
                 LEFT JOIN LATERAL (
                     SELECT
