@@ -25,6 +25,7 @@ Founder: Arpit Goel | Freedom by 2035 | Rs.500Cr floor
 
 ## Reporting style (CC → Arpit)
 - After a push/deploy: keep the reply SHORT — confirm what was pushed (file + commit/sha) and state what's next (next pending task or remaining items). No long recaps or re-explanations.
+- **PUSH CONFIRMATION SIGNAL (set 08-Jul-2026):** every time code is pushed to `main`, end the reply with the line `DONE WHAT NEXT` in ALL CAPS (on its own line, after the short file+sha confirm). This is Arpit's deploy-confirmed handshake — seeing `DONE WHAT NEXT` = task is pushed/deploying and CC is ready for the next. Canonical: session_log DONE_WHAT_NEXT_PUSH_SIGNAL_V1.
 
 ## Key Files
 | File | Purpose | Size |
