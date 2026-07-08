@@ -103,7 +103,12 @@ SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 OPTION_RETENTION_DAYS = 7      # option_chain stays lean (heaviest churn, not used by sim)
 ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
-N_STRIKES             = 10     # ATM ± 10
+N_STRIKES             = 30     # cc#320: INDEX options ATM±30 (61 strikes, was ±10/21) — fixes the
+                               # PCR window-drift bias where strikes exited the tracked band as spot
+                               # moved and silently dropped their OI from the PCR sums. Index only
+                               # (NIFTY/BANKNIFTY); STOCK options stay STOCK_N_STRIKES=3. 7d retention
+                               # (purge_old_bars) already covers the wider band. Capacity: index
+                               # 84->244 contracts, feed total ~4170->~4330 (< ~5000 WS budget).
 # cc#189 (founder redesign 04-Jul): options subscribe ONLY when live prices are
 # fresh. No boot/REST hydration — a cold-boot/pre-market restart just waits for
 # the market + a fresh cmp_prices tick set, then computes ATM from LIVE prices.
