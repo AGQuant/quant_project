@@ -1150,25 +1150,11 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
             else:
                 return 0
 
-            # cc#265: India VIX as the 5th equal-vote market-gate check. INDIAVIX (source
-            # fyers_eq, 5-min) read with the same DISTINCT-latest / ts<=_cut pattern as the
-            # NIFTY50 live close above. Absolute threshold 15.0 (VIX >= 15 = FAIL, calm < 15 =
-            # pass) — there is no EOD INDIAVIX history yet to build a percentile from, so a
-            # fixed threshold ships now (percentile recalibration flagged as a fast-follow).
-            # FAIL-SAFE: if there is no INDIAVIX bar for _d (missing/stale — the cc#259 gap
-            # class), NULL-PASS the check rather than crash or over-count a fail — matching the
-            # conservative-on-error pattern already used here. This also preserves historical
-            # BT7 parity: pre-INDIAVIX sim dates have no bar -> pass -> gate_fails identical to
-            # the old 4-check calc; only recent/live days with real INDIAVIX data can shift.
-            cur.execute("""
-                SELECT close FROM intraday_prices
-                WHERE symbol='INDIAVIX' AND source='fyers_eq' AND ts::date=%s AND ts <= %s
-                ORDER BY ts DESC LIMIT 1
-            """, (_d, _cut))
-            vrow = cur.fetchone()
-            vix_pass = True if (vrow is None or vrow[0] is None) else (float(vrow[0]) < 15.0)
-
-            checks = [adr >= 1.0, nday >= 0, nweek >= 0, nmonth >= 0, vix_pass]
+            # cc#323: REVERTED cc#265 — India VIX removed from the market gate (never founder-
+            # approved as a check). Back to the locked 4-check design: ADR + Nifty day/week/month.
+            # (The VIX 5-min feed, /indiavix_intraday endpoint and dashboard popout stay — display
+            # only, not a gate vote.)
+            checks = [adr >= 1.0, nday >= 0, nweek >= 0, nmonth >= 0]
             return sum(1 for c in checks if not c)
     except Exception as e:
         # cc#216: fail CONSERVATIVE, never aggressive. Returning 0 fails = Strong Bullish
