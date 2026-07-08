@@ -711,14 +711,25 @@ def _load_hourly_fut(conn, symbols: List[str], sim_ts=None) -> Dict[str, Optiona
     return out
 
 
-def _load_filter_state(conn) -> Dict[str, bool]:
-    """cc#158: per-basket V2.1 enable state (v8_filter_state). Read live each
-    tick so a kill-switch disable takes effect on the next signal pass. FAIL-SAFE:
-    on any error, return {} -> every basket's hard gate treats itself as DISABLED
-    (exact locked behavior), never accidentally-on."""
+def _load_filter_state(conn, sim_ts=None) -> Dict[str, bool]:
+    """cc#158: per-basket V2.1 enable state. LIVE (sim_ts=None) reads v8_filter_state so a
+    kill-switch disable takes effect on the next signal pass — byte-identical to before.
+    cc#324: SIM/BT7 (sim_ts set) is POINT-IN-TIME — the latest v8_filter_state_log row per
+    basket with changed_at <= the replayed day START (IST midnight); a basket with no predating
+    log row resolves DISABLED (matches the locked fail-safe). This closes the parity hole where
+    a replay of a past day applied TODAY'S enable state. FAIL-SAFE: on any error, return {} ->
+    every basket's hard gate treats itself as DISABLED (exact locked behavior), never on."""
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT basket, enabled FROM v8_filter_state")
+            if sim_ts is None:
+                cur.execute("SELECT basket, enabled FROM v8_filter_state")
+                return {b: bool(e) for b, e in cur.fetchall()}
+            cur.execute("""
+                SELECT DISTINCT ON (basket) basket, enabled
+                FROM v8_filter_state_log
+                WHERE changed_at <= (%s::timestamp AT TIME ZONE 'Asia/Kolkata')
+                ORDER BY basket, changed_at DESC
+            """, (_today(sim_ts),))
             return {b: bool(e) for b, e in cur.fetchall()}
     except Exception as e:
         # cc#218 hotfix: failed SELECT aborts the transaction — clear it so the per-basket
@@ -1521,12 +1532,13 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
 
 # -- Step 8: Write v8_qualified + funnel --------------------------------------
 
-def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None):
+def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
     from v8_endpoints import FILTER_CONFIG, v21_hard_gate_pass
 
     gate_fails = _market_gate_fails(conn, sim_ts=sim_ts)
     pivots     = _load_pivots(conn, sim_ts=sim_ts)
-    enabled_v21 = _load_filter_state(conn)   # cc#158: per-basket V2.1 enable state (config, not time)
+    # cc#324: point-in-time V2.1 enable state in sim (was reading TODAY's state during replays).
+    enabled_v21 = _load_filter_state(conn, sim_ts=sim_ts)
 
     nifty_1m   = _get_nifty_1m_return(conn, sim_ts=sim_ts)
     dyn_br     = _get_dynamic_buy_reversal_overrides(nifty_1m)
@@ -1590,8 +1602,9 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
         v21_on = enabled_v21.get(basket, False)
         if v21_on:
             before = len(universe)
-            universe = [s for s in universe if v21_hard_gate_pass(basket, s, True)]
-            log.info(f"{basket}: V2.1 hard-gate ON -> {len(universe)}/{before} pass")
+            universe = [s for s in universe if v21_hard_gate_pass(basket, s, True, backtest=v21_backtest)]
+            log.info(f"{basket}: V2.1 hard-gate ON ({'backtest' if v21_backtest else 'live/parity'})"
+                     f" -> {len(universe)}/{before} pass")
 
         universe = [
             s for s in universe
@@ -1671,9 +1684,11 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
-                                    gate_fails, pivots, signal_ts_ist, enabled_v21, sim_ts=sim_ts)
+                                    gate_fails, pivots, signal_ts_ist, enabled_v21,
+                                    sim_ts=sim_ts, v21_backtest=v21_backtest)
     _write_sell_overbought_qualified(conn, all_metrics, target_date,
-                                      gate_fails, pivots, signal_ts_ist, enabled_v21, sim_ts=sim_ts)
+                                      gate_fails, pivots, signal_ts_ist, enabled_v21,
+                                      sim_ts=sim_ts, v21_backtest=v21_backtest)
 
     # cc#256: tick complete — flush a slot_full_burst alert if any pool piled up. Live only
     # (sim_ts is None); replay/bt7 ticks accumulate harmlessly but never emit alerts.
@@ -1683,7 +1698,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
 
 def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: date,
                                     gate_fails: int, pivots: dict, signal_ts_ist,
-                                    enabled_v21: Optional[dict] = None, sim_ts=None):
+                                    enabled_v21: Optional[dict] = None, sim_ts=None,
+                                    v21_backtest=False):
     """
     Buy S1 Bounce V1 (17-Jun-2026). 8 strict filters (nifty_rsi gate + gvm>=7 + 6 stages).
     Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR (predates gvm>=7
@@ -1736,7 +1752,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
     # cc#158: V2.1 hard-gate layer (strict-AND) — hourly_pct + week_index_52.
     if s1b_on:
         before = len(qualified)
-        qualified = [s for s in qualified if v21_hard_gate_pass("buy_s1_bounce", s, True)]
+        qualified = [s for s in qualified if v21_hard_gate_pass("buy_s1_bounce", s, True, backtest=v21_backtest)]
         log.info(f"buy_s1_bounce: V2.1 hard-gate ON -> {len(qualified)}/{before} pass")
 
     for s in qualified:
@@ -1788,7 +1804,8 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
 
 def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date: date,
                                       gate_fails: int, pivots: dict, signal_ts_ist,
-                                      enabled_v21: Optional[dict] = None, sim_ts=None):
+                                      enabled_v21: Optional[dict] = None, sim_ts=None,
+                                      v21_backtest=False):
     from v8_endpoints import v21_hard_gate_pass
     enabled_v21 = enabled_v21 or {}
     so_v21_on = enabled_v21.get("sell_overbought", False)
@@ -1886,7 +1903,7 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
             continue
         # cc#158: V2.1 hard gate (strict-AND) — fall_from_day_high <= -1.5.
         # NULL-passes if no intraday high yet (spec id=1268).
-        if so_v21_on and not v21_hard_gate_pass("sell_overbought", s, True):
+        if so_v21_on and not v21_hard_gate_pass("sell_overbought", s, True, backtest=v21_backtest):
             continue
         qualified_so.append((s, pr))
 
@@ -1956,10 +1973,13 @@ def _write_heartbeat(conn, sim_ts=None):
         log.warning(f"sched_writer_hb write failed: {_hbe}")
 
 
-def run_live_signal_writer(conn, sim_ts=None) -> dict:
+def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
     # cc#218: sim_ts=None => live (datetime.now(IST)); sim_ts set => frozen clock for the
     # BT7 harness. Every time read below routes through _now/_today(sim_ts) or is threaded
     # into the callee, so this whole tick is point-in-time when replaying a golden day.
+    # cc#324: v21_backtest (BT7 BACKTEST mode) applies V2.1 as week_index_52 ONLY — the live-only
+    # intraday refinements (hourly_pct, fall_from_day_high) are policy-skipped. Default False =
+    # live + PARITY replays apply V2.1 exactly as live did (hourly included). Live never sets it.
     today = _today(sim_ts)
 
     # cc#211: HARD trading-day gate — the SINGLE write-layer choke point. Every caller
@@ -2118,7 +2138,7 @@ def run_live_signal_writer(conn, sim_ts=None) -> dict:
         f"gate>=1.5: legacy={old_pass} time_matched_v2={new_pass}"
     )
 
-    _write_qualified(conn, all_metrics, today, sim_ts=sim_ts)
+    _write_qualified(conn, all_metrics, today, sim_ts=sim_ts, v21_backtest=v21_backtest)
 
     _write_adr_intraday(conn, sim_ts=sim_ts)
     _update_sector_aggregates_sql(conn, today)

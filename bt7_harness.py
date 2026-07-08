@@ -219,16 +219,23 @@ def _archive(conn, label, target_date, ticks, src):
     return {"quals": quals, "entries": entries, "exits": exits, "gate_exits": gate_exits}
 
 
-def run_bt7(target_date, label):
+def run_bt7(target_date, label, mode="parity"):
     """cc#220 ASYNC entry. The 09:15->15:30 walk takes ~2min — far longer than an MCP/HTTP
     request tolerates — so instead of blocking (the old zombie/deadlock cycle), this:
+
       1. grabs the single-run advisory lock (a 2nd concurrent run returns {busy:true},
          never deadlocks on TRUNCATE),
       2. marks the run 'running' so a poller sees it immediately,
       3. hands the LOCKED connection to a daemon walker thread, and returns at once.
-    Poll harness.bt7_runs (or bt7_status) for status running -> ok/error + the summary."""
+    Poll harness.bt7_runs (or bt7_status) for status running -> ok/error + the summary.
+
+    cc#324: mode = 'parity' (default; apply V2.1 exactly as live, hourly incl — recent-day
+    replay to prove sim==live) or 'backtest' (V2.1 = week_index_52 conditions ONLY, hourly_pct/
+    fall_from_day_high policy-skipped — historical sweeps where 5yr hourly data does not exist).
+    The mode is recorded in harness.bt7_runs.notes.v21_mode."""
     if isinstance(target_date, str):
         target_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+    mode = "backtest" if str(mode).lower().strip() == "backtest" else "parity"   # cc#324
     conn = _conn()
     # single-run lock on THIS connection (held for the whole walk, auto-released on close/death)
     try:
@@ -258,17 +265,20 @@ def run_bt7(target_date, label):
             pass
         conn.close()
         return {"ok": False, "label": label, "error": f"pre-walk: {e!r}"}
-    threading.Thread(target=_walk, args=(conn, target_date, label),
+    threading.Thread(target=_walk, args=(conn, target_date, label, mode),
                      name=f"bt7-{label}", daemon=True).start()
     return {"ok": True, "started": True, "label": label, "date": str(target_date),
+            "v21_mode": mode,
             "msg": "walk started in background — poll harness.bt7_runs / bt7_status"}
 
 
-def _walk(conn, target_date, label):
+def _walk(conn, target_date, label, mode="parity"):
     """The actual walk, on the locked connection handed over by run_bt7. Owns `conn` for its
     whole life and releases the advisory lock + closes it in finally. Terminal status lands
-    in harness.bt7_runs via _archive (ok) / _write_error (error)."""
+    in harness.bt7_runs via _archive (ok) / _write_error (error). cc#324: mode ('parity'|
+    'backtest') is threaded into the writer's V2.1 application and recorded in the run notes."""
     ticks = 0
+    v21_backtest = (mode == "backtest")   # cc#324
     detail = None   # repr() of the first exception — surfaced to harness.bt7_runs on failure
     try:
         src = _materialize(conn, target_date)
@@ -281,7 +291,7 @@ def _walk(conn, target_date, label):
         end = datetime.combine(target_date, time(15, 30))
         while t <= end:
             try:
-                v8_signal_writer.run_live_signal_writer(conn, sim_ts=t)          # entries (mirrors live order)
+                v8_signal_writer.run_live_signal_writer(conn, sim_ts=t, v21_backtest=v21_backtest)   # entries (mirrors live order)
                 v8_paper.run_paper_exits(conn, target_date=target_date, mode="live", sim_ts=t)  # exits
             except Exception as e:
                 conn.rollback()
@@ -295,8 +305,10 @@ def _walk(conn, target_date, label):
         with conn.cursor() as cur:
             cur.execute("RESET ROLE")
         conn.commit()
+        if isinstance(src, dict):
+            src["v21_mode"] = mode   # cc#324: record which V2.1 mode ran, in bt7_runs.notes
         summ = _archive(conn, label, target_date, ticks, src)
-        log.info(f"bt7 run '{label}' {target_date}: ticks={ticks} {summ}")
+        log.info(f"bt7 run '{label}' {target_date} (v21_mode={mode}): ticks={ticks} {summ}")
     except Exception as e:
         # RESET ROLE back to the app superuser, then record the true first exception into
         # harness.bt7_runs (status='error') — the ops desk reads the DB, not Railway stdout.

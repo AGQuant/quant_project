@@ -111,6 +111,8 @@ def _disable(conn, basket: str, reason: str):
                SET enabled = FALSE, disabled_at = NOW(), disabled_reason = %s,
                    updated_at = NOW()
                WHERE basket = %s AND enabled = TRUE""", (reason, basket))
+        if cur.rowcount:   # cc#324: append the flip to the point-in-time history (sim/BT7 reads it)
+            cur.execute("INSERT INTO v8_filter_state_log (basket, enabled) VALUES (%s, FALSE)", (basket,))
     conn.commit()
 
 

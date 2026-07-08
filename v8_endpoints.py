@@ -177,16 +177,24 @@ def _v21_cond_pass(value, cond: dict) -> bool:
     return True
 
 
-def v21_hard_gate_pass(basket: str, metrics: dict, enabled: bool) -> bool:
+def v21_hard_gate_pass(basket: str, metrics: dict, enabled: bool, backtest: bool = False) -> bool:
     """cc#158 hard-gate layer. True if the stock passes this basket's ENABLED
     V2.1 refinement bands. Disabled -> always True (no-op = locked behavior).
     Keys ending in '_modify' are score-gate modifications, not hard gates, and
-    are skipped here."""
+    are skipped here.
+
+    cc#324 (founder-locked): backtest=True = BT7 BACKTEST mode — apply the EOD
+    week_index_52 conditions ONLY; the live-only intraday refinements (hourly_pct,
+    fall_from_day_high) are POLICY-SKIPPED (not merely NULL-passed by data absence),
+    because 5yr hourly history does not exist and must never gate a historical
+    backtest. backtest=False (default) = live + PARITY replays apply V2.1 in full."""
     if not enabled:
         return True
     for metric, cond in V21_FILTERS.get(basket, {}).items():
         if metric.endswith("_modify"):
             continue
+        if backtest and metric != "week_index_52":
+            continue   # cc#324: BACKTEST = w52 only; skip live-only intraday refinements
         if not _v21_cond_pass(metrics.get(metric), cond):
             return False
     return True
