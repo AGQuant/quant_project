@@ -607,11 +607,16 @@ function openSectorDetail(segment){
   if(!segment)return;
   const rows=(cache.metricsAll||[]).filter(x=>x.segment===segment);
   document.getElementById('mTitle').textContent=segment;
-  document.getElementById('mSub').textContent=`${rows.length} stock${rows.length===1?'':'s'} · 1D / 1W / 1M returns`;
+  document.getElementById('mSub').textContent=`${rows.length} stock${rows.length===1?'':'s'} · GVM · 1D / 1W / 1M returns`;
+  // cc#298: GVM (Scorr's proprietary quality signal) verdict band colors — deep-green Excellent >
+  // green Good > amber Average > red Weak. Makes the return-vs-quality gap visually instant (a
+  // stock high on 1D but red/Weak GVM stands out). gvm_score/verdict now ride on metricsAll.
+  const gvmCol=v=>({Excellent:'#0a7d4f',Good:'var(--grn)',Average:'var(--amber)',Weak:'var(--red)'})[v]||'var(--dim)';
   const body=sortTbl('secdetail',
-    [["symbol","Symbol"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
+    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
     rows,x=>`<tr>
       <td class="sym">${x.symbol}</td>
+      <td title="${x.verdict||''}" style="font-family:'Space Mono'"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${gvmCol(x.verdict)};margin-right:5px;vertical-align:middle"></span>${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,

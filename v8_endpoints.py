@@ -657,10 +657,13 @@ def metrics_all():
                    -- metrics dropped (cc#232).
                    m.month_index, m.ma9_vs_ma21,
                    m.sector_week, m.sector_month,
-                   g.segment
+                   g.segment, g.verdict
             FROM v8_metrics m
             LEFT JOIN gvm_scores g ON g.symbol = m.symbol
             WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+            -- cc#298: g.verdict (Excellent/Good/Average/Weak) joins alongside the existing
+            -- m.gvm_score (verified equal to g.gvm_score) for the sector-detail GVM column.
+            -- gvm_scores is a single-snapshot table (1 row/symbol) so this LEFT JOIN never fans out.
         """)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -719,7 +722,7 @@ def metrics_all():
     for s in rows:
         s["segment"] = _seg_override(s["symbol"], s.get("segment"))
         for k, v in list(s.items()):
-            if k not in ("symbol", "segment") and v is not None:
+            if k not in ("symbol", "segment", "verdict") and v is not None:   # cc#298: verdict stays a string
                 try: s[k] = float(v)
                 except (TypeError, ValueError): pass
     return rows
