@@ -610,6 +610,150 @@ def clients_set_source_tag(payload: dict = Body(...)):
         return {"error": str(e)}
 
 
+# ── cc#315: Test Trade book (copies of the client endpoints, reading test_positions/test_closed;
+# `entity` column instead of `client`; no hardcoded scope — renders whatever entities exist.
+# The JSON keeps the "client" key so the shared frontend renderers work unchanged.) ──
+
+@router.get("/api/test/positions")
+def test_positions():
+    """Open Test Trade positions valued on FUTURES LTP — mirror of /api/clients/positions on
+    test_positions. All entities are real (is_dabba false); qty authoritative via cp.qty."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT cp.id, cp.entity, cp.symbol, cp.direction, cp.lots, cp.qty, cp.is_dabba,
+                       ROUND(cp.entry_price::numeric, 2)                     AS entry_price,
+                       fu.lot_size,
+                       (SELECT ip.close FROM intraday_prices ip
+                         WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
+                           AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                           AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
+                         ORDER BY ip.ts DESC LIMIT 1)                        AS fut_ltp,
+                       (SELECT ip.ts FROM intraday_prices ip
+                         WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
+                           AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                           AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
+                         ORDER BY ip.ts DESC LIMIT 1)                        AS fut_ts,
+                       (SELECT vp.basket FROM v8_paper_positions vp
+                         WHERE vp.symbol = cp.symbol AND vp.side = cp.direction
+                           AND vp.status = 'OPEN' LIMIT 1)                    AS v8_basket,
+                       cp.source_tag                                        AS source_tag
+                FROM test_positions cp
+                LEFT JOIN futures_universe fu ON fu.symbol = cp.symbol
+                WHERE cp.status = 'OPEN'
+                ORDER BY cp.entity, cp.symbol
+            """)
+            rows = cur.fetchall()
+
+        now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        positions, last_ts = [], None
+        for (pid, entity, symbol, direction, lots, raw_qty, is_dabba, entry, lot_size,
+             fut_ltp, fut_ts, v8_basket, source_tag) in rows:
+            lots = int(lots) if lots is not None else None
+            entry = float(entry) if entry is not None else None
+            lot_size = int(lot_size) if lot_size is not None else None
+            ltp = float(fut_ltp) if fut_ltp is not None else None
+            qty = int(raw_qty) if raw_qty is not None else (
+                lots * lot_size if (lots is not None and lot_size is not None) else None)
+            mtm = None
+            if ltp is not None and entry is not None and qty is not None:
+                per = (ltp - entry) if direction == "LONG" else (entry - ltp)
+                mtm = round(per * qty, 2)
+            age_min = None
+            if fut_ts is not None:
+                age_min = round((now_ist - fut_ts).total_seconds() / 60.0, 1)
+                if last_ts is None or fut_ts > last_ts:
+                    last_ts = fut_ts
+            positions.append({
+                "id": pid, "client": entity, "symbol": symbol, "direction": direction,
+                "lots": lots, "lot_size": lot_size, "qty": qty, "is_dabba": bool(is_dabba),
+                "entry_price": entry, "cmp": round(ltp, 2) if ltp is not None else None, "mtm": mtm,
+                "v8_basket": v8_basket, "source_tag": source_tag,
+                "is_live": (age_min is not None and age_min <= 10 and _market_open_ist()),
+            })
+
+        order = []   # distinct entities in the data (no hardcoded scope)
+        for p in positions:
+            if p["client"] not in order:
+                order.append(p["client"])
+        summary = [{"client": c,
+                    "mtm": round(sum(p["mtm"] or 0 for p in positions if p["client"] == c), 2),
+                    "position_count": len([p for p in positions if p["client"] == c])}
+                   for c in order]
+        grand = round(sum(p["mtm"] or 0 for p in positions), 2)
+        return {
+            "clients": order, "positions": positions, "summary": summary,
+            "grand_total_mtm": grand, "total_positions": len(positions),
+            "last_updated": last_ts.isoformat() if last_ts else None, "data_source": "fyers_fut",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/test/realised")
+def test_realised():
+    """Booked Test Trade P&L — mirror of /api/clients/realised on test_closed."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT entity, close_date, symbol, direction, lots, qty,
+                       ROUND(entry_price::numeric, 2), ROUND(exit_price::numeric, 2),
+                       ROUND(pnl::numeric, 2)
+                FROM test_closed
+                ORDER BY entity, close_date DESC, id
+            """)
+            rows = cur.fetchall()
+
+        emap = {}
+        for entity, close_date, symbol, direction, lots, qty, entry, exit_, pnl in rows:
+            pv = float(pnl) if pnl is not None else 0.0
+            cm = emap.setdefault(entity, {"total": 0.0, "count": 0, "dates": {}})
+            cm["total"] += pv
+            cm["count"] += 1
+            dm = cm["dates"].setdefault(str(close_date), {"date_total": 0.0, "closes": []})
+            dm["date_total"] += pv
+            dm["closes"].append({
+                "symbol": symbol, "direction": direction,
+                "lots": int(lots) if lots is not None else None,
+                "qty": int(qty) if qty is not None else None,
+                "entry_price": float(entry) if entry is not None else None,
+                "exit_price": float(exit_) if exit_ is not None else None,
+                "pnl": round(pv, 2),
+            })
+
+        order = list(emap.keys())
+        by_client = []
+        for c in order:
+            cm = emap[c]
+            dates = [{"close_date": dk, "date_total": round(cm["dates"][dk]["date_total"], 2),
+                      "closes": cm["dates"][dk]["closes"]}
+                     for dk in sorted(cm["dates"].keys(), reverse=True)]
+            by_client.append({"client": c, "total_realised": round(cm["total"], 2),
+                              "position_count": cm["count"], "dates": dates})
+        grand = round(sum(cm["total"] for cm in emap.values()), 2)
+        return {"clients": order, "by_client": by_client,
+                "grand_total_realised": grand, "total_closed": len(rows)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/api/test/position/source_tag")
+def test_set_source_tag(payload: dict = Body(...)):
+    """Set the editable Source tag on a Test Trade position (test_positions), keyed by id."""
+    tag = (str(payload.get("source_tag") or "").strip()) or None
+    pid = payload.get("id")
+    if pid is None:
+        return {"error": "id required"}
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE test_positions SET source_tag=%s, updated_at=NOW() WHERE id=%s", (tag, pid))
+            n = cur.rowcount
+            conn.commit()
+        return {"ok": True, "updated": n, "source_tag": tag}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/scorr/health")

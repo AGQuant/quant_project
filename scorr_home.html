@@ -238,6 +238,7 @@
     <span class="sg-seg">
       <button class="sg-seg-btn on" id="seg-sg" type="button" onclick="setSGView('sg')">SmartGain</button>
       <button class="sg-seg-btn" id="seg-client" type="button" onclick="setSGView('client')">Client</button>
+      <button class="sg-seg-btn" id="seg-test" type="button" onclick="setSGView('test')">Test Trade</button>
     </span>
   </div>
   <a class="sg-card" href="/holdings" id="sg-card">
@@ -318,6 +319,19 @@
     <div id="cl-pnl" style="display:none"></div>
     <div id="cl-real" style="display:none"></div>
     <div class="sg-meta" id="cl-meta"></div>
+  </div>
+
+  <!-- cc#315: Test Trade view — mirrors the Client view exactly (3 tabs, same components) -->
+  <div class="sg-card" id="test-view" style="display:none">
+    <div class="cl-tabs">
+      <button class="cl-tab on" id="test-tab-pos" type="button" onclick="setTestTab('pos')">Positions</button>
+      <button class="cl-tab" id="test-tab-pnl" type="button" onclick="setTestTab('pnl')">P&amp;L Summary</button>
+      <button class="cl-tab" id="test-tab-real" type="button" onclick="setTestTab('real')">Realised P&amp;L</button>
+    </div>
+    <div id="test-pos"><span class="sg-loading">Loading&hellip;</span></div>
+    <div id="test-pnl" style="display:none"></div>
+    <div id="test-real" style="display:none"></div>
+    <div class="sg-meta" id="test-meta"></div>
   </div>
 
   <!-- cc#312: shared Source-tag editor modal (SmartGain + Client cards) -->
@@ -486,11 +500,13 @@ function closeSourceTag(){document.getElementById('srcModal').style.display='non
 async function _srcSave(val){
   const c=_srcCtx; if(!c){closeSourceTag();return;}
   const tag=(val||'').trim();
-  const url = c.kind==='client' ? '/api/clients/position/source_tag' : '/api/smartgain/position/source_tag';
-  const body = c.kind==='client' ? {id:Number(c.id), source_tag:tag} : {symbol:c.sym, direction:c.dir, source_tag:tag};
+  let url, body;
+  if(c.kind==='client'){ url='/api/clients/position/source_tag'; body={id:Number(c.id), source_tag:tag}; }
+  else if(c.kind==='test'){ url='/api/test/position/source_tag'; body={id:Number(c.id), source_tag:tag}; }
+  else { url='/api/smartgain/position/source_tag'; body={symbol:c.sym, direction:c.dir, source_tag:tag}; }
   try{ await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){}
   const kind=c.kind; closeSourceTag();
-  if(kind==='client') loadClients(); else loadSG();
+  if(kind==='client') loadBook(CLIENT_BOOK); else if(kind==='test') loadBook(TEST_BOOK); else loadSG();
 }
 // one delegated listener: open the editor for any source pill (preventDefault so the SmartGain
 // card's <a href="/holdings"> does NOT navigate), and handle preset-button clicks in the modal.
@@ -641,27 +657,35 @@ async function loadSG() {
 loadSG();
 setInterval(loadSG, 30000);
 
-// ── cc#305: Client tracking view (read-only, live). SmartGain | Client toggle + 2 tabs. ──
-let clientTimer = null;
+// ── cc#305/315: Client + Test Trade books (read-only, live). SmartGain | Client | Test Trade
+// toggle. Both books mirror the SAME 3-tab layout and share these render/load functions via a
+// `book` config — only the endpoints, DOM id prefix (pfx) and source-pill kind differ. ──
+const CLIENT_BOOK = { name:'client', srcKind:'client', pfx:'cl', view:'client-view', seg:'seg-client',
+  posEP:'/api/clients/positions', realEP:'/api/clients/realised', emptyPos:'No clients configured' };
+const TEST_BOOK   = { name:'test',   srcKind:'test',   pfx:'test', view:'test-view',  seg:'seg-test',
+  posEP:'/api/test/positions',    realEP:'/api/test/realised',    emptyPos:'No test entities yet' };
+let clientTimer = null, testTimer = null;
+
 function setSGView(v) {
-  const sg = v === "sg";
-  document.getElementById("sg-card").style.display = sg ? "block" : "none";
-  document.getElementById("client-view").style.display = sg ? "none" : "block";
-  document.getElementById("seg-sg").className = "sg-seg-btn" + (sg ? " on" : "");
-  document.getElementById("seg-client").className = "sg-seg-btn" + (sg ? "" : " on");
-  if (!sg) {
-    refreshClients();
-    if (!clientTimer) clientTimer = setInterval(refreshClients, 30000);   // poll like SmartGain
-  }
+  const map = { sg:'sg-card', client:'client-view', test:'test-view' };
+  Object.keys(map).forEach(k => { document.getElementById(map[k]).style.display = (k === v) ? "block" : "none"; });
+  document.getElementById("seg-sg").className     = "sg-seg-btn" + (v === "sg" ? " on" : "");
+  document.getElementById("seg-client").className = "sg-seg-btn" + (v === "client" ? " on" : "");
+  document.getElementById("seg-test").className   = "sg-seg-btn" + (v === "test" ? " on" : "");
+  if (v === "client") { refreshBook(CLIENT_BOOK); if (!clientTimer) clientTimer = setInterval(() => refreshBook(CLIENT_BOOK), 30000); }
+  if (v === "test")   { refreshBook(TEST_BOOK);   if (!testTimer)   testTimer   = setInterval(() => refreshBook(TEST_BOOK), 30000); }
 }
-function refreshClients() { loadClients(); loadClientRealised(); }   // cc#306: both panes stay fresh
-function setClientTab(t) {
+function refreshBook(book) { loadBook(book); loadBookRealised(book); }   // both panes stay fresh
+function setBookTab(book, t) {
   ["pos", "pnl", "real"].forEach(k => {
-    document.getElementById("cl-" + k).style.display = (k === t) ? "block" : "none";
-    document.getElementById("cl-tab-" + k).className = "cl-tab" + (k === t ? " on" : "");
+    document.getElementById(book.pfx + "-" + k).style.display = (k === t) ? "block" : "none";
+    document.getElementById(book.pfx + "-tab-" + k).className = "cl-tab" + (k === t ? " on" : "");
   });
 }
-function renderClientPositions(d) {
+function setClientTab(t) { setBookTab(CLIENT_BOOK, t); }
+function setTestTab(t)   { setBookTab(TEST_BOOK, t); }
+
+function renderBookPositions(d, book) {
   const order = d.clients || [];
   const byClient = {};
   (d.positions || []).forEach(p => { (byClient[p.client] = byClient[p.client] || []).push(p); });
@@ -692,7 +716,7 @@ function renderClientPositions(d) {
         <div class="sg-row-top">
           <span class="sg-sym">${p.symbol}</span>
           <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
-          ${_srcPill('client', p)}
+          ${_srcPill(book.srcKind, p)}
         </div>
         <div class="sg-mtm ${mc}">${mtmTxt}</div>
         <div class="sg-sub">
@@ -706,95 +730,84 @@ function renderClientPositions(d) {
       </div>`;
     });
   });
-  document.getElementById("cl-pos").innerHTML = html || '<div class="cl-flat">No clients configured</div>';
+  document.getElementById(book.pfx + "-pos").innerHTML = html || `<div class="cl-flat">${book.emptyPos}</div>`;
 }
-function renderClientPnl(d) {
+function renderBookPnl(d, book) {
   const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
   const rows = (d.summary || []).map(s => {
     const col = s.position_count ? (s.mtm >= 0 ? "var(--grn)" : "var(--red)") : "var(--mut)";
-    return `<div class="cl-pnl-row">
-      <span class="cl-pnl-name">${s.client}</span>
-      <span class="cl-pnl-cnt">${s.position_count} pos</span>
-      <span class="cl-pnl-val" style="color:${col}">${sgn(s.mtm)}</span>
-    </div>`;
+    return `<div class="cl-pnl-row"><span class="cl-pnl-name">${s.client}</span>`
+      + `<span class="cl-pnl-cnt">${s.position_count} pos</span>`
+      + `<span class="cl-pnl-val" style="color:${col}">${sgn(s.mtm)}</span></div>`;
   }).join("");
   const g = d.grand_total_mtm || 0;
-  const foot = `<div class="cl-pnl-row cl-pnl-foot">
-    <span class="cl-pnl-name">Grand Total</span>
-    <span class="cl-pnl-cnt">${d.total_positions || 0} pos</span>
-    <span class="cl-pnl-val" style="color:${g >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(g)}</span>
-  </div>`;
-  document.getElementById("cl-pnl").innerHTML = rows + foot;
+  const foot = `<div class="cl-pnl-row cl-pnl-foot"><span class="cl-pnl-name">Grand Total</span>`
+    + `<span class="cl-pnl-cnt">${d.total_positions || 0} pos</span>`
+    + `<span class="cl-pnl-val" style="color:${g >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(g)}</span></div>`;
+  document.getElementById(book.pfx + "-pnl").innerHTML = rows + foot;
 }
-async function loadClients() {
+async function loadBook(book) {
   try {
-    const r = await fetch("/api/clients/positions");
+    const r = await fetch(book.posEP);
     const d = await r.json();
-    if (d.error) { document.getElementById("cl-pos").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
-    renderClientPositions(d);
-    renderClientPnl(d);
+    if (d.error) { document.getElementById(book.pfx + "-pos").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
+    renderBookPositions(d, book);
+    renderBookPnl(d, book);
     const nowIST = new Date().toLocaleTimeString("en-IN", {timeZone:"Asia/Kolkata", hour:"2-digit", minute:"2-digit", second:"2-digit"});
-    document.getElementById("cl-meta").textContent =
+    document.getElementById(book.pfx + "-meta").textContent =
       (d.total_positions || 0) + " open · " + nowIST + " IST · live (futures LTP)";
   } catch (e) {
-    document.getElementById("cl-pos").innerHTML = '<div class="cl-flat">Could not load</div>';
+    document.getElementById(book.pfx + "-pos").innerHTML = '<div class="cl-flat">Could not load</div>';
   }
 }
 
-// cc#306: Realised P&L tab — client-wise total + expandable date-wise breakup.
+// cc#306: Realised P&L tab — entity-wise total + expandable date-wise breakup.
 function toggleRealised(id) {
   const el = document.getElementById(id), arw = document.getElementById(id + "-arw");
   const open = el.style.display === "none";
   el.style.display = open ? "block" : "none";
   if (arw) arw.textContent = open ? "▾" : "▸";
 }
-function renderClientRealised(d) {
+function renderBookRealised(d, book) {
   const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
   let html = "";
   if ((d.total_closed || 0) === 0) html += '<div class="cl-flat">No realised trades yet.</div>';
   (d.by_client || []).forEach((c, ci) => {
     const has = c.position_count > 0;
     const col = has ? (c.total_realised >= 0 ? "var(--grn)" : "var(--red)") : "var(--mut)";
-    const rid = "clr-" + ci;
-    html += `<div class="clr-cli${has ? ' clr-exp' : ''}"${has ? ` onclick="toggleRealised('${rid}')"` : ""}>
-      <span class="clr-name">${has ? `<span class="clr-arw" id="${rid}-arw">▸</span> ` : ""}${c.client}</span>
-      <span class="cl-pnl-cnt">${c.position_count} closed</span>
-      <span class="cl-pnl-val" style="color:${col}">${sgn(c.total_realised)}</span>
-    </div>`;
+    const rid = book.name + "-clr-" + ci;   // unique across books so ids never collide
+    html += `<div class="clr-cli${has ? ' clr-exp' : ''}"${has ? ` onclick="toggleRealised('${rid}')"` : ""}>`
+      + `<span class="clr-name">${has ? `<span class="clr-arw" id="${rid}-arw">▸</span> ` : ""}${c.client}</span>`
+      + `<span class="cl-pnl-cnt">${c.position_count} closed</span>`
+      + `<span class="cl-pnl-val" style="color:${col}">${sgn(c.total_realised)}</span></div>`;
     if (has) {
       let det = `<div class="clr-detail" id="${rid}" style="display:none">`;
       (c.dates || []).forEach(dt => {
-        det += `<div class="clr-date">
-          <span>${fmtD(dt.close_date)}</span>
-          <span class="cl-pnl-val" style="color:${dt.date_total >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(dt.date_total)}</span>
-        </div>`;
+        det += `<div class="clr-date"><span>${fmtD(dt.close_date)}</span>`
+          + `<span class="cl-pnl-val" style="color:${dt.date_total >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(dt.date_total)}</span></div>`;
         (dt.closes || []).forEach(x => {
-          det += `<div class="clr-close">
-            <span class="clr-cl-sym">${x.symbol} <span class="sg-dir ${x.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${x.direction}</span></span>
-            <span class="clr-cl-px">${x.qty} · ₹${f2(x.entry_price)}→₹${f2(x.exit_price)}</span>
-            <span class="cl-pnl-val" style="color:${x.pnl >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(x.pnl)}</span>
-          </div>`;
+          det += `<div class="clr-close"><span class="clr-cl-sym">${x.symbol} <span class="sg-dir ${x.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${x.direction}</span></span>`
+            + `<span class="clr-cl-px">${x.qty} · ₹${f2(x.entry_price)}→₹${f2(x.exit_price)}</span>`
+            + `<span class="cl-pnl-val" style="color:${x.pnl >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(x.pnl)}</span></div>`;
         });
       });
       html += det + `</div>`;
     }
   });
   const g = d.grand_total_realised || 0;
-  html += `<div class="cl-pnl-row cl-pnl-foot">
-    <span class="cl-pnl-name">Grand Total</span>
-    <span class="cl-pnl-cnt">${d.total_closed || 0} closed</span>
-    <span class="cl-pnl-val" style="color:${g >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(g)}</span>
-  </div>`;
-  document.getElementById("cl-real").innerHTML = html;
+  html += `<div class="cl-pnl-row cl-pnl-foot"><span class="cl-pnl-name">Grand Total</span>`
+    + `<span class="cl-pnl-cnt">${d.total_closed || 0} closed</span>`
+    + `<span class="cl-pnl-val" style="color:${g >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(g)}</span></div>`;
+  document.getElementById(book.pfx + "-real").innerHTML = html;
 }
-async function loadClientRealised() {
+async function loadBookRealised(book) {
   try {
-    const r = await fetch("/api/clients/realised");
+    const r = await fetch(book.realEP);
     const d = await r.json();
-    if (d.error) { document.getElementById("cl-real").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
-    renderClientRealised(d);
+    if (d.error) { document.getElementById(book.pfx + "-real").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
+    renderBookRealised(d, book);
   } catch (e) {
-    document.getElementById("cl-real").innerHTML = '<div class="cl-flat">Could not load</div>';
+    document.getElementById(book.pfx + "-real").innerHTML = '<div class="cl-flat">Could not load</div>';
   }
 }
 
