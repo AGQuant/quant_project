@@ -94,10 +94,12 @@ def _signals_in_window(cur, basket: str, days: list) -> int:
 
 def _wr_since(cur, basket: str, since_ts) -> tuple:
     """(closed_count, win_rate_pct). Win = return_pct > 0."""
+    # cc#325: closed_at is now naive IST; enabled_at (since_ts) is timestamptz -> convert
+    # it to naive IST for an apples-to-apples compare (was skewed 5:30h before the fix).
     cur.execute(
         """SELECT COUNT(*), COUNT(*) FILTER (WHERE return_pct > 0)
            FROM v8_paper_trades
-           WHERE basket = %s AND closed_at >= %s""", (basket, since_ts))
+           WHERE basket = %s AND closed_at >= (%s AT TIME ZONE 'Asia/Kolkata')""", (basket, since_ts))
     total, wins = cur.fetchone()
     total = int(total or 0); wins = int(wins or 0)
     wr = (wins / total * 100.0) if total else None

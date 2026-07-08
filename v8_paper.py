@@ -174,7 +174,10 @@ CREATE TABLE IF NOT EXISTS v8_paper_trades (
     entry_price NUMERIC NOT NULL, entry_ts TIMESTAMP NOT NULL,
     exit_price NUMERIC NOT NULL, exit_ts TIMESTAMP NOT NULL, qty INTEGER NOT NULL,
     target NUMERIC, stop_loss NUMERIC, pnl NUMERIC, return_pct NUMERIC,
-    result TEXT, pivot_date DATE, closed_at TIMESTAMP DEFAULT NOW()
+    result TEXT, pivot_date DATE,
+    -- cc#325: closed_at stamped naive IST (Asia/Kolkata) to match entry_ts/exit_ts (both code-passed IST).
+    -- Bare NOW() on Railway (UTC) stored UTC wall-clock => closed_at < entry_ts by 5:30h. Now IST-consistent.
+    closed_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'Asia/Kolkata')
 );
 CREATE INDEX IF NOT EXISTS idx_paper_trades_sym ON v8_paper_trades(symbol, closed_at DESC);
 
@@ -535,7 +538,7 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
             INSERT INTO v8_paper_trades
             (symbol,side,basket,entry_price,entry_ts,exit_price,exit_ts,qty,target,stop_loss,
              pnl,return_pct,result,pivot_date,closed_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,(NOW() AT TIME ZONE 'Asia/Kolkata'))
         """, (sym,side,basket,entry,ets,exit_px,exit_ts,qty,tgt,sl,round(pnl,2),round(ret,2),result,pdt))
         cur.execute("DELETE FROM v8_paper_positions WHERE id=%s", (pid,))
         conn.commit()

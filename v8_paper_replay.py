@@ -248,7 +248,7 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
             INSERT INTO v8_paper_trades
             (symbol,side,basket,entry_price,entry_ts,exit_price,exit_ts,qty,target,stop_loss,
              pnl,return_pct,result,pivot_date,closed_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,(NOW() AT TIME ZONE 'Asia/Kolkata'))  -- cc#325: naive IST
         """, (sym,side,basket,entry,ets,exit_px,exit_ts,qty,tgt,sl,round(pnl,2),round(ret,2),result,pdt))
         cur.execute("DELETE FROM v8_paper_positions WHERE id=%s", (pid,))
         conn.commit()
