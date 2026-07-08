@@ -765,9 +765,12 @@ function pivotBar(cmp,pp,r1,s1){
 // cc_task #71: compact single-row gate — mood tag + 4 gate pills (ADR/Day/Week/Month
 // Y/N coloured) + Buy/Sell slots far right.
 function renderMood(m){
+  // cc#310: slot numerators come from paper (a separate parallel job). Until paper lands show
+  // '--', never a transient 0 that reads as a real "0 open" while the market gate is live.
+  const _paperLoaded=!!(cache.paper&&cache.paper.open_positions);
   const _op=(cache.paper&&cache.paper.open_positions)||[];
-  const _lo=_op.filter(p=>(p.side||'').toUpperCase()==='LONG').length;
-  const _so=_op.filter(p=>(p.side||'').toUpperCase()==='SHORT').length;
+  const _lo=_paperLoaded?_op.filter(p=>(p.side||'').toUpperCase()==='LONG').length:'--';
+  const _so=_paperLoaded?_op.filter(p=>(p.side||'').toUpperCase()==='SHORT').length:'--';
   const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#fdf3df','var(--amber)'],Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
   const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
   const short=s=>String(s||'').replace(/^Nifty\s+/i,'');   // "Nifty Day" -> "Day"
@@ -794,6 +797,13 @@ function renderMood(m){
       <div class="moodChecks">${pills}</div>
       <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>
     </div>`;
+  // cc#310: the innerHTML above ships EMPTY #vixInline/#niftyPcrInline/#bankniftyPcrInline
+  // spans. Immediately re-inject the last known VIX/PCR values so a re-render never blanks
+  // an already-loaded value (the chart loaders are not re-invoked on every renderMood pass).
+  for(const id of ['vixInline','niftyPcrInline','bankniftyPcrInline']){
+    const el=document.getElementById(id);
+    if(el&&_metricInlineCache[id]!=null)el.innerHTML=_metricInlineCache[id];
+  }
 }
 
 function sectorCards(sectors,title,label){
@@ -1498,9 +1508,14 @@ function _pcDayChg(pts,vals){
   return(prev!=null&&prev!==0)?((last-prev)/prev*100):null;
 }
 // cc#293: inline row display — Label <value> <day-change% coloured>. Reuses sign()/cls().
+// cc#310: cache the last VIX/PCR inline HTML per span. renderMood() rebuilds the mood card
+// via innerHTML with EMPTY inline spans; without this cache the values (filled separately by
+// the async chart loaders) blanked on every re-render -> the first-load/refresh flicker.
+const _metricInlineCache={};
 function _setMetricInline(inlineId,last,dc){
-  const el=document.getElementById(inlineId);if(!el)return;
-  el.innerHTML=last==null?'':`${last.toFixed(2)}${dc==null?'':` <span class="${cls(dc)}">${sign(dc,2)}%</span>`}`;
+  const html=last==null?'':`${last.toFixed(2)}${dc==null?'':` <span class="${cls(dc)}">${sign(dc,2)}%</span>`}`;
+  _metricInlineCache[inlineId]=html;                    // remember so renderMood can re-inject it
+  const el=document.getElementById(inlineId);if(el)el.innerHTML=html;
 }
 
 // ---- India VIX chart (cc#266) — Chart.js line, refreshes on the market-gate cadence -------
@@ -1606,7 +1621,7 @@ async function loadAll(){
     run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);loadVixChart();loadNiftyPcrChart();loadBankniftyPcrChart();}),   // cc#266/#290: VIX + PCR charts on the gate cadence
     run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
-    run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();}),
+    run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
   ];
