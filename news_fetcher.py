@@ -257,7 +257,8 @@ def _insert_rows(conn, rows):
     so no stage is ever silent again. url_hash is globally UNIQUE, so dup_skipped
     counts BOTH intra-source repeats and cross-source-type collisions (a company URL
     already present as a domestic row) — the counter tells us which stage kills rows."""
-    stats = {"parsed": len(rows), "stale_rejected": 0, "quality_rejected": 0, "dup_skipped": 0, "inserted": 0}
+    stats = {"parsed": len(rows), "stale_rejected": 0, "quality_rejected": 0,
+             "content_dup_skipped": 0, "dup_skipped": 0, "inserted": 0}
     if not rows:
         return stats
     # cc#289: reuse the retention window (UNPOLISHED_MAX_HOURS) as an INGEST age gate. Anything
@@ -286,6 +287,23 @@ def _insert_rows(conn, rows):
                 stats["quality_rejected"] += 1
                 log.debug(f"[news_fetcher] skipped low-quality article: {(r[2] or '')[:60]}")
                 continue
+            # cc#296: content-level dedup BEFORE the url_hash insert. url_hash (MD5 of URL) can't
+            # catch same-story-different-URL duplicates — ET syndicates identical stories to both
+            # its Markets and Industry RSS feeds (same headline + published_at, different URL), and
+            # a single feed occasionally re-lists a story under a new URL at a later fetch. Skip if
+            # an identical headline already exists with published_at within ±2 min in the last 7
+            # days. r[2]=headline, r[7]=published_at (NULL published_at can't be content-matched).
+            if r[2] and r[7] is not None:
+                cur.execute("""
+                    SELECT 1 FROM raw_news
+                    WHERE headline = %s
+                      AND published_at BETWEEN %s - INTERVAL '2 minutes' AND %s + INTERVAL '2 minutes'
+                      AND fetched_at > NOW() - INTERVAL '7 days'
+                    LIMIT 1
+                """, (r[2], r[7], r[7]))
+                if cur.fetchone():
+                    stats["content_dup_skipped"] += 1
+                    continue
             cur.execute("""
                 INSERT INTO raw_news
                     (source_type, symbol, headline, description, url, url_hash, source_name, published_at)
@@ -301,6 +319,8 @@ def _insert_rows(conn, rows):
         log.info(f"_insert_rows: rejected {stats['stale_rejected']} stale (>{UNPOLISHED_MAX_HOURS}h) article(s)")
     if stats["quality_rejected"]:
         log.info(f"_insert_rows: skipped {stats['quality_rejected']} low-quality article(s)")
+    if stats["content_dup_skipped"]:
+        log.info(f"_insert_rows: skipped {stats['content_dup_skipped']} content-duplicate(s)")
     return stats
 
 
@@ -368,14 +388,22 @@ def fetch_market_news(conn=None):
     try:
         ensure_schema(conn)
         total, by_src = 0, {}
+        # cc#296: aggregate the full _insert_rows funnel (incl. content_dup_skipped) across feeds.
+        agg = {"parsed": 0, "stale_rejected": 0, "quality_rejected": 0,
+               "content_dup_skipped": 0, "dup_skipped": 0, "inserted": 0}
         for source_type, feeds in (("domestic", RSS_DOMESTIC), ("global", RSS_GLOBAL)):
             for name, url in feeds:
                 rows = _rows_from_entries(_parse_feed(url), source_type, name)
-                n = _insert_rows(conn, rows)["inserted"]
-                total += n
-                by_src[name] = n
-        log.info(f"fetch_market_news: {total} new | {by_src}")
-        return {"ok": True, "inserted": total, "by_source": by_src}
+                st = _insert_rows(conn, rows)
+                for k in agg:
+                    agg[k] += st.get(k, 0)
+                total += st["inserted"]
+                by_src[name] = st["inserted"]
+        # cc#296: surface the market-path funnel (incl. content_dup_skipped) to ops_log — this path
+        # previously only logged, so duplicate suppression here is now visible, not silent.
+        _write_ops_log(conn, "news_fetch", "fetch_market_news", {**agg, "by_source": by_src})
+        log.info(f"fetch_market_news: {total} new | {by_src} | content_dup_skipped={agg['content_dup_skipped']}")
+        return {"ok": True, "inserted": total, "by_source": by_src, **agg}
     except Exception as e:
         log.error(f"fetch_market_news: {e}")
         return {"ok": False, "error": str(e)}
@@ -459,6 +487,7 @@ def fetch_stock_news(conn=None, symbols=None):
         _have = {s for s, _ in universe}
         universe = list(universe) + [(s, s) for s in catchup if s not in _have]
         parsed = alias_filtered = inserted = dup_skipped = quality_rejected = stale_rejected = 0
+        content_dup_skipped = 0   # cc#296
         http_429 = http_other = empty = 0
         consec_429 = 0
         aborted = False
@@ -498,6 +527,7 @@ def fetch_stock_news(conn=None, symbols=None):
                     inserted += st["inserted"]; dup_skipped += st["dup_skipped"]
                     quality_rejected += st["quality_rejected"]
                     stale_rejected += st["stale_rejected"]   # cc#289
+                    content_dup_skipped += st["content_dup_skipped"]   # cc#296
                     s_inserted = st["inserted"]
             # cc#295 (scope 0): per-symbol evidence so the NEXT scheduled run gives definitive proof
             # of whether is_primary() alias-match is the culprit for specific symbols (entries came
@@ -510,6 +540,7 @@ def fetch_stock_news(conn=None, symbols=None):
                  "catchup_symbols_count": catchup_hits,   # cc#295 (scope 2): fetched via catch-up vs normal schedule
                  "parsed": parsed, "alias_filtered": alias_filtered,
                  "stale_rejected": stale_rejected,   # cc#289: age-gate rejections (evergreen tracker pages)
+                 "content_dup_skipped": content_dup_skipped,   # cc#296: same-story-different-URL dups
                  "quality_rejected": quality_rejected, "dup_skipped": dup_skipped, "inserted": inserted,
                  "http_429": http_429, "http_other": http_other, "empty": empty, "aborted": aborted,
                  "per_symbol": per_symbol}   # cc#295 (scope 0): per-symbol entries/alias_filtered/inserted/catchup
