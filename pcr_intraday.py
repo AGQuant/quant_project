@@ -126,6 +126,38 @@ def _compute_one(conn, underlying, ts):
         pcr_total = round(put_total / call_total, 4) if call_total else None
         pcr_atm5 = (round(put_atm / call_atm, 4) if (call_atm and put_atm is not None) else None)
 
+        # cc#292: bad/partial options-chain fetch guard. put_atm5==0 AND call_atm5==0 is the
+        # reliable tell (observed on EVERY bad tick 02-Jul): the ATM±5 strikes didn't load, and the
+        # total-band figures are unreliable too — call_oi_total froze at 80,015 while put stayed
+        # ~normal, producing an impossible pcr_total=25.95 (normal NIFTY PCR is 0.5-2.0). Secondary
+        # heuristic: a one-sided >75% total-OI collapse vs the last good tick (the other side steady)
+        # is the same corruption without the ATM=0 signature. On a bad tick, null pcr_total (and
+        # pcr_atm5) — extending the pipeline's existing pcr_atm5 null-on-bad-tick behavior — so the
+        # impossible spike never enters the series/chart. Raw OI is still stored for forensics.
+        bad_tick = (put_atm == 0 and call_atm == 0)
+        if not bad_tick and pcr_total is not None:
+            cur.execute("""
+                SELECT put_oi_total, call_oi_total FROM pcr_intraday
+                WHERE underlying=%s AND ts < %s AND pcr_total IS NOT NULL
+                  AND put_oi_total IS NOT NULL AND call_oi_total IS NOT NULL
+                ORDER BY ts DESC LIMIT 1
+            """, (underlying, ts))
+            pr = cur.fetchone()
+            if pr and pr[0] and pr[1]:
+                p_drop = put_total  < pr[0] * 0.25
+                c_drop = call_total < pr[1] * 0.25
+                if p_drop != c_drop:   # exactly one side collapsed — one-sided corruption
+                    bad_tick = True
+        # cc#292: hard sanity bound — a total-band PCR outside [0.1, 5] is implausible for
+        # NIFTY/BANKNIFTY (normal 0.5-2.0) and only arises from a corrupt/partial OI fetch (a
+        # one-sided collapse, or a put/call side reading 0). Catch-all guaranteeing no impossible
+        # value ever reaches the series/chart, even when the ATM=0 tell doesn't fire (e.g. no spot
+        # anchor at 09:05 leaves ATM null while call_oi_total collapsed → pcr_total=26).
+        if pcr_total is not None and (pcr_total > 5 or pcr_total < 0.1):
+            bad_tick = True
+        if bad_tick:
+            pcr_total = None   # null pcr_total (extends the existing pcr_atm5 null-on-bad-tick pattern)
+
         cur.execute("""
             INSERT INTO pcr_intraday
                 (ts, underlying, spot, atm_strike,

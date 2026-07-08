@@ -49,10 +49,13 @@
   .feed-badge.fb-red{color:var(--red);border-color:var(--red);background:rgba(226,55,68,.07)}
   .feed-badge.fb-red .fb-dot{background:var(--red);box-shadow:0 0 0 3px rgba(226,55,68,.16)}
   .feed-badge .fb-txt:empty{display:none}
-  .mood{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px 18px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;box-shadow:var(--shadow)}
+  /* cc#293: genuine two-column layout — left info block, right = pills stacked over slots — so
+     .slots no longer wraps to its own far-down line on laptop widths (which inflated box height). */
+  .mood{margin:12px 0;border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px 18px;display:flex;align-items:flex-start;justify-content:space-between;gap:24px;box-shadow:var(--shadow)}
+  .mood-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
   .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
   .mood .pill{font-size:11px;font-weight:700;padding:5px 12px;border-radius:30px;text-transform:uppercase;letter-spacing:1px}
-  .moodChecks{display:flex;gap:10px;flex-wrap:wrap;margin-left:auto}
+  .moodChecks{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
   .chk{font-size:12px;font-family:'Space Mono';padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--bg2)}
   .chk.pass{color:var(--grn);border-color:var(--grn-d)}
   .chk.fail{color:var(--red);border-color:var(--red-d)}
@@ -139,6 +142,7 @@
     .tabs::-webkit-scrollbar-thumb{background:var(--line2);border-radius:2px}
     .tab{white-space:nowrap;flex-shrink:0;padding:9px 11px;font-size:12px}
     .mood{flex-direction:column;align-items:flex-start;gap:12px}
+    .mood-right{align-items:flex-start}   /* cc#293: left-align the stacked right column on mobile */
     .moodChecks{margin-left:0}
     .cards{grid-template-columns:repeat(2,1fr)}
     .pivot-bar-wrap{width:120px!important}
@@ -769,14 +773,20 @@ function renderMood(m){
   // cc#221: ring-fenced pools (used/cap) from market_mood — SO is a short basket, S1B a long one
   const soP=m.so_pool||{cap:m.so_slots,used:0};
   const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
+  // cc#293: each metric row shows Label -> last value -> day-change% (coloured) -> icon. The
+  // #*Inline spans are (re)populated by the chart-load fns (loadVixChart/loadNiftyPcrChart/
+  // loadBankniftyPcrChart) from the SAME series they already fetch — one source of truth per metric.
+  const metricRow=(fn,label,inlineId)=>`<div style="margin-top:6px"><span onclick="${fn}" title="${label} chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">${label} <span id="${inlineId}" style="font-family:'Space Mono';font-weight:700"></span> <span class="info-btn">&#128200;</span></span></div>`;
   document.getElementById('mood').innerHTML=`
-    <div><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
+    <div class="mood-left"><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
-      <div style="margin-top:6px"><span onclick="openVix()" title="India VIX chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">India VIX <span class="info-btn">&#128200;</span></span></div>
-      <div style="margin-top:6px"><span onclick="openNiftyPcr()" title="NIFTY PCR trend" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">NIFTY PCR <span class="info-btn">&#128200;</span></span></div>
-      <div style="margin-top:6px"><span onclick="openBankniftyPcr()" title="BankNifty PCR trend" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">BankNifty PCR <span class="info-btn">&#128200;</span></span></div></div>
-    <div class="moodChecks">${pills}</div>
-    <div class="slots" style="margin-left:auto"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>`;
+      ${metricRow('openVix()','India VIX','vixInline')}
+      ${metricRow('openNiftyPcr()','NIFTY PCR','niftyPcrInline')}
+      ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
+    <div class="mood-right">
+      <div class="moodChecks">${pills}</div>
+      <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>
+    </div>`;
 }
 
 function sectorCards(sectors,title,label){
@@ -1438,6 +1448,23 @@ function renderGlobalIndices(data){
     <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Live 5-min feed · 06:00-23:30 IST · <span style="color:var(--grn)">●</span> = tile receiving live ticks · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
 }
 
+// cc#293: day change vs the PREVIOUS trading day's last value = the last series point whose date
+// is earlier than today (IST). Shared by the India VIX / NIFTY PCR / BankNifty PCR rows.
+function _pcDayChg(pts,vals){
+  if(!pts.length||vals[vals.length-1]==null)return null;
+  const t=new Date(Date.now()+(5*60+30)*60000);
+  const today=t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');
+  let prev=null;
+  for(let i=pts.length-1;i>=0;i--){if(String(pts[i].ts).slice(0,10)<today){prev=vals[i];break;}}
+  const last=vals[vals.length-1];
+  return(prev!=null&&prev!==0)?((last-prev)/prev*100):null;
+}
+// cc#293: inline row display — Label <value> <day-change% coloured>. Reuses sign()/cls().
+function _setMetricInline(inlineId,last,dc){
+  const el=document.getElementById(inlineId);if(!el)return;
+  el.innerHTML=last==null?'':`${last.toFixed(2)}${dc==null?'':` <span class="${cls(dc)}">${sign(dc,2)}%</span>`}`;
+}
+
 // ---- India VIX chart (cc#266) — Chart.js line, refreshes on the market-gate cadence -------
 let VIX_CHART=null;
 async function loadVixChart(){
@@ -1449,6 +1476,7 @@ async function loadVixChart(){
   const vals=pts.map(p=>p.vix);
   const last=vals.length?vals[vals.length-1]:null;
   const lastEl=document.getElementById('vixLast');if(lastEl)lastEl.textContent=last==null?'--':last.toFixed(2);
+  _setMetricInline('vixInline',last,_pcDayChg(pts,vals));   // cc#293: inline row value + day change
   const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
   const line=dark?'#3987e5':'#2a78d6';
   // Only the last (current) point gets a visible marker — a current-reading indicator.
@@ -1475,7 +1503,7 @@ async function loadVixChart(){
 // styling: 2px line, area fill, single current-point marker; instance created once then updated
 // in place, never rebuilt). Fed by the new hourly PCR endpoint; value field is p.pcr (total PCR).
 let NIFTY_PCR_CHART=null, BANKNIFTY_PCR_CHART=null;
-async function _loadPcrChart(ep,canvasId,lastId,getChart,setChart){
+async function _loadPcrChart(ep,canvasId,lastId,inlineId,getChart,setChart){
   if(!window.Chart)return;
   let d;try{d=await getJSON(ep);}catch(e){return;}
   const pts=(d&&d.points)||[];
@@ -1484,6 +1512,7 @@ async function _loadPcrChart(ep,canvasId,lastId,getChart,setChart){
   const vals=pts.map(p=>p.pcr);
   const last=vals.length?vals[vals.length-1]:null;
   const lastEl=document.getElementById(lastId);if(lastEl)lastEl.textContent=last==null?'--':last.toFixed(2);
+  _setMetricInline(inlineId,last,_pcDayChg(pts,vals));   // cc#293: inline row value + day change
   const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
   const line=dark?'#3987e5':'#2a78d6';
   const radii=vals.map((_,i)=>i===vals.length-1?5:0);
@@ -1506,8 +1535,8 @@ async function _loadPcrChart(ep,canvasId,lastId,getChart,setChart){
       }}});
   setChart(ch);
 }
-function loadNiftyPcrChart(){return _loadPcrChart(EP.niftyPcr,'niftyPcrChart','niftyPcrLast',()=>NIFTY_PCR_CHART,c=>{NIFTY_PCR_CHART=c;});}
-function loadBankniftyPcrChart(){return _loadPcrChart(EP.bankniftyPcr,'bankniftyPcrChart','bankniftyPcrLast',()=>BANKNIFTY_PCR_CHART,c=>{BANKNIFTY_PCR_CHART=c;});}
+function loadNiftyPcrChart(){return _loadPcrChart(EP.niftyPcr,'niftyPcrChart','niftyPcrLast','niftyPcrInline',()=>NIFTY_PCR_CHART,c=>{NIFTY_PCR_CHART=c;});}
+function loadBankniftyPcrChart(){return _loadPcrChart(EP.bankniftyPcr,'bankniftyPcrChart','bankniftyPcrLast','bankniftyPcrInline',()=>BANKNIFTY_PCR_CHART,c=>{BANKNIFTY_PCR_CHART=c;});}
 
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
