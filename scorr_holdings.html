@@ -539,7 +539,7 @@ function renderLWChart(d){
   if(_lw){ try{_lw.remove();}catch(e){} _lw=null; }
   if(_lwRO){ _lwRO.disconnect(); _lwRO=null; }
   el.innerHTML="";
-  const H=window.matchMedia("(max-width:560px)").matches?240:260;
+  const H=window.matchMedia("(max-width:767px)").matches?240:260;
   const w=el.clientWidth||320, range=d.range;
   const chart=LightweightCharts.createChart(el,{
     width:w, height:H,

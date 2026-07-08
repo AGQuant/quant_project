@@ -145,6 +145,15 @@ _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/
                      "/screener", "/intraday", "/structure", "/performance", "/ask"}
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
+# cc#327 MOBILE_UX_REDEFINE_V1 P1/10: canonical Sora font + shared mobile.css,
+# injected into <head> on every protected/app page via the same gate as the PWA
+# bootstrap, so no page is missed and the design system is defined in ONE place.
+_MOBILE_HEAD = (
+    b'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
+    b'<link rel="stylesheet" href="/static/mobile.css">'
+)
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     if request.url.path in PROTECTED and not _is_authed(request):
@@ -164,6 +173,12 @@ async def auth_gate(request: Request, call_next):
                 body = body.replace(b"</body>", _LOGOUT_BTN + b"</body>", 1)
             if do_pwa and b'src="/pwa.js"' not in body:
                 body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
+            # cc#327: shared mobile design system into <head> (fallback: before </body>)
+            if b'href="/static/mobile.css"' not in body:
+                if b"</head>" in body:
+                    body = body.replace(b"</head>", _MOBILE_HEAD + b"</head>", 1)
+                else:
+                    body = body.replace(b"</body>", _MOBILE_HEAD + b"</body>", 1)
         headers = dict(response.headers)
         headers["content-length"] = str(len(body))
         headers["cache-control"] = "no-store, no-cache, must-revalidate"

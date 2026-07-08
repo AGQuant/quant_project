@@ -450,6 +450,68 @@ NAV_TOGGLE_JS = """
 
 _NOCACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
+# ── cc#327 MOBILE_UX_REDEFINE_V1 P1/10 — shared mobile design system ──────────
+# Served at /static/mobile.css and injected site-wide via the auth_gate middleware
+# in main.py (same path as the PWA bootstrap, so no protected page is missed).
+# Every later mobile-UX task (cc#328-336) consumes these tokens + utilities.
+MOBILE_CSS = """/* ==========================================================================
+   MOBILE_UX_STANDARD_V1  —  cc#327 (program MOBILE_UX_REDEFINE_V1)
+   Single shared mobile design system. Do NOT re-declare these per page.
+   --------------------------------------------------------------------------
+   BREAKPOINTS (use EVERYWHERE — the ad-hoc 560px query is retired):
+       <=480px  phone
+       <=767px  large phone / small tablet  (primary mobile target)
+       >=768px  desktop  (all mobile rules OFF)
+   TAP TARGETS : every interactive control >= 44x44px at <=767px
+   TYPE FLOOR  : no text < 11px; body >= 13px; ALL inputs/selects >= 16px
+                 (16px is what stops iOS from auto-zooming on focus)
+   SAFE AREAS  : body reserves bottom-nav height (56px) + env(safe-area-inset-*)
+   FONT        : one canonical stack site-wide — Sora + system fallback
+   UTILITIES   : .hscroll  .hscroll-fade  .sticky-col  .tap44  .stack-480
+   ========================================================================== */
+:root{
+  --mux-bp-phone:480px;
+  --mux-bp-mobile:767px;
+  --mux-font:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --mux-nav-h:56px;
+  --mux-tap:44px;
+}
+
+/* canonical font site-wide */
+body{font-family:var(--mux-font);}
+
+/* ---- utility classes (available at every width) ---- */
+.tap44{min-width:var(--mux-tap);min-height:var(--mux-tap);}
+.hscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;}
+.hscroll::-webkit-scrollbar{height:5px;}
+.hscroll::-webkit-scrollbar-thumb{background:rgba(120,130,150,.4);border-radius:3px;}
+/* right-edge fade hints there is more content to scroll to */
+.hscroll-fade{position:relative;}
+.hscroll-fade::after{content:'';position:absolute;top:0;right:0;bottom:0;width:26px;
+  pointer-events:none;background:linear-gradient(to right,rgba(255,255,255,0),rgba(255,255,255,.92));}
+.sticky-col{position:sticky;left:0;z-index:2;background:inherit;
+  box-shadow:2px 0 5px -3px rgba(0,0,0,.25);}
+
+/* ---- mobile rules (<=767px) ---- */
+@media(max-width:767px){
+  html{-webkit-text-size-adjust:100%;}
+  body{font-size:13px;
+    padding-bottom:calc(var(--mux-nav-h) + env(safe-area-inset-bottom,0px));}
+  /* inputs never below 16px -> kills iOS focus auto-zoom (.fnum was 11px) */
+  input,select,textarea,.fnum{font-size:16px !important;}
+  /* tap targets — interactive controls reach 44px */
+  button,a.btn,.btn,.chip,.tab,.toggle,select,
+  th[onclick],[role=button],.week-nav button,.book-toggle{min-height:var(--mux-tap);}
+  button,a.btn,.btn,.chip{min-width:var(--mux-tap);}
+  input[type=checkbox],input[type=radio]{min-height:auto;}
+  /* sticky top elements respect the notch */
+  .sticky-top,.topbar,header.sticky{padding-top:env(safe-area-inset-top,0px);}
+}
+@media(max-width:480px){
+  .stack-480{display:grid !important;grid-template-columns:1fr !important;gap:8px;}
+}
+"""
+
 
 @router.get("/app")
 def pwa_home():
@@ -490,3 +552,10 @@ def pwa_icon_192():
 def pwa_icon_512():
     return Response(_icon(512), media_type="image/png",
                    headers={"Cache-Control": "public, max-age=604800"})
+
+
+@router.get("/static/mobile.css")
+def pwa_mobile_css():
+    # cc#327: served no-cache during the MOBILE_UX_REDEFINE_V1 program so later
+    # tasks' edits propagate immediately; not in the SW SHELL (avoids stale cache).
+    return Response(MOBILE_CSS, media_type="text/css", headers=_NOCACHE)
