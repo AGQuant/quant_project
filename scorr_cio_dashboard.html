@@ -781,8 +781,136 @@ function OpsMetrics({ symbol, segment }) {
   );
 }
 
+// cc#300: Fibcheck relocated here from the Trade Check page and rebuilt natively in React
+// (was a standalone SVG string in scorr_check.html). Opened from the GVM hero card CMP block.
+// Reuses GET /api/trade-check/fibcheck (all downstream math unchanged). Ranges 1M/3M/6M/1Y/All;
+// 1Y maps to the backend 12m param, All is the new full-history mode (backend cc#300).
+const FIB_RANGES = [["1M","1m"],["3M","3m"],["6M","6m"],["1Y","12m"],["All","all"]];
+
+function FibChartSvg({ d }) {
+  const W = 680, H = 340, L = 8, R = 92, T = 16, B = 24;
+  const ser = (d.series || []).filter(p => p.close != null);
+  const n = ser.length;
+  if (n < 2) return <div style={{ fontSize: 12.5, color: C.muted, padding: "24px 0", textAlign: "center" }}>No price path available.</div>;
+  const fl = d.fib_levels || [];
+  const lo = d.swing_low.price, hi = d.swing_high.price, cmp = d.cmp;
+  const vals = ser.map(p => p.close).concat([lo, hi]);
+  if (cmp != null) vals.push(cmp);
+  let ymin = Math.min(...vals), ymax = Math.max(...vals);
+  const ypad = (ymax - ymin) * 0.05 || 1; ymin -= ypad; ymax += ypad;
+  const xF = i => L + (i / (n - 1)) * (W - L - R);
+  const yF = p => T + (ymax - p) / (ymax - ymin) * (H - T - B);
+  // shaded band split at the fib level nearest CMP (green reclaimed below, red remaining above)
+  let split = hi;
+  if (cmp != null && fl.length) { let bd = 1e18; fl.forEach(f => { const dd = Math.abs(f.price - cmp); if (dd < bd) { bd = dd; split = f.price; } }); }
+  const ySplit = yF(split), yBot = yF(lo), yTop = yF(hi);
+  const dpath = ser.map((p, i) => (i ? "L" : "M") + xF(i).toFixed(1) + " " + yF(p.close).toFixed(1)).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
+      style={{ width: "100%", height: "auto", display: "block", border: `1px solid ${C.border}`, borderRadius: 10, background: C.bg }}>
+      <rect x={L} y={ySplit.toFixed(1)} width={W - L - R} height={Math.max(0, yBot - ySplit).toFixed(1)} fill={C.green} opacity="0.06" />
+      <rect x={L} y={yTop.toFixed(1)} width={W - L - R} height={Math.max(0, ySplit - yTop).toFixed(1)} fill={C.red} opacity="0.06" />
+      {fl.map((f, i) => {
+        const y = yF(f.price);
+        return (
+          <g key={i}>
+            <line x1={L} y1={y.toFixed(1)} x2={W - R} y2={y.toFixed(1)} stroke={C.muted} strokeWidth="1" strokeDasharray="4 3" strokeOpacity="0.5" />
+            <text x={W - R + 4} y={(y + 3.5).toFixed(1)} fontSize="10" fontFamily="monospace" fill={C.muted}>{f.pct.toFixed(1)}% · {f.price.toFixed(2)}</text>
+          </g>
+        );
+      })}
+      <path d={dpath} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {cmp != null && (
+        <g>
+          <circle cx={xF(n - 1).toFixed(1)} cy={yF(cmp).toFixed(1)} r="4" fill={C.accent} stroke="#fff" strokeWidth="1.5" />
+          <text x={(xF(n - 1) - 6).toFixed(1)} y={(yF(cmp) - 7).toFixed(1)} fontSize="11" fontFamily="monospace" fontWeight="700" fill={C.text} textAnchor="end">CMP {cmp.toFixed(2)}</text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+function FibStat({ label, children }) {
+  return (
+    <span style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 7, padding: "5px 9px", color: C.text }}>
+      <b style={{ color: C.muted, fontWeight: 600 }}>{label}</b> {children}
+    </span>
+  );
+}
+
+function FibPopout({ symbol, onClose }) {
+  const [lookback, setLookback] = useState("3m");   // default 3M (matches backend default)
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true); setErr(null);
+    apiGet(`/api/trade-check/fibcheck?symbol=${encodeURIComponent(symbol)}&lookback=${lookback}`)
+      .then(d => { if (!alive) return; if (d.error) setErr(d.error); else setData(d); })
+      .catch(e => { if (alive) setErr(`Server error ${e.message} — fibcheck failed.`); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [symbol, lookback]);
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(20,28,45,0.55)", zIndex: 200,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.border}`,
+        boxShadow: "0 12px 40px rgba(20,28,45,0.25)", width: "min(760px, 96vw)", maxHeight: "92vh", overflowY: "auto", padding: "18px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>Fibcheck — {symbol}</div>
+          <button onClick={onClose} title="Close (Esc)"
+            style={{ background: "none", border: "none", fontSize: 24, lineHeight: 1, color: C.muted, cursor: "pointer", padding: 0 }}>×</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          {FIB_RANGES.map(([lbl, val]) => (
+            <button key={val} onClick={() => setLookback(val)}
+              style={{ padding: "5px 13px", borderRadius: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+                border: `1px solid ${lookback === val ? C.accent : C.border}`,
+                background: lookback === val ? C.accent : C.card,
+                color: lookback === val ? "#fff" : C.muted }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {loading && <div style={{ padding: "40px 0", textAlign: "center", color: C.muted, fontSize: 13 }}>Drawing Fibonacci retracement…</div>}
+        {err && !loading && <div style={{ padding: "24px 0", textAlign: "center", color: C.red, fontSize: 13 }}>{err}</div>}
+        {data && !loading && !err && (
+          <React.Fragment>
+            <FibChartSvg d={data} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12, fontFamily: "monospace", fontSize: 11.5 }}>
+              <FibStat label="Swing">{fmt(data.swing_low.price, 2)} → {fmt(data.swing_high.price, 2)}</FibStat>
+              <FibStat label="CMP">{fmt(data.cmp, 2)}{data.cmp_retracement_pct != null ? ` (${data.cmp_retracement_pct.toFixed(1)}%)` : ""}</FibStat>
+              {data.nearest_level_above && (
+                <FibStat label="Next resist">{data.nearest_level_above.pct.toFixed(1)}% @ {fmt(data.nearest_level_above.price, 2)}</FibStat>
+              )}
+              <span style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 7, padding: "5px 9px", color: C.muted }}>
+                {(data.is_live ? "live" : "EOD")} · {data.lookback_days || 0} bars
+              </span>
+            </div>
+            {data.commentary && (
+              <div style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.6, marginTop: 12, background: C.bg, borderRadius: 10, padding: "12px 14px" }}>
+                {data.commentary}
+              </div>
+            )}
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
+  const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
   const x = r.extras || {};
@@ -823,6 +951,7 @@ function GvmReport({ r, hist }) {
 
   return (
     <div style={{ paddingBottom: 80 }}>
+      {fibOpen && <FibPopout symbol={r.symbol} onClose={() => setFibOpen(false)} />}
       <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <button onClick={() => window.print()}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
@@ -887,7 +1016,13 @@ function GvmReport({ r, hist }) {
           </div>
 
           <div style={{ textAlign: "right", minWidth: 170 }}>
-            <div style={{ fontSize: 13, color: C.muted }}>CMP</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+              <div style={{ fontSize: 13, color: C.muted }}>CMP</div>
+              {/* cc#300: Fibcheck chart-icon popout (price-structure context lives next to CMP) */}
+              <button onClick={() => setFibOpen(true)} title="Fibonacci retracement"
+                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer",
+                  fontSize: 13, lineHeight: 1, color: C.accent, padding: "2px 6px" }}>📈</button>
+            </div>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(cmp, 1)}</div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
             {pos52 != null && (

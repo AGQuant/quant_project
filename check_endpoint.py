@@ -85,18 +85,30 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
     if not sym:
         return {"error": "symbol required"}
     # cc#269: map the horizon to a calendar-day window; anything unrecognised defaults to 3m.
-    days = _FIB_HORIZONS.get((lookback or "3m").lower().strip(), _FIB_HORIZONS["3m"])
+    # cc#300: 'all' = full history (drop the date filter entirely); swing hi/lo computed over
+    # the whole 5yr series. Everything downstream is window-size-agnostic and needs no change.
+    lb = (lookback or "3m").lower().strip()
+    is_all = lb == "all"
+    days = _FIB_HORIZONS.get(lb, _FIB_HORIZONS["3m"])
     try:
         with _fib_conn() as conn, conn.cursor() as cur:
             # EOD bars within the selected calendar-day window, oldest->newest. The date filter
             # bounds the set (no LIMIT); everything downstream is window-size-agnostic.
-            cur.execute("""
-                SELECT price_date, high, low, close
-                FROM raw_prices
-                WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL
-                  AND price_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
-                ORDER BY price_date ASC
-            """, (sym, days))
+            if is_all:
+                cur.execute("""
+                    SELECT price_date, high, low, close
+                    FROM raw_prices
+                    WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL
+                    ORDER BY price_date ASC
+                """, (sym,))
+            else:
+                cur.execute("""
+                    SELECT price_date, high, low, close
+                    FROM raw_prices
+                    WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL
+                      AND price_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+                    ORDER BY price_date ASC
+                """, (sym, days))
             rows = cur.fetchall()
             if len(rows) < 2:
                 return {"error": f"Not enough price history for {sym}"}
@@ -163,7 +175,7 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
 
         return {
             "symbol": sym,
-            "lookback": (lookback or "3m").lower().strip() if (lookback or "3m").lower().strip() in _FIB_HORIZONS else "3m",  # cc#269: echo the resolved horizon
+            "lookback": lb if (is_all or lb in _FIB_HORIZONS) else "3m",  # cc#269/300: echo resolved horizon (incl 'all')
             "lookback_days": len(rows),
             "swing_high": {"price": swing_high, "date": swing_high_date},
             "swing_low": {"price": swing_low, "date": swing_low_date},

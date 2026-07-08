@@ -77,20 +77,7 @@
   .side-btn.long.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
   .side-btn.short.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
   .side-btn.invest.on{border-color:var(--purp);background:var(--purp-d);color:var(--purp)}
-  .side-btn.fib.on{border-color:var(--cyan);background:var(--cyan-d);color:var(--cyan)}
-  /* cc#131 Fibcheck chart */
-  .fib-wrap{max-width:720px;margin:14px auto 0;background:var(--panel);border:1px solid var(--line);
-    border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;display:none}
-  .fib-wrap.show{display:block}
-  .fib-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .fib-title{font-size:14px;font-weight:800;color:var(--txt)}
-  .fib-sub{font-size:11px;color:var(--dim);font-family:var(--mono)}
-  .fib-svg{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:10px;background:var(--bg2)}
-  .fib-comment{font-size:12.5px;color:var(--mut);line-height:1.6;margin-top:12px;
-    background:var(--panel2);border-radius:10px;padding:12px 14px}
-  .fib-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;font-family:var(--mono);font-size:11px}
-  .fib-stat{background:var(--bg2);border:1px solid var(--line2);border-radius:7px;padding:5px 9px;color:var(--txt)}
-  .fib-stat b{color:var(--mut);font-weight:600}
+  /* cc#300: Fibcheck relocated to GVM report (scorr_cio_dashboard.html); its CSS/UI removed here. */
 
   .run-btn{width:100%;margin-top:12px;padding:13px;border:none;border-radius:9px;
     background:var(--blu);color:#fff;font-family:var(--font);font-size:14px;font-weight:700;
@@ -365,16 +352,8 @@
       <button class="side-btn long on"  id="btnLong"   onclick="setMode('LONG')">&#9650; LONG</button>
       <button class="side-btn short"    id="btnShort"  onclick="setMode('SHORT')">&#9660; SHORT</button>
       <button class="side-btn invest"   id="btnInvest" onclick="setMode('INVEST')">&#9670; INVEST</button>
-      <button class="side-btn fib"      id="btnFib"    onclick="setMode('FIBCHECK')">&#9651; FIBCHECK</button>
     </div>
-    <input id="fibEntry" class="sym-input" style="display:none;margin-top:9px" placeholder="Reference entry price (optional)" inputmode="decimal" autocomplete="off">
-    <!-- cc#269: Fibcheck horizon selector (replaces the old 120d/52w toggle). Default 3M. -->
-    <div id="fibHorizon" class="scr-tabs" style="display:none;margin-top:9px">
-      <button class="scr-tab"    id="fh1m"  onclick="setFibHorizon('1m')">1M</button>
-      <button class="scr-tab on" id="fh3m"  onclick="setFibHorizon('3m')">3M</button>
-      <button class="scr-tab"    id="fh6m"  onclick="setFibHorizon('6m')">6M</button>
-      <button class="scr-tab"    id="fh12m" onclick="setFibHorizon('12m')">12M</button>
-    </div>
+    <!-- cc#300: FIBCHECK button, entry-price input and horizon selector removed — Fibcheck now lives on the GVM report. -->
     <button class="run-btn" id="runBtn" onclick="run()">Run Trade Check</button>
     <button class="run-btn" id="screenBtn" onclick="runScreen()" style="margin-top:9px;background:var(--cyan);box-shadow:0 2px 8px rgba(8,145,178,.25)">&#8862; Future Scans</button>
     <div class="chips" id="chips"></div>
@@ -422,17 +401,7 @@
     <div class="foot" id="rFoot">Personal trade context &middot; not a V8 algo signal &middot; v3.4 &middot; &#9888; Spot price, not futures.</div>
   </div>
 
-  <!-- Fibcheck Result (cc_task #131) -->
-  <div class="fib-wrap" id="fibResult">
-    <div class="fib-head">
-      <span class="fib-title" id="fibTitle"></span>
-      <span class="fib-sub" id="fibSub"></span>
-    </div>
-    <div id="fibChart"></div>
-    <div class="fib-stats" id="fibStats"></div>
-    <div class="fib-comment" id="fibComment"></div>
-    <div class="foot">On-demand Fibonacci retracement &middot; selectable swing horizon &middot; spot EOD/live close &middot; cc#131</div>
-  </div>
+  <!-- cc#300: Fibcheck Result block removed — relocated to the GVM report popout. -->
 
   <!-- Room Left (task #12) — 1D structure room from /api/structure -->
   <style>
@@ -573,27 +542,17 @@ function renderChips(){
 function setMode(m){
   mode=m;
   const inv=(m==='INVEST');
-  const fib=(m==='FIBCHECK');
   document.getElementById('btnLong').className='side-btn long'+(m==='LONG'?' on':'');
   document.getElementById('btnShort').className='side-btn short'+(m==='SHORT'?' on':'');
   document.getElementById('btnInvest').className='side-btn invest'+(m==='INVEST'?' on':'');
-  document.getElementById('btnFib').className='side-btn fib'+(fib?' on':'');
   const runBtn=document.getElementById('runBtn');
   const pageTitle=document.getElementById('pageTitle');
   const pageSub=document.getElementById('pageSub');
-  document.getElementById('fibEntry').style.display=fib?'block':'none';
-  document.getElementById('fibHorizon').style.display=fib?'flex':'none';   // cc#269
   if(inv){
     runBtn.textContent='Run Investment Check';
     runBtn.classList.remove('invest-mode');runBtn.classList.add('invest-mode');
     pageTitle.innerHTML='Investment <span class="invest">Check</span>';
     pageSub.textContent='V1.0 · 12 RULES · GVM-NATIVE · MEDIUM-LONG TERM';
-  } else if(fib){
-    runBtn.textContent='Run Fibcheck';
-    runBtn.classList.remove('invest-mode');
-    pageTitle.innerHTML='Fib<span>check</span>';
-    // cc#269: reflect the selected horizon instead of hardcoding "120-DAY SWING".
-    pageSub.textContent='ON-DEMAND · FIBONACCI RETRACEMENT · '+fibHorizon.toUpperCase()+' SWING';
   } else {
     runBtn.textContent='Run Trade Check';
     runBtn.classList.remove('invest-mode');
@@ -604,7 +563,6 @@ function setMode(m){
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
   document.getElementById('roomCard').classList.remove('show');
-  document.getElementById('fibResult').classList.remove('show');
 }
 
 async function fetchAC(q){
@@ -687,16 +645,13 @@ async function run(){
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
   document.getElementById('roomCard').classList.remove('show');
-  document.getElementById('fibResult').classList.remove('show');
   document.getElementById('err').classList.remove('show');
   const ld=document.getElementById('loading');
   const inv=(mode==='INVEST');
-  const fib=(mode==='FIBCHECK');
   ld.className='loading show'+(inv?' invest-loading':'');
-  ld.textContent=inv?'Running Investment Check…':fib?'Drawing Fibonacci retracement…':'Computing v3.4…';
+  ld.textContent=inv?'Running Investment Check…':'Computing v3.4…';
   try{
     if(inv){ await runInvestCheck(sym); }
-    else if(fib){ await runFibcheck(sym); }
     else { await runTradeCheck(sym); }
   }catch(e){
     document.getElementById('loading').classList.remove('show');
@@ -728,98 +683,8 @@ async function runInvestCheck(sym){
   renderInvest(d);
 }
 
-// ── Fibcheck (cc_task #131): on-demand Fibonacci retracement ──
-// cc#269: horizon selector — 1W/1M/3M/5M/12M, default 3M. Clicking a horizon re-fetches
-// the current symbol; renderFib()/drawFibSvg() consume the response unchanged.
-let fibHorizon='3m';
-function setFibHorizon(h){
-  fibHorizon=h;
-  ['1m','3m','6m','12m'].forEach(k=>{const b=document.getElementById('fh'+k);if(b)b.className='scr-tab'+(k===h?' on':'');});
-  if(mode==='FIBCHECK'){const ps=document.getElementById('pageSub');if(ps)ps.textContent='ON-DEMAND · FIBONACCI RETRACEMENT · '+h.toUpperCase()+' SWING';}
-  // re-fetch only when a report is already on screen (run() reads the symbol + dispatches to fib)
-  if(document.getElementById('fibResult').classList.contains('show'))run();
-}
-async function runFibcheck(sym){
-  const epRaw=(document.getElementById('fibEntry').value||'').trim();
-  const ep=epRaw?parseFloat(epRaw.replace(/[^0-9.]/g,'')):null;
-  let url='/api/trade-check/fibcheck?symbol='+encodeURIComponent(sym)+'&lookback='+fibHorizon;   // cc#269
-  if(ep!=null&&!isNaN(ep)&&ep>0)url+='&entry_price='+ep;
-  const r=await fetch(url);
-  document.getElementById('loading').classList.remove('show');
-  if(!r.ok){showErr('Server error '+r.status+' — fibcheck failed.');return;}
-  let d;
-  try{d=await r.json();}catch(e){showErr('Bad response from server.');return;}
-  if(d.error){showErr(d.error);return;}
-  renderFib(d);
-}
-
-function _fmt(v,dp){return v==null||isNaN(v)?'—':Number(v).toFixed(dp==null?2:dp);}
-
-function drawFibSvg(d){
-  const W=720,H=380,L=10,R=82,T=18,B=26;
-  const ser=(d.series||[]).filter(p=>p.close!=null);
-  const n=ser.length; if(n<2)return'<div class="fib-sub">No price path available.</div>';
-  const fl=d.fib_levels||[];
-  const lo=d.swing_low.price, hi=d.swing_high.price, cmp=d.cmp, ep=d.entry_price;
-  const vals=ser.map(p=>p.close).concat([lo,hi]);
-  if(cmp!=null)vals.push(cmp); if(ep!=null)vals.push(ep);
-  let ymin=Math.min(...vals),ymax=Math.max(...vals);
-  const pad=(ymax-ymin)*0.05||1; ymin-=pad; ymax+=pad;
-  const xF=i=>L+(i/(n-1))*(W-L-R);
-  const yF=p=>T+(ymax-p)/(ymax-ymin)*(H-T-B);
-  // band split at the fib level nearest CMP
-  let split=hi;
-  if(cmp!=null&&fl.length){let bd=1e18;fl.forEach(f=>{const dd=Math.abs(f.price-cmp);if(dd<bd){bd=dd;split=f.price;}});}
-  let svg='<svg class="fib-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">';
-  // zone bands: teal below split (reclaimed), coral above split (remaining)
-  const ySplit=yF(split),yBot=yF(lo),yTop=yF(hi);
-  svg+='<rect x="'+L+'" y="'+ySplit.toFixed(1)+'" width="'+(W-L-R)+'" height="'+Math.max(0,(yBot-ySplit)).toFixed(1)+'" fill="#0e7490" opacity="0.06"/>';
-  svg+='<rect x="'+L+'" y="'+yTop.toFixed(1)+'" width="'+(W-L-R)+'" height="'+Math.max(0,(ySplit-yTop)).toFixed(1)+'" fill="#e2603a" opacity="0.07"/>';
-  // fib level dashed lines + right-margin labels
-  fl.forEach(f=>{const y=yF(f.price).toFixed(1);
-    svg+='<line x1="'+L+'" y1="'+y+'" x2="'+(W-R)+'" y2="'+y+'" stroke="#9aa7bd" stroke-width="1" stroke-dasharray="4 3"/>';
-    svg+='<text x="'+(W-R+4)+'" y="'+(parseFloat(y)+3.5)+'" font-size="10" font-family="monospace" fill="#5a6781">'+f.pct.toFixed(1)+'% · '+f.price.toFixed(2)+'</text>';
-  });
-  // price path (blue)
-  let dpath=ser.map((p,i)=>(i?'L':'M')+xF(i).toFixed(1)+' '+yF(p.close).toFixed(1)).join(' ');
-  svg+='<path d="'+dpath+'" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
-  // entry line (solid coral) + label
-  if(ep!=null){const ye=yF(ep).toFixed(1);
-    svg+='<line x1="'+L+'" y1="'+ye+'" x2="'+(W-R)+'" y2="'+ye+'" stroke="#e23744" stroke-width="1.6"/>';
-    svg+='<text x="'+(L+4)+'" y="'+(parseFloat(ye)-4)+'" font-size="10.5" font-family="monospace" font-weight="700" fill="#e23744">Entry '+ep.toFixed(2)+'</text>';
-  }
-  // CMP marker + leader label (at last point)
-  if(cmp!=null){const xl=xF(n-1),yc=yF(cmp);
-    // connector CMP -> entry (dashed vertical, arrow)
-    if(ep!=null){const ye=yF(ep);
-      svg+='<line x1="'+(xl-26).toFixed(1)+'" y1="'+yc.toFixed(1)+'" x2="'+(xl-26).toFixed(1)+'" y2="'+ye.toFixed(1)+'" stroke="#7c3aed" stroke-width="1.3" stroke-dasharray="3 2"/>';
-      const ax=(xl-26).toFixed(1),ay=(ye+(ye>yc?-5:5)).toFixed(1),s=(ye>yc?-1:1);
-      svg+='<path d="M'+ax+' '+ye.toFixed(1)+' l -3 '+(5*s)+' l 6 0 z" fill="#7c3aed"/>';
-      const dp=d.pct_distance_cmp_to_entry;
-      svg+='<text x="'+(xl-30).toFixed(1)+'" y="'+((yc+ye)/2).toFixed(1)+'" font-size="10" font-family="monospace" fill="#7c3aed" text-anchor="end">'+(dp!=null?(dp>=0?'+':'')+dp.toFixed(2)+'%':'')+'</text>';
-    }
-    svg+='<circle cx="'+xl.toFixed(1)+'" cy="'+yc.toFixed(1)+'" r="4" fill="#2563eb" stroke="#fff" stroke-width="1.5"/>';
-    svg+='<text x="'+(xl-6).toFixed(1)+'" y="'+(yc-7).toFixed(1)+'" font-size="11" font-family="monospace" font-weight="700" fill="#1c2536" text-anchor="end">CMP '+cmp.toFixed(2)+'</text>';
-  }
-  svg+='</svg>';
-  return svg;
-}
-
-function renderFib(d){
-  document.getElementById('fibTitle').textContent='Fibcheck — '+d.symbol;
-  document.getElementById('fibSub').textContent=(d.is_live?'live':'EOD')+' · '+(d.lookback_days||0)+'d swing';
-  document.getElementById('fibChart').innerHTML=drawFibSvg(d);
-  const st=[];
-  st.push('<span class="fib-stat"><b>Swing</b> '+_fmt(d.swing_low.price)+' → '+_fmt(d.swing_high.price)+'</span>');
-  st.push('<span class="fib-stat"><b>CMP</b> '+_fmt(d.cmp)+(d.cmp_retracement_pct!=null?' ('+d.cmp_retracement_pct.toFixed(1)+'%)':'')+'</span>');
-  if(d.nearest_level_above)st.push('<span class="fib-stat"><b>Next resist</b> '+d.nearest_level_above.pct.toFixed(1)+'% @ '+_fmt(d.nearest_level_above.price)+'</span>');
-  if(d.entry_price!=null)st.push('<span class="fib-stat"><b>Entry</b> '+_fmt(d.entry_price)+(d.entry_retracement_pct!=null?' ('+d.entry_retracement_pct.toFixed(1)+'%)':'')+'</span>');
-  if(d.pct_distance_cmp_to_entry!=null)st.push('<span class="fib-stat"><b>CMP→Entry</b> '+(d.pct_distance_cmp_to_entry>=0?'+':'')+d.pct_distance_cmp_to_entry.toFixed(2)+'%</span>');
-  document.getElementById('fibStats').innerHTML=st.join('');
-  document.getElementById('fibComment').textContent=d.commentary||'';
-  document.getElementById('fibResult').classList.add('show');
-  document.getElementById('fibResult').scrollIntoView({behavior:'smooth',block:'start'});
-}
+// cc#300: Fibcheck (setFibHorizon/runFibcheck/drawFibSvg/renderFib + _fmt helper) removed —
+// rebuilt natively in React on the GVM report (scorr_cio_dashboard.html).
 
 function showErr(m){const e=document.getElementById('err');e.textContent=m;e.classList.add('show');}
 
