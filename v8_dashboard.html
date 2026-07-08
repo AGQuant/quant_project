@@ -625,6 +625,30 @@ function openSectorDetail(segment){
   document.getElementById('infoModal').classList.add('open');
 }
 
+// cc#319: NIFTY 50 sector card click -> same infoModal/sortTbl, but the holdings (only the
+// NIFTY-50 stocks in that official NSE industry) come from the endpoint, not cache.metricsAll.
+async function openNifty50Detail(industry){
+  if(!industry)return;
+  document.getElementById('mTitle').textContent=industry;
+  document.getElementById('mSub').textContent='NIFTY 50 · loading…';
+  document.getElementById('mBody').innerHTML='';
+  document.getElementById('infoModal').classList.add('open');
+  let d;try{d=await getJSON('/api/v8/nifty50_sectors/'+encodeURIComponent(industry)+'/holdings');}
+  catch(e){document.getElementById('mBody').innerHTML='<div class="empty">Could not load holdings.</div>';return;}
+  const rows=(d&&d.holdings)||[];
+  document.getElementById('mSub').textContent=`${rows.length} NIFTY 50 stock${rows.length===1?'':'s'} · GVM · 1D / 1W / 1M returns`;
+  const body=sortTbl('n50detail',
+    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
+    rows,x=>`<tr>
+      <td class="sym" title="${(x.company||'').replace(/"/g,'&quot;')}">${x.symbol}</td>
+      <td style="font-family:'Space Mono'">${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
+      <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
+      <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
+      <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this industry",wrapClass:''});
+  document.getElementById('mBody').innerHTML=body;
+}
+
 // -- Core utils --------------------------------------------------------------
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
@@ -806,7 +830,8 @@ function renderMood(m){
   }
 }
 
-function sectorCards(sectors,title,label){
+function sectorCards(sectors,title,label,clickFn){
+  clickFn=clickFn||'openSectorDetail';   // cc#319: NIFTY 50 grid reuses this card, own click handler
   if(!sectors||!sectors.length)return`<div class="ptitle">${title} <span class="ct">${label}</span></div><div class="empty" style="padding:16px;font-size:12px">No data</div>`;
   const cards=sectors.map((s,i)=>{const pct=s.avg_day_1d;
     // cc#279: metric area redesigned to a VERTICAL STACK of 1D/1W/1M rows (label left, value
@@ -817,7 +842,7 @@ function sectorCards(sectors,title,label){
     const mrow=(lbl,v,vSize)=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">`+
       `<span style="color:var(--dim);font-size:10.5px">${lbl}</span>`+
       `<b style="font-family:'Space Mono';font-size:${vSize}px;color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
-    return`<div class="sec-card" style="cursor:pointer" data-seg="${s.segment}" onclick="openSectorDetail(this.dataset.seg)"><div class="sc-num">${i+1}</div>`+
+    return`<div class="sec-card" style="cursor:pointer" data-seg="${s.segment}" onclick="${clickFn}(this.dataset.seg)"><div class="sc-num">${i+1}</div>`+
       `<div class="sc-name" style="margin-top:14px">${s.segment}</div>`+
       `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px">`+
         mrow('1D',pct,14)+mrow('1W',s.sector_week,12)+mrow('1M',s.sector_month,12)+
@@ -1046,7 +1071,13 @@ function renderMaster(){
     `<div class="funnelGrid" style="margin-top:16px">
       <div>${sectorCards(top8,'Top Sectors','1D positive')}</div>
       <div>${sectorCards(bot8,'Bottom Sectors','1D negative')}</div>
-    </div>`;
+    </div>`+
+    // cc#319: NIFTY 50 Sectors — official NSE industries across the 50 constituents, single grid
+    // sorted 1D% desc. Populated by the /api/v8/nifty50_sectors job into cache.nifty50; renders
+    // once it lands (renderMasterPanels re-render). Card click -> openNifty50Detail holdings modal.
+    (cache.nifty50 && cache.nifty50.sectors && cache.nifty50.sectors.length
+      ? `<div style="margin-top:20px">${sectorCards(cache.nifty50.sectors,'NIFTY 50 Sectors','official NSE industry · '+cache.nifty50.sectors.length+' groups','openNifty50Detail')}</div>`
+      : "");
 }
 
 function renderFunnel(b){
@@ -1622,6 +1653,7 @@ async function loadAll(){
     run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
+    run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
   ];

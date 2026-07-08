@@ -2214,3 +2214,68 @@ def v8_indiavix_intraday():
         return {"points": points, "count": len(points)}
     except Exception as e:
         raise HTTPException(500, f"v8_indiavix_intraday failed: {e}")
+
+
+# ── cc#319: NIFTY 50 Sectors — official NSE industry groups over the 50 constituents ──────────
+# Reuses the EXACT sector-aggregate math the Top/Bottom Sector cards use (avg day_1d/week_return/
+# month_return from v8_metrics), just grouped by nifty50_constituents.industry and scoped to the
+# 50 NIFTY-50 symbols. Membership+industry come from nifty50_constituents (NSE CSV, cc#319).
+
+@router.get("/nifty50_sectors")
+def v8_nifty50_sectors():
+    """One card per official NSE industry across the NIFTY 50: avg 1D/1W/1M return + stock count,
+    sorted 1D% desc. Same field names the frontend sectorCards() consumes."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT nc.industry,
+                       COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL)      AS n,
+                       AVG(m.day_1d)      FILTER (WHERE m.day_1d IS NOT NULL),
+                       AVG(m.week_return) FILTER (WHERE m.week_return IS NOT NULL),
+                       AVG(m.month_return)FILTER (WHERE m.month_return IS NOT NULL)
+                FROM nifty50_constituents nc
+                LEFT JOIN v8_metrics m ON m.symbol = nc.symbol
+                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                GROUP BY nc.industry
+                HAVING COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL) > 0
+                ORDER BY AVG(m.day_1d) FILTER (WHERE m.day_1d IS NOT NULL) DESC NULLS LAST
+            """)
+            sectors = []
+            for industry, n, d1, wk, mo in cur.fetchall():
+                sectors.append({
+                    "segment": industry, "count": int(n),
+                    "avg_day_1d": round(float(d1), 2) if d1 is not None else None,
+                    "sector_week": round(float(wk), 2) if wk is not None else None,
+                    "sector_month": round(float(mo), 2) if mo is not None else None,
+                })
+        return {"sectors": sectors, "count": len(sectors)}
+    except Exception as e:
+        raise HTTPException(500, f"v8_nifty50_sectors failed: {e}")
+
+
+@router.get("/nifty50_sectors/{industry}/holdings")
+def v8_nifty50_sector_holdings(industry: str):
+    """The NIFTY-50 stocks in one official NSE industry, each with gvm_score + 1D/1W/1M — same
+    shape as the existing sector-detail modal, for the card click-through."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT nc.symbol, nc.company_name, m.gvm_score, m.day_1d, m.week_return, m.month_return
+                FROM nifty50_constituents nc
+                LEFT JOIN v8_metrics m ON m.symbol = nc.symbol
+                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                WHERE nc.industry = %s
+                ORDER BY m.day_1d DESC NULLS LAST
+            """, (industry,))
+            holdings = []
+            for sym, company, gvm, d1, wk, mo in cur.fetchall():
+                holdings.append({
+                    "symbol": sym, "company": company,
+                    "gvm_score": round(float(gvm), 2) if gvm is not None else None,
+                    "day_1d": round(float(d1), 2) if d1 is not None else None,
+                    "week_return": round(float(wk), 2) if wk is not None else None,
+                    "month_return": round(float(mo), 2) if mo is not None else None,
+                })
+        return {"industry": industry, "holdings": holdings, "count": len(holdings)}
+    except Exception as e:
+        raise HTTPException(500, f"v8_nifty50_sector_holdings failed: {e}")

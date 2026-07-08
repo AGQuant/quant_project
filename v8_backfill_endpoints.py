@@ -168,4 +168,32 @@ def sync_universe_endpoint(x_admin_token: str = Header(None)):
     except Exception as e:
         log.error(f"sync_universe lot audit failed: {e}")
         out["lot_size_audit_error"] = str(e)
+    # cc#319: ONE-TIME NIFTY 50 constituent+industry populate — only while the table is empty,
+    # so a routine universe sync never re-fetches NSE. Explicit refresh (after a NIFTY 50
+    # rebalance) goes through /api/v8/backfill/sync_nifty50.
+    try:
+        import nifty50_sync
+        with _conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM nifty50_constituents")
+                n = int(cur.fetchone()[0])
+            out["nifty50_sync"] = nifty50_sync.populate_nifty50(conn) if n == 0 else {"skipped": f"already {n} rows"}
+    except Exception as e:
+        log.error(f"sync_universe nifty50 populate failed: {e}")
+        out["nifty50_sync_error"] = str(e)
     return out
+
+
+@router.post("/sync_nifty50")
+def sync_nifty50_endpoint(x_admin_token: str = Header(None)):
+    """cc#319: one-time / manual NIFTY 50 constituent+industry populate from the NSE CSV into
+    nifty50_constituents. Re-run after a semi-annual NSE rebalance. No scheduler wiring."""
+    if x_admin_token != os.getenv("ADMIN_TOKEN"):
+        raise HTTPException(401, "Unauthorized")
+    try:
+        import nifty50_sync
+        with _conn() as conn:
+            return nifty50_sync.populate_nifty50(conn)
+    except Exception as e:
+        log.error(f"sync_nifty50 failed: {e}")
+        raise HTTPException(500, str(e))
