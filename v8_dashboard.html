@@ -153,6 +153,27 @@
     .desktop-only{display:block}
     table{min-width:640px}
   }
+  /* cc#331 P5: dashboard mobile pass */
+  @media(max-width:767px){
+    .tab{min-height:44px;display:inline-flex;align-items:center;font-size:12px}
+    /* edge-fade hint that the tab strip scrolls */
+    .tabs{-webkit-mask-image:linear-gradient(to right,transparent,#000 14px,#000 calc(100% - 14px),transparent);
+          mask-image:linear-gradient(to right,transparent,#000 14px,#000 calc(100% - 14px),transparent)}
+    /* mood gate: 4 gate pills wrap to a 2x2 grid instead of an overflowing row */
+    .moodChecks{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;justify-content:stretch}
+    .moodChecks>*{min-height:40px;display:flex;align-items:center;justify-content:center}
+    /* popouts never overflow the viewport */
+    .modal-box{width:min(94vw,720px)!important;max-width:min(94vw,720px)!important}
+  }
+  @media(max-width:480px){
+    .sec-cards{grid-template-columns:1fr 1fr}
+    /* modal -> bottom sheet, sticky close (modal-head is already position:sticky) */
+    .modal-overlay.open{align-items:flex-end}
+    .modal-box{width:100%!important;max-width:100%!important;max-height:92vh;border-radius:16px 16px 0 0}
+  }
+  @media(max-width:360px){
+    .sec-cards{grid-template-columns:1fr}
+  }
   .sym{font-family:'Sora';font-weight:600;color:var(--txt)}
   .seg{font-family:'Sora';font-size:11px;color:var(--mut);text-align:left}
   .pos{color:var(--grn)}.neg{color:var(--red)}
@@ -630,8 +651,11 @@ async function openNifty50Detail(industry){
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
 function setMasterSide(s){MASTER_SIDE=s;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
-let OPENPOS_VIEW='table';              // cc#274: Open Positions Table View / Ladder View toggle
-function setOpenPosView(v){OPENPOS_VIEW=v;const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
+// cc#274 Table/Ladder toggle. cc#331: Ladder is the default on phones (its cc#288 rows are
+// mobile-friendly); choice persists per device via localStorage.
+let OPENPOS_VIEW=(function(){try{var s=localStorage.getItem('v8_openpos_view');if(s)return s;}catch(e){}
+  return (window.innerWidth<=767)?'ladder':'table';})();
+function setOpenPosView(v){OPENPOS_VIEW=v;try{localStorage.setItem('v8_openpos_view',v);}catch(e){}const el=document.getElementById('panel0');if(el)el.innerHTML=renderMaster();}
 const cache={};
 async function getJSON(path){
   const r=await fetch(API_BASE+path,{headers:{'Accept':'application/json'}});
@@ -696,7 +720,11 @@ TAB_ORDER.forEach(panelIdx=>{
   tabsEl.appendChild(b);
 });
 function selectTab(i){
-  [...tabsEl.children].forEach(t=>t.classList.toggle('active',t.textContent===TAB_LABELS[i]));
+  [...tabsEl.children].forEach(t=>{
+    const on=t.textContent===TAB_LABELS[i];
+    t.classList.toggle('active',on);
+    if(on) try{t.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'});}catch(e){}  // cc#331: keep active tab visible
+  });
   [...panelsEl.children].forEach((p,j)=>p.classList.toggle('active',j===i));
   if(i===8&&!DAYLOG_LOADED)loadDayLog();
   if(i===12&&!FR_LOADED)loadForthcoming();   // cc#226
