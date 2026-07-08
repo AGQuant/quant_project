@@ -443,7 +443,84 @@ def _load_slot_full(basket: str) -> set:
         return set()
 
 
-def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: set) -> list:
+# cc#326: basket-tab 3-status taxonomy (OPEN / SIGNAL·reason / NEAR_MISS). Founder-locked
+# 08-Jul: tabs show only actionable truth. SLOT_FULL is folded into SIGNAL·slots; a symbol
+# whose trade already closed today (traded_today) is REMOVED — it is spent until tomorrow.
+def _ist_today_sql() -> str:
+    return "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"   # cc#325: closed_at/exit_ts are naive IST
+
+
+def _load_closed_today(basket: str) -> set:
+    """Symbols on this basket's side whose paper trade CLOSED today (IST) — spent for today.
+    Side-scoped, not basket-scoped: the engine's traded_today exclusion is symbol+side."""
+    side = "LONG" if basket.startswith("buy") else "SHORT"
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT DISTINCT symbol FROM v8_paper_trades
+                WHERE side=%s AND COALESCE(closed_at, exit_ts)::date = {_ist_today_sql()}
+            """, (side,))
+            return {r[0] for r in cur.fetchall()}
+    except Exception:
+        return set()
+
+
+def _load_conflict_syms(basket: str) -> set:
+    """Symbols with an OPEN position on the OPPOSITE side (incl prior-day) -> SIGNAL·conflict."""
+    opp = "SHORT" if basket.startswith("buy") else "LONG"
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT symbol FROM v8_paper_positions WHERE status='OPEN' AND side=%s", (opp,))
+            return {r[0] for r in cur.fetchall()}
+    except Exception:
+        return set()
+
+
+def _load_missed_reasons(basket: str) -> dict:
+    """Engine missed-reasons for today (IST) -> {symbol: raw_reason}. Canonical SIGNAL source."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(f"""SELECT symbol, reason FROM v8_paper_missed
+                            WHERE basket=%s AND miss_date = {_ist_today_sql()}""", (basket,))
+            return {r[0]: r[1] for r in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+_MISS_REASON_MAP = {
+    'slot_full': 'slots', 'slots': 'slots', 'slot_burst': 'slots',
+    'blackout': 'blackout', 'earnings': 'blackout',
+    'conflict': 'conflict', 'opposite_open': 'conflict', 'has_open': 'conflict',
+    'after_cutoff': 'cutoff', 'cutoff': 'cutoff',
+}
+
+
+def _signal_reason(sym, signal_ts, slot_full, missed, conflict_syms) -> str:
+    """Resolve the gate that blocked entry for a today-qualified, non-OPEN, non-traded-today row.
+    Priority: conflict (opposite-side open) > explicit engine missed-reason > slots > cutoff > slots."""
+    if sym in conflict_syms:
+        return 'conflict'
+    raw = missed.get(sym)
+    if raw and raw in _MISS_REASON_MAP:
+        return _MISS_REASON_MAP[raw]
+    if sym in slot_full:
+        return 'slots'
+    try:
+        if signal_ts is not None and hasattr(signal_ts, 'hour'):
+            if signal_ts.hour > 15 or (signal_ts.hour == 15 and signal_ts.minute >= 20):
+                return 'cutoff'
+    except Exception:
+        pass
+    return 'slots'   # slots is the dominant gate; a valid signal that didn't enter was slot-gated
+
+
+def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: set,
+                        closed_today: set = None, conflict_syms: set = None,
+                        missed: dict = None) -> list:
+    closed_today  = closed_today  or set()
+    conflict_syms = conflict_syms or set()
+    missed        = missed        or {}
+    out = []
     for s in stocks:
         sym = s.get("symbol", "")
         pos = open_pos.get(sym)
@@ -458,11 +535,19 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
             s["open_pnl_pct"] = float(pos["pnl_pct"])    if pos.get("pnl_pct")     else None
             s["open_target"]  = float(pos["target"])      if pos.get("target")      else None
             s["open_stop"]    = float(pos["stop_loss"])   if pos.get("stop_loss")   else None
-        elif sym in slot_full:
-            s["status"] = "SLOT_FULL"
-        elif s.get("status") != "NEAR_MISS":
-            s["status"] = "QUALIFIED"
-    return stocks
+            out.append(s)
+            continue
+        # cc#326: traded+closed today on this side -> spent, drop entirely (day log / trades is its home)
+        if sym in closed_today:
+            continue
+        if s.get("status") == "NEAR_MISS":
+            out.append(s)
+            continue
+        # everything surviving here qualified today but did not enter -> SIGNAL, gated
+        s["status"] = "SIGNAL"
+        s["signal_reason"] = _signal_reason(sym, s.get("signal_ts"), slot_full, missed, conflict_syms)
+        out.append(s)
+    return out
 
 
 def _inject_open_positions(cur, rows: list, basket: str, open_pos: dict) -> list:
@@ -1052,8 +1137,11 @@ def qualified(basket: str, response: Response, limit: int = 50):
     if basket == "buy_s1_bounce":   return _enrich_qualified_result(buy_s1_bounce_qualified(limit=limit))
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
-        open_pos  = _load_open_positions(basket)
-        slot_full = _load_slot_full(basket)
+        open_pos      = _load_open_positions(basket)
+        slot_full     = _load_slot_full(basket)
+        closed_today  = _load_closed_today(basket)      # cc#326
+        conflict_syms = _load_conflict_syms(basket)     # cc#326
+        missed        = _load_missed_reasons(basket)    # cc#326
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT q.symbol, q.gvm_score, q.cmp,
@@ -1107,7 +1195,8 @@ def qualified(basket: str, response: Response, limit: int = 50):
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
         with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
             rows = _inject_open_positions(cur, rows, basket, open_pos)
-        rows = _enrich_with_status(rows, basket, open_pos, slot_full)
+        rows = _enrich_with_status(rows, basket, open_pos, slot_full,
+                                   closed_today, conflict_syms, missed)   # cc#326
         extra = {}
         if basket == "buy_momentum":
             regime, nifty_1m = _get_nifty_regime()
@@ -1781,8 +1870,11 @@ def s1b_stock_passcount():
 @router.get("/buy_s1_bounce")
 def buy_s1_bounce_qualified(limit: int = 50):
     try:
-        open_pos  = _load_open_positions("buy_s1_bounce")
-        slot_full = _load_slot_full("buy_s1_bounce")
+        open_pos      = _load_open_positions("buy_s1_bounce")
+        slot_full     = _load_slot_full("buy_s1_bounce")
+        closed_today  = _load_closed_today("buy_s1_bounce")      # cc#326
+        conflict_syms = _load_conflict_syms("buy_s1_bounce")     # cc#326
+        missed        = _load_missed_reasons("buy_s1_bounce")    # cc#326
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT q.symbol, q.gvm_score, q.cmp,
@@ -1820,7 +1912,8 @@ def buy_s1_bounce_qualified(limit: int = 50):
             r['status']  = r.pop('stored_status', None) or 'QUALIFIED'
         with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
             rows = _inject_open_positions(cur, rows, "buy_s1_bounce", open_pos)
-        rows = _enrich_with_status(rows, "buy_s1_bounce", open_pos, slot_full)
+        rows = _enrich_with_status(rows, "buy_s1_bounce", open_pos, slot_full,
+                                   closed_today, conflict_syms, missed)   # cc#326
         return {
             "basket": "buy_s1_bounce", "count": len(rows),
             "target": "+1.5% fixed from entry", "stop": "-1.5% fixed from entry",
@@ -1834,8 +1927,11 @@ def buy_s1_bounce_qualified(limit: int = 50):
 @router.get("/sell_overbought")
 def sell_overbought(limit: int = 50):
     try:
-        open_pos  = _load_open_positions("sell_overbought")
-        slot_full = _load_slot_full("sell_overbought")
+        open_pos      = _load_open_positions("sell_overbought")
+        slot_full     = _load_slot_full("sell_overbought")
+        closed_today  = _load_closed_today("sell_overbought")      # cc#326
+        conflict_syms = _load_conflict_syms("sell_overbought")     # cc#326
+        missed        = _load_missed_reasons("sell_overbought")    # cc#326
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 WITH pivots AS (
@@ -1892,7 +1988,8 @@ def sell_overbought(limit: int = 50):
         for r in rows: r["status"] = "QUALIFIED"
         with _conn() as conn, conn.cursor() as cur:      # cc#240: inject prior-day OPEN positions
             rows = _inject_open_positions(cur, rows, "sell_overbought", open_pos)
-        rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full)
+        rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full,
+                                   closed_today, conflict_syms, missed)   # cc#326
         return {"basket": "sell_overbought", "count": len(rows),
                 "target": "S1", "stop": "R2",
                 "slot_architecture": "Dedicated ring-fenced: 4 (Bull/Neutral) / 3 (Bearish)",
