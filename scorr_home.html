@@ -77,6 +77,11 @@
   /* cc#302: within-side weight — subtle secondary pill on the qty/val/pct line */
   .sg-wt{font-family:monospace;font-weight:700;font-size:10px;color:var(--mut);
     background:#f1f5f9;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+  /* cc#303: Long/Short value row (2-up) + neutral value color + group sub-header */
+  .sg-buckets-2{grid-template-columns:repeat(2,1fr);margin-top:-6px}
+  .sg-val-neu{color:var(--txt,#1c2536)}
+  .sg-grp{font-size:9.5px;font-weight:800;color:var(--mut);text-transform:uppercase;
+    letter-spacing:.07em;margin:10px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--line)}
 
   .sg-meta{font-size:11px;color:var(--dim);margin-top:10px}
   .sg-loading{color:var(--dim);font-size:12px;font-style:italic}
@@ -200,6 +205,17 @@
       <div class="sg-bucket">
         <div class="sg-bk-label">Brokerage</div>
         <div class="sg-bk-val" id="sg-brokerage">&mdash;</div>
+      </div>
+    </div>
+    <!-- cc#303: Long/Short open value totals (values-only, live SUM(qty*ltp) per side) -->
+    <div class="sg-buckets sg-buckets-2" id="sg-buckets-2" style="display:none">
+      <div class="sg-bucket">
+        <div class="sg-bk-label">Long Value</div>
+        <div class="sg-bk-val sg-val-neu" id="sg-long-val">&mdash;</div>
+      </div>
+      <div class="sg-bucket">
+        <div class="sg-bk-label">Short Value</div>
+        <div class="sg-bk-val sg-val-neu" id="sg-short-val">&mdash;</div>
       </div>
     </div>
     <div class="sg-positions" id="sg-positions"></div>
@@ -391,7 +407,37 @@ async function loadSG() {
     rows.forEach(p => {
       if (p.ltp != null && p.qty != null && sideTotal[p.direction] != null) sideTotal[p.direction] += p.ltp * p.qty;
     });
-    document.getElementById("sg-positions").innerHTML = rows.map(p => {
+
+    // cc#303 (A): Long Value / Short Value front-card totals = SUM(qty*ltp) per direction
+    // (same live basis as the weight pills). Values-only, no utilization %.
+    document.getElementById("sg-long-val").textContent  = "₹" + f0(sideTotal.LONG);
+    document.getElementById("sg-short-val").textContent = "₹" + f0(sideTotal.SHORT);
+    document.getElementById("sg-buckets-2").style.display = "grid";
+
+    // cc#303 (B): group LONGs first then SHORTs; within each group sort by signed gain%
+    // descending (best performer on top). gain% = the same signed % shown on each card;
+    // positions with no live LTP sort last within their group.
+    const gainPct = p => {
+      if (p.ltp != null && p.entry_price != null && p.entry_price !== 0) {
+        return p.direction === "LONG" ? (p.ltp - p.entry_price) / p.entry_price * 100
+                                      : (p.entry_price - p.ltp) / p.entry_price * 100;
+      }
+      return null;
+    };
+    rows.sort((a, b) => {
+      const dr = (a.direction === "LONG" ? 0 : 1) - (b.direction === "LONG" ? 0 : 1);
+      if (dr !== 0) return dr;
+      const ga = gainPct(a), gb = gainPct(b);
+      if (ga == null && gb == null) return 0;
+      if (ga == null) return 1;
+      if (gb == null) return -1;
+      return gb - ga;   // signed gain% descending
+    });
+
+    document.getElementById("sg-positions").innerHTML = rows.map((p, i) => {
+      // cc#303: subtle group sub-header at each LONG/SHORT boundary
+      const grpHdr = (i === 0 || rows[i - 1].direction !== p.direction)
+        ? `<div class="sg-grp">${p.direction === "LONG" ? "Long" : "Short"}</div>` : "";
       // cc#161: pricing_method="unavailable" means ltp/mtm were deliberately
       // withheld (stale spot fallback or a structurally fut-less symbol, e.g.
       // NIFTY pre-cc#162) -- never present a wrong/blank number, show why.
@@ -419,7 +465,7 @@ async function loadSG() {
       const wt = (val != null && sideTot > 0) ? (val / sideTot * 100) : null;
       const wtTxt = wt != null ? "Wt " + wt.toFixed(1) + "%" : "";
 
-      return `<div class="sg-row">
+      return grpHdr + `<div class="sg-row">
         <div class="sg-row-top">
           <span class="sg-sym">${p.symbol}</span>
           <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
