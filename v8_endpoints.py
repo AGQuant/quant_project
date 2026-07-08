@@ -2185,9 +2185,11 @@ def v8_global_indices():
 
 @router.get("/indiavix_intraday")
 def v8_indiavix_intraday():
-    """cc#266: INDIAVIX hourly points (xx:15, 09:15-15:15) across the most recent 5 TRADING
-    days (rolling window, auto-advances daily) for the Master Dashboard VIX line chart.
-    Missing marks are skipped, never interpolated."""
+    """cc#266/318: INDIAVIX at TRUE 5-MIN resolution (every bar 09:15-15:30) across the most
+    recent 5 TRADING days (rolling window, auto-advances daily) for the Master Dashboard VIX line
+    chart. cc#318 dropped the old xx:15 hourly filter so a missing :15 bar can no longer make the
+    inline value / chart last-point lag behind the freshest tick; the last element is always the
+    latest bar. Missing bars are simply absent, never interpolated."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -2201,7 +2203,6 @@ def v8_indiavix_intraday():
                 FROM intraday_prices
                 WHERE symbol='INDIAVIX' AND source='fyers_eq'
                   AND ts::date IN (SELECT d FROM days)
-                  AND EXTRACT(MINUTE FROM ts) = 15
                   AND EXTRACT(HOUR FROM ts) BETWEEN 9 AND 15
                 ORDER BY ts ASC
             """)

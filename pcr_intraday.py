@@ -254,10 +254,12 @@ def get_pcr_intraday(underlying="NIFTY", days=2, conn=None):
 
 
 def get_pcr_intraday_hourly(underlying="NIFTY", conn=None):
-    """cc#290: total PCR (pcr_total) at the xx:15 hourly mark (09:15-15:15) across the most
-    recent 5 TRADING days (rolling window, auto-advances daily). Mirrors the
-    /api/v8/indiavix_intraday 5-day/hourly rollup exactly, applied to pcr_intraday. Missing
-    marks are skipped, never interpolated. Single series (total PCR, not the ATM±5 breakdown)."""
+    """cc#290/318: total PCR (pcr_total) at TRUE 5-MIN resolution (every bar 09:15-15:30)
+    across the most recent 5 TRADING days (rolling window, auto-advances daily). cc#318 dropped
+    the old xx:15 hourly filter: a missing :15 bar (an option-feed gap) silently fell back to the
+    last successful :15 mark, so the inline value + chart last-point could lag ~an hour behind the
+    fresh data already in pcr_intraday. Full 5-min granularity makes the last element always the
+    freshest bar. Missing bars are simply absent, never interpolated. Name kept for compatibility."""
     own = conn is None
     if own:
         conn = get_conn()
@@ -275,7 +277,6 @@ def get_pcr_intraday_hourly(underlying="NIFTY", conn=None):
                 FROM pcr_intraday
                 WHERE underlying = %s
                   AND ts::date IN (SELECT d FROM days)
-                  AND EXTRACT(MINUTE FROM ts) = 15
                   AND EXTRACT(HOUR FROM ts) BETWEEN 9 AND 15
                 ORDER BY ts ASC
             """, (ul, ul))
