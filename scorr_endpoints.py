@@ -217,8 +217,12 @@ def smartgain_m2m():
                     (SELECT vp.basket FROM v8_paper_positions vp
                       WHERE vp.symbol = h.symbol AND vp.side = h.direction
                         AND vp.status = 'OPEN' LIMIT 1)                      AS v8_basket,
-                    h.source_tag                                            AS source_tag   -- cc#312
+                    -- cc#317: row-level override wins, else the symbol-level tag (symbol_tags,
+                    -- applies to every position of that symbol across all books), else (frontend)
+                    -- V8-basket, else Undefined.
+                    COALESCE(h.source_tag, st.source_tag)                    AS source_tag
                 FROM open_book h
+                LEFT JOIN symbol_tags st ON st.symbol = h.symbol
                 LEFT JOIN LATERAL (
                     SELECT
                         c.spot_ltp, c.basis, c.fut_close,
@@ -432,9 +436,10 @@ def clients_positions():
                        (SELECT vp.basket FROM v8_paper_positions vp
                          WHERE vp.symbol = cp.symbol AND vp.side = cp.direction
                            AND vp.status = 'OPEN' LIMIT 1)                    AS v8_basket,
-                       cp.source_tag                                        AS source_tag
+                       COALESCE(cp.source_tag, st.source_tag)               AS source_tag   -- cc#317
                 FROM client_positions cp
                 LEFT JOIN futures_universe fu ON fu.symbol = cp.symbol
+                LEFT JOIN symbol_tags st ON st.symbol = cp.symbol           -- cc#317 symbol-level tag
                 WHERE cp.status = 'OPEN'
                 ORDER BY cp.client, cp.symbol
             """)
@@ -637,9 +642,10 @@ def test_positions():
                        (SELECT vp.basket FROM v8_paper_positions vp
                          WHERE vp.symbol = cp.symbol AND vp.side = cp.direction
                            AND vp.status = 'OPEN' LIMIT 1)                    AS v8_basket,
-                       cp.source_tag                                        AS source_tag
+                       COALESCE(cp.source_tag, st.source_tag)               AS source_tag   -- cc#317
                 FROM test_positions cp
                 LEFT JOIN futures_universe fu ON fu.symbol = cp.symbol
+                LEFT JOIN symbol_tags st ON st.symbol = cp.symbol           -- cc#317 symbol-level tag
                 WHERE cp.status = 'OPEN'
                 ORDER BY cp.entity, cp.symbol
             """)
