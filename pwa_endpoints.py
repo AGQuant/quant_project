@@ -551,6 +551,118 @@ body{font-family:var(--mux-font);}
 @media(max-width:480px){
   .stack-480{display:grid !important;grid-template-columns:1fr !important;gap:8px;}
 }
+
+/* ==========================================================================
+   cc#330 P4 — shared mobile TABLE pattern (.mtable). Pages adopt by markup:
+     <div class="tw mtable-wrap"><table class="mtable"> ... </table></div>
+     mark each <th>/<td> with data-pri 1|2|3 (col 1 = identity, never hidden).
+   mobile_tables.js wires: edge-fade affordances, row-tap expand-all-fields.
+   ========================================================================== */
+.mtable-wrap{position:relative;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.mtable-wrap::-webkit-scrollbar{height:5px}
+.mtable-wrap::-webkit-scrollbar-thumb{background:rgba(120,130,150,.4);border-radius:3px}
+/* left/right edge fades — JS toggles .can-l/.can-r when scrollable that way */
+.mtable-wrap::before,.mtable-wrap::after{content:'';position:absolute;top:0;bottom:0;width:22px;
+  pointer-events:none;z-index:5;opacity:0;transition:opacity .15s}
+.mtable-wrap::before{left:0;background:linear-gradient(to right,rgba(255,255,255,.96),rgba(255,255,255,0))}
+.mtable-wrap::after{right:0;background:linear-gradient(to left,rgba(255,255,255,.96),rgba(255,255,255,0))}
+.mtable-wrap.can-l::before{opacity:1}
+.mtable-wrap.can-r::after{opacity:1}
+/* first column sticky so the row keeps its identity while scrolling */
+.mtable th:first-child,.mtable td:first-child{position:sticky;left:0;z-index:2;
+  background:var(--mtable-bg,#fff);box-shadow:2px 0 5px -3px rgba(0,0,0,.25)}
+.mtable thead th{position:sticky;top:0;z-index:3;background:var(--mtable-bg,#fff)}
+.mtable thead th:first-child{z-index:4}
+/* JS-injected expand row: every field as label:value */
+.mtable-detail>td{background:#f6f8fb;padding:10px 12px}
+.mtable-detail dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:12.5px}
+.mtable-detail dt{color:#5a6781;font-weight:600;white-space:nowrap}
+.mtable-detail dd{margin:0;font-weight:700;text-align:right}
+.mtable .mchev{display:none;color:#94a3b8;transition:transform .15s}
+@media(max-width:767px){
+  .mtable th,.mtable td{white-space:nowrap}
+  .mtable thead th{height:44px;font-size:12px;vertical-align:middle}
+  .mtable thead th .arrow{font-size:12px}
+  .mtable tr.mrow-exp{cursor:pointer}
+  .mtable .mchev{display:inline-block;margin-left:5px}
+  .mtable tr.mrow-exp.open .mchev{transform:rotate(90deg)}
+}
+@media(max-width:480px){ .mtable [data-pri="3"]{display:none} }
+@media(max-width:390px){ .mtable [data-pri="2"]{display:none} }
+"""
+
+# cc#330 P4 — shared table helper: edge-fade affordances + row-tap expand.
+# Served at /mobile_tables.js and injected site-wide alongside mobile.css.
+MOBILE_TABLES_JS = """
+(function () {
+  if (window.__scorrMTables) return; window.__scorrMTables = true;
+
+  function initWrap(w) {
+    if (w.__mwrap) return; w.__mwrap = true;
+    function upd() {
+      var sl = w.scrollLeft, max = w.scrollWidth - w.clientWidth;
+      w.classList.toggle('can-l', sl > 1);
+      w.classList.toggle('can-r', sl < max - 1);
+    }
+    w.addEventListener('scroll', upd, {passive: true});
+    window.addEventListener('resize', upd);
+    upd();
+  }
+
+  function initTable(t) {
+    var heads = [].map.call(t.querySelectorAll('thead th'), function (th) {
+      var c = th.cloneNode(true); var a = c.querySelector('.arrow'); if (a) a.remove();
+      return c.textContent.trim();
+    });
+    var body = t.tBodies[0]; if (!body) return;
+    [].forEach.call(body.rows, function (row) {
+      if (row.classList.contains('mtable-detail') || row.__mwired) return;
+      row.__mwired = true;
+      var f = row.cells[0];
+      if (f && !f.querySelector('.mchev')) {
+        var c = document.createElement('span'); c.className = 'mchev'; c.innerHTML = '\\u203a';
+        f.appendChild(c);
+      }
+      row.classList.add('mrow-exp');
+      row.addEventListener('click', function (e) {
+        if (e.target.closest('a,button,input,select,[onclick]')) return;
+        toggle(row);
+      });
+    });
+    function toggle(row) {
+      if (row.classList.contains('open')) {
+        row.classList.remove('open');
+        if (row._detail && row._detail.parentNode) row._detail.parentNode.removeChild(row._detail);
+        row._detail = null; return;
+      }
+      row.classList.add('open');
+      var tr = document.createElement('tr'); tr.className = 'mtable-detail';
+      var td = document.createElement('td'); td.colSpan = row.cells.length;
+      var dl = '<dl>';
+      [].forEach.call(row.cells, function (cell, i) {
+        var label = heads[i] || ''; if (!label) return;
+        dl += '<dt>' + label + '</dt><dd>' + cell.textContent.trim() + '</dd>';
+      });
+      dl += '</dl>'; td.innerHTML = dl; tr.appendChild(td);
+      row.parentNode.insertBefore(tr, row.nextSibling);
+      row._detail = tr;
+    }
+  }
+
+  function scan() {
+    [].forEach.call(document.querySelectorAll('.mtable-wrap'), initWrap);
+    [].forEach.call(document.querySelectorAll('table.mtable'), initTable);
+  }
+
+  var pending = null;
+  function scanSoon() { if (pending) return; pending = setTimeout(function () { pending = null; scan(); }, 150); }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scan);
+  else scan();
+  if (window.MutationObserver) {
+    new MutationObserver(scanSoon).observe(document.body, {childList: true, subtree: true});
+  }
+})();
 """
 
 
@@ -600,3 +712,9 @@ def pwa_mobile_css():
     # cc#327: served no-cache during the MOBILE_UX_REDEFINE_V1 program so later
     # tasks' edits propagate immediately; not in the SW SHELL (avoids stale cache).
     return Response(MOBILE_CSS, media_type="text/css", headers=_NOCACHE)
+
+
+@router.get("/mobile_tables.js")
+def pwa_mobile_tables_js():
+    # cc#330 P4: shared table helper, injected site-wide alongside mobile.css.
+    return Response(MOBILE_TABLES_JS, media_type="application/javascript", headers=_NOCACHE)

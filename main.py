@@ -152,6 +152,7 @@ _MOBILE_HEAD = (
     b'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
     b'<link rel="stylesheet" href="/static/mobile.css">'
+    b'<script src="/mobile_tables.js" defer></script>'   # cc#330 P4: shared table helper
 )
 
 @app.middleware("http")

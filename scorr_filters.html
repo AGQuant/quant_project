@@ -222,12 +222,13 @@ function pctCell(v,d=2){
 }
 function numCell(v,d=1){return v==null?'<span class="nt">--</span>':v.toFixed(d);}
 
+// cc#330 P4: data-pri column priority — 1=always (identity+key), 2=hide<=390, 3=hide<=480
 const HEAD_COLS=[
-  {key:'symbol',   label:'Stock'},
-  {key:'day_pct',  label:'Day Change%'},
-  {key:'cmp',      label:'CMP'},
-  {key:'gvm_score',label:'GVM'},
-  {key:'segment',  label:'Segment'},
+  {key:'symbol',   label:'Stock',      pri:1},
+  {key:'day_pct',  label:'Day Change%',pri:1},
+  {key:'cmp',      label:'CMP',        pri:2},
+  {key:'gvm_score',label:'GVM',        pri:1},
+  {key:'segment',  label:'Segment',    pri:3},
 ];
 
 function renderTable(){
@@ -247,22 +248,22 @@ function renderTable(){
   HEAD_COLS.forEach(c=>{
     const sorted=c.key===SORT_KEY;
     const arrow=sorted?(SORT_DIR===1?'&#9650;':'&#9660;'):'';
-    head+='<th class="'+(sorted?'sorted':'')+'" onclick="onSort(\''+c.key+'\')">'+c.label+'<span class="arrow">'+arrow+'</span></th>';
+    head+='<th class="'+(sorted?'sorted':'')+'" data-pri="'+c.pri+'" onclick="onSort(\''+c.key+'\')">'+c.label+'<span class="arrow">'+arrow+'</span></th>';
   });
   head+='</tr>';
 
   const body=matched.map(r=>{
     return '<tr>'+
-      '<td class="sym">'+r.symbol+'</td>'+
-      '<td>'+pctCell(r.day_pct)+'</td>'+
-      '<td class="muted">'+(r.cmp==null?'--':Number(r.cmp).toLocaleString('en-IN',{maximumFractionDigits:2}))+'</td>'+
-      '<td class="muted">'+numCell(r.gvm_score,2)+'</td>'+
-      '<td class="muted seg">'+(r.segment||'--')+'</td>'+
+      '<td class="sym" data-pri="1">'+r.symbol+'</td>'+
+      '<td data-pri="1">'+pctCell(r.day_pct)+'</td>'+
+      '<td class="muted" data-pri="2">'+(r.cmp==null?'--':Number(r.cmp).toLocaleString('en-IN',{maximumFractionDigits:2}))+'</td>'+
+      '<td class="muted" data-pri="1">'+numCell(r.gvm_score,2)+'</td>'+
+      '<td class="muted seg" data-pri="3">'+(r.segment||'--')+'</td>'+
       '</tr>';
   }).join('');
 
   document.getElementById('f-tbl').innerHTML = matched.length
-    ? ('<div class="tw"><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>')
+    ? ('<div class="tw mtable-wrap"><table class="mtable"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>')
     : '<div class="empty">No stocks match the active filters</div>';
 }
 
