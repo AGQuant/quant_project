@@ -106,6 +106,7 @@ _intraday_paper_running = False
 _tc_lite_running = False                          # cc_task #77: TC Lite screener pass guard
 _smartgain_mtm_running = False                    # cc#123: SmartGain live MTM refresh guard
 _fu_sync_ran_this_week: Optional[date] = None
+_lot_sync_ran_today: Optional[date] = None   # cc#314: nightly Fyers lot-size audit day-lock
 _v8_paper_exit_running = False                   # cc_task #72 bug_0: live exit pass guard
 _v8_paper_exit_eod_ran: Optional[date] = None    # cc_task #72 bug_0: EOD fallback day-lock
 _premarket_check_ran: Optional[date] = None      # cc_task #72 bug_1: 09:10 check day-lock
@@ -979,18 +980,30 @@ def _bg_fu_sync():
         with _conn() as conn:
             fyers_sync.sync_futures_universe(conn)
             _log_health(conn, "fu_sync", {"date": str(today)})  # cc#255
-        # cc#308: also refresh lot_size from the Fyers NSE_FO master (was frozen forever,
-        # so an NSE lot revision at expiry was never picked up). Runs independently.
-        try:
-            import lot_sync
-            with _conn() as conn:
-                rep = lot_sync.audit_and_fix_lots(conn, apply=True)
-            log.info(f"fu_sync lot audit: {rep.get('applied')} lots corrected, {rep.get('changed_count')} stale")
-        except Exception as e:
-            log.error(f"fu_sync lot audit: {e}")
+        # cc#314: the lot_size audit moved to its own NIGHTLY job (_bg_lot_sync, ~01:05 IST)
+        # so an NSE lot revision at expiry is picked up within ~1 day, not up to 6 (Monday-only).
+        # Membership add/remove stays weekly here.
         _fu_sync_ran_this_week = today
         log.info("fu_sync done")
     except Exception as e: log.error(f"fu_sync: {e}")
+
+
+def _bg_lot_sync():
+    """cc#314: NIGHTLY Fyers lot-size audit/correction (~01:05 IST). Day-locked. Keeps
+    futures_universe.lot_size <=~1 day stale (was Monday-only inside _bg_fu_sync, up to 6 days
+    stale after an expiry-day lot revision -> mis-sized V8 paper + client qty). Idempotent."""
+    global _lot_sync_ran_today
+    today = _ist_now().date()
+    if _lot_sync_ran_today == today: return
+    try:
+        import lot_sync
+        with _conn() as conn:
+            rep = lot_sync.audit_and_fix_lots(conn, apply=True)
+            _log_health(conn, "lot_sync", {"date": str(today), "applied": rep.get("applied"),
+                                           "changed": rep.get("changed_count")})
+        _lot_sync_ran_today = today
+        log.info(f"lot_sync: {rep.get('applied')} lots corrected, {rep.get('changed_count')} stale")
+    except Exception as e: log.error(f"lot_sync: {e}")
 
 def _bg_fetch_global():
     global _global_fetching
@@ -1235,6 +1248,7 @@ async def _scheduler_loop():
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
         # 15-min spacing gives each job runway; order preserves deps (prices→QB→GVM→pivots).
         if h == 1 and m == 0:   _spawn(_bg_yahoo_daily_sync)
+        if h == 1 and m == 5:   _spawn(_bg_lot_sync)   # cc#314: nightly Fyers lot-size audit (day-locked)
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 30:  _spawn(_bg_gvm)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
