@@ -364,15 +364,23 @@ def smartgain_m2m():
             # closes with Arpit's other trades (cross-contamination), and BUG C left it empty
             # so this tile read +0.00 all session. All three realised endpoints (/m2m,
             # /daily_m2m week card, /daily_m2m?range=1w) now read this same replay -> identical.
-            from smartgain_daily_m2m import current_week_realised
+            from smartgain_daily_m2m import current_week_realised, current_week_brokerage
             realised = current_week_realised("MHK40")
 
-            # ── TOTAL: headline number = realised + unrealised ──
-            total = round(realised + unrealised, 2)
+            # ── GROSS: realised + unrealised ──
+            gross = round(realised + unrealised, 2)
+
+            # ── cc#301: brokerage (this week, live estimate) + NET = gross - brokerage.
+            # Standing rule: Gross / Brokerage / Net must always be shown as three separate
+            # line items, never netted silently. `total` stays = gross for byte-compat with
+            # older consumers; the web surfaces now headline `net`.
+            brokerage = current_week_brokerage("MHK40")
+            net = round(gross - brokerage, 2)
 
             return {
                 "account": "MHK40", "positions": rows,
-                "realised": realised, "unrealised": unrealised, "total": total,
+                "realised": realised, "unrealised": unrealised, "total": gross,
+                "gross": gross, "brokerage": brokerage, "net": net,   # cc#301
                 "total_mtm": unrealised,  # back-compat: old field == unrealised bucket
                 "position_count": len(rows), "last_updated": last_updated,
                 "data_source": "live_fyers" if any_live else "holdings",

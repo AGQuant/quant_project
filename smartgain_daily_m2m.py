@@ -286,10 +286,15 @@ def _daily_range(cur, account, rng, today):
         prev_unreal = unreal
 
     open_pos = _open_positions(cur, end_books, today)
+    total_m2m = round(sum(s["m2m"] for s in series), 2)
+    brokerage = _range_brokerage(cur, account, window[0] if window else start, end)   # cc#301
     return {
         "account": account, "range": rng, "mode": mode, "x_type": "date",
         "from_date": str(inception), "series": series,
-        "total_m2m": round(sum(s["m2m"] for s in series), 2),
+        "total_m2m": total_m2m,
+        "total_gross": total_m2m,                       # cc#301 alias
+        "total_brokerage": brokerage,                   # cc#301 live estimate over window
+        "total_net": round(total_m2m - brokerage, 2),   # cc#301
         "total_realised": round(sum(s["realised"] for s in series), 2),
         "closed_all": _closed_all_display(closed),
         "open_positions": open_pos,
@@ -482,15 +487,72 @@ def _week_response(week_start, account):
         mismatch = _holdings_mismatch(cur, account, open_out)
         if mismatch:
             notes.append("replay/holdings mismatch — an orderbook batch is likely missing from smartgain_orders")
+        # cc#301: Gross = realised + unrealised (= week_m2m, unchanged for byte-compat).
+        # Net = Gross - brokerage. Historical weeks read the stored screenshot brokerage;
+        # the current open week reads the live per-fill estimate.
+        week_gross = round(sum(x["m2m"] for x in days_out), 2)
+        brokerage, brok_source = _week_brokerage(cur, account, ws, week_days[-1])
     return {
         "account": account, "week_start": str(ws), "week_end": str(week_days[-1]),
         "opening_positions": opening, "days": days_out,
-        "week_m2m": round(sum(x["m2m"] for x in days_out), 2),
+        "week_m2m": week_gross,
         "week_realised": round(sum(x["realised"] for x in days_out), 2),
+        "week_gross": week_gross,                                  # cc#301 alias of week_m2m
+        "week_brokerage": brokerage,                              # cc#301
+        "week_brokerage_source": brok_source,                    # cc#301: snapshot | live_estimate
+        "week_net": round(week_gross - brokerage, 2),            # cc#301
         "closed_positions": closed, "open_positions": open_out,
         "holdings_mismatch": mismatch, "notes": notes,
         "computed_at": datetime.utcnow().isoformat() + "Z",
     }
+
+
+# ── cc#301: brokerage (Net P&L must always be shown as Gross / Brokerage / Net) ──
+# Standing rule (Arpit 08-Jul-2026): every SmartGain P&L surfaced must be NET of brokerage,
+# with Gross / Brokerage / Net shown as three separate line items — never netted silently.
+BROKERAGE_RATE = 1000.0 / 10_000_000.0   # Rs 1000 per Rs 1cr of transaction value, per fill leg.
+
+
+def _week_brokerage(cur, account, ws, we):
+    """Brokerage for the week [ws, we]. Returns (brokerage, source).
+
+    Closed/historical weeks: the REAL figure stored in smartgain_weekly_pnl (sourced from
+    the broker-screenshot Total row, parent spec id=1008) — used AS-IS, never recomputed.
+    Current/open week (no snapshot row yet): live estimate = SUM of per-fill brokerage on
+    smartgain_orders, with a defensive formula fallback (qty*price*rate) for any NULL row
+    (cc#301: smartgain_orders.brokerage backfilled 08-Jul, but future manual inserts may not)."""
+    cur.execute("""SELECT brokerage FROM smartgain_weekly_pnl
+                   WHERE account=%s AND week_start=%s""", (account, ws))
+    r = cur.fetchone()
+    if r and r[0] is not None:
+        return round(float(r[0]), 2), "weekly_pnl_snapshot"
+    cur.execute("""SELECT COALESCE(SUM(COALESCE(brokerage, qty*price*%s)), 0)
+                   FROM smartgain_orders
+                   WHERE account=%s AND status='FILLED' AND trade_date BETWEEN %s AND %s""",
+                (BROKERAGE_RATE, account, ws, we))
+    r = cur.fetchone()
+    return round(float(r[0]) if r and r[0] is not None else 0.0, 2), "live_estimate"
+
+
+def _range_brokerage(cur, account, start, end):
+    """Live-estimate brokerage over an arbitrary window [start, end] (for the /holdings
+    M2M chart tabs, which span multiple weeks). Formula fallback for any NULL brokerage."""
+    cur.execute("""SELECT COALESCE(SUM(COALESCE(brokerage, qty*price*%s)), 0)
+                   FROM smartgain_orders
+                   WHERE account=%s AND status='FILLED' AND trade_date BETWEEN %s AND %s""",
+                (BROKERAGE_RATE, account, start, end))
+    r = cur.fetchone()
+    return round(float(r[0]) if r and r[0] is not None else 0.0, 2)
+
+
+def current_week_brokerage(account: str = DEFAULT_ACCOUNT) -> float:
+    """Brokerage for the current ISO week (live estimate). Sibling of current_week_realised —
+    the single source /api/smartgain/m2m reads to net the headline number."""
+    today = _ist_today()
+    ws = _monday(today)
+    with _conn() as conn, conn.cursor() as cur:
+        brok, _src = _week_brokerage(cur, account, ws, today)
+        return brok
 
 
 def current_week_realised(account: str = DEFAULT_ACCOUNT) -> float:

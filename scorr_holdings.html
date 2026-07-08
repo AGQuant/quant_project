@@ -31,7 +31,7 @@
   .hero-label{font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
   .hero-val{font-size:40px;font-weight:900;font-family:monospace;line-height:1;transition:color .3s}
   .hero-cap{font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-top:5px}
-  .hero-buckets{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .hero-buckets{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
   .hero-bucket{background:var(--bg,#f8fafc);border:1px solid var(--border);border-radius:10px;padding:9px 12px}
   .hero-bk-label{font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
   .hero-bk-val{font-size:18px;font-weight:800;font-family:monospace;line-height:1;transition:color .3s}
@@ -167,7 +167,8 @@
   <div class="hero" id="hero" style="display:none">
     <div class="hero-label">Week M2M &#183; MHK40</div>
     <div class="hero-val" id="hero-val">&#8212;</div>
-    <div class="hero-cap">Total = Realised + Unrealised</div>
+    <!-- cc#301: headline is NET of brokerage; Gross / Brokerage / Net shown as separate lines. -->
+    <div class="hero-cap">Net = Realised + Unrealised &minus; Brokerage</div>
     <div class="hero-buckets">
       <div class="hero-bucket">
         <div class="hero-bk-label">Realised</div>
@@ -176,6 +177,10 @@
       <div class="hero-bucket">
         <div class="hero-bk-label">Unrealised</div>
         <div class="hero-bk-val" id="hero-unrealised">&#8212;</div>
+      </div>
+      <div class="hero-bucket">
+        <div class="hero-bk-label">Brokerage</div>
+        <div class="hero-bk-val" id="hero-brokerage">&#8212;</div>
       </div>
     </div>
     <div class="hero-buckets-2">
@@ -268,23 +273,27 @@ async function loadHoldings(smooth=false) {
     if (d.error) return;
 
     const pos = d.positions||[];
-    /* Three buckets: Realised + Unrealised = Total (headline). cc#115 */
+    /* cc#301: headline is NET of brokerage. Gross = Realised + Unrealised; Net = Gross − Brokerage. */
     const realised   = d.realised   != null ? d.realised   : 0;
     const unrealised = d.unrealised != null ? d.unrealised : (d.total_mtm||0);
-    const total      = d.total      != null ? d.total      : (realised + unrealised);
+    const gross      = d.gross      != null ? d.gross      : (d.total != null ? d.total : realised + unrealised);
+    const brokerage  = d.brokerage  != null ? d.brokerage  : 0;
+    const net        = d.net        != null ? d.net        : (gross - brokerage);
     const isLive = d.data_source==="live_fyers";
 
     /* Hero */
     const hero = document.getElementById("hero");
     hero.style.display="block";
     const hv = document.getElementById("hero-val");
-    hv.textContent = (total>=0?"+":"")+"₹"+f2(Math.abs(total));
-    hv.style.color = colorOf(total);
+    hv.textContent = (net>=0?"+":"")+"₹"+f2(Math.abs(net));
+    hv.style.color = colorOf(net);
 
     const rv = document.getElementById("hero-realised");
     const uv = document.getElementById("hero-unrealised");
+    const bkv = document.getElementById("hero-brokerage");
     rv.textContent = (realised>=0?"+":"−")+"₹"+f2(Math.abs(realised));   rv.style.color = colorOf(realised);
     uv.textContent = (unrealised>=0?"+":"−")+"₹"+f2(Math.abs(unrealised)); uv.style.color = colorOf(unrealised);
+    bkv.textContent = "−₹"+f2(Math.abs(brokerage)); bkv.style.color = "var(--mut)";
     document.getElementById("hero-meta").textContent = pos.length+" positions · "+ago(d.last_updated);
 
     /* cc#133: Long/Short value tiles */
@@ -361,9 +370,9 @@ async function loadHoldings(smooth=false) {
         }
       });
 
-      /* Total */
+      /* cc#301: Net M2M (after brokerage) */
       const te = document.getElementById("total-el");
-      if (te) { te.textContent=(total>=0?"+":"")+"₹"+f2(Math.abs(total)); te.style.color=colorOf(total); }
+      if (te) { te.textContent=(net>=0?"+":"")+"₹"+f2(Math.abs(net)); te.style.color=colorOf(net); }
 
       lastPositions = {};
       pos.forEach(p=>lastPositions[p.symbol]=p);
@@ -419,8 +428,8 @@ async function loadHoldings(smooth=false) {
     html+="</div>";
 
     html+=`<div class="total-card">
-      <span class="total-label">Total M2M</span>
-      <span class="total-val" id="total-el" style="color:${colorOf(total)}">${(total>=0?"+":"")+"₹"+f2(Math.abs(total))}</span>
+      <span class="total-label">Net M2M <span style="font-weight:600;color:var(--mut)">(after brokerage)</span></span>
+      <span class="total-val" id="total-el" style="color:${colorOf(net)}">${(net>=0?"+":"")+"₹"+f2(Math.abs(net))}</span>
     </div>`;
 
     document.getElementById("pos-wrap").innerHTML=html;
@@ -614,8 +623,12 @@ async function loadM2M(range){
     if(Array.isArray(d.holdings_mismatch)) renderMismatchBanner(d);
     if(range===curRange && document.querySelector(".m2m-tab.active").dataset.tab==="chart"){
       renderLWChart(d);                                   // cc#181: interactive chart (SVG fallback inside)
-      const t=d.total_m2m||0;
-      document.getElementById("m2m-total").innerHTML=`<b style="font-size:20px;font-family:monospace;color:${t>=0?"var(--grn)":"var(--red)"}">${sgn(t)}</b> <span style="color:var(--mut);font-size:11px">${rangeCap[range]||""}</span>`;
+      // cc#301: headline the NET-of-brokerage total; show Gross − Brokerage inline when present.
+      const gross=d.total_m2m||0;
+      const brok=(d.total_brokerage!=null)?d.total_brokerage:null;
+      const t=(d.total_net!=null)?d.total_net:gross;
+      const brokNote=(brok!=null)?` <span style="color:var(--mut);font-size:11px">(gross ${sgn(gross)} − brokerage ₹${f2(Math.abs(brok))})</span>`:"";
+      document.getElementById("m2m-total").innerHTML=`<b style="font-size:20px;font-family:monospace;color:${t>=0?"var(--grn)":"var(--red)"}">${sgn(t)}</b>${brokNote} <span style="color:var(--mut);font-size:11px">${rangeCap[range]||""}</span>`;
       document.getElementById("m2m-legend").innerHTML=chartLegend(range);
       let cap=(range==="1m"||range==="1y")&&d.from_date?"Orderbook history from "+fmtDate(d.from_date)+" — earlier data accrues over time.":
                 (range==="1d"&&d.target_day?"Intraday replay for "+fmtDate(d.target_day):"");

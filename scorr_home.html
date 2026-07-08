@@ -46,7 +46,7 @@
   .sg-total-cap{font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
 
   /* Realised / Unrealised breakdown */
-  .sg-buckets{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+  .sg-buckets{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
   .sg-bucket{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 11px}
   .sg-bk-label{font-size:9.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
   .sg-bk-val{font-size:16px;font-weight:800;font-family:monospace;line-height:1}
@@ -183,7 +183,8 @@
       <span class="sg-badge">MHK40</span>
     </div>
     <div class="sg-total" id="sg-total"><span class="sg-loading">Loading&hellip;</span></div>
-    <div class="sg-total-cap" id="sg-total-cap" style="display:none">Total = Realised + Unrealised</div>
+    <!-- cc#301: headline is NET of brokerage; Gross / Brokerage / Net shown as separate lines. -->
+    <div class="sg-total-cap" id="sg-total-cap" style="display:none">Net = Realised + Unrealised &minus; Brokerage</div>
     <div class="sg-buckets" id="sg-buckets" style="display:none">
       <div class="sg-bucket">
         <div class="sg-bk-label">Realised</div>
@@ -192,6 +193,10 @@
       <div class="sg-bucket">
         <div class="sg-bk-label">Unrealised</div>
         <div class="sg-bk-val" id="sg-unrealised">&mdash;</div>
+      </div>
+      <div class="sg-bucket">
+        <div class="sg-bk-label">Brokerage</div>
+        <div class="sg-bk-val" id="sg-brokerage">&mdash;</div>
       </div>
     </div>
     <div class="sg-positions" id="sg-positions"></div>
@@ -351,21 +356,26 @@ async function loadSG() {
     const d = await r.json();
     if (d.error || !d.positions) return;
 
-    // Three buckets: Realised + Unrealised = Total (headline). cc#115
+    // cc#301: headline is NET of brokerage. Gross = Realised + Unrealised; Net = Gross − Brokerage.
     const realised   = d.realised   != null ? d.realised   : 0;
     const unrealised = d.unrealised != null ? d.unrealised : (d.total_mtm || 0);
-    const total      = d.total      != null ? d.total      : (realised + unrealised);
+    const gross      = d.gross      != null ? d.gross      : (d.total != null ? d.total : realised + unrealised);
+    const brokerage  = d.brokerage  != null ? d.brokerage  : 0;
+    const net        = d.net        != null ? d.net        : (gross - brokerage);
 
     const tv = document.getElementById("sg-total");
-    tv.textContent = (total >= 0 ? "+" : "") + "₹" + f2(total);
-    tv.style.color = total >= 0 ? "var(--grn)" : "var(--red)";
+    tv.textContent = (net >= 0 ? "+" : "") + "₹" + f2(net);
+    tv.style.color = net >= 0 ? "var(--grn)" : "var(--red)";
 
     const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
     const col = n => n >= 0 ? "var(--grn)" : "var(--red)";
     const rv = document.getElementById("sg-realised");
     const uv = document.getElementById("sg-unrealised");
+    const bv = document.getElementById("sg-brokerage");
     rv.textContent = sgn(realised);   rv.style.color = col(realised);
     uv.textContent = sgn(unrealised); uv.style.color = col(unrealised);
+    // brokerage is always a cost — show it as a negative (deducted) amount, muted.
+    bv.textContent = "−₹" + f2(Math.abs(brokerage)); bv.style.color = "var(--mut)";
     document.getElementById("sg-total-cap").style.display = "block";
     document.getElementById("sg-buckets").style.display = "grid";
 
@@ -496,10 +506,14 @@ async function loadDailyM2M(weekStart) {
 
     document.getElementById("sg-chart-wrap").style.display = "block";
     // surface the week total on the collapsed tab so it's obvious data lives here
-    if (sgCurWeek === sgThisWeek && typeof d.week_m2m === "number") {
-      const hint = document.getElementById("sg-m2m-tab-hint");
-      if (hint && document.getElementById("sg-m2m-panel").style.display === "none") {
-        hint.textContent = (d.week_m2m >= 0 ? "+" : "−") + "₹" + f2(Math.abs(d.week_m2m)) + " · tap to expand";
+    // cc#301: show the NET-of-brokerage week figure (falls back to gross week_m2m).
+    {
+      const wkNet = (typeof d.week_net === "number") ? d.week_net : d.week_m2m;
+      if (sgCurWeek === sgThisWeek && typeof wkNet === "number") {
+        const hint = document.getElementById("sg-m2m-tab-hint");
+        if (hint && document.getElementById("sg-m2m-panel").style.display === "none") {
+          hint.textContent = (wkNet >= 0 ? "+" : "−") + "₹" + f2(Math.abs(wkNet)) + " net · tap to expand";
+        }
       }
     }
     document.getElementById("sg-wk-label").textContent =
