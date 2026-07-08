@@ -166,7 +166,7 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
     own = conn is None
     if own:
         conn = _conn()
-    orders_inserted = journal_inserted = holdings_upserted = holdings_deleted = 0
+    orders_inserted = journal_inserted = journal_deleted = holdings_upserted = holdings_deleted = 0
     opening_created = False
     try:
         with conn.cursor() as cur:
@@ -212,48 +212,30 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
                             (account, week_start, sym, direction, v["qty"], v["avg_price"]))
                         opening_created = True
 
-            # ---- (c)+(d) FIFO-match the batch, write closed round-trips to personal_journal
-            # pre-book = inception + every fill strictly before this batch (excluding it).
-            min_ts = min((r["order_ts"] for r in rows), default=None)
-            if min_ts is not None:
-                pre = _all_fills(cur, account, before_ts=min_ts, exclude_batch=batch_id)
-                pre_books, _ = _replay(inc_opening, pre)
-                batch_fill_tuples = [(r["trade_date"], r["order_ts"], r["symbol"], r["side"],
-                                      r["qty"], r["price"]) for r in rows]
-                _, batch_closed = _replay_onto(pre_books, batch_fill_tuples)
-                # cc#248: dedup on the round-trip's STABLE identity WITHIN THIS BATCH —
-                # (symbol, direction, entry) tagged with this batch_id — NOT the qty/pnl shape.
-                # _roundtrips emits at most one rt per (symbol,direction,entry) per batch, so this
-                # key is exactly one row per canonical close. Being entry-based (not qty/pnl) it
-                # survives pre-existing hand-written rows split differently (e.g. 10/10/5 vs the
-                # aggregated 20/5), which the old qty/pnl-shape dedup silently double-counted; being
-                # batch-scoped (not a shared date window) it does NOT suppress a distinct close of
-                # the SAME opening lot booked in a different batch on the same day (e.g. DIVISLAB
-                # lot 6828 closed 20 in OB_..._01 and the remaining 5 in OB_..._02).
-                for rt in _roundtrips(batch_closed):
-                    cur.execute("""SELECT 1 FROM personal_journal
-                                   WHERE result='CLOSED' AND symbol=%s AND direction=%s
-                                     AND ROUND(entry_price,4)=%s AND notes LIKE %s""",
-                                (rt["symbol"], rt["direction"], round(rt["entry"], 4),
-                                 f"%{batch_id}%"))
-                    if cur.fetchone():
-                        continue
-                    notes = f"{account} dabba FIFO close {batch_id}"
-                    cur.execute("""INSERT INTO personal_journal
-                        (trade_date, symbol, direction, qty, entry_price, exit_price, exit_time,
-                         pnl, result, notes)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'CLOSED',%s)""",
-                        (rt["close_date"], rt["symbol"], rt["direction"], rt["qty"],
-                         round(rt["entry"], 4), round(rt["exit"], 4), max(r["order_ts"] for r in rows),
-                         round(rt["pnl"], 2), notes))
-                    journal_inserted += 1
-
-            # ---- (e) UPSERT holdings from the FULL current replay (inception + all fills) --
-            # Manual upsert keyed on (account, symbol) — smartgain_holdings has no unique
-            # constraint (only PK id), so ON CONFLICT is unavailable. One row per symbol.
+            # ---- FULL FIFO replay from inception — the SINGLE source of truth for BOTH the
+            # journal (d) and holdings (e). cc#309: attributing each closing fill exactly once
+            # off this one replay is what removes the cross-batch double-count. The old path
+            # replayed only THIS batch's fills onto a pre-book scoped by min_ts/exclude_batch,
+            # which re-emitted a close leg whenever a single opening lot was covered across two
+            # batches (e.g. INOXWIND SELL 1000 covered by 500+250+250 split across batches ->
+            # a phantom +377.5 row), inflating realised P&L.
             all_fills = _all_fills(cur, account)
             full_books, full_closed = _replay(inc_opening, all_fills)
             residual = _residual(full_books)
+
+            # ---- (d) cc#309: DELETE-AND-REBUILD the SmartGain FIFO-close journal from that
+            # replay. Self-healing: any prior phantom/drift is wiped and regenerated correctly,
+            # so matches_journal_sum holds by construction and reconcile/backfill converge with
+            # NO manual SQL surgery. _roundtrips aggregates per opening lot, so DIVISLAB-style
+            # two distinct closes of one lot keep their FULL summed pnl (no over-suppression).
+            # Guarded to THIS account's dabba-FIFO rows — never touches other accounts or
+            # non-SmartGain personal_journal rows.
+            journal_deleted, _rts = _rebuild_journal_rows(cur, account, full_closed)
+            journal_inserted = len(_rts)
+
+            # ---- (e) UPSERT holdings from the same replay residual. Manual upsert keyed on
+            # (account, symbol) — smartgain_holdings has no unique constraint (only PK id),
+            # so ON CONFLICT is unavailable. One row per symbol.
             cur.execute("SELECT symbol FROM smartgain_holdings WHERE account=%s", (account,))
             existing_syms = {r[0] for r in cur.fetchall()}
             for (sym, direction), v in residual.items():
@@ -298,7 +280,7 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
     result = {
         "batch_id": batch_id, "account": account,
         "orders_inserted": orders_inserted, "orders_status_value_used": ORDER_STATUS,
-        "journal_rows_inserted": journal_inserted,
+        "journal_rows_inserted": journal_inserted, "journal_rows_deleted": journal_deleted,
         "holdings_rows_upserted": holdings_upserted, "holdings_rows_deleted": holdings_deleted,
         "opening_position_row_created": opening_created,
         "realised_this_week_computed": realised_week,
@@ -311,12 +293,29 @@ def reconcile_smartgain_batch(account: str, batch_rows: List[Dict[str, Any]],
     return result
 
 
-def _replay_onto(books, fills):
-    """Apply fills onto an EXISTING (already-built) books dict, returning (books, closed)."""
-    closed: List[dict] = []
-    for _td, _ts, sym, side, qty, price in fills:
-        _apply_fill(books, closed, sym, side, int(qty), float(price), _td)
-    return books, closed
+def _rebuild_journal_rows(cur, account, full_closed):
+    """cc#309: DELETE every SmartGain FIFO-close row for `account`, then write one CLOSED
+    row per round-trip from the full-inception FIFO replay's closes. Because it rebuilds
+    from the single authoritative replay, each closing fill is attributed EXACTLY ONCE
+    (no cross-batch double-count) and the journal is self-healing — any prior phantom/drift
+    is wiped. The DELETE is guarded by the account + dabba-FIFO notes signature, so other
+    accounts and non-SmartGain personal_journal rows are never touched. Returns
+    (deleted_count, roundtrips)."""
+    cur.execute("DELETE FROM personal_journal WHERE result='CLOSED' AND notes LIKE %s",
+                (f"{account} dabba FIFO close%",))
+    deleted = cur.rowcount
+    rts = _roundtrips(full_closed)
+    notes = f"{account} dabba FIFO close"
+    for rt in rts:
+        exit_time = datetime.combine(_as_date(rt["close_date"]), datetime.min.time())
+        cur.execute("""INSERT INTO personal_journal
+            (trade_date, symbol, direction, qty, entry_price, exit_price, exit_time,
+             pnl, result, notes)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'CLOSED',%s)""",
+            (rt["close_date"], rt["symbol"], rt["direction"], rt["qty"],
+             round(rt["entry"], 4), round(rt["exit"], 4), exit_time,
+             round(rt["pnl"], 2), notes))
+    return deleted, rts
 
 
 def _week_realised(inc_opening, all_fills):
@@ -355,10 +354,42 @@ def _log_ops(result: Dict[str, Any]):
         pass
 
 
+def repair_journal(account: str = DEFAULT_ACCOUNT) -> Dict[str, Any]:
+    """cc#309: standalone atomic delete-and-rebuild of the SmartGain FIFO-close journal from
+    the full-inception FIFO replay — no order ingestion. A dedicated self-healing repair path
+    (reconcile/backfill also self-heal now). Returns the self-check; matches_journal_sum must
+    be TRUE after. Atomic — rolls back on error; never touches non-SmartGain journal rows."""
+    with _conn() as conn:
+        try:
+            with conn.cursor() as cur:
+                inception, inc_opening = _load_inception(cur, account)
+                if not inception:
+                    raise ValueError("no inception opening-position checksum — cannot repair")
+                all_fills = _all_fills(cur, account)
+                _, full_closed = _replay(inc_opening, all_fills)
+                deleted, rts = _rebuild_journal_rows(cur, account, full_closed)
+                journal_sum_replay = round(sum(c["pnl"] for c in full_closed), 2)
+                cur.execute("""SELECT COALESCE(SUM(pnl),0) FROM personal_journal
+                               WHERE result='CLOSED' AND notes LIKE %s""",
+                            (f"{account} dabba FIFO close%",))
+                journal_sum_db = round(float(cur.fetchone()[0]), 2)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return {
+        "account": account, "mode": "delete_and_rebuild",
+        "journal_rows_deleted": deleted, "journal_rows_written": len(rts),
+        "journal_sum_replay": journal_sum_replay, "journal_sum_db": journal_sum_db,
+        "matches_journal_sum": abs(journal_sum_replay - journal_sum_db) < 0.01,
+    }
+
+
 def backfill_all_batches(account: str = DEFAULT_ACCOUNT) -> Dict[str, Any]:
-    """Idempotently re-run the corrected cascade over EVERY batch since inception, in
-    chronological order (cc#237 part 4). Safe to run repeatedly: dedup guards prevent any
-    double-write (e.g. the closes Claude web hand-inserted this session)."""
+    """Re-run the corrected cascade over EVERY batch since inception, in chronological order
+    (cc#237 part 4). cc#309: now self-healing — each reconcile delete-and-rebuilds the journal
+    from the single full-inception replay, so any accumulated phantom/drift is removed (no
+    manual DELETE needed) and matches_journal_sum converges to TRUE. Safe to run repeatedly."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""SELECT batch_id, MIN(order_ts) FROM smartgain_orders
                        WHERE account=%s AND status=%s GROUP BY batch_id ORDER BY MIN(order_ts)""",
@@ -400,3 +431,13 @@ def api_backfill(payload: Dict[str, Any] = Body(default={})):
         return backfill_all_batches(account)
     except Exception as e:
         raise HTTPException(500, f"backfill failed: {e}")
+
+
+@router.post("/api/smartgain/repair_journal")
+def api_repair_journal(payload: Dict[str, Any] = Body(default={})):
+    """cc#309: delete-and-rebuild ONLY the SmartGain FIFO-close journal (no order ingest)."""
+    account = payload.get("account", DEFAULT_ACCOUNT)
+    try:
+        return repair_journal(account)
+    except Exception as e:
+        raise HTTPException(500, f"repair_journal failed: {e}")
