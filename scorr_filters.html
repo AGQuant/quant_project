@@ -89,6 +89,18 @@ td{padding:7px 10px;white-space:nowrap}
   .pchip .picon{width:30px;height:30px;font-size:14px}
   .psave{height:40px;border-radius:20px}
 }
+/* cc#335 P9: mobile filter drawer */
+.mfilter-toggle{display:none}
+@media(max-width:767px){
+  .mfilter-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+    min-height:44px;padding:0 14px;margin:10px 0 4px;border:1px solid var(--line);border-radius:10px;
+    background:var(--panel,#fff);color:var(--txt,#1c2536);font-weight:700;font-size:14px;
+    font-family:inherit;cursor:pointer}
+  .mfilter-toggle .mft-r{color:var(--mut,#5a6781);font-weight:600;font-size:12px;display:flex;gap:6px;align-items:center}
+  .fpanel{max-height:62vh;overflow-y:auto;transition:max-height .2s ease}
+  body.mfilters-collapsed .fpanel{max-height:0;overflow:hidden;margin:0;padding:0;border:none}
+  body.mfilters-collapsed .mfilter-toggle .mft-r>span:last-child{display:inline-block;transform:rotate(-90deg)}
+}
 </style>
 </head>
 <body>
@@ -101,6 +113,11 @@ td{padding:7px 10px;white-space:nowrap}
     <label class="autotoggle"><input type="checkbox" id="f-auto" checked onchange="onAutoToggle()">Auto-refresh 30s</label>
   </div>
   <div class="presets" id="f-presets"></div>
+  <!-- cc#335 P9: mobile filter drawer toggle — collapses the 27-row panel so results
+       are one tap away; live re-filter means no separate apply button is needed. -->
+  <button class="mfilter-toggle" type="button" onclick="toggleFilters()">
+    <span>Adjust Filters</span><span class="mft-r"><span id="mfilterCount"></span> &#9662;</span>
+  </button>
   <div class="screen">
     <div class="fpanel" id="f-panel"></div>
     <div class="fresults">
@@ -243,6 +260,7 @@ function renderTable(){
   });
   const st=document.getElementById('f-st');
   st.innerHTML=matched.length+' matched / '+ROWS.length+' universe'+asOfTag();
+  const mc=document.getElementById('mfilterCount');if(mc)mc.textContent=matched.length+' shown';  // cc#335
 
   let head='<tr>';
   HEAD_COLS.forEach(c=>{
@@ -267,6 +285,9 @@ function renderTable(){
     : '<div class="empty">No stocks match the active filters</div>';
 }
 
+// cc#335 P9: mobile filter drawer collapse. Live re-filter -> collapsing IS "show results".
+function toggleFilters(){document.body.classList.toggle('mfilters-collapsed');}
+try{ if(window.innerWidth<=767) document.body.classList.add('mfilters-collapsed'); }catch(e){}
 function onSort(key){
   if(SORT_KEY===key) SORT_DIR=-SORT_DIR;
   else { SORT_KEY=key; SORT_DIR=-1; }

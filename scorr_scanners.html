@@ -168,7 +168,7 @@ async function loadSide(side){
       const lbl=side.toUpperCase();
       st.textContent=data.count+' '+lbl+' signals · '+(data.near_miss_count||0)+' near-miss · ADR '+num(data.adr,2)+(data.nifty_rsi!=null?' · NIFTY RSI '+num(data.nifty_rsi,1):'')+' · universe '+data.universe;
       const rows=data.signals||[];
-      tbl.innerHTML=rows.length?('<div class="tw"><table><thead>'+SIG_HEAD+'</thead><tbody>'+
+      tbl.innerHTML=rows.length?('<div class="tw mtable-wrap"><table class="mtable"><thead>'+SIG_HEAD+'</thead><tbody>'+
         rows.map(r=>sigRow(r,side)).join('')+'</tbody></table></div>')
         :'<div class="empty">No '+lbl+' signals passed Tier1 + Tier2</div>';
     }
@@ -203,7 +203,7 @@ function renderWatchlist(){
   const rows=[].concat(window._nm.long||[],window._nm.short||[])
     .sort((a,b)=>(b.tier1_score||0)-(a.tier1_score||0));
   if(dot)dot.className='dot';if(st)st.textContent=rows.length+' near-miss candidates'+(window._nmtime?' · '+window._nmtime:'');
-  tbl.innerHTML=rows.length?('<div class="tw"><table><thead><tr><th>Symbol</th><th>Dir</th><th>Bucket Passed</th><th>Tier1</th><th>What Failed</th><th>CMP</th><th>2W High/Low</th><th>Room%</th><th>Time</th></tr></thead><tbody>'+
+  tbl.innerHTML=rows.length?('<div class="tw mtable-wrap"><table class="mtable"><thead><tr><th>Symbol</th><th>Dir</th><th>Bucket Passed</th><th>Tier1</th><th>What Failed</th><th>CMP</th><th>2W High/Low</th><th>Room%</th><th>Time</th></tr></thead><tbody>'+
     rows.map(nmRow).join('')+'</tbody></table></div>')
     :'<div class="empty">No near-miss candidates right now (or market closed)</div>';
 }
