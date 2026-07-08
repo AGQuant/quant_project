@@ -148,11 +148,14 @@ def sync_universe_endpoint(x_admin_token: str = Header(None)):
     if x_admin_token != os.getenv("ADMIN_TOKEN"):
         raise HTTPException(401, "Unauthorized")
     out = {}
-    # legacy universe membership sync (add/deactivate symbols from the Fyers feed)
+    # legacy universe membership sync (add/deactivate symbols from the Fyers feed).
+    # cc#308: fixed the import — the module is fyers_sync (scheduler._bg_fu_sync uses it);
+    # the old `from scheduler import sync_futures_universe` never resolved, so the endpoint
+    # membership sync had been silently failing.
     try:
-        from scheduler import sync_futures_universe
+        import fyers_sync
         with _conn() as conn:
-            out["universe_sync"] = sync_futures_universe(conn)
+            out["universe_sync"] = fyers_sync.sync_futures_universe(conn)
     except Exception as e:
         log.error(f"sync_universe membership failed: {e}")
         out["universe_sync_error"] = str(e)
