@@ -351,7 +351,11 @@ NAV_TOGGLE_JS = """
   var HID = 'data-scorr-nav-hidden';
   var root = document.documentElement;
 
-  function isHidden() { return localStorage.getItem(KEY) === 'true'; }
+  // cc#311: model-nav is HIDDEN BY DEFAULT now. Hidden unless the user explicitly chose Show
+  // (localStorage 'false'); no stored pref -> hidden. setHidden() still writes 'true'/'false',
+  // so a Show choice persists across pages/reloads until the user Hides again. Clearing storage
+  // returns to the hidden default. The fixed top-right toggle + sticky Show strip stay reachable.
+  function isHidden() { return localStorage.getItem(KEY) !== 'false'; }
 
   function injectStyle() {
     if (document.getElementById('scorr-navtoggle-style')) return;
