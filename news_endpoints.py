@@ -33,6 +33,37 @@ def _conn():
     return psycopg.connect(DATABASE_URL)
 
 
+# cc#322: canonical polished-news view — the SINGLE source every polished endpoint reads from,
+# so the raw_news/polished_news join + timestamp logic exists exactly once. display_time is the
+# canonical article timestamp (polish time first, raw only as a last resort) used for BOTH sort
+# and display; raw_published_at is exposed separately for the rare original-date reference.
+# Ensured idempotently at import so the view exists wherever this code runs (Railway=truth,
+# GitHub=code) — CREATE OR REPLACE is a no-op when it already matches.
+_V_POLISHED_ARTICLES_DDL = """
+CREATE OR REPLACE VIEW v_polished_articles AS
+SELECT p.id AS polished_id, p.raw_news_id AS raw_news_id, r.id AS raw_id,
+       COALESCE(p.headline_clean, r.headline) AS headline,
+       p.summary, p.full_summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
+       COALESCE(p.source, r.source_name) AS source_name,
+       r.source_type, r.symbol, r.url,
+       COALESCE(p.published_time, p.polished_at, r.published_at) AS display_time,
+       r.published_at AS raw_published_at, p.polished_at
+FROM polished_news p JOIN raw_news r ON r.id = p.raw_news_id
+"""
+
+
+def _ensure_polished_view():
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(_V_POLISHED_ARTICLES_DDL)
+            conn.commit()
+    except Exception:
+        pass   # view is created out-of-band too; a transient DB hiccup here must not block import
+
+
+_ensure_polished_view()
+
+
 def _rows(cur):
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -53,15 +84,15 @@ _QUALITY_CLAUSE = (
 
 
 def _polished_by_type(cur, source_type: str, limit: int):
+    # cc#322: read the canonical v_polished_articles view; display_time (polish time) is the
+    # sort + displayed timestamp, exposed under the legacy `published_at` field name.
     cur.execute("""
-        SELECT p.id AS polished_id, r.id AS raw_id,
-               COALESCE(p.headline_clean, r.headline) AS headline,
-               p.summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
-               r.symbol, r.source_type, r.source_name, r.url, r.published_at
-        FROM polished_news p
-        JOIN raw_news r ON r.id = p.raw_news_id
-        WHERE r.source_type = %s
-        ORDER BY r.published_at DESC NULLS LAST, r.fetched_at DESC
+        SELECT polished_id, raw_id, headline,
+               summary, category, sentiment, impact, mentioned_symbols,
+               symbol, source_type, source_name, url, display_time AS published_at
+        FROM v_polished_articles
+        WHERE source_type = %s
+        ORDER BY display_time DESC NULLS LAST, polished_id DESC
         LIMIT %s
     """, (source_type, limit))
     return _rows(cur)
@@ -93,16 +124,13 @@ def news_company(symbol: str):
     sym = symbol.upper()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT p.id AS polished_id, r.id AS raw_id,
-                   COALESCE(p.headline_clean, r.headline) AS headline,
-                   p.full_summary, p.summary, p.category, p.sentiment, p.impact,
-                   p.mentioned_symbols, r.symbol,
-                   COALESCE(p.source, r.source_name) AS source_name,
-                   COALESCE(p.published_time, r.published_at) AS published_at
-            FROM polished_news p
-            JOIN raw_news r ON r.id = p.raw_news_id
-            WHERE r.symbol = %s OR p.mentioned_symbols @> ARRAY[%s]::text[]
-            ORDER BY COALESCE(p.published_time, r.published_at) DESC NULLS LAST, r.fetched_at DESC
+            SELECT polished_id, raw_id, headline,
+                   full_summary, summary, category, sentiment, impact,
+                   mentioned_symbols, symbol, source_name,
+                   display_time AS published_at
+            FROM v_polished_articles
+            WHERE symbol = %s OR mentioned_symbols @> ARRAY[%s]::text[]
+            ORDER BY display_time DESC NULLS LAST, polished_id DESC
             LIMIT 30
         """, (sym, sym))
         rows = _rows(cur)
@@ -206,32 +234,32 @@ def news_top(days: int = 3, category: str = "ai_editorial", limit: int = 50):
     IPO_SET     = "('IPO','STARTUP')"
     COMPANY_SET = "('COMPANY_UPDATES','COMPANY')"
     # word count of full_summary (fallback summary) = spaces + 1 -> read-time badge
-    _wc = ("(LENGTH(TRIM(COALESCE(p.full_summary,p.summary,''))) "
-           "- LENGTH(REPLACE(TRIM(COALESCE(p.full_summary,p.summary,'')),' ','')) + 1)")
+    _wc = ("(LENGTH(TRIM(COALESCE(full_summary,summary,''))) "
+           "- LENGTH(REPLACE(TRIM(COALESCE(full_summary,summary,'')),' ','')) + 1)")
+    # cc#322: read v_polished_articles; window + sort on display_time (polish time) so a stock
+    # story with an OLD raw date but polished recently isn't excluded/mis-sorted by raw time.
     sql = f"""
-        SELECT p.id AS polished_id, r.id AS raw_id,
-               COALESCE(p.headline_clean, r.headline) AS headline,
-               p.summary, p.full_summary, p.category, p.sentiment, p.impact, p.mentioned_symbols,
-               r.symbol, r.source_type, r.source_name, r.url, r.published_at,
+        SELECT polished_id, raw_id, headline,
+               summary, full_summary, category, sentiment, impact, mentioned_symbols,
+               symbol, source_type, source_name, url, display_time AS published_at,
                CEIL({_wc}::numeric / 200) AS read_min
-        FROM polished_news p
-        JOIN raw_news r ON r.id = p.raw_news_id
-        WHERE r.published_at >= NOW() - (%s || ' days')::interval
+        FROM v_polished_articles
+        WHERE display_time >= NOW() - (%s || ' days')::interval
     """
     params = [days]
     if cat == "ipo":
-        sql += f" AND UPPER(COALESCE(p.category,'')) IN {IPO_SET}"
+        sql += f" AND UPPER(COALESCE(category,'')) IN {IPO_SET}"
     elif cat == "global":
-        sql += f" AND UPPER(COALESCE(p.category,'')) IN {GLOBAL_SET}"
+        sql += f" AND UPPER(COALESCE(category,'')) IN {GLOBAL_SET}"
     elif cat in ("company_updates", "company"):
         cat = "company_updates"
-        sql += f" AND UPPER(COALESCE(p.category,'')) IN {COMPANY_SET}"
+        sql += f" AND UPPER(COALESCE(category,'')) IN {COMPANY_SET}"
     else:  # ai_editorial — India editorial: all categories NOT in global/ipo/company
         cat = "ai_editorial"            # cc_task #70: no read-time gate (supersedes #69 >=2min)
-        sql += (f" AND UPPER(COALESCE(p.category,'')) NOT IN {GLOBAL_SET}"
-                f" AND UPPER(COALESCE(p.category,'')) NOT IN {IPO_SET}"
-                f" AND UPPER(COALESCE(p.category,'')) NOT IN {COMPANY_SET}")
-    sql += " ORDER BY r.published_at DESC NULLS LAST LIMIT %s"
+        sql += (f" AND UPPER(COALESCE(category,'')) NOT IN {GLOBAL_SET}"
+                f" AND UPPER(COALESCE(category,'')) NOT IN {IPO_SET}"
+                f" AND UPPER(COALESCE(category,'')) NOT IN {COMPANY_SET}")
+    sql += " ORDER BY display_time DESC NULLS LAST, polished_id DESC LIMIT %s"
     params.append(limit)
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
@@ -275,20 +303,22 @@ def news_polished(request: Request, category: str = "all", limit: int = 20, offs
     offset = max(0, offset)
     where, params = "", []
     if cat in _CANON_CAT:
-        where = "WHERE p.category = %s"
+        where = "WHERE category = %s"
         params.append(_CANON_CAT[cat])
     else:
         cat = "all"   # unknown / 'all' -> no category filter
+    # cc#322: read v_polished_articles. Was aliasing r.published_at AS published_time — actively
+    # discarding the REAL polish time and showing the raw source date under a polish-time name.
+    # Now published_time = display_time (the canonical polish timestamp), sorted by it too.
     sql = f"""
-        SELECT p.id, p.raw_news_id,
-               COALESCE(p.headline_clean, r.headline) AS headline_clean,
-               p.summary, p.full_summary, p.category, p.sentiment, p.impact,
-               p.mentioned_symbols, r.source_name AS source,
-               r.published_at AS published_time, p.polished_at
-        FROM polished_news p
-        JOIN raw_news r ON r.id = p.raw_news_id
+        SELECT polished_id AS id, raw_news_id,
+               headline AS headline_clean,
+               summary, full_summary, category, sentiment, impact,
+               mentioned_symbols, source_name AS source,
+               display_time AS published_time, polished_at
+        FROM v_polished_articles
         {where}
-        ORDER BY p.polished_at DESC NULLS LAST
+        ORDER BY display_time DESC NULLS LAST, polished_id DESC
         LIMIT %s OFFSET %s
     """
     params.extend([limit, offset])
