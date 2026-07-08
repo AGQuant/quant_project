@@ -360,6 +360,7 @@ const EP={
   vixIntraday:"/api/v8/indiavix_intraday",     // cc#266
   niftyPcr:"/api/pcr/intraday_hourly?underlying=NIFTY",         // cc#290
   bankniftyPcr:"/api/pcr/intraday_hourly?underlying=BANKNIFTY", // cc#290
+  positionNews:"/api/news/position",                           // cc#294
 };
 const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
@@ -374,13 +375,13 @@ const ALL5=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Forthcoming Results","Global Indices"];   // cc#226: index 12 · cc#264: index 13
+  "Forthcoming Results","Global Indices","Position News"];   // cc#294: Position News = index 14   // cc#226: index 12 · cc#264: index 13
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
 // ops_log alert now surfaces slot exhaustion proactively, making this passive tab redundant.
 // Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
 // Live News(11)/Forthcoming(12) stay stable so their hardcoded panel ids are untouched.
 // cc#264: "Global Indices" appended as index 13.
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,11,12,13];
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,11,12,13,14];
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -696,6 +697,7 @@ function selectTab(i){
   // any other tab is selected so it never polls in the background.
   if(i===13){loadGlobalIndices();if(!GI_TIMER)GI_TIMER=setInterval(loadGlobalIndices,5*60*1000);}
   else if(GI_TIMER){clearInterval(GI_TIMER);GI_TIMER=null;}
+  if(i===14&&!PN_LOADED)loadPositionNews();   // cc#294: Position News lazy-load on first click
   // cc#275: VIX is now a popout overlay (openVix/closeVix), no longer tab-toggled here.
 }
 
@@ -1446,6 +1448,37 @@ function renderGlobalIndices(data){
   const upd=data.data_ts?String(data.data_ts).slice(11,19)+' IST':'daily only';
   return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Space Mono'">Last updated ${upd}</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Live 5-min feed · 06:00-23:30 IST · <span style="color:var(--grn)">●</span> = tile receiving live ticks · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
+}
+
+// ---- Position News tab (cc#294) — relocated from scorr_news.html. Lazy-load on first tab click
+// (same pattern as loadForthcoming/loadGlobalIndices). Reuses /api/news/position UNCHANGED and the
+// locked Domestic-News card format (bold headline + full_summary body + source·time·symbol meta),
+// grouped by symbol, no detail-page link. newsAgo()/newsEsc() are the existing dashboard helpers.
+let PN_LOADED=false;
+async function loadPositionNews(){
+  const el=document.getElementById('panel14');if(!el)return;
+  el.innerHTML='<div class="loading">Loading Position News...</div>';
+  try{const d=await getJSON(EP.positionNews);PN_LOADED=true;el.innerHTML=renderPositionNews(d);}
+  catch(e){el.innerHTML=`<div class="err">Position News failed: ${e.message}</div>`;}
+}
+function renderPositionNews(d){
+  const groups=(d&&d.groups)||[];
+  const meta=`<div class="ptitle">Position News <span class="ct">${groups.length?`${d.total} items · ${d.symbols} open position${d.symbols===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
+  if(!groups.length)return meta+`<div class="empty">No open positions, or no polished news yet.</div>`;
+  return meta+groups.map(g=>{
+    const items=(g.items||[]).map(it=>{const age=it.published_at?newsAgo(it.published_at):'';
+      return`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
+        `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
+        (it.body?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(it.body)}</div>`:'')+
+        `<div style="font-size:11px;color:var(--dim)"><span>${newsEsc(it.source||'')}</span>`+
+        (age?` · <span>${newsEsc(age)}</span>`:'')+
+        (it.symbol?` · <span>${newsEsc(it.symbol)}</span>`:'')+`</div></div>`;
+    }).join('');
+    return`<div style="margin-top:16px">`+
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">`+
+        `<span style="font-size:14px;font-weight:800;color:var(--txt)">${newsEsc(g.symbol)}</span>`+
+        `<span class="ct">${g.count} ${g.count===1?'item':'items'}</span></div>${items}</div>`;
+  }).join('');
 }
 
 // cc#293: day change vs the PREVIOUS trading day's last value = the last series point whose date

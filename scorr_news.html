@@ -340,9 +340,10 @@ const CATS = [
   { id:"domestic",     label:"Domestic" },
   { id:"global",       label:"Global" },
   { id:"ipo",          label:"IPO" },
-  { id:"position",     label:"Position News" },   // cc#207: quarantined V8+SmartGain feed
   { id:"learn",        label:"Learn" },
 ];
+// cc#294: "Position News" tab relocated to v8_dashboard.html (Master Dashboard is where open
+// positions live). Its nav-item, dispatch and render functions were removed from this hub.
 let curCat = "all";
 const SEARCH_TABS = ["domestic"];
 let articles = [];
@@ -472,7 +473,7 @@ function pick(cat){
 async function load(){
   // cc_task #125: Learn tab uses its own Knowledge Hub feed, not /api/news/polished
   if(curCat === "learn"){ return loadKnowledge(); }
-  if(curCat === "position"){ return loadPositionNews(); }   // cc#207: quarantined feed
+  // cc#294: Position News relocated to v8_dashboard.html — dispatch removed.
   // -- Cancel any previous in-flight request --
   if(_abortCtrl){ _abortCtrl.abort(); }
   _abortCtrl = new AbortController();
@@ -573,58 +574,8 @@ function artCompact(a, showPill){
   </article>`;
 }
 
-// ─────────── cc#207: Position News (quarantined V8 + SmartGain feed) ───────────
-async function loadPositionNews(){
-  if(_abortCtrl){ _abortCtrl.abort(); }
-  _abortCtrl = new AbortController();
-  const signal = _abortCtrl.signal, activeCat = curCat;
-  const btn = document.getElementById("refreshBtn"); btn.disabled = true;
-  document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
-  document.getElementById("searchbar").style.display = "none";
-  try{
-    const r = await fetch(`${API}/api/news/position`, { signal });
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const d = await r.json();
-    if(curCat !== activeCat) return;
-    const groups = d.groups || [];
-    document.getElementById("meta").textContent = groups.length
-      ? `${d.total} items · ${d.symbols} open ${d.symbols===1?"position":"positions"} (V8 + SmartGain)`
-      : "Position News · open-position headlines, refreshed 3×/day";
-    renderPositionNews(groups);
-  } catch(e){
-    if(e.name === "AbortError") return;
-    if(curCat !== activeCat) return;
-    document.getElementById("feed").innerHTML = `<div class="msg">Could not load (${esc(e.message)}). Tap Refresh to try again.</div>`;
-  } finally{
-    if(curCat === activeCat) btn.disabled = false;
-  }
-}
-
-function renderPositionNews(groups){
-  const feed = document.getElementById("feed");
-  if(!groups.length){
-    feed.innerHTML = '<div class="msg">No open positions, or no polished news yet.<br><span style="color:#8a94a6;font-size:12px">Polished summaries for open V8 &amp; SmartGain positions appear here.</span></div>';
-    return;
-  }
-  // cc#243: polished COMPANY news for open positions (last 7 days) — Domestic-News card:
-  // bold headline + full_summary body (3-4 sentences) + meta(source · time · symbol). The
-  // one-line deck was dropped (it duplicated the headline). No detail page, no nav link.
-  feed.innerHTML = groups.map(function(g){
-    const items = (g.items||[]).map(function(it){
-      const age = it.published_at ? timeAgo(it.published_at) : "";
-      return `<div class="pn-item">`+
-        `<div class="pn-hl" style="font-size:13px;font-weight:700">${esc(it.headline||'')}</div>`+
-        (it.body?`<div class="pn-sum" style="font-size:12px;color:#5a6781;margin:3px 0 4px;line-height:1.5">${esc(it.body)}</div>`:``)+
-        `<div class="pn-meta" style="font-size:11px"><span class="pn-src">${esc(it.source||'')}</span>`+
-        (age?`<span>·</span><span>${esc(age)}</span>`:``)+
-        (it.symbol?`<span>·</span><span>${esc(it.symbol)}</span>`:``)+`</div></div>`;
-    }).join("");
-    return `<div class="pn-group"><div class="pn-head">`+
-      `<span class="pn-sym">${esc(g.symbol)}</span>`+
-      `<span class="pn-badge">${g.count} ${g.count===1?'item':'items'}</span>`+
-      `</div>${items}</div>`;
-  }).join("");
-}
+// cc#294: loadPositionNews()/renderPositionNews() and the /api/news/position fetch were removed
+// from this hub — the Position News tab now lives in v8_dashboard.html (unchanged endpoint).
 
 // ─────────── cc_task #125: Knowledge Hub (Learn tab) ───────────
 async function loadKnowledge(){

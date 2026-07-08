@@ -1,7 +1,8 @@
 """
-position_news_endpoints.py — cc#207
-Read API for the Position News quarantine tab. Grouped by symbol, newest first
-within a group. This is a reading room, not a product surface — plain and fast.
+position_news_endpoints.py — canonical polished company-news lookup for OPEN positions
+(id=1660 / cc#243). Grouped by symbol, newest first within a group; plain and fast.
+Surfaced by the Position News tab (relocated to v8_dashboard.html in cc#294; the retired
+cc#207 "quarantine tab" framing no longer applies). Query/logic unchanged.
 
   GET /api/news/position   -> { symbols, total, groups:[{symbol,origin,count,items:[...]}] }
 """
