@@ -4,7 +4,7 @@ Smart routing: Cache (0 tokens) → Anthropic API (only for explanations)
 Monthly cost: $2-3 (vs $100 Max plan)
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, time as dt_time
@@ -186,7 +186,8 @@ def smartgain_m2m():
                     -- cc#132: use smartgain_holdings for broker-reconciled entry_price.
                     -- personal_journal.entry_price can differ from the actual fill
                     -- (e.g. SONACOMS 614.40 journal vs 614.63 broker) causing MTM drift.
-                    SELECT id, symbol, direction, qty, entry_price
+                    -- cc#312: source_tag = Arpit's editable source override.
+                    SELECT id, symbol, direction, qty, entry_price, source_tag
                     FROM smartgain_holdings
                     WHERE account = 'MHK40'
                 )
@@ -215,7 +216,8 @@ def smartgain_m2m():
                     -- Arpit's choice). Dynamic: disappears if V8 later closes its paper leg.
                     (SELECT vp.basket FROM v8_paper_positions vp
                       WHERE vp.symbol = h.symbol AND vp.side = h.direction
-                        AND vp.status = 'OPEN' LIMIT 1)                      AS v8_basket
+                        AND vp.status = 'OPEN' LIMIT 1)                      AS v8_basket,
+                    h.source_tag                                            AS source_tag   -- cc#312
                 FROM open_book h
                 LEFT JOIN LATERAL (
                     SELECT
@@ -413,7 +415,7 @@ def clients_positions():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT cp.client, cp.symbol, cp.direction, cp.lots, cp.qty, cp.is_dabba,
+                SELECT cp.id, cp.client, cp.symbol, cp.direction, cp.lots, cp.qty, cp.is_dabba,
                        ROUND(cp.entry_price::numeric, 2)                     AS entry_price,
                        fu.lot_size,
                        (SELECT ip.close FROM intraday_prices ip
@@ -425,7 +427,12 @@ def clients_positions():
                          WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
                            AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
                            AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
-                         ORDER BY ip.ts DESC LIMIT 1)                        AS fut_ts
+                         ORDER BY ip.ts DESC LIMIT 1)                        AS fut_ts,
+                       -- cc#312: same live V8-basket VLOOKUP as SmartGain + editable source_tag
+                       (SELECT vp.basket FROM v8_paper_positions vp
+                         WHERE vp.symbol = cp.symbol AND vp.side = cp.direction
+                           AND vp.status = 'OPEN' LIMIT 1)                    AS v8_basket,
+                       cp.source_tag                                        AS source_tag
                 FROM client_positions cp
                 LEFT JOIN futures_universe fu ON fu.symbol = cp.symbol
                 WHERE cp.status = 'OPEN'
@@ -435,7 +442,8 @@ def clients_positions():
 
         now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
         positions, last_ts = [], None
-        for client, symbol, direction, lots, raw_qty, is_dabba, entry, lot_size, fut_ltp, fut_ts in rows:
+        for (pid, client, symbol, direction, lots, raw_qty, is_dabba, entry, lot_size,
+             fut_ltp, fut_ts, v8_basket, source_tag) in rows:
             lots = int(lots) if lots is not None else None
             entry = float(entry) if entry is not None else None
             lot_size = int(lot_size) if lot_size is not None else None
@@ -454,11 +462,12 @@ def clients_positions():
                 if last_ts is None or fut_ts > last_ts:
                     last_ts = fut_ts
             positions.append({
-                "client": client, "symbol": symbol, "direction": direction,
+                "id": pid, "client": client, "symbol": symbol, "direction": direction,
                 "lots": lots, "lot_size": lot_size, "qty": qty,
                 "is_dabba": bool(is_dabba),
                 "entry_price": entry, "cmp": round(ltp, 2) if ltp is not None else None,
                 "mtm": mtm,
+                "v8_basket": v8_basket, "source_tag": source_tag,   # cc#312
                 "is_live": (age_min is not None and age_min <= 10 and _market_open_ist()),
             })
 
@@ -550,6 +559,53 @@ def clients_realised():
             "grand_total_realised": grand,
             "total_closed": len(rows),
         }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── cc#312: editable Source tag (UI-only writes; position data itself is owned by Claude web) ──
+
+@router.post("/api/smartgain/position/source_tag")
+def smartgain_set_source_tag(payload: dict = Body(...)):
+    """Set Arpit's editable Source tag on a SmartGain open position (smartgain_holdings), keyed
+    by id or symbol+direction. A blank/empty value clears it (card falls back to auto V8 basket,
+    else Undefined). This is the ONLY UI write to source_tag; qty/P&L/reconcile are untouched."""
+    tag = (str(payload.get("source_tag") or "").strip()) or None
+    account = payload.get("account", "MHK40")
+    pid = payload.get("id")
+    sym, direction = payload.get("symbol"), payload.get("direction")
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            if pid is not None:
+                cur.execute("UPDATE smartgain_holdings SET source_tag=%s, updated_at=NOW() "
+                            "WHERE account=%s AND id=%s", (tag, account, pid))
+            elif sym and direction:
+                cur.execute("UPDATE smartgain_holdings SET source_tag=%s, updated_at=NOW() "
+                            "WHERE account=%s AND symbol=%s AND direction=%s",
+                            (tag, account, str(sym).upper(), str(direction).upper()))
+            else:
+                return {"error": "id or symbol+direction required"}
+            n = cur.rowcount
+            conn.commit()
+        return {"ok": True, "updated": n, "source_tag": tag}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/api/clients/position/source_tag")
+def clients_set_source_tag(payload: dict = Body(...)):
+    """Set the editable Source tag on a client open position (client_positions), keyed by id.
+    Blank/empty clears it (falls back to auto V8 basket, else Undefined)."""
+    tag = (str(payload.get("source_tag") or "").strip()) or None
+    pid = payload.get("id")
+    if pid is None:
+        return {"error": "id required"}
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE client_positions SET source_tag=%s, updated_at=NOW() WHERE id=%s", (tag, pid))
+            n = cur.rowcount
+            conn.commit()
+        return {"ok": True, "updated": n, "source_tag": tag}
     except Exception as e:
         return {"error": str(e)}
 

@@ -63,6 +63,24 @@
   /* cc#304: V8 basket tag — same pill shape as sg-dir, neutral slate/indigo so basket != direction */
   .sg-basket{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;
     background:#eef1f8;color:#4a5578;border:1px solid #dfe4f0}
+  /* cc#312: editable Source pill — Undefined reads as a fill-me placeholder (muted, dashed) */
+  .sg-src{cursor:pointer}
+  .sg-src-undef{background:transparent;color:var(--mut);border:1px dashed var(--mut);font-style:italic;font-weight:600}
+  .src-modal{position:fixed;inset:0;background:rgba(20,28,45,.5);z-index:200;
+    display:flex;align-items:center;justify-content:center;padding:20px}
+  .src-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+    width:min(360px,94vw);box-shadow:0 12px 40px rgba(20,28,45,.25)}
+  .src-head{font-size:14px;font-weight:800;color:var(--txt);margin-bottom:12px}
+  .src-presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .src-preset{font-size:11px;font-weight:700;padding:5px 10px;border-radius:8px;border:1px solid var(--line);
+    background:#eef1f8;color:#4a5578;cursor:pointer}
+  .src-preset:hover{border-color:var(--blu)}
+  .src-input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-size:13px;margin-bottom:12px}
+  .src-actions{display:flex;align-items:center;gap:8px}
+  .src-btn{font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;border:1px solid var(--line);
+    background:var(--card);color:var(--mut);cursor:pointer}
+  .src-save{background:var(--blu);color:#fff;border-color:transparent}
+  .src-clear{color:var(--red)}
   .sg-mtm{font-weight:800;font-family:monospace;font-size:13.5px;text-align:right}
   .sg-pos{color:var(--grn)} .sg-neg{color:var(--red)} .sg-neu{color:var(--mut)}
 
@@ -302,6 +320,21 @@
     <div class="sg-meta" id="cl-meta"></div>
   </div>
 
+  <!-- cc#312: shared Source-tag editor modal (SmartGain + Client cards) -->
+  <div id="srcModal" class="src-modal" style="display:none">
+    <div class="src-card">
+      <div class="src-head">Set Source &middot; <span id="srcSym"></span></div>
+      <div class="src-presets" id="srcPresets"></div>
+      <input id="srcInput" class="src-input" placeholder="or type a source&hellip;" autocomplete="off" spellcheck="false">
+      <div class="src-actions">
+        <button type="button" class="src-btn src-clear" onclick="_srcSave('')">Clear (auto)</button>
+        <span style="flex:1"></span>
+        <button type="button" class="src-btn" onclick="closeSourceTag()">Cancel</button>
+        <button type="button" class="src-btn src-save" onclick="_srcSave(document.getElementById('srcInput').value)">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Live Tools — collapsed by default -->
   <div class="tools-toggle">
     <span class="tools-toggle-label">Live Tools</span>
@@ -420,6 +453,55 @@ const V8_BASKET_LABELS = {
 };
 const v8BasketLabel = id => V8_BASKET_LABELS[id]
   || String(id).split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+
+// cc#312: editable Source pill (SmartGain + Client cards). Resolution order: source_tag
+// override -> auto V8 basket VLOOKUP -> Undefined (muted/dashed, click to fill). One shared
+// modal edits it; the pill carries data-* so a document-level delegated click opens the editor
+// (survives the 30s innerHTML re-renders). SmartGain keys by symbol+direction, Client by id.
+const SRC_PRESETS = ['V4','TC','Signal','Paper Miss','Buy Reversal','Buy Momentum','Buy S1 Bounce','Sell Reversal','Sell Momentum','Sell Overbought'];
+function _resolveSrc(p){
+  if(p.source_tag) return {text:p.source_tag, undef:false};
+  if(p.v8_basket)  return {text:v8BasketLabel(p.v8_basket), undef:false};
+  return {text:'Undefined', undef:true};
+}
+function _esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function _srcPill(kind, p){
+  const r=_resolveSrc(p);
+  const cur=_esc(p.source_tag||'');
+  const keyAttr = kind==='client'
+    ? `data-src-id="${p.id}"`
+    : `data-src-sym="${_esc(p.symbol)}" data-src-dir="${_esc(p.direction)}"`;
+  return `<span class="sg-basket sg-src${r.undef?' sg-src-undef':''}" data-src-kind="${kind}" ${keyAttr} data-src-cur="${cur}" title="Set source">${_esc(r.text)}</span>`;
+}
+let _srcCtx=null;
+function openSourceTag(ds){
+  _srcCtx={kind:ds.srcKind, id:ds.srcId, sym:ds.srcSym, dir:ds.srcDir};
+  document.getElementById('srcSym').textContent = ds.srcSym || ('#'+(ds.srcId||''));
+  document.getElementById('srcInput').value = ds.srcCur || '';
+  document.getElementById('srcPresets').innerHTML =
+    SRC_PRESETS.map(x=>`<button type="button" class="src-preset" data-src-preset="${_esc(x)}">${x}</button>`).join('');
+  document.getElementById('srcModal').style.display='flex';
+}
+function closeSourceTag(){document.getElementById('srcModal').style.display='none';_srcCtx=null;}
+async function _srcSave(val){
+  const c=_srcCtx; if(!c){closeSourceTag();return;}
+  const tag=(val||'').trim();
+  const url = c.kind==='client' ? '/api/clients/position/source_tag' : '/api/smartgain/position/source_tag';
+  const body = c.kind==='client' ? {id:Number(c.id), source_tag:tag} : {symbol:c.sym, direction:c.dir, source_tag:tag};
+  try{ await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }catch(e){}
+  const kind=c.kind; closeSourceTag();
+  if(kind==='client') loadClients(); else loadSG();
+}
+// one delegated listener: open the editor for any source pill (preventDefault so the SmartGain
+// card's <a href="/holdings"> does NOT navigate), and handle preset-button clicks in the modal.
+document.addEventListener('click', function(e){
+  const t=e.target;
+  const pill = t.closest && t.closest('[data-src-kind]');
+  if(pill){ e.preventDefault(); e.stopPropagation(); openSourceTag(pill.dataset); return; }
+  const preset = t.closest && t.closest('[data-src-preset]');
+  if(preset){ e.preventDefault(); _srcSave(preset.dataset.srcPreset); return; }
+  if(t.id==='srcModal'){ closeSourceTag(); }   // backdrop click closes
+});
 const f2 = n => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:2, maximumFractionDigits:2});
 const f0 = n => n == null ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:0, maximumFractionDigits:0});
 const ago = ts => {
@@ -525,15 +607,12 @@ async function loadSG() {
       const wt = (val != null && sideTot > 0) ? (val / sideTot * 100) : null;
       const wtTxt = wt != null ? "Wt " + wt.toFixed(1) + "%" : "";
 
-      // cc#304: auto-derived V8 basket tag (blank when V8 not currently in this symbol+side)
-      const basketTag = p.v8_basket
-        ? `<span class="sg-basket">${v8BasketLabel(p.v8_basket)}</span>` : "";
-
+      // cc#312: editable Source pill — source_tag override, else auto V8 basket, else Undefined.
       return grpHdr + `<div class="sg-row">
         <div class="sg-row-top">
           <span class="sg-sym">${p.symbol}</span>
           <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
-          ${basketTag}
+          ${_srcPill('sg', p)}
         </div>
         <div class="sg-mtm ${mc}">${mtmTxt}</div>
         <div class="sg-sub">
@@ -603,19 +682,21 @@ function renderClientPositions(d) {
       const pctColor = pct == null ? "var(--mut)" : pct >= 0 ? "var(--grn)" : "var(--red)";
       const val = (p.cmp != null && p.qty != null) ? p.cmp * p.qty : null;
       const valTxt = val != null ? "₹" + f0(val) : "";
-      // cc#307: real accounts show the lot pill; dabba (Trade Karo, lots null) shows a
-      // Dabba tag instead — never render lots=null as "0 lot".
-      const lotTag = p.is_dabba ? "Dabba"
-        : (p.lots != null ? p.lots + " lot" + (p.lots === 1 ? "" : "s") : "");
+      // cc#312: Dabba/N-lots pill replaced by the editable Source pill (source_tag -> auto V8
+      // basket -> Undefined). cc#313: lots moved to a bracket next to qty for real accounts;
+      // dabba shows raw qty with no bracket.
+      const qtyTxt = p.qty != null
+        ? p.qty + " qty" + ((!p.is_dabba && p.lots != null) ? ` (${p.lots} lot${p.lots === 1 ? "" : "s"})` : "")
+        : "—";
       html += `<div class="sg-row">
         <div class="sg-row-top">
           <span class="sg-sym">${p.symbol}</span>
           <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
-          ${lotTag ? `<span class="sg-basket">${lotTag}</span>` : ""}
+          ${_srcPill('client', p)}
         </div>
         <div class="sg-mtm ${mc}">${mtmTxt}</div>
         <div class="sg-sub">
-          <span class="sg-sub-val">${p.qty != null ? p.qty + " qty" : "—"}</span>
+          <span class="sg-sub-val">${qtyTxt}</span>
           <span class="sg-dot">·</span>
           <span class="sg-sub-val">${valTxt}</span>
           <span class="sg-dot">·</span>
