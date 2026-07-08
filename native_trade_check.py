@@ -114,31 +114,48 @@ def _parse_side(q):
 # ─────────────────────────────────────────────── parameter computers ───────────────────────────────────
 
 def _r10_intraday(cur, symbol, side):
+    # cc#299: R8 REDEFINED — 3 sub-signals, tri-state (3/3 PASS, 2/3 WATCH, <2 FAIL):
+    #   (1) CMP vs intraday VWAP (current session, typical-price×volume)
+    #   (2) CMP vs previous-day EOD close
+    #   (3) 15-min avg (last 3 bars) vs 120-min avg (rolling trailing 24×5m bars)
+    # The 120-min average uses a ROLLING TRAILING window that spans into the PRIOR session early
+    # in the day (NOT since-open-only) — intraday_prices retains ~59-61 prior-session bars, so the
+    # trailing window is always computable from market open. source='fyers_eq' pinned (cc#140).
     cur.execute("""
-        SELECT ts, open, high, low, close FROM intraday_prices
-        WHERE symbol=%s AND timeframe='5m'
-          AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices
-                        WHERE symbol=%s AND timeframe='5m')
-        ORDER BY ts""", (symbol, symbol))
-    bars = cur.fetchall()
-    if len(bars) < 8:
+        SELECT ts, close FROM intraday_prices
+        WHERE symbol=%s AND timeframe='5m' AND source='fyers_eq'
+        ORDER BY ts DESC LIMIT 24""", (symbol,))
+    rows = cur.fetchall()   # newest-first
+    if len(rows) < 8:
         # cc_task #83 FIX_2: insufficient intraday bars -> WATCH (0.5), not no-data.
-        return "watch", f"insufficient bars ({len(bars)} avail)"
-    bar_date = bars[0][0].date()
-    o0 = _f(bars[0][1]); cN = _f(bars[-1][4])
-    hi = max(_f(b[2]) for b in bars); lo = min(_f(b[3]) for b in bars)
-    closes = [_f(b[4]) for b in bars]
-    half = len(closes) // 2
-    h1 = sum(closes[:half]) / half
-    h2 = sum(closes[half:]) / (len(closes) - half)
-    pos = (cN - lo) / (hi - lo) if hi > lo else 0.5
+        return "watch", f"insufficient bars ({len(rows)} avail)"
+    cN = _f(rows[0][1])                                   # latest close = CMP
+    bar_date = rows[0][0].date()
+    closes = [_f(r[1]) for r in rows]                    # up-to-24 closes, newest-first
+    avg120 = sum(closes) / len(closes)                   # 120-min trailing avg (24 bars)
+    avg15  = sum(closes[:3]) / min(3, len(closes))       # 15-min avg (last 3 bars)
+    # (1) intraday VWAP over the current session
+    cur.execute("""
+        SELECT SUM((high+low+close)/3.0 * NULLIF(volume,0)) / NULLIF(SUM(NULLIF(volume,0)),0)
+        FROM intraday_prices
+        WHERE symbol=%s AND timeframe='5m' AND source='fyers_eq' AND ts::date=%s""",
+        (symbol, bar_date))
+    vw = cur.fetchone()
+    vwap = _f(vw[0]) if vw else None
+    # (2) previous-day EOD close (the trading day before this session)
+    cur.execute("""
+        SELECT close FROM raw_prices WHERE symbol=%s AND price_date < %s AND volume>0
+        ORDER BY price_date DESC LIMIT 1""", (symbol, bar_date))
+    pc = cur.fetchone()
+    prev_close = _f(pc[0]) if pc else None
     if side == "LONG":
-        checks = [cN > o0, pos >= 0.6, h2 > h1]
+        subs = [vwap is not None and cN > vwap, prev_close is not None and cN > prev_close, avg15 > avg120]
     else:
-        checks = [cN < o0, pos <= 0.4, h2 < h1]
-    n = sum(checks)
+        subs = [vwap is not None and cN < vwap, prev_close is not None and cN < prev_close, avg15 < avg120]
+    n = sum(subs)
+    state = True if n == 3 else ("watch" if n == 2 else False)
     stale = "" if bar_date == _ist_now().date() else f" ({bar_date.strftime('%d-%b')})"
-    return n >= 2, f"{n}/3 sub{stale}"
+    return state, f"{n}/3 sub · CMP{'>' if side=='LONG' else '<'}VWAP/prevC · 15m{'>' if side=='LONG' else '<'}120m{stale}"
 
 
 def _r12_pattern(cur, symbol, side):
@@ -205,8 +222,10 @@ def _r13_atr_ignition(cur, symbol):
     if not a5 or not a20:
         return None, "no ATR data"
     ratio = a5 / a20
+    # cc#299: R11 tri-state band — >=1.05 PASS, 1.00-1.05 WATCH, <1.00 FAIL (was binary >=1.05).
     # cc#120 fix_8: always show the threshold so the gap is visible.
-    return ratio >= 1.05, f"ATR5/20 {ratio:.2f} (need >=1.05)"
+    state = True if ratio >= 1.05 else ("watch" if ratio >= 1.00 else False)
+    return state, f"ATR5/20 {ratio:.2f} (>=1.05 PASS / 1.00-1.05 WATCH)"
 
 
 def _f6_dte():
@@ -499,18 +518,25 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 rules.append(row("R4 GVM", ">=7.0", f"{_f(gvm):.2f}" if gvm is not None else "—",
                                  gvm is not None and float(gvm) >= 7.0))
 
-            # R5 Trend
+            # R5 Trend — cc#299: tri-state on TWO halves. half A = MA-stack (2of3 MAs), half B =
+            # RSI floor (both monthly AND weekly). BOTH -> PASS(1.0), exactly ONE -> WATCH(0.5),
+            # NEITHER -> FAIL(0). RSI comparison uses the UNROUNDED value (e.g. 49.82 < 50 fails half
+            # B); display shows 1 dp so a 49.82 no longer misleadingly reads as 50.
             mas = [dma20, dma50, dma200]
             if side == "LONG":
                 n = sum(1 for x in mas if x is not None and float(x) > 0)
-                rsi_ok = (rsi_m is not None and rsi_w is not None and float(rsi_m) >= 50 and float(rsi_w) >= 50)
+                half_a = n >= 2
+                half_b = (rsi_m is not None and rsi_w is not None and float(rsi_m) >= 50 and float(rsi_w) >= 50)
+                r5_state = True if (half_a and half_b) else ("watch" if (half_a or half_b) else False)
                 rules.append(row("R5 Trend", "2of3 MAs above + RSI M/W>=50",
-                                 f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}", n >= 2 and rsi_ok))
+                                 f"{n}/3 MAs · RSI M {_f(rsi_m):.1f}/W {_f(rsi_w):.1f}", r5_state))
             else:
                 n = sum(1 for x in mas if x is not None and float(x) < 0)
-                rsi_ok = (rsi_m is not None and rsi_w is not None and float(rsi_m) <= 50 and float(rsi_w) <= 50)
+                half_a = n >= 2
+                half_b = (rsi_m is not None and rsi_w is not None and float(rsi_m) <= 50 and float(rsi_w) <= 50)
+                r5_state = True if (half_a and half_b) else ("watch" if (half_a or half_b) else False)
                 rules.append(row("R5 Trend", "2of3 MAs below + RSI M/W<=50",
-                                 f"{n}/3 MAs · RSI M {_f(rsi_m):.0f}/W {_f(rsi_w):.0f}", n >= 2 and rsi_ok))
+                                 f"{n}/3 MAs · RSI M {_f(rsi_m):.1f}/W {_f(rsi_w):.1f}", r5_state))
 
             # R6 Volume — cc#145: time-adjusted intraday volume vs 5-day baseline,
             # same threshold for LONG and SHORT (high volume confirms either direction).
@@ -530,8 +556,9 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
                 r7_state = True if aligned == 2 else ("watch" if aligned == 1 else False)
                 rules.append(row("R7 Returns", "week<0 & month<0", r7_val, r7_state))
 
-            # R8 5-min
-            rules.append(row("R8 5-min", "intraday strength (2/3 sub)", r10_val, r10_ok, r10_method))
+            # R8 5-min — cc#299: 3-state on 3 subs (CMP>VWAP, CMP>prev-close, 15m>120m avg).
+            # 3/3 PASS · 2/3 WATCH · <=1/3 FAIL (<8 bars -> WATCH).
+            rules.append(row("R8 5-min", "3of3 intraday sub PASS / 2of3 WATCH", r10_val, r10_ok, r10_method))
 
             # R9 RSI room
             if side == "LONG":
@@ -601,7 +628,8 @@ def compute_trade_check(symbol_text, side=None, gate1=None, gate2=None, use_api=
 
             # VERDICT bands (v3.4)
             if side == "LONG":
-                pass_cut, watch_cut = 12, 9   # 15 rules
+                pass_cut, watch_cut = 12.5, 9   # cc#299: 15 rules, raised 12->12.5 (founder). A card of
+                                                # 12 clean passes + 0 watches now scores 12.0 and FAILS.
             else:
                 pass_cut, watch_cut = 11, 8   # 14 rules
             if score >= pass_cut:
