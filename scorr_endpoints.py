@@ -413,7 +413,7 @@ def clients_positions():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT cp.client, cp.symbol, cp.direction, cp.lots,
+                SELECT cp.client, cp.symbol, cp.direction, cp.lots, cp.qty, cp.is_dabba,
                        ROUND(cp.entry_price::numeric, 2)                     AS entry_price,
                        fu.lot_size,
                        (SELECT ip.close FROM intraday_prices ip
@@ -435,12 +435,15 @@ def clients_positions():
 
         now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
         positions, last_ts = [], None
-        for client, symbol, direction, lots, entry, lot_size, fut_ltp, fut_ts in rows:
+        for client, symbol, direction, lots, raw_qty, is_dabba, entry, lot_size, fut_ltp, fut_ts in rows:
             lots = int(lots) if lots is not None else None
             entry = float(entry) if entry is not None else None
             lot_size = int(lot_size) if lot_size is not None else None
             ltp = float(fut_ltp) if fut_ltp is not None else None
-            qty = lots * lot_size if (lots is not None and lot_size is not None) else None
+            # cc#307: cp.qty is authoritative (supports dabba accounts w/ raw qty + lots=NULL).
+            # Only fall back to lots*lot_size when qty was never stored.
+            qty = int(raw_qty) if raw_qty is not None else (
+                lots * lot_size if (lots is not None and lot_size is not None) else None)
             mtm = None
             if ltp is not None and entry is not None and qty is not None:
                 per = (ltp - entry) if direction == "LONG" else (entry - ltp)
@@ -453,6 +456,7 @@ def clients_positions():
             positions.append({
                 "client": client, "symbol": symbol, "direction": direction,
                 "lots": lots, "lot_size": lot_size, "qty": qty,
+                "is_dabba": bool(is_dabba),
                 "entry_price": entry, "cmp": round(ltp, 2) if ltp is not None else None,
                 "mtm": mtm,
                 "is_live": (age_min is not None and age_min <= 10 and _market_open_ist()),
