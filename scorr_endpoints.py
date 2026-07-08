@@ -396,6 +396,96 @@ def smartgain_m2m():
         return {"error": str(e)}
 
 
+# ── cc#305: Client tracking (read-only, live) ─────────────────────────────────
+# Lightweight LIVE view of external clients' open F&O positions (separate book from
+# SmartGain MHK40). Data entry is done by Claude web via SQL into client_positions;
+# this endpoint only reads + values them. NO realised/closed/orderbook — open + live P&L.
+
+CLIENT_SCOPE = ["Trade Karo", "Phani", "Kartik", "Ashish", "Akshay"]
+
+
+@router.get("/api/clients/positions")
+def clients_positions():
+    """Open client positions valued on FUTURES LTP. quantity = lots * futures lot_size;
+    mtm = (LONG: fut_ltp-entry ELSE entry-fut_ltp) * lots * lot_size. CMP = fut_ltp
+    (latest fyers_fut 5m trading-session close, same fut-LTP-first basis as SmartGain).
+    Every in-scope client appears even with zero open positions (shows flat)."""
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT cp.client, cp.symbol, cp.direction, cp.lots,
+                       ROUND(cp.entry_price::numeric, 2)                     AS entry_price,
+                       fu.lot_size,
+                       (SELECT ip.close FROM intraday_prices ip
+                         WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
+                           AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                           AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
+                         ORDER BY ip.ts DESC LIMIT 1)                        AS fut_ltp,
+                       (SELECT ip.ts FROM intraday_prices ip
+                         WHERE ip.symbol = cp.symbol AND ip.source = 'fyers_fut'
+                           AND EXTRACT(DOW FROM ip.ts) BETWEEN 1 AND 5
+                           AND ip.ts::time >= TIME '09:15' AND ip.ts::time < TIME '15:30'
+                         ORDER BY ip.ts DESC LIMIT 1)                        AS fut_ts
+                FROM client_positions cp
+                LEFT JOIN futures_universe fu ON fu.symbol = cp.symbol
+                WHERE cp.status = 'OPEN'
+                ORDER BY cp.client, cp.symbol
+            """)
+            rows = cur.fetchall()
+
+        now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        positions, last_ts = [], None
+        for client, symbol, direction, lots, entry, lot_size, fut_ltp, fut_ts in rows:
+            lots = int(lots) if lots is not None else None
+            entry = float(entry) if entry is not None else None
+            lot_size = int(lot_size) if lot_size is not None else None
+            ltp = float(fut_ltp) if fut_ltp is not None else None
+            qty = lots * lot_size if (lots is not None and lot_size is not None) else None
+            mtm = None
+            if ltp is not None and entry is not None and qty is not None:
+                per = (ltp - entry) if direction == "LONG" else (entry - ltp)
+                mtm = round(per * qty, 2)
+            age_min = None
+            if fut_ts is not None:
+                age_min = round((now_ist - fut_ts).total_seconds() / 60.0, 1)
+                if last_ts is None or fut_ts > last_ts:
+                    last_ts = fut_ts
+            positions.append({
+                "client": client, "symbol": symbol, "direction": direction,
+                "lots": lots, "lot_size": lot_size, "qty": qty,
+                "entry_price": entry, "cmp": round(ltp, 2) if ltp is not None else None,
+                "mtm": mtm,
+                "is_live": (age_min is not None and age_min <= 10 and _market_open_ist()),
+            })
+
+        # per-client summary — every in-scope client present (+ any extra client in the data)
+        order = list(CLIENT_SCOPE)
+        for p in positions:
+            if p["client"] not in order:
+                order.append(p["client"])
+        summary = []
+        for c in order:
+            cps = [p for p in positions if p["client"] == c]
+            summary.append({
+                "client": c,
+                "mtm": round(sum(p["mtm"] or 0 for p in cps), 2),
+                "position_count": len(cps),
+            })
+
+        grand_mtm = round(sum(p["mtm"] or 0 for p in positions), 2)
+        return {
+            "clients": order,
+            "positions": positions,
+            "summary": summary,
+            "grand_total_mtm": grand_mtm,
+            "total_positions": len(positions),
+            "last_updated": last_ts.isoformat() if last_ts else None,
+            "data_source": "fyers_fut",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/scorr/health")

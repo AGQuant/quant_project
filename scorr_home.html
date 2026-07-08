@@ -85,6 +85,23 @@
   .sg-val-neu{color:var(--txt,#1c2536)}
   .sg-grp{font-size:9.5px;font-weight:800;color:var(--mut);text-transform:uppercase;
     letter-spacing:.07em;margin:10px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+  /* cc#305: Client tracking view — segmented toggle, tabs, P&L summary */
+  .sg-head-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .sg-seg{display:inline-flex;gap:0;background:#eef1f5;border:1px solid var(--line);border-radius:9px;padding:2px}
+  .sg-seg-btn{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+    border:none;background:transparent;color:var(--mut);padding:4px 10px;border-radius:7px;cursor:pointer}
+  .sg-seg-btn.on{background:var(--card);color:var(--txt);box-shadow:0 1px 3px rgba(25,40,70,.12)}
+  .cl-tabs{display:flex;gap:6px;margin-bottom:12px}
+  .cl-tab{flex:1;font-size:11px;font-weight:700;border:1px solid var(--line);background:var(--card);
+    color:var(--mut);padding:7px 10px;border-radius:9px;cursor:pointer}
+  .cl-tab.on{background:#eef1f8;color:#4a5578;border-color:#dfe4f0}
+  .cl-flat{font-size:11.5px;color:var(--dim);font-style:italic;padding:4px 2px 8px}
+  .cl-pnl-row{display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line)}
+  .cl-pnl-name{font-weight:800;color:var(--txt);font-size:13px;flex:1}
+  .cl-pnl-cnt{font-size:11px;color:var(--dim);font-family:monospace}
+  .cl-pnl-val{font-weight:800;font-family:monospace;font-size:14px;min-width:92px;text-align:right}
+  .cl-pnl-foot{border-top:2px solid var(--line);border-bottom:none;margin-top:4px}
+  .cl-pnl-foot .cl-pnl-name{text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:var(--mut)}
 
   .sg-meta{font-size:11px;color:var(--dim);margin-top:10px}
   .sg-loading{color:var(--dim);font-size:12px;font-style:italic}
@@ -185,7 +202,14 @@
   <div class="quote">&ldquo;Claude disrupted the world. Arpit disrupted how to use Claude.&rdquo;</div>
 
   <!-- SmartGain M2M -->
-  <div class="sec">SmartGain &middot; MHK40</div>
+  <!-- cc#305: SmartGain | Client segmented toggle in the heading row -->
+  <div class="sec sg-head-row">
+    <span>SmartGain &middot; MHK40</span>
+    <span class="sg-seg">
+      <button class="sg-seg-btn on" id="seg-sg" type="button" onclick="setSGView('sg')">SmartGain</button>
+      <button class="sg-seg-btn" id="seg-client" type="button" onclick="setSGView('client')">Client</button>
+    </span>
+  </div>
   <a class="sg-card" href="/holdings" id="sg-card">
     <div class="sg-top">
       <div>
@@ -252,6 +276,17 @@
 
     <div class="sg-meta" id="sg-meta"></div>
   </a>
+
+  <!-- cc#305: Client tracking view (read-only, live). Hidden until the Client toggle. -->
+  <div class="sg-card" id="client-view" style="display:none">
+    <div class="cl-tabs">
+      <button class="cl-tab on" id="cl-tab-pos" type="button" onclick="setClientTab('pos')">Positions</button>
+      <button class="cl-tab" id="cl-tab-pnl" type="button" onclick="setClientTab('pnl')">P&amp;L Summary</button>
+    </div>
+    <div id="cl-pos"><span class="sg-loading">Loading&hellip;</span></div>
+    <div id="cl-pnl" style="display:none"></div>
+    <div class="sg-meta" id="cl-meta"></div>
+  </div>
 
   <!-- Live Tools — collapsed by default -->
   <div class="tools-toggle">
@@ -512,6 +547,101 @@ async function loadSG() {
 }
 loadSG();
 setInterval(loadSG, 30000);
+
+// ── cc#305: Client tracking view (read-only, live). SmartGain | Client toggle + 2 tabs. ──
+let clientTimer = null;
+function setSGView(v) {
+  const sg = v === "sg";
+  document.getElementById("sg-card").style.display = sg ? "block" : "none";
+  document.getElementById("client-view").style.display = sg ? "none" : "block";
+  document.getElementById("seg-sg").className = "sg-seg-btn" + (sg ? " on" : "");
+  document.getElementById("seg-client").className = "sg-seg-btn" + (sg ? "" : " on");
+  if (!sg) {
+    loadClients();
+    if (!clientTimer) clientTimer = setInterval(loadClients, 30000);   // poll like SmartGain
+  }
+}
+function setClientTab(t) {
+  const pos = t === "pos";
+  document.getElementById("cl-pos").style.display = pos ? "block" : "none";
+  document.getElementById("cl-pnl").style.display = pos ? "none" : "block";
+  document.getElementById("cl-tab-pos").className = "cl-tab" + (pos ? " on" : "");
+  document.getElementById("cl-tab-pnl").className = "cl-tab" + (pos ? "" : " on");
+}
+function renderClientPositions(d) {
+  const order = d.clients || [];
+  const byClient = {};
+  (d.positions || []).forEach(p => { (byClient[p.client] = byClient[p.client] || []).push(p); });
+  let html = "";
+  order.forEach(c => {
+    html += `<div class="sg-grp">${c}</div>`;
+    const list = byClient[c] || [];
+    if (!list.length) { html += `<div class="cl-flat">Flat &middot; no open positions</div>`; return; }
+    list.forEach(p => {
+      const mc = p.mtm == null ? "sg-neu" : p.mtm >= 0 ? "sg-pos" : "sg-neg";
+      const mtmTxt = p.mtm == null ? "—" : (p.mtm >= 0 ? "+" : "") + "₹" + f0(Math.abs(p.mtm));
+      let pct = null;
+      if (p.cmp != null && p.entry_price != null && p.entry_price !== 0) {
+        pct = p.direction === "LONG" ? (p.cmp - p.entry_price) / p.entry_price * 100
+                                     : (p.entry_price - p.cmp) / p.entry_price * 100;
+      }
+      const pctTxt = pct == null ? "" : (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+      const pctColor = pct == null ? "var(--mut)" : pct >= 0 ? "var(--grn)" : "var(--red)";
+      const val = (p.cmp != null && p.qty != null) ? p.cmp * p.qty : null;
+      const valTxt = val != null ? "₹" + f0(val) : "";
+      const lotsTxt = p.lots != null ? p.lots + " lot" + (p.lots === 1 ? "" : "s") : "";
+      html += `<div class="sg-row">
+        <div class="sg-row-top">
+          <span class="sg-sym">${p.symbol}</span>
+          <span class="sg-dir ${p.direction === 'LONG' ? 'sg-long' : 'sg-short'}">${p.direction}</span>
+          ${lotsTxt ? `<span class="sg-basket">${lotsTxt}</span>` : ""}
+        </div>
+        <div class="sg-mtm ${mc}">${mtmTxt}</div>
+        <div class="sg-sub">
+          <span class="sg-sub-val">${p.qty != null ? p.qty + " qty" : "—"}</span>
+          <span class="sg-dot">·</span>
+          <span class="sg-sub-val">${valTxt}</span>
+          <span class="sg-dot">·</span>
+          <span class="sg-pct" style="color:${pctColor}">${pctTxt}</span>
+        </div>
+        <div><span class="sg-avgcmp">Avg ₹${f2(p.entry_price)} · CMP ₹${f2(p.cmp)}</span></div>
+      </div>`;
+    });
+  });
+  document.getElementById("cl-pos").innerHTML = html || '<div class="cl-flat">No clients configured</div>';
+}
+function renderClientPnl(d) {
+  const sgn = n => (n >= 0 ? "+" : "−") + "₹" + f2(Math.abs(n));
+  const rows = (d.summary || []).map(s => {
+    const col = s.position_count ? (s.mtm >= 0 ? "var(--grn)" : "var(--red)") : "var(--mut)";
+    return `<div class="cl-pnl-row">
+      <span class="cl-pnl-name">${s.client}</span>
+      <span class="cl-pnl-cnt">${s.position_count} pos</span>
+      <span class="cl-pnl-val" style="color:${col}">${sgn(s.mtm)}</span>
+    </div>`;
+  }).join("");
+  const g = d.grand_total_mtm || 0;
+  const foot = `<div class="cl-pnl-row cl-pnl-foot">
+    <span class="cl-pnl-name">Grand Total</span>
+    <span class="cl-pnl-cnt">${d.total_positions || 0} pos</span>
+    <span class="cl-pnl-val" style="color:${g >= 0 ? 'var(--grn)' : 'var(--red)'}">${sgn(g)}</span>
+  </div>`;
+  document.getElementById("cl-pnl").innerHTML = rows + foot;
+}
+async function loadClients() {
+  try {
+    const r = await fetch("/api/clients/positions");
+    const d = await r.json();
+    if (d.error) { document.getElementById("cl-pos").innerHTML = '<div class="cl-flat">Could not load</div>'; return; }
+    renderClientPositions(d);
+    renderClientPnl(d);
+    const nowIST = new Date().toLocaleTimeString("en-IN", {timeZone:"Asia/Kolkata", hour:"2-digit", minute:"2-digit", second:"2-digit"});
+    document.getElementById("cl-meta").textContent =
+      (d.total_positions || 0) + " open · " + nowIST + " IST · live (futures LTP)";
+  } catch (e) {
+    document.getElementById("cl-pos").innerHTML = '<div class="cl-flat">Could not load</div>';
+  }
+}
 
 // cc#166: daily M2M chart + closed positions from /api/smartgain/daily_m2m
 // (orderbook FIFO replay — recomputed server-side on every call, no snapshots).
