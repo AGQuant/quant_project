@@ -1201,8 +1201,13 @@ async def _scheduler_loop():
         # cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
         # universe -> raw_news (source_type='company', alias-filtered). Supersedes the cc#207
         # position_news quarantine fetch.
-        if _is_trading_day(today) and m == 30 and h in (8, 12, 16):
-            _spawn(_bg_fetch_stock_news)               # cc#242: 08:30 / 12:30 / 16:30 IST
+        # cc#321: moved from 3x/day (08:30/12:30/16:30, market/dev hours) to ONCE at ~00:30 IST —
+        # the no-push window just before the 01:00 nightly chain — so a CC deploy landing on the
+        # fetch tick can no longer silently skip the run (the 16:30 miss found 08-Jul). Company
+        # freshness is 1x/day now (intentional tradeoff for schedule stability); the 120h ingest
+        # gate (news_fetcher.COMPANY_STALE_HOURS) widens per-run coverage to compensate.
+        if h == 0 and m == 30:
+            _spawn(_bg_fetch_stock_news)               # cc#321: once daily ~00:30 IST
         if _is_trading_day(today) and m == 20 and h in (7, 16, 22):
             _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger — off-session (backfills on first run)
         # cc#291: global intraday now runs 24x7 (was 06:00-23:30) — its symbols are commodities/

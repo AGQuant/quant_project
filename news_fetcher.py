@@ -40,6 +40,12 @@ DESC_MAX        = 1000     # raw_news.description is VARCHAR(1000)
 # Editorial). Backlog above the alert threshold means ingest or the polish step
 # broke upstream.
 UNPOLISHED_MAX_HOURS       = 48
+# cc#321: company (per-stock Google News) ingest age gate widened to 120h — Google News RSS
+# legitimately surfaces older-dated but still-relevant coverage for lower-profile stocks, and the
+# 48h window rejected 500-650 of ~700-860 parsed entries/run (8/12 open symbols got ZERO news
+# ever). ONLY the company ingest path uses this; UNPOLISHED_MAX_HOURS=48 stays for domestic/global
+# RSS staleness AND the news_retention() 48h unpolished-deletion sweep (unchanged).
+COMPANY_STALE_HOURS        = 120
 POLISHED_MAX_DAYS          = 90     # cc#208: founder ask — store polished news 90 days
 UNPOLISHED_ALERT_THRESHOLD = 800
 HTTP_TIMEOUT    = 12
@@ -261,21 +267,25 @@ def _insert_rows(conn, rows):
              "content_dup_skipped": 0, "dup_skipped": 0, "inserted": 0}
     if not rows:
         return stats
-    # cc#289: reuse the retention window (UNPOLISHED_MAX_HOURS) as an INGEST age gate. Anything
-    # already older than that at insert time is evergreen churn — 2017-dated TradingView/
-    # Investing.com "Share Price" tracker pages Google resurfaces once the 48h retention sweep
-    # frees their url_hash, which would otherwise re-insert forever. No new magic number.
-    stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=UNPOLISHED_MAX_HOURS)
+    # cc#289: ingest age gate — anything already older than the window at insert time is evergreen
+    # churn (2017-dated "Share Price" tracker pages Google resurfaces once the retention sweep frees
+    # their url_hash, re-inserting forever). cc#321: source_type-aware — company (per-stock Google
+    # News) gets the wider 120h window (COMPANY_STALE_HOURS); domestic/global RSS keep 48h. Mirrors
+    # the existing source_type-aware quality gate (_is_company_quality vs _is_quality_article).
+    _now_utc = datetime.now(timezone.utc)
+    stale_cutoff_company = _now_utc - timedelta(hours=COMPANY_STALE_HOURS)
+    stale_cutoff_default = _now_utc - timedelta(hours=UNPOLISHED_MAX_HOURS)
     with conn.cursor() as cur:
         for r in rows:
-            # cc#289: age gate BEFORE the quality gate. r[7]=published_at (aware UTC, or None).
-            # NULL published_at passes through unchanged — news_retention() COALESCEs to
-            # fetched_at, so an unparseable date still gets the standard 48h grace from ingest.
+            # age gate BEFORE the quality gate. r[7]=published_at (aware UTC, or None), r[0]=source_type.
+            # NULL published_at passes through unchanged — news_retention() COALESCEs to fetched_at,
+            # so an unparseable date still gets the standard grace from ingest.
             pub = r[7]
             if pub is not None:
                 if pub.tzinfo is None:
                     pub = pub.replace(tzinfo=timezone.utc)
-                if pub < stale_cutoff:
+                cutoff = stale_cutoff_company if r[0] == 'company' else stale_cutoff_default
+                if pub < cutoff:
                     stats["stale_rejected"] += 1
                     continue
             # cc#245: source_type-aware quality gate. r[0]=source_type. Company (per-stock
@@ -316,7 +326,8 @@ def _insert_rows(conn, rows):
                 stats["dup_skipped"] += 1
     conn.commit()
     if stats["stale_rejected"]:
-        log.info(f"_insert_rows: rejected {stats['stale_rejected']} stale (>{UNPOLISHED_MAX_HOURS}h) article(s)")
+        log.info(f"_insert_rows: rejected {stats['stale_rejected']} stale article(s) "
+                 f"(company >{COMPANY_STALE_HOURS}h, other >{UNPOLISHED_MAX_HOURS}h)")
     if stats["quality_rejected"]:
         log.info(f"_insert_rows: skipped {stats['quality_rejected']} low-quality article(s)")
     if stats["content_dup_skipped"]:
