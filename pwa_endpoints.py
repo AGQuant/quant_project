@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v3';
+const CACHE = 'scorr-pwa-v4';   // cc#328: pwa.js nav rebuilt (bottom nav + More sheet)
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -186,15 +186,35 @@ PWA_JS = """
     var css = ''
       + '.pwa-mnav{display:none}'
       + '@media(max-width:767px){'
-      + '  body{padding-bottom:62px!important}'
-      + '  .pwa-mnav{display:flex;position:fixed;bottom:0;left:0;right:0;height:56px;'
+      // cc#328: reserve bottom-nav height + iPhone home-indicator safe area
+      + '  body{padding-bottom:calc(62px + env(safe-area-inset-bottom,0px))!important}'
+      + '  .pwa-mnav{display:flex;position:fixed;bottom:0;left:0;right:0;'
+      + '    height:calc(56px + env(safe-area-inset-bottom,0px));'
+      + '    padding-bottom:env(safe-area-inset-bottom,0px);'
       + '    background:#fff;border-top:1px solid #e4e9f1;z-index:9998;'
       + '    box-shadow:0 -1px 6px rgba(20,35,70,.06)}'
       + '  .pwa-mn{flex:1;display:flex;flex-direction:column;align-items:center;'
-      + '    justify-content:center;gap:2px;font-size:9px;font-weight:600;'
-      + '    color:#5a6781;text-decoration:none}'
-      + '  .pwa-mn .ic{font-size:18px;line-height:1}'
+      + '    justify-content:center;gap:2px;font-size:10px;font-weight:600;'
+      + '    color:#5a6781;text-decoration:none;background:none;border:none;'
+      + '    font-family:inherit;cursor:pointer;min-height:44px}'
+      + '  .pwa-mn .ic{font-size:20px;line-height:1}'
       + '  .pwa-mn.active{color:#2563eb}'
+      // cc#328: "More" bottom-sheet — all remaining destinations, 2-col 44px rows
+      + '  .pwa-sheet-ov{display:none;position:fixed;inset:0;z-index:9999;'
+      + '    background:rgba(15,22,35,.45)}'
+      + '  .pwa-sheet-ov.open{display:block}'
+      + '  .pwa-sheet{position:fixed;left:0;right:0;bottom:0;z-index:10000;background:#fff;'
+      + '    border-radius:16px 16px 0 0;padding:10px 12px calc(14px + env(safe-area-inset-bottom,0px));'
+      + '    transform:translateY(100%);transition:transform .22s ease;'
+      + '    box-shadow:0 -4px 20px rgba(20,35,70,.18)}'
+      + '  .pwa-sheet-ov.open .pwa-sheet{transform:translateY(0)}'
+      + '  .pwa-sheet h4{margin:6px 4px 10px;font-size:13px;color:#1c2536;font-weight:700}'
+      + '  .pwa-sheet-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}'
+      + '  .pwa-sheet-grid a{display:flex;align-items:center;gap:9px;min-height:44px;'
+      + '    padding:0 12px;border:1px solid #e4e9f1;border-radius:10px;text-decoration:none;'
+      + '    color:#1c2536;font-size:13px;font-weight:600}'
+      + '  .pwa-sheet-grid a.active{border-color:#2563eb;color:#2563eb;background:#eff6ff}'
+      + '  .pwa-sheet-grid a .ic{font-size:17px;line-height:1}'
       + '  .pwa-install{display:flex;position:fixed;left:0;right:0;bottom:56px;'
       + '    height:48px;align-items:center;gap:10px;padding:0 14px;z-index:9999;'
       + '    background:#2563eb;color:#fff;font-size:12px;font-weight:600}'
@@ -210,25 +230,65 @@ PWA_JS = """
     document.head.appendChild(st);
   }
 
-  // 4) bottom nav (active item by pathname)
+  // cc#328: SINGLE nav source — bottom nav (4 primary + More sheet) AND desktop
+  // top-nav both build from THIS array. Pages ship only an empty #scorr-nav placeholder.
+  var NAV = [
+    ['/', '\\u2302', 'Home'],
+    ['/dashboard', '\\u26a1', 'V8'],
+    ['/cio2?model=gvm', '\\u25c9', 'GVM'],
+    ['/sector', '\\u2297', 'Sector'],
+    ['/check', '\\u2713', 'Check'],
+    ['/news', '\\ud83d\\udcf0', 'Intel'],
+    ['/scanners', '\\u229e', 'Scanners'],
+    ['/filters', '\\u25bd', 'V13'],
+    ['/screener', '\\u229f', 'V12'],
+    ['/cio', '\\u2299', 'Max'],
+    ['/fpc', '\\u25e7', 'FPC'],
+    ['/quant-basket', '\\u25eb', 'QB'],
+    ['/holdings', '\\u25c6', 'Holdings'],
+    ['/v10', '\\u25b3', 'V10']
+  ];
+  var p = location.pathname, qs = location.search;
+  function isActive(route) {
+    var base = route.split('?')[0];
+    if (route.indexOf('model=gvm') > -1) return p === '/cio2' && qs.indexOf('model=gvm') > -1;
+    if (base === '/') return p === '/';
+    return p === base || p.indexOf(base + '/') === 0;   // prefix match: sub-views highlight
+  }
+  function navByPath(pp) { for (var i = 0; i < NAV.length; i++) { if (NAV[i][0] === pp) return NAV[i]; } return null; }
+
+  // 4) mobile bottom nav — 4 primary slots + More (opens all-destinations sheet)
+  var PRIMARY = ['/', '/dashboard', '/cio2?model=gvm', '/check'];
   if (!document.getElementById('pwa-mobile-nav')) {
-    var path = location.pathname;
-    var items = [
-      ['/', '\\u2302', 'Home'],
-      ['/cio2?model=gvm', '\\u25ce', 'GVM'],
-      ['/check', '\\u2713', 'Check'],
-      ['/news', '\\u2605', 'Intel'],
-      ['/v10', '\\u25b3', 'V10']
-    ];
     var nav = document.createElement('div');
     nav.className = 'pwa-mnav'; nav.id = 'pwa-mobile-nav';
-    nav.innerHTML = items.map(function (it) {
-      var base = it[0].split('?')[0];
-      var active = (path === base) ? ' active' : '';
-      return '<a class="pwa-mn' + active + '" href="' + it[0] + '">'
+    var mhtml = '';
+    PRIMARY.forEach(function (pp) {
+      var it = navByPath(pp); if (!it) return;
+      var active = isActive(it[0]) ? ' active' : '';
+      mhtml += '<a class="pwa-mn' + active + '" href="' + it[0] + '">'
         + '<span class="ic">' + it[1] + '</span><span>' + it[2] + '</span></a>';
-    }).join('');
+    });
+    var inSheet = NAV.some(function (it) { return PRIMARY.indexOf(it[0]) === -1 && isActive(it[0]); });
+    mhtml += '<button type="button" class="pwa-mn' + (inSheet ? ' active' : '') + '" id="pwa-more-btn">'
+      + '<span class="ic">\\u2261</span><span>More</span></button>';
+    nav.innerHTML = mhtml;
     document.body.appendChild(nav);
+
+    // one-time sheet: every remaining destination + Logout
+    var ov = document.createElement('div');
+    ov.className = 'pwa-sheet-ov'; ov.id = 'pwa-sheet-ov';
+    var rows = NAV.filter(function (it) { return PRIMARY.indexOf(it[0]) === -1; })
+      .map(function (it) {
+        return '<a class="' + (isActive(it[0]) ? 'active' : '') + '" href="' + it[0] + '">'
+          + '<span class="ic">' + it[1] + '</span>' + it[2] + '</a>';
+      }).join('');
+    rows += '<a href="/logout"><span class="ic">\\u23cf</span>Logout</a>';
+    ov.innerHTML = '<div class="pwa-sheet"><h4>All destinations</h4>'
+      + '<div class="pwa-sheet-grid">' + rows + '</div></div>';
+    document.body.appendChild(ov);
+    document.getElementById('pwa-more-btn').addEventListener('click', function () { ov.classList.add('open'); });
+    ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('open'); });
   }
 
   // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637):
@@ -253,29 +313,7 @@ PWA_JS = """
     document.head.appendChild(nst);
   }
   (function () {
-    var NAV = [
-      ['/', '\\u2302', 'Home'],
-      ['/dashboard', '\\u26a1', 'V8'],
-      ['/cio2?model=gvm', '\\u25c9', 'GVM'],
-      ['/sector', '\\u2297', 'Sector'],
-      ['/check', '\\u2713', 'Check'],
-      ['/news', '\\ud83d\\udcf0', 'Intel'],
-      ['/scanners', '\\u229e', 'Scanners'],
-      ['/filters', '\\u25bd', 'V13'],
-      ['/screener', '\\u229f', 'V12'],
-      ['/cio', '\\u2299', 'Max'],
-      ['/fpc', '\\u25e7', 'FPC'],
-      ['/quant-basket', '\\u25eb', 'QB'],
-      ['/holdings', '\\u25c6', 'Holdings'],
-      ['/v10', '\\u25b3', 'V10']
-    ];
-    var p = location.pathname, qs = location.search;
-    function isActive(route) {
-      var base = route.split('?')[0];
-      if (route.indexOf('model=gvm') > -1) return p === '/cio2' && qs.indexOf('model=gvm') > -1;
-      if (base === '/') return p === '/';
-      return p === base || p.indexOf(base + '/') === 0;
-    }
+    // cc#328: same NAV + isActive as the bottom nav (single source, defined above)
     var host = document.getElementById('scorr-nav');
     if (!host) {
       host = document.createElement('nav'); host.id = 'scorr-nav';
@@ -381,7 +419,10 @@ NAV_TOGGLE_JS = """
       + '  background:#2563eb;color:#fff;font-size:11px;font-weight:600;'
       + '  padding:4px 12px;border-radius:12px;border:none;cursor:pointer;margin:0;'
       + '  box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:.92}'
-      + '#scorr-nav-toggle-btn:hover{opacity:1}';
+      + '#scorr-nav-toggle-btn:hover{opacity:1}'
+      // cc#328: the top-nav is display:none at <=767px (bottom nav is used there),
+      // so the Show/Hide pill + reveal strip are dead controls on mobile — kill them.
+      + '@media(max-width:767px){#scorr-nav-toggle-btn,#scorr-nav-strip{display:none!important}}';
     var st = document.createElement('style');
     st.id = 'scorr-navtoggle-style'; st.textContent = css;
     (document.head || root).appendChild(st);
