@@ -147,11 +147,22 @@ def sync_universe_endpoint(x_admin_token: str = Header(None)):
     """
     if x_admin_token != os.getenv("ADMIN_TOKEN"):
         raise HTTPException(401, "Unauthorized")
+    out = {}
+    # legacy universe membership sync (add/deactivate symbols from the Fyers feed)
     try:
         from scheduler import sync_futures_universe
         with _conn() as conn:
-            result = sync_futures_universe(conn)
-        return result
+            out["universe_sync"] = sync_futures_universe(conn)
     except Exception as e:
-        log.error(f"sync_universe failed: {e}")
-        raise HTTPException(500, str(e))
+        log.error(f"sync_universe membership failed: {e}")
+        out["universe_sync_error"] = str(e)
+    # cc#308: refresh lot_size from the Fyers NSE_FO master EVERY run (was frozen forever).
+    # Runs independently so a membership-sync error never blocks the lot correction.
+    try:
+        import lot_sync
+        with _conn() as conn:
+            out["lot_size_audit"] = lot_sync.audit_and_fix_lots(conn, apply=True)
+    except Exception as e:
+        log.error(f"sync_universe lot audit failed: {e}")
+        out["lot_size_audit_error"] = str(e)
+    return out

@@ -5,7 +5,7 @@ V8 Futures Universe Management
 - Used by Buy/Sell Reversal + Momentum baskets
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Header
 from typing import Optional, List
 import psycopg
 import os
@@ -90,17 +90,35 @@ async def add_futures(req: Request):
                 lot = s.get("lot_size") if isinstance(s, dict) else None
                 if not sym:
                     continue
+                # cc#308: also refresh lot_size on conflict (was frozen — the root cause of
+                # stale lots). COALESCE keeps the existing lot when the incoming one is null.
                 cur.execute("""
                     INSERT INTO futures_universe (symbol, lot_size, is_active)
                     VALUES (%s, %s, TRUE)
                     ON CONFLICT (symbol) DO UPDATE
-                    SET is_active = TRUE, updated_at = NOW()
+                    SET lot_size = COALESCE(EXCLUDED.lot_size, futures_universe.lot_size),
+                        is_active = TRUE, updated_at = NOW()
                 """, (sym, lot))
                 added += 1
             conn.commit()
         return {"status": "ok", "added": added}
     except Exception as e:
         raise HTTPException(500, f"add_futures failed: {e}")
+
+
+@router.post("/sync_lots")
+def sync_lots(x_admin_token: str = Header(None)):
+    """cc#308: refresh futures_universe.lot_size from the Fyers NSE_FO master + audit.
+    Corrects stale lots (frozen by the old upsert), logs the diff + client blast radius
+    to ops_log(lot_size_audit), and returns the full report. Idempotent."""
+    if x_admin_token != os.getenv("ADMIN_TOKEN"):
+        raise HTTPException(401, "Unauthorized")
+    try:
+        import lot_sync
+        with _conn() as conn:
+            return lot_sync.audit_and_fix_lots(conn, apply=True)
+    except Exception as e:
+        raise HTTPException(500, f"sync_lots failed: {e}")
 
 
 @router.post("/remove")

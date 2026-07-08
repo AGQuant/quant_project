@@ -979,6 +979,15 @@ def _bg_fu_sync():
         with _conn() as conn:
             fyers_sync.sync_futures_universe(conn)
             _log_health(conn, "fu_sync", {"date": str(today)})  # cc#255
+        # cc#308: also refresh lot_size from the Fyers NSE_FO master (was frozen forever,
+        # so an NSE lot revision at expiry was never picked up). Runs independently.
+        try:
+            import lot_sync
+            with _conn() as conn:
+                rep = lot_sync.audit_and_fix_lots(conn, apply=True)
+            log.info(f"fu_sync lot audit: {rep.get('applied')} lots corrected, {rep.get('changed_count')} stale")
+        except Exception as e:
+            log.error(f"fu_sync lot audit: {e}")
         _fu_sync_ran_this_week = today
         log.info("fu_sync done")
     except Exception as e: log.error(f"fu_sync: {e}")
