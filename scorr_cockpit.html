@@ -7,15 +7,16 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
 
-  :root{
-    --bg:#f6f8fb; --bg2:#fbfcfe; --panel:#ffffff; --panel2:#f1f4f9; --panel3:#e8ecf3;
-    --line:#e4e9f1; --line2:#d4dbe7;
-    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
-    --grn:#0fa968; --grn-d:#e8f9f1; --grn-b:#c3edd8;
-    --red:#e23744; --red-d:#fdf0f1; --red-b:#f5c6ca;
-    --blu:#2563eb; --blu-d:#eff4ff;
-    --cyan:#0891b2; --cyan-d:#e0f5fb;
-    --amber:#d97706; --amber-d:#fef3e2; --amber-b:#fcd89a;
+  /* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
+:root{
+    --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241; --panel3:#182241;
+    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+    --grn:#2FD48B; --grn-d:#e8f9f1; --grn-b:#c3edd8;
+    --red:#FF5C6C; --red-d:#fdf0f1; --red-b:#f5c6ca;
+    --blu:#4D7CFE; --blu-d:rgba(77,124,254,.14);
+    --cyan:#37D3E8; --cyan-d:rgba(55,211,232,.14);
+    --amber:#F5B94A; --amber-d:rgba(245,185,74,.14); --amber-b:#fcd89a;
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --mono:'Space Mono','SF Mono',Consolas,monospace;
     --shadow:0 1px 4px rgba(20,35,70,.06);
@@ -26,17 +27,17 @@
     font-family:var(--font);font-size:13px;line-height:1.55;-webkit-font-smoothing:antialiased}
 
   /* ── Canonical Scorr model-nav ── */
-  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;
-    border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#121A33;
+    border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;
     position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
   .model-nav::-webkit-scrollbar{display:none}
   .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
     border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
-    color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
-  .mnav-item:hover{color:#1c2536}
-  .mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+    color:#8C99BD;font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:#E9EEFB}
+  .mnav-item.active{border-bottom-color:#4D7CFE;color:#4D7CFE}
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
-  .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+  .mnav-sep{width:1px;height:20px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 4px}
 
   .app{display:flex;flex-direction:column;height:calc(100vh - 46px);max-width:880px;margin:0 auto;width:100%;transition:max-width .2s}
   .app.chatting{max-width:1180px}
@@ -86,9 +87,9 @@
   .mode-pill{border:none;background:transparent;color:var(--mut);font-family:var(--font);font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;cursor:pointer;transition:.12s}
   .mode-pill:hover{color:var(--txt)}
   .mode-pill.on{color:#fff}
-  .mode-pill[data-mode="native"].on{background:#0a9e63}
-  .mode-pill[data-mode="haiku"].on{background:#2563eb}
-  .mode-pill[data-mode="gemini"].on{background:#b45309}
+  .mode-pill[data-mode="native"].on{background:#2FD48B}
+  .mode-pill[data-mode="haiku"].on{background:#4D7CFE}
+  .mode-pill[data-mode="gemini"].on{background:#F5B94A}
 
   .welcome{flex:1;overflow-y:auto;padding:8px 18px 20px;display:flex;flex-direction:column;gap:18px}
   .welcome::-webkit-scrollbar{width:4px}

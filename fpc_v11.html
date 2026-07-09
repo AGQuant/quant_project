@@ -7,13 +7,14 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+/* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
 :root{
   /* Scorr light theme (canonical tokens from scorr_home.html) */
-  --bg:#f6f8fb;--bg2:#ffffff;--bg3:#eef1f6;
-  --text:#1c2536;--text2:#5a6781;--text3:#8a96ad;
-  --border:#e4e9f1;--border2:#d4dbe7;
-  --accent:#0891b2;--green:#1D9E75;--gold:#c79200;
-  --red:#E24B4A;--warn:#BA7517;--blue:#378ADD;
+  --bg:#0A0F1E;--bg2:#121A33;--bg3:#182241;
+  --text:#E9EEFB;--text2:#8C99BD;--text3:#5E6B8F;
+  --border:rgba(148,166,210,.14);--border2:rgba(148,166,210,.24);
+  --accent:#37D3E8;--green:#2FD48B;--gold:#F5B94A;
+  --red:#FF5C6C;--warn:#F5B94A;--blue:#4D7CFE;
   --radius:8px;--radius-lg:12px;
 }
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:0}
@@ -50,7 +51,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .bg{background:rgba(29,158,117,.15);color:#0e7a50}
 .br{background:rgba(226,75,74,.15);color:#c0392b}
 .bw{background:rgba(186,117,23,.15);color:#a16207}
-.bi{background:rgba(55,138,221,.15);color:#2563eb}
+.bi{background:rgba(55,138,221,.15);color:#4D7CFE}
 .sb{display:flex;align-items:center;font-size:13px;padding:8px 0;border-bottom:0.5px solid var(--border)}
 .sb:last-child{border-bottom:none}
 .sl{width:140px;color:var(--text2);font-size:12px}
@@ -438,7 +439,7 @@ function calculate(){
     </div>
     <div class="card">
       <div class="card-title"><i class="ti ti-rosette"></i> Financial health scorecard</div>
-      ${[['Emergency fund',emgScore,'#1D9E75'],['Debt management',debtScore,'#1D9E75'],['Savings rate',savScore,'#1D9E75'],['Insurance cover',insScore,insScore<50?'#E24B4A':'#BA7517'],['Retirement ready',retScore,retScore>=80?'#1D9E75':'#BA7517']].map(([l,s2,c])=>`
+      ${[['Emergency fund',emgScore,'#2FD48B'],['Debt management',debtScore,'#2FD48B'],['Savings rate',savScore,'#2FD48B'],['Insurance cover',insScore,insScore<50?'#FF5C6C':'#F5B94A'],['Retirement ready',retScore,retScore>=80?'#2FD48B':'#F5B94A']].map(([l,s2,c])=>`
         <div class="sb"><span class="sl">${l}</span>${bar(s2,c)}<span class="sn" style="color:${c}">${s2}</span><span class="badge ${sc(s2)}" style="margin-left:8px;font-size:10px">${s2>=80?'Good':s2>=50?'Fair':'Act'}</span></div>`).join('')}
       <div class="divider"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600">
@@ -478,19 +479,19 @@ function calculate(){
     <div class="card">
       <div class="card-title"><i class="ti ti-chart-pie"></i> Asset allocation · ${rp.label}</div>
       ${Object.entries({'Large cap equity':rp.alloc.lc,'Mid & small cap':rp.alloc.ms,'Debt / bonds / FD':rp.alloc.debt,'Gold / SGB':rp.alloc.gold,'International equity':rp.alloc.intl,'Cash / liquid':rp.alloc.cash}).map(([l,p],i)=>{
-        const clrs=['#1D9E75','#378ADD','#BA7517','#D4537E','#7F77DD','#888780'];
+        const clrs=['#2FD48B','#4D7CFE','#F5B94A','#D4537E','#7F77DD','#888780'];
         return`<div class="ar"><span class="an">${l}</span><div class="abw"><div class="ab" style="width:${p*100}%;background:${clrs[i]}"></div></div><span class="ap">${Math.round(p*100)}%</span></div>`;
       }).join('')}
     </div>
     <div class="card">
       <div class="card-title"><i class="ti ti-list-check"></i> Recommended action plan</div>
       ${[
-        {ic:'ti-shield-check',c:'#1D9E75',t:'Emergency fund',d:cash>=emgReq?`Adequate (${fmt(cash)} vs ${fmt(emgReq)} required). No action needed.`:`Build ${fmt(emgReq-cash)} more to reach your ${emgMonths}-month target of ${fmt(emgReq)}.`,ok:cash>=emgReq},
-        {ic:'ti-heart',c:lifeCoverGap>0?'#E24B4A':'#1D9E75',t:'Life insurance',d:lifeCoverGap>0?`Buy a pure term plan for ${fmt(lifeCoverGap)} immediately to protect family income replacement.`:'Life cover is adequate. Review annually.',ok:lifeCoverGap<=0},
-        {ic:'ti-first-aid-kit',c:healthGap>0?'#BA7517':'#1D9E75',t:'Health insurance',d:healthGap>0?`Increase family health cover by ${fmt(healthGap)}. Current ${fmt(healthCover)} vs benchmark ${fmt(healthBench)}.`:'Health cover adequate for family size.',ok:healthGap<=0},
-        {ic:'ti-trending-up',c:addSip>0?'#BA7517':'#1D9E75',t:'Retirement SIP',d:addSip>0?`Increase monthly SIP by ${fmt(addSip)} to close the ${fmt(retShortfall)} retirement corpus gap.`:'On track for retirement. Projected corpus exceeds requirement.',ok:addSip<=0},
-        {ic:'ti-credit-card-off',c:'#1D9E75',t:'Debt management',d:emiTotal===0?'Completely debt-free. Excellent financial position.':emiTotal/totalInc<0.3?`Healthy EMI burden at ${pct(emiTotal/totalInc*100)} of income.`:`EMIs at ${pct(emiTotal/totalInc*100)} of income — target reducing below 30%.`,ok:emiTotal/totalInc<0.3},
-        {ic:'ti-target',c:'#378ADD',t:'Goal SIPs',d:goalsSip>0?`Start ${fmt(goalsSip)}/month across ${goalRows.filter(g=>g.active&&g.sip>0).length} dedicated goal SIPs.`:'No active goals requiring SIPs currently.',ok:goalsSip===0},
+        {ic:'ti-shield-check',c:'#2FD48B',t:'Emergency fund',d:cash>=emgReq?`Adequate (${fmt(cash)} vs ${fmt(emgReq)} required). No action needed.`:`Build ${fmt(emgReq-cash)} more to reach your ${emgMonths}-month target of ${fmt(emgReq)}.`,ok:cash>=emgReq},
+        {ic:'ti-heart',c:lifeCoverGap>0?'#FF5C6C':'#2FD48B',t:'Life insurance',d:lifeCoverGap>0?`Buy a pure term plan for ${fmt(lifeCoverGap)} immediately to protect family income replacement.`:'Life cover is adequate. Review annually.',ok:lifeCoverGap<=0},
+        {ic:'ti-first-aid-kit',c:healthGap>0?'#F5B94A':'#2FD48B',t:'Health insurance',d:healthGap>0?`Increase family health cover by ${fmt(healthGap)}. Current ${fmt(healthCover)} vs benchmark ${fmt(healthBench)}.`:'Health cover adequate for family size.',ok:healthGap<=0},
+        {ic:'ti-trending-up',c:addSip>0?'#F5B94A':'#2FD48B',t:'Retirement SIP',d:addSip>0?`Increase monthly SIP by ${fmt(addSip)} to close the ${fmt(retShortfall)} retirement corpus gap.`:'On track for retirement. Projected corpus exceeds requirement.',ok:addSip<=0},
+        {ic:'ti-credit-card-off',c:'#2FD48B',t:'Debt management',d:emiTotal===0?'Completely debt-free. Excellent financial position.':emiTotal/totalInc<0.3?`Healthy EMI burden at ${pct(emiTotal/totalInc*100)} of income.`:`EMIs at ${pct(emiTotal/totalInc*100)} of income — target reducing below 30%.`,ok:emiTotal/totalInc<0.3},
+        {ic:'ti-target',c:'#4D7CFE',t:'Goal SIPs',d:goalsSip>0?`Start ${fmt(goalsSip)}/month across ${goalRows.filter(g=>g.active&&g.sip>0).length} dedicated goal SIPs.`:'No active goals requiring SIPs currently.',ok:goalsSip===0},
       ].map(a=>`<div class="ai"><div class="aic" style="background:${a.c}22;color:${a.c}"><i class="ti ${a.ic}" style="font-size:15px"></i></div><div><div class="at">${a.t} <span class="badge ${a.ok?'bg':'bw'}" style="font-size:10px;margin-left:4px">${a.ok?'On track':'Action needed'}</span></div><div class="ad">${a.d}</div></div></div>`).join('')}
     </div>`;
 
@@ -509,7 +510,7 @@ function buildProjChart(){
   if(pChart)pChart.destroy();
   pChart=new Chart(ctx,{
     type:'line',
-    data:{labels:projData.map(d=>''+d.age),datasets:[{label:'Corpus',data:projData.map(d=>+(d.close/10000000).toFixed(2)),borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2}]},
+    data:{labels:projData.map(d=>''+d.age),datasets:[{label:'Corpus',data:projData.map(d=>+(d.close/10000000).toFixed(2)),borderColor:'#2FD48B',backgroundColor:'rgba(29,158,117,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`₹${c.parsed.y} Cr`}}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'Cr'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
   });
   const rows=projData.filter((_,i)=>i%2===0||i===projData.length-1).slice(0,20);
@@ -551,15 +552,15 @@ function runSWP(){
   swpC=new Chart(document.getElementById('swpChart'),{
     type:'line',
     data:{labels:rows.map(r=>'Yr '+r.y),datasets:[
-      {label:'Corpus',data:rows.map(r=>+(r.closeBal/100000).toFixed(1)),borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2},
-      {label:'Annual withdrawal',data:rows.map(r=>+(r.wdl/100000).toFixed(1)),borderColor:'#BA7517',fill:false,tension:.3,pointRadius:0,borderWidth:1.5,borderDash:[5,3]},
+      {label:'Corpus',data:rows.map(r=>+(r.closeBal/100000).toFixed(1)),borderColor:'#2FD48B',backgroundColor:'rgba(29,158,117,.08)',fill:true,tension:.4,pointRadius:0,borderWidth:2},
+      {label:'Annual withdrawal',data:rows.map(r=>+(r.wdl/100000).toFixed(1)),borderColor:'#F5B94A',fill:false,tension:.3,pointRadius:0,borderWidth:1.5,borderDash:[5,3]},
     ]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'L'}},x:{ticks:{autoSkip:true,maxTicksLimit:12,color:'#8B949E'},grid:{display:false}}}}
   });
   document.getElementById('swpTable').innerHTML=`
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text2)">
-      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:#1D9E75;display:inline-block"></span>Corpus balance</span>
-      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#BA7517;display:inline-block;border-radius:2px"></span>Annual withdrawal (step-up)</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:#2FD48B;display:inline-block"></span>Corpus balance</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#F5B94A;display:inline-block;border-radius:2px"></span>Annual withdrawal (step-up)</span>
     </div>
     <div class="card"><table class="yt"><thead><tr><th>Year</th><th class="num">Opening</th><th class="num">Annual withdrawal</th><th class="num">Real value (infl. adj.)</th><th class="num">Closing corpus</th></tr></thead>
     <tbody>${rows.map(r=>`<tr style="${r.ex?'color:#c0392b':''}"><td>${r.y}</td><td class="num">${fmt(r.openBal)}</td><td class="num">${fmt(r.wdl)}</td><td class="num">${fmt(r.realWdl)}</td><td class="num" style="font-weight:600;${r.ex?'color:#c0392b':'color:#0e7a50'}">${fmt(r.closeBal)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -606,7 +607,7 @@ function runMonteCarlo(){
     </div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-title"><i class="ti ti-chart-bar"></i> Probability outcomes at year ${yrs}</div>
-      ${[['90th percentile (best 10%)',p90,'#1D9E75'],['75th percentile',p75,'#378ADD'],['50th percentile (median)',p50,'#8B949E'],['25th percentile',p25,'#BA7517'],['10th percentile (worst 10%)',p10,'#E24B4A']].map(([l,val,c])=>`
+      ${[['90th percentile (best 10%)',p90,'#2FD48B'],['75th percentile',p75,'#4D7CFE'],['50th percentile (median)',p50,'#8B949E'],['25th percentile',p25,'#F5B94A'],['10th percentile (worst 10%)',p10,'#FF5C6C']].map(([l,val,c])=>`
         <div class="prob-band">
           <span class="prob-label">${l}</span>
           <div class="prob-bar-wrap"><div class="prob-bar" style="width:${Math.min(val/p90*100,100)}%;background:${c}"></div></div>
@@ -620,18 +621,18 @@ function runMonteCarlo(){
   mcC=new Chart(document.getElementById('mcChart'),{
     type:'line',
     data:{labels:lbls,datasets:[
-      {label:'90th',data:bands[4].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#1D9E75',backgroundColor:'rgba(29,158,117,.07)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1.5},
-      {label:'75th',data:bands[3].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#378ADD',backgroundColor:'rgba(55,138,221,.05)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1},
+      {label:'90th',data:bands[4].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#2FD48B',backgroundColor:'rgba(29,158,117,.07)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1.5},
+      {label:'75th',data:bands[3].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#4D7CFE',backgroundColor:'rgba(55,138,221,.05)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1},
       {label:'Median',data:bands[2].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#8B949E',backgroundColor:'rgba(139,148,158,.04)',fill:'+1',tension:.4,pointRadius:0,borderWidth:2},
-      {label:'25th',data:bands[1].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#BA7517',backgroundColor:'rgba(186,117,23,.04)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1},
-      {label:'10th',data:bands[0].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#E24B4A',backgroundColor:'rgba(226,75,74,.04)',fill:false,tension:.4,pointRadius:0,borderWidth:1.5},
+      {label:'25th',data:bands[1].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#F5B94A',backgroundColor:'rgba(186,117,23,.04)',fill:'+1',tension:.4,pointRadius:0,borderWidth:1},
+      {label:'10th',data:bands[0].map(v2=>+(v2/100000).toFixed(1)),borderColor:'#FF5C6C',backgroundColor:'rgba(226,75,74,.04)',fill:false,tension:.4,pointRadius:0,borderWidth:1.5},
     ]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{grid:{color:'rgba(20,35,70,.08)'},ticks:{color:'#8B949E',callback:v2=>v2+'L'}},x:{ticks:{autoSkip:true,maxTicksLimit:10,color:'#8B949E'},grid:{display:false}}}}
   });
 
   document.getElementById('mcDetail').innerHTML=`
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text2)">
-      ${[['#1D9E75','90th (best 10%)'],['#378ADD','75th'],['#8B949E','Median'],['#BA7517','25th'],['#E24B4A','10th (worst 10%)']].map(([c,l])=>`<span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></span>${l}</span>`).join('')}
+      ${[['#2FD48B','90th (best 10%)'],['#4D7CFE','75th'],['#8B949E','Median'],['#F5B94A','25th'],['#FF5C6C','10th (worst 10%)']].map(([c,l])=>`<span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></span>${l}</span>`).join('')}
     </div>
     <div class="card">
       <div class="card-title"><i class="ti ti-info-circle"></i> What this means for you</div>

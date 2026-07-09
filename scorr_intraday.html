@@ -6,14 +6,15 @@
 <title>Intraday</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
-  :root{
-    --bg:#f4f6f9;--bg2:#fbfcfe;--panel:#ffffff;--panel2:#f1f4f8;
-    --line:#e2e7ee;--line2:#cfd8e3;
-    --txt:#1c2536;--mut:#5a6781;--dim:#8a96ad;
-    --grn:#0a9e63;--grn-d:#e3f6ed;--grn-b:#a7e3c6;
-    --red:#dd3a4a;--red-d:#fceaec;--red-b:#f5b8be;
-    --blu:#2563eb;--cyan:#0e7490;--amber:#b45309;
-    --purp:#7c3aed;--purp-d:#f0ebff;
+  /* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
+:root{
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);--grn-b:#a7e3c6;
+    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);--red-b:#f5b8be;
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+    --purp:#9B7CFF;--purp-d:#f0ebff;
     --shadow:0 2px 10px rgba(25,40,70,.06);
     --font:'Sora',sans-serif;--mono:'Space Mono',monospace;
   }
@@ -21,17 +22,17 @@
   html,body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
 
   /* Nav */
-  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;
-    border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#121A33;
+    border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;
     position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(20,35,70,.06)}
   .model-nav::-webkit-scrollbar{display:none}
   .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
     border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
-    color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
-  .mnav-item:hover{color:#1c2536}
+    color:#8C99BD;font-size:11.5px;font-weight:600;transition:.12s}
+  .mnav-item:hover{color:#E9EEFB}
   .mnav-item.active{border-bottom-color:var(--purp);color:var(--purp)}
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
-  .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+  .mnav-sep{width:1px;height:20px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 4px}
 
   /* Layout */
   .wrap{max-width:1120px;margin:0 auto;padding:12px 18px 40px}
@@ -99,7 +100,7 @@
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:var(--bg2)}
   tr.row-win:hover{background:#dcfce7}
-  tr.row-loss:hover{background:#fce4e6}
+  tr.row-loss:hover{background:rgba(255,92,108,.14)}
   .sym{font-family:var(--font);font-weight:700;color:var(--txt)}
   .pos{color:var(--grn);font-weight:700}.neg{color:var(--red);font-weight:700}
   .badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;
