@@ -1419,10 +1419,11 @@ function renderForthcoming(data){
   const MONS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const fmtDate=d=>{if(!d)return'--';const p=String(d).split('-');return p.length<3?String(d):p[2]+'-'+MONS[parseInt(p[1],10)-1]+'-'+p[0];};
   const fmtCr=v=>v==null?'--':(v>=100000?(v/100000).toFixed(2)+'L Cr':Math.round(v).toLocaleString('en-IN')+' Cr');
-  const cols=[['symbol','NSE Symbol'],['company','Company'],['result_date','Result Date'],['cap_tier','Cap Tier'],['market_cap_cr','Market Cap (Cr)'],['in_v8_universe','In V8 Universe'],['blackout','Blackout']];
+  // cc#344 (founder 09-Jul): Company column dropped — symbol is enough, company ate width on mobile.
+  const cols=[['symbol','NSE Symbol'],['result_date','Result Date'],['cap_tier','Cap Tier'],['market_cap_cr','Market Cap (Cr)'],['in_v8_universe','In V8 Universe'],['blackout','Blackout']];
   // cc#226: highlight In-V8-Universe=Yes rows (actionable / blackout names)
   const rowFn=r=>`<tr style="${r.in_v8_universe?'background:rgba(56,132,255,.10);font-weight:600':''}">`+
-    `<td>${r.symbol||''}</td><td>${r.company||''}</td><td>${fmtDate(r.result_date)}</td>`+
+    `<td>${r.symbol||''}</td><td>${fmtDate(r.result_date)}</td>`+
     `<td>${r.cap_tier||''}</td><td style="text-align:right">${fmtCr(r.market_cap_cr)}</td>`+
     `<td>${r.in_v8_universe?'Yes':'No'}</td>`+
     `<td>${r.blackout?'<span style="color:var(--red)">Yes</span>':'No'}</td></tr>`;
