@@ -411,6 +411,29 @@
     .room-pin{color:var(--cyan);font-weight:700}
     .room-major{font-weight:700;color:var(--txt)}
     .room-up{color:var(--grn)} .room-dn{color:var(--red)} .room-nt{color:var(--mut)}
+    /* cc#342: Pivot Range rail (reuses the CIO Pivot Range visual: red->green gradient track,
+       S2-S1-PP-R1-R2 ticks, proportional pulsing-green CMP dot). Table demoted to Details. */
+    .room-rail-wrap{margin:2px 0 6px;padding-top:24px}
+    .room-rail{position:relative;height:52px}
+    .room-rail-track{position:absolute;top:8px;left:0;right:0;height:6px;border-radius:3px;
+      background:linear-gradient(90deg,var(--red) 0%,var(--red) 42%,var(--grn) 58%,var(--grn) 100%);opacity:.42}
+    .room-tick{position:absolute;top:5px;width:2px;height:12px;transform:translateX(-50%);opacity:.85}
+    .room-tick.sec{top:7px;height:8px;opacity:.6}
+    .room-tick-lab{position:absolute;top:25px;transform:translateX(-50%);text-align:center;line-height:1.25}
+    .room-tick-lab .k{font-size:11px;font-weight:800}
+    .room-tick-lab .v{font-size:11px;color:var(--mut);font-family:var(--mono)}
+    .room-cmp-lab{position:absolute;top:-18px;transform:translateX(-50%);white-space:nowrap;
+      font-family:var(--mono);font-size:12px;font-weight:800;color:var(--grn)}
+    .room-cmp-dot{position:absolute;top:3px;width:12px;height:12px;border-radius:50%;background:var(--grn);
+      transform:translateX(-50%);box-shadow:0 0 0 2px var(--panel);animation:roomPulse 1.5s ease-in-out infinite}
+    @keyframes roomPulse{0%,100%{box-shadow:0 0 0 2px var(--panel),0 0 0 3px rgba(10,158,99,.55)}
+      50%{box-shadow:0 0 0 2px var(--panel),0 0 0 9px rgba(10,158,99,0)}}
+    @media (prefers-reduced-motion:reduce){.room-cmp-dot{animation:none}}
+    .room-details{margin-top:12px;border-top:1px solid var(--panel2);padding-top:8px}
+    .room-details>summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--mut);list-style:none;user-select:none;padding:2px 0}
+    .room-details>summary::-webkit-details-marker{display:none}
+    .room-details>summary::before{content:'▸ ';color:var(--dim)}
+    .room-details[open]>summary::before{content:'▾ '}
   </style>
   <div class="room-card" id="roomCard">
     <div class="room-head">
@@ -419,10 +442,14 @@
     </div>
     <div class="room-analysis" id="roomAnalysis"></div>
     <div class="room-warn" id="roomWarn"></div>
-    <table class="room-table">
-      <thead><tr><th>Level</th><th>Price</th><th>Pts</th><th>%</th><th>Strength</th></tr></thead>
-      <tbody id="roomBody"></tbody>
-    </table>
+    <div id="roomRail"></div>
+    <details class="room-details" id="roomDetails">
+      <summary>Details &mdash; all levels &amp; strength</summary>
+      <table class="room-table">
+        <thead><tr><th>Level</th><th>Price</th><th>Pts</th><th>%</th><th>Strength</th></tr></thead>
+        <tbody id="roomBody"></tbody>
+      </table>
+    </details>
   </div>
 
   <!-- Investment Check Result -->
@@ -717,6 +744,31 @@ async function loadRoom(sym, side){
   }catch(e){card.classList.remove('show');}
 }
 
+// cc#342: build the Pivot Range rail (S2-S1-PP-R1-R2 red->green track + proportional pulsing
+// green CMP dot) from d.pivots (v8_paper_pivots) + d.current_price. Swing High / 52W levels from
+// room.levels render as faint secondary ticks only when they fall inside the S2..R2 span.
+function _roomRail(pivots, cmp, levels){
+  pivots=pivots||{};
+  const s2=+pivots.s2,s1=+pivots.s1,pp=+pivots.pp,r1=+pivots.r1,r2=+pivots.r2;
+  if(![s2,s1,pp,r1,r2].every(isFinite)||r2<=s2)return '';
+  const lo=s2,hi=r2,span=hi-lo;
+  const X=v=>Math.min(99,Math.max(1,(v-lo)/span*100));
+  const colOf=k=>(k==='S2'||k==='S1')?'var(--red)':(k==='PP'?'var(--mut)':'var(--grn)');
+  const marks=[['S2',s2],['S1',s1],['PP',pp],['R1',r1],['R2',r2]];
+  let ticks=marks.map(function(m){var k=m[0],v=m[1];
+    return '<div class="room-tick" style="left:'+X(v)+'%;background:'+colOf(k)+'"></div>'+
+      '<div class="room-tick-lab" style="left:'+X(v)+'%"><div class="k" style="color:'+colOf(k)+'">'+k+'</div>'+
+      '<div class="v">'+v.toFixed(0)+'</div></div>';}).join('');
+  (levels||[]).forEach(function(l){var lab=l.label||'';var pr=+l.price;
+    if(/52W|Swing/i.test(lab)&&isFinite(pr)&&pr>=lo&&pr<=hi){
+      ticks+='<div class="room-tick sec" style="left:'+X(pr)+'%;background:var(--cyan)" title="'+lab+' '+pr.toFixed(0)+'"></div>';}});
+  var dot='';
+  if(cmp!=null&&isFinite(+cmp)){var cx=X(+cmp);
+    dot='<div class="room-cmp-lab" style="left:'+cx+'%">₹'+(+cmp).toFixed(1)+'</div>'+
+        '<div class="room-cmp-dot" style="left:'+cx+'%"></div>';}
+  return '<div class="room-rail-wrap"><div class="room-rail"><div class="room-rail-track"></div>'+ticks+dot+'</div></div>';
+}
+
 function renderRoom(d, side){
   const room=d.room||{};
   const vmap={GOOD_ROOM:['good','GOOD'],TIGHT:['tight','TIGHT'],AT_LEVEL:['at','AT LEVEL'],NO_DATA:['na','NO DATA']};
@@ -724,6 +776,7 @@ function renderRoom(d, side){
   const vEl=document.getElementById('roomVerdict');
   vEl.className='room-verdict '+vb[0]; vEl.textContent=vb[1];
   document.getElementById('roomAnalysis').textContent=room.analysis||'';
+  document.getElementById('roomRail').innerHTML=_roomRail(d.pivots, d.current_price, room.levels);   // cc#342
   const warn=document.getElementById('roomWarn');
   const rsiW=d.metrics?d.metrics.rsi_weekly:null;
   if(side==='SHORT'&&rsiW!=null&&rsiW<20){

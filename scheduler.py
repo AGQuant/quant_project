@@ -92,6 +92,7 @@ _yahoo_ran_today: Optional[date] = None
 _yahoo_daily_running = False
 _gvm_ran_today: Optional[date] = None
 _pivots_ran_today: Optional[date] = None
+_upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_pivots rebuild
 _qb_eod_ran_today: Optional[date] = None
 _ut_ran_today: Optional[date] = None   # cc#154: universe_technicals nightly guard
 _qb_eod_running = False
@@ -909,6 +910,31 @@ def _bg_pivots():
         log.error(f"pivots: {e}")
         _log_alert("pivots_error", f"paper pivot build failed for {today}: {e}")
 
+def _bg_universe_pivots():
+    """cc#342: nightly full-universe (~1720+) rolling-5d pivot rebuild into v8_paper_pivots.
+    The 01:45 _bg_pivots only covers the 211 futures symbols, so GVM companies outside it
+    showed a stale pivot_date on the CIO Pivot Range card (e.g. 2026-06-13). This refreshes
+    the whole GVM universe so that card (which reads v8_paper_pivots latest) is always current.
+    Same table + ON CONFLICT (symbol, pivot_date) upsert — idempotent, complements _bg_pivots."""
+    global _upivots_ran_today
+    today = _ist_now().date()
+    if _upivots_ran_today == today: return
+    try:
+        import gvm_universe_pivots
+        res = gvm_universe_pivots.compute_universe_pivots(today)
+        built = res.get("built", 0) if isinstance(res, dict) else 0
+        with _conn() as conn:
+            _log_health(conn, "universe_pivots_build",
+                        {"date": str(today), "status": "ok" if built else "empty", "built": built})
+        if built:
+            _upivots_ran_today = today
+        else:
+            _log_alert("universe_pivots_missing", f"universe pivots built 0 rows for {today} at 01:47")
+        log.info(f"universe pivots built: {res}")
+    except Exception as e:
+        log.error(f"universe_pivots: {e}")
+        _log_alert("universe_pivots_error", f"universe pivot build failed for {today}: {e}")
+
 def _bg_universe_technicals():
     """cc#154: nightly RSI/DMA/returns/pivots for the full ~1766 GVM universe
     (not just the 209 futures_universe symbols v8_metrics covers). Scheduled
@@ -1257,6 +1283,7 @@ async def _scheduler_loop():
         if h == 1 and m == 15:  _spawn(_bg_qb_eod)
         if h == 1 and m == 30:  _spawn(_bg_gvm)
         if h == 1 and m == 45:  _spawn(_bg_pivots)
+        if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
