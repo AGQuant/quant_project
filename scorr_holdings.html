@@ -5,12 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smartgain</title>
 <style>
+  /* cc#344 page 3: DARK TERMINAL re-skin — :root remapped to the R2 palette (design_refs). */
   :root{
-    --bg:#f4f6f9;--card:#fff;--border:#e2e7ee;
-    --txt:#1c2536;--mut:#5a6781;--dim:#9aa4b5;
-    --grn:#0a9e63;--red:#dd3a4a;--blu:#2563eb;
-    --font:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+    --bg:#0A0F1E;--card:#121A33;--border:rgba(148,166,210,.14);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;
+    --surface2:#182241;--well:#0D1428;--line2:rgba(148,166,210,.24);--r:18px;
+    --font:'Sora',-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
   }
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{min-height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px}
 
@@ -56,8 +59,8 @@
   .pos-row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .pos-sym{font-size:16px;font-weight:800;color:var(--txt)}
   .pos-dir{display:inline-block;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:800;letter-spacing:.04em}
-  .dir-long{background:#e3f6ed;color:var(--grn);border:1px solid #b6e8d0}
-  .dir-short{background:#fceaec;color:var(--red);border:1px solid #f5b8bd}
+  .dir-long{background:rgba(47,212,139,.14);color:var(--grn);border:1px solid rgba(47,212,139,.4)}
+  .dir-short{background:rgba(255,92,108,.13);color:var(--red);border:1px solid rgba(255,92,108,.4)}
   .pos-mtm{font-size:20px;font-weight:900;font-family:monospace;line-height:1;transition:color .3s;white-space:nowrap;flex-shrink:0}
 
   .pos-row2{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
@@ -70,14 +73,14 @@
     margin-left:3px;vertical-align:middle;animation:blink 1.4s infinite}
 
   /* Total row */
-  .total-card{background:#f8fafc;border:1px solid var(--border);border-radius:12px;
+  .total-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;
     padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
   .total-label{font-size:12px;font-weight:700;color:var(--mut)}
   .total-val{font-size:22px;font-weight:900;font-family:monospace}
 
   /* Flash animation for value updates */
-  @keyframes flash-grn{0%{background:#e3f6ed}100%{background:transparent}}
-  @keyframes flash-red{0%{background:#fceaec}100%{background:transparent}}
+  @keyframes flash-grn{0%{background:rgba(47,212,139,.14)}100%{background:transparent}}
+  @keyframes flash-red{0%{background:rgba(255,92,108,.13)}100%{background:transparent}}
   .flash-grn{animation:flash-grn .6s ease}
   .flash-red{animation:flash-red .6s ease}
 
@@ -102,13 +105,13 @@
      closed table scrolls horizontally. All data orderbook-native (SPEC_V1). */
   .m2m-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px 14px 16px;margin-top:14px}
   .m2m-tabs{display:flex;gap:6px;margin-bottom:12px}
-  .m2m-tab{flex:1;height:44px;border:1px solid var(--border);background:#f8fafc;border-radius:10px;
+  .m2m-tab{flex:1;height:44px;border:1px solid var(--border);background:var(--surface2);border-radius:10px;
     font-family:inherit;font-size:13px;font-weight:700;color:var(--mut);cursor:pointer;transition:.15s}
   .m2m-tab.active{background:var(--blu);border-color:var(--blu);color:#fff}
   .range-sel{display:flex;gap:6px;margin-bottom:10px}
-  .range-btn{flex:1;height:44px;border:1px solid var(--border);background:#f8fafc;border-radius:9px;
+  .range-btn{flex:1;height:44px;border:1px solid var(--border);background:var(--surface2);border-radius:9px;
     font-family:inherit;font-size:12.5px;font-weight:700;color:var(--mut);cursor:pointer;transition:.15s}
-  .range-btn.active{background:#e8effe;border-color:var(--blu);color:var(--blu)}
+  .range-btn.active{background:rgba(77,124,254,.14);border-color:var(--blu);color:var(--blu)}
   .range-btn:hover{border-color:var(--blu)}
   .m2m-head{display:flex;align-items:baseline;justify-content:space-between;margin:2px 2px 8px;flex-wrap:wrap;gap:4px}
   .m2m-legend{font-size:9.5px;color:var(--dim);display:flex;gap:9px}
@@ -118,7 +121,7 @@
   .m2m-cap{font-size:10.5px;color:var(--dim)}
   .cl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:10px}
   .cl-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:460px}
-  .cl-tbl th{background:#f8fafc;color:var(--mut);font-weight:700;font-size:10.5px;text-transform:uppercase;
+  .cl-tbl th{background:var(--surface2);color:var(--mut);font-weight:700;font-size:10.5px;text-transform:uppercase;
     letter-spacing:.04em;padding:9px 10px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)}
   .cl-tbl td{padding:9px 10px;border-bottom:1px solid #f1f4f9;white-space:nowrap}
   .cl-tbl td.num,.cl-tbl th.num{text-align:right;font-family:monospace}
@@ -129,7 +132,7 @@
 
   /* cc#181: TradingView Lightweight Charts container + crosshair tooltip + mismatch banner */
   #m2m-chart{position:relative;min-height:200px}
-  .m2m-tip{position:absolute;z-index:5;pointer-events:none;background:#fff;border:1px solid var(--border);
+  .m2m-tip{position:absolute;z-index:5;pointer-events:none;background:var(--surface2);border:1px solid var(--border);
     border-radius:8px;box-shadow:0 4px 14px rgba(20,35,70,.12);padding:7px 9px;font-size:11px;min-width:122px}
   .m2m-tip .tip-h{font-weight:800;font-size:11px;margin-bottom:4px;color:var(--txt)}
 
@@ -143,7 +146,7 @@
   .m2m-tip .tip-row{display:flex;justify-content:space-between;gap:14px;line-height:1.55}
   .m2m-tip .tip-row span{color:var(--mut)}
   .m2m-tip .tip-row b{font-family:monospace}
-  .m2m-mismatch{display:none;align-items:flex-start;gap:8px;background:#fff8ec;border:1px solid #f4d79a;
+  .m2m-mismatch{display:none;align-items:flex-start;gap:8px;background:rgba(245,185,74,.1);border:1px solid rgba(245,185,74,.35);
     border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11.5px;color:#8a5a00;line-height:1.5}
   .m2m-mismatch .mm-ic{font-size:15px;flex-shrink:0}
   .m2m-mismatch b{color:#7a4f00}
