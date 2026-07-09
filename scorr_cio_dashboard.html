@@ -47,15 +47,26 @@ async function apiGet(path, opts) {
   return r.json();
 }
 
-// cc#344 page 5: DARK TERMINAL re-skin — React palette remapped to the R2 tokens (design_refs).
-const C = {
+// cc#344 dark + cc#348 theme-aware: the React palette follows data-theme (read at load; the global
+// toggle reloads, so C is always correct for the active theme). Dark = design_refs R2 tokens.
+const _DARK_C = {
   bg: "#0A0F1E", card: "#121A33", border: "rgba(148,166,210,.14)",
   accent: "#4D7CFE", gold: "#F5B94A", green: "#2FD48B",
   red: "#FF5C6C", orange: "#F5B94A", purple: "#9B7CFF",
   text: "#E9EEFB", muted: "#8C99BD", gridLine: "rgba(148,166,210,.12)",
-  nav: "#121A33",
-  gPillar: "#2FD48B", vPillar: "#F5B94A", mPillar: "#4D7CFE",
+  nav: "#121A33", gPillar: "#2FD48B", vPillar: "#F5B94A", mPillar: "#4D7CFE",
 };
+const _LIGHT_C = {
+  bg: "#F4F7FE", card: "#FFFFFF", border: "rgba(20,35,80,.10)",
+  accent: "#3D6BEC", gold: "#C98A12", green: "#0FA968",
+  red: "#E0405A", orange: "#C98A12", purple: "#7C3AED",
+  text: "#0E1630", muted: "#5B6B94", gridLine: "rgba(20,35,80,.08)",
+  nav: "#FFFFFF", gPillar: "#0FA968", vPillar: "#C98A12", mPillar: "#3D6BEC",
+};
+const C = (function () {
+  try { return document.documentElement.getAttribute('data-theme') === 'light' ? _LIGHT_C : _DARK_C; }
+  catch (e) { return _LIGHT_C; }
+})();
 
 const GVM_PILLAR_MAP = {
   sales_5y:"G", sales_3y:"G", profit_5y:"G", profit_3y:"G",

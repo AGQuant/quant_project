@@ -79,8 +79,8 @@ MANIFEST = {
     "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
-    "theme_color": "#0A0F1E",    # cc#345: dark = default brand identity (splash/status bar)
-    "background_color": "#0A0F1E",
+    "theme_color": "#F4F7FE",    # cc#348: LIGHT is the default now (founder 09-Jul)
+    "background_color": "#F4F7FE",
     "icons": [
         {"src": "/static/icon-192.png", "type": "image/png", "sizes": "192x192"},
         {"src": "/static/icon-512.png", "type": "image/png", "sizes": "512x512"},
@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v9';   // cc#345: light theme + toggle (pwa.js shell changed)
+const CACHE = 'scorr-pwa-v10';  // cc#348: default light + top toggle + theme-aware nav
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -168,7 +168,7 @@ PWA_JS = """
   }
   if (!document.querySelector('meta[name="theme-color"]')) {
     var m = document.createElement('meta');
-    m.name = 'theme-color'; m.content = '#0A0F1E';   // cc#345: dark default; applyTheme swaps on light
+    m.name = 'theme-color'; m.content = '#F4F7FE';   // cc#348: light default; applyTheme swaps on dark
     document.head.appendChild(m);
   }
 
@@ -321,7 +321,7 @@ PWA_JS = """
     ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('open'); });
 
     // cc#345: theme toggle — dark default (brand identity), user pick persisted forever.
-    function curTheme() { try { return localStorage.getItem('scorr_theme') || 'dark'; } catch (e) { return 'dark'; } }
+    function curTheme() { try { return localStorage.getItem('scorr_theme') || 'light'; } catch (e) { return 'light'; } }
     function syncThemeBtn() {
       var t = curTheme(), ic = document.getElementById('pwa-theme-ic'), lbl = document.getElementById('pwa-theme-lbl');
       if (ic) ic.innerHTML = (t === 'light') ? '\\u263e' : '\\u2600';         // moon (->dark) / sun (->light)
@@ -335,7 +335,10 @@ PWA_JS = """
       syncThemeBtn();
     }
     document.getElementById('pwa-theme-toggle').addEventListener('click', function () {
-      applyTheme(curTheme() === 'light' ? 'dark' : 'light');
+      // cc#348: reload so EVERY page (CSS-var, React GVM, hardcoded) renders in the new theme.
+      var t = curTheme() === 'light' ? 'dark' : 'light';
+      try { localStorage.setItem('scorr_theme', t); } catch (e) {}
+      location.reload();
     });
     applyTheme(curTheme());   // sync meta + button to the theme the head script already applied
   }
@@ -345,17 +348,24 @@ PWA_JS = """
   //    active-by-path. Removes per-page nav drift. Hidden on mobile (bottom nav used).
   if (!document.getElementById('scorr-cnav-style')) {
     var ncss = ''
-      + '.scorr-cnav{display:flex;align-items:center;gap:2px;height:46px;background:#fff;'
-      + '  border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;'
-      + '  position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(20,35,70,.06)}'
+      // cc#348: desktop top-nav is theme-aware and self-contained (dark base + light override),
+      // so it never disagrees with the page it sits on.
+      + '.scorr-cnav{display:flex;align-items:center;gap:2px;height:46px;background:#121A33;'
+      + '  border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;'
+      + '  position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(3,7,20,.4)}'
       + '.scorr-cnav::-webkit-scrollbar{display:none}'
       + '.scorr-cnav a{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;'
-      + '  text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;'
+      + '  text-decoration:none;white-space:nowrap;flex-shrink:0;color:#8C99BD;font-size:11.5px;'
       + '  font-weight:600;border-bottom:2px solid transparent;transition:.12s}'
-      + '.scorr-cnav a:hover{color:#1c2536}'
-      + '.scorr-cnav a.active{border-bottom-color:#2563eb;color:#2563eb}'
+      + '.scorr-cnav a:hover{color:#E9EEFB}'
+      + '.scorr-cnav a.active{border-bottom-color:#4D7CFE;color:#4D7CFE}'
       + '.scorr-cnav a .ic{font-size:13px}'
-      + '.scorr-cnav .sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}'
+      + '.scorr-cnav .sep{width:1px;height:20px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 4px}'
+      + ':root[data-theme="light"] .scorr-cnav{background:#FFFFFF;border-bottom-color:rgba(20,35,80,.1);box-shadow:0 1px 4px rgba(20,35,70,.06)}'
+      + ':root[data-theme="light"] .scorr-cnav a{color:#5B6B94}'
+      + ':root[data-theme="light"] .scorr-cnav a:hover{color:#0E1630}'
+      + ':root[data-theme="light"] .scorr-cnav a.active{border-bottom-color:#3D6BEC;color:#3D6BEC}'
+      + ':root[data-theme="light"] .scorr-cnav .sep{background:rgba(20,35,80,.1)}'
       + '@media(max-width:767px){.scorr-cnav{display:none!important}}';
     var nst = document.createElement('style');
     nst.id = 'scorr-cnav-style'; nst.textContent = ncss;

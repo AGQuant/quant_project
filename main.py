@@ -131,6 +131,24 @@ _LOGOUT_BTN = (
     b'<div id="scorr-lo"><a href="/logout">&#x23CF; Logout</a></div>'
 )
 
+# cc#348: ONE global theme switch, fixed top-right just BELOW the logout pill (founder 09-Jul).
+# Sets scorr_theme + reloads so EVERY page — CSS-var pages, the React GVM, and the older
+# hardcoded pages — re-renders in the chosen theme (guaranteed consistency, no per-page drift).
+_THEME_BTN = (
+    b"<style>#scorr-th{position:fixed;top:50px;right:14px;z-index:9999}"
+    b"#scorr-th button{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;"
+    b"border-radius:7px;border:1px solid #2a3548;background:rgba(15,22,35,.88);color:#5a6781;"
+    b"font-size:10.5px;font-weight:600;cursor:pointer;backdrop-filter:blur(8px);"
+    b"font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif}"
+    b"#scorr-th button:hover{color:#4D7CFE;border-color:#4D7CFE}</style>"
+    b'<div id="scorr-th"><button id="scorr-th-b" type="button" title="Toggle light / dark"></button></div>'
+    b"<script>(function(){var b=document.getElementById('scorr-th-b');if(!b)return;"
+    b"function cur(){try{return localStorage.getItem('scorr_theme')||'light';}catch(e){return 'light';}}"
+    b"b.innerHTML=cur()==='light'?'\\u2600 Light':'\\u263e Dark';"
+    b"b.onclick=function(){var t=cur()==='light'?'dark':'light';"
+    b"try{localStorage.setItem('scorr_theme',t);}catch(e){}location.reload();};})();</script>"
+)
+
 def _is_embedded(request: Request) -> bool:
     if request.query_params.get("embed") == "1":
         return True
@@ -149,9 +167,9 @@ _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 # injected into <head> on every protected/app page via the same gate as the PWA
 # bootstrap, so no page is missed and the design system is defined in ONE place.
 _MOBILE_HEAD = (
-    # cc#345: set the saved theme SYNCHRONOUSLY before first paint (no light/dark flash).
-    # DARK is the default identity — no saved pick => dark (each page's own :root holds dark).
-    b"<script>(function(){try{var t=localStorage.getItem('scorr_theme')||'dark';"
+    # cc#345/348: set the saved theme SYNCHRONOUSLY before first paint (no flash).
+    # cc#348: DEFAULT is now LIGHT (founder 09-Jul) — no saved pick => light.
+    b"<script>(function(){try{var t=localStorage.getItem('scorr_theme')||'light';"
     b"document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"
     b'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
@@ -176,6 +194,8 @@ async def auth_gate(request: Request, call_next):
         if not is_embed:
             if do_logout:
                 body = body.replace(b"</body>", _LOGOUT_BTN + b"</body>", 1)
+            if (do_logout or do_pwa) and b'id="scorr-th"' not in body:   # cc#348: global theme switch
+                body = body.replace(b"</body>", _THEME_BTN + b"</body>", 1)
             if do_pwa and b'src="/pwa.js"' not in body:
                 body = body.replace(b"</body>", _PWA_TAG + b"</body>", 1)
             # cc#327: shared mobile design system into <head> (fallback: before </body>)

@@ -5,11 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QB</title>
 <style>
+/* cc#348: theme-aware — dark defaults; mobile.css light override flips these */
+:root{--bg:#0A0F1E;--panel:#121A33;--surface2:#182241;--well:#0D1428;--txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24)}
+
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   :root {
-    --bg:#0A0F1E; --card:#fff; --panel:#fff;
-    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
-    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+    --bg:var(--bg); --card:#fff; --panel:#fff;
+    --line:var(--line); --line2:var(--line2);
+    --txt:var(--txt); --mut:var(--mut); --dim:var(--dim);
     --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --shadow:0 1px 4px rgba(20,35,70,.06);
@@ -59,7 +62,7 @@
   .bc-info b{color:var(--txt);font-weight:600}
   .bc-badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px;border:1px solid;white-space:nowrap}
   .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:#a7f3d0}
-  .bc-badge.warn{background:#121A33beb;color:var(--amber);border-color:#fcd34d}
+  .bc-badge.warn{background:var(--panel)beb;color:var(--amber);border-color:#fcd34d}
   .bc-badge.risk{background:rgba(255,92,108,.08);color:var(--red);border-color:#fca5a5}
 
   .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
@@ -86,11 +89,11 @@
   .ar-val{color:var(--red);font-weight:600;flex:1}
   .ar-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px}
   .ar-chip.hs1{background:rgba(255,92,108,.08);color:var(--red)}
-  .ar-chip.hs2{background:#121A33beb;color:var(--amber)}
+  .ar-chip.hs2{background:var(--panel)beb;color:var(--amber)}
 
   .overlay{position:fixed;inset:0;background:rgba(10,18,36,.48);z-index:50;display:none;align-items:flex-end}
   .overlay.open{display:flex}
-  .modal{background:#121A33;border-radius:20px 20px 0 0;width:100%;max-height:82vh;
+  .modal{background:var(--panel);border-radius:20px 20px 0 0;width:100%;max-height:82vh;
     display:flex;flex-direction:column;box-shadow:0 -6px 36px rgba(20,35,70,.15)}
   .modal-hd{display:flex;align-items:center;justify-content:space-between;
     padding:16px 20px;border-bottom:1px solid var(--line);flex-shrink:0}
@@ -109,7 +112,7 @@
     text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);white-space:nowrap}
   td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
   tr:last-child td{border-bottom:none}
-  tr:hover td{background:#182241}
+  tr:hover td{background:var(--surface2)}
 
   .summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 20px;border-bottom:1px solid var(--line)}
   .sr-item .sk{font-size:10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
