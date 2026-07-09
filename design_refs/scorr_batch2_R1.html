@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scorr · Batch 2 — Holdings / Check / GVM / Sector</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--bull:#2FD48B;--bear:#FF5C6C;--amber:#F5B94A;--blue:#4D7CFE;--cyan:#37D3E8;--viol:#B08CFF;--disp:'Sora',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--r:18px}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--ink);color:var(--text);font-family:var(--disp);font-size:14px;-webkit-font-smoothing:antialiased}
+body{max-width:430px;margin:0 auto;padding:0 14px 60px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.pos{color:var(--bull)}.neg{color:var(--bear)}
+.divider{margin:34px -14px 18px;padding:8px 14px;background:var(--surface2);border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);font-size:11px;font-weight:800;letter-spacing:.18em;color:var(--cyan);text-transform:uppercase}
+.card{background:linear-gradient(168deg,var(--surface) 0%,#0F1730 100%);border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:0 18px 44px rgba(3,7,20,.5);margin-bottom:12px}
+.eyebrow{display:flex;justify-content:space-between;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.seg3{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;background:var(--well);border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:12px}
+.seg3 button{height:36px;border:0;border-radius:9px;background:transparent;color:var(--mut);font-family:var(--disp);font-size:12px;font-weight:700}
+.seg3 .on{background:var(--blue);color:#fff;box-shadow:0 4px 14px rgba(77,124,254,.35)}
+.pills{display:flex;gap:8px;margin-bottom:12px}
+.pill{flex:1;height:36px;display:flex;align-items:center;justify-content:center;border-radius:18px;border:1px solid var(--line);background:var(--surface);color:var(--mut);font-size:12px;font-weight:700}
+.pill.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.prow{display:grid;grid-template-columns:1.3fr .9fr .9fr auto;gap:6px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.prow:first-of-type{border-top:none}
+.prow .sym{font-weight:700;font-size:13px}
+.prow .sub{font-size:9px;color:var(--dim);font-weight:600;margin-top:1px}
+.prow .num{font-size:12.5px;font-weight:700;text-align:right}
+.wt{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.1);border:1px solid rgba(55,211,232,.3);padding:2px 7px;border-radius:8px}
+/* CHECK */
+.inrow{display:flex;gap:8px;margin-bottom:12px}
+.inp{flex:1;height:44px;border-radius:12px;border:1px solid var(--line2);background:var(--well);color:var(--text);font-family:var(--mono);font-size:16px;font-weight:700;padding:0 13px;display:flex;align-items:center}
+.side{width:88px;height:44px;border-radius:12px;background:var(--bull);color:#052;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+.xhero{display:flex;align-items:center;gap:14px;margin:4px 0 12px}
+.xnum{font-family:var(--mono);font-size:40px;font-weight:700;letter-spacing:-.03em}
+.vchip{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--bull);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.35);padding:5px 11px;border-radius:10px}
+.rule{display:flex;justify-content:space-between;align-items:center;background:var(--well);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:7px;position:relative;overflow:hidden}
+.rule::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.rule.p::before{background:var(--bull);box-shadow:0 0 10px var(--bull)}
+.rule.w::before{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+.rule.f::before{background:var(--bear);box-shadow:0 0 10px var(--bear)}
+.rule .n{font-size:12px;font-weight:700}
+.rule .d{font-size:9.5px;color:var(--dim);font-weight:600;margin-top:1px}
+.rule .s{font-family:var(--mono);font-size:10px;font-weight:700}
+.rule.p .s{color:var(--bull)}.rule.w .s{color:var(--amber)}.rule.f .s{color:var(--bear)}
+/* GVM */
+.gvmhero{display:flex;gap:16px;align-items:center}
+.ring{position:relative;width:92px;height:92px;flex-shrink:0}
+.ring svg{transform:rotate(-90deg)}
+.ring .v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .v b{font-family:var(--mono);font-size:22px;font-weight:700}
+.ring .v span{font-size:8.5px;font-weight:700;letter-spacing:.1em;color:var(--dim)}
+.gsegs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;flex:1}
+.gs{border-radius:12px;padding:9px 8px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden}
+.gs::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--gc);box-shadow:0 0 10px var(--gc)}
+.gs .k{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--dim)}
+.gs .v{font-family:var(--mono);font-size:15px;font-weight:700;margin-top:3px}
+.verd{display:inline-flex;margin-top:12px;font-family:var(--mono);font-size:11px;font-weight:700;color:var(--bull);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.35);padding:5px 11px;border-radius:10px}
+/* SECTOR */
+.stiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.st{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 13px;position:relative;overflow:hidden}
+.st::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--sc);box-shadow:0 0 10px var(--sc)}
+.st .t{font-weight:800;font-size:13px;min-height:34px}
+.st .r{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;font-weight:700;padding:3px 0;border-top:1px solid var(--line)}
+.st .r span:first-child{color:var(--dim);font-size:9.5px;font-weight:700;letter-spacing:.08em;align-self:center}
+</style>
+</head>
+<body>
+
+<div class="divider">Holdings</div>
+<div class="card">
+  <div class="seg3"><button class="on">SmartGain</button><button>Client</button><button>Test Trade</button></div>
+  <div class="pills"><span class="pill on">Positions</span><span class="pill">P&L Summary</span><span class="pill">Realised</span></div>
+  <div class="prow">
+    <div><div class="sym">ZYDUSLIFE</div><div class="sub">LONG · 150 · avg 1164.0</div></div>
+    <div class="num">1,167.2</div><div class="num pos">+480</div><span class="wt">Wt 40%</span>
+  </div>
+  <div class="prow">
+    <div><div class="sym">MARICO</div><div class="sub">LONG · 100 · avg 860.3</div></div>
+    <div class="num">858.9</div><div class="num neg">−145</div><span class="wt">Wt 60%</span>
+  </div>
+  <div class="prow" style="opacity:.55">
+    <div><div class="sym">KPITTECH</div><div class="sub">CLOSED · SHORT · 03→08 Jul</div></div>
+    <div class="num">—</div><div class="num pos">+17.6%</div><span class="wt" style="color:var(--dim);border-color:var(--line)">RT</span>
+  </div>
+</div>
+
+<div class="divider">Trade Check</div>
+<div class="card">
+  <div class="inrow"><span class="inp">HDFCBANK</span><span class="side">LONG</span></div>
+  <div class="eyebrow"><span>v3.3.2 · Tier 1 + Tier 2</span><span class="num">09 Jul 16:05</span></div>
+  <div class="xhero">
+    <span class="xnum pos">13<span style="font-size:20px;color:var(--dim)">/15</span></span>
+    <span class="vchip">STRONG · both gates ✓</span>
+  </div>
+  <div class="rule p"><div><div class="n">R6 · Trend</div><div class="d">2/3 MAs above · RSI M+W ≥ 50</div></div><span class="s">PASS</span></div>
+  <div class="rule w"><div><div class="n">R7 · Volume</div><div class="d">1-mo up/down ratio 0.9 — borderline</div></div><span class="s">WATCH</span></div>
+  <div class="rule f"><div><div class="n">F2 · Pivot room</div><div class="d">above PP · room to R1 0.8% &lt; 1%</div></div><span class="s">FAIL</span></div>
+</div>
+
+<div class="divider">GVM Report</div>
+<div class="card">
+  <div class="gvmhero">
+    <div class="ring">
+      <svg width="92" height="92" viewBox="0 0 92 92">
+        <circle cx="46" cy="46" r="40" fill="none" stroke="#182241" stroke-width="8"/>
+        <circle cx="46" cy="46" r="40" fill="none" stroke="#2FD48B" stroke-width="8" stroke-linecap="round" stroke-dasharray="186 251"/>
+      </svg>
+      <div class="v"><b>7.4</b><span>GVM</span></div>
+    </div>
+    <div class="gsegs">
+      <div class="gs" style="--gc:#2FD48B"><div class="k">G</div><div class="v">8.1</div></div>
+      <div class="gs" style="--gc:#F5B94A"><div class="k">V</div><div class="v">6.2</div></div>
+      <div class="gs" style="--gc:#37D3E8"><div class="k">M</div><div class="v">7.9</div></div>
+    </div>
+  </div>
+  <span class="verd">BUY · rank 3/17 in segment</span>
+</div>
+
+<div class="divider">Sector · Scorr Themes</div>
+<div class="stiles">
+  <div class="st" style="--sc:#2FD48B">
+    <div class="t">Pharma & Healthcare</div>
+    <div class="r"><span>1D</span><span class="pos">+1.12%</span></div>
+    <div class="r"><span>1W</span><span class="pos">+0.68%</span></div>
+    <div class="r"><span>1M</span><span class="pos">+6.88%</span></div>
+  </div>
+  <div class="st" style="--sc:#FF5C6C">
+    <div class="t">IT</div>
+    <div class="r"><span>1D</span><span class="neg">−1.25%</span></div>
+    <div class="r"><span>1W</span><span class="pos">+7.08%</span></div>
+    <div class="r"><span>1M</span><span class="neg">−3.41%</span></div>
+  </div>
+</div>
+
+</body>
+</html>
