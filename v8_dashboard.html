@@ -986,19 +986,22 @@ function renderMaster(){
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
+  // cc#341: futures day-change per symbol from the SAME day_1d live source as Raw Data / sector cards.
+  const _dayMap={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol!=null)_dayMap[m.symbol]=m.day_1d;});
   const openRows=open.map(x=>{
     const isShort=(x.side||'').toUpperCase()==='SHORT';
     const cmp=Number(x.cmp),tgt=Number(x.target),qty=Number(x.qty||0);
     const net_pnl=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;
     const potential_left=isShort?(cmp-tgt)*qty:(tgt-cmp)*qty;
     const pot_pct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
-    return{...x,isShort,net_pnl,potential_left,pot_pct,days:holdDays(x.entry_ts)};
+    const day_pct=(_dayMap[x.symbol]!=null?Number(_dayMap[x.symbol]):null);   // cc#341
+    return{...x,isShort,net_pnl,potential_left,pot_pct,day_pct,days:holdDays(x.entry_ts)};
   });
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
   const openPosTable=sortTbl('openpos',
-    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
+    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["day_pct","Day %"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
     openRows,x=>`<tr>
       <td class="sym">${x.symbol}<div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
@@ -1006,6 +1009,7 @@ function renderMaster(){
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
       <td style="text-align:right;font-family:'Space Mono'">${num(x.entry_price)}</td>
       <td style="text-align:right;font-family:'Space Mono'">${num(x.cmp)}</td>
+      <td data-pri="2" style="text-align:right;font-family:'Space Mono'" class="${cls(x.day_pct)}">${x.day_pct==null?'--':sign(x.day_pct,2)+'%'}</td>
       <td style="text-align:right;font-family:'Space Mono';color:var(--grn)">${num(x.target)}</td>
       <td style="text-align:right;font-family:'Space Mono';color:var(--red)">${num(x.stop_loss)}</td>
       <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
@@ -1029,7 +1033,7 @@ function renderMaster(){
       <div style="position:absolute;top:2px;${fillStyle};height:4px;background:${fillClr};border-radius:2px"></div>
       <div style="position:absolute;top:-2px;left:${tick}%;width:2px;height:12px;background:var(--mut);transform:translateX(-50%)" title="Entry ${num(entry)}"></div>
       <div style="position:absolute;top:0;left:${dot}%;width:8px;height:8px;border-radius:50%;background:${fillClr};border:1.5px solid var(--panel);transform:translateX(-50%)"></div>
-      <div style="position:absolute;bottom:13px;left:${dot}%;transform:translateX(-50%);white-space:nowrap;font-family:'Space Mono';font-size:10px;font-weight:700;background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;box-shadow:0 2px 6px rgba(0,0,0,.14)"><span style="color:var(--txt)">${num(cmp)}</span> <span class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span></div></div>`;
+      <div style="position:absolute;bottom:13px;left:${dot}%;transform:translateX(-50%);white-space:nowrap;font-family:'Space Mono';font-size:10px;font-weight:700;background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;box-shadow:0 2px 6px rgba(0,0,0,.14)"><span style="color:var(--txt)">${num(cmp)}</span> <span class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span> <span class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></div></div>`;
     return`<div style="display:flex;align-items:center;gap:8px;flex:1">${isShort?tgtPill:slPill}${track}${isShort?slPill:tgtPill}</div>`;
   };
   // cc#280: mobile keeps its vertical card shape but gets the same lean content — the Net P&L /
@@ -1073,7 +1077,7 @@ function renderMaster(){
           <div style="position:absolute;top:50%;left:${entryPct}%;width:2px;height:18px;transform:translate(-50%,-50%);background:#1c2536"></div>
           <div style="position:absolute;top:50%;left:${cmpPct}%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);background:${fill};box-shadow:0 0 0 2px #fff"></div>
           <div style="position:absolute;bottom:calc(50% + 10px);left:${tipLeft}%;transform:translateX(-50%);white-space:nowrap;background:#fff;border:1px solid var(--line);border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.12);padding:3px 8px;font-family:'Space Mono';font-size:11px">
-            <span style="color:var(--mut)">${num(cmp)}</span> <span style="font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span></div>
+            <span style="color:var(--mut)">${num(cmp)}</span> <span style="font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span> <span class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></div>
         </div>
         <span style="width:48px;flex-shrink:0;text-align:left;font-family:'Space Mono';font-size:11px;color:var(--mut)">${num(maxP,0)}</span>
       </div></div>`;};
