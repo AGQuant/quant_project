@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "watchPatterns": [
+      "fyers_feed.py",
+      "fyers_autologin.py",
+      "fyers_backfill.py",
+      "nse_holidays.py"
+    ]
+  }
+}

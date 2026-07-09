@@ -403,6 +403,98 @@ def get_valid_token(conn, auth_code=None):
 
 # ── universe ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+def _ist_now_str():
+    return datetime.now(IST).replace(tzinfo=None).isoformat()
+
+
+def _ops_log(conn, category, title, details):
+    """cc#339: one ops_log row (category=alert/info). Best-effort — never raises into the boot path."""
+    try:
+        with conn.cursor() as c:
+            c.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                         VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
+                      (category, title, json.dumps(details)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"_ops_log({title}) failed: {e}")
+
+
+def _rest_quote_ok(token):
+    """cc#339 fix_2: ONE REST quote self-test (NSE:SBIN-EQ). Returns (ok, detail). An EMPTY body is
+    the exact dead-token signature that produced the 09-Jul 'Expecting value: line 1 column 1' spam,
+    so it is treated as a hard failure (not a parse exception)."""
+    try:
+        r = requests.get(QUOTES_URL, params={'symbols': 'NSE:SBIN-EQ'},
+                         headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=8)
+        body = (r.text or '').strip()
+        if not body:
+            return False, 'EMPTY_BODY'
+        return (r.json().get('s') == 'ok'), body[:180]
+    except Exception as e:
+        return False, f'exc:{e}'
+
+
+def _boot_auth_selfcheck(conn, token):
+    """cc#339 fix_2: BEFORE subscribing, prove the token can actually fetch a REST quote. On failure:
+    CRITICAL log + ops_log(feed_token_dead) alert, retry auto-login ONCE, and if still dead exit(1)
+    so Railway's restart-loop + the alert make it LOUD instead of silent warning spam. Returns the
+    (possibly refreshed) valid token."""
+    ok, detail = _rest_quote_ok(token)
+    if ok:
+        log.info("BOOT AUTH OK — REST quote self-test passed (NSE:SBIN-EQ)")
+        _ops_log(conn, 'info', 'feed_boot_ok',
+                 {'selftest': 'NSE:SBIN-EQ', 'result': 'ok', 'ist': _ist_now_str()})
+        return token
+    log.critical(f"TOKEN DEAD — REST returning empty/invalid bodies on boot self-test (detail={detail}). "
+                 "Retrying auto-login ONCE...")
+    _ops_log(conn, 'alert', 'feed_token_dead',
+             {'selftest': 'NSE:SBIN-EQ', 'stage': 'boot', 'detail': str(detail)[:180], 'ist': _ist_now_str()})
+    try:
+        import fyers_autologin
+        token = fyers_autologin.auto_login(conn)
+        log.info("Auto-login retry SUCCESS — re-testing REST quote...")
+    except Exception as e:
+        log.critical(f"Auto-login retry FAILED ({e}) — exit(1) for a loud Railway restart")
+        _ops_log(conn, 'alert', 'feed_token_dead',
+                 {'stage': 'relogin_exception', 'detail': str(e)[:180], 'ist': _ist_now_str()})
+        sys.exit(1)
+    ok2, detail2 = _rest_quote_ok(token)
+    if ok2:
+        log.info("BOOT AUTH OK after re-login — REST quote self-test passed")
+        _ops_log(conn, 'info', 'feed_boot_ok',
+                 {'selftest': 'NSE:SBIN-EQ', 'result': 'ok_after_relogin', 'ist': _ist_now_str()})
+        return token
+    log.critical("TOKEN STILL DEAD after re-login — exit(1) so the failure is LOUD (Railway "
+                 "restart-loop + feed_token_dead alert) rather than 2900 silent 'Expecting value' warns")
+    _ops_log(conn, 'alert', 'feed_token_dead',
+             {'selftest': 'NSE:SBIN-EQ', 'stage': 'post_relogin', 'detail': str(detail2)[:180], 'ist': _ist_now_str()})
+    sys.exit(1)
+
+
+def _boot_gap_report(conn):
+    """cc#339 fix_3: gap-aware boot. Record the last 5m bar ts in DB + gap minutes so a mid-market
+    reboot always self-documents its outage window (ops_log feed_boot_gap). Non-fatal."""
+    try:
+        with conn.cursor() as c:
+            c.execute("""SELECT MAX(ts) FROM intraday_prices
+                         WHERE ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date AND timeframe='5m'""")
+            last = c.fetchone()[0]
+        now_ist = datetime.now(IST).replace(tzinfo=None)
+        mkt = is_trading_day(now_ist.date()) and MARKET_OPEN <= now_ist.time() <= MARKET_CLOSE
+        if last is None:
+            log.info("BOOT GAP: no 5m bars yet today (cold / pre-market boot)")
+            _ops_log(conn, 'info', 'feed_boot_gap',
+                     {'last_bar': None, 'gap_min': None, 'market_open': mkt, 'ist': now_ist.isoformat()})
+            return
+        gap_min = round((now_ist - last).total_seconds() / 60.0, 1)
+        level = 'alert' if (mkt and gap_min > 12) else 'info'   # >12min mid-market = a real outage
+        log.info(f"BOOT GAP: last 5m bar {last} — gap {gap_min} min (market_open={mkt})")
+        _ops_log(conn, level, 'feed_boot_gap',
+                 {'last_bar': str(last), 'gap_min': gap_min, 'market_open': mkt, 'ist': now_ist.isoformat()})
+    except Exception as e:
+        log.warning(f"_boot_gap_report failed (non-fatal): {e}")
+
+
 def get_universe(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT symbol FROM futures_universe WHERE is_active = TRUE")
@@ -1215,6 +1307,7 @@ def run(auth_code=None):
 
     conn    = get_db()
     token   = get_valid_token(conn, auth_code)
+    token   = _boot_auth_selfcheck(conn, token)   # cc#339 fix_2: prove REST auth BEFORE subscribing
     symbols = get_universe(conn)
 
     # cc#162: futures leg = stocks + confirmed-active index futures (NIFTY/
@@ -1224,6 +1317,7 @@ def run(auth_code=None):
     fut_codes       = symbols + index_fut_codes
 
     ensure_schemas(conn)
+    _boot_gap_report(conn)   # cc#339 fix_3: self-document any outage window at boot
     log.info(f"Universe: {len(symbols)} equity + {len(fut_codes)} futures "
              f"({len(index_fut_codes)} index: {index_fut_codes}) + options")
 
