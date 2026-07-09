@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scorr · Batch 4 — Intel / Filters / Scanners</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--bull:#2FD48B;--bear:#FF5C6C;--amber:#F5B94A;--blue:#4D7CFE;--cyan:#37D3E8;--disp:'Sora',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--r:18px}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--ink);color:var(--text);font-family:var(--disp);font-size:14px;-webkit-font-smoothing:antialiased}
+body{max-width:430px;margin:0 auto;padding:0 14px 60px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pos{color:var(--bull)}.neg{color:var(--bear)}
+.divider{margin:34px -14px 18px;padding:8px 14px;background:var(--surface2);border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);font-size:11px;font-weight:800;letter-spacing:.18em;color:var(--cyan);text-transform:uppercase}
+.card{background:linear-gradient(168deg,var(--surface) 0%,#0F1730 100%);border:1px solid var(--line);border-radius:var(--r);padding:15px;box-shadow:0 18px 44px rgba(3,7,20,.5);margin-bottom:12px}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -14px 12px;padding:2px 14px;-webkit-mask:linear-gradient(90deg,transparent,#000 18px,#000 calc(100% - 26px),transparent)}
+.chips::-webkit-scrollbar{display:none}
+.chp{flex-shrink:0;height:36px;padding:0 14px;border-radius:18px;border:1px solid var(--line);background:var(--surface);color:var(--mut);font-size:12px;font-weight:700;display:flex;align-items:center}
+.chp.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.tag{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px}
+.tag.hi{color:var(--bear);background:rgba(255,92,108,.12);border:1px solid rgba(255,92,108,.35)}
+.tag.bull{color:var(--bull);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.35)}
+.tag.ed{color:var(--cyan);background:rgba(55,211,232,.1);border:1px solid rgba(55,211,232,.3)}
+.hd{font-weight:800;font-size:14.5px;line-height:1.35;margin:8px 0 6px}
+.sum{font-size:12px;color:var(--mut);line-height:1.5}
+.meta{display:flex;justify-content:space-between;font-size:9.5px;color:var(--dim);font-weight:600;margin-top:10px}
+.nrow{padding:11px 0;border-top:1px solid var(--line)}
+.nrow .h{font-weight:700;font-size:12.5px;line-height:1.35}
+.nrow .m{font-size:9px;color:var(--dim);font-weight:600;margin-top:3px}
+/* filters */
+.fbar{display:flex;justify-content:space-between;align-items:center;height:44px;background:var(--well);border:1px solid var(--line2);border-radius:12px;padding:0 13px;font-size:12.5px;font-weight:700;margin-bottom:9px}
+.fbar b{color:var(--cyan)}
+.achips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
+.ac{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.1);border:1px solid rgba(55,211,232,.3);padding:5px 9px;border-radius:9px}
+.ac span{color:var(--dim);margin-left:5px}
+.tbl{border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.trh,.tr{display:grid;grid-template-columns:1.3fr .8fr .7fr .7fr;gap:6px;padding:10px 12px;align-items:center}
+.trh{background:var(--well);font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.tr{border-top:1px solid var(--line);font-size:12.5px}
+.tr .sym{font-weight:700;position:sticky;left:0}
+.tr .num{font-weight:700;text-align:right}
+.trh span:not(:first-child){text-align:right}
+.gvmp{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--bull);background:rgba(47,212,139,.1);border:1px solid rgba(47,212,139,.3);padding:2px 7px;border-radius:8px;justify-self:end}
+.apply{height:44px;border-radius:12px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;margin-top:11px;box-shadow:0 6px 18px rgba(77,124,254,.35)}
+/* scanners */
+.scn{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+.scn:first-of-type{border-top:none}
+.scn .n{font-weight:700;font-size:13px}
+.scn .d{font-size:9.5px;color:var(--dim);font-weight:600;margin-top:1px}
+.cnt{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cyan)}
+</style>
+</head>
+<body>
+
+<div class="divider">Intel · News</div>
+<div class="chips">
+  <span class="chp on">All</span><span class="chp">AI Editorial</span><span class="chp">Results</span><span class="chp">Markets</span><span class="chp">Global</span><span class="chp">Sector</span>
+</div>
+<div class="card">
+  <div style="display:flex;gap:7px"><span class="tag ed">AI EDITORIAL</span><span class="tag hi">HIGH IMPACT</span><span class="tag bull">BULLISH</span></div>
+  <div class="hd">Duty Relief Till 2029 Lifts Electronics Makers, Multiples Do the Rest</div>
+  <div class="sum">Customs duty exemptions extended to March 2029 sent Dixon, Syrma and Amber up to 6%; valuations now carry the burden of proof…</div>
+  <div class="meta"><span>DIXON · SYRMA · AMBER · KAYNES</span><span class="num">2h ago</span></div>
+</div>
+<div class="card" style="padding-top:8px">
+  <div class="nrow"><div class="h">SK Hynix's $13.8 billion share sale draws seven-fold oversubscription</div><div class="m">Global · 3h ago</div></div>
+  <div class="nrow"><div class="h">Tata Steel Q1 India deliveries up 6% on year</div><div class="m">Results · 4h ago</div></div>
+</div>
+
+<div class="divider">Filters · V13</div>
+<div class="fbar"><span>Filters · <b>3 active</b></span><span style="color:var(--dim)">▾</span></div>
+<div class="achips">
+  <span class="ac">GVM ≥ 7.5 <span>×</span></span>
+  <span class="ac">Day% 1–4 <span>×</span></span>
+  <span class="ac">Vol X ≥ 1.5 <span>×</span></span>
+</div>
+<div class="tbl">
+  <div class="trh"><span>Stock</span><span>CMP</span><span>Day %</span><span>GVM</span></div>
+  <div class="tr"><span class="sym">KAYNES</span><span class="num">7,120</span><span class="num pos">+3.2%</span><span class="gvmp">8.4</span></div>
+  <div class="tr"><span class="sym">DIXON</span><span class="num">14,882</span><span class="num pos">+2.8%</span><span class="gvmp">8.1</span></div>
+  <div class="tr"><span class="sym">TRENT</span><span class="num">5,610</span><span class="num pos">+1.9%</span><span class="gvmp">7.8</span></div>
+</div>
+<div class="apply">Show 17 results</div>
+
+<div class="divider">Scanners</div>
+<div class="card" style="padding-top:6px">
+  <div class="scn"><div><div class="n">52W High Break</div><div class="d">GVM ≥ 7 · vol confirmed</div></div><span class="cnt">6 hits</span></div>
+  <div class="scn"><div><div class="n">S1 Bounce Setup</div><div class="d">near S1 · nifty RSI gate ✓</div></div><span class="cnt">3 hits</span></div>
+  <div class="scn"><div><div class="n">Sector Rotation In</div><div class="d">theme 1W leaders</div></div><span class="cnt">4 themes</span></div>
+</div>
+
+</body>
+</html>
