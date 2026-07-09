@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>V10</title>
 <style>
+  /* cc#344 page 7: DARK TERMINAL re-skin — :root remapped to the R2 palette (design_refs). */
   :root{
-    --bg:#f6f8fb; --card:#ffffff; --card2:#fbfcfe; --panel:#ffffff;
-    --line:#e4e9f1; --line2:#d4dbe7;
-    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
-    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706; --violet:#7c3aed;
+    --bg:#0A0F1E; --card:#121A33; --card2:#0D1428; --panel:#121A33;
+    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+    --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A; --violet:#9B7CFF;
+    --surface2:#182241; --well:#0D1428; --r:18px;
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
-    --shadow:0 1px 4px rgba(20,35,70,.06);
+    --shadow:0 18px 44px rgba(3,7,20,.5);
   }
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800;900&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
@@ -204,15 +206,15 @@
 const CS = getComputedStyle(document.documentElement);
 const C = {
   grn:   CS.getPropertyValue('--grn').trim()   || '#0fa968',
-  red:   CS.getPropertyValue('--red').trim()   || '#e23744',
+  red:   CS.getPropertyValue('--red').trim()   || '#FF5C6C',
   blu:   CS.getPropertyValue('--blu').trim()   || '#2563eb',
   cyan:  CS.getPropertyValue('--cyan').trim()  || '#0891b2',
   amber: CS.getPropertyValue('--amber').trim() || '#d97706',
   violet:CS.getPropertyValue('--violet').trim()|| '#7c3aed',
   txt:   CS.getPropertyValue('--txt').trim()   || '#1c2536',
   mut:   CS.getPropertyValue('--mut').trim()   || '#5a6781',
-  line:  CS.getPropertyValue('--line').trim()  || '#e4e9f1',
-  card:  CS.getPropertyValue('--card').trim()  || '#ffffff',
+  line:  CS.getPropertyValue('--line').trim()  || 'rgba(148,166,210,.14)',
+  card:  CS.getPropertyValue('--card').trim()  || '#121A33',
 };
 /* semantic: green=up, red=down (light-theme palette) */
 const UP = C.grn, DN = C.red;
@@ -512,7 +514,7 @@ function rTopBar(){
 
 function rMood(){
   const {gate,fails,adr,nD,nW,nM,bSlots,sSlots,soSlots}=D.mood;
-  const mc = fails===0?UP:fails===1?C.amber:fails>=3?DN:'#ea580c';
+  const mc = fails===0?UP:fails===1?C.amber:fails>=3?DN:'#F5B94A';
   const conds=[['ADR',adr.toFixed(2),adr>=1.0],['Nifty D',pct(nD),nD>=0],['Nifty W',pct(nW),nW>=0],['Nifty M',pct(nM),nM>=0]];
   const condHtml = conds.map(([l,v,ok])=>{
     const col=ok?UP:DN;
@@ -750,7 +752,7 @@ function rPerf(){
 
 function buildupTable(title, rows, accent, pending){
   const sigClr = s => s==='LONG_BUILD'?UP : s==='SHORT_BUILD'?DN
-                    : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?'#ea580c' : C.mut;
+                    : s==='SHORT_COVER'?C.amber : s==='LONG_UNWIND'?'#F5B94A' : C.mut;
   // MEDIUM_1: drop the SIGNAL column entirely when OI feed is pending — a column
   // of NEUTRAL tags is misleading. Show price-direction columns only.
   const head = pending
