@@ -678,13 +678,13 @@ async function openThemeDetail(theme){
 
 // cc#347: DERIVATIVE COCKPIT — tap a symbol on Open Positions -> full-screen sheet (mobile) /
 // right slide-over (desktop). Shared + symbol-keyed (later mountable from GVM/TC). Data from
-// /api/deriv-metrics/{symbol} (cc#346). Rows with null data hide. Matches scorr_cockpit_R1.
+// /api/deriv-metrics/{symbol}?side= (cc#348). Strict one-screen: 3 verdict chips + 8 rows.
 function _dcColor(c){return c==='bull'?'var(--grn)':c==='bear'?'var(--red)':c==='amber'?'var(--amber)':'var(--mut)';}
 function _dcInjectStyle(){
   if(document.getElementById('dc-style'))return;
   const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(5,9,20,.6);display:none}
   #dcOv.open{display:block}
-  .dc-sheet{position:fixed;right:0;top:0;bottom:0;width:100%;max-width:440px;background:var(--bg);border-left:1px solid var(--line);overflow-y:auto;padding:14px 14px 40px;transform:translateX(100%);transition:transform .24s ease}
+  .dc-sheet{position:fixed;right:0;top:0;bottom:0;width:100%;max-width:440px;background:var(--bg);border-left:1px solid var(--line);overflow-y:auto;padding:14px 14px 18px;transform:translateX(100%);transition:transform .24s ease}
   #dcOv.open .dc-sheet{transform:none}
   .dc-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
   .dc-hd .s{font-size:20px;font-weight:800;color:var(--txt);letter-spacing:.02em}
@@ -692,18 +692,19 @@ function _dcInjectStyle(){
   .dc-side{font-family:'Space Mono';font-size:10px;font-weight:700;padding:4px 10px;border-radius:9px}
   .dc-side.long{color:var(--grn);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.35)}
   .dc-side.short{color:var(--red);background:rgba(255,92,108,.13);border:1px solid rgba(255,92,108,.35)}
-  .dc-sub{font-family:'Space Mono';font-size:11px;color:var(--dim);margin:6px 0 6px}
-  .dc-eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin:16px 2px 8px}
-  .dc-vstrip{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .dc-vc{border-radius:13px;padding:11px 12px;background:var(--bg2);border:1px solid var(--line);position:relative;overflow:hidden}
+  .dc-sub{font-family:'Space Mono';font-size:11px;color:var(--dim);margin:6px 0 10px}
+  .dc-vstrip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:9px}
+  .dc-vc{border-radius:12px;padding:9px 9px;background:var(--bg2);border:1px solid var(--line);position:relative;overflow:hidden}
   .dc-vc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc,var(--mut));box-shadow:0 0 10px var(--vc,transparent)}
-  .dc-vc .k{font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
-  .dc-vc .v{font-family:'Space Mono';font-size:14px;font-weight:700;margin-top:4px}
-  .dc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-top:7px}
+  .dc-vc .k{font-size:8.5px;font-weight:700;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+  .dc-vc .v{font-family:'Space Mono';font-size:13px;font-weight:700;margin-top:3px;line-height:1.1}
+  .dc-vc .vs{font-family:'Space Mono';font-size:9px;color:var(--dim);font-weight:600;margin-top:3px}
+  .dc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:8px 13px;margin-top:6px}
   .dc-row .k{font-size:11.5px;font-weight:700;color:var(--mut)}
   .dc-row .d{font-size:9px;color:var(--dim);font-weight:600;margin-top:2px}
   .dc-row .v{font-family:'Space Mono';font-size:13px;font-weight:700;text-align:right;color:var(--txt)}
-  .dc-row .v small{display:block;font-size:9.5px;color:var(--dim);font-weight:600}
+  .dc-row .v small{font-size:9.5px;color:var(--dim);font-weight:600;margin-left:5px}
+  .dc-thin{color:var(--mut);font-weight:700;font-size:10.5px;letter-spacing:.04em}
   .dc-chip{font-family:'Space Mono';font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:8px;white-space:nowrap}
   .dc-pos{color:var(--grn)}.dc-neg{color:var(--red)}
   .dc-skel{height:56px;border-radius:12px;margin-top:7px;background:linear-gradient(90deg,var(--panel) 25%,var(--panel2) 37%,var(--panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
@@ -720,43 +721,65 @@ function _dcHeader(sym,side,qty,entry,cmp,dcmp){
     <div><span class="dc-side ${isShort?'short':'long'}">${side||''}${qty?(' &middot; '+qty):''}${entry?(' @ '+num(entry)):''}</span></div>
     <div class="dc-sub">CMP ${c!=null?num(c):'--'}${chg!=null?(' &middot; '+sign(chg,2)+'% on entry'):''} &middot; Derivative Cockpit</div>`;
 }
+// cc#348: strict one-screen sheet — exactly 3 verdict chips + 8 rows, fits 390x800 zero scroll.
+function _dcVC(k,label,color,sub){
+  return `<div class="dc-vc" style="--vc:${_dcColor(color)}"><div class="k">${k}</div>`+
+    `<div class="v" style="color:${_dcColor(color)}">${label}</div>${sub?`<div class="vs">${sub}</div>`:''}</div>`;
+}
+function _dcR(k,vhtml,dhtml){
+  return `<div class="dc-row"><div><div class="k">${k}</div>${dhtml?`<div class="d">${dhtml}</div>`:''}</div><div class="v">${vhtml}</div></div>`;
+}
 function _dcRender(sym,side,qty,entry,cmp,d){
-  const V=d.verdict||{},L=d.levels||{},F=d.flow||{},E=d.energy||{},A=d.atm||{};
+  const V=d.verdict||{},L=d.levels||{},F=d.flow||{},E=d.energy||{},R=d.rsi||{};
+  // ── Verdict strip: OI Quadrant · Options Cost · TC Score (always 3 chips) ──
+  const q=V.oi_quadrant, o=V.options_cost, t=V.tc_score;
   let vc='';
-  if(V.oi_quadrant){const q=V.oi_quadrant;vc+=`<div class="dc-vc" style="--vc:${_dcColor(q.color)}"><div class="k">OI Quadrant</div><div class="v" style="color:${_dcColor(q.color)}">${q.label}</div></div>`;}
-  if(V.options_cost){const o=V.options_cost;const x=o.basis==='IVP'?('IVP '+num(o.ivp,0)):(num(o.iv_rv,2)+'×');vc+=`<div class="dc-vc" style="--vc:${_dcColor(o.color)}"><div class="k">Options Cost</div><div class="v" style="color:${_dcColor(o.color)}">${o.label} ${x}</div></div>`;}
-  const verdict=vc?`<div class="dc-eyebrow">Verdict</div><div class="dc-vstrip">${vc}</div>`:'';
-  let lr='';
-  if(L.vpoc_today&&L.vpoc_today.value!=null){const vp=L.vpoc_today;const nk=(L.vpoc_prior&&L.vpoc_prior.naked)?`prior-day ${num(L.vpoc_prior.value,0)} naked`:'';
-    const dd=vp.dist_pct!=null?`<small class="${vp.dist_pct>=0?'dc-pos':'dc-neg'}">CMP ${sign(vp.dist_pct,1)}%</small>`:'';
-    lr+=`<div class="dc-row"><div><div class="k">VPOC &middot; today</div>${nk?`<div class="d">${nk}</div>`:''}</div><div class="v">${num(vp.value,0)}${dd}</div></div>`;}
-  if(L.oi_walls&&(L.oi_walls.call||L.oi_walls.put)){const w=L.oi_walls;
-    lr+=`<div class="dc-row"><div><div class="k">OI Walls</div><div class="d">ATM±3 band</div></div><div class="v">${w.call?num(w.call.strike,0)+' CE':'--'} &middot; ${w.put?num(w.put.strike,0)+' PE':'--'}<small>${w.call?sign(w.call.dist_pct,1)+'%':''} / ${w.put?sign(w.put.dist_pct,1)+'%':''}</small></div></div>`;}
-  if(L.vwap&&L.vwap.value!=null){const dd=L.vwap.dist_pct!=null?`<small class="${L.vwap.dist_pct>=0?'dc-pos':'dc-neg'}">CMP ${sign(L.vwap.dist_pct,1)}%</small>`:'';
-    lr+=`<div class="dc-row"><div><div class="k">VWAP</div><div class="d">session</div></div><div class="v">${num(L.vwap.value,1)}${dd}</div></div>`;}
-  const levels=lr?`<div class="dc-eyebrow">Levels</div>${lr}`:'';
-  let fr='';
-  if(F.fut_oi&&F.fut_oi.chg_pct!=null)fr+=`<div class="dc-row"><div class="k">Futures OI</div><div class="v ${F.fut_oi.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(F.fut_oi.chg_pct,1)}% d/d</div></div>`;
-  if((F.call_oi&&F.call_oi.chg_pct!=null)||(F.put_oi&&F.put_oi.chg_pct!=null)){
-    const co=(F.call_oi&&F.call_oi.chg_pct!=null)?`<span class="${F.call_oi.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(F.call_oi.chg_pct,1)}%</span>`:'--';
-    const po=(F.put_oi&&F.put_oi.chg_pct!=null)?`<span class="${F.put_oi.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(F.put_oi.chg_pct,1)}%</span>`:'--';
-    const pc=(F.pcr&&F.pcr.value!=null)?`<small>PCR ${num(F.pcr.value,2)}${F.pcr.chg!=null?(' ('+sign(F.pcr.chg,2)+')'):''}</small>`:'';
-    fr+=`<div class="dc-row"><div class="k">Call OI / Put OI</div><div class="v">${co} / ${po}${pc}</div></div>`;}
-  if(F.basis&&F.basis.value!=null){const p=F.basis.percentile!=null?`<div class="d">5-day percentile ${num(F.basis.percentile,0)}%</div>`:'';
-    fr+=`<div class="dc-row"><div><div class="k">Basis</div>${p}</div><div class="v ${F.basis.value>=0?'dc-pos':'dc-neg'}">${sign(F.basis.value,1)}</div></div>`;}
-  const flow=fr?`<div class="dc-eyebrow">Flow</div>${fr}`:'';
-  let er='';
-  if(E.volx!=null)er+=`<div class="dc-row"><div class="k">Vol X &middot; time-matched</div><div class="v ${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</div></div>`;
-  if(E.hourly_pct!=null)er+=`<div class="dc-row"><div class="k">Hourly move</div><div class="v ${E.hourly_pct>=0?'dc-pos':'dc-neg'}">${sign(E.hourly_pct,1)}%</div></div>`;
-  if(E.fall_from_day_high!=null)er+=`<div class="dc-row"><div class="k">Fall from day high</div><div class="v ${E.fall_from_day_high>=0?'dc-pos':'dc-neg'}">${sign(E.fall_from_day_high,1)}%</div></div>`;
-  if(A&&A.strike!=null&&(A.ce_ltp!=null||A.pe_ltp!=null)){const g=A.gap;
-    const chip=g?`<span class="dc-chip" style="color:${_dcColor(g.color)};background:${_dcColor(g.color)}22;border:1px solid ${_dcColor(g.color)}66">${sign(g.premium_pct,0)}% ${g.label}</span>`:'';
-    const det=`CE ${A.ce_ltp!=null?num(A.ce_ltp,1):'--'} &middot; PE ${A.pe_ltp!=null?num(A.pe_ltp,1):'--'}${g?(' &middot; fair '+num(g.fair,1)):''}`;
-    const mkt=g?num(g.market,1):(( (A.ce_ltp||0)+(A.pe_ltp||0) )).toFixed(1);
-    er+=`<div class="dc-row"><div><div class="k">ATM ${num(A.strike,0)} Straddle</div><div class="d">${det}</div></div><div class="v">${mkt}${chip}</div></div>`;}
-  const energy=er?`<div class="dc-eyebrow">Energy</div>${er}`:'';
-  const body=verdict+levels+flow+energy;
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+(body||'<div class="empty" style="padding:22px 4px;color:var(--dim);font-size:12px">No derivative data tracked for this symbol yet.</div>');
+  vc+= q ? _dcVC('OI Quadrant',q.label,q.color,'') : _dcVC('OI Quadrant','DATA THIN','mut','');
+  vc+= o ? _dcVC('Options Cost',o.label,o.color, o.basis==='IVP'?('IVP '+num(o.ivp,0)):(num(o.iv_rv,2)+'×'))
+         : _dcVC('Options Cost','DATA THIN','mut','');
+  vc+= t ? _dcVC('TC Score', t.label, t.color, (t.score!=null?num(t.score,1):'--')+'/'+(t.total||''))
+         : _dcVC('TC Score','DATA THIN','mut', side?'':'no side');
+  const verdict=`<div class="dc-vstrip">${vc}</div>`;
+  // ── 8 rows: VPOC · VWAP · Basis · Fut OI · ATM Call OI · ATM Put OI · Vol X · RSI ──
+  const _sm=(x,dg)=>`<small class="${x>=0?'dc-pos':'dc-neg'}">${sign(x,dg)}%</small>`;
+  let rows='';
+  // 1 VPOC (today, dist to CMP; prior-day naked as sub)
+  const vp=L.vpoc_today;
+  rows+=_dcR('VPOC &middot; today',
+    (vp&&vp.value!=null)?(num(vp.value,0)+(vp.dist_pct!=null?_sm(vp.dist_pct,1):'')):'--',
+    (L.vpoc_prior&&L.vpoc_prior.naked)?('prior '+num(L.vpoc_prior.value,0)+' naked'):'');
+  // 2 VWAP
+  const vw=L.vwap;
+  rows+=_dcR('VWAP',
+    (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')):'--','session');
+  // 3 Basis
+  const b=F.basis;
+  rows+=_dcR('Basis',
+    (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>`:'--',
+    (b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):'');
+  // 4 Futures OI d/d (DATA THIN, never blank)
+  const fo=F.fut_oi;
+  rows+=_dcR('Fut OI &middot; d/d',
+    (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>`
+      :'<span class="dc-thin">DATA THIN</span>','');
+  // 5 ATM Call OI d/d
+  const ca=F.atm_call_oi;
+  rows+=_dcR('ATM Call OI &middot; d/d',
+    (ca&&ca.chg_pct!=null)?`<span class="${ca.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(ca.chg_pct,1)}%</span>`:'--',
+    (ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)):'');
+  // 6 ATM Put OI d/d
+  const pa=F.atm_put_oi;
+  rows+=_dcR('ATM Put OI &middot; d/d',
+    (pa&&pa.chg_pct!=null)?`<span class="${pa.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(pa.chg_pct,1)}%</span>`:'--',
+    (pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
+  // 7 Vol X
+  rows+=_dcR('Vol X &middot; time-matched',
+    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>`:'--','');
+  // 8 RSI Daily · Weekly (one row)
+  const rd=R.d,rw=R.w;
+  rows+=_dcR('RSI',
+    (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','');
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+verdict+rows;
 }
 async function openDerivCockpit(sym,side,qty,entry,cmp){
   _dcInjectStyle();
@@ -766,7 +789,7 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
   const sheet=document.getElementById('dcSheet');
   sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+'<div class="dc-skel"></div><div class="dc-skel"></div><div class="dc-skel"></div>';
   ov.classList.add('open');
-  let d;try{d=await getJSON('/api/deriv-metrics/'+encodeURIComponent(sym));}
+  let d;try{d=await getJSON('/api/deriv-metrics/'+encodeURIComponent(sym)+(side?('?side='+encodeURIComponent(side)):''));}
   catch(e){sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+'<div class="empty" style="padding:18px;color:var(--red);font-size:12px">Cockpit failed to load.</div>';return;}
   sheet.innerHTML=_dcRender(sym,side,qty,entry,cmp,d||{});
 }

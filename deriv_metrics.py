@@ -16,7 +16,7 @@ Sections (round-2 additions dropped per founder 09-Jul):
 atm_iv_daily(symbol,d,atm_iv,rv20,straddle_pct) is ensured here; a 15:25 snapshot job fills
 it. Once a symbol has >=60 rows the Options-Cost verdict auto-upgrades from IV/RV to true IVP.
 """
-import os, math, logging
+import os, math, time, logging
 from datetime import date
 from typing import Optional, Dict, Any, List
 
@@ -40,6 +40,38 @@ def _f(x) -> Optional[float]:
         return None if x is None else float(x)
     except (TypeError, ValueError):
         return None
+
+
+# cc#348: TC Score chip — computed on sheet-open via the SAME engine the /check page uses
+# (native_trade_check.compute_trade_check), cached 5 min per (symbol, side). Never reads the
+# stale tc_cache / tc_screener_cache. verdict_class pass/watch/fail -> STRONG/VALID/WEAK.
+_TC_CACHE: Dict[tuple, tuple] = {}
+_TC_TTL = 300.0
+
+
+def _tc_score(sym: str, side: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not side:
+        return None
+    side = side.upper()
+    if side not in ("LONG", "SHORT"):
+        return None
+    key = (sym, side)
+    now = time.time()
+    c = _TC_CACHE.get(key)
+    if c and now - c[0] < _TC_TTL:
+        return c[1]
+    res = None
+    try:
+        import native_trade_check as ntc
+        d = ntc.compute_trade_check(sym, side, use_api=False)
+        if d and d.get("ok"):
+            lbl, col = {"pass": ("STRONG", "bull"), "watch": ("VALID", "amber"),
+                        "fail": ("WEAK", "bear")}.get(d.get("verdict_class"), ("--", "mut"))
+            res = {"score": d.get("score"), "total": d.get("total"), "label": lbl, "color": col}
+    except Exception as e:
+        log.warning(f"tc_score {sym}/{side}: {e}")
+    _TC_CACHE[key] = (now, res)
+    return res
 
 
 # ── Black-Scholes: price + IV inversion (bisection) ─────────────────────────────
@@ -105,11 +137,13 @@ def _basis_block(cur, sym) -> Dict[str, Any]:
             "fut_oi": {"oi": oi, "chg_pct": oi_chg}}
 
 
-def _price_chg_pct(cur, sym) -> Optional[float]:
-    cur.execute("""SELECT day_1d FROM v8_metrics WHERE symbol=%s
+def _metrics(cur, sym) -> Dict[str, Any]:
+    cur.execute("""SELECT day_1d, daily_rsi, rsi_weekly FROM v8_metrics WHERE symbol=%s
                    ORDER BY score_date DESC LIMIT 1""", (sym,))
     r = cur.fetchone()
-    return _f(r[0]) if r else None
+    if not r:
+        return {}
+    return {"price_chg": _f(r[0]), "rsi_d": _f(r[1]), "rsi_w": _f(r[2])}
 
 
 def _oi_quadrant(oi_chg, price_chg) -> Optional[Dict[str, Any]]:
@@ -255,8 +289,26 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
             gap = {"market": round(market_str, 2), "fair": round(fair, 2), "premium_pct": prem,
                    "label": lbl, "color": col}
 
+    # cc#348: single-ATM strike OI d/d (Call + Put) — the OI trio rows 5 & 6. Each side at the
+    # ATM strike; strike labelled. Stock-option OI is often unfed -> chg stays null (row shows --).
+    def _strike_oi(rws, cp):
+        x = next((r for r in rws if r[1] == cp and _f(r[0]) == atm and r[3] is not None), None)
+        return int(x[3]) if x else None
+    atm_call_oi, atm_put_oi = _strike_oi(rows, "CE"), _strike_oi(rows, "PE")
+    atm_call_chg = atm_put_chg = None
+    if len(days) > 1:
+        prows2 = _chain_rows(cur, sym, days[1])
+        if prows2:
+            pca, ppa = _strike_oi(prows2, "CE"), _strike_oi(prows2, "PE")
+            if atm_call_oi is not None and pca:
+                atm_call_chg = round((atm_call_oi - pca) / pca * 100.0, 1)
+            if atm_put_oi is not None and ppa:
+                atm_put_chg = round((atm_put_oi - ppa) / ppa * 100.0, 1)
+
     return {
         "has_options": True,
+        "atm_call_oi": {"strike": atm, "oi": atm_call_oi, "chg_pct": atm_call_chg},
+        "atm_put_oi": {"strike": atm, "oi": atm_put_oi, "chg_pct": atm_put_chg},
         "call_oi": {"oi": call_oi, "chg_pct": call_chg},
         "put_oi": {"oi": put_oi, "chg_pct": put_chg},
         "pcr": {"value": pcr, "chg": pcr_chg},
@@ -347,7 +399,7 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
 
 
 @deriv_router.get("/api/deriv-metrics/{symbol}")
-def deriv_metrics(symbol: str):
+def deriv_metrics(symbol: str, side: Optional[str] = None):
     sym = (symbol or "").strip().upper()
     if not sym:
         raise HTTPException(400, "symbol required")
@@ -358,38 +410,34 @@ def deriv_metrics(symbol: str):
             fut = basis.get("fut")
             spot = basis.get("spot")
             cmp_px = fut or spot   # futures-first, consistent with the position CMP
-            price_chg = _price_chg_pct(cur, sym)
+            m = _metrics(cur, sym)
             oi_chg = (basis.get("fut_oi") or {}).get("chg_pct")
-
             opt = _options_block(cur, sym, cmp_px)
             intr = _intraday_block(cur, sym, cmp_px)
 
+        tc = _tc_score(sym, side)   # opens its own connection — kept outside the block above
+
         resp = {
-            "symbol": sym, "cmp": cmp_px, "fut": fut, "spot": spot,
+            "symbol": sym, "cmp": cmp_px, "fut": fut, "spot": spot, "side": (side or "").upper() or None,
             "has_options": opt.get("has_options", False),
             "verdict": {
-                "oi_quadrant": _oi_quadrant(oi_chg, price_chg),
+                "oi_quadrant": _oi_quadrant(oi_chg, m.get("price_chg")),
                 "options_cost": opt.get("options_cost"),
+                "tc_score": tc,
             },
             "levels": {
                 "vpoc_today": intr.get("vpoc_today"),
                 "vpoc_prior": intr.get("vpoc_prior"),
-                "oi_walls": opt.get("oi_walls"),
                 "vwap": intr.get("vwap"),
             },
             "flow": {
                 "fut_oi": basis.get("fut_oi"),
-                "call_oi": opt.get("call_oi"),
-                "put_oi": opt.get("put_oi"),
-                "pcr": opt.get("pcr"),
+                "atm_call_oi": opt.get("atm_call_oi"),
+                "atm_put_oi": opt.get("atm_put_oi"),
                 "basis": basis.get("basis"),
             },
-            "energy": {
-                "volx": intr.get("volx"),
-                "hourly_pct": intr.get("hourly_pct"),
-                "fall_from_day_high": intr.get("fall_from_day_high"),
-            },
-            "atm": opt.get("atm"),
+            "energy": {"volx": intr.get("volx")},
+            "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
         return resp
     except HTTPException:
