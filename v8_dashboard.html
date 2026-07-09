@@ -2,15 +2,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V8 Dashboard</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  /* cc#344 page 1: DARK TERMINAL re-skin. The page is variable-driven, so remapping :root to the
+     R2 palette flips the whole surface to the dark institutional terminal. Semantic names kept so
+     no downstream selector changes; values are the design_refs/scorr_v8_R2 tokens. */
   :root{
-    --bg:#f4f6f9;--bg2:#fbfcfe;--panel:#ffffff;--panel2:#f1f4f8;
-    --line:#e2e7ee;--line2:#cfd8e3;
-    --txt:#1c2536;--mut:#5a6781;--dim:#8a96ad;
-    --grn:#0a9e63;--grn-d:#e3f6ed;
-    --red:#dd3a4a;--red-d:#fceaec;
-    --blu:#2563eb;--cyan:#0e7490;--amber:#b45309;
-    --shadow:0 2px 10px rgba(25,40,70,.06);
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+    --shadow:0 18px 44px rgba(3,7,20,.5);
+    --ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
+    --bull:#2FD48B;--bear:#FF5C6C;--r:18px;
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
@@ -87,7 +92,7 @@
   .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:4px 0 12px;display:flex;gap:8px;align-items:center}
   .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
   .info-btn{font-size:11px;font-weight:700;width:20px;height:20px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-family:'Space Mono';vertical-align:middle;transition:.15s;flex-shrink:0}
-  .info-btn:hover{border-color:var(--blu);color:var(--blu);background:#eff6ff}
+  .info-btn:hover{border-color:var(--blu);color:var(--blu);background:rgba(77,124,254,.14)}
   .sec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:4px}
   .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;position:relative;cursor:default}
   .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Space Mono';font-size:10px;color:var(--dim)}
@@ -112,20 +117,20 @@
   .scroll.rawscroll table{min-width:1980px}
   .rawscroll th:first-child,.rawscroll td:first-child{position:sticky;left:0;background:var(--panel);z-index:2}
   .rawscroll th:first-child{background:var(--panel2);z-index:3}
-  .rawscroll tbody tr:hover td:first-child{background:#f0f4f9}
+  .rawscroll tbody tr:hover td:first-child{background:rgba(148,166,210,.07)}
   .rawscroll tr.row-idx td{background:var(--bg2)}
   tr:last-child td{border-bottom:none}
-  tbody tr:hover{background:#f0f4f9}
-  tr.row-open{background:#f0fdf4}
-  tr.row-open:hover{background:#dcfce7}
-  tr.row-slotfull{background:#fff7ed}
-  tr.row-slotfull:hover{background:#ffedd5}
-  tr.row-nearmiss{background:#fafafa}
-  tr.row-nearmiss:hover{background:#f1f5f9}
+  tbody tr:hover{background:rgba(148,166,210,.07)}
+  tr.row-open{background:rgba(47,212,139,.08)}
+  tr.row-open:hover{background:rgba(47,212,139,.14)}
+  tr.row-slotfull{background:rgba(245,185,74,.09)}
+  tr.row-slotfull:hover{background:rgba(245,185,74,.15)}
+  tr.row-nearmiss{background:rgba(148,166,210,.05)}
+  tr.row-nearmiss:hover{background:rgba(148,166,210,.1)}
   .mob-cards{display:none;flex-direction:column;gap:8px}
   .mob-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
   .mob-card.mob-open{border-color:var(--grn);background:var(--grn-d)}
-  .mob-card.mob-slotfull{border-color:var(--amber);background:#fff7ed}
+  .mob-card.mob-slotfull{border-color:var(--amber);background:rgba(245,185,74,.09)}
   .mob-card.mob-nearmiss{border-color:var(--line2);background:var(--bg2)}
   .mob-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
   .mob-sym{font-family:'Sora';font-weight:700;font-size:14px;color:var(--txt)}
@@ -182,13 +187,13 @@
   .b-short{background:var(--red-d);color:var(--red)}
   .b-tgt{background:var(--grn-d);color:var(--grn)}
   .b-sl{background:var(--red-d);color:var(--red)}
-  .b-open{background:#dcfce7;color:#166534;border:1px solid #86efac}
-  .b-slotfull{background:#ffedd5;color:#9a3412;border:1px solid #fdba74}
-  .b-nearmiss{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
-  .b-qualified{background:#fff7ed;color:#9a3412;border:1px solid #fdba74}
+  .b-open{background:rgba(47,212,139,.14);color:var(--grn);border:1px solid rgba(47,212,139,.35)}
+  .b-slotfull{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
+  .b-nearmiss{background:rgba(148,166,210,.1);color:var(--mut);border:1px solid var(--line2)}
+  .b-qualified{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
   .sig-reason{font-size:9px;font-weight:600;color:#94a3b8;margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
-  .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';border:1px dashed var(--amber);border-radius:10px;background:#fdf3df;margin-bottom:10px}
+  .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
   .score-hi{color:var(--grn)}.score-mid{color:var(--amber)}.score-lo{color:var(--red)}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
@@ -214,8 +219,8 @@
   .pc-card .pc-fail{font-size:10px;color:var(--mut);margin-top:3px;line-height:1.3}
   footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
   /* Canonical Scorr model-nav */
-  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;
-    border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;
+  .model-nav{display:flex;align-items:center;gap:2px;height:46px;background:var(--panel);
+    border-bottom:1px solid var(--line);padding:0 16px;overflow-x:auto;scrollbar-width:none;
     position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(20,35,70,.06)}
   .model-nav::-webkit-scrollbar{display:none}
   .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
@@ -224,7 +229,7 @@
   .mnav-item:hover{color:#1c2536}
   .mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
   .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
-  .mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+  .mnav-sep{width:1px;height:20px;background:var(--line2);flex-shrink:0;margin:0 4px}
   /* Info Modal */
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;align-items:center;justify-content:center}
   .modal-overlay.open{display:flex}
@@ -237,15 +242,15 @@
   .frow:last-child{border-bottom:none}
   .fm{flex:1;font-weight:600;color:var(--txt);font-family:'Space Mono';font-size:11px}
   .fc{color:var(--cyan);font-family:'Space Mono';font-size:11px;min-width:130px}
-  .fdyn{font-size:9px;padding:1px 6px;border-radius:4px;background:#fdf3df;color:var(--amber);border:1px solid #fde68a;white-space:nowrap;font-weight:700}
+  .fdyn{font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(245,185,74,.12);color:var(--amber);border:1px solid #fde68a;white-space:nowrap;font-weight:700}
   .pf{font-family:'Space Mono';font-size:11px;color:var(--txt);background:var(--panel2);border-radius:8px;padding:10px 13px;line-height:2}
   .stat-pills{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
   .sp{font-size:11px;font-weight:700;padding:4px 11px;border-radius:6px}
   .sp-g{background:var(--grn-d);color:var(--grn)}
-  .sp-b{background:#eff6ff;color:var(--blu)}
-  .sp-a{background:#fdf3df;color:var(--amber)}
+  .sp-b{background:rgba(77,124,254,.14);color:var(--blu)}
+  .sp-a{background:rgba(245,185,74,.12);color:var(--amber)}
   .sp-r{background:var(--red-d);color:var(--red)}
-  .sp-c{background:#e0f2f6;color:var(--cyan)}
+  .sp-c{background:rgba(55,211,232,.14);color:var(--cyan)}
 </style>
 
 <nav class="model-nav" id="scorr-nav"></nav>
@@ -825,7 +830,7 @@ function renderMood(m){
   const _op=(cache.paper&&cache.paper.open_positions)||[];
   const _lo=_paperLoaded?_op.filter(p=>(p.side||'').toUpperCase()==='LONG').length:'--';
   const _so=_paperLoaded?_op.filter(p=>(p.side||'').toUpperCase()==='SHORT').length:'--';
-  const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['#fdf3df','var(--amber)'],Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
+  const mc={Bearish:['var(--red-d)','var(--red)'],Neutral:['rgba(245,185,74,.12)','var(--amber)'],Bullish:['#e0f2f6','var(--cyan)'],'Strong Bullish':['var(--grn-d)','var(--grn)']};
   const [bg,fg]=mc[m.mood]||['var(--panel2)','var(--txt)'];
   const short=s=>String(s||'').replace(/^Nifty\s+/i,'');   // "Nifty Day" -> "Day"
   // cc#129 bug_1: show the numeric value driving each gate, not just Y/N.
@@ -978,8 +983,8 @@ function renderMaster(){
     const on=MASTER_SIDE===key;
     let s='background:var(--panel2);color:var(--mut);border:1px solid var(--line2)';
     if(on&&key==='all')s='background:var(--panel2);color:var(--txt);border:1px solid var(--line2)';
-    else if(on&&key==='long')s='background:#eaf3de;color:#3B6D11;border:1px solid #3B6D11';
-    else if(on&&key==='short')s='background:#fcebeb;color:#A32D2D;border:1px solid #A32D2D';
+    else if(on&&key==='long')s='background:rgba(47,212,139,.14);color:var(--grn);border:1px solid rgba(47,212,139,.4)';
+    else if(on&&key==='short')s='background:rgba(255,92,108,.13);color:var(--red);border:1px solid rgba(255,92,108,.4)';
     return`<button onclick="setMasterSide('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s">${label} <b style="font-family:'Space Mono'">${cnt}</b></button>`;
   };
   const toggle=`<div style="display:flex;gap:6px;margin-bottom:12px">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}</div>`;
@@ -1062,7 +1067,7 @@ function renderMaster(){
     const accent=isShort?'var(--red)':'var(--grn)';                    // left-border + badge, by side
     const badgeBg=isShort?'var(--red-d)':'var(--grn-d)',badgeFg=isShort?'var(--red)':'var(--grn)';
     const tipLeft=Math.max(8,Math.min(90,cmpPct));                     // clamp so tooltip never overflows the card
-    return`<div style="display:flex;align-items:center;gap:20px;background:#fff;border:1px solid var(--line);border-left:4px solid ${accent};border-radius:5px;padding:14px 18px">
+    return`<div style="display:flex;align-items:center;gap:20px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${accent};border-radius:5px;padding:14px 18px">
       <div style="width:210px;flex-shrink:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
           <span style="font-size:15px;font-weight:700;letter-spacing:.04em">${x.symbol}</span>
@@ -1076,7 +1081,7 @@ function renderMaster(){
           <div style="position:absolute;top:50%;${fillStyle};height:3px;transform:translateY(-50%);background:${fill};opacity:.75;border-radius:2px"></div>
           <div style="position:absolute;top:50%;left:${entryPct}%;width:2px;height:18px;transform:translate(-50%,-50%);background:#1c2536"></div>
           <div style="position:absolute;top:50%;left:${cmpPct}%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);background:${fill};box-shadow:0 0 0 2px #fff"></div>
-          <div style="position:absolute;bottom:calc(50% + 10px);left:${tipLeft}%;transform:translateX(-50%);white-space:nowrap;background:#fff;border:1px solid var(--line);border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.12);padding:3px 8px;font-family:'Space Mono';font-size:11px">
+          <div style="position:absolute;bottom:calc(50% + 10px);left:${tipLeft}%;transform:translateX(-50%);white-space:nowrap;background:var(--surface2);border:1px solid var(--line);border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.35);padding:3px 8px;font-family:'Space Mono';font-size:11px">
             <span style="color:var(--mut)">${num(cmp)}</span> <span style="font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span> <span class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></div>
         </div>
         <span style="width:48px;flex-shrink:0;text-align:left;font-family:'Space Mono';font-size:11px;color:var(--mut)">${num(maxP,0)}</span>
@@ -1369,7 +1374,7 @@ function renderTCLite(){
   const meta=`<div class="ptitle">TC Lite Screener <span class="ct">${d.count||0} signals today</span></div>
     <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Futures passing the 5-check TC gate intraday (one per stock/side/day). Screener only — no P&amp;L, stop or target. Tracks where price went after the flag.</div>`;
   if(!sigs.length)return meta+`<div class="empty">No TC Lite signals yet today.</div>`;
-  const rowBg=s=>(s.direction==='LONG')?'background:#f0fdf4':'background:#fef2f2';
+  const rowBg=s=>(s.direction==='LONG')?'background:rgba(47,212,139,.08)':'background:rgba(255,92,108,.08)';
   // cc#262: sortable-header pattern applied to TC Lite too. Default sort by signal time desc.
   const desktop=sortTbl('tclite',
     [["symbol","Symbol"],["direction","Side"],["signal_ts","Signal Time"],["entry_price","Entry"],["cmp","CMP"],["high_pct","High%"],["low_pct","Low%"],["pp","PP"],["r1","R1"],["s1","S1"],["gvm_score","GVM"]],
@@ -1449,8 +1454,8 @@ function renderDayLog(data){
     <div class="card"><div class="k">Overall Return</div><div class="v ${pnlCls(s.overall_return_pct)}">${s.overall_return_pct!=null?sign(s.overall_return_pct,2)+'%':'--'}</div></div>
   </div>`;
   if(!days.length)return cards+'<div class="empty">No trading data yet.</div>';
-  const rowBg=r=>Number(r.net_pnl)>0?'background:#e6f9f0':Number(r.net_pnl)<0?'background:#fef0f0':'';
-  const totrow=`<tr style="font-weight:700;border-top:2px solid var(--line);background:#f8fafc">
+  const rowBg=r=>Number(r.net_pnl)>0?'background:rgba(47,212,139,.08)':Number(r.net_pnl)<0?'background:rgba(255,92,108,.08)':'';
+  const totrow=`<tr style="font-weight:700;border-top:2px solid var(--line);background:rgba(148,166,210,.06)">
     <td style="white-space:nowrap">TOTAL</td>
     <td>${s.total_opened??0}</td><td>-</td><td>-</td>
     <td>${s.total_closed??0}</td><td>-</td><td>-</td>

@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v5';   // cc#336: pwa.js gained the ?uxdebug=1 overflow detector
+const CACHE = 'scorr-pwa-v6';   // cc#344 p1: dark-terminal re-skin (bust stale shell so the PWA repaints)
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
