@@ -7,21 +7,23 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
 
+  /* cc#344 page 4: DARK TERMINAL re-skin — :root remapped to the R2 palette (design_refs). */
   :root{
-    --bg:#f6f8fb; --bg2:#fbfcfe; --panel:#ffffff; --panel2:#f1f4f9;
-    --line:#e4e9f1; --line2:#d4dbe7;
-    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
-    --grn:#0fa968; --grn-d:#e8f9f1; --grn-b:#c3edd8;
-    --red:#e23744; --red-d:#fdf0f1; --red-b:#f5c6ca;
-    --blu:#2563eb; --blu-d:#eff4ff;
-    --cyan:#0891b2; --cyan-d:#e0f5fb;
-    --amber:#d97706; --amber-d:#fef3e2; --amber-b:#fcd89a;
-    --purp:#7c3aed; --purp-d:#f0ebff; --purp-b:#c4b5fd;
+    --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241;
+    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+    --grn:#2FD48B; --grn-d:rgba(47,212,139,.14); --grn-b:rgba(47,212,139,.4);
+    --red:#FF5C6C; --red-d:rgba(255,92,108,.13); --red-b:rgba(255,92,108,.4);
+    --blu:#4D7CFE; --blu-d:rgba(77,124,254,.14);
+    --cyan:#37D3E8; --cyan-d:rgba(55,211,232,.14);
+    --amber:#F5B94A; --amber-d:rgba(245,185,74,.14); --amber-b:rgba(245,185,74,.4);
+    --purp:#9B7CFF; --purp-d:rgba(155,124,255,.16); --purp-b:rgba(155,124,255,.4);
+    --surface2:#182241; --well:#0D1428;
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --mono:'Space Mono','SF Mono',Consolas,monospace;
-    --radius:14px; --radius-sm:8px;
-    --shadow:0 1px 4px rgba(20,35,70,.06);
-    --shadow-md:0 4px 16px rgba(20,35,70,.09);
+    --radius:18px; --radius-sm:8px;
+    --shadow:0 18px 44px rgba(3,7,20,.5);
+    --shadow-md:0 20px 50px rgba(3,7,20,.55);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{min-height:100%;background:var(--bg);color:var(--txt);
