@@ -61,7 +61,12 @@ async def upload_futures(req: Request):
 
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE futures_universe")
+            # cc#338: theme-preserving replace. A TRUNCATE would wipe the curated `theme`
+            # column (the dashboard Sector-Cards grouping key) for EVERY row, so instead:
+            # deactivate all -> upsert the new list (ON CONFLICT never touches theme, so
+            # retained symbols keep it) -> delete symbols no longer in the list. lot_size /
+            # is_active semantics are identical to the old truncate+reinsert.
+            cur.execute("UPDATE futures_universe SET is_active = FALSE")
             for s in stocks:
                 cur.execute("""
                     INSERT INTO futures_universe (symbol, lot_size, is_active)
@@ -69,6 +74,8 @@ async def upload_futures(req: Request):
                     ON CONFLICT (symbol) DO UPDATE
                     SET lot_size = EXCLUDED.lot_size, is_active = TRUE, updated_at = NOW()
                 """, (s["symbol"], s["lot_size"]))
+            cur.execute("DELETE FROM futures_universe WHERE symbol <> ALL(%s)",
+                        ([s["symbol"] for s in stocks],))
             conn.commit()
         return {"status": "ok", "action": "replaced", "count": len(stocks), "sample": [s["symbol"] for s in stocks[:5]]}
     except Exception as e:

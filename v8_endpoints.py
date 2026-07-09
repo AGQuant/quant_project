@@ -2386,3 +2386,80 @@ def v8_nifty50_sector_holdings(theme: str):
         return {"theme": theme, "holdings": holdings, "count": len(holdings)}
     except Exception as e:
         raise HTTPException(500, f"v8_nifty50_sector_holdings failed: {e}")
+
+
+# ── cc#338: Sector Cards regrouped by curated futures_universe.theme (22 Scorr themes) ─────────
+# DISPLAY ONLY. Companion to cc#337. Equal-weight simple average of constituent day_1d/week/month
+# from v8_metrics — a breadth signal for the 1-lot-per-name futures book (NOT mcap-weighted, which
+# would let RELIANCE dominate Energy). This is a NEW, forked read path: it does NOT touch the GVM
+# segment peer-averages (v8_metrics.sector_week/day/month) the locked basket filters are calibrated
+# to — the engine still runs on GVM segments, completely unaffected. Indices (NIFTY/BANKNIFTY, seg
+# 'F&O', theme NULL) are excluded; any OTHER active null-theme symbol is a genuine new F&O entrant
+# and is surfaced under a "NEW ENTRANTS" card (never silently dropped) until Claude-web themes it.
+_INDEX_EXCLUDE_SQL = "fu.symbol NOT LIKE '%%NIFTY%%' AND fu.symbol NOT LIKE '%%SENSEX%%'"
+
+@router.get("/theme_sectors")
+def v8_theme_sectors():
+    """One card per curated Scorr theme across the active futures universe: equal-weight avg
+    1D/1W/1M + stock count, sorted 1D% desc. Same fields the frontend sectorCards() consumes."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT COALESCE(fu.theme, 'NEW ENTRANTS') AS theme,
+                       COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL)       AS n,
+                       AVG(m.day_1d)       FILTER (WHERE m.day_1d IS NOT NULL),
+                       AVG(m.week_return)  FILTER (WHERE m.week_return IS NOT NULL),
+                       AVG(m.month_return) FILTER (WHERE m.month_return IS NOT NULL)
+                FROM futures_universe fu
+                LEFT JOIN v8_metrics m ON m.symbol = fu.symbol
+                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                WHERE fu.is_active = TRUE AND {_INDEX_EXCLUDE_SQL}
+                GROUP BY COALESCE(fu.theme, 'NEW ENTRANTS')
+                HAVING COUNT(*) FILTER (WHERE m.day_1d IS NOT NULL) > 0
+                ORDER BY AVG(m.day_1d) FILTER (WHERE m.day_1d IS NOT NULL) DESC NULLS LAST
+            """)
+            sectors = []
+            for theme, n, d1, wk, mo in cur.fetchall():
+                sectors.append({
+                    "segment": theme, "count": int(n),
+                    "avg_day_1d": round(float(d1), 2) if d1 is not None else None,
+                    "sector_week": round(float(wk), 2) if wk is not None else None,
+                    "sector_month": round(float(mo), 2) if mo is not None else None,
+                })
+        return {"sectors": sectors, "count": len(sectors)}
+    except Exception as e:
+        raise HTTPException(500, f"v8_theme_sectors failed: {e}")
+
+
+@router.get("/theme_sectors/{theme}/holdings")
+def v8_theme_sector_holdings(theme: str):
+    """The active futures-universe stocks in one Scorr theme, each with gvm_score + 1D/1W/1M,
+    sorted 1D% desc. 'NEW ENTRANTS' resolves to active null-theme non-index symbols."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            if theme == "NEW ENTRANTS":
+                theme_pred = "fu.theme IS NULL"
+                params = ()
+            else:
+                theme_pred = "fu.theme = %s"
+                params = (theme,)
+            cur.execute(f"""
+                SELECT fu.symbol, m.gvm_score, m.day_1d, m.week_return, m.month_return
+                FROM futures_universe fu
+                LEFT JOIN v8_metrics m ON m.symbol = fu.symbol
+                     AND m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                WHERE fu.is_active = TRUE AND {_INDEX_EXCLUDE_SQL} AND {theme_pred}
+                ORDER BY m.day_1d DESC NULLS LAST
+            """, params)
+            holdings = []
+            for sym, gvm, d1, wk, mo in cur.fetchall():
+                holdings.append({
+                    "symbol": sym,
+                    "gvm_score": round(float(gvm), 2) if gvm is not None else None,
+                    "day_1d": round(float(d1), 2) if d1 is not None else None,
+                    "week_return": round(float(wk), 2) if wk is not None else None,
+                    "month_return": round(float(mo), 2) if mo is not None else None,
+                })
+        return {"theme": theme, "holdings": holdings, "count": len(holdings)}
+    except Exception as e:
+        raise HTTPException(500, f"v8_theme_sector_holdings failed: {e}")

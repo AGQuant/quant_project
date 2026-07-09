@@ -647,6 +647,30 @@ async function openNifty50Detail(theme){
   document.getElementById('mBody').innerHTML=body;
 }
 
+// cc#338: futures-universe Sector Card (Scorr theme) click -> same infoModal/sortTbl, holdings
+// pulled from /api/v8/theme_sectors/{theme}/holdings (active theme constituents sorted 1D% desc).
+async function openThemeDetail(theme){
+  if(!theme)return;
+  document.getElementById('mTitle').textContent=theme;
+  document.getElementById('mSub').textContent='Sector · loading…';
+  document.getElementById('mBody').innerHTML='';
+  document.getElementById('infoModal').classList.add('open');
+  let d;try{d=await getJSON('/api/v8/theme_sectors/'+encodeURIComponent(theme)+'/holdings');}
+  catch(e){document.getElementById('mBody').innerHTML='<div class="empty">Could not load holdings.</div>';return;}
+  const rows=(d&&d.holdings)||[];
+  document.getElementById('mSub').textContent=`${rows.length} stock${rows.length===1?'':'s'} · GVM · 1D / 1W / 1M returns`;
+  const body=sortTbl('themedetail',
+    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
+    rows,x=>`<tr>
+      <td class="sym">${x.symbol}</td>
+      <td style="font-family:'Space Mono'">${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
+      <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
+      <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
+      <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this theme",wrapClass:''});
+  document.getElementById('mBody').innerHTML=body;
+}
+
 // -- Core utils --------------------------------------------------------------
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
@@ -1074,10 +1098,15 @@ function renderMaster(){
   return cards+toggle+`<div class="ptitle">Open Positions <span class="ct">${open.length}</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage · sorted by Net P&L</div>`+
     viewToggle+posBody+
-    `<div class="funnelGrid" style="margin-top:16px">
+    // cc#338: Sector Cards regrouped by curated futures_universe.theme (22 Scorr themes),
+    // equal-weight avg, single grid sorted 1D% desc. DISPLAY ONLY — engine still on GVM segments.
+    // Falls back to the GVM-segment Top/Bottom grid only until /api/v8/theme_sectors lands.
+    (cache.themeSectors && cache.themeSectors.sectors && cache.themeSectors.sectors.length
+      ? `<div style="margin-top:16px">${sectorCards(cache.themeSectors.sectors,'Sector Cards','Scorr themes · '+cache.themeSectors.sectors.length+' groups','openThemeDetail')}</div>`
+      : `<div class="funnelGrid" style="margin-top:16px">
       <div>${sectorCards(top8,'Top Sectors','1D positive')}</div>
       <div>${sectorCards(bot8,'Bottom Sectors','1D negative')}</div>
-    </div>`+
+    </div>`)+
     // cc#319: NIFTY 50 Sectors — official NSE industries across the 50 constituents, single grid
     // sorted 1D% desc. Populated by the /api/v8/nifty50_sectors job into cache.nifty50; renders
     // once it lands (renderMasterPanels re-render). Card click -> openNifty50Detail holdings modal.
@@ -1656,6 +1685,7 @@ async function loadAll(){
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
+    run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
   ];
