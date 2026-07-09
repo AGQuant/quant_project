@@ -47,13 +47,14 @@ async function apiGet(path, opts) {
   return r.json();
 }
 
+// cc#344 page 5: DARK TERMINAL re-skin — React palette remapped to the R2 tokens (design_refs).
 const C = {
-  bg: "#f4f6f9", card: "#ffffff", border: "#e2e7ee",
-  accent: "#2563eb", gold: "#b45309", green: "#0a9e63",
-  red: "#dd3a4a", orange: "#d97706", purple: "#7c3aed",
-  text: "#1c2536", muted: "#5a6781", gridLine: "#edf1f6",
-  nav: "#ffffff",
-  gPillar: "#0a9e63", vPillar: "#b45309", mPillar: "#2563eb",
+  bg: "#0A0F1E", card: "#121A33", border: "rgba(148,166,210,.14)",
+  accent: "#4D7CFE", gold: "#F5B94A", green: "#2FD48B",
+  red: "#FF5C6C", orange: "#F5B94A", purple: "#9B7CFF",
+  text: "#E9EEFB", muted: "#8C99BD", gridLine: "rgba(148,166,210,.12)",
+  nav: "#121A33",
+  gPillar: "#2FD48B", vPillar: "#F5B94A", mPillar: "#4D7CFE",
 };
 
 const GVM_PILLAR_MAP = {
@@ -67,9 +68,9 @@ const GVM_PILLAR_MAP = {
 };
 
 const PILLAR_INFO = {
-  G: { label:"G — Growth", color: C.gPillar, bg:"#e3f6ed", desc:"Profitability" },
-  V: { label:"V — Value",  color: C.vPillar, bg:"#fdf3df", desc:"Valuation" },
-  M: { label:"M — Momentum", color: C.mPillar, bg:"#e8effd", desc:"Price returns" },
+  G: { label:"G — Growth", color: C.gPillar, bg:"rgba(47,212,139,.14)", desc:"Profitability" },
+  V: { label:"V — Value",  color: C.vPillar, bg:"rgba(245,185,74,.14)", desc:"Valuation" },
+  M: { label:"M — Momentum", color: C.mPillar, bg:"rgba(77,124,254,.14)", desc:"Price returns" },
 };
 
 const MODELS = [
@@ -119,7 +120,7 @@ function Tag({ children, color = C.accent }) {
 function ShellNav({ current, onPick }) {
   return (
     <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 2, height: 46, flexShrink: 0,
-      background: "#fff", borderBottom: `1px solid ${C.border}`, padding: "0 14px", overflowX: "auto", whiteSpace: "nowrap" }}>
+      background: "#121A33", borderBottom: `1px solid ${C.border}`, padding: "0 14px", overflowX: "auto", whiteSpace: "nowrap" }}>
       {MODELS.map(m => {
         const active = current === m.id;
         return (
@@ -142,7 +143,7 @@ function ShellNav({ current, onPick }) {
 }
 
 function FrameModule({ src }) {
-  return <iframe src={src} title="frame" style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#fff" }} />;
+  return <iframe src={src} title="frame" style={{ width: "100%", height: "100%", border: "none", display: "block", background: "#121A33" }} />;
 }
 
 function TrendChart({ points }) {
@@ -481,10 +482,10 @@ function FlowStrip({ flow, val }) {
 }
 
 function cellColor(rating) {
-  if (rating == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
-  if (rating >= 6.5) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
-  if (rating >= 4)   return { bg: "#fdf3df", bd: "#d9a73a", fg: "#9a6a00" };
-  return { bg: "#fceaec", bd: "#dd3a4a", fg: "#bf2230" };
+  if (rating == null) return { bg: "rgba(148,166,210,.1)", bd: "rgba(148,166,210,.24)", fg: "#8C99BD" };
+  if (rating >= 6.5) return { bg: "rgba(47,212,139,.14)", bd: "#2FD48B", fg: "#2FD48B" };
+  if (rating >= 4)   return { bg: "rgba(245,185,74,.14)", bd: "#F5B94A", fg: "#F5B94A" };
+  return { bg: "rgba(255,92,108,.13)", bd: "#FF5C6C", fg: "#FF5C6C" };
 }
 
 function BenchCell({ b }) {
@@ -499,7 +500,7 @@ function BenchCell({ b }) {
         <span style={{ fontSize: 12, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#5a6781", fontFamily: "monospace" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8C99BD", fontFamily: "monospace" }}>
         <span>peer {peer}</span><span>#{b.rank ?? "—"}/{b.peer_n}</span>
       </div>
     </div>
@@ -579,7 +580,7 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
                 <th key={c.key} style={{
                   padding: "8px 6px", fontSize: 12.5, fontWeight: 700, color: C.muted,
                   textTransform: "uppercase", letterSpacing: ".04em",
-                  textAlign: c.align, background: "#f8fafc",
+                  textAlign: c.align, background: "rgba(148,166,210,.06)",
                   width: c.w, whiteSpace: "nowrap" }}>{c.lbl}</th>
               ))}
             </tr>
@@ -713,12 +714,12 @@ function OpsMetrics({ symbol, segment }) {
   };
 
   const cellTone = (m) => {
-    if (m.company == null) return { bg: "#eef1f5", bd: "#dde3ea", fg: "#5a6781" };
+    if (m.company == null) return { bg: "rgba(148,166,210,.1)", bd: "rgba(148,166,210,.24)", fg: "#8C99BD" };
     const better = m.lower_better ? m.company < m.peer_avg : m.company > m.peer_avg;
     const worse  = m.lower_better ? m.company > m.peer_avg : m.company < m.peer_avg;
-    if (better) return { bg: "#e3f6ed", bd: "#0a9e63", fg: "#0a7a4d" };
-    if (worse)  return { bg: "#fceaec", bd: "#dd3a4a", fg: "#bf2230" };
-    return { bg: "#fdf3df", bd: "#d9a73a", fg: "#9a6a00" };
+    if (better) return { bg: "rgba(47,212,139,.14)", bd: "#2FD48B", fg: "#2FD48B" };
+    if (worse)  return { bg: "rgba(255,92,108,.13)", bd: "#FF5C6C", fg: "#FF5C6C" };
+    return { bg: "rgba(245,185,74,.14)", bd: "#F5B94A", fg: "#F5B94A" };
   };
 
   return (
@@ -740,9 +741,9 @@ function OpsMetrics({ symbol, segment }) {
           if (m.company != null && m.peer_avg != null) {
             const better = m.lower_better ? m.company < m.peer_avg : m.company > m.peer_avg;
             const worse  = m.lower_better ? m.company > m.peer_avg : m.company < m.peer_avg;
-            verdict = better ? { txt: "BEATS PEER", col: "#0a7a4d" }
-                    : worse  ? { txt: "TRAILS PEER", col: "#bf2230" }
-                    : { txt: "IN-LINE", col: "#9a6a00" };
+            verdict = better ? { txt: "BEATS PEER", col: "#2FD48B" }
+                    : worse  ? { txt: "TRAILS PEER", col: "#FF5C6C" }
+                    : { txt: "IN-LINE", col: "#F5B94A" };
           }
           return (
             <div key={i} title={m.notes || ""}
@@ -757,13 +758,13 @@ function OpsMetrics({ symbol, segment }) {
                 {m.company != null ? fmtVal(m.company, m.unit) : "—"}
               </div>
               <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 5, letterSpacing: ".02em" }}>{dirHint}</div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, color: "#5a6781", fontFamily: "monospace" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, color: "#8C99BD", fontFamily: "monospace" }}>
                 <span>peer {fmtVal(m.peer_avg, m.unit)} <span style={{color:"#b0b8c8",fontSize:12}}>({m.peer_n})</span></span>
                 {m.company != null && m.peer_avg != null && m.peer_avg !== 0 && (() => {
                   const diff = m.lower_better
                     ? (m.peer_avg - m.company) / Math.abs(m.peer_avg) * 100
                     : (m.company - m.peer_avg) / Math.abs(m.peer_avg) * 100;
-                  return <span style={{fontWeight:700, color: diff >= 0 ? "#0a7a4d" : "#bf2230", fontSize:13.5}}>
+                  return <span style={{fontWeight:700, color: diff >= 0 ? "#2FD48B" : "#FF5C6C", fontSize:13.5}}>
                     {diff >= 0 ? `▲${diff.toFixed(1)}%` : `▼${(-diff).toFixed(1)}%`}
                   </span>;
                 })()}
@@ -955,7 +956,7 @@ function GvmReport({ r, hist }) {
       <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <button onClick={() => window.print()}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
-            background: "#fff", border: `1px solid ${C.border}`, borderRadius: 7,
+            background: "#121A33", border: `1px solid ${C.border}`, borderRadius: 7,
             fontSize: 13, fontWeight: 700, color: C.muted, cursor: "pointer",
             boxShadow: "0 1px 4px rgba(25,40,70,0.06)" }}>
           ↓ Download PDF
@@ -1106,13 +1107,13 @@ function GvmReport({ r, hist }) {
 
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14, fontSize: 12.5 }}>
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#0a9e63" }} />Better than segment
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#2FD48B" }} />Better than segment
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#d9a73a" }} />In-line
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#F5B94A" }} />In-line
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.muted }}>
-            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#dd3a4a" }} />Lower than segment
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "#FF5C6C" }} />Lower than segment
           </span>
           <span style={{ color: C.muted }}>· canonical engine-scored metrics only</span>
         </div>
@@ -1125,7 +1126,7 @@ function GvmReport({ r, hist }) {
                   {["Pillar","Metric","Company","Peer Avg","Rating","Rank","Best","Worst"].map(h => (
                     <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 12,
                       fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em",
-                      background: "#f8fafc", whiteSpace: "nowrap" }}>{h}</th>
+                      background: "rgba(148,166,210,.06)", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
