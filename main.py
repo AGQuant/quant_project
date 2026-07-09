@@ -223,6 +223,8 @@ app.include_router(investment_check_router)
 app.include_router(scanner_router)
 app.include_router(intraday_scanner_router)
 app.include_router(structure_router)
+from deriv_metrics import deriv_router          # cc#346: DERIVATIVE COCKPIT data layer
+app.include_router(deriv_router)
 app.include_router(performance_router)
 app.include_router(scheduler_health_router)
 app.include_router(news_router)
