@@ -619,6 +619,120 @@ body{font-family:var(--mux-font);}
 }
 @media(max-width:480px){ .mtable [data-pri="3"]{display:none} }
 @media(max-width:390px){ .mtable [data-pri="2"]{display:none} }
+
+/* ==========================================================================
+   DARK TERMINAL DESIGN SYSTEM  —  cc#344 (SCORR_FULL_APP_REDESIGN, ref R2)
+   The shared visual layer held back in cc#327. Dark institutional terminal:
+   navy ink, Sora display + IBM Plex Mono numerals, glow-edge state segments,
+   capacity bars, LIVE/STALE feed chip, pulsing CMP dots. Extracted verbatim
+   from design_refs/scorr_v8_R2.html so every page re-skin consumes ONE source.
+   SCOPED to `.dt` (a re-skinned page adds class="dt" to <body>) so the pages
+   not yet converted keep their current theme — zero global bleed.
+   ========================================================================== */
+.dt{
+  --ink:#0A0F1E; --surface:#121A33; --surface2:#182241; --well:#0D1428;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+  --text:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --bull:#2FD48B; --bull-soft:rgba(47,212,139,.14);
+  --bear:#FF5C6C; --bear-soft:rgba(255,92,108,.13);
+  --amber:#F5B94A; --amber-soft:rgba(245,185,74,.14);
+  --blue:#4D7CFE; --cyan:#37D3E8;
+  --disp:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --r:18px;
+  background:var(--ink); color:var(--text); font-family:var(--disp);
+  -webkit-font-smoothing:antialiased;
+}
+.dt .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+/* header + LIVE/STALE feed chip */
+.dt .hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 2px 12px;position:sticky;top:0;background:linear-gradient(var(--ink) 82%,transparent);z-index:30}
+.dt .brand{font-weight:800;font-size:17px}.dt .brand b{color:var(--blue)}
+.dt .hdr-right{display:flex;align-items:center;gap:8px}
+.dt .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:15px;border:1px solid var(--line);background:var(--surface);font-size:11px;font-weight:600;color:var(--mut)}
+.dt .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.dt .chip.live{color:var(--bull);border-color:rgba(47,212,139,.35)}
+.dt .chip.live .dot{background:var(--bull);box-shadow:0 0 8px var(--bull);animation:dtPulse 1.6s ease-in-out infinite}
+.dt .chip.stale{color:var(--bear);border-color:rgba(255,92,108,.35)}
+.dt .chip.stale .dot{background:var(--bear);box-shadow:0 0 8px var(--bear)}
+.dt .clock{font-family:var(--mono);font-size:11px;color:var(--dim)}
+@keyframes dtPulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes dtRise{to{opacity:1;transform:none}}
+/* gate card + glow-edge state segments */
+.dt .gate{background:linear-gradient(168deg,var(--surface) 0%,#0F1730 100%);border:1px solid var(--line);border-radius:var(--r);padding:18px 16px 16px;box-shadow:0 18px 44px rgba(3,7,20,.5)}
+.dt .eyebrow{display:flex;justify-content:space-between;font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+.dt .mood-row{display:flex;align-items:baseline;gap:12px;margin:10px 0 14px}
+.dt .mood{font-size:34px;font-weight:800;letter-spacing:-.02em}
+.dt .mood-count{font-family:var(--mono);font-size:12px;font-weight:600;padding:4px 9px;border-radius:9px}
+.dt .segs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.dt .seg{border-radius:12px;padding:9px 8px 8px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden}
+.dt .seg::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.dt .seg.pass::before{background:var(--bull);box-shadow:0 0 10px var(--bull)}
+.dt .seg.fail::before{background:var(--bear);box-shadow:0 0 10px var(--bear)}
+.dt .seg .k{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.dt .seg .v{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:3px}
+.dt .seg.pass .v{color:var(--bull)}.dt .seg.fail .v{color:var(--bear)}
+.dt .seg .s{font-size:9px;font-weight:700;margin-top:2px;color:var(--dim)}
+/* instrument tiles w/ vs-prev-close delta */
+.dt .instr{display:flex;gap:7px;margin-top:12px}
+.dt .ins{flex:1;background:var(--surface2);border:1px solid var(--line);border-radius:11px;padding:8px 10px;min-height:52px}
+.dt .ins .top{display:flex;justify-content:space-between;align-items:center}
+.dt .ins .k{font-size:9.5px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.dt .ins .v{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:2px}
+.dt .ins .d{font-family:var(--mono);font-size:10px;font-weight:700;margin-top:1px}
+.dt .ins .d.neg{color:var(--bear)}.dt .ins .d.pos{color:var(--bull)}
+.dt .ins .d small{color:var(--dim);font-weight:600;font-size:9px;letter-spacing:.02em}
+.dt .ins .spark{width:26px;height:14px;flex-shrink:0;opacity:.9}
+/* slot capacity bars */
+.dt .slots{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);display:grid;gap:9px}
+.dt .slot{display:grid;grid-template-columns:44px 1fr 56px;align-items:center;gap:10px}
+.dt .slot .k{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--mut);text-transform:uppercase}
+.dt .slot .bar{display:block;height:8px;border-radius:4px;background:var(--well);border:1px solid var(--line);overflow:hidden}
+.dt .slot .fill{display:block;height:100%;border-radius:4px}
+.dt .slot .n{font-family:var(--mono);font-size:12px;font-weight:700;text-align:right}
+.dt .f-buy{background:linear-gradient(90deg,#1E9E68,var(--bull))}
+.dt .f-sell{background:linear-gradient(90deg,#C2404E,var(--bear))}
+.dt .f-so{background:linear-gradient(90deg,#8A5BD6,#B08CFF)}
+.dt .f-s1b{background:linear-gradient(90deg,#2789C9,var(--cyan))}
+.dt .mini{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+/* pill tabs */
+.dt .tabs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:18px -14px 0;padding:2px 14px 6px;-webkit-mask:linear-gradient(90deg,transparent,#000 18px,#000 calc(100% - 26px),transparent)}
+.dt .tabs::-webkit-scrollbar{display:none}
+.dt .tab{flex-shrink:0;height:38px;padding:0 15px;border-radius:19px;border:1px solid var(--line);background:var(--surface);color:var(--mut);font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:7px;cursor:pointer}
+.dt .tab.on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 6px 18px rgba(77,124,254,.35)}
+.dt .tab .b{font-family:var(--mono);font-size:10px;font-weight:700;background:rgba(255,255,255,.14);border-radius:8px;padding:2px 6px}
+.dt .tab:not(.on) .b{background:var(--well);color:var(--dim)}
+/* cards + position rows + KPI duo */
+.dt .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;margin-top:14px}
+.dt .card .h{display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:10px}
+.dt .prow{display:grid;grid-template-columns:1.2fr .9fr .7fr .9fr;gap:6px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.dt .prow:first-of-type{border-top:none}
+.dt .prow .sym{font-weight:700;font-size:13px}
+.dt .prow .bk{font-size:9px;color:var(--dim);font-weight:600;margin-top:1px}
+.dt .prow .num{font-size:12.5px;font-weight:700;text-align:right}
+.dt .lab{display:grid;grid-template-columns:1.2fr .9fr .7fr .9fr;gap:6px;font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;padding-bottom:5px}
+.dt .lab span:not(:first-child){text-align:right}
+.dt .pos{color:var(--bull)}.dt .neg{color:var(--bear)}
+.dt .kpis{display:grid;grid-template-columns:1fr 1.35fr;gap:10px;margin-top:14px}
+.dt .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 15px 13px}
+.dt .kpi .k{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.dt .kpi .v{font-family:var(--mono);font-size:26px;font-weight:700;margin-top:7px;letter-spacing:-.02em}
+.dt .kpi .sub{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:4px}
+/* pivot rail w/ pulsing CMP dot (Room Left) */
+.dt .rail-wrap{margin-top:6px;padding:18px 6px 6px}
+.dt .rail{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,rgba(255,92,108,.55),rgba(255,92,108,.18) 40%,rgba(47,212,139,.18) 60%,rgba(47,212,139,.55))}
+.dt .rail .tick{position:absolute;top:-5px;width:2px;height:16px;background:var(--dim);border-radius:1px}
+.dt .rail .tick.major{background:var(--mut)}
+.dt .rail .tlab{position:absolute;top:14px;transform:translateX(-50%);text-align:center}
+.dt .rail .tlab .n1{font-size:9px;font-weight:700;color:var(--dim);letter-spacing:.04em}
+.dt .rail .tlab .n2{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--mut)}
+.dt .cmp-dot{position:absolute;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;background:var(--bull);box-shadow:0 0 0 3px rgba(47,212,139,.25),0 0 14px var(--bull);animation:dtPulse 1.4s ease-in-out infinite}
+.dt .cmp-tag{position:absolute;top:-26px;transform:translateX(-50%);font-family:var(--mono);font-size:11px;font-weight:700;color:var(--bull);white-space:nowrap}
+.dt .verdict{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(245,185,74,.3);padding:3px 8px;border-radius:8px}
+/* dark bottom nav */
+.dt .bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;height:calc(60px + env(safe-area-inset-bottom));padding:0 8px env(safe-area-inset-bottom);display:flex;background:rgba(13,20,40,.92);backdrop-filter:blur(18px);border-top:1px solid var(--line2)}
+.dt .bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--dim);font-size:10px;font-weight:700;text-decoration:none}
+.dt .bn svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.dt .bn.on{color:var(--cyan)}
+@media (prefers-reduced-motion:reduce){.dt .chip.live .dot,.dt .cmp-dot,.dt .seg{animation:none;opacity:1;transform:none}}
 """
 
 # cc#330 P4 — shared table helper: edge-fade affordances + row-tap expand.
