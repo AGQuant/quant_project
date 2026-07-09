@@ -79,8 +79,8 @@ MANIFEST = {
     "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
-    "theme_color": "#2563eb",
-    "background_color": "#f6f8fb",
+    "theme_color": "#0A0F1E",    # cc#345: dark = default brand identity (splash/status bar)
+    "background_color": "#0A0F1E",
     "icons": [
         {"src": "/static/icon-192.png", "type": "image/png", "sizes": "192x192"},
         {"src": "/static/icon-512.png", "type": "image/png", "sizes": "512x512"},
@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v8';   // cc#344: dark bottom nav + More sheet (pwa.js shell changed)
+const CACHE = 'scorr-pwa-v9';   // cc#345: light theme + toggle (pwa.js shell changed)
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -168,7 +168,7 @@ PWA_JS = """
   }
   if (!document.querySelector('meta[name="theme-color"]')) {
     var m = document.createElement('meta');
-    m.name = 'theme-color'; m.content = '#2563eb';
+    m.name = 'theme-color'; m.content = '#0A0F1E';   // cc#345: dark default; applyTheme swaps on light
     document.head.appendChild(m);
   }
 
@@ -235,6 +235,12 @@ PWA_JS = """
       + '    color:#E9EEFB;font-size:13px;font-weight:600;background:#182241}'
       + '  .pwa-sheet-grid a.active{border-color:#37D3E8;color:#37D3E8;background:rgba(55,211,232,.14)}'
       + '  .pwa-sheet-grid a .ic{font-size:17px;line-height:1}'
+      // cc#345: theme toggle row (sun/moon)
+      + '  .pwa-theme-row{display:flex;align-items:center;gap:9px;width:100%;min-height:44px;'
+      + '    padding:0 12px;border:1px solid rgba(148,166,210,.14);border-radius:10px;'
+      + '    background:#182241;color:#E9EEFB;font-size:13px;font-weight:600;cursor:pointer;'
+      + '    font-family:inherit;text-align:left}'
+      + '  .pwa-theme-row .ic{font-size:17px;line-height:1}'
       + '  .pwa-install{display:flex;position:fixed;left:0;right:0;bottom:56px;'
       + '    height:48px;align-items:center;gap:10px;padding:0 14px;z-index:9999;'
       + '    background:#2563eb;color:#fff;font-size:12px;font-weight:600}'
@@ -305,10 +311,33 @@ PWA_JS = """
       }).join('');
     rows += '<a href="/logout"><span class="ic">\\u23cf</span>Logout</a>';
     ov.innerHTML = '<div class="pwa-sheet"><h4>All destinations</h4>'
-      + '<div class="pwa-sheet-grid">' + rows + '</div></div>';
+      + '<div class="pwa-sheet-grid">' + rows + '</div>'
+      + '<h4 style="margin-top:14px">Settings</h4>'
+      + '<button id="pwa-theme-toggle" class="pwa-theme-row" type="button">'
+      + '<span class="ic" id="pwa-theme-ic"></span><span id="pwa-theme-lbl"></span></button>'
+      + '</div>';
     document.body.appendChild(ov);
     document.getElementById('pwa-more-btn').addEventListener('click', function () { ov.classList.add('open'); });
     ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('open'); });
+
+    // cc#345: theme toggle — dark default (brand identity), user pick persisted forever.
+    function curTheme() { try { return localStorage.getItem('scorr_theme') || 'dark'; } catch (e) { return 'dark'; } }
+    function syncThemeBtn() {
+      var t = curTheme(), ic = document.getElementById('pwa-theme-ic'), lbl = document.getElementById('pwa-theme-lbl');
+      if (ic) ic.innerHTML = (t === 'light') ? '\\u263e' : '\\u2600';         // moon (->dark) / sun (->light)
+      if (lbl) lbl.textContent = (t === 'light') ? 'Switch to Dark' : 'Switch to Light';
+    }
+    function applyTheme(t) {
+      document.documentElement.setAttribute('data-theme', t);
+      try { localStorage.setItem('scorr_theme', t); } catch (e) {}
+      var m = document.querySelector('meta[name="theme-color"]');
+      if (m) m.content = (t === 'light') ? '#F4F7FE' : '#0A0F1E';
+      syncThemeBtn();
+    }
+    document.getElementById('pwa-theme-toggle').addEventListener('click', function () {
+      applyTheme(curTheme() === 'light' ? 'dark' : 'light');
+    });
+    applyTheme(curTheme());   // sync meta + button to the theme the head script already applied
   }
 
   // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637):
@@ -733,6 +762,44 @@ body{font-family:var(--mux-font);}
 .dt .bn svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .dt .bn.on{color:var(--cyan)}
 @media (prefers-reduced-motion:reduce){.dt .chip.live .dot,.dt .cmp-dot,.dt .seg{animation:none;opacity:1;transform:none}}
+
+/* ==========================================================================
+   LIGHT THEME  —  cc#345. DARK is the default identity (each page's own :root
+   holds the dark tokens). Setting data-theme="light" on <html> overrides every
+   page's token names here — this rule out-specifies a bare :root (0,2,0 vs 0,1,0),
+   so it wins regardless of load order. rgba-tint chips adapt to the surface on
+   their own; only opaque token names need remapping. Light values from Fable.
+   ========================================================================== */
+:root[data-theme="light"]{
+  --bg:#F4F7FE; --bg2:#EDF1FA; --bg3:#E7ECF8;
+  --panel:#FFFFFF; --panel2:#EDF1FA; --panel3:#E7ECF8;
+  --card:#FFFFFF; --card2:#EDF1FA;
+  /* cc#345 NOTE: --ink is a TEXT token on the live pages (screener), NOT the .dt bg meaning
+     Fable listed (#F4F7FE). Protecting the live consumer -> dark text; .dt (unused) gets its
+     own bg from --surface/--bg. */
+  --ink:#0E1630; --surface:#FFFFFF; --surface2:#EDF1FA; --well:#E7ECF8;
+  --line:rgba(20,35,80,.10); --line2:rgba(20,35,80,.18);
+  --border:rgba(20,35,80,.10); --border2:rgba(20,35,80,.18);
+  --txt:#0E1630; --text:#0E1630; --text2:#5B6B94; --text3:#8A97BC;
+  --mut:#5B6B94; --dim:#8A97BC; --grey:#5B6B94; --tag-bg:#EDF1FA; --tag-fg:#5B6B94;
+  --grn:#0FA968; --green:#0FA968; --bull:#0FA968;
+  --grn-d:rgba(15,169,104,.12); --grn-b:rgba(15,169,104,.35);
+  --red:#E0405A; --bear:#E0405A;
+  --red-d:rgba(224,64,90,.10); --red-b:rgba(224,64,90,.35);
+  --blu:#3D6BEC; --blue:#3D6BEC; --accent:#3D6BEC; --blu-d:rgba(61,107,236,.12);
+  --cyan:#0FA8C4; --cyan-d:rgba(15,168,196,.12);
+  --amber:#C98A12; --gold:#C98A12; --warn:#C98A12;
+  --amber-d:rgba(201,138,18,.12); --amber-b:rgba(201,138,18,.35);
+  --violet:#7C3AED; --purp:#7C3AED; --purp-d:rgba(124,58,237,.10); --purp-b:rgba(124,58,237,.35);
+  --shadow:0 1px 4px rgba(20,35,80,.08); --shadow-md:0 4px 16px rgba(20,35,80,.10);
+}
+/* glow is a dark-native effect — on light keep the solid 3px edge, drop the bloom */
+:root[data-theme="light"] .seg.pass::before{box-shadow:none}
+:root[data-theme="light"] .seg.fail::before{box-shadow:none}
+:root[data-theme="light"] .cmp-dot,:root[data-theme="light"] .room-cmp-dot{box-shadow:0 0 0 2px rgba(15,169,104,.22)}
+:root[data-theme="light"] .chip.live .dot{box-shadow:0 0 4px rgba(15,169,104,.5)}
+/* dark translucent bottom nav -> light translucent on light theme */
+:root[data-theme="light"] .dt .bnav{background:rgba(255,255,255,.9);border-top-color:rgba(20,35,80,.14)}
 """
 
 # cc#330 P4 — shared table helper: edge-fade affordances + row-tap expand.

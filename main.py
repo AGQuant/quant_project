@@ -149,6 +149,10 @@ _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 # injected into <head> on every protected/app page via the same gate as the PWA
 # bootstrap, so no page is missed and the design system is defined in ONE place.
 _MOBILE_HEAD = (
+    # cc#345: set the saved theme SYNCHRONOUSLY before first paint (no light/dark flash).
+    # DARK is the default identity — no saved pick => dark (each page's own :root holds dark).
+    b"<script>(function(){try{var t=localStorage.getItem('scorr_theme')||'dark';"
+    b"document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"
     b'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
     b'<link rel="stylesheet" href="/static/mobile.css">'
