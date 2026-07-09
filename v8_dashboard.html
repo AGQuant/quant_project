@@ -625,13 +625,13 @@ function openSectorDetail(segment){
 
 // cc#319: NIFTY 50 sector card click -> same infoModal/sortTbl, but the holdings (only the
 // NIFTY-50 stocks in that official NSE industry) come from the endpoint, not cache.metricsAll.
-async function openNifty50Detail(industry){
-  if(!industry)return;
-  document.getElementById('mTitle').textContent=industry;
+async function openNifty50Detail(theme){
+  if(!theme)return;
+  document.getElementById('mTitle').textContent=theme;
   document.getElementById('mSub').textContent='NIFTY 50 · loading…';
   document.getElementById('mBody').innerHTML='';
   document.getElementById('infoModal').classList.add('open');
-  let d;try{d=await getJSON('/api/v8/nifty50_sectors/'+encodeURIComponent(industry)+'/holdings');}
+  let d;try{d=await getJSON('/api/v8/nifty50_sectors/'+encodeURIComponent(theme)+'/holdings');}
   catch(e){document.getElementById('mBody').innerHTML='<div class="empty">Could not load holdings.</div>';return;}
   const rows=(d&&d.holdings)||[];
   document.getElementById('mSub').textContent=`${rows.length} NIFTY 50 stock${rows.length===1?'':'s'} · GVM · 1D / 1W / 1M returns`;
@@ -643,7 +643,7 @@ async function openNifty50Detail(industry){
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
-    {sortKey:'day_1d',dir:-1,empty:"No stocks in this industry",wrapClass:''});
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this theme",wrapClass:''});
   document.getElementById('mBody').innerHTML=body;
 }
 
@@ -1082,7 +1082,7 @@ function renderMaster(){
     // sorted 1D% desc. Populated by the /api/v8/nifty50_sectors job into cache.nifty50; renders
     // once it lands (renderMasterPanels re-render). Card click -> openNifty50Detail holdings modal.
     (cache.nifty50 && cache.nifty50.sectors && cache.nifty50.sectors.length
-      ? `<div style="margin-top:20px">${sectorCards(cache.nifty50.sectors,'NIFTY 50 Sectors','official NSE industry · '+cache.nifty50.sectors.length+' groups','openNifty50Detail')}</div>`
+      ? `<div style="margin-top:20px">${sectorCards(cache.nifty50.sectors,'NIFTY 50 Sectors','Scorr themes · '+cache.nifty50.sectors.length+' groups','openNifty50Detail')}</div>`
       : "");
 }
 

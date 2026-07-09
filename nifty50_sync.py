@@ -80,6 +80,10 @@ def populate_nifty50(conn) -> dict:
     rows = fetch_nifty50()
     with conn.cursor() as cur:
         for r in rows:
+            # cc#337: the curated `theme` column (12 Scorr themes, the dashboard grouping key) is
+            # INTENTIONALLY absent from both the INSERT column list and the DO UPDATE SET — so an
+            # NSE re-fetch NEVER nulls or overwrites it. Existing rows keep their theme; a genuinely
+            # new index constituent lands with theme=NULL and is curated manually (rare).
             cur.execute("""INSERT INTO nifty50_constituents (symbol, company_name, industry, updated_at)
                            VALUES (%s,%s,%s,NOW())
                            ON CONFLICT (symbol) DO UPDATE
