@@ -1582,6 +1582,68 @@ function _setMetricInline(inlineId,last,dc){
 
 // ---- India VIX chart (cc#266) — Chart.js line, refreshes on the market-gate cadence -------
 let VIX_CHART=null;
+// cc#340: shared popout-chart axis helpers — ONE date label + faint separator per trading day on
+// X (intraday ts stay in the tooltip), clean padded 4-5 gridline / 1-decimal Y. Used by all 3
+// popouts (VIX + both PCR) so the axis treatment lives in ONE place, not copy-pasted x3.
+// Labels are fmtTs strings "DD Mon HH:MM"; the day key is the "DD Mon" prefix.
+function _dayKey(label){return String(label||'').split(' ').slice(0,2).join(' ');}
+function _dayBounds(labels){   // indices where a new trading day starts (aligned to that day's first bar, ~09:15)
+  const b=[];let prev=null;
+  labels.forEach((l,i)=>{const k=_dayKey(l);if(k&&k!==prev){b.push(i);prev=k;}});
+  return b;
+}
+function _dayTickLabels(labels){   // "DD Mon" only at each day boundary, '' elsewhere
+  const first=new Set(_dayBounds(labels));
+  return labels.map((l,i)=>first.has(i)?_dayKey(l):'');
+}
+const _dayBoundaryPlugin={
+  id:'dayBoundary',
+  beforeDatasetsDraw(chart){
+    const b=chart.$dayBounds;if(!b||!b.length)return;
+    const ctx=chart.ctx,x=chart.scales.x,area=chart.chartArea;if(!x||!area)return;
+    ctx.save();
+    for(let k=0;k<b.length;k++){
+      const x0=x.getPixelForValue(b[k]);
+      const x1=(k+1<b.length)?x.getPixelForValue(b[k+1]):area.right;
+      if(k%2===1){ctx.fillStyle='rgba(138,148,166,.05)';ctx.fillRect(x0,area.top,x1-x0,area.bottom-area.top);}   // alt-day shading
+      if(k>0){ctx.strokeStyle='rgba(138,148,166,.28)';ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(x0,area.top);ctx.lineTo(x0,area.bottom);ctx.stroke();}                      // day separator
+    }
+    ctx.restore();
+  }
+};
+function _buildTrendChart(cv,labels,vals){
+  const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
+  const line=dark?'#3987e5':'#2a78d6';
+  const radii=vals.map((_,i)=>i===vals.length-1?5:0);   // only the current point gets a marker
+  let dayTicks=_dayTickLabels(labels);
+  if(window.Chart&&!window.__dayBoundaryReg){Chart.register(_dayBoundaryPlugin);window.__dayBoundaryReg=true;}
+  const ch=new Chart(cv.getContext('2d'),{
+    type:'line',
+    data:{labels,datasets:[{data:vals,borderColor:line,borderWidth:2,
+      backgroundColor:line+'1a',fill:true,tension:.25,
+      pointRadius:radii,pointBackgroundColor:line,pointBorderColor:'#fff',pointBorderWidth:2,
+      spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index'}},   // tooltip title = full "DD Mon HH:MM"
+      scales:{
+        x:{grid:{display:false,drawTicks:false},ticks:{autoSkip:false,maxRotation:0,color:'#8a94a6',font:{size:9},
+             callback:function(v,i){return dayTicks[i]||'';}}},
+        y:{grace:'8%',grid:{color:'rgba(138,148,166,.15)'},
+           ticks:{maxTicksLimit:5,color:'#8a94a6',font:{size:9},callback:function(v){return Number(v).toFixed(1);}}}
+      }}});
+  ch.$dayBounds=_dayBounds(labels);
+  return ch;
+}
+function _updateTrendChart(ch,labels,vals){
+  const radii=vals.map((_,i)=>i===vals.length-1?5:0);
+  ch.data.labels=labels;ch.data.datasets[0].data=vals;ch.data.datasets[0].pointRadius=radii;
+  ch.$dayBounds=_dayBounds(labels);
+  const dayTicks=_dayTickLabels(labels);   // rebind the tick callback to the refreshed day boundaries
+  ch.options.scales.x.ticks.callback=function(v,i){return dayTicks[i]||'';};
+  ch.update('none');
+}
+
 async function loadVixChart(){
   if(!window.Chart)return;   // CDN not ready/blocked — dashboard stays fully functional without it
   let d;try{d=await getJSON(EP.vixIntraday);}catch(e){return;}
@@ -1592,26 +1654,8 @@ async function loadVixChart(){
   const last=vals.length?vals[vals.length-1]:null;
   const lastEl=document.getElementById('vixLast');if(lastEl)lastEl.textContent=last==null?'--':last.toFixed(2);
   _setMetricInline('vixInline',last,_pcDayChg(pts,vals));   // cc#293: inline row value + day change
-  const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
-  const line=dark?'#3987e5':'#2a78d6';
-  // Only the last (current) point gets a visible marker — a current-reading indicator.
-  const radii=vals.map((_,i)=>i===vals.length-1?5:0);
-  if(VIX_CHART){
-    VIX_CHART.data.labels=labels;VIX_CHART.data.datasets[0].data=vals;
-    VIX_CHART.data.datasets[0].pointRadius=radii;VIX_CHART.update('none');return;
-  }
-  VIX_CHART=new Chart(cv.getContext('2d'),{
-    type:'line',
-    data:{labels,datasets:[{data:vals,borderColor:line,borderWidth:2,
-      backgroundColor:line+'1a',fill:true,tension:.25,
-      pointRadius:radii,pointBackgroundColor:line,pointBorderColor:'#fff',pointBorderWidth:2,
-      spanGaps:true}]},
-    options:{responsive:true,maintainAspectRatio:false,animation:false,
-      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index'}},
-      scales:{
-        x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,color:'#8a94a6',font:{size:9}}},
-        y:{grid:{color:'rgba(138,148,166,.15)'},ticks:{color:'#8a94a6',font:{size:9}}}
-      }}});
+  if(VIX_CHART){_updateTrendChart(VIX_CHART,labels,vals);return;}
+  VIX_CHART=_buildTrendChart(cv,labels,vals);   // cc#340: shared day-boundary axis config
 }
 
 // cc#290: NIFTY / BankNifty PCR trend charts — mirror loadVixChart() exactly (same Chart.js
@@ -1628,26 +1672,9 @@ async function _loadPcrChart(ep,canvasId,lastId,inlineId,getChart,setChart){
   const last=vals.length?vals[vals.length-1]:null;
   const lastEl=document.getElementById(lastId);if(lastEl)lastEl.textContent=last==null?'--':last.toFixed(2);
   _setMetricInline(inlineId,last,_pcDayChg(pts,vals));   // cc#293: inline row value + day change
-  const dark=matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches;
-  const line=dark?'#3987e5':'#2a78d6';
-  const radii=vals.map((_,i)=>i===vals.length-1?5:0);
   let ch=getChart();
-  if(ch){
-    ch.data.labels=labels;ch.data.datasets[0].data=vals;
-    ch.data.datasets[0].pointRadius=radii;ch.update('none');return;
-  }
-  ch=new Chart(cv.getContext('2d'),{
-    type:'line',
-    data:{labels,datasets:[{data:vals,borderColor:line,borderWidth:2,
-      backgroundColor:line+'1a',fill:true,tension:.25,
-      pointRadius:radii,pointBackgroundColor:line,pointBorderColor:'#fff',pointBorderWidth:2,
-      spanGaps:true}]},
-    options:{responsive:true,maintainAspectRatio:false,animation:false,
-      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index'}},
-      scales:{
-        x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,color:'#8a94a6',font:{size:9}}},
-        y:{grid:{color:'rgba(138,148,166,.15)'},ticks:{color:'#8a94a6',font:{size:9}}}
-      }}});
+  if(ch){_updateTrendChart(ch,labels,vals);return;}
+  ch=_buildTrendChart(cv,labels,vals);   // cc#340: shared day-boundary axis config (same as VIX)
   setChart(ch);
 }
 function loadNiftyPcrChart(){return _loadPcrChart(EP.niftyPcr,'niftyPcrChart','niftyPcrLast','niftyPcrInline',()=>NIFTY_PCR_CHART,c=>{NIFTY_PCR_CHART=c;});}
