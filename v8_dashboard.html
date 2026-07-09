@@ -1156,15 +1156,21 @@ function renderMaster(){
       <div style="position:absolute;top:2px;${fillStyle};height:4px;background:${fillClr};border-radius:2px"></div>
       <div style="position:absolute;top:-2px;left:${tick}%;width:2px;height:12px;background:var(--mut);transform:translateX(-50%)" title="Entry ${num(entry)}"></div>
       <div style="position:absolute;top:0;left:${dot}%;width:8px;height:8px;border-radius:50%;background:${fillClr};border:1.5px solid var(--panel);transform:translateX(-50%)"></div>
-      <div style="position:absolute;bottom:13px;left:${dot}%;transform:translateX(-50%);white-space:nowrap;font-family:'Space Mono';font-size:10px;font-weight:700;background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;box-shadow:0 2px 6px rgba(0,0,0,.14)"><span style="color:var(--txt)">${num(cmp)}</span> <span class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span> <span class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></div></div>`;
+      <div style="position:absolute;bottom:13px;left:${dot}%;transform:translateX(-50%);white-space:nowrap;font-family:'Space Mono';font-size:10px;font-weight:700;background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;box-shadow:0 2px 6px rgba(0,0,0,.14)"><span style="color:var(--txt)">${num(cmp)}</span></div></div>`;
     return`<div style="display:flex;align-items:center;gap:8px;flex:1">${isShort?tgtPill:slPill}${track}${isShort?slPill:tgtPill}</div>`;
   };
   // cc#280: mobile keeps its vertical card shape but gets the same lean content — the Net P&L /
   // Potential Left / Qty chips are gone (P&L now lives only in the bar tooltip).
+  // cc: open-date moves up beside the symbol (small, muted); Net P&L promoted to a big number on
+  // its own row so the eye lands on money first, not the timestamp. Bar tooltip drops the P&L dup.
   const openPosMobile=`<div class="mob-cards">${openRows.length?openRows.map(x=>`
-    <div class="mob-card"><div class="mob-card-header"><span class="mob-sym dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
-    <div class="mob-chips"><span class="mob-chip" style="padding:0;border:none;background:none">${basketPill(x.basket)}</span><span class="mob-chip" style="color:var(--dim)">${fmtTs(x.entry_ts)} · D${x.days}</span></div>
-    <div style="margin-top:15px">${ladderTrack(x)}</div></div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
+    <div class="mob-card"><div class="mob-card-header"><span style="display:flex;align-items:baseline;gap:8px;min-width:0">
+        <span class="mob-sym dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
+        <span style="font-family:'Space Mono';font-size:10px;color:var(--dim);white-space:nowrap">${fmtTs(x.entry_ts)} · D${x.days}</span></span>
+      <span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">${basketPill(x.basket)}
+      <span style="display:flex;align-items:baseline;gap:7px"><span style="font-family:'Space Mono';font-size:18px;font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span><span style="font-family:'Space Mono';font-size:11px;font-weight:700" class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></span></div>
+    ${ladderTrack(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
   // cc#288: desktop Ladder View rebuilt to the founder's Claude Design reference (supersedes
   // cc#280's ladderRow/ladderTrack; cc#286/287 cancelled — the 210px info panel avoids the
   // Symbol/Side overlap and the bar stays flex:1 by design). Structure/mechanics kept exactly as
