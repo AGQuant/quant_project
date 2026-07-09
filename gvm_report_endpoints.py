@@ -362,6 +362,18 @@ def gvm_company_report(symbol: str):
         log.warning(f"content fetch failed for {sym}: {e}")
         persist_error = str(e)
 
+    # cc#343: unify the card price with Fibcheck via the ONE shared resolver — FEED symbols show
+    # live CMP, NON-FEED symbols the latest COMPLETED close (Prev Close, never a partial row), so
+    # the card, fibcheck and pivot-range dot can never disagree again (RAMCOIND 362.65 vs 336.1).
+    try:
+        import price_resolver
+        with _conn() as _pc, _pc.cursor() as _pcur:
+            _pr = price_resolver.resolve_price(_pcur, sym)
+    except Exception as _pe:
+        log.warning(f"price resolve failed for {sym}: {_pe}")
+        _pr = {"price": base.get("price"), "label": "CMP", "date": None, "is_live": True}
+    _resolved_price = _pr.get("price") if _pr.get("price") is not None else base.get("price")
+
     # --- 8. Assemble final response (NaN/Inf-scrubbed for JSON safety) ---
     return _json_safe({
         "symbol":        sym,
@@ -370,7 +382,10 @@ def gvm_company_report(symbol: str):
         "is_bfsi":       base.get("is_bfsi", False),
         "verdict":       base.get("verdict"),
         "punchline":     base.get("punchline"),
-        "price":         base.get("price"),
+        "price":         _resolved_price,
+        "price_label":   _pr.get("label"),
+        "price_date":    _pr.get("date"),
+        "price_is_live": _pr.get("is_live"),
         "market_cap":    base.get("market_cap"),
         "score_date":    base.get("score_date"),
         "mcap_rank":     mcap_rank,

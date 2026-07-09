@@ -90,22 +90,26 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
     lb = (lookback or "3m").lower().strip()
     is_all = lb == "all"
     days = _FIB_HORIZONS.get(lb, _FIB_HORIZONS["3m"])
+    # cc#343: while the market is open, exclude today's row — it is a mid-session PARTIAL candle,
+    # never a completed close. Fibcheck is a structural, previous-close view; the swing hi/lo AND
+    # the anchor must both ignore the partial (root cause of RAMCOIND's 362.65 partial anchor).
+    _excl = " AND price_date < CURRENT_DATE" if _ist_market_hours() else ""
     try:
         with _fib_conn() as conn, conn.cursor() as cur:
             # EOD bars within the selected calendar-day window, oldest->newest. The date filter
             # bounds the set (no LIMIT); everything downstream is window-size-agnostic.
             if is_all:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT price_date, high, low, close
                     FROM raw_prices
-                    WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL
+                    WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL{_excl}
                     ORDER BY price_date ASC
                 """, (sym,))
             else:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT price_date, high, low, close
                     FROM raw_prices
-                    WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL
+                    WHERE symbol=%s AND high IS NOT NULL AND low IS NOT NULL{_excl}
                       AND price_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
                     ORDER BY price_date ASC
                 """, (sym, days))
@@ -130,19 +134,12 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
                            "price": round(swing_low + (p / 100.0) * span, 2)}
                           for p in _FIB_PCTS]
 
-            # CMP: live intraday during market hours, else latest EOD close
-            cmp_val = None
-            if _ist_market_hours():
-                cur.execute("""
-                    SELECT close FROM intraday_prices
-                    WHERE symbol=%s AND ts::date=CURRENT_DATE
-                    ORDER BY ts DESC LIMIT 1
-                """, (sym,))
-                ir = cur.fetchone()
-                if ir and ir[0] is not None:
-                    cmp_val = float(ir[0])
-            if cmp_val is None:
-                cmp_val = float(rows[-1][3]) if rows[-1][3] is not None else None
+            # cc#343: ANCHOR = the PREVIOUS CLOSE (latest completed EOD close), never a live/
+            # intraday price and never today's partial. The series above already dropped the
+            # CURRENT_DATE partial while the market is open, so rows[-1] IS the latest completed
+            # close. Retracement %, the annotated dot and the nearest-level math all key off this.
+            cmp_val = float(rows[-1][3]) if rows[-1][3] is not None else None
+            anchor_date = str(rows[-1][0])
 
             # latest supporting technicals
             cur.execute("""
@@ -181,6 +178,8 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
             "swing_low": {"price": swing_low, "date": swing_low_date},
             "fib_levels": fib_levels,
             "cmp": round(cmp_val, 2) if cmp_val is not None else None,
+            "anchor_label": "Prev Close",          # cc#343: the anchor is the previous close, not live CMP
+            "anchor_date": anchor_date,
             "cmp_retracement_pct": cmp_retr,
             "entry_price": entry_price,
             "entry_retracement_pct": entry_retr,
@@ -189,7 +188,7 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
             "technicals": tech,
             "series": series,
             "commentary": commentary,
-            "is_live": _ist_market_hours(),
+            "is_live": False,   # cc#343: Fibcheck is always previous-close-anchored (EOD structural view)
         }
     except Exception as e:
         return {"error": f"fibcheck failed: {e}"}

@@ -823,7 +823,7 @@ function FibChartSvg({ d }) {
       {cmp != null && (
         <g>
           <circle cx={xF(n - 1).toFixed(1)} cy={yF(cmp).toFixed(1)} r="4" fill={C.accent} stroke="#fff" strokeWidth="1.5" />
-          <text x={(xF(n - 1) - 6).toFixed(1)} y={(yF(cmp) - 7).toFixed(1)} fontSize="11" fontFamily="monospace" fontWeight="700" fill={C.text} textAnchor="end">CMP {cmp.toFixed(2)}</text>
+          <text x={(xF(n - 1) - 6).toFixed(1)} y={(yF(cmp) - 7).toFixed(1)} fontSize="11" fontFamily="monospace" fontWeight="700" fill={C.text} textAnchor="end">Prev Close {cmp.toFixed(2)}</text>
         </g>
       )}
     </svg>
@@ -888,7 +888,7 @@ function FibPopout({ symbol, onClose }) {
             <FibChartSvg d={data} />
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12, fontFamily: "monospace", fontSize: 11.5 }}>
               <FibStat label="Swing">{fmt(data.swing_low.price, 2)} → {fmt(data.swing_high.price, 2)}</FibStat>
-              <FibStat label="CMP">{fmt(data.cmp, 2)}{data.cmp_retracement_pct != null ? ` (${data.cmp_retracement_pct.toFixed(1)}%)` : ""}</FibStat>
+              <FibStat label={(data.anchor_label || "CMP") + (data.anchor_date ? ` ${data.anchor_date}` : "")}>{fmt(data.cmp, 2)}{data.cmp_retracement_pct != null ? ` (${data.cmp_retracement_pct.toFixed(1)}%)` : ""}</FibStat>
               {data.nearest_level_above && (
                 <FibStat label="Next resist">{data.nearest_level_above.pct.toFixed(1)}% @ {fmt(data.nearest_level_above.price, 2)}</FibStat>
               )}
@@ -1017,8 +1017,8 @@ function GvmReport({ r, hist }) {
 
           <div style={{ textAlign: "right", minWidth: 170 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-              <div style={{ fontSize: 13, color: C.muted }}>CMP</div>
-              {/* cc#300: Fibcheck chart-icon popout (price-structure context lives next to CMP) */}
+              <div style={{ fontSize: 13, color: C.muted }}>{r.price_label || "CMP"}{r.price_label === "Prev Close" && r.price_date ? ` ${r.price_date}` : ""}</div>
+              {/* cc#300: Fibcheck chart-icon popout. cc#343: label = CMP (feed) or Prev Close <date> (non-feed) */}
               <button onClick={() => setFibOpen(true)} title="Fibonacci retracement"
                 style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer",
                   fontSize: 13, lineHeight: 1, color: C.accent, padding: "2px 6px" }}>📈</button>
