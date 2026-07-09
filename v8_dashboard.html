@@ -1169,7 +1169,7 @@ function renderMaster(){
         <span style="font-family:'Space Mono';font-size:10px;color:var(--dim);white-space:nowrap">${fmtTs(x.entry_ts)} · D${x.days}</span></span>
       <span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">${basketPill(x.basket)}
-      <span style="display:flex;align-items:baseline;gap:7px"><span style="font-family:'Space Mono';font-size:18px;font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span><span style="font-family:'Space Mono';font-size:11px;font-weight:700" class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></span></div>
+      <span style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'Space Mono';font-size:14px;font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span><span style="font-family:'Space Mono';font-size:10px;font-weight:700" class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></span></div>
     ${ladderTrack(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
   // cc#288: desktop Ladder View rebuilt to the founder's Claude Design reference (supersedes
   // cc#280's ladderRow/ladderTrack; cc#286/287 cancelled — the 210px info panel avoids the
