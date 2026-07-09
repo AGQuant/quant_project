@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scorr · V8 — Design R2</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0A0F1E; --surface:#121A33; --surface2:#182241; --well:#0D1428;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+  --text:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --bull:#2FD48B; --bear:#FF5C6C; --amber:#F5B94A;
+  --amber-soft:rgba(245,185,74,.14);
+  --blue:#4D7CFE; --cyan:#37D3E8;
+  --disp:'Sora',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --r:18px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--ink);color:var(--text);font-family:var(--disp);font-size:14px;-webkit-font-smoothing:antialiased}
+body{max-width:430px;margin:0 auto;padding:0 14px calc(84px + env(safe-area-inset-bottom));}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+/* header */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 2px 12px;position:sticky;top:0;background:linear-gradient(var(--ink) 82%,transparent);z-index:30}
+.brand{font-weight:800;font-size:17px}.brand b{color:var(--blue)}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:15px;border:1px solid var(--line);background:var(--surface);font-size:11px;font-weight:600;color:var(--mut)}
+.chip .dot{width:7px;height:7px;border-radius:50%}
+.chip.live .dot{background:var(--bull);box-shadow:0 0 8px var(--bull);animation:pulse 1.6s ease-in-out infinite}
+.chip.live{color:var(--bull);border-color:rgba(47,212,139,.35)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.clock{font-family:var(--mono);font-size:11px;color:var(--dim)}
+
+/* gate card */
+.gate{background:linear-gradient(168deg,var(--surface) 0%,#0F1730 100%);border:1px solid var(--line);border-radius:var(--r);padding:18px 16px 16px;box-shadow:0 18px 44px rgba(3,7,20,.5)}
+.eyebrow{display:flex;justify-content:space-between;font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+.mood-row{display:flex;align-items:baseline;gap:12px;margin:10px 0 14px}
+.mood{font-size:34px;font-weight:800;letter-spacing:-.02em;color:var(--bull)}
+.mood-count{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--bull);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.3);padding:4px 9px;border-radius:9px}
+.segs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.seg{border-radius:12px;padding:9px 8px 8px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden}
+.seg::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.seg.pass::before{background:var(--bull);box-shadow:0 0 10px var(--bull)}
+.seg.fail::before{background:var(--bear);box-shadow:0 0 10px var(--bear)}
+.seg .k{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+.seg .v{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:3px}
+.seg.pass .v{color:var(--bull)}.seg.fail .v{color:var(--bear)}
+.seg .s{font-size:9px;font-weight:700;margin-top:2px;color:var(--dim)}
+/* instruments with delta + basis label */
+.instr{display:flex;gap:7px;margin-top:12px}
+.ins{flex:1;background:var(--surface2);border:1px solid var(--line);border-radius:11px;padding:8px 10px;min-height:52px}
+.ins .top{display:flex;justify-content:space-between;align-items:center}
+.ins .k{font-size:9.5px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.ins .v{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:2px}
+.ins .d{font-family:var(--mono);font-size:10px;font-weight:700;margin-top:1px}
+.ins .d.neg{color:var(--bear)}.ins .d.pos{color:var(--bull)}
+.ins .d small{color:var(--dim);font-weight:600;font-size:9px;letter-spacing:.02em}
+.ins .spark{width:26px;height:14px;flex-shrink:0;opacity:.9}
+/* slot capacity — FIXED fills */
+.slots{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);display:grid;gap:9px}
+.slot{display:grid;grid-template-columns:44px 1fr 56px;align-items:center;gap:10px}
+.slot .k{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--mut);text-transform:uppercase}
+.slot .bar{display:block;height:8px;border-radius:4px;background:var(--well);border:1px solid var(--line);overflow:hidden}
+.slot .fill{display:block;height:100%;border-radius:4px}
+.slot .n{font-family:var(--mono);font-size:12px;font-weight:700;text-align:right}
+.f-buy{background:linear-gradient(90deg,#1E9E68,var(--bull))}
+.f-sell{background:linear-gradient(90deg,#C2404E,var(--bear))}
+.f-so{background:linear-gradient(90deg,#8A5BD6,#B08CFF)}
+.f-s1b{background:linear-gradient(90deg,#2789C9,var(--cyan))}
+.mini{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+
+/* tabs */
+.tabs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:18px -14px 0;padding:2px 14px 6px;-webkit-mask:linear-gradient(90deg,transparent,#000 18px,#000 calc(100% - 26px),transparent)}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex-shrink:0;height:38px;padding:0 15px;border-radius:19px;border:1px solid var(--line);background:var(--surface);color:var(--mut);font-size:12.5px;font-weight:700;display:flex;align-items:center;gap:7px}
+.tab.on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 6px 18px rgba(77,124,254,.35)}
+.tab .b{font-family:var(--mono);font-size:10px;font-weight:700;background:rgba(255,255,255,.14);border-radius:8px;padding:2px 6px}
+.tab:not(.on) .b{background:var(--well);color:var(--dim)}
+
+/* positions preview with Day% */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 15px;margin-top:14px}
+.card .h{display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;margin-bottom:10px}
+.prow{display:grid;grid-template-columns:1.2fr .9fr .7fr .9fr;gap:6px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.prow:first-of-type{border-top:none}
+.prow .sym{font-weight:700;font-size:13px}
+.prow .bk{font-size:9px;color:var(--dim);font-weight:600;margin-top:1px}
+.prow .num{font-size:12.5px;font-weight:700;text-align:right}
+.lab{display:grid;grid-template-columns:1.2fr .9fr .7fr .9fr;gap:6px;font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;padding-bottom:5px}
+.lab span:not(:first-child){text-align:right}
+.pos{color:var(--bull)}.neg{color:var(--bear)}
+
+/* pivot rail — Room Left */
+.rail-wrap{margin-top:6px;padding:18px 6px 6px}
+.rail{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,rgba(255,92,108,.55),rgba(255,92,108,.18) 40%,rgba(47,212,139,.18) 60%,rgba(47,212,139,.55))}
+.tick{position:absolute;top:-5px;width:2px;height:16px;background:var(--dim);border-radius:1px}
+.tick.major{background:var(--mut)}
+.tlab{position:absolute;top:14px;transform:translateX(-50%);text-align:center}
+.tlab .n1{font-size:9px;font-weight:700;color:var(--dim);letter-spacing:.04em}
+.tlab .n2{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--mut)}
+.cmp-dot{position:absolute;top:50%;transform:translate(-50%,-50%);width:13px;height:13px;border-radius:50%;background:var(--bull);box-shadow:0 0 0 3px rgba(47,212,139,.25),0 0 14px var(--bull);animation:pulse 1.4s ease-in-out infinite}
+.cmp-tag{position:absolute;top:-26px;transform:translateX(-50%);font-family:var(--mono);font-size:11px;font-weight:700;color:var(--bull);white-space:nowrap}
+.verdict{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(245,185,74,.3);padding:3px 8px;border-radius:8px}
+
+/* bottom nav */
+.bnav{position:fixed;left:0;right:0;bottom:0;max-width:430px;margin:0 auto;height:calc(60px + env(safe-area-inset-bottom));padding:0 8px env(safe-area-inset-bottom);display:flex;background:rgba(13,20,40,.92);backdrop-filter:blur(18px);border-top:1px solid var(--line2)}
+.bn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--dim);font-size:10px;font-weight:700;text-decoration:none}
+.bn svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.bn.on{color:var(--cyan)}
+@media (prefers-reduced-motion:reduce){.chip.live .dot,.cmp-dot{animation:none}}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">SCO<b>RR</b> <span style="color:var(--dim);font-weight:600;font-size:13px">· V8</span></div>
+  <div class="hdr-right">
+    <span class="clock num">16:20 IST</span>
+    <span class="chip live"><span class="dot"></span>LIVE · 5m</span>
+  </div>
+</header>
+
+<section class="gate">
+  <div class="eyebrow"><span>Market Mood Gate</span><span class="num" style="letter-spacing:.06em">09 Jul 2026</span></div>
+  <div class="mood-row">
+    <div class="mood">Bullish</div>
+    <div class="mood-count">3 / 4 checks</div>
+  </div>
+
+  <div class="segs">
+    <div class="seg fail"><div class="k">ADR</div><div class="v">0.47</div><div class="s">FAIL</div></div>
+    <div class="seg pass"><div class="k">Day</div><div class="v">+0.21%</div><div class="s">PASS</div></div>
+    <div class="seg pass"><div class="k">Week</div><div class="v">+0.22%</div><div class="s">PASS</div></div>
+    <div class="seg pass"><div class="k">Month</div><div class="v">+4.05%</div><div class="s">PASS</div></div>
+  </div>
+
+  <div class="instr">
+    <div class="ins">
+      <div class="top"><span class="k">India VIX</span>
+      <svg class="spark" viewBox="0 0 26 14"><polyline points="0,4 6,6 11,5 16,9 21,8 26,11" fill="none" stroke="#F5B94A" stroke-width="1.6"/></svg></div>
+      <div class="v">13.14</div>
+      <div class="d neg">−9.9% <small>vs prev close</small></div>
+    </div>
+    <div class="ins">
+      <div class="top"><span class="k">Nifty PCR</span>
+      <svg class="spark" viewBox="0 0 26 14"><polyline points="0,3 6,5 11,4 16,8 21,9 26,10" fill="none" stroke="#37D3E8" stroke-width="1.6"/></svg></div>
+      <div class="v">1.01</div>
+      <div class="d neg">−21.3% <small>vs prev close</small></div>
+    </div>
+    <div class="ins">
+      <div class="top"><span class="k">BN PCR</span>
+      <svg class="spark" viewBox="0 0 26 14"><polyline points="0,2 6,4 11,3 16,7 21,9 26,11" fill="none" stroke="#37D3E8" stroke-width="1.6"/></svg></div>
+      <div class="v">1.02</div>
+      <div class="d neg">−38.3% <small>vs prev close</small></div>
+    </div>
+  </div>
+
+  <div class="slots">
+    <div class="slot"><span class="k">Buy</span><span class="bar"><span class="fill f-buy" style="width:58.3%"></span></span><span class="n num" style="color:var(--bull)">7 / 12</span></div>
+    <div class="slot"><span class="k">Sell</span><span class="bar"><span class="fill f-sell" style="width:75%"></span></span><span class="n num" style="color:var(--bear)">6 / 8</span></div>
+    <div class="mini">
+      <div class="slot" style="grid-template-columns:44px 1fr 36px"><span class="k">SO</span><span class="bar"><span class="fill f-so" style="width:0%"></span></span><span class="n num" style="color:var(--dim)">0/4</span></div>
+      <div class="slot" style="grid-template-columns:36px 1fr 36px"><span class="k">S1B</span><span class="bar"><span class="fill f-s1b" style="width:0%"></span></span><span class="n num" style="color:var(--dim)">0/3</span></div>
+    </div>
+  </div>
+</section>
+
+<nav class="tabs">
+  <div class="tab on">Master</div>
+  <div class="tab">Buy Reversal <span class="b">2</span></div>
+  <div class="tab">Buy Momentum <span class="b">3</span></div>
+  <div class="tab">S1 Bounce</div>
+  <div class="tab">Sell Reversal <span class="b">4</span></div>
+</nav>
+
+<div class="card">
+  <div class="h"><span>Open Positions · 12</span><span class="num" style="letter-spacing:0">7S · 5L</span></div>
+  <div class="lab"><span>Symbol</span><span>CMP</span><span>Day %</span><span>Net P&L</span></div>
+  <div class="prow">
+    <div><div class="sym">MARICO</div><div class="bk">Buy Momentum · L</div></div>
+    <div class="num">858.85</div><div class="num pos">+1.5%</div><div class="num pos">6,100</div>
+  </div>
+  <div class="prow">
+    <div><div class="sym">ZYDUSLIFE</div><div class="bk">Buy Momentum · L</div></div>
+    <div class="num">1,162.6</div><div class="num pos">+0.6%</div><div class="num pos">5,440</div>
+  </div>
+  <div class="prow">
+    <div><div class="sym">DELHIVERY</div><div class="bk">Buy Momentum · L</div></div>
+    <div class="num">516.80</div><div class="num neg">−0.4%</div><div class="num neg">−4,028</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="h"><span>Room Left · 1D — MARICO</span><span class="verdict">TIGHT · 1.1%</span></div>
+  <div class="rail-wrap">
+    <div class="rail">
+      <span class="tick" style="left:2%"></span><span class="tlab" style="left:2%"><div class="n1">S2</div><div class="n2">828.4</div></span>
+      <span class="tick" style="left:22%"></span><span class="tlab" style="left:22%"><div class="n1">S1</div><div class="n2">843.8</div></span>
+      <span class="tick major" style="left:47%"></span><span class="tlab" style="left:47%"><div class="n1">PP</div><div class="n2">852.1</div></span>
+      <span class="tick" style="left:74%"></span><span class="tlab" style="left:74%"><div class="n1">R1</div><div class="n2">868.8</div></span>
+      <span class="tick" style="left:97%"></span><span class="tlab" style="left:97%"><div class="n1">R2</div><div class="n2">889.9</div></span>
+      <span class="cmp-tag" style="left:62%">859.3</span>
+      <span class="cmp-dot" style="left:62%"></span>
+    </div>
+    <div style="height:34px"></div>
+  </div>
+</div>
+
+<nav class="bnav">
+  <a class="bn" href="#"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Home</a>
+  <a class="bn on" href="#"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>V8</a>
+  <a class="bn" href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>GVM</a>
+  <a class="bn" href="#"><svg viewBox="0 0 24 24"><path d="M4 13l5 5L20 7"/></svg>Check</a>
+  <a class="bn" href="#"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>More</a>
+</nav>
+
+</body>
+</html>
