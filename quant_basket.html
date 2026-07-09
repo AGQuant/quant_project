@@ -7,10 +7,10 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   :root {
-    --bg:#f6f8fb; --card:#fff; --panel:#fff;
-    --line:#e4e9f1; --line2:#d4dbe7;
-    --txt:#1c2536; --mut:#5a6781; --dim:#8a96ad;
-    --grn:#0fa968; --red:#e23744; --blu:#2563eb; --cyan:#0891b2; --amber:#d97706;
+    --bg:#0A0F1E; --card:#fff; --panel:#fff;
+    --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+    --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
     --font:'Sora',system-ui,-apple-system,sans-serif;
     --shadow:0 1px 4px rgba(20,35,70,.06);
   }
@@ -58,17 +58,17 @@
   .bc-info{font-size:10px;color:var(--mut)}
   .bc-info b{color:var(--txt);font-weight:600}
   .bc-badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px;border:1px solid;white-space:nowrap}
-  .bc-badge.ok{background:#f0fdf8;color:var(--grn);border-color:#a7f3d0}
-  .bc-badge.warn{background:#fffbeb;color:var(--amber);border-color:#fcd34d}
-  .bc-badge.risk{background:#fef2f2;color:var(--red);border-color:#fca5a5}
+  .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:#a7f3d0}
+  .bc-badge.warn{background:#121A33beb;color:var(--amber);border-color:#fcd34d}
+  .bc-badge.risk{background:rgba(255,92,108,.08);color:var(--red);border-color:#fca5a5}
 
   .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
   .bc-crit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
   .bc-crit-row:last-child{margin-bottom:0}
   .bc-crit-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
     padding:2px 6px;border-radius:5px;white-space:nowrap;flex-shrink:0;margin-top:1px}
-  .bc-crit-label.entry{background:#eff6ff;color:#2563eb}
-  .bc-crit-label.exit{background:#fef2f2;color:#e23744}
+  .bc-crit-label.entry{background:rgba(77,124,254,.14);color:#4D7CFE}
+  .bc-crit-label.exit{background:rgba(255,92,108,.08);color:#FF5C6C}
   .bc-crit-text{font-size:10px;color:var(--mut);line-height:1.5}
 
   .bc-click{font-size:10px;color:var(--blu);margin-top:10px;text-align:center;font-weight:500}
@@ -85,12 +85,12 @@
   .ar-basket{color:var(--mut);min-width:70px}
   .ar-val{color:var(--red);font-weight:600;flex:1}
   .ar-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px}
-  .ar-chip.hs1{background:#fef2f2;color:var(--red)}
-  .ar-chip.hs2{background:#fffbeb;color:var(--amber)}
+  .ar-chip.hs1{background:rgba(255,92,108,.08);color:var(--red)}
+  .ar-chip.hs2{background:#121A33beb;color:var(--amber)}
 
   .overlay{position:fixed;inset:0;background:rgba(10,18,36,.48);z-index:50;display:none;align-items:flex-end}
   .overlay.open{display:flex}
-  .modal{background:#fff;border-radius:20px 20px 0 0;width:100%;max-height:82vh;
+  .modal{background:#121A33;border-radius:20px 20px 0 0;width:100%;max-height:82vh;
     display:flex;flex-direction:column;box-shadow:0 -6px 36px rgba(20,35,70,.15)}
   .modal-hd{display:flex;align-items:center;justify-content:space-between;
     padding:16px 20px;border-bottom:1px solid var(--line);flex-shrink:0}
@@ -109,7 +109,7 @@
     text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--line);white-space:nowrap}
   td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
   tr:last-child td{border-bottom:none}
-  tr:hover td{background:#f8fafd}
+  tr:hover td{background:#182241}
 
   .summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 20px;border-bottom:1px solid var(--line)}
   .sr-item .sk{font-size:10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
@@ -175,7 +175,7 @@ const BRULE  = {
   small_cap:'GVM ≥ 8.0 · 5 Thematic segments · Quarterly rebalance',
   alpha_multicap:'GVM×0.6 + Mom×0.4 · GVM ≥ 7.5 · Mom ≥ 8 · Nifty 500 · Quarterly'
 };
-const BCOL = {large_cap:'#0fa968',mid_cap:'#2563eb',small_cap:'#d97706',alpha_multicap:'#7c3aed'};
+const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF'};
 const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap'];
 
 const BCRITERIA = {

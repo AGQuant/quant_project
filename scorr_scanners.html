@@ -6,56 +6,56 @@
 <title>Scanners</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fc;color:#1c2536;font-size:13px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0A0F1E;color:#E9EEFB;font-size:13px}
 /* -- Canonical Scorr model-nav -- */
-.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#121A33;border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
 .model-nav::-webkit-scrollbar{display:none}
-.mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
-.mnav-item:hover{color:#1c2536}
-.mnav-item.active{border-bottom-color:#2563eb;color:#2563eb}
+.mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;color:#8C99BD;font-size:11.5px;font-weight:600;transition:.12s}
+.mnav-item:hover{color:#E9EEFB}
+.mnav-item.active{border-bottom-color:#4D7CFE;color:#4D7CFE}
 .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
-.mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+.mnav-sep{width:1px;height:20px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 4px}
 .page{max-width:980px;margin:0 auto;padding:14px 12px}
 .h1{font-size:18px;font-weight:800;letter-spacing:-.3px}
-.h2{font-size:11px;color:#8a94a6;margin-top:2px;margin-bottom:14px}
-.tabs{display:flex;border-bottom:1px solid #e4e9f1;margin-bottom:14px}
-.tab{padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600;color:#5a6781;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.12s}
-.tab:hover{color:#1c2536;background:#f8faff}
-.tab.on{color:#2563eb;border-bottom-color:#2563eb}
+.h2{font-size:11px;color:#8C99BD;margin-top:2px;margin-bottom:14px}
+.tabs{display:flex;border-bottom:1px solid rgba(148,166,210,.14);margin-bottom:14px}
+.tab{padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600;color:#8C99BD;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.12s}
+.tab:hover{color:#E9EEFB;background:#182241}
+.tab.on{color:#4D7CFE;border-bottom-color:#4D7CFE}
 .panel{display:none}
 .panel.on{display:block}
 .bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
-.bar label{font-size:11px;color:#5a6781;font-weight:600}
-.st{font-size:11px;color:#8a94a6;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.dot{width:6px;height:6px;border-radius:50%;background:#10b981;flex-shrink:0}
-.dot.y{background:#f59e0b}
-.dot.busy{background:#2563eb;animation:pulse 1s infinite}
+.bar label{font-size:11px;color:#8C99BD;font-weight:600}
+.st{font-size:11px;color:#8C99BD;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.dot{width:6px;height:6px;border-radius:50%;background:#2FD48B;flex-shrink:0}
+.dot.y{background:#F5B94A}
+.dot.busy{background:#4D7CFE;animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.tw{overflow-x:auto;border-radius:8px;border:1px solid #e4e9f1;background:#fff}
+.tw{overflow-x:auto;border-radius:8px;border:1px solid rgba(148,166,210,.14);background:#121A33}
 table{width:100%;border-collapse:collapse;font-size:12px}
-thead tr{background:#f8faff;border-bottom:1px solid #e4e9f1}
-th{padding:8px 10px;text-align:left;font-weight:700;font-size:11px;color:#5a6781;white-space:nowrap}
-tbody tr{border-bottom:1px solid #f1f4f9}
-tbody tr:hover{background:#f8faff}
+thead tr{background:#182241;border-bottom:1px solid rgba(148,166,210,.14)}
+th{padding:8px 10px;text-align:left;font-weight:700;font-size:11px;color:#8C99BD;white-space:nowrap}
+tbody tr{border-bottom:1px solid #182241}
+tbody tr:hover{background:#182241}
 tbody tr:last-child{border-bottom:none}
 td{padding:7px 10px;white-space:nowrap}
 .sym{font-weight:700}
-.seg{font-size:10px;color:#8a94a6;margin-top:1px}
-.up{color:#059669;font-weight:600}
-.dn{color:#dc2626;font-weight:600}
-.nt{color:#5a6781}
+.seg{font-size:10px;color:#8C99BD;margin-top:1px}
+.up{color:#2FD48B;font-weight:600}
+.dn{color:#FF5C6C;font-weight:600}
+.nt{color:#8C99BD}
 .gp{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:18px;padding:0 5px;border-radius:4px;font-size:10px;font-weight:700}
-.g4{background:#d1fae5;color:#065f46}
-.g3{background:#dbeafe;color:#1e40af}
-.g2{background:#fef3c7;color:#92400e}
-.g1{background:#fee2e2;color:#991b1b}
-.fs{display:inline-block;font-size:8px;font-weight:800;background:#0ea5e9;color:#fff;padding:1px 4px;border-radius:3px;margin-left:5px;vertical-align:middle}
-.fsrow{background:#f0f9ff}
-.fsrow:hover{background:#e0f2fe}
-.empty{text-align:center;padding:40px 20px;color:#8a94a6}
-.cs{text-align:center;padding:60px 20px;color:#8a94a6}
+.g4{background:rgba(47,212,139,.14);color:#065f46}
+.g3{background:rgba(77,124,254,.14);color:#1e40af}
+.g2{background:rgba(245,185,74,.14);color:#92400e}
+.g1{background:rgba(255,92,108,.13);color:#991b1b}
+.fs{display:inline-block;font-size:8px;font-weight:800;background:#37D3E8;color:#fff;padding:1px 4px;border-radius:3px;margin-left:5px;vertical-align:middle}
+.fsrow{background:rgba(55,211,232,.14)}
+.fsrow:hover{background:rgba(55,211,232,.14)}
+.empty{text-align:center;padding:40px 20px;color:#8C99BD}
+.cs{text-align:center;padding:60px 20px;color:#8C99BD}
 .cs big{display:block;font-size:28px;margin-bottom:8px}
-.cs b{display:block;font-size:14px;font-weight:700;color:#1c2536;margin-bottom:4px}
+.cs b{display:block;font-size:14px;font-weight:700;color:#E9EEFB;margin-bottom:4px}
 @media(max-width:768px){
   body{font-size:12px}
   .page{padding:10px 8px}
@@ -81,7 +81,7 @@ td{padding:7px 10px;white-space:nowrap}
   <!-- LONG -->
   <div class="panel on" id="p-long">
     <div class="bar">
-      <span style="font-size:11px;color:#5a6781;font-weight:600">V2 &middot; Tier1 (4 buckets) &rarr; Tier2 (MA + room) &middot; 09:30&ndash;15:15 IST &middot; <span class="fs">FS</span> = also passes Future Scan (native TC)</span>
+      <span style="font-size:11px;color:#8C99BD;font-weight:600">V2 &middot; Tier1 (4 buckets) &rarr; Tier2 (MA + room) &middot; 09:30&ndash;15:15 IST &middot; <span class="fs">FS</span> = also passes Future Scan (native TC)</span>
     </div>
     <div class="st"><span class="dot" id="long-dot"></span><span id="long-st">Loading...</span></div>
     <div id="long-tbl"><div class="empty">Loading...</div></div>
@@ -90,7 +90,7 @@ td{padding:7px 10px;white-space:nowrap}
   <!-- SHORT -->
   <div class="panel" id="p-short">
     <div class="bar">
-      <span style="font-size:11px;color:#5a6781;font-weight:600">V2 &middot; Tier1 (4 sell buckets) &rarr; Tier2 (inverted MA + room-to-fall) &middot; 09:30&ndash;15:15 IST &middot; <span class="fs">FS</span> = also passes Future Scan</span>
+      <span style="font-size:11px;color:#8C99BD;font-weight:600">V2 &middot; Tier1 (4 sell buckets) &rarr; Tier2 (inverted MA + room-to-fall) &middot; 09:30&ndash;15:15 IST &middot; <span class="fs">FS</span> = also passes Future Scan</span>
     </div>
     <div class="st"><span class="dot" id="short-dot"></span><span id="short-st">Loading...</span></div>
     <div id="short-tbl"><div class="empty">Loading...</div></div>
@@ -99,7 +99,7 @@ td{padding:7px 10px;white-space:nowrap}
   <!-- WATCHLIST (near-miss) -->
   <div class="panel" id="p-watchlist">
     <div class="bar">
-      <span style="font-size:11px;color:#5a6781;font-weight:600">Near-miss &middot; passed Tier 1 (any bucket n-1) but failed a Tier-2 gate &middot; on watch for manual entry</span>
+      <span style="font-size:11px;color:#8C99BD;font-weight:600">Near-miss &middot; passed Tier 1 (any bucket n-1) but failed a Tier-2 gate &middot; on watch for manual entry</span>
     </div>
     <div class="st"><span class="dot" id="wl-dot"></span><span id="wl-st">Loading...</span></div>
     <div id="wl-tbl"><div class="empty">Loading...</div></div>

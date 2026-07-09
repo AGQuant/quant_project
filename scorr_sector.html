@@ -9,29 +9,29 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box}
-body{margin:0;padding:0;background:#f4f6f9;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:13px;color:#1c2536}
+body{margin:0;padding:0;background:#0A0F1E;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;font-size:13px;color:#E9EEFB}
 table{border-collapse:collapse;width:100%}
-th{background:#f8fafc;padding:7px 8px;font-size:10px;font-weight:700;color:#5a6781;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid #e2e7ee;cursor:pointer;white-space:nowrap;user-select:none}
-th:hover{color:#2563eb}
-td{padding:5px 8px;border-bottom:1px solid #edf1f6;vertical-align:middle;white-space:nowrap}
-tr:hover td{background:#f0f4f9;cursor:pointer}
+th{background:#182241;padding:7px 8px;font-size:10px;font-weight:700;color:#8C99BD;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid rgba(148,166,210,.14);cursor:pointer;white-space:nowrap;user-select:none}
+th:hover{color:#4D7CFE}
+td{padding:5px 8px;border-bottom:1px solid rgba(148,166,210,.12);vertical-align:middle;white-space:nowrap}
+tr:hover td{background:rgba(148,166,210,.07);cursor:pointer}
 .mono{font-family:'SFMono-Regular',Consolas,monospace}
 button.tab{padding:8px 16px;border-radius:0;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:500}
 ::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-thumb{background:#cfd8e3;border-radius:3px}
+::-webkit-scrollbar-thumb{background:rgba(148,166,210,.24);border-radius:3px}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* ── Canonical Scorr model-nav ── */
-.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#ffffff;
-  border-bottom:1px solid #e4e9f1;padding:0 16px;overflow-x:auto;scrollbar-width:none;
+.model-nav{display:flex;align-items:center;gap:2px;height:46px;background:#121A33;
+  border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;
   position:sticky;top:0;z-index:20;box-shadow:0 1px 4px rgba(20,35,70,.06)}
 .model-nav::-webkit-scrollbar{display:none}
 .mnav-item{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;cursor:pointer;
   border-bottom:2px solid transparent;text-decoration:none;white-space:nowrap;flex-shrink:0;
-  color:#5a6781;font-size:11.5px;font-weight:600;transition:.12s}
-.mnav-item:hover{color:#1c2536}
-.mnav-item.active{border-bottom-color:#7c3aed;color:#7c3aed}
+  color:#8C99BD;font-size:11.5px;font-weight:600;transition:.12s}
+.mnav-item:hover{color:#E9EEFB}
+.mnav-item.active{border-bottom-color:#9B7CFF;color:#9B7CFF}
 .mnav-item.soon{opacity:.35;cursor:default;pointer-events:none}
-.mnav-sep{width:1px;height:20px;background:#e4e9f1;flex-shrink:0;margin:0 4px}
+.mnav-sep{width:1px;height:20px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 4px}
 @media(max-width:768px){
   body{font-size:12px}
   table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -41,7 +41,7 @@ button.tab{padding:8px 16px;border-radius:0;border:none;background:transparent;c
   .model-nav{padding:0 8px}
   button.tab{padding:7px 12px;font-size:11px;min-height:40px}
   /* keep rank/segment identity pinned while the wide table scrolls */
-  table th:first-child,table td:first-child{position:sticky;left:0;background:#fff;z-index:1}
+  table th:first-child,table td:first-child{position:sticky;left:0;background:#121A33;z-index:1}
 }
 /* cc#334 P8: segment grid 2-col<=480 / 1-col<=360 (any .seg-grid / .sector-grid) */
 @media(max-width:480px){ .seg-grid,.sector-grid{grid-template-columns:1fr 1fr!important} }
@@ -59,8 +59,8 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 <script type="text/babel">
 const {useState,useEffect,useMemo,useRef} = React;
 
-const C = {bg:"#f4f6f9",card:"#fff",border:"#e2e7ee",accent:"#2563eb",green:"#0a9e63",red:"#dd3a4a",gold:"#b45309",orange:"#d97706",purple:"#7c3aed",text:"#1c2536",muted:"#5a6781"};
-const VC = {"Excellent":"#0a9e63","Good":"#2563eb","Average":"#d97706","Weak":"#dd3a4a"};
+const C = {bg:"#0A0F1E",card:"#fff",border:"rgba(148,166,210,.14)",accent:"#4D7CFE",green:"#2FD48B",red:"#FF5C6C",gold:"#F5B94A",orange:"#F5B94A",purple:"#9B7CFF",text:"#E9EEFB",muted:"#8C99BD"};
+const VC = {"Excellent":"#2FD48B","Good":"#4D7CFE","Average":"#F5B94A","Weak":"#FF5C6C"};
 
 const fmt  = (v,d=2) => v==null ? "—" : Number(v).toFixed(d);
 const pct  = (v,d=1) => v==null ? "—" : (v>0?"+":"")+Number(v).toFixed(d)+"%";
@@ -77,7 +77,7 @@ function Dots({row}) {
   return (
     <span style={{display:"inline-flex",gap:3,marginLeft:6}}>
       {sigs.map((ok,i)=>(
-        <span key={i} title={labels[i]} style={{width:7,height:7,borderRadius:"50%",display:"inline-block",background:ok?"#0a9e63":"#dd3a4a",opacity:0.85}}/>
+        <span key={i} title={labels[i]} style={{width:7,height:7,borderRadius:"50%",display:"inline-block",background:ok?"#2FD48B":"#FF5C6C",opacity:0.85}}/>
       ))}
     </span>
   );
@@ -126,7 +126,7 @@ function Strip({top5, cold, onSel}) {
         <div style={{flex:1,minWidth:0,marginLeft:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,letterSpacing:".06em"}}>
             ❄️ COLD SECTORS · Score &lt; 4.0 &nbsp;
-            <span style={{background:"#fef2f2",color:C.red,border:"1px solid #fecaca",borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:800}}>{cold.length}</span>
+            <span style={{background:"rgba(255,92,108,.08)",color:C.red,border:"1px solid #fecaca",borderRadius:10,padding:"1px 7px",fontSize:9,fontWeight:800}}>{cold.length}</span>
           </div>
           <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
             {cold.map((r,i)=><div key={r.segment} onClick={()=>onSel(r)}><RankCard row={r} rank={i} isBottom={true}/></div>)}
@@ -162,7 +162,7 @@ function SectorBrief({segment, defaultOpen=false, hideConstituents=false}) {
       {open && brief && !brief.error && (
         <div style={{marginTop:10,display:"grid",gap:12}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:12,alignItems:"start"}}>
-            <div style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px"}}>
+            <div style={{background:"#182241",border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.purple,marginBottom:4,letterSpacing:".05em"}}>WHAT IS THIS SECTOR</div>
               <div style={{fontSize:12,color:C.text,lineHeight:1.6}}>{brief.what_is_it}</div>
             </div>
@@ -173,7 +173,7 @@ function SectorBrief({segment, defaultOpen=false, hideConstituents=false}) {
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"10px 12px"}}>
+            <div style={{background:"rgba(47,212,139,.08)",border:"1px solid #bbf7d0",borderRadius:6,padding:"10px 12px"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.green,marginBottom:6,letterSpacing:".05em"}}>🚀 KEY GROWTH DRIVERS</div>
               {(brief.growth_drivers||[]).map((d,i)=>(
                 <div key={i} style={{display:"flex",gap:8,marginBottom:5}}>
@@ -247,7 +247,7 @@ function Detail({row, onClose}) {
           <div style={{fontSize:11,color:C.muted,marginTop:3}}>{row.stocks_count} stocks · ₹{row.total_mcap}L Cr</div>
           <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
             {(row.top_stocks&&row.top_stocks.length?row.top_stocks:[{symbol:row.top_stock,gvm:row.top_stock_gvm,day_ret:null}]).slice(0,2).map((p,j)=>(
-              <span key={j} style={{display:"inline-flex",alignItems:"center",gap:7,background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 10px"}}>
+              <span key={j} style={{display:"inline-flex",alignItems:"center",gap:7,background:"#182241",border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 10px"}}>
                 <b style={{color:C.accent,fontSize:12}}>{p.symbol||"—"}</b>
                 <span className="mono" style={{fontSize:10,color:C.muted}}>GVM {fmt(p.gvm)}</span>
                 <span className="mono" style={{fontSize:11,fontWeight:700,color:clr(p.day_ret)}}>{p.day_ret==null?"—":pct(p.day_ret,1)}</span>
@@ -268,7 +268,7 @@ function Detail({row, onClose}) {
         {sigs.map(s=>{
           const ok=s.v!=null&&s.good(s.v); const col=s.v==null?C.muted:ok?C.green:C.red;
           return (
-            <div key={s.lbl} style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>
+            <div key={s.lbl} style={{background:"#182241",border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>
               <div style={{fontSize:10,color:C.muted}}>{s.lbl}</div>
               <div style={{fontSize:9,color:C.muted,marginBottom:4}}>{s.sub}</div>
               <div style={{fontSize:16,fontWeight:900,color:col,fontFamily:"monospace"}}>{s.v==null?"—":s.fmt(s.v)}</div>
@@ -361,14 +361,14 @@ function GVMTab({data, onSel}) {
       <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
         <span style={{fontSize:11,color:C.muted,fontWeight:700}}>RANK BY:</span>
         {MODES.map(([k,l])=>(
-          <button key={k} onClick={()=>setMode(k)} style={{cursor:"pointer",borderRadius:6,fontSize:11,fontWeight:600,padding:"5px 10px",border:`1px solid ${mode===k?C.accent:C.border}`,background:mode===k?"#eff4ff":"#fff",color:mode===k?C.accent:C.muted}}>{l}</button>
+          <button key={k} onClick={()=>setMode(k)} style={{cursor:"pointer",borderRadius:6,fontSize:11,fontWeight:600,padding:"5px 10px",border:`1px solid ${mode===k?C.accent:C.border}`,background:mode===k?"rgba(77,124,254,.14)":"#fff",color:mode===k?C.accent:C.muted}}>{l}</button>
         ))}
         <span style={{marginLeft:"auto",fontSize:10,color:C.muted}}>Top 25 · Click for detail + brief</span>
       </div>
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
         {rows.map((r,i)=>(
           <div key={r.segment} onClick={()=>onSel(r)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderBottom:i<rows.length-1?`1px solid ${C.border}`:"none",cursor:"pointer"}}
-            onMouseEnter={e=>e.currentTarget.style.background="#f0f4f9"}
+            onMouseEnter={e=>e.currentTarget.style.background="rgba(148,166,210,.07)"}
             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <div className="mono" style={{fontSize:11,color:C.muted,width:22,textAlign:"right"}}>{i+1}</div>
             <div style={{width:210,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.segment}</div>
@@ -376,7 +376,7 @@ function GVMTab({data, onSel}) {
               {[["g_score",C.green,"G"],["v_score",C.gold,"V"],["m_score",C.accent,"M"]].map(([k,col,lbl])=>(
                 <div key={k} style={{display:"flex",alignItems:"center",gap:4}}>
                   <span className="mono" style={{width:18,fontSize:10,color:col,fontWeight:700}}>{lbl}</span>
-                  <div style={{flex:1,height:5,background:"#f0f4f9",borderRadius:3}}><div style={{height:5,width:(r[k]/10*100)+"%",background:col,borderRadius:3}}/></div>
+                  <div style={{flex:1,height:5,background:"rgba(148,166,210,.07)",borderRadius:3}}><div style={{height:5,width:(r[k]/10*100)+"%",background:col,borderRadius:3}}/></div>
                   <span className="mono" style={{fontSize:11,color:col,width:30,textAlign:"right"}}>{fmt(r[k])}</span>
                 </div>
               ))}
@@ -391,7 +391,7 @@ function GVMTab({data, onSel}) {
   );
 }
 
-const THEME_COLORS = ["#7c3aed","#0891b2","#0a9e63","#d97706","#dd3a4a","#7c3aed","#2563eb","#b45309","#0891b2","#0a9e63"];
+const THEME_COLORS = ["#9B7CFF","#37D3E8","#2FD48B","#F5B94A","#FF5C6C","#9B7CFF","#4D7CFE","#F5B94A","#37D3E8","#2FD48B"];
 
 function ThemesSection() {
   const [data, setData] = useState(null);
@@ -400,55 +400,55 @@ function ThemesSection() {
   useEffect(()=>{
     fetch("/api/sector/themes").then(r=>r.json()).then(d=>{ setData(d); setLoading(false); }).catch(()=>setLoading(false));
   },[]);
-  if (loading) return (<div style={{textAlign:"center",padding:"30px",color:"#5a6781",fontSize:12,marginTop:24}}><div style={{width:24,height:24,border:"2px solid #e2e7ee",borderTop:"2px solid #7c3aed",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/><div>Loading emerging themes…</div></div>);
+  if (loading) return (<div style={{textAlign:"center",padding:"30px",color:"#8C99BD",fontSize:12,marginTop:24}}><div style={{width:24,height:24,border:"2px solid rgba(148,166,210,.14)",borderTop:"2px solid #9B7CFF",borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/><div>Loading emerging themes…</div></div>);
   if (!data || data.error) return null;
   return (
     <div style={{marginTop:32}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:12,borderBottom:"2px solid #e2e7ee"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,paddingBottom:12,borderBottom:"2px solid rgba(148,166,210,.14)"}}>
         <span style={{fontSize:22}}>🌱</span>
         <div>
-          <div style={{fontSize:16,fontWeight:800,color:"#1c2536"}}>Top 10 Emerging Investment Themes</div>
-          <div style={{fontSize:11,color:"#5a6781",marginTop:2}}>Cross-sector structural plays · Expert reasoning · Live GVM-ranked companies · Click any theme to expand</div>
+          <div style={{fontSize:16,fontWeight:800,color:"#E9EEFB"}}>Top 10 Emerging Investment Themes</div>
+          <div style={{fontSize:11,color:"#8C99BD",marginTop:2}}>Cross-sector structural plays · Expert reasoning · Live GVM-ranked companies · Click any theme to expand</div>
         </div>
       </div>
       <div style={{display:"grid",gap:10}}>
         {data.themes.map((t,i)=>{
-          const col = THEME_COLORS[i] || "#7c3aed";
+          const col = THEME_COLORS[i] || "#9B7CFF";
           const isOpen = expanded===i;
           return (
-            <div key={i} style={{background:"#fff",border:"1px solid #e2e7ee",borderRadius:10,overflow:"hidden",borderLeft:`4px solid ${col}`,boxShadow:isOpen?"0 4px 16px rgba(0,0,0,.06)":"0 1px 3px rgba(0,0,0,.04)"}}>
-              <div onClick={()=>setExpanded(isOpen?null:i)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#f8fafc"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <div key={i} style={{background:"#fff",border:"1px solid rgba(148,166,210,.14)",borderRadius:10,overflow:"hidden",borderLeft:`4px solid ${col}`,boxShadow:isOpen?"0 4px 16px rgba(0,0,0,.06)":"0 1px 3px rgba(0,0,0,.04)"}}>
+              <div onClick={()=>setExpanded(isOpen?null:i)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="#182241"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <div style={{width:30,height:30,borderRadius:"50%",background:col,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,flexShrink:0}}>{i+1}</div>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:800,color:"#1c2536"}}>{t.theme_name}</div>
-                  <div style={{fontSize:11,color:"#5a6781",marginTop:2,fontStyle:"italic"}}>{t.tagline}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:"#E9EEFB"}}>{t.theme_name}</div>
+                  <div style={{fontSize:11,color:"#8C99BD",marginTop:2,fontStyle:"italic"}}>{t.tagline}</div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                   <span style={{fontSize:10,fontWeight:700,color:col,background:col+"15",border:`1px solid ${col}40`,borderRadius:20,padding:"3px 10px"}}>{t.macro_tailwind}</span>
-                  <span style={{fontSize:10,color:"#5a6781",background:"#f4f6f9",border:"1px solid #e2e7ee",borderRadius:20,padding:"3px 10px"}}>{(t.companies||[]).length} companies</span>
-                  <span style={{color:"#5a6781",fontSize:16,fontWeight:700,lineHeight:1}}>{isOpen?"−":"+"}</span>
+                  <span style={{fontSize:10,color:"#8C99BD",background:"#0A0F1E",border:"1px solid rgba(148,166,210,.14)",borderRadius:20,padding:"3px 10px"}}>{(t.companies||[]).length} companies</span>
+                  <span style={{color:"#8C99BD",fontSize:16,fontWeight:700,lineHeight:1}}>{isOpen?"−":"+"}</span>
                 </div>
               </div>
               {isOpen && (
-                <div style={{borderTop:"1px solid #e2e7ee",padding:"18px 16px"}}>
+                <div style={{borderTop:"1px solid rgba(148,166,210,.14)",padding:"18px 16px"}}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
                     <div>
-                      <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,padding:"12px 14px",marginBottom:14,borderLeft:`3px solid ${col}`}}>
+                      <div style={{background:"#182241",border:"1px solid rgba(148,166,210,.14)",borderRadius:8,padding:"12px 14px",marginBottom:14,borderLeft:`3px solid ${col}`}}>
                         <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:6,letterSpacing:".06em"}}>WHY THIS THEME IS EMERGING NOW</div>
-                        <div style={{fontSize:12,color:"#1c2536",lineHeight:1.7}}>{t.reasoning}</div>
+                        <div style={{fontSize:12,color:"#E9EEFB",lineHeight:1.7}}>{t.reasoning}</div>
                       </div>
                       <div style={{fontSize:10,fontWeight:700,color:col,marginBottom:8,letterSpacing:".06em"}}>🚀 KEY STRUCTURAL DRIVERS</div>
-                      {(t.key_drivers||[]).map((d,j)=>(<div key={j} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:6,padding:"8px 10px"}}><span style={{width:20,height:20,borderRadius:"50%",background:col,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0,marginTop:1}}>{j+1}</span><span style={{fontSize:11,color:"#166534",lineHeight:1.5}}>{d}</span></div>))}
+                      {(t.key_drivers||[]).map((d,j)=>(<div key={j} style={{display:"flex",gap:10,marginBottom:8,alignItems:"flex-start",background:"rgba(47,212,139,.08)",border:"1px solid #bbf7d0",borderRadius:6,padding:"8px 10px"}}><span style={{width:20,height:20,borderRadius:"50%",background:col,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0,marginTop:1}}>{j+1}</span><span style={{fontSize:11,color:"#166534",lineHeight:1.5}}>{d}</span></div>))}
                     </div>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#5a6781",marginBottom:8,letterSpacing:".06em"}}>FOCUSED COMPANIES · Ranked by GVM Score</div>
-                      <div style={{background:"#f8fafc",border:"1px solid #e2e7ee",borderRadius:8,overflow:"hidden"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#8C99BD",marginBottom:8,letterSpacing:".06em"}}>FOCUSED COMPANIES · Ranked by GVM Score</div>
+                      <div style={{background:"#182241",border:"1px solid rgba(148,166,210,.14)",borderRadius:8,overflow:"hidden"}}>
                         <table style={{fontSize:11}}>
-                          <thead><tr style={{background:"#f0f4f9"}}><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>#</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Symbol</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Company</th><th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:700,color:"#5a6781"}}>GVM</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#5a6781"}}>Segment</th></tr></thead>
-                          <tbody>{(t.companies||[]).map((co,k)=>(<tr key={k} style={{borderTop:"1px solid #edf1f6"}}><td style={{padding:"5px 10px",color:"#5a6781",fontSize:10}}>{k+1}</td><td style={{padding:"5px 10px",fontWeight:800,color:"#2563eb",fontFamily:"monospace"}}>{co.symbol}</td><td style={{padding:"5px 10px",color:"#1c2536",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.company_name}</td><td style={{padding:"5px 10px",textAlign:"right",fontWeight:900,fontFamily:"monospace",color:co.gvm_score>=7?"#0a9e63":co.gvm_score>=6?"#d97706":"#dd3a4a"}}>{Number(co.gvm_score).toFixed(2)}</td><td style={{padding:"5px 10px",color:"#5a6781",fontSize:9,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.segment}</td></tr>))}</tbody>
+                          <thead><tr style={{background:"rgba(148,166,210,.07)"}}><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#8C99BD"}}>#</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#8C99BD"}}>Symbol</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#8C99BD"}}>Company</th><th style={{padding:"6px 10px",textAlign:"right",fontSize:9,fontWeight:700,color:"#8C99BD"}}>GVM</th><th style={{padding:"6px 10px",textAlign:"left",fontSize:9,fontWeight:700,color:"#8C99BD"}}>Segment</th></tr></thead>
+                          <tbody>{(t.companies||[]).map((co,k)=>(<tr key={k} style={{borderTop:"1px solid rgba(148,166,210,.12)"}}><td style={{padding:"5px 10px",color:"#8C99BD",fontSize:10}}>{k+1}</td><td style={{padding:"5px 10px",fontWeight:800,color:"#4D7CFE",fontFamily:"monospace"}}>{co.symbol}</td><td style={{padding:"5px 10px",color:"#E9EEFB",maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.company_name}</td><td style={{padding:"5px 10px",textAlign:"right",fontWeight:900,fontFamily:"monospace",color:co.gvm_score>=7?"#2FD48B":co.gvm_score>=6?"#F5B94A":"#FF5C6C"}}>{Number(co.gvm_score).toFixed(2)}</td><td style={{padding:"5px 10px",color:"#8C99BD",fontSize:9,maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{co.segment}</td></tr>))}</tbody>
                         </table>
                       </div>
-                      <div style={{marginTop:10}}><div style={{fontSize:9,color:"#5a6781",fontWeight:700,marginBottom:5,letterSpacing:".05em"}}>RELATED SEGMENTS</div><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{(t.related_segments||[]).map((s,k)=>(<span key={k} style={{fontSize:9,color:col,background:col+"12",border:`1px solid ${col}35`,borderRadius:20,padding:"3px 9px",fontWeight:600}}>{s}</span>))}</div></div>
+                      <div style={{marginTop:10}}><div style={{fontSize:9,color:"#8C99BD",fontWeight:700,marginBottom:5,letterSpacing:".05em"}}>RELATED SEGMENTS</div><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{(t.related_segments||[]).map((s,k)=>(<span key={k} style={{fontSize:9,color:col,background:col+"12",border:`1px solid ${col}35`,borderRadius:20,padding:"3px 9px",fontWeight:600}}>{s}</span>))}</div></div>
                     </div>
                   </div>
                 </div>
@@ -457,7 +457,7 @@ function ThemesSection() {
           );
         })}
       </div>
-      <div style={{fontSize:9,color:"#5a6781",textAlign:"center",marginTop:12,paddingTop:12,borderTop:"1px solid #e2e7ee"}}>Themes curated by Scorr · Companies ranked by live GVM score · Updated with market data</div>
+      <div style={{fontSize:9,color:"#8C99BD",textAlign:"center",marginTop:12,paddingTop:12,borderTop:"1px solid rgba(148,166,210,.14)"}}>Themes curated by Scorr · Companies ranked by live GVM score · Updated with market data</div>
     </div>
   );
 }
@@ -507,7 +507,7 @@ function SectorSearch({allSectors}) {
           <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:0,background:C.card,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden",zIndex:30,boxShadow:"0 8px 24px rgba(25,40,70,.12)",maxHeight:320,overflowY:"auto"}}>
             {matches.map(n=>(
               <div key={n} onClick={()=>pick(n)} style={{padding:"9px 14px",fontSize:12,cursor:"pointer",borderBottom:`1px solid ${C.border}`,color:C.text}}
-                onMouseEnter={e=>e.currentTarget.style.background="#f0f4f9"}
+                onMouseEnter={e=>e.currentTarget.style.background="rgba(148,166,210,.07)"}
                 onMouseLeave={e=>e.currentTarget.style.background="transparent"}>{n}</div>
             ))}
           </div>
@@ -522,7 +522,7 @@ function SectorSearch({allSectors}) {
 
       {selected && loading && (
         <div style={{textAlign:"center",padding:"40px",color:C.muted,fontSize:12}}>
-          <div style={{width:26,height:26,border:"2px solid #e2e7ee",borderTop:`2px solid ${C.purple}`,borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/>
+          <div style={{width:26,height:26,border:"2px solid rgba(148,166,210,.14)",borderTop:`2px solid ${C.purple}`,borderRadius:"50%",animation:"spin 0.8s linear infinite",display:"inline-block",marginBottom:8}}/>
           <div>Loading {selected}…</div>
         </div>
       )}
@@ -577,7 +577,7 @@ function SectorSearch({allSectors}) {
 }
 
 function Loading() {
-  return (<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}><div style={{width:32,height:32,border:"3px solid #e2e7ee",borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><div style={{color:C.muted,fontSize:12}}>Loading sector data from Railway…</div></div>);
+  return (<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}><div style={{width:32,height:32,border:"3px solid rgba(148,166,210,.14)",borderTop:`3px solid ${C.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><div style={{color:C.muted,fontSize:12}}>Loading sector data from Railway…</div></div>);
 }
 
 function App() {
