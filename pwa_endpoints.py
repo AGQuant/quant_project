@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v7';   // cc#344 p2: Home dark re-skin ('/' is in SHELL — repaint)
+const CACHE = 'scorr-pwa-v8';   // cc#344: dark bottom nav + More sheet (pwa.js shell changed)
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -211,29 +211,29 @@ PWA_JS = """
       + '  .pwa-mnav{display:flex;position:fixed;bottom:0;left:0;right:0;'
       + '    height:calc(56px + env(safe-area-inset-bottom,0px));'
       + '    padding-bottom:env(safe-area-inset-bottom,0px);'
-      + '    background:#fff;border-top:1px solid #e4e9f1;z-index:9998;'
-      + '    box-shadow:0 -1px 6px rgba(20,35,70,.06)}'
+      + '    background:rgba(13,20,40,.92);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);'   // cc#344: dark terminal nav
+      + '    border-top:1px solid rgba(148,166,210,.24);z-index:9998}'
       + '  .pwa-mn{flex:1;display:flex;flex-direction:column;align-items:center;'
-      + '    justify-content:center;gap:2px;font-size:10px;font-weight:600;'
-      + '    color:#5a6781;text-decoration:none;background:none;border:none;'
+      + '    justify-content:center;gap:2px;font-size:10px;font-weight:700;'
+      + '    color:#8C99BD;text-decoration:none;background:none;border:none;'
       + '    font-family:inherit;cursor:pointer;min-height:44px}'
       + '  .pwa-mn .ic{font-size:20px;line-height:1}'
-      + '  .pwa-mn.active{color:#2563eb}'
+      + '  .pwa-mn.active{color:#37D3E8}'
       // cc#328: "More" bottom-sheet — all remaining destinations, 2-col 44px rows
       + '  .pwa-sheet-ov{display:none;position:fixed;inset:0;z-index:9999;'
       + '    background:rgba(15,22,35,.45)}'
       + '  .pwa-sheet-ov.open{display:block}'
-      + '  .pwa-sheet{position:fixed;left:0;right:0;bottom:0;z-index:10000;background:#fff;'
+      + '  .pwa-sheet{position:fixed;left:0;right:0;bottom:0;z-index:10000;background:#121A33;'
       + '    border-radius:16px 16px 0 0;padding:10px 12px calc(14px + env(safe-area-inset-bottom,0px));'
       + '    transform:translateY(100%);transition:transform .22s ease;'
       + '    box-shadow:0 -4px 20px rgba(20,35,70,.18)}'
       + '  .pwa-sheet-ov.open .pwa-sheet{transform:translateY(0)}'
-      + '  .pwa-sheet h4{margin:6px 4px 10px;font-size:13px;color:#1c2536;font-weight:700}'
+      + '  .pwa-sheet h4{margin:6px 4px 10px;font-size:13px;color:#E9EEFB;font-weight:700}'
       + '  .pwa-sheet-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}'
       + '  .pwa-sheet-grid a{display:flex;align-items:center;gap:9px;min-height:44px;'
-      + '    padding:0 12px;border:1px solid #e4e9f1;border-radius:10px;text-decoration:none;'
-      + '    color:#1c2536;font-size:13px;font-weight:600}'
-      + '  .pwa-sheet-grid a.active{border-color:#2563eb;color:#2563eb;background:#eff6ff}'
+      + '    padding:0 12px;border:1px solid rgba(148,166,210,.14);border-radius:10px;text-decoration:none;'
+      + '    color:#E9EEFB;font-size:13px;font-weight:600;background:#182241}'
+      + '  .pwa-sheet-grid a.active{border-color:#37D3E8;color:#37D3E8;background:rgba(55,211,232,.14)}'
       + '  .pwa-sheet-grid a .ic{font-size:17px;line-height:1}'
       + '  .pwa-install{display:flex;position:fixed;left:0;right:0;bottom:56px;'
       + '    height:48px;align-items:center;gap:10px;padding:0 14px;z-index:9999;'
