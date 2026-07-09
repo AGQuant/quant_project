@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scorr · Derivative Cockpit R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;--line:rgba(148,166,210,.14);--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--bull:#2FD48B;--bear:#FF5C6C;--amber:#F5B94A;--blue:#4D7CFE;--cyan:#37D3E8;--disp:'Sora',sans-serif;--mono:'IBM Plex Mono',monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--text);font-family:var(--disp);max-width:430px;margin:0 auto;padding:14px 14px 40px;font-size:14px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pos{color:var(--bull)}.neg{color:var(--bear)}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.hd .s{font-size:20px;font-weight:800}
+.hd .side{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--bull);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.35);padding:4px 10px;border-radius:9px}
+.sub{font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:14px}
+.eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin:16px 2px 8px}
+.vstrip{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.vc{border-radius:13px;padding:11px 12px;background:var(--well);border:1px solid var(--line);position:relative;overflow:hidden}
+.vc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc);box-shadow:0 0 10px var(--vc)}
+.vc .k{font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase}
+.vc .v{font-family:var(--mono);font-size:14px;font-weight:700;margin-top:4px}
+.row{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 13px;margin-top:7px}
+.row .k{font-size:11.5px;font-weight:700;color:var(--mut)}
+.row .d{font-size:9px;color:var(--dim);font-weight:600;margin-top:2px}
+.row .v{font-family:var(--mono);font-size:13px;font-weight:700;text-align:right}
+.row .v small{display:block;font-size:9.5px;color:var(--dim);font-weight:600}
+.chip{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:8px}
+.c-exp{color:var(--bear);background:rgba(255,92,108,.12);border:1px solid rgba(255,92,108,.35)}
+.c-ok{color:var(--amber);background:rgba(245,185,74,.12);border:1px solid rgba(245,185,74,.35)}
+</style>
+</head>
+<body>
+
+<div class="hd"><span class="s">ZYDUSLIFE</span><span class="side">LONG · 150 @ 1164.0</span></div>
+<div class="sub">CMP 1167.2 · +0.28% on entry · Derivative Cockpit</div>
+
+<div class="eyebrow">Verdict</div>
+<div class="vstrip">
+  <div class="vc" style="--vc:#2FD48B"><div class="k">OI Quadrant</div><div class="v pos">LONG BUILDUP</div></div>
+  <div class="vc" style="--vc:#F5B94A"><div class="k">Options Cost</div><div class="v" style="color:var(--amber)">REASONABLE +11%</div></div>
+</div>
+
+<div class="eyebrow">Levels</div>
+<div class="row"><div><div class="k">VPOC · today</div><div class="d">prior-day 1152 naked ↓</div></div><div class="v">1,159<small class="pos">CMP +0.7% above</small></div></div>
+<div class="row"><div><div class="k">OI Walls</div><div class="d">ATM±3 band</div></div><div class="v">1200 CE · 1140 PE<small>+2.8% / −2.3%</small></div></div>
+<div class="row"><div><div class="k">VWAP</div><div class="d">session</div></div><div class="v">1,161.4<small class="pos">CMP +0.5% above</small></div></div>
+
+<div class="eyebrow">Flow</div>
+<div class="row"><div class="k">Futures OI</div><div class="v pos">+6.4% d/d</div></div>
+<div class="row"><div class="k">Call OI / Put OI</div><div class="v"><span class="neg">+9.1%</span> / <span class="pos">+14.2%</span><small>PCR 0.86 → 0.91</small></div></div>
+<div class="row"><div><div class="k">Basis</div><div class="d">5-day percentile 78%</div></div><div class="v pos">+3.2<small>expanding</small></div></div>
+
+<div class="eyebrow">Energy</div>
+<div class="row"><div class="k">Vol X · time-matched</div><div class="v pos">1.8×</div></div>
+<div class="row"><div class="k">Hourly move</div><div class="v pos">+0.6%</div></div>
+<div class="row"><div><div class="k">ATM 1160 Straddle</div><div class="d">CE 24.6 · PE 21.9 · fair 41.8</div></div><div class="v">46.5<span class="chip c-ok">+11% REASONABLE</span></div></div>
+
+</body>
+</html>
