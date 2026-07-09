@@ -2257,6 +2257,11 @@ def v8_global_indices():
                 ORDER BY symbol, ts DESC
             """)
             live = {r[0]: (float(r[1]) if r[1] is not None else None, r[2]) for r in cur.fetchall()}
+            # cc#349: server IST-now to age each intraday bar — a tile is "live" only if its last bar
+            # is <=15 min old; older bars still overlay (as the true last close) but flip to PREV CLOSE.
+            cur.execute("SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')")
+            now_ist = cur.fetchone()[0]
+        STALE_MIN = 15
         qd = None
         latest_ts = None
         rows = []
@@ -2268,13 +2273,17 @@ def v8_global_indices():
             row['chg_pct']    = float(row['chg_pct'])    if row['chg_pct']    is not None else None
             lv = live.get(row['symbol'])
             if lv and lv[0] is not None:
+                # cc#349: overlay the latest intraday close regardless of age (it IS the last real
+                # print), but 'live' is honest — True only while the bar is fresh (<=15 min). A stale
+                # bar (market closed / feed frozen) keeps its ts so the tile reads PREV CLOSE · <time>.
+                age_min = (now_ist - lv[1]).total_seconds() / 60.0 if now_ist else 0
                 row['price'] = lv[0]
-                row['ts']    = str(lv[1])                          # cc#291: live tile → latest intraday bar time
-                row['live']  = True
+                row['ts']    = str(lv[1])                          # tile shows ITS OWN last-tick time
+                row['live']  = age_min <= STALE_MIN
                 pc = row['prev_close']
                 row['chg_pct'] = round((lv[0] - pc) / pc * 100, 2) if pc else row['chg_pct']
-                if latest_ts is None or lv[1] > latest_ts:
-                    latest_ts = lv[1]
+                if row['live'] and (latest_ts is None or lv[1] > latest_ts):
+                    latest_ts = lv[1]                              # data_ts reflects only genuinely-live tiles
             else:
                 # cc#291: daily tile has no intraday bar — frontend shows its trading date
                 # (row['quote_date']) instead of a misleading time, so live vs daily freshness is

@@ -303,6 +303,26 @@ GLOBAL_INTRADAY_TICKERS = [
     ("INR=X",    "USDINR"),
 ]
 
+# cc#349: US/JP equity indices back on the 5-min feed (removed by cc#291), but WINDOW-GATED so we
+# only poll while their exchanges can produce fresh bars — avoids cc#291's concern of endlessly
+# re-fetching a stale unchanged close 24x7. `symbol` MUST equal the daily GLOBAL_TICKERS symbol so
+# the /api/v8/global_indices overlay joins them (name column is cosmetic here). Window = 06:00-01:40
+# IST: covers the full US cash session (19:00/20:00 -> 01:30/02:30 IST, spec targets 01:30 EDT close)
+# and Nikkei's 05:30-11:30 IST session. Outside the window no bar is written, so each tile ages out
+# and the UI honestly flips it to PREV CLOSE.
+GLOBAL_INTRADAY_INDEX_TICKERS = [
+    ("^DJI",  "DOW"),
+    ("^GSPC", "SP500"),
+    ("^IXIC", "NASDAQ"),
+    ("^N225", "NIKKEI"),
+]
+
+
+def _index_window_open(now_ist) -> bool:
+    """True inside 06:00-01:40 IST (the equity-index polling window). now_ist = naive IST datetime."""
+    t = now_ist.hour * 60 + now_ist.minute
+    return t >= 6 * 60 or t <= 1 * 60 + 40
+
 INTRADAY_DDL = """
 CREATE TABLE IF NOT EXISTS global_intraday (
     id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, name TEXT NOT NULL,
@@ -329,8 +349,13 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
     ensure_intraday_table(conn)
     total, errors = 0, 0
     failed = []
+    # cc#349: commodities/crypto/fx poll 24x7; equity indices only inside their 06:00-01:40 IST window.
+    now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    tickers = list(GLOBAL_INTRADAY_TICKERS)
+    if _index_window_open(now_ist):
+        tickers += GLOBAL_INTRADAY_INDEX_TICKERS
     async with httpx.AsyncClient(timeout=30, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        for symbol, name in GLOBAL_INTRADAY_TICKERS:
+        for symbol, name in tickers:
             url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
                    f"{urllib.parse.quote(symbol)}?interval=5m&range={range_str}")
             try:
@@ -383,13 +408,13 @@ async def fetch_global_intraday(conn, range_str: str = "7d") -> dict:
             await asyncio.sleep(0.4)
     # cc#282: if EVERY symbol failed this cycle, Yahoo itself is likely down — raise ONE louder
     # alert (not one per symbol), mirroring the total-failure escalation used elsewhere (cc#246).
-    if failed and len(failed) == len(GLOBAL_INTRADAY_TICKERS):
+    if failed and len(failed) == len(tickers):
         _ops_log(conn, "alert", "global_intraday_total_failure",
                  {"failed": len(failed),
                   "message": "all global_intraday symbols failed this cycle — Yahoo likely "
                              "unreachable; last-known-good values retained, retrying next run"})
     return {"stored": total, "errors": errors, "failed": failed,
-            "symbols": len(GLOBAL_INTRADAY_TICKERS)}
+            "symbols": len(tickers)}
 
 
 def prune_global_intraday(conn, days: int = 7) -> int:
