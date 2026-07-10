@@ -1299,6 +1299,86 @@ def _batched_subscribe(ws, symbols, action='sub', label=''):
         time.sleep(WS_SUB_BATCH_SLEEP_SEC)
 
 
+# ── cold-boot CMP seed (cc#352, id166 family) ───────────────────────────────────
+CMP_BOOT_STALE_MIN = 20   # cc#352: seed cmp_prices from REST if the freshest row is older than this
+QUOTE_BATCH        = 50   # Fyers quotes API cap per request
+
+def _seed_cmp_from_rest(conn, token, equity_symbols):
+    """cc#352 (id166 family): on a cold/stale boot, seed cmp_prices SPOT from the Fyers REST
+    quotes API for the full equity universe BEFORE the WS subscribes — so the worker is never
+    left price-less on a pre-market / crash / overnight boot and the options live-price gate has
+    prices immediately (empty cmp_prices was the root of the connected-but-deaf zombie).
+
+    cmp_prices holds SPOT (equity/index) price keyed by the plain NSE symbol — matching every
+    existing consumer (_get_cmp, the ATM gate) — so we seed the EQUITY leg (NSE:SYM-EQ), never
+    futures/options prices (which would corrupt the spot cache). Additive + fully guarded: 3x
+    retry with backoff per batch; on total failure logs ops_log feed_boot_initial_failed and
+    falls back to prior behavior. This function NEVER raises — it can only add prices, never
+    change the subscribe logic, so it cannot break the feed."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*), EXTRACT(EPOCH FROM (NOW() - MAX(updated_at)))/60 FROM cmp_prices")
+            n, age_min = cur.fetchone()
+        n = n or 0
+        if n > 0 and age_min is not None and age_min <= CMP_BOOT_STALE_MIN:
+            log.info(f"boot cmp seed: cmp_prices fresh ({n} rows, {age_min:.0f}m old) — skip REST seed")
+            return
+        log.warning(f"boot cmp seed: cmp_prices empty/stale (rows={n}, age_min={age_min}) — "
+                    f"seeding SPOT from Fyers REST before subscribe (cc#352/id166)")
+    except Exception as e:
+        log.warning(f"boot cmp seed precheck failed (skipping seed): {e}")
+        return
+
+    fsyms = [fyers_eq_symbol(s) for s in equity_symbols]   # NSE:SYM-EQ (M&M handled by SPECIAL_SYMBOLS)
+    seeded, failed_batches = 0, 0
+    for i in range(0, len(fsyms), QUOTE_BATCH):
+        batch = fsyms[i:i + QUOTE_BATCH]
+        rows = []
+        for attempt in range(3):
+            try:
+                r = requests.get(QUOTES_URL, params={'symbols': ','.join(batch)},
+                                 headers={'Authorization': f'{FYERS_CLIENT_ID}:{token}'}, timeout=10)
+                d = r.json()
+                if d.get('s') != 'ok':
+                    raise RuntimeError(f"quotes s={d.get('s')} {str(d)[:120]}")
+                ist = datetime.now(IST).replace(tzinfo=None)
+                for item in d.get('d', []):
+                    lp   = (item.get('v') or {}).get('lp')
+                    fsym = item.get('n')
+                    if not lp or not fsym:
+                        continue
+                    rows.append((from_fyers_symbol(fsym), float(lp), ist))
+                break
+            except Exception as e:
+                if attempt == 2:
+                    failed_batches += 1
+                    log.warning(f"boot cmp seed batch {i // QUOTE_BATCH} failed after 3x: {e}")
+                else:
+                    time.sleep(2 ** attempt)
+        if rows:
+            try:
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO cmp_prices (symbol,cmp,updated_at,source) VALUES (%s,%s,%s,'fyers_boot') "
+                        "ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, "
+                        "updated_at=EXCLUDED.updated_at, source='fyers_boot'", rows)
+                conn.commit()
+                seeded += len(rows)
+            except Exception as e:
+                log.warning(f"boot cmp seed write batch {i // QUOTE_BATCH}: {e}")
+    if seeded == 0:
+        try:
+            _ops_log(conn, 'alert', 'feed_boot_initial_failed',
+                     {'reason': 'REST cmp seed returned 0 rows', 'failed_batches': failed_batches,
+                      'universe': len(fsyms), 'ist': _ist_now_str()})
+        except Exception:
+            pass
+        log.error("boot cmp seed: 0 rows seeded — feed_boot_initial_failed (falling back to prior behavior)")
+    else:
+        log.info(f"boot cmp seed: seeded {seeded}/{len(fsyms)} equity SPOT from REST "
+                 f"({failed_batches} batch failures) (cc#352)")
+
+
 # ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def run(auth_code=None):
@@ -1320,6 +1400,12 @@ def run(auth_code=None):
     _boot_gap_report(conn)   # cc#339 fix_3: self-document any outage window at boot
     log.info(f"Universe: {len(symbols)} equity + {len(fut_codes)} futures "
              f"({len(index_fut_codes)} index: {index_fut_codes}) + options")
+
+    # cc#352 (id166 family): seed cmp_prices SPOT from Fyers REST on a cold/stale boot BEFORE the
+    # WS subscribes, so the worker is never price-less (the options live-price gate needs a
+    # populated cmp_prices, and an empty cache was the root of the connected-but-deaf zombie).
+    # Fully guarded — never raises, only adds prices, never alters subscribe logic.
+    _seed_cmp_from_rest(conn, token, symbols)
 
     # Skip-if-fresh: only backfill when today's intraday data is missing.
     # When fresh, skip the ~40-min sequential backfill entirely (instant restart).
