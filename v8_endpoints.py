@@ -3,9 +3,13 @@ V8 endpoints -- Quant Long-Short Basket Strategy
 
 ADR (14-Jun-2026): _read_adr gates the live tiers behind _market_open().
 ADR (11-Jun-2026): market_mood reads adr_intraday primary, falls back to adr_daily.
-buy_reversal V2 LOCKED (16-Jun-2026): RSI caps widened, dma_50 widened, mom_2d widened.
-  rsiM[52-82] rsiW[57-73] dma50[2-12] mom2d[0-3] | 83 sigs/yr, 85.9% WR, EV +0.496%
-buy_reversal/buy_momentum GVM floor relaxed to 6.0 (23-Jun-2026) — was 6.5/7.0.
+buy_reversal V3 (10-Jul-2026, spec id=2818): TRUE REVERSAL inverse-sandwich dip-buy. Dedicated
+  strict-AND handler in v8_signal_writer (NOT the score-gate loop, NO regime). 8 conditions:
+  daily_rsi<=40, true_weekly_rsi>=60, dma_200>=0, gvm>=6.5, mom_2d 0-3, hourly 0.1-1.0 (from 09:20),
+  CMP>PP, room-to-R1>2%. Target R1 only, 1:1 mirror stop. ~35-55 sigs/yr, 62-64% WR, +1.0-1.2% EV.
+  FILTER_CONFIG below carries only the v8_metrics-computable subset (the 4 daily-metric gates) for
+  the funnel display; the 4 live/pivot gates are enforced live in the writer's dedicated handler.
+buy_momentum GVM floor relaxed to 6.0 (23-Jun-2026) — was 7.0.
 sell_reversal V4 LOCKED (16-Jun-2026): 5 strict AND | 79.3% WR | EV +0.752%/trade.
   Mood relaxation (18-Jun-2026): 4/5 in Strong Bullish + Bullish | 5/5 in Neutral/Bear.
 sell_momentum V2 LOCKED (16-Jun-2026): 6 strict AND | 71.9% WR | EV +0.55%/trade.
@@ -50,17 +54,14 @@ def _market_open() -> bool:
 
 
 FILTER_CONFIG = {
+    # cc#354/355 V3: dedicated strict-AND handler in the writer. Only the 4 v8_metrics-computable
+    # gates live here (for the funnel); true_weekly_rsi>=60, hourly 0.1-1.0, CMP>PP, room>2% are the
+    # live/pivot gates enforced in _write_buy_reversal_v3_qualified. No regime overrides.
     "buy_reversal": {
-        "gvm_score":    [6.0,  10.0],  # relaxed from 6.5 (23-Jun-2026)
-        "dma_200":      [1.5,  20.0],
-        "dma_50":       [2.0,  12.0],
-        "month_return": [-2.0,  7.2],
-        "week_return":  [0.0,   4.0],
-        "rsi_month":    [52.0, 82.0],
-        "rsi_weekly":   [57.0, 73.0],
-        "mom_2d":       [0.0,   3.0],
-        "sector_week":  [1.0,   6.0],
-        "sector_month": [0.0,   6.0],
+        "daily_rsi":  [None, 40.0],   # cold short-term dip
+        "dma_200":    [0.0,  None],   # long-term uptrend
+        "gvm_score":  [6.5,  None],   # quality
+        "mom_2d":     [0.0,   3.0],   # 2-day momentum turned up
     },
     "buy_momentum": {
         # V2 filter optimisation (cc_task #74, 24-Jun-2026): EOD backtest across 9
@@ -114,7 +115,7 @@ SELL_REVERSAL_SL_MULT  = 0.5
 SELL_MOMENTUM_SL_MULT  = 0.5
 
 BASKET_META = {
-    "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "85.9%", "signals_per_day": "~0.3/day"},
+    "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "62-64%", "signals_per_day": "~35-55/yr"},
     "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2/day"},
     "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "79.3%", "signals_per_day": "~0.6/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
@@ -152,7 +153,7 @@ V21_FILTERS = {
 
 # Locked-spec WR baselines (per specs 1263-1268) for the WR kill-switch.
 V21_BASELINE_WR = {
-    "buy_reversal": 85.9, "buy_momentum": 77.4, "buy_s1_bounce": 73.9,
+    "buy_reversal": 63.0, "buy_momentum": 77.4, "buy_s1_bounce": 73.9,  # cc#354 V3 honest baseline
     "sell_reversal": 79.3, "sell_momentum": 71.9, "sell_overbought": 81.5,
 }
 
@@ -315,15 +316,9 @@ def _get_nifty_regime() -> tuple:
 
 
 def _get_buy_reversal_live_filters() -> dict:
-    regime, nifty_1m = _get_nifty_regime()
-    if regime == "BULL":      wk_max, rsi_max, sec_max = 3.0, 82.0, 4.0
-    elif regime == "NEUTRAL": wk_max, rsi_max, sec_max = 2.0, 75.0, 3.0
-    else:                     wk_max, rsi_max, sec_max = 1.0, 65.0, 2.0
-    live = dict(FILTER_CONFIG["buy_reversal"])
-    live["week_return"] = [0.0, wk_max]
-    live["rsi_month"]   = [52.0, rsi_max]
-    live["sector_week"] = [1.0, sec_max]
-    return live, regime, nifty_1m
+    # cc#354/355 V3: no Nifty-regime overrides — buy_reversal V3 uses fixed absolute gates.
+    _, nifty_1m = _get_nifty_regime()
+    return dict(FILTER_CONFIG["buy_reversal"]), "V3", nifty_1m
 
 
 def _get_buy_momentum_target(regime: str) -> str:
@@ -891,16 +886,16 @@ def filter_config(basket: str):
             rows.append({"metric": metric, "min": mn, "max": mx,
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx,
-                         "dynamic": metric in ("week_return", "rsi_month", "sector_week")})
+                         "dynamic": False})
+        # cc#354/355: V3 has no Nifty regime; 4 daily-metric gates shown here, 4 live/pivot gates
+        # (true_weekly_rsi>=60, hourly 0.1-1.0 from 09:20, CMP>PP, room-to-R1>2%) enforced live.
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "regime": regime, "nifty_1m_return": round(nifty_1m, 2),
-            "regime_rules": {
-                "BULL":    {"condition": "Nifty 1M > +2%",  "week_return_max": 3.0, "rsi_month_max": 82.0, "sector_week_max": 4.0},
-                "NEUTRAL": {"condition": "Nifty 1M 0-2%",   "week_return_max": 2.0, "rsi_month_max": 75.0, "sector_week_max": 3.0},
-                "BEAR":    {"condition": "Nifty 1M < 0%",   "week_return_max": 1.0, "rsi_month_max": 65.0, "sector_week_max": 2.0},
-            },
-            "backtest": {"signals": 83, "wr_pct": 85.9, "ev_per_trade": 0.496},
+            "regime": "V3", "nifty_1m_return": round(nifty_1m, 2),
+            "live_gates": ["true_weekly_rsi >= 60 (true calendar weekly)", "hourly_pct 0.1-1.0 (from 09:20)",
+                           "CMP > PP", "room-to-R1 > 2%"],
+            "entry_exit": "entry live CMP, target R1 only, 1:1 mirror stop, max hold 15d",
+            "backtest": {"signals": "~35-55/yr", "wr_pct": "62-64", "ev_per_trade": "1.0-1.2"},
             **BASKET_META.get(basket, {})
         }
     if basket == "buy_momentum":
@@ -1246,7 +1241,10 @@ def funnel_counts(basket: str):
         if basket in V21_FILTERS:
             v21_pass = sum(1 for s in all_rows
                            if v21_hard_gate_pass(basket, {**s, **v21_metrics.get(s["symbol"], {})}, v21_enabled))
-        if row:
+        # cc#354/355: buy_reversal V3 is a dedicated-handler basket — the writer no longer
+        # precomputes its funnel, so ignore any stale V2 v8_funnel_counts row and always compute
+        # the V3 daily-gate funnel live.
+        if row and basket != "buy_reversal":
             counts = row[0] if isinstance(row[0], dict) else {}
             counts = {**counts, "_v21_enabled": v21_enabled, "_v21_pass": v21_pass}
             return {"basket": basket, "score_date": str(date.today()), "counts": counts, "source": "precomputed"}
