@@ -1629,8 +1629,8 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
     # (last/earliest-of-day) until the 12-bar rolling value exists (~10:15). Only the 09:15-09:20
     # window (0 settled bars) is exempt. Batched once for the whole universe.
     hourly_v3 = _load_hourly_fut_v3(conn, [s["symbol"] for s in all_metrics], sim_ts=sim_ts)
-    # cheap conditions first (metrics + pivots); TRUE weekly RSI is DB-heavy -> only on survivors
-    pre = []
+    # cc#357: base universe = symbols with a live CMP + valid pivots; annotate room + v3 hourly once.
+    base = []
     for s in all_metrics:
         cmp = s.get("_cmp")
         pv  = pivots.get(s["symbol"])
@@ -1639,29 +1639,48 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
         pp, r1 = pv.get("pp"), pv.get("r1")
         if pp is None or r1 is None:
             continue
-        room   = (r1 - cmp) / cmp * 100.0
+        s["_pp"] = pp
+        s["_room_r1_pct"] = round((r1 - cmp) / cmp * 100.0, 3)
         hourly, n_bars = hourly_v3.get(s["symbol"], (None, 0))
         s["_hourly_v3"] = round(hourly, 3) if hourly is not None else None
-        # (f) exempt ONLY in the 09:15-09:20 single-bar window (n_bars==0); otherwise ENFORCE 0.1-1.0
-        hourly_ok = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
-        if (_passes(s.get("daily_rsi"), None, 40.0)      # (a)
-                and _passes(s.get("dma_200"), 0.0, None)  # (c)
-                and _passes(s.get("gvm_score"), 6.5, None)  # (d)
-                and _passes(s.get("mom_2d"), 0.0, 3.0)    # (e)
-                and hourly_ok                              # (f)
-                and cmp > pp                               # (g)
-                and room > 2.0):                           # (h)
-            s["_room_r1_pct"] = round(room, 3)
-            pre.append(s)
-    log.info(f"buy_reversal_v3: {len(pre)} after 7-condition cheap pre-filter")
+        # (f) exempt ONLY in the 09:15-09:20 single-bar window (n_bars==0); else ENFORCE 0.1-1.0
+        s["_hourly_ok"] = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
+        base.append(s)
+
+    # cc#357: cumulative, cheap-first 8-stage funnel (spec order). true_weekly_rsi (DB-heavy) is
+    # stage 8 and only computed on stage-7 survivors. Counts feed v8_funnel_counts for the dashboard.
+    funnel = {"_universe": len(base)}
+    surv = [s for s in base if _passes(s.get("daily_rsi"), None, 40.0)];   funnel["daily_rsi"]  = len(surv)   # 1 (a)
+    surv = [s for s in surv if _passes(s.get("dma_200"), 0.0, None)];      funnel["dma_200"]    = len(surv)   # 2 (c)
+    surv = [s for s in surv if _passes(s.get("gvm_score"), 6.5, None)];    funnel["gvm_score"]  = len(surv)   # 3 (d)
+    surv = [s for s in surv if _passes(s.get("mom_2d"), 0.0, 3.0)];        funnel["mom_2d"]     = len(surv)   # 4 (e)
+    surv = [s for s in surv if s["_hourly_ok"]];                           funnel["hourly_pct"] = len(surv)   # 5 (f)
+    surv = [s for s in surv if s["_cmp"] > s["_pp"]];                      funnel["cmp_gt_pp"]  = len(surv)   # 6 (g)
+    surv = [s for s in surv if s["_room_r1_pct"] > 2.0];                   funnel["room_r1"]    = len(surv)   # 7 (h)
+    log.info(f"buy_reversal_v3: {len(surv)} after 7-condition cheap pre-filter")
 
     qualified = []
-    for s in pre:
+    for s in surv:
         twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
         s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr >= 60.0:               # (b)
+        if twr is not None and twr >= 60.0:               # 8 (b)
             qualified.append(s)
+    funnel["true_weekly_rsi"] = len(qualified)
+    funnel["_score_qualified"] = len(qualified)
     log.info(f"buy_reversal_v3: {len(qualified)} qualified (true_weekly_rsi>=60) [spec id=2818]")
+
+    # cc#357: persist the 8-stage funnel so /funnel_detail/buy_reversal (br_funnel_detail) can render it.
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (basket, score_date) DO UPDATE SET
+                    counts = EXCLUDED.counts, computed_at = NOW()
+            """, (basket, target_date, json.dumps(funnel)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"buy_reversal_v3 funnel: {e}")
 
     for s in qualified:
         sym  = s["symbol"]

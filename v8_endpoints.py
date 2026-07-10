@@ -1278,11 +1278,57 @@ def _basket_pivots(cur):
     return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3])} for r in cur.fetchall()}
 
 
+# cc#357: buy_reversal V3 is a dedicated strict-AND basket; 4 of its 8 gates are live/pivot-based
+# (not v8_metrics columns), so the funnel is CAPTURED by the writer (_write_buy_reversal_v3_qualified
+# -> v8_funnel_counts) and reshaped here — never recomputed from FILTER_CONFIG. Static stage order +
+# display labels (labels carry spaces so the dashboard renders them verbatim via metric.replace).
+_BR_V3_STAGES = [
+    ("daily_rsi",       "daily RSI",             "",       "<= 40"),
+    ("dma_200",         "dma 200",               ">= 0",   ""),
+    ("gvm_score",       "gvm score",             ">= 6.5", ""),
+    ("mom_2d",          "mom 2d",                ">= 0",   "<= 3"),
+    ("hourly_pct",      "hourly % (from 09:20)", ">= 0.1", "<= 1.0"),
+    ("cmp_gt_pp",       "CMP > PP",              "",       ""),
+    ("room_r1",         "room to R1",            "> 2%",   ""),
+    ("true_weekly_rsi", "true weekly RSI",       ">= 60",  ""),
+]
+
+def br_funnel_detail():
+    """cc#357: 8-stage cumulative funnel for buy_reversal V3, reshaped from the handler-written
+    v8_funnel_counts row (score_date=today). Empty stages (all 0) until the first live tick writes."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='buy_reversal' "
+                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
+            row = cur.fetchone()
+        counts   = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+        universe = int(counts.get("_universe", 0) or 0)
+        stages, prev = [], universe
+        for key, label, cmin, cmax in _BR_V3_STAGES:
+            surv = counts.get(key)
+            surv = prev if surv is None else int(surv)   # missing -> no kill (defensive)
+            stages.append({"metric": label, "condition_min": cmin, "condition_max": cmax,
+                           "survivors": surv, "killed": max(prev - surv, 0)})
+            prev = surv
+        final = int(counts.get("_score_qualified", prev) or 0)
+        return {
+            "basket": "buy_reversal", "score_date": str(date.today()),
+            "universe": universe, "final": final,
+            "filter_count": 8, "n_filters": 8,
+            "gate_type": "strict AND (all 8 must pass)",
+            "score_qualified": final, "pivot_pass": final,
+            "stages": stages, **BASKET_META.get("buy_reversal", {}),
+        }
+    except Exception as e:
+        raise HTTPException(500, f"br_funnel_detail failed: {e}")
+
+
 @router.get("/funnel_detail/{basket}")
 def funnel_detail(basket: str):
     basket = basket.lower()
     if basket == "buy_s1_bounce":   return s1b_funnel_detail()
     if basket == "sell_overbought": return so_funnel_detail()
+    if basket == "buy_reversal":    return br_funnel_detail()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
