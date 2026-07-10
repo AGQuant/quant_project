@@ -15,7 +15,7 @@ What it does every 5-min during market hours:
   9. Writes adr_intraday (live ADR every 5-min tick) -- 11-Jun-2026
 
 Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
-  BUY threshold (buy_reversal, buy_momentum -- 18-Jun-2026):
+  BUY threshold (buy_momentum -- 18-Jun-2026):
     Strong Bullish (0 fails) + Bullish (1 fail): n   (strict AND -- fewer, higher quality)
     Neutral (2 fails) + Bearish (3+ fails):       n-1 (1 miss allowed -- genuine setups rarer)
   SELL threshold (sell_reversal=5, sell_momentum=6):
@@ -24,11 +24,12 @@ Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
     Rationale: in bull markets genuine weakness is rarer; n-1 still a
     meaningful signal. In bear markets signals fire freely -- keep strict.
 
-Dynamic buy_reversal filters (v2.2.0, 15-Jun-2026):
-  Nifty 1-month return used as regime gate. 3 filters adjust dynamically.
-  BULL    (Nifty 1M > +2%): week_return<=3, rsi_month<=67, sector_week<=4
-  NEUTRAL (Nifty 1M  0-2%): week_return<=2, rsi_month<=62, sector_week<=3
-  BEAR    (Nifty 1M  < 0%): week_return<=1, rsi_month<=58, sector_week<=2
+buy_reversal V3 (10-Jul-2026, spec id=2818 -- supersedes V2 dynamic-regime, id=355 archived):
+  TRUE REVERSAL inverse-sandwich dip-buy. NOT in the score-gate loop; dedicated strict-AND of 8
+  fixed conditions via _write_buy_reversal_v3_qualified (NO Nifty regime, NO R2):
+    daily_rsi<=40, true_weekly_rsi>=60 (TRUE calendar weekly, basket-local), dma_200>=0,
+    gvm_score>=6.5, mom_2d 0-3, hourly_pct 0.1-1.0 (NULL first hr), CMP>PP, room-to-R1>2%.
+  Entry live CMP, target R1 only, stop 1:1 mirror, max hold 15 trading days. Standard slot pool.
 
 Slot architecture (v2.3.0, 16-Jun-2026):
   Standard pool (4 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum):
@@ -1268,16 +1269,8 @@ def _get_nifty_rsi(conn, sim_ts=None) -> Optional[float]:
         return None
 
 
-def _get_dynamic_buy_reversal_overrides(nifty_1m: float) -> dict:
-    if nifty_1m > 2.0:
-        return {"week_return": (0.0, 3.0), "rsi_month": (52.0, 67.0),
-                "sector_week": (1.0, 4.0), "_regime": "BULL"}
-    elif nifty_1m >= 0.0:
-        return {"week_return": (0.0, 2.0), "rsi_month": (52.0, 62.0),
-                "sector_week": (1.0, 3.0), "_regime": "NEUTRAL"}
-    else:
-        return {"week_return": (0.0, 1.0), "rsi_month": (52.0, 58.0),
-                "sector_week": (1.0, 2.0), "_regime": "BEAR"}
+# cc#354: _get_dynamic_buy_reversal_overrides (V2 Nifty-regime bounds) removed — buy_reversal V3
+# uses fixed absolute conditions (spec id=2818), no regime overrides.
 
 
 # -- Auto paper entry (standard baskets) --------------------------------------
@@ -1532,6 +1525,131 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
 
 # -- Step 8: Write v8_qualified + funnel --------------------------------------
 
+# -- BUY_REVERSAL_V3 (inverse-sandwich dip-buy, canonical spec id=2818) --------
+
+def _true_weekly_rsi(conn, symbol: str, live_cmp: Optional[float], sim_ts=None) -> Optional[float]:
+    """cc#354: TRUE calendar-weekly Wilder RSI-14 for the buy_reversal V3 basket ONLY.
+    Resamples raw_prices daily closes to week-end (W, Mon-Sun) last-close, then sets the
+    CURRENT (partial) week's running close to the live CMP — filters define the dip, the live
+    tick catches the turn. Computed BASKET-LOCALLY; it must NEVER read/write the shared synthetic
+    rsi_weekly column (cc#353 audit: that column is a 5-day-stride approximation, ~16pt off)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT price_date, close FROM raw_prices
+                           WHERE symbol=%s AND price_date < %s
+                             AND price_date >= (%s::date - INTERVAL '800 days')
+                           ORDER BY price_date""",
+                        (symbol, _today(sim_ts), _today(sim_ts)))
+            rows = cur.fetchall()
+        if len(rows) < 90:
+            return None
+        s  = pd.Series([float(c) for _, c in rows],
+                       index=pd.to_datetime([d for d, _ in rows]))
+        wk = s.resample("W").last().dropna()   # W = week ending Sunday (Mon-Sun buckets)
+        if len(wk) < 15:
+            return None
+        if live_cmp:
+            # set THIS week's running close to the live tick. Overwrites the current-week bucket
+            # if history already has partial-week closes, else starts it (e.g. a Monday tick) —
+            # never clobbers last week's completed bar (the naive iloc[-1] overwrite would).
+            today_ts   = pd.Timestamp(_today(sim_ts)).normalize()
+            cur_sunday = today_ts + pd.Timedelta(days=(6 - today_ts.weekday()) % 7)
+            wk.loc[cur_sunday] = float(live_cmp)
+            wk = wk.sort_index()
+        return _wilder_rsi(wk, 14)
+    except Exception as e:
+        log.warning(f"_true_weekly_rsi {symbol}: {e}")
+        return None
+
+
+def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date: date,
+                                     gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
+    """cc#354 BUY_REVERSAL_V3 — TRUE REVERSAL inverse-sandwich dip-buy (spec id=2818, supersedes
+    the archived V2 id=355). buy_reversal is REMOVED from the standard score-gate + dynamic-regime
+    loop; this is a strict-AND of 8 conditions with no regime overrides and no R2 anywhere:
+      (a) daily_rsi <= 40           (cold short-term dip)
+      (b) true_weekly_rsi >= 60     (strong larger frame — TRUE calendar weekly, cc#353)
+      (c) dma_200 >= 0              (long-term uptrend)
+      (d) gvm_score >= 6.5          (quality)
+      (e) mom_2d in [0, 3]          (2-day momentum turned up — dip has started recovering)
+      (f) hourly_pct in [0.1, 1.0]  (fyers_fut hourly turning up, not spiking; NULL passes first hour)
+      (g) CMP > PP                  (holding above pivot)
+      (h) room-to-R1 > 2%          (QUALIFICATION gate — no room, no signal; never fall back to R2)
+    Entry = standard _auto_paper_entry (live CMP, target R1, 1:1 mirror stop, standard slot pool)."""
+    basket, side = "buy_reversal", "BUY"
+    # cheap conditions first (metrics + pivots); TRUE weekly RSI is DB-heavy -> only on survivors
+    pre = []
+    for s in all_metrics:
+        cmp = s.get("_cmp")
+        pv  = pivots.get(s["symbol"])
+        if not cmp or not pv:
+            continue
+        pp, r1 = pv.get("pp"), pv.get("r1")
+        if pp is None or r1 is None:
+            continue
+        room   = (r1 - cmp) / cmp * 100.0
+        hourly = s.get("hourly_pct")
+        hourly_ok = (hourly is None) or (0.1 <= float(hourly) <= 1.0)   # (f) NULL-passes first hour
+        if (_passes(s.get("daily_rsi"), None, 40.0)      # (a)
+                and _passes(s.get("dma_200"), 0.0, None)  # (c)
+                and _passes(s.get("gvm_score"), 6.5, None)  # (d)
+                and _passes(s.get("mom_2d"), 0.0, 3.0)    # (e)
+                and hourly_ok                              # (f)
+                and cmp > pp                               # (g)
+                and room > 2.0):                           # (h)
+            s["_room_r1_pct"] = round(room, 3)
+            pre.append(s)
+    log.info(f"buy_reversal_v3: {len(pre)} after 7-condition cheap pre-filter")
+
+    qualified = []
+    for s in pre:
+        twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
+        s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
+        if twr is not None and twr >= 60.0:               # (b)
+            qualified.append(s)
+    log.info(f"buy_reversal_v3: {len(qualified)} qualified (true_weekly_rsi>=60) [spec id=2818]")
+
+    for s in qualified:
+        sym  = s["symbol"]
+        snap = {
+            "true_weekly_rsi": s.get("_true_weekly_rsi"),   # step_5 audit fields
+            "daily_rsi":       s.get("daily_rsi"),
+            "mom_2d":          s.get("mom_2d"),
+            "hourly_pct":      s.get("hourly_pct"),
+            "room_r1_pct":     s.get("_room_r1_pct"),
+            "gvm_score":       s.get("gvm_score"),
+            "dma_200":         s.get("dma_200"),
+            "filter_score": 8, "filter_total": 8,
+            "spec": "BUY_REVERSAL_V3_INVERSE_SANDWICH id=2818",
+        }
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_qualified
+                    (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
+                     mom_2d, week_return, month_return, dma_200, dma_50,
+                     rsi_month, rsi_weekly, sector_week, sector_day,
+                     month_index, week_index_52, daily_rsi,
+                     metrics, source)
+                    VALUES (%s,'buy_reversal',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
+                    ON CONFLICT (symbol, basket, signal_date) DO NOTHING
+                """, (
+                    sym, target_date, signal_ts_ist,
+                    s.get("gvm_score"), s.get("_cmp"),
+                    s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
+                    s.get("dma_200"), s.get("dma_50"),
+                    s.get("rsi_month"), s.get("rsi_weekly"),
+                    s.get("sector_week"), s.get("sector_day"),
+                    s.get("month_index"), s.get("week_index_52"),
+                    s.get("daily_rsi"), json.dumps(snap),
+                ))
+            conn.commit()
+            _auto_paper_entry(conn, sym, basket, side, s.get("_cmp"), pivots.get(sym),
+                              target_date, gate_fails, sim_ts=sim_ts)
+        except Exception as e:
+            log.warning(f"buy_reversal_v3 insert {sym}: {e}")
+
+
 def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
     from v8_endpoints import FILTER_CONFIG, v21_hard_gate_pass
 
@@ -1540,24 +1658,16 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     # cc#324: point-in-time V2.1 enable state in sim (was reading TODAY's state during replays).
     enabled_v21 = _load_filter_state(conn, sim_ts=sim_ts)
 
-    nifty_1m   = _get_nifty_1m_return(conn, sim_ts=sim_ts)
-    dyn_br     = _get_dynamic_buy_reversal_overrides(nifty_1m)
-    log.info(f"Nifty 1M={nifty_1m:+.2f}% -> buy_reversal regime={dyn_br['_regime']}")
-
     signal_ts_ist = _now_ist(sim_ts)   # cc#218
     _reset_slot_blocks()   # cc#256: fresh per-tick slot_full accumulator
 
     for basket, filters in FILTER_CONFIG.items():
-        if basket in ("sell_overbought", "buy_s1_bounce"):
+        # cc#354: buy_reversal left the standard score-gate + dynamic-regime loop entirely —
+        # it now runs as BUY_REVERSAL_V3 via its own dedicated strict-AND handler (spec id=2818).
+        if basket in ("sell_overbought", "buy_s1_bounce", "buy_reversal"):
             continue
 
-        if basket == "buy_reversal":
-            active_filters = dict(filters)
-            active_filters["week_return"] = list(dyn_br["week_return"])
-            active_filters["rsi_month"]   = list(dyn_br["rsi_month"])
-            active_filters["sector_week"] = list(dyn_br["sector_week"])
-        else:
-            active_filters = filters
+        active_filters = filters
 
         # cc#158: sell_momentum V2.1 w52 is a MODIFY of a locked score-gate
         # filter (<=20 -> <=30), not a hard-gate add. Swap the bound in-place
@@ -1590,9 +1700,6 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
             funnel[metric] = len(survivors)
         funnel["_score_threshold"] = need
         funnel["_score_qualified"] = len(universe)
-        if basket == "buy_reversal":
-            funnel["_regime"] = dyn_br["_regime"]
-            funnel["_nifty_1m"] = round(nifty_1m, 2)
 
         log.info(f"{basket}: score-gate need={need}/{n_filters} "
                  f"gate_fails={gate_fails} -> {len(universe)} score-qualified")
@@ -1644,8 +1751,6 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
             snap["hourly_pct"]          = s.get("hourly_pct")           # cc#158
             snap["fall_from_day_high"]  = s.get("fall_from_day_high")   # cc#158
             snap["v21_enabled"]         = v21_on                        # cc#158
-            if basket == "buy_reversal":
-                snap["regime"] = dyn_br["_regime"]
             try:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -1683,6 +1788,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
             except Exception as e:
                 log.warning(f"qualified insert {basket} {sym}: {e}")
 
+    _write_buy_reversal_v3_qualified(conn, all_metrics, target_date,
+                                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
                                     gate_fails, pivots, signal_ts_ist, enabled_v21,
                                     sim_ts=sim_ts, v21_backtest=v21_backtest)
