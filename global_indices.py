@@ -258,16 +258,143 @@ async def backfill_india_vix(conn, days: int = 30) -> dict:
     return {"stored": stored}
 
 
+async def _india_vix_yahoo_history(period1: int, period2: int):
+    """cc#350: fetch ^INDIAVIX daily closes over an explicit unix window (period1..period2).
+    Returns (rows, meta) where rows = [(qd, close)] date-ascending and meta describes coverage
+    for the caller's validation gate. Never raises — a failure returns ([], {...error}) so the
+    caller can decide to fall back to NSE."""
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote('^INDIAVIX')}?interval=1d&period1={period1}&period2={period2}")
+    try:
+        async with httpx.AsyncClient(timeout=45, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            res    = r.json()["chart"]["result"][0]
+            ts     = res.get("timestamp", []) or []
+            closes = (res.get("indicators", {}).get("quote", [{}])[0].get("close", []) or [])
+        rows, nulls, zeros = [], 0, 0
+        for i, t in enumerate(ts):
+            cl = closes[i] if i < len(closes) else None
+            if cl is None:
+                nulls += 1; continue
+            if cl <= 0:
+                zeros += 1; continue
+            qd = (datetime.utcfromtimestamp(t) + timedelta(hours=5, minutes=30)).date()
+            rows.append((qd, float(cl)))
+        rows.sort(key=lambda x: x[0])
+        meta = {"fetched": len(ts), "valid": len(rows), "nulls": nulls, "zeros": zeros,
+                "first": str(rows[0][0]) if rows else None, "last": str(rows[-1][0]) if rows else None}
+        return rows, meta
+    except Exception as e:
+        return [], {"error": str(e)[:200]}
+
+
+async def _india_vix_nse_history(start_ddmmyyyy: str, end_ddmmyyyy: str):
+    """cc#350 fallback: NSE historical India VIX archive when Yahoo is gappy. Primes the NSE
+    session cookie off the homepage (NSE rejects cold API hits), then pages the historical/vix
+    JSON. Best-effort — returns ([], {...}) if NSE blocks the datacenter IP so the caller degrades
+    gracefully rather than crashing. Rows tagged source=backfill_nse by the caller."""
+    base = "https://www.nseindia.com"
+    hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{base}/reports-indices-historical-india-vix"}
+    try:
+        async with httpx.AsyncClient(timeout=45, headers=hdrs, follow_redirects=True) as client:
+            await client.get(base + "/")                          # seed cookies
+            url = f"{base}/api/historical/vix?from={start_ddmmyyyy}&to={end_ddmmyyyy}"
+            r = await client.get(url)
+            r.raise_for_status()
+            data = (r.json() or {}).get("data", []) or []
+        rows = []
+        for d in data:
+            val = d.get("EOD_CLOSE_INDEX_VAL") or d.get("close")
+            dt  = d.get("EOD_TIMESTAMP") or d.get("EOD_INDEX_DATE") or d.get("timestamp")
+            if val is None or not dt:
+                continue
+            try:
+                qd = datetime.strptime(str(dt)[:11].strip(), "%d-%b-%Y").date()
+            except Exception:
+                continue
+            rows.append((qd, float(val)))
+        rows.sort(key=lambda x: x[0])
+        return rows, {"valid": len(rows)}
+    except Exception as e:
+        return [], {"error": str(e)[:200]}
+
+
+def _upsert_india_vix(conn, rows, source: str) -> int:
+    """Idempotent insert of [(quote_date, close)] with running prev_close/chg_pct.
+    ON CONFLICT DO NOTHING — existing (esp. live-collected) rows always win, so re-runs are safe
+    and the 36 live rows are never overwritten."""
+    if not rows:
+        return 0
+    stored, prev = 0, None
+    with conn.cursor() as cur:
+        for qd, cl in rows:
+            chg = round((cl - prev) / prev * 100, 2) if prev else None
+            cur.execute(
+                """INSERT INTO global_indices
+                   (symbol,name,category,price,prev_close,chg_pct,quote_date,updated_at,source)
+                   VALUES ('INDIAVIX','India VIX','volatility',%s,%s,%s,%s,NOW(),%s)
+                   ON CONFLICT (symbol,quote_date) DO NOTHING""",
+                (cl, prev, chg, qd, source))
+            stored += cur.rowcount
+            prev = cl
+    conn.commit()
+    return stored
+
+
+async def backfill_india_vix_history(conn, start_date: str = "2021-06-01") -> dict:
+    """cc#350: one-time ~5yr India VIX EOD backfill into global_indices, Yahoo-primary with an
+    NSE fallback if Yahoo is gappy/zero. Non-destructive (ON CONFLICT DO NOTHING) so the live
+    06:00 rows are untouched. Idempotent. Returns a report with the source actually used."""
+    ensure_table(conn)
+    from datetime import datetime as _dt
+    y, m, d = (int(x) for x in start_date.split("-"))
+    period1 = int((_dt(y, m, d) - _dt(1970, 1, 1)).total_seconds())
+    now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    period2 = int((_dt(now_ist.year, now_ist.month, now_ist.day) + timedelta(days=1)
+                   - _dt(1970, 1, 1)).total_seconds())
+    rows, meta = await _india_vix_yahoo_history(period1, period2)
+    # validation gate: Yahoo ^INDIAVIX is known-flaky — a full ~5yr span is ~1240 trading days, so
+    # require near-full coverage (>=1000 valid closes) and few zeros before trusting it; a truncated
+    # or gappy response fails the gate and falls through to the NSE archive.
+    yahoo_ok = len(rows) >= 1000 and meta.get("zeros", 0) <= max(5, len(rows) // 50)
+    if yahoo_ok:
+        stored = _upsert_india_vix(conn, rows, "backfill_yahoo")
+        log.info(f"backfill_india_vix_history: yahoo stored={stored} {meta}")
+        return {"ok": True, "source": "backfill_yahoo", "stored": stored, "yahoo": meta}
+    # Yahoo insufficient → NSE fallback
+    log.warning(f"backfill_india_vix_history: yahoo insufficient ({meta}) — trying NSE")
+    s = f"{d:02d}-{m:02d}-{y:04d}"
+    e = now_ist.strftime("%d-%m-%Y")
+    nrows, nmeta = await _india_vix_nse_history(s, e)
+    if len(nrows) >= 400:
+        stored = _upsert_india_vix(conn, nrows, "backfill_nse")
+        log.info(f"backfill_india_vix_history: nse stored={stored} {nmeta}")
+        return {"ok": True, "source": "backfill_nse", "stored": stored, "yahoo": meta, "nse": nmeta}
+    # neither source hit full coverage — if Yahoo still returned a usable partial (zeros already
+    # dropped), store it rather than nothing; better a gappy series than none for percentile depth.
+    if len(rows) >= 400:
+        stored = _upsert_india_vix(conn, rows, "backfill_yahoo")
+        log.warning(f"backfill_india_vix_history: partial yahoo stored={stored} {meta}")
+        return {"ok": True, "source": "backfill_yahoo_partial", "stored": stored,
+                "yahoo": meta, "nse": nmeta}
+    log.error(f"backfill_india_vix_history: both sources insufficient yahoo={meta} nse={nmeta}")
+    return {"ok": False, "source": None, "stored": 0, "yahoo": meta, "nse": nmeta}
+
+
 async def ensure_india_vix_history(conn):
-    """First-run seed: run the 30-day India VIX backfill once, only when no INDIAVIX
-    EOD history exists yet. Idempotent — a no-op on every subsequent daily fetch."""
+    """First-run / self-heal seed for INDIAVIX EOD history. cc#350: when history is sparse
+    (<500 rows — e.g. only the ~36 live rows exist), run the one-time ~5yr backfill so VIX
+    percentile/regime logic has depth. Idempotent — a no-op once full history is present."""
     ensure_table(conn)
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM global_indices WHERE symbol='INDIAVIX'")
         n = cur.fetchone()[0]
-    if n == 0:
-        log.info("global_indices: seeding India VIX 30-day history (first run)")
-        await backfill_india_vix(conn, days=30)
+    if n < 500:
+        log.info(f"global_indices: India VIX history sparse ({n} rows) — running ~5yr backfill")
+        await backfill_india_vix_history(conn)
 
 
 def prune_global_indices(conn, years: int = 5) -> int:
