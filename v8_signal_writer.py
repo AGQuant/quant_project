@@ -712,6 +712,53 @@ def _load_hourly_fut(conn, symbols: List[str], sim_ts=None) -> Dict[str, Optiona
     return out
 
 
+def _load_hourly_fut_v3(conn, symbols: List[str], sim_ts=None) -> Dict[str, tuple]:
+    """cc#355: buy_reversal_v3 hourly with NO null-pass window. Returns {sym: (hourly_pct, n_bars)}:
+      - n_bars = settled fyers_fut 5m bars so far today (the first settles at 09:20).
+      - hourly_pct: >=13 bars (~10:15+) -> standard 12-bar (60-min) rolling change (last vs 12-ago);
+                    1..12 bars (09:20-~10:15) -> PARTIAL window = (last close / earliest settled bar
+                    of the day - 1)*100; 0 bars (09:15-09:20) -> None (the only exempt window).
+    The handler enforces 0.1-1.0 whenever n_bars>=1 (i.e. from 09:20 on). In sim/replay with no
+    recent fut bars n_bars=0 -> exempt (hourly stays a live-only trigger, per spec id 1263-1267)."""
+    today = _today(sim_ts)
+    cut   = _bar_cutoff(sim_ts)
+    out: Dict[str, tuple] = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT symbol, close,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn,
+                           COUNT(*)     OVER (PARTITION BY symbol)                  AS n
+                    FROM intraday_prices
+                    WHERE source='fyers_fut' AND timeframe='5m'
+                      AND ts::date = %s AND symbol = ANY(%s) AND ts <= %s
+                )
+                SELECT symbol,
+                       MAX(n)                                    AS n_bars,
+                       MAX(close) FILTER (WHERE rn = 1)          AS last_close,
+                       MAX(close) FILTER (WHERE rn = 13)         AS close_12_ago,
+                       MAX(close) FILTER (WHERE rn = n)          AS first_close
+                FROM ranked GROUP BY symbol
+            """, (today, symbols, cut))
+            for sym, n_bars, last_close, close_12_ago, first_close in cur.fetchall():
+                n_bars = int(n_bars or 0)
+                hourly = None
+                if last_close is not None:
+                    if n_bars >= 13 and close_12_ago and float(close_12_ago) > 0:
+                        hourly = (float(last_close) / float(close_12_ago) - 1) * 100
+                    elif n_bars >= 1 and first_close and float(first_close) > 0:
+                        hourly = (float(last_close) / float(first_close) - 1) * 100
+                out[sym] = (hourly, n_bars)
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        log.warning(f"_load_hourly_fut_v3: {e} -- hourly exempt this tick")
+    return out
+
+
 def _load_filter_state(conn, sim_ts=None) -> Dict[str, bool]:
     """cc#158: per-basket V2.1 enable state. LIVE (sim_ts=None) reads v8_filter_state so a
     kill-switch disable takes effect on the next signal pass — byte-identical to before.
@@ -1572,11 +1619,16 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
       (c) dma_200 >= 0              (long-term uptrend)
       (d) gvm_score >= 6.5          (quality)
       (e) mom_2d in [0, 3]          (2-day momentum turned up — dip has started recovering)
-      (f) hourly_pct in [0.1, 1.0]  (fyers_fut hourly turning up, not spiking; NULL passes first hour)
+      (f) hourly_pct in [0.1, 1.0]  (fyers_fut hourly turning up, not spiking; cc#355: partial-window
+                                     from 09:20, ENFORCED — only the 09:15-09:20 single-bar window is exempt)
       (g) CMP > PP                  (holding above pivot)
       (h) room-to-R1 > 2%          (QUALIFICATION gate — no room, no signal; never fall back to R2)
     Entry = standard _auto_paper_entry (live CMP, target R1, 1:1 mirror stop, standard slot pool)."""
     basket, side = "buy_reversal", "BUY"
+    # cc#355: v3 hourly — enforced 0.1-1.0 from the first settled fut bar (09:20); partial window
+    # (last/earliest-of-day) until the 12-bar rolling value exists (~10:15). Only the 09:15-09:20
+    # window (0 settled bars) is exempt. Batched once for the whole universe.
+    hourly_v3 = _load_hourly_fut_v3(conn, [s["symbol"] for s in all_metrics], sim_ts=sim_ts)
     # cheap conditions first (metrics + pivots); TRUE weekly RSI is DB-heavy -> only on survivors
     pre = []
     for s in all_metrics:
@@ -1588,8 +1640,10 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
         if pp is None or r1 is None:
             continue
         room   = (r1 - cmp) / cmp * 100.0
-        hourly = s.get("hourly_pct")
-        hourly_ok = (hourly is None) or (0.1 <= float(hourly) <= 1.0)   # (f) NULL-passes first hour
+        hourly, n_bars = hourly_v3.get(s["symbol"], (None, 0))
+        s["_hourly_v3"] = round(hourly, 3) if hourly is not None else None
+        # (f) exempt ONLY in the 09:15-09:20 single-bar window (n_bars==0); otherwise ENFORCE 0.1-1.0
+        hourly_ok = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
         if (_passes(s.get("daily_rsi"), None, 40.0)      # (a)
                 and _passes(s.get("dma_200"), 0.0, None)  # (c)
                 and _passes(s.get("gvm_score"), 6.5, None)  # (d)
@@ -1615,7 +1669,7 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
             "true_weekly_rsi": s.get("_true_weekly_rsi"),   # step_5 audit fields
             "daily_rsi":       s.get("daily_rsi"),
             "mom_2d":          s.get("mom_2d"),
-            "hourly_pct":      s.get("hourly_pct"),
+            "hourly_pct":      s.get("_hourly_v3"),   # cc#355: enforced v3 hourly (partial from 09:20)
             "room_r1_pct":     s.get("_room_r1_pct"),
             "gvm_score":       s.get("gvm_score"),
             "dma_200":         s.get("dma_200"),
