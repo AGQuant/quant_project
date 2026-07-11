@@ -260,8 +260,19 @@ def run_phase_a(conn=None, token=None) -> dict:
         conn = fyers_feed.get_db()
     started = time.time()
     try:
-        if token is None:
-            token = fyers_feed.get_valid_token(conn)
+        try:
+            if token is None:
+                token = fyers_feed.get_valid_token(conn)   # raises SystemExit if no same-day token + auto-login fails
+        except BaseException as e:
+            # capture instead of dying silently in the daemon thread (weekend token-unavailable case)
+            _oplog(conn, "data_infra", "PHASE_A_ERROR",
+                   {"stage": "token", "error": str(e)[:400], "type": type(e).__name__})
+            try:
+                _set_config(conn, _PHASE_A_FLAG, "error_token")
+            except Exception:
+                pass
+            log.error(f"run_phase_a token acquisition failed: {e}")
+            return {"error": str(e)[:400], "stage": "token"}
         with conn.cursor() as cur:
             cur.execute("SELECT UPPER(symbol) FROM futures_universe WHERE is_active=TRUE ORDER BY symbol")
             symbols = [r[0] for r in cur.fetchall()]
