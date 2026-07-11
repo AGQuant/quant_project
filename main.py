@@ -71,6 +71,7 @@ from fyers_range_backfill_endpoints import router as fyers_range_backfill_router
 from smartgain_daily_m2m import router as smartgain_daily_m2m_router
 from smartgain_reconcile import router as smartgain_reconcile_router
 from stock_options_backfill import router as stock_options_backfill_router
+from fyers_hist_backfill import router as fyers_hist_backfill_router   # cc#377 Phase B
 from v13_presets_endpoints import router as v13_presets_router
 from galaxy_endpoints import router as galaxy_router
 import yahoo_ondemand
@@ -265,6 +266,7 @@ app.include_router(fyers_range_backfill_router)
 app.include_router(smartgain_daily_m2m_router)
 app.include_router(smartgain_reconcile_router)
 app.include_router(stock_options_backfill_router)
+app.include_router(fyers_hist_backfill_router)   # cc#377 Phase B
 app.include_router(v13_presets_router)
 app.include_router(galaxy_router)
 

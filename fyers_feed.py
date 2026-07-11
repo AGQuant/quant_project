@@ -1211,11 +1211,14 @@ def purge_old_bars(conn):
             # cc#227: SOURCE-AWARE intraday retention. fyers_eq (canonical equity, cc#228) keeps
             # 365d (cc#297) for BT7/sim history; fyers_fut keeps 7d; residual legacy fyers/yahoo keep
             # 7d (shrinking once the cc#228 relabel/dedupe lands). IS DISTINCT FROM handles any NULL.
+            # cc#377: source='fyers_hist' (Phase B/A backtest warehouse) is PURGE-EXEMPT — it holds
+            # deliberately old bars (up to 365d) that the 7d "other" rule would otherwise wipe within
+            # days; excluded from BOTH deletes so backtest readers keep the full hist series.
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source='fyers_eq'", (eq_cutoff,))
             eq_del = cur.rowcount
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
-                        "AND source IS DISTINCT FROM 'fyers_eq'", (fut_cutoff,))
+                        "AND source IS DISTINCT FROM 'fyers_eq' AND source IS DISTINCT FROM 'fyers_hist'", (fut_cutoff,))
             other_del = cur.rowcount
             cur.execute("DELETE FROM option_chain WHERE ts < %s", (opt_cutoff,))
             opt_del = cur.rowcount
