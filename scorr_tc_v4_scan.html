@@ -1,0 +1,148 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TC v4 · Dual-Style Scanner</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  :root{
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:12px 18px 40px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 0 12px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}.logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .backlink{font-size:12px;font-weight:600;color:var(--mut);border:1px solid var(--line2);border-radius:9px;padding:7px 12px}
+  .backlink:hover{border-color:var(--blu);color:var(--blu)}
+  .lead{font-size:12px;color:var(--dim);line-height:1.6;margin:12px 0 4px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 8px}
+  .seg{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:3px}
+  .seg button{background:none;border:none;color:var(--mut);font-family:'Sora';font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer}
+  .seg button.on{background:var(--panel2);color:var(--txt)}
+  .rbtn{font-size:12px;font-weight:700;color:var(--mut);border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:8px 12px;cursor:pointer}
+  .meta{font-size:11px;color:var(--dim);font-family:'Space Mono';margin-left:auto}
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin-top:8px}
+  table{border-collapse:collapse;width:100%;min-width:720px}
+  th{font-family:'Sora';font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);text-align:left;padding:9px 12px;background:var(--panel2);border-bottom:1px solid var(--line2);white-space:nowrap}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:12px;white-space:nowrap}
+  tr.row{cursor:pointer}tr.row:hover td{background:var(--panel2)}
+  tr.strong td{background:rgba(47,212,139,.06)}
+  .sym{font-family:'Sora';font-weight:700;font-size:13px}
+  .seg-c{font-family:'Sora';color:var(--mut);font-size:11px;white-space:normal;max-width:200px}
+  .num{font-family:'IBM Plex Mono',monospace}
+  .chip{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px}
+  .chip.buy{background:var(--grn-d);color:var(--grn)}.chip.sell{background:var(--red-d);color:var(--red)}
+  .bg{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:700}
+  .badge{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px}
+  .badge.STRONG{background:var(--grn-d);color:var(--grn)}
+  .badge.VALID{background:rgba(245,185,74,.14);color:var(--amber)}
+  .badge.REJECT{background:var(--red-d);color:var(--red)}
+  .mini{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--mut)}
+  .mini b{color:var(--txt)}
+  /* modal */
+  .ov{position:fixed;inset:0;background:rgba(4,8,20,.72);display:none;align-items:flex-start;justify-content:center;padding:24px 12px;z-index:50;overflow-y:auto}
+  .ov.open{display:flex}
+  .box{background:var(--panel);border:1px solid var(--line2);border-radius:16px;max-width:900px;width:100%;padding:18px 20px}
+  .box h2{margin:0;font-size:18px}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  @media(max-width:680px){.cards{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line2);border-radius:12px;padding:12px 14px;background:var(--panel2)}
+  .card.win{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan) inset}
+  .card h3{margin:0 0 8px;font-size:13px;display:flex;align-items:center;gap:8px}
+  .rrow{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;border-bottom:.5px solid var(--line)}
+  .rrow .rl{color:var(--mut)}
+  .rrow .rc{font-family:'IBM Plex Mono',monospace;font-weight:700}
+  .c1{color:var(--grn)}.c05{color:var(--amber)}.c0{color:var(--dim)}
+  .close{float:right;width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer}
+  .empty{padding:24px;text-align:center;color:var(--dim)}
+</style>
+
+<div class="wrap">
+  <header>
+    <div><div class="logo">TC <b>v4</b> Scanner</div><div class="tag">Dual-style · momentum + reversal</div></div>
+    <div class="spacer"></div>
+    <a class="backlink" href="/check">&#8592; Trade Check</a>
+  </header>
+  <div class="lead">Every active futures stock scored on all four cards (BUY/SELL &times; MOMENTUM/REVERSAL) in one pass &mdash; the higher card wins with its style label. 3 gates + 15 rules, verdict <b style="color:var(--grn)">STRONG &ge;12</b> / <b style="color:var(--amber)">VALID 10&ndash;12</b> / REJECT &lt;10. Click any row for the full dual scorecard. <span style="color:var(--amber)">v4 is in validation &mdash; v3.3.2 stays primary until founder sign-off.</span></div>
+
+  <div class="controls">
+    <div class="seg" id="sideSeg">
+      <button data-v="ALL" class="on">All</button><button data-v="BUY">Buy</button><button data-v="SELL">Sell</button>
+    </div>
+    <div class="seg" id="verSeg">
+      <button data-v="ALL" class="on">Any verdict</button><button data-v="STRONG">Strong</button><button data-v="VALID">Valid+</button>
+    </div>
+    <button class="rbtn" onclick="load()">&#8635; Rescan</button>
+    <span class="meta" id="meta">&hellip;</span>
+  </div>
+
+  <div id="tbl"><div class="empty">Scanning&hellip;</div></div>
+</div>
+
+<div class="ov" id="ov" onclick="if(event.target===this)closeM()"><div class="box" id="boxc"></div></div>
+
+<script>
+const API=location.origin;
+let SIDE='ALL', VER='ALL';
+function seg(id,set){document.getElementById(id).addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;[...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b));set(b.dataset.v);load();});}
+seg('sideSeg',v=>SIDE=v); seg('verSeg',v=>VER=v);
+
+async function getJSON(u){const r=await fetch(API+u,{headers:{'Accept':'application/json'}});if(!r.ok)throw new Error(r.status);return r.json();}
+function chip(lbl){const buy=lbl.startsWith('BUY');return `<span class="chip ${buy?'buy':'sell'}">${lbl}</span>`;}
+function scoreCol(s){return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';}
+
+async function load(){
+  document.getElementById('tbl').innerHTML='<div class="empty">Scanning&hellip;</div>';
+  document.getElementById('meta').textContent='…';
+  let d;try{d=await getJSON(`/api/trade-check/v4/scan?side=${SIDE}&verdict=${VER}&limit=250`);}catch(e){document.getElementById('tbl').innerHTML=`<div class="empty">Scan failed: ${e.message}</div>`;return;}
+  if(d.error){document.getElementById('tbl').innerHTML=`<div class="empty">${d.error}</div>`;return;}
+  document.getElementById('meta').textContent=`${d.count} of ${d.universe} · ${d.runtime_s}s · ${d.computed_at}`;
+  const rows=d.results||[];
+  if(!rows.length){document.getElementById('tbl').innerHTML='<div class="empty">No stocks match.</div>';return;}
+  const order=['BUY-MOM','BUY-REV','SELL-MOM','SELL-REV'];
+  const body=rows.map(x=>{
+    const mini=order.map(k=>x.scores[k]!=null?`<span title="${k}">${k.split('-')[1]==='MOM'?'M':'R'}${x.best_label.startsWith(k.split('-')[0])?'':''}<b>${x.scores[k]}</b></span>`:'').filter(Boolean);
+    const miniBuy=order.filter(k=>k.startsWith('BUY')&&x.scores[k]!=null).map(k=>`${k.split('-')[1][0]}<b>${x.scores[k]}</b>`).join(' ');
+    const miniSell=order.filter(k=>k.startsWith('SELL')&&x.scores[k]!=null).map(k=>`${k.split('-')[1][0]}<b>${x.scores[k]}</b>`).join(' ');
+    return `<tr class="row ${x.verdict==='STRONG'?'strong':''}" onclick="openM('${x.symbol}')">
+      <td class="sym">${x.symbol}</td>
+      <td class="seg-c">${x.segment||'&mdash;'}</td>
+      <td class="num">${x.cmp??'&mdash;'}</td>
+      <td>${chip(x.best_label)}</td>
+      <td class="bg" style="color:${scoreCol(x.best_score)}">${x.best_score}</td>
+      <td><span class="badge ${x.verdict}">${x.verdict}</span></td>
+      <td class="mini"><span style="color:var(--grn)">${miniBuy||'&mdash;'}</span> &middot; <span style="color:var(--red)">${miniSell||'&mdash;'}</span></td>
+    </tr>`;}).join('');
+  document.getElementById('tbl').innerHTML=`<div class="scroll"><table>
+    <thead><tr><th>Symbol</th><th>Sector</th><th>CMP</th><th>Best card</th><th>Score</th><th>Verdict</th><th>Buy M/R · Sell M/R</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+async function openM(sym){
+  const ov=document.getElementById('ov'),box=document.getElementById('boxc');
+  box.innerHTML=`<button class="close" onclick="closeM()">&times;</button><h2>${sym}</h2><div class="empty">Loading scorecard&hellip;</div>`;
+  ov.classList.add('open');
+  let d;try{d=await getJSON(`/api/trade-check/v4/dual?symbol=${encodeURIComponent(sym)}&side=ALL`);}catch(e){box.innerHTML=`<button class="close" onclick="closeM()">&times;</button><div class="empty">${e.message}</div>`;return;}
+  if(d.error){box.innerHTML=`<button class="close" onclick="closeM()">&times;</button><h2>${sym}</h2><div class="empty">${d.error}</div>`;return;}
+  const cc=c=>parseFloat(c)>=1?'c1':parseFloat(c)>=0.5?'c05':'c0';
+  const cardHtml=c=>`<div class="card ${d.best&&c.style===d.best.style&&c.side===d.best.side?'win':''}">
+    <h3>${chip(c.label)} <span class="bg" style="font-size:14px;color:${scoreCol(c.score)}">${c.score}</span>/15 <span class="badge ${c.verdict}">${c.verdict}</span></h3>
+    ${c.rules.map(r=>`<div class="rrow"><span class="rl">${r.rule} ${r.label}</span><span class="rc ${cc(r.credit)}">${r.credit}</span></div>`).join('')}
+  </div>`;
+  const gates=Object.entries(d.gates||{}).map(([s,g])=>`<span class="chip ${s==='BUY'?'buy':'sell'}" style="opacity:${g.pass?1:.45}">${s} gates ${g.pass?'PASS':'REJECT'}</span>`).join(' ');
+  box.innerHTML=`<button class="close" onclick="closeM()">&times;</button>
+    <h2>${sym} <span class="num" style="font-size:13px;color:var(--mut)">${d.cmp??''}</span></h2>
+    <div style="margin:8px 0;font-size:12px;color:var(--mut)">Best: ${d.best_label?chip(d.best_label):'&mdash;'} <b class="num" style="color:${scoreCol(d.best_score||0)}">${d.best_score??'&mdash;'}</b> &middot; ${gates}</div>
+    <div class="cards">${(d.cards||[]).map(cardHtml).join('')||'<div class="empty">All gates rejected &mdash; no scorecard.</div>'}</div>`;
+}
+function closeM(){document.getElementById('ov').classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeM();});
+load();
+</script>

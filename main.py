@@ -50,6 +50,7 @@ from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
 from tc_v4_endpoints import router as tc_v4_router
 from tc_v4_dual import router as tc_v4_dual_router   # cc#386: dual-style v4 engine (spec id=2926)
+from tc_v4_scan import router as tc_v4_scan_router   # cc#387: dual-style v4 batch scanner
 from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
@@ -246,6 +247,7 @@ app.include_router(scorr_chat_router)
 app.include_router(trade_check_v34_router)
 app.include_router(tc_v4_router)
 app.include_router(tc_v4_dual_router)   # cc#386
+app.include_router(tc_v4_scan_router)   # cc#387
 app.include_router(check_router)
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
@@ -612,6 +614,11 @@ def holdings_page():
 def v13_filter_registry_page():
     """cc#384: V13 filter registry — reality-verified inventory of every platform metric."""
     with open("scorr_v13.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/v4scan", response_class=HTMLResponse)
+def tc_v4_scan_page():
+    """cc#387: Trade Check v4 dual-style batch scanner (ranked, 4 cards per stock)."""
+    with open("scorr_tc_v4_scan.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
