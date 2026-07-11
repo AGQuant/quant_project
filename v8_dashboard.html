@@ -356,6 +356,7 @@ const EP={
   paper:"/api/paper/status",
   funnelDetail:b=>`/api/v8/funnel_detail/${b}`,
   passCount:b=>`/api/v8/stock_passcount/${b}`,
+  brStockDetail:s=>`/api/v8/br_stock_detail/${encodeURIComponent(s)}`,   // cc#366
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
@@ -583,6 +584,30 @@ function openInfo(basket){
   document.getElementById('infoModal').classList.add('open');
 }
 function closeInfo(){document.getElementById('infoModal').classList.remove('open');}
+// cc#366: buy_reversal pass-count box click -> per-stock 8-filter breakdown (actual vs required,
+// pass/fail) in the shared infoModal, so each V3 engine decision can be verified by hand. The
+// green-row count matches the n/8 on the box (endpoint mirrors the writer's pass logic exactly).
+async function openBrDetail(symbol){
+  document.getElementById('mTitle').textContent=symbol+' · Buy Reversal V3';
+  document.getElementById('mSub').textContent='Loading 8-filter breakdown…';
+  document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
+  document.getElementById('infoModal').classList.add('open');
+  let d;try{d=await getJSON(EP.brStockDetail(symbol));}
+  catch(e){document.getElementById('mBody').innerHTML=`<div class="err">Could not load detail for ${symbol}.</div>`;return;}
+  const hdr=[['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['R1',num(d.r1,2)],['Room&rarr;R1',d.room_r1_pct!=null?sign(d.room_r1_pct,2)+'%':'--']]
+    .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
+  const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
+  document.getElementById('mSub').innerHTML=`${hdr}<span style="white-space:nowrap">&middot; <b style="color:${pcCol}">${d.passed}/${d.total} pass</b></span>`;
+  const rows=(d.rows||[]).map(r=>`<tr style="border-top:1px solid var(--line)">
+    <td style="padding:8px 8px;font-weight:600">${r.filter.replace(/_/g,' ')}</td>
+    <td style="padding:8px 8px;color:var(--mut);white-space:nowrap">${r.required}</td>
+    <td style="padding:8px 8px;font-family:'Space Mono';white-space:nowrap">${r.actual}${r.note?`<div style="font-size:10px;color:var(--dim);white-space:normal;margin-top:2px">${r.note}</div>`:''}</td>
+    <td style="padding:8px 8px;text-align:center;font-weight:800;color:${r.pass?'var(--grn)':'var(--red)'}">${r.pass?'PASS':'FAIL'}</td></tr>`).join('');
+  document.getElementById('mBody').innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr style="text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.4px">
+      <th style="padding:6px 8px">Filter</th><th style="padding:6px 8px">Required</th><th style="padding:6px 8px">Actual</th><th style="padding:6px 8px;text-align:center">Status</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
 // cc#275: VIX popout open/close. Chart.js instance is never rebuilt — opening just reveals the
 // live canvas and resizes it (it was 0-sized while the overlay was display:none), so the current
 // chart shows instantly with no fetch/spinner. Background refresh (loadVixChart) is unchanged.
@@ -1442,10 +1467,13 @@ async function loadFunnelInline(basketId,panelIdx){
     }).join('')}</div>`;
   }else inner+=`<div class="err">funnel_detail not available for ${basketId}</div>`;
   if(pc&&pc.stocks){
-    inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}</span></div>`;
+    // cc#366: buy_reversal boxes are click-through to the per-stock 8-filter breakdown modal.
+    const isBR=basketId==='buy_reversal';
+    inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}${isBR?' · tap a box for the 8-filter breakdown':''}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
     inner+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
-      return`<div class="pc-card"><div class="pc-sym">${x.symbol}</div><div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div><div class="pc-fail">${fails||'all pass'}</div></div>`;
+      const clk=isBR?` style="cursor:pointer" onclick="openBrDetail('${x.symbol}')" title="8-filter breakdown for ${x.symbol}"`:'';
+      return`<div class="pc-card"${clk}><div class="pc-sym">${x.symbol}</div><div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div><div class="pc-fail">${fails||'all pass'}</div></div>`;
     }).join('')}</div>`;}
   inner+=preFreezeBanner();
   // cc#365: fill the pre-rendered shell + flip the summary from loading -> enabled (no pop-in).

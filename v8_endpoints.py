@@ -1408,6 +1408,75 @@ def br_stock_passcount():
         raise HTTPException(500, f"br_stock_passcount failed: {e}")
 
 
+@router.get("/br_stock_detail/{symbol}")
+def br_stock_detail(symbol: str):
+    """cc#366: per-stock 8-filter breakdown for buy_reversal V3 (spec id=2818) — ACTUAL value vs
+    REQUIRED bound + PASS/FAIL for each of the 8 gates, computed LIVE for ONE symbol. Powers the
+    pass-count click-through modal so engine decisions can be verified by hand. Pass logic mirrors
+    br_stock_passcount / _write_buy_reversal_v3_qualified EXACTLY (incl. the stage-8 rule that
+    true_weekly_rsi only counts once all 7 cheap gates pass), so the green-row count equals the
+    n/8 on the box. true_weekly_rsi is always computed here (one stock, cheap) so the row is never
+    blank — even when the engine would have skipped it. Display only, never qualifies."""
+    from v8_signal_writer import _load_hourly_fut_v3, _true_weekly_rsi
+    sym = symbol.upper()
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT gvm_score, dma_200, mom_2d, daily_rsi FROM v8_metrics
+                WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM v8_metrics)""", (sym,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"No v8_metrics for {sym}")
+            gvm, dma200, mom2d, drsi = [float(x) if x is not None else None for x in row]
+            cur.execute("""SELECT pp, r1 FROM v8_paper_pivots WHERE symbol=%s
+                AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)""", (sym,))
+            pv = cur.fetchone()
+            pp = float(pv[0]) if pv and pv[0] is not None else None
+            r1 = float(pv[1]) if pv and pv[1] is not None else None
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s AND cmp IS NOT NULL", (sym,))
+            cr = cur.fetchone()
+            cmp = float(cr[0]) if cr else None
+            hourly, n_bars = _load_hourly_fut_v3(conn, [sym]).get(sym, (None, 0))
+            twr = _true_weekly_rsi(conn, sym, cmp)   # one stock — always compute so the row is never blank
+
+        def _fmt(v, d):
+            return "--" if v is None else f"{v:.{d}f}"
+        room = ((r1 - cmp) / cmp * 100.0) if (cmp and r1) else None
+
+        # pass booleans — identical to br_stock_passcount (NULL-pass when the live datum is absent)
+        p_drsi = _passes_filter(drsi, None, 40.0)
+        p_dma  = _passes_filter(dma200, 0.0, None)
+        p_gvm  = _passes_filter(gvm, 6.5, None)
+        p_mom  = _passes_filter(mom2d, 0.0, 3.0)
+        p_hr   = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
+        p_cmp  = (cmp is None or pp is None) or (cmp > pp)
+        p_room = (room is None) or (room > 2.0)
+        cleared = all([p_drsi, p_dma, p_gvm, p_mom, p_hr, p_cmp, p_room])   # all 7 cheap gates
+        p_twr  = cleared and (twr is not None and twr >= 60.0)             # stage-8 engine rule
+
+        hr_actual = "no fut bars yet (exempt)" if n_bars == 0 else _fmt(hourly, 2)
+        rows = [
+            {"filter": "daily_rsi",       "required": "<= 40",      "actual": _fmt(drsi, 1),          "pass": p_drsi},
+            {"filter": "dma_200",         "required": ">= 0",       "actual": _fmt(dma200, 2) + "%",  "pass": p_dma},
+            {"filter": "gvm_score",       "required": ">= 6.5",     "actual": _fmt(gvm, 1),           "pass": p_gvm},
+            {"filter": "mom_2d",          "required": "0 to 3",     "actual": _fmt(mom2d, 2) + "%",   "pass": p_mom},
+            {"filter": "hourly_pct",      "required": "0.1 to 1.0", "actual": hr_actual,              "pass": p_hr},
+            {"filter": "cmp_gt_pp",       "required": "CMP > PP",   "actual": f"{_fmt(cmp, 2)} vs {_fmt(pp, 2)}", "pass": p_cmp},
+            {"filter": "room_r1",         "required": "> 2%",       "actual": _fmt(room, 2) + "%",    "pass": p_room},
+            {"filter": "true_weekly_rsi", "required": ">= 60",      "actual": _fmt(twr, 1),           "pass": p_twr},
+        ]
+        if not cleared:
+            rows[7]["note"] = "engine evaluates true weekly RSI only after all 7 cheap gates pass"
+        passed = sum(1 for r in rows if r["pass"])
+        return {"symbol": sym, "cmp": cmp, "pp": pp, "r1": r1,
+                "room_r1_pct": round(room, 2) if room is not None else None,
+                "passed": passed, "total": 8, "rows": rows,
+                "spec": "BUY_REVERSAL_V3 id=2818"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"br_stock_detail failed: {e}")
+
+
 @router.get("/funnel_detail/{basket}")
 def funnel_detail(basket: str):
     basket = basket.lower()
