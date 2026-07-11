@@ -1400,8 +1400,11 @@ function renderTradeLog(){
   // cc#370: All/All shows the authoritative summary totals; ANY filter recomputes from the subset.
   const isAll=(TLOG_DUR==='all'&&TLOG_BASKET==='all');
   const bTrades=isAll?(s.trades??t.length):t.length;
-  const bWins  =isAll?(s.wins??0):t.filter(x=>x.result==='TARGET').length;
-  const bLosses=isAll?(s.losses??0):t.filter(x=>x.result==='SL').length;
+  // cc#371: classify WINS/LOSSES by gross-P&L SIGN, not the result string. result==TARGET/SL missed
+  // GAP_TARGET_EXIT / GAP_SL_EXIT / MAX_HOLD / CONFLICT_EXIT rows (21+13!=42). ONE classifier for
+  // BOTH All/All and filtered (recent_trades holds every closed trade). pnl==0 = scratch -> neither.
+  const bWins  =t.filter(x=>Number(x.pnl)>0).length;
+  const bLosses=t.filter(x=>Number(x.pnl)<0).length;
   const bPnl   =isAll?Number(s.total_pnl||0):t.reduce((a,x)=>a+Number(x.pnl||0),0);
   const bAvg   =isAll?Number(s.avg_ret||0):(t.length?t.reduce((a,x)=>a+Number(x.return_pct||0),0)/t.length:0);
   const bNet   =netPnl(bPnl,bTrades);
