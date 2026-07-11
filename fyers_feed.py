@@ -82,7 +82,8 @@ IST               = pytz.timezone('Asia/Kolkata')
 # intraday store — fyers_fut, residual legacy bars, AND futures_basis — uses the 7d futures window.
 # The old shared RETENTION_DAYS (=30, drove BOTH fyers_eq and futures_basis) is removed so an equity
 # bump can never silently drag futures_basis along again.
-EQUITY_RETENTION_DAYS = 365   # intraday_prices source='fyers_eq' ONLY (30→365 on 08-Jul-2026 for long sim/BT7 history)
+EQUITY_RETENTION_DAYS = 730   # intraday_prices source='fyers_eq' ONLY (30→365 08-Jul; →730 cc#381 11-Jul: 2yr rolling for replay/sim depth)
+HIST_RETENTION_DAYS   = 730   # cc#381: source='fyers_hist' backtest warehouse — 2yr rolling (matches equity; was purge-exempt in cc#377)
 INTRADAY_FUT_RETENTION_DAYS = 7   # cc#227: fyers_fut + residual legacy fyers/yahoo intraday bars — AND futures_basis (cc#297)
 MARKET_OPEN    = dt_time(9, 15)
 MARKET_CLOSE   = dt_time(15, 30)
@@ -1202,7 +1203,8 @@ def purge_old_bars(conn):
     now          = datetime.now(IST).replace(tzinfo=None)
     # cc#297: fyers_eq → 365d (long sim/BT7 history); futures_basis → 7d (the INTRADAY_FUT window,
     # NOT the equity constant — decoupled so a future equity bump can't silently drag it along).
-    eq_cutoff    = now - timedelta(days=EQUITY_RETENTION_DAYS)             # intraday fyers_eq (365d, sim history)
+    eq_cutoff    = now - timedelta(days=EQUITY_RETENTION_DAYS)             # intraday fyers_eq (730d, 2yr sim history)
+    hist_cutoff  = now - timedelta(days=HIST_RETENTION_DAYS)              # cc#381: fyers_hist warehouse (730d, 2yr rolling)
     basis_cutoff = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # futures_basis (7d, matches fyers_fut)
     fut_cutoff   = now - timedelta(days=INTRADAY_FUT_RETENTION_DAYS)       # intraday fyers_fut + legacy (7d)
     opt_cutoff   = now - timedelta(days=OPTION_RETENTION_DAYS)            # option_chain (7d, leaner)
@@ -1211,12 +1213,15 @@ def purge_old_bars(conn):
             # cc#227: SOURCE-AWARE intraday retention. fyers_eq (canonical equity, cc#228) keeps
             # 365d (cc#297) for BT7/sim history; fyers_fut keeps 7d; residual legacy fyers/yahoo keep
             # 7d (shrinking once the cc#228 relabel/dedupe lands). IS DISTINCT FROM handles any NULL.
-            # cc#377: source='fyers_hist' (Phase B/A backtest warehouse) is PURGE-EXEMPT — it holds
-            # deliberately old bars (up to 365d) that the 7d "other" rule would otherwise wipe within
-            # days; excluded from BOTH deletes so backtest readers keep the full hist series.
+            # cc#377/381: source='fyers_hist' (backtest warehouse) rolls on its OWN 2yr window (730d,
+            # HIST_RETENTION_DAYS) — was purge-exempt in cc#377; cc#381 gives it a cutoff so it rolls
+            # instead of growing forever. Still excluded from the 7d "other" rule below.
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source='fyers_eq'", (eq_cutoff,))
             eq_del = cur.rowcount
+            cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
+                        "AND source='fyers_hist'", (hist_cutoff,))
+            hist_del = cur.rowcount
             cur.execute("DELETE FROM intraday_prices WHERE ts < %s AND timeframe='5m' "
                         "AND source IS DISTINCT FROM 'fyers_eq' AND source IS DISTINCT FROM 'fyers_hist'", (fut_cutoff,))
             other_del = cur.rowcount
@@ -1226,6 +1231,7 @@ def purge_old_bars(conn):
             basis_del = cur.rowcount
         conn.commit()
         log.info(f"Purged intraday: fyers_eq={eq_del} (>{EQUITY_RETENTION_DAYS}d), "
+                 f"fyers_hist={hist_del} (>{HIST_RETENTION_DAYS}d), "
                  f"fut/legacy={other_del} (>{INTRADAY_FUT_RETENTION_DAYS}d); "
                  f"option_chain={opt_del} (>{OPTION_RETENTION_DAYS}d), "
                  f"futures_basis={basis_del} (>{INTRADAY_FUT_RETENTION_DAYS}d)")
