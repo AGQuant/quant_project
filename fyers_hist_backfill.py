@@ -164,6 +164,46 @@ def probe_5m_depth(symbol="SBIN", conn=None, token=None) -> dict:
             conn.close()
 
 
+# ── deploy-time self-trigger for the Phase 0 probe ──
+# The CC sandbox has no HTTP path to prod, so a DB flag set via MCP run_sql + this startup hook
+# runs the probe exactly once (atomic claim). Flag app_config['fyers_5m_probe']='pending' -> SBIN;
+# 'pending:SYMBOL' -> that symbol. Mirrors stock_options_backfill's boot trigger.
+_PROBE_FLAG = "fyers_5m_probe"
+
+
+def _claim_probe_flag():
+    import fyers_feed
+    try:
+        conn = fyers_feed.get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key=%s AND value LIKE 'pending%%' FOR UPDATE",
+                            (_PROBE_FLAG,))
+                r = cur.fetchone()
+                if r:
+                    cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s",
+                                (_PROBE_FLAG,))
+            conn.commit()
+        finally:
+            conn.close()
+        if not r:
+            return None
+        val = r[0] or "pending"
+        return val.split(":", 1)[1].strip().upper() if ":" in val else "SBIN"
+    except Exception as e:
+        log.error(f"probe flag claim failed: {e}")
+        return None
+
+
+@router.on_event("startup")
+async def _probe_startup_trigger():
+    import threading
+    sym = _claim_probe_flag()
+    if sym:
+        log.info(f"cc#377: 5m-depth-probe flag claimed — probing {sym} in background")
+        threading.Thread(target=probe_5m_depth, args=(sym,), name="cc377-probe", daemon=True).start()
+
+
 # ── admin endpoints (thin wiring; also proxied by the MCP tools in mcp_dispatch.py) ──
 class FetchHistReq(BaseModel):
     symbol: str
