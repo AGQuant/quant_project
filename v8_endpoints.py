@@ -1302,8 +1302,12 @@ _BR_V3_STAGES = [
 ]
 
 def br_funnel_detail():
-    """cc#357: 8-stage cumulative funnel for buy_reversal V3, reshaped from the handler-written
-    v8_funnel_counts row (score_date=today). Empty stages (all 0) until the first live tick writes."""
+    """cc#357/364: 8-stage funnel for buy_reversal V3, reshaped from the handler-written
+    v8_funnel_counts row (score_date=today). cc#364 FOUNDER DIRECTIVE 11-Jul: rows are INDEPENDENT
+    per-filter pass counts across the universe (buy_momentum convention), NOT cumulative survivors —
+    each of the 7 cheap gates is passes/fails vs the whole universe; true_weekly_rsi (stage 8) is
+    passes vs the stocks that cleared all 7 cheap gates. Final still = strict-AND of all 8.
+    Empty stages (all 0) until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='buy_reversal' "
@@ -1311,24 +1315,97 @@ def br_funnel_detail():
             row = cur.fetchone()
         counts   = (row[0] if row and isinstance(row[0], dict) else {}) or {}
         universe = int(counts.get("_universe", 0) or 0)
-        stages, prev = [], universe
+        stage7   = counts.get("_stage7_survivors")
+        stage7   = int(stage7) if stage7 is not None else None
+        final    = int(counts.get("_score_qualified", 0) or 0)
+        stages = []
         for key, label, cmin, cmax in _BR_V3_STAGES:
-            surv = counts.get(key)
-            surv = prev if surv is None else int(surv)   # missing -> no kill (defensive)
-            stages.append({"metric": label, "condition_min": cmin, "condition_max": cmax,
-                           "survivors": surv, "killed": max(prev - surv, 0)})
-            prev = surv
-        final = int(counts.get("_score_qualified", prev) or 0)
+            passes = int(counts.get(key, 0) or 0)
+            # true_weekly_rsi (stage 8) is only evaluated on the 7-gate survivors -> its denominator
+            # is that survivor count, not the full universe (the heavy read is skipped for the rest).
+            denom = (stage7 if stage7 is not None else universe) if key == "true_weekly_rsi" else universe
+            fails = max(denom - passes, 0)
+            stage = {"metric": label, "condition_min": cmin, "condition_max": cmax,
+                     "passes": passes, "fails": fails,
+                     "survivors": passes, "killed": fails,
+                     "pass_pct": round(passes / denom * 100, 1) if denom else 0}
+            if key == "true_weekly_rsi":
+                stage["denominator"] = denom
+                stage["note"] = f"of {denom} stocks passing all 7 cheap gates"
+            stages.append(stage)
         return {
             "basket": "buy_reversal", "score_date": str(date.today()),
             "universe": universe, "final": final,
             "filter_count": 8, "n_filters": 8,
-            "gate_type": "strict AND (all 8 must pass)",
+            "stage7_survivors": stage7,
+            "gate_type": "independent per-filter counts; final = strict AND of all 8",
             "score_qualified": final, "pivot_pass": final,
             "stages": stages, **BASKET_META.get("buy_reversal", {}),
         }
     except Exception as e:
         raise HTTPException(500, f"br_funnel_detail failed: {e}")
+
+
+# cc#364: buy_reversal V3 pass-count gates — the 4 cheap daily-metric gates (spec id=2818).
+# The other 4 of the 8 (hourly_pct, cmp>pp, room-to-R1, true_weekly_rsi) are live/pivot/heavy and
+# computed inline in br_stock_passcount, mirroring _write_buy_reversal_v3_qualified exactly.
+_BR_V3_PASSCOUNT_GATES = [
+    ("daily_rsi", None, 40.0),   # (a) cold short-term dip
+    ("dma_200",   0.0,  None),   # (c) long-term uptrend
+    ("gvm_score", 6.5,  None),   # (d) quality
+    ("mom_2d",    0.0,  3.0),     # (e) 2-day momentum turned up
+]
+
+def br_stock_passcount():
+    """cc#364: buy_reversal V3 pass-count = n/8 (V3 parity, spec id=2818), cheap-first.
+    The 4 daily gates + 3 cheap live checks (hourly_pct, CMP>PP, room-to-R1) are evaluated for ALL
+    stocks; true_weekly_rsi (stage 8, DB-heavy) is computed ONLY for stocks that clear the first 7 —
+    every other stock caps at <=7/8 with true_weekly_rsi in the failed/skipped list. Off-market or
+    missing pivot/CMP: the live checks NULL-pass gracefully (same exemption as the writer's hourly
+    09:15-09:20 rule). Display only — mirrors _write_buy_reversal_v3_qualified, never qualifies."""
+    from v8_signal_writer import _load_hourly_fut_v3, _true_weekly_rsi
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            all_rows = _basket_universe(cur)
+            pivots   = _basket_pivots(cur)
+            cmp_map  = _basket_cmp(cur)
+            hourly_v3 = _load_hourly_fut_v3(conn, [r["symbol"] for r in all_rows])
+            out = []
+            for s in all_rows:
+                sym = s["symbol"]
+                passed, failed = [], []
+                # 4 cheap daily gates
+                for metric, mn, mx in _BR_V3_PASSCOUNT_GATES:
+                    (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
+                # 3 cheap live checks — NULL-pass when the live datum is unavailable (off-market / no pivot)
+                cmp = cmp_map.get(sym)
+                pv  = pivots.get(sym)
+                pp  = pv.get("pp") if pv else None
+                r1  = pv.get("r1") if pv else None
+                hourly, n_bars = hourly_v3.get(sym, (None, 0))
+                hourly_ok = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
+                cmp_ok    = (cmp is None or pp is None) or (cmp > pp)
+                room_pct  = ((r1 - cmp) / cmp * 100.0) if (cmp and r1) else None
+                room_ok   = (room_pct is None) or (room_pct > 2.0)
+                (passed if hourly_ok else failed).append("hourly_pct")
+                (passed if cmp_ok   else failed).append("cmp_gt_pp")
+                (passed if room_ok  else failed).append("room_r1")
+                # stage 8 true_weekly_rsi — heavy read, ONLY for stocks that cleared all 7 cheap gates
+                if len(passed) == 7:
+                    twr = _true_weekly_rsi(conn, sym, cmp)
+                    (passed if (twr is not None and twr >= 60.0) else failed).append("true_weekly_rsi")
+                else:
+                    failed.append("true_weekly_rsi")   # skipped — not evaluated, caps at <=7/8
+                out.append({"symbol": sym, "passed": len(passed), "total": 8,
+                            "passed_filters": passed, "failed_filters": failed,
+                            "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                            "v21_pass": None})
+        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
+        return {"basket": "buy_reversal", "score_date": str(date.today()),
+                "universe": len(out), "filter_count": 8, "stocks": out,
+                "v21_enabled": False, **BASKET_META.get("buy_reversal", {})}
+    except Exception as e:
+        raise HTTPException(500, f"br_stock_passcount failed: {e}")
 
 
 @router.get("/funnel_detail/{basket}")
@@ -1431,6 +1508,7 @@ def stock_passcount(basket: str):
     basket = basket.lower()
     if basket == "buy_s1_bounce":   return s1b_stock_passcount()
     if basket == "sell_overbought": return so_stock_passcount()
+    if basket == "buy_reversal":    return br_stock_passcount()
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:

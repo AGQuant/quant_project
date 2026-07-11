@@ -1651,16 +1651,29 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
         s["_hourly_ok"] = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
         base.append(s)
 
-    # cc#357: cumulative, cheap-first 8-stage funnel (spec order). true_weekly_rsi (DB-heavy) is
-    # stage 8 and only computed on stage-7 survivors. Counts feed v8_funnel_counts for the dashboard.
+    # cc#364: INDEPENDENT per-filter pass counts across `base` (buy_momentum convention) — each of
+    # the 7 cheap gates counted ALONE over the whole base, NOT cumulative survivors. true_weekly_rsi
+    # (stage 8, DB-heavy) is counted only over the strict-intersection stage-7 survivors below.
+    # Final = strict-AND of all 8 (unchanged). Counts feed v8_funnel_counts / br_funnel_detail.
     funnel = {"_universe": len(base)}
-    surv = [s for s in base if _passes(s.get("daily_rsi"), None, 40.0)];   funnel["daily_rsi"]  = len(surv)   # 1 (a)
-    surv = [s for s in surv if _passes(s.get("dma_200"), 0.0, None)];      funnel["dma_200"]    = len(surv)   # 2 (c)
-    surv = [s for s in surv if _passes(s.get("gvm_score"), 6.5, None)];    funnel["gvm_score"]  = len(surv)   # 3 (d)
-    surv = [s for s in surv if _passes(s.get("mom_2d"), 0.0, 3.0)];        funnel["mom_2d"]     = len(surv)   # 4 (e)
-    surv = [s for s in surv if s["_hourly_ok"]];                           funnel["hourly_pct"] = len(surv)   # 5 (f)
-    surv = [s for s in surv if s["_cmp"] > s["_pp"]];                      funnel["cmp_gt_pp"]  = len(surv)   # 6 (g)
-    surv = [s for s in surv if s["_room_r1_pct"] > 2.0];                   funnel["room_r1"]    = len(surv)   # 7 (h)
+    funnel["daily_rsi"]  = sum(1 for s in base if _passes(s.get("daily_rsi"), None, 40.0))   # (a)
+    funnel["dma_200"]    = sum(1 for s in base if _passes(s.get("dma_200"), 0.0, None))       # (c)
+    funnel["gvm_score"]  = sum(1 for s in base if _passes(s.get("gvm_score"), 6.5, None))     # (d)
+    funnel["mom_2d"]     = sum(1 for s in base if _passes(s.get("mom_2d"), 0.0, 3.0))         # (e)
+    funnel["hourly_pct"] = sum(1 for s in base if s["_hourly_ok"])                            # (f)
+    funnel["cmp_gt_pp"]  = sum(1 for s in base if s["_cmp"] > s["_pp"])                       # (g)
+    funnel["room_r1"]    = sum(1 for s in base if s["_room_r1_pct"] > 2.0)                     # (h)
+    # strict intersection of the 7 cheap gates — only these reach the heavy stage-8 wRSI read
+    # (identical set to the old cumulative pre-filter, so qualification is byte-for-byte unchanged).
+    surv = [s for s in base
+            if _passes(s.get("daily_rsi"), None, 40.0)
+            and _passes(s.get("dma_200"), 0.0, None)
+            and _passes(s.get("gvm_score"), 6.5, None)
+            and _passes(s.get("mom_2d"), 0.0, 3.0)
+            and s["_hourly_ok"]
+            and s["_cmp"] > s["_pp"]
+            and s["_room_r1_pct"] > 2.0]
+    funnel["_stage7_survivors"] = len(surv)   # denominator for the stage-8 true_weekly_rsi row
     log.info(f"buy_reversal_v3: {len(surv)} after 7-condition cheap pre-filter")
 
     qualified = []
