@@ -981,7 +981,7 @@ def filter_config(basket: str):
             "principle": "Bounce from pivot S1 support -- 7 filters (1 gate + 6 stages)",
             "filters": [
                 {"metric": "nifty_rsi (market gate)", "condition": ">= 55"},
-                {"metric": "week_return",             "condition": "0% to 3%"},
+                {"metric": "week_return",             "condition": "0% to 2.5%"},
                 {"metric": "dma_50",                  "condition": "> 0%"},
                 {"metric": "vol_ratio",               "condition": ">= 1.5x"},
                 {"metric": "recovery_2d",             "condition": "2% to 8%"},
@@ -1757,7 +1757,7 @@ def _s1b_funnel_stages():
                    "condition_min": ">= 55", "condition_max": f"OPEN ({nifty_rsi:.1f})",
                    "survivors": total, "killed": 0})
     _stage("gvm_score",   lambda s: _passes_filter(s.get("gvm_score"), 7.0, None), ">= 7.0", "-")   # cc_task #76 4d
-    _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 3.0), ">= 0%", "<= 3%")
+    _stage("week_return", lambda s: _passes_filter(s.get("week_return"), 0.0, 2.5), ">= 0%", "<= 2.5%")
     _stage("dma_50",      lambda s: _passes_filter(s.get("dma_50"), 0.0, None),     "> 0%",   "-")
     _stage("vol_ratio",   lambda s: _passes_filter(s.get("vol_ratio"), 1.5, None),  ">= 1.5x", "-")
     _stage("recovery_2d", lambda s: _passes_filter(s.get("recovery_2d"), 2.0, 8.0), ">= 2%", "<= 8%")
@@ -1893,7 +1893,7 @@ def s1b_stock_passcount():
             checks = {
                 "nifty_rsi":      gate_open,
                 "gvm_score":      _passes_filter(r.get("gvm_score"), 7.0, None),
-                "week_return":    _passes_filter(r.get("week_return"), 0.0, 3.0),
+                "week_return":    _passes_filter(r.get("week_return"), 0.0, 2.5),
                 "dma_50":         _passes_filter(r.get("dma_50"), 0.0, None),
                 "vol_ratio":      _passes_filter(r.get("vol_ratio"), 1.5, None),
                 "recovery_2d":    _passes_filter(rec2d, 2.0, 8.0),
