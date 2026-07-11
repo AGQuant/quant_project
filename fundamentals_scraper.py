@@ -21,6 +21,11 @@ Trigger (app_config key 'fundamentals_scrape'):
                  (lets the parser be verified before the full run).
     'run'/'pending' -> full universe (screener_raw.nse_code), resumable in ~590-symbol stages.
 Status: GET /api/admin/fundamentals_scrape_status.  Manual kick: POST /api/admin/run_fundamentals_scrape.
+
+DEPTH NOTE (verified 11-Jul on RELIANCE/HDFCBANK/KPITTECH test scrape): logged-out public pages
+expose ~13 trailing quarters + ~12 annual years — NOT the ~40 quarters the spec anticipated. Annual
+history (12y) is ample for the annual-stepped G/V components; quarterly QoQ inputs are capped at
+~3.25y. Phase 2 compute should lean on annual G/V + daily-M and treat QoQ as short-history.
 """
 
 import logging
