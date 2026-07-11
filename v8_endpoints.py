@@ -79,13 +79,13 @@ FILTER_CONFIG = {
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # V4 LOCKED 16-Jun-2026. 5 strict AND in Neutral/Bear.
-        # Mood relaxation 18-Jun-2026: 4/5 in Strong Bullish + Bullish.
-        "rsi_weekly":   [None, 45.0],
-        "mom_2d":       [None, -3.0],
-        "sector_week":  [None, -1.5],
-        "dma_200":      [None,  2.0],
-        "week_return":  [-10.0, -0.5],
+        # cc#378 SELL_REVERSAL_V5D (spec id=2894, supersedes V4 id=357). Dedicated strict-AND handler
+        # (_write_sell_reversal_v5d_qualified) — OUT of the score-gate loop. These are the 3
+        # v8_metrics-computable gates shown in the funnel; the live/pivot gates (TRUE weekly RSI<=40,
+        # CMP<PP, room-to-S1/S2>=2%) are enforced in the handler and rendered via sr_funnel_detail.
+        "daily_rsi":  [60.0, None],   # hot bounce
+        "rsi_month":  [None, 50.0],   # weak monthly (engine enforces STRICT <50)
+        "dma_200":    [None, 0.0],    # below the 200-DMA
     },
     "sell_momentum": {
         # V2 LOCKED 16-Jun-2026. 6 strict AND in Neutral/Bear.
@@ -111,13 +111,12 @@ FILTER_CONFIG = {
     },
 }
 
-SELL_REVERSAL_SL_MULT  = 0.5
-SELL_MOMENTUM_SL_MULT  = 0.5
+SELL_MOMENTUM_SL_MULT  = 0.5   # cc#378: SELL_REVERSAL_SL_MULT retired — V5-D uses S1/S2 + 1:1 mirror
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "62-64%", "signals_per_day": "~35-55/yr"},
     "buy_momentum":    {"side": "BUY",  "target": "+3.0% fixed",               "win_pct": "67% live", "signals_per_day": "~2/day"},
-    "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "79.3%", "signals_per_day": "~0.6/day"},
+    "sell_reversal":   {"side": "SELL", "target": "S1/S2 dynamic",             "win_pct": "73% (12mo bt)", "signals_per_day": "~0.5/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
     "buy_s1_bounce":   {"side": "BUY",  "target": "+2.0% fixed",               "win_pct": "73.9%", "signals_per_day": "~0.3/day"},
@@ -145,8 +144,9 @@ V21_FILTERS = {
                         "week_index_52": {"min": 60.0, "max": 100.0}},
     "buy_s1_bounce":   {"hourly_pct": {"min": 0.0, "min_excl": True, "max": 1.0},
                         "week_index_52": {"min": 50.0, "max": 90.0}},
-    "sell_reversal":   {"hourly_pct": {"max": 0.0, "max_excl": True},
-                        "week_index_52": {"min": 20.0, "max": 60.0}},
+    # cc#378: sell_reversal V2.1 bands removed — sell_reversal is now V5-D (dedicated strict-AND
+    # handler, RAW: no market gate, no kill-switch, never calls the V2.1 hard gate). Absence is
+    # handled by every reader (.get(basket,{}) / `basket in V21_FILTERS`), so no v21_pass for it.
     "sell_momentum":   {"hourly_pct": {"max": 0.0, "max_excl": True},
                         "week_index_52_modify": {"max": 30.0}},
     "sell_overbought": {"fall_from_day_high": {"max": -1.5}},
@@ -155,7 +155,7 @@ V21_FILTERS = {
 # Locked-spec WR baselines (per specs 1263-1268) for the WR kill-switch.
 V21_BASELINE_WR = {
     "buy_reversal": 63.0, "buy_momentum": 67.0, "buy_s1_bounce": 73.9,  # cc#354/359 V2/V3 honest baselines
-    "sell_reversal": 79.3, "sell_momentum": 71.9, "sell_overbought": 81.5,
+    "sell_reversal": 73.0, "sell_momentum": 71.9, "sell_overbought": 81.5,  # cc#378 V5-D honest (RAW, no kill-switch)
 }
 
 
@@ -927,18 +927,23 @@ def filter_config(basket: str):
             **BASKET_META.get(basket, {})
         }
     if basket == "sell_reversal":
+        # cc#378 SELL_REVERSAL_V5D (spec id=2894). 3 v8_metrics gates + 3 live/pivot gates.
         rows = []
         for metric, bounds in FILTER_CONFIG["sell_reversal"].items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
             rows.append({"metric": metric, "min": mn, "max": mx,
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx})
+        rows += [{"metric": "true_weekly_rsi", "condition": "<= 40 (TRUE calendar weekly)"},
+                 {"metric": "cmp_lt_pp",        "condition": "CMP < PP"},
+                 {"metric": "room",             "condition": "target (S1 or S2) >= 2% from entry"}]
         return {
             "basket": basket, "filters": rows, "count": len(rows),
-            "target": "S2", "target_formula": "S2 = PP - (H5 - L5)  [rolling-5-day pivot]",
-            "stop": f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)", "sl_mult": SELL_REVERSAL_SL_MULT,
-            "gate_note": "Strict AND in Neutral/Bear (5/5). 1 miss allowed (4/5) in Strong Bullish + Bullish (18-Jun-2026).",
-            "backtest": {"signals": 156, "wr_pct": 79.3, "expected_value": 0.752},
+            "target": "S1/S2 dynamic",
+            "target_formula": "S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2); no signal if <2%",
+            "stop": "1:1 mirror = entry + (entry - target)",
+            "gate_note": "V5-D (id=2894): strict AND of 6, RAW — no market gate, no auto kill-switch (founder-locked 11-Jul).",
+            "backtest": {"trades": 126, "wr_pct": 73.3, "window": "12mo episode-level 1:1 (+2.00%/trade)"},
             **BASKET_META.get(basket, {})
         }
     if basket == "sell_momentum":
@@ -1206,8 +1211,10 @@ def qualified(basket: str, response: Response, limit: int = 50):
             extra = {"regime": regime, "nifty_1m": round(nifty_1m, 2),
                      "target": _get_buy_momentum_target(regime)}
         elif basket == "sell_reversal":
-            extra = {"target": "S2", "target_formula": "S2 = PP - (H5 - L5)",
-                     "stop_formula": f"PP + {SELL_REVERSAL_SL_MULT}*(R1-PP)", "sl_mult": SELL_REVERSAL_SL_MULT}
+            # cc#378 V5-D: dynamic S1/S2 target + 1:1 mirror stop (frozen at entry); no V4 SL_MULT.
+            extra = {"target": "S1/S2 dynamic",
+                     "target_formula": "S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",
+                     "stop_formula": "1:1 mirror = entry + (entry - target)"}
         elif basket == "sell_momentum":
             extra = {"target": "S2", "target_formula": "S2 = PP - (H5 - L5)",
                      "stop_formula": f"PP + {SELL_MOMENTUM_SL_MULT}*(R1-PP)", "sl_mult": SELL_MOMENTUM_SL_MULT}
@@ -1280,10 +1287,27 @@ def _basket_universe(cur):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 def _basket_pivots(cur):
-    cur.execute("""SELECT symbol, pp, r1, s1 FROM v8_paper_pivots
+    # cc#378: s2 added (not in WHERE, so no symbol drops) for sell_reversal V5-D's S1/S2 target.
+    cur.execute("""SELECT symbol, pp, r1, s1, s2 FROM v8_paper_pivots
         WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
           AND pp IS NOT NULL AND r1 IS NOT NULL""")
-    return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3])} for r in cur.fetchall()}
+    return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3]),
+                   "s2": float(r[4]) if r[4] is not None else None} for r in cur.fetchall()}
+
+
+def _sr_dynamic_target(cmp, s1, s2):
+    """cc#378: sell_reversal V5-D dynamic target — S1 if (cmp-S1)/cmp >= 2% else S2 (never beyond
+    S2); no valid target if even S2 is < 2% away. Returns (target, room_pct) or (None, None)."""
+    if cmp is None or s1 is None or cmp <= 0:
+        return None, None
+    room_s1 = (cmp - s1) / cmp * 100.0
+    if room_s1 >= 2.0:
+        return s1, round(room_s1, 3)
+    if s2 is not None:
+        room_s2 = (cmp - s2) / cmp * 100.0
+        if room_s2 >= 2.0:
+            return s2, round(room_s2, 3)
+    return None, None
 
 
 # cc#357: buy_reversal V3 is a dedicated strict-AND basket; 4 of its 8 gates are live/pivot-based
@@ -1477,12 +1501,175 @@ def br_stock_detail(symbol: str):
         raise HTTPException(500, f"br_stock_detail failed: {e}")
 
 
+# cc#378: sell_reversal V5-D funnel stages (spec id=2894) — SELL mirror of _BR_V3_STAGES. Cheap-first,
+# true_weekly_rsi last (heavy, only on cheap-intersection survivors). Labels carry spaces for verbatim render.
+_SR_V5D_STAGES = [
+    ("daily_rsi",       "daily RSI",       ">= 60", ""),
+    ("rsi_month",       "monthly RSI",     "",      "< 50"),
+    ("dma_200",         "dma 200",         "",      "<= 0"),
+    ("cmp_lt_pp",       "CMP < PP",        "",      ""),
+    ("room",            "room to S1/S2",   ">= 2%", ""),
+    ("true_weekly_rsi", "true weekly RSI", "",      "<= 40"),
+]
+
+def sr_funnel_detail():
+    """cc#378: 6-stage funnel for sell_reversal V5-D, reshaped from the handler-written
+    v8_funnel_counts row. INDEPENDENT per-filter pass counts across the universe (buy_momentum
+    convention); true_weekly_rsi (stage 6) is passes vs the stocks clearing all 5 cheap gates.
+    Final = strict-AND of all 6. Empty until the first live tick writes."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_reversal' "
+                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
+            row = cur.fetchone()
+        counts   = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+        universe = int(counts.get("_universe", 0) or 0)
+        stage5   = counts.get("_stage5_survivors")
+        stage5   = int(stage5) if stage5 is not None else None
+        final    = int(counts.get("_score_qualified", 0) or 0)
+        stages = []
+        for key, label, cmin, cmax in _SR_V5D_STAGES:
+            passes = int(counts.get(key, 0) or 0)
+            denom = (stage5 if stage5 is not None else universe) if key == "true_weekly_rsi" else universe
+            fails = max(denom - passes, 0)
+            stage = {"metric": label, "condition_min": cmin, "condition_max": cmax,
+                     "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
+                     "pass_pct": round(passes / denom * 100, 1) if denom else 0}
+            if key == "true_weekly_rsi":
+                stage["denominator"] = denom
+                stage["note"] = f"of {denom} stocks passing all 5 cheap gates"
+            stages.append(stage)
+        return {
+            "basket": "sell_reversal", "score_date": str(date.today()),
+            "universe": universe, "final": final, "filter_count": 6, "n_filters": 6,
+            "stage5_survivors": stage5,
+            "gate_type": "independent per-filter counts; final = strict AND of all 6",
+            "score_qualified": final, "pivot_pass": final,
+            "stages": stages, **BASKET_META.get("sell_reversal", {}),
+        }
+    except Exception as e:
+        raise HTTPException(500, f"sr_funnel_detail failed: {e}")
+
+
+# cc#378: sell_reversal V5-D pass-count cheap daily-metric gates (>=60 / <=0). rsi_month<50 (strict),
+# CMP<PP, room-to-S1/S2, true_weekly_rsi are handled inline in sr_stock_passcount.
+_SR_V5D_PASSCOUNT_GATES = [
+    ("daily_rsi", 60.0, None),   # (a) hot bounce
+    ("dma_200",   None, 0.0),    # (d) below the 200-DMA
+]
+
+def sr_stock_passcount():
+    """cc#378: sell_reversal V5-D pass-count = n/6 (spec id=2894), cheap-first (mirror cc#364).
+    5 cheap gates for ALL stocks; true_weekly_rsi (stage 6, heavy) only for stocks clearing the first 5.
+    Off-market / missing pivot|CMP: the CMP<PP + room checks NULL-pass. Display only — mirrors the
+    handler, never qualifies."""
+    from v8_signal_writer import _true_weekly_rsi
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            all_rows = _basket_universe(cur)
+            pivots   = _basket_pivots(cur)
+            cmp_map  = _basket_cmp(cur)
+            out = []
+            for s in all_rows:
+                sym = s["symbol"]
+                passed, failed = [], []
+                for metric, mn, mx in _SR_V5D_PASSCOUNT_GATES:
+                    (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
+                rm = s.get("rsi_month")
+                (passed if (rm is not None and float(rm) < 50.0) else failed).append("rsi_month")
+                cmp = cmp_map.get(sym)
+                pv  = pivots.get(sym)
+                pp  = pv.get("pp") if pv else None
+                s1  = pv.get("s1") if pv else None
+                s2  = pv.get("s2") if pv else None
+                cmp_ok = (cmp is None or pp is None) or (cmp < pp)
+                tgt, _ = _sr_dynamic_target(cmp, s1, s2)
+                room_ok = (cmp is None or s1 is None) or (tgt is not None)
+                (passed if cmp_ok  else failed).append("cmp_lt_pp")
+                (passed if room_ok else failed).append("room")
+                if len(passed) == 5:
+                    twr = _true_weekly_rsi(conn, sym, cmp)
+                    (passed if (twr is not None and twr <= 40.0) else failed).append("true_weekly_rsi")
+                else:
+                    failed.append("true_weekly_rsi")
+                out.append({"symbol": sym, "passed": len(passed), "total": 6,
+                            "passed_filters": passed, "failed_filters": failed,
+                            "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
+                            "v21_pass": None})
+        out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
+        return {"basket": "sell_reversal", "score_date": str(date.today()),
+                "universe": len(out), "filter_count": 6, "stocks": out,
+                "v21_enabled": False, **BASKET_META.get("sell_reversal", {})}
+    except Exception as e:
+        raise HTTPException(500, f"sr_stock_passcount failed: {e}")
+
+
+@router.get("/sr_stock_detail/{symbol}")
+def sr_stock_detail(symbol: str):
+    """cc#378: per-stock 6-filter breakdown for sell_reversal V5-D (spec id=2894) — ACTUAL vs REQUIRED
+    + PASS/FAIL. Mirrors sr_stock_passcount / _write_sell_reversal_v5d_qualified so the green-row count
+    equals n/6. true_weekly_rsi always computed here (one stock) so the row is never blank."""
+    from v8_signal_writer import _true_weekly_rsi
+    sym = symbol.upper()
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT dma_200, rsi_month, daily_rsi FROM v8_metrics
+                WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM v8_metrics)""", (sym,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"No v8_metrics for {sym}")
+            dma200, rmon, drsi = [float(x) if x is not None else None for x in row]
+            cur.execute("""SELECT pp, s1, s2 FROM v8_paper_pivots WHERE symbol=%s
+                AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)""", (sym,))
+            pv = cur.fetchone()
+            pp = float(pv[0]) if pv and pv[0] is not None else None
+            s1 = float(pv[1]) if pv and pv[1] is not None else None
+            s2 = float(pv[2]) if pv and pv[2] is not None else None
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s AND cmp IS NOT NULL", (sym,))
+            cr = cur.fetchone()
+            cmp = float(cr[0]) if cr else None
+            twr = _true_weekly_rsi(conn, sym, cmp)
+
+        def _fmt(v, d):
+            return "--" if v is None else f"{v:.{d}f}"
+        tgt, room = _sr_dynamic_target(cmp, s1, s2)
+
+        p_drsi = _passes_filter(drsi, 60.0, None)
+        p_rm   = rmon is not None and rmon < 50.0
+        p_dma  = _passes_filter(dma200, None, 0.0)
+        p_cmp  = (cmp is None or pp is None) or (cmp < pp)
+        p_room = (cmp is None or s1 is None) or (tgt is not None)
+        cleared = all([p_drsi, p_rm, p_dma, p_cmp, p_room])   # 5 cheap gates
+        p_twr  = cleared and (twr is not None and twr <= 40.0)
+
+        tgt_lbl = "S1" if (tgt is not None and s1 is not None and abs(tgt - s1) < 1e-6) else ("S2" if tgt is not None else "--")
+        rows = [
+            {"filter": "daily_rsi",       "required": ">= 60",  "actual": _fmt(drsi, 1),        "pass": p_drsi},
+            {"filter": "rsi_month",       "required": "< 50",   "actual": _fmt(rmon, 1),        "pass": p_rm},
+            {"filter": "dma_200",         "required": "<= 0",   "actual": _fmt(dma200, 2) + "%","pass": p_dma},
+            {"filter": "cmp_lt_pp",       "required": "CMP < PP","actual": f"{_fmt(cmp, 2)} vs {_fmt(pp, 2)}", "pass": p_cmp},
+            {"filter": "room",            "required": ">= 2%",  "actual": (f"{_fmt(room, 2)}% -> {tgt_lbl}" if room is not None else "--"), "pass": p_room},
+            {"filter": "true_weekly_rsi", "required": "<= 40",  "actual": _fmt(twr, 1),         "pass": p_twr},
+        ]
+        if not cleared:
+            rows[5]["note"] = "engine evaluates true weekly RSI only after all 5 cheap gates pass"
+        passed = sum(1 for r in rows if r["pass"])
+        return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1, "s2": s2,
+                "target": tgt, "room_pct": room, "passed": passed, "total": 6, "rows": rows,
+                "spec": "SELL_REVERSAL_V5D id=2894"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"sr_stock_detail failed: {e}")
+
+
 @router.get("/funnel_detail/{basket}")
 def funnel_detail(basket: str):
     basket = basket.lower()
     if basket == "buy_s1_bounce":   return s1b_funnel_detail()
     if basket == "sell_overbought": return so_funnel_detail()
     if basket == "buy_reversal":    return br_funnel_detail()
+    if basket == "sell_reversal":   return sr_funnel_detail()   # cc#378 V5-D
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -1578,6 +1765,7 @@ def stock_passcount(basket: str):
     if basket == "buy_s1_bounce":   return s1b_stock_passcount()
     if basket == "sell_overbought": return so_stock_passcount()
     if basket == "buy_reversal":    return br_stock_passcount()
+    if basket == "sell_reversal":   return sr_stock_passcount()   # cc#378 V5-D
     if basket not in FILTER_CONFIG: raise HTTPException(404, f"Unknown basket: {basket}")
     try:
         with _conn() as conn, conn.cursor() as cur:

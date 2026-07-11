@@ -252,19 +252,22 @@ def _load_pivots(conn, sim_ts=None) -> Dict[str, dict]:
     with conn.cursor() as cur:
         if sim_ts is None:
             cur.execute("""
-                SELECT symbol, pp, r1, s1
+                SELECT symbol, pp, r1, s1, s2
                 FROM v8_paper_pivots
                 WHERE pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
                   AND pp IS NOT NULL AND r1 IS NOT NULL AND s1 IS NOT NULL
             """)
         else:
             cur.execute("""
-                SELECT symbol, pp, r1, s1
+                SELECT symbol, pp, r1, s1, s2
                 FROM v8_paper_pivots
                 WHERE pivot_date = %s
                   AND pp IS NOT NULL AND r1 IS NOT NULL AND s1 IS NOT NULL
             """, (_today(sim_ts),))
-        return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3])}
+        # cc#378: s2 added (NOT in the WHERE, so it never drops a symbol) — sell_reversal V5-D
+        # picks S1 or S2 as its dynamic target. s2 may be None for a symbol without it.
+        return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3]),
+                       "s2": float(r[4]) if r[4] is not None else None}
                 for r in cur.fetchall()}
 
 
@@ -1375,7 +1378,8 @@ def _entry_guards(conn, sym: str, paper_side: str, basket: str, d: date, cmp: fl
 
 
 def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[float],
-                       pv: Optional[dict], d: date, gate_fails: int, sim_ts=None):
+                       pv: Optional[dict], d: date, gate_fails: int, sim_ts=None,
+                       target: Optional[float] = None, stop: Optional[float] = None):
     if not cmp or not pv:
         return
 
@@ -1413,7 +1417,12 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         log.warning(f"auto_paper slot check {sym}: {e}"); return
 
     entry = round(cmp, 2)
-    if basket == "buy_momentum":
+    if target is not None and stop is not None:
+        # cc#378: caller-supplied FROZEN levels (sell_reversal V5-D: S1/S2-dynamic target + 1:1
+        # mirror stop, computed in the dedicated handler) — used verbatim, no basket recompute.
+        target = round(target, 2)
+        stop   = round(stop, 2)
+    elif basket == "buy_momentum":
         # cc#359 V2 (spec id=2834): fixed +/-3.0% 1:1, frozen at entry (replaces R1/mirror).
         target = round(entry * 1.03, 2)
         stop   = round(entry * 0.97, 2)
@@ -1747,6 +1756,133 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
             log.warning(f"buy_reversal_v3 insert {sym}: {e}")
 
 
+def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_date: date,
+                                       gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
+    """cc#378 SELL_REVERSAL_V5D (spec id=2894, supersedes archived V4 id=357). The SELL mirror of
+    BUY_REVERSAL_V3: sell_reversal is REMOVED from the standard score-gate loop; strict-AND of 6
+    conditions, RAW — NO market gate, NO auto kill-switch (founder-locked 11-Jul):
+      (a) daily_rsi   >= 60         (hot bounce)
+      (b) true_weekly_rsi <= 40     (weak larger frame — TRUE calendar weekly, basket-local; cc#353)
+      (c) rsi_month   < 50          (weak monthly)
+      (d) dma_200     <= 0          (below the 200-DMA)
+      (e) CMP < PP                  (below the rolling-5d pivot)
+      (f) room gate: target (S1 if (cmp-S1)/cmp >= 2% else S2, never beyond S2) >= 2% away, else NO signal.
+    Target = that S1-or-S2 level; Stop = 1:1 mirror = entry + (entry - target). Entry = _auto_paper_entry
+    with the handler-computed FROZEN levels, standard SELL slot pool + all standard guards."""
+    basket, side = "sell_reversal", "SELL"
+    # cc#378: base universe = symbols with a live CMP + valid pivots; annotate dynamic target + room once.
+    base = []
+    for s in all_metrics:
+        cmp = s.get("_cmp")
+        pv  = pivots.get(s["symbol"])
+        if not cmp or not pv:
+            continue
+        pp, s1, s2 = pv.get("pp"), pv.get("s1"), pv.get("s2")
+        if pp is None or s1 is None:
+            continue
+        # (f) dynamic target: S1 if >=2% below entry, else S2 (needs s2); chosen target must be >=2%.
+        room_s1 = round((cmp - s1) / cmp * 100.0, 3)
+        room_s2 = round((cmp - s2) / cmp * 100.0, 3) if s2 is not None else None
+        if room_s1 >= 2.0:
+            tgt, room = s1, room_s1
+        elif room_s2 is not None and room_s2 >= 2.0:
+            tgt, room = s2, room_s2
+        else:
+            tgt, room = None, None      # room gate fails -> no signal
+        s["_pp"] = pp
+        s["_sr_target"] = tgt
+        s["_sr_room_pct"] = room
+        s["_sr_room_ok"] = tgt is not None
+        base.append(s)
+
+    # cc#378: INDEPENDENT per-filter pass counts across `base` (buy_momentum convention, cc#364 style).
+    # true_weekly_rsi (heavy) is counted only over the strict-intersection of the 5 cheap gates.
+    def _rm_lt50(s):   # rsi_month < 50 (STRICT — _passes is inclusive, so handle it directly)
+        v = s.get("rsi_month")
+        return v is not None and float(v) < 50.0
+    funnel = {"_universe": len(base)}
+    funnel["daily_rsi"] = sum(1 for s in base if _passes(s.get("daily_rsi"), 60.0, None))   # (a)
+    funnel["rsi_month"] = sum(1 for s in base if _rm_lt50(s))                                # (c)
+    funnel["dma_200"]   = sum(1 for s in base if _passes(s.get("dma_200"), None, 0.0))       # (d)
+    funnel["cmp_lt_pp"] = sum(1 for s in base if s["_cmp"] < s["_pp"])                        # (e)
+    funnel["room"]      = sum(1 for s in base if s["_sr_room_ok"])                            # (f)
+    surv = [s for s in base
+            if _passes(s.get("daily_rsi"), 60.0, None)
+            and _rm_lt50(s)
+            and _passes(s.get("dma_200"), None, 0.0)
+            and s["_cmp"] < s["_pp"]
+            and s["_sr_room_ok"]]
+    funnel["_stage5_survivors"] = len(surv)   # denominator for the stage-6 true_weekly_rsi row
+    log.info(f"sell_reversal_v5d: {len(surv)} after 5-condition cheap pre-filter")
+
+    qualified = []
+    for s in surv:
+        twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
+        s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
+        if twr is not None and twr <= 40.0:               # (b)
+            qualified.append(s)
+    funnel["true_weekly_rsi"] = len(qualified)
+    funnel["_score_qualified"] = len(qualified)
+    log.info(f"sell_reversal_v5d: {len(qualified)} qualified (true_weekly_rsi<=40) [spec id=2894]")
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (basket, score_date) DO UPDATE SET
+                    counts = EXCLUDED.counts, computed_at = NOW()
+            """, (basket, target_date, json.dumps(funnel)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"sell_reversal_v5d funnel: {e}")
+
+    for s in qualified:
+        sym   = s["symbol"]
+        cmp   = s.get("_cmp")
+        entry = round(cmp, 2)
+        tgt   = round(s["_sr_target"], 2)
+        stop  = round(entry + (entry - tgt), 2)   # 1:1 mirror ABOVE entry (SELL)
+        snap = {
+            "true_weekly_rsi": s.get("_true_weekly_rsi"),
+            "daily_rsi":       s.get("daily_rsi"),
+            "rsi_month":       s.get("rsi_month"),
+            "dma_200":         s.get("dma_200"),
+            "room_pct":        s.get("_sr_room_pct"),
+            "target":          tgt,
+            "stop":            stop,
+            "filter_score": 6, "filter_total": 6,
+            "spec": "SELL_REVERSAL_V5D id=2894",
+        }
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO v8_qualified
+                    (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
+                     mom_2d, week_return, month_return, dma_200, dma_50,
+                     rsi_month, rsi_weekly, sector_week, sector_day,
+                     month_index, week_index_52, daily_rsi,
+                     metrics, source)
+                    VALUES (%s,'sell_reversal',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
+                    ON CONFLICT (symbol, basket, signal_date) DO NOTHING
+                """, (
+                    sym, target_date, signal_ts_ist,
+                    s.get("gvm_score"), cmp,
+                    s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
+                    s.get("dma_200"), s.get("dma_50"),
+                    s.get("rsi_month"), s.get("rsi_weekly"),
+                    s.get("sector_week"), s.get("sector_day"),
+                    s.get("month_index"), s.get("week_index_52"),
+                    s.get("daily_rsi"), json.dumps(snap),
+                ))
+            conn.commit()
+            # cc#378: entry with the handler-computed FROZEN S1/S2 target + 1:1 mirror stop.
+            _auto_paper_entry(conn, sym, basket, side, cmp, pivots.get(sym),
+                              target_date, gate_fails, sim_ts=sim_ts, target=tgt, stop=stop)
+        except Exception as e:
+            log.warning(f"sell_reversal_v5d insert {sym}: {e}")
+
+
 def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
     from v8_endpoints import FILTER_CONFIG, v21_hard_gate_pass
 
@@ -1761,7 +1897,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     for basket, filters in FILTER_CONFIG.items():
         # cc#354: buy_reversal left the standard score-gate + dynamic-regime loop entirely —
         # it now runs as BUY_REVERSAL_V3 via its own dedicated strict-AND handler (spec id=2818).
-        if basket in ("sell_overbought", "buy_s1_bounce", "buy_reversal"):
+        # cc#378: sell_reversal likewise left the loop — SELL_REVERSAL_V5D dedicated handler (id=2894).
+        if basket in ("sell_overbought", "buy_s1_bounce", "buy_reversal", "sell_reversal"):
             continue
 
         active_filters = filters
@@ -1887,6 +2024,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
 
     _write_buy_reversal_v3_qualified(conn, all_metrics, target_date,
                                      gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+    _write_sell_reversal_v5d_qualified(conn, all_metrics, target_date,
+                                       gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
                                     gate_fails, pivots, signal_ts_ist, enabled_v21,
                                     sim_ts=sim_ts, v21_backtest=v21_backtest)

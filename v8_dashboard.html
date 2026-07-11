@@ -357,6 +357,7 @@ const EP={
   funnelDetail:b=>`/api/v8/funnel_detail/${b}`,
   passCount:b=>`/api/v8/stock_passcount/${b}`,
   brStockDetail:s=>`/api/v8/br_stock_detail/${encodeURIComponent(s)}`,   // cc#366
+  srStockDetail:s=>`/api/v8/sr_stock_detail/${encodeURIComponent(s)}`,   // cc#378
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
@@ -452,19 +453,20 @@ const BASKET_INFO={
     wr:73.9,ev:0.716,sigs:88,spd:"~0.3/day · fires in clusters at market bottoms",
   },
   sell_reversal:{
-    label:"Sell Reversal V4",side:"SELL",version:"V4",
-    thesis:"Weak stock below key MAs, oversold weekly RSI, negative sector alignment. Entry near PP ceiling, target deeper support at S2. V4 tightened mom_2d from -2 to -3, cutting 45% of signals but raising WR by 4pp and EV by 38%.",
+    label:"Sell Reversal V5-D",side:"SELL",version:"V5-D",
+    thesis:"TRUE reversal (SELL mirror of Buy Reversal V3): a hot short-term bounce (daily RSI>=60) in a weak larger frame (true weekly RSI<=40, monthly RSI<50) below the 200-DMA and below the rolling pivot. Fade the bounce back to support. RAW gate: no market gate, no auto kill-switch (founder-locked 11-Jul, spec id=2894). Deployed into a currently-losing regime for live reps — human weekly review only.",
     filters:[
-      {m:"rsi_weekly",c:"<= 45",dyn:false},
-      {m:"mom_2d",c:"<= -3.0%",dyn:false},
-      {m:"sector_week",c:"<= -1.5",dyn:false},
-      {m:"dma_200",c:"<= 2.0%",dyn:false},
-      {m:"week_return",c:"-10% to -0.5%",dyn:false},
+      {m:"daily_rsi",c:">= 60",dyn:false},
+      {m:"true_weekly_rsi",c:"<= 40 (TRUE calendar weekly)",dyn:false},
+      {m:"rsi_month",c:"< 50",dyn:false},
+      {m:"dma_200",c:"<= 0",dyn:false},
+      {m:"cmp_lt_pp",c:"CMP < PP",dyn:false},
+      {m:"room",c:"target (S1 or S2) >= 2% away",dyn:false},
     ],
-    gateType:"strict AND -- all 5 must pass · no score fallback",
-    target:"S2 = PP - (H5 - L5)",stop:"PP + 0.5x(R1 - PP)",
-    pivotEntry:"SELL zone: S1 <= CMP < PP  AND  (CMP-S1) >= 0.5x(PP-S1)",
-    wr:79.3,ev:0.752,sigs:156,spd:"~0.6/day",
+    gateType:"strict AND -- all 6 must pass · dedicated handler, no score fallback",
+    target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
+    pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
+    wr:73.3,ev:2.00,sigs:126,spd:"~0.5/day · 12mo episode-level 1:1 backtest",
   },
   sell_momentum:{
     label:"Sell Momentum V2",side:"SELL",version:"V2",
@@ -587,14 +589,19 @@ function closeInfo(){document.getElementById('infoModal').classList.remove('open
 // cc#366: buy_reversal pass-count box click -> per-stock 8-filter breakdown (actual vs required,
 // pass/fail) in the shared infoModal, so each V3 engine decision can be verified by hand. The
 // green-row count matches the n/8 on the box (endpoint mirrors the writer's pass logic exactly).
-async function openBrDetail(symbol){
-  document.getElementById('mTitle').textContent=symbol+' · Buy Reversal V3';
-  document.getElementById('mSub').textContent='Loading 8-filter breakdown…';
+async function openBrDetail(symbol,basket){
+  // cc#378: generalized to buy_reversal V3 (8 gates) AND sell_reversal V5-D (6 gates). Rows share
+  // the {filter,required,actual,pass} shape; only the endpoint + header levels differ by basket.
+  const isSR=basket==='sell_reversal';
+  document.getElementById('mTitle').textContent=symbol+(isSR?' · Sell Reversal V5-D':' · Buy Reversal V3');
+  document.getElementById('mSub').textContent=`Loading ${isSR?6:8}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
   document.getElementById('infoModal').classList.add('open');
-  let d;try{d=await getJSON(EP.brStockDetail(symbol));}
+  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):EP.brStockDetail(symbol));}
   catch(e){document.getElementById('mBody').innerHTML=`<div class="err">Could not load detail for ${symbol}.</div>`;return;}
-  const hdr=[['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['R1',num(d.r1,2)],['Room&rarr;R1',d.room_r1_pct!=null?sign(d.room_r1_pct,2)+'%':'--']]
+  const hdr=(isSR
+    ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S1',num(d.s1,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['Target',d.target!=null?num(d.target,2):'--'],['Room',d.room_pct!=null?sign(d.room_pct,2)+'%':'--']]
+    : [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['R1',num(d.r1,2)],['Room&rarr;R1',d.room_r1_pct!=null?sign(d.room_r1_pct,2)+'%':'--']])
     .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
   const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
   document.getElementById('mSub').innerHTML=`${hdr}<span style="white-space:nowrap">&middot; <b style="color:${pcCol}">${d.passed}/${d.total} pass</b></span>`;
@@ -1528,12 +1535,13 @@ async function loadFunnelInline(basketId,panelIdx){
     }).join('')}</div>`;
   }else inner+=`<div class="err">funnel_detail not available for ${basketId}</div>`;
   if(pc&&pc.stocks){
-    // cc#366: buy_reversal boxes are click-through to the per-stock 8-filter breakdown modal.
-    const isBR=basketId==='buy_reversal';
-    inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}${isBR?' · tap a box for the 8-filter breakdown':''}</span></div>`;
+    // cc#366/378: buy_reversal (8) AND sell_reversal (6) boxes are click-through to the per-stock
+    // filter breakdown modal (openBrDetail is basket-generalized).
+    const isDetail=(basketId==='buy_reversal'||basketId==='sell_reversal');
+    inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}${isDetail?' · tap a box for the filter breakdown':''}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
     inner+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
-      const clk=isBR?` style="cursor:pointer" onclick="openBrDetail('${x.symbol}')" title="8-filter breakdown for ${x.symbol}"`:'';
+      const clk=isDetail?` style="cursor:pointer" onclick="openBrDetail('${x.symbol}','${basketId}')" title="filter breakdown for ${x.symbol}"`:'';
       return`<div class="pc-card"${clk}><div class="pc-sym">${x.symbol}</div><div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div><div class="pc-fail">${fails||'all pass'}</div></div>`;
     }).join('')}</div>`;}
   inner+=preFreezeBanner();
