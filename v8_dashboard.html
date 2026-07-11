@@ -1128,7 +1128,7 @@ function renderMaster(){
   const cards=`<div class="cards">
     <div class="card"><div class="k">Open Positions</div><div class="v">${open.length}</div></div>
     <div class="card"><div class="k">Unrealised P&L</div><div class="v ${pnlCls(unreal)}">${inr(unreal)}</div><div class="v-sub">Net ${inr(netUnreal)}</div></div>
-    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(totalClosedPnl)}">${inr(totalClosedPnl)}</div><div class="v-sub">Net ${inr(netClosed)}</div></div>
+    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(netClosed)}">${inr(netClosed)}</div><div class="v-sub">Gross ${inr(totalClosedPnl)} &minus; Brokerage ${inr(totalClosedPnl-netClosed)}</div></div>
     <div class="card"><div class="k">Win / Loss</div><div class="v">${winsTxt}/${lossTxt}</div></div>
   </div>`;
   // [ All ] [ Long ] [ Short ] toggle — active tints per spec, count badge per side.
@@ -1408,6 +1408,10 @@ function renderTradeLog(){
   const bPnl   =isAll?Number(s.total_pnl||0):t.reduce((a,x)=>a+Number(x.pnl||0),0);
   const bAvg   =isAll?Number(s.avg_ret||0):(t.length?t.reduce((a,x)=>a+Number(x.return_pct||0),0)/t.length:0);
   const bNet   =netPnl(bPnl,bTrades);
+  // cc#372: AVG RET on a NET basis. Per-trade net return = gross return scaled by (pnl-brokerage)/pnl
+  // (exact — return% and P&L share the same notional, so no qty needed); pnl==0 scratch -> gross.
+  // Computed from the loaded trades for BOTH views (All/All = all recent_trades).
+  const bAvgNet=(function(){const a=t.map(x=>{const g=Number(x.pnl),r=Number(x.return_pct);return g!==0?r*(g-BROKERAGE_PER_TRADE)/g:r;}).filter(v=>isFinite(v));return a.length?a.reduce((s2,v)=>s2+v,0)/a.length:0;})();
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
   const bkBtns=[['all','All'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['buy_s1_bounce','Buy S1 Bounce'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum'],['sell_overbought','Sell Overbought']].map(([v,l])=>`<button class="btn${TLOG_BASKET===v?' on':''}" onclick="setTlogBasket('${v}')">${l}</button>`).join('');
   const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
@@ -1418,8 +1422,8 @@ function renderTradeLog(){
     <div class="card"><div class="k">Trades</div><div class="v">${bTrades??'--'}</div></div>
     <div class="card"><div class="k">Wins</div><div class="v pos">${bWins??'--'}</div></div>
     <div class="card"><div class="k">Losses</div><div class="v neg">${bLosses??'--'}</div></div>
-    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(bPnl)}">${inr(bPnl)}</div><div class="v-sub">Net ${inr(bNet)}</div></div>
-    <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(bAvg)}">${sign(bAvg)}%</div></div>
+    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(bNet)}">${inr(bNet)}</div><div class="v-sub">Gross ${inr(bPnl)} &minus; Brokerage ${inr(bPnl-bNet)}</div></div>
+    <div class="card"><div class="k">Avg Ret (net)</div><div class="v ${pnlCls(bAvgNet)}">${sign(bAvgNet)}%</div><div class="v-sub">gross ${sign(bAvg)}%</div></div>
   </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage (round trip = Rs.${BROKERAGE_PER_TRADE*2})${isAll?'':` &middot; showing ${t.length} filtered trade${t.length===1?'':'s'}`}</div>`;
   const desktopTable=`<div class="ptitle">Recent Closed Trades</div>`+
     sortTbl('tlog',
