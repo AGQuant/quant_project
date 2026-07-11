@@ -110,7 +110,7 @@
      for readability; scoped to .mtbl so the dense funnel tables stay compact. */
   .mtbl td{font-size:15px}
   /* cc#383: Matrix row-label cell — left-aligned Sora, sticky on horizontal scroll. */
-  td.mxlabel{text-align:left;font-family:'Sora',sans-serif;font-size:11px;font-weight:600;color:var(--mut);position:sticky;left:0;background:var(--panel);z-index:1;white-space:normal;min-width:150px}
+  td.mxlabel{text-align:left;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;color:var(--mut);position:sticky;left:0;background:var(--panel);z-index:1;white-space:normal;min-width:150px}
   .mtbl th{font-size:12.5px}
   /* cc#168: Raw Data — all 23 metric columns, horizontal scroll, pinned symbol col.
      .scroll.rawscroll beats the mobile .scroll table{min-width:unset} on specificity
@@ -242,8 +242,10 @@
   .msec-title{font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px}
   .frow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--line);font-size:12px}
   .frow:last-child{border-bottom:none}
-  .fm{flex:1;font-weight:600;color:var(--txt);font-family:'Space Mono';font-size:11px}
-  .fc{color:var(--cyan);font-family:'Space Mono';font-size:11px;min-width:130px}
+  /* cc#379: filter dimension label + constraint value cells use the dashboard body font (Sora),
+     not a standalone monospace, and +2 notches (11->13px) for readability. Colour coding kept. */
+  .fm{flex:1;font-weight:600;color:var(--txt);font-family:'Sora',sans-serif;font-size:13px}
+  .fc{color:var(--cyan);font-family:'Sora',sans-serif;font-size:13px;min-width:130px}
   .fdyn{font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(245,185,74,.12);color:var(--amber);border:1px solid #fde68a;white-space:nowrap;font-weight:700}
   .pf{font-family:'Space Mono';font-size:11px;color:var(--txt);background:var(--panel2);border-radius:8px;padding:10px 13px;line-height:2}
   .stat-pills{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
@@ -585,7 +587,7 @@ function renderMatrix(){
     const tds=MATRIX_COLS.map(id=>{
       const inf=BASKET_INFO[id];
       if(r.live){const w=_mxLiveWR(id);if(!w)return cell(id,null);const col=w.acc>=60?"var(--grn)":w.acc>=45?"var(--amber)":"var(--red)";return cell(id,`<span style="color:${col};font-weight:700">${w.acc.toFixed(1)}%</span> <span style="color:var(--dim);font-size:9px">(${w.n})</span>`);}
-      if(r.map!==undefined)return cell(id,_mxCell(id,r.map[id]),"font-size:10px");
+      if(r.map!==undefined)return cell(id,_mxCell(id,r.map[id]),"font-family:'Sora',sans-serif;font-size:12px");  // cc#379: filter-constraint cells in body font, +2 size
       if(r.lit!==undefined)return cell(id,r.lit);
       if(r.pull){let v=inf[r.pull];if(v==null||v==="")return cell(id,null);
         if(r.pct)v=(typeof v==="number")?v+"%":v;
@@ -1403,6 +1405,39 @@ function renderMaster(){
       : "");
 }
 
+// cc#379: canonical basket-table column set + row renderers, shared by ALL six baskets
+// (renderFunnel for the 5 BASKETS + renderSellOB). Reference = Buy Momentum layout. A value that
+// is momentarily unavailable renders -- (the column is NEVER dropped). Sell baskets use the exact
+// same set — no mirrored/alternate columns. Display-only; per-basket gates are untouched.
+const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]];
+function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
+function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
+  return`<tr class="${rc}">
+    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
+    <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
+    <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
+    <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
+    <td>${x.rsi_month!=null?num(x.rsi_month,0):'--'}</td>
+    <td class="${bkGvmCls(x)}">${x.gvm_score!=null?num(x.gvm_score,1):'--'}</td>
+    <td>${x.cmp!=null?num(x.cmp,1):'--'}</td>
+    <td style="color:var(--mut)">${x.pp!=null?num(x.pp,0):'--'}</td>
+    <td class="pos">${x.r1!=null?num(x.r1,0):'--'}</td>
+    <td class="neg">${x.s1!=null?num(x.s1,0):'--'}</td>
+    <td${isOpen?' style="color:var(--mut)"':''}>${isOpen?num(x.entry_price,1):'--'}</td>
+    <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td>
+    <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;}
+function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
+    return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
+      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
+      <div class="mob-chips">
+        <span class="mob-chip ${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'% 1D':'1D --'}</span>
+        <span class="mob-chip ${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'% 2D':'2D --'}</span>
+        <span class="mob-chip">DMA50 ${x.dma_50!=null?num(x.dma_50,0):'--'}</span>
+        <span class="mob-chip">RSIm ${x.rsi_month!=null?num(x.rsi_month,0):'--'}</span>
+        <span class="mob-chip ${bkGvmCls(x)}">GVM ${x.gvm_score!=null?num(x.gvm_score,1):'--'}</span>
+        ${isOpen?`<span class="mob-chip">Entry ${num(x.entry_price,1)}</span><span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}
+        <span class="mob-chip" style="color:var(--dim)">${fmtSince(x.signal_ts)}</span></div>
+      <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div></div>`;}).join('')}</div>`;}
 function renderFunnel(b){
   const d=cache['q_'+b.id];if(!d)return'<div class="loading">...</div>';
   const isSell=b.id.startsWith('sell');
@@ -1418,52 +1453,12 @@ function renderFunnel(b){
     <span style="color:var(--dim);margin:0 4px">·</span>
     <span class="badge b-nearmiss">NEAR MISS</span><span style="color:var(--dim)">Score-gate fallback</span>
   </div>`;
-  // cc#360: buy_reversal V3 shows its own strict-AND daily-gate fields (daily RSI, mom_2d, dma_200,
-  // room-to-R1%) — dropping DMA50/RSIm/1D%/S1 which are not V3 filters. Other baskets keep the shared set.
-  const isBR=b.id==='buy_reversal';
-  const gvmCls=x=>Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';
-  const desktopTable=isBR?sortTbl('bk_'+b.id,
-    [["symbol","Symbol"],["daily_rsi","dRSI"],["mom_2d","2D Mom%"],["gvm_score","GVM"],["dma_200","DMA200%"],["cmp","CMP"],["pp","PP"],["r1","R1"],["room_r1_pct","Room→R1%"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]],
-    sorted,x=>{const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
-      return`<tr class="${rc}">
-        <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
-        <td>${num(x.daily_rsi,0)}</td><td class="${cls(x.mom_2d)}">${sign(x.mom_2d,1)}%</td>
-        <td class="${gvmCls(x)}">${num(x.gvm_score,1)}</td>
-        <td class="${cls(x.dma_200)}">${sign(x.dma_200,1)}%</td>
-        <td>${num(x.cmp,1)}</td><td style="color:var(--mut)">${num(x.pp,0)}</td>
-        <td class="pos">${num(x.r1,0)}</td>
-        <td class="${cls(x.room_r1_pct)}">${x.room_r1_pct!=null?sign(x.room_r1_pct,1)+'%':'--'}</td>
-        <td${isOpen?' style="color:var(--mut)"':''}>${isOpen?num(x.entry_price,1):'--'}</td>
-        <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td>
-        <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;},
-    {sortKey:'gvm_score',dir:-1,empty:"No qualified names"}):sortTbl('bk_'+b.id,
-    [["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]],
-    sorted,x=>{const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
-      return`<tr class="${rc}">
-        <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
-        <td class="${cls(x.day_1d)}">${sign(x.day_1d,1)}%</td><td class="${cls(x.mom_2d)}">${sign(x.mom_2d,1)}%</td>
-        <td class="${cls(x.dma_50)}">${num(x.dma_50,0)}</td><td>${num(x.rsi_month,0)}</td>
-        <td class="${gvmCls(x)}">${num(x.gvm_score,1)}</td>
-        <td>${num(x.cmp,1)}</td><td style="color:var(--mut)">${num(x.pp,0)}</td>
-        <td class="pos">${num(x.r1,0)}</td><td class="neg">${num(x.s1,0)}</td>
-        <td${isOpen?' style="color:var(--mut)"':''}>${isOpen?num(x.entry_price,1):'--'}</td>
-        <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td>
-        <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;},
-    {sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
-  const mobileCards=`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
-    const chips=isBR
-      ?`<span class="mob-chip">dRSI ${num(x.daily_rsi,0)}</span><span class="mob-chip ${cls(x.mom_2d)}">${sign(x.mom_2d,1)}% 2D</span>
-        <span class="mob-chip ${cls(x.dma_200)}">DMA200 ${sign(x.dma_200,1)}%</span><span class="mob-chip ${gvmCls(x)}">GVM ${num(x.gvm_score,1)}</span>
-        <span class="mob-chip ${cls(x.room_r1_pct)}">Room ${x.room_r1_pct!=null?sign(x.room_r1_pct,1)+'%':'--'}</span>`
-      :`<span class="mob-chip ${cls(x.day_1d)}">${sign(x.day_1d,1)}% 1D</span><span class="mob-chip ${cls(x.mom_2d)}">${sign(x.mom_2d,1)}% 2D</span>
-        <span class="mob-chip">DMA50 ${num(x.dma_50,0)}</span><span class="mob-chip">RSIm ${num(x.rsi_month,0)}</span>
-        <span class="mob-chip ${gvmCls(x)}">GVM ${num(x.gvm_score,1)}</span>`;
-    return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
-      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
-      <div class="mob-chips">${chips}
-      ${isOpen?`<span class="mob-chip">Entry ${num(x.entry_price,1)}</span><span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}
-      <span class="mob-chip" style="color:var(--dim)">${fmtSince(x.signal_ts)}</span></div>
-      <div class="mob-pivot">${pivotBar(x.cmp,x.pp,x.r1,x.s1)}</div></div>`;}).join('')}</div>`;
+  // cc#379: ONE canonical column set across all six baskets (Buy Momentum reference layout).
+  // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/
+  // colour-semantics/sort everywhere, no alternate set. Engine handlers (cc#360/378/380/382) and the
+  // per-basket Filter Funnel sections are unchanged; only these position/signal table columns unify.
+  const desktopTable=sortTbl('bk_'+b.id,BK_COLS,sorted,bkRow,{sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
+  const mobileCards=bkMobile(sorted,isSell);
   return meta+legend+desktopTable+mobileCards;
 }
 
@@ -1479,23 +1474,11 @@ function renderSellOB(){
     <span style="color:var(--dim);margin:0 4px">·</span>
     <span class="badge b-qualified">SIGNAL</span><span style="color:var(--dim)">Qualified today, entry gated (reason shown)</span>
   </div>`;
-  const desktopTable=sortTbl('sellob',
-    [["symbol","Symbol"],["entry","Entry"],["target","Target"],["tgt_pct","Tgt%"],["rsi_month","RSIm"],["dma_200","DMA200"],["gvm_score","GVM"],["open_pnl_pct","P&L%"]],
-    sorted,x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';
-      return`<tr class="${rowClass(st)}">
-        <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
-        <td>${num(x.entry)}</td><td class="neg">${num(x.target)}</td><td class="neg">${num(x.tgt_pct,1)}%</td>
-        <td>${num(x.rsi_month,0)}</td><td>${num(x.dma_200,0)}</td>
-        <td class="${Number(x.gvm_score)>=7?'pos':'score-mid'}">${num(x.gvm_score,1)}</td>
-        <td${isOpen?` class="${cls(x.open_pnl_pct)}"`:''}}>${isOpen?sign(x.open_pnl_pct,2)+'%':'--'}</td></tr>`;},
-    {sortKey:'rsi_month',dir:-1,empty:"No overbought signals"});
-  const mobileCards=`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';
-    return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
-      <div style="display:flex;gap:6px">${statusBadge(st,x.signal_reason)}<span class="mob-badge b-short">SELL</span></div></div>
-      <div class="mob-chips"><span class="mob-chip">Entry ${num(x.entry)}</span><span class="mob-chip neg">Tgt ${num(x.target)} (${num(x.tgt_pct,1)}%)</span>
-      <span class="mob-chip">RSIm ${num(x.rsi_month,0)}</span><span class="mob-chip">DMA200 ${num(x.dma_200,0)}</span>
-      <span class="mob-chip">GVM ${num(x.gvm_score,1)}</span>
-      ${isOpen?`<span class="mob-chip ${cls(x.open_pnl_pct)}">P&L ${sign(x.open_pnl_pct,2)}%</span>`:''}</div></div>`;}).join('')}</div>`;
+  // cc#379: sell_overbought uses the SAME canonical column set as the other five baskets (no
+  // mirrored/alternate columns). Target/Tgt% now live in the i-button modal + Filter Funnel, not
+  // the position table. Payload enriched (v8_endpoints sell_overbought) to carry the canonical fields.
+  const desktopTable=sortTbl('sellob',BK_COLS,sorted,bkRow,{sortKey:'gvm_score',dir:-1,empty:"No overbought signals"});
+  const mobileCards=bkMobile(sorted,true);
   return meta+legend+desktopTable+mobileCards;
 }
 

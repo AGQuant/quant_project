@@ -2548,9 +2548,13 @@ def sell_overbought(limit: int = 50):
         with _conn() as conn, conn.cursor() as cur:
             # cc#382 V3: qualifiers come from the dedicated handler (v8_qualified today), NOT a V2
             # inline recompute. Display FIXED -/+2% levels off the live CMP; enrich with pivots for context.
+            # cc#379: also select the canonical basket-table fields (cmp, mom_2d, dma_50, dma_200,
+            # s1, day_1d) so sell_overbought renders the SAME unified column set as the other baskets.
+            # Display-only enrichment — the V3 qualification handler is untouched.
             cur.execute("""
                 SELECT q.symbol,
                     ROUND(COALESCE(c.cmp, q.cmp)::numeric,2)          AS entry,
+                    ROUND(COALESCE(c.cmp, q.cmp)::numeric,2)          AS cmp,
                     ROUND((COALESCE(c.cmp, q.cmp)*0.98)::numeric,2)   AS target,
                     ROUND((COALESCE(c.cmp, q.cmp)*1.02)::numeric,2)   AS stop,
                     -2.0 AS tgt_pct, 2.0 AS sl_pct,
@@ -2559,10 +2563,17 @@ def sell_overbought(limit: int = 50):
                     ROUND(q.week_return::numeric,2) AS week_return,
                     ROUND(q.sector_week::numeric,2) AS sector_week,
                     ROUND(q.gvm_score::numeric,2)   AS gvm_score,
+                    ROUND(q.mom_2d::numeric,2)      AS mom_2d,
+                    ROUND(q.dma_50::numeric,2)      AS dma_50,
+                    ROUND(q.dma_200::numeric,2)     AS dma_200,
+                    ROUND(m.day_1d::numeric,2)      AS day_1d,
                     ROUND(p.r1::numeric,2) AS r1, ROUND(p.pp::numeric,2) AS pp,
+                    ROUND(p.s1::numeric,2) AS s1,
                     q.signal_ts, q.metrics
                 FROM v8_qualified q
                 LEFT JOIN cmp_prices c ON c.symbol=q.symbol
+                LEFT JOIN v8_metrics m ON m.symbol=q.symbol
+                    AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
                 LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
                     AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
                 WHERE q.basket='sell_overbought' AND q.signal_date=CURRENT_DATE
