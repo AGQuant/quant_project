@@ -2649,6 +2649,30 @@ def adr_only():
         raise HTTPException(500, f"adr failed: {e}")
 
 
+@router.get("/v9_pairs_sectors")
+def v9_pairs_sectors():
+    """cc#385: dynamic sector list for the V9 Sector-Pairs concept tab. Every futures-universe
+    sector (GVM segment) holding >=4 active stocks — the pool the long-short pairs engine will draw
+    from once the backfills land. Read-only display data; NO engine, no signal computation."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT ir.gvm_segment AS segment, COUNT(*) AS stock_count
+                FROM futures_universe fu
+                JOIN input_raw ir ON UPPER(ir.nse_code)=UPPER(fu.symbol)
+                WHERE fu.is_active=TRUE AND ir.gvm_segment IS NOT NULL AND ir.gvm_segment<>''
+                GROUP BY ir.gvm_segment HAVING COUNT(*)>=4
+                ORDER BY COUNT(*) DESC, ir.gvm_segment
+            """)
+            rows = [{"segment": r[0], "stock_count": int(r[1])} for r in cur.fetchall()]
+        return {"sector_count": len(rows),
+                "total_stocks": sum(r["stock_count"] for r in rows),
+                "min_stocks": 4, "status": "DESIGN",
+                "sectors": rows}
+    except Exception as e:
+        raise HTTPException(500, f"v9_pairs_sectors failed: {e}")
+
+
 @router.get("/domestic_live")
 def domestic_live():
     out = {}

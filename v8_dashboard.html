@@ -111,6 +111,8 @@
   .mtbl td{font-size:15px}
   /* cc#383: Matrix row-label cell — left-aligned Sora, sticky on horizontal scroll. */
   td.mxlabel{text-align:left;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;color:var(--mut);position:sticky;left:0;background:var(--panel);z-index:1;white-space:normal;min-width:150px}
+  /* cc#385: V9 Pairs concept chips */
+  .chip-info{font-family:'Sora',sans-serif;font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;white-space:nowrap}
   .mtbl th{font-size:12.5px}
   /* cc#168: Raw Data — all 23 metric columns, horizontal scroll, pinned symbol col.
      .scroll.rawscroll beats the mobile .scroll table{min-width:unset} on specificity
@@ -368,6 +370,7 @@ const EP={
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
+  v9Pairs:"/api/v8/v9_pairs_sectors",          // cc#385
   globalIndices:"/api/v8/global_indices",      // cc#264
   vixIntraday:"/api/v8/indiavix_intraday",     // cc#266
   niftyPcr:"/api/pcr/intraday_hourly?underlying=NIFTY",         // cc#290
@@ -387,13 +390,13 @@ const ALL5=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Forthcoming Results","Global Indices","Position News","Matrix"];   // cc#294: Position News = index 14   // cc#226: index 12 · cc#264: index 13   // cc#383: Matrix = index 15 (all-basket comparison grid)
+  "Forthcoming Results","Global Indices","Position News","Matrix","V9 Pairs"];   // cc#294: Position News = index 14   // cc#226: index 12 · cc#264: index 13   // cc#383: Matrix = index 15   // cc#385: V9 Pairs = index 16 (sector long-short concept)
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
 // ops_log alert now surfaces slot exhaustion proactively, making this passive tab redundant.
 // Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
 // Live News(11)/Forthcoming(12) stay stable so their hardcoded panel ids are untouched.
 // cc#264: "Global Indices" appended as index 13.
-const TAB_ORDER=[0,15,1,2,3,4,5,6,7,8,9,11,12,13,14];   // cc#383: Matrix pinned right after Master Dashboard
+const TAB_ORDER=[0,15,16,1,2,3,4,5,6,7,8,9,11,12,13,14];   // cc#383: Matrix · cc#385: V9 Pairs — both pinned right after Master Dashboard
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -603,6 +606,45 @@ function renderMatrix(){
     <div class="scroll" style="overflow-x:auto"><table style="min-width:900px"><thead><tr>
       <th style="text-align:left;min-width:150px;position:sticky;left:0;background:var(--panel);z-index:2">Dimension</th>${th}
     </tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// -- V9 Sector Pairs (cc#385) — DESIGN-stage concept tab -----------------------
+// Display-only placeholder: the concept card + the LIVE 23-sector eligible pool
+// (futures-universe × GVM segment, >=4 stocks) from /api/v8/v9_pairs_sectors.
+// No engine/signals — the long-short backtest lands after the cc#377 + GVM backfills.
+function renderV9Pairs(){
+  const card=`<div class="ptitle">V9 Sector Pairs <span class="ct" style="background:rgba(245,185,74,.12);border-color:var(--amber);color:var(--amber)">DESIGN</span></div>
+    <div style="background:linear-gradient(135deg,var(--panel2),var(--panel));border:1px solid var(--line2);border-radius:14px;padding:18px 20px;margin-bottom:16px">
+      <div style="font-size:15px;font-weight:800;letter-spacing:.3px;margin-bottom:10px;color:var(--txt)">Sector-neutral long-short pairs</div>
+      <div style="font-size:13px;color:var(--mut);line-height:1.7">
+        Within each futures-universe sector holding <b style="color:var(--txt)">4+ stocks</b> (23 sectors, e.g. Private Banks 11, Pharma 11, IT 10), rank stocks by <b style="color:var(--txt)">strength</b> &mdash; GVM quality, rising momentum (1M + 3M), above DMA50 &amp; DMA200, 50DMA &gt; 200DMA.
+        <span style="color:var(--grn);font-weight:700">LONG the strongest</span>, <span style="color:var(--red);font-weight:700">SHORT the weakest</span>, 1 lot each.
+        Sector and market beta cancel by construction &mdash; no hedge ratios, no z-scores; the spread is a quality-momentum divergence, not a statistical artifact. Rebalance monthly or on rank-flip.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <span class="chip-info" style="background:var(--grn-d);color:var(--grn)">Sector-neutral</span>
+        <span class="chip-info" style="background:var(--grn-d);color:var(--grn)">Market-beta cancelled</span>
+        <span class="chip-info" style="background:rgba(77,124,254,.12);color:var(--blu)">GVM + momentum rank</span>
+        <span class="chip-info" style="background:rgba(55,211,232,.12);color:var(--cyan)">Monthly / rank-flip rebalance</span>
+      </div>
+      <div style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6;border-top:1px solid var(--line);padding-top:12px">
+        <b style="color:var(--amber)">Status: DESIGN.</b> 5-yr technical backtest + GVM overlay pending backfills &mdash; (a) cc#377 Phase A 1-yr 5-min history and (b) GVM / fundamental backfill from the Screener scrape. This tab is the concept + live eligible pool; the engine ships after both land.
+      </div>
+    </div>`;
+  const d=cache.v9pairs;
+  let table;
+  if(!d){table='<div class="loading">Loading sector pool&hellip;</div>';}
+  else{
+    const secs=d.sectors||[];
+    const head=`<div class="ptitle">Eligible sector pool <span class="ct">${d.sector_count??secs.length} sectors &middot; ${d.total_stocks??''} stocks &middot; &ge;${d.min_stocks??4} each &middot; live</span></div>`;
+    table=head+sortTbl('v9pairs',
+      [["segment","Sector (GVM segment)"],["stock_count","Stocks"]],
+      secs,x=>`<tr>
+        <td class="sym" style="font-family:'Sora',sans-serif;font-weight:600">${x.segment}</td>
+        <td><span style="font-family:'Space Mono';font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
+      {sortKey:'stock_count',dir:-1,empty:"No eligible sectors",wrapClass:''});
+  }
+  return card+table;
 }
 
 // -- Modal -------------------------------------------------------------------
@@ -1020,6 +1062,7 @@ TAB_ORDER.forEach(panelIdx=>{
   tabsEl.appendChild(b);
 });
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
+try{document.getElementById('panel16').innerHTML=renderV9Pairs();}catch(e){}   // cc#385: concept card instant; sector table fills on fetch
 function selectTab(i){
   [...tabsEl.children].forEach(t=>{
     const on=t.textContent===TAB_LABELS[i];
@@ -2048,6 +2091,7 @@ function paint(){
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel9').innerHTML=renderRaw();
   document.getElementById('panel15').innerHTML=renderMatrix();   // cc#383
+  document.getElementById('panel16').innerHTML=renderV9Pairs();  // cc#385
   // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
   BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
   loadFunnelInline('sell_overbought',6);
@@ -2078,6 +2122,7 @@ async function loadAll(){
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
+    run('v9pairs',()=>getJSON(EP.v9Pairs),()=>{const el=document.getElementById('panel16');if(el)el.innerHTML=renderV9Pairs();}),   // cc#385
   ];
   await Promise.all(jobs);
   if(cache.mood)renderMood(cache.mood);
