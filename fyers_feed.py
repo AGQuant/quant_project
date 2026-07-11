@@ -142,6 +142,8 @@ RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
 WATCHDOG_MAX_RECONNECTS = 2    # forced socket reconnects before escalating to hard restart
 CMP_STALE_GUARD_SECS    = 90   # cc_task #112: only (re)write a cmp_prices row when its tick is
                                # newer than the last flush — no fresh tick => no timestamp update
+CMP_SANITY_MAX_DEV      = 0.02 # cc#367: reject a cmp write that deviates >2% from the symbol's most
+                               # recent completed equity 5m bar (same session) — a polluted spot tick.
 STARTUP_GRACE_MINS      = 10   # suppress the watchdog this long after 09:15 (bars need time to form)
 OPEN_RACE_GUARD_SECS    = 60   # hold the first subscription until N s after 09:15 (NSE feed-init race)
 WS_SUB_BATCH            = 200  # cc_task #88: subscribe in 200-symbol batches (Fyers silently drops bulk subs at open)
@@ -891,8 +893,14 @@ class BarAggregator:
         bkt = self._bucket(ts)
         key = (sym, source)
         with self.lock:
-            self.last_ltp[sym]    = ltp
-            self.last_ltp_ts[sym] = ts   # cc_task #112: mark when this genuine tick arrived
+            # cc#367: last_ltp/last_ltp_ts feed cmp_prices (SPOT snapshot) via flush_cmp ONLY.
+            # The bar dict is keyed by (sym, source) so eq & fut bars stay separate, but last_ltp
+            # was keyed by sym alone — a futures tick (source='fyers_fut') would overwrite the
+            # spot LTP with a basis-premium/discount price (3-4% off), and flush_cmp then wrote
+            # that fut price into cmp_prices as if it were spot. Only spot ticks may set last_ltp.
+            if source != 'fyers_fut':
+                self.last_ltp[sym]    = ltp
+                self.last_ltp_ts[sym] = ts   # cc_task #112: mark when this genuine tick arrived
             bar = self.bars.get(key)
             if bar is None or bar['ts'] != bkt:
                 if bar is not None:
@@ -1027,6 +1035,45 @@ class BarAggregator:
         if not rows:
             log.warning("CMP flush SKIPPED — 0 fresh ticks since last flush "
                         "(WS feed likely dead; NOT stamping stale prices)")
+            return
+        # cc#367: SANITY GUARD (defense-in-depth behind the spot-only last_ltp fix above). A genuine
+        # spot tick must sit within CMP_SANITY_MAX_DEV of the symbol's most recent completed equity
+        # 5m bar in the SAME session; a larger gap = a polluted tick (fut LTP that slipped through,
+        # corrupt post-close tick, symbol mis-map). Reject those writes and record them to ops_log so
+        # the eq snapshot can't be corrupted. Best-effort — on any error we write `rows` unchanged.
+        try:
+            _syms = [r[0] for r in rows]
+            _ref = {}
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT ON (symbol) symbol, close FROM intraday_prices
+                    WHERE source='fyers_eq' AND timeframe='5m'
+                      AND ts::date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+                      AND symbol = ANY(%s)
+                    ORDER BY symbol, ts DESC
+                """, (_syms,))
+                for _s, _c in cur.fetchall():
+                    if _c: _ref[_s] = float(_c)
+            _kept, _rejected = [], []
+            for r in rows:
+                base = _ref.get(r[0])
+                if base and base > 0 and abs(float(r[1]) / base - 1.0) > CMP_SANITY_MAX_DEV:
+                    _rejected.append((r[0], round(float(r[1]), 2), round(base, 2),
+                                      round((float(r[1]) / base - 1.0) * 100, 2)))
+                else:
+                    _kept.append(r)
+            if _rejected:
+                _ops_log(self.conn, 'alert', 'cmp_guard_reject',
+                         {"n": len(_rejected), "threshold_pct": CMP_SANITY_MAX_DEV * 100,
+                          "rejected": [{"symbol": s, "cmp": p, "eq_bar_close": b, "dev_pct": d}
+                                       for s, p, b, d in _rejected[:40]]})
+                log.warning(f"CMP guard: rejected {len(_rejected)} polluted tick(s) "
+                            f">{CMP_SANITY_MAX_DEV*100:.0f}% off eq bar: "
+                            + ", ".join(f"{s}({d:+.1f}%)" for s, _, _, d in _rejected[:8]))
+            rows = _kept
+        except Exception as e:
+            log.warning(f"flush_cmp sanity guard skipped (writing rows unchanged): {e}")
+        if not rows:
             return
         try:
             with self.conn.cursor() as cur:

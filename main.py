@@ -1141,18 +1141,28 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/paper/status")
 def paper_status():
+    # cc#367: CMP must be the SPOT equity bar — the old lateral had NO source filter, so a symbol's
+    # latest bar could be a fyers_fut (futures) bar at the same 5-min ts, putting a basis-off price
+    # in the CMP column. Excluding fyers_fut pins CMP to spot. prev_close = previous trading-day
+    # raw_prices close, so the dashboard can compute DAY% = CMP / prev_close - 1 (one consistent,
+    # hand-verifiable pair) instead of the mismatched v8_metrics.day_1d.
     open_positions = api_query("""
         SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
             p.target, p.stop_loss, p.qty, p.pivot_date,
             COALESCE(lp.cmp, p.entry_price) AS cmp,
             ROUND(CASE p.side WHEN 'LONG' THEN (COALESCE(lp.cmp, p.entry_price) - p.entry_price) * p.qty
                 WHEN 'SHORT' THEN (p.entry_price - COALESCE(lp.cmp, p.entry_price)) * p.qty ELSE 0 END::numeric, 2) AS unrealised_pnl,
-            lp.ts AS cmp_updated_at
+            lp.ts AS cmp_updated_at, pc.prev_close
         FROM v8_paper_positions p
         LEFT JOIN LATERAL (
             SELECT close AS cmp, ts FROM intraday_prices
-            WHERE symbol = p.symbol ORDER BY ts DESC LIMIT 1
+            WHERE symbol = p.symbol AND source <> 'fyers_fut' ORDER BY ts DESC LIMIT 1
         ) lp ON true
+        LEFT JOIN LATERAL (
+            SELECT close AS prev_close FROM raw_prices
+            WHERE symbol = p.symbol AND price_date < (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+            ORDER BY price_date DESC LIMIT 1
+        ) pc ON true
         WHERE p.status = 'OPEN' ORDER BY p.entry_ts DESC
     """)
     return {

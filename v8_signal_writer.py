@@ -828,7 +828,14 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     if len(c) >= 22:  out["month_return"] = _safe_pct(live, c[-22])
     if len(c) >= 6:   out["week_return"]  = _safe_pct(live, c[-6])
 
-    price = cmp if cmp else live
+    # cc#367: day_1d & mom_2d are pinned to `live` (the clean equity 5-min bar close), NOT the
+    # cmp_prices LTP. cmp_prices can be polluted by 3-4% (a futures tick leaking onto the spot
+    # key, or a corrupt post-close tick), and mom_2d is a LIVE GATE INPUT (buy_reversal 0-3,
+    # buy_momentum 0.5-6, sell_momentum <=-1.5, sell_reversal <=-3.0) — a polluted snapshot could
+    # flip qualifications. Every other ratio in this function already uses `live`; this makes the
+    # two momentum ratios consistent with them and immune to cmp_prices corruption. (day_1d is
+    # display-only — confirmed not present in any FILTER_CONFIG gate.)
+    price = live
 
     base_2d = hist.get("close_2d_ago")
     if base_2d and base_2d > 0:

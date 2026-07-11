@@ -1127,15 +1127,18 @@ function renderMaster(){
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
-  // cc#341: futures day-change per symbol from the SAME day_1d live source as Raw Data / sector cards.
-  const _dayMap={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol!=null)_dayMap[m.symbol]=m.day_1d;});
   const openRows=open.map(x=>{
     const isShort=(x.side||'').toUpperCase()==='SHORT';
     const cmp=Number(x.cmp),tgt=Number(x.target),qty=Number(x.qty||0);
     const net_pnl=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;
     const potential_left=isShort?(cmp-tgt)*qty:(tgt-cmp)*qty;
     const pot_pct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
-    const day_pct=(_dayMap[x.symbol]!=null?Number(_dayMap[x.symbol]):null);   // cc#341
+    // cc#367: DAY% = this row's OWN CMP vs the previous trading-day raw close — one consistent pair,
+    // hand-verifiable from the row. Never v8_metrics.day_1d (its cmp_prices-LTP numerator didn't
+    // match the CMP shown and could be polluted by a futures tick). Off-market both freeze to the
+    // last session (CMP = final eq bar, prev = the session before), so DAY% shows the completed day.
+    const _prev=Number(x.prev_close);
+    const day_pct=(isFinite(cmp)&&isFinite(_prev)&&_prev>0)?((cmp/_prev-1)*100):null;
     return{...x,isShort,net_pnl,potential_left,pot_pct,day_pct,days:holdDays(x.entry_ts)};
   });
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
