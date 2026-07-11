@@ -116,7 +116,7 @@ SELL_MOMENTUM_SL_MULT  = 0.5
 
 BASKET_META = {
     "buy_reversal":    {"side": "BUY",  "target": "R1",                        "win_pct": "62-64%", "signals_per_day": "~35-55/yr"},
-    "buy_momentum":    {"side": "BUY",  "target": "R2(BULL)/R1(NEUTRAL+BEAR)", "win_pct": "77.4%", "signals_per_day": "~2/day"},
+    "buy_momentum":    {"side": "BUY",  "target": "+3.0% fixed",               "win_pct": "67% live", "signals_per_day": "~2/day"},
     "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "79.3%", "signals_per_day": "~0.6/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
@@ -153,7 +153,7 @@ V21_FILTERS = {
 
 # Locked-spec WR baselines (per specs 1263-1268) for the WR kill-switch.
 V21_BASELINE_WR = {
-    "buy_reversal": 63.0, "buy_momentum": 77.4, "buy_s1_bounce": 73.9,  # cc#354 V3 honest baseline
+    "buy_reversal": 63.0, "buy_momentum": 67.0, "buy_s1_bounce": 73.9,  # cc#354/359 V2/V3 honest baselines
     "sell_reversal": 79.3, "sell_momentum": 71.9, "sell_overbought": 81.5,
 }
 
@@ -322,7 +322,7 @@ def _get_buy_reversal_live_filters() -> dict:
 
 
 def _get_buy_momentum_target(regime: str) -> str:
-    return "R2" if regime == "BULL" else "R1"
+    return "+3.0% fixed"   # cc#359 V2: fixed +/-3.0% exits (regime R2/R1 targeting retired)
 
 
 def _pivot_room_ok(side: str, cmp, pp, r1, s1) -> bool:
@@ -910,14 +910,14 @@ def filter_config(basket: str):
         return {
             "basket": basket, "filters": rows, "count": len(rows),
             "regime": regime, "nifty_1m_return": round(nifty_1m, 2),
-            "target": target, "target_rule": "R2 in BULL (Nifty 1M > +2%), R1 in NEUTRAL/BEAR",
-            "stop": "S1",
+            "target": "+3.0% fixed", "target_rule": "cc#359 V2: fixed +3.0% / -3.0% (1:1), frozen at entry",
+            "stop": "-3.0% fixed",
             "regime_rules": {
-                "BULL":    {"condition": "Nifty 1M > +2%", "target": "R2", "slots": 15},
-                "NEUTRAL": {"condition": "-2% to +2%",     "target": "R1", "slots": 12},
-                "BEAR":    {"condition": "Nifty 1M < -2%", "target": "R1", "slots": 8},
+                "BULL":    {"condition": "Nifty 1M > +2%", "slots": 15},
+                "NEUTRAL": {"condition": "-2% to +2%",     "slots": 12},
+                "BEAR":    {"condition": "Nifty 1M < -2%", "slots": 8},
             },
-            "backtest": {"signals": 243, "wr_pct": 77.4, "avg_win": 1.79, "total_pnl": 120.27},
+            "backtest": {"note": "Live 30d: 12 trades, 67% WR at 1:1; V2 fixed-3% replay: 81.8%"},
             **BASKET_META.get(basket, {})
         }
     if basket == "sell_reversal":

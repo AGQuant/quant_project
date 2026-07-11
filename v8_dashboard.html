@@ -407,8 +407,8 @@ const BASKET_INFO={
     wr:"62-64",ev:"1.0-1.2",sigs:"35-55",spd:"~35-55 trades/yr",
   },
   buy_momentum:{
-    label:"Buy Momentum V1",side:"BUY",version:"V1",
-    thesis:"Strong uptrend continuation -- stock well above key MAs, RSI elevated. Brief pullback to pivot PP zone is the entry. Target R2 in bull markets significantly improves P&L. High-frequency basket (engine of buy-side P&L).",
+    label:"Buy Momentum V2",side:"BUY",version:"V2",
+    thesis:"Strong uptrend continuation -- stock well above key MAs, RSI elevated. Brief pullback to pivot PP zone is the entry, then ride the trend to a fixed target. High-frequency basket (engine of buy-side P&L). V2 (10-Jul-2026) swaps the old R2/regime target for symmetric fixed +3.0%/-3.0% exits. Live 30d: 12 trades, 67% WR at 1:1; V2 fixed-3% replay: 81.8%.",
     filters:[
       {m:"gvm_score",c:"7.0 - 10.0",dyn:false},
       {m:"dma_50",c:"8.0 - 25.0%",dyn:false},
@@ -423,13 +423,13 @@ const BASKET_INFO={
     ],
     gateType:"score-based · adaptive",
     regimes:[
-      {r:"BULL",c:"Nifty 1M > +2%",n:"Target R2, 15 buy slots"},
-      {r:"NEUTRAL",c:"Nifty 1M 0-2%",n:"Target R1, 12 buy slots"},
-      {r:"BEAR",c:"Nifty 1M < 0%",n:"Target R1, 8 buy slots"},
+      {r:"BULL",c:"Nifty 1M > +2%",n:"15 buy slots"},
+      {r:"NEUTRAL",c:"Nifty 1M 0-2%",n:"12 buy slots"},
+      {r:"BEAR",c:"Nifty 1M < 0%",n:"8 buy slots"},
     ],
-    target:"R2 (BULL) / R1 (NEUTRAL/BEAR)",stop:"S1 = 2xPP - H5",
-    pivotEntry:"BUY zone: PP < CMP <= R1  AND  (R1-CMP) >= 0.5x(R1-PP)",
-    wr:77.4,ev:0.634,sigs:243,spd:"~2/day",
+    target:"+3.0% / -3.0% fixed, 1:1, frozen at entry · V2 locked 10-Jul-2026",stop:"-3.0% fixed from entry",
+    pivotEntry:"BUY zone: PP < CMP <= R1  AND  (R1-CMP) >= 0.5x(R1-PP). Entry live CMP; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
+    wr:"67 live / 81.8 replay",ev:"1:1 fixed",sigs:"~2/day",spd:"~2/day · Live 30d 12 trades 67% WR",
   },
   buy_s1_bounce:{
     label:"Buy S1 Bounce V2",side:"BUY",version:"V2",

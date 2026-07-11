@@ -1406,7 +1406,11 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         log.warning(f"auto_paper slot check {sym}: {e}"); return
 
     entry = round(cmp, 2)
-    if paper_side == "LONG":
+    if basket == "buy_momentum":
+        # cc#359 V2 (spec id=2834): fixed +/-3.0% 1:1, frozen at entry (replaces R1/mirror).
+        target = round(entry * 1.03, 2)
+        stop   = round(entry * 0.97, 2)
+    elif paper_side == "LONG":
         target = round(r1, 2)
         stop   = round(entry - (r1 - entry), 2)
     else:
