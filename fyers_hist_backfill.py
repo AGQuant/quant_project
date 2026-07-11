@@ -222,6 +222,130 @@ def _claim_hist_fetch_flag():
         return None
 
 
+# ── cc#389 Phase A: full trailing-365d 5m EQUITY warehouse for ALL active futures symbols ──
+_PHASE_A_FLAG     = "phase_a_run"        # 'pending' -> claimed -> done (boot self-trigger)
+_PHASE_A_PROGRESS = "phase_a_progress"   # last completed symbol (resume checkpoint)
+
+
+def _set_config(conn, key, value):
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO app_config (key, value, updated_at) VALUES (%s, %s, NOW())
+                       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()""",
+                    (key, value))
+    conn.commit()
+
+
+def _oplog(conn, category, title, details):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
+                        (category, title, json.dumps(details, default=str)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"ops_log write ({title}): {e}")
+
+
+def run_phase_a(conn=None, token=None) -> dict:
+    """cc#389: full warehouse run. For every active futures_universe symbol (A->Z) fetch trailing
+    365d of 5m EQ bars into source='fyers_hist' (purge-exempt), reusing ONE shared conn+token.
+    RESUMABLE: app_config['phase_a_progress'] holds the last completed symbol; on start we skip every
+    symbol <= saved, so a crash/restart continues and never repeats (upserts make repeats harmless
+    anyway). ops_log PHASE_A_PROGRESS every 20 symbols; completion -> session_log
+    PHASE_A_WAREHOUSE_COMPLETE with totals + failures. A failed symbol is logged and skipped, never
+    aborts the run. Post-market/on-demand only (fetch_hist_5m asserts market-hours block)."""
+    import fyers_feed
+    own = conn is None
+    if own:
+        conn = fyers_feed.get_db()
+    started = time.time()
+    try:
+        if token is None:
+            token = fyers_feed.get_valid_token(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT UPPER(symbol) FROM futures_universe WHERE is_active=TRUE ORDER BY symbol")
+            symbols = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT value FROM app_config WHERE key=%s", (_PHASE_A_PROGRESS,))
+            r = cur.fetchone()
+        progress = (r[0] or "") if r else ""
+        today = date.today()
+        frm = today - timedelta(days=365)
+        pending = [s for s in symbols if s > progress] if progress else list(symbols)
+        _oplog(conn, "data_infra", "PHASE_A_START",
+               {"universe": len(symbols), "resuming_after": progress or None,
+                "to_do": len(pending), "from": str(frm), "to": str(today)})
+        done = bars_total = failures_ct = 0
+        failures = []
+        for sym in pending:
+            try:
+                res = fetch_hist_5m(sym, frm, today, conn=conn, token=token)
+                bars_total += res["bars"]
+            except Exception as e:
+                failures_ct += 1
+                failures.append({"symbol": sym, "error": str(e)[:200]})
+                log.error(f"run_phase_a {sym} failed: {e}")
+            done += 1
+            try:
+                _set_config(conn, _PHASE_A_PROGRESS, sym)   # checkpoint after EVERY symbol
+            except Exception as e:
+                log.warning(f"phase_a checkpoint {sym}: {e}")
+            if done % 20 == 0:
+                _oplog(conn, "data_infra", "PHASE_A_PROGRESS",
+                       {"done": done, "of": len(pending), "bars_written": bars_total,
+                        "failures": failures_ct, "elapsed_min": round((time.time() - started) / 60, 1),
+                        "last_symbol": sym})
+        elapsed = round((time.time() - started) / 60, 1)
+        with conn.cursor() as cur:
+            cur.execute("""SELECT COUNT(*), COUNT(DISTINCT symbol), MIN(ts)::date
+                           FROM intraday_prices WHERE source=%s""", (HIST_SOURCE,))
+            c = cur.fetchone()
+        summary = {"symbols_processed": done, "universe": len(symbols),
+                   "bars_written_this_run": bars_total, "failures": failures_ct,
+                   "failures_list": failures, "elapsed_min": elapsed,
+                   "warehouse_total_bars": int(c[0] or 0), "warehouse_symbols": int(c[1] or 0),
+                   "warehouse_oldest": str(c[2]) if c[2] else None, "source": HIST_SOURCE}
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'data_audit', 'PHASE_A_WAREHOUSE_COMPLETE', %s::jsonb)""",
+                            (json.dumps(summary, default=str),))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"PHASE_A completion log: {e}")
+        try:
+            _set_config(conn, _PHASE_A_FLAG, "done")
+        except Exception:
+            pass
+        log.info(f"run_phase_a COMPLETE: {summary}")
+        return summary
+    finally:
+        if own:
+            conn.close()
+
+
+def _claim_phase_a_flag():
+    """Atomically consume app_config['phase_a_run']='pending' (deploy-time self-trigger; CC has no
+    HTTP path to prod). 'claimed'/'done' never re-fire."""
+    import fyers_feed
+    try:
+        conn = fyers_feed.get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key=%s AND value='pending' FOR UPDATE",
+                            (_PHASE_A_FLAG,))
+                r = cur.fetchone()
+                if r:
+                    cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s",
+                                (_PHASE_A_FLAG,))
+            conn.commit()
+        finally:
+            conn.close()
+        return bool(r)
+    except Exception as e:
+        log.error(f"phase_a flag claim failed: {e}")
+        return False
+
+
 @router.on_event("startup")
 async def _probe_startup_trigger():
     import threading
@@ -236,6 +360,9 @@ async def _probe_startup_trigger():
             fsym, frm, to = parts[0].strip().upper(), parts[1].strip(), parts[2].strip()
             log.info(f"cc#377: hist_fetch flag claimed — {fsym} {frm}..{to} in background")
             threading.Thread(target=fetch_hist_5m, args=(fsym, frm, to), name="cc377-histfetch", daemon=True).start()
+    if _claim_phase_a_flag():   # cc#389
+        log.info("cc#389: phase_a_run flag claimed — starting full 365d warehouse in background")
+        threading.Thread(target=run_phase_a, name="cc389-phasea", daemon=True).start()
 
 
 # ── admin endpoints (thin wiring; also proxied by the MCP tools in mcp_dispatch.py) ──
@@ -278,3 +405,14 @@ async def probe_5m_depth_now(symbol: str = "SBIN", x_admin_token: Optional[str] 
         return await asyncio.to_thread(probe_5m_depth, symbol)
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+@router.post("/run_phase_a")
+async def run_phase_a_now(x_admin_token: Optional[str] = Header(None)):
+    """cc#389: kick the full 365d 5m warehouse run (all active futures) in a background daemon —
+    resumable, non-blocking. Watch ops_log PHASE_A_PROGRESS + session_log PHASE_A_WAREHOUSE_COMPLETE."""
+    _check_admin(x_admin_token)
+    import threading
+    threading.Thread(target=run_phase_a, name="cc389-phasea-manual", daemon=True).start()
+    return {"status": "started",
+            "note": "Phase A warehouse running in background; poll ops_log / session_log for progress."}
