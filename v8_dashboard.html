@@ -605,11 +605,13 @@ async function openBrDetail(symbol,basket){
     .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
   const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
   document.getElementById('mSub').innerHTML=`${hdr}<span style="white-space:nowrap">&middot; <b style="color:${pcCol}">${d.passed}/${d.total} pass</b></span>`;
-  const rows=(d.rows||[]).map(r=>`<tr style="border-top:1px solid var(--line)">
-    <td style="padding:8px 8px;font-weight:600">${r.filter.replace(/_/g,' ')}</td>
+  // cc#378: PASS/FAIL as a compact coloured pill + a full-row tint so the verdict is always visible
+  // (was a plain column that scrolled off-screen). ACTUAL wraps so the 4 columns fit — no h-scroll.
+  const rows=(d.rows||[]).map(r=>`<tr style="border-top:1px solid var(--line);background:${r.pass?'rgba(47,212,139,.06)':'rgba(255,92,108,.06)'}">
+    <td style="padding:8px 8px;font-weight:600;white-space:nowrap">${r.filter.replace(/_/g,' ')}</td>
     <td style="padding:8px 8px;color:var(--mut);white-space:nowrap">${r.required}</td>
-    <td style="padding:8px 8px;font-family:'Space Mono';white-space:nowrap">${r.actual}${r.note?`<div style="font-size:10px;color:var(--dim);white-space:normal;margin-top:2px">${r.note}</div>`:''}</td>
-    <td style="padding:8px 8px;text-align:center;font-weight:800;color:${r.pass?'var(--grn)':'var(--red)'}">${r.pass?'PASS':'FAIL'}</td></tr>`).join('');
+    <td style="padding:8px 8px;font-family:'Space Mono'">${r.actual}${r.note?`<div style="font-size:10px;color:var(--dim);margin-top:2px">${r.note}</div>`:''}</td>
+    <td style="padding:8px 6px;text-align:center;white-space:nowrap"><span style="font-weight:800;font-size:10px;padding:3px 9px;border-radius:6px;color:${r.pass?'var(--grn)':'var(--red)'};background:${r.pass?'rgba(47,212,139,.16)':'rgba(255,92,108,.16)'}">${r.pass?'PASS':'FAIL'}</span></td></tr>`).join('');
   document.getElementById('mBody').innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
     <thead><tr style="text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.4px">
       <th style="padding:6px 8px">Filter</th><th style="padding:6px 8px">Required</th><th style="padding:6px 8px">Actual</th><th style="padding:6px 8px;text-align:center">Status</th></tr></thead>
