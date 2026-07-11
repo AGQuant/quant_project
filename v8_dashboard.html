@@ -1412,6 +1412,14 @@ function renderTradeLog(){
   // (exact — return% and P&L share the same notional, so no qty needed); pnl==0 scratch -> gross.
   // Computed from the loaded trades for BOTH views (All/All = all recent_trades).
   const bAvgNet=(function(){const a=t.map(x=>{const g=Number(x.pnl),r=Number(x.return_pct);return g!==0?r*(g-BROKERAGE_PER_TRADE)/g:r;}).filter(v=>isFinite(v));return a.length?a.reduce((s2,v)=>s2+v,0)/a.length:0;})();
+  // cc#376: ACCURACY = win rate by the cc#371 P&L-sign classifier (scratches excluded from both).
+  // House rule "win rate never without geometry" -> subtitle carries avg win% / avg loss% (from the
+  // filtered win/loss return_pct). Filter-aware via bWins/bLosses. Color green>=60 / amber45-60 / red<45.
+  const _winRows=t.filter(x=>Number(x.pnl)>0), _lossRows=t.filter(x=>Number(x.pnl)<0);
+  const bAcc=(bWins+bLosses)>0?(bWins/(bWins+bLosses)*100):null;
+  const bAccCol=bAcc==null?'var(--dim)':(bAcc>=60?'var(--grn)':bAcc>=45?'var(--amber)':'var(--red)');
+  const bAvgWin =_winRows.length ?_winRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_winRows.length :null;
+  const bAvgLoss=_lossRows.length?_lossRows.reduce((a,x)=>a+Number(x.return_pct||0),0)/_lossRows.length:null;
   const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
   const bkBtns=[['all','All'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['buy_s1_bounce','Buy S1 Bounce'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum'],['sell_overbought','Sell Overbought']].map(([v,l])=>`<button class="btn${TLOG_BASKET===v?' on':''}" onclick="setTlogBasket('${v}')">${l}</button>`).join('');
   const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
@@ -1422,6 +1430,7 @@ function renderTradeLog(){
     <div class="card"><div class="k">Trades</div><div class="v">${bTrades??'--'}</div></div>
     <div class="card"><div class="k">Wins</div><div class="v pos">${bWins??'--'}</div></div>
     <div class="card"><div class="k">Losses</div><div class="v neg">${bLosses??'--'}</div></div>
+    <div class="card"><div class="k">Accuracy</div><div class="v" style="color:${bAccCol}">${bAcc==null?'--':bAcc.toFixed(1)+'%'}</div><div class="v-sub">avg win ${bAvgWin==null?'--':sign(bAvgWin,2)+'%'} / avg loss ${bAvgLoss==null?'--':sign(bAvgLoss,2)+'%'}</div></div>
     <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(bNet)}">${inr(bNet)}</div><div class="v-sub">Gross ${inr(bPnl)} &minus; Brokerage ${inr(bPnl-bNet)}</div></div>
     <div class="card"><div class="k">Avg Ret (net)</div><div class="v ${pnlCls(bAvgNet)}">${sign(bAvgNet)}%</div><div class="v-sub">gross ${sign(bAvg)}%</div></div>
   </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage (round trip = Rs.${BROKERAGE_PER_TRADE*2})${isAll?'':` &middot; showing ${t.length} filtered trade${t.length===1?'':'s'}`}</div>`;
