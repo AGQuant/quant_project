@@ -132,9 +132,20 @@ def _basis_block(cur, sym) -> Dict[str, Any]:
     if spark and len(spark) >= 2 and basis is not None:
         lo, hi = min(spark), max(spark)
         pct = round((basis - lo) / (hi - lo) * 100.0, 1) if hi > lo else 50.0
+    # cc#374: honest day-over-day OI %. The stored oi_chg is an ABSOLUTE contract delta (BIGINT,
+    # bar-over-bar) that the cockpit rendered with a '%' sign -> "-1500.0%" garbage. Recompute a real
+    # d/d percent: latest OI vs the last OI of the PRIOR trading session; None (-> "--") if missing.
+    cur.execute("""SELECT oi FROM futures_basis
+                   WHERE symbol=%s AND oi IS NOT NULL
+                     AND ts::date < (SELECT MAX(ts::date) FROM futures_basis WHERE symbol=%s AND oi IS NOT NULL)
+                   ORDER BY ts DESC LIMIT 1""", (sym, sym))
+    _pr = cur.fetchone()
+    oi_prev_day = _f(_pr[0]) if _pr else None
+    oi_dd_pct = (round((oi - oi_prev_day) / oi_prev_day * 100.0, 1)
+                 if (oi is not None and oi_prev_day and oi_prev_day > 0) else None)
     return {"fut": fut, "spot": spot,
             "basis": {"value": basis, "pct": basis_pct, "percentile": pct, "spark": spark},
-            "fut_oi": {"oi": oi, "chg_pct": oi_chg}}
+            "fut_oi": {"oi": oi, "chg_pct": oi_dd_pct}}
 
 
 def _metrics(cur, sym) -> Dict[str, Any]:
