@@ -195,6 +195,33 @@ def _claim_probe_flag():
         return None
 
 
+_HIST_FETCH_FLAG = "hist_fetch_pending"   # value 'SYMBOL:FROM:TO' (dates YYYY-MM-DD) -> one fetch_hist_5m
+
+
+def _claim_hist_fetch_flag():
+    """Atomically consume a one-off 'SYMBOL:FROM:TO' hist-fetch flag (deploy-time self-trigger for
+    the Phase B acceptance test / ad-hoc pulls; CC has no HTTP path to prod). 'claimed' has no
+    colon so it never re-runs."""
+    import fyers_feed
+    try:
+        conn = fyers_feed.get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key=%s AND value LIKE '%%:%%' FOR UPDATE",
+                            (_HIST_FETCH_FLAG,))
+                r = cur.fetchone()
+                if r:
+                    cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s",
+                                (_HIST_FETCH_FLAG,))
+            conn.commit()
+        finally:
+            conn.close()
+        return r[0] if r else None
+    except Exception as e:
+        log.error(f"hist_fetch flag claim failed: {e}")
+        return None
+
+
 @router.on_event("startup")
 async def _probe_startup_trigger():
     import threading
@@ -202,6 +229,13 @@ async def _probe_startup_trigger():
     if sym:
         log.info(f"cc#377: 5m-depth-probe flag claimed — probing {sym} in background")
         threading.Thread(target=probe_5m_depth, args=(sym,), name="cc377-probe", daemon=True).start()
+    spec = _claim_hist_fetch_flag()
+    if spec:
+        parts = spec.split(":")
+        if len(parts) >= 3:
+            fsym, frm, to = parts[0].strip().upper(), parts[1].strip(), parts[2].strip()
+            log.info(f"cc#377: hist_fetch flag claimed — {fsym} {frm}..{to} in background")
+            threading.Thread(target=fetch_hist_5m, args=(fsym, frm, to), name="cc377-histfetch", daemon=True).start()
 
 
 # ── admin endpoints (thin wiring; also proxied by the MCP tools in mcp_dispatch.py) ──
