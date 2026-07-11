@@ -1382,17 +1382,42 @@ function renderSellOB(){
   return meta+legend+desktopTable+mobileCards;
 }
 
+// cc#370: Trade log filters — Duration (calendar window) + Basket. Client-side (all closed trades
+// already load in recent_trades). State persists across paper refreshes; setters re-render panel7.
+let TLOG_DUR='all', TLOG_BASKET='all';
+function setTlogDur(v){TLOG_DUR=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
+function setTlogBasket(v){TLOG_BASKET=v;const el=document.getElementById('panel7');if(el)el.innerHTML=renderTradeLog();}
+function _istDateMinus(days){   // YYYY-MM-DD of (IST today - days), for calendar-window filtering
+  const t=new Date(Date.now()+(5*60+30)*60000-days*86400000);
+  return t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');
+}
 function renderTradeLog(){
   const p=cache.paper;if(!p)return'<div class="loading">...</div>';
-  const t=p.recent_trades||[],s=p.summary||{};
-  const totalPnl=Number(s.total_pnl||0);const netTotal=netPnl(totalPnl,s.trades||0);
+  let t=p.recent_trades||[];const s=p.summary||{};
+  // cc#370: apply the Duration + Basket filters (combine); default All/All = no filtering.
+  if(TLOG_DUR!=='all'){const cut=_istDateMinus(TLOG_DUR==='1w'?7:30);t=t.filter(x=>String(x.exit_ts||'').slice(0,10)>=cut);}
+  if(TLOG_BASKET!=='all')t=t.filter(x=>(x.basket||'')===TLOG_BASKET);
+  // cc#370: All/All shows the authoritative summary totals; ANY filter recomputes from the subset.
+  const isAll=(TLOG_DUR==='all'&&TLOG_BASKET==='all');
+  const bTrades=isAll?(s.trades??t.length):t.length;
+  const bWins  =isAll?(s.wins??0):t.filter(x=>x.result==='TARGET').length;
+  const bLosses=isAll?(s.losses??0):t.filter(x=>x.result==='SL').length;
+  const bPnl   =isAll?Number(s.total_pnl||0):t.reduce((a,x)=>a+Number(x.pnl||0),0);
+  const bAvg   =isAll?Number(s.avg_ret||0):(t.length?t.reduce((a,x)=>a+Number(x.return_pct||0),0)/t.length:0);
+  const bNet   =netPnl(bPnl,bTrades);
+  const durBtns=[['all','All'],['1w','1 Week'],['1m','1 Month']].map(([v,l])=>`<button class="btn${TLOG_DUR===v?' on':''}" onclick="setTlogDur('${v}')">${l}</button>`).join('');
+  const bkBtns=[['all','All'],['buy_reversal','Buy Reversal'],['buy_momentum','Buy Momentum'],['buy_s1_bounce','Buy S1 Bounce'],['sell_reversal','Sell Reversal'],['sell_momentum','Sell Momentum'],['sell_overbought','Sell Overbought']].map(([v,l])=>`<button class="btn${TLOG_BASKET===v?' on':''}" onclick="setTlogBasket('${v}')">${l}</button>`).join('');
+  const filterBar=`<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Duration</span>${durBtns}</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;width:58px;flex-shrink:0">Basket</span>${bkBtns}</div>
+  </div>`;
   const summaryCards=`<div class="cards">
-    <div class="card"><div class="k">Trades</div><div class="v">${s.trades??'--'}</div></div>
-    <div class="card"><div class="k">Wins</div><div class="v pos">${s.wins??'--'}</div></div>
-    <div class="card"><div class="k">Losses</div><div class="v neg">${s.losses??'--'}</div></div>
-    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(totalPnl)}">${inr(totalPnl)}</div><div class="v-sub">Net ${inr(netTotal)}</div></div>
-    <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(s.avg_ret||0)}">${sign(s.avg_ret)}%</div></div>
-  </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage (round trip = Rs.${BROKERAGE_PER_TRADE*2})</div>`;
+    <div class="card"><div class="k">Trades</div><div class="v">${bTrades??'--'}</div></div>
+    <div class="card"><div class="k">Wins</div><div class="v pos">${bWins??'--'}</div></div>
+    <div class="card"><div class="k">Losses</div><div class="v neg">${bLosses??'--'}</div></div>
+    <div class="card"><div class="k">Realised P&L</div><div class="v ${pnlCls(bPnl)}">${inr(bPnl)}</div><div class="v-sub">Net ${inr(bNet)}</div></div>
+    <div class="card"><div class="k">Avg Ret</div><div class="v ${pnlCls(bAvg)}">${sign(bAvg)}%</div></div>
+  </div><div style="font-size:10px;color:var(--dim);margin-bottom:10px">Net of Rs.${BROKERAGE_PER_TRADE}/trade brokerage (round trip = Rs.${BROKERAGE_PER_TRADE*2})${isAll?'':` &middot; showing ${t.length} filtered trade${t.length===1?'':'s'}`}</div>`;
   const desktopTable=`<div class="ptitle">Recent Closed Trades</div>`+
     sortTbl('tlog',
     [["symbol","Symbol"],["side","Side"],["basket","Basket"],["entry_ts","Entry Time"],["exit_ts","Exit Time"],["entry_price","Entry"],["exit_price","Exit"],["return_pct","Ret %"],["pnl","Gross P&L"],["net_pnl","Net P&L"],["result","Result"]],
@@ -1411,7 +1436,7 @@ function renderTradeLog(){
     <span class="mob-chip ${cls(x.return_pct)}">${sign(x.return_pct)}%</span><span class="mob-chip ${pnlCls(x.pnl)}">Gross ${inr(x.pnl)}</span>
     <span class="mob-chip ${pnlCls(np)}">Net ${inr(np)}</span><span class="mob-chip"><span class="badge ${x.result==='TARGET'?'b-tgt':'b-sl'}">${x.result}</span></span>
     <span class="mob-chip" style="color:var(--dim)">${fmtTs(x.exit_ts)}</span></div></div>`;}).join('')}</div>`;
-  return summaryCards+desktopTable+mobileTradeCards;
+  return filterBar+summaryCards+desktopTable+mobileTradeCards;
 }
 
 function renderRaw(){
