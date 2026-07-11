@@ -1143,9 +1143,12 @@ def paper_tick_now(x_admin_token: Optional[str] = Header(None)):
 def paper_status():
     # cc#367: CMP must be the SPOT equity bar — the old lateral had NO source filter, so a symbol's
     # latest bar could be a fyers_fut (futures) bar at the same 5-min ts, putting a basis-off price
-    # in the CMP column. Excluding fyers_fut pins CMP to spot. prev_close = previous trading-day
-    # raw_prices close, so the dashboard can compute DAY% = CMP / prev_close - 1 (one consistent,
-    # hand-verifiable pair) instead of the mismatched v8_metrics.day_1d.
+    # in the CMP column. Excluding fyers_fut pins CMP to spot. prev_close lets the dashboard compute
+    # DAY% = CMP / prev_close - 1 (one consistent, hand-verifiable pair) instead of v8_metrics.day_1d.
+    # cc#373: prev_close base is the latest raw close STRICTLY BEFORE THE CMP'S OWN SESSION
+    # (lp.ts::date), NOT before CURRENT_DATE. Off-market the CMP is the last (e.g. Friday) tick, so a
+    # "< today" base returned that same Friday session -> DAY% compared Friday against itself (~0.0x%).
+    # Anchoring to lp.ts::date gives Thu-close base for a Fri CMP, and Fri-close base for a Mon live CMP.
     open_positions = api_query("""
         SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
             p.target, p.stop_loss, p.qty, p.pivot_date,
@@ -1160,7 +1163,8 @@ def paper_status():
         ) lp ON true
         LEFT JOIN LATERAL (
             SELECT close AS prev_close FROM raw_prices
-            WHERE symbol = p.symbol AND price_date < (NOW() AT TIME ZONE 'Asia/Kolkata')::date
+            WHERE symbol = p.symbol
+              AND price_date < COALESCE(lp.ts::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
             ORDER BY price_date DESC LIMIT 1
         ) pc ON true
         WHERE p.status = 'OPEN' ORDER BY p.entry_ts DESC
