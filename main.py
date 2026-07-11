@@ -127,7 +127,10 @@ _LOGOUT_BTN = (
     b"color:#5a6781;font-size:10.5px;font-weight:600;text-decoration:none;"
     b"font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;"
     b"backdrop-filter:blur(8px);transition:all .15s;}"
-    b"#scorr-lo a:hover{color:#b45309!important;border-color:#b45309!important;}</style>"
+    b"#scorr-lo a:hover{color:#b45309!important;border-color:#b45309!important;}"
+    # cc#363: light-theme override — dark pill was unreadable on the light header.
+    b":root[data-theme=\"light\"] #scorr-lo a{background:rgba(255,255,255,.92);"
+    b"border-color:rgba(20,35,80,.14);color:#5B6B94;}</style>"
     b'<div id="scorr-lo"><a href="/logout">&#x23CF; Logout</a></div>'
 )
 
@@ -140,7 +143,11 @@ _THEME_BTN = (
     b"border-radius:7px;border:1px solid #2a3548;background:rgba(15,22,35,.88);color:#5a6781;"
     b"font-size:10.5px;font-weight:600;cursor:pointer;backdrop-filter:blur(8px);"
     b"font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif}"
-    b"#scorr-th button:hover{color:#4D7CFE;border-color:#4D7CFE}</style>"
+    b"#scorr-th button:hover{color:#4D7CFE;border-color:#4D7CFE}"
+    # cc#363: light-theme override — the dark pill on the light header was the "broken" look.
+    b":root[data-theme=\"light\"] #scorr-th button{background:rgba(255,255,255,.92);"
+    b"border-color:rgba(20,35,80,.14);color:#5B6B94}"
+    b":root[data-theme=\"light\"] #scorr-th button:hover{color:#3D6BEC;border-color:#3D6BEC}</style>"
     b'<div id="scorr-th"><button id="scorr-th-b" type="button" title="Toggle light / dark"></button></div>'
     b"<script>(function(){var b=document.getElementById('scorr-th-b');if(!b)return;"
     b"function cur(){try{return localStorage.getItem('scorr_theme')||'light';}catch(e){return 'light';}}"

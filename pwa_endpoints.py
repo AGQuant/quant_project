@@ -474,7 +474,9 @@ NAV_TOGGLE_JS = """
       + '#scorr-nav-strip .scorr-nav-btn{color:#fff}'
       // cc#126: toggle button is fixed top-right (NOT inline in the nav) so it stays
       // visible no matter how wide the nav grows or whether the nav is hidden.
-      + '#scorr-nav-toggle-btn{position:fixed;top:7px;right:10px;z-index:9999;'
+      // cc#363: stacked below the Logout (top:12) + theme (top:50) pills so it no
+      // longer overlaps them at the top-right corner; right-aligned to match (14px).
+      + '#scorr-nav-toggle-btn{position:fixed;top:88px;right:14px;z-index:9999;'
       + '  background:#2563eb;color:#fff;font-size:11px;font-weight:600;'
       + '  padding:4px 12px;border-radius:12px;border:none;cursor:pointer;margin:0;'
       + '  box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:.92}'
