@@ -358,6 +358,7 @@ const EP={
   passCount:b=>`/api/v8/stock_passcount/${b}`,
   brStockDetail:s=>`/api/v8/br_stock_detail/${encodeURIComponent(s)}`,   // cc#366
   srStockDetail:s=>`/api/v8/sr_stock_detail/${encodeURIComponent(s)}`,   // cc#378
+  smStockDetail:s=>`/api/v8/sm_stock_detail/${encodeURIComponent(s)}`,   // cc#380
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
@@ -469,20 +470,23 @@ const BASKET_INFO={
     wr:73.3,ev:2.00,sigs:126,spd:"~0.5/day · 12mo episode-level 1:1 backtest",
   },
   sell_momentum:{
-    label:"Sell Momentum V2",side:"SELL",version:"V2",
-    thesis:"Genuine structural downtrend -- price well below 200 DMA, RSI deeply oversold at both monthly and weekly level, stock near 52-week lows, sector weak. Bear phase cluster engine. Expect long quiet periods in bull markets -- not a bug.",
+    label:"Sell Momentum V3-N5",side:"SELL",version:"V3-N5",
+    thesis:"Structural downtrend caught with true 1:1 geometry. Weak larger frame (true weekly RSI<=45, monthly RSI<40) below/near the 200-DMA, weak week + sector, mid 52-week band, below the rolling pivot — and support (S2) must sit >=3% below so it can't block the fall to the fixed 3% target. Merge of old Sell Reversal V4 + SellMom V2 + founder filters (spec id=2901, founder-locked 11-Jul as live base; iteration continues after Phase B 5-min replay).",
     filters:[
-      {m:"dma_200",c:"<= -2.0%",dyn:false},
-      {m:"rsi_month",c:"<= 38",dyn:false},
-      {m:"rsi_weekly",c:"<= 38",dyn:false},
-      {m:"week_index_52",c:"<= 20 (near 52W low)",dyn:false},
-      {m:"sector_week",c:"<= -2.0",dyn:false},
-      {m:"mom_2d",c:"<= -1.5%",dyn:false},
+      {m:"true_weekly_rsi",c:"<= 45 (TRUE calendar weekly)",dyn:false},
+      {m:"rsi_month",c:"< 40",dyn:false},
+      {m:"mom_2d",c:"-4% to -1%",dyn:false},
+      {m:"dma_200",c:"<= +2%",dyn:false},
+      {m:"week_return",c:"-10% to -0.5%",dyn:false},
+      {m:"sector_week",c:"< 0",dyn:false},
+      {m:"cmp_lt_pp",c:"CMP < PP",dyn:false},
+      {m:"week_index_52",c:"20 to 60",dyn:false},
+      {m:"s2_clearance",c:"(CMP-S2)/CMP >= 3%",dyn:false},
     ],
-    gateType:"strict AND -- all 6 must pass · no score fallback",
-    target:"S2 = PP - (H5 - L5)",stop:"PP + 0.5x(R1 - PP)",
-    pivotEntry:"SELL zone: S1 <= CMP < PP  AND  (CMP-S1) >= 0.5x(PP-S1)",
-    wr:71.9,ev:0.55,sigs:97,spd:"~0.4/day (bear phase clusters)",
+    gateType:"strict AND -- all 9 must pass · dedicated handler, no score fallback",
+    target:"-3.0% fixed = entry x 0.97",stop:"+3.0% fixed = entry x 1.03 (true 1:1)",
+    pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
+    wr:64.0,ev:0.80,sigs:183,spd:"~0.5/day · 1yr episode-level EOD backtest (+147pts)",
   },
   sell_overbought:{
     label:"Sell Overbought V2",side:"SELL",version:"V2",
@@ -592,15 +596,19 @@ function closeInfo(){document.getElementById('infoModal').classList.remove('open
 async function openBrDetail(symbol,basket){
   // cc#378: generalized to buy_reversal V3 (8 gates) AND sell_reversal V5-D (6 gates). Rows share
   // the {filter,required,actual,pass} shape; only the endpoint + header levels differ by basket.
-  const isSR=basket==='sell_reversal';
-  document.getElementById('mTitle').textContent=symbol+(isSR?' · Sell Reversal V5-D':' · Buy Reversal V3');
-  document.getElementById('mSub').textContent=`Loading ${isSR?6:8}-filter breakdown…`;
+  const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum';
+  const lbl=isSR?' · Sell Reversal V5-D':isSM?' · Sell Momentum V3-N5':' · Buy Reversal V3';
+  const nf=isSR?6:isSM?9:8;
+  document.getElementById('mTitle').textContent=symbol+lbl;
+  document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
   document.getElementById('infoModal').classList.add('open');
-  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):EP.brStockDetail(symbol));}
+  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):isSM?EP.smStockDetail(symbol):EP.brStockDetail(symbol));}
   catch(e){document.getElementById('mBody').innerHTML=`<div class="err">Could not load detail for ${symbol}.</div>`;return;}
   const hdr=(isSR
     ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S1',num(d.s1,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['Target',d.target!=null?num(d.target,2):'--'],['Room',d.room_pct!=null?sign(d.room_pct,2)+'%':'--']]
+    : isSM
+    ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['S2 clr',d.s2_clearance_pct!=null?sign(d.s2_clearance_pct,2)+'%':'--']]
     : [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['R1',num(d.r1,2)],['Room&rarr;R1',d.room_r1_pct!=null?sign(d.room_r1_pct,2)+'%':'--']])
     .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
   const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
@@ -1539,7 +1547,7 @@ async function loadFunnelInline(basketId,panelIdx){
   if(pc&&pc.stocks){
     // cc#366/378: buy_reversal (8) AND sell_reversal (6) boxes are click-through to the per-stock
     // filter breakdown modal (openBrDetail is basket-generalized).
-    const isDetail=(basketId==='buy_reversal'||basketId==='sell_reversal');
+    const isDetail=(basketId==='buy_reversal'||basketId==='sell_reversal'||basketId==='sell_momentum');
     inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}${isDetail?' · tap a box for the filter breakdown':''}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
     inner+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
