@@ -99,11 +99,12 @@ FILTER_CONFIG = {
         "sector_week":   [None,  0.0],    # weak sector (engine enforces STRICT <0)
         "week_index_52": [20.0,  60.0],   # mid 52-week band
     },
-    # sell_overbought: 2 pivot-based filters computed live. 3 RSI/sector here for reference.
+    # cc#382 SELL_OVERBOUGHT_V3 (spec id=2912, replaces the never-firing V2). Dedicated handler
+    # (_write_sell_overbought_v3_qualified). The 1 v8_metrics gate shown for reference; the live gates
+    # (NIFTY RSI<=45, day HIGH>=R1, fall-from-2d-high 1-10%, day change<0) are handler-enforced and
+    # rendered via so_funnel_detail. week_return here is the only v8_metrics-computable filter.
     "sell_overbought": {
-        "rsi_weekly":   [80.0, None],
-        "rsi_month":    [70.0, None],
-        "sector_week":  [None,  0.0],
+        "week_return":  [-2.5, 0.0],   # mild weekly weakness
     },
     # buy_s1_bounce: 7 filters (1 gate + 6 stages). Reference cols only.
     "buy_s1_bounce": {
@@ -120,7 +121,7 @@ BASKET_META = {
     "buy_momentum":    {"side": "BUY",  "target": "+3.0% fixed",               "win_pct": "67% live", "signals_per_day": "~2/day"},
     "sell_reversal":   {"side": "SELL", "target": "S1/S2 dynamic",             "win_pct": "73% (12mo bt)", "signals_per_day": "~0.5/day"},
     "sell_momentum":   {"side": "SELL", "target": "-3.0% fixed",               "win_pct": "64% (1yr bt)", "signals_per_day": "~0.5/day"},
-    "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
+    "sell_overbought": {"side": "SELL", "target": "-2.0% fixed",               "win_pct": "59% (1yr bt)", "signals_per_day": "~0.4/day"},
     "buy_s1_bounce":   {"side": "BUY",  "target": "+2.0% fixed",               "win_pct": "73.9%", "signals_per_day": "~0.3/day"},
 }
 
@@ -157,7 +158,7 @@ V21_FILTERS = {
 # Locked-spec WR baselines (per specs 1263-1268) for the WR kill-switch.
 V21_BASELINE_WR = {
     "buy_reversal": 63.0, "buy_momentum": 67.0, "buy_s1_bounce": 73.9,  # cc#354/359 V2/V3 honest baselines
-    "sell_reversal": 73.0, "sell_momentum": 64.0, "sell_overbought": 81.5,  # cc#378 V5-D / cc#380 V3-N5 honest
+    "sell_reversal": 73.0, "sell_momentum": 64.0, "sell_overbought": 59.0,  # cc#378/380/382 honest baselines
 }
 
 
@@ -968,22 +969,23 @@ def filter_config(basket: str):
             **BASKET_META.get(basket, {})
         }
     if basket == "sell_overbought":
+        # cc#382 SELL_OVERBOUGHT_V3 (spec id=2912). Fresh same-day R1 rejection short.
         return {
             "basket": basket,
-            "principle": "Mean reversion from overbought resistance",
+            "principle": "Fresh same-day R1 rejection short (S1-Bounce mirror) in a bear regime",
             "filters": [
-                {"metric": "week_high_vs_pivot", "condition": "hi5d > 0.9*R1 OR hi5d > 0.9*R2"},
-                {"metric": "fall_3d",            "condition": "< -3.0%"},
-                {"metric": "rsi_weekly",         "condition": ">= 80"},
-                {"metric": "rsi_month",          "condition": ">= 70"},
-                {"metric": "sector_week",        "condition": "< 0"},
+                {"metric": "nifty_rsi",   "condition": "<= 45 (NIFTY daily RSI market gate)"},
+                {"metric": "high_ge_r1",  "condition": "day session HIGH >= R1 (touched TODAY)"},
+                {"metric": "fall_2d",     "condition": "fall from 2-day high 1% to 10%"},
+                {"metric": "day_red",     "condition": "day change < 0"},
+                {"metric": "week_return", "condition": "-2.5% to 0%"},
             ],
             "count": 5,
-            "target": "S1", "target_formula": "S1 = 2*PP - H5",
-            "stop": "R2",   "stop_formula":   "R2 = PP + (H5 - L5)",
+            "target": "-2.0% fixed", "target_formula": "entry * 0.98 (frozen at entry)",
+            "stop": "+2.0% fixed",   "stop_formula":   "entry * 1.02 (true 1:1)",
             "slot_architecture": {"strong_bullish": 4, "bullish": 4, "neutral": 4, "bearish": 3,
                                   "note": "Ring-fenced -- never competes with standard sell pool"},
-            "backtest": {"signals": 112, "wr_pct": 81.5, "expected_value": 1.56},
+            "backtest": {"trades": 112, "wr_pct": 59.0, "window": "1yr episode-level EOD (+0.36/trade, +40pts)"},
             **BASKET_META.get(basket, {})
         }
     if basket == "buy_s1_bounce":
@@ -2057,71 +2059,41 @@ def _so_enrich(rows):
     return rows
 
 
-def _so_funnel_stages():
-    try:
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute(_SO_COMMON_SQL)
-            cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    except Exception as e:
-        raise HTTPException(500, f"_so_funnel_stages DB error: {e}")
-    rows = _so_enrich(rows)
-    total = len(rows)
-    survivors_list = rows[:]
-    prev = total
-    stages = []
-
-    def _stage(label, cond, cmin, cmax):
-        nonlocal survivors_list, prev
-        survivors_list = [s for s in survivors_list if cond(s)]
-        n = len(survivors_list)
-        stages.append({"metric": label, "condition_min": cmin, "condition_max": cmax,
-                       "survivors": n, "killed": prev - n})
-        prev = n
-
-    _stage("week_high_vs_pivot", lambda s: s.get("week_high_vs_pivot") is True, "hi5d", "> 0.9*R1/R2")
-    _stage("fall_3d", lambda s: s.get("fall_3d") is not None and float(s["fall_3d"]) < -3.0, "< -3%", "-")
-    _stage("rsi_weekly", lambda s: _passes_filter(s.get("rsi_weekly"), 80.0, None), ">= 80", "-")
-    _stage("rsi_month",  lambda s: _passes_filter(s.get("rsi_month"), 70.0, None),  ">= 70", "-")
-    _stage("sector_week", lambda s: s.get("sector_week") is not None and float(s["sector_week"]) < 0, "< 0", "-")
-
-    # cc#164: V2.1 hard-gate stage (fall_from_day_high <= -1.5), chained onto the
-    # survivors of the 5 locked filters above -- this dedicated funnel has no
-    # separate v8_qualified read, so "final" below must include this gate to
-    # accurately reflect what the live engine (v8_signal_writer.py) qualifies.
-    v21_enabled = False
-    try:
-        with _conn() as conn:
-            v21_enabled = _load_filter_state(conn).get("sell_overbought", False)
-            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in rows])
-    except Exception:
-        v21_metrics = {}
-    for r in rows:
-        r["fall_from_day_high"] = v21_metrics.get(r["symbol"], {}).get("fall_from_day_high")
-    n_before = len(survivors_list)
-    survivors_list = [s for s in survivors_list
-                      if v21_hard_gate_pass("sell_overbought", s, v21_enabled)]
-    stages.append({
-        "metric": "v2.1_hard_gate", "condition_min": "fall_from_day_high", "condition_max": "<= -1.5",
-        "survivors": len(survivors_list), "killed": n_before - len(survivors_list),
-        "v21_enabled": v21_enabled,
-        "v21_note": "V2.1 hard gate (fall_from_day_high)" if v21_enabled
-                    else "V2.1 hard gate DISABLED (locked behavior in effect)",
-    })
-    return stages, total
+# cc#382: sell_overbought V3 funnel stages (spec id=2912) — reshaped from the handler-written
+# v8_funnel_counts row. All 5 cheap/live (no heavy stage). (The V2 _so_funnel_stages that live-computed
+# wRSI>=80/mRSI>=70 was removed — those V2 thresholds never fired and are gone from the SO path.)
+_SO_V3_STAGES = [
+    ("nifty_rsi",   "NIFTY daily RSI",   "",       "<= 45"),
+    ("high_ge_r1",  "day high >= R1",    "",       ""),
+    ("fall_2d",     "fall from 2d high", ">= 1%",  "<= 10%"),
+    ("day_red",     "day change < 0",    "",       ""),
+    ("week_return", "week return",       ">= -2.5","<= 0"),
+]
 
 
 def so_funnel_detail():
+    """cc#382: 5-stage funnel for sell_overbought V3, reshaped from the handler-written
+    v8_funnel_counts row (independent per-filter counts; final = strict AND of all 5)."""
     try:
-        stages, total = _so_funnel_stages()
-        final = stages[-1]["survivors"] if stages else 0
-        v21_enabled = stages[-1].get("v21_enabled", False) if stages else False
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_overbought' "
+                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
+            row = cur.fetchone()
+        counts = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+        universe = int(counts.get("_universe", 0) or 0)
+        final = int(counts.get("_score_qualified", 0) or 0)
+        stages = []
+        for key, label, cmin, cmax in _SO_V3_STAGES:
+            passes = int(counts.get(key, 0) or 0)
+            fails = max(universe - passes, 0)
+            stages.append({"metric": label, "condition_min": cmin, "condition_max": cmax,
+                           "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
+                           "pass_pct": round(passes / universe * 100, 1) if universe else 0})
         return {
             "basket": "sell_overbought", "score_date": str(date.today()),
-            "universe": total, "final": final, "filter_count": 5, "n_filters": 5,
-            "gate_type": "strict AND (all must pass)",
+            "universe": universe, "final": final, "filter_count": 5, "n_filters": 5,
+            "gate_type": "independent per-filter counts; final = strict AND of all 5",
             "score_qualified": final, "pivot_pass": final, "stages": stages,
-            "v21_enabled": v21_enabled,
             **BASKET_META.get("sell_overbought", {})
         }
     except Exception as e:
@@ -2130,50 +2102,123 @@ def so_funnel_detail():
 
 def so_funnel_counts():
     try:
-        stages, total = _so_funnel_stages()
-        counts = {st["metric"]: st["survivors"] for st in stages}
-        counts["_final_qualified"] = stages[-1]["survivors"] if stages else 0
-        counts["_v21_enabled"] = stages[-1].get("v21_enabled", False) if stages else False
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_overbought' "
+                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
+            row = cur.fetchone()
+        counts = (row[0] if row and isinstance(row[0], dict) else {}) or {}
         return {"basket": "sell_overbought", "score_date": str(date.today()),
-                "counts": counts, "source": "live_5filter"}
+                "counts": counts, "source": "handler_v3"}
     except Exception as e:
         raise HTTPException(500, f"so_funnel_counts failed: {e}")
 
 
+_SO_V3_PASSCOUNT_GATES = [("week_return", -2.5, 0.0)]   # only v8_metrics gate; rest are live/pivot
+
 def so_stock_passcount():
+    """cc#382: sell_overbought V3 pass-count = n/5 (spec id=2912). NIFTY-RSI market gate + live session
+    HIGH>=R1 + fall-from-2d-high 1-10% + day change<0 + week_return -2.5..0. Display only."""
+    from v8_signal_writer import _get_nifty_rsi
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute(_SO_COMMON_SQL)
-            cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            v21_enabled = _load_filter_state(conn).get("sell_overbought", False)
-            v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in rows])
-        rows = _so_enrich(rows)
+            all_rows = _basket_universe(cur)
+            pivots   = _basket_pivots(cur)
+            cmp_map  = _basket_cmp(cur)
+            nifty_rsi = _get_nifty_rsi(conn)
+            nifty_ok  = nifty_rsi is not None and nifty_rsi <= 45.0
+            syms = [r["symbol"] for r in all_rows]
+            sess_high, prev_high = {}, {}
+            cur.execute("""SELECT symbol, MAX(high) FROM intraday_prices WHERE source='fyers_eq'
+                AND timeframe='5m' AND ts::date=CURRENT_DATE AND symbol=ANY(%s) GROUP BY symbol""", (syms,))
+            for sym, h in cur.fetchall():
+                if h is not None: sess_high[sym] = float(h)
+            cur.execute("""SELECT DISTINCT ON (symbol) symbol, high FROM raw_prices
+                WHERE symbol=ANY(%s) AND price_date < CURRENT_DATE ORDER BY symbol, price_date DESC""", (syms,))
+            for sym, h in cur.fetchall():
+                if h is not None: prev_high[sym] = float(h)
         out = []
-        for r in rows:
-            r["fall_from_day_high"] = v21_metrics.get(r["symbol"], {}).get("fall_from_day_high")
-            checks = {
-                "week_high_vs_pivot": r.get("week_high_vs_pivot") is True,
-                "fall_3d":     r.get("fall_3d") is not None and float(r["fall_3d"]) < -3.0,
-                "rsi_weekly":  _passes_filter(r.get("rsi_weekly"), 80.0, None),
-                "rsi_month":   _passes_filter(r.get("rsi_month"), 70.0, None),
-                "sector_week": r.get("sector_week") is not None and float(r["sector_week"]) < 0,
-            }
-            passed = [k for k, ok in checks.items() if ok]
-            failed = [k for k, ok in checks.items() if not ok]
-            v21_pass = v21_hard_gate_pass("sell_overbought", r, v21_enabled)
-            out.append({"symbol": r["symbol"], "passed": len(passed), "total": 5,
+        for s in all_rows:
+            sym = s["symbol"]
+            passed, failed = [], []
+            (passed if nifty_ok else failed).append("nifty_rsi")
+            cmp = cmp_map.get(sym)
+            pv  = pivots.get(sym)
+            r1  = pv.get("r1") if pv else None
+            sh  = sess_high.get(sym)
+            ph  = prev_high.get(sym)
+            (passed if (sh is not None and r1 is not None and sh >= r1) else failed).append("high_ge_r1")
+            h2 = max([x for x in (sh, ph) if x is not None], default=None)
+            fall = ((h2 - cmp) / h2 * 100.0) if (h2 and cmp) else None
+            (passed if (fall is not None and 1.0 <= fall <= 10.0) else failed).append("fall_2d")
+            d1 = s.get("day_1d")
+            (passed if (d1 is not None and float(d1) < 0) else failed).append("day_red")
+            (passed if _passes_filter(s.get("week_return"), -2.5, 0.0) else failed).append("week_return")
+            out.append({"symbol": sym, "passed": len(passed), "total": 5,
                         "passed_filters": passed, "failed_filters": failed,
-                        "gvm_score": r.get("gvm_score"),
-                        "fall_3d": round(float(r["fall_3d"]), 2) if r.get("fall_3d") is not None else None,
-                        "v21_pass": v21_pass})
+                        "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"), "v21_pass": None})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_overbought", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 5, "stocks": out,
-                "v21_enabled": v21_enabled,
-                **BASKET_META.get("sell_overbought", {})}
+                "v21_enabled": False, **BASKET_META.get("sell_overbought", {})}
     except Exception as e:
         raise HTTPException(500, f"so_stock_passcount failed: {e}")
+
+
+@router.get("/so_stock_detail/{symbol}")
+def so_stock_detail(symbol: str):
+    """cc#382: per-stock 5-filter breakdown for sell_overbought V3 (spec id=2912). Mirrors
+    so_stock_passcount / the handler so the green-row count equals n/5."""
+    from v8_signal_writer import _get_nifty_rsi
+    sym = symbol.upper()
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT day_1d, week_return FROM v8_metrics
+                WHERE symbol=%s AND score_date=(SELECT MAX(score_date) FROM v8_metrics)""", (sym,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"No v8_metrics for {sym}")
+            d1, wret = [float(x) if x is not None else None for x in row]
+            cur.execute("""SELECT r1 FROM v8_paper_pivots WHERE symbol=%s
+                AND pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)""", (sym,))
+            pv = cur.fetchone()
+            r1 = float(pv[0]) if pv and pv[0] is not None else None
+            cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s AND cmp IS NOT NULL", (sym,))
+            cr = cur.fetchone()
+            cmp = float(cr[0]) if cr else None
+            cur.execute("""SELECT MAX(high) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m'
+                AND ts::date=CURRENT_DATE AND symbol=%s""", (sym,))
+            sh = cur.fetchone()[0]; sh = float(sh) if sh is not None else None
+            cur.execute("""SELECT high FROM raw_prices WHERE symbol=%s AND price_date < CURRENT_DATE
+                ORDER BY price_date DESC LIMIT 1""", (sym,))
+            ph = cur.fetchone(); ph = float(ph[0]) if ph and ph[0] is not None else None
+            nifty_rsi = _get_nifty_rsi(conn)
+
+        def _fmt(v, d):
+            return "--" if v is None else f"{v:.{d}f}"
+        nifty_ok = nifty_rsi is not None and nifty_rsi <= 45.0
+        h2 = max([x for x in (sh, ph) if x is not None], default=None)
+        fall = ((h2 - cmp) / h2 * 100.0) if (h2 and cmp) else None
+
+        p_nifty = nifty_ok
+        p_high  = sh is not None and r1 is not None and sh >= r1
+        p_fall  = fall is not None and 1.0 <= fall <= 10.0
+        p_day   = d1 is not None and d1 < 0
+        p_wret  = _passes_filter(wret, -2.5, 0.0)
+        rows = [
+            {"filter": "nifty_rsi",   "required": "<= 45",     "actual": _fmt(nifty_rsi, 1) + " (mkt)", "pass": p_nifty},
+            {"filter": "high_ge_r1",  "required": "HIGH >= R1", "actual": f"{_fmt(sh, 2)} vs R1 {_fmt(r1, 2)}", "pass": p_high},
+            {"filter": "fall_2d",     "required": "1% to 10%",  "actual": _fmt(fall, 2) + "%",  "pass": p_fall},
+            {"filter": "day_red",     "required": "< 0",        "actual": _fmt(d1, 2) + "%",    "pass": p_day},
+            {"filter": "week_return", "required": "-2.5 to 0",  "actual": _fmt(wret, 2) + "%",  "pass": p_wret},
+        ]
+        passed = sum(1 for r in rows if r["pass"])
+        return {"symbol": sym, "cmp": cmp, "r1": r1, "session_high": sh, "nifty_rsi": nifty_rsi,
+                "fall_2d_pct": round(fall, 2) if fall is not None else None,
+                "passed": passed, "total": 5, "rows": rows, "spec": "SELL_OVERBOUGHT_V3 id=2912"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"so_stock_detail failed: {e}")
 
 
 # ── Buy S1 Bounce dedicated funnel ────────────────────────────────────────────
@@ -2501,55 +2546,27 @@ def sell_overbought(limit: int = 50):
         conflict_syms = _load_conflict_syms("sell_overbought")     # cc#326
         missed        = _load_missed_reasons("sell_overbought")    # cc#326
         with _conn() as conn, conn.cursor() as cur:
+            # cc#382 V3: qualifiers come from the dedicated handler (v8_qualified today), NOT a V2
+            # inline recompute. Display FIXED -/+2% levels off the live CMP; enrich with pivots for context.
             cur.execute("""
-                WITH pivots AS (
-                    SELECT symbol, price_date,
-                        AVG((high+low+close)/3.0) OVER w AS pp,
-                        MAX(high) OVER w AS h5, MIN(low) OVER w AS l5
-                    FROM raw_prices WHERE price_date >= CURRENT_DATE - INTERVAL '14 days'
-                    WINDOW w AS (PARTITION BY symbol ORDER BY price_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
-                ),
-                latest_pivot AS (
-                    SELECT symbol, pp, 2*pp-h5 AS s1, 2*pp-l5 AS r1, pp+(h5-l5) AS r2
-                    FROM pivots WHERE price_date=(SELECT MAX(price_date) FROM pivots p2 WHERE p2.symbol=pivots.symbol)
-                ),
-                hi3d AS (SELECT symbol, MAX(high) AS max_high_3d FROM raw_prices
-                    WHERE price_date>=CURRENT_DATE-INTERVAL '4 days' AND price_date<=CURRENT_DATE GROUP BY symbol),
-                hi5d AS (SELECT symbol, MAX(high) AS max_high_5d FROM raw_prices
-                    WHERE price_date>=CURRENT_DATE-INTERVAL '7 days' AND price_date<=CURRENT_DATE GROUP BY symbol),
-                latest_close AS (
-                    SELECT DISTINCT ON (symbol) symbol, close, price_date
-                    FROM raw_prices WHERE price_date<=CURRENT_DATE ORDER BY symbol, price_date DESC
-                )
-                SELECT lc.symbol,
-                    ROUND(lc.close::numeric,2) AS entry,
-                    ROUND(lp.s1::numeric,2)    AS target,
-                    ROUND(lp.r2::numeric,2)    AS stop,
-                    ROUND(((lp.s1-lc.close)/NULLIF(lc.close,0)*100)::numeric,2) AS tgt_pct,
-                    ROUND(((lp.r2-lc.close)/NULLIF(lc.close,0)*100)::numeric,2) AS sl_pct,
-                    ROUND(h5d.max_high_5d::numeric,2) AS week_high,
-                    ROUND(h3d.max_high_3d::numeric,2) AS high_3d,
-                    ROUND(((lc.close-h3d.max_high_3d)/NULLIF(h3d.max_high_3d,0)*100)::numeric,2) AS fall_3d_pct,
-                    ROUND(lp.r1::numeric,2) AS r1, ROUND(lp.r2::numeric,2) AS r2, ROUND(lp.pp::numeric,2) AS pp,
-                    ROUND(vm.rsi_weekly::numeric,1) AS rsi_weekly,
-                    ROUND(vm.rsi_month::numeric,1)  AS rsi_month,
-                    ROUND(vm.sector_week::numeric,2) AS sector_week,
-                    ROUND(vm.gvm_score::numeric,2)   AS gvm_score
-                FROM latest_close lc
-                JOIN futures_universe fu ON fu.symbol=lc.symbol AND fu.is_active=TRUE
-                JOIN latest_pivot lp ON lp.symbol=lc.symbol
-                JOIN hi3d h3d ON h3d.symbol=lc.symbol
-                JOIN hi5d h5d ON h5d.symbol=lc.symbol
-                JOIN v8_metrics vm ON vm.symbol=lc.symbol
-                    AND vm.score_date=(SELECT MAX(score_date) FROM v8_metrics)
-                WHERE (h5d.max_high_5d>0.9*lp.r1 OR h5d.max_high_5d>0.9*lp.r2)
-                  AND (lc.close-h3d.max_high_3d)/NULLIF(h3d.max_high_3d,0)*100 < -3.0
-                  AND vm.rsi_weekly>=80 AND vm.rsi_month>=70 AND vm.sector_week<0
-                  AND lp.s1<lc.close
-                  AND lc.symbol NOT IN (
-                      SELECT UPPER(ticker) FROM earnings_calendar
-                      WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE+INTERVAL '1 day'))
-                ORDER BY vm.rsi_weekly DESC NULLS LAST LIMIT %s
+                SELECT q.symbol,
+                    ROUND(COALESCE(c.cmp, q.cmp)::numeric,2)          AS entry,
+                    ROUND((COALESCE(c.cmp, q.cmp)*0.98)::numeric,2)   AS target,
+                    ROUND((COALESCE(c.cmp, q.cmp)*1.02)::numeric,2)   AS stop,
+                    -2.0 AS tgt_pct, 2.0 AS sl_pct,
+                    ROUND(q.daily_rsi::numeric,1)   AS daily_rsi,
+                    ROUND(q.rsi_month::numeric,1)   AS rsi_month,
+                    ROUND(q.week_return::numeric,2) AS week_return,
+                    ROUND(q.sector_week::numeric,2) AS sector_week,
+                    ROUND(q.gvm_score::numeric,2)   AS gvm_score,
+                    ROUND(p.r1::numeric,2) AS r1, ROUND(p.pp::numeric,2) AS pp,
+                    q.signal_ts, q.metrics
+                FROM v8_qualified q
+                LEFT JOIN cmp_prices c ON c.symbol=q.symbol
+                LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
+                    AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
+                WHERE q.basket='sell_overbought' AND q.signal_date=CURRENT_DATE
+                ORDER BY q.signal_ts DESC LIMIT %s
             """, (min(max(limit, 1), 200),))
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -2559,9 +2576,9 @@ def sell_overbought(limit: int = 50):
         rows = _enrich_with_status(rows, "sell_overbought", open_pos, slot_full,
                                    closed_today, conflict_syms, missed)   # cc#326
         return {"basket": "sell_overbought", "count": len(rows),
-                "target": "S1", "stop": "R2",
+                "target": "-2.0% fixed", "stop": "+2.0% fixed",
                 "slot_architecture": "Dedicated ring-fenced: 4 (Bull/Neutral) / 3 (Bearish)",
-                "win_pct": "81.5%", "ev_per_trade": "+1.56%", "stocks": rows}
+                "win_pct": "59% (1yr bt)", "ev_per_trade": "+0.36%", "stocks": rows}
     except Exception as e:
         raise HTTPException(500, f"sell_overbought failed: {e}")
 

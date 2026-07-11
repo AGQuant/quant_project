@@ -359,6 +359,7 @@ const EP={
   brStockDetail:s=>`/api/v8/br_stock_detail/${encodeURIComponent(s)}`,   // cc#366
   srStockDetail:s=>`/api/v8/sr_stock_detail/${encodeURIComponent(s)}`,   // cc#378
   smStockDetail:s=>`/api/v8/sm_stock_detail/${encodeURIComponent(s)}`,   // cc#380
+  soStockDetail:s=>`/api/v8/so_stock_detail/${encodeURIComponent(s)}`,   // cc#382
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
@@ -489,20 +490,20 @@ const BASKET_INFO={
     wr:64.0,ev:0.80,sigs:183,spd:"~0.5/day · 1yr episode-level EOD backtest (+147pts)",
   },
   sell_overbought:{
-    label:"Sell Overbought V2",side:"SELL",version:"V2",
-    thesis:"Mean reversion from overbought resistance. Stock hit R1 or R2 in the past week, RSI extreme, now pulling back. Fires BEST in bull markets (88.9% WR). Dedicated ring-fenced slots -- never competes with standard sell pool. Stop at R2, not PP formula.",
+    label:"Sell Overbought V3",side:"SELL",version:"V3",
+    thesis:"Fresh same-day R1 rejection short (S1-Bounce mirror). In a bear regime (NIFTY daily RSI<=45) a stock touches R1 intraday, gets rejected (now 1-10% below its 2-day high, red on the day, mildly weak week). Fade the rejection to a fixed 2% target. Replaces the never-firing V2 (wRSI>=80+mRSI>=70 was unreachable — ZERO signals ever). Founder-locked 11-Jul (spec id=2912); refinement gated on Phase B 5-min replay.",
     filters:[
-      {m:"week_high_vs_pivot",c:"hi5d > 0.9xR1 OR > 0.9xR2",dyn:false},
-      {m:"fall_3d",c:"< -3.0%",dyn:false},
-      {m:"rsi_weekly",c:">= 80",dyn:false},
-      {m:"rsi_month",c:">= 70",dyn:false},
-      {m:"sector_week",c:"< 0",dyn:false},
+      {m:"nifty_rsi",c:"<= 45 (NIFTY daily RSI market gate)",dyn:false},
+      {m:"high_ge_r1",c:"day session HIGH >= R1 (touched today)",dyn:false},
+      {m:"fall_2d",c:"fall from 2-day high 1% to 10%",dyn:false},
+      {m:"day_red",c:"day change < 0",dyn:false},
+      {m:"week_return",c:"-2.5% to 0%",dyn:false},
     ],
-    gateType:"strict AND -- all 5 must pass · dedicated pool",
+    gateType:"strict AND -- all 5 must pass · dedicated ring-fenced pool",
     slots:{"Strong Bullish":4,"Bullish":4,"Neutral":4,"Bearish":3},
-    target:"S1 = 2xPP - H5",stop:"R2 = PP + (H5 - L5)  [NOT PP formula]",
-    pivotEntry:"SELL zone: S1 <= CMP < PP  AND  (CMP-S1) >= 0.5x(PP-S1)",
-    wr:81.5,ev:1.56,sigs:112,spd:"~0.4/day · 88.9% WR in bull mood",
+    target:"-2.0% fixed = entry x 0.98",stop:"+2.0% fixed = entry x 1.02 (true 1:1)",
+    pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
+    wr:59.0,ev:0.36,sigs:112,spd:"~0.4/day · 1yr episode-level EOD backtest (+40pts)",
   },
 };
 
@@ -596,19 +597,21 @@ function closeInfo(){document.getElementById('infoModal').classList.remove('open
 async function openBrDetail(symbol,basket){
   // cc#378: generalized to buy_reversal V3 (8 gates) AND sell_reversal V5-D (6 gates). Rows share
   // the {filter,required,actual,pass} shape; only the endpoint + header levels differ by basket.
-  const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum';
-  const lbl=isSR?' · Sell Reversal V5-D':isSM?' · Sell Momentum V3-N5':' · Buy Reversal V3';
-  const nf=isSR?6:isSM?9:8;
+  const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum', isSO=basket==='sell_overbought';
+  const lbl=isSR?' · Sell Reversal V5-D':isSM?' · Sell Momentum V3-N5':isSO?' · Sell Overbought V3':' · Buy Reversal V3';
+  const nf=isSR?6:isSM?9:isSO?5:8;
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
   document.getElementById('infoModal').classList.add('open');
-  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):isSM?EP.smStockDetail(symbol):EP.brStockDetail(symbol));}
+  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):isSM?EP.smStockDetail(symbol):isSO?EP.soStockDetail(symbol):EP.brStockDetail(symbol));}
   catch(e){document.getElementById('mBody').innerHTML=`<div class="err">Could not load detail for ${symbol}.</div>`;return;}
   const hdr=(isSR
     ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S1',num(d.s1,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['Target',d.target!=null?num(d.target,2):'--'],['Room',d.room_pct!=null?sign(d.room_pct,2)+'%':'--']]
     : isSM
     ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['S2 clr',d.s2_clearance_pct!=null?sign(d.s2_clearance_pct,2)+'%':'--']]
+    : isSO
+    ? [['CMP',num(d.cmp,2)],['R1',num(d.r1,2)],['Sess High',d.session_high!=null?num(d.session_high,2):'--'],['NIFTY RSI',d.nifty_rsi!=null?num(d.nifty_rsi,1):'--'],['Fall 2d',d.fall_2d_pct!=null?sign(d.fall_2d_pct,2)+'%':'--']]
     : [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['R1',num(d.r1,2)],['Room&rarr;R1',d.room_r1_pct!=null?sign(d.room_r1_pct,2)+'%':'--']])
     .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
   const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
@@ -1547,7 +1550,7 @@ async function loadFunnelInline(basketId,panelIdx){
   if(pc&&pc.stocks){
     // cc#366/378: buy_reversal (8) AND sell_reversal (6) boxes are click-through to the per-stock
     // filter breakdown modal (openBrDetail is basket-generalized).
-    const isDetail=(basketId==='buy_reversal'||basketId==='sell_reversal'||basketId==='sell_momentum');
+    const isDetail=(basketId==='buy_reversal'||basketId==='sell_reversal'||basketId==='sell_momentum'||basketId==='sell_overbought');
     inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}${isDetail?' · tap a box for the filter breakdown':''}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
     inner+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');

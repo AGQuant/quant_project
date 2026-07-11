@@ -1495,15 +1495,12 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
     except Exception as e:
         log.warning(f"auto_paper_so slot check {sym}: {e}"); return
 
-    pp, r1, s1 = pv["pp"], pv["r1"], pv["s1"]
-    r2 = r1 + (r1 - pp)
-    target = round(s1, 2)
-    stop   = round(r2, 2)
+    pp = pv["pp"]
     entry  = round(cmp, 2)
-
-    if target >= entry:
-        log.debug(f"auto_paper_so {sym}: S1 ({target}) >= entry ({entry}), skip")
-        return
+    # cc#382 V3 (spec id=2912): fixed -/+2.0% 1:1 SHORT (target below, stop above), frozen at entry —
+    # replaces the V2 S1-target / R2-stop pivot formulas.
+    target = round(entry * 0.98, 2)
+    stop   = round(entry * 1.02, 2)
 
     try:
         with conn.cursor() as cur:
@@ -1527,7 +1524,7 @@ def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
         if inserted:
             log.info(f"auto_paper_so entry: {sym} SHORT @ {entry} "
                      f"entry_ts={entry_ts_ist.strftime('%H:%M')} IST "
-                     f"target(S1)={target} sl(R2)={stop} so_slots={so_open+1}/{so_cap}")
+                     f"target(-2%)={target} sl(+2%)={stop} so_slots={so_open+1}/{so_cap}")
     except Exception as e:
         log.warning(f"auto_paper_so insert {sym}: {e}")
 
@@ -2164,9 +2161,8 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
                                     gate_fails, pivots, signal_ts_ist, enabled_v21,
                                     sim_ts=sim_ts, v21_backtest=v21_backtest)
-    _write_sell_overbought_qualified(conn, all_metrics, target_date,
-                                      gate_fails, pivots, signal_ts_ist, enabled_v21,
-                                      sim_ts=sim_ts, v21_backtest=v21_backtest)
+    _write_sell_overbought_v3_qualified(conn, all_metrics, target_date,
+                                        gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
 
     # cc#256: tick complete — flush a slot_full_burst alert if any pool piled up. Live only
     # (sim_ts is None); replay/bt7 ticks accumulate harmlessly but never emit alerts.
@@ -2280,124 +2276,111 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
             log.warning(f"buy_s1_bounce insert {sym}: {e}")
 
 
-def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date: date,
-                                      gate_fails: int, pivots: dict, signal_ts_ist,
-                                      enabled_v21: Optional[dict] = None, sim_ts=None,
-                                      v21_backtest=False):
-    from v8_endpoints import v21_hard_gate_pass
-    enabled_v21 = enabled_v21 or {}
-    so_v21_on = enabled_v21.get("sell_overbought", False)
+def _write_sell_overbought_v3_qualified(conn, all_metrics: List[dict], target_date: date,
+                                        gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
+    """cc#382 SELL_OVERBOUGHT_V3 (spec id=2912) — replaces the never-firing V2 (wRSI>=80 + mRSI>=70
+    was unreachable, ZERO signals ever). Fresh same-day R1 rejection short (S1-Bounce mirror). Strict
+    AND of 5, all cheap/live (no heavy weekly-RSI stage):
+      (1) NIFTY daily RSI <= 45     (bear-regime market gate)
+      (2) day session HIGH >= R1    (rolling-5d pivot r1, TOUCHED TODAY — live session high)
+      (3) fall from 2-day high in [1, 10]%  (rejected, not crashed)
+      (4) day change < 0            (red today)
+      (5) week_return in [-2.5, 0]  (mild weekly weakness)
+    Exits FIXED +/-2.0% (true 1:1) via _auto_paper_entry_so; max hold 15 trading days. Ring-fenced SO
+    slot pool unchanged. Independent per-filter funnel counts (cc#364 convention)."""
+    basket = "sell_overbought"
     so_cap = _so_slots(gate_fails)
-    log.info(f"sell_overbought: SO slots={so_cap} gate_fails={gate_fails}")
+    nifty_rsi = _get_nifty_rsi(conn, sim_ts=sim_ts)
+    nifty_ok = nifty_rsi is not None and nifty_rsi <= 45.0
+    log.info(f"sell_overbought_v3: SO slots={so_cap}, nifty_rsi={nifty_rsi} gate={'ON' if nifty_ok else 'OFF'}")
 
-    candidates = [
-        s for s in all_metrics
-        if (s.get("rsi_weekly") or 0) >= 80
-        and (s.get("rsi_month") or 0) >= 70
-        and (s.get("sector_week") or 0) < 0
-    ]
-    log.info(f"sell_overbought: {len(candidates)} candidates after RSI/sector pre-filter")
+    base = []
+    for s in all_metrics:
+        cmp = s.get("_cmp")
+        pv  = pivots.get(s["symbol"])
+        if not cmp or not pv:
+            continue
+        r1 = pv.get("r1")
+        if r1 is None:
+            continue
+        s["_so_r1"] = r1
+        base.append(s)
+    syms = [s["symbol"] for s in base]
 
-    if not candidates:
-        return
+    # (2)/(3): today's LIVE session high (touched R1?) + the prior day's high (for the 2-day high).
+    sess_high, prev_high = {}, {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT symbol, MAX(high) FROM intraday_prices
+                WHERE source='fyers_eq' AND timeframe='5m' AND ts::date=%s AND symbol=ANY(%s)
+                GROUP BY symbol""", (target_date, syms))
+            for sym, h in cur.fetchall():
+                if h is not None:
+                    sess_high[sym] = float(h)
+            cur.execute("""SELECT DISTINCT ON (symbol) symbol, high FROM raw_prices
+                WHERE symbol=ANY(%s) AND price_date < %s ORDER BY symbol, price_date DESC""",
+                (syms, target_date))
+            for sym, h in cur.fetchall():
+                if h is not None:
+                    prev_high[sym] = float(h)
+    except Exception as e:
+        log.warning(f"sell_overbought_v3 high load: {e}")
 
-    syms = [s["symbol"] for s in candidates]
-    today = target_date
+    for s in base:
+        sym = s["symbol"]
+        cmp = s["_cmp"]
+        sh = sess_high.get(sym)
+        ph = prev_high.get(sym)
+        s["_so_high_ge_r1"] = (sh is not None and sh >= s["_so_r1"])
+        h2 = max([x for x in (sh, ph) if x is not None], default=None)   # 2-day high (today live + prior day)
+        s["_so_fall2d"] = round((h2 - cmp) / h2 * 100.0, 3) if (h2 and cmp) else None
+
+    def _fall_ok(s):
+        f = s["_so_fall2d"]
+        return f is not None and 1.0 <= f <= 10.0
+    def _day_red(s):
+        v = s.get("day_1d")
+        return v is not None and float(v) < 0.0
+
+    # cc#382: INDEPENDENT per-filter counts (cc#364 style). The NIFTY gate is market-wide: all `base`
+    # pass it iff nifty_ok. Final = strict-AND of all 5. No heavy stage.
+    funnel = {"_universe": len(base)}
+    funnel["nifty_rsi"]   = len(base) if nifty_ok else 0                                       # (1)
+    funnel["high_ge_r1"]  = sum(1 for s in base if s["_so_high_ge_r1"])                        # (2)
+    funnel["fall_2d"]     = sum(1 for s in base if _fall_ok(s))                                # (3)
+    funnel["day_red"]     = sum(1 for s in base if _day_red(s))                                # (4)
+    funnel["week_return"] = sum(1 for s in base if _passes(s.get("week_return"), -2.5, 0.0))   # (5)
+    surv = [s for s in base
+            if nifty_ok
+            and s["_so_high_ge_r1"]
+            and _fall_ok(s)
+            and _day_red(s)
+            and _passes(s.get("week_return"), -2.5, 0.0)]
+    funnel["_score_qualified"] = len(surv)
+    log.info(f"sell_overbought_v3: {len(surv)} qualified [spec id=2912]")
 
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                WITH pivots AS (
-                    SELECT symbol, price_date,
-                        AVG((high+low+close)/3.0) OVER w AS pp,
-                        MAX(high) OVER w AS h5,
-                        MIN(low)  OVER w AS l5
-                    FROM raw_prices
-                    WHERE symbol = ANY(%s)
-                      AND price_date >= %s - INTERVAL '14 days'
-                    WINDOW w AS (PARTITION BY symbol ORDER BY price_date
-                                 ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
-                ),
-                latest_pivot AS (
-                    SELECT DISTINCT ON (symbol) symbol, pp, h5, l5,
-                        2*pp - h5           AS s1,
-                        2*pp - l5           AS r1,
-                        pp + (h5 - l5)      AS r2
-                    FROM pivots ORDER BY symbol, price_date DESC
-                ),
-                hi5d AS (
-                    SELECT symbol, MAX(high) AS max_h5d
-                    FROM raw_prices
-                    WHERE symbol = ANY(%s)
-                      AND price_date >= %s - INTERVAL '7 days'
-                      AND price_date <= %s
-                    GROUP BY symbol
-                ),
-                hi3d AS (
-                    SELECT symbol, MAX(high) AS max_h3d
-                    FROM raw_prices
-                    WHERE symbol = ANY(%s)
-                      AND price_date >= %s - INTERVAL '4 days'
-                      AND price_date <= %s
-                    GROUP BY symbol
-                ),
-                latest_close AS (
-                    SELECT DISTINCT ON (symbol) symbol, close
-                    FROM raw_prices
-                    WHERE symbol = ANY(%s) AND price_date <= %s
-                    ORDER BY symbol, price_date DESC
-                )
-                SELECT lc.symbol,
-                    lc.close AS entry,
-                    lp.s1, lp.r1, lp.r2, lp.pp,
-                    h5d.max_h5d,
-                    h3d.max_h3d,
-                    (lc.close - h3d.max_h3d) / NULLIF(h3d.max_h3d, 0) * 100 AS fall_3d_pct,
-                    CASE WHEN h5d.max_h5d > 0.9 * lp.r1
-                              OR h5d.max_h5d > 0.9 * lp.r2
-                         THEN TRUE ELSE FALSE END AS near_resistance
-                FROM latest_close lc
-                JOIN latest_pivot lp ON lp.symbol = lc.symbol
-                JOIN hi5d         h5d ON h5d.symbol = lc.symbol
-                JOIN hi3d         h3d ON h3d.symbol = lc.symbol
-                WHERE lp.s1 < lc.close
-            """, (syms, today, syms, today, today, syms, today, today, syms, today))
-            pivot_rows = {r[0]: dict(zip(
-                ["symbol","entry","s1","r1","r2","pp","max_h5d","max_h3d","fall_3d_pct","near_resistance"],
-                r)) for r in cur.fetchall()}
+            cur.execute("""INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                VALUES (%s,%s,%s) ON CONFLICT (basket, score_date) DO UPDATE SET
+                    counts=EXCLUDED.counts, computed_at=NOW()""",
+                (basket, target_date, json.dumps(funnel)))
+        conn.commit()
     except Exception as e:
-        log.warning(f"sell_overbought pivot query: {e}")
-        return
+        log.warning(f"sell_overbought_v3 funnel: {e}")
 
-    qualified_so = []
-    for s in candidates:
+    for s in surv:
         sym = s["symbol"]
-        pr  = pivot_rows.get(sym)
-        if not pr:
-            continue
-        if not pr["near_resistance"]:
-            continue
-        if (pr["fall_3d_pct"] or 0) >= -3.0:
-            continue
-        # cc#158: V2.1 hard gate (strict-AND) — fall_from_day_high <= -1.5.
-        # NULL-passes if no intraday high yet (spec id=1268).
-        if so_v21_on and not v21_hard_gate_pass("sell_overbought", s, True, backtest=v21_backtest):
-            continue
-        qualified_so.append((s, pr))
-
-    log.info(f"sell_overbought: {len(qualified_so)} qualified after pivot filters"
-             f"{' (V2.1 hard-gate ON)' if so_v21_on else ''}")
-
-    for s, pr in qualified_so:
-        sym = s["symbol"]
+        cmp = s.get("_cmp")
+        entry = round(cmp, 2)
         snap = {
-            "rsi_weekly": s.get("rsi_weekly"), "rsi_month": s.get("rsi_month"),
-            "sector_week": s.get("sector_week"), "fall_3d_pct": pr["fall_3d_pct"],
-            "near_r1": float(pr["max_h5d"] or 0) > 0.9 * float(pr["r1"] or 0),
-            "near_r2": float(pr["max_h5d"] or 0) > 0.9 * float(pr["r2"] or 0),
+            "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
+            "high_ge_r1": s["_so_high_ge_r1"], "r1": s["_so_r1"],
+            "fall_2d_pct": s.get("_so_fall2d"), "day_1d": s.get("day_1d"),
+            "week_return": s.get("week_return"),
+            "target": round(entry * 0.98, 2), "stop": round(entry * 1.02, 2),
             "filter_score": 5, "filter_total": 5, "so_slots": so_cap,
-            "fall_from_day_high": s.get("fall_from_day_high"),   # cc#158
-            "v21_enabled": so_v21_on,                            # cc#158
+            "spec": "SELL_OVERBOUGHT_V3 id=2912",
         }
         try:
             with conn.cursor() as cur:
@@ -2408,29 +2391,22 @@ def _write_sell_overbought_qualified(conn, all_metrics: List[dict], target_date:
                      rsi_month, rsi_weekly, sector_week, sector_day,
                      month_index, week_index_52, daily_rsi,
                      metrics, source)
-                    VALUES (%s,'sell_overbought',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,'sell_overbought',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
                     ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                 """, (
                     sym, target_date, signal_ts_ist,
-                    s.get("gvm_score"), s.get("_cmp"),
+                    s.get("gvm_score"), cmp,
                     s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
                     s.get("dma_200"), s.get("dma_50"),
                     s.get("rsi_month"), s.get("rsi_weekly"),
                     s.get("sector_week"), s.get("sector_day"),
                     s.get("month_index"), s.get("week_index_52"),
-                    s.get("daily_rsi"),
-                    json.dumps(snap), "live_5min",
+                    s.get("daily_rsi"), json.dumps(snap),
                 ))
-                first_qualification = cur.rowcount > 0   # daily latch (display)
             conn.commit()
-
-            # cc#254: retry entry every tick it still passes the SO gate, not just first
-            # qualification — _auto_paper_entry_so re-checks window/guards/slot live (idempotent).
-            pv = pivots.get(sym)
-            _auto_paper_entry_so(conn, sym, s.get("_cmp"), pv,
-                                 target_date, gate_fails, sim_ts=sim_ts)
+            _auto_paper_entry_so(conn, sym, cmp, pivots.get(sym), target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
-            log.warning(f"sell_overbought qualified insert {sym}: {e}")
+            log.warning(f"sell_overbought_v3 insert {sym}: {e}")
 
 
 # -- Main entry point ---------------------------------------------------------
