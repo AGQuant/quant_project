@@ -1773,12 +1773,20 @@ function renderPositionNews(d){
 // is earlier than today (IST). Shared by the India VIX / NIFTY PCR / BankNifty PCR rows.
 function _pcDayChg(pts,vals){
   if(!pts.length||vals[vals.length-1]==null)return null;
-  const t=new Date(Date.now()+(5*60+30)*60000);
-  const today=t.getUTCFullYear()+'-'+String(t.getUTCMonth()+1).padStart(2,'0')+'-'+String(t.getUTCDate()).padStart(2,'0');
-  let prev=null;
-  for(let i=pts.length-1;i>=0;i--){if(String(pts[i].ts).slice(0,10)<today){prev=vals[i];break;}}
-  const last=vals[vals.length-1];
-  return(prev!=null&&prev!==0)?((last-prev)/prev*100):null;
+  // cc#369 (cc#367 definition): change = latest trading session's last value vs the PREVIOUS
+  // trading session's last value, driven by the DISTINCT trading dates present in the data —
+  // NEVER the calendar "today". The old code compared vs "today"; off-market (weekend/evening)
+  // "today" has no bars, so `prev` landed on the SAME latest session and every tile read +0.00%.
+  // This shows the completed-session change frozen off-market, and live-vs-prior-session in-market.
+  const lastDay=String(pts[pts.length-1].ts).slice(0,10);
+  let last=null,prev=null;
+  for(let i=pts.length-1;i>=0;i--){
+    if(vals[i]==null)continue;
+    const day=String(pts[i].ts).slice(0,10);
+    if(last==null&&day===lastDay){last=vals[i];continue;}   // latest session's last value
+    if(day<lastDay){prev=vals[i];break;}                    // previous session's last value
+  }
+  return(last!=null&&prev!=null&&prev!==0)?((last-prev)/prev*100):null;
 }
 // cc#293: inline row display — Label <value> <day-change% coloured>. Reuses sign()/cls().
 // cc#310: cache the last VIX/PCR inline HTML per span. renderMood() rebuilds the mood card
