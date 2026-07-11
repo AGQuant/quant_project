@@ -17,7 +17,7 @@ sell_momentum V2 LOCKED (16-Jun-2026): 6 strict AND | 71.9% WR | EV +0.55%/trade
 sell_overbought V2 LOCKED (16-Jun-2026): 5 strict AND | 81.5% WR | EV +1.56%/trade.
   Dedicated ring-fenced slots: 4 (Bull/Neutral) / 3 (Bearish). Total always 24.
   Funnel: dedicated so_funnel_detail() computes all 5 filters live from raw_prices.
-buy_s1_bounce V1 LOCKED (17-Jun-2026): 7 filters (1 gate + 6 stages). 73.9% WR.
+buy_s1_bounce V2 LOCKED (10-Jul-2026): 7 filters (1 gate + 6 stages), week_return<=2.5, fixed +/-2.0% exits.
   Dedicated ring-fenced slots: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish).
   Funnel: dedicated s1b_funnel_detail() computes all 7 filters live.
 Generic funnel_detail stages emit survivors/killed (dashboard aliases for passes/fails).
@@ -105,7 +105,7 @@ FILTER_CONFIG = {
     },
     # buy_s1_bounce: 7 filters (1 gate + 6 stages). Reference cols only.
     "buy_s1_bounce": {
-        "week_return":  [0.0,  3.0],
+        "week_return":  [0.0,  2.5],   # cc#358 V2: cap 2.5 (was 3.0)
         "vol_ratio":    [1.5, None],
         "dma_50":       [0.0, None],
     },
@@ -120,7 +120,7 @@ BASKET_META = {
     "sell_reversal":   {"side": "SELL", "target": "S2",                        "win_pct": "79.3%", "signals_per_day": "~0.6/day"},
     "sell_momentum":   {"side": "SELL", "target": "S2",                        "win_pct": "71.9%", "signals_per_day": "~0.4/day"},
     "sell_overbought": {"side": "SELL", "target": "S1",                        "win_pct": "81.5%", "signals_per_day": "~0.4/day"},
-    "buy_s1_bounce":   {"side": "BUY",  "target": "+1.5% fixed",               "win_pct": "73.9%", "signals_per_day": "~0.3/day"},
+    "buy_s1_bounce":   {"side": "BUY",  "target": "+2.0% fixed",               "win_pct": "73.9%", "signals_per_day": "~0.3/day"},
 }
 
 # ── cc#158 V2.1 candidate filters — hourly + w52 + fall_from_day_high ────────
@@ -984,7 +984,7 @@ def filter_config(basket: str):
             ],
             "count": 7,
             "note": "close_vs_open is implied by day_ret>0.5% -- not a separate filter.",
-            "target": "+1.5% fixed from entry", "stop": "-1.5% fixed from entry",
+            "target": "+2.0% fixed from entry", "stop": "-2.0% fixed from entry",
             "slot_architecture": {"strong_bullish": 3, "bullish": 3, "neutral": 3, "bearish": 2,
                                   "note": "Ring-fenced -- never competes with standard buy pool"},
             "backtest": {"signals": 88, "wr_pct": 73.9, "expected_value": 0.716},
@@ -1960,7 +1960,7 @@ def buy_s1_bounce_qualified(limit: int = 50):
                                    closed_today, conflict_syms, missed)   # cc#326
         return {
             "basket": "buy_s1_bounce", "count": len(rows),
-            "target": "+1.5% fixed from entry", "stop": "-1.5% fixed from entry",
+            "target": "+2.0% fixed from entry", "stop": "-2.0% fixed from entry",
             "slot_architecture": "Dedicated ring-fenced: 3 (Strong Bull/Bull/Neutral) / 2 (Bearish)",
             "win_pct": "73.9%", "ev_per_trade": "+0.716%", "stocks": rows,
         }

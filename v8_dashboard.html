@@ -432,12 +432,12 @@ const BASKET_INFO={
     wr:77.4,ev:0.634,sigs:243,spd:"~2/day",
   },
   buy_s1_bounce:{
-    label:"Buy S1 Bounce V1",side:"BUY",version:"V1",
+    label:"Buy S1 Bounce V2",side:"BUY",version:"V2",
     thesis:"Quality futures stock tested pivot S1 support in the past week and is now bouncing with volume confirmation on a bullish day while Nifty is healthy (RSI>=55) and stock is above 50DMA. Enter the confirmed recovery, not the panic. Market bottom detection basket.",
     filters:[
       {m:"week_low vs S1",c:"low_5d <= S1 (touched support)",dyn:false},
       {m:"recovery_2d",c:"2.0 - 8.0% (bouncing, not chasing)",dyn:false},
-      {m:"week_return",c:"0.0 - 3.0%",dyn:false},
+      {m:"week_return",c:"0.0 - 2.5%",dyn:false},
       {m:"close > open",c:"bullish candle",dyn:false},
       {m:"day_ret",c:"> 0.5%",dyn:false},
       {m:"vol_ratio",c:">= 1.5x 10d avg",dyn:false},
@@ -446,8 +446,8 @@ const BASKET_INFO={
     ],
     gateType:"strict AND -- all 8 must pass · dedicated ring-fenced pool",
     slots:{"Strong Bullish":3,"Bullish":3,"Neutral":3,"Bearish":2},
-    target:"Fixed +1.5% from entry",stop:"Fixed -1.5% from entry",
-    pivotEntry:"No pivot room gate. Entry on signal day close. Fixed +1.5% target / -1.5% stop.",
+    target:"Fixed +2.0% from entry",stop:"Fixed -2.0% from entry",
+    pivotEntry:"No pivot room gate. Entry on the live signal tick. Fixed +2.0% target / -2.0% stop, 1:1, frozen at entry. V2 locked 10-Jul-2026.",
     wr:73.9,ev:0.716,sigs:88,spd:"~0.3/day · fires in clusters at market bottoms",
   },
   sell_reversal:{

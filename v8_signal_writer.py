@@ -1539,8 +1539,8 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
         log.warning(f"auto_paper_s1b slot check {sym}: {e}"); return
 
     entry  = round(cmp, 2)
-    target = round(entry * 1.015, 2)
-    stop   = round(entry * 0.985, 2)
+    target = round(entry * 1.020, 2)   # cc#358 V2: +2.0% (was +1.5%)
+    stop   = round(entry * 0.980, 2)   # cc#358 V2: -2.0% (was -1.5%)
 
     try:
         with conn.cursor() as cur:
@@ -1564,7 +1564,7 @@ def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fa
         conn.commit()
         if inserted:
             log.info(f"auto_paper_s1b: {sym} LONG @ {entry} "
-                     f"tgt={target}(+1.5%) sl={stop}(-1.5%) "
+                     f"tgt={target}(+2.0%) sl={stop}(-2.0%) "
                      f"slots={s1b_open+1}/{s1b_cap} ts={entry_ts_ist.strftime('%H:%M')} IST")
     except Exception as e:
         log.warning(f"auto_paper_s1b insert {sym}: {e}")
@@ -1904,7 +1904,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
         # endpoint + funnel but NOT the writer, so the writer auto-entered paper for
         # gvm<7 stocks the qualified list then hid (ghost entries). Now writer==funnel==endpoint.
         if _passes(s.get("gvm_score"),    7.0, None)
-        and _passes(s.get("week_return"),  0.0, 3.0)
+        and _passes(s.get("week_return"),  0.0, 2.5)   # cc#358 V2: cap 2.5 (was 3.0)
         and _passes(s.get("dma_50"),      0.0, None)
         and _passes(s.get("vol_ratio"),   1.5, None)
         and _passes(s.get("recovery_2d"), 2.0, 8.0)
