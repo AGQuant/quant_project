@@ -414,12 +414,20 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             oi_chg = (basis.get("fut_oi") or {}).get("chg_pct")
             opt = _options_block(cur, sym, cmp_px)
             intr = _intraday_block(cur, sym, cmp_px)
+            # cc#368: freshness stamp = latest available option_chain snapshot for this underlying.
+            # The chain blocks already read MAX(ts) (never today-only), so off-market/weekend still
+            # returns the last live snapshot; data_ts lets the UI label it honestly ("as of <ts>")
+            # and, when NULL, flip to an explicit "No option data" state instead of an infinite skeleton.
+            cur.execute("SELECT MAX(ts) FROM option_chain WHERE underlying=%s", (sym,))
+            _cts = cur.fetchone()
+            chain_ts = _cts[0].isoformat() if _cts and _cts[0] else None
 
         tc = _tc_score(sym, side)   # opens its own connection — kept outside the block above
 
         resp = {
             "symbol": sym, "cmp": cmp_px, "fut": fut, "spot": spot, "side": (side or "").upper() or None,
             "has_options": opt.get("has_options", False),
+            "data_ts": chain_ts,   # cc#368: latest option_chain snapshot ts (None = no chain rows)
             "verdict": {
                 "oi_quadrant": _oi_quadrant(oi_chg, m.get("price_chg")),
                 "options_cost": opt.get("options_cost"),

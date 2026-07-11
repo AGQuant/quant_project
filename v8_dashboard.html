@@ -797,7 +797,20 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const rd=R.d,rw=R.w;
   rows+=_dcR('RSI',
     (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','');
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+verdict+rows;
+  // cc#368: honest freshness line — off-market/weekend shows the last chain snapshot ts ("as of
+  // <ts>"); zero chain rows shows an explicit "No option data" state (never an infinite skeleton).
+  let fresh='';
+  if(!d.has_options && !d.data_ts) fresh=`<div class="dc-sub" style="color:var(--amber);margin:-2px 0 8px">&#9888; No option data for ${sym}</div>`;
+  else if(d.data_ts) fresh=`<div class="dc-sub" style="margin:-2px 0 8px">Options as of ${_dcFmtTs(d.data_ts)} IST</div>`;
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+fresh+verdict+rows;
+}
+// cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
+// Date()/timezone drift (the server stamp is already IST).
+function _dcFmtTs(s){
+  const m=String(s||'').match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if(!m)return String(s||'');
+  const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m[2],10)-1];
+  return `${m[3]}-${mon} ${m[4]}:${m[5]}`;
 }
 async function openDerivCockpit(sym,side,qty,entry,cmp){
   _dcInjectStyle();
@@ -807,8 +820,12 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
   const sheet=document.getElementById('dcSheet');
   sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+'<div class="dc-skel"></div><div class="dc-skel"></div><div class="dc-skel"></div>';
   ov.classList.add('open');
-  let d;try{d=await getJSON('/api/deriv-metrics/'+encodeURIComponent(sym)+(side?('?side='+encodeURIComponent(side)):''));}
-  catch(e){sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+'<div class="empty" style="padding:18px;color:var(--red);font-size:12px">Cockpit failed to load.</div>';return;}
+  // cc#368: never let the skeleton shimmer forever — race the fetch against a 10s timeout so the
+  // sheet ALWAYS resolves (to data, or an explicit failure/timeout state).
+  const _to=new Promise((_,rej)=>setTimeout(()=>rej(new Error('dc_timeout')),10000));
+  let d;try{d=await Promise.race([getJSON('/api/deriv-metrics/'+encodeURIComponent(sym)+(side?('?side='+encodeURIComponent(side)):'')),_to]);}
+  catch(e){const msg=(e&&e.message==='dc_timeout')?'Cockpit timed out (10s) — tap the symbol to retry.':'Cockpit failed to load.';
+    sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+`<div class="empty" style="padding:18px;color:var(--red);font-size:12px">${msg}</div>`;return;}
   sheet.innerHTML=_dcRender(sym,side,qty,entry,cmp,d||{});
 }
 
