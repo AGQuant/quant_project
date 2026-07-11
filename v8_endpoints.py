@@ -138,8 +138,9 @@ BASKET_META = {
 # (<=20 -> <=30 when enabled), NOT a hard-gate add — keyed "_modify" and
 # handled in the score-gate, so it is skipped by the hard-gate pass below.
 V21_FILTERS = {
-    "buy_reversal":    {"hourly_pct": {"min": 0.2, "max": 1.0},
-                        "week_index_52": {"min": 40.0, "max": 80.0}},
+    # cc#360: buy_reversal V2.1 bands removed — buy_reversal is now V3 (dedicated strict-AND
+    # handler that never calls the V2.1 hard gate). Absence is handled gracefully by every reader
+    # (all use .get(basket,{}) or `basket in V21_FILTERS`), so no v21_pass is computed for it.
     "buy_momentum":    {"hourly_pct": {"min": 0.2, "max": 1.5},
                         "week_index_52": {"min": 60.0, "max": 100.0}},
     "buy_s1_bounce":   {"hourly_pct": {"min": 0.0, "min_excl": True, "max": 1.0},
@@ -360,7 +361,10 @@ def _live_qualified_fallback(basket: str, limit: int):
     else:
         config = FILTER_CONFIG[basket]
     n_filters = len(config)
-    need      = max(n_filters - 1, 1)
+    # cc#360: buy_reversal V3 is strict-AND — its NEAR_MISS watchlist must pass ALL 4 daily gates
+    # (daily_rsi<=40, dma_200>=0, gvm>=6.5, mom_2d 0-3), not the n-1 fallback (which surfaced
+    # hot-RSI names that are the opposite of a dip). Other baskets keep the n-1 near-miss.
+    need      = n_filters if basket == "buy_reversal" else max(n_filters - 1, 1)
 
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(f"""
@@ -395,6 +399,8 @@ def _live_qualified_fallback(basket: str, limit: int):
         r["cmp"] = cmp
         if pv:
             r["pp"] = pv.get("pp"); r["r1"] = pv.get("r1"); r["s1"] = pv.get("s1")
+            if cmp and pv.get("r1"):   # cc#360: room-to-R1 % for the V3 buy_reversal column
+                r["room_r1_pct"] = round((pv["r1"] - cmp) / cmp * 100, 2)
         if cmp is None or pv is None:
             out.append(r); continue
         if _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
@@ -1140,7 +1146,7 @@ def qualified(basket: str, response: Response, limit: int = 50):
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT q.symbol, q.gvm_score, q.cmp,
-                    q.dma_50, q.dma_200, q.rsi_month, q.rsi_weekly,
+                    q.dma_50, q.dma_200, q.rsi_month, q.rsi_weekly, q.daily_rsi,
                     q.week_return, q.month_return,
                     q.mom_2d, q.week_index_52,
                     (q.metrics->>'vol_ratio')::numeric AS vol_ratio,
@@ -1185,6 +1191,8 @@ def qualified(basket: str, response: Response, limit: int = 50):
                     r["pp"] = pv.get("pp"); r["r1"] = pv.get("r1"); r["s1"] = pv.get("s1")
                 if not r.get("cmp") and sym in cmp_map:
                     r["cmp"] = cmp_map[sym]
+                if r.get("cmp") and r.get("r1"):   # cc#360: room-to-R1 % for the V3 column
+                    r["room_r1_pct"] = round((float(r["r1"]) - float(r["cmp"])) / float(r["cmp"]) * 100, 2)
                 r["status"] = r.pop("stored_status", None) or "QUALIFIED"
         for r in rows:
             r['segment'] = _seg_override(r['symbol'], r.get('segment'))
