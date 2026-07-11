@@ -825,6 +825,16 @@ class OptionSymbolManager:
         idx = set(INDEX_OPTION_UNDERLYINGS)
         return [s for s in syms if (self.sym_map.get(s) or ('',))[0] in idx]
 
+    def stock_option_syms(self, syms):
+        """cc#375: stock-only subset of the given (subscribed) option syms — for a SEPARATE OI depth
+        poll so stock option_chain rows carry OI (the WS strips it; without this poll oi stays NULL
+        and the cockpit ATM OI d/d is always '--'). Complements index_option_syms. Bounded by the
+        subscribed set (app_config stock_options_limit, pilot default 20 underlyings ~= a few hundred
+        syms), which fits the 5-min bar; at full 209-stock scale the caller's separate lock lets a
+        long cycle skip gracefully rather than delay the index poll."""
+        idx = set(INDEX_OPTION_UNDERLYINGS)
+        return [s for s in syms if s in self.sym_map and (self.sym_map.get(s) or ('',))[0] not in idx]
+
     def check_atm_drift(self):
         """Returns (add_syms, remove_syms) if any ATM has drifted >= ATM_DRIFT_STRIKES."""
         add, remove = [], []
@@ -1281,20 +1291,23 @@ def poll_futures_oi(token, fut_syms, agg):
 
 
 _OPT_OI_POLL_LOCK = threading.Lock()
+_STOCK_OPT_OI_POLL_LOCK = threading.Lock()   # cc#375: separate lock so a slow stock OI cycle never blocks the index poll
 
-def poll_options_oi(token, opt_syms, opt_store):
+def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
     """
-    Index option OI via DEPTH REST. The WS feed strips OI (Fyers SDK pops the 'OI'
-    field), so depth is the only live source — same pattern as poll_futures_oi.
-    INDEX-ONLY scope keeps this to ~136 symbols (NIFTY+BANKNIFTY ATM+/-10) so a full
-    cycle (~136 * OI_CALL_SPACING_SEC ~= 48s) fits inside the 5-min bar.
+    Option OI via DEPTH REST. The WS feed strips OI (Fyers SDK pops the 'OI' field),
+    so depth is the only live source — same pattern as poll_futures_oi.
+    Index cycle (~136 NIFTY+BANKNIFTY ATM+/-10 syms ~= 48s) fits inside the 5-min bar.
+    cc#375: also called for the SUBSCRIBED stock options (bounded by stock_options_limit)
+    on a SEPARATE lock/thread, so their option_chain rows carry OI instead of NULL.
     Latest OI -> opt_store.last_oi[fsym] -> attached on next option bar flush.
     """
-    if not _OPT_OI_POLL_LOCK.acquire(blocking=False):
-        log.info("Option OI poll skipped — previous cycle still running")
+    lock = lock or _OPT_OI_POLL_LOCK
+    if not lock.acquire(blocking=False):
+        log.info(f"Option OI poll ({label}) skipped — previous cycle still running")
         return
     try:
-        log.info(f"Option OI poll starting: {len(opt_syms)} index options via depth API")
+        log.info(f"Option OI poll ({label}) starting: {len(opt_syms)} options via depth API")
         headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
         got = 0
         for fsym in opt_syms:
@@ -1317,11 +1330,11 @@ def poll_options_oi(token, opt_syms, opt_store):
                 opt_store.last_oi[fsym] = int(oi)   # GIL-atomic dict write; no lock needed
                 got += 1
             except Exception as e:
-                log.warning(f"poll_options_oi {fsym}: {e}")
+                log.warning(f"poll_options_oi ({label}) {fsym}: {e}")
             time.sleep(OI_CALL_SPACING_SEC)
-        log.info(f"Option OI poll (depth API): {got}/{len(opt_syms)} index option OI updated")
+        log.info(f"Option OI poll ({label}, depth API): {got}/{len(opt_syms)} option OI updated")
     finally:
-        _OPT_OI_POLL_LOCK.release()
+        lock.release()
 
 
 def _batched_subscribe(ws, symbols, action='sub', label=''):
@@ -1814,6 +1827,15 @@ def run(auth_code=None):
                     threading.Thread(target=poll_options_oi,
                                      args=(token, opt_mgr.index_option_syms(list(option_syms)), opt_store),
                                      daemon=True).start()
+                    # cc#375: also poll OI for the SUBSCRIBED stock options (separate lock/thread so it
+                    # never delays the index poll). Without this their WS bars carry no OI -> option_chain
+                    # oi stays NULL and the cockpit ATM OI d/d is always '--'. Only when stock options are
+                    # actually subscribed; bounded by app_config stock_options_limit (pilot default 20).
+                    if opt_stock_subscribed:
+                        threading.Thread(target=poll_options_oi,
+                                         args=(token, opt_mgr.stock_option_syms(list(option_syms)), opt_store),
+                                         kwargs={"lock": _STOCK_OPT_OI_POLL_LOCK, "label": "stock"},
+                                         daemon=True).start()
                     last_oi_poll = now_dt
 
                 # ATM drift check every ATM_CHECK_MINS

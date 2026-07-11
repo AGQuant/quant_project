@@ -158,6 +158,11 @@ def _metrics(cur, sym) -> Dict[str, Any]:
 
 
 def _oi_quadrant(oi_chg, price_chg) -> Optional[Dict[str, Any]]:
+    # cc#375: INPUTS ARE FUTURES OI ONLY — oi_chg is the FUT OI day-over-day % (futures_basis, honest
+    # since cc#374), price_chg is day_1d. This is the classic futures OI/price map (Long/Short Buildup,
+    # Long Unwind, Short Covering); options OI is NOT an input (it lives in the separate ATM Call/Put OI
+    # rows). Returns None -> the tile shows "DATA THIN" whenever either input is missing, so it never
+    # renders a confident label off absent/garbage OI (a stock with no fut OI d/d stays DATA THIN).
     if oi_chg is None or price_chg is None:
         return None
     oi_up, px_up = oi_chg > 0, price_chg > 0
