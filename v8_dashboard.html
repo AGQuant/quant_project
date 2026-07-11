@@ -109,6 +109,8 @@
   /* cc#129 bug_3: Open Positions (Master) table — bump cell text +3 notches (12->15px)
      for readability; scoped to .mtbl so the dense funnel tables stay compact. */
   .mtbl td{font-size:15px}
+  /* cc#383: Matrix row-label cell — left-aligned Sora, sticky on horizontal scroll. */
+  td.mxlabel{text-align:left;font-family:'Sora',sans-serif;font-size:11px;font-weight:600;color:var(--mut);position:sticky;left:0;background:var(--panel);z-index:1;white-space:normal;min-width:150px}
   .mtbl th{font-size:12.5px}
   /* cc#168: Raw Data — all 23 metric columns, horizontal scroll, pinned symbol col.
      .scroll.rawscroll beats the mobile .scroll table{min-width:unset} on specificity
@@ -382,13 +384,13 @@ const ALL5=[
 ];
 const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
-  "Forthcoming Results","Global Indices","Position News"];   // cc#294: Position News = index 14   // cc#226: index 12 · cc#264: index 13
+  "Forthcoming Results","Global Indices","Position News","Matrix"];   // cc#294: Position News = index 14   // cc#226: index 12 · cc#264: index 13   // cc#383: Matrix = index 15 (all-basket comparison grid)
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
 // ops_log alert now surfaces slot exhaustion proactively, making this passive tab redundant.
 // Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
 // Live News(11)/Forthcoming(12) stay stable so their hardcoded panel ids are untouched.
 // cc#264: "Global Indices" appended as index 13.
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,11,12,13,14];
+const TAB_ORDER=[0,15,1,2,3,4,5,6,7,8,9,11,12,13,14];   // cc#383: Matrix pinned right after Master Dashboard
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -506,6 +508,99 @@ const BASKET_INFO={
     wr:59.0,ev:0.36,sigs:112,spd:"~0.4/day · 1yr episode-level EOD backtest (+40pts)",
   },
 };
+
+// -- Matrix tab (cc#383) ------------------------------------------------------
+// All 6 baskets side-by-side. ROWS = filter dimensions (union across baskets) +
+// exits + performance; COLUMNS = 6 baskets. Cells read from BASKET_INFO (the code
+// constant kept current with every V3/V5-D/N5 spec) so the grid can never drift
+// from the i-button modals. `map` value forms: "m" (look up that filter's constraint),
+// ["m1","m2"] (join several), {lit:"..."} (literal for entry-zone rules not in filters[]).
+const MATRIX_COLS=["buy_reversal","buy_momentum","buy_s1_bounce","sell_reversal","sell_momentum","sell_overbought"];
+const MATRIX_BUY=new Set(["buy_reversal","buy_momentum","buy_s1_bounce"]);
+const MATRIX_SHORT={buy_reversal:"Buy Reversal",buy_momentum:"Buy Momentum",buy_s1_bounce:"Buy S1 Bounce",
+  sell_reversal:"Sell Reversal",sell_momentum:"Sell Momentum",sell_overbought:"Sell Overbought"};
+const MATRIX_ROWS=[
+  {sec:"Quality & trend"},
+  {label:"GVM score",       map:{buy_reversal:"gvm_score",buy_momentum:"gvm_score"}},
+  {label:"50-DMA distance", map:{buy_momentum:"dma_50",buy_s1_bounce:"dma_50"}},
+  {label:"200-DMA distance",map:{buy_reversal:"dma_200",buy_momentum:"dma_200",sell_reversal:"dma_200",sell_momentum:"dma_200"}},
+  {sec:"RSI & momentum"},
+  {label:"Daily RSI",       map:{buy_reversal:"daily_rsi",sell_reversal:"daily_rsi"}},
+  {label:"Weekly RSI",      map:{buy_reversal:"true_weekly_rsi",buy_momentum:"rsi_weekly",sell_reversal:"true_weekly_rsi",sell_momentum:"true_weekly_rsi"}},
+  {label:"Monthly RSI",     map:{buy_momentum:"rsi_month",sell_reversal:"rsi_month",sell_momentum:"rsi_month"}},
+  {label:"Nifty market gate",map:{buy_s1_bounce:"nifty_rsi",sell_overbought:"nifty_rsi"}},
+  {label:"2-day momentum",  map:{buy_reversal:"mom_2d",buy_momentum:"mom_2d",buy_s1_bounce:"recovery_2d",sell_momentum:"mom_2d"}},
+  {label:"Hourly momentum", map:{buy_reversal:"hourly_pct"}},
+  {sec:"Returns, sector & volume"},
+  {label:"Week return",     map:{buy_momentum:"week_return",buy_s1_bounce:"week_return",sell_momentum:"week_return",sell_overbought:"week_return"}},
+  {label:"Month return",    map:{buy_momentum:"month_return"}},
+  {label:"Sector (week)",   map:{buy_momentum:"sector_week",sell_momentum:"sector_week"}},
+  {label:"Sector (month)",  map:{buy_momentum:"sector_month"}},
+  {label:"52-week index",   map:{sell_momentum:"week_index_52"}},
+  {label:"Volume ratio",    map:{buy_s1_bounce:"vol_ratio"}},
+  {label:"Day change / candle",map:{buy_s1_bounce:["day_ret","close > open"],sell_overbought:"day_red"}},
+  {sec:"Pivot geometry"},
+  {label:"Pivot position",  map:{buy_reversal:"CMP vs PP",buy_momentum:{lit:"PP < CMP ≤ R1"},sell_reversal:"cmp_lt_pp",sell_momentum:"cmp_lt_pp"}},
+  {label:"Support / rejection trigger",map:{buy_reversal:"room to R1",buy_s1_bounce:"week_low vs S1",sell_reversal:"room",sell_momentum:"s2_clearance",sell_overbought:["high_ge_r1","fall_2d"]}},
+  {sec:"Exits (frozen at entry)",exits:true},
+  {label:"Target",   pull:"target"},
+  {label:"Stop",     pull:"stop"},
+  {label:"Max hold", lit:"15 trading days"},
+  {sec:"Performance",perf:true},
+  {label:"Backtest trades/yr (EOD)",pull:"sigs"},
+  {label:"Backtest WR (EOD)",       pull:"wr",pct:true},
+  {label:"EV / trade (EOD)",        pull:"ev",ev:true},
+  {label:"Live WR (trade log)",     live:true},
+];
+function _mxShort(c){return String(c).split(/\s*(?:\(|--|—|·|,)/)[0].trim();}
+function _mxCell(basketId,spec){
+  const inf=BASKET_INFO[basketId];if(!inf||spec==null)return null;
+  if(spec.lit)return spec.lit;
+  const byM=m=>{const f=(inf.filters||[]).find(x=>x.m===m);return f?_mxShort(f.c):null;};
+  if(Array.isArray(spec)){const parts=spec.map(byM).filter(Boolean);return parts.length?parts.join("; "):null;}
+  return byM(spec);
+}
+function _mxLiveWR(basketId){
+  const t=((cache.paper&&cache.paper.recent_trades)||[]).filter(x=>(x.basket||"")===basketId);
+  const w=t.filter(x=>Number(x.pnl)>0).length,l=t.filter(x=>Number(x.pnl)<0).length;
+  if(w+l===0)return null;return{acc:w/(w+l)*100,n:w+l};
+}
+function renderMatrix(){
+  const EM='<span style="color:var(--dim)">—</span>';
+  const th=MATRIX_COLS.map(id=>{
+    const buy=MATRIX_BUY.has(id),bg=buy?"var(--grn-d)":"var(--red-d)",fg=buy?"var(--grn)":"var(--red)";
+    return `<th style="background:${bg};color:${fg};text-align:center;min-width:132px;border-bottom:2px solid ${fg}">
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px">
+        <span style="font-family:Sora;font-weight:700;font-size:11px">${MATRIX_SHORT[id]}</span>
+        <span class="info-btn" style="width:18px;height:18px;font-size:10px" onclick="openInfo('${id}')" title="Strategy detail">i</span>
+      </div>
+      <div style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);font-weight:600;margin-top:2px">${BASKET_INFO[id].version} · ${buy?"BUY":"SELL"}</div>
+    </th>`;}).join("");
+  const colTint=id=>MATRIX_BUY.has(id)?"background:rgba(47,212,139,.045)":"background:rgba(255,92,108,.045)";
+  const cell=(id,v,extra)=>`<td style="text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--txt);${colTint(id)};${extra||""}">${v==null?EM:v}</td>`;
+  let body="";
+  MATRIX_ROWS.forEach(r=>{
+    if(r.sec){body+=`<tr><td colspan="${MATRIX_COLS.length+1}" style="font-family:Sora;font-weight:700;font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--cyan);background:var(--panel2);padding:7px 12px;border-bottom:1px solid var(--line)">${r.sec}</td></tr>`;return;}
+    const tds=MATRIX_COLS.map(id=>{
+      const inf=BASKET_INFO[id];
+      if(r.live){const w=_mxLiveWR(id);if(!w)return cell(id,null);const col=w.acc>=60?"var(--grn)":w.acc>=45?"var(--amber)":"var(--red)";return cell(id,`<span style="color:${col};font-weight:700">${w.acc.toFixed(1)}%</span> <span style="color:var(--dim);font-size:9px">(${w.n})</span>`);}
+      if(r.map!==undefined)return cell(id,_mxCell(id,r.map[id]),"font-size:10px");
+      if(r.lit!==undefined)return cell(id,r.lit);
+      if(r.pull){let v=inf[r.pull];if(v==null||v==="")return cell(id,null);
+        if(r.pct)v=(typeof v==="number")?v+"%":v;
+        else if(r.ev)v=(typeof v==="number")?"+"+v+"%":v;
+        else v=_mxShort(v);
+        return cell(id,v,(r.pull==="target"||r.pull==="stop")?"font-size:10px":"");}
+      return cell(id,null);
+    }).join("");
+    body+=`<tr><td class="mxlabel">${r.label}</td>${tds}</tr>`;
+  });
+  return `<div class="ptitle">Strategy Matrix <span class="ct">6 baskets · filters, exits & edge</span></div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 12px;line-height:1.55">All active baskets side-by-side. Filter &amp; exit rows mirror each basket's i-button spec; backtest rows are episode-level EOD figures; <b style="color:var(--mut)">Live WR</b> is computed from the closed paper trades (same P&amp;L-sign classifier as the Trade Log accuracy box). Tap <span class="info-btn" style="width:16px;height:16px;font-size:9px;vertical-align:middle">i</span> in any column header for the full strategy detail. — = filter not used by that basket.</div>
+    <div class="scroll" style="overflow-x:auto"><table style="min-width:900px"><thead><tr>
+      <th style="text-align:left;min-width:150px;position:sticky;left:0;background:var(--panel);z-index:2">Dimension</th>${th}
+    </tr></thead><tbody>${body}</tbody></table></div>`;
+}
 
 // -- Modal -------------------------------------------------------------------
 function openInfo(basket){
@@ -921,6 +1016,7 @@ TAB_ORDER.forEach(panelIdx=>{
   b.onclick=()=>selectTab(panelIdx);
   tabsEl.appendChild(b);
 });
+try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
 function selectTab(i){
   [...tabsEl.children].forEach(t=>{
     const on=t.textContent===TAB_LABELS[i];
@@ -1967,6 +2063,7 @@ function paint(){
   document.getElementById('panel6').innerHTML=renderSellOB();
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel9').innerHTML=renderRaw();
+  document.getElementById('panel15').innerHTML=renderMatrix();   // cc#383
   // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
   BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
   loadFunnelInline('sell_overbought',6);
@@ -1979,6 +2076,7 @@ function renderMasterPanels(){
   document.getElementById('panel0').innerHTML=renderMaster();
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel9').innerHTML=renderRaw();
+  document.getElementById('panel15').innerHTML=renderMatrix();   // cc#383: refresh Live WR when paper lands
 }
 async function loadAll(){
   document.getElementById('refreshBtn').textContent='Refresh...';
