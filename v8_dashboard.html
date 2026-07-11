@@ -1420,9 +1420,19 @@ async function loadFunnelInline(basketId,panelIdx){
   // basket's stocks table (the standalone Filter Funnel tab was removed). Fetches
   // funnel_detail + stock_passcount for ONE basket and appends them into its panel.
   const el=document.getElementById('panel'+panelIdx);if(!el)return;
+  const label=basketId.replace(/_/g,' ');
+  // cc#365: render the <details> shell IMMEDIATELY in a disabled/loading state so the Filter
+  // Funnel button never pops in after the fetch; it is enabled + filled once data resolves.
+  el.querySelectorAll(':scope > details.funnel-inline').forEach(d=>d.remove());
+  const sumBase='font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:8px 0';
+  const det=document.createElement('details');
+  det.className='funnel-inline';det.style.marginTop='18px';
+  det.innerHTML=`<summary style="${sumBase};color:var(--dim);cursor:default;pointer-events:none">Filter Funnel · ${label} <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--dim)">· loading…</span></summary><div class="fi-body" style="margin-top:10px"><div class="loading">Loading...</div></div>`;
+  el.appendChild(det);
   let fd=null,pc=null;
   try{fd=await getJSON(EP.funnelDetail(basketId));}catch(e){}
   try{pc=await getJSON(EP.passCount(basketId));}catch(e){}
+  if(!det.isConnected)return;   // panel was re-painted mid-fetch -> a newer shell owns this panel
   let inner='';
   if(fd&&fd.stages){
     const maxSurv=Math.max(...fd.stages.map(s=>s.survivors||0),1);
@@ -1438,11 +1448,10 @@ async function loadFunnelInline(basketId,panelIdx){
       return`<div class="pc-card"><div class="pc-sym">${x.symbol}</div><div class="pc-score ${sc_cls}">${x.passed}/${x.total}</div><div class="pc-fail">${fails||'all pass'}</div></div>`;
     }).join('')}</div>`;}
   inner+=preFreezeBanner();
-  el.querySelectorAll(':scope > details.funnel-inline').forEach(d=>d.remove());
-  const det=document.createElement('details');
-  det.className='funnel-inline';det.style.marginTop='18px';
-  det.innerHTML=`<summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--cyan);letter-spacing:.5px;text-transform:uppercase;padding:8px 0">Filter Funnel · ${basketId.replace(/_/g,' ')}</summary><div style="margin-top:10px">${inner}</div>`;
-  el.appendChild(det);
+  // cc#365: fill the pre-rendered shell + flip the summary from loading -> enabled (no pop-in).
+  const body=det.querySelector(':scope > .fi-body');if(body)body.innerHTML=inner;
+  const sum=det.querySelector(':scope > summary');
+  if(sum){sum.style.color='var(--cyan)';sum.style.cursor='pointer';sum.style.pointerEvents='auto';sum.textContent=`Filter Funnel · ${label}`;}
 }
 
 // ---- Live News tab (raw RSS headlines, task #46) ---------------------------

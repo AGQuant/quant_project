@@ -250,7 +250,11 @@ PWA_JS = """
       + '  .pwa-install .x{background:transparent;color:#fff;font-size:16px;'
       + '    padding:4px 6px;margin-left:4px}'
       + '}'
-      + '@media(min-width:768px){.pwa-mnav,.pwa-install{display:none!important}}';
+      // cc#365: the More-sheet overlay was only hidden inside the max-width:767px block, so on
+      // desktop it had no display rule and rendered as raw flow content ("All destinations" /
+      // links / "Switch to Dark") at the page bottom. Hide it on desktop too (it is only ever
+      // opened via the mobile bottom-nav "More" button, which is itself desktop-hidden).
+      + '@media(min-width:768px){.pwa-mnav,.pwa-install,.pwa-sheet-ov{display:none!important}}';
     var st = document.createElement('style');
     st.id = 'pwa-style'; st.textContent = css;
     document.head.appendChild(st);
