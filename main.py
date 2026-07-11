@@ -606,6 +606,11 @@ def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
     with open("scorr_holdings.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/v13", response_class=HTMLResponse)
+def v13_filter_registry_page():
+    """cc#384: V13 filter registry — reality-verified inventory of every platform metric."""
+    with open("scorr_v13.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
 

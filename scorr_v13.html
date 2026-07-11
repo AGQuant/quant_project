@@ -1,0 +1,366 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V13 · Filter Registry</title>
+<style>
+  /* cc#384: V13 filter-registry page. Reuses the V8 R2 dark-terminal tokens verbatim so the
+     surface matches /dashboard exactly (IBM Plex Mono numerics, Sora text, dark navy palette). */
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  :root{
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+    --shadow:0 18px 44px rgba(3,7,20,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1240px;margin:0 auto;padding:12px 18px 40px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 0 12px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
+  .logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .backlink{font-size:12px;font-weight:600;color:var(--mut);border:1px solid var(--line2);border-radius:9px;padding:7px 12px;transition:.15s}
+  .backlink:hover{border-color:var(--blu);color:var(--blu)}
+  .lead{font-size:12px;color:var(--dim);line-height:1.6;margin:12px 0 4px}
+  /* summary strip */
+  .strip{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 6px}
+  .kpi{flex:1;min-width:120px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 14px}
+  .kpi .k{font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
+  .kpi .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:22px;font-weight:700;margin-top:4px;line-height:1}
+  /* controls */
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 6px}
+  .controls input{background:var(--bg2);border:1px solid var(--line2);border-radius:9px;color:var(--txt);font-family:'Sora';font-size:13px;padding:8px 12px;min-width:220px;flex:1}
+  .controls input::placeholder{color:var(--dim)}
+  .tgl{font-size:11px;font-weight:700;color:var(--mut);border:1px solid var(--line2);background:var(--panel);border-radius:9px;padding:8px 12px;cursor:pointer;white-space:nowrap;transition:.15s}
+  .tgl.on{background:var(--grn-d);border-color:var(--grn);color:var(--grn)}
+  /* bucket */
+  .bucket{margin-top:22px}
+  .bucket-head{display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 14px;border-radius:12px;background:linear-gradient(90deg,var(--panel2),var(--panel));border:1px solid var(--line2)}
+  .bucket-head .bidx{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);font-weight:700}
+  .bucket-head .btitle{font-size:14px;font-weight:800;letter-spacing:.4px}
+  .bucket-head .bcount{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--mut);margin-left:auto}
+  .bucket-head .caret{color:var(--mut);transition:.2s;font-size:12px}
+  .bucket.closed .caret{transform:rotate(-90deg)}
+  .bucket.closed .bucket-body{display:none}
+  .bucket-body{padding:4px 0 0}
+  /* subcategory */
+  .sub{margin-top:12px}
+  .sub-title{font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--cyan);margin:0 0 6px 2px}
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+  table{border-collapse:collapse;width:100%;min-width:720px}
+  th{font-family:'Sora';font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);text-align:left;padding:8px 12px;background:var(--panel2);border-bottom:1px solid var(--line2);white-space:nowrap}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.fname{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;color:var(--txt);white-space:nowrap}
+  td.meas{color:var(--mut);font-family:'Sora';min-width:200px;line-height:1.45}
+  td.src{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--dim);white-space:nowrap}
+  .cad{font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--bg2);border:1px solid var(--line2);color:var(--mut);white-space:nowrap}
+  .chip{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;margin:1px 3px 1px 0;white-space:nowrap}
+  .chip.buy{background:var(--grn-d);color:var(--grn)}
+  .chip.sell{background:var(--red-d);color:var(--red)}
+  .none{color:var(--dim)}
+  .badge{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap}
+  .badge.active{background:var(--grn-d);color:var(--grn)}
+  .badge.dormant{background:rgba(245,185,74,.13);color:var(--amber)}
+  tr.dormant-row td{opacity:.72}
+  tr.used-row{background:rgba(77,124,254,.05)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+  .legend b{color:var(--mut);font-weight:700}
+  .foot{font-size:10.5px;color:var(--dim);line-height:1.6;margin-top:14px}
+  @media(max-width:640px){.kpi .v{font-size:18px}.wrap{padding:10px 12px 32px}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div><div class="logo">V13 <b>Filter Registry</b></div><div class="tag">Every metric on the platform</div></div>
+    <div class="spacer"></div>
+    <a class="backlink" href="/dashboard">&#8592; V8 Dashboard</a>
+  </header>
+
+  <div class="lead">
+    Complete, <b style="color:var(--mut)">reality-verified</b> inventory of every computable filter/metric across the platform &mdash;
+    classified into 5 buckets with sub-categories. Each row shows its source table/API, refresh cadence, what it measures, and which
+    of the 6 live baskets currently gate on it. Rows tagged <span class="badge active">ACTIVE</span> are confirmed populating in the DB;
+    <span class="badge dormant">DORMANT</span> = defined in code but not currently populating (0 non-null in the verification window), so
+    not yet usable ammunition. Unused metrics with no basket chips are the open opportunity surface for new strategies.
+  </div>
+
+  <div class="strip" id="strip"></div>
+
+  <div class="controls">
+    <input id="q" type="text" placeholder="Search filter name or description&hellip;" oninput="renderV13()">
+    <button class="tgl" id="tUnused" onclick="toggleFlag('unused')">Unused only</button>
+    <button class="tgl" id="tDormant" onclick="toggleFlag('dormant')">Dormant only</button>
+  </div>
+
+  <div id="buckets"></div>
+
+  <div class="legend">
+    <span><b>Baskets:</b></span>
+    <span><span class="chip buy">BR</span>Buy Reversal</span>
+    <span><span class="chip buy">BM</span>Buy Momentum</span>
+    <span><span class="chip buy">S1B</span>Buy S1 Bounce</span>
+    <span><span class="chip sell">SR</span>Sell Reversal</span>
+    <span><span class="chip sell">SM</span>Sell Momentum</span>
+    <span><span class="chip sell">SO</span>Sell Overbought</span>
+  </div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+// cc#384 — ONE registry constant powers the whole page (founder: keep the data model clean).
+// Row shape: [name, measures, source, cadence, usedBy[], status]. status omitted => 'active'.
+// usedBy codes: BR/BM/S1B (buy, green) · SR/SM/SO (sell, red).  DB-verified 11-Jul-2026.
+const BUY=new Set(['BR','BM','S1B']);
+const BNAME={BR:'Buy Reversal',BM:'Buy Momentum',S1B:'Buy S1 Bounce',SR:'Sell Reversal',SM:'Sell Momentum',SO:'Sell Overbought'};
+const REGISTRY=[
+ {key:'technical',label:'Technical',subs:[
+  {label:'Momentum',rows:[
+   ['daily_rsi','Daily RSI-14 — short-term momentum / overbought-oversold','v8_metrics · live','5-min',['BR','SR']],
+   ['true_weekly_rsi','TRUE calendar weekly RSI-14 (not the synthetic) — larger-frame strength','v8_signal_writer (live)','5-min',['BR','SR','SM']],
+   ['rsi_weekly','Synthetic weekly RSI (5×daily proxy)','v8_metrics','EOD',['BM']],
+   ['rsi_month','Monthly RSI-14 — long-frame momentum','v8_metrics','EOD',['BM','SR','SM']],
+   ['mom_2d','2-day price momentum % (turn-up / turn-down)','v8_metrics · live','5-min',['BR','BM','SM']],
+   ['recovery_2d','2-day recovery off the recent low % (bounce, not chase)','v8_qualified.metrics (live)','5-min',['S1B']],
+   ['hourly_pct','Rolling 60-min move % (intraday thrust)','v8_signal_writer (live)','5-min',['BR']],
+   ['day_1d','Day change % (session move)','v8_metrics · live','5-min',['S1B','SO']],
+   ['day_ret','Live intraday day return % (used for the >0.5% / <0 gates)','v8_qualified.metrics (live)','5-min',['S1B','SO']],
+   ['week_return','5-day (week) return %','v8_metrics','5-min',['BM','S1B','SM','SO']],
+   ['month_return','1-month return %','v8_metrics','EOD',['BM']],
+   ['year_return','1-year return %','v8_metrics','EOD',[]],
+   ['eod_chg','End-of-day close change %','v8_metrics','EOD',[]],
+  ]},
+  {label:'Trend',rows:[
+   ['dma_50','% above / below the 50-day moving average','v8_metrics','5-min',['BM','S1B']],
+   ['dma_200','% above / below the 200-day moving average','v8_metrics','5-min',['BR','BM','SR','SM']],
+   ['dma_20','% above / below the 20-day moving average','v8_metrics','5-min',[]],
+   ['ma9_vs_ma21','9-EMA vs 21-EMA spread % (fast/slow cross)','v8_metrics · live','5-min',[]],
+   ['supertrend_state','SuperTrend regime (up/down flip)','V10 engine (live)','5-min',[]],
+   ['ema_3_10','EMA-3 vs EMA-10 fast cross state','V10 engine (live)','5-min',[]],
+  ]},
+  {label:'Volatility & Range',rows:[
+   ['week_index_52','Position within the 52-week range (0–100)','v8_metrics','5-min',['SM']],
+   ['month_index','Position within the 1-month range','v8_metrics','EOD',[]],
+   ['range_3d','3-day high-low range % (live)','v8_qualified.metrics (live)','5-min',[]],
+   ['upper_bb','Upper Bollinger band (20,2)','v8_metrics','EOD',[],'dormant'],
+   ['lower_bb','Lower Bollinger band (20,2)','v8_metrics','EOD',[],'dormant'],
+   ['range_1d','1-day range % (EOD column)','v8_metrics','EOD',[],'dormant'],
+  ]},
+  {label:'Volume',rows:[
+   ['vol_ratio','Volume vs 10-day average (time-normalised intraday)','v8_metrics · live','5-min',['S1B']],
+  ]},
+  {label:'Pivots & Levels',rows:[
+   ['pp / r1 / r2 / s1 / s2','Rolling pivot point, resistances & supports','v8_paper_pivots','daily',['BR','BM','SR','SM']],
+   ['room_to_r1','% distance from CMP up to R1 (qualification gate)','live (pivots + cmp)','5-min',['BR']],
+   ['room_to_target','% distance down to S1/S2 target','live (pivots + cmp)','5-min',['SR']],
+   ['s2_clearance','% clearance from CMP down to S2 (fall not blocked)','live (pivots + cmp)','5-min',['SM']],
+   ['high_ge_r1','Session HIGH reached R1 today (rejection trigger)','live (intraday max)','5-min',['SO']],
+   ['fall_from_day_high','Fall off the 2-day high %','v8_qualified.metrics (live)','5-min',['SO']],
+   ['week_low','5-day low vs S1 (support test)','v8_qualified.metrics (live)','5-min',['S1B']],
+  ]},
+ ]},
+ {key:'fundamental',label:'Fundamental',note:'screener_raw · weekly dump · BFSI rule: D/E + interest coverage excluded for financials',subs:[
+  {label:'Valuation',rows:[
+   ['pe','Price / earnings (trailing)','screener_raw','weekly',[]],
+   ['historical_pe','Own 5-year median PE','screener_raw','weekly',[]],
+   ['segment_pe','Sector median PE (peer anchor)','screener_raw','weekly',[]],
+   ['Price to book value','P/B ratio','screener_raw','weekly',[]],
+   ['PEG Ratio','PE / earnings-growth','screener_raw','weekly',[]],
+   ['EVEBITDA','Enterprise value / EBITDA','screener_raw','weekly',[]],
+   ['Enterprise Value','EV (mcap + debt − cash)','screener_raw','weekly',[]],
+   ['dividend_yield','Trailing dividend yield %','screener_raw','weekly',[]],
+   ['Average 5years dividend','5-year average dividend','screener_raw','weekly',[]],
+  ]},
+  {label:'Profitability & Quality',rows:[
+   ['roce','Return on capital employed %','screener_raw','weekly',[]],
+   ['Return on equity','ROE %','screener_raw','weekly',[]],
+   ['opm','Operating profit margin %','screener_raw','weekly',[]],
+   ['opm_latest_q','Latest-quarter OPM %','screener_raw','weekly',[]],
+   ['opm_prev_year_q','Year-ago-quarter OPM % (comparison)','screener_raw','weekly',[]],
+   ['NPM last year','Net profit margin %','screener_raw','weekly',[]],
+   ['Cfo by Pat','Cash flow from ops / PAT (earnings quality)','screener_raw','weekly',[]],
+   ['EPS','Earnings per share','screener_raw','weekly',[]],
+   ['EPS last year','Prior-year EPS','screener_raw','weekly',[]],
+  ]},
+  {label:'Growth',rows:[
+   ['Sales growth','TTM sales growth %','screener_raw','weekly',[]],
+   ['sales_growth_3y','3-year sales CAGR %','screener_raw','weekly',[]],
+   ['sales_growth_5y','5-year sales CAGR %','screener_raw','weekly',[]],
+   ['qoq_sales_growth','QoQ sales growth %','screener_raw','weekly',[]],
+   ['Operating profit growth','TTM operating-profit growth %','screener_raw','weekly',[]],
+   ['profit_growth_3y','3-year profit CAGR %','screener_raw','weekly',[]],
+   ['profit_growth_5y','5-year profit CAGR %','screener_raw','weekly',[]],
+   ['qoq_profit_growth','QoQ profit growth %','screener_raw','weekly',[]],
+   ['EPS growth 3/5/7/10Years','Multi-horizon EPS CAGR %','screener_raw','weekly',[]],
+   ['fixed_asset_growth','Fixed-asset (capex) growth %','screener_raw','weekly',[]],
+  ]},
+  {label:'Leverage & Ownership',rows:[
+   ['Debt to equity','D/E ratio (BFSI-excluded)','screener_raw','weekly',[]],
+   ['interest_coverage','EBIT / interest (BFSI-excluded)','screener_raw','weekly',[]],
+   ['Debt','Total debt','screener_raw','weekly',[]],
+   ['Promoter holding','Promoter stake %','screener_raw','weekly',[]],
+   ['Unpledged promoter holding','Unpledged promoter stake %','screener_raw','weekly',[]],
+   ['fii_holding / dii_holding','Institutional holding %','screener_raw','weekly',[]],
+   ['fii_change / dii_change','QoQ institutional stake change %','screener_raw','weekly',[]],
+   ['No of Shareholder','Shareholder count (retail dispersion)','screener_raw','weekly',[]],
+  ]},
+  {label:'Screener technicals & returns',rows:[
+   ['RSI (screener)','Screener daily RSI (v8 uses its own daily_rsi)','screener_raw','weekly',[]],
+   ['dma_50 / dma_200 (screener)','Screener MA distances (v8 uses live values)','screener_raw','weekly',[]],
+   ['return_1y / return_3y','1-yr / 3-yr price return %','screener_raw','weekly',[]],
+   ['Return over 1month','1-month price return %','screener_raw','weekly',[]],
+   ['return_52w_vs_index','52-week return vs index %','screener_raw','weekly',[]],
+   ['market_cap','Market capitalisation','screener_raw','weekly',[]],
+  ]},
+ ]},
+ {key:'quality',label:'Quality · GVM',note:'gvm_scores + sector_ratings · recomputed nightly (22:00 IST)',subs:[
+  {label:'GVM composite',rows:[
+   ['gvm_score','0–10 composite Growth·Value·Momentum quality score','gvm_scores','nightly',['BR','BM']],
+   ['g_score','Growth sub-score (sales/profit/EPS growth ratings)','gvm_scores','nightly',[]],
+   ['v_score','Value sub-score (PE/PB/EV·EBITDA/upside ratings)','gvm_scores','nightly',[]],
+   ['m_score','Momentum sub-score (returns / DMA / 52w ratings)','gvm_scores','nightly',[]],
+   ['verdict / *_label','Growth/Value/Momentum/overall verdict labels','gvm_scores','nightly',[]],
+  ]},
+  {label:'Component ratings (peer-relative 0–10)',rows:[
+   ['sales_5y/3y, profit_5y/3y rating','Growth ratings vs peers','gvm_scores','nightly',[]],
+   ['qoq_sales / qoq_profit rating','Sequential-growth ratings vs peers','gvm_scores','nightly',[]],
+   ['opm / opm_exp / roce / int_cov rating','Profitability & leverage ratings vs peers','gvm_scores','nightly',[]],
+   ['pe / upside / div_yield rating','Valuation ratings vs peers','gvm_scores','nightly',[]],
+   ['ret_1y/3y, dma_50/200, ret_52w_idx rating','Momentum ratings vs peers','gvm_scores','nightly',[]],
+   ['promoter / inst_change / inst_abs rating','Ownership ratings vs peers','gvm_scores','nightly',[]],
+  ]},
+  {label:'Rank & segment',rows:[
+   ['market_cap','Market cap (mcap-rank basis)','gvm_scores','nightly',[]],
+   ['segment','Sector / segment classification','gvm_scores','nightly',[]],
+   ['rank','Intra-segment GVM rank','gvm_scores','nightly',[],'dormant'],
+   ['segment GVM rating','Mcap-weighted segment GVM, G/V/M, verdict, top stock','sector_ratings','nightly',[]],
+  ]},
+ ]},
+ {key:'derivatives',label:'Derivatives',note:'Fyers feed · 5-min intraday (market hours)',subs:[
+  {label:'Futures',rows:[
+   ['basis','Futures − spot (absolute basis)','futures_basis','5-min',[]],
+   ['basis_pct','Basis as % of spot (premium/discount)','futures_basis','5-min',[]],
+   ['oi','Futures open interest','futures_basis','5-min',[]],
+   ['oi_chg','Futures OI day-over-day change','futures_basis','5-min',[]],
+   ['spot_close / futures_close','Spot & futures reference prices','futures_basis','5-min',[]],
+  ]},
+  {label:'Options chain',rows:[
+   ['oi (CE/PE)','Per-strike call/put open interest','option_chain','5-min',[]],
+   ['volume','Per-strike option volume','option_chain','5-min',[]],
+   ['ltp','Option last-traded price','option_chain','5-min',[]],
+   ['strike / expiry','Strike & expiry reference','option_chain','5-min',[]],
+   ['bid / ask','Best bid / ask quote','option_chain','5-min',[],'dormant'],
+  ]},
+  {label:'PCR & flow',rows:[
+   ['pcr_atm5','Put/Call OI ratio, ATM ±5 strikes','pcr_intraday','hourly',[]],
+   ['pcr_total','Put/Call OI ratio, full chain','pcr_intraday','hourly',[]],
+   ['put_oi / call_oi (atm5 & total)','Aggregated put/call OI (ATM band & total)','pcr_intraday','hourly',[]],
+   ['oi_quadrant','Price×OI quadrant (long/short build-up/unwind)','Trade Check v3.4.1 (derived)','5-min',[]],
+  ]},
+ ]},
+ {key:'market',label:'Market Context',subs:[
+  {label:'Index & breadth',rows:[
+   ['nifty_rsi','NIFTY daily RSI (market regime gate)','live (index)','5-min',['S1B','SO']],
+   ['adr','Advance/decline ratio (market breadth)','adr_daily · adr_intraday','daily / 5-min',[]],
+   ['market_mood / regime','Composite market gate + BULL/NEUTRAL/BEAR regime','v8 mood (live)','5-min',[]],
+  ]},
+  {label:'Sector aggregates',rows:[
+   ['sector_week','Sector 5-day return aggregate','v8_metrics · live','5-min',['BM','SM']],
+   ['sector_month','Sector 1-month return aggregate','v8_metrics','EOD',['BM']],
+   ['sector_day','Sector day-change aggregate (live; EOD column dormant)','v8_qualified.metrics (live)','5-min',[]],
+  ]},
+  {label:'Global (overnight)',rows:[
+   ['India VIX','Volatility index — level & change','global_indices (volatility)','daily / intraday',[]],
+   ['DXY','US Dollar index','global_indices (currency)','daily / intraday',[]],
+   ['Crude','Crude oil','global_indices (commodity)','daily / intraday',[]],
+   ['Dow / Nasdaq','US indices — overnight close & intraday','global_indices · global_intraday','daily / intraday',[]],
+   ['BTC / crypto','Crypto risk-proxy','global_indices (crypto)','daily / intraday',[]],
+  ]},
+  {label:'Events & news',rows:[
+   ['days_to_earnings','Days to next earnings (from ex_date)','earnings_calendar','daily',[]],
+   ['news sentiment / impact','Per-stock polished-news sentiment, impact & recency','polished_news','realtime',[]],
+   ['news count','Mentioned-symbol news volume','polished_news','realtime',[]],
+  ]},
+ ]},
+];
+
+let FLAGS={unused:false,dormant:false};
+function toggleFlag(f){FLAGS[f]=!FLAGS[f];document.getElementById(f==='unused'?'tUnused':'tDormant').classList.toggle('on',FLAGS[f]);renderV13();}
+
+function _rowMatch(r,q){
+  const [name,meas,,,used,status]=r;
+  if(FLAGS.unused && (used&&used.length))return false;
+  if(FLAGS.dormant && (status!=='dormant'))return false;
+  if(q){const hay=(name+' '+meas).toLowerCase();if(!hay.includes(q))return false;}
+  return true;
+}
+function _stats(){
+  let total=0,active=0,dormant=0,used=0;
+  REGISTRY.forEach(b=>b.subs.forEach(s=>s.rows.forEach(r=>{total++;(r[5]==='dormant')?dormant++:active++;if(r[4]&&r[4].length)used++;})));
+  return{total,active,dormant,used,unused:total-used};
+}
+function renderStrip(){
+  const s=_stats();
+  document.getElementById('strip').innerHTML=[
+    ['Filters registered',s.total,'var(--txt)'],
+    ['Active (verified)',s.active,'var(--grn)'],
+    ['Dormant',s.dormant,'var(--amber)'],
+    ['Used by a basket',s.used,'var(--blu)'],
+    ['Unused (opportunity)',s.unused,'var(--cyan)'],
+  ].map(([k,v,c])=>`<div class="kpi"><div class="k">${k}</div><div class="v" style="color:${c}">${v}</div></div>`).join('');
+}
+function chips(used){
+  if(!used||!used.length)return '<span class="none">&mdash;</span>';
+  return used.map(u=>`<span class="chip ${BUY.has(u)?'buy':'sell'}" title="${BNAME[u]||u}">${u}</span>`).join('');
+}
+function renderV13(){
+  const q=(document.getElementById('q').value||'').trim().toLowerCase();
+  let html='';
+  REGISTRY.forEach((b,bi)=>{
+    let subHtml='',shown=0;
+    b.subs.forEach(s=>{
+      const rows=s.rows.filter(r=>_rowMatch(r,q));
+      if(!rows.length)return;shown+=rows.length;
+      subHtml+=`<div class="sub"><div class="sub-title">${s.label}</div><div class="scroll"><table>
+        <thead><tr><th>Filter</th><th>Measures</th><th>Source</th><th>Cadence</th><th>Used&nbsp;by</th><th>Status</th></tr></thead><tbody>`;
+      rows.forEach(r=>{
+        const [name,meas,src,cad,used,status]=r;
+        const dorm=status==='dormant';
+        const cls=(dorm?'dormant-row':'')+((used&&used.length)?' used-row':'');
+        subHtml+=`<tr class="${cls.trim()}">
+          <td class="fname">${name}</td>
+          <td class="meas">${meas}</td>
+          <td class="src">${src}</td>
+          <td><span class="cad">${cad}</span></td>
+          <td>${chips(used)}</td>
+          <td><span class="badge ${dorm?'dormant':'active'}">${dorm?'DORMANT':'ACTIVE'}</span></td>
+        </tr>`;
+      });
+      subHtml+='</tbody></table></div></div>';
+    });
+    const openCls=shown?'':'closed';
+    if(!shown && (q||FLAGS.unused||FLAGS.dormant))return;  // hide empty buckets when filtering
+    html+=`<div class="bucket ${openCls}" id="bk${bi}">
+      <div class="bucket-head" onclick="document.getElementById('bk${bi}').classList.toggle('closed')">
+        <span class="bidx">${String(bi+1).padStart(2,'0')}</span>
+        <span class="btitle">${b.label.toUpperCase()}</span>
+        <span class="bcount">${shown} filter${shown===1?'':'s'}${b.note?' &middot; '+b.note:''}</span>
+        <span class="caret">&#9660;</span>
+      </div>
+      <div class="bucket-body">${subHtml||'<div class="foot" style="padding:10px 4px">No matches in this bucket.</div>'}</div>
+    </div>`;
+  });
+  document.getElementById('buckets').innerHTML=html||'<div class="foot">No filters match the current search / toggles.</div>';
+}
+
+document.getElementById('foot').innerHTML=
+  'Reality-verified 11-Jul-2026 against Railway PostgreSQL (non-null counts: last 7 days for 5-min metrics, latest snapshot for weekly/nightly). '+
+  'DORMANT = column exists but 0 non-null in-window: Bollinger bands (upper_bb/lower_bb), range_1d (v8_metrics), option bid/ask (option_chain), '+
+  'intra-segment rank (gvm_scores). Groundwork for a larger initiative &mdash; the whole page is driven by one REGISTRY constant.';
+renderStrip();
+renderV13();
+</script>
