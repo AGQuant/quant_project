@@ -49,6 +49,7 @@ from scorr_endpoints import router as scorr_router
 from scorr_chat_endpoint import router as scorr_chat_router
 from trade_check_v34_endpoints import router as trade_check_v34_router
 from tc_v4_endpoints import router as tc_v4_router
+from tc_v4_dual import router as tc_v4_dual_router   # cc#386: dual-style v4 engine (spec id=2926)
 from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
@@ -244,6 +245,7 @@ app.include_router(scorr_router)
 app.include_router(scorr_chat_router)
 app.include_router(trade_check_v34_router)
 app.include_router(tc_v4_router)
+app.include_router(tc_v4_dual_router)   # cc#386
 app.include_router(check_router)
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
