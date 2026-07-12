@@ -219,6 +219,7 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
         failed = [{"rule": r["rule"], "label": r["label"]} for r in best.get("rules", []) if r["credit"] == 0]
         results.append({
             "symbol": sym, "cmp": _r(d["cmp"]), "segment": d.get("segment"),
+            "day_chg": _r((d.get("v8") or {}).get("day_1d")),   # cc#413: day change % (last session, cc#373 convention)
             "best_label": best["label"], "best_score": best["score"], "verdict": best["verdict"],
             "scores": {c["label"]: c["score"] for c in cards},
             "failed_rules": failed,

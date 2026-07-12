@@ -1270,6 +1270,7 @@ function v4Toggle(which){
   if(bb)bb.classList.toggle('on',v4BUY); if(ss)ss.classList.toggle('on',v4SELL);
   loadV4Scan();
 }
+let v4ScanData=[], v4SortKey=null, v4SortDir=-1;
 async function loadV4Scan(){
   const tbl=document.getElementById('v4ScanTbl'),meta=document.getElementById('v4ScanMeta');
   if(!tbl)return;
@@ -1280,19 +1281,35 @@ async function loadV4Scan(){
   catch(e){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Scan failed: '+e.message+'</div>';return;}
   if(d.error){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+d.error+'</div>';return;}
   if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s'+(d.as_of?' · as-of '+d.as_of:'');
-  const rows=d.results||[];
+  v4ScanData=d.results||[];
+  v4SortKey=null; v4SortDir=-1;   // reset to server order (best_score desc)
+  _renderV4ScanTable();
+}
+function v4SortBy(key){
+  if(v4SortKey===key){v4SortDir=-v4SortDir;} else {v4SortKey=key; v4SortDir=-1;}
+  _renderV4ScanTable();
+}
+function _renderV4ScanTable(){
+  const tbl=document.getElementById('v4ScanTbl'); if(!tbl)return;
+  let rows=v4ScanData.slice();
+  if(v4SortKey){const k=v4SortKey,dir=v4SortDir;
+    rows.sort((a,b)=>{const av=(a[k]==null?-1e12:a[k]),bv=(b[k]==null?-1e12:b[k]);return (av-bv)*dir;});}
   if(!rows.length){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">No stocks match.</div>';return;}
+  const dayArrow=v4SortKey==='day_chg'?(v4SortDir<0?' ▼':' ▲'):'';
   const body=rows.map((x,i)=>{
     const failed=(x.failed_rules||[]);
     const failStr=failed.length?failed.map(f=>f.rule).join(' '):'<span style="color:var(--grn)">clean</span>';
     const failTitle=failed.map(f=>f.rule+' '+f.label).join(', ').replace(/"/g,'');
     const bk=(x.v8_basket||[]);
     const bkStr=bk.length?bk.map(_v8BasketChip).join(' '):'<span style="color:var(--dim)">—</span>';
-    return '<tr style="cursor:pointer" onclick="v4ScanOpen(\''+x.symbol+'\',\''+(x.best_label||'')+'\')">'
+    const dc=x.day_chg;
+    const dcCell=dc!=null?'<span class="'+(dc>=0?'pos':'neg')+'">'+(dc>=0?'+':'−')+Math.abs(dc).toFixed(2)+'</span>':'—';
+    const cmpTip=x.cmp!=null?'CMP ₹'+x.cmp:'';
+    return '<tr style="cursor:pointer" title="'+cmpTip+'" onclick="v4ScanOpen(\''+x.symbol+'\',\''+(x.best_label||'')+'\')">'
       + '<td>'+(i+1)+'</td>'
-      + '<td class="v4t-sym">'+x.symbol+'</td>'
+      + '<td class="v4t-sym" title="'+cmpTip+'">'+x.symbol+'</td>'
       + '<td class="v4t-seg">'+(x.segment||'—')+'</td>'
-      + '<td>'+(x.cmp!=null?x.cmp:'—')+'</td>'
+      + '<td style="font-family:var(--mono);font-weight:700">'+dcCell+'</td>'
       + '<td>'+_v4styleChip(x.best_label)+'</td>'
       + '<td style="font-weight:700;color:'+_v4scoreCol(x.best_score||0,x.verdict)+'">'+(x.best_score!=null?Number(x.best_score).toFixed(2):'—')+'</td>'
       + '<td><span class="v4-badge '+x.verdict+'">'+x.verdict+'</span></td>'
@@ -1302,7 +1319,9 @@ async function loadV4Scan(){
       + '</tr>';
   }).join('');
   tbl.innerHTML='<div style="overflow-x:auto"><table class="scr-table"><thead><tr>'
-    +'<th>#</th><th>Symbol</th><th>Sector</th><th>CMP</th><th>Best card</th><th>Score</th><th>Verdict</th>'
+    +'<th>#</th><th>Symbol</th><th>Sector</th>'
+    +'<th class="v4-sortable" onclick="v4SortBy(\'day_chg\')" style="cursor:pointer" title="Sort by day change">Day %'+dayArrow+'</th>'
+    +'<th>Best card</th><th>Score</th><th>Verdict</th>'
     +'<th>Rules failed</th><th>V8 Basket</th><th>Buy M/R · Sell M/R</th>'
     +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
