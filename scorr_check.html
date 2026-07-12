@@ -349,6 +349,49 @@
     border-radius:20px;background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2)}
   .v4-gated{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--red-d);
     border:1px solid var(--red-b);color:var(--red);font-family:var(--mono);font-size:11.5px;font-weight:700;line-height:1.5}
+  /* cc#408 — inline "View Detailed" structure panels */
+  .v4-detail-btn{font-family:var(--mono);font-size:11px;font-weight:700;padding:9px 16px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--panel);color:var(--cyan);cursor:pointer;letter-spacing:.3px}
+  .v4-detail-btn:hover{border-color:var(--cyan);background:var(--cyan-d)}
+  .v4-detail{display:none;margin-top:12px}
+  .v4-detail.show{display:block}
+  .v4-det-msg{padding:22px;text-align:center;color:var(--dim);font-family:var(--mono);font-size:12px}
+  .v4-det-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:680px){.v4-det-grid{grid-template-columns:1fr}}
+  .v4-det-card{background:var(--panel);border:1px solid var(--line2);border-radius:11px;padding:13px 15px}
+  .v4-det-h{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+  .v4-det-rid{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--cyan);background:var(--cyan-d);
+    padding:2px 7px;border-radius:6px;flex:none}
+  .v4-det-t{font-size:11.5px;font-weight:700;color:var(--txt);flex:1;line-height:1.3}
+  .v4-det-chip{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;flex:none}
+  .v4-det-chip.g{background:var(--grn-d);color:var(--grn)} .v4-det-chip.a{background:var(--amber-d);color:var(--amber)}
+  .v4-det-chip.r{background:var(--red-d);color:var(--red)}
+  .v4-det-kv{display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;border-bottom:.5px solid var(--line)}
+  .v4-det-kv:last-child{border-bottom:none} .v4-det-kv span:first-child{color:var(--mut)}
+  .v4-det-kv span:last-child{font-family:var(--mono);font-weight:700}
+  .v4-det-note{font-size:10px;color:var(--dim);margin-top:8px;line-height:1.5}
+  .v4-det-chips{display:flex;gap:6px;flex-wrap:wrap}
+  .v4-det-mchip{font-family:var(--mono);font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;
+    background:var(--panel2);color:var(--mut);border:1px solid var(--line2)}
+  .v4-det-mchip.pos{background:var(--grn-d);color:var(--grn);border-color:var(--grn-b)}
+  .v4-det-mchip.neg{background:var(--red-d);color:var(--red);border-color:var(--red-b)}
+  .v4-det-tbl{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono)}
+  .v4-det-tbl th{text-align:left;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:4px 6px;border-bottom:1px solid var(--line2)}
+  .v4-det-tbl td{padding:5px 6px;border-bottom:1px solid var(--line)} .v4-det-tbl tr:last-child td{border-bottom:none}
+  .v4-det-tbl .lbl{font-weight:700;color:var(--txt)} .v4-det-tbl .bar-cell{width:36%}
+  .v4-det-dma{display:flex;justify-content:space-between;font-size:11.5px;padding:5px 0;border-bottom:.5px solid var(--line)}
+  .v4-det-dma:last-child{border-bottom:none} .v4-det-dma span:first-child{color:var(--mut);font-weight:600}
+  .v4-det-dma .pos{color:var(--grn);font-weight:700} .v4-det-dma .neg{color:var(--red);font-weight:700}
+  .v4-det-vbar{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:10.5px}
+  .v4-det-vbar .vl{width:74px;color:var(--mut);flex:none} .v4-det-vbar .vv{width:74px;text-align:right;font-family:var(--mono);color:var(--txt);flex:none}
+  .vtrack{flex:1;height:9px;background:var(--panel2);border-radius:5px;overflow:hidden}
+  .vfill{height:100%;border-radius:5px} .vfill.pos{background:var(--grn)} .vfill.neg{background:var(--red)}
+  .v4-det-gauges{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px}
+  .v4-det-gauge{text-align:center} .v4-det-gauge .gv{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--txt)}
+  .v4-det-gauge .gt{font-size:9px;color:var(--dim);margin:2px 0 4px;text-transform:uppercase;letter-spacing:.4px}
+  .v4-det-gauge .gbar{height:4px;background:var(--panel2);border-radius:3px;overflow:hidden}
+  .v4-det-gauge .gfill{height:100%;border-radius:3px}
+  .pos{color:var(--grn)} .neg{color:var(--red)}
 </style>
 </head>
 <body>
@@ -779,9 +822,173 @@ function renderV4Dual(d, uiMode){
     + '</div></div>'
     + gatedBanner
     + cardsHtml
+    + '<div style="margin-top:12px"><button class="v4-detail-btn" onclick="loadDetail(\''+d.symbol+'\',\''+uiMode+'\')">⊞ View Detailed — rule-by-rule evidence</button></div>'
+    + '<div class="v4-detail" id="v4Detail"></div>'
     + '<div class="foot">V4 · Dual-Style · Native $0 · momentum + reversal scored side-by-side · not a V8 algo signal · ⚠ Spot price, not futures.</div>';
   el.classList.add('show');
   el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// cc#408: inline "View Detailed" — Trade Structure Analyzer merged into /check as the drill-down of
+// a v4 result. Renders already-computed rule evidence (one detail API) into structure-style panels.
+async function loadDetail(sym, uiMode){
+  const box=document.getElementById('v4Detail'); if(!box) return;
+  if(box.classList.contains('show')){ box.classList.remove('show'); box.innerHTML=''; return; }  // toggle
+  box.classList.add('show');
+  box.innerHTML='<div class="v4-det-msg">Loading detailed structure for '+sym+'…</div>';
+  const side=(uiMode==='SHORT')?'SELL':'BUY';
+  try{
+    const r=await fetch('/api/trade-check/v4/detail?symbol='+encodeURIComponent(sym)+'&side='+side);
+    const d=await r.json();
+    if(d.error){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">'+d.error+'</div>';return;}
+    renderTcDetail(box, d, uiMode);
+    box.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">Failed to load detail: '+e+'</div>';}
+}
+
+function _detChip(c){
+  if(c==null)return '';
+  const cls=c>=1?'g':c>=0.5?'a':'r', t=Number(c).toFixed(c%1?1:0);
+  return '<span class="v4-det-chip '+cls+'">'+t+'</span>';
+}
+function _detPanel(rid, title, credit, inner){
+  return '<div class="v4-det-card"><div class="v4-det-h"><span class="v4-det-rid">'+rid+'</span>'
+    +'<span class="v4-det-t">'+title+'</span>'+_detChip(credit)+'</div>'+inner+'</div>';
+}
+function _kv(label, val, cls){
+  return '<div class="v4-det-kv"><span>'+label+'</span><span class="'+(cls||'')+'">'+(val==null?'—':val)+'</span></div>';
+}
+function _sgn(v,dp){ if(v==null)return '—'; dp=(dp==null)?2:dp; return (v>=0?'+':'−')+Math.abs(v).toFixed(dp); }
+function _sgnCls(v,good){ if(v==null)return ''; return (good?v>=0:v<0)?'pos':'neg'; }
+
+function renderTcDetail(box, d, uiMode){
+  const SELL=(uiMode==='SHORT'), ev=d.evidence||{};
+  const best=d.best||{}, style=best.style||'MOMENTUM', REV=(style==='REVERSAL');
+  const cr={}; (best.rules||[]).forEach(r=>cr[r.rule]=r.credit);  // rule -> best-card credit
+  const P=[];   // panels in rule order
+
+  // ── verdict banner mirroring the scorecard (+ GATED from cc#402) ──
+  const vcls=d.best_verdict==='STRONG'?'strong':d.best_verdict==='VALID'?'valid':'reject';
+  const fails=(d.gate_fails&&d.gate_fails.length)?d.gate_fails:[];
+  const gatedBanner=(d.gated&&fails.length)
+    ? '<div class="v4-gated">⛔ GATED — '+fails.map(g=>g.gate+' '+g.label+(g.value!=null?' ('+g.value+')':'')).join(' · ')+' — verdict held at REJECT.</div>' : '';
+  const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'+d.best_verdict
+    +(d.best_label?' · '+d.best_label:'')+'</div><div class="v4-best">'+d.symbol+' · '+(SELL?'▼ SHORT':'▲ LONG')
+    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?13:15))
+    +' · evidence audits the '+style+' card</div></div>'+gatedBanner;
+
+  // R1 mood
+  const md=ev.mood||{};
+  const moodItem=(lb,v,bull)=>'<span class="v4-det-mchip '+(v==null?'':(bull?'pos':'neg'))+'">'+lb+' '+(v==null?'—':_sgn(v))+'</span>';
+  P.push([1,_detPanel('R1','Market mood',cr.R1,
+    '<div class="v4-det-chips">'
+    +'<span class="v4-det-mchip '+((md.adr!=null&&md.adr>=1)?'pos':'neg')+'">ADR '+(md.adr!=null?md.adr:'—')+'</span>'
+    +moodItem('Nifty D',md.nifty_day,md.nifty_day>=0)+moodItem('Nifty W',md.nifty_wk,md.nifty_wk>=0)+moodItem('Nifty M',md.nifty_mo,md.nifty_mo>=0)
+    +'</div><div class="v4-det-note">'+(SELL?'SELL wants a bearish tape — any bearish check credits.':'BUY wants a bullish tape — mood fails hurt.')+' Fails: '+(md.fails!=null?md.fails:'—')+'</div>')]);
+
+  // R2 sector
+  const sc=ev.sector||{};
+  P.push([2,_detPanel('R2','Sector ('+(sc.week!=null?'wk '+_sgn(sc.week):'')+' '+(sc.month!=null?'mo '+_sgn(sc.month):'')+')',cr.R2,
+    '<div class="v4-det-chips">'
+    +'<span class="v4-det-mchip '+_sgnCls(sc.week,!SELL)+'">seg wk '+_sgn(sc.week)+'</span>'
+    +'<span class="v4-det-mchip '+_sgnCls(sc.month,!SELL)+'">seg mo '+_sgn(sc.month)+'</span></div>'
+    +'<div class="v4-det-note">'+(ev.segment||'')+'</div>')]);
+
+  // R3 peers
+  const pr=(ev.peers||[]), pc=ev.peer_counts||{};
+  const peerRows=pr.map(p=>'<tr><td>'+p.symbol+'</td><td class="'+_sgnCls(p.day_1d,!SELL)+'" style="text-align:right">'+_sgn(p.day_1d)+'%</td></tr>').join('');
+  P.push([3,_detPanel('R3','Peers · same segment ('+(SELL?'fallers':'gainers')+')',cr.R3,
+    '<table class="v4-det-tbl"><tbody>'+(peerRows||'<tr><td class="v4-det-note">no peers</td></tr>')+'</tbody></table>'
+    +'<div class="v4-det-note">'+(SELL?('down>0.5%: '+(pc.dn05!=null?pc.dn05:'—')+' · down: '+(pc.dn!=null?pc.dn:'—')):('up>1%: '+(pc.up1!=null?pc.up1:'—')+' · up: '+(pc.up!=null?pc.up:'—')))+' of '+(pc.n!=null?pc.n:'—')+'</div>')]);
+
+  // R4 DMA strip
+  const dm=ev.dma||{};
+  const dmaBar=(lb,v)=>{const want=SELL?(v!=null&&v<0):(v!=null&&v>0);return '<div class="v4-det-dma"><span>'+lb+'</span><span class="'+(v==null?'':(want?'pos':'neg'))+'">'+(v==null?'—':(want?(SELL?'below':'above'):(SELL?'above':'below'))+' '+_sgn(v)+'%')+'</span></div>';};
+  P.push([4,_detPanel('R4','Price vs DMA 20/50/200',cr.R4,dmaBar('DMA20',dm.d20)+dmaBar('DMA50',dm.d50)+dmaBar('DMA200',dm.d200))]);
+
+  // R5 volume up/down bar pair
+  const vol=ev.vol21||{}, au=vol.au||0, ad=vol.ad||0, vmax=Math.max(au,ad,1);
+  P.push([5,_detPanel('R5','Volume 21-session · up-close vs down-close',cr.R5,
+    '<div class="v4-det-vbar"><span class="vl">Up-close</span><div class="vtrack"><div class="vfill pos" style="width:'+(au/vmax*100)+'%"></div></div><span class="vv">'+(vol.au!=null?Math.round(vol.au).toLocaleString('en-IN'):'—')+'</span></div>'
+    +'<div class="v4-det-vbar"><span class="vl">Down-close</span><div class="vtrack"><div class="vfill neg" style="width:'+(ad/vmax*100)+'%"></div></div><span class="vv">'+(vol.ad!=null?Math.round(vol.ad).toLocaleString('en-IN'):'—')+'</span></div>'
+    +'<div class="v4-det-note">'+(SELL?'down/up ratio ':'up/down ratio ')+'<b>'+((SELL?vol.dn_up:vol.up_dn)!=null?Number(SELL?vol.dn_up:vol.up_dn).toFixed(2):'—')+'</b></div>')]);
+
+  // R7 RSI gauges (sandwich highlight on SELL-REV)
+  const rs=ev.rsi||{};
+  const gauge=(lb,v)=>'<div class="v4-det-gauge"><div class="gv">'+(v==null?'—':Math.round(v))+'</div><div class="gt">'+lb+'</div><div class="gbar"><div class="gfill" style="width:'+(v!=null?Math.max(0,Math.min(100,v)):0)+'%;background:'+(v==null?'var(--line2)':(v>=60?'var(--grn)':v<=40?'var(--red)':'var(--amber)'))+'"></div></div></div>';
+  P.push([7,_detPanel('R7',REV?'RSI sandwich'+(SELL?' (wk<50 & daily>50)':''):'RSI frame',cr.R7,
+    '<div class="v4-det-gauges">'+gauge('Daily',rs.daily)+gauge('Weekly',rs.weekly)+gauge('Monthly',rs.monthly)+gauge('True Wk',rs.true_weekly)+'</div>')]);
+
+  // R9 intraday 5-min + VWAP
+  P.push([9,_detPanel('R9','Intraday 5-min + day-VWAP',cr.R9,_detChart(ev, SELL))]);
+
+  // R10 style extras
+  const st=ev.style||{};
+  P.push([10,_detPanel('R10','Style extras',cr.R10, REV
+    ? _kv(SELL?'Fall from 2d high':'Recovery off 2d low', (SELL?_sgn(st.fall_from_high_2d):_sgn(st.recovery_2d))+'%')
+    : _kv('mom_2d',_sgn(st.mom_2d)+'%')+_kv('52w index',st.week_index_52!=null?st.week_index_52.toFixed(0):'—'))]);
+
+  // R11 room ladder (1D)
+  P.push([11,_detPanel('R11','Room · 1D '+(SELL?'(room to fall → S1)':'(room to rise → R1)'),cr.R11,_detLadder(d, SELL))]);
+
+  // R12 OI
+  const oi=ev.oi||{};
+  P.push([12,_detPanel('R12','OI structure',cr.R12,
+    _kv('Day %',_sgn(oi.day_1d)+'%',_sgnCls(oi.day_1d,!SELL))+_kv('OI change',oi.oi_chg!=null?_sgn(oi.oi_chg):'missing (→0.5)'))]);
+
+  // R13 basis
+  const bs=ev.basis||{};
+  P.push([13,_detPanel('R13','Futures basis',cr.R13,
+    _kv('Basis now',bs.now!=null?_sgn(bs.now)+'%':'missing (→0.5)')+_kv('Basis prev',bs.prev!=null?_sgn(bs.prev)+'%':'—')
+    +'<div class="v4-det-note">'+(bs.fresh?'basis feed live':'basis data missing → 0.5')+'</div>')]);
+
+  // R15 RS vs Nifty
+  const rr=ev.rs||{};
+  P.push([15,_detPanel('R15','Relative strength vs Nifty',cr.R15,
+    _kv('RS week',_sgn(rr.wk)+'%',_sgnCls(rr.wk,!SELL))+_kv('RS month',_sgn(rr.mo)+'%',_sgnCls(rr.mo,!SELL)))]);
+
+  P.sort((a,b)=>a[0]-b[0]);
+  box.innerHTML=banner+'<div class="v4-det-grid">'+P.map(x=>x[1]).join('')+'</div>';
+}
+
+// R9 inline SVG 5-min chart: close line + VWAP horizontal + last-close marker
+function _detChart(ev, SELL){
+  const bars=ev.bars||[]; const closes=bars.map(b=>b.c).filter(v=>v!=null);
+  if(closes.length<2)return '<div class="v4-det-note">no session bars</div>';
+  const vwap=ev.vwap; let lo=Math.min.apply(null,closes),hi=Math.max.apply(null,closes);
+  if(vwap!=null){lo=Math.min(lo,vwap);hi=Math.max(hi,vwap);}
+  const pad=(hi-lo)*0.08||1; lo-=pad; hi+=pad; const W=100,H=40;
+  const xs=i=>i/(closes.length-1)*W, ys=v=>H-((v-lo)/(hi-lo))*H;
+  const col=SELL?'var(--red)':'var(--grn)';
+  const pts=closes.map((v,i)=>xs(i).toFixed(1)+','+ys(v).toFixed(1)).join(' ');
+  let vwapLine=''; if(vwap!=null){const y=ys(vwap).toFixed(1);vwapLine='<line x1="0" y1="'+y+'" x2="100" y2="'+y+'" stroke="var(--amber)" stroke-width="0.5" stroke-dasharray="2 1.5"/>';}
+  const lx=xs(closes.length-1).toFixed(1),ly=ys(closes[closes.length-1]).toFixed(1);
+  const rp=ev.range_pos;
+  return '<svg viewBox="0 0 100 40" preserveAspectRatio="none" style="width:100%;height:90px">'
+    +'<polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="1"/>'+vwapLine
+    +'<circle cx="'+lx+'" cy="'+ly+'" r="1.6" fill="'+col+'"/></svg>'
+    +'<div class="v4-det-chips" style="margin-top:8px">'
+    +'<span class="v4-det-mchip '+(ev.above_vwap===false?(SELL?'pos':'neg'):(SELL?'neg':'pos'))+'">'+(ev.above_vwap===false?'below VWAP':'above VWAP')+'</span>'
+    +'<span class="v4-det-mchip">VWAP '+(vwap!=null?vwap:'—')+'</span>'
+    +'<span class="v4-det-mchip">range pos '+(rp!=null?Math.round(rp*100)+'%':'—')+'</span></div>';
+}
+
+// R11 room ladder: pivots vs CMP with room bars (LONG=to R-levels, SHORT=to S-levels)
+function _detLadder(d, SELL){
+  const p=d.pivots||{}, cmp=d.cmp; if(cmp==null)return '<div class="v4-det-note">no CMP</div>';
+  const defs=SELL?[['R1',p.r1],['PP',p.pp],['S1',p.s1],['S2',p.s2]]:[['S1',p.s1],['PP',p.pp],['R1',p.r1],['R2',p.r2]];
+  const rows=defs.filter(x=>x[1]!=null).map(x=>{
+    const dist=(x[1]-cmp)/cmp*100; const wrong=SELL?dist>0:dist<0;
+    return {lb:x[0],px:x[1],dist:dist,wrong:wrong};
+  });
+  const maxd=Math.max.apply(null,[1].concat(rows.map(r=>Math.abs(r.dist))));
+  const col=SELL?'var(--red)':'var(--grn)';
+  const body=rows.map(r=>{const w=Math.max(3,Math.abs(r.dist)/maxd*100);
+    return '<tr><td class="lbl">'+r.lb+'</td><td style="text-align:right">'+Number(r.px).toFixed(1)+'</td>'
+      +'<td style="text-align:right" class="'+(r.wrong?'v4-det-note':'')+'">'+_sgn(r.dist)+'%</td>'
+      +'<td class="bar-cell"><div class="vtrack"><div class="vfill" style="width:'+w+'%;background:'+(r.wrong?'var(--line2)':col)+'"></div></div></td></tr>';
+  }).join('');
+  return '<table class="v4-det-tbl"><thead><tr><th>Level</th><th style="text-align:right">Price</th><th style="text-align:right">Dist</th><th>'+(SELL?'Room to fall':'Room to rise')+'</th></tr></thead><tbody>'+(body||'<tr><td class="v4-det-note">no pivots</td></tr>')+'</tbody></table>';
 }
 
 async function runInvestCheck(sym){

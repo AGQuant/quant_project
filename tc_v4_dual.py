@@ -128,6 +128,7 @@ def _derive(d):
     ad = sum(dn_v) / len(dn_v) if dn_v else None
     d["vol21_up_dn"] = (au / ad) if (au is not None and ad not in (None, 0)) else None  # up/down
     d["vol21_dn_up"] = (ad / au) if (ad is not None and au not in (None, 0)) else None  # down/up (SELL)
+    d["vol21_au"], d["vol21_ad"] = au, ad   # cc#408: raw up/down-close avg volumes for the detail panel
 
     # R9 — day VWAP from session bars + close position in the day range
     num = den = 0.0
@@ -575,6 +576,43 @@ def score_card(d, style, side):
 
 # ── public compute (single symbol, both sides / a chosen side) ───────────────────
 
+def _compute_result(d, symbol, side):
+    """Score both style cards for each requested side and assemble the dual result. Shared by the
+    dual endpoint and the detail endpoint (cc#408) so scores are identical by construction."""
+    # cc#402: gates keep verdict authority but never hide information — ALWAYS compute both style
+    # cards for each requested side, flag the gated ones, and let the caller render them with a
+    # GATED banner. Overall verdict stays REJECT whenever the best card's side gates failed.
+    sides = (["BUY", "SELL"] if side == "ALL" else [side])
+    cards, gate_map = [], {}
+    for s in sides:
+        ok, gates = _gates(d, s)
+        fails = [g for g in gates if not g.get("pass")]
+        gate_map[s] = {"pass": ok, "gates": gates, "fails": fails}
+        for st in STYLES:
+            card = score_card(d, st, s)
+            card["gated"] = (not ok)
+            card["gate_fails"] = fails
+            cards.append(card)
+    passing = [c for c in cards if not c["gated"]]
+    pool = passing if passing else cards
+    best = max(pool, key=lambda c: c["score"], default=None)
+    best_gated = bool(best and best.get("gated"))
+    return {
+        "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
+        "gates": gate_map,
+        "best": best,
+        "best_label": best["label"] if best else None,
+        "best_score": best["score"] if best else None,
+        "best_verdict": ("REJECT" if best_gated else (best["verdict"] if best else "REJECT")),
+        "gated": best_gated,
+        "gate_fails": (best.get("gate_fails") if best else []),
+        "cards": cards,
+        "pivots": {k: _r(v) for k, v in d["pivots"].items()},
+        "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
+        "spec_ref": SPEC_REF, "version": VERSION,
+    }
+
+
 def trade_check_v4_dual(symbol, side="ALL"):
     symbol = (symbol or "").strip().upper()
     side = (side or "ALL").strip().upper()
@@ -591,41 +629,81 @@ def trade_check_v4_dual(symbol, side="ALL"):
         return {"error": f"no raw_prices history for {symbol}"}
     if d["cmp"] is None:
         return {"error": f"no CMP available for {symbol}"}
+    return _compute_result(d, symbol, side)
 
-    # cc#402: gates keep verdict authority but never hide information — ALWAYS compute both style
-    # cards for each requested side, flag the gated ones, and let the caller render them with a
-    # GATED banner. Overall verdict stays REJECT whenever the best card's side gates failed.
-    sides = (["BUY", "SELL"] if side == "ALL" else [side])
-    cards, gate_map = [], {}
-    for s in sides:
-        ok, gates = _gates(d, s)
-        fails = [g for g in gates if not g.get("pass")]
-        gate_map[s] = {"pass": ok, "gates": gates, "fails": fails}
-        for st in STYLES:
-            card = score_card(d, st, s)
-            card["gated"] = (not ok)
-            card["gate_fails"] = fails
-            cards.append(card)
-    # prefer a gate-passing (tradeable) card for "best"; else the top gated card, for display only
-    passing = [c for c in cards if not c["gated"]]
-    pool = passing if passing else cards
-    best = max(pool, key=lambda c: c["score"], default=None)
-    best_gated = bool(best and best.get("gated"))
 
+def _peer_rows(cur, segment, symbol, side):
+    """Top same-segment peers by day% in the trade direction (for the R3 evidence panel)."""
+    if not segment:
+        return []
+    order = "ASC" if side == "SELL" else "DESC"   # SELL wants the biggest fallers first
+    cur.execute(f"""
+        SELECT g.symbol, v.day_1d
+        FROM gvm_scores g JOIN v8_metrics v ON v.symbol = g.symbol
+        WHERE g.segment = %s AND g.symbol <> %s
+          AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+          AND v.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+          AND v.day_1d IS NOT NULL
+        ORDER BY v.day_1d {order} LIMIT 8
+    """, (segment, symbol))
+    return [{"symbol": r[0], "day_1d": _r(r[1])} for r in cur.fetchall()]
+
+
+def _evidence(cur, d, side):
+    """Package already-computed rule inputs for the detail panels (cc#408). No new math."""
+    v8 = d.get("v8") or {}
+    bars = d.get("bars") or []
     return {
-        "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
-        "gates": gate_map,
-        "best": best,
-        "best_label": best["label"] if best else None,
-        "best_score": best["score"] if best else None,
-        "best_verdict": ("REJECT" if best_gated else (best["verdict"] if best else "REJECT")),
-        "gated": best_gated,
-        "gate_fails": (best.get("gate_fails") if best else []),
-        "cards": cards,
-        "pivots": {k: _r(v) for k, v in d["pivots"].items()},
-        "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
-        "spec_ref": SPEC_REF, "version": VERSION,
+        "bars": [{"o": _r(b.get("open")), "h": _r(b.get("high")), "l": _r(b.get("low")),
+                  "c": _r(b.get("close")), "v": _r(b.get("volume"))} for b in bars],
+        "vwap": _r(d.get("vwap")), "range_pos": _r(d.get("range_pos")), "above_vwap": d.get("above_vwap"),
+        "dma": {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))},
+        "rsi": {"daily": _r(v8.get("daily_rsi")), "weekly": _r(v8.get("rsi_weekly")),
+                "monthly": _r(v8.get("rsi_month")), "true_weekly": _r(d.get("true_weekly_rsi"))},
+        "vol21": {"up_dn": _r(d.get("vol21_up_dn")), "dn_up": _r(d.get("vol21_dn_up")),
+                  "au": _r(d.get("vol21_au")), "ad": _r(d.get("vol21_ad"))},
+        "peers": _peer_rows(cur, d.get("segment"), d.get("symbol"), side),
+        "peer_counts": {"up1": d.get("peers_up1"), "up": d.get("peers_up"),
+                        "dn05": d.get("peers_dn05"), "dn": d.get("peers_dn"), "n": d.get("peer_count")},
+        "sector": {"week": _r(v8.get("sector_week")), "month": _r(v8.get("sector_month"))},
+        "rs": {"wk": _r(d.get("rs_wk")), "mo": _r(d.get("rs_mo"))},
+        "returns": {"wk": _r(v8.get("week_return")), "mo": _r(v8.get("month_return"))},
+        "style": {"mom_2d": _r(v8.get("mom_2d")), "week_index_52": _r(v8.get("week_index_52")),
+                  "recovery_2d": _r(d.get("recovery_2d")), "fall_from_high_2d": _r(d.get("fall_from_high_2d"))},
+        "oi": {"day_1d": _r(v8.get("day_1d")), "oi_chg": _r(d.get("oi_chg"))},
+        "basis": {"now": _r(d.get("basis_now")), "prev": _r(d.get("basis_prev")),
+                  "fresh": bool(d.get("basis"))},
+        "mood": {"fails": d.get("mood_fails"), "bull": d.get("mood_bull"), "adr": _r(d.get("adr")),
+                 "nifty_day": _r(d.get("nifty_day")), "nifty_wk": _r(d.get("nifty_wk")),
+                 "nifty_mo": _r(d.get("nifty_mo"))},
+        "room": {"room_r1": _r(d.get("room_r1")), "room_s1": _r(d.get("room_s1")),
+                 "above_pp": d.get("above_pp")},
+        "gvm": _r(d.get("gvm_score")), "segment": d.get("segment"),
     }
+
+
+def trade_check_v4_detail(symbol, side="BUY"):
+    """cc#408: dual result + a full evidence block for the inline structure-style detail panels."""
+    symbol = (symbol or "").strip().upper()
+    side = (side or "BUY").strip().upper()
+    if side == "ALL":
+        side = "BUY"
+    if side not in ("BUY", "SELL"):
+        return {"error": f"side must be BUY or SELL, got {side!r}"}
+    if not symbol:
+        return {"error": "symbol required"}
+    try:
+        with psycopg.connect(_DB) as conn, conn.cursor() as cur:
+            d = _load_one(cur, symbol)
+            if not d["daily"]:
+                return {"error": f"no raw_prices history for {symbol}"}
+            if d["cmp"] is None:
+                return {"error": f"no CMP available for {symbol}"}
+            res = _compute_result(d, symbol, side)
+            res["evidence"] = _evidence(cur, d, side)
+            return res
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
 
 
 # ── routes ───────────────────────────────────────────────────────────────────────
@@ -643,6 +721,12 @@ def v4_dual_post(req: TCV4DualRequest):
 @router.get("/api/trade-check/v4/dual")
 def v4_dual_get(symbol: str, side: str = "ALL"):
     return trade_check_v4_dual(symbol, side)
+
+
+@router.get("/api/trade-check/v4/detail")
+def v4_detail_get(symbol: str, side: str = "BUY"):
+    """cc#408: dual result + evidence block for the inline structure-style detail panels."""
+    return trade_check_v4_detail(symbol, side)
 
 
 @router.get("/api/trade-check/v4/health-dual")
