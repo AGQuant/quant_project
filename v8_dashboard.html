@@ -1096,8 +1096,11 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
   // sheet ALWAYS resolves (to data, or an explicit failure/timeout state).
   const _to=new Promise((_,rej)=>setTimeout(()=>rej(new Error('dc_timeout')),10000));
   let d;try{d=await Promise.race([getJSON('/api/deriv-metrics/'+encodeURIComponent(sym)+(side?('?side='+encodeURIComponent(side)):'')),_to]);}
-  catch(e){const msg=(e&&e.message==='dc_timeout')?'Cockpit timed out (10s) — tap the symbol to retry.':'Cockpit failed to load.';
-    sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+`<div class="empty" style="padding:18px;color:var(--red);font-size:12px">${msg}</div>`;return;}
+  catch(e){const isTo=(e&&e.message==='dc_timeout');
+    const msg=isTo?'Cockpit timed out (10s) — tap the symbol to retry.':'Cockpit failed to load.';
+    // cc#449: surface the actual error detail (not a bare one-liner) so a real API failure is diagnosable.
+    const det=(!isTo&&e&&e.message)?`<div style="color:var(--mut);font-size:11px;margin-top:6px">${String(e.message).slice(0,240)}</div>`:'';
+    sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+`<div class="empty" style="padding:18px;color:var(--red);font-size:12px">${msg}${det}</div>`;return;}
   sheet.innerHTML=_dcRender(sym,side,qty,entry,cmp,d||{});
 }
 

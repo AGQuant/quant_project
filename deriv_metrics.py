@@ -42,6 +42,17 @@ def _f(x) -> Optional[float]:
         return None
 
 
+def _safe(label, fn, default=None):
+    """cc#449: per-field graceful degradation. Any single cockpit field that throws (a symbol
+    lacking some datum, a null in a join) falls back to `default` and logs — it NEVER kills the
+    whole panel. The response is assembled from these so one bad field can't 500 the cockpit."""
+    try:
+        return fn()
+    except Exception as e:
+        log.warning(f"deriv field '{label}' degraded: {e}")
+        return default
+
+
 # cc#348: TC Score chip — computed on sheet-open via the SAME engine the /check page uses
 # (native_trade_check.compute_trade_check), cached 5 min per (symbol, side). Never reads the
 # stale tc_cache / tc_screener_cache. verdict_class pass/watch/fail -> STRONG/VALID/WEAK.
@@ -655,44 +666,60 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             fut = basis.get("fut")
             spot = basis.get("spot")
             cmp_px = fut or spot   # futures-first, consistent with the position CMP
-            m = _metrics(cur, sym)
+            m = _safe("metrics", lambda: _metrics(cur, sym), {})
             oi_chg = (basis.get("fut_oi") or {}).get("chg_pct")
-            opt = _options_block(cur, sym, cmp_px)
-            intr = _intraday_block(cur, sym, cmp_px)
-            oi_5d = _oi_5d_rolling(cur, sym)   # cc#427 fix_8
+            opt = _safe("options", lambda: _options_block(cur, sym, cmp_px), {"has_options": False})
+            intr = _safe("intraday", lambda: _intraday_block(cur, sym, cmp_px), {})
+            oi_5d = _safe("oi_5d", lambda: _oi_5d_rolling(cur, sym))   # cc#427 fix_8
             # cc#445 fix_3: futures-OI quadrant tag (OI d/d × price change)
-            _fq = _quadrant_tag(oi_chg, m.get("price_chg"))
+            _fq = _safe("fut_quadrant", lambda: _quadrant_tag(oi_chg, m.get("price_chg")))
             if basis.get("fut_oi"):
                 basis["fut_oi"]["quadrant"] = _fq["label"] if _fq else None
                 basis["fut_oi"]["quadrant_color"] = _fq["color"] if _fq else None
                 basis["fut_oi"]["price_chg"] = m.get("price_chg")
-            # cc#445 fix_4: ATM Call/Put OI d/d from the daily snapshot store (live vs latest prior day)
-            _coi = (opt.get("atm_call_oi") or {}).get("oi")
-            _poi = (opt.get("atm_put_oi") or {}).get("oi")
-            _cdd, _pdd, _firstsnap, _dd_asof = _atm_dd_from_daily(cur, sym, _coi, _poi)
-            if opt.get("atm_call_oi"):
-                opt["atm_call_oi"].update({"chg_pct": _cdd, "first_snapshot": _firstsnap, "dd_asof": _dd_asof})
-            if opt.get("atm_put_oi"):
-                opt["atm_put_oi"].update({"chg_pct": _pdd, "first_snapshot": _firstsnap, "dd_asof": _dd_asof})
+            # cc#449/cc#446 fix_1: ATM Call/Put OI d/d — the option_chain latest-2-days d/d computed in
+            # _options_block (atm_call_oi/atm_put_oi.chg_pct + first_snapshot) is the PRIMARY source
+            # (chain has 4-5 snapshot days per underlying). The options_oi_daily store is only a FALLBACK
+            # when the chain carries a single snapshot day, so a symbol with deeper daily history still
+            # shows a real d/d instead of "1st snapshot". [cc#445 fix_4 REGRESSION fixed: it overrode the
+            # good chain d/d with the empty daily store AND called _atm_dd_from_daily with 4 of 5 args
+            # (TypeError -> whole cockpit 500'd for every symbol).]
+            def _atm_dd_fallback():
+                ac, ap = opt.get("atm_call_oi"), opt.get("atm_put_oi")
+                if not (ac or ap):
+                    return
+                if not ((ac or {}).get("first_snapshot") or (ap or {}).get("first_snapshot")):
+                    return   # chain already has a real d/d — keep it
+                _atm = (ac or ap or {}).get("strike")
+                _coi = (ac or {}).get("oi")
+                _poi = (ap or {}).get("oi")
+                _cdd, _pdd, _firstsnap, _dd_asof = _atm_dd_from_daily(cur, sym, _atm, _coi, _poi)
+                if _cdd is not None and ac:
+                    ac.update({"chg_pct": _cdd, "first_snapshot": False, "dd_asof": _dd_asof})
+                if _pdd is not None and ap:
+                    ap.update({"chg_pct": _pdd, "first_snapshot": False, "dd_asof": _dd_asof})
+            _safe("atm_dd_fallback", _atm_dd_fallback)
             # cc#445 fix_5/fix_6: A/D 21d + daily ATR
-            ad = _ad_21d(cur, sym)
-            atr_d = _atr_daily(cur, sym)
+            ad = _safe("ad_21d", lambda: _ad_21d(cur, sym))
+            atr_d = _safe("atr_daily", lambda: _atr_daily(cur, sym))
             # cc#368: freshness stamp = latest available option_chain snapshot for this underlying.
             # The chain blocks already read MAX(ts) (never today-only), so off-market/weekend still
             # returns the last live snapshot; data_ts lets the UI label it honestly ("as of <ts>")
             # and, when NULL, flip to an explicit "No option data" state instead of an infinite skeleton.
-            cur.execute("SELECT MAX(ts) FROM option_chain WHERE underlying=%s", (sym,))
-            _cts = cur.fetchone()
-            chain_ts = _cts[0].isoformat() if _cts and _cts[0] else None
+            def _chain_ts():
+                cur.execute("SELECT MAX(ts) FROM option_chain WHERE underlying=%s", (sym,))
+                _cts = cur.fetchone()
+                return _cts[0].isoformat() if _cts and _cts[0] else None
+            chain_ts = _safe("chain_ts", _chain_ts)
 
-        tc = _tc_score(sym, side)   # opens its own connection — kept outside the block above
+        tc = _safe("tc_score", lambda: _tc_score(sym, side))   # opens its own connection — kept outside the block above
 
         resp = {
             "symbol": sym, "cmp": cmp_px, "fut": fut, "spot": spot, "side": (side or "").upper() or None,
             "has_options": opt.get("has_options", False),
             "data_ts": chain_ts,   # cc#368: latest option_chain snapshot ts (None = no chain rows)
             "verdict": {
-                "oi_quadrant": _oi_quadrant(oi_chg, m.get("price_chg")),
+                "oi_quadrant": _safe("oi_quadrant", lambda: _oi_quadrant(oi_chg, m.get("price_chg"))),
                 "options_cost": opt.get("options_cost"),
                 "tc_score": tc,
             },
