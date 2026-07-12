@@ -1257,6 +1257,18 @@ def _bg_tag_news():
     except Exception as e:
         log.error(f"news_tagger: {e}")
 
+def _bg_mf_nav():
+    """cc#466: V15 MF data layer — daily AMFI NAV pull + master upsert + append NAV history, then a
+    seed<->AMFI reconcile pass (idempotent; only matches still-unmatched curated funds). ops_logged."""
+    try:
+        import mf_pipeline
+        r1 = mf_pipeline.run_amfi_nav()
+        r2 = mf_pipeline.reconcile_seed()
+        log.info(f"_bg_mf_nav: nav={r1} reconcile_matched={sum(1 for x in r2.get('results',[]) if x.get('amfi_code'))}")
+    except Exception as e:
+        log.error(f"_bg_mf_nav: {e}")
+
+
 # ── main loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
@@ -1354,6 +1366,7 @@ async def _scheduler_loop():
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
+        if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile (V15 MF)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
 

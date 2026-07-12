@@ -87,6 +87,7 @@ from stock_options_backfill import router as stock_options_backfill_router
 from fyers_hist_backfill import router as fyers_hist_backfill_router   # cc#377 Phase B
 from fundamentals_scraper import router as fundamentals_scraper_router   # cc#361 Phase 1 scrape
 from v13_presets_endpoints import router as v13_presets_router
+from mf_pipeline import router as mf_pipeline_router   # cc#466: V15 MF Intelligence data layer
 from galaxy_endpoints import router as galaxy_router
 from hr_endpoints import router as hr_router   # cc#398 Portfolio Health Report (M1 ingest)
 from hr_report import router as hr_report_router   # cc#398 Portfolio Health Report (M2 report engine)
@@ -297,6 +298,7 @@ app.include_router(stock_options_backfill_router)
 app.include_router(fyers_hist_backfill_router)   # cc#377 Phase B
 app.include_router(fundamentals_scraper_router)   # cc#361 Phase 1 scrape
 app.include_router(v13_presets_router)
+app.include_router(mf_pipeline_router)   # cc#466: /api/v15/mf/*
 app.include_router(galaxy_router)
 app.include_router(hr_router)   # cc#398 Portfolio Health Report (ingest)
 app.include_router(hr_report_router)   # cc#398 Portfolio Health Report (report engine)
