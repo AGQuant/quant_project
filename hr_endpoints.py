@@ -25,12 +25,29 @@ def _conn():
     return psycopg.connect(_DB)
 
 
-# flexible header detection — a column "counts" if its lowercased name contains any keyword
-_COL_KEYS = {
-    "symbol":    ["symbol", "ticker", "scrip", "nse", "stock", "instrument", "security", "name", "company"],
-    "qty":       ["qty", "quantity", "shares", "units", "holding", "no. of", "no of"],
-    "avg_price": ["avg", "average", "buy price", "cost", "purchase", "price", "rate", "acq"],
+# cc#462: header-detection parser for REAL broker exports (Zerodha Console = 22 preamble rows, table at
+# row 23, data offset to col B; Groww/Upstox/Dhan/Fyers/Angel/ICICI/Motilal/Sharekhan/... each preamble +
+# column-offset variants). Locate the table by HEADER TEXT, not position: scan the first ~40 rows of EVERY
+# sheet for a row carrying a Symbol + Quantity + Average-price column (synonym dictionary below, built from
+# the founder's verbatim per-broker headers), then take the rows under it until the first fully-empty row.
+# Column order/offset is irrelevant. Synonyms are ordered most-specific-first so "Quantity Available" beats
+# "Quantity Discrepant"/"...Long Term" and "Average Price" beats "Previous Closing Price".
+_SYN = {
+    "symbol": ["stock symbol", "scrip name", "scripname", "scrip code", "scripcode", "instrument name",
+               "security name", "company name", "stock name", "symbol", "instrument", "scrip", "ticker",
+               "stock", "company", "security", "contract"],
+    "qty": ["quantity available", "holding quantity", "free quantity", "current qty", "net quantity",
+            "holding qty", "net qty", "free qty", "dp bal", "dp avail", "quantity", "qty", "shares",
+            "units", "holding"],
+    "avg_price": ["average cost price", "avg. cost price", "avg cost price", "avg trading price",
+                  "avg. trading price", "average price", "averageprice", "buy average", "buy avg",
+                  "purchase price", "collateral price", "cost price", "hold price", "avg.cost", "avg cost",
+                  "buy price", "avg rate", "avg. rate", "average", "avg", "rate", "cost"],
 }
+_BAD_SYM = {"", "total", "grand total", "subtotal", "sub total", "summary", "nan", "equity",
+            "mutual funds", "combined"}
+_STOP = {"ltd", "limited", "india", "indian", "the", "co", "company", "corp", "corporation", "and",
+         "pvt", "private", "enterprises", "industries", "&"}
 
 
 def _norm(s):
@@ -38,7 +55,7 @@ def _norm(s):
 
 
 def _pick_col(headers, keys):
-    """Return the index of the first header matching any keyword (earliest keyword wins)."""
+    """Index of the first header cell whose lowercased text contains any keyword (earliest keyword wins)."""
     low = [str(h or "").strip().lower() for h in headers]
     for kw in keys:
         for i, h in enumerate(low):
@@ -47,51 +64,114 @@ def _pick_col(headers, keys):
     return None
 
 
-def _rows_from_table(headers, rows):
-    """Given a header list + row lists, map to holdings dicts using flexible column detection."""
-    si = _pick_col(headers, _COL_KEYS["symbol"])
-    qi = _pick_col(headers, _COL_KEYS["qty"])
-    pi = _pick_col(headers, _COL_KEYS["avg_price"])
+def _num(r, idx):
+    if idx is None or idx >= len(r):
+        return None
+    v = str(r[idx] or "").replace(",", "").replace("₹", "").replace("Rs", "").replace("rs", "").strip()
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def _map_rows(header, body, si, qi, pi):
     out = []
-    for r in rows:
+    for r in body:
         if si is None or si >= len(r):
             continue
         sym = _norm(r[si])
-        if not sym or sym.lower() in ("total", "grand total", "nan"):
+        if not sym or sym.lower() in _BAD_SYM:
             continue
-
-        def _num(idx):
-            if idx is None or idx >= len(r):
-                return None
-            v = str(r[idx] or "").replace(",", "").replace("₹", "").strip()
-            try:
-                return float(v)
-            except Exception:
-                return None
-        out.append({"input": sym, "qty": _num(qi), "avg_price": _num(pi)})
+        out.append({"input": sym, "qty": _num(r, qi), "avg_price": _num(r, pi)})
     return out
 
 
+def _rows_from_table(headers, rows):
+    """Map a KNOWN header + rows to holdings (PDF + paste paths where the header is row 0)."""
+    si = _pick_col(headers, _SYN["symbol"])
+    if si is None:
+        return []
+    return _map_rows(headers, rows, si, _pick_col(headers, _SYN["qty"]), _pick_col(headers, _SYN["avg_price"]))
+
+
+def _detect_and_map(grid, scan=40):
+    """Scan the first `scan` rows for a header carrying Symbol + Quantity + Average columns; the table is
+    the rows under it until the first fully-empty row. Returns (rows_or_None, info_dict_or_missing_reason)."""
+    limit = min(len(grid), scan)
+    for hi in range(limit):
+        row = grid[hi]
+        si, qi, pi = _pick_col(row, _SYN["symbol"]), _pick_col(row, _SYN["qty"]), _pick_col(row, _SYN["avg_price"])
+        if si is not None and qi is not None and pi is not None:
+            body = []
+            for r in grid[hi + 1:]:
+                if all(str(c).strip() == "" for c in r):
+                    break
+                body.append(r)
+            rows = _map_rows(row, body, si, qi, pi)
+            info = {"header_row": hi + 1,
+                    "columns": {"symbol": _norm(row[si]), "qty": _norm(row[qi]), "avg_price": _norm(row[pi])}}
+            return (rows, info) if rows else (None, f"header found (row {hi + 1}) but no data rows below it")
+    seen = {"symbol": False, "qty": False, "avg_price": False}
+    for r in grid[:limit]:
+        for k in seen:
+            if _pick_col(r, _SYN[k]) is not None:
+                seen[k] = True
+    miss = [k for k, v in seen.items() if not v]
+    if not miss:
+        return None, "found Symbol/Quantity/Average tokens but never together in one header row"
+    return None, "no header row with all of Symbol + Quantity + Average; missing: " + ", ".join(miss)
+
+
 def _parse_bytes(filename, data):
-    """Parse xlsx/csv (pandas) or pdf (best-effort). Returns (rows, warning)."""
+    """Header-detection parse across ALL sheets (Equity preferred; Mutual Funds captured separately, never
+    blocking the equity flow). Returns (rows, warning, diagnostics)."""
     name = (filename or "").lower()
-    warning = None
+    if name.endswith(".pdf"):
+        r, w = _parse_pdf(data)
+        return r, w, {"format": "pdf"}
     try:
         import pandas as pd
+    except Exception:
+        return [], "spreadsheet parser unavailable on server — paste rows instead", {}
+    diag = {"sheets": []}
+    try:
         if name.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(data), header=0, dtype=str)
-        elif name.endswith(".csv") or (b"," in data[:2000] and not name.endswith(".pdf")):
-            df = pd.read_csv(io.BytesIO(data), header=0, dtype=str)
-        elif name.endswith(".pdf"):
-            return _parse_pdf(data)
+            xl = pd.read_excel(io.BytesIO(data), sheet_name=None, header=None, dtype=str)
+            sheets = list(xl.items())
         else:
-            df = pd.read_csv(io.BytesIO(data), header=0, dtype=str)
-        df = df.fillna("")
-        headers = list(df.columns)
-        rows = df.values.tolist()
-        return _rows_from_table(headers, rows), warning
+            df = pd.read_csv(io.BytesIO(data), header=None, dtype=str, on_bad_lines="skip")
+            sheets = [("csv", df)]
     except Exception as e:
-        return [], f"parse error: {str(e)[:200]}"
+        return [], f"could not read file: {str(e)[:160]}", diag
+    best = None          # (priority, rows, sheet_name)
+    mf_rows, mf_sheet = [], None
+    for sname, df in sheets:
+        df = df.fillna("")
+        grid = df.values.tolist()
+        rows, info = _detect_and_map(grid)
+        sd = {"sheet": str(sname), "scanned_rows": min(len(grid), 40)}
+        if rows:
+            sd.update({"holdings": len(rows), "header_row": info.get("header_row"), "columns": info.get("columns")})
+            low = str(sname).lower()
+            if "mutual" in low or low in ("mf", "mutual funds"):
+                if len(rows) > len(mf_rows):
+                    mf_rows, mf_sheet = rows, str(sname)
+            else:
+                pri = 2 if "equit" in low else 1
+                if best is None or pri > best[0] or (pri == best[0] and len(rows) > len(best[1])):
+                    best = (pri, rows, str(sname))
+        else:
+            sd["missing"] = info
+        diag["sheets"].append(sd)
+    if best:
+        diag["chosen_sheet"] = best[2]
+        if mf_rows:
+            diag["mutual_funds"] = {"sheet": mf_sheet, "count": len(mf_rows)}   # cc#462 fix_3: stashed, not blocking
+        return best[1], None, diag
+    if mf_rows:
+        diag["chosen_sheet"] = mf_sheet
+        return mf_rows, "only a Mutual Funds sheet was detected — equity analytics will be limited", diag
+    return [], "no holdings table detected — scanned every sheet for a header with Symbol + Quantity + Average columns", diag
 
 
 def _parse_pdf(data):
@@ -121,55 +201,90 @@ def _parse_pasted(text):
     delim = "\t" if "\t" in lines[0] else ("," if "," in lines[0] else None)
     split = (lambda ln: ln.split(delim)) if delim else (lambda ln: ln.split())
     grid = [split(ln) for ln in lines]
-    first = [c.lower() for c in grid[0]]
-    has_header = any(any(kw in c for kw in _COL_KEYS["symbol"]) for c in first) and \
-        not any(ch.isdigit() for ch in "".join(grid[0][1:2]))
-    if has_header:
+    # header row present if the first row carries a symbol-token (cc#462: _SYN, not the old _COL_KEYS)
+    if _pick_col(grid[0], _SYN["symbol"]) is not None:
         return _rows_from_table(grid[0], grid[1:])
     # no header: assume symbol[, qty[, avg]]
-    return _rows_from_table(["symbol", "qty", "avg_price"], grid)
+    return _map_rows(["symbol", "qty", "avg_price"], grid, 0, 1, 2)
+
+
+def _norm_name(s):
+    """Normalize a company name to significant tokens (cc#462): strip punctuation + corp-suffix stopwords."""
+    s = re.sub(r"[^a-z0-9 ]", " ", str(s or "").lower())
+    return [t for t in s.split() if t and t not in _STOP]
 
 
 def _resolve(cur, holdings):
-    """Resolve each raw input to a Scorr symbol via input_raw: nse_code exact, then company_name fuzzy."""
+    """cc#462 tiered resolution against input_raw: (a) exact nse_code (exchange suffix stripped),
+    (b) exact normalized company_name, (c) token-overlap fuzzy vs company_names (Jaccard >= 0.6 accepted),
+    else (d) unmatched WITH top-3 suggestions for one-click confirmation — never silently guess low
+    confidence into a financial report. Each row reports the resolution method for transparency."""
     resolved = []
     for h in holdings:
         raw = h["input"]
-        up = raw.upper().strip()
+        up = re.sub(r"[-.](eq|ns|bo|bse|nse|be)$", "", raw.upper().strip(), flags=re.I).strip()
+        sym = cname = method = None
+        sugg = []
+        # (a) exact nse_code
         cur.execute("SELECT nse_code, company_name FROM input_raw WHERE UPPER(nse_code)=%s LIMIT 1", (up,))
         m = cur.fetchone()
-        if not m:
-            cur.execute("""SELECT nse_code, company_name FROM input_raw
-                           WHERE company_name ILIKE %s ORDER BY LENGTH(company_name) LIMIT 1""",
-                        (f"%{raw}%",))
-            m = cur.fetchone()
         if m:
-            resolved.append({"input": raw, "symbol": m[0], "company_name": m[1],
-                             "qty": h.get("qty"), "avg_price": h.get("avg_price"), "resolved": True})
-        else:
-            resolved.append({"input": raw, "symbol": None, "company_name": None,
-                             "qty": h.get("qty"), "avg_price": h.get("avg_price"), "resolved": False})
+            sym, cname, method = m[0], m[1], "nse_code"
+        # (b) exact normalized company_name
+        if not sym:
+            key = re.sub(r"[^a-z0-9]", "", raw.lower())
+            if key:
+                cur.execute("""SELECT nse_code, company_name FROM input_raw
+                               WHERE REGEXP_REPLACE(LOWER(company_name), '[^a-z0-9]', '', 'g') = %s LIMIT 1""",
+                            (key,))
+                m = cur.fetchone()
+                if m:
+                    sym, cname, method = m[0], m[1], "company_name"
+        # (c) token-overlap fuzzy (pg_trgm not installed — scored in Python)
+        if not sym:
+            toks = _norm_name(raw)
+            if toks:
+                longest = max(toks, key=len)
+                cur.execute("SELECT nse_code, company_name FROM input_raw WHERE company_name ILIKE %s LIMIT 60",
+                            (f"%{longest}%",))
+                tset = set(toks)
+                scored = []
+                for nc, cn in cur.fetchall():
+                    cset = set(_norm_name(cn))
+                    if not cset:
+                        continue
+                    jac = len(tset & cset) / float(len(tset | cset))
+                    scored.append((jac, nc, cn))
+                scored.sort(reverse=True)
+                sugg = [{"symbol": s2, "company_name": c2, "score": round(j, 2)} for j, s2, c2 in scored[:3]]
+                if scored and scored[0][0] >= 0.6:
+                    sym, cname, method = scored[0][1], scored[0][2], "fuzzy"
+        resolved.append({"input": raw, "symbol": sym, "company_name": cname, "method": method,
+                         "qty": h.get("qty"), "avg_price": h.get("avg_price"),
+                         "resolved": bool(sym), "suggestions": ([] if sym else sugg)})
     return resolved
 
 
 @router.post("/api/health/upload")
 async def health_upload(file: Optional[UploadFile] = File(None), text: Optional[str] = Form(None)):
-    """Parse an uploaded holdings file (xlsx/csv/pdf) or pasted text, resolve symbols, return a grid."""
+    """Parse an uploaded holdings file (xlsx/csv/pdf) or pasted text, resolve symbols, return a grid.
+    On parse failure returns `diagnostics` (which sheets/rows were scanned + what column was missing)."""
     warning = None
+    diag = {}
     if file is not None:
         data = await file.read()
-        rows, warning = _parse_bytes(file.filename, data)
+        rows, warning, diag = _parse_bytes(file.filename, data)
     elif text:
         rows = _parse_pasted(text)
     else:
         return {"error": "provide a file or pasted text"}
     if not rows:
-        return {"error": warning or "no holdings parsed", "rows": [], "warning": warning}
+        return {"error": warning or "no holdings parsed", "rows": [], "warning": warning, "diagnostics": diag}
     with _conn() as conn, conn.cursor() as cur:
         resolved = _resolve(cur, rows)
     return {"count": len(resolved), "resolved": sum(1 for r in resolved if r["resolved"]),
             "unresolved": sum(1 for r in resolved if not r["resolved"]),
-            "warning": warning, "rows": resolved}
+            "warning": warning, "diagnostics": diag, "rows": resolved}
 
 
 class HRHolding(BaseModel):
