@@ -1977,9 +1977,13 @@ async function loadPositionNews(){
   catch(e){el.innerHTML=`<div class="err">Position News failed: ${e.message}</div>`;}
 }
 function renderPositionNews(d){
-  const groups=(d&&d.groups)||[];
+  const groups=((d&&d.groups)||[]).slice();
   const meta=`<div class="ptitle">Position News <span class="ct">${groups.length?`${d.total} items · ${d.symbols} open position${d.symbols===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
   if(!groups.length)return meta+`<div class="empty">No open positions, or no polished news yet.</div>`;
+  // cc#415: sort sections by their newest item (freshest coverage first), not by item count.
+  const _pnTs=s=>{const t=Date.parse(String(s||'').replace(' ','T'));return isNaN(t)?0:t;};
+  groups.forEach(g=>{let mx=0,mts=null;(g.items||[]).forEach(it=>{const t=_pnTs(it.published_at);if(t>mx){mx=t;mts=it.published_at;}});g._ms=mx;g._newest=mts;});
+  groups.sort((a,b)=>b._ms-a._ms);
   return meta+groups.map(g=>{
     const items=(g.items||[]).map(it=>{const age=it.published_at?newsAgo(it.published_at):'';
       return`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
@@ -1989,10 +1993,11 @@ function renderPositionNews(d){
         (age?` · <span>${newsEsc(age)}</span>`:'')+
         (it.symbol?` · <span>${newsEsc(it.symbol)}</span>`:'')+`</div></div>`;
     }).join('');
+    const hdrAge=g._newest?newsAgo(g._newest):'';   // cc#415: section header age stamp of the newest item
     return`<div style="margin-top:16px">`+
       `<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">`+
         `<span style="font-size:14px;font-weight:800;color:var(--txt)">${newsEsc(g.symbol)}</span>`+
-        `<span class="ct">${g.count} ${g.count===1?'item':'items'}</span></div>${items}</div>`;
+        `<span class="ct">${g.count} ${g.count===1?'item':'items'}${hdrAge?' · '+newsEsc(hdrAge):''}</span></div>${items}</div>`;
   }).join('');
 }
 
