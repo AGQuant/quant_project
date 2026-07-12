@@ -392,3 +392,161 @@ def v12_universe_get(uid: int):
             return {"error": "not found"}
         cols = [d[0] for d in cur.description]
         return dict(zip(cols, r))
+
+
+# ===========================================================================
+# cc#394 V12 — MODULE 2: basket CRUD + definition JSONB validator (spec fix_3)
+# ===========================================================================
+# ONE basket definition JSONB consumed by TWO executors (bt walker + paper walker). The validator
+# is the single gate both share, so a saved basket is always structurally runnable.
+_ROC_LOOKBACKS = {"1M", "3M", "6M", "12M"}
+_REBAL_FREQ = {"weekly", "monthly", "quarterly"}
+
+
+def _isnum(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _validate_basket_def(d: dict) -> list:
+    """Validate the basket definition per spec fix_3. Returns a list of human-readable errors
+    ([] = valid). entry (mandatory momentum rank + optional RSI/EMA gates), exit (all optional),
+    rebalance, costs, universe_ref."""
+    errs = []
+    if not isinstance(d, dict):
+        return ["definition must be an object"]
+    e = d.get("entry")
+    if not isinstance(e, dict):
+        errs.append("entry is required")
+        e = {}
+    else:
+        roc = e.get("roc_lookback")
+        if isinstance(roc, str):
+            if roc not in _ROC_LOOKBACKS:
+                errs.append(f"entry.roc_lookback must be one of {sorted(_ROC_LOOKBACKS)} or a blend list")
+        elif isinstance(roc, list):
+            if not roc or any(not isinstance(x, dict) or x.get("lookback") not in _ROC_LOOKBACKS
+                              or not _isnum(x.get("weight")) for x in roc):
+                errs.append("entry.roc_lookback blend items need {lookback in set, weight number}")
+        else:
+            errs.append("entry.roc_lookback required (a lookback string or a blend list)")
+        manual = e.get("manual_list")
+        if manual is not None:
+            if not isinstance(manual, list) or not all(isinstance(s, str) for s in manual):
+                errs.append("entry.manual_list must be a list of symbols")
+        elif not (isinstance(e.get("top_x"), int) and e["top_x"] >= 1):
+            errs.append("entry.top_x must be an int >= 1 (or provide entry.manual_list)")
+        for k in ("min_stocks", "max_stocks"):
+            if k in e and not (isinstance(e[k], int) and e[k] >= 1):
+                errs.append(f"entry.{k} must be a positive int")
+        if isinstance(e.get("min_stocks"), int) and isinstance(e.get("max_stocks"), int) and e["min_stocks"] > e["max_stocks"]:
+            errs.append("entry.min_stocks cannot exceed entry.max_stocks")
+        rsi = e.get("rsi_gate")
+        if rsi is not None and not (isinstance(rsi, dict) and rsi.get("tf") in ("D", "W", "M")
+                                    and isinstance(rsi.get("period"), int) and _isnum(rsi.get("threshold"))
+                                    and rsi.get("dir") in ("above", "below")):
+            errs.append("entry.rsi_gate needs {tf D/W/M, period int, threshold num, dir above/below}")
+        ema = e.get("ema_gate")
+        if ema is not None and not (isinstance(ema, dict) and ema.get("tf") in ("D", "W", "M")
+                                    and isinstance(ema.get("ema1"), int) and isinstance(ema.get("ema2"), int)):
+            errs.append("entry.ema_gate needs {tf D/W/M, ema1 int, ema2 int, ema3? int}")
+    x = d.get("exit") or {}
+    if not isinstance(x, dict):
+        errs.append("exit must be an object")
+    else:
+        if "trailing_peak_pct" in x and not _isnum(x["trailing_peak_pct"]):
+            errs.append("exit.trailing_peak_pct must be a number")
+        if "rank_fall_y" in x and not (isinstance(x["rank_fall_y"], int) and x["rank_fall_y"] >= 1):
+            errs.append("exit.rank_fall_y must be a positive int")
+        if isinstance(x.get("rank_fall_y"), int) and isinstance(e.get("top_x"), int) and x["rank_fall_y"] < e["top_x"]:
+            errs.append("exit.rank_fall_y must be >= entry.top_x")
+        for k in ("weight_max_pct", "weight_cushion"):
+            if k in x and not _isnum(x[k]):
+                errs.append(f"exit.{k} must be a number")
+        if "gate_mirror" in x and not isinstance(x["gate_mirror"], bool):
+            errs.append("exit.gate_mirror must be true/false")
+    rb = d.get("rebalance")
+    if not (isinstance(rb, dict) and rb.get("freq") in _REBAL_FREQ):
+        errs.append(f"rebalance.freq must be one of {sorted(_REBAL_FREQ)}")
+    c = d.get("costs") or {}
+    if not isinstance(c, dict):
+        errs.append("costs must be an object")
+    else:
+        for k in ("txn_pct", "slippage_pct"):
+            if k in c and not _isnum(c[k]):
+                errs.append(f"costs.{k} must be a number")
+    u = d.get("universe_ref")
+    if u is None:
+        errs.append("universe_ref is required (a v12_universes id or an inline {filters} object)")
+    elif not (isinstance(u, int) or isinstance(u, dict)):
+        errs.append("universe_ref must be a universe id (int) or an object with filters")
+    return errs
+
+
+class V12BasketReq(BaseModel):
+    name: str
+    definition: dict
+    status: Optional[str] = None
+
+
+@router.post("/api/v12/basket/validate")
+def v12_basket_validate(body: V12BasketReq):
+    errs = _validate_basket_def(body.definition or {})
+    return {"valid": not errs, "errors": errs}
+
+
+@router.post("/api/v12/basket")
+def v12_basket_create(body: V12BasketReq):
+    errs = _validate_basket_def(body.definition or {})
+    if errs:
+        return {"error": "invalid definition", "errors": errs}
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO v12_baskets (name, definition, status, created_at, updated_at) "
+                    "VALUES (%s, %s::jsonb, 'draft', NOW(), NOW()) RETURNING id",
+                    (body.name, json.dumps(body.definition)))
+        bid = cur.fetchone()[0]
+        conn.commit()
+    return {"id": bid, "name": body.name, "status": "draft"}
+
+
+@router.get("/api/v12/basket")
+def v12_basket_list():
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, status, definition, created_at, updated_at "
+                    "FROM v12_baskets ORDER BY id DESC LIMIT 200")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return {"count": len(rows), "baskets": rows}
+
+
+@router.get("/api/v12/basket/{bid}")
+def v12_basket_get(bid: int):
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, status, definition, created_at, updated_at FROM v12_baskets WHERE id=%s", (bid,))
+        r = cur.fetchone()
+        if not r:
+            return {"error": "not found"}
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, r))
+
+
+@router.put("/api/v12/basket/{bid}")
+def v12_basket_update(bid: int, body: V12BasketReq):
+    errs = _validate_basket_def(body.definition or {})
+    if errs:
+        return {"error": "invalid definition", "errors": errs}
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE v12_baskets SET name=%s, definition=%s::jsonb, status=COALESCE(%s,status), "
+                    "updated_at=NOW() WHERE id=%s RETURNING id",
+                    (body.name, json.dumps(body.definition), body.status, bid))
+        r = cur.fetchone()
+        conn.commit()
+    return {"id": bid, "name": body.name, "updated": True} if r else {"error": "not found"}
+
+
+@router.delete("/api/v12/basket/{bid}")
+def v12_basket_delete(bid: int):
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM v12_baskets WHERE id=%s RETURNING id", (bid,))
+        r = cur.fetchone()
+        conn.commit()
+    return {"deleted": bool(r), "id": bid}
