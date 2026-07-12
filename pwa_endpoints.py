@@ -279,6 +279,7 @@ PWA_JS = """
     ['/v13', '\\u25a4', 'V13'],
     ['/v12', '\\u229f', 'V12'],
     ['/screener', '\\u25a8', 'Screener'],
+    ['/health', '\\u2695', 'Health Report'],
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],

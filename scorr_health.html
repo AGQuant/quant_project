@@ -378,6 +378,296 @@ html,body{margin:0;padding:0;background:var(--bg);}
    - hr-refresh: POST /api/health/refresh/{portfolio_id} then re-render.
    - Theme: site sets [data-theme] on :root; both palettes above.
    ============================================================ */
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var q = new URLSearchParams(location.search);
+  var pid = q.get('pid') || q.get('portfolio');
+
+  // ---- formatters (conventions: rupee no decimals, scores 2dp) ----
+  function inr(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return '₹'+Math.round(n).toLocaleString('en-IN'); }
+  function inrSigned(n){ if(n===null||n===undefined||isNaN(n)) return '—'; var s=n<0?'−':'+'; return s+'₹'+Math.round(Math.abs(n)).toLocaleString('en-IN'); }
+  function pct(n,dp){ if(n===null||n===undefined||isNaN(n)) return '—'; dp=(dp===undefined)?1:dp; var s=n<0?'−':'+'; return s+Math.abs(n).toFixed(dp)+'%'; }
+  function pctPlain(n,dp){ if(n===null||n===undefined||isNaN(n)) return '—'; dp=(dp===undefined)?1:dp; return (n<0?'−':'')+Math.abs(n).toFixed(dp)+'%'; }
+  function f2(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return Number(n).toFixed(2); }
+  function num(n){ if(n===null||n===undefined||isNaN(n)) return '—'; return Math.round(n).toLocaleString('en-IN'); }
+  function esc(s){ var d=document.createElement('div'); d.textContent=(s===null||s===undefined)?'':String(s); return d.innerHTML; }
+  function set(id,txt){ var el=$(id); if(el) el.textContent=txt; }
+  function dmy(iso){ if(!iso) return '—'; var d=new Date(iso); if(isNaN(d)) return iso;
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate()+' '+M[d.getMonth()]; }
+
+  var CH = { 'Buy Systematically':'g', 'Accumulate-Hold':'b', 'Wait & Watch':'a', 'Avoid-Exit':'r' };
+  function gvmColor(g){ if(g===null||g===undefined) return 'var(--faint)'; return g>=7?'var(--grn)':(g>=5?'var(--amb)':'var(--red)'); }
+  function callClass(c){ return {'Strong':'g','Neutral':'b','Weak':'r','Caution':'a'}[c] || 'b'; }
+  var SEG_COLORS = ['#0B6E42','#2A3650','#1847DF','#9A3C1E','#4532A8','#1A9070','#5B667D','#8892AA'];
+
+  // ---------------------------------------------------------------- render
+  function render(d){
+    if(!d || d.error){ showMsg(d && d.error ? d.error : 'Report unavailable.'); return; }
+    var s=d.snapshot||{}, rt=d.ratings||{}, b=d.benchmark||{}, v=d.valuation||{}, y=d['yield']||{};
+
+    // masthead
+    set('hr-name', d.portfolio && d.portfolio.name ? d.portfolio.name : 'My Portfolio');
+    set('hr-count', s.holdings_count!=null ? s.holdings_count : (d.holdings||[]).length);
+    try{ set('hr-date', new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})); }catch(e){}
+    set('hr-asof', 'live');
+    set('hr-overall', f2(rt.overall));
+    var vb=$('hr-verdict');
+    if(vb){ vb.textContent=(rt.verdict||'').toUpperCase();
+      var band = rt.verdict==='Excellent'||rt.verdict==='Good' ? ['var(--grn-t)','#4ED8A0']
+               : rt.verdict==='Average' ? ['var(--amb-t)','var(--amb)'] : ['var(--red-t)','var(--red)'];
+      vb.style.background=band[0]; vb.style.color=band[1]; }
+    set('hr-gvmq', 'G '+f2(rt.growth)+' · V '+f2(rt.value)+' · M '+f2(rt.momentum)+' · Q '+f2(rt.quality));
+    set('hr-invested', inr(s.invested));
+    set('hr-current', inr(s.current));
+    var pnlEl=$('hr-pnl'); if(pnlEl){ pnlEl.textContent=inrSigned(s.pnl_abs); pnlEl.style.color=(s.pnl_abs>=0?'var(--grn)':'var(--red)'); }
+    var ppEl=$('hr-pnl-pct'); if(ppEl){ ppEl.textContent=pct(s.pnl_pct); ppEl.style.color=(s.pnl_pct>=0?'var(--grn)':'var(--red)'); }
+    var alEl=$('hr-alpha'); if(alEl){ alEl.textContent=pct(s.alpha); alEl.style.color=(s.alpha>=0?'var(--blu)':'var(--red)'); }
+
+    // parameters (Growth/Value/Momentum/Quality) — update bars + values in DOM order
+    var pr=document.querySelectorAll('#hr-params .rrow'), pv=[rt.growth,rt.value,rt.momentum,rt.quality];
+    for(var i=0;i<pr.length && i<pv.length;i++){
+      var fill=pr[i].querySelector('.bfill'), rv=pr[i].querySelector('.rv');
+      if(fill) fill.style.width=(pv[i]!=null?Math.max(0,Math.min(100,pv[i]*10)):0)+'%';
+      if(rv) rv.textContent=f2(pv[i]);
+    }
+    set('hr-params-note', rt.insight||'');
+
+    // benchmark bars
+    var br=document.querySelectorAll('#hr-bench .rrow'), bv=[b.portfolio_1y,b.nifty50_1y,b.nifty500_1y];
+    var bmax=1; for(var j=0;j<bv.length;j++){ if(bv[j]!=null) bmax=Math.max(bmax,Math.abs(bv[j])); }
+    for(var k=0;k<br.length && k<bv.length;k++){
+      var bf=br[k].querySelector('.bfill'), brv=br[k].querySelector('.rv');
+      if(bf) bf.style.width=(bv[k]!=null?Math.max(0,Math.abs(bv[k])/bmax*100):0)+'%';
+      if(brv){ brv.textContent=pct(bv[k]); if(k>0) brv.style.color=(bv[k]<0?'var(--red)':'var(--faint)'); }
+    }
+
+    // valuation + yield (6 cells, DOM order)
+    var vc=document.querySelectorAll('#hr-val > div'), vv=[v.portfolio_pe,v.sector_pe,v.nifty_pe,y.portfolio_yield,y.sector_yield,y.nifty_yield];
+    for(var m2=0;m2<vc.length && m2<vv.length;m2++){
+      var big=vc[m2].querySelector('div'); if(!big) continue;
+      big.textContent = m2<3 ? (vv[m2]!=null?Number(vv[m2]).toFixed(1):'—') : (vv[m2]!=null?Number(vv[m2]).toFixed(1)+'%':'—');
+    }
+    set('hr-val-note', v.insight||'');
+
+    // sector strip + concentration
+    var sec=d.sector||{}, strip=sec.strip||[];
+    var topN=Math.min(5,strip.length), topSum=0; for(var n2=0;n2<topN;n2++) topSum+=strip[n2].weight||0;
+    set('hr-conc', 'top '+topN+' hold '+Math.round(topSum)+'%');
+    var stripEl=$('hr-strip');
+    if(stripEl){
+      var html='', shown=strip.slice(0,5), rest=strip.slice(5).reduce(function(a,x){return a+(x.weight||0);},0);
+      shown.forEach(function(sg,ix){
+        var lbl=(sg.segment||'').split(/[ -]/)[0];
+        html+='<div style="width:'+(sg.weight||0)+'%;background:'+SEG_COLORS[ix%SEG_COLORS.length]+';display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">'+esc(lbl)+' '+Math.round(sg.weight||0)+'%</div>';
+      });
+      if(rest>0.5) html+='<div style="width:'+rest+'%;background:#8892AA;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Others '+Math.round(rest)+'%</div>';
+      stripEl.innerHTML=html;
+    }
+    // sector ratings table
+    var stb=document.querySelector('#hr-sectors tbody');
+    if(stb){ stb.innerHTML=(sec.table||[]).map(function(r){
+      return '<tr><td style="font-weight:600;padding-left:24px;">'+esc(r.segment)+'</td><td>'+pctPlain(r.weight)+'</td><td>'+f2(r.score)+'</td><td>—</td><td style="padding-right:24px;"><span class="chip '+callClass(r.call)+'">'+esc(r.call)+'</span></td></tr>';
+    }).join(''); }
+    set('hr-sector-note', sec.insight||'');
+
+    // winners vs losers
+    var wl=d.winners_losers||{};
+    var wlEl=$('hr-wl'); if(wlEl) wlEl.innerHTML=esc(wl.winners||0)+' <span style="font-size:20px;color:var(--faint);font-weight:300;">:</span> '+esc(wl.losers||0);
+    var wtot=(wl.winners||0)+(wl.losers||0)||1;
+    var wlbar=$('hr-wl-bar'); if(wlbar) wlbar.innerHTML='<div style="width:'+((wl.winners||0)/wtot*100)+'%;background:var(--grn);"></div><div style="width:1px;background:var(--paper);"></div><div style="width:'+((wl.losers||0)/wtot*100)+'%;background:var(--red);"></div>';
+    set('hr-wl-note', wl.insight||'');
+
+    // cap bands
+    renderBands('hr-cap-bar','hr-cap-legend', d.cap_bands, ['Large','Mid','Small','Micro','Unknown'],
+                {'Large':'var(--blu)','Mid':'var(--amb)','Small':'var(--faint)','Micro':'#5340C2','Unknown':'#8892AA'}, false);
+    set('hr-cap-note', d.cap_bands && d.cap_bands.insight || '');
+    // quality bands
+    renderBands('hr-qual-bar','hr-qual-legend', d.quality_bands, ['Excellent','Good','Average','Weak','Unrated'],
+                {'Excellent':'var(--grn)','Good':'#1A9070','Average':'var(--amb)','Weak':'var(--red)','Unrated':'var(--faint)'}, true);
+    set('hr-qual-note', d.quality_bands && d.quality_bands.insight || '');
+
+    // gainers / losers
+    renderMovers('hr-gainers', d.gainers, 'pos');
+    renderMovers('hr-losers', d.losers, 'neg');
+
+    // upcoming
+    var utb=document.querySelector('#hr-upcoming tbody');
+    if(utb){ var up=d.upcoming||[];
+      utb.innerHTML = up.length ? up.slice(0,8).map(function(u,ix,arr){ var bd=ix===arr.length-1?'border-bottom:none;':'';
+        return '<tr><td style="font-weight:600;padding:7px 0;'+bd+'">'+esc(u.symbol)+'</td><td style="text-align:right;padding:7px 0;color:var(--muted);'+bd+'">'+dmy(u.date)+'</td><td style="text-align:right;padding:7px 0;color:var(--faint);'+bd+'">'+(u.days_to!=null?u.days_to+'d':'')+'</td></tr>';
+      }).join('') : '<tr><td style="padding:7px 0;color:var(--muted);border-bottom:none;">No results scheduled.</td></tr>'; }
+
+    // red flags
+    var fl=$('hr-flags'), flags=d.red_flags||[];
+    if(fl){ fl.innerHTML = flags.length ? flags.map(function(f){ var col=f.flag==='FII selling'?'var(--amb)':'var(--red)';
+      return '<div class="flag"><span class="dot" style="background:'+col+';"></span><div><span style="font-weight:600;">'+esc(f.symbol)+'</span> — '+esc(f.detail)+'</div></div>';
+    }).join('') : '<div class="note">No red flags detected.</div>'; }
+
+    // replacements
+    var rp=$('hr-replacements'), reps=d.replacements||[], hmap={};
+    (d.holdings||[]).forEach(function(h){ hmap[h.symbol]=h; });
+    if(rp){ rp.innerHTML = reps.length ? reps.map(function(r){
+      var h=hmap[r.holding]||{}, peers=(r.peers||[]);
+      var peerStr=peers.map(function(p){ return esc(p.symbol)+' <span class="pos">'+f2(p.gvm)+'</span>'; }).join(' · ');
+      return '<div style="background:var(--red-t);border-left:2px solid var(--red);padding:8px 12px;margin-bottom:8px;">'
+           + '<div style="font-size:12px;font-weight:700;">'+esc(r.holding)+' &nbsp;<span style="color:var(--red);font-weight:500;">GVM '+f2(h.gvm)+'</span></div>'
+           + '<div style="font-size:10px;color:var(--muted);margin-top:2px;">'+esc(r.action||'Avoid-Exit')+' · '+pctPlain(h.weight)+' weight</div></div>'
+           + '<div style="font-size:10px;color:var(--muted);margin-bottom:4px;letter-spacing:.3px;">↓ CONSIDER</div>'
+           + '<div style="background:var(--grn-t);border-left:2px solid var(--grn);padding:8px 12px;margin-bottom:12px;">'
+           + '<div style="font-size:11.5px;font-weight:600;">'+(peerStr||'—')+'</div>'
+           + '<div style="font-size:10px;color:var(--muted);margin-top:2px;">Same segment · highest-GVM peers</div></div>';
+    }).join('') : '<div class="note">No Avoid-Exit holdings — nothing to replace.</div>'; }
+
+    // holdings
+    var htb=document.querySelector('#hr-holdings tbody');
+    if(htb){ htb.innerHTML=(d.holdings||[]).map(function(h){
+      var tr = h.gvm_trend==='up' ? '<span class="pos">▲ '+pct(h.gvm_trend_delta,2)+'</span>'
+             : h.gvm_trend==='down' ? '<span class="neg">▼ '+pctPlain(h.gvm_trend_delta,2)+'</span>' : '—';
+      var peSeg=(h.pe!=null?Number(h.pe).toFixed(1):'—')+' / '+(h.segment_pe!=null?Number(h.segment_pe).toFixed(1):'—');
+      var upside=(h.fwd_growth!=null?Math.round(h.fwd_growth)+'%':'—');
+      var pnlCls=(h.pnl_pct!=null && h.pnl_pct<0)?'neg':'pos';
+      return '<tr><td style="font-weight:700;padding-left:24px;">'+esc(h.symbol)+'</td>'
+        + '<td>'+num(h.cmp)+'</td><td>'+num(h.qty)+'</td><td>'+pctPlain(h.weight)+'</td>'
+        + '<td class="'+pnlCls+'">'+pctPlain(h.pnl_pct)+'</td><td>'+peSeg+'</td>'
+        + '<td style="color:'+gvmColor(h.gvm)+';font-weight:700;">'+f2(h.gvm)+'</td>'
+        + '<td>'+tr+'</td><td>'+pctPlain(h.from_ath)+'</td><td>'+upside+'</td>'
+        + '<td style="padding-right:24px;"><span class="chip '+(CH[h.action]||'b')+'">'+esc(h.action)+'</span></td></tr>';
+    }).join(''); }
+
+    // latest result analysis (empty state per wiring notes)
+    var res=$('hr-results'), ra=d.result_analysis||[];
+    if(res){ res.innerHTML = ra.length ? ra.map(function(r){
+      var cc={'Strong':'g','Moderate':'a','Weak':'r'}[r.chip]||'b', dot={'Strong':'var(--grn)','Moderate':'var(--amb)','Weak':'var(--red)'}[r.chip]||'var(--faint)';
+      return '<div class="flag"><span class="dot" style="background:'+dot+';"></span><div><span style="font-weight:700;">'+esc(r.symbol)+'</span> <span class="chip '+cc+'" style="margin-left:4px;">'+esc(r.chip||'')+'</span><br>'+esc(r.analysis)+'</div></div>';
+    }).join('') : '<div class="note">No fresh results in the last 45 days.</div>'; }
+
+    // highlights
+    var hi=$('hr-highlights'), hl=d.highlights||[];
+    if(hi){ hi.innerHTML=hl.map(function(t,ix){
+      return '<div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">'+('0'+(ix+1)).slice(-2)+'</span><span>'+esc(t)+'</span></div>';
+    }).join(''); }
+
+    // expert take
+    set('hr-expert', d.expert_take||'');
+  }
+
+  function renderBands(barId, legId, obj, order, colors, colorVal){
+    var w=(obj&&obj.weights)||{}, bar=$(barId), leg=$(legId);
+    var keys=order.filter(function(k){ return w[k]>0; });
+    Object.keys(w).forEach(function(k){ if(keys.indexOf(k)===-1 && w[k]>0) keys.push(k); });
+    if(bar){ bar.innerHTML=keys.map(function(k,ix){
+      var sep=ix>0?'<div style="width:1px;background:var(--paper);"></div>':'';
+      return sep+'<div style="width:'+w[k]+'%;background:'+(colors[k]||'var(--faint)')+';"></div>';
+    }).join(''); }
+    if(leg){ leg.innerHTML=keys.map(function(k){
+      var col=colorVal?('color:'+(colors[k]||'var(--faint)')+';'):'';
+      return '<div class="kv"><span>'+esc(k)+'</span><span style="'+col+'">'+Math.round(w[k])+'%</span></div>';
+    }).join(''); }
+  }
+
+  function renderMovers(id, arr, cls){
+    var tb=document.querySelector('#'+id+' tbody'); if(!tb) return;
+    arr=arr||[];
+    tb.innerHTML = arr.length ? arr.map(function(m,ix){ var bd=ix===arr.length-1?'border-bottom:none;':'';
+      var abs=m.pnl_abs!=null ? (m.pnl_abs<0?'('+num(Math.abs(m.pnl_abs))+')':num(m.pnl_abs)) : '';
+      return '<tr><td style="font-weight:600;padding:7px 0;'+bd+'">'+esc(m.symbol)+'</td><td style="padding:7px 0;'+bd+'" class="'+cls+'">'+pct(m.pnl_pct)+(abs?' · '+abs:'')+'</td></tr>';
+    }).join('') : '<tr><td style="padding:7px 0;color:var(--muted);border-bottom:none;">None</td></tr>';
+  }
+
+  function showMsg(msg){
+    var phr=document.querySelector('.phr');
+    if(phr) phr.innerHTML='<div style="padding:80px 32px;text-align:center;color:var(--muted);font-family:\'IBM Plex Mono\',monospace;">'+esc(msg)+'</div>';
+  }
+
+  // ---------------------------------------------------------------- upload flow (no pid)
+  function renderUpload(){
+    var phr=document.querySelector('.phr');
+    if(!phr) return;
+    phr.innerHTML =
+      '<div class="mast" style="padding:28px 120px 24px 32px;"><div>'
+      + '<div style="font-size:9px;font-weight:600;letter-spacing:1.2px;color:rgba(255,255,255,.35);text-transform:uppercase;margin-bottom:10px;">Portfolio Health Report</div>'
+      + '<div style="font-family:\'Sora\',sans-serif;font-size:34px;font-weight:800;letter-spacing:-.5px;color:#fff;">Upload your holdings</div>'
+      + '<div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:6px;">Excel / CSV / PDF, or paste rows — symbol, qty, avg price</div></div></div>'
+      + '<div style="background:var(--paper);padding:28px 32px;display:flex;flex-direction:column;gap:18px;max-width:640px;">'
+      + '<div><div class="lbl" style="margin-bottom:8px;">Upload file</div>'
+      + '<input id="hr-file" type="file" accept=".xlsx,.xls,.csv,.pdf" style="font-size:12px;color:var(--ink);"></div>'
+      + '<div style="text-align:center;color:var(--faint);font-size:10px;">— or —</div>'
+      + '<div><div class="lbl" style="margin-bottom:8px;">Paste rows</div>'
+      + '<textarea id="hr-paste" rows="7" placeholder="RELIANCE, 50, 2400&#10;TCS, 20, 3200" style="width:100%;font-family:\'IBM Plex Mono\',monospace;font-size:12px;padding:10px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:3px;"></textarea></div>'
+      + '<div><div class="lbl" style="margin-bottom:8px;">Portfolio name</div>'
+      + '<input id="hr-pname" type="text" value="My Portfolio" style="width:100%;font-size:12px;padding:9px 10px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);border-radius:3px;"></div>'
+      + '<button id="hr-parse" style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;font-weight:600;padding:11px 20px;border:none;background:var(--blu);color:#fff;border-radius:3px;letter-spacing:.3px;cursor:pointer;align-self:flex-start;">ANALYZE →</button>'
+      + '<div id="hr-parse-msg" style="font-size:11px;color:var(--muted);"></div>'
+      + '<div id="hr-grid"></div></div>';
+    $('hr-parse').addEventListener('click', doParse);
+  }
+
+  function doParse(){
+    var msg=$('hr-parse-msg'); msg.textContent='Parsing…'; msg.style.color='var(--muted)';
+    var file=$('hr-file').files[0], text=$('hr-paste').value;
+    var fd=new FormData();
+    if(file) fd.append('file', file);
+    else if(text && text.trim()) fd.append('text', text);
+    else { msg.textContent='Provide a file or paste rows.'; msg.style.color='var(--red)'; return; }
+    fetch('/api/health/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+      if(d.error && !(d.rows&&d.rows.length)){ msg.textContent=d.error; msg.style.color='var(--red)'; return; }
+      if(d.warning) { msg.textContent=d.warning; msg.style.color='var(--amb)'; } else { msg.textContent=(d.resolved||0)+' of '+(d.count||0)+' symbols resolved.'; msg.style.color='var(--muted)'; }
+      renderGrid(d.rows||[]);
+    }).catch(function(e){ msg.textContent='Upload failed: '+e; msg.style.color='var(--red)'; });
+  }
+
+  function renderGrid(rows){
+    var g=$('hr-grid');
+    if(!rows.length){ g.innerHTML='<div class="note">No holdings parsed.</div>'; return; }
+    var body=rows.map(function(r,ix){
+      var okc = r.resolved?'var(--grn)':'var(--red)';
+      return '<tr data-ix="'+ix+'">'
+        + '<td style="padding:6px 8px;"><input class="g-sym" style="width:120px;font-size:11px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);" value="'+esc(r.symbol||r.input||'')+'"></td>'
+        + '<td style="padding:6px 8px;font-size:11px;color:var(--muted);">'+esc(r.company_name||'')+'</td>'
+        + '<td style="padding:6px 8px;"><input class="g-qty" style="width:70px;font-size:11px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:right;" value="'+(r.qty!=null?r.qty:'')+'"></td>'
+        + '<td style="padding:6px 8px;"><input class="g-avg" style="width:80px;font-size:11px;padding:4px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:right;" value="'+(r.avg_price!=null?r.avg_price:'')+'"></td>'
+        + '<td style="padding:6px 8px;"><span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:'+okc+';" title="'+(r.resolved?'resolved':'unresolved')+'"></span></td></tr>';
+    }).join('');
+    g.innerHTML='<div class="lbl" style="margin:6px 0 10px;">Confirm holdings <span style="color:var(--faint);text-transform:none;letter-spacing:0;">— fix symbol / qty / avg, then save</span></div>'
+      + '<table style="width:100%;"><thead><tr>'
+      + '<th style="text-align:left;font-size:9px;color:var(--faint);padding:4px 8px;">Symbol</th><th style="text-align:left;font-size:9px;color:var(--faint);padding:4px 8px;">Name</th>'
+      + '<th style="text-align:left;font-size:9px;color:var(--faint);padding:4px 8px;">Qty</th><th style="text-align:left;font-size:9px;color:var(--faint);padding:4px 8px;">Avg</th><th style="font-size:9px;color:var(--faint);padding:4px 8px;">OK</th>'
+      + '</tr></thead><tbody id="hr-grid-body">'+body+'</tbody></table>'
+      + '<button id="hr-save" style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;font-weight:600;padding:11px 20px;border:none;background:var(--grn);color:#fff;border-radius:3px;letter-spacing:.3px;cursor:pointer;margin-top:16px;">SAVE &amp; BUILD REPORT →</button>'
+      + '<span id="hr-save-msg" style="font-size:11px;color:var(--muted);margin-left:12px;"></span>';
+    $('hr-save').addEventListener('click', doSave);
+  }
+
+  function doSave(){
+    var msg=$('hr-save-msg'); msg.textContent='Saving…'; msg.style.color='var(--muted)';
+    var trs=document.querySelectorAll('#hr-grid-body tr'), holdings=[];
+    trs.forEach(function(tr){
+      var sym=(tr.querySelector('.g-sym').value||'').trim().toUpperCase();
+      if(!sym) return;
+      var qv=tr.querySelector('.g-qty').value, av=tr.querySelector('.g-avg').value;
+      holdings.push({symbol:sym, qty:qv?parseFloat(qv):null, avg_price:av?parseFloat(av):null});
+    });
+    if(!holdings.length){ msg.textContent='Nothing to save.'; msg.style.color='var(--red)'; return; }
+    fetch('/api/health/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:($('hr-pname').value||'My Portfolio'), source:'upload', holdings:holdings})})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d.error || !d.portfolio_id){ msg.textContent=d.error||'Save failed.'; msg.style.color='var(--red)'; return; }
+        location.href='/health?pid='+d.portfolio_id;
+      }).catch(function(e){ msg.textContent='Save failed: '+e; msg.style.color='var(--red)'; });
+  }
+
+  // ---------------------------------------------------------------- boot
+  function load(method){
+    var url='/api/health/'+(method==='POST'?'refresh':'report')+'/'+pid;
+    fetch(url,{method:method||'GET'}).then(function(r){return r.json();}).then(render)
+      .catch(function(e){ showMsg('Failed to load report: '+e); });
+  }
+  var rf=$('hr-refresh'); if(rf) rf.addEventListener('click', function(){ if(pid) load('POST'); });
+
+  if(pid) load('GET'); else renderUpload();
+})();
 </script>
 </body>
 </html>

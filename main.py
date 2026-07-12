@@ -175,8 +175,8 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/screener", "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v4scan", "/v12"}   # cc#392/394: no-store + theme/logout pills
-PROTECTED.add("/v13"); PROTECTED.add("/v4scan"); PROTECTED.add("/v12")   # cc#392/394: gate + no-store
+                     "/v13", "/v4scan", "/v12", "/health"}   # cc#392/394/398: no-store + theme/logout pills
+PROTECTED.add("/v13"); PROTECTED.add("/v4scan"); PROTECTED.add("/v12"); PROTECTED.add("/health")   # cc#392/394/398: gate + no-store
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 # cc#327 MOBILE_UX_REDEFINE_V1 P1/10: canonical Sora font + shared mobile.css,
@@ -665,6 +665,11 @@ def v12_builder_page():
     """cc#394: V12 Quant Basket Builder — 5-step wizard (universe/entry/exit/backtest/deploy)."""
     with open("scorr_v12.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/health", response_class=HTMLResponse)
+def health_report_page():
+    """cc#398: Portfolio Health Report — upload holdings -> Scorr-native 13-section report."""
+    with open("scorr_health.html", "r", encoding="utf-8") as f: return f.read()
+
 # ── NAV_REGISTRY (cc#397, rule id=2987) — every GET-HTML route -> nav label -> status ──────────────
 # STATUS: nav = in cockpit web nav + cio dashboard nav + mobile launcher; redirect = 301s away;
 # INTERNAL = deliberately not in nav (test/dev). Keep this in sync when adding a page (nav-complete
@@ -690,6 +695,7 @@ NAV_REGISTRY = {
     "/v4scan":       ("TC Scan",              "nav"),
     "/v12":          ("V12 · Quant Basket Builder", "nav"),
     "/screener":     ("Screener (Custom)",    "nav"),
+    "/health":       ("Health Report",        "nav"),        # cc#398 rule id=2987
     "/filters":      ("(-> /v13)",            "redirect"),   # cc#393 301
     "/test-cio":     ("(test harness)",       "INTERNAL"),   # test_cio_endpoints, dev-only
 }

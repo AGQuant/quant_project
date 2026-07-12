@@ -138,10 +138,12 @@ def _load_screener(cur, syms):
 
 def _load_input(cur, syms):
     cur.execute("""SELECT nse_code, company_name, gvm_segment, cap_category, mcap_rank,
-                          result_analysis, fy27_growth, market_cap
+                          result_analysis, fy27_growth, market_cap,
+                          (last_result_analysis_updated >= (CURRENT_DATE - INTERVAL '45 days')) AS ra_fresh
                    FROM input_raw WHERE nse_code = ANY(%s)""", (syms,))
     return {r[0]: {"company_name": r[1], "segment": r[2], "cap": r[3], "mcap_rank": r[4],
-                   "result_analysis": r[5], "fy27_growth": _f(r[6]), "mcap": _f(r[7])}
+                   "result_analysis": r[5], "fy27_growth": _f(r[6]), "mcap": _f(r[7]),
+                   "ra_fresh": bool(r[8])}
             for r in cur.fetchall()}
 
 
@@ -305,6 +307,7 @@ def build_report(cur, pid):
             "fwd_growth": i.get("fy27_growth"),
             "result_analysis": i.get("result_analysis"),
             "result_chip": _strength_chip(i.get("result_analysis")),
+            "result_fresh": i.get("ra_fresh", False),
         })
 
     # weights
@@ -318,25 +321,31 @@ def build_report(cur, pid):
     port_1y = _wavg(_wpairs("return_1y"))
     n50 = _nifty50_1y(cur)
     n500 = _nifty500_1y(cur)
+    bench_alpha = n500 if n500 is not None else n50   # template label: "Alpha vs Nifty 500"
     snapshot = {
         "invested": _r(total_invested), "current": _r(total_current),
         "pnl_abs": _r(total_current - total_invested),
         "pnl_pct": round((total_current - total_invested) / total_invested * 100, 2) if total_invested > 0 else None,
-        "alpha": round(port_1y - n50, 2) if (port_1y is not None and n50 is not None) else None,
+        "alpha": round(port_1y - bench_alpha, 2) if (port_1y is not None and bench_alpha is not None) else None,
         "holdings_count": len(holdings),
     }
 
     # ---- (2) ratings ----
     wg, wv, wm, wq = _wavg(_wpairs("g")), _wavg(_wpairs("v")), _wavg(_wpairs("m")), _wavg(_wpairs("gvm"))
     overall = wq
+    _legs = {"Growth": wg, "Value": wv, "Momentum": wm}
+    _soft = min((k for k in _legs if _legs[k] is not None), key=lambda k: _legs[k], default=None)
     ratings = {"growth": _r(wg), "value": _r(wv), "momentum": _r(wm), "quality": _r(wq),
-               "overall": _r(overall), "verdict": _band_from_score(overall)}
+               "overall": _r(overall), "verdict": _band_from_score(overall),
+               "insight": (f"{_soft} is the softest leg at {_legs[_soft]:.1f} — "
+                           + ("quality-heavy but late-trend." if _soft == "Momentum" else
+                              "watch this dimension.")) if _soft else ""}
 
     # ---- (3) gainers / losers ----
     ranked = [h for h in holdings if h["pnl_pct"] is not None]
     ranked.sort(key=lambda h: h["pnl_pct"], reverse=True)
     _slim = lambda h: {"symbol": h["symbol"], "company_name": h["company_name"],
-                       "pnl_pct": h["pnl_pct"], "cmp": h["cmp"], "weight": h["weight"]}
+                       "pnl_pct": h["pnl_pct"], "pnl_abs": h["pnl_abs"], "cmp": h["cmp"], "weight": h["weight"]}
     gainers = [_slim(h) for h in ranked if h["pnl_pct"] > 0][:5]
     losers = [_slim(h) for h in reversed(ranked) if h["pnl_pct"] < 0][:5]
 
@@ -384,8 +393,15 @@ def build_report(cur, pid):
             seg_w[h["segment"]] = seg_w.get(h["segment"], 0) + (h["weight"] or 0)
     sector_pe = _wavg([(seg_aggs.get(s, {}).get("pe"), w) for s, w in seg_w.items()])
     sector_yield = _wavg([(seg_aggs.get(s, {}).get("yield"), w) for s, w in seg_w.items()])
-    valuation = {"portfolio_pe": _r(_wavg(_wpairs("pe"))), "sector_pe": _r(sector_pe),
-                 "nifty_pe": _r(mkt_pe), "nifty_pe_note": "large-cap median proxy"}
+    port_pe = _wavg(_wpairs("pe"))
+    _val_ins = ""
+    if port_pe is not None and mkt_pe is not None and sector_pe is not None:
+        vs_n = "premium to" if port_pe > mkt_pe else "discount to"
+        vs_s = "discount to" if port_pe < sector_pe else "premium to"
+        _val_ins = f"{vs_n.capitalize()} Nifty, {vs_s} own sectors — " + (
+            "growth-priced, not bubble-priced." if port_pe < sector_pe else "richly valued; demand growth.")
+    valuation = {"portfolio_pe": _r(port_pe), "sector_pe": _r(sector_pe),
+                 "nifty_pe": _r(mkt_pe), "nifty_pe_note": "large-cap median proxy", "insight": _val_ins}
     yield_sec = {"portfolio_yield": _r(_wavg(_wpairs("yield"))), "sector_yield": _r(sector_yield),
                  "nifty_yield": _r(mkt_yield), "nifty_yield_note": "large-cap median proxy"}
 
@@ -422,10 +438,10 @@ def build_report(cur, pid):
     # ---- (12) upcoming results ----
     upcoming = _upcoming(cur, syms)
 
-    # ---- (13) latest result analysis ----
+    # ---- (13) latest result analysis (only results < 45 days old, per template) ----
     result_analysis = [{"symbol": h["symbol"], "company_name": h["company_name"],
                         "analysis": h["result_analysis"], "chip": h["result_chip"]}
-                       for h in holdings if h["result_analysis"]]
+                       for h in holdings if h["result_analysis"] and h["result_fresh"]]
 
     # ---- red flags ----
     red_flags = []
@@ -510,3 +526,62 @@ def health_report(portfolio_id: int):
             return build_report(cur, portfolio_id)
     except Exception as e:
         return {"error": f"report engine failed: {str(e)[:300]}"}
+
+
+@router.post("/api/health/refresh/{portfolio_id}")
+def health_refresh(portfolio_id: int):
+    """Recompute the report (all metrics are computed live, so this is a fresh rebuild)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            return build_report(cur, portfolio_id)
+    except Exception as e:
+        return {"error": f"report engine failed: {str(e)[:300]}"}
+
+
+# ── boot self-test (cc#398): exercises the real engine against a seeded 5-stock portfolio when
+#    app_config key='hr_selftest'='run'; writes a JSON summary back. Guarded/no-op otherwise. ──
+@router.on_event("startup")
+def _hr_selftest():
+    def _run():
+        import json as _j
+        import threading  # noqa
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key='hr_selftest'")
+                row = cur.fetchone()
+                if not row or row[0] != 'run':
+                    return
+                cur.execute("UPDATE app_config SET value='running', updated_at=NOW() WHERE key='hr_selftest'")
+                conn.commit()
+                cur.execute("DELETE FROM hr_portfolios WHERE name='__hr_selftest__'")
+                cur.execute("INSERT INTO hr_portfolios (name, source) VALUES ('__hr_selftest__','upload') RETURNING id")
+                spid = cur.fetchone()[0]
+                for sym, qty, avg in [('RELIANCE', 50, 2400), ('TCS', 20, 3200), ('HDFCBANK', 40, 1500),
+                                      ('INFY', 30, 1400), ('ITC', 100, 420)]:
+                    cur.execute("INSERT INTO hr_holdings (portfolio_id, symbol, qty, avg_price, resolved) "
+                                "VALUES (%s, %s, %s, %s, TRUE)", (spid, sym, qty, avg))
+                conn.commit()
+                rep = build_report(cur, spid)
+                summary = {"ok": "error" not in rep, "error": rep.get("error"),
+                           "sections": sorted(list(rep.keys())),
+                           "snapshot": rep.get("snapshot"), "ratings": rep.get("ratings"),
+                           "benchmark": rep.get("benchmark"), "valuation": rep.get("valuation"),
+                           "holdings_n": len(rep.get("holdings", [])),
+                           "flags_n": len(rep.get("red_flags", [])),
+                           "reps_n": len(rep.get("replacements", [])),
+                           "upcoming_n": len(rep.get("upcoming", [])),
+                           "highlights_n": len(rep.get("highlights", []))}
+                cur.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key='hr_selftest'",
+                            (_j.dumps(summary, default=str)[:6000],))
+                cur.execute("DELETE FROM hr_portfolios WHERE id=%s", (spid,))
+                conn.commit()
+        except Exception as e:
+            try:
+                with _conn() as c2, c2.cursor() as cu2:
+                    cu2.execute("UPDATE app_config SET value=%s, updated_at=NOW() WHERE key='hr_selftest'",
+                                (f"error: {str(e)[:800]}",))
+                    c2.commit()
+            except Exception:
+                pass
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
