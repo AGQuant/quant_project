@@ -240,6 +240,15 @@
   .modal-box{background:var(--panel);border-radius:16px;max-width:620px;width:94%;max-height:88vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.22)}
   .modal-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:1}
   .modal-body{padding:16px 20px 28px}
+  /* cc#430: sector/segment drill-down modal table — fit Symbol/GVM/1D%/1W%/1M% inside the modal
+     with ZERO horizontal scroll on desktop (620px) AND mobile (94vw). table-layout:fixed +
+     compact cells; long symbols ellipsis rather than widening the row. Folds the cc#423 pattern. */
+  .scroll.secfit{overflow-x:hidden}
+  .scroll.secfit table{table-layout:fixed;width:100%;min-width:0}
+  .scroll.secfit th,.scroll.secfit td{padding:7px 8px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .scroll.secfit th:first-child,.scroll.secfit td:first-child{width:32%}
+  .scroll.secfit th:nth-child(2),.scroll.secfit td:nth-child(2){width:16%}
+  .scroll.secfit th:nth-child(n+3),.scroll.secfit td:nth-child(n+3){width:17.3%}
   .msec{margin-bottom:18px}
   .msec-title{font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px}
   .frow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--line);font-size:12px}
@@ -845,7 +854,7 @@ function openSectorDetail(segment){
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
-    {sortKey:'day_1d',dir:-1,empty:"No stocks in this sector",wrapClass:''});
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this sector",wrapClass:'',scrollCls:'secfit'});   // cc#430
   document.getElementById('mBody').innerHTML=body;
   document.getElementById('infoModal').classList.add('open');
 }
@@ -870,7 +879,7 @@ async function openNifty50Detail(theme){
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
-    {sortKey:'day_1d',dir:-1,empty:"No stocks in this theme",wrapClass:''});
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this theme",wrapClass:'',scrollCls:'secfit'});   // cc#430
   document.getElementById('mBody').innerHTML=body;
 }
 
@@ -894,7 +903,7 @@ async function openThemeDetail(theme){
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
-    {sortKey:'day_1d',dir:-1,empty:"No stocks in this theme",wrapClass:''});
+    {sortKey:'day_1d',dir:-1,empty:"No stocks in this theme",wrapClass:'',scrollCls:'secfit'});   // cc#430
   document.getElementById('mBody').innerHTML=body;
 }
 
