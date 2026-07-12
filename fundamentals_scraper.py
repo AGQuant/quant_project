@@ -49,6 +49,7 @@ THROTTLE = 2.5          # seconds between company pages (spec: 2-3 s)
 STAGE_SIZE = 590        # ~1766 / 3 -> per-stage summary boundary
 SPOT_CHECK = ["RELIANCE", "KPITTECH", "HDFCBANK"]
 SCRAPE_FLAG = "fundamentals_scrape"
+SCRAPE_1B_FLAG = "fundamentals_scrape_1b"   # cc#391 shareholding phase
 
 # screener section id -> period_type stored in fundamentals_history
 SECTIONS = {"quarters": "quarter", "profit-loss": "annual", "balance-sheet": "annual",
@@ -89,6 +90,10 @@ def ensure_tables(conn):
                 error        TEXT,
                 scraped_at   TIMESTAMPTZ DEFAULT NOW()
             )""")
+        # cc#391: independent Phase-1B (shareholding) progress on the SAME status table
+        cur.execute("ALTER TABLE fundamentals_scrape_status ADD COLUMN IF NOT EXISTS phase1b_status TEXT")
+        cur.execute("ALTER TABLE fundamentals_scrape_status ADD COLUMN IF NOT EXISTS phase1b_rows INTEGER")
+        cur.execute("ALTER TABLE fundamentals_scrape_status ADD COLUMN IF NOT EXISTS phase1b_scraped_at TIMESTAMPTZ")
     conn.commit()
 
 
@@ -161,24 +166,40 @@ def _fetch(url):
     return None
 
 
-def fetch_company(symbol):
-    """Try consolidated then standalone; return (rows, consolidated_flag) or ([], None) on failure.
-    'consolidated' is chosen when that page actually carries a profit-loss data-table."""
+def _fetch_soup(symbol):
+    """Fetch a company page (consolidated preferred, else standalone) and return (soup, cons) or
+    (None, None). A valid page carries a profit-loss data-table."""
     sym = symbol.strip().upper()
     for cons, path in ((True, f"{BASE}{sym}/consolidated/"), (False, f"{BASE}{sym}/")):
         r = _fetch(path)
         if r is None or r.status_code != 200 or "data-table" not in r.text:
             continue
         soup = BeautifulSoup(r.text, "lxml")
-        # a valid financials page has a profit-loss table; else fall through to standalone
-        if not soup.find("section", id="profit-loss"):
-            continue
-        rows = []
-        for sid, ptype in SECTIONS.items():
-            rows.extend(_parse_section(soup, sid, ptype))
-        if rows:
-            return rows, cons
-    return [], None
+        if soup.find("section", id="profit-loss"):
+            return soup, cons
+    return None, None
+
+
+def fetch_company(symbol):
+    """Financials sections (quarters/profit-loss/balance-sheet/cash-flow/ratios).
+    Returns (rows, consolidated_flag) or ([], None)."""
+    soup, cons = _fetch_soup(symbol)
+    if soup is None:
+        return [], None
+    rows = []
+    for sid, ptype in SECTIONS.items():
+        rows.extend(_parse_section(soup, sid, ptype))
+    return (rows, cons) if rows else ([], None)
+
+
+def fetch_shareholding(symbol):
+    """cc#391 Phase 1B: the shareholding quarterly table only (Promoters/FIIs/DIIs/Government/Public/
+    No. of Shareholders per quarter). Returns (rows, consolidated_flag) or ([], None)."""
+    soup, cons = _fetch_soup(symbol)
+    if soup is None:
+        return [], None
+    rows = _parse_section(soup, "shareholding", "quarter")
+    return (rows, cons) if rows else ([], None)
 
 
 # ── writing + status ─────────────────────────────────────────────────────────────
@@ -296,6 +317,82 @@ def run_scrape(mode="run") -> dict:
         conn.close()
 
 
+def _set_status_1b(conn, symbol, status, rows_written=0):
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO fundamentals_scrape_status (symbol, phase1b_status, phase1b_rows, phase1b_scraped_at)
+            VALUES (%s,%s,%s,NOW())
+            ON CONFLICT (symbol) DO UPDATE SET phase1b_status=EXCLUDED.phase1b_status,
+                phase1b_rows=EXCLUDED.phase1b_rows, phase1b_scraped_at=NOW()
+        """, (symbol, status, rows_written))
+    conn.commit()
+
+
+def run_shareholding_scrape() -> dict:
+    """cc#391 Phase 1B: scrape ONLY the shareholding quarterly table for the full universe into
+    fundamentals_history (section='shareholding'), tracked independently via phase1b_status. Same
+    politeness pacing + checkpoint-resume (skip phase1b_status='ok'). Completion -> session_log
+    PHASE_1B_SHAREHOLDING_COMPLETE. Never computes GVM (Phases 2-4 gated)."""
+    import fyers_feed
+    conn = fyers_feed.get_db()
+    started = time.time()
+    try:
+        ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT UPPER(nse_code) FROM screener_raw "
+                        "WHERE nse_code IS NOT NULL AND nse_code<>'' ORDER BY 1")
+            symbols = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE phase1b_status='ok'")
+            already = {r[0] for r in cur.fetchall()}
+        todo = [s for s in symbols if s not in already]
+        _slog(conn, "backfill", "PHASE_1B_SHAREHOLDING_START",
+              {"universe": len(symbols), "already_ok": len(already), "to_do": len(todo)})
+        ok = failed = rows_total = 0
+        failures = []
+        for i, sym in enumerate(todo, 1):
+            try:
+                rows, cons = fetch_shareholding(sym)
+                if rows:
+                    _write_symbol(conn, sym, rows, cons)
+                    _set_status_1b(conn, sym, "ok", len(rows))
+                    ok += 1; rows_total += len(rows)
+                else:
+                    _set_status_1b(conn, sym, "failed", 0)
+                    failed += 1; failures.append(sym)
+            except Exception as e:
+                try:
+                    _set_status_1b(conn, sym, "failed", 0)
+                except Exception:
+                    pass
+                failed += 1; failures.append(sym)
+                log.error(f"shareholding scrape {sym} failed: {e}")
+            if i % STAGE_SIZE == 0:
+                _slog(conn, "backfill", "PHASE_1B_SHAREHOLDING_STAGE",
+                      {"done": i, "of": len(todo), "ok": ok, "failed": failed, "rows": rows_total,
+                       "elapsed_min": round((time.time()-started)/60, 1), "last": sym})
+            time.sleep(THROTTLE)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM fundamentals_scrape_status WHERE phase1b_status='ok'")
+            tot = cur.fetchone()
+            cur.execute("SELECT COUNT(DISTINCT symbol) FROM fundamentals_history WHERE section='shareholding'")
+            covered = cur.fetchone()
+        summary = {"ok": ok, "failed": failed, "skipped_already": len(already),
+                   "rows_written_this_run": rows_total, "symbols_ok_total": int(tot[0] or 0),
+                   "symbols_with_shareholding": int(covered[0] or 0),
+                   "elapsed_min": round((time.time()-started)/60, 1), "failures_sample": failures[:50]}
+        _slog(conn, "data_audit", "PHASE_1B_SHAREHOLDING_COMPLETE", summary)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE app_config SET value='done', updated_at=NOW() WHERE key=%s", (SCRAPE_1B_FLAG,))
+            conn.commit()
+        except Exception:
+            pass
+        log.info(f"run_shareholding_scrape COMPLETE: {summary}")
+        return summary
+    finally:
+        conn.close()
+
+
 def _claim_scrape_flag():
     """Consume app_config['fundamentals_scrape'] in ('test','run','pending'); return the mode or None.
     Marks 'claimed:<mode>' so it never re-fires on the next boot."""
@@ -320,6 +417,28 @@ def _claim_scrape_flag():
         return None
 
 
+def _claim_1b_flag():
+    """Consume app_config['fundamentals_scrape_1b'] in ('run','pending') -> claimed. Returns True once."""
+    import fyers_feed
+    try:
+        conn = fyers_feed.get_db()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key=%s FOR UPDATE", (SCRAPE_1B_FLAG,))
+                r = cur.fetchone()
+                val = (r[0] or "").strip().lower() if r else ""
+                if val not in ("run", "pending"):
+                    conn.commit(); return False
+                cur.execute("UPDATE app_config SET value='claimed', updated_at=NOW() WHERE key=%s", (SCRAPE_1B_FLAG,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"scrape_1b flag claim failed: {e}")
+        return False
+
+
 @router.on_event("startup")
 async def _scrape_startup_trigger():
     import threading
@@ -327,6 +446,9 @@ async def _scrape_startup_trigger():
     if mode:
         log.info(f"cc#361: fundamentals_scrape flag claimed (mode={mode}) — starting in background")
         threading.Thread(target=run_scrape, args=(mode,), name="cc361-scrape", daemon=True).start()
+    if _claim_1b_flag():   # cc#391
+        log.info("cc#391: fundamentals_scrape_1b flag claimed — starting shareholding scrape in background")
+        threading.Thread(target=run_shareholding_scrape, name="cc391-scrape1b", daemon=True).start()
 
 
 @router.get("/fundamentals_scrape_status")
@@ -343,12 +465,15 @@ async def fundamentals_scrape_status():
             counts = {r[0]: int(r[1]) for r in cur.fetchall()}
             cur.execute("SELECT COALESCE(SUM(rows_written),0) FROM fundamentals_scrape_status WHERE status='ok'")
             rows = int(cur.fetchone()[0] or 0)
+            cur.execute("SELECT phase1b_status, COUNT(*) FROM fundamentals_scrape_status WHERE phase1b_status IS NOT NULL GROUP BY phase1b_status")
+            phase1b = {r[0]: int(r[1]) for r in cur.fetchall()}
             cur.execute("SELECT COUNT(DISTINCT UPPER(nse_code)) FROM screener_raw WHERE nse_code IS NOT NULL AND nse_code<>''")
             universe = int(cur.fetchone()[0] or 0)
         done = sum(counts.values())
         remaining = max(0, universe - counts.get("ok", 0))
         return {"universe": universe, "counts": counts, "rows_written": rows,
-                "remaining_est": remaining, "eta_min_est": round(remaining * THROTTLE / 60, 1),
+                "phase1b": phase1b, "remaining_est": remaining,
+                "eta_min_est": round(remaining * THROTTLE / 60, 1),
                 "at": datetime.utcnow().isoformat()}
     finally:
         conn.close()
@@ -364,3 +489,14 @@ async def run_fundamentals_scrape(mode: str = "run", x_admin_token: Optional[str
     threading.Thread(target=run_scrape, args=(m,), name="cc361-scrape-manual", daemon=True).start()
     return {"status": "started", "mode": m,
             "note": "Scrape running in background; poll /api/admin/fundamentals_scrape_status."}
+
+
+@router.post("/run_shareholding_scrape")
+async def run_shareholding_scrape_now(x_admin_token: Optional[str] = Header(None)):
+    """cc#391 Phase 1B: kick the shareholding scrape (Promoters/FIIs/DIIs/... per quarter) in a
+    background daemon — resumable, independent of Phase 1. Phases 2-4 remain gated."""
+    _check_admin(x_admin_token)
+    import threading
+    threading.Thread(target=run_shareholding_scrape, name="cc391-scrape1b-manual", daemon=True).start()
+    return {"status": "started",
+            "note": "Shareholding scrape running; poll /api/admin/fundamentals_scrape_status (phase1b_* fields)."}
