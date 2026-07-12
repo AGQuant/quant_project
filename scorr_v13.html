@@ -85,6 +85,20 @@
   .pchip .pname{cursor:pointer;padding:0 2px}.pchip:hover{border-color:var(--blu)}
   .pchip.active{background:var(--blu);border-color:var(--blu);color:#fff}
   .pchip .picon{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:11px;opacity:.55;cursor:pointer}
+  /* cc#460: Themes section — DB-driven saved-screen cards (Fable pipeline inserts into v13_presets) */
+  .themes-sec{margin:6px 0 4px}
+  .themes-sec .th-ttl{font-size:12px;font-weight:800;letter-spacing:.4px;color:var(--violet);text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:8px}
+  .theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:11px}
+  .theme-card{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:12px 14px}
+  .theme-card.on{border-color:var(--violet);box-shadow:0 0 0 1px var(--violet) inset}
+  .tc-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .tc-name{font-size:13.5px;font-weight:800;color:var(--txt);flex:1;line-height:1.3}
+  .tc-run{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;color:var(--violet);background:rgba(155,124,255,.14);border:1px solid var(--violet);border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+  .tc-run:hover{background:rgba(155,124,255,.26)}
+  .tc-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:7px}
+  .tchip{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:var(--mut);background:var(--bg2);border:1px solid var(--line2);border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .tc-meta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--dim)}
+  .tc-cnt{color:var(--cyan);font-weight:700}
   .pchip .picon:hover{opacity:1;background:rgba(148,166,210,.14)}
   .pempty{font-size:10.5px;color:var(--dim);font-style:italic}
   .matched{font-size:12px;font-weight:700;color:var(--txt);margin:8px 0 2px}
@@ -162,6 +176,7 @@
     <span class="reset2" onclick="resetFilters()">Reset filters</span>
   </div>
 
+  <div class="themes-sec" id="themes"></div>
   <div class="presets" id="presets"></div>
   <div class="matched" id="matched"></div>
 
@@ -498,6 +513,32 @@ async function renamePreset(id,ev){if(ev)ev.stopPropagation();const p=PRESETS.fi
   try{const r=await fetch('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});if(!r.ok){alert(r.status===409?'Name taken':'Rename failed');return;}await loadPresets();}catch(e){alert('Rename failed');}}
 async function deletePreset(id,ev){if(ev)ev.stopPropagation();const p=PRESETS.find(x=>x.id===id);if(!p)return;if(!confirm('Delete theme "'+p.name+'"?'))return;
   try{const r=await fetch('/api/v13/presets/'+id,{method:'DELETE'});if(!r.ok){alert('Delete failed');return;}if(ACTIVE_PRESET===id)ACTIVE_PRESET=null;await loadPresets();}catch(e){}}
+// ── cc#460: Themes section — DB-driven saved-screen cards from v13_presets (the Fable pipeline
+// reverse-engineers a shared chart into filter logic and INSERTs a named preset; this section shows
+// them, no deploy needed). Fable presets use the {fieldkey:{min?,max?}} jsonb shape. Run applies the
+// filters to the SAME client-side registry engine the page already uses (correct field semantics incl.
+// dma_* as %-distance) + sorts per sort_key/sort_dir, results land in the existing right-hand rail. ──
+let THEMES=[], ACTIVE_THEME=null;
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+async function loadThemes(){try{const r=await fetch('/api/v13/presets?scope=global');if(!r.ok){renderThemes();return;}const j=await r.json();THEMES=(j.presets||[]).filter(t=>t.filters&&!Array.isArray(t.filters));renderThemes();}catch(e){renderThemes();}}
+function themeSummary(f){return Object.keys(f).map(k=>{const c=f[k]||{};const p=[];if(c.min!=null)p.push('≥'+c.min);if(c.max!=null)p.push('≤'+c.max);return `<span class="tchip">${esc(k)} ${p.join(' ')}</span>`;}).join('');}
+function renderThemes(){const el=document.getElementById('themes');if(!el)return;
+  if(!THEMES.length){el.innerHTML='';return;}
+  el.innerHTML='<div class="th-ttl">&#9670; Themes &middot; saved screens</div><div class="theme-grid">'
+    +THEMES.map(t=>{const f=t.filters||{};const n=Object.keys(f).length;const on=t.id===ACTIVE_THEME?' on':'';
+      return `<div class="theme-card${on}"><div class="tc-head"><span class="tc-name">${esc(t.name)}</span><button class="tc-run" onclick="runTheme(${t.id})">&#9654; Run</button></div>`
+        +`<div class="tc-chips">${themeSummary(f)}</div>`
+        +`<div class="tc-meta">${n} filters &middot; sort ${esc(t.sort_key||'—')} ${t.sort_dir===1?'↑':'↓'}${t.scope&&t.scope!=='v13'?(' &middot; '+esc(t.scope)):''}${t.id===ACTIVE_THEME?' &middot; <span class="tc-cnt">running</span>':''}</div></div>`;}).join('')
+    +'</div>';}
+function runTheme(id){const t=THEMES.find(x=>x.id===id);if(!t)return;const f=t.filters||{};
+  Object.keys(FILT).forEach(k=>{FILT[k].on=false;});   // clear current filter state
+  let missing=[];
+  Object.keys(f).forEach(k=>{if(FILT[k]){FILT[k].on=true;if(f[k].min!=null&&!isNaN(f[k].min))FILT[k].min=f[k].min;if(f[k].max!=null&&!isNaN(f[k].max))FILT[k].max=f[k].max;}else missing.push(k);});
+  if(t.sort_key){SORT_KEY=t.sort_key;SORT_DIR=(t.sort_dir===1?1:-1);}
+  ACTIVE_THEME=id;ACTIVE_PRESET=null;
+  renderV13();renderResults();renderThemes();renderPresets();
+  if(missing.length)console.warn('v13 theme '+id+': keys not in registry (skipped): '+missing.join(', '));
+  const m=document.getElementById('matched');if(m)m.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function toggleReg(){document.body.classList.toggle('regcollapsed');}
 
 let FLAGS={unused:false,dormant:false};
@@ -580,6 +621,7 @@ renderStrip();
 renderV13();
 loadData();
 loadPresets();
+loadThemes();   // cc#460: DB-driven Themes section
 try{if(window.innerWidth<=900)document.body.classList.add('regcollapsed');}catch(e){}
 setInterval(loadData,60000);
 
