@@ -1115,7 +1115,10 @@ def v8_live_metrics():
     # CMP / Day Change / Hourly keep serving Friday's values on weekends & holidays.
     # Hourly is anchored to the latest bar (lc.ts) rather than NOW(): on a live day
     # that IS "~65 min ago"; off-hours it becomes the last 65-min window of that day.
-    as_of = api_query("SELECT MAX(ts::date) AS d FROM intraday_prices WHERE timeframe='5m'", single=True)
+    # cc#424: anchor to the last day that actually has fyers_eq bars. Without the source
+    # filter, a stray phantom fyers_hist bar (e.g. a Sat backfill row) wins MAX(ts::date)
+    # while the LATERAL joins below read source='fyers_eq' only -> 0 rows -> blank funnels.
+    as_of = api_query("SELECT MAX(ts::date) AS d FROM intraday_prices WHERE timeframe='5m' AND source='fyers_eq'", single=True)
     as_of_date = (as_of or {}).get("d")
     rows = api_query("""
         WITH asof AS (SELECT %s::date AS d)

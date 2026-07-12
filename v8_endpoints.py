@@ -1388,6 +1388,21 @@ def _basket_cmp(cur):
 
 
 @router.get("/funnel/{basket}")
+def _latest_funnel_counts(cur, basket: str):
+    """cc#424: as-of funnel-count row for a basket. Off-market there is no
+    score_date=CURRENT_DATE row, so serve the most recent session's precomputed counts
+    (last session, frozen-15:30 convention cc#417/418) instead of a blank UNIVERSE-0 funnel.
+    Monday's first live tick writes today's row and it wins automatically.
+    Returns (counts_dict, score_date|None)."""
+    cur.execute("SELECT counts, score_date FROM v8_funnel_counts WHERE basket=%s "
+                "ORDER BY score_date DESC, computed_at DESC LIMIT 1", (basket,))
+    row = cur.fetchone()
+    if not row:
+        return {}, None
+    counts = row[0] if isinstance(row[0], dict) else {}
+    return (counts or {}), row[1]
+
+
 def funnel_counts(basket: str):
     basket = basket.lower()
     if basket == "buy_s1_bounce":   return s1b_funnel_counts()
@@ -1408,8 +1423,9 @@ def funnel_counts(basket: str):
             # v8_signal_writer.py, untouched).
             v21_enabled = _load_filter_state(conn).get(basket, False)
             v21_metrics = _load_v21_live_metrics(conn, [r["symbol"] for r in all_rows])
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket=%s AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1", (basket,))
-            row = cur.fetchone()
+            # cc#424: anchor to the last session's counts off-market (was score_date=CURRENT_DATE
+            # -> blank on weekends/holidays). Monday's first live tick overwrites today's row.
+            _fc_counts, _fc_asof = _latest_funnel_counts(cur, basket)
         v21_pass = None
         if basket in V21_FILTERS:
             v21_pass = sum(1 for s in all_rows
@@ -1417,10 +1433,9 @@ def funnel_counts(basket: str):
         # cc#354/355: buy_reversal V3 is a dedicated-handler basket — the writer no longer
         # precomputes its funnel, so ignore any stale V2 v8_funnel_counts row and always compute
         # the V3 daily-gate funnel live.
-        if row and basket != "buy_reversal":
-            counts = row[0] if isinstance(row[0], dict) else {}
-            counts = {**counts, "_v21_enabled": v21_enabled, "_v21_pass": v21_pass}
-            return {"basket": basket, "score_date": str(date.today()), "counts": counts, "source": "precomputed"}
+        if _fc_counts and basket != "buy_reversal":
+            counts = {**_fc_counts, "_v21_enabled": v21_enabled, "_v21_pass": v21_pass}
+            return {"basket": basket, "score_date": str(_fc_asof or date.today()), "counts": counts, "source": "precomputed"}
         filters = FILTER_CONFIG[basket]; universe = all_rows[:]; counts = {}
         for metric, bounds in filters.items():
             mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
@@ -1428,7 +1443,7 @@ def funnel_counts(basket: str):
             counts[metric] = len(universe)
         counts["_v21_enabled"] = v21_enabled
         counts["_v21_pass"] = v21_pass
-        return {"basket": basket, "score_date": str(date.today()), "counts": counts, "source": "live_fallback"}
+        return {"basket": basket, "score_date": str(_fc_asof or date.today()), "counts": counts, "source": "live_fallback"}
     except Exception as e:
         raise HTTPException(500, f"funnel failed: {e}")
 
@@ -1492,10 +1507,7 @@ def br_funnel_detail():
     Empty stages (all 0) until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='buy_reversal' "
-                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
-            row = cur.fetchone()
-        counts   = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+            counts, _asof = _latest_funnel_counts(cur, "buy_reversal")   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage7   = counts.get("_stage7_survivors")
         stage7   = int(stage7) if stage7 is not None else None
@@ -1516,7 +1528,7 @@ def br_funnel_detail():
                 stage["note"] = f"of {denom} stocks passing all 7 cheap gates"
             stages.append(stage)
         return {
-            "basket": "buy_reversal", "score_date": str(date.today()),
+            "basket": "buy_reversal", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final,
             "filter_count": 8, "n_filters": 8,
             "stage7_survivors": stage7,
@@ -1677,10 +1689,7 @@ def sr_funnel_detail():
     Final = strict-AND of all 6. Empty until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_reversal' "
-                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
-            row = cur.fetchone()
-        counts   = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+            counts, _asof = _latest_funnel_counts(cur, "sell_reversal")   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage5   = counts.get("_stage5_survivors")
         stage5   = int(stage5) if stage5 is not None else None
@@ -1698,7 +1707,7 @@ def sr_funnel_detail():
                 stage["note"] = f"of {denom} stocks passing all 5 cheap gates"
             stages.append(stage)
         return {
-            "basket": "sell_reversal", "score_date": str(date.today()),
+            "basket": "sell_reversal", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": 6, "n_filters": 6,
             "stage5_survivors": stage5,
             "gate_type": "independent per-filter counts; final = strict AND of all 6",
@@ -1842,10 +1851,7 @@ def sm_funnel_detail():
     Final = strict-AND of all 9. Empty until the first live tick writes."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_momentum' "
-                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
-            row = cur.fetchone()
-        counts   = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+            counts, _asof = _latest_funnel_counts(cur, "sell_momentum")   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         stage8   = counts.get("_stage8_survivors")
         stage8   = int(stage8) if stage8 is not None else None
@@ -1863,7 +1869,7 @@ def sm_funnel_detail():
                 stage["note"] = f"of {denom} stocks passing all 8 cheap gates"
             stages.append(stage)
         return {
-            "basket": "sell_momentum", "score_date": str(date.today()),
+            "basket": "sell_momentum", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": 9, "n_filters": 9,
             "stage8_survivors": stage8,
             "gate_type": "independent per-filter counts; final = strict AND of all 9",
@@ -2010,7 +2016,7 @@ def funnel_detail(basket: str):
             cur.execute("SELECT COUNT(*) FROM v8_qualified WHERE basket=%s AND signal_date=CURRENT_DATE", (basket,))
             score_qualified = int(cur.fetchone()[0])
             cur.execute("""SELECT counts->>'_score_threshold' FROM v8_funnel_counts
-                WHERE basket=%s AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1""", (basket,))
+                WHERE basket=%s ORDER BY score_date DESC, computed_at DESC LIMIT 1""", (basket,))  # cc#424: last-session as-of
             fc = cur.fetchone()
             score_threshold = int(fc[0]) if fc and fc[0] else None
             # cc#164: V2.1 hard-gate visibility -- read-only, computed against this
@@ -2225,10 +2231,7 @@ def so_funnel_detail():
     v8_funnel_counts row (independent per-filter counts; final = strict AND of all 5)."""
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_overbought' "
-                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
-            row = cur.fetchone()
-        counts = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+            counts, _asof = _latest_funnel_counts(cur, "sell_overbought")   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
         final = int(counts.get("_score_qualified", 0) or 0)
         stages = []
@@ -2239,7 +2242,7 @@ def so_funnel_detail():
                            "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
                            "pass_pct": round(passes / universe * 100, 1) if universe else 0})
         return {
-            "basket": "sell_overbought", "score_date": str(date.today()),
+            "basket": "sell_overbought", "score_date": str(_asof or date.today()),
             "universe": universe, "final": final, "filter_count": 5, "n_filters": 5,
             "gate_type": "independent per-filter counts; final = strict AND of all 5",
             "score_qualified": final, "pivot_pass": final, "stages": stages,
@@ -2252,11 +2255,8 @@ def so_funnel_detail():
 def so_funnel_counts():
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT counts FROM v8_funnel_counts WHERE basket='sell_overbought' "
-                        "AND score_date=CURRENT_DATE ORDER BY computed_at DESC LIMIT 1")
-            row = cur.fetchone()
-        counts = (row[0] if row and isinstance(row[0], dict) else {}) or {}
-        return {"basket": "sell_overbought", "score_date": str(date.today()),
+            counts, _asof = _latest_funnel_counts(cur, "sell_overbought")   # cc#424: last-session as-of
+        return {"basket": "sell_overbought", "score_date": str(_asof or date.today()),
                 "counts": counts, "source": "handler_v3"}
     except Exception as e:
         raise HTTPException(500, f"so_funnel_counts failed: {e}")
@@ -2278,7 +2278,9 @@ def so_stock_passcount():
             syms = [r["symbol"] for r in all_rows]
             sess_high, prev_high = {}, {}
             cur.execute("""SELECT symbol, MAX(high) FROM intraday_prices WHERE source='fyers_eq'
-                AND timeframe='5m' AND ts::date=CURRENT_DATE AND symbol=ANY(%s) GROUP BY symbol""", (syms,))
+                AND timeframe='5m'
+                AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m')
+                AND symbol=ANY(%s) GROUP BY symbol""", (syms,))   # cc#424: anchor session high to last session off-market
             for sym, h in cur.fetchall():
                 if h is not None: sess_high[sym] = float(h)
             cur.execute("""SELECT DISTINCT ON (symbol) symbol, high FROM raw_prices
@@ -2335,7 +2337,8 @@ def so_stock_detail(symbol: str):
             cr = cur.fetchone()
             cmp = float(cr[0]) if cr else None
             cur.execute("""SELECT MAX(high) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m'
-                AND ts::date=CURRENT_DATE AND symbol=%s""", (sym,))
+                AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m')
+                AND symbol=%s""", (sym,))   # cc#424: anchor session high to last session off-market
             sh = cur.fetchone()[0]; sh = float(sh) if sh is not None else None
             cur.execute("""SELECT high FROM raw_prices WHERE symbol=%s AND price_date < CURRENT_DATE
                 ORDER BY price_date DESC LIMIT 1""", (sym,))
@@ -2400,7 +2403,9 @@ def _s1b_funnel_stages():
                     (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
                     (array_agg(close ORDER BY ts DESC))[1] AS live_close,
                     MIN(low) AS today_low
-                FROM intraday_prices WHERE ts::date=CURRENT_DATE AND source='fyers_eq' GROUP BY symbol
+                -- cc#424: anchor session bars to the last session off-market (frozen-15:30) so the
+                -- s1b funnel isn't blank on weekends/holidays; live day still resolves to today.
+                FROM intraday_prices WHERE ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m') AND source='fyers_eq' GROUP BY symbol
             ),
             hist AS (
                 SELECT symbol,
@@ -2560,7 +2565,9 @@ def s1b_stock_passcount():
                         (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
                         (array_agg(close ORDER BY ts DESC))[1] AS live_close,
                         MIN(low) AS today_low
-                    FROM intraday_prices WHERE ts::date=CURRENT_DATE AND source='fyers_eq' GROUP BY symbol
+                    -- cc#424: anchor session bars to the last session off-market (frozen-15:30) so the
+                    -- s1b pass grid isn't blank on weekends/holidays; live day resolves to today.
+                    FROM intraday_prices WHERE ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m') AND source='fyers_eq' GROUP BY symbol
                 ),
                 hist AS (
                     SELECT symbol,
