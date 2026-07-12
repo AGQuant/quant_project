@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V14 · Intraday</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  /* cc#442: V14 intraday engine page — dark terminal skin (V-family, design_refs/scorr_v8_R2). */
+  :root{
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);--red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;--violet:#9B7CFF;
+    --shadow:0 18px 44px rgba(3,7,20,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1280px;margin:0 auto;padding:12px 18px 44px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}.logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .clock{font-family:'Space Mono';font-size:11px;color:var(--mut)}
+  .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:16px 0 10px;display:flex;gap:8px;align-items:center}
+  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+  .chip{display:inline-flex;align-items:center;font-family:'Space Mono';font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid;white-space:nowrap}
+  .c-orb{color:var(--blu);border-color:var(--blu);background:rgba(77,124,254,.12)}
+  .c-vwap{color:var(--cyan);border-color:var(--cyan);background:rgba(55,211,232,.12)}
+  .c-r1{color:var(--violet);border-color:var(--violet);background:rgba(155,124,255,.12)}
+  .c-long{color:var(--grn);border-color:var(--grn);background:var(--grn-d)}
+  .c-short{color:var(--red);border-color:var(--red);background:var(--red-d)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:6px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+  .card .k{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+  .card .v{font-family:'Space Mono';font-size:18px;font-weight:800;margin-top:4px}
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;padding:9px 11px;border-bottom:1px solid var(--line2);white-space:nowrap;font-size:10px;letter-spacing:.3px;text-transform:uppercase}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:8px 11px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  td.sym{font-family:'Sora';font-weight:700}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:rgba(148,166,210,.06)}
+  .pos{color:var(--grn)}.neg{color:var(--red)}
+  .loading{color:var(--mut);font-size:13px;padding:20px 4px}
+  .empty{color:var(--dim);font-size:13px;padding:20px 12px;text-align:center}
+  .note{font-size:10px;color:var(--dim);margin:4px 0 0}
+</style>
+</head>
+<body>
+<nav id="scorr-nav"></nav>
+<div class="wrap">
+  <header>
+    <div class="logo">SCORR<b>.</b></div><div class="tag">V14 · Intraday</div>
+    <div class="spacer"></div>
+    <div class="clock" id="clk">--:--</div>
+  </header>
+  <div id="root"><div class="loading">Loading V14 intraday engine…</div></div>
+</div>
+<script>
+const EP={pos:"/api/v14/positions",trades:"/api/v14/trades?limit=200",summary:"/api/v14/summary"};
+const D={open:[],closed:[],tags:[],cost:{}};
+async function getJSON(u){const r=await fetch(u,{headers:{'Accept':'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function num(v,d=2){return v==null||isNaN(v)?'--':Number(v).toFixed(d);}
+function sign(v,d=2){if(v==null||isNaN(v))return'--';const n=Number(v);return(n>=0?'+':'')+n.toFixed(d);}
+function tagChip(t){const c=t==='ORB'?'c-orb':t==='VWAP-RECLAIM'?'c-vwap':'c-r1';return`<span class="chip ${c}">${esc(t)}</span>`;}
+function sideChip(s){const lng=(s||'').toLowerCase()==='long';return`<span class="chip ${lng?'c-long':'c-short'}">${lng?'LONG':'SHORT'}</span>`;}
+function fmtT(ts){if(!ts)return'--';const d=new Date(ts);if(isNaN(d))return'--';const i=new Date(d.getTime()+(5*60+30)*60000);return String(i.getUTCHours()).padStart(2,'0')+':'+String(i.getUTCMinutes()).padStart(2,'0');}
+
+function rSummary(){
+  const t=D.tags||[];
+  const cost=D.cost||{};
+  const totals=t.reduce((a,x)=>({n:a.n+x.trades,w:a.w+x.wins,pts:a.pts+(x.net_points||0)}),{n:0,w:0,pts:0});
+  const head=['TAG','TRADES','WIN RATE','NET PTS','AVG NET %'];
+  const body=t.length?t.map(x=>`<tr>
+    <td>${tagChip(x.tag)}</td>
+    <td>${x.trades}</td>
+    <td class="${x.win_rate>=55?'pos':x.win_rate>0?'':'neg'}">${x.win_rate}%</td>
+    <td class="${(x.net_points||0)>=0?'pos':'neg'}">${sign(x.net_points,1)}</td>
+    <td class="${(x.avg_net_pct||0)>=0?'pos':'neg'}">${sign(x.avg_net_pct,3)}%</td></tr>`).join('')
+    :`<tr><td colspan="5" class="empty">No closed trades yet today.</td></tr>`;
+  return `<div class="ptitle">Per-tag day summary <span class="ct">${totals.n} closed · ${totals.n?Math.round(100*totals.w/totals.n):0}% WR · net ${sign(totals.pts,1)} pts</span></div>
+    <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="note">Costs per trade: Rs ${cost.flat_rs??500} flat + ${cost.slippage_pct??0.05}% slippage (net % is after slippage). Viability gate: ship only setups clearing 55% WR after costs at 1:1 (BT7 replay).</div>`;
+}
+function rOpen(){
+  const head=['TAG','SIDE','SYMBOL','ENTRY','STOP','TARGET','ATR','SINCE'];
+  const body=D.open.length?D.open.map(p=>`<tr>
+    <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
+    <td class="sym">${esc(p.symbol)}</td>
+    <td>${num(p.entry_px)}</td>
+    <td class="neg">${num(p.stop_px)}</td>
+    <td class="pos">${num(p.target_px)}</td>
+    <td style="color:var(--mut)">${num(p.atr,1)}</td>
+    <td style="color:var(--dim)">${fmtT(p.entry_ts)}</td></tr>`).join('')
+    :`<tr><td colspan="8" class="empty">No open positions.</td></tr>`;
+  return `<div class="ptitle">Open positions <span class="ct">${D.open.length} / 4 slots</span></div>
+    <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function rClosed(){
+  const head=['DATE','TAG','SIDE','SYMBOL','ENTRY','EXIT','REASON','PNL PTS','NET %'];
+  const body=D.closed.length?D.closed.map(p=>`<tr>
+    <td style="color:var(--mut);font-size:10px">${esc(p.trade_date)}</td>
+    <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
+    <td class="sym">${esc(p.symbol)}</td>
+    <td>${num(p.entry_px)}</td><td>${num(p.exit_px)}</td>
+    <td style="color:var(--mut);font-size:10px">${esc(p.exit_reason||'')}</td>
+    <td class="${(p.pnl_pts||0)>=0?'pos':'neg'}">${sign(p.pnl_pts,1)}</td>
+    <td class="${(p.net_pnl_pct||0)>=0?'pos':'neg'}">${sign(p.net_pnl_pct,2)}%</td></tr>`).join('')
+    :`<tr><td colspan="9" class="empty">No closed trades yet.</td></tr>`;
+  return `<div class="ptitle">Closed trades <span class="ct">${D.closed.length} logged</span></div>
+    <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="note">Every row carries a full gates snapshot at entry (in v14_trades.gates_snapshot) for evening per-tag analysis.</div>`;
+}
+function render(){document.getElementById('root').innerHTML=rSummary()+rOpen()+rClosed();}
+async function load(){
+  try{
+    const [pos,tr,sm]=await Promise.all([getJSON(EP.pos),getJSON(EP.trades),getJSON(EP.summary)]);
+    D.open=(pos&&pos.open_positions)||[]; D.closed=(tr&&tr.closed_trades)||[];
+    D.tags=(sm&&sm.by_tag)||[]; D.cost=(sm&&sm.cost)||{};
+  }catch(e){document.getElementById('root').innerHTML=`<div class="empty">V14 feed failed: ${esc(e.message)}</div>`;return;}
+  render();
+}
+function tick(){const i=new Date(Date.now()+(5*60+30)*60000);document.getElementById('clk').textContent=String(i.getUTCHours()).padStart(2,'0')+':'+String(i.getUTCMinutes()).padStart(2,'0')+' IST';}
+tick();setInterval(tick,1000);
+load();setInterval(load,60000);
+</script>
+</body>
+</html>

@@ -988,6 +988,28 @@ def _check_pivots_health():
         log.error(f"pivots_watchdog: {e}")
         _log_alert("pivots_watchdog_error", f"pivot watchdog failed for {today}: {e}")
 
+_v14_running = False
+
+def _bg_v14_cycle():
+    """cc#442: one V14 intraday paper cycle (manage exits + evaluate 3 setups + paper-open triggers).
+    Non-reentrant; read-only on V8/V10 engine state."""
+    global _v14_running
+    if _v14_running:
+        return
+    _v14_running = True
+    try:
+        import v14_engine
+        with _conn() as conn:
+            res = v14_engine.run_v14_cycle(conn)
+        if res.get("status") == "ok":
+            log.info(f"v14_cycle: slots={res.get('open_slots_used')} opened={len(res.get('opened', []))} "
+                     f"exits={res.get('exits', {}).get('closed')}")
+    except Exception as e:
+        log.error(f"v14_cycle: {e}")
+    finally:
+        _v14_running = False
+
+
 def _bg_qb_eod():
     # cc#439 fix_2: this job used to call qb_eod_checker.run_eod_check(conn) — a function that does
     # NOT exist (the real one is run_eod_checker(conn, basket_name=...)) — so it threw AttributeError
@@ -1277,6 +1299,10 @@ async def _scheduler_loop():
             _spawn(_bg_open_bars_alarm)       # cc#229: 09:25 feed-silent-at-open alarm
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
+        # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.
+        # Read-only on V8/V10; does NOT touch worker/** (Phase A safe).
+        if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
+            _spawn(_bg_v14_cycle)
             _spawn(_bg_v8_paper_exit)         # cc_task #72 bug_0: live exit pass (primary)
             _spawn(_bg_v10_tick)
             _spawn(_bg_pcr_intraday)

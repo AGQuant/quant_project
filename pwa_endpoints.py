@@ -282,7 +282,8 @@ PWA_JS = """
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/holdings', '\\u25c6', 'Holdings'],
     ['/v10', '\\u25b3', 'V10'],
-    ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs']
+    ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
+    ['/v14', '\\u26a1', 'V14']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {

@@ -46,6 +46,7 @@ from fyers_endpoints import router as fyers_router
 from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
+from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
 from pcr_endpoints import router as pcr_router
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
@@ -185,12 +186,12 @@ def _is_embedded(request: Request) -> bool:
 
 # cc#176: /screener /intraday /structure /performance /ask were missing -- those
 # pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
-_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9",
+_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health"}   # cc#392/394/398/426: no-store + theme/logout pills
+                     "/v13", "/v12", "/health"}   # cc#392/394/398/426/442: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
-PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9")   # cc#392/394/398/426: gate + no-store
+PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14")   # cc#392/394/398/426/442: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -257,6 +258,7 @@ app.include_router(fyers_router)
 app.include_router(diagnosis_router)
 app.include_router(v9_router)
 app.include_router(v10_router)
+app.include_router(v14_router)   # cc#442
 app.include_router(pcr_router)
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
@@ -666,6 +668,12 @@ def v9_pairs_page():
     into its own page (same renderer + /api/v8/v9_pairs_sectors pool)."""
     with open("scorr_v9.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/v14", response_class=HTMLResponse)
+def v14_intraday_page():
+    """cc#442: V14 intraday engine (paper) — live open positions with tag chips, closed-trade log,
+    per-tag day summary. Data from /api/v14/*."""
+    with open("scorr_v14.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/holdings", response_class=HTMLResponse)
 def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
@@ -712,6 +720,7 @@ NAV_REGISTRY = {
     "/news":         ("News (Intelligence)",  "nav"),
     "/v10":          ("V10",                  "nav"),
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
+    "/v14":          ("V14 · Intraday",       "nav"),        # cc#442 rule id=2987 (intraday engine)
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
