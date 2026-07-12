@@ -104,8 +104,14 @@
   .sig-col{border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--card2)}
   .sig-col-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .sig3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
-  .sig-ets{display:flex;gap:10px;font-family:var(--mono);font-size:10px;color:var(--mut)}
+  .sig-ets{display:flex;gap:10px;font-family:var(--mono);font-size:11px;color:var(--mut);flex-wrap:wrap}
   .sig-ets b{font-weight:800}
+  /* cc#434 fix_6: FUT + OPT feed line on each signal tile */
+  .sig-feed{display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--mut);
+    margin:0 0 8px;padding:5px 9px;background:var(--card2);border:1px solid var(--line);border-radius:7px}
+  /* cc#434 fix_5: larger, more readable font for the Open Positions / Closed Trades tables */
+  .pos-tbl td,.pos-tbl th{font-size:12px;padding:6px 9px}
+  .pos-tbl td.td-mono{font-size:12px}
 
   /* max pain */
   .mp-big{font-family:var(--mono);font-size:30px;font-weight:900;line-height:1}
@@ -388,20 +394,25 @@ async function loadPCR(){
   D.pcr = { nifty:mkPcr(n), bnk:mkPcr(b) };
 }
 async function loadIdx(){
-  /* CMP + day change (domestic_live) and weekly pivot PP (paper pivots) per index,
-     merged into the signal boxes for NIFTY + BANKNIFTY. */
-  const [pv,dl] = await Promise.all([
+  /* cc#434 fix_2: CMP + day change from /api/v8/live_metrics (LAST-TICK anchored, cc#424 — Friday
+     close off-market, live from 09:16) instead of domestic_live (which is CURRENT_DATE-only and
+     goes blank on weekends, the "--" the founder saw). domestic_live kept as a secondary fallback. */
+  const [pv,lm,dl] = await Promise.all([
     getJSON('/api/paper/pivots?limit=300').catch(()=>null),
+    getJSON('/api/v8/live_metrics').catch(()=>null),
     getJSON('/api/v8/domestic_live').catch(()=>null),
   ]);
   const pvRows = rowsOf(pv);
+  const lmRows = (lm&&lm.rows)||[];
   const map = { NIFTY:'NIFTY50', BANKNIFTY:'BANKNIFTY' };
   for(const k of ['NIFTY','BANKNIFTY']){
     const feed = map[k];
+    const lmx = lmRows.find(r=>r.symbol===feed);
     const dlx = dl && dl[feed];
+    const cmp = (lmx&&lmx.cmp!=null)?Number(lmx.cmp) : (dlx?Number(dlx.close)||0:0);
+    const chg = (lmx&&lmx.day_pct!=null)?Number(lmx.day_pct) : (dlx?Number(dlx.chg_pct)||0:0);
     const pvx = pvRows.find(r=>r.symbol===feed);
-    D.idx[k] = { cmp: dlx?Number(dlx.close)||0:0, chg: dlx?Number(dlx.chg_pct)||0:0,
-                 pp: pvx?Number(pvx.pp)||0:0 };
+    D.idx[k] = { cmp: cmp||0, chg: chg||0, pp: pvx?Number(pvx.pp)||0:0 };
   }
 }
 async function loadMaxPain(){
@@ -450,7 +461,7 @@ async function loadOpen(){
              entry, cmp, tgt:Number(x.target)||0, sl:Number(x.sl||x.stop_loss||x.stop)||0,
              qty:Number(x.lot_size||x.qty)||0,
              pnl:Number(x.unrealised_pnl||x.pnl)||0, pPct,
-             entryTs:x.entry_ts||null, eng:'V10' };
+             asof:x.premium_asof||null, entryTs:x.entry_ts||null, eng:'V10' };
   });
 }
 function fmtDate(s){ if(!s)return '—'; const d=new Date(s); if(isNaN(d))return String(s).slice(0,10);
@@ -473,7 +484,10 @@ async function loadClosed(){
     const dir=normSide(x.direction||x.side);
     const pnl=Number(x.pnl)||0;
     const pPct=entry?((dir==='SHORT'?entry-ex:ex-entry)/entry*100):0;
+    // cc#434 fix_5: carry leg + option strike/type so each leg (FUT / OPT-write) renders with its own
+    // strike and both legs of a trade are visible.
     return { id:x.id||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct,
+             leg:(x.leg||'').toUpperCase(), str:x.opt_strike||null, opt:x.opt_type||null,
              rsn:(x.exit_reason||x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
              dt:fmtDate(x.trade_date||x.exit_ts||x.exit_time||x.exit_date),
              eng:'V10' };
@@ -537,25 +551,38 @@ function rMood(){
 }
 
 function sigCol(sym, s, ix){
-  const dir=s.dir;
+  const fullSym = sym==='NIFTY'?'NIFTY50':sym;
+  const posF = D.open.find(p=>(p.sym||'').toUpperCase()===fullSym && p.type==='FUT');
+  const posO = D.open.find(p=>(p.sym||'').toUpperCase()===fullSym && p.type==='OPT');
+  // cc#434 fix_3: the tile direction follows the OPEN position when one exists (engine truth) —
+  // removes the "ST BUY + EMA BUY but FLAT" contradiction. Falls back to the live signal when flat.
+  const dir = posF ? posF.side : s.dir;
   const c = dir==='LONG'?UP:dir==='SHORT'?DN:C.mut;
   const tag = dir==='LONG'?'▲ LONG':dir==='SHORT'?'▼ SHORT':'— FLAT';
   const boxes=[
     ['CMP', ix.cmp?num(ix.cmp):'—', C.blu],
     ['ST BAND', s.stBand?num(s.stBand):'—', C.amber],
-    ['SINCE FLIP', durSince(s.flipTs), C.mut],
+    ['SINCE', posF?durSince(posF.entryTs):durSince(s.flipTs), C.mut],
   ];
   const boxHtml=boxes.map(([l,v,col])=>`<div class="sbox"><div class="l">${l}</div><div class="v" style="color:${col}">${v}</div></div>`).join('');
-  // live position for this index (FUT leg) — engine manages its own book
-  const fullSym = sym==='NIFTY'?'NIFTY50':sym;
-  const pos = D.open.find(p=>(p.sym||'').toUpperCase()===fullSym && p.type==='FUT');
+  // cc#434 fix_6: FUT + OPT live feed line (last-tick anchored). FUT = index CMP; OPT = the active
+  // ATM write leg premium from the latest option_chain snapshot, as-of stamped.
+  let feed='';
+  if(posO){
+    const asof = posO.asof?String(posO.asof).slice(5,16).replace('T',' '):null;
+    feed = `<div class="sig-feed"><span>FUT <b style="color:var(--txt)">${ix.cmp?num(ix.cmp):'—'}</b></span>
+      <span>OPT <b style="color:var(--txt)">${posO.str} ${posO.opt} wrt</b> @ <b style="color:var(--txt)">${num(posO.cmp||posO.entry)}</b>${asof?` <i style="color:var(--dim);font-style:normal">as of ${asof}</i>`:''}</span></div>`;
+  }
   let ets;
-  if(pos){
-    ets = `<span>Pos <b style="color:${pos.side==='SHORT'?DN:UP}">${pos.side}</b> @ <b style="color:var(--txt)">${num(pos.entry)}</b></span>
-       <span>${fmtDate(pos.entryTs)} · ${durSince(pos.entryTs)}</span>
-       <span>uP&L <b style="color:${cx(pos.pnl)}">₹${num(pos.pnl)}</b></span>`;
-  } else if(dir==='FLAT'){
-    ets = `<span style="color:var(--mut)">No active trade — awaiting flip</span>`;
+  if(posF){
+    ets = `<span>Pos <b style="color:${posF.side==='SHORT'?DN:UP}">${posF.side}</b> @ <b style="color:var(--txt)">${num(posF.entry)}</b> since ${fmtDate(posF.entryTs)}</span>
+       <span>uP&L <b style="color:${cx(posF.pnl)}">₹${num(posF.pnl)}</b></span>`;
+  } else if(s.dir==='FLAT'){
+    ets = (s.st==='BUY'&&s.ema==='BUY')
+      ? `<span style="color:${C.amber}">Signals aligned (ST+EMA BUY) — entry armed on next 5m flip confirm</span>`
+      : (s.st==='SELL'&&s.ema==='SELL')
+      ? `<span style="color:${C.amber}">Signals aligned (ST+EMA SELL) — entry armed on next 5m flip confirm</span>`
+      : `<span style="color:var(--mut)">No active trade — signals unaligned, awaiting flip</span>`;
   } else {
     ets = `<span>Entry <b style="color:var(--txt)">${num(s.entry)}</b></span>
        <span>Tgt <b style="color:${UP}">${num(s.tgt)}</b></span>
@@ -568,6 +595,7 @@ function sigCol(sym, s, ix){
       <span style="font-size:9px;color:var(--mut)">ST</span>${bdg(s.st,s.st==='BUY'?UP:DN,true)}
       <span style="font-size:9px;color:var(--mut)">EMA</span>${bdg(s.ema,s.ema==='BUY'?UP:DN,true)}</div>
     <div class="sig3">${boxHtml}</div>
+    ${feed}
     <div class="sig-ets">${ets}</div>
   </div>`;
 }
@@ -661,44 +689,45 @@ function rOpen(){
   const head=['ENG','SYMBOL','SIDE','TYPE','ENTRY','CMP','TARGET','STOP','QTY','P&L','P&L%'];
   const body = D.open.length ? D.open.map(p=>`<tr>
     <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
-    <td class="td-mono" style="font-weight:800">${esc(p.sym)}${p.str?`<span style="color:var(--mut);font-size:9px"> ${p.str}${p.opt}</span>`:''}</td>
+    <td class="td-mono" style="font-weight:800">${esc(p.sym)}${p.str?`<span style="color:var(--mut);font-size:10px"> ${p.str} ${p.opt}${p.type==='OPT'?' wrt':''}</span>`:''}</td>
     <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
-    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.type}</td>
+    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.type==='OPT'?'OPT·wrt':p.type}</td>
     <td class="td-mono">${num(p.entry)}</td>
-    <td class="td-mono" style="font-weight:700;color:${C.blu}">${num(p.cmp)}</td>
-    <td class="td-mono" style="color:${UP}">${num(p.tgt)}</td>
-    <td class="td-mono" style="color:${DN}">${num(p.sl)}</td>
+    <td class="td-mono" style="font-weight:700;color:${C.blu}">${p.cmp?num(p.cmp):'—'}</td>
+    <td class="td-mono" style="color:${UP}">${p.tgt?num(p.tgt):'—'}</td>
+    <td class="td-mono" style="color:${DN}">${p.sl?num(p.sl):'—'}</td>
     <td class="td-mono" style="color:var(--mut)">${p.qty}</td>
-    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
-    <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td></tr>`).join('')
+    <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">${p.pnl!=null?'₹'+num(p.pnl):'—'}</td>
+    <td class="td-mono" style="color:${cx(p.pPct)}">${p.cmp?pct(p.pPct):'—'}</td></tr>`).join('')
     : `<tr class="empty-row"><td colspan="11">No open positions</td></tr>`;
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Open Positions (${D.open.length})</div>
       <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div>
-    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
   </div>`;
 }
 
 function rClosed(){
   const tot=D.closed.reduce((a,p)=>a+p.pnl,0);
   const wr=D.closed.length?(D.closed.filter(p=>p.pnl>0).length/D.closed.length*100).toFixed(0):0;
-  const head=['DATE','ENG','SYMBOL','SIDE','ENTRY','EXIT','P&L','P&L%','EXIT REASON'];
+  const head=['DATE','ENG','SYMBOL','LEG','SIDE','ENTRY','EXIT','P&L','P&L%','EXIT REASON'];
   const body = D.closed.length ? D.closed.map(p=>`<tr>
     <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.dt}</td>
     <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
     <td class="td-mono" style="font-weight:800">${esc(p.sym)}</td>
+    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.leg==='OPT'?`${p.str||''} ${p.opt||''} wrt`:(p.leg||'FUT')}</td>
     <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
     <td class="td-mono">${num(p.entry)}</td>
     <td class="td-mono">${num(p.exit)}</td>
     <td class="td-mono" style="font-weight:800;color:${cx(p.pnl)}">₹${num(p.pnl)}</td>
     <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td>
     <td>${bdg(p.rsn,p.pnl>=0?UP:DN,true)}</td></tr>`).join('')
-    : `<tr class="empty-row"><td colspan="9">No closed trades</td></tr>`;
+    : `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`;
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Closed Trades (${D.closed.length})</div>
       <div style="display:flex;gap:8px;align-items:center">${bdg('WR '+wr+'%',UP)}
         <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div></div>
-    <div class="tbl-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
   </div>`;
 }
 

@@ -434,28 +434,89 @@ def gap_exit(conn=None):
 
 
 # ---------- dashboard reads ----------
+def _fx(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def get_open_positions():
+    # cc#434 fix_1: RAW cursor (was _read_df -> pandas -> to_dict gave numpy/Timestamp types that
+    # broke JSON serialization -> 500 -> the page showed "0 open positions"). fix_2: attach a
+    # last-tick CMP (cmp_prices holds the last known LTP => Friday close off-market) + unrealised P&L
+    # (FUT: (cmp-entry)*lot*dir; OPT is the ATM WRITE leg -> (entry-premium)*lot, premium from the
+    # latest option_chain snapshot, as-of stamped).
     conn = _db()
     try:
-        df = _read_df(conn,
-                      "SELECT symbol, leg, side, entry_price, entry_ts, stop, target, lot_size, "
-                      "opt_strike, opt_type, opt_expiry FROM v10_positions WHERE status='OPEN' "
-                      "ORDER BY symbol, leg")
+        with conn.cursor() as cur:
+            cur.execute("SELECT symbol, leg, side, entry_price, entry_ts, stop, target, lot_size, "
+                        "opt_strike, opt_type, opt_expiry FROM v10_positions WHERE status='OPEN' "
+                        "ORDER BY symbol, leg")
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE symbol IN ('NIFTY50','BANKNIFTY')")
+            cmp_map = {r[0]: _fx(r[1]) for r in cur.fetchall()}
+            out = []
+            for r in rows:
+                sym = r["symbol"]; leg = (r["leg"] or "").upper()
+                entry = _fx(r["entry_price"]); lot = int(r["lot_size"] or 0)
+                dirmul = 1 if (r["side"] or "").upper() == "BUY" else -1
+                cmp_v = pnl = asof = None
+                if leg == "FUT":
+                    cmp_v = cmp_map.get(sym)
+                    if cmp_v is not None and entry is not None:
+                        pnl = round((cmp_v - entry) * lot * dirmul, 2)
+                elif leg == "OPT" and r.get("opt_strike") and r.get("opt_type"):
+                    under = "NIFTY" if sym in ("NIFTY50", "NIFTY") else sym
+                    cur.execute("SELECT ltp, ts FROM option_chain WHERE underlying=%s "
+                                "AND strike=%s::numeric AND option_type=%s ORDER BY ts DESC LIMIT 1",
+                                (under, str(r["opt_strike"]), r["opt_type"]))
+                    orow = cur.fetchone()
+                    if orow and orow[0] is not None:
+                        cmp_v = _fx(orow[0])
+                        asof = orow[1].isoformat() if orow[1] else None
+                        if entry is not None:      # ATM write -> profit as premium decays
+                            pnl = round((entry - cmp_v) * lot, 2)
+                out.append({
+                    "symbol": sym, "leg": leg, "side": (r["side"] or "").upper(),
+                    "entry_price": entry,
+                    "entry_ts": r["entry_ts"].isoformat() if r["entry_ts"] else None,
+                    "stop": _fx(r["stop"]), "target": _fx(r["target"]), "lot_size": lot,
+                    "opt_strike": r["opt_strike"], "opt_type": r["opt_type"],
+                    "opt_expiry": str(r["opt_expiry"]) if r.get("opt_expiry") else None,
+                    "cmp": cmp_v, "unrealised_pnl": pnl, "premium_asof": asof,
+                })
     finally:
         conn.close()
-    return df.to_dict("records")
+    return out
 
 
 def get_closed_trades(limit=200):
+    # cc#434 fix_1: RAW cursor (was _read_df -> pandas serialization 500 -> empty closed-trades list).
     conn = _db()
     try:
-        df = _read_df(conn,
-                      "SELECT symbol, leg, side, entry_price, entry_ts, exit_price, exit_ts, "
-                      "exit_reason, points, lot_size, pnl, opt_strike, opt_type FROM v10_trades "
-                      "ORDER BY exit_ts DESC LIMIT %s", (limit,))
+        with conn.cursor() as cur:
+            cur.execute("SELECT symbol, leg, side, entry_price, entry_ts, exit_price, exit_ts, "
+                        "exit_reason, points, lot_size, pnl, opt_strike, opt_type FROM v10_trades "
+                        "ORDER BY exit_ts DESC LIMIT %s", (limit,))
+            cols = [d[0] for d in cur.description]
+            out = []
+            for r in cur.fetchall():
+                d = dict(zip(cols, r))
+                out.append({
+                    "symbol": d["symbol"], "leg": d["leg"], "side": d["side"],
+                    "entry_price": _fx(d["entry_price"]),
+                    "entry_ts": d["entry_ts"].isoformat() if d["entry_ts"] else None,
+                    "exit_price": _fx(d["exit_price"]),
+                    "exit_ts": d["exit_ts"].isoformat() if d["exit_ts"] else None,
+                    "exit_reason": d["exit_reason"], "points": _fx(d["points"]),
+                    "lot_size": int(d["lot_size"]) if d["lot_size"] is not None else None,
+                    "pnl": _fx(d["pnl"]), "opt_strike": d["opt_strike"], "opt_type": d["opt_type"],
+                })
     finally:
         conn.close()
-    return df.to_dict("records")
+    return out
 
 
 def get_summary():
