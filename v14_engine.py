@@ -58,11 +58,15 @@ def ensure_tables(conn):
             CREATE TABLE IF NOT EXISTS v14_trades (
                 id SERIAL PRIMARY KEY,
                 trade_date DATE NOT NULL, tag TEXT NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL,
-                entry_ts TIMESTAMPTZ, entry_px NUMERIC, exit_ts TIMESTAMPTZ, exit_px NUMERIC,
-                stop_px NUMERIC, target_px NUMERIC, atr NUMERIC,
+                entry_ts TIMESTAMPTZ, entry_px NUMERIC, eq_signal_px NUMERIC,
+                exit_ts TIMESTAMPTZ, exit_px NUMERIC,
+                stop_px NUMERIC, target_px NUMERIC, target_basis TEXT, atr NUMERIC,
                 gates_snapshot JSONB, exit_reason TEXT,
                 pnl_pts NUMERIC, pnl_pct NUMERIC, net_pnl_pct NUMERIC,
                 cost_flat NUMERIC DEFAULT 500, cost_slippage_pct NUMERIC DEFAULT 0.05,
+                basis_entry_rs NUMERIC, basis_entry_pct NUMERIC, basis_entry_sign TEXT, basis_dir_entry TEXT,
+                basis_exit_rs NUMERIC, basis_exit_pct NUMERIC, basis_exit_sign TEXT, basis_dir_exit TEXT,
+                results_date DATE,
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
@@ -159,6 +163,86 @@ def _volx(cur, sym: str, d: date, bars: List[Tuple], priors: List[date]) -> Opti
         return None
     avg = sum(pcs) / len(pcs)
     return round(today_cum / avg, 2) if avg else None
+
+
+def _touch_count(bars: List[Tuple], vwap: float) -> int:
+    """Number of VWAP touches this session = sign-changes of (close - vwap) + 1 (id=3063: #1-#3 allowed)."""
+    signs = []
+    for b in bars:
+        c = _f(b[4])
+        if c is None:
+            continue
+        signs.append(1 if c >= vwap else -1)
+    if not signs:
+        return 0
+    crosses = sum(1 for i in range(1, len(signs)) if signs[i] != signs[i - 1])
+    return crosses + 1
+
+
+def _fut_price(cur, sym: str, d: date) -> Optional[float]:
+    """cc#444: EXECUTION price = concurrent Fyers FUTURES 5m close (latest on the as-of session).
+    Signals compute on equity; entries/exits/MTM price on futures."""
+    cur.execute("""SELECT close FROM intraday_prices WHERE symbol=%s AND source='fyers_fut'
+                   AND timeframe='5m' AND ts::date=%s ORDER BY ts DESC LIMIT 1""", (sym, d))
+    r = cur.fetchone()
+    return _f(r[0]) if r else None
+
+
+def _target_dist(side: str, eq_px: float, atr: Optional[float], piv: Dict) -> Tuple[Optional[float], Optional[str]]:
+    """id=3064 min-1% target rule (equity-derived DISTANCE in points, frozen at entry):
+    ATR(5m,20) if ATR%>1, else R1 if room>1%, else R2 (shorts ATR->S1->S2)."""
+    if not eq_px:
+        return None, None
+    atr_pct = (atr / eq_px * 100) if atr else 0.0
+    if side == "long":
+        if atr and atr_pct > 1.0:
+            return atr, "ATR"
+        r1, r2 = piv.get("r1"), piv.get("r2")
+        if r1 and (r1 - eq_px) / eq_px * 100 > 1.0:
+            return (r1 - eq_px), "R1"
+        if r2 and r2 > eq_px:
+            return (r2 - eq_px), "R2"
+        return (atr, "ATR") if atr else (None, None)
+    if atr and atr_pct > 1.0:
+        return atr, "ATR"
+    s1, s2 = piv.get("s1"), piv.get("s2")
+    if s1 and (eq_px - s1) / eq_px * 100 > 1.0:
+        return (eq_px - s1), "S1"
+    if s2 and s2 < eq_px:
+        return (eq_px - s2), "S2"
+    return (atr, "ATR") if atr else (None, None)
+
+
+def _basis_snapshot(cur, sym: str, latest: Dict) -> Dict:
+    """cc#444 basis research field: fut-eq value (Rs + %), premium/discount sign, and 30-min
+    direction (widening = |basis| growing, fading = shrinking toward 0, flat)."""
+    rs = latest.get("basis"); pct = latest.get("pct")
+    sign = None if rs is None else ("premium" if rs >= 0 else "discount")
+    direction = "flat"
+    cur.execute("""SELECT ts, basis FROM futures_basis WHERE symbol=%s AND basis IS NOT NULL
+                   ORDER BY ts DESC LIMIT 12""", (sym,))
+    rows = cur.fetchall()
+    if len(rows) >= 2 and rs is not None:
+        latest_ts = rows[0][0]; ref = None
+        for ts, b in rows:
+            if (latest_ts - ts).total_seconds() >= 30 * 60:
+                ref = _f(b); break
+        if ref is None:
+            ref = _f(rows[-1][1])
+        if ref is not None:
+            if abs(rs - ref) < 0.5:
+                direction = "flat"
+            else:
+                direction = "widening" if abs(rs) > abs(ref) else "fading"
+    return {"rs": _rnd(rs), "pct": _rnd(pct), "sign": sign, "dir": direction}
+
+
+def _results_date(cur, sym: str) -> Optional[str]:
+    """Next earnings ex_date for the symbol (G5 / id=3062 Results column). None if none upcoming."""
+    cur.execute("SELECT MIN(ex_date) FROM earnings_calendar WHERE UPPER(ticker)=%s AND ex_date >= CURRENT_DATE",
+                (sym.upper(),))
+    r = cur.fetchone()
+    return str(r[0]) if r and r[0] else None
 
 
 # ── shared per-cycle context loaded once ──────────────────────────────────────────
@@ -260,10 +344,16 @@ def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
     if None in (cur_c, vwap):
         return []
 
+    # cc#444 (id=3063): gap (from prev close) + VWAP touch counter (#1-#3 allowed)
+    today_open = _f(bars[0][1])
+    gap_pct = ((today_open - prev) / prev * 100.0) if (today_open and prev) else None
+    touch = _touch_count(bars, vwap)
     base = {"cmp": _rnd(cur_c), "vwap": _rnd(vwap), "atr": _rnd(atr), "volx": _rnd(volx),
             "or_high": _rnd(or_hi), "or_low": _rnd(or_lo), "sess_high": _rnd(sess_hi),
-            "day_pct": _rnd(day_pct), "pp": _rnd(pp), "r1": _rnd(r1), "s1": _rnd(s1),
+            "day_pct": _rnd(day_pct), "gap_pct": _rnd(gap_pct), "vwap_touch": touch,
+            "pp": _rnd(pp), "r1": _rnd(r1), "s1": _rnd(s1),
             "basis": _rnd(basis), "oi_chg": _rnd(oi_chg), "sector_day": _rnd(sec_day),
+            "turnover_top80": True, "v10_long": ctx.get("v10_long"), "v10_short": ctx.get("v10_short"),
             "segment": seg, "bar_ts": bars[-1][0].isoformat()}
     out: List[Dict] = []
 
@@ -271,34 +361,46 @@ def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
     if sym not in ctx["top80"] or sym in ctx["blackout"]:
         return []
 
-    # ── ORB ──────────────────────────────────────────────────────────────────────
-    if None not in (or_hi, or_lo, volx, day_pct):
-        for side, brk, dmin, dmax, basis_ok in (
-            ("long",  cur_c > or_hi,  0.3,  3.0, (basis is not None and basis >= 0)),
-            ("short", cur_c < or_lo, -3.0, -0.3, (basis is not None and basis < 0)),
-        ):
-            aligned = (cur_c > vwap) if side == "long" else (cur_c < vwap)
-            dp_ok = (dmin <= day_pct <= dmax) if side == "long" else (dmin <= day_pct <= dmax)
-            if brk and volx >= 1.5 and aligned and basis_ok and dp_ok and _regime_ok(ctx, side):
-                out.append({"tag": "ORB", "side": side, "entry_px": cur_c, "snapshot": {**base}})
+    # id=3064 common structural gate for the momentum setups (ORB, VWAP-RECLAIM):
+    # long only above PP, short only below PP. (R1-REJ / S1-BOUNCE are mean-reversion-to-PP and
+    # keep their own room-to-PP rule — the CMP-vs-PP gate would contradict them by construction.)
+    def _pp_ok(side):
+        if pp is None:
+            return False
+        return cur_c > pp if side == "long" else cur_c < pp
 
-    # ── VWAP-RECLAIM ─────────────────────────────────────────────────────────────
-    # above-VWAP fraction of the session + shallow dip below then close back above (long); mirror short
-    if volx is not None:
+    # ── ORB (id=3063) ─────────────────────────────────────────────────────────────
+    # long: VolX>=1.25, gap-up<=2%. short: NO volume rule, gap-down<=3%.
+    if None not in (or_hi, or_lo, day_pct) and gap_pct is not None:
+        long_ok = (cur_c > or_hi and cur_c > vwap and (basis is not None and basis >= 0)
+                   and 0.3 <= day_pct <= 3.0 and (volx is not None and volx >= 1.25)
+                   and gap_pct <= 2.0 and _pp_ok("long") and _regime_ok(ctx, "long"))
+        if long_ok:
+            out.append({"tag": "ORB", "side": "long", "entry_px": cur_c, "snapshot": {**base}})
+        short_ok = (cur_c < or_lo and cur_c < vwap and (basis is not None and basis < 0)
+                    and -3.0 <= day_pct <= -0.3 and gap_pct >= -3.0
+                    and _pp_ok("short") and _regime_ok(ctx, "short"))
+        if short_ok:
+            out.append({"tag": "ORB", "side": "short", "entry_px": cur_c, "snapshot": {**base}})
+
+    # ── VWAP-RECLAIM (id=3063) ────────────────────────────────────────────────────
+    # touch #1-#3; long relative-strength (sector>0 AND stock>sector, VolX>=1.0);
+    # short mirror (sector<0 AND stock<sector, NO volume rule).
+    if touch <= 3 and len(bars) >= 2:
         above_frac = sum(1 for bb in bars if (_f(bb[4]) or 0) >= vwap) / max(1, len(bars))
         below_frac = 1.0 - above_frac
-        prev_c = _f(bars[-2][4]) if len(bars) >= 2 else None
-        prev_low = _f(bars[-2][3]) if len(bars) >= 2 else None
-        # long: majority above VWAP, prior bar dipped <=0.6% below, this bar closes back above
+        prev_c = _f(bars[-2][4]); prev_low = _f(bars[-2][3]); prev_high = _f(bars[-2][2])
         dip_long = (prev_low is not None and prev_low < vwap and (vwap - prev_low) / vwap * 100 <= 0.6)
+        rel_long = (sec_day is not None and day_pct is not None and sec_day > 0 and day_pct > sec_day)
         if (above_frac >= 0.60 and dip_long and prev_c is not None and prev_c < vwap and cur_c > vwap
-                and volx >= 1.0 and (sec_day is not None and sec_day >= 0) and _regime_ok(ctx, "long")):
+                and (volx is not None and volx >= 1.0) and rel_long and _pp_ok("long")
+                and _regime_ok(ctx, "long")):
             out.append({"tag": "VWAP-RECLAIM", "side": "long", "entry_px": cur_c,
                         "snapshot": {**base, "above_vwap_frac": round(above_frac, 2)}})
-        prev_high = _f(bars[-2][2]) if len(bars) >= 2 else None
         rip_short = (prev_high is not None and prev_high > vwap and (prev_high - vwap) / vwap * 100 <= 0.6)
+        rel_short = (sec_day is not None and day_pct is not None and sec_day < 0 and day_pct < sec_day)
         if (below_frac >= 0.60 and rip_short and prev_c is not None and prev_c > vwap and cur_c < vwap
-                and volx >= 1.0 and (sec_day is not None and sec_day <= 0) and _regime_ok(ctx, "short")):
+                and rel_short and _pp_ok("short") and _regime_ok(ctx, "short")):
             out.append({"tag": "VWAP-RECLAIM", "side": "short", "entry_px": cur_c,
                         "snapshot": {**base, "below_vwap_frac": round(below_frac, 2)}})
 
@@ -333,58 +435,55 @@ def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
 
 
 # ── entry / exit ───────────────────────────────────────────────────────────────────
-def _nearest_pivot_cap(side: str, entry: float, target: float, piv: Dict) -> float:
-    """Cap the ATR target at the nearest pivot in the trade direction (R1/R2 for long, S1/S2 for short)."""
-    if side == "long":
-        levels = [v for v in (piv.get("r1"), piv.get("r2")) if v and v > entry]
-        cap = min(levels) if levels else None
-        return min(target, cap) if cap else target
-    levels = [v for v in (piv.get("s1"), piv.get("s2")) if v and v < entry]
-    cap = max(levels) if levels else None
-    return max(target, cap) if cap else target
-
-
 def open_trade(conn, ctx: Dict, cand: Dict) -> Optional[int]:
-    sym = cand["snapshot"].get("symbol") or cand.get("symbol")
-    side = cand["side"]; entry = float(cand["entry_px"]); tag = cand["tag"]
-    atr = cand["snapshot"].get("atr")
-    piv = ctx["pivots"].get(cand["symbol"], {})
-    if atr:
-        raw_target = entry + ATR_MULT * atr if side == "long" else entry - ATR_MULT * atr
-        target = _nearest_pivot_cap(side, entry, raw_target, piv)
-    else:
-        target = None
-    # 1:1 mirror stop, set at order time, never widened
-    stop = (entry - (target - entry)) if (target and side == "long") else \
-           (entry + (entry - target)) if (target and side == "short") else None
+    """cc#444: signal fires on EQUITY; EXECUTION prices on the concurrent FUTURES 5m close.
+    Target = equity-derived min-1% distance (id=3064) applied to the futures entry; 1:1 mirror stop.
+    Records the entry basis (fut-eq Rs/%/sign/dir) + next results date for evening analysis."""
+    sym = cand["symbol"]; side = cand["side"]; tag = cand["tag"]
+    eq_px = float(cand["entry_px"]); atr = cand["snapshot"].get("atr")
+    piv = ctx["pivots"].get(sym, {})
     today = _now().date()
     with conn.cursor() as cur:
+        fut_px = _fut_price(cur, sym, ctx["asof"]) or eq_px
+        dist, tbasis = _target_dist(side, eq_px, atr, piv)   # equity-derived distance (points)
+        if dist and dist > 0:
+            target = fut_px + dist if side == "long" else fut_px - dist
+            stop = fut_px - dist if side == "long" else fut_px + dist   # 1:1 mirror, never widened
+        else:
+            target = stop = None
+        bsnap = _basis_snapshot(cur, sym, ctx["basis"].get(sym, {}))
+        rdate = _results_date(cur, sym)
         cur.execute("""INSERT INTO v14_trades
-            (trade_date, tag, symbol, side, entry_ts, entry_px, stop_px, target_px, atr,
-             gates_snapshot, status)
-            VALUES (%s,%s,%s,%s,NOW(),%s,%s,%s,%s,%s,'open') RETURNING id""",
-            (today, tag, cand["symbol"], side, entry, stop, target, atr,
-             json.dumps(cand["snapshot"])))
+            (trade_date, tag, symbol, side, entry_ts, entry_px, eq_signal_px, stop_px, target_px,
+             target_basis, atr, gates_snapshot, results_date,
+             basis_entry_rs, basis_entry_pct, basis_entry_sign, basis_dir_entry, status)
+            VALUES (%s,%s,%s,%s,NOW(),%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'open') RETURNING id""",
+            (today, tag, sym, side, round(fut_px, 2), round(eq_px, 2), _rnd(stop), _rnd(target),
+             tbasis, atr, json.dumps(cand["snapshot"]), rdate,
+             bsnap["rs"], bsnap["pct"], bsnap["sign"], bsnap["dir"]))
         tid = cur.fetchone()[0]
         cur.execute("""INSERT INTO v14_watchlist (trade_date, tag, symbol, notes)
                        VALUES (%s,%s,%s,'entered') ON CONFLICT (trade_date, tag, symbol)
-                       DO UPDATE SET touches=v14_watchlist.touches+1""",
-                    (today, tag, cand["symbol"]))
+                       DO UPDATE SET touches=v14_watchlist.touches+1""", (today, tag, sym))
     conn.commit()
-    log.info(f"v14 OPEN {tag} {side} {cand['symbol']} @ {entry} tgt={target} stop={stop}")
+    log.info(f"v14 OPEN {tag} {side} {sym} fut@{fut_px} eq@{eq_px} tgt={target}({tbasis}) stop={stop}")
     return tid
 
 
-def _close_trade(conn, trade: Dict, exit_px: float, reason: str):
+def _close_trade(conn, trade: Dict, exit_px: float, reason: str, basis_ctx: Optional[Dict] = None):
     side = trade["side"]; entry = float(trade["entry_px"])
     pnl_pts = (exit_px - entry) if side == "long" else (entry - exit_px)
     pnl_pct = pnl_pts / entry * 100.0 if entry else 0.0
     net_pct = pnl_pct - COST_SLIPPAGE
     with conn.cursor() as cur:
+        bs = _basis_snapshot(cur, trade["symbol"], (basis_ctx or {}).get(trade["symbol"], {})) \
+            if basis_ctx is not None else {"rs": None, "pct": None, "sign": None, "dir": None}
         cur.execute("""UPDATE v14_trades SET exit_ts=NOW(), exit_px=%s, exit_reason=%s,
-                       pnl_pts=%s, pnl_pct=%s, net_pnl_pct=%s, status='closed' WHERE id=%s""",
-                    (round(exit_px, 2), reason, round(pnl_pts, 2), round(pnl_pct, 3),
-                     round(net_pct, 3), trade["id"]))
+                       pnl_pts=%s, pnl_pct=%s, net_pnl_pct=%s,
+                       basis_exit_rs=%s, basis_exit_pct=%s, basis_exit_sign=%s, basis_dir_exit=%s,
+                       status='closed' WHERE id=%s""",
+                    (round(exit_px, 2), reason, round(pnl_pts, 2), round(pnl_pct, 3), round(net_pct, 3),
+                     bs["rs"], bs["pct"], bs["sign"], bs["dir"], trade["id"]))
     conn.commit()
     log.info(f"v14 CLOSE {trade['tag']} {trade['symbol']} @ {exit_px} ({reason}) {pnl_pts:+.2f}pts")
 
@@ -401,14 +500,16 @@ def manage_open(conn, ctx: Dict) -> Dict:
     hard = (now.hour, now.minute) >= SQUAREOFF
     for t in opens:
         sym = t["symbol"]; side = t["side"]; entry = _f(t["entry_px"])
+        # cc#444: MTM / exits price on the FUTURES feed (the tradeable instrument), fyers_eq fallback.
         with conn.cursor() as cur:
-            cur.execute("""SELECT close FROM intraday_prices WHERE symbol=%s AND source='fyers_eq'
-                           AND timeframe='5m' AND ts::date=%s ORDER BY ts DESC LIMIT 1""", (sym, d))
-            r = cur.fetchone()
-        cmp_v = _f(r[0]) if r else None
+            cmp_v = _fut_price(cur, sym, d)
+            if cmp_v is None:
+                cur.execute("""SELECT close FROM intraday_prices WHERE symbol=%s AND source='fyers_eq'
+                               AND timeframe='5m' AND ts::date=%s ORDER BY ts DESC LIMIT 1""", (sym, d))
+                r = cur.fetchone(); cmp_v = _f(r[0]) if r else None
         if cmp_v is None or entry is None:
             if hard and cmp_v is not None:
-                _close_trade(conn, t, cmp_v, "squareoff"); closed.append(sym)
+                _close_trade(conn, t, cmp_v, "squareoff", ctx["basis"]); closed.append(sym)
             continue
         move_pct = ((cmp_v - entry) / entry * 100.0) if side == "long" else ((entry - cmp_v) / entry * 100.0)
         stop = _f(t["stop_px"]); target = _f(t["target_px"])
@@ -429,7 +530,7 @@ def manage_open(conn, ctx: Dict) -> Dict:
         elif hard:
             reason = "squareoff"
         if reason:
-            _close_trade(conn, t, cmp_v, reason); closed.append(sym)
+            _close_trade(conn, t, cmp_v, reason, ctx["basis"]); closed.append(sym)
     return {"open": len(opens), "closed": closed}
 
 
@@ -478,13 +579,16 @@ def run_v14_cycle(conn) -> Dict:
 # ── read helpers for the /v14 page ──────────────────────────────────────────────────
 def get_open(conn) -> List[Dict]:
     with conn.cursor() as cur:
-        cur.execute("""SELECT id, tag, symbol, side, entry_ts, entry_px, stop_px, target_px, atr,
-                       gates_snapshot FROM v14_trades WHERE status='open' ORDER BY entry_ts DESC""")
+        cur.execute("""SELECT id, tag, symbol, side, entry_ts, entry_px, eq_signal_px, stop_px,
+                       target_px, target_basis, atr, results_date,
+                       basis_entry_rs, basis_entry_sign, basis_dir_entry, gates_snapshot
+                       FROM v14_trades WHERE status='open' ORDER BY entry_ts DESC""")
         cols = [c[0] for c in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     for r in rows:
         r["entry_ts"] = r["entry_ts"].isoformat() if r["entry_ts"] else None
-        for k in ("entry_px", "stop_px", "target_px", "atr"):
+        r["results_date"] = str(r["results_date"]) if r["results_date"] else None
+        for k in ("entry_px", "eq_signal_px", "stop_px", "target_px", "atr", "basis_entry_rs"):
             r[k] = _f(r[k])
     return rows
 
@@ -492,7 +596,9 @@ def get_open(conn) -> List[Dict]:
 def get_trades(conn, limit: int = 200) -> List[Dict]:
     with conn.cursor() as cur:
         cur.execute("""SELECT id, trade_date, tag, symbol, side, entry_ts, entry_px, exit_ts, exit_px,
-                       exit_reason, pnl_pts, pnl_pct, net_pnl_pct, gates_snapshot
+                       exit_reason, pnl_pts, pnl_pct, net_pnl_pct, target_basis,
+                       basis_entry_rs, basis_entry_sign, basis_dir_entry,
+                       basis_exit_rs, basis_exit_sign, basis_dir_exit, gates_snapshot
                        FROM v14_trades WHERE status='closed' ORDER BY exit_ts DESC LIMIT %s""", (limit,))
         cols = [c[0] for c in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -500,9 +606,60 @@ def get_trades(conn, limit: int = 200) -> List[Dict]:
         r["trade_date"] = str(r["trade_date"])
         r["entry_ts"] = r["entry_ts"].isoformat() if r["entry_ts"] else None
         r["exit_ts"] = r["exit_ts"].isoformat() if r["exit_ts"] else None
-        for k in ("entry_px", "exit_px", "pnl_pts", "pnl_pct", "net_pnl_pct"):
+        for k in ("entry_px", "exit_px", "pnl_pts", "pnl_pct", "net_pnl_pct",
+                  "basis_entry_rs", "basis_exit_rs"):
             r[k] = _f(r[k])
     return rows
+
+
+def get_daily_pnl(conn) -> Dict:
+    """cc#444 daily P&L view: OPEN P&L (live futures MTM of open trades) + CLOSED P&L (realized
+    today, net of costs) + combined day net. As-of futures price off-market."""
+    with conn.cursor() as cur:
+        d = _asof_date(cur)
+        # closed today
+        cur.execute("""SELECT COUNT(*), COUNT(*) FILTER (WHERE net_pnl_pct>0),
+                       COALESCE(SUM(pnl_pts),0), COALESCE(SUM(pnl_pct),0), COALESCE(SUM(net_pnl_pct),0)
+                       FROM v14_trades WHERE status='closed' AND trade_date=%s""", (d,))
+        cn, cw, cpts, cpct, cnet = cur.fetchone()
+        # open MTM
+        cur.execute("SELECT id, symbol, side, entry_px FROM v14_trades WHERE status='open'")
+        opens = cur.fetchall()
+        open_pts = 0.0; open_pct = 0.0; nopen = 0
+        for _id, sym, side, ep in opens:
+            ep = _f(ep)
+            cmpv = _fut_price(cur, sym, d)
+            if cmpv is None or ep is None:
+                continue
+            pts = (cmpv - ep) if side == "long" else (ep - cmpv)
+            open_pts += pts; open_pct += pts / ep * 100.0 if ep else 0.0; nopen += 1
+    return {
+        "asof": str(d) if d else None,
+        "open": {"positions": nopen, "mtm_pts": round(open_pts, 2), "mtm_pct": round(open_pct, 3)},
+        "closed_today": {"trades": int(cn), "wins": int(cw),
+                         "win_rate": round(100 * cw / cn, 1) if cn else 0.0,
+                         "gross_pts": round(_f(cpts) or 0, 2), "gross_pct": round(_f(cpct) or 0, 3),
+                         "net_pct": round(_f(cnet) or 0, 3)},
+        "combined_net_pct": round((_f(cnet) or 0) + open_pct, 3),
+    }
+
+
+def get_day_log(conn, limit: int = 30) -> List[Dict]:
+    """cc#444 Day-Log history: per trading day — trades, WR, gross pts, cost %, net %."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT trade_date, COUNT(*), COUNT(*) FILTER (WHERE net_pnl_pct>0),
+                       COALESCE(ROUND(SUM(pnl_pts)::numeric,2),0),
+                       COALESCE(ROUND(SUM(pnl_pct)::numeric,3),0),
+                       COALESCE(ROUND(SUM(net_pnl_pct)::numeric,3),0)
+                       FROM v14_trades WHERE status='closed'
+                       GROUP BY trade_date ORDER BY trade_date DESC LIMIT %s""", (limit,))
+        out = []
+        for d, n, w, gpts, gpct, npct in cur.fetchall():
+            out.append({"date": str(d), "trades": int(n),
+                        "win_rate": round(100 * w / n, 1) if n else 0.0,
+                        "gross_pts": _f(gpts), "cost_pct": round((_f(gpct) or 0) - (_f(npct) or 0), 3),
+                        "net_pct": _f(npct)})
+    return out
 
 
 def get_tag_summary(conn, trade_date: Optional[str] = None) -> List[Dict]:

@@ -42,13 +42,16 @@ def v14_trades(limit: int = 200):
 
 @router.get("/summary")
 def v14_summary(trade_date: Optional[str] = None):
-    """Per-tag day summary (trades / win-rate / net points after costs) + spec metadata."""
+    """Per-tag day summary + daily P&L view (open MTM + closed realized) + day-log history."""
     with _conn() as conn:
         tags = v14_engine.get_tag_summary(conn, trade_date)
-    return {"trade_date": trade_date, "by_tag": tags,
-            "spec": "V14 P1 · ORB / VWAP-RECLAIM / R1-REJ · paper · id=3060",
+        daily = v14_engine.get_daily_pnl(conn)
+        day_log = v14_engine.get_day_log(conn)
+    return {"trade_date": trade_date, "by_tag": tags, "daily_pnl": daily, "day_log": day_log,
+            "spec": "V14 P1.1 · ORB / VWAP-RECLAIM / R1-REJ · paper · id=3062/3063/3064 (final)",
             "cost": {"flat_rs": v14_engine.COST_FLAT, "slippage_pct": v14_engine.COST_SLIPPAGE},
-            "max_slots": v14_engine.MAX_SLOTS, "clock": v14_engine.CLOCK_WINDOWS}
+            "max_slots": v14_engine.MAX_SLOTS, "clock": v14_engine.CLOCK_WINDOWS,
+            "execution": "signals on equity 5m; execution/MTM on futures 5m"}
 
 
 @router.post("/tick")

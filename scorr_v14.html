@@ -61,7 +61,7 @@
 </div>
 <script>
 const EP={pos:"/api/v14/positions",trades:"/api/v14/trades?limit=200",summary:"/api/v14/summary"};
-const D={open:[],closed:[],tags:[],cost:{}};
+const D={open:[],closed:[],tags:[],cost:{},daily:null,dayLog:[]};
 async function getJSON(u){const r=await fetch(u,{headers:{'Accept':'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function num(v,d=2){return v==null||isNaN(v)?'--':Number(v).toFixed(d);}
@@ -86,41 +86,76 @@ function rSummary(){
     <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
     <div class="note">Costs per trade: Rs ${cost.flat_rs??500} flat + ${cost.slippage_pct??0.05}% slippage (net % is after slippage). Viability gate: ship only setups clearing 55% WR after costs at 1:1 (BT7 replay).</div>`;
 }
+function basisCell(rs,sign,dir){
+  if(rs==null)return'<td style="color:var(--dim)">--</td>';
+  const col=(sign==='premium')?'var(--grn)':(sign==='discount')?'var(--red)':'var(--mut)';
+  return `<td style="color:${col}" title="${esc(sign||'')} · ${esc(dir||'')}">${num(rs,1)}<span style="color:var(--dim);font-size:9px"> ${(dir||'').slice(0,4)}</span></td>`;
+}
 function rOpen(){
-  const head=['TAG','SIDE','SYMBOL','ENTRY','STOP','TARGET','ATR','SINCE'];
+  const head=['TAG','SIDE','SYMBOL','ENTRY(F)','EQ SIG','STOP','TARGET','T·BASIS','BASIS','RESULTS','SINCE'];
   const body=D.open.length?D.open.map(p=>`<tr>
     <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
     <td class="sym">${esc(p.symbol)}</td>
     <td>${num(p.entry_px)}</td>
+    <td style="color:var(--mut)">${num(p.eq_signal_px)}</td>
     <td class="neg">${num(p.stop_px)}</td>
     <td class="pos">${num(p.target_px)}</td>
-    <td style="color:var(--mut)">${num(p.atr,1)}</td>
+    <td style="color:var(--mut);font-size:10px">${esc(p.target_basis||'--')}</td>
+    ${basisCell(p.basis_entry_rs,p.basis_entry_sign,p.basis_dir_entry)}
+    <td style="color:${p.results_date?'var(--amber)':'var(--dim)'};font-size:10px">${esc(p.results_date||'--')}</td>
     <td style="color:var(--dim)">${fmtT(p.entry_ts)}</td></tr>`).join('')
-    :`<tr><td colspan="8" class="empty">No open positions.</td></tr>`;
-  return `<div class="ptitle">Open positions <span class="ct">${D.open.length} / 4 slots</span></div>
+    :`<tr><td colspan="11" class="empty">No open positions.</td></tr>`;
+  return `<div class="ptitle">Open positions <span class="ct">${D.open.length} / 4 slots · entry priced on FUT</span></div>
     <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function rClosed(){
-  const head=['DATE','TAG','SIDE','SYMBOL','ENTRY','EXIT','REASON','PNL PTS','NET %'];
+  const head=['DATE','TAG','SIDE','SYMBOL','ENTRY','EXIT','REASON','BASIS↔','PNL PTS','NET %'];
   const body=D.closed.length?D.closed.map(p=>`<tr>
     <td style="color:var(--mut);font-size:10px">${esc(p.trade_date)}</td>
     <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
     <td class="sym">${esc(p.symbol)}</td>
     <td>${num(p.entry_px)}</td><td>${num(p.exit_px)}</td>
     <td style="color:var(--mut);font-size:10px">${esc(p.exit_reason||'')}</td>
+    <td style="font-size:10px;color:var(--dim)" title="entry ${esc(p.basis_entry_sign||'')}/${esc(p.basis_dir_entry||'')} → exit ${esc(p.basis_exit_sign||'')}/${esc(p.basis_dir_exit||'')}">${num(p.basis_entry_rs,1)}→${num(p.basis_exit_rs,1)}</td>
     <td class="${(p.pnl_pts||0)>=0?'pos':'neg'}">${sign(p.pnl_pts,1)}</td>
     <td class="${(p.net_pnl_pct||0)>=0?'pos':'neg'}">${sign(p.net_pnl_pct,2)}%</td></tr>`).join('')
-    :`<tr><td colspan="9" class="empty">No closed trades yet.</td></tr>`;
+    :`<tr><td colspan="10" class="empty">No closed trades yet.</td></tr>`;
   return `<div class="ptitle">Closed trades <span class="ct">${D.closed.length} logged</span></div>
     <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
     <div class="note">Every row carries a full gates snapshot at entry (in v14_trades.gates_snapshot) for evening per-tag analysis.</div>`;
 }
-function render(){document.getElementById('root').innerHTML=rSummary()+rOpen()+rClosed();}
+function rDaily(){
+  const d=D.daily; if(!d)return'';
+  const o=d.open||{},c=d.closed_today||{};
+  const cell=(k,v,col)=>`<div class="card"><div class="k">${k}</div><div class="v" style="color:${col||'var(--txt)'}">${v}</div></div>`;
+  const c1=(x)=>x>=0?'var(--grn)':'var(--red)';
+  return `<div class="ptitle">Daily P&amp;L <span class="ct">${d.asof||''} · as-of</span></div>
+    <div class="cards">
+      ${cell('Open P&L (MTM)', sign(o.mtm_pct,2)+'%', c1(o.mtm_pct||0))}
+      ${cell('Open positions', (o.positions||0)+' / 4')}
+      ${cell('Closed today', sign(c.net_pct,2)+'%', c1(c.net_pct||0))}
+      ${cell('Closed WR', (c.win_rate||0)+'%', (c.win_rate||0)>=55?'var(--grn)':'var(--amber)')}
+      ${cell('Day net (comb.)', sign(d.combined_net_pct,2)+'%', c1(d.combined_net_pct||0))}
+    </div>`;
+}
+function rDayLog(){
+  const l=D.dayLog||[]; if(!l.length)return'';
+  const head=['DATE','TRADES','WIN RATE','GROSS PTS','COST %','NET %'];
+  const body=l.map(x=>`<tr>
+    <td class="sym">${esc(x.date)}</td><td>${x.trades}</td>
+    <td class="${x.win_rate>=55?'pos':''}">${x.win_rate}%</td>
+    <td class="${(x.gross_pts||0)>=0?'pos':'neg'}">${sign(x.gross_pts,1)}</td>
+    <td style="color:var(--mut)">${num(x.cost_pct,3)}%</td>
+    <td class="${(x.net_pct||0)>=0?'pos':'neg'}">${sign(x.net_pct,2)}%</td></tr>`).join('');
+  return `<div class="ptitle">Day log <span class="ct">${l.length} days</span></div>
+    <div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function render(){document.getElementById('root').innerHTML=rDaily()+rSummary()+rOpen()+rClosed()+rDayLog();}
 async function load(){
   try{
     const [pos,tr,sm]=await Promise.all([getJSON(EP.pos),getJSON(EP.trades),getJSON(EP.summary)]);
     D.open=(pos&&pos.open_positions)||[]; D.closed=(tr&&tr.closed_trades)||[];
-    D.tags=(sm&&sm.by_tag)||[]; D.cost=(sm&&sm.cost)||{};
+    D.tags=(sm&&sm.by_tag)||[]; D.cost=(sm&&sm.cost)||{}; D.daily=(sm&&sm.daily_pnl)||null; D.dayLog=(sm&&sm.day_log)||[];
   }catch(e){document.getElementById('root').innerHTML=`<div class="empty">V14 feed failed: ${esc(e.message)}</div>`;return;}
   render();
 }
