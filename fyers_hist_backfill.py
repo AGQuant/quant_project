@@ -371,9 +371,10 @@ async def _probe_startup_trigger():
             fsym, frm, to = parts[0].strip().upper(), parts[1].strip(), parts[2].strip()
             log.info(f"cc#377: hist_fetch flag claimed — {fsym} {frm}..{to} in background")
             threading.Thread(target=fetch_hist_5m, args=(fsym, frm, to), name="cc377-histfetch", daemon=True).start()
-    if _claim_phase_a_flag():   # cc#389
-        log.info("cc#389: phase_a_run flag claimed — starting full 365d warehouse in background")
-        threading.Thread(target=run_phase_a, name="cc389-phasea", daemon=True).start()
+    # cc#390: the MAIN APP no longer claims phase_a_run — it lacks the Fyers TOTP env vars and would
+    # only race the worker and fail (SystemExit -> error_token). Phase A now runs exclusively inside
+    # the fyers_feed.py worker (which owns the secrets). run_phase_a() + POST /run_phase_a stay
+    # available for manual/worker use, but there is NO main-app boot auto-claim.
 
 
 # ── admin endpoints (thin wiring; also proxied by the MCP tools in mcp_dispatch.py) ──

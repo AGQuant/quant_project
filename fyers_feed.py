@@ -1556,7 +1556,8 @@ def _worker_run_phase_a():
 
 def _phase_a_worker_daemon():
     """Boot + hourly idle check: when off-market, atomically claim phase_a_run and run the warehouse
-    once, then keep idle-checking hourly (so a missed boot claim still fires later)."""
+    once, then keep idle-checking hourly (so a missed boot claim still fires later).
+    cc#390 follow-up: main-app auto-claim removed, so the worker is the sole owner of this flag."""
     while True:
         try:
             if not _phase_a_market_open() and _claim_phase_a_worker():
