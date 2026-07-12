@@ -17,7 +17,7 @@ import json
 from typing import Optional, List
 import psycopg
 from fastapi import APIRouter, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -248,11 +248,11 @@ def v12_filters_meta():
     return out
 
 
-@router.get("/screener", response_class=HTMLResponse)
+@router.get("/screener")
 def screener_page():
-    """V12 screener frontend (CC_TASK_106). Auth-gated via PROTECTED in main.py middleware."""
-    with open("screener.html", "r", encoding="utf-8") as f:
-        return f.read()
+    """cc#407: the old unified Screener is retired — V13 is the single screening surface (cc#393).
+    301 keeps bookmarks working. screener.html kept one release for rollback, then deleted next."""
+    return RedirectResponse(url="/v13", status_code=301)
 
 
 # ===========================================================================

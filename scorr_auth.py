@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 router = APIRouter()
 
 COOKIE_NAME = "scorr_auth"
-PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/screener", "/fpc", "/news", "/holdings", "/filters"}
+PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/scanners", "/fpc", "/news", "/holdings", "/filters"}
 _SALT = "scorr2026"
 
 # Hardcoded password — change here to update.

@@ -104,7 +104,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.64"
+VERSION = "2.9.65"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -174,8 +174,9 @@ def _is_embedded(request: Request) -> bool:
 # pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
-                     "/screener", "/intraday", "/structure", "/performance", "/ask",
+                     "/intraday", "/structure", "/performance", "/ask",
                      "/v13", "/v12", "/health"}   # cc#392/394/398: no-store + theme/logout pills
+# cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health")   # cc#392/394/398: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
@@ -695,7 +696,7 @@ NAV_REGISTRY = {
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
     "/v12":          ("V12 · Quant Basket Builder", "nav"),
-    "/screener":     ("Screener (Custom)",    "nav"),
+    "/screener":     ("(-> /v13 · RETIRED)",  "redirect"),   # cc#407 301 (V13 = single screener)
     "/health":       ("Health Report",        "nav"),        # cc#398 rule id=2987
     "/filters":      ("(-> /v13)",            "redirect"),   # cc#393 301
     "/test-cio":     ("(test harness)",       "INTERNAL"),   # test_cio_endpoints, dev-only
