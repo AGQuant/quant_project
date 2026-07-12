@@ -313,6 +313,23 @@ def create_tables():
     INSERT INTO app_config (key, value) VALUES ('yahoo_cmp_fallback', 'off') ON CONFLICT (key) DO NOTHING;
     INSERT INTO app_config (key, value) VALUES ('takeaway_refresh_due', 'false') ON CONFLICT (key) DO NOTHING;
     INSERT INTO app_config (key, value) VALUES ('overview_refresh_due', 'false') ON CONFLICT (key) DO NOTHING;
+    -- cc#394 V12 Quant Basket Builder (P1): one basket definition JSONB, two executors (bt + paper).
+    CREATE TABLE IF NOT EXISTS v12_universes (
+        id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, definition JSONB NOT NULL,
+        created_by TEXT, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS v12_baskets (
+        id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, definition JSONB NOT NULL,
+        status TEXT DEFAULT 'draft', created_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS v12_backtests (
+        id BIGSERIAL PRIMARY KEY, basket_id BIGINT, params_hash TEXT UNIQUE,
+        status TEXT DEFAULT 'pending', result JSONB, error TEXT,
+        created_at TIMESTAMP DEFAULT NOW(), finished_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_v12_backtests_hash ON v12_backtests(params_hash);
+    CREATE INDEX IF NOT EXISTS idx_v12_baskets_status ON v12_baskets(status);
     CREATE TABLE IF NOT EXISTS v8_history_cache (
         symbol TEXT PRIMARY KEY, cache_date DATE NOT NULL,
         closes JSONB, highs JSONB, lows JSONB, volumes JSONB, segment TEXT,

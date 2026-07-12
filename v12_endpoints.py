@@ -13,10 +13,12 @@ filters optional -- no filter returns the full universe, paginated. Default
 sort: gvm_score DESC NULLS LAST. Logic lives here, not in main.py.
 """
 import os
+import json
 from typing import Optional, List
 import psycopg
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 router = APIRouter()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -251,3 +253,142 @@ def screener_page():
     """V12 screener frontend (CC_TASK_106). Auth-gated via PROTECTED in main.py middleware."""
     with open("screener.html", "r", encoding="utf-8") as f:
         return f.read()
+
+
+# ===========================================================================
+# cc#394 V12 QUANT BASKET BUILDER (master spec id=2970) — MODULE 1: universe API
+# ===========================================================================
+# component_1: universe = screener_raw + gvm_scores + input_raw. All filter keys reuse the V13
+# FUNDAMENTAL vocabulary (one vocabulary, never a second list). BFSI rule enforced server-side:
+# a leverage filter (D/E or interest coverage) auto-excludes financial segments. Universe is a
+# saved object (v12_universes), dynamic (re-evaluated) or frozen (symbol list snapshotted at save).
+
+# filter key -> SQL expression. g=gvm_scores, s=screener_raw, i=input_raw
+_UNI_COLS = {
+    "price":            "g.price",
+    "market_cap":       "g.market_cap",
+    "mcap_rank":        "i.mcap_rank",
+    "gvm":              "g.gvm_score",
+    "g_score":          "g.g_score",
+    "v_score":          "g.v_score",
+    "m_score":          "g.m_score",
+    "roe":              's."Return on equity"',
+    "roce":             "s.roce",
+    "opm":              "s.opm",
+    "de":               's."Debt to equity"',
+    "pb":               's."Price to book value"',
+    "pe":               "s.pe",
+    "div_yield":        "s.dividend_yield",
+    "int_cov":          "s.interest_coverage",
+    "sales_growth_3y":  "s.sales_growth_3y",
+    "sales_growth_5y":  "s.sales_growth_5y",
+    "profit_growth_3y": "s.profit_growth_3y",
+    "profit_growth_5y": "s.profit_growth_5y",
+    "qoq_sales":        "s.qoq_sales_growth",
+    "qoq_profit":       "s.qoq_profit_growth",
+    "promoter":         's."Promoter holding"',
+    "fii_change":       "s.fii_change",
+    "dii_change":       "s.dii_change",
+    "w52_index":        "s.return_52w_vs_index",
+}
+_UNI_LEVERAGE_KEYS = {"de", "int_cov"}   # any of these triggers the BFSI exclusion
+
+_UNI_BASE = """
+    FROM gvm_scores g
+    LEFT JOIN screener_raw s ON UPPER(s.nse_code) = UPPER(g.symbol)
+    LEFT JOIN input_raw i    ON UPPER(i.nse_code) = UPPER(g.symbol)
+    WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+"""
+
+
+def _uni_where(filters: dict):
+    """Build the WHERE tail + params from a component_1 filter dict. Each numeric key takes
+    {min?, max?}; `segments` takes a list. BFSI auto-exclusion when a leverage key is used."""
+    conds, params, applied = [], [], []
+    bfsi = False
+    segs = (filters or {}).get("segments")
+    if segs:
+        conds.append("g.segment = ANY(%s)"); params.append(list(segs)); applied.append("segments")
+    for key, expr in _UNI_COLS.items():
+        rng = (filters or {}).get(key)
+        if not isinstance(rng, dict):
+            continue
+        lo, hi = rng.get("min"), rng.get("max")
+        if lo is not None:
+            conds.append(f"{expr} >= %s"); params.append(lo); applied.append(key + "_min")
+        if hi is not None:
+            conds.append(f"{expr} <= %s"); params.append(hi); applied.append(key + "_max")
+        if key in _UNI_LEVERAGE_KEYS and (lo is not None or hi is not None):
+            bfsi = True
+    if bfsi:
+        conds.append("NOT (" + " OR ".join(["g.segment ILIKE %s"] * len(_BFSI_PATTERNS)) + ")")
+        params.extend(_BFSI_PATTERNS); applied.append("bfsi_excluded")
+    where = (" AND " + " AND ".join(conds)) if conds else ""
+    return where, params, applied
+
+
+class V12UniverseReq(BaseModel):
+    name: Optional[str] = None
+    filters: dict = {}
+    mode: str = "dynamic"     # dynamic (re-evaluated at use) | frozen (symbols snapshotted at save)
+    limit: int = 500
+
+
+@router.post("/api/v12/universe/preview")
+def v12_universe_preview(body: V12UniverseReq):
+    """Preview a universe from a filter set — count + ranked sample. No write."""
+    where, params, applied = _uni_where(body.filters or {})
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) " + _UNI_BASE + where, params)
+        total = cur.fetchone()[0]
+        cur.execute(
+            "SELECT g.symbol, g.company_name, g.segment, g.gvm_score, g.g_score, g.v_score, "
+            "g.m_score, g.verdict, g.market_cap, g.price, i.mcap_rank "
+            + _UNI_BASE + where + " ORDER BY g.gvm_score DESC NULLS LAST LIMIT %s",
+            params + [min(max(int(body.limit or 500), 1), 2000)])
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return {"total": total, "count": len(rows), "filters_applied": applied,
+            "bfsi_excluded": ("bfsi_excluded" in applied), "stocks": rows}
+
+
+@router.post("/api/v12/universe/save")
+def v12_universe_save(body: V12UniverseReq):
+    """Persist a universe object (v12_universes). mode='frozen' snapshots the symbol list."""
+    if not body.name:
+        return {"error": "name required"}
+    where, params, applied = _uni_where(body.filters or {})
+    definition = {"filters": body.filters or {}, "mode": body.mode, "filters_applied": applied}
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) " + _UNI_BASE + where, params)
+        total = cur.fetchone()[0]
+        if body.mode == "frozen":
+            cur.execute("SELECT g.symbol " + _UNI_BASE + where + " ORDER BY g.symbol", params)
+            definition["frozen_symbols"] = [r[0] for r in cur.fetchall()]
+        cur.execute("INSERT INTO v12_universes (name, definition, created_at, updated_at) "
+                    "VALUES (%s, %s::jsonb, NOW(), NOW()) RETURNING id",
+                    (body.name, json.dumps(definition)))
+        uid = cur.fetchone()[0]
+        conn.commit()
+    return {"id": uid, "name": body.name, "total": total, "mode": body.mode,
+            "filters_applied": applied}
+
+
+@router.get("/api/v12/universe")
+def v12_universe_list():
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, definition, created_at FROM v12_universes ORDER BY id DESC LIMIT 100")
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return {"count": len(rows), "universes": rows}
+
+
+@router.get("/api/v12/universe/{uid}")
+def v12_universe_get(uid: int):
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, name, definition, created_at FROM v12_universes WHERE id=%s", (uid,))
+        r = cur.fetchone()
+        if not r:
+            return {"error": "not found"}
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, r))
