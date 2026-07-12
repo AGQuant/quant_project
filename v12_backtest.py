@@ -293,19 +293,8 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         equity_series.append({"date": str(d), "equity": round(equity, 4)})
         bench_series.append({"date": str(d), "equity": round(bench_close[d] / bench0 * 100, 4)})
 
-    # core stats (Module 4 enriches)
     years = max((cal[-1] - cal[start_i]).days / 365.25, 1e-9)
-    total_ret = equity / 100.0 - 1.0
-    cagr = (equity / 100.0) ** (1 / years) - 1.0
-    peak, maxdd = 0.0, 0.0
-    for pt in equity_series:
-        peak = max(peak, pt["equity"])
-        if peak > 0:
-            maxdd = min(maxdd, pt["equity"] / peak - 1.0)
-    bench_ret = bench_series[-1]["equity"] / 100.0 - 1.0
-    wins = [t for t in trades if t["return_pct"] > 0]
-    losses = [t for t in trades if t["return_pct"] < 0]
-
+    pack = _stats_pack(equity_series, bench_series, trades, years, equity)
     return {
         "pit_flag": pit_flag,
         "pit_partial": pit_flag in ("current_snapshot",),
@@ -314,16 +303,108 @@ def run_backtest(basket_def, start, end, benchmark="NIFTY50"):
         "rebalances": len(rebals), "freq": freq,
         "equity_series": equity_series, "benchmark_series": bench_series,
         "rebalance_log": rebalance_log[-60:], "trades": trades,
-        "stats": {
-            "start_capital": 100.0, "end_capital": round(equity, 2),
-            "absolute_return_pct": round(total_ret * 100, 2), "cagr_pct": round(cagr * 100, 2),
-            "max_drawdown_pct": round(maxdd * 100, 2),
-            "benchmark_return_pct": round(bench_ret * 100, 2),
-            "alpha_pct": round((total_ret - bench_ret) * 100, 2),
-            "total_trades": len(trades), "win_trades": len(wins), "loss_trades": len(losses),
-            "accuracy_pct": round(len(wins) / (len(wins) + len(losses)) * 100, 1) if (wins or losses) else None,
-        },
+        "stats": pack["stats"], "month_wise": pack["month_wise"],
+        "yearly": pack["yearly"], "streaks": pack["streaks"], "honesty": pack["honesty"],
     }
+
+
+# ── MODULE 4: stats pack (Scorr names + house honesty guards, spec fix_5) ─────────
+
+def _daily_rets(series):
+    out = []
+    for i in range(1, len(series)):
+        p0, p1 = series[i - 1]["equity"], series[i]["equity"]
+        out.append((p1 / p0 - 1.0) if p0 else 0.0)
+    return out
+
+
+def _mean(xs):
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+def _pstd(xs):
+    if len(xs) < 2:
+        return 0.0
+    m = _mean(xs)
+    return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
+
+
+def _stats_pack(equity_series, bench_series, trades, years, end_capital):
+    """Full analytics per spec fix_5, Scorr names. Daily returns drive Sharpe/Beta/Alpha; equity
+    marks drive drawdown; trades drive accuracy/streaks. Honesty guards: yearly split, min-n, geometry."""
+    total_ret = end_capital / 100.0 - 1.0
+    cagr = (end_capital / 100.0) ** (1 / years) - 1.0
+    # drawdown on daily equity marks
+    peak = maxdd = 0.0
+    for pt in equity_series:
+        peak = max(peak, pt["equity"])
+        if peak > 0:
+            maxdd = min(maxdd, pt["equity"] / peak - 1.0)
+    bench_end = bench_series[-1]["equity"] if bench_series else 100.0
+    bench_ret = bench_end / 100.0 - 1.0
+    bench_cagr = (bench_end / 100.0) ** (1 / years) - 1.0
+    pr, br = _daily_rets(equity_series), _daily_rets(bench_series)
+    n = min(len(pr), len(br))
+    pr, br = pr[:n], br[:n]
+    sd_p = _pstd(pr)
+    sharpe = (_mean(pr) / sd_p * (252 ** 0.5)) if sd_p else None
+    # beta / CAPM alpha (rf=0)
+    beta = alpha = None
+    if n >= 2:
+        mp, mb = _mean(pr), _mean(br)
+        var_b = sum((x - mb) ** 2 for x in br) / n
+        if var_b:
+            beta = sum((pr[i] - mp) * (br[i] - mb) for i in range(n)) / n / var_b
+            alpha = (cagr - beta * bench_cagr)
+    calmar = (cagr / abs(maxdd)) if maxdd else None
+    wins = [t for t in trades if t["return_pct"] > 0]
+    losses = [t for t in trades if t["return_pct"] < 0]
+    # streaks (by exit date)
+    st = sorted(trades, key=lambda t: t.get("exit_date", ""))
+    win_streak = loss_streak = cw = cl = 0
+    for t in st:
+        if t["return_pct"] > 0:
+            cw += 1; cl = 0; win_streak = max(win_streak, cw)
+        elif t["return_pct"] < 0:
+            cl += 1; cw = 0; loss_streak = max(loss_streak, cl)
+    # month-wise + yearly (compound daily returns by period)
+    mw, yr = {}, {}
+    for i in range(1, len(equity_series)):
+        d = equity_series[i]["date"]
+        r = pr[i - 1] if i - 1 < len(pr) else 0.0
+        mw[d[:7]] = (mw.get(d[:7], 1.0)) * (1 + r)
+        yr[d[:4]] = (yr.get(d[:4], 1.0)) * (1 + r)
+    month_wise = [{"month": k, "return_pct": round((v - 1) * 100, 2)} for k, v in sorted(mw.items())]
+    yearly = [{"year": k, "return_pct": round((v - 1) * 100, 2)} for k, v in sorted(yr.items())]
+    profits = [t["return_pct"] for t in wins]
+    losses_pct = [t["return_pct"] for t in losses]
+    stats = {
+        "start_capital": 100.0, "end_capital": round(end_capital, 2),
+        "absolute_return_pct": round(total_ret * 100, 2), "cagr_pct": round(cagr * 100, 2),
+        "xirr_pct": round(cagr * 100, 2),   # single lump-sum in/out -> XIRR == CAGR
+        "max_drawdown_pct": round(maxdd * 100, 2),
+        "sharpe": round(sharpe, 2) if sharpe is not None else None,
+        "calmar": round(calmar, 2) if calmar is not None else None,
+        "beta": round(beta, 2) if beta is not None else None,
+        "alpha_pct": round(alpha * 100, 2) if alpha is not None else None,
+        "benchmark_return_pct": round(bench_ret * 100, 2),
+        "benchmark_cagr_pct": round(bench_cagr * 100, 2),
+        "total_trades": len(trades), "win_trades": len(wins), "loss_trades": len(losses),
+        "accuracy_pct": round(len(wins) / (len(wins) + len(losses)) * 100, 1) if (wins or losses) else None,
+        "avg_profit_pct": round(_mean(profits), 2) if profits else None,
+        "avg_loss_pct": round(_mean(losses_pct), 2) if losses_pct else None,
+        "max_profit_pct": round(max(profits), 2) if profits else None,
+        "max_loss_pct": round(min(losses_pct), 2) if losses_pct else None,
+        "longest_win_streak": win_streak, "longest_loss_streak": loss_streak,
+    }
+    honesty = {
+        "min_n_badge": len(trades) < 50,
+        "geometry": "Returns are geometric (compounded); drawdown measured on daily equity marks.",
+        "yearly_split_shown": True,
+        "note": "Yearly split always shown; a min-n badge flags <50 trades.",
+    }
+    return {"stats": stats, "month_wise": month_wise, "yearly": yearly,
+            "streaks": {"win": win_streak, "loss": loss_streak}, "honesty": honesty}
 
 
 def _passes_gates(series, sym, d, entry):
