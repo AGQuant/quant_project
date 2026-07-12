@@ -335,6 +335,21 @@
       <div class="modal-body"><div style="height:280px;position:relative"><canvas id="bankniftyPcrChart"></canvas></div></div>
     </div>
   </div>
+  <!-- cc#448: ADR 5-trading-day trend popout — mirrors the VIX/PCR popout pattern exactly (persistent
+       canvas, .modal-overlay/.open show-hide, refreshed on the gate cadence). Daily breadth ratio,
+       zone-coloured per cc#443 (>2 bullish · 0.5-2 neutral · <0.5 weak). Replaces the inline sparkline. -->
+  <div class="modal-overlay" id="adrCard" onclick="if(event.target===this)closeAdr()">
+    <div class="modal-box" style="max-width:680px;width:94%">
+      <div class="modal-head">
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:800;color:var(--txt)">ADR &middot; Advance/Decline</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5 trading-day trend &middot; &gt;2 bullish &middot; 0.5&ndash;2 neutral &middot; &lt;0.5 weak &middot; last <b id="adrLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+        </div>
+        <button onclick="closeAdr()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
+      </div>
+      <div class="modal-body"><div style="height:280px;position:relative"><canvas id="adrChart"></canvas></div></div>
+    </div>
+  </div>
   <div class="tabs" id="tabs"></div>
   <div id="panels"></div>
 
@@ -847,6 +862,10 @@ function closeVix(){const el=document.getElementById('vixCard');if(el)el.classLi
 function openNiftyPcr(){const el=document.getElementById('niftyPcrCard');if(!el)return;el.classList.add('open');if(typeof NIFTY_PCR_CHART!=='undefined'&&NIFTY_PCR_CHART&&NIFTY_PCR_CHART.resize)NIFTY_PCR_CHART.resize();}
 function closeNiftyPcr(){const el=document.getElementById('niftyPcrCard');if(el)el.classList.remove('open');}
 function openBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard');if(!el)return;el.classList.add('open');if(typeof BANKNIFTY_PCR_CHART!=='undefined'&&BANKNIFTY_PCR_CHART&&BANKNIFTY_PCR_CHART.resize)BANKNIFTY_PCR_CHART.resize();}
+// cc#448: ADR trend popout — mirrors openVix()/closeVix(). Build/refresh on open so the chart is
+// current even if the gate-cadence refresh hasn't run since the last adrHistory fetch.
+function openAdr(){const el=document.getElementById('adrCard');if(!el)return;el.classList.add('open');try{loadAdrChart();}catch(e){}if(typeof ADR_CHART!=='undefined'&&ADR_CHART&&ADR_CHART.resize)ADR_CHART.resize();}
+function closeAdr(){const el=document.getElementById('adrCard');if(el)el.classList.remove('open');}
 function closeBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard');if(el)el.classList.remove('open');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();closeNiftyPcr();closeBankniftyPcr();}});
 
@@ -1269,31 +1288,8 @@ function pivotBar(cmp,pp,r1,s1){
     </div></div>`;
 }
 
-// cc#443: compact ADR rolling-trend sparkline for the mood panel (below the India VIX line), same
-// visual language as the VIX/PCR trends. 5 trading days (weekend-excluded server-side), latest value
-// + weekday stamp; colour by ADR zone (>2 bullish green, 0.5-2 neutral amber, <0.5 red); per-point
-// hover shows the date + value.
-function _adrSpark(){
-  const pts=(cache.adrHistory&&cache.adrHistory.points)||[];
-  if(!pts.length)return'';
-  const vals=pts.map(p=>Number(p.adr));
-  const last=vals[vals.length-1];
-  const ld=pts[pts.length-1].date;
-  const dow=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][(new Date(ld+'T00:00:00Z')).getUTCDay()];
-  const zc=last>2?'var(--grn)':last<0.5?'var(--red)':'var(--amber)';
-  const W=118,H=26,pad=3;
-  const mn=Math.min(...vals),mx=Math.max(...vals),rng=(mx-mn)||1;
-  const X=i=>pad+i*(W-2*pad)/Math.max(1,vals.length-1);
-  const Y=v=>H-pad-((v-mn)/rng)*(H-2*pad);
-  const path=vals.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
-  const dots=vals.map((v,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${i===vals.length-1?2.6:1.4}" fill="${i===vals.length-1?zc:'var(--dim)'}"><title>${pts[i].date}: ${v.toFixed(2)}</title></circle>`).join('');
-  return `<div style="margin-top:6px;display:flex;align-items:center;gap:8px" title="ADR ${vals.length} trading-day trend · >2 bullish · <0.5 weak">
-    <span style="font-size:11px;font-weight:600;color:var(--mut)">ADR</span>
-    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible">
-      <path d="${path}" fill="none" stroke="${zc}" stroke-width="1.5" stroke-linejoin="round"/>${dots}</svg>
-    <span style="font-family:'Space Mono';font-size:12px;font-weight:700;color:${zc}">${last.toFixed(2)} <span style="color:var(--dim);font-weight:600">${dow}</span></span>
-  </div>`;
-}
+// cc#448: the inline ADR sparkline was replaced by a uniform metric row (ADR value + chart icon)
+// that opens the 5-day ADR trend popout (openAdr/loadAdrChart), matching the VIX/PCR pattern.
 // cc_task #71: compact single-row gate — mood tag + 4 gate pills (ADR/Day/Week/Month
 // Y/N coloured) + Buy/Sell slots far right.
 function renderMood(m){
@@ -1331,7 +1327,7 @@ function renderMood(m){
     <div class="mood-left"><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
       ${metricRow('openVix()','India VIX','vixInline')}
-      ${_adrSpark()}
+      ${metricRow('openAdr()','ADR','adrInline')}
       ${metricRow('openNiftyPcr()','NIFTY PCR','niftyPcrInline')}
       ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
     <div class="mood-right">
@@ -1341,7 +1337,7 @@ function renderMood(m){
   // cc#310: the innerHTML above ships EMPTY #vixInline/#niftyPcrInline/#bankniftyPcrInline
   // spans. Immediately re-inject the last known VIX/PCR values so a re-render never blanks
   // an already-loaded value (the chart loaders are not re-invoked on every renderMood pass).
-  for(const id of ['vixInline','niftyPcrInline','bankniftyPcrInline']){
+  for(const id of ['vixInline','adrInline','niftyPcrInline','bankniftyPcrInline']){   // cc#448: adrInline joins the re-inject set
     const el=document.getElementById(id);
     if(el&&_metricInlineCache[id]!=null)el.innerHTML=_metricInlineCache[id];
   }
@@ -2310,6 +2306,61 @@ async function _loadPcrChart(ep,canvasId,lastId,inlineId,getChart,setChart){
 function loadNiftyPcrChart(){return _loadPcrChart(EP.niftyPcr,'niftyPcrChart','niftyPcrLast','niftyPcrInline',()=>NIFTY_PCR_CHART,c=>{NIFTY_PCR_CHART=c;});}
 function loadBankniftyPcrChart(){return _loadPcrChart(EP.bankniftyPcr,'bankniftyPcrChart','bankniftyPcrLast','bankniftyPcrInline',()=>BANKNIFTY_PCR_CHART,c=>{BANKNIFTY_PCR_CHART=c;});}
 
+// cc#448: ADR daily 5-trading-day trend — Chart.js line matching the VIX/PCR popouts, but DAILY
+// (one point per session) and a breadth RATIO (not %), so no day-change token. Points are colour-coded
+// by cc#443 zone (>2 bullish green · 0.5-2 neutral amber · <0.5 weak red) and green/amber/red zone
+// bands are shaded behind the line. Fed by EP.adrHistory (cache.adrHistory.points = [{date, adr}]).
+let ADR_CHART=null;
+function _adrZoneColor(v){return v==null?'#8a94a6':(v>2?'#22a565':v<0.5?'#e5484d':'#f5b94a');}
+const _adrZonePlugin={id:'adrZones',beforeDatasetsDraw(chart){
+  const a=chart.chartArea,y=chart.scales.y,ctx=chart.ctx;if(!a||!y)return;
+  const band=(lo,hi,col)=>{const yHi=y.getPixelForValue(Math.min(hi,y.max)),yLo=y.getPixelForValue(Math.max(lo,y.min));
+    ctx.fillStyle=col;ctx.fillRect(a.left,yHi,a.right-a.left,yLo-yHi);};
+  ctx.save();
+  band(2,Math.max(y.max,2),'rgba(34,165,101,.08)');   // bullish
+  band(0.5,2,'rgba(245,185,74,.06)');                  // neutral
+  band(y.min,0.5,'rgba(229,72,77,.08)');               // weak
+  ctx.restore();
+}};
+function _adrWkLabel(d){try{return new Date(d+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'});}catch(e){return d;}}
+function loadAdrChart(){
+  const pts=(cache.adrHistory&&cache.adrHistory.points)||[];
+  const vals=pts.map(p=>Number(p.adr));
+  const last=vals.length?vals[vals.length-1]:null;
+  // inline metric-row value: ADR ratio + weekday stamp, coloured by the latest zone (mirrors VIX/PCR
+  // value tokens, but ADR is a ratio not a %). Cached so renderMood re-injects it on every repaint.
+  if(pts.length){
+    let dow='';try{dow=new Date(pts[pts.length-1].date+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',timeZone:'UTC'});}catch(e){}
+    const zc=_adrZoneColor(last);
+    const html=`<span style="color:${zc}">${last==null?'--':last.toFixed(2)}</span> <span style="color:var(--dim);font-weight:600">${dow}</span>`;
+    _metricInlineCache['adrInline']=html;
+    const el=document.getElementById('adrInline');if(el)el.innerHTML=html;
+  }
+  const le=document.getElementById('adrLast');if(le)le.textContent=last==null?'--':last.toFixed(2);
+  if(!window.Chart)return;   // CDN blocked — inline value still shows, dashboard stays functional
+  const cv=document.getElementById('adrChart');if(!cv)return;
+  const labels=pts.map(p=>_adrWkLabel(p.date));
+  const dotCols=vals.map(v=>_adrZoneColor(v));
+  const lineCol=_adrZoneColor(last);
+  if(ADR_CHART){
+    ADR_CHART.data.labels=labels;ADR_CHART.data.datasets[0].data=vals;
+    ADR_CHART.data.datasets[0].pointBackgroundColor=dotCols;
+    ADR_CHART.data.datasets[0].borderColor=lineCol;ADR_CHART.data.datasets[0].backgroundColor=lineCol+'1a';
+    ADR_CHART.update('none');return;
+  }
+  ADR_CHART=new Chart(cv.getContext('2d'),{
+    type:'line',plugins:[_adrZonePlugin],
+    data:{labels,datasets:[{data:vals,borderColor:lineCol,borderWidth:2,backgroundColor:lineCol+'1a',
+      fill:true,tension:.25,pointRadius:5,pointBackgroundColor:dotCols,pointBorderColor:'#fff',
+      pointBorderWidth:1.5,spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false},tooltip:{intersect:false,mode:'index',
+        callbacks:{label:c=>'ADR '+Number(c.parsed.y).toFixed(2)}}},
+      scales:{x:{grid:{display:false},ticks:{color:'#8a94a6',font:{size:9},maxRotation:0}},
+        y:{grace:'12%',grid:{color:'rgba(138,148,166,.15)'},
+           ticks:{maxTicksLimit:5,color:'#8a94a6',font:{size:9},callback:v=>Number(v).toFixed(1)}}}}});
+}
+
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
   BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
@@ -2346,7 +2397,7 @@ async function loadAll(){
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
-    run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);}),   // cc#443: ADR trend sparkline
+    run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);loadAdrChart();}),   // cc#443/#448: ADR trend row + popout chart
     run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
