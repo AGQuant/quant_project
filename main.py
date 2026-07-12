@@ -104,7 +104,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.63"
+VERSION = "2.9.64"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -175,8 +175,9 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/screener", "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v4scan", "/v12", "/health"}   # cc#392/394/398: no-store + theme/logout pills
-PROTECTED.add("/v13"); PROTECTED.add("/v4scan"); PROTECTED.add("/v12"); PROTECTED.add("/health")   # cc#392/394/398: gate + no-store
+                     "/v13", "/v12", "/health"}   # cc#392/394/398: no-store + theme/logout pills
+PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health")   # cc#392/394/398: gate + no-store
+# cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 # cc#327 MOBILE_UX_REDEFINE_V1 P1/10: canonical Sora font + shared mobile.css,
@@ -655,10 +656,10 @@ def v13_filter_registry_page():
     """cc#384: V13 filter registry — reality-verified inventory of every platform metric."""
     with open("scorr_v13.html", "r", encoding="utf-8") as f: return f.read()
 
-@app.get("/v4scan", response_class=HTMLResponse)
+@app.get("/v4scan")
 def tc_v4_scan_page():
-    """cc#387: Trade Check v4 dual-style batch scanner (ranked, 4 cards per stock)."""
-    with open("scorr_tc_v4_scan.html", "r", encoding="utf-8") as f: return f.read()
+    """cc#399: TC v4 merged into /check (Future Scans). /v4scan now 301-redirects to /check."""
+    return RedirectResponse(url="/check", status_code=301)
 
 @app.get("/v12", response_class=HTMLResponse)
 def v12_builder_page():
@@ -692,7 +693,7 @@ NAV_REGISTRY = {
     "/v10":          ("V10",                  "nav"),
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
-    "/v4scan":       ("TC Scan",              "nav"),
+    "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
     "/v12":          ("V12 · Quant Basket Builder", "nav"),
     "/screener":     ("Screener (Custom)",    "nav"),
     "/health":       ("Health Report",        "nav"),        # cc#398 rule id=2987

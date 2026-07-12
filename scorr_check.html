@@ -317,6 +317,34 @@
     .scr-table td:first-child,.scr-table th:first-child{
       position:sticky;left:0;background:var(--card,#fff);z-index:1}
   }
+  /* cc#399 — v4 dual-style Trade Check surface */
+  .v4-result{display:none;margin-top:16px}
+  .v4-result.show{display:block}
+  .v4-best{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.6}
+  .v4-best b{color:var(--txt)}
+  .v4-gates{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
+  .v4-gate{font-size:10px;font-weight:700;font-family:var(--mono);padding:3px 9px;border-radius:20px;
+    border:1px solid var(--line2);background:var(--panel2);color:var(--mut)}
+  .v4-gate.pass{background:var(--grn-d);color:var(--grn);border-color:var(--grn-b)}
+  .v4-gate.fail{background:var(--red-d);color:var(--red);border-color:var(--red-b)}
+  .v4-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  @media(max-width:680px){.v4-cards{grid-template-columns:1fr}}
+  .v4-card{border:1px solid var(--line2);border-radius:12px;padding:13px 15px;background:var(--panel)}
+  .v4-card.win{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan) inset}
+  .v4-chead{display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap}
+  .v4-chip{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px}
+  .v4-chip.buy{background:var(--grn-d);color:var(--grn)}
+  .v4-chip.sell{background:var(--red-d);color:var(--red)}
+  .v4-cscore{font-family:var(--mono);font-size:15px;font-weight:700}
+  .v4-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px}
+  .v4-badge.STRONG{background:var(--grn-d);color:var(--grn)}
+  .v4-badge.VALID{background:var(--amber-d);color:var(--amber)}
+  .v4-badge.REJECT{background:var(--red-d);color:var(--red)}
+  .v4-crow{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;border-bottom:.5px solid var(--line)}
+  .v4-crow:last-child{border-bottom:none}
+  .v4-crow .rl{color:var(--mut)}
+  .v4-crow .rc{font-family:var(--mono);font-weight:700}
+  .v4-crow .c1{color:var(--grn)} .v4-crow .c05{color:var(--amber)} .v4-crow .c0{color:var(--dim)}
 </style>
 </head>
 <body>
@@ -325,7 +353,7 @@
 <div class="wrap">
   <div class="page-head">
     <div class="page-title" id="pageTitle">Trade <span>Check</span></div>
-    <div class="page-sub" id="pageSub">V3.4 &middot; NATIVE $0 &middot; UNIFIED CHECKLIST</div>
+    <div class="page-sub" id="pageSub">V4 &middot; DUAL-STYLE &middot; NATIVE $0</div>
   </div>
 
   <div class="card">
@@ -345,7 +373,7 @@
     <div class="chips" id="chips"></div>
   </div>
 
-  <div class="loading" id="loading">Computing v3.4&hellip;</div>
+  <div class="loading" id="loading">Computing V4&hellip;</div>
   <div class="err" id="err"></div>
 
   <!-- Trade Check Result -->
@@ -384,8 +412,11 @@
         <div class="legend-item"><div class="leg-dot" style="background:var(--amber)"></div>&#129505; No data</div>
       </div>
     </div>
-    <div class="foot" id="rFoot">Personal trade context &middot; not a V8 algo signal &middot; v3.4 &middot; &#9888; Spot price, not futures.</div>
+    <div class="foot" id="rFoot">Personal trade context &middot; not a V8 algo signal &middot; V4 &middot; &#9888; Spot price, not futures.</div>
   </div>
+
+  <!-- cc#399: v4 dual-style Trade Check result (LONG/SHORT) -->
+  <div class="v4-result" id="v4Result"></div>
 
   <!-- cc#300: Fibcheck Result block removed — relocated to the GVM report popout. -->
 
@@ -519,7 +550,7 @@
         <tbody id="scrBody"></tbody></table>
       <div id="moversWrap" style="display:none"></div>
     </div>
-    <div class="foot" id="scrFoot">Top 10 by score (WATCH included) &middot; same v3.4 engine, run per symbol &middot; mcap proxy, not the real index.</div>
+    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; STRONG&ge;12 / VALID 10&ndash;12 / REJECT&lt;10.</div>
   </div>
 
   <!-- chip popup -->
@@ -570,9 +601,10 @@ function setMode(m){
     runBtn.textContent='Run Trade Check';
     runBtn.classList.remove('invest-mode');
     pageTitle.innerHTML='Trade <span>Check</span>';
-    pageSub.textContent='V3.4 · NATIVE $0 · UNIFIED CHECKLIST';
+    pageSub.textContent='V4 · DUAL-STYLE · NATIVE $0';
   }
   document.getElementById('result').classList.remove('show');
+  document.getElementById('v4Result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
   document.getElementById('roomCard').classList.remove('show');
@@ -655,6 +687,7 @@ async function run(){
   document.getElementById('sym').value=sym;
   document.getElementById('runBtn').disabled=true;
   document.getElementById('result').classList.remove('show');
+  document.getElementById('v4Result').classList.remove('show');
   document.getElementById('invResult').classList.remove('show');
   document.getElementById('scrResult').classList.remove('show');
   document.getElementById('roomCard').classList.remove('show');
@@ -662,7 +695,7 @@ async function run(){
   const ld=document.getElementById('loading');
   const inv=(mode==='INVEST');
   ld.className='loading show'+(inv?' invest-loading':'');
-  ld.textContent=inv?'Running Investment Check…':'Computing v3.4…';
+  ld.textContent=inv?'Running Investment Check…':'Computing V4…';
   try{
     if(inv){ await runInvestCheck(sym); }
     else { await runTradeCheck(sym); }
@@ -673,17 +706,66 @@ async function run(){
   document.getElementById('runBtn').disabled=false;
 }
 
+// cc#399: /check now runs the v4 dual-style engine. LONG -> BUY (MOM+REV), SHORT -> SELL (MOM+REV).
 async function runTradeCheck(sym){
-  const side=mode;
-  const r=await fetch('/api/check',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({symbol:sym,side:side,gate1:gate1,gate2:gate2})});
+  const v4side=(mode==='SHORT')?'SELL':'BUY';
+  const r=await fetch('/api/trade-check/v4/dual?symbol='+encodeURIComponent(sym)+'&side='+v4side);
   document.getElementById('loading').classList.remove('show');
   if(!r.ok){showErr('Server error '+r.status+' — trade check failed. Try again shortly.');return;}
   let d;
   try{d=await r.json();}catch(e){showErr('Bad response from server. Try again shortly.');return;}
-  if(!d.ok){showErr(d.error||'No data.');return;}
-  renderTrade(d);
+  if(d.error){showErr(d.error);return;}
+  renderV4Dual(d, mode);
+}
+
+function _v4scoreCol(s){return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';}
+function _v4creditCls(c){c=parseFloat(c);return c>=1?'c1':c>=0.5?'c05':'c0';}
+function _v4chip(lbl){const buy=(lbl||'').indexOf('BUY')===0;return '<span class="v4-chip '+(buy?'buy':'sell')+'">'+lbl+'</span>';}
+function _vClassFor(v){return v==='STRONG'?'strong':v==='VALID'?'valid':'reject';}
+
+function renderV4Dual(d, uiMode){
+  const side=(uiMode==='SHORT')?'SELL':'BUY';
+  const sideLabel=(uiMode==='SHORT')?'▼ SHORT':'▲ LONG';
+  const gate=(d.gates&&d.gates[side])||{pass:false,gates:[]};
+  // GVM (BUY gate G1 carries it)
+  let gvm=null;
+  (gate.gates||[]).forEach(g=>{if(g.gate==='G1'&&typeof g.value==='number')gvm=g.value;});
+  const gvmHtml = gvm!=null
+    ? '<span class="r-gvm '+(gvm>=7?'hi':gvm>=6?'mid':'lo')+'">GVM '+gvm.toFixed(2)+'</span>' : '';
+  const gatesHtml=(gate.gates||[]).map(g=>
+    '<span class="v4-gate '+(g.pass?'pass':'fail')+'">'+g.gate+' '+g.label+(g.pass?' ✓':' ✗')+'</span>').join('');
+  const cards=(d.cards||[]);
+  const cardHtml=c=>{
+    const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
+    const rules=(c.rules||[]).map(r=>
+      '<div class="v4-crow"><span class="rl">'+r.rule+' '+r.label+'</span><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>').join('');
+    return '<div class="v4-card'+win+'"><div class="v4-chead">'+_v4chip(c.label)
+      +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score)+'">'+Number(c.score).toFixed(2)+'</span>'
+      +'<span style="font-size:11px;color:var(--dim)">/15</span>'
+      +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span></div>'+rules+'</div>';
+  };
+  const cardsHtml = cards.length
+    ? '<div class="v4-cards">'+cards.map(cardHtml).join('')+'</div>'
+    : '<div class="card" style="padding:16px 18px;color:var(--red)">All '+side+' gates rejected — no scorecard. Check the gate row above.</div>';
+  const bestChip = d.best_label?_v4chip(d.best_label):'—';
+  const el=document.getElementById('v4Result');
+  el.innerHTML =
+    '<div class="card" style="padding:16px 18px">'
+    + '<span class="r-company">'+d.symbol+'</span>'
+    + '<div class="r-pills">'
+    +   '<span class="r-side-badge '+uiMode+'">'+sideLabel+'</span>'
+    +   gvmHtml
+    +   '<span class="r-ts">CMP '+(d.cmp!=null?d.cmp:'—')+' · '+(d.computed_at||'')+'</span>'
+    + '</div>'
+    + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
+    +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/15</b> · verdict STRONG≥12 / VALID 10–12 / REJECT&lt;10</div>'
+    +   '<div class="v4-gates">'+gatesHtml+'</div>'
+    + '</div></div>'
+    + cardsHtml
+    + '<div class="foot">V4 · Dual-Style · Native $0 · momentum + reversal scored side-by-side · not a V8 algo signal · ⚠ Spot price, not futures.</div>';
+  el.classList.add('show');
+  el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 async function runInvestCheck(sym){
@@ -724,7 +806,7 @@ function renderTrade(d){
   if(interpEl)interpEl.textContent=d.interpretation||'';
   document.getElementById('t1Label').textContent='Checklist — Process + Entry';
   document.getElementById('t1Score').textContent=d.score+'/'+d.total+' · '+d.n_pass+' pass · '+d.n_watch+' watch · '+d.n_fail+' fail · PASS≥'+d.pass_cut;
-  document.getElementById('rFoot').textContent=d.foot||'Personal trade context · not a V8 algo signal · v3.4 · ⚠ Spot price, not futures.';
+  document.getElementById('rFoot').textContent=d.foot||'Personal trade context · not a V8 algo signal · V4 · ⚠ Spot price, not futures.';
   const body=document.getElementById('ruleBody');body.innerHTML='';
   (d.rules||[]).forEach(r=>{body.insertAdjacentHTML('beforeend',
     '<tr class="'+rowClass(r.state)+'"><td class="td-rule">'+r.rule+'</td><td class="td-cond">'+r.cond+'</td><td class="td-val">'+r.val+'</td><td class="td-state">'+stateBadge(r.state)+'</td></tr>');});
@@ -874,18 +956,80 @@ async function loadScreen(universe){
   document.getElementById('runBtn').disabled=false;
 }
 
+// cc#399: "Future Scans" now opens the v4 dual-style batch scanner in-page.
+let v4SIDE='ALL', v4VER='ALL';
 function runScreen(){
-  scrMode='screener';scrUniverse='nifty50';scrSide='LONG';
-  document.getElementById('icBar').style.display='none';
-  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.';
-  syncScrTabs();loadScreen('nifty50');
+  const panel=document.getElementById('scrResult');
+  const card=panel.querySelector('.card');
+  card.innerHTML =
+    '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
+    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL); the higher card wins with its style label. STRONG≥12 / VALID 10–12 / REJECT&lt;10. Tap a row for the full dual scorecard.</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+    +   '<div class="scr-stabs" id="v4SideSeg">'
+    +     '<button class="scr-stab long on" data-v="ALL" onclick="setV4Side(\'ALL\')">All</button>'
+    +     '<button class="scr-stab long" data-v="BUY" onclick="setV4Side(\'BUY\')">&#9650; Buy</button>'
+    +     '<button class="scr-stab short" data-v="SELL" onclick="setV4Side(\'SELL\')">&#9660; Sell</button>'
+    +   '</div>'
+    +   '<div class="scr-stabs" id="v4VerSeg">'
+    +     '<button class="scr-stab long on" data-v="ALL" onclick="setV4Ver(\'ALL\')">Any verdict</button>'
+    +     '<button class="scr-stab long" data-v="STRONG" onclick="setV4Ver(\'STRONG\')">Strong</button>'
+    +     '<button class="scr-stab long" data-v="VALID" onclick="setV4Ver(\'VALID\')">Valid+</button>'
+    +   '</div>'
+    +   '<button class="chip" onclick="loadV4Scan()">&#8635; Rescan</button>'
+    + '</div>'
+    + '<div id="v4ScanTbl"><div style="padding:22px;text-align:center;color:var(--dim)">Scanning&hellip;</div></div>';
+  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · verdict from spec id=2926 (STRONG≥12 / VALID 10–12 / REJECT<10).';
+  panel.classList.add('show');
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+  loadV4Scan();
+}
+function setV4Side(v){v4SIDE=v;_v4SegSync('v4SideSeg',v);loadV4Scan();}
+function setV4Ver(v){v4VER=v;_v4SegSync('v4VerSeg',v);loadV4Scan();}
+function _v4SegSync(segId,v){
+  const seg=document.getElementById(segId);if(!seg)return;
+  [...seg.children].forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+}
+async function loadV4Scan(){
+  const tbl=document.getElementById('v4ScanTbl'),meta=document.getElementById('v4ScanMeta');
+  if(!tbl)return;
+  tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">Scanning&hellip;</div>';
+  if(meta)meta.textContent='…';
+  let d;
+  try{const r=await fetch('/api/trade-check/v4/scan?side='+v4SIDE+'&verdict='+v4VER+'&limit=250');d=await r.json();}
+  catch(e){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Scan failed: '+e.message+'</div>';return;}
+  if(d.error){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+d.error+'</div>';return;}
+  if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s';
+  const rows=d.results||[];
+  if(!rows.length){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">No stocks match.</div>';return;}
+  const body=rows.map((x,i)=>{
+    const mr=(pre)=>['MOM','REV'].map(st=>{const k=pre+'-'+st;return x.scores&&x.scores[k]!=null?st[0]+'<b>'+x.scores[k]+'</b>':'';}).filter(Boolean).join(' ');
+    const buyMR=mr('BUY'),sellMR=mr('SELL');
+    return '<tr style="cursor:pointer" onclick="v4ScanOpen(\''+x.symbol+'\',\''+(x.best_label||'')+'\')">'
+      + '<td>'+(i+1)+'</td>'
+      + '<td style="font-weight:700;color:var(--txt)">'+x.symbol+'</td>'
+      + '<td style="color:var(--mut);white-space:normal;max-width:160px">'+(x.segment||'—')+'</td>'
+      + '<td>'+(x.cmp!=null?x.cmp:'—')+'</td>'
+      + '<td>'+_v4chip(x.best_label||'—')+'</td>'
+      + '<td style="font-weight:700;color:'+_v4scoreCol(x.best_score||0)+'">'+(x.best_score!=null?Number(x.best_score).toFixed(2):'—')+'</td>'
+      + '<td><span class="v4-badge '+x.verdict+'">'+x.verdict+'</span></td>'
+      + '<td style="font-family:var(--mono);font-size:10px"><span style="color:var(--grn)">'+(buyMR||'—')+'</span> · <span style="color:var(--red)">'+(sellMR||'—')+'</span></td>'
+      + '</tr>';
+  }).join('');
+  tbl.innerHTML='<table class="scr-table"><thead><tr><th>#</th><th>Symbol</th><th>Sector</th><th>CMP</th><th>Best card</th><th>Score</th><th>Verdict</th><th>Buy M/R · Sell M/R</th></tr></thead><tbody>'+body+'</tbody></table>';
+}
+// tapping a scan row loads that symbol's full dual scorecard through the main surface
+function v4ScanOpen(sym, bestLabel){
+  document.getElementById('sym').value=sym;
+  const short=(bestLabel||'').indexOf('SELL')===0;
+  setMode(short?'SHORT':'LONG');
+  run();
 }
 
 function setUniverse(u){
   scrMode='screener';scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='Top 10 by score (WATCH included) · same v3.4 engine, run per symbol · mcap proxy, not the real index.';
+  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · STRONG≥12 / VALID 10–12 / REJECT<10.';
   syncScrTabs();
   if(scrCache[u])renderScreen();
   else loadScreen(u);
