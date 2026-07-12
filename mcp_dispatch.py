@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import asyncio
 import httpx
@@ -24,6 +25,22 @@ router = APIRouter()
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
+
+
+# cc#351 MAINTENANCE_LOCK_RULE: lock-taking maintenance ops must NOT run through the single-connection
+# run_sql MCP path (10-Jul incident: a REINDEX wedged ~45 min behind an idle-in-transaction backfill
+# lock). These are Railway-console-only, weekends, propose-first.
+_MAINT_BLOCK_RE = re.compile(r"^\s*(REINDEX|CLUSTER|VACUUM\s+FULL|VACUUM\s+\(\s*FULL|ALTER\s+TABLE)\b", re.I)
+
+
+def _maintenance_block(query):
+    """Return the blocked op name if the query is a lock-taking maintenance statement, else None."""
+    # strip a leading run of line/block comments + whitespace so the guard sees the real first keyword
+    s = re.sub(r"^(?:\s|--[^\n]*\n|/\*.*?\*/)+", "", query or "", flags=re.S)
+    m = _MAINT_BLOCK_RE.match(s)
+    if not m:
+        return None
+    return re.sub(r"\s+", " ", m.group(1).upper())
 
 MCP_TOOLS = [
     {"name":"server_now","description":"Authoritative India time (Asia/Kolkata, UTC+5:30).","inputSchema":{"type":"object","properties":{},"required":[]}},
@@ -173,6 +190,11 @@ async def _call_tool(name, args):
         elif name == "env_check": r = await client.get(f"{BASE_URL}/api/admin/env_check", headers=h); return r.json()
         elif name == "run_sql":
             q = args["query"]
+            _blocked = _maintenance_block(q)
+            if _blocked:
+                return {"error": f"BLOCKED by MAINTENANCE_LOCK_RULE (cc#351): '{_blocked}' is a lock-taking "
+                                 f"maintenance op and must not run via the single-connection run_sql path. "
+                                 f"Run it from the Railway console on a weekend, propose-first."}
             try:
                 with get_conn() as conn, conn.cursor() as cur:
                     cur.execute(q)
