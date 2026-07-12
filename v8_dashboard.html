@@ -2050,29 +2050,49 @@ async function loadPositionNews(){
   try{const d=await getJSON(EP.positionNews);PN_LOADED=true;el.innerHTML=renderPositionNews(d);}
   catch(e){el.innerHTML=`<div class="err">Position News failed: ${e.message}</div>`;}
 }
+// cc#422: ONE flat chronological feed across ALL open-position symbols (supersedes cc#415 per-symbol
+// grouping). Every item flattened, sorted by published_at DESC (newest first regardless of symbol),
+// with Today / Yesterday / date separators when the list crosses a day boundary. Each item carries a
+// SYMBOL chip. Source = /api/news/position (V8 paper OPEN ∪ SmartGain holdings) — unchanged.
+function _pnDayLabel(ts){
+  const d=new Date(ts);if(isNaN(d.getTime()))return'';
+  const ist=new Date(d.getTime()+(5*60+30)*60000);                 // published_at is UTC ISO -> IST date
+  const now=new Date(Date.now()+(5*60+30)*60000);
+  const itemD=Date.UTC(ist.getUTCFullYear(),ist.getUTCMonth(),ist.getUTCDate());
+  const todayD=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
+  const diff=Math.round((todayD-itemD)/86400000);
+  if(diff<=0)return'Today';
+  if(diff===1)return'Yesterday';
+  return String(ist.getUTCDate()).padStart(2,'0')+' '+MON[ist.getUTCMonth()];
+}
 function renderPositionNews(d){
-  const groups=((d&&d.groups)||[]).slice();
-  const meta=`<div class="ptitle">Position News <span class="ct">${groups.length?`${d.total} items · ${d.symbols} open position${d.symbols===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
-  if(!groups.length)return meta+`<div class="empty">No open positions, or no polished news yet.</div>`;
-  // cc#415: sort sections by their newest item (freshest coverage first), not by item count.
+  const groups=((d&&d.groups)||[]);
+  const meta=`<div class="ptitle">Position News <span class="ct">${(d&&d.total!=null)?`${d.total} items · ${d.symbols} open position${d.symbols===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
+  // flatten every group's items into ONE list
+  const items=[];
+  groups.forEach(g=>(g.items||[]).forEach(it=>items.push(Object.assign({},it,{symbol:it.symbol||g.symbol}))));
+  if(!items.length)return meta+`<div class="empty">No open positions, or no polished news yet.</div>`;
   const _pnTs=s=>{const t=Date.parse(String(s||'').replace(' ','T'));return isNaN(t)?0:t;};
-  groups.forEach(g=>{let mx=0,mts=null;(g.items||[]).forEach(it=>{const t=_pnTs(it.published_at);if(t>mx){mx=t;mts=it.published_at;}});g._ms=mx;g._newest=mts;});
-  groups.sort((a,b)=>b._ms-a._ms);
-  return meta+groups.map(g=>{
-    const items=(g.items||[]).map(it=>{const age=it.published_at?newsAgo(it.published_at):'';
-      return`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
-        `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
-        (it.body?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(it.body)}</div>`:'')+
-        `<div style="font-size:11px;color:var(--dim)"><span>${newsEsc(it.source||'')}</span>`+
-        (age?` · <span>${newsEsc(age)}</span>`:'')+
-        (it.symbol?` · <span>${newsEsc(it.symbol)}</span>`:'')+`</div></div>`;
-    }).join('');
-    const hdrAge=g._newest?newsAgo(g._newest):'';   // cc#415: section header age stamp of the newest item
-    return`<div style="margin-top:16px">`+
-      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">`+
-        `<span style="font-size:14px;font-weight:800;color:var(--txt)">${newsEsc(g.symbol)}</span>`+
-        `<span class="ct">${g.count} ${g.count===1?'item':'items'}${hdrAge?' · '+newsEsc(hdrAge):''}</span></div>${items}</div>`;
-  }).join('');
+  items.sort((a,b)=>_pnTs(b.published_at||b.polished_at)-_pnTs(a.published_at||a.polished_at));
+  let html=meta,lastDay=null;
+  items.forEach(it=>{
+    const ts=it.published_at||it.polished_at;
+    const day=_pnDayLabel(ts);
+    if(day&&day!==lastDay){
+      html+=`<div style="font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:16px 0 4px;padding-bottom:5px;border-bottom:1px solid var(--line2)">${day}</div>`;
+      lastDay=day;
+    }
+    const age=ts?newsAgo(ts):'';
+    html+=`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
+      `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
+      (it.body?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(it.body)}</div>`:'')+
+      `<div style="font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center;flex-wrap:wrap">`+
+        `<span>${newsEsc(it.source||'')}</span>`+
+        (age?`<span>· ${newsEsc(age)}</span>`:'')+
+        (it.symbol?`<span style="font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border-radius:6px;padding:1px 7px;font-family:'Space Mono'">${newsEsc(it.symbol)}</span>`:'')+
+      `</div></div>`;
+  });
+  return html;
 }
 
 // cc#293: day change vs the PREVIOUS trading day's last value = the last series point whose date
