@@ -62,6 +62,9 @@ USAGE:
   Manual override:     python fyers_feed.py --auth-code <code>
 """
 
+# ops: worker bounce 12-Jul-2026 (weekend, market closed) to resume the stalled cc#389/#390 Phase A
+# 5m warehouse backfill (phase_a_run re-armed to 'run'; daemon re-claims on boot). No logic change.
+
 import argparse, bisect, calendar, hashlib, os, sys, json, time, logging, threading, re
 from datetime import datetime, timedelta, time as dt_time, date
 import pytz, psycopg2, requests
