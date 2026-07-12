@@ -810,16 +810,18 @@ async function openBrDetail(symbol,basket){
     .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
   const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
   document.getElementById('mSub').innerHTML=`${hdr}<span style="white-space:nowrap">&middot; <b style="color:${pcCol}">${d.passed}/${d.total} pass</b></span>`;
-  // cc#378: PASS/FAIL as a compact coloured pill + a full-row tint so the verdict is always visible
-  // (was a plain column that scrolled off-screen). ACTUAL wraps so the 4 columns fit — no h-scroll.
+  // cc#378/423: PASS/FAIL as a compact P/F pill + a full-row tint. cc#423: table-layout:fixed with
+  // colgroup widths + wrapping REQUIRED/ACTUAL so all 4 columns fit the modal with ZERO horizontal
+  // scroll on desktop AND mobile (the STATUS column no longer gets cut off).
   const rows=(d.rows||[]).map(r=>`<tr style="border-top:1px solid var(--line);background:${r.pass?'rgba(47,212,139,.06)':'rgba(255,92,108,.06)'}">
-    <td style="padding:8px 8px;font-weight:600;white-space:nowrap">${r.filter.replace(/_/g,' ')}</td>
-    <td style="padding:8px 8px;color:var(--mut);white-space:nowrap">${r.required}</td>
-    <td style="padding:8px 8px;font-family:'Space Mono'">${r.actual}${r.note?`<div style="font-size:10px;color:var(--dim);margin-top:2px">${r.note}</div>`:''}</td>
-    <td style="padding:8px 6px;text-align:center;white-space:nowrap"><span style="font-weight:800;font-size:10px;padding:3px 9px;border-radius:6px;color:${r.pass?'var(--grn)':'var(--red)'};background:${r.pass?'rgba(47,212,139,.16)':'rgba(255,92,108,.16)'}">${r.pass?'PASS':'FAIL'}</span></td></tr>`).join('');
-  document.getElementById('mBody').innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-    <thead><tr style="text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.4px">
-      <th style="padding:6px 8px">Filter</th><th style="padding:6px 8px">Required</th><th style="padding:6px 8px">Actual</th><th style="padding:6px 8px;text-align:center">Status</th></tr></thead>
+    <td style="padding:7px 7px;font-weight:600;white-space:normal;word-break:break-word">${r.filter.replace(/_/g,' ')}</td>
+    <td style="padding:7px 7px;color:var(--mut);white-space:normal;word-break:break-word">${r.required}</td>
+    <td style="padding:7px 7px;font-family:'Space Mono';white-space:normal;word-break:break-word">${r.actual}${r.note?`<div style="font-size:9.5px;color:var(--dim);margin-top:2px">${r.note}</div>`:''}</td>
+    <td style="padding:7px 4px;text-align:center;white-space:nowrap"><span title="${r.pass?'PASS':'FAIL'}" style="font-weight:800;font-size:10px;padding:3px 8px;border-radius:6px;color:${r.pass?'var(--grn)':'var(--red)'};background:${r.pass?'rgba(47,212,139,.16)':'rgba(255,92,108,.16)'}">${r.pass?'P':'F'}</span></td></tr>`).join('');
+  document.getElementById('mBody').innerHTML=`<div style="overflow-x:hidden"><table style="width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed">
+    <colgroup><col style="width:27%"><col style="width:28%"><col style="width:30%"><col style="width:15%"></colgroup>
+    <thead><tr style="text-align:left;color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.3px">
+      <th style="padding:6px 7px">Filter</th><th style="padding:6px 7px">Required</th><th style="padding:6px 7px">Actual</th><th style="padding:6px 4px;text-align:center">Status</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
 }
 // cc#275: VIX popout open/close. Chart.js instance is never rebuilt — opening just reveals the
