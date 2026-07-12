@@ -351,15 +351,19 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         # ── Update position ───────────────────────────────────────────────────
         try:
             with conn.cursor() as cur:
+                # cc#439: cast the nullable params (curr_value/pnl/pnl_pct numeric, exit_reason text)
+                # so psycopg3 can infer their type when they are NULL. A bare None in `CASE WHEN %s IS
+                # NOT NULL` raised "could not determine data type of parameter $6" -> the whole EOD
+                # transaction aborted -> positions never marked and HS1/HS2 exits never recorded.
                 cur.execute("""
                     UPDATE quant_paper_positions SET
                         current_price  = %s,
-                        current_value  = %s,
-                        pnl            = %s,
-                        pnl_pct        = %s,
+                        current_value  = %s::numeric,
+                        pnl            = %s::numeric,
+                        pnl_pct        = %s::numeric,
                         status         = %s,
-                        exit_price     = CASE WHEN %s IS NOT NULL THEN %s ELSE exit_price END,
-                        exit_date      = CASE WHEN %s IS NOT NULL THEN %s ELSE exit_date END,
+                        exit_price     = CASE WHEN %s::text IS NOT NULL THEN %s ELSE exit_price END,
+                        exit_date      = CASE WHEN %s::text IS NOT NULL THEN %s ELSE exit_date END,
                         updated_at     = NOW()
                     WHERE id = %s
                 """, (
