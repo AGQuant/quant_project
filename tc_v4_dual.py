@@ -49,6 +49,20 @@ def _ist():
     return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 
+def _fmt_event_date(iso):
+    """cc#451: render an imminent result date as 'DD-Mon (relative)' — e.g. '13-Jul (tomorrow)',
+    '14-Jul (Tue)', 'today' — relative to IST today, for the G2 gate chip/banner."""
+    if not iso:
+        return None
+    try:
+        dt = date.fromisoformat(iso)
+    except Exception:
+        return str(iso)
+    delta = (dt - _ist().date()).days
+    rel = "today" if delta == 0 else "tomorrow" if delta == 1 else dt.strftime("%a")
+    return f"{dt.strftime('%d-%b')} ({rel})"
+
+
 # ── credit helpers ──────────────────────────────────────────────────────────────
 
 def _both(a, b):
@@ -326,10 +340,16 @@ def _load_one(cur, symbol):
     cur.execute("SELECT 1 FROM futures_universe WHERE UPPER(symbol)=UPPER(%s) AND is_active=TRUE", (symbol,))
     d["is_future"] = cur.fetchone() is not None
 
-    cur.execute("""SELECT 1 FROM earnings_calendar
-                   WHERE UPPER(ticker)=UPPER(%s) AND ex_date IN (CURRENT_DATE, CURRENT_DATE+1) LIMIT 1""",
+    # cc#451: G2 events gate — 3-day earnings lookahead. Capture the imminent result DATE (not just a
+    # boolean) so the gate display can cite it ("Results 13-Jul (tomorrow)") from ONE evaluation, and
+    # so chip + banner can never disagree. result dates are scraped + refreshed daily (cc#420).
+    cur.execute("""SELECT ex_date FROM earnings_calendar
+                   WHERE UPPER(ticker)=UPPER(%s) AND ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 2
+                   ORDER BY ex_date ASC LIMIT 1""",
                 (symbol,))
-    d["event_blackout"] = cur.fetchone() is not None
+    _ev = cur.fetchone()
+    d["event_blackout"] = _ev is not None
+    d["event_date"] = _ev[0].isoformat() if _ev and _ev[0] else None
 
     return _derive(d)
 
@@ -346,8 +366,16 @@ def _gates(d, side):
         ok = ok and g1
     else:
         gates.append({"gate": "G1", "label": "GVM n/a (short convention)", "value": None, "pass": True})
+    # cc#451: G2 label derives from the SAME single evaluation as the boolean — cite the imminent
+    # result date when failing ("Results 13-Jul (tomorrow)"), else the clear form. value carries the
+    # ISO date (or None) so downstream never re-derives its own boolean and disagrees with the chip.
     g2 = not d.get("event_blackout")
-    gates.append({"gate": "G2", "label": "Events clear (no ex-date T/T+1)", "value": d.get("event_blackout"), "pass": g2})
+    if g2:
+        _g2_label = "No results next 3d"
+    else:
+        _ed = _fmt_event_date(d.get("event_date"))
+        _g2_label = f"Results {_ed}" if _ed else "Results imminent (next 3d)"
+    gates.append({"gate": "G2", "label": _g2_label, "value": d.get("event_date"), "pass": g2})
     g3 = bool(d.get("is_future")) and (d.get("dte") is not None and d["dte"] >= 3)
     gates.append({"gate": "G3", "label": "Futures & DTE >= 3", "value": d.get("dte"), "pass": g3})
     ok = ok and g2 and g3

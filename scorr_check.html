@@ -323,8 +323,8 @@
   .v4-best{font-size:12px;color:var(--mut);margin-top:8px;line-height:1.6}
   .v4-best b{color:var(--txt)}
   .v4-gates{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
-  .v4-gate{font-size:10px;font-weight:700;font-family:var(--mono);padding:3px 9px;border-radius:20px;
-    border:1px solid var(--line2);background:var(--panel2);color:var(--mut)}
+  .v4-gate{font-size:12px;font-weight:700;font-family:var(--mono);padding:4px 10px;border-radius:20px;
+    border:1px solid var(--line2);background:var(--panel2);color:var(--mut)}   /* cc#451 fix_4: 10->12px */
   .v4-gate.pass{background:var(--grn-d);color:var(--grn);border-color:var(--grn-b)}
   .v4-gate.fail{background:var(--red-d);color:var(--red);border-color:var(--red-b)}
   .v4-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
@@ -370,7 +370,7 @@
   .v4-recal{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;padding:2px 7px;
     border-radius:20px;background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2)}
   .v4-gated{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--red-d);
-    border:1px solid var(--red-b);color:var(--red);font-family:var(--mono);font-size:11.5px;font-weight:700;line-height:1.5}
+    border:1px solid var(--red-b);color:var(--red);font-family:var(--mono);font-size:13.5px;font-weight:700;line-height:1.5}   /* cc#451 fix_4: 11.5->13.5px */
   /* cc#408 — inline "View Detailed" structure panels */
   .v4-detail-btn{font-family:var(--mono);font-size:11px;font-weight:700;padding:9px 16px;border-radius:8px;
     border:1px solid var(--line2);background:var(--panel);color:var(--cyan);cursor:pointer;letter-spacing:.3px}
@@ -945,6 +945,17 @@ function tcRuleInfo(rule, side, style){
 function closeTcInfo(){document.getElementById('tcInfoOv').classList.remove('open');}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTcInfo();});
 
+// cc#451: concise per-gate fail phrase for the GATED banner. The chips carry the full gate detail;
+// the banner names ONLY the failing gate(s) + values in one short line — no restated passing gates,
+// no raw "(true)" boolean. G1 shows GVM vs the 6.5 cut; G2's label already reads "Results 13-Jul
+// (tomorrow)" (single-sourced from the backend eval); G3 appends the DTE.
+function _gateFail(g){
+  if(g.gate==='G1') return 'G1 GVM '+(g.value!=null?g.value:'n/a')+' < 6.5';
+  if(g.gate==='G2') return 'G2 '+g.label;
+  if(g.gate==='G3') return 'G3 '+g.label+(g.value!=null?' (DTE '+g.value+')':'');
+  return g.gate+' '+g.label;
+}
+
 function renderV4Dual(d, uiMode){
   const side=(uiMode==='SHORT')?'SELL':'BUY';
   const sideLabel=(uiMode==='SHORT')?'▼ SHORT':'▲ LONG';
@@ -980,7 +991,7 @@ function renderV4Dual(d, uiMode){
   // cc#402: gate-fail no longer blanks the cards — show them all, with a GATED banner naming the fail.
   const fails=(gate.fails&&gate.fails.length?gate.fails:(gate.gates||[]).filter(g=>!g.pass));
   const gatedBanner = (gate.pass===false && fails.length)
-    ? '<div class="v4-gated">⛔ GATED — '+fails.map(g=>g.gate+' '+g.label+(g.value!=null?' ('+g.value+')':'')).join(' · ')
+    ? '<div class="v4-gated">⛔ GATED — '+fails.map(_gateFail).join(' · ')   // cc#451 fix_3: failing gates only, deduped
       +' — verdict held at REJECT; scorecards shown for context.</div>'
     : '';
   const cardsHtml = winner
@@ -1059,7 +1070,7 @@ function renderTcDetail(box, d, uiMode){
   const vcls=d.best_verdict==='STRONG'?'strong':d.best_verdict==='VALID'?'valid':'reject';
   const fails=(d.gate_fails&&d.gate_fails.length)?d.gate_fails:[];
   const gatedBanner=(d.gated&&fails.length)
-    ? '<div class="v4-gated">⛔ GATED — '+fails.map(g=>g.gate+' '+g.label+(g.value!=null?' ('+g.value+')':'')).join(' · ')+' — verdict held at REJECT.</div>' : '';
+    ? '<div class="v4-gated">⛔ GATED — '+fails.map(_gateFail).join(' · ')+' — verdict held at REJECT.</div>' : '';   // cc#451 fix_3: deduped, failing gates only
   const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'+d.best_verdict
     +(d.best_label?' · '+d.best_label:'')+'</div><div class="v4-best">'+d.symbol+' · '+(SELL?'▼ SHORT':'▲ LONG')
     +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?14:16))
