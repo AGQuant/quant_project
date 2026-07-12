@@ -370,6 +370,7 @@ const EP={
   mood:"/api/v8/market_mood",
   metricsAll:"/api/v8/metrics/all",
   segmentDay:"/api/v8/segment_day",          // cc#429: mcap-weighted futures-segment day change
+  adrHistory:"/api/v8/adr_history?days=5",    // cc#443: 5 trading-day ADR trend for the mood panel
   qualified:b=>`/api/v8/qualified/${b}`,
   sellOB:"/api/v8/sell_overbought?limit=25",
   paper:"/api/paper/status",
@@ -1235,6 +1236,31 @@ function pivotBar(cmp,pp,r1,s1){
     </div></div>`;
 }
 
+// cc#443: compact ADR rolling-trend sparkline for the mood panel (below the India VIX line), same
+// visual language as the VIX/PCR trends. 5 trading days (weekend-excluded server-side), latest value
+// + weekday stamp; colour by ADR zone (>2 bullish green, 0.5-2 neutral amber, <0.5 red); per-point
+// hover shows the date + value.
+function _adrSpark(){
+  const pts=(cache.adrHistory&&cache.adrHistory.points)||[];
+  if(!pts.length)return'';
+  const vals=pts.map(p=>Number(p.adr));
+  const last=vals[vals.length-1];
+  const ld=pts[pts.length-1].date;
+  const dow=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][(new Date(ld+'T00:00:00Z')).getUTCDay()];
+  const zc=last>2?'var(--grn)':last<0.5?'var(--red)':'var(--amber)';
+  const W=118,H=26,pad=3;
+  const mn=Math.min(...vals),mx=Math.max(...vals),rng=(mx-mn)||1;
+  const X=i=>pad+i*(W-2*pad)/Math.max(1,vals.length-1);
+  const Y=v=>H-pad-((v-mn)/rng)*(H-2*pad);
+  const path=vals.map((v,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const dots=vals.map((v,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${i===vals.length-1?2.6:1.4}" fill="${i===vals.length-1?zc:'var(--dim)'}"><title>${pts[i].date}: ${v.toFixed(2)}</title></circle>`).join('');
+  return `<div style="margin-top:6px;display:flex;align-items:center;gap:8px" title="ADR ${vals.length} trading-day trend · >2 bullish · <0.5 weak">
+    <span style="font-size:11px;font-weight:600;color:var(--mut)">ADR</span>
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="overflow:visible">
+      <path d="${path}" fill="none" stroke="${zc}" stroke-width="1.5" stroke-linejoin="round"/>${dots}</svg>
+    <span style="font-family:'Space Mono';font-size:12px;font-weight:700;color:${zc}">${last.toFixed(2)} <span style="color:var(--dim);font-weight:600">${dow}</span></span>
+  </div>`;
+}
 // cc_task #71: compact single-row gate — mood tag + 4 gate pills (ADR/Day/Week/Month
 // Y/N coloured) + Buy/Sell slots far right.
 function renderMood(m){
@@ -1272,6 +1298,7 @@ function renderMood(m){
     <div class="mood-left"><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
       ${metricRow('openVix()','India VIX','vixInline')}
+      ${_adrSpark()}
       ${metricRow('openNiftyPcr()','NIFTY PCR','niftyPcrInline')}
       ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
     <div class="mood-right">
@@ -2286,6 +2313,7 @@ async function loadAll(){
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
+    run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);}),   // cc#443: ADR trend sparkline
     run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),

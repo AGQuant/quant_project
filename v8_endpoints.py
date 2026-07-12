@@ -2896,6 +2896,22 @@ def adr_only():
         raise HTTPException(500, f"adr failed: {e}")
 
 
+@router.get("/adr_history")
+def adr_history(days: int = 5):
+    """cc#443: last N TRADING-day ADR values from adr_daily (weekend rows excluded, matching the
+    cc#417 guard) for the mood-panel rolling-trend sparkline. Oldest -> newest."""
+    try:
+        n = max(1, min(days, 30))
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT price_date, adr FROM adr_daily
+                           WHERE adr IS NOT NULL AND EXTRACT(DOW FROM price_date) BETWEEN 1 AND 5
+                           ORDER BY price_date DESC LIMIT %s""", (n,))
+            rows = [{"date": str(r[0]), "adr": round(float(r[1]), 2)} for r in cur.fetchall()][::-1]
+        return {"points": rows}
+    except Exception as e:
+        raise HTTPException(500, f"adr_history failed: {e}")
+
+
 @router.get("/v9_pairs_sectors")
 def v9_pairs_sectors():
     """cc#385: dynamic sector list for the V9 Sector-Pairs concept tab. Every futures-universe
