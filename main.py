@@ -650,6 +650,35 @@ def v12_builder_page():
     """cc#394: V12 Quant Basket Builder — 5-step wizard (universe/entry/exit/backtest/deploy)."""
     with open("scorr_v12.html", "r", encoding="utf-8") as f: return f.read()
 
+# ── NAV_REGISTRY (cc#397, rule id=2987) — every GET-HTML route -> nav label -> status ──────────────
+# STATUS: nav = in cockpit web nav + cio dashboard nav + mobile launcher; redirect = 301s away;
+# INTERNAL = deliberately not in nav (test/dev). Keep this in sync when adding a page (nav-complete
+# shipping rule: a page is not "done" until it is routed + in BOTH navs, collision-free, cache-safe).
+NAV_REGISTRY = {
+    "/":             ("Home",                 "nav"),
+    "/dashboard":    ("V8",                   "nav"),
+    "/cio":          ("Max (AI CIO)",         "nav"),
+    "/cio2":         ("GVM (?model=gvm)",     "nav"),
+    "/ask":          ("Ask",                  "nav"),
+    "/check":        ("Check",                "nav"),
+    "/intraday":     ("Intraday",             "nav"),
+    "/sector":       ("Sector",               "nav"),
+    "/fpc":          ("FPC",                  "nav"),
+    "/scanners":     ("Scanners",             "nav"),
+    "/structure":    ("Structure",            "nav"),
+    "/performance":  ("Performance",          "nav"),
+    "/quant-basket": ("QB (curated Quant Basket)", "nav"),
+    "/news":         ("News (Intelligence)",  "nav"),
+    "/v10":          ("V10",                  "nav"),
+    "/holdings":     ("Holdings",             "nav"),
+    "/v13":          ("V13 · Registry & Screener", "nav"),
+    "/v4scan":       ("TC Scan",              "nav"),
+    "/v12":          ("V12 · Quant Basket Builder", "nav"),
+    "/screener":     ("Screener (Custom)",    "nav"),
+    "/filters":      ("(-> /v13)",            "redirect"),   # cc#393 301
+    "/test-cio":     ("(test harness)",       "INTERNAL"),   # test_cio_endpoints, dev-only
+}
+
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
 
