@@ -1065,9 +1065,14 @@ function fmtSince(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return"
 function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
 // cc#326: 3-status taxonomy — OPEN (green) / SIGNAL·reason (amber) / NEAR MISS (grey).
 // SLOT_FULL folded into SIGNAL·slots; reason is a muted tag appended to the SIGNAL badge.
-function statusBadge(status,reason){
+function statusBadge(status,reason,missText){
   if(status==='OPEN')return`<span class="badge b-open">&#9679; OPEN</span>`;
-  if(status==='NEAR_MISS')return`<span class="badge b-nearmiss">NEAR MISS</span>`;
+  if(status==='NEAR_MISS'){
+    // cc#425: chip tooltip = which gate(s) missed + by how much (miss_text from the API).
+    const mt=missText?String(missText).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'):'';
+    const ttl=mt?` title="misses: ${mt}"`:'';
+    const cue=mt?`<span style="color:var(--dim);font-weight:400">&#9432;</span>`:'';
+    return`<span class="badge b-nearmiss"${ttl} style="cursor:${mt?'help':'default'}">NEAR MISS ${cue}</span>`;}
   const rt=reason?`<span class="sig-reason">&middot;${String(reason).toUpperCase()}</span>`:'';
   return`<span class="badge b-qualified">SIGNAL</span>${rt}`;}
 function rowClass(status){if(status==='OPEN')return'row-open';if(status==='NEAR_MISS')return'row-nearmiss';return'';}
@@ -1504,7 +1509,7 @@ const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_5
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
+    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason,x.miss_text)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -1519,7 +1524,8 @@ function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen
     <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
     return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
-      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
+      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason,x.miss_text)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
+      ${st==='NEAR_MISS'&&x.miss_text?`<div style="font-size:10px;color:var(--dim);margin:2px 0 4px">misses: ${String(x.miss_text).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>`:''}
       <div class="mob-chips">
         <span class="mob-chip ${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'% 1D':'1D --'}</span>
         <span class="mob-chip ${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'% 2D':'2D --'}</span>
@@ -1542,7 +1548,7 @@ function renderFunnel(b){
     <span style="color:var(--dim);margin:0 4px">·</span>
     <span class="badge b-qualified">SIGNAL</span><span style="color:var(--dim)">Qualified today, entry gated (&middot;slots / &middot;conflict / &middot;cutoff / &middot;blackout)</span>
     <span style="color:var(--dim);margin:0 4px">·</span>
-    <span class="badge b-nearmiss">NEAR MISS</span><span style="color:var(--dim)">Score-gate fallback</span>
+    <span class="badge b-nearmiss">NEAR MISS</span><span style="color:var(--dim)">Score-gate fallback &middot; hover &#9432; for the missed gate(s)</span>
   </div>`;
   // cc#379: ONE canonical column set across all six baskets (Buy Momentum reference layout).
   // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/
