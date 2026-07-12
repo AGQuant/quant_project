@@ -17,6 +17,7 @@ The shared basket-definition validator + universe vocabulary live in v12_endpoin
 """
 import os
 import json
+import time
 import bisect
 import hashlib
 import threading
@@ -545,3 +546,46 @@ def v12_backtest_get(bt_id: int):
             return {"error": "not found"}
         cols = [d[0] for d in cur.description]
         return dict(zip(cols, r))
+
+
+# ── boot self-test (gated by app_config['v12_bt_selftest']='run') — end-to-end pipeline proof ──
+def _v12_selftest_run():
+    try:
+        t0 = time.time()
+        defn = {"universe_ref": {"filters": {"gvm": {"min": 7}}},
+                "entry": {"roc_lookback": "3M", "top_x": 10, "min_stocks": 5, "max_stocks": 15},
+                "exit": {"trailing_peak_pct": 15}, "rebalance": {"freq": "monthly"},
+                "costs": {"txn_pct": 0.1, "slippage_pct": 0.1}}
+        res = run_backtest(defn, date.today() - timedelta(days=5 * 365), date.today(), "NIFTY50")
+        out = {"error": res.get("error"), "pit_flag": res.get("pit_flag"),
+               "runtime_s": round(time.time() - t0, 1), "stats": res.get("stats"),
+               "n_trades": len(res.get("trades", [])), "rebalances": res.get("rebalances"),
+               "universe_size": res.get("universe_size"),
+               "first_rebal": (res.get("rebalance_log") or [{}])[0]}
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config(key,value,updated_at) VALUES('v12_bt_selftest_result',%s,NOW()) "
+                        "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                        (json.dumps(out, default=str)[:60000],))
+            cur.execute("UPDATE app_config SET value='done', updated_at=NOW() WHERE key='v12_bt_selftest'")
+            conn.commit()
+    except Exception as e:
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config(key,value,updated_at) VALUES('v12_bt_selftest_result',%s,NOW()) "
+                            "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (str(e)[:400],))
+                cur.execute("UPDATE app_config SET value='error', updated_at=NOW() WHERE key='v12_bt_selftest'")
+                conn.commit()
+        except Exception:
+            pass
+
+
+@router.on_event("startup")
+def _v12_selftest_trigger():
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='v12_bt_selftest'")
+            row = cur.fetchone()
+        if row and str(row[0]).strip() == "run":
+            threading.Thread(target=_v12_selftest_run, name="v12-bt-selftest", daemon=True).start()
+    except Exception:
+        pass
