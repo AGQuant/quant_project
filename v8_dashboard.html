@@ -2019,11 +2019,11 @@ function renderGlobalIndices(data){
     return'';
   };
   const tile=r=>{
-    // cc#428: volatility (VIX) tiles invert — a DECLINE = falling fear = calm = bullish = GREEN,
-    // a RISE = rising fear = RED. All other tiles keep the natural sign colouring.
-    const isVol=r.category==='volatility';const cp=Number(r.chg_pct);
-    const clr=isVol?(cp<=0?'var(--grn)':'var(--red)'):(cp>=0?'var(--grn)':'var(--red)');
-    const chgTip=isVol?' title="VIX down = falling fear = calm = bullish (green); up = rising fear = red"':'';
+    // cc#431 (reverts cc#428): ALL tiles including volatility (VIX) use plain sign colouring —
+    // negative = red, positive = green. Volatility tiles keep an explanatory tooltip.
+    const cp=Number(r.chg_pct);
+    const clr=cp>=0?'var(--grn)':'var(--red)';
+    const chgTip=r.category==='volatility'?' title="VIX: falling = cooling fear (calm); coloured by sign (down = red, up = green)"':'';
     // cc#349: three honest states per tile — LIVE (green dot, bar <=15m), PREV CLOSE (had an
     // intraday bar but it aged out: market closed / feed frozen), or DAILY (no intraday bar at all).
     const live=!!r.live, stale=!live&&!!r.ts;
@@ -2131,12 +2131,12 @@ function _pcDayChg(pts,vals){
 // the async chart loaders) blanked on every re-render -> the first-load/refresh flicker.
 const _metricInlineCache={};
 function _setMetricInline(inlineId,last,dc){
-  // cc#428: colour encodes MARKET MEANING, not sign. India VIX: DOWN = falling fear = calm =
-  // bullish = GREEN, UP = RED (inverted). NIFTY/BankNifty PCR: DOWN = complacency = bearish = RED,
-  // UP = hedging/fear building = GREEN (natural sign). Tooltip on the % explains the logic.
+  // cc#431 (reverts the cc#428 VIX flip): VIX returns to PLAIN SIGN colouring — down = red, up =
+  // green — same as every other change %. PCR keeps its cc#428 sign colouring (down = complacency =
+  // bearish = red). Tooltips stay: the VIX one still notes that a falling VIX = cooling fear.
   const isVix=/vix/i.test(inlineId);
-  const colorCls=dc==null?'':(isVix?(dc<0?'pos':dc>0?'neg':''):cls(dc));
-  const tip=isVix?'VIX down = falling fear = calm = bullish (green); up = rising fear = red'
+  const colorCls=dc==null?'':cls(dc);
+  const tip=isVix?'VIX: a falling VIX = cooling fear (calm); coloured by sign (down = red, up = green)'
                  :'PCR down = complacency = bearish (red); up = hedging / fear building = green';
   const html=last==null?'':`${last.toFixed(2)}${dc==null?'':` <span class="${colorCls}" title="${tip}">${sign(dc,2)}%</span>`}`;
   _metricInlineCache[inlineId]=html;                    // remember so renderMood can re-inject it

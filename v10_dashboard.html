@@ -590,7 +590,7 @@ function rVix(){
     <div class="card-hd"><div class="t">${esc(label||'India VIX')}</div>${bdg(vl,vc)}</div>
     <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">
       <span class="big-val" style="color:${vc}">${has?cur.toFixed(2):'—'}</span>
-      <span class="big-chg" style="color:${chg<=0?UP:DN}" title="VIX down = falling fear = calm = bullish (green); up = rising fear = red">${has?sgn(chg,2):''}</span></div>
+      <span class="big-chg" style="color:${cx(chg)}" title="VIX: falling = cooling fear (calm); coloured by sign (down = red, up = green)">${has?sgn(chg,2):''}</span></div>
     ${has?sparkline(data, vc, {liveLast:true,h:55}):'<div style="font-size:8px;color:var(--dim)">no VIX feed yet</div>'}
   </div>`;
 }
