@@ -387,10 +387,15 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
     # cc#427 fix_6: distinguish "only one snapshot exists yet" from genuinely-missing OI, so the UI
     # can show "1st snapshot" (not a bare "--") when there is current OI but no prior day to diff against.
     _first_snap = len(days) < 2
+    # cc#454: the fyers option-chain feed populates OI for INDEX options only (NIFTY/BANKNIFTY); every
+    # single-STOCK chain carries LTP but a NULL oi column. Flag that so the cockpit shows an honest
+    # "OI n/f" (not fed) instead of a bare "--" that reads like a broken fix. The chain-based d/d is
+    # correct — there is simply no stock-option OI in the feed to diff.
+    _oi_unfed = (call_oi is None and put_oi is None and atm_call_oi is None and atm_put_oi is None)
     return {
         "has_options": True,
-        "atm_call_oi": {"strike": atm, "oi": atm_call_oi, "chg_pct": atm_call_chg, "first_snapshot": _first_snap},
-        "atm_put_oi": {"strike": atm, "oi": atm_put_oi, "chg_pct": atm_put_chg, "first_snapshot": _first_snap},
+        "atm_call_oi": {"strike": atm, "oi": atm_call_oi, "chg_pct": atm_call_chg, "first_snapshot": _first_snap, "oi_unfed": _oi_unfed},
+        "atm_put_oi": {"strike": atm, "oi": atm_put_oi, "chg_pct": atm_put_chg, "first_snapshot": _first_snap, "oi_unfed": _oi_unfed},
         "call_oi": {"oi": call_oi, "chg_pct": call_chg},
         "put_oi": {"oi": put_oi, "chg_pct": put_chg},
         "pcr": {"value": pcr, "chg": pcr_chg},
@@ -483,37 +488,40 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
             if vpoc_p is not None:
                 naked = not (lo is not None and hi is not None and lo <= vpoc_p <= hi)
                 out["vpoc_prior"] = {"value": vpoc_p, "naked": naked}
-        # VolX — today's cum volume to the latest bar-time vs the avg cum volume at the
-        # same time-of-day over the prior up-to-5 sessions (time-matched multiple).
-        # cc#427 fix_7: if the anchor session carries no volume (a dead/empty latest print off-market),
-        # fall back to the last session that DID trade so VolX is never a misleading 0.0×. Also expose
-        # volx_pct = the % above/below a typical session (e.g. 1.4× -> +40%).
-        vx_bars, vx_days = tb, days
-        if sum((_f(x[3]) or 0) for x in tb) <= 0:
-            for j in range(1, len(days)):
-                cand = _bars(days[j])
-                if cand and sum((_f(x[3]) or 0) for x in cand) > 0:
-                    vx_bars, vx_days = cand, days[j:]
-                    break
-        # cc#445 fix_5: OFF-MARKET freeze at the last session's FULL-DAY (15:30) VolX — the time-match
-        # to a partial last bar (a Fri feed-freeze at ~10:45) made VolX read 0.0×/-97%. Live -> match to
-        # the current bar time; off-market -> full-session cum vs prior full-session cums.
+        # VolX — cumulative-volume multiple vs the prior sessions at the matched time-of-day.
+        # cc#427 fix_7 / cc#445 fix_5 / cc#454: the anchor session must be RELIABLE. Off-market the latest
+        # session can be corrupt/feed-frozen — Fri 10-Jul TRENT had 75 bars present but a full-day volume
+        # ~3% of a normal day (mixed cumulative/incremental prints), so VolX read 0.03×/-97%. Skip any
+        # anchor whose full-day volume is an outlier-low vs the trailing median (< 30%) and step back to the
+        # most recent session with normal-magnitude volume; stamp which session VolX is anchored to. Live ->
+        # match to the current bar; off-market -> full-session cum vs prior full-session cums.
         import datetime as _dt
-        _ist_today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
-        _is_live = (today == _ist_today)
-        last_t = vx_bars[-1][4].time() if _is_live else _dt.time(23, 59, 59)
-        today_cum = sum((_f(x[3]) or 0) for x in vx_bars)
-        prior_cums = []
-        for d in vx_days[1:6]:
-            db = _bars(d)
-            cum = sum((_f(x[3]) or 0) for x in db if x[4].time() <= last_t)
-            if cum > 0:
-                prior_cums.append(cum)
-        if prior_cums and today_cum > 0:
-            avg = sum(prior_cums) / len(prior_cums)
-            vx = round(today_cum / avg, 2) if avg else None
-            out["volx"] = vx
-            out["volx_pct"] = round((vx - 1.0) * 100.0, 0) if vx is not None else None
+        _dayvol = [(dd, _bars(dd)) for dd in days]
+        _dayvol = [(dd, bb, sum((_f(x[3]) or 0) for x in bb)) for dd, bb in _dayvol]
+        _vols = sorted(v for _, _, v in _dayvol if v > 0)
+        _med = _vols[len(_vols) // 2] if _vols else 0
+        vx_idx = None
+        for i, (dd, bb, v) in enumerate(_dayvol):
+            if v > 0 and (_med <= 0 or v >= 0.30 * _med):
+                vx_idx = i
+                break
+        if vx_idx is not None:
+            anchor_day, vx_bars, _ = _dayvol[vx_idx]
+            _ist_today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+            _is_live = (anchor_day == _ist_today)
+            last_t = vx_bars[-1][4].time() if (_is_live and vx_bars) else _dt.time(23, 59, 59)
+            today_cum = sum((_f(x[3]) or 0) for x in vx_bars)
+            prior_cums = []
+            for (_dd, db, _v) in _dayvol[vx_idx + 1: vx_idx + 6]:
+                cum = sum((_f(x[3]) or 0) for x in db if x[4].time() <= last_t)
+                if cum > 0:
+                    prior_cums.append(cum)
+            if prior_cums and today_cum > 0:
+                avg = sum(prior_cums) / len(prior_cums)
+                vx = round(today_cum / avg, 2) if avg else None
+                out["volx"] = vx
+                out["volx_pct"] = round((vx - 1.0) * 100.0, 0) if vx is not None else None
+                out["volx_asof"] = str(anchor_day)   # cc#454: the session VolX is anchored to
         # hourly % — last 12 5-min closes (1h) change
         if len(tb) >= 2:
             window = tb[-12:] if len(tb) >= 12 else tb
@@ -737,6 +745,7 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                 "oi_5d": oi_5d,   # cc#427 fix_8: 5-day futures OI rolling (cc#445: dated + quadrant)
             },
             "energy": {"volx": intr.get("volx"), "volx_pct": intr.get("volx_pct"),
+                       "volx_asof": intr.get("volx_asof"),   # cc#454: session VolX is anchored to
                        "ad_21d": ad,   # cc#445 fix_5
                        "atr_5m": intr.get("atr_5m"), "atr_5m_pct": intr.get("atr_5m_pct"),   # cc#445 fix_6
                        "atr_daily": atr_d,

@@ -1016,6 +1016,8 @@ function _dcInterp(distPct){
 function _dcOiVal(x){
   if(x&&x.chg_pct!=null)return `<span class="${x.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(x.chg_pct,1)}%</span>`;
   if(x&&x.oi!=null&&x.first_snapshot)return `<span class="dc-thin">1st snapshot</span>`;
+  // cc#454: stock-option OI is not in the feed (index-only) — say so honestly instead of a bare "--".
+  if(x&&x.oi_unfed)return `<span class="dc-thin" title="Option OI is fed for indices (NIFTY/BankNifty) only; single-stock option OI is not in the feed">OI n/f</span>`;
   return '--';
 }
 function _dcRender(sym,side,qty,entry,cmp,d){
@@ -1075,7 +1077,8 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   grid+=_dcR('ATM Put OI &middot; d/d',_dcOiVal(pa),(pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
   // Vol X (fix_5: last-session final off-market) + A/D 21d
   grid+=_dcR('Vol X &middot; time-matched',
-    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--','vs typical session');
+    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--',
+    'vs typical session'+(E.volx_asof?(' &middot; as of '+E.volx_asof):''));   // cc#454: stamp the anchored session
   const ad=E.ad_21d;
   grid+=_dcR('A/D &middot; 21d',
     ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',
@@ -1083,23 +1086,21 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   // ATR (fix_6: 5m intraday + daily)
   grid+=_dcR('ATR',
     (E.atr_5m!=null||E.atr_daily!=null)?(`5m ${E.atr_5m!=null?num(E.atr_5m,1):'--'}${E.atr_5m_pct!=null?` (${num(E.atr_5m_pct,2)}%)`:''} &middot; D ${E.atr_daily!=null?num(E.atr_daily,1):'--'}${E.atr_daily_pct!=null?` (${num(E.atr_daily_pct,1)}%)`:''}`):'--','5m,20 · daily,14');
-  // ORB (fix_8: opening range + CMP position)
-  const orb=L.orb;
-  grid+=_dcR('ORB &middot; 09:15-30',
-    orb?`<span class="${orb.position==='Above'?'dc-pos':orb.position==='Below'?'dc-neg':'dc-thin'}">${orb.position}</span>${orb.edge_pct!=null?` <small>${sign(orb.edge_pct,2)}%</small>`:''}`:'--',
-    orb?(`H ${num(orb.high,0)} &middot; L ${num(orb.low,0)}`):'');
+  // cc#454 fix_2a: ORB row removed (opening-range momentum now lives in V14 ORB); RSI moves UP into
+  // this grid slot (no longer a bottom full-width row).
+  const rd=R.d,rw=R.w;
+  grid+=_dcR('RSI &middot; D/W',
+    (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','daily · weekly');
   let rows=`<div class="dc-grid">${grid}</div>`;
   // fix_7: OI · 5d rolling — each value DATED + quadrant-tagged (needs price change alongside OI).
   const o5=F.oi_5d;
   if(o5&&o5.series&&o5.series.length){
     const _dm=s=>String(s||'').slice(5).replace('-','/');
-    const bars=o5.series.map(s=>`<span title="${s.date}: OI ${s.chg_pct==null?'--':sign(s.chg_pct,1)}% · Px ${s.px_chg==null?'--':sign(s.px_chg,1)}%${s.quadrant?(' · '+s.quadrant):''}" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.15"><span style="font-size:8px;color:var(--dim)">${_dm(s.date)}</span><span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span><span style="font-size:7.5px;color:${s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)'}">${s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,9):''}</span></span>`).join('<span style="color:var(--line2);margin:0 3px">|</span>');
-    rows+=`<div class="dc-row"><div><div class="k">OI &middot; 5d rolling</div><div class="d">dated, quadrant-tagged, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:4px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-end">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
+    // cc#454 fix_2b: doubled row height + larger fonts (dates 11px · values 14px · tags 10px) for readability.
+    const bars=o5.series.map(s=>`<span title="${s.date}: OI ${s.chg_pct==null?'--':sign(s.chg_pct,1)}% · Px ${s.px_chg==null?'--':sign(s.px_chg,1)}%${s.quadrant?(' · '+s.quadrant):''}" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.4;gap:3px"><span style="font-size:11px;color:var(--dim)">${_dm(s.date)}</span><span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span><span style="font-size:10px;color:${s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)'}">${s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,12):''}</span></span>`).join('<span style="color:var(--line2);margin:0 5px;align-self:center">|</span>');
+    rows+=`<div class="dc-row" style="padding:12px 0"><div><div class="k">OI &middot; 5d rolling</div><div class="d">dated, quadrant-tagged, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:7px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-end;min-height:60px">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
   }
-  // RSI Daily · Weekly (unchanged, full-width)
-  const rd=R.d,rw=R.w;
-  rows+=_dcR('RSI',
-    (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','');
+  // cc#454 fix_2a: RSI moved into the grid above (was here as a bottom full-width row).
   // cc#368: honest freshness line — off-market/weekend shows the last chain snapshot ts ("as of
   // <ts>"); zero chain rows shows an explicit "No option data" state (never an infinite skeleton).
   let fresh='';
