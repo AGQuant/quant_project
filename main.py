@@ -181,12 +181,12 @@ def _is_embedded(request: Request) -> bool:
 
 # cc#176: /screener /intraday /structure /performance /ask were missing -- those
 # pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
-_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
+_PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health"}   # cc#392/394/398: no-store + theme/logout pills
+                     "/v13", "/v12", "/health"}   # cc#392/394/398/426: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
-PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health")   # cc#392/394/398: gate + no-store
+PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9")   # cc#392/394/398/426: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -656,6 +656,12 @@ def news_page():
 def v10_dashboard_page():
     with open("v10_dashboard.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/v9", response_class=HTMLResponse)
+def v9_pairs_page():
+    """cc#426: V9 · Pairs — sector-neutral long-short concept, extracted from the V8 dashboard tab
+    into its own page (same renderer + /api/v8/v9_pairs_sectors pool)."""
+    with open("scorr_v9.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/holdings", response_class=HTMLResponse)
 def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
@@ -701,6 +707,7 @@ NAV_REGISTRY = {
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
     "/news":         ("News (Intelligence)",  "nav"),
     "/v10":          ("V10",                  "nav"),
+    "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301

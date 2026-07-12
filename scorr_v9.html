@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V9 · Pairs</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  /* cc#426: standalone V9 Sector Pairs page — extracted from the V8 dashboard tab.
+     Dark terminal palette mirrors the V8/V10 V-family surfaces (design_refs/scorr_v8_R2). */
+  :root{
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);
+    --red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+    --shadow:0 18px 44px rgba(3,7,20,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .wrap{max-width:1240px;margin:0 auto;padding:12px 18px 40px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:4px 0 12px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}
+  .logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:16px 0 12px;display:flex;gap:8px;align-items:center}
+  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+  .chip-info{font-family:'Sora',sans-serif;font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;white-space:nowrap}
+  .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;padding:10px 12px;border-bottom:1px solid var(--line2);white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;user-select:none}
+  th:first-child,td:first-child{text-align:left}
+  th:hover{color:var(--txt)}
+  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  td.sym{font-family:'Sora',sans-serif;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:rgba(148,166,210,.07)}
+  .loading{color:var(--mut);font-size:13px;padding:22px 4px}
+  .empty{color:var(--dim);font-size:13px;padding:22px 12px;text-align:center}
+</style>
+</head>
+<body>
+<nav id="scorr-nav"></nav>
+<div class="wrap">
+  <header>
+    <div class="logo">SCORR<b>.</b></div>
+    <div class="tag">V9 · Pairs</div>
+    <div class="spacer"></div>
+  </header>
+  <div id="v9root"><div class="loading">Loading V9 Sector Pairs&hellip;</div></div>
+</div>
+<script>
+const EP={v9Pairs:"/api/v8/v9_pairs_sectors"};   // cc#385/426: live 23-sector eligible pool
+const cache={};
+async function getJSON(u){const r=await fetch(u,{headers:{'Accept':'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+
+// -- sort helper (verbatim from the V8 dashboard, cc#262) ----------------------
+const SORTREG={};
+function sortTbl(uid,cols,rows,rowFn,opts={}){
+  SORTREG[uid]={cols,rows:rows||[],rowFn,sortKey:opts.sortKey??null,dir:opts.dir??-1,empty:opts.empty||"No rows",pinned:opts.pinned||[],scrollCls:opts.scrollCls||'',footer:opts.footer||''};
+  return`<div id="tw_${uid}" class="${opts.wrapClass!==undefined?opts.wrapClass:''}">${drawTbl(uid)}</div>`;
+}
+function drawTbl(uid){
+  const t=SORTREG[uid];
+  const total=t?(t.rows.length+(t.pinned?t.pinned.length:0)):0;
+  if(!t||!total)return`<div class="scroll"><div class="empty">${t?t.empty:"No rows"}</div></div>`;
+  let rows=t.rows;
+  if(t.sortKey){rows=[...rows].sort((a,b)=>{const av=a[t.sortKey],bv=b[t.sortKey];if(typeof av==='string'||typeof bv==='string')return t.dir*String(av??'').localeCompare(String(bv??''));return t.dir*(((av===null||av===undefined)?-1e9:+av)-((bv===null||bv===undefined)?-1e9:+bv));});}
+  const head=t.cols.map(([k,l])=>`<th onclick="tblSort('${uid}','${k}')" style="cursor:pointer;user-select:none;white-space:nowrap">${l}${t.sortKey===k?(t.dir<0?' <span style="color:var(--cyan)">▼</span>':' <span style="color:var(--cyan)">▲</span>'):' <span style="opacity:.25;font-size:9px">⇅</span>'}</th>`).join('');
+  const body=(t.pinned||[]).map(t.rowFn).join('')+rows.map(t.rowFn).join('');
+  const foot=t.footer?`<tfoot>${t.footer}</tfoot>`:'';
+  return`<div class="scroll${t.scrollCls?' '+t.scrollCls:''}"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot}</table></div>`;
+}
+function tblSort(uid,k){
+  const t=SORTREG[uid];if(!t)return;
+  t.dir=(t.sortKey===k)?-t.dir:1;t.sortKey=k;
+  const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
+}
+
+// -- V9 Sector Pairs (cc#385, standalone cc#426) — DESIGN-stage concept + live pool ----
+function renderV9Pairs(){
+  const card=`<div class="ptitle">V9 Sector Pairs <span class="ct" style="background:rgba(245,185,74,.12);border-color:var(--amber);color:var(--amber)">DESIGN</span></div>
+    <div style="background:linear-gradient(135deg,var(--panel2),var(--panel));border:1px solid var(--line2);border-radius:14px;padding:18px 20px;margin-bottom:16px">
+      <div style="font-size:15px;font-weight:800;letter-spacing:.3px;margin-bottom:10px;color:var(--txt)">Sector-neutral long-short pairs</div>
+      <div style="font-size:13px;color:var(--mut);line-height:1.7">
+        Within each futures-universe sector holding <b style="color:var(--txt)">4+ stocks</b> (23 sectors, e.g. Private Banks 11, Pharma 11, IT 10), rank stocks by <b style="color:var(--txt)">strength</b> &mdash; GVM quality, rising momentum (1M + 3M), above DMA50 &amp; DMA200, 50DMA &gt; 200DMA.
+        <span style="color:var(--grn);font-weight:700">LONG the strongest</span>, <span style="color:var(--red);font-weight:700">SHORT the weakest</span>, 1 lot each.
+        Sector and market beta cancel by construction &mdash; no hedge ratios, no z-scores; the spread is a quality-momentum divergence, not a statistical artifact. Rebalance monthly or on rank-flip.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+        <span class="chip-info" style="background:var(--grn-d);color:var(--grn)">Sector-neutral</span>
+        <span class="chip-info" style="background:var(--grn-d);color:var(--grn)">Market-beta cancelled</span>
+        <span class="chip-info" style="background:rgba(77,124,254,.12);color:var(--blu)">GVM + momentum rank</span>
+        <span class="chip-info" style="background:rgba(55,211,232,.12);color:var(--cyan)">Monthly / rank-flip rebalance</span>
+      </div>
+      <div style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6;border-top:1px solid var(--line);padding-top:12px">
+        <b style="color:var(--amber)">Status: DESIGN.</b> 5-yr technical backtest + GVM overlay pending backfills &mdash; (a) cc#377 Phase A 1-yr 5-min history and (b) GVM / fundamental backfill from the Screener scrape. This page is the concept + live eligible pool; the engine ships after both land.
+      </div>
+    </div>`;
+  const d=cache.v9pairs;
+  let table;
+  if(!d){table='<div class="loading">Loading sector pool&hellip;</div>';}
+  else{
+    const secs=d.sectors||[];
+    const head=`<div class="ptitle">Eligible sector pool <span class="ct">${d.sector_count??secs.length} sectors &middot; ${d.total_stocks??''} stocks &middot; &ge;${d.min_stocks??4} each &middot; live</span></div>`;
+    table=head+sortTbl('v9pairs',
+      [["segment","Sector (GVM segment)"],["stock_count","Stocks"]],
+      secs,x=>`<tr>
+        <td class="sym">${x.segment}</td>
+        <td><span style="font-family:'Space Mono';font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
+      {sortKey:'stock_count',dir:-1,empty:"No eligible sectors",wrapClass:''});
+  }
+  return card+table;
+}
+
+async function boot(){
+  const root=document.getElementById('v9root');
+  try{cache.v9pairs=await getJSON(EP.v9Pairs);}catch(e){/* render concept card even if the pool fails */}
+  root.innerHTML=renderV9Pairs();
+}
+boot();
+</script>
+</body>
+</html>

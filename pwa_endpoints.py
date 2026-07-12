@@ -285,7 +285,8 @@ PWA_JS = """
     ['/structure', '\\u25a6', 'Structure'],
     ['/performance', '\\u25b2', 'Performance'],
     ['/ask', '\\u2709', 'Ask'],
-    ['/v10', '\\u25b3', 'V10']
+    ['/v10', '\\u25b3', 'V10'],
+    ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs']
   ];
   var p = location.pathname, qs = location.search;
   function isActive(route) {

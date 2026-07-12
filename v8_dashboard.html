@@ -353,6 +353,8 @@
      Guarded at render time (if(!window.Chart)) so a CDN hiccup never breaks the dashboard. -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
+// cc#426: V9 Pairs is now the standalone /v9 page — old in-dashboard deep link redirects there.
+if(location.hash==='#v9pairs'||location.hash==='#v9'){location.replace('/v9');}
 const API_BASE="";
 const BROKERAGE_PER_TRADE=500;
 const EP={
@@ -397,7 +399,10 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounc
 // Index 10 dropped from TAB_ORDER (no button, page never rendered); labels/panel indices for
 // Live News(11)/Forthcoming(12) stay stable so their hardcoded panel ids are untouched.
 // cc#264: "Global Indices" appended as index 13.
-const TAB_ORDER=[0,15,16,17,1,2,3,4,5,6,7,8,9,11,12,13,14];   // cc#383 Matrix · cc#385 V9 Pairs · cc#388 OH-OL — pinned after Master
+// cc#426: V9 Pairs (16) extracted to its own /v9 page — removed from the tab row (label kept at
+// index 16 for panel-id stability, no button). Matrix (15) moved to the LAST position (after
+// Position News, 14). OH-OL (17) stays pinned right after Master.
+const TAB_ORDER=[0,17,1,2,3,4,5,6,7,8,9,11,12,13,14,15];   // cc#388 OH-OL pinned · cc#383/426 Matrix last
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -1106,7 +1111,7 @@ TAB_ORDER.forEach(panelIdx=>{
   tabsEl.appendChild(b);
 });
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
-try{document.getElementById('panel16').innerHTML=renderV9Pairs();}catch(e){}   // cc#385: concept card instant; sector table fills on fetch
+// cc#426: V9 Pairs moved to standalone /v9 — panel16 no longer rendered here (tab removed).
 try{document.getElementById('panel17').innerHTML='<div class="loading">Loading OH-OL…</div>';}catch(e){}   // cc#388
 function selectTab(i){
   [...tabsEl.children].forEach(t=>{
@@ -2188,7 +2193,7 @@ async function loadAll(){
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
-    run('v9pairs',()=>getJSON(EP.v9Pairs),()=>{const el=document.getElementById('panel16');if(el)el.innerHTML=renderV9Pairs();}),   // cc#385
+    // cc#426: V9 Pairs fetch removed — it lives on the standalone /v9 page now.
     run('ohol',()=>getJSON(EP.ohol),()=>{const el=document.getElementById('panel17');if(el)el.innerHTML=renderOHOL();}),   // cc#388
   ];
   await Promise.all(jobs);
