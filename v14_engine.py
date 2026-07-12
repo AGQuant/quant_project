@@ -597,6 +597,7 @@ def get_trades(conn, limit: int = 200) -> List[Dict]:
     with conn.cursor() as cur:
         cur.execute("""SELECT id, trade_date, tag, symbol, side, entry_ts, entry_px, exit_ts, exit_px,
                        exit_reason, pnl_pts, pnl_pct, net_pnl_pct, target_basis,
+                       stop_px, target_px, atr, eq_signal_px,
                        basis_entry_rs, basis_entry_sign, basis_dir_entry,
                        basis_exit_rs, basis_exit_sign, basis_dir_exit, gates_snapshot
                        FROM v14_trades WHERE status='closed' ORDER BY exit_ts DESC LIMIT %s""", (limit,))
@@ -607,6 +608,7 @@ def get_trades(conn, limit: int = 200) -> List[Dict]:
         r["entry_ts"] = r["entry_ts"].isoformat() if r["entry_ts"] else None
         r["exit_ts"] = r["exit_ts"].isoformat() if r["exit_ts"] else None
         for k in ("entry_px", "exit_px", "pnl_pts", "pnl_pct", "net_pnl_pct",
+                  "stop_px", "target_px", "atr", "eq_signal_px",   # cc#457: bracket fields for the logic-memory popover
                   "basis_entry_rs", "basis_exit_rs"):
             r[k] = _f(r[k])
     return rows

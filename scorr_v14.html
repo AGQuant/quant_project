@@ -64,6 +64,19 @@
   .rp-x{font-family:'Space Mono';font-size:12px;color:var(--mut);background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;cursor:pointer}
   .rp-toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--blu);color:var(--txt);font-family:'Space Mono';font-size:13px;font-weight:700;padding:12px 22px;border-radius:10px;box-shadow:var(--shadow);opacity:0;transition:opacity .3s;z-index:210;pointer-events:none}
   .rp-toast.show{opacity:1}
+  /* cc#457: trade logic-memory i-button + popover */
+  .ibtn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:9px;font-weight:700;font-family:'Space Mono';cursor:pointer;vertical-align:middle;margin-left:6px}
+  .ibtn:hover{border-color:var(--blu);color:var(--blu)}
+  .ti-ov{position:fixed;inset:0;background:rgba(6,10,22,.78);z-index:220;display:none;align-items:center;justify-content:center;padding:18px}
+  .ti-ov.open{display:flex}
+  .ti-box{background:var(--panel);border:1px solid var(--line2);border-radius:14px;max-width:460px;width:100%;max-height:88vh;overflow-y:auto;padding:18px 20px 20px;box-shadow:var(--shadow);position:relative}
+  .ti-close{position:absolute;top:12px;right:12px;width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px}
+  .ti-h{font-family:'Space Mono';font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:30px}
+  .ti-sec{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--cyan);margin:15px 0 5px}
+  .ti-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .ti-row:last-child{border-bottom:none}
+  .ti-row .k{color:var(--mut)}
+  .ti-row .v{font-family:'Space Mono';color:var(--txt);font-weight:700;text-align:right}
 </style>
 </head>
 <body>
@@ -90,6 +103,8 @@
   </div>
 </div>
 <div class="rp-toast" id="rpToast"></div>
+<!-- cc#457: trade logic-memory popover -->
+<div class="ti-ov" id="tiOv" onclick="if(event.target===this)closeTradeInfo()"><div class="ti-box" id="tiBox"></div></div>
 <script>
 const EP={pos:"/api/v14/positions",trades:"/api/v14/trades?limit=200",summary:"/api/v14/summary"};
 const D={open:[],closed:[],tags:[],cost:{},daily:null,dayLog:[]};
@@ -126,7 +141,7 @@ function rOpen(){
   const head=['TAG','SIDE','SYMBOL','ENTRY(F)','EQ SIG','STOP','TARGET','T·BASIS','BASIS','RESULTS','SINCE'];
   const body=D.open.length?D.open.map(p=>`<tr>
     <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
-    <td class="sym">${esc(p.symbol)}</td>
+    <td class="sym">${esc(p.symbol)}<span class="ibtn" onclick="tradeInfo('${p.id}')" title="Trade logic memory">i</span></td>
     <td>${num(p.entry_px)}</td>
     <td style="color:var(--mut)">${num(p.eq_signal_px)}</td>
     <td class="neg">${num(p.stop_px)}</td>
@@ -144,7 +159,7 @@ function rClosed(){
   const body=D.closed.length?D.closed.map(p=>`<tr>
     <td style="color:var(--mut);font-size:10px">${esc(p.trade_date)}</td>
     <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
-    <td class="sym">${esc(p.symbol)}</td>
+    <td class="sym">${esc(p.symbol)}<span class="ibtn" onclick="tradeInfo('${p.id}')" title="Trade logic memory">i</span></td>
     <td>${num(p.entry_px)}</td><td>${num(p.exit_px)}</td>
     <td style="color:var(--mut);font-size:10px">${esc(p.exit_reason||'')}</td>
     <td style="font-size:10px;color:var(--dim)" title="entry ${esc(p.basis_entry_sign||'')}/${esc(p.basis_dir_entry||'')} → exit ${esc(p.basis_exit_sign||'')}/${esc(p.basis_dir_exit||'')}">${num(p.basis_entry_rs,1)}→${num(p.basis_exit_rs,1)}</td>
@@ -248,6 +263,50 @@ document.getElementById('replayBtn').onclick=startReplay;
 document.getElementById('rpClose').onclick=stopReplay;
 document.querySelectorAll('.rp-speed button').forEach(b=>b.onclick=()=>{RP.dur=+b.getAttribute('data-dur');document.querySelectorAll('.rp-speed button').forEach(x=>x.classList.remove('on'));b.classList.add('on');if(RP.running){stopReplay();startReplay();}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&RP.running)stopReplay();});
+
+// ── cc#457: trade "logic memory" popover — the full WHY of a trade from gates_snapshot + the
+// bracket/exit/basis/cost columns already stored per row. Dynamic: renders whatever jsonb keys exist
+// (skips the sim flag + nulls), so future rule additions show with no UI change. Same popover style as
+// the cc#452 scorecard i-buttons. Works on open + closed rows. ──
+const GS_LABELS={v10:'V10 state',mood:'Market mood',volx:'VolX (×)',day_pct:'Day %',gap_pct:'Gap %',cmp_vs_pp:'CMP vs PP',vwap_side:'VWAP side',turnover_rank:'Turnover rank',r1_touch:'R1 touch',oi_red_bar:'OI bar',room_to_pp_pct:'Room to PP %',fall_from_high_pct:'Fall from high %',touch_count:'Touch #',dip_depth_pct:'Dip depth %',sector_vs_stock:'Sector vs stock',reclaim:'VWAP reclaim'};
+function gsLabel(k){return GS_LABELS[k]||k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
+function gsVal(k,v){if(typeof v==='boolean')return v?'yes':'no';if(typeof v==='number')return /_pct$/.test(k)?(v+'%'):String(v);return esc(String(v));}
+function findTrade(id){return (D.open||[]).concat(D.closed||[]).find(t=>String(t.id)===String(id));}
+function tiRow(k,v){return `<div class="ti-row"><span class="k">${k}</span><span class="v">${v}</span></div>`;}
+function tradeInfo(id){
+  const t=findTrade(id);if(!t)return;
+  const gs=t.gates_snapshot||{};
+  const entryRows=Object.keys(gs).filter(k=>k!=='sim'&&gs[k]!=null).map(k=>tiRow(gsLabel(k),gsVal(k,gs[k]))).join('')||tiRow('&mdash;','no snapshot stored');
+  const dur=(t.entry_ts&&t.exit_ts)?Math.round((new Date(t.exit_ts)-new Date(t.entry_ts))/60000):null;
+  const cost=D.cost||{};
+  const exChip=t.exit_reason?`<span class="chip ${t.exit_reason==='target'?'c-long':t.exit_reason==='stop'?'c-short':'c-orb'}">${esc(t.exit_reason)}</span>`:'--';
+  let h=`<button class="ti-close" onclick="closeTradeInfo()">&times;</button>`
+    +`<div class="ti-h">${esc(t.symbol)} ${tagChip(t.tag)} ${sideChip(t.side)}</div>`
+    +`<div class="ti-sec">Entry logic</div>`+entryRows
+    +`<div class="ti-sec">Bracket</div>`
+      +tiRow('Entry (FUT)',num(t.entry_px))
+      +(t.eq_signal_px!=null?tiRow('Eq signal',num(t.eq_signal_px)):'')
+      +tiRow('Target',num(t.target_px)+(t.target_basis?` <span style="color:var(--dim);font-size:10px">${esc(t.target_basis)}</span>`:''))
+      +tiRow('Stop',num(t.stop_px))
+      +(t.atr!=null?tiRow('ATR',num(t.atr)):'');
+  if(t.exit_reason||t.exit_px!=null){
+    h+=`<div class="ti-sec">Exit</div>`+tiRow('Reason',exChip)
+      +(t.exit_px!=null?tiRow('Exit px',num(t.exit_px)):'')
+      +(dur!=null?tiRow('Duration',dur+' min'):'')
+      +(t.net_pnl_pct!=null?tiRow('Net P&amp;L',`<span class="${t.net_pnl_pct>=0?'pos':'neg'}">${sign(t.net_pnl_pct,2)}%</span>`):'');
+  }
+  if(t.basis_entry_rs!=null||t.basis_exit_rs!=null){
+    h+=`<div class="ti-sec">Basis memory</div>`
+      +tiRow('Entry basis',(t.basis_entry_rs!=null?num(t.basis_entry_rs,1):'--')+` <span style="color:var(--dim);font-size:10px">${esc(((t.basis_entry_sign||'')+' '+(t.basis_dir_entry||'')).trim())}</span>`)
+      +(t.basis_exit_rs!=null?tiRow('Exit basis',num(t.basis_exit_rs,1)+` <span style="color:var(--dim);font-size:10px">${esc(((t.basis_exit_sign||'')+' '+(t.basis_dir_exit||'')).trim())}</span>`):'');
+  }
+  h+=`<div class="ti-sec">Costs</div>`+tiRow('Flat',`Rs ${cost.flat_rs??500}`)+tiRow('Slippage',`${cost.slippage_pct??0.05}%`)
+    +((t.net_pnl_pct!=null&&t.pnl_pct!=null)?tiRow('Gross &rarr; net',`${sign(t.pnl_pct,2)}% &rarr; ${sign(t.net_pnl_pct,2)}%`):'');
+  document.getElementById('tiBox').innerHTML=h;
+  document.getElementById('tiOv').classList.add('open');
+}
+function closeTradeInfo(){document.getElementById('tiOv').classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeTradeInfo();});
 
 function tick(){const i=new Date(Date.now()+(5*60+30)*60000);document.getElementById('clk').textContent=String(i.getUTCHours()).padStart(2,'0')+':'+String(i.getUTCMinutes()).padStart(2,'0')+' IST';}
 tick();setInterval(tick,1000);
