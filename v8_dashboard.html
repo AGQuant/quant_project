@@ -413,7 +413,7 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounc
 // cc#426: V9 Pairs (16) extracted to its own /v9 page — removed from the tab row (label kept at
 // index 16 for panel-id stability, no button). Matrix (15) moved to the LAST position (after
 // Position News, 14). OH-OL (17) stays pinned right after Master.
-const TAB_ORDER=[0,17,1,2,3,4,5,6,7,8,9,11,12,13,14,15];   // cc#388 OH-OL pinned · cc#383/426 Matrix last
+const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
 
 // -- Basket info --------------------------------------------------------------
 const BASKET_INFO={
@@ -667,7 +667,19 @@ function renderV9Pairs(){
 // -- OH-OL scanner (cc#388) ---------------------------------------------------
 // Open=High (bearish: session high still pinned to the opening-range high, red on the day, below PP)
 // and Open=Low (bullish mirror). Live from 09:35; off-market shows the last-session snapshot.
+// cc#447: OH-OL DEACTIVATED — V14 ORB (fuller confirmation stack + uniform exits + trade log) is
+// the single opening-momentum engine. The tab is removed from TAB_ORDER; this panel is dormant
+// (reachable only by direct DOM access) and shows an inactive banner. The /api/v8/ohol endpoint
+// (read-only, writes nothing) and all historical data are preserved for future BT7 comparison.
 function renderOHOL(){
+  return '<div class="ptitle">OH-OL Scanner <span class="ct" style="color:var(--mut)">INACTIVE</span></div>'
+    + '<div class="empty" style="padding:20px;line-height:1.6">'
+    + '<strong style="color:var(--amber)">INACTIVE — superseded by V14 ORB.</strong><br>'
+    + 'Open=High / Open=Low is the same opening-momentum archetype as V14 ORB, which carries a fuller '
+    + 'confirmation stack, uniform bracket exits and a paper trade log. OH-OL is retained dormant '
+    + '(code + historical data preserved for BT7 comparison), no longer evaluated live. '
+    + 'See <a href="/v14" style="color:var(--acc)">V14 · Intraday</a>.</div>';
+  // --- legacy live scanner (dormant; retained for reference / future re-activation) ---
   const d=cache.ohol;
   if(!d)return'<div class="loading">Loading OH-OL&hellip;</div>';
   const meta=`<div class="ptitle">OH-OL Scanner <span class="ct">${d.snapshot?('snapshot &middot; '+(d.session_date||'')):'live &middot; '+(d.as_of_ts||'')}</span></div>`;
@@ -1183,7 +1195,7 @@ TAB_ORDER.forEach(panelIdx=>{
 });
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
 // cc#426: V9 Pairs moved to standalone /v9 — panel16 no longer rendered here (tab removed).
-try{document.getElementById('panel17').innerHTML='<div class="loading">Loading OH-OL…</div>';}catch(e){}   // cc#388
+try{document.getElementById('panel17').innerHTML=renderOHOL();}catch(e){}   // cc#388 · cc#447: static INACTIVE banner (no live poll)
 function selectTab(i){
   [...tabsEl.children].forEach(t=>{
     const on=t.textContent===TAB_LABELS[i];
@@ -2306,7 +2318,7 @@ function paint(){
   document.getElementById('panel9').innerHTML=renderRaw();
   document.getElementById('panel15').innerHTML=renderMatrix();   // cc#383
   document.getElementById('panel16').innerHTML=renderV9Pairs();  // cc#385
-  if(cache.ohol)document.getElementById('panel17').innerHTML=renderOHOL();  // cc#388
+  // cc#447: OH-OL inactive — panel17 shows a static banner set at init; no live re-render.
   // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
   BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
   loadFunnelInline('sell_overbought',6);
@@ -2340,7 +2352,7 @@ async function loadAll(){
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
       ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
     // cc#426: V9 Pairs fetch removed — it lives on the standalone /v9 page now.
-    run('ohol',()=>getJSON(EP.ohol),()=>{const el=document.getElementById('panel17');if(el)el.innerHTML=renderOHOL();}),   // cc#388
+    // cc#447: OH-OL fetch removed — scanner INACTIVE (superseded by V14 ORB). Endpoint + data preserved.
   ];
   await Promise.all(jobs);
   if(cache.mood)renderMood(cache.mood);
