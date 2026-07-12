@@ -915,8 +915,15 @@ function _dcInjectStyle(){
   if(document.getElementById('dc-style'))return;
   const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(5,9,20,.6);display:none}
   #dcOv.open{display:block}
-  .dc-sheet{font-family:'Sora',system-ui,sans-serif;position:fixed;right:0;top:0;bottom:0;width:100%;max-width:440px;background:var(--bg);border-left:1px solid var(--line);overflow-y:auto;padding:14px 14px 18px;transform:translateX(100%);transition:transform .24s ease}
+  .dc-sheet{font-family:'Sora',system-ui,sans-serif;position:fixed;right:0;top:0;bottom:0;width:min(94vw,660px);max-width:660px;background:var(--bg);border-left:1px solid var(--line);overflow-y:auto;padding:14px 16px 18px;transform:translateX(100%);transition:transform .24s ease}
+  /* cc#427 fix_9: one-screen redesign — widen to ~50% viewport on desktop so all metrics fit in a
+     2-col grid with no vertical scroll; full-width stacked single column on mobile. */
+  @media(min-width:768px){.dc-sheet{width:min(50vw,660px)}}
+  @media(max-width:560px){.dc-sheet{width:100%;max-width:100%}}
   #dcOv.open .dc-sheet{transform:none}
+  .dc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+  .dc-grid .dc-row{margin-top:0}
+  @media(max-width:560px){.dc-grid{grid-template-columns:1fr}}
   .dc-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
   .dc-hd .s{font-size:20px;font-weight:800;color:var(--txt);letter-spacing:.02em}
   .dc-x{background:none;border:1px solid var(--line);color:var(--mut);width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;flex-shrink:0}
@@ -953,60 +960,90 @@ function _dcHeader(sym,side,qty,entry,cmp,dcmp){
     <div class="dc-sub">CMP ${c!=null?num(c):'--'}${chg!=null?(' &middot; '+sign(chg,2)+'% on entry'):''} &middot; Derivative Cockpit</div>`;
 }
 // cc#348: strict one-screen sheet — exactly 3 verdict chips + 8 rows, fits 390x800 zero scroll.
-function _dcVC(k,label,color,sub){
-  return `<div class="dc-vc" style="--vc:${_dcColor(color)}"><div class="k">${k}</div>`+
+function _dcVC(k,label,color,sub,tip){
+  const tt=tip?` title="${String(tip).replace(/"/g,'&quot;')}"`:'';
+  return `<div class="dc-vc" style="--vc:${_dcColor(color)}"${tt}><div class="k">${k}</div>`+
     `<div class="v" style="color:${_dcColor(color)}">${label}</div>${sub?`<div class="vs">${sub}</div>`:''}</div>`;
 }
 function _dcR(k,vhtml,dhtml){
   return `<div class="dc-row"><div><div class="k">${k}</div>${dhtml?`<div class="d">${dhtml}</div>`:''}</div><div class="v">${vhtml}</div></div>`;
+}
+// cc#427 fix_4: per-row STRONG/NEUTRAL/WEAK chip from the BUY perspective — CMP above this level
+// (dist>0) = STRONG, below = WEAK, within ±0.15% = NEUTRAL.
+function _dcInterp(distPct){
+  if(distPct==null)return'';
+  const s=distPct>0.15?['STRONG','dc-pos']:distPct<-0.15?['WEAK','dc-neg']:['NEUTRAL','dc-thin'];
+  return ` <span class="dc-chip ${s[1]}">${s[0]}</span>`;
+}
+// cc#427 fix_6: ATM OI d/d value — %chg when a prior snapshot exists, "1st snapshot" when there is
+// current OI but no prior day to diff, "--" only when the chain genuinely carries no OI.
+function _dcOiVal(x){
+  if(x&&x.chg_pct!=null)return `<span class="${x.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(x.chg_pct,1)}%</span>`;
+  if(x&&x.oi!=null&&x.first_snapshot)return `<span class="dc-thin">1st snapshot</span>`;
+  return '--';
 }
 function _dcRender(sym,side,qty,entry,cmp,d){
   const V=d.verdict||{},L=d.levels||{},F=d.flow||{},E=d.energy||{},R=d.rsi||{};
   // ── Verdict strip: OI Quadrant · Options Cost · TC Score (always 3 chips) ──
   const q=V.oi_quadrant, o=V.options_cost, t=V.tc_score;
   let vc='';
-  vc+= q ? _dcVC('OI Quadrant',q.label,q.color,'') : _dcVC('OI Quadrant','DATA THIN','mut','');
-  vc+= o ? _dcVC('Options Cost',o.label,o.color, o.basis==='IVP'?('IVP '+num(o.ivp,0)):(num(o.iv_rv,2)+'×'))
+  // fix_1: OI Quadrant — show the classifying numbers (Fut OI d/d% · price change%) beneath the label.
+  vc+= q ? _dcVC('OI Quadrant',q.label,q.color,
+             `OI ${sign(q.oi_chg_pct,1)}% &middot; Px ${sign(q.price_chg_pct,1)}%`,
+             'OI Quadrant = futures OI d/d × price change. Long/Short Buildup, Long Unwind, Short Covering.')
+         : _dcVC('OI Quadrant','DATA THIN','mut','');
+  // fix_2: Options Cost — working = ATM strike, current ATM-CE premium vs BS fair premium, ratio.
+  let oSub='';
+  if(o){const w=o.working;
+    oSub = w ? `${num(w.strike,0)} CE @ ${num(w.ce_ltp,0)} vs fair ${num(w.ce_fair,0)} &middot; ${num(w.ce_ratio,2)}×`
+             : (o.basis==='IVP'?('IVP '+num(o.ivp,0)):(o.iv_rv!=null?num(o.iv_rv,2)+'×':''));}
+  vc+= o ? _dcVC('Options Cost',o.label,o.color,oSub,
+             'Options Cost: ATM straddle implied vol vs 20d realised (RV20). Working shows the ATM-CE market premium vs the Black-Scholes fair premium (σ=RV20); ratio <1× = cheap.')
          : _dcVC('Options Cost','DATA THIN','mut','');
-  vc+= t ? _dcVC('TC Score', t.label, t.color, (t.score!=null?num(t.score,1):'--')+'/'+(t.total||''))
+  // fix_3: TC Score — TC v4 dual HIGHEST card: style tag (e.g. SELL-REV) + side colour + X/16(BUY)|X/14(SELL).
+  vc+= t ? _dcVC('TC Score', (t.style||t.label||'--'), t.color,
+             (t.score!=null?num(t.score,1):'--')+'/'+(t.total||'')+(t.verdict?(' &middot; '+t.verdict):''),
+             'TC Score = the highest-scoring TC v4 dual card (Momentum/Reversal × BUY/SELL). Score out of 16 (BUY) or 14 (SELL).')
          : _dcVC('TC Score','DATA THIN','mut', side?'':'no side');
   const verdict=`<div class="dc-vstrip">${vc}</div>`;
-  // ── 8 rows: VPOC · VWAP · Basis · Fut OI · ATM Call OI · ATM Put OI · Vol X · RSI ──
+  // ── metric grid: VPOC · VWAP · Basis · Fut OI · ATM Call OI · ATM Put OI · Vol X (2-col) ──
   const _sm=(x,dg)=>`<small class="${x>=0?'dc-pos':'dc-neg'}">${sign(x,dg)}%</small>`;
-  let rows='';
-  // 1 VPOC (today, dist to CMP; prior-day naked as sub)
+  let grid='';
+  // VPOC (fix_4 STRONG/NEUTRAL/WEAK chip vs its own level)
   const vp=L.vpoc_today;
-  rows+=_dcR('VPOC &middot; today',
-    (vp&&vp.value!=null)?(num(vp.value,0)+(vp.dist_pct!=null?_sm(vp.dist_pct,1):'')):'--',
+  grid+=_dcR('VPOC &middot; today',
+    (vp&&vp.value!=null)?(num(vp.value,0)+(vp.dist_pct!=null?_sm(vp.dist_pct,1):'')+_dcInterp(vp.dist_pct)):'--',
     (L.vpoc_prior&&L.vpoc_prior.naked)?('prior '+num(L.vpoc_prior.value,0)+' naked'):'');
-  // 2 VWAP
+  // VWAP (fix_4)
   const vw=L.vwap;
-  rows+=_dcR('VWAP',
-    (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')):'--','session');
-  // 3 Basis
-  const b=F.basis;
-  rows+=_dcR('Basis',
+  grid+=_dcR('VWAP',
+    (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')+_dcInterp(vw.dist_pct)):'--','session');
+  // Basis (fix_5: rupee — Fut vs Eq price + rupee spread; 5d percentile secondary)
+  const b=F.basis, fut=d.fut, spot=d.spot;
+  grid+=_dcR('Basis',
     (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>`:'--',
-    (b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):'');
-  // 4 Futures OI d/d (DATA THIN, never blank)
+    (fut!=null&&spot!=null)?(`Fut ${num(fut,1)} vs Eq ${num(spot,1)}`+((b&&b.percentile!=null)?(' &middot; 5d pct '+num(b.percentile,0)+'%'):''))
+                           :((b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):''));
+  // Fut OI (fix_1: clearer label)
   const fo=F.fut_oi;
-  rows+=_dcR('Fut OI &middot; d/d',
+  grid+=_dcR('Futures OI &middot; vs prev day',
     (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>`
       :'<span class="dc-thin">DATA THIN</span>','');
-  // 5 ATM Call OI d/d
-  const ca=F.atm_call_oi;
-  rows+=_dcR('ATM Call OI &middot; d/d',
-    (ca&&ca.chg_pct!=null)?`<span class="${ca.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(ca.chg_pct,1)}%</span>`:'--',
-    (ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)):'');
-  // 6 ATM Put OI d/d
-  const pa=F.atm_put_oi;
-  rows+=_dcR('ATM Put OI &middot; d/d',
-    (pa&&pa.chg_pct!=null)?`<span class="${pa.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(pa.chg_pct,1)}%</span>`:'--',
-    (pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
-  // 7 Vol X
-  rows+=_dcR('Vol X &middot; time-matched',
-    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>`:'--','');
-  // 8 RSI Daily · Weekly (one row)
+  // ATM Call/Put OI (fix_6)
+  const ca=F.atm_call_oi, pa=F.atm_put_oi;
+  grid+=_dcR('ATM Call OI &middot; d/d',_dcOiVal(ca),(ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)):'');
+  grid+=_dcR('ATM Put OI &middot; d/d',_dcOiVal(pa),(pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
+  // Vol X (fix_7: never 0.0× from a dead session; show % vs typical)
+  grid+=_dcR('Vol X &middot; time-matched',
+    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--','vs typical session');
+  let rows=`<div class="dc-grid">${grid}</div>`;
+  // fix_8: OI · 5d rolling (full-width mini-row) — last 5 sessions futures OI d/d + net-5d.
+  const o5=F.oi_5d;
+  if(o5&&o5.series&&o5.series.length){
+    const bars=o5.series.map(s=>`<span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span>`).join('<span style="color:var(--dim);margin:0 1px">·</span>');
+    rows+=`<div class="dc-row"><div><div class="k">OI &middot; 5d rolling</div><div class="d">futures OI d/d, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
+  }
+  // RSI Daily · Weekly (unchanged, full-width)
   const rd=R.d,rw=R.w;
   rows+=_dcR('RSI',
     (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','');

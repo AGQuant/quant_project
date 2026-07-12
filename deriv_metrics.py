@@ -50,24 +50,29 @@ _TC_TTL = 300.0
 
 
 def _tc_score(sym: str, side: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not side:
-        return None
-    side = side.upper()
-    if side not in ("LONG", "SHORT"):
-        return None
-    key = (sym, side)
+    # cc#427 fix_3: source = TC v4 dual HIGHEST card. Returns the winning style tag (e.g. SELL-REV),
+    # the trade side, side colour (cc#405: BUY=bull/green, SELL=bear/red), the verdict band, and the
+    # score as X/16 (BUY) or X/14 (SELL). When a position side is known (LONG->BUY, SHORT->SELL) we
+    # score that side; otherwise "ALL" and the engine's best card wins.
+    v4side = {"LONG": "BUY", "SHORT": "SELL"}.get((side or "").upper(), "ALL")
+    key = (sym, v4side)
     now = time.time()
     c = _TC_CACHE.get(key)
     if c and now - c[0] < _TC_TTL:
         return c[1]
     res = None
     try:
-        import native_trade_check as ntc
-        d = ntc.compute_trade_check(sym, side, use_api=False)
-        if d and d.get("ok"):
-            lbl, col = {"pass": ("STRONG", "bull"), "watch": ("VALID", "amber"),
-                        "fail": ("WEAK", "bear")}.get(d.get("verdict_class"), ("--", "mut"))
-            res = {"score": d.get("score"), "total": d.get("total"), "label": lbl, "color": col}
+        from tc_v4_dual import trade_check_v4_dual
+        r = trade_check_v4_dual(sym, v4side)
+        b = r.get("best") if (r and not r.get("error")) else None
+        if b:
+            bside = b.get("side")
+            col = "bull" if bside == "BUY" else "bear"           # cc#405 side palette
+            verdict = "REJECT" if r.get("gated") else b.get("verdict")
+            res = {"score": b.get("score"), "total": b.get("max"),
+                   "style": (b.get("label") or "").upper(),      # "SELL-REV" / "BUY-MOM"
+                   "side": bside, "verdict": verdict, "label": verdict, "color": col,
+                   "gated": bool(r.get("gated"))}
     except Exception as e:
         log.warning(f"tc_score {sym}/{side}: {e}")
     _TC_CACHE[key] = (now, res)
@@ -175,6 +180,26 @@ def _oi_quadrant(oi_chg, price_chg) -> Optional[Dict[str, Any]]:
     else:
         label, color = "SHORT COVERING", "bull"
     return {"label": label, "color": color, "oi_chg_pct": oi_chg, "price_chg_pct": price_chg}
+
+
+def _oi_5d_rolling(cur, sym) -> Optional[Dict[str, Any]]:
+    """cc#427 fix_8: last-5-session futures OI day-over-day % (one OI per session), plus the net-5d
+    figure. Feeds the "OI · 5d rolling" mini-row. Needs >=2 sessions or returns None (row hidden)."""
+    cur.execute("""SELECT DISTINCT ON (ts::date) ts::date, oi FROM futures_basis
+                   WHERE symbol=%s AND oi IS NOT NULL
+                   ORDER BY ts::date DESC, ts DESC LIMIT 6""", (sym,))
+    rows = [(r[0], _f(r[1])) for r in cur.fetchall()][::-1]   # oldest -> newest
+    if len(rows) < 2:
+        return None
+    series = []
+    for i in range(1, len(rows)):
+        prev, oi = rows[i - 1][1], rows[i][1]
+        pct = round((oi - prev) / prev * 100.0, 1) if (prev and prev > 0) else None
+        series.append({"date": str(rows[i][0]), "chg_pct": pct})
+    series = series[-5:]
+    vals = [s["chg_pct"] for s in series if s["chg_pct"] is not None]
+    net = round(sum(vals), 1) if vals else None
+    return {"series": series, "net_pct": net}
 
 
 def _chain_latest_two_days(cur, sym):
@@ -294,6 +319,7 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
 
     # BS fair-value straddle gap (sigma = RV20) — founder-final bands
     gap = None
+    fair_ce = fair_pe = None
     market_str = (ce_ltp or 0) + (pe_ltp or 0) if (ce_ltp is not None and pe_ltp is not None) else None
     if market_str and rv20 and T:
         fair_ce = _bs_price(cmp_px, atm, T, rv20, "CE")
@@ -304,6 +330,12 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
             lbl, col = ("EXPENSIVE", "bear") if prem > 25 else ("CHEAP", "bull") if prem < 0 else ("REASONABLE", "amber")
             gap = {"market": round(market_str, 2), "fair": round(fair, 2), "premium_pct": prem,
                    "label": lbl, "color": col}
+    # cc#427 fix_2: the OPTIONS COST verdict's "working" — ATM strike + current ATM-CE premium vs the
+    # model (BS, sigma=RV20) fair premium and their ratio, e.g. "2920 CE @ 41 vs fair 78 · 0.53x".
+    if cost is not None and ce_ltp is not None and fair_ce:
+        cost["working"] = {"strike": atm, "ce_ltp": round(ce_ltp, 2),
+                           "ce_fair": round(fair_ce, 2),
+                           "ce_ratio": round(ce_ltp / fair_ce, 2) if fair_ce else None}
 
     # cc#348: single-ATM strike OI d/d (Call + Put) — the OI trio rows 5 & 6. Each side at the
     # ATM strike; strike labelled. Stock-option OI is often unfed -> chg stays null (row shows --).
@@ -321,10 +353,13 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
             if atm_put_oi is not None and ppa:
                 atm_put_chg = round((atm_put_oi - ppa) / ppa * 100.0, 1)
 
+    # cc#427 fix_6: distinguish "only one snapshot exists yet" from genuinely-missing OI, so the UI
+    # can show "1st snapshot" (not a bare "--") when there is current OI but no prior day to diff against.
+    _first_snap = len(days) < 2
     return {
         "has_options": True,
-        "atm_call_oi": {"strike": atm, "oi": atm_call_oi, "chg_pct": atm_call_chg},
-        "atm_put_oi": {"strike": atm, "oi": atm_put_oi, "chg_pct": atm_put_chg},
+        "atm_call_oi": {"strike": atm, "oi": atm_call_oi, "chg_pct": atm_call_chg, "first_snapshot": _first_snap},
+        "atm_put_oi": {"strike": atm, "oi": atm_put_oi, "chg_pct": atm_put_chg, "first_snapshot": _first_snap},
         "call_oi": {"oi": call_oi, "chg_pct": call_chg},
         "put_oi": {"oi": put_oi, "chg_pct": put_chg},
         "pcr": {"value": pcr, "chg": pcr_chg},
@@ -394,17 +429,29 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
                 out["vpoc_prior"] = {"value": vpoc_p, "naked": naked}
         # VolX — today's cum volume to the latest bar-time vs the avg cum volume at the
         # same time-of-day over the prior up-to-5 sessions (time-matched multiple).
-        last_t = tb[-1][4].time()
-        today_cum = sum((_f(x[3]) or 0) for x in tb)
+        # cc#427 fix_7: if the anchor session carries no volume (a dead/empty latest print off-market),
+        # fall back to the last session that DID trade so VolX is never a misleading 0.0×. Also expose
+        # volx_pct = the % above/below a typical session (e.g. 1.4× -> +40%).
+        vx_bars, vx_days = tb, days
+        if sum((_f(x[3]) or 0) for x in tb) <= 0:
+            for j in range(1, len(days)):
+                cand = _bars(days[j])
+                if cand and sum((_f(x[3]) or 0) for x in cand) > 0:
+                    vx_bars, vx_days = cand, days[j:]
+                    break
+        last_t = vx_bars[-1][4].time()
+        today_cum = sum((_f(x[3]) or 0) for x in vx_bars)
         prior_cums = []
-        for d in days[1:6]:
+        for d in vx_days[1:6]:
             db = _bars(d)
             cum = sum((_f(x[3]) or 0) for x in db if x[4].time() <= last_t)
             if cum > 0:
                 prior_cums.append(cum)
-        if prior_cums:
+        if prior_cums and today_cum > 0:
             avg = sum(prior_cums) / len(prior_cums)
-            out["volx"] = round(today_cum / avg, 2) if avg else None
+            vx = round(today_cum / avg, 2) if avg else None
+            out["volx"] = vx
+            out["volx_pct"] = round((vx - 1.0) * 100.0, 0) if vx is not None else None
         # hourly % — last 12 5-min closes (1h) change
         if len(tb) >= 2:
             window = tb[-12:] if len(tb) >= 12 else tb
@@ -430,6 +477,7 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             oi_chg = (basis.get("fut_oi") or {}).get("chg_pct")
             opt = _options_block(cur, sym, cmp_px)
             intr = _intraday_block(cur, sym, cmp_px)
+            oi_5d = _oi_5d_rolling(cur, sym)   # cc#427 fix_8
             # cc#368: freshness stamp = latest available option_chain snapshot for this underlying.
             # The chain blocks already read MAX(ts) (never today-only), so off-market/weekend still
             # returns the last live snapshot; data_ts lets the UI label it honestly ("as of <ts>")
@@ -459,8 +507,9 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                 "atm_call_oi": opt.get("atm_call_oi"),
                 "atm_put_oi": opt.get("atm_put_oi"),
                 "basis": basis.get("basis"),
+                "oi_5d": oi_5d,   # cc#427 fix_8: 5-day futures OI rolling
             },
-            "energy": {"volx": intr.get("volx")},
+            "energy": {"volx": intr.get("volx"), "volx_pct": intr.get("volx_pct")},
             "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
         return resp
