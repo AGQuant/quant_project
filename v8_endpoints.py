@@ -1030,6 +1030,14 @@ def segment_day():
     SEC WK%/SEC MO% in Raw Data), derived from member v8_metrics.day_1d weighted by gvm_scores.market_cap.
     Anchored to MAX(score_date) so off-market it serves the last session's finals (cc#424 convention).
     Returns {segment: {day_pct, n, top_mover, top_day}} for the Open Positions 'Sector Day %' column."""
+    # cc#432 fix_1: root cause of the "--" everywhere — the cc#429 version called _f() (a helper that
+    # only exists as a NESTED function elsewhere, not at module scope) -> NameError -> 500 -> the
+    # dashboard job cached null -> every row rendered "--". Use a local float converter instead.
+    def _num(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -1050,8 +1058,8 @@ def segment_day():
             """)
             out = {}
             for seg, day_pct, n, top_mover, top_day in cur.fetchall():
-                out[seg] = {"day_pct": _f(day_pct), "n": int(n),
-                            "top_mover": top_mover, "top_day": _f(top_day)}
+                out[seg] = {"day_pct": _num(day_pct), "n": int(n),
+                            "top_mover": top_mover, "top_day": _num(top_day)}
         return {"segments": out}
     except Exception as e:
         raise HTTPException(500, f"segment_day failed: {e}")

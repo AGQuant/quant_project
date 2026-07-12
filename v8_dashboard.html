@@ -1432,13 +1432,19 @@ function renderMaster(){
     // last session (CMP = final eq bar, prev = the session before), so DAY% shows the completed day.
     const _prev=Number(x.prev_close);
     const day_pct=(isFinite(cmp)&&isFinite(_prev)&&_prev>0)?((cmp/_prev-1)*100):null;
-    return{...x,isShort,net_pnl,potential_left,pot_pct,day_pct,sector_seg,sector_day,sector_sd,days:holdDays(x.entry_ts)};
+    // cc#432 fix_2: Net P&L as % of entry value (entry_price × qty).
+    const _entryVal=Number(x.entry_price)*qty;
+    const net_pnl_pct=(isFinite(_entryVal)&&_entryVal>0)?(net_pnl/_entryVal*100):null;
+    // cc#432 fix_4: position Day P&L % — side-adjusted (SHORT inverts the stock day move so a fall
+    // reads as profit). Replaces the mid-table raw stock DAY% column.
+    const day_pnl_pct=(day_pct==null)?null:(isShort?-day_pct:day_pct);
+    return{...x,isShort,net_pnl,net_pnl_pct,potential_left,pot_pct,day_pct,day_pnl_pct,sector_seg,sector_day,sector_sd,days:holdDays(x.entry_ts)};
   });
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
   const openPosTable=sortTbl('openpos',
-    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["day_pct","Day %"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"],["sector_day","Sector Day %"]],
+    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
     openRows,x=>`<tr>
       <td class="sym"><span class="dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
@@ -1446,12 +1452,13 @@ function renderMaster(){
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
       <td style="text-align:right;font-family:'Space Mono'">${num(x.entry_price)}</td>
       <td style="text-align:right;font-family:'Space Mono'">${num(x.cmp)}</td>
-      <td data-pri="2" style="text-align:right;font-family:'Space Mono'" class="${cls(x.day_pct)}">${x.day_pct==null?'--':sign(x.day_pct,2)+'%'}</td>
       <td style="text-align:right;font-family:'Space Mono';color:var(--grn)">${num(x.target)}</td>
       <td style="text-align:right;font-family:'Space Mono';color:var(--red)">${num(x.stop_loss)}</td>
       <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
+      <td style="text-align:right;font-family:'Space Mono'" class="${cls(x.net_pnl_pct)}">${x.net_pnl_pct==null?'--':sign(x.net_pnl_pct,2)+'%'}</td>
       <td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td>
-      <td style="text-align:right;font-family:'Space Mono'" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
+      <td data-pri="2" style="text-align:right;font-family:'Space Mono'" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${x.day_pnl_pct==null?'--':sign(x.day_pnl_pct,2)+'%'}</td>
+      <td style="text-align:right;font-family:'Space Mono';font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
     {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
   // cc#280: lean bar-only component shared by the desktop Ladder rows and the mobile cards.
   // Direction-aware (LONG: SL-left/TGT-right; SHORT: TGT-left/SL-right). Positions are price-linear
