@@ -340,11 +340,33 @@
   .v4-badge.STRONG{background:var(--grn-d);color:var(--grn)}
   .v4-badge.VALID{background:var(--amber-d);color:var(--amber)}
   .v4-badge.REJECT{background:var(--red-d);color:var(--red)}
-  .v4-crow{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;border-bottom:.5px solid var(--line)}
+  .v4-crow{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 6px;border-bottom:.5px solid var(--line);border-radius:5px}
   .v4-crow:last-child{border-bottom:none}
   .v4-crow .rl{color:var(--mut)}
   .v4-crow .rc{font-family:var(--mono);font-weight:700}
   .v4-crow .c1{color:var(--grn)} .v4-crow .c05{color:var(--amber)} .v4-crow .c0{color:var(--dim)}
+  /* cc#452: row tint by score — 1.0 green · 0.5 amber · 0 light red (founder_revision) */
+  .v4-crow.rg{background:rgba(47,212,139,.09)}
+  .v4-crow.ra{background:rgba(245,185,74,.09)}
+  .v4-crow.rr{background:rgba(255,92,108,.07)}
+  .v4-crow .rcw{display:inline-flex;align-items:center;gap:7px;flex:none}
+  /* cc#452: per-rule (i) button — V13-style (cc#395), opens the definition popover */
+  .v4-ibtn{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:9px;font-weight:700;font-family:var(--mono);cursor:pointer;line-height:1;flex:none}
+  .v4-ibtn:hover{border-color:var(--blu);color:var(--blu)}
+  .tcinfo-ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.55);z-index:95;align-items:center;justify-content:center;padding:20px}
+  .tcinfo-ov.open{display:flex}
+  .tcinfo-box{background:var(--panel);border:1px solid var(--line2);border-radius:12px;max-width:440px;width:100%;padding:18px 20px 20px;position:relative;max-height:85vh;overflow:auto}
+  .tcinfo-close{position:absolute;top:11px;right:11px;width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:14px;line-height:1}
+  .tcinfo-h{font-family:var(--mono);font-size:15px;font-weight:800;color:var(--txt);margin-bottom:2px;padding-right:30px}
+  .tcinfo-sub{font-size:11px;color:var(--dim);margin-bottom:13px}
+  .tcinfo-row{margin-bottom:11px}
+  .tcinfo-k{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dim);margin-bottom:4px}
+  .tcinfo-v{font-size:12.5px;color:var(--txt);line-height:1.5}
+  .tcinfo-src{font-family:var(--mono);font-size:11px;color:var(--mut)}
+  .tcinfo-band{display:flex;gap:9px;align-items:baseline;font-size:12px;padding:3px 0}
+  .tcinfo-band b{font-family:var(--mono);flex:none;width:28px;text-align:right}
+  .tcinfo-band span{color:var(--txt);line-height:1.4}
+  .tcinfo-band.g b{color:var(--grn)} .tcinfo-band.a b{color:var(--amber)} .tcinfo-band.r b{color:var(--dim)}
   .v4-recal{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;padding:2px 7px;
     border-radius:20px;background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2)}
   .v4-gated{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--red-d);
@@ -643,6 +665,9 @@
     </div>
   </div>
 
+  <!-- cc#452: TC v4 per-rule definition popover (opened by the (i) button on each scorecard row) -->
+  <div class="tcinfo-ov" id="tcInfoOv" onclick="if(event.target===this)closeTcInfo()"><div class="tcinfo-box" id="tcInfoBox"></div></div>
+
 </div>
 
 <script>
@@ -813,6 +838,113 @@ function v4ToggleLoser(btn){
   btn.textContent=open?'view':'hide';
 }
 
+// cc#452: canonical TC v4 rule definitions for the per-rule (i) popover. Sourced from the locked
+// rulebooks (BUY 16-rule = tc_v4_dual.py _rules(); SELL 13-rule = session_log id=3010; R16 fib =
+// id=3019). Written ONCE, reused across all four style cards. Per rule: n=name, m=measures, s=data
+// source, w=why it matters; BM/BR/SM/SR = the [credit, criteria] bands for BUY-MOM / BUY-REV /
+// SELL-MOM / SELL-REV. Credit shown as '1'/'0.5'/'0'. R6 & R14 are BUY-only (dropped on SELL).
+const TC_RULE_DEFS={
+  R1:{n:'R1 · Mood',m:'Market breadth/mood — how many of {ADR<1.0, Nifty day<0, week<0, month<0} read bearish.',s:'adr_daily.adr + live Nifty day/week/month',w:'A weak-breadth tape lowers the odds of any single-name setup following through.',
+    BM:[['1','≤1 mood check failing'],['0.5','exactly 2 failing'],['0','≥3 failing']],
+    BR:[['1','≤1 mood check failing'],['0.5','exactly 2 failing'],['0','≥3 failing']],
+    SM:[['1','≥1 mood check failing (bearish tape)'],['0','all mood checks passing']],
+    SR:[['1','≥1 mood check failing (bearish tape)'],['0','all mood checks passing']]},
+  R2:{n:'R2 · Sector',m:'Direction of the stock’s sector-segment return (weekly & monthly).',s:'v8_metrics.sector_week / sector_month',w:'A stock swims with its sector — trade with the segment tide, not against it.',
+    BM:[['1','sector wk>0 AND mo>0'],['0.5','one of the two >0'],['0','neither >0']],
+    BR:[['1','sector month>0'],['0','sector month≤0']],
+    SM:[['1','sector wk<0 AND mo<0'],['0.5','one of the two <0'],['0','neither <0']],
+    SR:[['1','sector month<0'],['0','sector month≥0']]},
+  R3:{n:'R3 · Peers',m:'Same-segment peers moving in the trade direction by day%. Fewer than 3 peers ⇒ auto 0.5.',s:'gvm_scores.segment ⋈ v8_metrics.day_1d',w:'Confirmation from peers means the move is a segment theme, not a lone tick.',
+    BM:[['1','≥2 peers up >1%'],['0.5','≥1 peer up >0%'],['0','no peer up']],
+    BR:[['1','≥2 peers up'],['0.5','≥1 peer up'],['0','no peer up']],
+    SM:[['1','≥2 peers down >0.5%'],['0.5','≥1 peer down >0%'],['0','no peer down']],
+    SR:[['1','2 peers down'],['0.5','1 peer down'],['0','none down']]},
+  R4:{n:'R4 · Moving averages',m:'Price vs the 20/50/200-day moving averages.',s:'v8_metrics.dma_20 / dma_50 / dma_200',w:'Trend alignment across timeframes; more MAs on-side = stronger structural backing.',
+    BM:[['1','above ≥2 of 3 DMAs'],['0.5','above exactly 1'],['0','above none']],
+    BR:[['1','above DMA200'],['0','below DMA200']],
+    SM:[['1','below ≥2 of 3 DMAs'],['0.5','below exactly 1'],['0','below none']],
+    SR:[['1','below DMA200'],['0','above DMA200']]},
+  R5:{n:'R5 · Volume 1M (up/down)',m:'21-session average volume on up-close days vs down-close days.',s:'raw_prices close & volume (21 sessions)',w:'Volume leaning to the trade direction shows real participation, not drift.',
+    BM:[['1','up/down vol ≥1.1'],['0.5','0.9–1.1'],['0','<0.9']],
+    BR:[['1','up/down vol ≥1.1'],['0.5','0.9–1.1'],['0','<0.9']],
+    SM:[['1','down/up vol >1.05'],['0.5','0.95–1.05'],['0','<0.95']],
+    SR:[['1','down/up vol >1.05'],['0.5','0.95–1.05'],['0','<0.95']]},
+  R6:{n:'R6 · Volume today',m:'Today’s time-adjusted intraday volume ratio (BUY-only rule).',s:'intraday volume_ratio (r6_volume)',w:'Fresh demand showing up today, not just historically.',
+    BM:[['1','vol ratio ≥1.5'],['0.5','1.1–1.5'],['0','<1.1']],
+    BR:[['1','vol ratio ≥1.5'],['0.5','1.1–1.5'],['0','<1.1']],
+    SM:[['—','Not scored on SELL (BUY-only rule)']],
+    SR:[['—','Not scored on SELL (BUY-only rule)']]},
+  R7:{n:'R7 · RSI frame',m:'RSI alignment across timeframes (MOM=frame, REV=sandwich).',s:'v8_metrics.rsi_weekly / rsi_month; REV: true weekly RSI + daily RSI',w:'Momentum wants RSI on-side; reversal wants a stretched-then-turning sandwich.',
+    BM:[['1','monthly RSI≥50 AND weekly≥50'],['0.5','one ≥50'],['0','neither']],
+    BR:[['1','weekly RSI≥60 AND daily≤40'],['0.5','one side true'],['0','neither']],
+    SM:[['1','weekly RSI<50 AND monthly<50'],['0.5','one <50'],['0','neither']],
+    SR:[['1','sandwich: weekly RSI<50 AND daily>50'],['0.5','one side true'],['0','neither']]},
+  R8:{n:'R8 · Returns',m:'Direction of the stock’s own price return (weekly & monthly).',s:'v8_metrics.week_return / month_return',w:'The name should already be going your way on its own return.',
+    BM:[['1','week>0 AND month>0'],['0.5','one >0'],['0','neither']],
+    BR:[['1','month>0'],['0','month≤0']],
+    SM:[['1','week<0 AND month<0'],['0.5','one <0'],['0','neither']],
+    SR:[['1','month<0'],['0','month≥0']]},
+  R9:{n:'R9 · 5m + VWAP',m:'Intraday structure vs the day VWAP + close position in the day range.',s:'intraday_prices 5m VWAP, range position, 2-day recovery',w:'Where price sits vs VWAP intraday tells you who is winning the session.',
+    BM:[['1','above VWAP AND close in upper-half of range'],['0.5','above VWAP only'],['0','neither']],
+    BR:[['1','2-day recovery>0 AND above VWAP'],['0.5','above VWAP only'],['0','neither']],
+    SM:[['1','weak + below VWAP + lower-half close'],['0.5','below VWAP only'],['0','neither']],
+    SR:[['1','fall off high + VWAP rejection'],['0.5','below VWAP only'],['0','neither']]},
+  R10:{n:'R10 · Style extra',m:'MOM=short-term momentum + 52-week window; REV=recovery magnitude off the 2-day low/high.',s:'v8_metrics.mom_2d, week_index_52; derived recovery',w:'A style-specific fitness check: not too extended (MOM), a real but not-broken dip (REV).',
+    BM:[['1','mom_2d 0–6% AND 52w position 40–90'],['0.5','one true'],['0','neither']],
+    BR:[['1','recovery off 2-day low 2–8%'],['0','outside 2–8%']],
+    SM:[['1','mom_2d −6–0% AND 52w position 10–60'],['0.5','one true'],['0','neither']],
+    SR:[['1','fall from day/2d high 2–8%'],['0.5','1–2% or 8–12%'],['0','else']]},
+  R11:{n:'R11 · Location + room',m:'Price vs the pivot PP + room to the next level (R1 for longs, S1 for shorts) as %.',s:'v8_paper_pivots.pp / r1 / s1',w:'Enter where there is room to run, not into a level that caps the move.',
+    BM:[['1','above PP AND room-to-R1 ≥2%'],['0.5','above PP, room <2%'],['0','not above PP']],
+    BR:[['1','room-to-R1 ≥3%'],['0.5','room 2–3%'],['0','else / none']],
+    SM:[['1','below PP AND room-to-S1 ≥2%'],['0.5','room 1–2%'],['0','above PP']],
+    SR:[['1','at R1/fib rejection, room-to-S1 ≥2%'],['0.5','room 1–2%'],['0','else']]},
+  R12:{n:'R12 · OI structure',m:'Open-interest build vs price — long buildup (BUY) / short buildup or long unwind (SELL).',s:'v8_metrics.day_1d, futures_basis.oi_chg',w:'Positioning confirms conviction behind the price move.',
+    BM:[['1','price up AND OI change present (long buildup)'],['0','otherwise']],
+    BR:[['1','price up AND OI change present (long buildup)'],['0','otherwise']],
+    SM:[['1','short buildup OR long unwinding'],['0.5','OI missing/stale'],['0','otherwise']],
+    SR:[['1','short buildup OR long unwinding'],['0.5','OI missing/stale'],['0','otherwise']]},
+  R13:{n:'R13 · Basis',m:'Futures basis trend (now vs the prior reading).',s:'futures_basis.basis_pct (newest vs prior)',w:'Basis widening in your favour flags smart-money positioning ahead of spot.',
+    BM:[['1','premium widening (now>prev AND now>0)'],['0','otherwise']],
+    BR:[['1','discount narrowing (now>prev AND now<0)'],['0','otherwise']],
+    SM:[['1','discount widening'],['0.5','discount present'],['0','none']],
+    SR:[['1','premium fading'],['0.5','flat'],['0','else · missing⇒0.5']]},
+  R14:{n:'R14 · ATR ignition',m:'Today’s true range vs ATR14 — a volatility-ignition check (BUY-only rule).',s:'raw_prices OHLC + intraday day hi/lo',w:'Expansion confirms the move has energy, not a quiet drift.',
+    BM:[['1','true range ≥1.3× ATR14 (ignition)'],['0','below ignition']],
+    BR:[['1','true range ≥1.3× ATR14 (ignition)'],['0','below ignition']],
+    SM:[['—','Not scored on SELL (BUY-only rule)']],
+    SR:[['—','Not scored on SELL (BUY-only rule)']]},
+  R15:{n:'R15 · RS vs Nifty',m:'Relative strength = stock return − Nifty return (weekly & monthly).',s:'derived: v8 week/month return − Nifty week/month',w:'Outperforming the index is the cleanest read on genuine leadership.',
+    BM:[['1','RS week>0 AND RS month>0'],['0.5','one >0'],['0','neither']],
+    BR:[['1','RS month>0'],['0.5','RS month −1–0'],['0','< −1']],
+    SM:[['1','RS week<0 AND RS month<0'],['0.5','one <0'],['0','neither']],
+    SR:[['1','RS month<0'],['0.5','RS month 0–+1'],['0','else']]},
+  R16:{n:'R16 · Fib position (3M)',m:'CMP location inside the 3-month high–low swing (0=low, 100=high, >100=breakout). 3M range <5% ⇒ auto 0.5 (data-quality).',s:'last ~63 raw_prices high/low (3M swing)',w:'Where price sits in its own range sets the reward-to-risk for the style being scored.',
+    BM:[['1','>100 or 61.8–78.6'],['0.5','78.6–100 or 50–61.8'],['0','<50']],
+    BR:[['1','38.2–61.8'],['0.5','23.6–38.2, 61.8–78.6, or >78.6'],['0','<23.6']],
+    SM:[['1','<23.6 (incl. below swing low)'],['0.5','23.6–38.2'],['0','>38.2']],
+    SR:[['1','78.6–100'],['0.5','61.8–78.6 or >100'],['0','<61.8']]}
+};
+function tcRuleInfo(rule, side, style){
+  const d=TC_RULE_DEFS[rule]; if(!d){return;}
+  const vk=(side==='SELL'?'S':'B')+(style==='REVERSAL'?'R':'M');
+  const bands=d[vk]||[];
+  const variantLbl=(side==='SELL'?'SELL':'BUY')+' · '+(style==='REVERSAL'?'Reversal':'Momentum');
+  const bandHtml=bands.map(b=>{const cls=b[0]==='1'?'g':b[0]==='0.5'?'a':'r';
+    return '<div class="tcinfo-band '+cls+'"><b>'+b[0]+'</b><span>'+b[1]+'</span></div>';}).join('');
+  document.getElementById('tcInfoBox').innerHTML=
+    '<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
+    +'<div class="tcinfo-h">'+d.n+'</div>'
+    +'<div class="tcinfo-sub">Points criteria &middot; '+variantLbl+' card</div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Measures</div><div class="tcinfo-v">'+d.m+'</div></div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Points criteria</div>'+bandHtml+'</div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Data source</div><div class="tcinfo-v tcinfo-src">'+d.s+'</div></div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Why it matters</div><div class="tcinfo-v">'+d.w+'</div></div>';
+  document.getElementById('tcInfoOv').classList.add('open');
+}
+function closeTcInfo(){document.getElementById('tcInfoOv').classList.remove('open');}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeTcInfo();});
+
 function renderV4Dual(d, uiMode){
   const side=(uiMode==='SHORT')?'SELL':'BUY';
   const sideLabel=(uiMode==='SHORT')?'▼ SHORT':'▲ LONG';
@@ -829,7 +961,11 @@ function renderV4Dual(d, uiMode){
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
     const rules=(c.rules||[]).map(r=>{
       const zone=(r.rule==='R16'&&r.value&&r.value.zone)?' · '+(r.value.pos!=null?Number(r.value.pos).toFixed(1)+'% ':'')+r.value.zone:'';
-      return '<div class="v4-crow"><span class="rl">'+r.rule+' '+r.label+zone+'</span><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>';
+      // cc#452: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
+      const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
+      return '<div class="v4-crow '+rt+'"><span class="rl">'+r.rule+' '+r.label+zone+'</span>'
+        +'<span class="rcw"><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span>'
+        +'<span class="v4-ibtn" onclick="tcRuleInfo(\''+r.rule+'\',\''+side+'\',\''+c.style+'\')" title="Rule definition">i</span></span></div>';
     }).join('');
     const recal=c.recal?'<span class="v4-recal">'+c.recal+'</span>':'';
     return '<div class="v4-card'+win+'"><div class="v4-chead">'+_v4styleChip(c.label)
