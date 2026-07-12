@@ -1158,6 +1158,7 @@ function GvmReport({ r, hist }) {
               <span>{r.symbol}</span><span>·</span><span>{r.segment}</span><span>·</span>
               <span style={{ fontWeight: 700, color: C.accent }}>#{r.segment_rank}/{r.segment_total} in segment</span>
               {r.mcap_rank && <span>· MCap #{r.mcap_rank}</span>}
+              {r.market_cap != null && <span>· ₹{fmt(r.market_cap, 0)} Cr</span>}{/* cc#450: MCap value moved to header (was /100 units bug); already in Cr */}
               {r.cap_category && <Tag color={C.muted}>{r.cap_category}</Tag>}
               {r.is_bfsi && <Tag color={C.purple}>BFSI</Tag>}
               {x.earnings && x.earnings.blackout && <Tag color={C.red}>⚠ Blackout {x.earnings.days_to}d</Tag>}
@@ -1189,30 +1190,9 @@ function GvmReport({ r, hist }) {
             <PriceSparkline symbol={r.symbol} onExpand={() => setFibOpen(true)} />
           </div>
 
-          <div style={{ textAlign: "right", minWidth: 170 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-              <div style={{ fontSize: 13, color: C.muted }}>{r.price_label || "CMP"}{r.price_label === "Prev Close" && r.price_date ? ` ${r.price_date}` : ""}</div>
-              {/* cc#411: chart icon removed — the hero 3M sparkline "expand" is the single entry to Fibcheck */}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(cmp, 1)}</div>
-            <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
-            {pos52 != null && (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "monospace",
-                  color: pos52 >= 75 ? C.green : pos52 >= 40 ? C.gold : C.red }}>
-                  {pos52.toFixed(0)}% of 52W · {signFmt(fromHigh, 1)}% from high
-                </div>
-              </div>
-            )}
-            {Object.keys(verdictDist).length > 0 && (
-              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }}>
-                <div style={{ fontSize: 11.5, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em" }}>Segment peers</div>
-                {Object.entries(verdictDist).map(([v, n]) => (
-                  <div key={v} style={{ fontSize: 12, color: verdictColor(v), fontWeight: 700 }}>{n}× {v}</div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* cc#450: right info block removed (Prev Close date/price, MCap line, %-of-52W/from-high,
+              Segment-peers mini-list) — MCap value now lives in the header pill; peer detail is in the
+              peer-comparison section. Header reflows cleanly without this column. */}
         </div>
       </div>
 

@@ -333,6 +333,10 @@ def gvm_company_report(symbol: str):
     mcap_rank    = None
     cap_category = None
     persist_error = None
+    # cc#450: header MCap value. gvm_scores/input_raw carry the score-snapshot market_cap (in Cr) that
+    # mcap_rank/cap_category were ranked on; screener_raw holds the freshest fundamentals scrape (the
+    # founder-verified "truth"). Prefer screener_raw for the displayed value, fall back to the snapshot.
+    market_cap_disp = base.get("market_cap")
 
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -358,6 +362,11 @@ def gvm_company_report(symbol: str):
                 }
                 mcap_rank    = row[6]
                 cap_category = row[7]
+            # cc#450: freshest market_cap (Cr) from screener_raw for the header display
+            cur.execute("SELECT market_cap FROM screener_raw WHERE nse_code = %s LIMIT 1", (sym,))
+            _mc = cur.fetchone()
+            if _mc and _mc[0] is not None:
+                market_cap_disp = _f(_mc[0])
     except Exception as e:
         log.warning(f"content fetch failed for {sym}: {e}")
         persist_error = str(e)
@@ -386,7 +395,7 @@ def gvm_company_report(symbol: str):
         "price_label":   _pr.get("label"),
         "price_date":    _pr.get("date"),
         "price_is_live": _pr.get("is_live"),
-        "market_cap":    base.get("market_cap"),
+        "market_cap":    market_cap_disp,   # cc#450: fresh screener_raw value (Cr), snapshot fallback
         "score_date":    base.get("score_date"),
         "mcap_rank":     mcap_rank,
         "cap_category":  cap_category,
