@@ -1669,6 +1669,7 @@ function renderRaw(){
       <td class="${cls(x.week_return)}">${sign(x.week_return)}%</td><td class="${cls(x.month_return)}">${sign(x.month_return)}%</td>
       <td class="${cls(x.dma_50)}">${num(x.dma_50,1)}</td><td class="${cls(x.dma_200)}">${num(x.dma_200,1)}</td>
       <td>${num(x.rsi_month,0)}</td><td>${num(x.rsi_weekly,0)}</td>
+      <td>${num(x.daily_rsi,0)}</td><td>${num(x.true_weekly_rsi,0)}</td>
       <td>${num(x.week_index_52,0)}</td>
       <td>${num(x.vol_ratio,2)}</td>
       <td class="${cls(x.sector_week)}">${sign(x.sector_week)}%</td><td class="${cls(x.sector_month)}">${sign(x.sector_month)}%</td>
@@ -1676,11 +1677,13 @@ function renderRaw(){
       <td class="${cls(x.fall_from_day_high)}">${sign(x.fall_from_day_high)}%</td>
       <td class="${cls(x.recovery_2d)}">${sign(x.recovery_2d)}%</td>
       <td class="${cls(x.day_ret)}">${sign(x.day_ret)}%</td>
-      <td class="${cls(x.week_low_pct)}">${sign(x.week_low_pct)}%</td></tr>`;
+      <td class="${cls(x.week_low_pct)}">${sign(x.week_low_pct)}%</td>
+      <td class="${cls(x.vs_pp)}">${sign(x.vs_pp)}%${x.r1_touch?' <span title="High touched R1 today" style="color:var(--grn);font-weight:700">&#10003;</span>':''}</td>
+      <td title="${x.room_level||''}">${x.room_pct==null?'--':(x.room_pct>=0?'+':'')+Number(x.room_pct).toFixed(1)+'%'}</td></tr>`;
   return`<div class="ptitle">Raw Data <span class="ct">${rest.length} symbols + ${pinned.length} indices${hidden>0?` · ${hidden} empty hidden`:''}</span></div>`+
-    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">19 signal-driving columns (display-only metrics hidden) — Symbol stays pinned. Indices (NIFTY50/BANKNIFTY) pinned on top. Hour%/Fall%/Rec2D%/Intra%/WkLow%: -- = pre-10:15 warmup / missing bars; off-market values frozen at last session 15:30.</div>`+
+    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">24 signal-driving columns (full six-basket coverage) — Symbol pinned; indices (NIFTY50/BANKNIFTY) on top. RSI(D)=daily, tRSI(W)=true calendar-weekly; vs-PP%=CMP vs pivot PP; ROOM%=side-aware room to R1 (above PP) / S1·S2 (below), hover names the level; &#10003; in vs-PP% = day high touched R1 (SOB trigger). Hour%/Fall%/Rec2D%/Intra%/WkLow%/vs-PP%/ROOM%: -- = pre-10:15 warmup / missing bars; off-market values frozen at last session 15:30.</div>`+
     sortTbl('raw',
-    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"],["fall_from_day_high","Fall%"],["recovery_2d","Rec2D%"],["day_ret","Intra%"],["week_low_pct","WkLow%"]],
+    [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["daily_rsi","RSI(D)"],["true_weekly_rsi","tRSI(W)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"],["fall_from_day_high","Fall%"],["recovery_2d","Rec2D%"],["day_ret","Intra%"],["week_low_pct","WkLow%"],["vs_pp","vs-PP%"],["room_pct","ROOM%"]],
     rest,row,
     {sortKey:'mom_2d',dir:-1,empty:"No metrics",pinned,wrapClass:'',scrollCls:'rawscroll'});
 }

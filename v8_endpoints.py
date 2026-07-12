@@ -742,6 +742,51 @@ def market_mood():
         raise HTTPException(500, f"market_mood failed: {e}")
 
 
+def _wilder_rsi(closes, period=14):
+    """Wilder RSI on a close series (engine-identical to tc_v4 _rsi). None if < period+1 points."""
+    closes = [c for c in closes if c is not None]
+    if len(closes) < period + 1:
+        return None
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0.0 for d in deltas]
+    losses = [-d if d < 0 else 0.0 for d in deltas]
+    ag = sum(gains[:period]) / period
+    al = sum(losses[:period]) / period
+    for i in range(period, len(deltas)):
+        ag = (ag * (period - 1) + gains[i]) / period
+        al = (al * (period - 1) + losses[i]) / period
+    if al == 0:
+        return 100.0
+    rs = ag / al
+    return 100.0 - 100.0 / (1.0 + rs)
+
+
+_TWR_CACHE = {"ts": 0.0, "data": None}
+
+def _true_weekly_rsi_all(cur, ttl=300):
+    """cc#419: TRUE calendar-weekly RSI-14 per symbol (last close of each ISO week -> Wilder RSI),
+    matching the engine's buy_reversal/sell gate. Cached 5 min (weekly RSI barely moves intraday)."""
+    now = time.time()
+    if _TWR_CACHE["data"] is not None and (now - _TWR_CACHE["ts"]) < ttl:
+        return _TWR_CACHE["data"]
+    cur.execute("""
+        SELECT symbol, close FROM (
+            SELECT symbol, close, price_date,
+                ROW_NUMBER() OVER (PARTITION BY symbol, EXTRACT(ISOYEAR FROM price_date), EXTRACT(WEEK FROM price_date)
+                                   ORDER BY price_date DESC) AS rn
+            FROM raw_prices WHERE price_date >= CURRENT_DATE - INTERVAL '400 days'
+        ) x WHERE rn = 1 ORDER BY symbol, price_date
+    """)
+    series = {}
+    for sym, close in cur.fetchall():
+        if close is not None:
+            series.setdefault(sym, []).append(float(close))
+    out = {sym: _wilder_rsi(cl) for sym, cl in series.items()}
+    _TWR_CACHE["ts"] = now
+    _TWR_CACHE["data"] = out
+    return out
+
+
 def _offhours_metrics_all(cur):
     """cc#418 (extends cc#417 fix_3 from index-only to ALL symbols): last-session finals for the Raw
     Data intraday columns (hour%, fall%, Intra%/day_ret, Rec2D%, WkLow%). Anchored to the market's
@@ -787,6 +832,7 @@ def _offhours_metrics_all(cur):
             "day_ret": (cmpv - op) / op * 100 if (op and op > 0) else None,
             "recovery_2d": (cmpv - lo2) / lo2 * 100 if (lo2 and lo2 > 0) else None,
             "week_low_pct": (cmpv - week_low) / week_low * 100 if (week_low and week_low > 0) else None,
+            "_cmp": cmpv, "_day_high": dh,   # cc#419: for vs-PP / ROOM / R1-touch off-market
         }
     return out
 
@@ -833,7 +879,7 @@ def metrics_all():
                 SELECT symbol,
                     (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
                     (array_agg(close ORDER BY ts DESC))[1] AS live_close,
-                    MIN(low) AS today_low
+                    MIN(low) AS today_low, MAX(high) AS day_high
                 FROM intraday_prices
                 WHERE ts::date = CURRENT_DATE AND source = 'fyers_eq'
                 GROUP BY symbol
@@ -847,7 +893,7 @@ def metrics_all():
                       FROM raw_prices WHERE price_date < CURRENT_DATE) x
                 WHERE rn<=5 GROUP BY symbol
             )
-            SELECT td.symbol, td.day_open, td.live_close, td.today_low, h.lo_2d, h.lo_5d
+            SELECT td.symbol, td.day_open, td.live_close, td.today_low, h.lo_2d, h.lo_5d, td.day_high
             FROM td LEFT JOIN hist h ON h.symbol = td.symbol
         """)
         s1b_live = {r[0]: r for r in cur.fetchall()}
@@ -857,7 +903,7 @@ def metrics_all():
         except (TypeError, ValueError): return None
     for s in rows:
         d = s1b_live.get(s["symbol"])
-        # SELECT order: symbol[0], day_open[1], live_close[2], today_low[3], lo_2d[4], lo_5d[5]
+        # SELECT order: symbol[0], day_open[1], live_close[2], today_low[3], lo_2d[4], lo_5d[5], day_high[6]
         op   = _f(d[1]) if d else None   # day_open
         cmpv = _f(d[2]) if d else None   # live_close (this is the live cmp)
         tlow = _f(d[3]) if d else None   # today_low
@@ -868,6 +914,8 @@ def metrics_all():
         wl_cand = [x for x in (lo5, tlow) if x is not None]
         week_low = min(wl_cand) if wl_cand else None
         s["week_low_pct"] = ((cmpv - week_low) / week_low * 100) if (cmpv and week_low and week_low > 0) else None
+        s["_cmp"] = cmpv                         # cc#419: CMP + day-high for vs-PP / ROOM / R1-touch
+        s["_day_high"] = _f(d[6]) if d else None
 
     # cc#417 fix_3 / cc#418: off-market (no CURRENT_DATE fyers_eq bars) -> anchor the intraday-derived
     # columns (hour%, fall%, Intra%, Rec2D%, WkLow%) to each symbol's last-session finals for EVERY
@@ -885,6 +933,37 @@ def metrics_all():
             for k in ("hourly_pct", "fall_from_day_high", "day_ret", "recovery_2d", "week_low_pct"):
                 if s.get(k) is None and fb.get(k) is not None:
                     s[k] = fb[k]
+            if s.get("_cmp") is None: s["_cmp"] = fb.get("_cmp")
+            if s.get("_day_high") is None: s["_day_high"] = fb.get("_day_high")
+
+    # cc#419: surface 5 more basket-filter fields — RSI(D) (daily_rsi, already selected), tRSI(W)
+    # (true calendar weekly, engine formula), vs-PP%, ROOM% (side-aware), R1-touch flag. Pivots from
+    # v8_paper_pivots; CMP/day-high from the same as-of source as the intraday cols above.
+    with _conn() as _c3, _c3.cursor() as _cur3:
+        _cur3.execute("""SELECT DISTINCT ON (symbol) symbol, pp, r1, s1, r2, s2
+                         FROM v8_paper_pivots ORDER BY symbol, pivot_date DESC""")
+        _piv = {r[0]: {"pp": _f(r[1]), "r1": _f(r[2]), "s1": _f(r[3]), "r2": _f(r[4]), "s2": _f(r[5])} for r in _cur3.fetchall()}
+        _twr = _true_weekly_rsi_all(_cur3)
+    for s in rows:
+        s["true_weekly_rsi"] = _twr.get(s["symbol"])
+        p = _piv.get(s["symbol"]) or {}
+        cmpv, dh = s.get("_cmp"), s.get("_day_high")
+        pp, r1, s1, s2 = p.get("pp"), p.get("r1"), p.get("s1"), p.get("s2")
+        s["vs_pp"] = ((cmpv - pp) / pp * 100) if (cmpv and pp and pp > 0) else None
+        # ROOM% — side-aware room to the nearest target (names the level used for the tooltip)
+        room, lvl = None, None
+        if cmpv and pp:
+            if cmpv > pp:
+                if r1 and r1 > 0: room, lvl = (r1 - cmpv) / cmpv * 100, ("R1", r1)
+            else:
+                # below PP -> room to S1; if already below S1, room to S2 (sell_rev/sell_mom semantics)
+                if s1 and cmpv > s1 and s1 > 0: room, lvl = (cmpv - s1) / cmpv * 100, ("S1", s1)
+                elif s2 and s2 > 0: room, lvl = (cmpv - s2) / cmpv * 100, ("S2", s2)
+                elif s1 and s1 > 0: room, lvl = (cmpv - s1) / cmpv * 100, ("S1", s1)
+        s["room_pct"] = room
+        s["room_level"] = (f"{lvl[0]} {round(lvl[1],1)}" if lvl else None)
+        s["r1_touch"] = bool(dh and r1 and dh >= r1)
+        s.pop("_cmp", None); s.pop("_day_high", None)
 
     for s in rows:
         s["segment"] = _seg_override(s["symbol"], s.get("segment"))
