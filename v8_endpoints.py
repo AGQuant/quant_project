@@ -2673,6 +2673,85 @@ def v9_pairs_sectors():
         raise HTTPException(500, f"v9_pairs_sectors failed: {e}")
 
 
+@router.get("/ohol")
+def ohol():
+    """cc#388: Open=High (bearish) / Open=Low (bullish) live scanner over the active futures universe.
+    Open reference = the 09:15 5-min bar high/low. From 09:35 IST every tick: OPEN=HIGH list = session
+    running HIGH still <= open_ref_high*1.001 (0.1% tol) AND day% < 0 AND CMP < PP; OPEN=LOW mirror
+    (session LOW >= open_ref_low*0.999 AND day% > 0 AND CMP > PP). A name drops off once its level
+    breaks. DAY% uses the cc#373 pair (CMP spot / last raw close before the CMP's session). Empty
+    pre-09:35 on a live day; off-market shows the last-session final snapshot with its date."""
+    def _ff(v):
+        try:
+            return float(v) if v is not None else None
+        except Exception:
+            return None
+    now = _ist_now()
+    live = _market_open()
+    if live and now.time() < now.replace(hour=9, minute=35, second=0, microsecond=0).time():
+        return {"open_high": [], "open_low": [], "live": True,
+                "as_of_ts": now.strftime("%Y-%m-%d %H:%M:%S IST"), "session_date": str(now.date()),
+                "note": "OH-OL populates from 09:35 IST — waiting for the opening range to settle."}
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH sess AS (SELECT MAX(ts::date) d FROM intraday_prices
+                              WHERE source='fyers_eq' AND timeframe='5m'),
+                fut AS (SELECT UPPER(symbol) sym FROM futures_universe WHERE is_active=TRUE),
+                bars AS (
+                    SELECT i.symbol, i.ts, i.high, i.low, i.close
+                    FROM intraday_prices i, sess
+                    WHERE i.source='fyers_eq' AND i.timeframe='5m' AND i.ts::date = sess.d
+                      AND UPPER(i.symbol) IN (SELECT sym FROM fut)
+                ),
+                openb AS (SELECT DISTINCT ON (symbol) symbol, high AS oref_high, low AS oref_low
+                          FROM bars ORDER BY symbol, ts ASC),
+                agg AS (SELECT symbol, MAX(high) sess_high, MIN(low) sess_low,
+                               (ARRAY_AGG(close ORDER BY ts DESC))[1] last_close
+                        FROM bars GROUP BY symbol)
+                SELECT a.symbol, a.sess_high, a.sess_low, a.last_close,
+                       o.oref_high, o.oref_low, cp.cmp, pc.prev_close, pv.pp
+                FROM agg a
+                JOIN openb o ON o.symbol = a.symbol
+                LEFT JOIN LATERAL (SELECT close AS cmp FROM intraday_prices
+                    WHERE symbol=a.symbol AND source<>'fyers_fut' ORDER BY ts DESC LIMIT 1) cp ON true
+                LEFT JOIN LATERAL (SELECT close AS prev_close FROM raw_prices
+                    WHERE symbol=a.symbol AND price_date < (SELECT d FROM sess)
+                    ORDER BY price_date DESC LIMIT 1) pc ON true
+                LEFT JOIN LATERAL (SELECT pp FROM v8_paper_pivots
+                    WHERE symbol=a.symbol ORDER BY pivot_date DESC LIMIT 1) pv ON true
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            cur.execute("SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m'")
+            sess = cur.fetchone()[0]
+    except Exception as e:
+        raise HTTPException(500, f"ohol failed: {e}")
+    oh, ol = [], []
+    for r in rows:
+        cmp_v = _ff(r.get("cmp")) or _ff(r.get("last_close"))
+        prevc, pp = _ff(r.get("prev_close")), _ff(r.get("pp"))
+        sh, sl = _ff(r.get("sess_high")), _ff(r.get("sess_low"))
+        orh, orl = _ff(r.get("oref_high")), _ff(r.get("oref_low"))
+        if None in (cmp_v, prevc, pp, sh, sl, orh, orl) or prevc == 0 or orh == 0 or orl == 0:
+            continue
+        day_pct = round((cmp_v / prevc - 1) * 100, 2)
+        dist_pp = round((cmp_v - pp) / pp * 100, 2)
+        if sh <= orh * 1.001 and day_pct < 0 and cmp_v < pp:
+            oh.append({"symbol": r["symbol"], "cmp": round(cmp_v, 2), "day_pct": day_pct,
+                       "dist_to_pp": dist_pp, "open_ref_high": round(orh, 2),
+                       "session_high": round(sh, 2), "hold_pct": round((orh - sh) / orh * 100, 2)})
+        if sl >= orl * 0.999 and day_pct > 0 and cmp_v > pp:
+            ol.append({"symbol": r["symbol"], "cmp": round(cmp_v, 2), "day_pct": day_pct,
+                       "dist_to_pp": dist_pp, "open_ref_low": round(orl, 2),
+                       "session_low": round(sl, 2), "hold_pct": round((sl - orl) / orl * 100, 2)})
+    oh.sort(key=lambda x: x["day_pct"])       # most bearish first
+    ol.sort(key=lambda x: -x["day_pct"])      # most bullish first
+    return {"open_high": oh, "open_low": ol, "live": bool(live), "snapshot": (not live),
+            "as_of_ts": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+            "session_date": str(sess) if sess else None}
+
+
 @router.get("/domestic_live")
 def domestic_live():
     out = {}
