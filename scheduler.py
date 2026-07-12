@@ -788,6 +788,11 @@ def _read_adr_pcr_today(conn, today):
 def _bg_adr_pcr():
     global _adr_pcr_ran_today
     today = _ist_now().date()
+    # cc#417 fix_1: never compute/write adr_daily or pcr_daily on a non-trading day (weekend/holiday) —
+    # those phantom 0-rows displaced Friday's real ADR as "latest" and broke the mood gate.
+    if not _is_trading_day(today):
+        log.debug(f"adr_pcr: skip — {today} is not a trading day")
+        return
     if _adr_pcr_ran_today == today: return
     try:
         with _conn() as conn:
@@ -813,6 +818,7 @@ def _bg_adr_pcr_retry():
     """task #59: 10-min retry — if the 15:50 run didn't produce today's ADR, redo
     it once at 16:00 (covers a transient feed/scheduler hiccup)."""
     today = _ist_now().date()
+    if not _is_trading_day(today): return                 # cc#417: no retry on non-trading days
     if _adr_pcr_ran_today == today: return                # already verified-complete
     log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
     _bg_adr_pcr()

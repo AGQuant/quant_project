@@ -629,7 +629,11 @@ def _read_adr(cur):
             adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
             adr = round(adv / dec, 3) if dec else float(adv)
             return adv, dec, unc, adr, "live_intraday", str(date.today())
-    cur.execute("SELECT advances, declines, unchanged, adr, price_date FROM adr_daily ORDER BY price_date DESC LIMIT 1")
+    # cc#417 fix_2: latest adr_daily row on a TRADING day — defensively exclude any weekend row
+    # (Sat/Sun) even if one slipped in, so the mood gate never reads a phantom 0-ADR weekend row.
+    cur.execute("""SELECT advances, declines, unchanged, adr, price_date FROM adr_daily
+                   WHERE EXTRACT(DOW FROM price_date) BETWEEN 1 AND 5
+                   ORDER BY price_date DESC LIMIT 1""")
     r = cur.fetchone()
     if r:
         adv, dec, unc = r[0] or 0, r[1] or 0, r[2] or 0
@@ -738,6 +742,54 @@ def market_mood():
         raise HTTPException(500, f"market_mood failed: {e}")
 
 
+def _index_offhours_metrics(cur):
+    """cc#417 fix_3: NIFTY50/BANKNIFTY price-derived intraday fields anchored to the LAST SESSION's
+    fyers_eq bars, so when the market is closed the index rows show Friday's values (frozen-15:30
+    convention) instead of blank '--'. Same formulas as the live path. Index rows only."""
+    out = {}
+    for sym in ("NIFTY50", "BANKNIFTY"):
+        try:
+            cur.execute("""
+                WITH ls AS (SELECT MAX(ts::date) AS d FROM intraday_prices WHERE symbol=%s AND source='fyers_eq'),
+                b AS (SELECT open, high, low, close, ts FROM intraday_prices i, ls
+                      WHERE i.symbol=%s AND i.source='fyers_eq' AND i.ts::date = ls.d)
+                SELECT (SELECT open  FROM b ORDER BY ts ASC  LIMIT 1),
+                       (SELECT close FROM b ORDER BY ts DESC LIMIT 1),
+                       (SELECT MAX(high) FROM b),
+                       (SELECT MIN(low)  FROM b),
+                       (SELECT close FROM b ORDER BY ts DESC OFFSET 12 LIMIT 1),
+                       (SELECT d FROM ls)
+            """, (sym, sym))
+            r = cur.fetchone()
+            if not r or r[1] is None:
+                continue
+            day_open = float(r[0]) if r[0] is not None else None
+            cmpv     = float(r[1])
+            day_high = float(r[2]) if r[2] is not None else None
+            today_low = float(r[3]) if r[3] is not None else None
+            close_12 = float(r[4]) if r[4] is not None else None
+            sdate = r[5]
+            cur.execute("""SELECT MIN(low) FILTER (WHERE rn<=2), MIN(low) FILTER (WHERE rn<=5)
+                           FROM (SELECT low, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
+                                 FROM raw_prices WHERE symbol=%s AND price_date < %s) x WHERE rn<=5""",
+                        (sym, sdate))
+            hr = cur.fetchone()
+            lo2 = float(hr[0]) if hr and hr[0] is not None else None
+            lo5 = float(hr[1]) if hr and hr[1] is not None else None
+            wl_cand = [x for x in (lo5, today_low) if x is not None]
+            week_low = min(wl_cand) if wl_cand else None
+            out[sym] = {
+                "hourly_pct": (cmpv / close_12 - 1) * 100 if (close_12 and close_12 > 0) else None,
+                "fall_from_day_high": (cmpv - day_high) / day_high * 100 if (day_high and day_high > 0) else None,
+                "day_ret": (cmpv - day_open) / day_open * 100 if (day_open and day_open > 0) else None,
+                "recovery_2d": (cmpv - lo2) / lo2 * 100 if (lo2 and lo2 > 0) else None,
+                "week_low_pct": (cmpv - week_low) / week_low * 100 if (week_low and week_low > 0) else None,
+            }
+        except Exception:
+            continue
+    return out
+
+
 @router.get("/metrics/all")
 def metrics_all():
     """Flat array of every stock's latest v8_metrics + segment.
@@ -815,6 +867,19 @@ def metrics_all():
         wl_cand = [x for x in (lo5, tlow) if x is not None]
         week_low = min(wl_cand) if wl_cand else None
         s["week_low_pct"] = ((cmpv - week_low) / week_low * 100) if (cmpv and week_low and week_low > 0) else None
+
+    # cc#417 fix_3: fill NIFTY50/BANKNIFTY price-derived fields from the last session when today's
+    # intraday bars are absent (market closed) — index rows show Friday's values, not blanks.
+    _idx_off = None
+    for s in rows:
+        if s["symbol"] in ("NIFTY50", "BANKNIFTY"):
+            if _idx_off is None:
+                with _conn() as _c2, _c2.cursor() as _cur2:
+                    _idx_off = _index_offhours_metrics(_cur2)
+            fb = _idx_off.get(s["symbol"], {})
+            for k in ("hourly_pct", "fall_from_day_high", "day_ret", "recovery_2d", "week_low_pct"):
+                if s.get(k) is None and fb.get(k) is not None:
+                    s[k] = fb[k]
 
     for s in rows:
         s["segment"] = _seg_override(s["symbol"], s.get("segment"))

@@ -1191,9 +1191,17 @@ function renderMood(m){
   // cc#129 bug_1: show the numeric value driving each gate, not just Y/N.
   // ADR is a ratio (2dp); Day/Week/Month are signed percentages.
   const gval=c=>{const v=Number(c.value);if(c.value==null||isNaN(v))return'';return short(c.filter)==='ADR'?v.toFixed(2):sign(v,2)+'%';};
+  // cc#417 fix_2: when the ADR breadth row is from a prior trading day (weekend/holiday), stamp its
+  // date so the gate reads e.g. "ADR 5.03 (Fri)" instead of implying it is today's breadth.
+  const _adrDate=(m.adr_detail&&m.adr_detail.adr_date)||'';
+  let adrStamp='';
+  if(_adrDate&&_adrDate!==(m.checked_at||'')){
+    let wd='';try{wd=new Date(_adrDate+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short'});}catch(e){wd=_adrDate;}
+    adrStamp=` <span style="color:var(--dim);font-weight:400">(${wd})</span>`;
+  }
   // cc#271: value (ADR ratio / signed %) rendered big in its own <b class="chk-val">, matching
   // the Buy/Sell slot number size; the ADR/Day/Week/Month label and the Y/N suffix stay small.
-  const pills=(m.checks||[]).map(c=>{const v=gval(c);return`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)}${v?` <b class="chk-val">${v}</b>`:''} ${c.pass?'Y':'N'}</div>`;}).join('');
+  const pills=(m.checks||[]).map(c=>{const v=gval(c);const st=(short(c.filter)==='ADR')?adrStamp:'';return`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)}${v?` <b class="chk-val">${v}</b>`:''}${st} ${c.pass?'Y':'N'}</div>`;}).join('');
   // cc#221: ring-fenced pools (used/cap) from market_mood — SO is a short basket, S1B a long one
   const soP=m.so_pool||{cap:m.so_slots,used:0};
   const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
