@@ -742,51 +742,52 @@ def market_mood():
         raise HTTPException(500, f"market_mood failed: {e}")
 
 
-def _index_offhours_metrics(cur):
-    """cc#417 fix_3: NIFTY50/BANKNIFTY price-derived intraday fields anchored to the LAST SESSION's
-    fyers_eq bars, so when the market is closed the index rows show Friday's values (frozen-15:30
-    convention) instead of blank '--'. Same formulas as the live path. Index rows only."""
+def _offhours_metrics_all(cur):
+    """cc#418 (extends cc#417 fix_3 from index-only to ALL symbols): last-session finals for the Raw
+    Data intraday columns (hour%, fall%, Intra%/day_ret, Rec2D%, WkLow%). Anchored to the market's
+    last session (all symbols share it off-market). Same formulas as the live path. '--' remains only
+    for symbols with no recent session bars. Called only when CURRENT_DATE has no fyers_eq bars."""
+    cur.execute("SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND ts >= NOW() - INTERVAL '12 days'")
+    r0 = cur.fetchone()
+    ls = r0[0] if r0 else None
+    if not ls:
+        return {}
+    cur.execute("""
+        WITH td AS (
+            SELECT symbol,
+                (array_agg(open  ORDER BY ts ASC ))[1]  AS day_open,
+                (array_agg(close ORDER BY ts DESC))[1]  AS live_close,
+                MAX(high) AS day_high, MIN(low) AS today_low,
+                (array_agg(close ORDER BY ts DESC))[13] AS close_12_ago
+            FROM intraday_prices WHERE ts::date = %s AND source = 'fyers_eq' GROUP BY symbol
+        ),
+        hist AS (
+            SELECT symbol, MIN(low) FILTER (WHERE rn<=2) AS lo_2d, MIN(low) FILTER (WHERE rn<=5) AS lo_5d
+            FROM (SELECT symbol, low, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                  FROM raw_prices WHERE price_date < %s) x WHERE rn<=5 GROUP BY symbol
+        )
+        SELECT td.symbol, td.day_open, td.live_close, td.day_high, td.today_low, td.close_12_ago, h.lo_2d, h.lo_5d
+        FROM td LEFT JOIN hist h ON h.symbol = td.symbol
+    """, (ls, ls))
+
+    def _ff(v):
+        try: return float(v) if v is not None else None
+        except (TypeError, ValueError): return None
     out = {}
-    for sym in ("NIFTY50", "BANKNIFTY"):
-        try:
-            cur.execute("""
-                WITH ls AS (SELECT MAX(ts::date) AS d FROM intraday_prices WHERE symbol=%s AND source='fyers_eq'),
-                b AS (SELECT open, high, low, close, ts FROM intraday_prices i, ls
-                      WHERE i.symbol=%s AND i.source='fyers_eq' AND i.ts::date = ls.d)
-                SELECT (SELECT open  FROM b ORDER BY ts ASC  LIMIT 1),
-                       (SELECT close FROM b ORDER BY ts DESC LIMIT 1),
-                       (SELECT MAX(high) FROM b),
-                       (SELECT MIN(low)  FROM b),
-                       (SELECT close FROM b ORDER BY ts DESC OFFSET 12 LIMIT 1),
-                       (SELECT d FROM ls)
-            """, (sym, sym))
-            r = cur.fetchone()
-            if not r or r[1] is None:
-                continue
-            day_open = float(r[0]) if r[0] is not None else None
-            cmpv     = float(r[1])
-            day_high = float(r[2]) if r[2] is not None else None
-            today_low = float(r[3]) if r[3] is not None else None
-            close_12 = float(r[4]) if r[4] is not None else None
-            sdate = r[5]
-            cur.execute("""SELECT MIN(low) FILTER (WHERE rn<=2), MIN(low) FILTER (WHERE rn<=5)
-                           FROM (SELECT low, ROW_NUMBER() OVER (ORDER BY price_date DESC) rn
-                                 FROM raw_prices WHERE symbol=%s AND price_date < %s) x WHERE rn<=5""",
-                        (sym, sdate))
-            hr = cur.fetchone()
-            lo2 = float(hr[0]) if hr and hr[0] is not None else None
-            lo5 = float(hr[1]) if hr and hr[1] is not None else None
-            wl_cand = [x for x in (lo5, today_low) if x is not None]
-            week_low = min(wl_cand) if wl_cand else None
-            out[sym] = {
-                "hourly_pct": (cmpv / close_12 - 1) * 100 if (close_12 and close_12 > 0) else None,
-                "fall_from_day_high": (cmpv - day_high) / day_high * 100 if (day_high and day_high > 0) else None,
-                "day_ret": (cmpv - day_open) / day_open * 100 if (day_open and day_open > 0) else None,
-                "recovery_2d": (cmpv - lo2) / lo2 * 100 if (lo2 and lo2 > 0) else None,
-                "week_low_pct": (cmpv - week_low) / week_low * 100 if (week_low and week_low > 0) else None,
-            }
-        except Exception:
+    for r in cur.fetchall():
+        cmpv = _ff(r[2])
+        if cmpv is None:
             continue
+        op, dh, tlow, c12, lo2, lo5 = (_ff(r[1]), _ff(r[3]), _ff(r[4]), _ff(r[5]), _ff(r[6]), _ff(r[7]))
+        wl_cand = [x for x in (lo5, tlow) if x is not None]
+        week_low = min(wl_cand) if wl_cand else None
+        out[r[0]] = {
+            "hourly_pct": (cmpv / c12 - 1) * 100 if (c12 and c12 > 0) else None,
+            "fall_from_day_high": (cmpv - dh) / dh * 100 if (dh and dh > 0) else None,
+            "day_ret": (cmpv - op) / op * 100 if (op and op > 0) else None,
+            "recovery_2d": (cmpv - lo2) / lo2 * 100 if (lo2 and lo2 > 0) else None,
+            "week_low_pct": (cmpv - week_low) / week_low * 100 if (week_low and week_low > 0) else None,
+        }
     return out
 
 
@@ -868,15 +869,19 @@ def metrics_all():
         week_low = min(wl_cand) if wl_cand else None
         s["week_low_pct"] = ((cmpv - week_low) / week_low * 100) if (cmpv and week_low and week_low > 0) else None
 
-    # cc#417 fix_3: fill NIFTY50/BANKNIFTY price-derived fields from the last session when today's
-    # intraday bars are absent (market closed) — index rows show Friday's values, not blanks.
-    _idx_off = None
-    for s in rows:
-        if s["symbol"] in ("NIFTY50", "BANKNIFTY"):
-            if _idx_off is None:
-                with _conn() as _c2, _c2.cursor() as _cur2:
-                    _idx_off = _index_offhours_metrics(_cur2)
-            fb = _idx_off.get(s["symbol"], {})
+    # cc#417 fix_3 / cc#418: off-market (no CURRENT_DATE fyers_eq bars) -> anchor the intraday-derived
+    # columns (hour%, fall%, Intra%, Rec2D%, WkLow%) to each symbol's last-session finals for EVERY
+    # symbol so Raw Data shows Friday's values, not blanks. During market hours (incl the pre-10:15
+    # warmup) today HAS bars, so this is skipped and live values / warmup '--' are preserved.
+    with _conn() as _c2, _c2.cursor() as _cur2:
+        _cur2.execute("SELECT EXISTS(SELECT 1 FROM intraday_prices WHERE ts::date=CURRENT_DATE AND source='fyers_eq')")
+        _today_has_bars = _cur2.fetchone()[0]
+        _off = {} if _today_has_bars else _offhours_metrics_all(_cur2)
+    if _off:
+        for s in rows:
+            fb = _off.get(s["symbol"])
+            if not fb:
+                continue
             for k in ("hourly_pct", "fall_from_day_high", "day_ret", "recovery_2d", "week_low_pct"):
                 if s.get(k) is None and fb.get(k) is not None:
                     s[k] = fb[k]

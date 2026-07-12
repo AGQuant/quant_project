@@ -1678,7 +1678,7 @@ function renderRaw(){
       <td class="${cls(x.day_ret)}">${sign(x.day_ret)}%</td>
       <td class="${cls(x.week_low_pct)}">${sign(x.week_low_pct)}%</td></tr>`;
   return`<div class="ptitle">Raw Data <span class="ct">${rest.length} symbols + ${pinned.length} indices${hidden>0?` · ${hidden} empty hidden`:''}</span></div>`+
-    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">19 signal-driving columns (display-only metrics hidden) — Symbol stays pinned. Indices (NIFTY50/BANKNIFTY) pinned on top. HOUR%/Fall%/Rec2D%/Intra%/WkLow% are -- before ~10:15 IST / missing bars.</div>`+
+    `<div style="font-size:10px;color:var(--dim);margin-bottom:8px">19 signal-driving columns (display-only metrics hidden) — Symbol stays pinned. Indices (NIFTY50/BANKNIFTY) pinned on top. Hour%/Fall%/Rec2D%/Intra%/WkLow%: -- = pre-10:15 warmup / missing bars; off-market values frozen at last session 15:30.</div>`+
     sortTbl('raw',
     [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","Day%"],["hourly_pct","Hour%"],["week_return","Wk %"],["month_return","Mo %"],["dma_50","DMA50"],["dma_200","DMA200"],["rsi_month","RSI(m)"],["rsi_weekly","RSI(w)"],["week_index_52","52W idx"],["vol_ratio","Vol x"],["sector_week","Sec Wk%"],["sector_month","Sec Mo%"],["mom_2d","2D Mom%"],["fall_from_day_high","Fall%"],["recovery_2d","Rec2D%"],["day_ret","Intra%"],["week_low_pct","WkLow%"]],
     rest,row,
