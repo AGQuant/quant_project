@@ -72,6 +72,34 @@ def _R(rid, label, credit, value):
     return {"rule": rid, "label": label, "credit": round(float(credit), 2), "value": value}
 
 
+# cc#410 (session_log id=3019) — Fib Strength Rule zones (position in swing range: 0=low, 100=high).
+_FIB_PCTS_16 = [0.0, 23.6, 38.2, 50.0, 61.8, 78.6, 100.0, 123.6]
+
+
+def _fib_zone_name(pos):
+    if pos is None:
+        return None
+    if pos >= 100:
+        return "Breakout"
+    if pos >= 78.6:
+        return "Resistance Test"
+    if pos >= 61.8:
+        return "Strength"
+    if pos >= 38.2:
+        return "Decision"
+    if pos >= 23.6:
+        return "Weak"
+    return "Breakdown"
+
+
+def _fib_levels(hi, lo):
+    """Standard fib ladder prices for a swing [lo, hi] (incl the 123.6 extension)."""
+    if hi is None or lo is None or hi <= lo:
+        return []
+    span = hi - lo
+    return [{"pct": p, "price": round(lo + (p / 100.0) * span, 2)} for p in _FIB_PCTS_16]
+
+
 # ── derived-metric math (SHARED by single + bulk loaders) ────────────────────────
 
 def _true_range_series(daily):
@@ -183,6 +211,22 @@ def _derive(d):
     d["basis_now"] = b[0]["basis_pct"] if b else None
     d["basis_prev"] = b[-1]["basis_pct"] if len(b) >= 2 else None
     d["oi_chg"] = b[0]["oi_chg"] if b else None
+
+    # R16 (cc#410, id=3019): 3M swing position for the fib rule. Swing = last ~63 trading days EOD
+    # high/low; position = CMP location in the range (0=low, 100=high, >100 = breakout). 3M range
+    # <5% -> fib meaningless -> the rule auto-credits 0.5 (data-quality convention).
+    d3 = daily[-63:] if len(daily) >= 63 else daily
+    fh = [r["high"] for r in d3 if r["high"] is not None]
+    flo = [r["low"] for r in d3 if r["low"] is not None]
+    if fh and flo and cmp_v is not None:
+        sh, sl = max(fh), min(flo)
+        rng = sh - sl
+        d["fib_swing_hi"], d["fib_swing_lo"] = sh, sl
+        d["fib_pos"] = ((cmp_v - sl) / rng * 100.0) if rng > 0 else None
+        d["fib_range_ok"] = (sl > 0 and rng > 0 and (rng / sl * 100.0) >= 5.0)
+    else:
+        d["fib_swing_hi"] = d["fib_swing_lo"] = d["fib_pos"] = None
+        d["fib_range_ok"] = False
 
     # DTE to monthly expiry (G3)
     today = _ist().date()
@@ -540,37 +584,52 @@ def _rules(d, style, side):
         val = {"rs_mo": _r(rm)}
     out.append(_R("R15", "RS vs Nifty", c, val))
 
+    # R16 — Fib position (3M swing). cc#410/id=3019: fib is now SCORED, style/side-aware zones.
+    pos = d.get("fib_pos")
+    if not d.get("fib_range_ok") or pos is None:
+        c = 0.5   # 3M range <5% (or no swing) -> meaningless -> auto 0.5
+    elif MOM and BUY:      # BUY-MOM: 1 >100 or 61.8-78.6 | 0.5 78.6-100 or 50-61.8 | 0 <50
+        c = 1.0 if (pos > 100 or (61.8 <= pos < 78.6)) else (0.5 if ((78.6 <= pos <= 100) or (50 <= pos < 61.8)) else 0.0)
+    elif (not MOM) and BUY:  # BUY-REV: 1 38.2-61.8 | 0 only <23.6 | else 0.5 (overshoot=caution)
+        c = 0.0 if pos < 23.6 else (1.0 if (38.2 <= pos <= 61.8) else 0.5)
+    elif MOM and (not BUY):  # SELL-MOM: 1 <23.6 | 0.5 23.6-38.2 | 0 >38.2
+        c = 1.0 if pos < 23.6 else (0.5 if (23.6 <= pos <= 38.2) else 0.0)
+    else:                    # SELL-REV: 1 78.6-100 | 0 only <61.8 | else 0.5 (>100 breakout=caution)
+        c = 0.0 if pos < 61.8 else (1.0 if (78.6 <= pos <= 100) else 0.5)
+    out.append(_R("R16", "Fib position (3M)", c,
+                  {"pos": _r(pos), "zone": _fib_zone_name(pos), "range_ok": d.get("fib_range_ok")}))
+
     return out
 
 
 def _verdict(score, side="BUY"):
-    # cc#400: SELL recalibrated (session_log id=3010) — max 13, separate bands. BUY unchanged (max 15).
-    if side == "SELL":
-        if score >= 10.5:
+    # cc#410 (id=3019): R16 fib added -> max BUY 16 / SELL 14, bands rescaled.
+    if side == "SELL":   # max 14
+        if score >= 11.5:
             return "STRONG"
-        if score >= 8.5:
+        if score >= 9:
             return "VALID"
         return "REJECT"
-    if score >= 12:
+    if score >= 13:      # BUY max 16
         return "STRONG"
-    if score >= 10:
+    if score >= 10.5:
         return "VALID"
     return "REJECT"
 
 
 def score_card(d, style, side):
     """The one shared scorer. Returns the full card for one (style, side).
-    cc#400: SELL drops R6+R14 (max 13) and uses its own verdict bands; BUY untouched (max 15)."""
+    cc#400: SELL drops R6+R14. cc#410: R16 fib added to both -> max BUY 16 / SELL 14, bands rescaled."""
     rules = _rules(d, style, side)
     score = round(sum(r["credit"] for r in rules), 2)
-    max_score = 13 if side == "SELL" else 15
+    max_score = 14 if side == "SELL" else 16
     card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
             "score": score, "max": max_score, "verdict": _verdict(score, side), "rules": rules}
     if side == "SELL":
         card["recal"] = "RECALIBRATED 12-JUL"
-        card["bands"] = "STRONG≥10.5 / VALID 8.5–10.5 / REJECT<8.5"
+        card["bands"] = "STRONG≥11.5 / VALID 9–11.5 / REJECT<9"
     else:
-        card["bands"] = "STRONG≥12 / VALID 10–12 / REJECT<10"
+        card["bands"] = "STRONG≥13 / VALID 10.5–13 / REJECT<10.5"
     return card
 
 
@@ -678,8 +737,33 @@ def _evidence(cur, d, side):
                  "nifty_mo": _r(d.get("nifty_mo"))},
         "room": {"room_r1": _r(d.get("room_r1")), "room_s1": _r(d.get("room_s1")),
                  "above_pp": d.get("above_pp")},
+        "fib": _fib_evidence(d),
         "gvm": _r(d.get("gvm_score")), "segment": d.get("segment"),
     }
+
+
+def _fib_evidence(d):
+    """cc#410: 3M fib swing + levels for the detail panel, with 6M-confluence MAJOR tags
+    (a 3M level within ~1% of a 6M level). Display-only; the R16 credit is scored in _rules."""
+    daily = d.get("daily") or []
+    d3 = daily[-63:] if len(daily) >= 63 else daily
+    d6 = daily[-126:] if len(daily) >= 126 else daily
+
+    def _swing(rows):
+        hs = [r["high"] for r in rows if r["high"] is not None]
+        ls = [r["low"] for r in rows if r["low"] is not None]
+        return (max(hs), min(ls)) if (hs and ls) else (None, None)
+
+    h3, l3 = _swing(d3)
+    h6, l6 = _swing(d6)
+    lv3 = _fib_levels(h3, l3)
+    lv6 = _fib_levels(h6, l6)
+    for L in lv3:
+        L["major"] = any(x["price"] and abs(L["price"] - x["price"]) / x["price"] <= 0.01 for x in lv6)
+    return {"pos": _r(d.get("fib_pos")), "zone": _fib_zone_name(d.get("fib_pos")),
+            "range_ok": d.get("fib_range_ok"), "swing_hi": _r(h3), "swing_lo": _r(l3),
+            "cmp": _r(d.get("cmp")),
+            "levels": [{"pct": x["pct"], "price": x["price"], "major": x["major"]} for x in lv3]}
 
 
 def trade_check_v4_detail(symbol, side="BUY"):

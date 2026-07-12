@@ -419,6 +419,11 @@
     border:1px solid var(--line2);background:var(--panel);color:var(--cyan);cursor:pointer}
   .v4-loser-view:hover{border-color:var(--cyan);background:var(--cyan-d)}
   .v4-loser-full{margin-top:10px}
+  /* cc#410 — R16 fib detail panel */
+  .fib-bar{position:relative;display:flex;height:18px;border-radius:5px;overflow:hidden;border:1px solid var(--line2)}
+  .fib-bar>div{height:100%}
+  .fib-cmp{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--cyan);box-shadow:0 0 0 1px var(--bg)}
+  .fib-major{font-family:var(--mono);font-size:8px;font-weight:800;background:var(--amber-d);color:var(--amber);padding:1px 4px;border-radius:4px;margin-left:4px}
 </style>
 </head>
 <body>
@@ -624,7 +629,7 @@
         <tbody id="scrBody"></tbody></table>
       <div id="moversWrap" style="display:none"></div>
     </div>
-    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; STRONG&ge;12 / VALID 10&ndash;12 / REJECT&lt;10.</div>
+    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; BUY STRONG&ge;13 / SELL STRONG&ge;11.5 (max 16 / 14, incl R16 fib).</div>
   </div>
 
   <!-- chip popup -->
@@ -822,8 +827,10 @@ function renderV4Dual(d, uiMode){
   const cards=(d.cards||[]);
   const cardHtml=c=>{
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
-    const rules=(c.rules||[]).map(r=>
-      '<div class="v4-crow"><span class="rl">'+r.rule+' '+r.label+'</span><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>').join('');
+    const rules=(c.rules||[]).map(r=>{
+      const zone=(r.rule==='R16'&&r.value&&r.value.zone)?' · '+(r.value.pos!=null?Number(r.value.pos).toFixed(1)+'% ':'')+r.value.zone:'';
+      return '<div class="v4-crow"><span class="rl">'+r.rule+' '+r.label+zone+'</span><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>';
+    }).join('');
     const recal=c.recal?'<span class="v4-recal">'+c.recal+'</span>':'';
     return '<div class="v4-card'+win+'"><div class="v4-chead">'+_v4styleChip(c.label)
       +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'+Number(c.score).toFixed(2)+'</span>'
@@ -862,7 +869,7 @@ function renderV4Dual(d, uiMode){
     + '</div>'
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
-    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?13:15))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥10.5 / VALID 8.5–10.5 / REJECT&lt;8.5':'STRONG≥12 / VALID 10–12 / REJECT&lt;10'))+'</div>'
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?14:16))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥11.5 / VALID 9–11.5 / REJECT&lt;9':'STRONG≥13 / VALID 10.5–13 / REJECT&lt;10.5'))+'</div>'
     +   '<div class="v4-gates">'+gatesHtml+'</div>'
     + '</div></div>'
     + gatedBanner
@@ -919,7 +926,7 @@ function renderTcDetail(box, d, uiMode){
     ? '<div class="v4-gated">⛔ GATED — '+fails.map(g=>g.gate+' '+g.label+(g.value!=null?' ('+g.value+')':'')).join(' · ')+' — verdict held at REJECT.</div>' : '';
   const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'+d.best_verdict
     +(d.best_label?' · '+d.best_label:'')+'</div><div class="v4-best">'+d.symbol+' · '+(SELL?'▼ SHORT':'▲ LONG')
-    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?13:15))
+    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?14:16))
     +' · evidence audits the '+style+' card</div></div>'+gatedBanner;
 
   // R1 mood
@@ -992,6 +999,10 @@ function renderTcDetail(box, d, uiMode){
   P.push([15,_detPanel('R15','Relative strength vs Nifty',cr.R15,
     _kv('RS week',_sgn(rr.wk)+'%',_sgnCls(rr.wk,!SELL))+_kv('RS month',_sgn(rr.mo)+'%',_sgnCls(rr.mo,!SELL)))]);
 
+  // R16 fib position (3M swing) — zoned bar + zone chip + fib levels with 6M-confluence MAJOR tags
+  const fb=ev.fib||{};
+  P.push([16,_detPanel('R16','Fib position (3M swing)',cr.R16,_detFib(fb))]);
+
   P.sort((a,b)=>a[0]-b[0]);
   box.innerHTML=banner+'<div class="v4-det-grid">'+P.map(x=>x[1]).join('')+'</div>';
 }
@@ -1034,6 +1045,36 @@ function _detLadder(d, SELL){
       +'<td class="bar-cell"><div class="vtrack"><div class="vfill" style="width:'+w+'%;background:'+(r.wrong?'var(--line2)':col)+'"></div></div></td></tr>';
   }).join('');
   return '<table class="v4-det-tbl"><thead><tr><th>Level</th><th style="text-align:right">Price</th><th style="text-align:right">Dist</th><th>'+(SELL?'Room to fall':'Room to rise')+'</th></tr></thead><tbody>'+(body||'<tr><td class="v4-det-note">no pivots</td></tr>')+'</tbody></table>';
+}
+
+// R16 fib panel (cc#410): zoned 0→123.6 bar (Fib Strength Rule colours) + CMP marker + zone chip +
+// 3M fib levels with 6M-confluence MAJOR tags.
+const _FIB_DET_ZONES=[
+  {lo:0,hi:23.6,name:'Breakdown',col:'var(--red)',op:0.5},
+  {lo:23.6,hi:38.2,name:'Weak',col:'var(--red)',op:0.22},
+  {lo:38.2,hi:61.8,name:'Decision',col:'var(--dim)',op:0.35},
+  {lo:61.8,hi:78.6,name:'Strength',col:'var(--grn)',op:0.32},
+  {lo:78.6,hi:100,name:'Resistance',col:'var(--red)',op:0.35},
+  {lo:100,hi:123.6,name:'Breakout',col:'var(--grn)',op:0.55}
+];
+function _detFib(fb){
+  if(!fb||fb.pos==null)return '<div class="v4-det-note">no 3M swing data</div>';
+  if(fb.range_ok===false)return '<div class="v4-det-note">3M range &lt;5% — fib not meaningful (auto 0.5). pos '+Number(fb.pos).toFixed(1)+'%</div>';
+  const TOP=123.6, pos=Math.max(0,Math.min(TOP,fb.pos));
+  const seg=_FIB_DET_ZONES.map(z=>'<div style="width:'+((z.hi-z.lo)/TOP*100)+'%;background:'+z.col+';opacity:'+z.op+'"></div>').join('');
+  const marker='<div class="fib-cmp" style="left:'+(pos/TOP*100)+'%"></div>';
+  const zoneChip='<span class="v4-det-mchip '+(cr16Pos(fb.pos))+'">'+Number(fb.pos).toFixed(1)+'% — '+(fb.zone||'—')+'</span>';
+  const lv=(fb.levels||[]).slice().reverse().map(l=>
+    '<tr><td class="lbl">'+l.pct.toFixed(1)+'%'+(l.major?' <span class="fib-major">MAJOR</span>':'')+'</td><td style="text-align:right">'+Number(l.price).toFixed(1)+'</td></tr>').join('');
+  return '<div class="fib-bar">'+seg+marker+'</div>'
+    +'<div style="display:flex;justify-content:space-between;font-size:8.5px;color:var(--dim);margin:2px 1px 8px">'
+      +'<span>swing lo '+(fb.swing_lo!=null?fb.swing_lo:'—')+'</span><span>hi '+(fb.swing_hi!=null?fb.swing_hi:'—')+'</span></div>'
+    +'<div style="margin-bottom:8px">'+zoneChip+'</div>'
+    +'<table class="v4-det-tbl"><thead><tr><th>Fib level</th><th style="text-align:right">Price</th></tr></thead><tbody>'+lv+'</tbody></table>'
+    +'<div class="v4-det-note">3M swing scored (R16). MAJOR = 3M level within ~1% of a 6M level (confluence).</div>';
+}
+function cr16Pos(pos){ // colour the zone chip like the bar
+  if(pos>=100)return 'pos'; if(pos>=78.6)return 'neg'; if(pos>=61.8)return 'pos'; if(pos>=38.2)return ''; return 'neg';
 }
 
 async function runInvestCheck(sym){
@@ -1250,7 +1291,7 @@ function runScreen(){
   const card=panel.querySelector('.card');
   card.innerHTML =
     '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
-    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL); the higher card wins with its style label. STRONG≥12 / VALID 10–12 / REJECT&lt;10. Tap a row for the full dual scorecard.</div>'
+    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib); the higher card wins with its style label. BUY STRONG≥13 (max 16) / SELL STRONG≥11.5 (max 14). Tap a row for the full dual scorecard.</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<button class="v4-sw buy'+(v4BUY?' on':'')+'" id="v4swBuy" onclick="v4Toggle(\'BUY\')">&#9650; Buy</button>'
     +   '<button class="v4-sw sell'+(v4SELL?' on':'')+'" id="v4swSell" onclick="v4Toggle(\'SELL\')">&#9660; Sell</button>'
@@ -1337,7 +1378,7 @@ function setUniverse(u){
   scrMode='screener';scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · STRONG≥12 / VALID 10–12 / REJECT<10.';
+  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · BUY STRONG≥13 (max 16) / SELL STRONG≥11.5 (max 14) · incl R16 fib.';
   syncScrTabs();
   if(scrCache[u])renderScreen();
   else loadScreen(u);
