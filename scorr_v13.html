@@ -72,21 +72,65 @@
   .legend b{color:var(--mut);font-weight:700}
   .foot{font-size:10.5px;color:var(--dim);line-height:1.6;margin-top:14px}
   @media(max-width:640px){.kpi .v{font-size:18px}.wrap{padding:10px 12px 32px}}
+  /* cc#393: screener merge — filter controls in registry rows + live results rail */
+  .asof{display:inline-block;padding:2px 9px;border-radius:9px;background:rgba(245,185,74,.14);color:var(--amber);font-size:10px;font-weight:700}
+  .presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 4px}
+  .psave{height:28px;padding:0 12px;border:1px dashed var(--blu);border-radius:14px;background:rgba(77,124,254,.14);color:var(--blu);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .psave:hover{background:var(--blu);color:#fff}
+  .pchip{display:inline-flex;align-items:center;gap:2px;height:28px;padding:0 4px 0 11px;border:1px solid var(--line2);border-radius:14px;background:var(--panel);font-size:11px;font-weight:600;color:var(--mut)}
+  .pchip .pname{cursor:pointer;padding:0 2px}.pchip:hover{border-color:var(--blu)}
+  .pchip.active{background:var(--blu);border-color:var(--blu);color:#fff}
+  .pchip .picon{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:11px;opacity:.55;cursor:pointer}
+  .pchip .picon:hover{opacity:1;background:rgba(148,166,210,.14)}
+  .pempty{font-size:10.5px;color:var(--dim);font-style:italic}
+  .matched{font-size:12px;font-weight:700;color:var(--txt);margin:8px 0 2px}
+  .matched b{font-family:'IBM Plex Mono',monospace;color:var(--cyan)}
+  .screen{display:flex;gap:14px;align-items:flex-start;margin-top:8px}
+  .regpane{flex:1;min-width:0}
+  .respane{flex:0 0 360px;position:sticky;top:8px;max-height:calc(100vh - 24px);overflow:auto}
+  /* inline filter control inside a registry row's Filter cell */
+  .sctl{display:inline-flex;align-items:center;gap:3px;margin-right:7px;vertical-align:middle}
+  .sctl input[type=checkbox]{cursor:pointer;margin:0}
+  .fnum{width:46px;font-size:10.5px;font-family:'IBM Plex Mono',monospace;padding:2px 3px;border:1px solid var(--line2);border-radius:4px;color:var(--txt);background:var(--bg2)}
+  .fnum:disabled{opacity:.4}
+  tr.screenable td.fname{white-space:nowrap}
+  tr.filt-on{background:rgba(77,124,254,.08)}
+  .reset2{font-size:11px;color:var(--blu);cursor:pointer;font-weight:700}
+  .reset2:hover{text-decoration:underline}
+  .resttl{font-size:12px;font-weight:800;margin-bottom:6px;letter-spacing:.3px}
+  .rtbl{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .rtbl table{border-collapse:collapse;width:100%}
+  .rtbl th{font-family:'Sora';font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);text-align:right;padding:7px 9px;background:var(--panel2);border-bottom:1px solid var(--line2);white-space:nowrap;cursor:pointer}
+  .rtbl th:first-child,.rtbl td:first-child{text-align:left}
+  .rtbl td{padding:6px 9px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;white-space:nowrap}
+  .rtbl tr:last-child td{border-bottom:none}
+  .rtbl .rsym{font-family:'Sora';font-weight:700;color:var(--txt)}
+  .rtbl .rseg{font-size:9px;color:var(--dim)}
+  .up{color:var(--grn)}.dn{color:var(--red)}.nt{color:var(--dim)}
+  .mfilter-toggle{display:none}
+  @media(max-width:900px){
+    .screen{flex-direction:column-reverse}   /* results first, registry (filter drawer) below */
+    .respane{flex:1 1 auto;width:100%;position:static;max-height:none}
+    .regpane{width:100%}
+    .mfilter-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:44px;padding:0 14px;margin:8px 0 2px;border:1px solid var(--line2);border-radius:10px;background:var(--panel);color:var(--txt);font-weight:700;font-size:14px;font-family:inherit;cursor:pointer}
+    .mfilter-toggle .mft-r{color:var(--mut);font-weight:600;font-size:12px}
+    body.regcollapsed .regpane{display:none}
+  }
 </style>
 
 <div class="wrap">
   <header>
-    <div><div class="logo">V13 <b>Filter Registry</b></div><div class="tag">Every metric on the platform</div></div>
+    <div><div class="logo">V13 <b>Registry &amp; Screener</b></div><div class="tag">Browse every metric · screen the live universe</div></div>
     <div class="spacer"></div>
+    <span class="asof" id="asof" style="display:none"></span>
     <a class="backlink" href="/dashboard">&#8592; V8 Dashboard</a>
   </header>
 
   <div class="lead">
-    Complete, <b style="color:var(--mut)">reality-verified</b> inventory of every computable filter/metric across the platform &mdash;
-    classified into 5 buckets with sub-categories. Each row shows its source table/API, refresh cadence, what it measures, and which
-    of the 6 live baskets currently gate on it. Rows tagged <span class="badge active">ACTIVE</span> are confirmed populating in the DB;
-    <span class="badge dormant">DORMANT</span> = defined in code but not currently populating (0 non-null in the verification window), so
-    not yet usable ammunition. Unused metrics with no basket chips are the open opportunity surface for new strategies.
+    Every computable filter/metric on the platform, <b style="color:var(--mut)">reality-verified</b> and classified into 5 buckets &mdash;
+    now also the live <b style="color:var(--txt)">screener</b>. Tick any <span class="badge active">ACTIVE</span> numeric row and set a min/max to
+    filter the futures universe (AND logic, instant client-side re-filter); results appear on the right (below on mobile).
+    <span class="badge dormant">DORMANT</span> rows stay display-only until they populate.
   </div>
 
   <div class="strip" id="strip"></div>
@@ -95,9 +139,20 @@
     <input id="q" type="text" placeholder="Search filter name or description&hellip;" oninput="renderV13()">
     <button class="tgl" id="tUnused" onclick="toggleFlag('unused')">Unused only</button>
     <button class="tgl" id="tDormant" onclick="toggleFlag('dormant')">Dormant only</button>
+    <span class="reset2" onclick="resetFilters()">Reset filters</span>
   </div>
 
-  <div id="buckets"></div>
+  <div class="presets" id="presets"></div>
+  <div class="matched" id="matched"></div>
+
+  <button class="mfilter-toggle" type="button" onclick="toggleReg()">
+    <span>Adjust filters</span><span class="mft-r" id="mftR">&#9662;</span>
+  </button>
+
+  <div class="screen">
+    <div class="regpane"><div id="buckets"></div></div>
+    <div class="respane"><div class="resttl">Live results</div><div id="results"><div class="foot">Loading universe&hellip;</div></div></div>
+  </div>
 
   <div class="legend">
     <span><b>Baskets:</b></span>
@@ -126,6 +181,7 @@ const REGISTRY=[
    ['rsi_month','Monthly RSI-14 — long-frame momentum','v8_metrics','EOD',['BM','SR','SM']],
    ['mom_2d','2-day price momentum % (turn-up / turn-down)','v8_metrics · live','5-min',['BR','BM','SM']],
    ['recovery_2d','2-day recovery off the recent low % (bounce, not chase)','v8_qualified.metrics (live)','5-min',['S1B']],
+   ['recovery_low','Recovery from the session low % (live)','live (intraday)','5-min',[]],
    ['hourly_pct','Rolling 60-min move % (intraday thrust)','v8_signal_writer (live)','5-min',['BR']],
    ['day_1d','Day change % (session move)','v8_metrics · live','5-min',['S1B','SO']],
    ['day_ret','Live intraday day return % (used for the >0.5% / <0 gates)','v8_qualified.metrics (live)','5-min',['S1B','SO']],
@@ -138,6 +194,7 @@ const REGISTRY=[
    ['dma_50','% above / below the 50-day moving average','v8_metrics','5-min',['BM','S1B']],
    ['dma_200','% above / below the 200-day moving average','v8_metrics','5-min',['BR','BM','SR','SM']],
    ['dma_20','% above / below the 20-day moving average','v8_metrics','5-min',[]],
+   ['mas_above','Count of the 20/50/200 DMAs price is above (0–3)','v8_metrics · live','5-min',[]],
    ['ma9_vs_ma21','9-EMA vs 21-EMA spread % (fast/slow cross)','v8_metrics · live','5-min',[]],
    ['supertrend_state','SuperTrend regime (up/down flip)','V10 engine (live)','5-min',[]],
    ['ema_3_10','EMA-3 vs EMA-10 fast cross state','V10 engine (live)','5-min',[]],
@@ -155,6 +212,7 @@ const REGISTRY=[
   ]},
   {label:'Pivots & Levels',rows:[
    ['pp / r1 / r2 / s1 / s2','Rolling pivot point, resistances & supports','v8_paper_pivots','daily',['BR','BM','SR','SM']],
+   ['cmp','Live traded price (spot CMP)','cmp_prices · live','5-min',[]],
    ['room_to_r1','% distance from CMP up to R1 (qualification gate)','live (pivots + cmp)','5-min',['BR']],
    ['room_to_target','% distance down to S1/S2 target','live (pivots + cmp)','5-min',['SR']],
    ['s2_clearance','% clearance from CMP down to S2 (fall not blocked)','live (pivots + cmp)','5-min',['SM']],
@@ -246,6 +304,7 @@ const REGISTRY=[
    ['basis_pct','Basis as % of spot (premium/discount)','futures_basis','5-min',[]],
    ['oi','Futures open interest','futures_basis','5-min',[]],
    ['oi_chg','Futures OI day-over-day change','futures_basis','5-min',[]],
+   ['basis_chg','Basis change vs the prior tick %','futures_basis · live','5-min',[]],
    ['spot_close / futures_close','Spot & futures reference prices','futures_basis','5-min',[]],
   ]},
   {label:'Options chain',rows:[
@@ -287,6 +346,133 @@ const REGISTRY=[
   ]},
  ]},
 ];
+
+// ── cc#393 screener: which ACTIVE registry rows are screenable (by row name) -> {k?, min, max}.
+// k = the data key in the loaded ROWS when it differs from the display name. These 27 mirror the
+// retired /filters screener; results match it 1:1 for identical ranges (same derive + AND logic).
+const SCREEN={
+  gvm_score:{min:6,max:10},
+  daily_rsi:{min:30,max:90}, rsi_weekly:{min:30,max:90}, rsi_month:{min:30,max:90},
+  mom_2d:{min:-10,max:10}, day_1d:{k:'day_pct',min:-10,max:10}, hourly_pct:{min:-5,max:5},
+  recovery_low:{min:0,max:20}, week_return:{min:-10,max:10}, month_return:{min:-20,max:20},
+  year_return:{min:-50,max:100}, eod_chg:{min:-10,max:10},
+  dma_20:{min:-20,max:20}, dma_50:{min:-20,max:20}, dma_200:{min:-20,max:20}, mas_above:{min:0,max:3},
+  week_index_52:{min:0,max:100}, vol_ratio:{min:0,max:10},
+  cmp:{min:0,max:100000}, room_to_r1:{k:'room_r1',min:0,max:20}, room_to_target:{k:'room_s1',min:0,max:20},
+  fall_from_day_high:{k:'fall_high',min:0,max:20},
+  sector_week:{min:-10,max:10}, sector_month:{min:-10,max:10},
+  basis_pct:{k:'basis_pct_now',min:-5,max:5}, basis_chg:{min:-2,max:2}, oi_chg:{k:'oi_chg_pct',min:-20,max:20},
+};
+const SKEY={}, FILT={};
+Object.entries(SCREEN).forEach(([name,def])=>{const k=def.k||name;SKEY[name]=k;FILT[k]={on:false,min:def.min,max:def.max,label:name};});
+let ROWS=[], AS_OF=null, SORT_KEY='day_pct', SORT_DIR=-1, PRESETS=[], ACTIVE_PRESET=null;
+
+function screenCtl(name){
+  const k=SKEY[name], f=FILT[k];
+  return `<span class="sctl" onclick="event.stopPropagation()">
+    <input type="checkbox" ${f.on?'checked':''} title="Activate filter" onchange="toggFilt('${k}',this.checked)">
+    <input type="number" class="fnum" id="min-${k}" value="${f.min}" ${f.on?'':'disabled'} onchange="setFilt('${k}','min',this.value)" title="min">
+    <input type="number" class="fnum" id="max-${k}" value="${f.max}" ${f.on?'':'disabled'} onchange="setFilt('${k}','max',this.value)" title="max">
+  </span>`;
+}
+function toggFilt(k,on){FILT[k].on=on;const mn=document.getElementById('min-'+k),mx=document.getElementById('max-'+k);
+  if(mn)mn.disabled=!on;if(mx)mx.disabled=!on;const tr=mn&&mn.closest('tr');if(tr)tr.classList.toggle('filt-on',on);
+  ACTIVE_PRESET=null;renderPresets();renderResults();}
+function setFilt(k,which,val){const v=parseFloat(val);if(!isNaN(v))FILT[k][which]=v;ACTIVE_PRESET=null;renderPresets();renderResults();}
+function resetFilters(){Object.entries(SCREEN).forEach(([name,def])=>{const k=def.k||name;FILT[k]={on:false,min:def.min,max:def.max,label:name};});
+  ACTIVE_PRESET=null;renderV13();renderPresets();renderResults();}
+
+function n(v){return v==null?null:(typeof v==='number'?v:(isNaN(parseFloat(v))?null:parseFloat(v)));}
+function istToday(){return new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});}
+function renderAsOf(){const el=document.getElementById('asof');if(!el)return;
+  if(!AS_OF||AS_OF===istToday()){el.style.display='none';return;}
+  const p=AS_OF.split('-');const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(p[1],10)-1];
+  el.textContent='as of '+parseInt(p[2],10)+' '+mon;el.style.display='inline-block';el.title='Non-trading day — last available session';}
+function passesActiveFilters(row){
+  for(const k in FILT){const f=FILT[k];if(!f.on)continue;const v=row[k];if(v==null)return false;
+    if(!isNaN(f.min)&&v<f.min)return false;if(!isNaN(f.max)&&v>f.max)return false;}
+  return true;}
+function activeKeys(){return Object.keys(FILT).filter(k=>FILT[k].on);}
+function fmtNum(v,d){return v==null?'<span class="nt">--</span>':(typeof v==='number'?v.toFixed(d):v);}
+function pctCell(v){if(v==null)return '<span class="nt">--</span>';return v>=0?'<span class="up">+'+v.toFixed(2)+'%</span>':'<span class="dn">'+v.toFixed(2)+'%</span>';}
+function onRSort(k){if(SORT_KEY===k)SORT_DIR=-SORT_DIR;else{SORT_KEY=k;SORT_DIR=-1;}renderResults();}
+
+function renderResults(){
+  const matched=ROWS.filter(passesActiveFilters);
+  matched.sort((a,b)=>{const av=a[SORT_KEY],bv=b[SORT_KEY];if(av==null&&bv==null)return 0;if(av==null)return 1;if(bv==null)return -1;
+    if(typeof av==='string')return SORT_DIR*av.localeCompare(bv);return SORT_DIR*(av-bv);});
+  const mEl=document.getElementById('matched');if(mEl)mEl.innerHTML='<b>'+matched.length+'</b> matched / '+ROWS.length+' universe';
+  const mft=document.getElementById('mftR');if(mft)mft.innerHTML=matched.length+' shown &#9662;';
+  const ak=activeKeys().filter(k=>!['cmp','day_pct','gvm_score'].includes(k));
+  const cols=[['symbol','Stock'],['cmp','CMP'],['day_pct','Day%'],['gvm_score','GVM'],['segment','Seg']].concat(ak.map(k=>[k,k]));
+  const head='<tr>'+cols.map(c=>`<th onclick="onRSort('${c[0]}')">${c[1]}${SORT_KEY===c[0]?(SORT_DIR<0?' ▼':' ▲'):''}</th>`).join('')+'</tr>';
+  const body=matched.slice(0,300).map(r=>{
+    let tds=`<td class="rsym">${r.symbol}<div class="rseg">${r.segment||''}</div></td>`+
+      `<td>${r.cmp==null?'<span class="nt">--</span>':Number(r.cmp).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>`+
+      `<td>${pctCell(r.day_pct)}</td><td>${fmtNum(r.gvm_score,2)}</td><td class="rseg" style="text-align:left">${r.segment||'--'}</td>`;
+    ak.forEach(k=>{tds+=`<td>${fmtNum(r[k],2)}</td>`;});
+    return '<tr>'+tds+'</tr>';}).join('');
+  document.getElementById('results').innerHTML=matched.length
+    ?`<div class="rtbl"><div class="scroll" style="overflow-x:auto"><table><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`
+    :'<div class="foot" style="padding:18px;text-align:center">No stocks match the active filters.</div>';
+  renderAsOf();}
+
+async function loadData(){
+  try{
+    const [metrics,live,pivots,dayRange]=await Promise.all([
+      fetch('/api/v8/metrics/all').then(r=>r.json()),
+      fetch('/api/v8/live_metrics').then(r=>r.json()),
+      fetch('/api/paper/pivots?limit=300').then(r=>r.json()),
+      fetch('/api/scanners/day_range_oi?limit=300').then(r=>r.json()),
+    ]);
+    const liveArr=(live&&Array.isArray(live.rows))?live.rows:(Array.isArray(live)?live:[]);
+    AS_OF=(live&&live.as_of)?live.as_of:null;
+    const liveMap={};liveArr.forEach(r=>liveMap[r.symbol]=r);
+    const pivMap={};(pivots||[]).forEach(r=>pivMap[r.symbol]=r);
+    const drMap={};((dayRange&&dayRange.rows)||[]).forEach(r=>drMap[r.symbol]=r);
+    ROWS=(metrics||[]).map(m=>{
+      const sym=m.symbol,lv=liveMap[sym]||{},pv=pivMap[sym]||{},dr=drMap[sym]||{};
+      const cmp=n(lv.cmp),r1=n(pv.r1),s1=n(pv.s1),dayHigh=n(dr.day_high),dayLow=n(dr.day_low);
+      const dma20=n(m.dma_20),dma50=n(m.dma_50),dma200=n(m.dma_200);
+      const masAbove=[dma20,dma50,dma200].filter(v=>v!=null&&v>0).length;
+      const roomR1=(cmp!=null&&r1!=null&&cmp<r1)?(r1-cmp)/cmp*100:null;
+      const roomS1=(cmp!=null&&s1!=null&&cmp>s1)?(cmp-s1)/cmp*100:null;
+      const fallHigh=(cmp!=null&&dayHigh)?(dayHigh-cmp)/dayHigh*100:null;
+      const recoveryLow=(cmp!=null&&dayLow)?(cmp-dayLow)/dayLow*100:null;
+      return {symbol:sym,segment:m.segment,gvm_score:n(m.gvm_score),rsi_month:n(m.rsi_month),rsi_weekly:n(m.rsi_weekly),
+        daily_rsi:n(m.daily_rsi),dma_20:dma20,dma_50:dma50,dma_200:dma200,week_return:n(m.week_return),
+        month_return:n(m.month_return),year_return:n(m.year_return),mom_2d:n(m.mom_2d),sector_week:n(m.sector_week),
+        sector_month:n(m.sector_month),week_index_52:n(m.week_index_52),eod_chg:n(m.eod_chg),vol_ratio:n(m.vol_ratio),
+        cmp:cmp,day_pct:n(lv.day_pct),hourly_pct:n(lv.hourly_pct),recovery_low:recoveryLow,fall_high:fallHigh,
+        mas_above:masAbove,room_r1:roomR1,room_s1:roomS1,basis_pct_now:n(dr.basis_pct_now),basis_chg:n(dr.basis_chg),oi_chg_pct:n(dr.oi_chg_pct)};
+    });
+    renderResults();
+  }catch(e){document.getElementById('results').innerHTML='<div class="foot" style="padding:18px">Data error: '+e.message+'</div>';}
+}
+
+async function loadPresets(){try{const r=await fetch('/api/v13/presets');if(!r.ok)return;const j=await r.json();PRESETS=j.presets||[];
+  if(ACTIVE_PRESET!=null&&!PRESETS.some(p=>p.id===ACTIVE_PRESET))ACTIVE_PRESET=null;renderPresets();}catch(e){}}
+function renderPresets(){const el=document.getElementById('presets');if(!el)return;
+  let html='<button class="psave" onclick="savePreset()">&#43; Save theme</button>';
+  if(!PRESETS.length)html+='<span class="pempty">No saved themes yet</span>';
+  else PRESETS.forEach(p=>{const act=p.id===ACTIVE_PRESET?' active':'';const nm=(p.name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    html+='<span class="pchip'+act+'"><span class="pname" onclick="applyPreset('+p.id+')" title="Load">'+nm+'</span>'+
+      '<span class="picon" onclick="renamePreset('+p.id+',event)" title="Rename">&#9998;</span>'+
+      '<span class="picon" onclick="deletePreset('+p.id+',event)" title="Delete">&times;</span></span>';});
+  el.innerHTML=html;}
+function gatherState(){return {filters:Object.keys(FILT).map(k=>({key:k,checked:FILT[k].on,min:FILT[k].min,max:FILT[k].max})),sort_key:SORT_KEY,sort_dir:SORT_DIR};}
+function applyState(st){const byKey={};(st.filters||[]).forEach(x=>byKey[x.key]=x);
+  Object.keys(FILT).forEach(k=>{const s=byKey[k];if(s){FILT[k].on=!!s.checked;if(s.min!=null&&!isNaN(s.min))FILT[k].min=s.min;if(s.max!=null&&!isNaN(s.max))FILT[k].max=s.max;}else FILT[k].on=false;});
+  if(st.sort_key){SORT_KEY=st.sort_key;SORT_DIR=(st.sort_dir===1?1:-1);}renderV13();renderResults();}
+async function savePreset(){const active=PRESETS.find(p=>p.id===ACTIVE_PRESET);const name=(prompt('Save current filters as theme:',active?active.name:'')||'').trim();if(!name)return;const st=gatherState();
+  try{const r=await fetch('/api/v13/presets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,filters:st.filters,sort_key:st.sort_key,sort_dir:st.sort_dir})});
+    if(!r.ok){alert('Could not save ('+r.status+')');return;}const j=await r.json();ACTIVE_PRESET=j.preset&&j.preset.id;await loadPresets();}catch(e){alert('Save failed: '+e.message);}}
+function applyPreset(id){const p=PRESETS.find(x=>x.id===id);if(!p)return;ACTIVE_PRESET=id;applyState({filters:p.filters,sort_key:p.sort_key,sort_dir:p.sort_dir});renderPresets();}
+async function renamePreset(id,ev){if(ev)ev.stopPropagation();const p=PRESETS.find(x=>x.id===id);if(!p)return;const name=(prompt('Rename theme:',p.name)||'').trim();if(!name||name===p.name)return;
+  try{const r=await fetch('/api/v13/presets/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});if(!r.ok){alert(r.status===409?'Name taken':'Rename failed');return;}await loadPresets();}catch(e){alert('Rename failed');}}
+async function deletePreset(id,ev){if(ev)ev.stopPropagation();const p=PRESETS.find(x=>x.id===id);if(!p)return;if(!confirm('Delete theme "'+p.name+'"?'))return;
+  try{const r=await fetch('/api/v13/presets/'+id,{method:'DELETE'});if(!r.ok){alert('Delete failed');return;}if(ACTIVE_PRESET===id)ACTIVE_PRESET=null;await loadPresets();}catch(e){}}
+function toggleReg(){document.body.classList.toggle('regcollapsed');}
 
 let FLAGS={unused:false,dormant:false};
 function toggleFlag(f){FLAGS[f]=!FLAGS[f];document.getElementById(f==='unused'?'tUnused':'tDormant').classList.toggle('on',FLAGS[f]);renderV13();}
@@ -330,9 +516,11 @@ function renderV13(){
       rows.forEach(r=>{
         const [name,meas,src,cad,used,status]=r;
         const dorm=status==='dormant';
-        const cls=(dorm?'dormant-row':'')+((used&&used.length)?' used-row':'');
+        const sc=(!dorm&&SCREEN[name])?SCREEN[name]:null;
+        const on=sc&&FILT[SKEY[name]].on;
+        const cls=(dorm?'dormant-row':'')+((used&&used.length)?' used-row':'')+(sc?' screenable':'')+(on?' filt-on':'');
         subHtml+=`<tr class="${cls.trim()}">
-          <td class="fname">${name}</td>
+          <td class="fname">${sc?screenCtl(name):''}${name}</td>
           <td class="meas">${meas}</td>
           <td class="src">${src}</td>
           <td><span class="cad">${cad}</span></td>
@@ -363,4 +551,8 @@ document.getElementById('foot').innerHTML=
   'intra-segment rank (gvm_scores). Groundwork for a larger initiative &mdash; the whole page is driven by one REGISTRY constant.';
 renderStrip();
 renderV13();
+loadData();
+loadPresets();
+try{if(window.innerWidth<=900)document.body.classList.add('regcollapsed');}catch(e){}
+setInterval(loadData,60000);
 </script>

@@ -101,7 +101,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.59"
+VERSION = "2.9.61"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -171,7 +171,9 @@ def _is_embedded(request: Request) -> bool:
 # pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
-                     "/screener", "/intraday", "/structure", "/performance", "/ask"}
+                     "/screener", "/intraday", "/structure", "/performance", "/ask",
+                     "/v13", "/v4scan"}   # cc#392: no-store + theme/logout pills on the registry + scanner
+PROTECTED.add("/v13"); PROTECTED.add("/v4scan")   # cc#392: gate + no-store (kills the stale-cache /v13 bug)
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 # cc#327 MOBILE_UX_REDEFINE_V1 P1/10: canonical Sora font + shared mobile.css,
@@ -583,9 +585,11 @@ def fpc():
 def scanners():
     with open("scorr_scanners.html", "r", encoding="utf-8") as f: return f.read()
 
-@app.get("/filters", response_class=HTMLResponse)
+@app.get("/filters")
 def filters_page():
-    with open("scorr_filters.html", "r", encoding="utf-8") as f: return f.read()
+    """cc#393: the Unified Screener is folded into /v13 (registry + live screener). Permanent
+    redirect keeps old bookmarks working. scorr_filters.html kept one release for rollback."""
+    return RedirectResponse(url="/v13", status_code=301)
 
 @app.get("/structure", response_class=HTMLResponse)
 def structure_page():
