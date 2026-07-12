@@ -262,20 +262,30 @@ PWA_JS = """
 
   // cc#328: SINGLE nav source — bottom nav (4 primary + More sheet) AND desktop
   // top-nav both build from THIS array. Pages ship only an empty #scorr-nav placeholder.
+  // cc#396/#397 (nav-complete rule id=2987): single nav source for desktop top-nav + mobile
+  // bottom-nav "More" sheet. V12 now -> /v12 (Basket Builder, was the /screener collision); V13 -> /v13
+  // direct (was /filters redirect); old screener renamed "Screener" -> /screener; every orphan route
+  // (TC Scan, Intraday, Structure, Performance, Ask) added so no page is typed-URL-only.
   var NAV = [
     ['/', '\\u2302', 'Home'],
     ['/dashboard', '\\u26a1', 'V8'],
     ['/cio2?model=gvm', '\\u25c9', 'GVM'],
     ['/sector', '\\u2297', 'Sector'],
     ['/check', '\\u2713', 'Check'],
+    ['/v4scan', '\\u25a3', 'TC Scan'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
     ['/scanners', '\\u229e', 'Scanners'],
-    ['/filters', '\\u25bd', 'V13'],
-    ['/screener', '\\u229f', 'V12'],
+    ['/intraday', '\\u23f1', 'Intraday'],
+    ['/v13', '\\u25a4', 'V13'],
+    ['/v12', '\\u229f', 'V12'],
+    ['/screener', '\\u25a8', 'Screener'],
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/holdings', '\\u25c6', 'Holdings'],
+    ['/structure', '\\u25a6', 'Structure'],
+    ['/performance', '\\u25b2', 'Performance'],
+    ['/ask', '\\u2709', 'Ask'],
     ['/v10', '\\u25b3', 'V10']
   ];
   var p = location.pathname, qs = location.search;
@@ -347,9 +357,9 @@ PWA_JS = """
     applyTheme(curTheme());   // sync meta + button to the theme the head script already applied
   }
 
-  // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637):
-  //    normalize #scorr-nav on every injected page to the same 12 items, Intel label,
-  //    active-by-path. Removes per-page nav drift. Hidden on mobile (bottom nav used).
+  // 6) canonical desktop top-nav — single source of truth (cc_task #80, spec 637; nav registry
+  //    updated cc#396/#397): normalize #scorr-nav on every injected page from the NAV array above,
+  //    active-by-path. Removes per-page nav drift. Scrolls horizontally; hidden on mobile (bottom nav).
   if (!document.getElementById('scorr-cnav-style')) {
     var ncss = ''
       // cc#348: desktop top-nav is theme-aware and self-contained (dark base + light override),
