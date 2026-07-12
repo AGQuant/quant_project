@@ -1934,8 +1934,9 @@ function renderGlobalIndices(data){
   if(!rows.length)return'<div class="empty">No global indices data.</div>';
   // Founder-specified grouping/order: Indices, Commodities, Currencies, then Volatility & Crypto
   // (US VIX + Bitcoin) merged into one section. US VIX here is CBOE ^VIX — NOT the India VIX gate.
-  const GROUPS=[['index','Indices'],['commodity','Commodities'],['currency','Currencies'],['__volx','Volatility & Crypto']];
-  const inGroup=(r,key)=>key==='__volx'?(r.category==='volatility'||r.category==='crypto'):r.category===key;
+  // cc#421: Currencies + Volatility & Crypto merged into one section (handful of tiles each).
+  const GROUPS=[['index','Indices'],['commodity','Commodities'],['__curvolx','Currencies · Volatility & Crypto']];
+  const inGroup=(r,key)=>key==='__curvolx'?(r.category==='currency'||r.category==='volatility'||r.category==='crypto'):r.category===key;
   const fmtPrice=v=>v==null?'--':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
   // cc#291: per-tile freshness. Live tiles (r.ts = latest intraday bar, IST-naive) show relative
   // "Xm ago" then "HH:MM" once older than an hour; daily tiles (no intraday bar) show their trading
