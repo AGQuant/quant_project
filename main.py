@@ -190,9 +190,9 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health"}   # cc#392/394/398/426/442: no-store + theme/logout pills
+                     "/v13", "/v12", "/health", "/v15"}   # cc#392/394/398/426/442/467: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
-PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14")   # cc#392/394/398/426/442: gate + no-store
+PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -676,6 +676,12 @@ def v14_intraday_page():
     per-tag day summary. Data from /api/v14/*."""
     with open("scorr_v14.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/v15", response_class=HTMLResponse)
+def v15_mf_page():
+    """cc#467: V15 MF Intelligence skeleton — curated screener + fund deep-dive (look-through holdings
+    scored on GVM, NAV-derived returns, external ratings). MQS scoring next session. Data from /api/v15/mf/*."""
+    with open("scorr_v15.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/holdings", response_class=HTMLResponse)
 def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
@@ -723,6 +729,7 @@ NAV_REGISTRY = {
     "/v10":          ("V10",                  "nav"),
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
     "/v14":          ("V14 · Intraday",       "nav"),        # cc#442 rule id=2987 (intraday engine)
+    "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
