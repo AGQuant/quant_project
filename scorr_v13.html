@@ -116,6 +116,20 @@
     .mfilter-toggle .mft-r{color:var(--mut);font-weight:600;font-size:12px}
     body.regcollapsed .regpane{display:none}
   }
+  /* cc#395: serial + (i) popover; Measures/Source columns removed for a lean one-line row */
+  td.cser,th.cser{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);width:40px;white-space:nowrap;text-align:left}
+  td.cinfo,th.cinfo{width:30px;text-align:center}
+  .ibtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:10px;font-weight:700;font-family:'IBM Plex Mono',monospace;cursor:pointer}
+  .ibtn:hover{border-color:var(--blu);color:var(--blu)}
+  .fov{position:fixed;inset:0;background:rgba(4,8,20,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:60}
+  .fov.open{display:flex}
+  .fbox{background:var(--panel);border:1px solid var(--line2);border-radius:14px;max-width:460px;width:100%;padding:16px 18px;box-shadow:var(--shadow)}
+  .fbox h3{margin:2px 0 0;font-size:15px}
+  .fbox .fser{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--dim);letter-spacing:.3px}
+  .fbox .frow2{display:flex;gap:8px;margin-top:11px;font-size:12px;line-height:1.5}
+  .fbox .frow2 .kk{color:var(--dim);min-width:76px;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.4px;padding-top:2px}
+  .fbox .frow2 .vv{color:var(--txt);flex:1}
+  .fbox .fclose{float:right;width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer}
 </style>
 </head>
 <body>
@@ -349,6 +363,12 @@ const REGISTRY=[
  ]},
 ];
 
+// ── cc#395: global continuous serial per filter row (render-time 1..N, bucket->subcat->row order).
+// Keyed by row-array reference; the reverse map powers the (i) popover. Renumbers when REGISTRY changes.
+const SERIAL = new Map(), SERIAL_ROW = {};
+(function(){let k=0;REGISTRY.forEach(b=>b.subs.forEach(s=>s.rows.forEach(r=>{k++;SERIAL.set(r,k);
+  SERIAL_ROW[k]={name:r[0],meas:r[1],src:r[2],cad:r[3],used:r[4]||[],status:r[5],bucket:b.label,sub:s.label};})));})();
+
 // ── cc#393 screener: which ACTIVE registry rows are screenable (by row name) -> {k?, min, max}.
 // k = the data key in the loaded ROWS when it differs from the display name. These 27 mirror the
 // retired /filters screener; results match it 1:1 for identical ranges (same derive + AND logic).
@@ -514,20 +534,21 @@ function renderV13(){
       const rows=s.rows.filter(r=>_rowMatch(r,q));
       if(!rows.length)return;shown+=rows.length;
       subHtml+=`<div class="sub"><div class="sub-title">${s.label}</div><div class="scroll"><table>
-        <thead><tr><th>Filter</th><th>Measures</th><th>Source</th><th>Cadence</th><th>Used&nbsp;by</th><th>Status</th></tr></thead><tbody>`;
+        <thead><tr><th class="cser">#</th><th>Filter</th><th>Cadence</th><th>Used&nbsp;by</th><th>Status</th><th class="cinfo"></th></tr></thead><tbody>`;
       rows.forEach(r=>{
         const [name,meas,src,cad,used,status]=r;
         const dorm=status==='dormant';
         const sc=(!dorm&&SCREEN[name])?SCREEN[name]:null;
         const on=sc&&FILT[SKEY[name]].on;
+        const ser=SERIAL.get(r)||0;
         const cls=(dorm?'dormant-row':'')+((used&&used.length)?' used-row':'')+(sc?' screenable':'')+(on?' filt-on':'');
         subHtml+=`<tr class="${cls.trim()}">
+          <td class="cser">#${String(ser).padStart(2,'0')}</td>
           <td class="fname">${sc?screenCtl(name):''}${name}</td>
-          <td class="meas">${meas}</td>
-          <td class="src">${src}</td>
           <td><span class="cad">${cad}</span></td>
           <td>${chips(used)}</td>
           <td><span class="badge ${dorm?'dormant':'active'}">${dorm?'DORMANT':'ACTIVE'}</span></td>
+          <td class="cinfo"><span class="ibtn" onclick="filtInfo(${ser})" title="Details">i</span></td>
         </tr>`;
       });
       subHtml+='</tbody></table></div></div>';
@@ -557,5 +578,25 @@ loadData();
 loadPresets();
 try{if(window.innerWidth<=900)document.body.classList.add('regcollapsed');}catch(e){}
 setInterval(loadData,60000);
+
+// cc#395: (i) popover — the Measures/Source detail moved out of the row into here.
+function filtInfo(ser){
+  const r=SERIAL_ROW[ser];if(!r)return;
+  const dorm=r.status==='dormant';
+  document.getElementById('fbox').innerHTML=
+    `<button class="fclose" onclick="closeFiltInfo()">&times;</button>`+
+    `<div class="fser">#${String(ser).padStart(2,'0')} &middot; ${r.bucket} &rsaquo; ${r.sub}</div>`+
+    `<h3 style="font-family:'IBM Plex Mono',ui-monospace,monospace">${r.name}</h3>`+
+    `<div class="frow2"><span class="kk">Measures</span><span class="vv">${r.meas}</span></div>`+
+    `<div class="frow2"><span class="kk">Source</span><span class="vv" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim)">${r.src}</span></div>`+
+    `<div class="frow2"><span class="kk">Cadence</span><span class="vv"><span class="cad">${r.cad}</span></span></div>`+
+    `<div class="frow2"><span class="kk">Used by</span><span class="vv">${chips(r.used)}</span></div>`+
+    `<div class="frow2"><span class="kk">Status</span><span class="vv"><span class="badge ${dorm?'dormant':'active'}">${dorm?'DORMANT':'ACTIVE'}</span></span></div>`;
+  document.getElementById('fov').classList.add('open');
+}
+function closeFiltInfo(){document.getElementById('fov').classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeFiltInfo();});
 </script>
+
+<div class="fov" id="fov" onclick="if(event.target===this)closeFiltInfo()"><div class="fbox" id="fbox"></div></div>
 </body>
