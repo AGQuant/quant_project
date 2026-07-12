@@ -78,6 +78,7 @@ from fyers_hist_backfill import router as fyers_hist_backfill_router   # cc#377 
 from fundamentals_scraper import router as fundamentals_scraper_router   # cc#361 Phase 1 scrape
 from v13_presets_endpoints import router as v13_presets_router
 from galaxy_endpoints import router as galaxy_router
+from hr_endpoints import router as hr_router   # cc#398 Portfolio Health Report (M1 ingest)
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -102,7 +103,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.61"
+VERSION = "2.9.62"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -279,6 +280,7 @@ app.include_router(fyers_hist_backfill_router)   # cc#377 Phase B
 app.include_router(fundamentals_scraper_router)   # cc#361 Phase 1 scrape
 app.include_router(v13_presets_router)
 app.include_router(galaxy_router)
+app.include_router(hr_router)   # cc#398 Portfolio Health Report
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
@@ -332,6 +334,17 @@ def create_tables():
     );
     CREATE INDEX IF NOT EXISTS idx_v12_backtests_hash ON v12_backtests(params_hash);
     CREATE INDEX IF NOT EXISTS idx_v12_baskets_status ON v12_baskets(status);
+    -- cc#398 Portfolio Health Report (spec id=2994): uploaded holdings -> Scorr-native report.
+    CREATE TABLE IF NOT EXISTS hr_portfolios (
+        id BIGSERIAL PRIMARY KEY, name TEXT, created_by TEXT, source TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS hr_holdings (
+        id BIGSERIAL PRIMARY KEY, portfolio_id BIGINT REFERENCES hr_portfolios(id) ON DELETE CASCADE,
+        symbol TEXT, company_name TEXT, qty NUMERIC, avg_price NUMERIC,
+        resolved BOOLEAN DEFAULT FALSE, raw_input JSONB, created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_hr_holdings_portfolio ON hr_holdings(portfolio_id);
     CREATE TABLE IF NOT EXISTS v8_history_cache (
         symbol TEXT PRIMARY KEY, cache_date DATE NOT NULL,
         closes JSONB, highs JSONB, lows JSONB, volumes JSONB, segment TEXT,
