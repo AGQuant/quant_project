@@ -109,9 +109,9 @@
   /* cc#434 fix_6: FUT + OPT feed line on each signal tile */
   .sig-feed{display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--mut);
     margin:0 0 8px;padding:5px 9px;background:var(--card2);border:1px solid var(--line);border-radius:7px}
-  /* cc#434 fix_5: larger, more readable font for the Open Positions / Closed Trades tables */
-  .pos-tbl td,.pos-tbl th{font-size:12px;padding:6px 9px}
-  .pos-tbl td.td-mono{font-size:12px}
+  /* cc#434 fix_5 / cc#463 fix4: larger, more readable font for the Open Positions / Closed Trades tables (+2) */
+  .pos-tbl td,.pos-tbl th{font-size:14px;padding:7px 9px}
+  .pos-tbl td.td-mono{font-size:14px}
 
   /* max pain */
   .mp-big{font-family:var(--mono);font-size:30px;font-weight:900;line-height:1}
@@ -157,9 +157,9 @@
 
   /* tables */
   .tbl-scroll{overflow-x:auto}
-  table{width:100%;border-collapse:collapse;font-size:11px}
+  table{width:100%;border-collapse:collapse;font-size:13px}   /* cc#463 fix4: +2 */
   thead th{padding:5px 8px;color:var(--mut);font-weight:700;text-align:left;
-    font-size:9px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}
+    font-size:11px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--line)}   /* cc#463 fix4: +2 */
   tbody td{padding:6px 8px;border-bottom:1px solid var(--line)}
   tbody tr:hover td{background:rgba(37,99,235,.03)}
   .td-mono{font-family:var(--mono)}
@@ -175,8 +175,8 @@
   .set-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
   @media(max-width:760px){.set-grid{grid-template-columns:repeat(2,1fr)}}
   .set-box{background:var(--card2);border-radius:6px;padding:6px 8px;border:1px solid var(--line)}
-  .set-box .k{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
-  .set-box .v{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--txt)}
+  .set-box .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}   /* cc#463 fix4: +2 */
+  .set-box .v{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--txt)}   /* cc#463 fix4: +2 */
 
   /* legend */
   .legend{display:flex;gap:20px;margin-top:10px;padding:6px 10px;
@@ -443,7 +443,7 @@ async function loadDivergence(){
                    ts:d.ts||'—', skipped_stale:d.skipped_stale||0,
                    threshold:d.threshold!=null?d.threshold:1 };
 }
-function normSide(s){ return (s||'').toUpperCase()==='SHORT'?'SHORT':'LONG'; }
+function normSide(s){ const u=(s||'').toUpperCase(); return (u==='SHORT'||u==='SELL')?'SHORT':'LONG'; }   /* cc#463 fix1: SELL legs were rendering LONG */
 /* V10 trades indices only — drop stray V8 stock-futures rows from fallback feeds */
 const IDX_SET = ['NIFTY','BANKNIFTY','NIFTY50','BANKNIFTY50'];
 function idxOnly(r){ return IDX_SET.includes((r.symbol||'').toUpperCase()) || !!r.opt_type; }
@@ -477,21 +477,23 @@ function durSince(ts){
 async function loadClosed(){
   /* V10 trade log ONLY — no V8 fallback */
   let rows=[];
-  try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=10')); }catch(e){}
+  try{ rows = rowsOf(await getJSON('/api/v10/trades?limit=500')); }catch(e){}   // cc#463 fix3: load ALL legs (was capped at 10)
   rows = rows.filter(idxOnly);
-  D.closed = rows.slice(0,10).map((x,i)=>{
+  D.closed = rows.map((x,i)=>{
     const entry=Number(x.entry||x.entry_price)||0, ex=Number(x.exit||x.exit_price)||0;
     const dir=normSide(x.direction||x.side);
+    const lot=Number(x.lot_size||x.qty)||0;
     const pnl=Number(x.pnl)||0;
-    const pPct=entry?((dir==='SHORT'?entry-ex:ex-entry)/entry*100):0;
-    // cc#434 fix_5: carry leg + option strike/type so each leg (FUT / OPT-write) renders with its own
-    // strike and both legs of a trade are visible.
-    return { id:x.id||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct,
+    // cc#463 fix2: P&L% must be SIGNED = pnl / (entry × lot) × 100 — the raw (exit-entry)/entry
+    // price-change % contradicted the pnl sign on SELL legs (id=42: +25.28% vs Rs -5,112).
+    const pPct=(entry&&lot)?(pnl/(entry*lot)*100):0;
+    // cc#434 fix_5: carry leg + option strike/type so each leg (FUT / OPT-write) renders with its own strike.
+    return { id:Number(x.id)||i, sym:x.symbol, side:dir, entry, exit:ex, pnl, pPct,
              leg:(x.leg||'').toUpperCase(), str:x.opt_strike||null, opt:x.opt_type||null,
              rsn:(x.exit_reason||x.result||'').toUpperCase()||(pnl>=0?'TGT':'SL'),
              dt:fmtDate(x.trade_date||x.exit_ts||x.exit_time||x.exit_date),
              eng:'V10' };
-  });
+  }).sort((a,b)=>b.id-a.id);   // cc#463 fix3: most-recent leg first
 }
 async function loadPerf(){
   /* V10 own performance stats (replaces the old V8 qualified pull) */
@@ -707,15 +709,18 @@ function rOpen(){
   </div>`;
 }
 
+let CLOSED_ALL=false;   // cc#463 fix3: last-15 vs View-All toggle
 function rClosed(){
-  const tot=D.closed.reduce((a,p)=>a+p.pnl,0);
-  const wr=D.closed.length?(D.closed.filter(p=>p.pnl>0).length/D.closed.length*100).toFixed(0):0;
+  const all=D.closed;   // all legs = all-time scope
+  const tot=all.reduce((a,p)=>a+p.pnl,0);
+  const wr=all.length?(all.filter(p=>p.pnl>0).length/all.length*100).toFixed(0):0;
+  const shown=CLOSED_ALL?all:all.slice(0,15);   // cc#463 fix3: default LAST 15 (most-recent first)
   const head=['DATE','ENG','SYMBOL','LEG','SIDE','ENTRY','EXIT','P&L','P&L%','EXIT REASON'];
-  const body = D.closed.length ? D.closed.map(p=>`<tr>
-    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.dt}</td>
+  const body = shown.length ? shown.map(p=>`<tr>
+    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.dt}</td>
     <td>${bdg(p.eng,p.eng==='V10'?C.cyan:C.amber,true)}</td>
     <td class="td-mono" style="font-weight:800">${esc(p.sym)}</td>
-    <td class="td-mono" style="font-size:10px;color:var(--mut)">${p.leg==='OPT'?`${p.str||''} ${p.opt||''} wrt`:(p.leg||'FUT')}</td>
+    <td class="td-mono" style="font-size:11px;color:var(--mut)">${p.leg==='OPT'?`${p.str||''} ${p.opt||''} wrt`:(p.leg||'FUT')}</td>
     <td>${bdg(p.side,p.side==='LONG'?UP:DN,true)}</td>
     <td class="td-mono">${num(p.entry)}</td>
     <td class="td-mono">${num(p.exit)}</td>
@@ -723,11 +728,13 @@ function rClosed(){
     <td class="td-mono" style="color:${cx(p.pPct)}">${pct(p.pPct)}</td>
     <td>${bdg(p.rsn,p.pnl>=0?UP:DN,true)}</td></tr>`).join('')
     : `<tr class="empty-row"><td colspan="10">No closed trades</td></tr>`;
+  // cc#463 "also": WR% + total are ALL-TIME (over every leg), labelled so — not the displayed window.
+  const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="CLOSED_ALL=!CLOSED_ALL;render()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</span></div>` : '';
   return `<div class="card" style="margin-bottom:10px">
-    <div class="card-hd"><div class="t">Closed Trades (${D.closed.length})</div>
-      <div style="display:flex;gap:8px;align-items:center">${bdg('WR '+wr+'%',UP)}
-        <span class="td-mono" style="font-size:13px;font-weight:800;color:${cx(tot)}">₹${fK(tot)}</span></div></div>
-    <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>
+    <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})</div>
+      <div style="display:flex;gap:8px;align-items:center">${bdg('WR '+wr+'% · all-time',UP)}
+        <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized P&L across ${all.length} legs">₹${fK(tot)}</span></div></div>
+    <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${more}
   </div>`;
 }
 
