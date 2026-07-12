@@ -273,7 +273,6 @@ PWA_JS = """
     ['/sector', '\\u2297', 'Sector'],
     ['/check', '\\u2713', 'Check'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
-    ['/scanners', '\\u229e', 'Scanners'],
     ['/intraday', '\\u23f1', 'Intraday'],
     ['/v13', '\\u25a4', 'V13'],
     ['/v12', '\\u229f', 'V12'],

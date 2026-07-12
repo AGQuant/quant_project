@@ -705,7 +705,7 @@ NAV_REGISTRY = {
     "/intraday":     ("Intraday",             "nav"),
     "/sector":       ("Sector",               "nav"),
     "/fpc":          ("FPC",                  "nav"),
-    "/scanners":     ("Scanners",             "nav"),
+    "/scanners":     ("(removed from nav — superseded by V12/V13/Check)", "typed-url"),   # cc#441
     "/structure":    ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/performance":  ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
