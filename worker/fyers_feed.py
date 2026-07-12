@@ -63,7 +63,9 @@ USAGE:
 """
 
 # ops: worker bounce 12-Jul-2026 (weekend, market closed) to resume the stalled cc#389/#390 Phase A
-# 5m warehouse backfill (phase_a_run re-armed to 'run'; daemon re-claims on boot). No logic change.
+# 5m warehouse backfill. Re-bounce #2: post-#416 restart, phase_a_run='pending' so the boot-claim
+# (_claim_phase_a_worker) fires immediately and resumes the 365d warehouse from checkpoint
+# (BAJAJHLDNG, 26/212 done) instead of waiting for the hourly idle check. No logic change.
 
 import argparse, bisect, calendar, hashlib, os, sys, json, time, logging, threading, re
 from datetime import datetime, timedelta, time as dt_time, date
