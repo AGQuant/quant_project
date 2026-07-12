@@ -1959,7 +1959,9 @@ function renderGlobalIndices(data){
   // data_ts = freshest genuinely-live bar across tiles (only tiles ticking within 15 min count), so
   // "Freshest tick" reads as the newest live print, not a single tab-wide "everything is live" stamp.
   const upd=data.data_ts?String(data.data_ts).slice(11,19)+' IST':'no live ticks';
-  return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Space Mono'">Freshest tick ${upd}</span></div>
+  const closed=(data.markets_closed!==undefined)?data.markets_closed:!rows.some(r=>r.live&&r.category!=='crypto');
+  const updTxt=upd+(closed?' · markets closed':'');
+  return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Space Mono'">Freshest tick ${updTxt}</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Each tile shows its own last tick · <span style="color:var(--grn)">●</span> live (≤15m) · <span style="color:var(--amber)">PREV CLOSE</span> = market closed / stale · US indices live ≈19:00-01:40 IST · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
 }
 

@@ -2940,19 +2940,24 @@ def v8_global_indices():
     so a stalled feed is honestly reflected in the tab's Last-updated label rather than masked."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            # cc#414: last daily snapshot PER SYMBOL regardless of date, so no tile vanishes on
+            # weekends (previously quote_date=MAX(...) returned only symbols updated today — i.e.
+            # just 24/7 crypto). Each symbol keeps its own latest close; freshness is decided per tile.
             cur.execute("""
-                SELECT symbol, name, category, price, prev_close, chg_pct, quote_date
-                FROM global_indices
-                WHERE quote_date = (SELECT MAX(quote_date) FROM global_indices)
-                ORDER BY category, symbol
+                SELECT symbol, name, category, price, prev_close, chg_pct, quote_date FROM (
+                    SELECT DISTINCT ON (symbol) symbol, name, category, price, prev_close, chg_pct, quote_date
+                    FROM global_indices ORDER BY symbol, quote_date DESC
+                ) t ORDER BY category, symbol
             """)
             cols = [d[0] for d in cur.description]
             base = [dict(zip(cols, r)) for r in cur.fetchall()]
-            # cc#281: latest live intraday close per symbol (today), if present.
+            # cc#414: latest intraday close PER SYMBOL over the 7-day rolling window (was CURRENT_DATE
+            # only, which never fired on weekends). Age is checked per tile below — a stale tick still
+            # overlays as the true last print and flips the tile to PREV CLOSE with its age stamp.
             cur.execute("""
                 SELECT DISTINCT ON (symbol) symbol, close, ts
                 FROM global_intraday
-                WHERE ts::date = CURRENT_DATE
+                WHERE ts >= NOW() - INTERVAL '7 days'
                 ORDER BY symbol, ts DESC
             """)
             live = {r[0]: (float(r[1]) if r[1] is not None else None, r[2]) for r in cur.fetchall()}
@@ -2990,8 +2995,10 @@ def v8_global_indices():
                 row['ts']   = None
                 row['live'] = False
             rows.append(row)
+        # cc#414: markets_closed = no non-crypto tile is currently live (drives the header suffix)
+        markets_closed = not any(r.get("live") and r.get("category") != "crypto" for r in rows)
         return {"quote_date": qd, "data_ts": (str(latest_ts) if latest_ts else None),
-                "instruments": rows, "count": len(rows)}
+                "instruments": rows, "count": len(rows), "markets_closed": markets_closed}
     except Exception as e:
         raise HTTPException(500, f"v8_global_indices failed: {e}")
 
