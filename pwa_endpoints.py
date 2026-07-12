@@ -282,8 +282,6 @@ PWA_JS = """
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/holdings', '\\u25c6', 'Holdings'],
-    ['/structure', '\\u25a6', 'Structure'],
-    ['/performance', '\\u25b2', 'Performance'],
     ['/v10', '\\u25b3', 'V10'],
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs']
   ];

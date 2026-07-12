@@ -706,8 +706,8 @@ NAV_REGISTRY = {
     "/sector":       ("Sector",               "nav"),
     "/fpc":          ("FPC",                  "nav"),
     "/scanners":     ("Scanners",             "nav"),
-    "/structure":    ("Structure",            "nav"),
-    "/performance":  ("Performance",          "nav"),
+    "/structure":    ("(removed from nav — superseded)", "typed-url"),   # cc#437
+    "/performance":  ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
     "/news":         ("News (Intelligence)",  "nav"),
     "/v10":          ("V10",                  "nav"),
