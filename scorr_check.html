@@ -347,6 +347,8 @@
   .v4-crow .c1{color:var(--grn)} .v4-crow .c05{color:var(--amber)} .v4-crow .c0{color:var(--dim)}
   .v4-recal{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;padding:2px 7px;
     border-radius:20px;background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2)}
+  .v4-gated{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--red-d);
+    border:1px solid var(--red-b);color:var(--red);font-family:var(--mono);font-size:11.5px;font-weight:700;line-height:1.5}
 </style>
 </head>
 <body>
@@ -751,9 +753,15 @@ function renderV4Dual(d, uiMode){
       +'<span style="font-size:11px;color:var(--dim)">/'+(c.max||15)+'</span>'
       +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span>'+recal+'</div>'+rules+'</div>';
   };
+  // cc#402: gate-fail no longer blanks the cards — show them all, with a GATED banner naming the fail.
+  const fails=(gate.fails&&gate.fails.length?gate.fails:(gate.gates||[]).filter(g=>!g.pass));
+  const gatedBanner = (gate.pass===false && fails.length)
+    ? '<div class="v4-gated">⛔ GATED — '+fails.map(g=>g.gate+' '+g.label+(g.value!=null?' ('+g.value+')':'')).join(' · ')
+      +' — verdict held at REJECT; scorecards shown for context.</div>'
+    : '';
   const cardsHtml = cards.length
     ? '<div class="v4-cards">'+cards.map(cardHtml).join('')+'</div>'
-    : '<div class="card" style="padding:16px 18px;color:var(--red)">All '+side+' gates rejected — no scorecard. Check the gate row above.</div>';
+    : '<div class="card" style="padding:16px 18px;color:var(--red)">No scorecard could be computed (missing data).</div>';
   const bestChip = d.best_label?_v4chip(d.best_label):'—';
   const el=document.getElementById('v4Result');
   el.innerHTML =
@@ -769,6 +777,7 @@ function renderV4Dual(d, uiMode){
     +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?13:15))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥10.5 / VALID 8.5–10.5 / REJECT&lt;8.5':'STRONG≥12 / VALID 10–12 / REJECT&lt;10'))+'</div>'
     +   '<div class="v4-gates">'+gatesHtml+'</div>'
     + '</div></div>'
+    + gatedBanner
     + cardsHtml
     + '<div class="foot">V4 · Dual-Style · Native $0 · momentum + reversal scored side-by-side · not a V8 algo signal · ⚠ Spot price, not futures.</div>';
   el.classList.add('show');

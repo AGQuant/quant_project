@@ -592,16 +592,25 @@ def trade_check_v4_dual(symbol, side="ALL"):
     if d["cmp"] is None:
         return {"error": f"no CMP available for {symbol}"}
 
+    # cc#402: gates keep verdict authority but never hide information — ALWAYS compute both style
+    # cards for each requested side, flag the gated ones, and let the caller render them with a
+    # GATED banner. Overall verdict stays REJECT whenever the best card's side gates failed.
     sides = (["BUY", "SELL"] if side == "ALL" else [side])
     cards, gate_map = [], {}
     for s in sides:
         ok, gates = _gates(d, s)
-        gate_map[s] = {"pass": ok, "gates": gates}
-        if not ok:
-            continue
+        fails = [g for g in gates if not g.get("pass")]
+        gate_map[s] = {"pass": ok, "gates": gates, "fails": fails}
         for st in STYLES:
-            cards.append(score_card(d, st, s))
-    best = max(cards, key=lambda c: c["score"], default=None)
+            card = score_card(d, st, s)
+            card["gated"] = (not ok)
+            card["gate_fails"] = fails
+            cards.append(card)
+    # prefer a gate-passing (tradeable) card for "best"; else the top gated card, for display only
+    passing = [c for c in cards if not c["gated"]]
+    pool = passing if passing else cards
+    best = max(pool, key=lambda c: c["score"], default=None)
+    best_gated = bool(best and best.get("gated"))
 
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
@@ -609,7 +618,9 @@ def trade_check_v4_dual(symbol, side="ALL"):
         "best": best,
         "best_label": best["label"] if best else None,
         "best_score": best["score"] if best else None,
-        "best_verdict": best["verdict"] if best else "REJECT",
+        "best_verdict": ("REJECT" if best_gated else (best["verdict"] if best else "REJECT")),
+        "gated": best_gated,
+        "gate_fails": (best.get("gate_fails") if best else []),
         "cards": cards,
         "pivots": {k: _r(v) for k, v in d["pivots"].items()},
         "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
