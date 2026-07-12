@@ -369,6 +369,7 @@ const BROKERAGE_PER_TRADE=500;
 const EP={
   mood:"/api/v8/market_mood",
   metricsAll:"/api/v8/metrics/all",
+  segmentDay:"/api/v8/segment_day",          // cc#429: mcap-weighted futures-segment day change
   qualified:b=>`/api/v8/qualified/${b}`,
   sellOB:"/api/v8/sell_overbought?limit=25",
   paper:"/api/paper/status",
@@ -1410,25 +1411,32 @@ function renderMaster(){
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
   // net_pnl (unrealised − brokerage), potential_left (rupees) and pot_pct (% to target),
   // days held. Direction-aware: LONG target is above CMP, SHORT target is below.
+  // cc#429: map each position's symbol -> its V8 futures segment (from metricsAll) -> that segment's
+  // mcap-weighted DAY change (from /api/v8/segment_day, last-session anchored off-market).
+  const _segBySym={};(cache.metricsAll||[]).forEach(m=>{if(m&&m.symbol)_segBySym[m.symbol]=m.segment;});
+  const _segDay=(cache.segmentDay&&cache.segmentDay.segments)||{};
   const openRows=open.map(x=>{
     const isShort=(x.side||'').toUpperCase()==='SHORT';
     const cmp=Number(x.cmp),tgt=Number(x.target),qty=Number(x.qty||0);
     const net_pnl=Number(x.unrealised_pnl||0)-BROKERAGE_PER_TRADE;
     const potential_left=isShort?(cmp-tgt)*qty:(tgt-cmp)*qty;
     const pot_pct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
+    const _seg=_segBySym[x.symbol]||null;
+    const _sd=_seg?_segDay[_seg]:null;
+    const sector_seg=_seg; const sector_day=_sd?_sd.day_pct:null; const sector_sd=_sd||null;
     // cc#367: DAY% = this row's OWN CMP vs the previous trading-day raw close — one consistent pair,
     // hand-verifiable from the row. Never v8_metrics.day_1d (its cmp_prices-LTP numerator didn't
     // match the CMP shown and could be polluted by a futures tick). Off-market both freeze to the
     // last session (CMP = final eq bar, prev = the session before), so DAY% shows the completed day.
     const _prev=Number(x.prev_close);
     const day_pct=(isFinite(cmp)&&isFinite(_prev)&&_prev>0)?((cmp/_prev-1)*100):null;
-    return{...x,isShort,net_pnl,potential_left,pot_pct,day_pct,days:holdDays(x.entry_ts)};
+    return{...x,isShort,net_pnl,potential_left,pot_pct,day_pct,sector_seg,sector_day,sector_sd,days:holdDays(x.entry_ts)};
   });
   // cc#274: Table View — 10 standing columns (Entry/CMP/Target/SL are now columns, not a
   // row-expand). Sortable via sortTbl, default Net P&L desc. Desktop-only; mobile falls back
   // to the compact mob-cards below.
   const openPosTable=sortTbl('openpos',
-    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["day_pct","Day %"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"]],
+    [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["day_pct","Day %"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["potential_left","Potential Left"],["sector_day","Sector Day %"]],
     openRows,x=>`<tr>
       <td class="sym"><span class="dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
@@ -1440,7 +1448,8 @@ function renderMaster(){
       <td style="text-align:right;font-family:'Space Mono';color:var(--grn)">${num(x.target)}</td>
       <td style="text-align:right;font-family:'Space Mono';color:var(--red)">${num(x.stop_loss)}</td>
       <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
-      <td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td></tr>`,
+      <td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td>
+      <td style="text-align:right;font-family:'Space Mono'" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
     {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
   // cc#280: lean bar-only component shared by the desktop Ladder rows and the mobile cards.
   // Direction-aware (LONG: SL-left/TGT-right; SHORT: TGT-left/SL-right). Positions are price-linear
@@ -2267,6 +2276,7 @@ async function loadAll(){
     run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
     run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
+    run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
     run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
     ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),

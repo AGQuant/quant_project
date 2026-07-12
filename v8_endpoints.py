@@ -1024,6 +1024,39 @@ def metrics_all():
     return rows
 
 
+@router.get("/segment_day")
+def segment_day():
+    """cc#429: mcap-weighted DAY change per V8 futures segment (gvm_scores.segment taxonomy — same as
+    SEC WK%/SEC MO% in Raw Data), derived from member v8_metrics.day_1d weighted by gvm_scores.market_cap.
+    Anchored to MAX(score_date) so off-market it serves the last session's finals (cc#424 convention).
+    Returns {segment: {day_pct, n, top_mover, top_day}} for the Open Positions 'Sector Day %' column."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                WITH mem AS (
+                    SELECT g.segment, m.symbol, m.day_1d::numeric AS day_1d, g.market_cap::numeric AS mcap
+                    FROM v8_metrics m
+                    JOIN gvm_scores g ON g.symbol = m.symbol
+                    WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                      AND g.segment IS NOT NULL AND m.day_1d IS NOT NULL
+                      AND g.market_cap IS NOT NULL AND g.market_cap > 0
+                )
+                SELECT segment,
+                       ROUND(SUM(day_1d * mcap) / NULLIF(SUM(mcap), 0), 2) AS day_pct,
+                       COUNT(*) AS n,
+                       (array_agg(symbol ORDER BY day_1d DESC))[1] AS top_mover,
+                       ROUND(MAX(day_1d), 2) AS top_day
+                FROM mem GROUP BY segment
+            """)
+            out = {}
+            for seg, day_pct, n, top_mover, top_day in cur.fetchall():
+                out[seg] = {"day_pct": _f(day_pct), "n": int(n),
+                            "top_mover": top_mover, "top_day": _f(top_day)}
+        return {"segments": out}
+    except Exception as e:
+        raise HTTPException(500, f"segment_day failed: {e}")
+
+
 @router.get("/scan")
 def scan(limit: int = 25):
     try:
