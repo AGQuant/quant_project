@@ -113,7 +113,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.65"
+VERSION = "2.9.66"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -788,6 +788,19 @@ def build_health_report() -> dict:
                     add_check("data_feeds", {"check": "GVM cache sync", "value": "never synced", "status": "fail"})
             except Exception as e:
                 add_check("data_feeds", {"check": "GVM cache sync", "value": str(e), "status": "fail"})
+
+            # cc#420: earnings_calendar freshness — scrape runs daily incl weekends (>36h warn, >72h fail)
+            try:
+                cur.execute("SELECT MAX(last_updated) FROM earnings_calendar")
+                em = cur.fetchone()
+                if em and em[0]:
+                    ec_hrs = round((now - em[0]).total_seconds() / 3600, 1)
+                    add_check("data_feeds", _check(f"{em[0]} ({ec_hrs}h ago)", "Earnings calendar",
+                        lambda v, a=ec_hrs: a <= 36, lambda v, a=ec_hrs: a <= 72))
+                else:
+                    add_check("data_feeds", {"check": "Earnings calendar", "value": "no rows", "status": "fail"})
+            except Exception as e:
+                add_check("data_feeds", {"check": "Earnings calendar", "value": str(e), "status": "fail"})
 
             report["sections"]["content_refresh"] = {"checks": [], "grade": "A"}
             add_check("content_refresh", _check(_get_config("takeaway_refresh_due","false"), "Takeaway refresh due", lambda v: v=="false", lambda v: True))

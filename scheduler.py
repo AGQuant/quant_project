@@ -1248,7 +1248,9 @@ async def _scheduler_loop():
             _spawn(_bg_fetch_global_intraday)
         if now.weekday() == 0 and h == 8 and m == 0:
             _spawn(_bg_fu_sync)
-        if now.weekday() < 5 and h == 6 and m == 15:
+        if h == 6 and m == 15:
+            # cc#420: EVERY day incl weekends/holidays — boards announce results over weekends and
+            # Monday reporters confirm Sat/Sun dates; a trading-day guard here starved the calendar.
             _spawn(_bg_earnings_refresh)      # cc#225: refresh earnings_calendar BEFORE the 09:10 pre-market check
         if h == 9 and m == 10:
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness

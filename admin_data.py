@@ -178,15 +178,13 @@ def _oplog(cur, category, title, details):
 
 
 def _earnings_lifecycle(cur):
-    """cc#252: after each scrape — age past-date 'upcoming' rows to 'reported', then purge
-    'reported'/'analyzed' older than 60 days. 'upcoming' rows are NEVER purged."""
+    """cc#252/#420: after each scrape — age past-date 'upcoming' rows to 'reported'. cc#420: the
+    purge is REMOVED — earnings_calendar is the permanent announcement-date archive from Jul-2026
+    onward; 'reported'/'analyzed' rows are NEVER deleted (rescheduled rows keep their reschedule_log)."""
     cur.execute("""UPDATE earnings_calendar SET status='reported', last_updated=NOW()
                    WHERE status='upcoming' AND ex_date < CURRENT_DATE""")
     reported = cur.rowcount
-    cur.execute("""DELETE FROM earnings_calendar
-                   WHERE status IN ('reported','analyzed')
-                     AND ex_date < CURRENT_DATE - INTERVAL '60 days'""")
-    purged = cur.rowcount
+    purged = 0   # cc#420: never purge reported/analyzed rows (permanent archive)
     return reported, purged
 
 
