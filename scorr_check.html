@@ -392,6 +392,25 @@
   .v4-det-gauge .gbar{height:4px;background:var(--panel2);border-radius:3px;overflow:hidden}
   .v4-det-gauge .gfill{height:100%;border-radius:3px}
   .pos{color:var(--grn)} .neg{color:var(--red)}
+  /* cc#405 — Future Scans redesign */
+  .v4-sw{font-family:var(--mono);font-size:12px;font-weight:700;padding:8px 17px;border-radius:8px;
+    border:1px solid var(--line2);background:var(--panel);cursor:pointer;color:var(--mut);opacity:.5;transition:.12s}
+  .v4-sw.on{opacity:1}
+  .v4-sw.buy.on{border-color:var(--grn);background:var(--grn-d);color:var(--grn)}
+  .v4-sw.sell.on{border-color:var(--red);background:var(--red-d);color:var(--red)}
+  .v4-sc{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:var(--panel2);color:var(--mut)}
+  .v4-sc.bm{background:var(--grn-d);color:var(--grn)}
+  .v4-sc.br{background:var(--cyan-d);color:var(--cyan)}
+  .v4-sc.sm{background:var(--red-d);color:var(--red)}
+  .v4-sc.sr{background:var(--amber-d);color:var(--amber)}
+  .v4-mr{font-family:var(--mono);font-size:10px;font-weight:600;padding:1px 5px;border-radius:5px;white-space:nowrap}
+  .v4-mr.bm{background:var(--grn-d);color:var(--grn)} .v4-mr.br{background:var(--cyan-d);color:var(--cyan)}
+  .v4-mr.sm{background:var(--red-d);color:var(--red)} .v4-mr.sr{background:var(--amber-d);color:var(--amber)}
+  .v8-bk{display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:5px;
+    background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2);white-space:nowrap}
+  .v4t-sym{font-weight:700;color:var(--txt)}
+  .v4t-seg{color:var(--mut);white-space:normal;max-width:150px;font-size:10.5px}
+  .v4t-fail{font-family:var(--mono);font-size:10px;color:var(--amber);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -1180,37 +1199,50 @@ async function loadScreen(universe){
 }
 
 // cc#399: "Future Scans" now opens the v4 dual-style batch scanner in-page.
-let v4SIDE='ALL', v4VER='ALL';
+// cc#405: Future Scans redesign — two Buy|Sell switches (verdict filter dropped), distinct style-chip
+// colours, Rules-failed column + V8 Basket column. Isolation id=244: v8_qualified join is display-only.
+let v4BUY=true, v4SELL=true;
+const V8_BASKET_SHORT={buy_momentum:'BuyMom',buy_reversal:'BuyRev',buy_s1_bounce:'S1B',
+  sell_momentum:'SellMom',sell_reversal:'SellRev',sell_overbought:'SOB',v5d:'V5-D',n5:'N5'};
+function _v4side(){return (v4BUY&&v4SELL)?'ALL':(v4BUY?'BUY':(v4SELL?'SELL':'ALL'));}
+function _v4styleChip(label){
+  if(!label)return '<span class="v4-sc">—</span>';
+  const cls={'BUY-MOM':'bm','BUY-REV':'br','SELL-MOM':'sm','SELL-REV':'sr'}[label]||'';
+  return '<span class="v4-sc '+cls+'">'+label+'</span>';
+}
+function _v8BasketChip(b){return '<span class="v8-bk">'+(V8_BASKET_SHORT[b]||b)+'</span>';}
+function _v4mr(scores){
+  scores=scores||{};
+  const cell=(lbl,cls)=>scores[lbl]!=null?'<span class="v4-mr '+cls+'">'+lbl.split('-')[1][0]+'<b>'+scores[lbl]+'</b></span>':'';
+  const buy=[cell('BUY-MOM','bm'),cell('BUY-REV','br')].filter(Boolean).join('');
+  const sell=[cell('SELL-MOM','sm'),cell('SELL-REV','sr')].filter(Boolean).join('');
+  return '<span style="display:inline-flex;gap:3px;flex-wrap:wrap;align-items:center">'+buy
+    +(buy&&sell?'<span style="color:var(--dim);margin:0 2px">·</span>':'')+sell+'</span>';
+}
 function runScreen(){
   const panel=document.getElementById('scrResult');
   const card=panel.querySelector('.card');
   card.innerHTML =
     '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
     + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL); the higher card wins with its style label. STRONG≥12 / VALID 10–12 / REJECT&lt;10. Tap a row for the full dual scorecard.</div>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
-    +   '<div class="scr-stabs" id="v4SideSeg">'
-    +     '<button class="scr-stab long on" data-v="ALL" onclick="setV4Side(\'ALL\')">All</button>'
-    +     '<button class="scr-stab long" data-v="BUY" onclick="setV4Side(\'BUY\')">&#9650; Buy</button>'
-    +     '<button class="scr-stab short" data-v="SELL" onclick="setV4Side(\'SELL\')">&#9660; Sell</button>'
-    +   '</div>'
-    +   '<div class="scr-stabs" id="v4VerSeg">'
-    +     '<button class="scr-stab long on" data-v="ALL" onclick="setV4Ver(\'ALL\')">Any verdict</button>'
-    +     '<button class="scr-stab long" data-v="STRONG" onclick="setV4Ver(\'STRONG\')">Strong</button>'
-    +     '<button class="scr-stab long" data-v="VALID" onclick="setV4Ver(\'VALID\')">Valid+</button>'
-    +   '</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    +   '<button class="v4-sw buy'+(v4BUY?' on':'')+'" id="v4swBuy" onclick="v4Toggle(\'BUY\')">&#9650; Buy</button>'
+    +   '<button class="v4-sw sell'+(v4SELL?' on':'')+'" id="v4swSell" onclick="v4Toggle(\'SELL\')">&#9660; Sell</button>'
     +   '<button class="chip" onclick="loadV4Scan()">&#8635; Rescan</button>'
     + '</div>'
     + '<div id="v4ScanTbl"><div style="padding:22px;text-align:center;color:var(--dim)">Scanning&hellip;</div></div>';
-  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · verdict from spec id=2926 (STRONG≥12 / VALID 10–12 / REJECT<10).';
+  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · SELL recalibrated (id=3010) · V8 Basket join is display-only.';
   panel.classList.add('show');
   panel.scrollIntoView({behavior:'smooth',block:'start'});
   loadV4Scan();
 }
-function setV4Side(v){v4SIDE=v;_v4SegSync('v4SideSeg',v);loadV4Scan();}
-function setV4Ver(v){v4VER=v;_v4SegSync('v4VerSeg',v);loadV4Scan();}
-function _v4SegSync(segId,v){
-  const seg=document.getElementById(segId);if(!seg)return;
-  [...seg.children].forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+function v4Toggle(which){
+  const nb=(which==='BUY')?!v4BUY:v4BUY, ns=(which==='SELL')?!v4SELL:v4SELL;
+  if(!nb&&!ns)return;   // keep at least one side on
+  v4BUY=nb; v4SELL=ns;
+  const bb=document.getElementById('v4swBuy'),ss=document.getElementById('v4swSell');
+  if(bb)bb.classList.toggle('on',v4BUY); if(ss)ss.classList.toggle('on',v4SELL);
+  loadV4Scan();
 }
 async function loadV4Scan(){
   const tbl=document.getElementById('v4ScanTbl'),meta=document.getElementById('v4ScanMeta');
@@ -1218,27 +1250,35 @@ async function loadV4Scan(){
   tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">Scanning&hellip;</div>';
   if(meta)meta.textContent='…';
   let d;
-  try{const r=await fetch('/api/trade-check/v4/scan?side='+v4SIDE+'&verdict='+v4VER+'&limit=250');d=await r.json();}
+  try{const r=await fetch('/api/trade-check/v4/scan?side='+_v4side()+'&limit=250');d=await r.json();}
   catch(e){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Scan failed: '+e.message+'</div>';return;}
   if(d.error){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+d.error+'</div>';return;}
   if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s'+(d.as_of?' · as-of '+d.as_of:'');
   const rows=d.results||[];
   if(!rows.length){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">No stocks match.</div>';return;}
   const body=rows.map((x,i)=>{
-    const mr=(pre)=>['MOM','REV'].map(st=>{const k=pre+'-'+st;return x.scores&&x.scores[k]!=null?st[0]+'<b>'+x.scores[k]+'</b>':'';}).filter(Boolean).join(' ');
-    const buyMR=mr('BUY'),sellMR=mr('SELL');
+    const failed=(x.failed_rules||[]);
+    const failStr=failed.length?failed.map(f=>f.rule).join(' '):'<span style="color:var(--grn)">clean</span>';
+    const failTitle=failed.map(f=>f.rule+' '+f.label).join(', ').replace(/"/g,'');
+    const bk=(x.v8_basket||[]);
+    const bkStr=bk.length?bk.map(_v8BasketChip).join(' '):'<span style="color:var(--dim)">—</span>';
     return '<tr style="cursor:pointer" onclick="v4ScanOpen(\''+x.symbol+'\',\''+(x.best_label||'')+'\')">'
       + '<td>'+(i+1)+'</td>'
-      + '<td style="font-weight:700;color:var(--txt)">'+x.symbol+'</td>'
-      + '<td style="color:var(--mut);white-space:normal;max-width:160px">'+(x.segment||'—')+'</td>'
+      + '<td class="v4t-sym">'+x.symbol+'</td>'
+      + '<td class="v4t-seg">'+(x.segment||'—')+'</td>'
       + '<td>'+(x.cmp!=null?x.cmp:'—')+'</td>'
-      + '<td>'+_v4chip(x.best_label||'—')+'</td>'
+      + '<td>'+_v4styleChip(x.best_label)+'</td>'
       + '<td style="font-weight:700;color:'+_v4scoreCol(x.best_score||0,x.verdict)+'">'+(x.best_score!=null?Number(x.best_score).toFixed(2):'—')+'</td>'
       + '<td><span class="v4-badge '+x.verdict+'">'+x.verdict+'</span></td>'
-      + '<td style="font-family:var(--mono);font-size:10px"><span style="color:var(--grn)">'+(buyMR||'—')+'</span> · <span style="color:var(--red)">'+(sellMR||'—')+'</span></td>'
+      + '<td class="v4t-fail" title="'+failTitle+'">'+failStr+'</td>'
+      + '<td>'+bkStr+'</td>'
+      + '<td>'+_v4mr(x.scores)+'</td>'
       + '</tr>';
   }).join('');
-  tbl.innerHTML='<table class="scr-table"><thead><tr><th>#</th><th>Symbol</th><th>Sector</th><th>CMP</th><th>Best card</th><th>Score</th><th>Verdict</th><th>Buy M/R · Sell M/R</th></tr></thead><tbody>'+body+'</tbody></table>';
+  tbl.innerHTML='<div style="overflow-x:auto"><table class="scr-table"><thead><tr>'
+    +'<th>#</th><th>Symbol</th><th>Sector</th><th>CMP</th><th>Best card</th><th>Score</th><th>Verdict</th>'
+    +'<th>Rules failed</th><th>V8 Basket</th><th>Buy M/R · Sell M/R</th>'
+    +'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 // tapping a scan row loads that symbol's full dual scorecard through the main surface
 function v4ScanOpen(sym, bestLabel){

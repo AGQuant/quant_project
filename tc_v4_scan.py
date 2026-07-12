@@ -176,9 +176,17 @@ def _load_bulk(cur):
     cur.execute("""SELECT MAX(ts::date) FROM intraday_prices
                    WHERE source='fyers_eq' AND timeframe='5m'""")
     bars_asof = cur.fetchone()[0]
+
+    # cc#405: V8 basket membership for the latest signal_date (display-only join, isolation id=244)
+    cur.execute("""SELECT UPPER(symbol), array_agg(DISTINCT basket)
+                   FROM v8_qualified WHERE signal_date = (SELECT MAX(signal_date) FROM v8_qualified)
+                   GROUP BY UPPER(symbol)""")
+    v8_baskets = {r[0]: r[1] for r in cur.fetchall()}
+
     return D, {"nifty": {"day": nday, "wk": nwk, "mo": nmo, "src": nsrc}, "adr": adr,
                "count": len(syms), "as_of": str(v8_asof) if v8_asof else None,
-               "session_bars_as_of": str(bars_asof) if bars_asof else None}
+               "session_bars_as_of": str(bars_asof) if bars_asof else None,
+               "v8_baskets": v8_baskets}
 
 
 def scan(side="ALL", verdict="ALL", segment=None, limit=250):
@@ -207,10 +215,14 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
         best = max(cards, key=lambda c: c["score"])
         if verdict != "ALL" and best["verdict"] != verdict:
             continue
+        # cc#405: failed rule ids for the best card (0-scored only; 0.5 partials excluded) + V8 basket
+        failed = [{"rule": r["rule"], "label": r["label"]} for r in best.get("rules", []) if r["credit"] == 0]
         results.append({
             "symbol": sym, "cmp": _r(d["cmp"]), "segment": d.get("segment"),
             "best_label": best["label"], "best_score": best["score"], "verdict": best["verdict"],
             "scores": {c["label"]: c["score"] for c in cards},
+            "failed_rules": failed,
+            "v8_basket": ctx.get("v8_baskets", {}).get(sym, []),
         })
     results.sort(key=lambda x: x["best_score"], reverse=True)
     runtime = round((datetime.utcnow() - t0).total_seconds(), 2)
