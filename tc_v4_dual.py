@@ -38,8 +38,8 @@ router = APIRouter()
 
 _DB = os.getenv("DATABASE_URL", "")
 
-VERSION = "v4-dual.0"
-SPEC_REF = "session_log id=2926 / TRADE_CHECK_SPEC_V4_DUAL_STYLE (locked 11-Jul-2026)"
+VERSION = "v4-dual.2-sell-recal"
+SPEC_REF = "session_log id=2926 (v4 dual) + id=3010 (SELL recalibration, locked 12-Jul-2026)"
 
 STYLES = ("MOMENTUM", "REVERSAL")
 SIDES = ("BUY", "SELL")
@@ -226,12 +226,13 @@ def _load_one(cur, symbol):
     d["gvm_score"] = _f(g[0]) if g else None
     d["segment"] = g[1] if g else None
 
-    d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn": 0, "peer_count": 0})
+    d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
     if d["segment"]:
         cur.execute("""
             SELECT COUNT(*) FILTER (WHERE v.day_1d > 1),
                    COUNT(*) FILTER (WHERE v.day_1d > 0),
                    COUNT(*) FILTER (WHERE v.day_1d < -1),
+                   COUNT(*) FILTER (WHERE v.day_1d < -0.5),
                    COUNT(*) FILTER (WHERE v.day_1d < 0),
                    COUNT(*)
             FROM gvm_scores g
@@ -242,8 +243,8 @@ def _load_one(cur, symbol):
         """, (d["segment"], symbol))
         p = cur.fetchone()
         d.update({"peers_up1": int(p[0] or 0), "peers_up": int(p[1] or 0),
-                  "peers_dn1": int(p[2] or 0), "peers_dn": int(p[3] or 0),
-                  "peer_count": int(p[4] or 0)})
+                  "peers_dn1": int(p[2] or 0), "peers_dn05": int(p[3] or 0),
+                  "peers_dn": int(p[4] or 0), "peer_count": int(p[5] or 0)})
 
     cur.execute("""SELECT pp, r1, s1, r2, s2 FROM v8_paper_pivots WHERE symbol=%s
                    ORDER BY pivot_date DESC LIMIT 1""", (symbol,))
@@ -311,6 +312,10 @@ def _gates(d, side):
 # ── 15 scored rules (style + side aware) ─────────────────────────────────────────
 
 def _rules(d, style, side):
+    """cc#400 (session_log id=3010): SELL side recalibrated. BUY side UNTOUCHED.
+    SELL drops R6 (vol-today) and R14 (ATR ignition) -> max 13. Killer rules relaxed to the
+    live-validated sell conditions (V5-D / SellMom-N5 / SellOB-V3). R3/R9 are session-anchored
+    by the loaders (last trading session, not CURRENT_DATE)."""
     MOM = style == "MOMENTUM"
     BUY = side == "BUY"
     v8 = d.get("v8") or {}
@@ -321,10 +326,11 @@ def _rules(d, style, side):
         f = d.get("mood_fails", 0)
         out.append(_R("R1", "Mood (fails)", 1.0 if f <= 1 else (0.5 if f == 2 else 0.0), f))
     else:
-        b = d.get("mood_bull", 0)
-        out.append(_R("R1", "Mood (not extreme bull)", 1.0 if b <= 1 else (0.5 if b == 2 else 0.0), b))
+        # 3010: binary — any mood check bearish -> 1; all-bullish -> 0
+        f = d.get("mood_fails", 0)
+        out.append(_R("R1", "Mood (any bearish)", 1.0 if f >= 1 else 0.0, f))
 
-    # R2 — sector (V8 futures segment aggregates)
+    # R2 — sector (unchanged; already matches 3010)
     sw, sm = v8.get("sector_week"), v8.get("sector_month")
     if MOM:
         c = _both((sw or 0) > 0, (sm or 0) > 0) if BUY else _both((sw or 0) < 0, (sm or 0) < 0)
@@ -333,21 +339,23 @@ def _rules(d, style, side):
         c = 1.0 if pos else 0.0
     out.append(_R("R2", f"Sector {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(sw), "mo": _r(sm)}))
 
-    # R3 — peers in same segment (<3 peers -> auto 0.5)
+    # R3 — peers in same segment (<3 peers -> auto 0.5). 3010 SELL MOM uses down>0.5% for the strong tier.
     if d.get("peer_count", 0) < 3:
         c = 0.5
     else:
-        strong = d.get("peers_up1", 0) if BUY else d.get("peers_dn1", 0)
-        any_dir = d.get("peers_up", 0) if BUY else d.get("peers_dn", 0)
+        if BUY:
+            strong, any_dir = d.get("peers_up1", 0), d.get("peers_up", 0)
+        else:
+            strong, any_dir = d.get("peers_dn05", 0), d.get("peers_dn", 0)
         if MOM:
             c = 1.0 if strong >= 2 else (0.5 if any_dir >= 1 else 0.0)
         else:
             c = 1.0 if any_dir >= 2 else (0.5 if any_dir >= 1 else 0.0)
-    out.append(_R("R3", "Peers", c, {"strong": d.get("peers_up1") if BUY else d.get("peers_dn1"),
-                                     "dir": d.get("peers_up") if BUY else d.get("peers_dn"),
+    out.append(_R("R3", "Peers", c, {"strong": (d.get("peers_up1") if BUY else d.get("peers_dn05")),
+                                     "dir": (d.get("peers_up") if BUY else d.get("peers_dn")),
                                      "n": d.get("peer_count")}))
 
-    # R4 — moving averages
+    # R4 — moving averages (unchanged; matches 3010)
     above = [(v8.get("dma_20") or 0) > 0, (v8.get("dma_50") or 0) > 0, (v8.get("dma_200") or 0) > 0]
     below = [(v8.get("dma_20") or 0) < 0, (v8.get("dma_50") or 0) < 0, (v8.get("dma_200") or 0) < 0]
     if MOM:
@@ -359,28 +367,35 @@ def _rules(d, style, side):
     out.append(_R("R4", f"MAs {'2of3' if MOM else 'DMA200'}", c,
                   {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))}))
 
-    # R5 — 1-month up/down close volume ratio
-    ratio = d.get("vol21_up_dn") if BUY else d.get("vol21_dn_up")
-    out.append(_R("R5", "Vol 1M (up/dn)", _band(ratio, 1.1, 0.9), _r(ratio)))
+    # R5 — 1-month up/down close volume ratio. BUY band (1.1,0.9); SELL relaxed to (1.05,0.95) per 3010.
+    if BUY:
+        ratio, c = d.get("vol21_up_dn"), _band(d.get("vol21_up_dn"), 1.1, 0.9)
+    else:
+        ratio, c = d.get("vol21_dn_up"), _band(d.get("vol21_dn_up"), 1.05, 0.95)
+    out.append(_R("R5", "Vol 1M (up/dn)", c, _r(ratio)))
 
-    # R6 — today's time-adjusted volume ratio (both sides same scale)
-    out.append(_R("R6", "Vol today", _band(d.get("vol_ratio_today"), 1.5, 1.1), _r(d.get("vol_ratio_today"))))
+    # R6 — today's time-adjusted volume ratio. BUY only; DROPPED on SELL (3010).
+    if BUY:
+        out.append(_R("R6", "Vol today", _band(d.get("vol_ratio_today"), 1.5, 1.1), _r(d.get("vol_ratio_today"))))
 
-    # R7 — RSI frame
+    # R7 — RSI frame (MOM) / sandwich (REV)
     dr, mr, wr = v8.get("daily_rsi"), v8.get("rsi_month"), v8.get("rsi_weekly")
     twr = d.get("true_weekly_rsi")
     if MOM:
-        c = _both((mr or 0) >= 50, (wr or 0) >= 50) if BUY else _both((mr or 100) <= 50, (wr or 100) <= 50)
+        if BUY:
+            c = _both((mr or 0) >= 50, (wr or 0) >= 50)
+        else:
+            c = _both(wr is not None and wr < 50, mr is not None and mr < 50)   # 3010: wRSI<50 AND mRSI<50
         val = {"mRSI": _r(mr), "wRSI": _r(wr)}
     else:
         if BUY:
             c = _both((twr or 0) >= 60, (dr or 100) <= 40)
         else:
-            c = _both((twr or 100) <= 40, (dr or 0) >= 60)
+            c = _both(twr is not None and twr < 50, dr is not None and dr > 50)  # 3010 sandwich: wk<50 & daily>50
         val = {"trueWk": _r(twr), "dRSI": _r(dr)}
     out.append(_R("R7", f"RSI {'frame' if MOM else 'sandwich'}", c, val))
 
-    # R8 — returns
+    # R8 — returns (unchanged; matches 3010)
     wk, mo = v8.get("week_return"), v8.get("month_return")
     if MOM:
         c = _both((wk or 0) > 0, (mo or 0) > 0) if BUY else _both((wk or 0) < 0, (mo or 0) < 0)
@@ -388,16 +403,20 @@ def _rules(d, style, side):
         c = 1.0 if (mo is not None and (mo > 0 if BUY else mo < 0)) else 0.0
     out.append(_R("R8", f"Returns {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(wk), "mo": _r(mo)}))
 
-    # R9 — 5-min structure + VWAP
+    # R9 — 5-min structure + VWAP (session-anchored via last-session bars). 3010 SELL: below-VWAP is the
+    #      gate for any credit — full (below-VWAP + weak structure) ->1, below-VWAP only ->0.5, else 0.
     upper = (d.get("range_pos") is not None and d["range_pos"] >= 0.5)
     lower = (d.get("range_pos") is not None and d["range_pos"] < 0.5)
     av = d.get("above_vwap")
-    if MOM:
-        c = _both(av, upper) if BUY else _both((av is False and d.get("vwap") is not None), lower)
+    below_vwap = (av is False and d.get("vwap") is not None)
+    if BUY:
+        if MOM:
+            c = _both(av, upper)
+        else:
+            c = _both((d.get("recovery_2d") or 0) > 0, av)
     else:
-        rec = (d.get("recovery_2d") or 0) > 0
-        fall = (d.get("fall_from_high_2d") or 0) > 0
-        c = _both(rec, av) if BUY else _both(fall, (av is False and d.get("vwap") is not None))
+        second = lower if MOM else ((d.get("fall_from_high_2d") or 0) > 0)
+        c = 1.0 if (below_vwap and second) else (0.5 if below_vwap else 0.0)
     out.append(_R("R9", "5m + VWAP", c, {"vwap": _r(d.get("vwap")), "rangePos": _r(d.get("range_pos"))}))
 
     # R10 — style extras
@@ -415,57 +434,97 @@ def _rules(d, style, side):
             c = 1.0 if (rec is not None and 2 <= rec <= 8) else 0.0
             val = {"recovery_2d": _r(rec)}
         else:
+            # 3010: fall 2-8% ->1, 1-2% or 8-12% ->0.5, else 0
             fall = d.get("fall_from_high_2d")
-            c = 1.0 if (fall is not None and 2 <= fall <= 8) else 0.0
+            if fall is not None and 2 <= fall <= 8:
+                c = 1.0
+            elif fall is not None and ((1 <= fall < 2) or (8 < fall <= 12)):
+                c = 0.5
+            else:
+                c = 0.0
             val = {"fall_2d": _r(fall)}
     out.append(_R("R10", "Style extra", c, val))
 
-    # R11 — location + room. MOM: wrong side of PP -> 0, else room>=2% ->1 / short ->0.5.
-    # REV: at the reversal zone with room to the opposite level >=3% ->1, 2-3% ->0.5, else 0.
+    # R11 — location + room. 3010 SELL MOM: below PP, S1-room >=2% ->1, 1-2% ->0.5, above PP ->0.
+    #        SELL REV: S1-room >=2% ->1, 1-2% ->0.5, else 0.
     room_next = d.get("room_r1") if BUY else d.get("room_s1")
     if MOM:
-        wrong_side = (not d.get("above_pp")) if BUY else bool(d.get("above_pp"))
-        if wrong_side:
-            c = 0.0
-        elif room_next is not None and room_next >= 2:
-            c = 1.0
+        if BUY:
+            if not d.get("above_pp"):
+                c = 0.0
+            elif room_next is not None and room_next >= 2:
+                c = 1.0
+            else:
+                c = 0.5
         else:
-            c = 0.5
+            if d.get("above_pp"):
+                c = 0.0
+            elif room_next is not None and room_next >= 2:
+                c = 1.0
+            elif room_next is not None and room_next >= 1:
+                c = 0.5
+            else:
+                c = 0.0
     else:
-        if room_next is None:
-            c = 0.0
-        elif room_next >= 3:
-            c = 1.0
-        elif room_next >= 2:
-            c = 0.5
+        if BUY:
+            if room_next is None:
+                c = 0.0
+            elif room_next >= 3:
+                c = 1.0
+            elif room_next >= 2:
+                c = 0.5
+            else:
+                c = 0.0
         else:
-            c = 0.0
+            if room_next is None:
+                c = 0.0
+            elif room_next >= 2:
+                c = 1.0
+            elif room_next >= 1:
+                c = 0.5
+            else:
+                c = 0.0
     out.append(_R("R11", "Location + room", c, {"abovePP": d.get("above_pp"), "room": _r(room_next)}))
 
-    # R12 — OI structure (price up + any OI = buildup/covering for BUY; mirror for SELL)
+    # R12 — OI structure. 3010 SELL: short-buildup OR long-unwinding (price down) ->1; OI missing/stale ->0.5.
     day = v8.get("day_1d")
     oic = d.get("oi_chg")
     if BUY:
         c = 1.0 if (day is not None and day > 0 and oic is not None) else 0.0
     else:
-        c = 1.0 if (day is not None and day < 0 and oic is not None) else 0.0
+        if oic is None:
+            c = 0.5
+        elif day is not None and day < 0:
+            c = 1.0
+        else:
+            c = 0.0
     out.append(_R("R12", "OI structure", c, {"day": _r(day), "oi_chg": _r(oic)}))
 
-    # R13 — basis
+    # R13 — basis. 3010 SELL: MOM discount widening ->1 / discount present ->0.5; REV premium fading ->1 /
+    #        premium present (flat) ->0.5; basis missing ->0.5.
     now, prev = d.get("basis_now"), d.get("basis_prev")
-    if now is None or prev is None:
-        c = 0.0
-    elif MOM:
-        c = 1.0 if ((now > prev and now > 0) if BUY else (now < prev and now < 0)) else 0.0
-    else:  # REV: recovering from discount (BUY) / fading from premium (SELL)
-        c = 1.0 if ((now > prev and now < 0) if BUY else (now < prev and now > 0)) else 0.0
+    if BUY:
+        if now is None or prev is None:
+            c = 0.0
+        elif MOM:
+            c = 1.0 if (now > prev and now > 0) else 0.0
+        else:
+            c = 1.0 if (now > prev and now < 0) else 0.0
+    else:
+        if now is None or prev is None:
+            c = 0.5
+        elif MOM:
+            c = 1.0 if (now < prev and now < 0) else (0.5 if now < 0 else 0.0)
+        else:
+            c = 1.0 if (now < prev and now > 0) else (0.5 if now > 0 else 0.0)
     out.append(_R("R13", "Basis", c, {"now": _r(now), "prev": _r(prev)}))
 
-    # R14 — ATR ignition (both sides)
-    out.append(_R("R14", "ATR ignition", 1.0 if d.get("ignition") else 0.0,
-                  {"tr": _r(d.get("tr_today")), "atr14": _r(d.get("atr14"))}))
+    # R14 — ATR ignition. BUY only; DROPPED on SELL (3010).
+    if BUY:
+        out.append(_R("R14", "ATR ignition", 1.0 if d.get("ignition") else 0.0,
+                      {"tr": _r(d.get("tr_today")), "atr14": _r(d.get("atr14"))}))
 
-    # R15 — relative strength vs Nifty
+    # R15 — relative strength vs Nifty (unchanged; matches 3010)
     rw, rm = d.get("rs_wk"), d.get("rs_mo")
     if MOM:
         c = _both((rw or 0) > 0, (rm or 0) > 0) if BUY else _both((rw or 0) < 0, (rm or 0) < 0)
@@ -483,7 +542,14 @@ def _rules(d, style, side):
     return out
 
 
-def _verdict(score):
+def _verdict(score, side="BUY"):
+    # cc#400: SELL recalibrated (session_log id=3010) — max 13, separate bands. BUY unchanged (max 15).
+    if side == "SELL":
+        if score >= 10.5:
+            return "STRONG"
+        if score >= 8.5:
+            return "VALID"
+        return "REJECT"
     if score >= 12:
         return "STRONG"
     if score >= 10:
@@ -492,11 +558,19 @@ def _verdict(score):
 
 
 def score_card(d, style, side):
-    """The one shared scorer. Returns the full card for one (style, side)."""
+    """The one shared scorer. Returns the full card for one (style, side).
+    cc#400: SELL drops R6+R14 (max 13) and uses its own verdict bands; BUY untouched (max 15)."""
     rules = _rules(d, style, side)
     score = round(sum(r["credit"] for r in rules), 2)
-    return {"style": style, "side": side, "label": f"{side}-{style[:3]}",
-            "score": score, "max": 15, "verdict": _verdict(score), "rules": rules}
+    max_score = 13 if side == "SELL" else 15
+    card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
+            "score": score, "max": max_score, "verdict": _verdict(score, side), "rules": rules}
+    if side == "SELL":
+        card["recal"] = "RECALIBRATED 12-JUL"
+        card["bands"] = "STRONG≥10.5 / VALID 8.5–10.5 / REJECT<8.5"
+    else:
+        card["bands"] = "STRONG≥12 / VALID 10–12 / REJECT<10"
+    return card
 
 
 # ── public compute (single symbol, both sides / a chosen side) ───────────────────

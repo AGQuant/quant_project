@@ -345,6 +345,8 @@
   .v4-crow .rl{color:var(--mut)}
   .v4-crow .rc{font-family:var(--mono);font-weight:700}
   .v4-crow .c1{color:var(--grn)} .v4-crow .c05{color:var(--amber)} .v4-crow .c0{color:var(--dim)}
+  .v4-recal{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;padding:2px 7px;
+    border-radius:20px;background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2)}
 </style>
 </head>
 <body>
@@ -718,7 +720,11 @@ async function runTradeCheck(sym){
   renderV4Dual(d, mode);
 }
 
-function _v4scoreCol(s){return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';}
+// colour by verdict when known (side-agnostic — SELL bands differ from BUY); fall back to BUY scale
+function _v4scoreCol(s,verdict){
+  if(verdict)return verdict==='STRONG'?'var(--grn)':verdict==='VALID'?'var(--amber)':'var(--dim)';
+  return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';
+}
 function _v4creditCls(c){c=parseFloat(c);return c>=1?'c1':c>=0.5?'c05':'c0';}
 function _v4chip(lbl){const buy=(lbl||'').indexOf('BUY')===0;return '<span class="v4-chip '+(buy?'buy':'sell')+'">'+lbl+'</span>';}
 function _vClassFor(v){return v==='STRONG'?'strong':v==='VALID'?'valid':'reject';}
@@ -739,10 +745,11 @@ function renderV4Dual(d, uiMode){
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
     const rules=(c.rules||[]).map(r=>
       '<div class="v4-crow"><span class="rl">'+r.rule+' '+r.label+'</span><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>').join('');
+    const recal=c.recal?'<span class="v4-recal">'+c.recal+'</span>':'';
     return '<div class="v4-card'+win+'"><div class="v4-chead">'+_v4chip(c.label)
-      +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score)+'">'+Number(c.score).toFixed(2)+'</span>'
-      +'<span style="font-size:11px;color:var(--dim)">/15</span>'
-      +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span></div>'+rules+'</div>';
+      +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'+Number(c.score).toFixed(2)+'</span>'
+      +'<span style="font-size:11px;color:var(--dim)">/'+(c.max||15)+'</span>'
+      +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span>'+recal+'</div>'+rules+'</div>';
   };
   const cardsHtml = cards.length
     ? '<div class="v4-cards">'+cards.map(cardHtml).join('')+'</div>'
@@ -759,7 +766,7 @@ function renderV4Dual(d, uiMode){
     + '</div>'
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
-    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/15</b> · verdict STRONG≥12 / VALID 10–12 / REJECT&lt;10</div>'
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?13:15))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥10.5 / VALID 8.5–10.5 / REJECT&lt;8.5':'STRONG≥12 / VALID 10–12 / REJECT&lt;10'))+'</div>'
     +   '<div class="v4-gates">'+gatesHtml+'</div>'
     + '</div></div>'
     + cardsHtml
@@ -998,7 +1005,7 @@ async function loadV4Scan(){
   try{const r=await fetch('/api/trade-check/v4/scan?side='+v4SIDE+'&verdict='+v4VER+'&limit=250');d=await r.json();}
   catch(e){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">Scan failed: '+e.message+'</div>';return;}
   if(d.error){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--red)">'+d.error+'</div>';return;}
-  if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s';
+  if(meta)meta.textContent=(d.count||0)+' of '+(d.universe||0)+' · '+(d.runtime_s||'?')+'s'+(d.as_of?' · as-of '+d.as_of:'');
   const rows=d.results||[];
   if(!rows.length){tbl.innerHTML='<div style="padding:22px;text-align:center;color:var(--dim)">No stocks match.</div>';return;}
   const body=rows.map((x,i)=>{
@@ -1010,7 +1017,7 @@ async function loadV4Scan(){
       + '<td style="color:var(--mut);white-space:normal;max-width:160px">'+(x.segment||'—')+'</td>'
       + '<td>'+(x.cmp!=null?x.cmp:'—')+'</td>'
       + '<td>'+_v4chip(x.best_label||'—')+'</td>'
-      + '<td style="font-weight:700;color:'+_v4scoreCol(x.best_score||0)+'">'+(x.best_score!=null?Number(x.best_score).toFixed(2):'—')+'</td>'
+      + '<td style="font-weight:700;color:'+_v4scoreCol(x.best_score||0,x.verdict)+'">'+(x.best_score!=null?Number(x.best_score).toFixed(2):'—')+'</td>'
       + '<td><span class="v4-badge '+x.verdict+'">'+x.verdict+'</span></td>'
       + '<td style="font-family:var(--mono);font-size:10px"><span style="color:var(--grn)">'+(buyMR||'—')+'</span> · <span style="color:var(--red)">'+(sellMR||'—')+'</span></td>'
       + '</tr>';

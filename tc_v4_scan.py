@@ -88,26 +88,27 @@ def _load_bulk(cur):
     cur.execute("""
         SELECT g.segment,
                COUNT(*) FILTER (WHERE v.day_1d > 1),  COUNT(*) FILTER (WHERE v.day_1d > 0),
-               COUNT(*) FILTER (WHERE v.day_1d < -1), COUNT(*) FILTER (WHERE v.day_1d < 0),
-               COUNT(*)
+               COUNT(*) FILTER (WHERE v.day_1d < -1), COUNT(*) FILTER (WHERE v.day_1d < -0.5),
+               COUNT(*) FILTER (WHERE v.day_1d < 0),  COUNT(*)
         FROM gvm_scores g JOIN v8_metrics v ON v.symbol = g.symbol
         WHERE g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
           AND v.score_date = (SELECT MAX(score_date) FROM v8_metrics)
           AND g.segment IS NOT NULL
         GROUP BY g.segment""")
     seg = {r[0]: {"up1": int(r[1] or 0), "up": int(r[2] or 0), "dn1": int(r[3] or 0),
-                  "dn": int(r[4] or 0), "n": int(r[5] or 0)} for r in cur.fetchall()}
+                  "dn05": int(r[4] or 0), "dn": int(r[5] or 0), "n": int(r[6] or 0)} for r in cur.fetchall()}
     for s in syms:
         d = D[s]; sg = seg.get(d.get("segment"))
         day = (d.get("v8") or {}).get("day_1d")
         if not sg or day is None:
-            d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn": 0,
+            d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0,
                       "peer_count": (sg["n"] - 1) if sg else 0})
         else:
             d.update({
                 "peers_up1": sg["up1"] - (1 if day > 1 else 0),
                 "peers_up":  sg["up"] - (1 if day > 0 else 0),
                 "peers_dn1": sg["dn1"] - (1 if day < -1 else 0),
+                "peers_dn05": sg["dn05"] - (1 if day < -0.5 else 0),
                 "peers_dn":  sg["dn"] - (1 if day < 0 else 0),
                 "peer_count": sg["n"] - 1})
 
@@ -167,7 +168,17 @@ def _load_bulk(cur):
 
     for s in syms:
         _derive(D[s])
-    return D, {"nifty": {"day": nday, "wk": nwk, "mo": nmo, "src": nsrc}, "adr": adr, "count": len(syms)}
+
+    # cc#400 engineering: session anchor — the last trading session this scan's data reflects
+    # (off-hours/weekend safe; loaders already read MAX(date), so R3/R9 use the last live session).
+    cur.execute("SELECT MAX(score_date) FROM v8_metrics")
+    v8_asof = cur.fetchone()[0]
+    cur.execute("""SELECT MAX(ts::date) FROM intraday_prices
+                   WHERE source='fyers_eq' AND timeframe='5m'""")
+    bars_asof = cur.fetchone()[0]
+    return D, {"nifty": {"day": nday, "wk": nwk, "mo": nmo, "src": nsrc}, "adr": adr,
+               "count": len(syms), "as_of": str(v8_asof) if v8_asof else None,
+               "session_bars_as_of": str(bars_asof) if bars_asof else None}
 
 
 def scan(side="ALL", verdict="ALL", segment=None, limit=250):
@@ -206,6 +217,7 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
     return {"count": len(results), "runtime_s": runtime, "universe": ctx.get("count", 0),
             "side": side, "verdict": verdict, "segment": segment,
             "computed_at": _ist().strftime("%Y-%m-%d %H:%M:%S IST"),
+            "as_of": ctx.get("as_of"), "session_bars_as_of": ctx.get("session_bars_as_of"),
             "spec_ref": SPEC_REF, "version": VERSION, "results": results[:limit]}
 
 
@@ -238,8 +250,16 @@ def _v4_selftest():
             for s in probe:
                 probe[s]["scan_score"] = sc_map.get(s)
                 probe[s]["match"] = (probe[s]["best_score"] == sc_map.get(s))
+            # cc#400: SELL verdict distribution + score ceiling (best SELL card per symbol that clears gates)
+            scs = scan("SELL", "ALL", None, 250)
+            sdist = {"STRONG": 0, "VALID": 0, "REJECT": 0}
+            for x in scs.get("results", []):
+                sdist[x["verdict"]] = sdist.get(x["verdict"], 0) + 1
+            sell_ceiling = max((x["best_score"] for x in scs.get("results", [])), default=None)
             out = {"probe": probe, "scan_count": sc.get("count"), "scan_runtime_s": sc.get("runtime_s"),
-                   "universe": sc.get("universe"), "at": _ist().strftime("%Y-%m-%d %H:%M:%S IST")}
+                   "universe": sc.get("universe"), "as_of": sc.get("as_of"),
+                   "sell_dist": sdist, "sell_scored": scs.get("count"), "sell_ceiling": sell_ceiling,
+                   "at": _ist().strftime("%Y-%m-%d %H:%M:%S IST")}
             cur.execute("""INSERT INTO app_config(key, value, updated_at)
                            VALUES('v4dual_selftest_result', %s, NOW())
                            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()""",
