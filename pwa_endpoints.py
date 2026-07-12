@@ -284,7 +284,6 @@ PWA_JS = """
     ['/holdings', '\\u25c6', 'Holdings'],
     ['/structure', '\\u25a6', 'Structure'],
     ['/performance', '\\u25b2', 'Performance'],
-    ['/ask', '\\u2709', 'Ask'],
     ['/v10', '\\u25b3', 'V10'],
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs']
   ];

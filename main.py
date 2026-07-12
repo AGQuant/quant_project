@@ -700,7 +700,7 @@ NAV_REGISTRY = {
     "/dashboard":    ("V8",                   "nav"),
     "/cio":          ("Max (AI CIO)",         "nav"),
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
-    "/ask":          ("Ask",                  "nav"),
+    "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
     "/intraday":     ("Intraday",             "nav"),
     "/sector":       ("Sector",               "nav"),
