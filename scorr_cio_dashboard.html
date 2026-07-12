@@ -803,38 +803,130 @@ function OpsMetrics({ symbol, segment }) {
 // 1Y maps to the backend 12m param, All is the new full-history mode (backend cc#300).
 const FIB_RANGES = [["1M","1m"],["3M","3m"],["6M","6m"],["1Y","12m"],["All","all"]];
 
-function FibChartSvg({ d }) {
+// cc#409 — Fib Strength Rule (founder-locked). Position in swing range: 0 = swing low, 100 = swing high.
+// Display-only (id=143) — never scored. Zones + 123.6 extension target headroom.
+const FIB_ZONE_BANDS = [
+  { top: 123.6, bot: 100,  key: "breakout" },
+  { top: 100,   bot: 78.6, key: "resist" },
+  { top: 78.6,  bot: 61.8, key: "strength" },
+  { top: 61.8,  bot: 38.2, key: "decision" },
+  { top: 38.2,  bot: 23.6, key: "weak" },
+  { top: 23.6,  bot: 0,    key: "breakdown" },
+];
+function fibZoneKey(pct) {
+  if (pct == null) return null;
+  if (pct >= 100) return "breakout";
+  if (pct >= 78.6) return "resist";
+  if (pct >= 61.8) return "strength";
+  if (pct >= 38.2) return "decision";
+  if (pct >= 23.6) return "weak";
+  return "breakdown";
+}
+function fibZoneName(key, SHORT) {
+  const L = { breakout: "Breakout", resist: "Resistance Test", strength: "Strength",
+              decision: "Decision", weak: "Weak", breakdown: "Breakdown" };
+  const S = { breakout: "Extended", resist: "Supply Test", strength: "Weakness",
+              decision: "Decision", weak: "Demand Test", breakdown: "Breakdown" };
+  return (SHORT ? S : L)[key] || key;
+}
+function fibZoneColor(key) {
+  switch (key) {
+    case "breakout":  return [C.green, 0.16];
+    case "resist":    return [C.red,   0.14];
+    case "strength":  return [C.green, 0.09];
+    case "decision":  return [C.muted, 0.07];
+    case "weak":      return [C.red,   0.07];
+    case "breakdown": return [C.red,   0.15];
+    default:          return [C.muted, 0.05];
+  }
+}
+function fibZoneInterp(key, SHORT) {
+  if (SHORT) {
+    switch (key) {
+      case "breakout":  return "Extended above the range — overbought for a short; wait for rejection.";
+      case "resist":    return "At supply — short trigger if it rejects the prior high.";
+      case "strength":  return "Still strong — early for a short; needs to lose 61.8%.";
+      case "decision":  return "Decision zone — no short edge yet.";
+      case "weak":      return "Weakening — shorts favoured below 38.2%.";
+      case "breakdown": return "Broken down — below 23.6%; −23.6 is the first extension target.";
+    }
+  } else {
+    switch (key) {
+      case "breakout":  return "Above the swing high — breakout; 123.6 is the first extension target.";
+      case "resist":    return "Testing prior-high resistance — a close above 100% confirms the breakout.";
+      case "strength":  return "Strength band — dips buyable above 61.8%.";
+      case "decision":  return "Decision zone (38.2–61.8%) — no edge; wait for a break either way.";
+      case "weak":      return "Weak — below 38.2%; reclaim 50% to stabilise.";
+      case "breakdown": return "Breakdown — below 23.6%; structure broken.";
+    }
+  }
+  return "";
+}
+
+function FibChartSvg({ d, side }) {
+  const SHORT = side === "SHORT";
   const W = 680, H = 340, L = 8, R = 92, T = 16, B = 24;
   const ser = (d.series || []).filter(p => p.close != null);
   const n = ser.length;
   if (n < 2) return <div style={{ fontSize: 12.5, color: C.muted, padding: "24px 0", textAlign: "center" }}>No price path available.</div>;
   const fl = d.fib_levels || [];
   const lo = d.swing_low.price, hi = d.swing_high.price, cmp = d.cmp;
-  const vals = ser.map(p => p.close).concat([lo, hi]);
+  const span = (hi - lo) || 1;
+  const pxAt = p => lo + (p / 100) * span;   // position% -> price (0 = low, 100 = high)
+  const p1236 = pxAt(123.6), pNeg = pxAt(-23.6);
+  // cc#409: extend headroom so the 123.6 extension target (and its dashed line) is always visible
+  const vals = ser.map(p => p.close).concat([lo, hi, p1236]);
   if (cmp != null) vals.push(cmp);
+  if (SHORT) vals.push(pNeg);
   let ymin = Math.min(...vals), ymax = Math.max(...vals);
-  const ypad = (ymax - ymin) * 0.05 || 1; ymin -= ypad; ymax += ypad;
+  const ypad = (ymax - ymin) * 0.04 || 1; ymin -= ypad; ymax += ypad;
   const xF = i => L + (i / (n - 1)) * (W - L - R);
   const yF = p => T + (ymax - p) / (ymax - ymin) * (H - T - B);
-  // shaded band split at the fib level nearest CMP (green reclaimed below, red remaining above)
-  let split = hi;
-  if (cmp != null && fl.length) { let bd = 1e18; fl.forEach(f => { const dd = Math.abs(f.price - cmp); if (dd < bd) { bd = dd; split = f.price; } }); }
-  const ySplit = yF(split), yBot = yF(lo), yTop = yF(hi);
+  const clampY = y => Math.max(T, Math.min(H - B, y));
   const dpath = ser.map((p, i) => (i ? "L" : "M") + xF(i).toFixed(1) + " " + yF(p.close).toFixed(1)).join(" ");
+  const bands = SHORT ? FIB_ZONE_BANDS.concat([{ top: 0, bot: -23.6, key: "breakdown" }]) : FIB_ZONE_BANDS;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "auto", display: "block", border: `1px solid ${C.border}`, borderRadius: 10, background: C.bg }}>
-      <rect x={L} y={ySplit.toFixed(1)} width={W - L - R} height={Math.max(0, yBot - ySplit).toFixed(1)} fill={C.green} opacity="0.06" />
-      <rect x={L} y={yTop.toFixed(1)} width={W - L - R} height={Math.max(0, ySplit - yTop).toFixed(1)} fill={C.red} opacity="0.06" />
+      {bands.map((z, i) => {
+        const yt = clampY(yF(pxAt(z.top))), yb = clampY(yF(pxAt(z.bot)));
+        const zc = fibZoneColor(z.key);
+        return <rect key={"z" + i} x={L} y={Math.min(yt, yb).toFixed(1)} width={W - L - R}
+          height={Math.max(0.5, Math.abs(yb - yt)).toFixed(1)} fill={zc[0]} opacity={zc[1]} />;
+      })}
+      {bands.map((z, i) => {
+        const ymid = clampY((yF(pxAt(z.top)) + yF(pxAt(z.bot))) / 2);
+        return <text key={"zt" + i} x={W - R - 4} y={(ymid + 3).toFixed(1)} fontSize="9" fontFamily="monospace"
+          fill={C.muted} textAnchor="end" opacity="0.7">{fibZoneName(z.key, SHORT)}</text>;
+      })}
       {fl.map((f, i) => {
-        const y = yF(f.price);
+        const y = yF(f.price), bold = Math.abs(f.pct - 61.8) < 0.5;   // 61.8 = bull/bear line, bolder
         return (
           <g key={i}>
-            <line x1={L} y1={y.toFixed(1)} x2={W - R} y2={y.toFixed(1)} stroke={C.muted} strokeWidth="1" strokeDasharray="4 3" strokeOpacity="0.5" />
+            <line x1={L} y1={y.toFixed(1)} x2={W - R} y2={y.toFixed(1)} stroke={bold ? C.text : C.muted}
+              strokeWidth={bold ? "1.3" : "1"} strokeDasharray={bold ? "6 3" : "4 3"} strokeOpacity={bold ? "0.6" : "0.45"} />
             <text x={W - R + 4} y={(y + 3.5).toFixed(1)} fontSize="10" fontFamily="monospace" fill={C.muted}>{f.pct.toFixed(1)}% · {f.price.toFixed(2)}</text>
           </g>
         );
       })}
+      {(function () {
+        const y = yF(p1236);
+        return (
+          <g>
+            <line x1={L} y1={y.toFixed(1)} x2={W - R} y2={y.toFixed(1)} stroke={C.green} strokeWidth="1.2" strokeDasharray="2 2" strokeOpacity="0.85" />
+            <text x={W - R + 4} y={(y + 3.5).toFixed(1)} fontSize="10" fontFamily="monospace" fontWeight="700" fill={C.green}>123.6 · {p1236.toFixed(2)} · first target</text>
+          </g>
+        );
+      })()}
+      {SHORT && (function () {
+        const y = yF(pNeg);
+        return (
+          <g>
+            <line x1={L} y1={y.toFixed(1)} x2={W - R} y2={y.toFixed(1)} stroke={C.red} strokeWidth="1.2" strokeDasharray="2 2" strokeOpacity="0.85" />
+            <text x={W - R + 4} y={(y + 3.5).toFixed(1)} fontSize="10" fontFamily="monospace" fontWeight="700" fill={C.red}>−23.6 · {pNeg.toFixed(2)} · target ext</text>
+          </g>
+        );
+      })()}
       <path d={dpath} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       {cmp != null && (
         <g>
@@ -854,7 +946,7 @@ function FibStat({ label, children }) {
   );
 }
 
-function FibPopout({ symbol, onClose }) {
+function FibPopout({ symbol, onClose, side = "LONG" }) {
   const [lookback, setLookback] = useState("3m");   // default 3M (matches backend default)
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -901,7 +993,21 @@ function FibPopout({ symbol, onClose }) {
         {err && !loading && <div style={{ padding: "24px 0", textAlign: "center", color: C.red, fontSize: 13 }}>{err}</div>}
         {data && !loading && !err && (
           <React.Fragment>
-            <FibChartSvg d={data} />
+            <FibChartSvg d={data} side={side} />
+            {data.cmp_retracement_pct != null && (function () {
+              const zk = fibZoneKey(data.cmp_retracement_pct), zc = fibZoneColor(zk)[0], SH = side === "SHORT";
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                  <span style={{ border: `1px solid ${zc}`, color: zc, background: C.bg, borderRadius: 7,
+                    padding: "5px 11px", fontWeight: 800, fontFamily: "monospace", fontSize: 12 }}>
+                    {data.cmp_retracement_pct.toFixed(1)}% — {fibZoneName(zk, SH)}
+                  </span>
+                  <span style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, flex: 1, minWidth: 200 }}>
+                    {fibZoneInterp(zk, SH)}
+                  </span>
+                </div>
+              );
+            })()}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12, fontFamily: "monospace", fontSize: 11.5 }}>
               <FibStat label="Swing">{fmt(data.swing_low.price, 2)} → {fmt(data.swing_high.price, 2)}</FibStat>
               <FibStat label={(data.anchor_label || "CMP") + (data.anchor_date ? ` ${data.anchor_date}` : "")}>{fmt(data.cmp, 2)}{data.cmp_retracement_pct != null ? ` (${data.cmp_retracement_pct.toFixed(1)}%)` : ""}</FibStat>
