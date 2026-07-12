@@ -100,31 +100,41 @@ async function getJSON(u){const r=await fetch(API+u,{headers:{'Accept':'applicat
 function chip(lbl){const buy=lbl.startsWith('BUY');return `<span class="chip ${buy?'buy':'sell'}">${lbl}</span>`;}
 function scoreCol(s){return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';}
 
+// cc#455: TOP-10 per side (tie-break GVM: BUY higher / SELL lower) + Day%/Sector Day%/Rules-failed
+// columns + proportional widths + a "show all" toggle. Fetch once, render from LAST.
+let LAST=[], LAST_META='', SHOW_ALL=false;
+function dayCell(v){if(v==null)return '<td class="num" style="color:var(--dim)">&mdash;</td>';const c=v>=0?'var(--grn)':'var(--red)';return `<td class="num" style="color:${c}">${(v>=0?'+':'')+Number(v).toFixed(2)}%</td>`;}
+function rulesCell(fr){if(!fr||!fr.length)return '<td class="mini" style="color:var(--grn)">clean</td>';const ids=fr.map(r=>r.rule).join(' &middot; ');const lab=fr.map(r=>r.rule+' '+(r.label||'')).join(', ').replace(/"/g,'&quot;');return `<td class="mini" title="${lab}">${ids}</td>`;}
 async function load(){
   document.getElementById('tbl').innerHTML='<div class="empty">Scanning&hellip;</div>';
   document.getElementById('meta').textContent='…';
   let d;try{d=await getJSON(`/api/trade-check/v4/scan?side=${SIDE}&verdict=${VER}&limit=250`);}catch(e){document.getElementById('tbl').innerHTML=`<div class="empty">Scan failed: ${e.message}</div>`;return;}
   if(d.error){document.getElementById('tbl').innerHTML=`<div class="empty">${d.error}</div>`;return;}
-  document.getElementById('meta').textContent=`${d.count} of ${d.universe} · ${d.runtime_s}s · ${d.computed_at}`;
-  const rows=d.results||[];
-  if(!rows.length){document.getElementById('tbl').innerHTML='<div class="empty">No stocks match.</div>';return;}
-  const order=['BUY-MOM','BUY-REV','SELL-MOM','SELL-REV'];
-  const body=rows.map(x=>{
-    const mini=order.map(k=>x.scores[k]!=null?`<span title="${k}">${k.split('-')[1]==='MOM'?'M':'R'}${x.best_label.startsWith(k.split('-')[0])?'':''}<b>${x.scores[k]}</b></span>`:'').filter(Boolean);
-    const miniBuy=order.filter(k=>k.startsWith('BUY')&&x.scores[k]!=null).map(k=>`${k.split('-')[1][0]}<b>${x.scores[k]}</b>`).join(' ');
-    const miniSell=order.filter(k=>k.startsWith('SELL')&&x.scores[k]!=null).map(k=>`${k.split('-')[1][0]}<b>${x.scores[k]}</b>`).join(' ');
-    return `<tr class="row ${x.verdict==='STRONG'?'strong':''}" onclick="openM('${x.symbol}')">
+  LAST_META=`${d.count} of ${d.universe} · ${d.runtime_s}s · ${d.computed_at}`;
+  LAST=(d.results||[]).slice().sort((a,b)=>{if(b.best_score!==a.best_score)return b.best_score-a.best_score;
+    const sell=(a.best_label||'').startsWith('SELL');return sell?((a.gvm??0)-(b.gvm??0)):((b.gvm??0)-(a.gvm??0));});   // tie-break by GVM
+  SHOW_ALL=false; renderScan();
+}
+function renderScan(){
+  document.getElementById('meta').textContent=LAST_META;
+  if(!LAST.length){document.getElementById('tbl').innerHTML='<div class="empty">No stocks match.</div>';return;}
+  const shown=SHOW_ALL?LAST:LAST.slice(0,10);
+  const body=shown.map(x=>`<tr class="row ${x.verdict==='STRONG'?'strong':''}" onclick="openM('${x.symbol}')">
       <td class="sym">${x.symbol}</td>
       <td class="seg-c">${x.segment||'&mdash;'}</td>
-      <td class="num">${x.cmp??'&mdash;'}</td>
+      ${dayCell(x.day_chg)}
+      ${dayCell(x.sector_day)}
       <td>${chip(x.best_label)}</td>
       <td class="bg" style="color:${scoreCol(x.best_score)}">${x.best_score}</td>
       <td><span class="badge ${x.verdict}">${x.verdict}</span></td>
-      <td class="mini"><span style="color:var(--grn)">${miniBuy||'&mdash;'}</span> &middot; <span style="color:var(--red)">${miniSell||'&mdash;'}</span></td>
-    </tr>`;}).join('');
+      ${rulesCell(x.failed_rules)}
+    </tr>`).join('');
+  const link=(t,f)=>`<a style="color:var(--blu);cursor:pointer;font-weight:700" onclick="${f}">${t}</a>`;
+  const foot=LAST.length>10?`<div style="font-size:11px;color:var(--dim);padding:11px 4px;text-align:center">${SHOW_ALL?`Showing all ${LAST.length} · ${link('show top 10','SHOW_ALL=false;renderScan()')}`:`Showing top 10 of ${LAST.length} · ${link('show all','SHOW_ALL=true;renderScan()')}`}</div>`:'';
   document.getElementById('tbl').innerHTML=`<div class="scroll"><table>
-    <thead><tr><th>Symbol</th><th>Sector</th><th>CMP</th><th>Best card</th><th>Score</th><th>Verdict</th><th>Buy M/R · Sell M/R</th></tr></thead>
-    <tbody>${body}</tbody></table></div>`;
+    <colgroup><col style="width:14%"><col style="width:22%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:8%"><col style="width:10%"><col style="width:20%"></colgroup>
+    <thead><tr><th>Symbol</th><th>Sector</th><th>Day%</th><th>Sector Day%</th><th>Best card</th><th>Score</th><th>Verdict</th><th>Rules failed</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`+foot;
 }
 
 async function openM(sym){

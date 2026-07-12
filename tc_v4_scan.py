@@ -191,6 +191,25 @@ def _load_bulk(cur):
                "v8_baskets": v8_baskets}
 
 
+def _segment_day_map(cur):
+    """cc#455: mcap-weighted DAY change per segment — SUM(day_1d*mcap)/SUM(mcap) anchored to the last
+    v8_metrics session (same derive as /segment_day, cc#429/#432). Returns {segment: day_pct} for the
+    scanner's Sector Day% column; off-market it serves the last session's finals (cc#424 convention)."""
+    try:
+        cur.execute("""
+            WITH mem AS (
+                SELECT g.segment, m.day_1d::numeric AS day_1d, g.market_cap::numeric AS mcap
+                FROM v8_metrics m JOIN gvm_scores g ON g.symbol = m.symbol
+                WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+                  AND g.segment IS NOT NULL AND m.day_1d IS NOT NULL
+                  AND g.market_cap IS NOT NULL AND g.market_cap > 0)
+            SELECT segment, ROUND(SUM(day_1d*mcap)/NULLIF(SUM(mcap),0), 2) FROM mem GROUP BY segment
+        """)
+        return {r[0]: _f(r[1]) for r in cur.fetchall()}
+    except Exception:
+        return {}
+
+
 def scan(side="ALL", verdict="ALL", segment=None, limit=250):
     side = (side or "ALL").upper()
     verdict = (verdict or "ALL").upper()
@@ -198,6 +217,7 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
     t0 = datetime.utcnow()
     with psycopg.connect(_DB) as conn, conn.cursor() as cur:
         D, ctx = _load_bulk(cur)
+        seg_day = _segment_day_map(cur)   # cc#455: mcap-weighted segment day% for the Sector Day% column
 
     results = []
     for sym, d in D.items():
@@ -222,6 +242,8 @@ def scan(side="ALL", verdict="ALL", segment=None, limit=250):
         results.append({
             "symbol": sym, "cmp": _r(d["cmp"]), "segment": d.get("segment"),
             "day_chg": _r((d.get("v8") or {}).get("day_1d")),   # cc#413: day change % (last session, cc#373 convention)
+            "sector_day": seg_day.get(d.get("segment")),   # cc#455: segment mcap-weighted day % (last-tick)
+            "gvm": _r(d.get("gvm_score")),                  # cc#455: for the top-10 tie-break
             "best_label": best["label"], "best_score": best["score"], "verdict": best["verdict"],
             "scores": {c["label"]: c["score"] for c in cards},
             "failed_rules": failed,
