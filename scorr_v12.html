@@ -1,0 +1,287 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V12 · Basket Builder</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  :root{
+    --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
+    --line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--grn-d:rgba(47,212,139,.14);--red:#FF5C6C;--red-d:rgba(255,92,108,.13);
+    --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:'Sora',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1100px;margin:0 auto;padding:12px 18px 44px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 0 12px;border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:20px}.logo b{color:var(--blu)}
+  .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+  .spacer{flex:1}
+  .backlink{font-size:12px;font-weight:600;color:var(--mut);border:1px solid var(--line2);border-radius:9px;padding:7px 12px}
+  .steps{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}
+  .step{flex:1;min-width:130px;padding:9px 12px;border:1px solid var(--line2);border-radius:10px;background:var(--panel);cursor:pointer;font-size:12px;font-weight:700;color:var(--mut);display:flex;align-items:center;gap:8px}
+  .step.on{border-color:var(--blu);color:var(--txt);background:var(--panel2)}
+  .step .n{font-family:'IBM Plex Mono',monospace;font-size:11px;width:20px;height:20px;border-radius:50%;background:var(--bg2);display:inline-flex;align-items:center;justify-content:center;color:var(--dim)}
+  .step.on .n{background:var(--blu);color:#fff}
+  .step.disabled{opacity:.5;cursor:not-allowed}
+  .panel{display:none;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:6px}
+  .panel.on{display:block}
+  h2{font-size:15px;margin:0 0 4px}.sub{font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.5}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+  .fld{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:9px 11px}
+  .fld label{display:block;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+  .fld input,.fld select{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:7px;color:var(--txt);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:6px 8px}
+  .fld .two{display:flex;gap:6px}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--mut);margin:4px 0}
+  .chk input{cursor:pointer}
+  .btn{background:var(--blu);border:none;color:#fff;font-family:'Sora';font-weight:700;font-size:13px;padding:9px 16px;border-radius:9px;cursor:pointer}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:var(--panel2);color:var(--mut);border:1px solid var(--line2)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  .pill{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px}
+  .pill.g{background:var(--grn-d);color:var(--grn)}.pill.a{background:rgba(245,185,74,.14);color:var(--amber)}
+  .pill.b{background:rgba(77,124,254,.14);color:var(--blu)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px;margin:12px 0}
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
+  .card .k{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--dim)}
+  .card .v{font-family:'IBM Plex Mono',monospace;font-size:19px;font-weight:700;margin-top:4px;line-height:1}
+  .pos{color:var(--grn)}.neg{color:var(--red)}
+  table{border-collapse:collapse;width:100%;margin-top:8px}
+  th{font-family:'Sora';font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);text-align:right;padding:6px 9px;background:var(--panel2);border-bottom:1px solid var(--line2);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:6px 9px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;white-space:nowrap}
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+  .empty{padding:26px;text-align:center;color:var(--dim)}
+  .chartwrap{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--bg2);margin:12px 0}
+  .legend{display:flex;gap:16px;font-size:11px;color:var(--mut);margin-top:6px}
+  .legend .sw{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  @media(max-width:640px){.wrap{padding:10px 12px 32px}.card .v{font-size:16px}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div><div class="logo">V12 <b>Basket Builder</b></div><div class="tag">Rotation baskets · momentum + gates + honest backtest</div></div>
+    <div class="spacer"></div>
+    <a class="backlink" href="/dashboard">&#8592; V8 Dashboard</a>
+  </header>
+
+  <div class="steps" id="steps"></div>
+
+  <!-- STEP 1 UNIVERSE -->
+  <div class="panel" id="p0">
+    <h2>1 · Universe</h2>
+    <div class="sub">Screen the stock pool. Filters reuse the Scorr vocabulary (GVM, segments, fundamentals). BFSI rule (D/E &amp; interest-coverage never screened for financials) is enforced server-side.</div>
+    <div class="grid">
+      <div class="fld"><label>GVM score (min / max)</label><div class="two"><input id="u_gvm_min" type="number" placeholder="min"><input id="u_gvm_max" type="number" placeholder="max"></div></div>
+      <div class="fld"><label>Mcap rank (min / max)</label><div class="two"><input id="u_mcaprank_min" type="number" placeholder="1"><input id="u_mcaprank_max" type="number" placeholder="500"></div></div>
+      <div class="fld"><label>ROE % (min)</label><input id="u_roe_min" type="number" placeholder="min"></div>
+      <div class="fld"><label>ROCE % (min)</label><input id="u_roce_min" type="number" placeholder="min"></div>
+      <div class="fld"><label>D/E (max) · BFSI-excluded</label><input id="u_de_max" type="number" placeholder="max"></div>
+      <div class="fld"><label>Profit growth 3y % (min)</label><input id="u_pg3_min" type="number" placeholder="min"></div>
+      <div class="fld"><label>Promoter holding % (min)</label><input id="u_promoter_min" type="number" placeholder="min"></div>
+      <div class="fld"><label>Segment (contains)</label><input id="u_segment" type="text" placeholder="e.g. IT - Large"></div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" onclick="previewUniverse()">Preview universe</button>
+      <span id="u_result" class="pill b" style="display:none"></span>
+      <span id="u_bfsi" class="pill a" style="display:none">BFSI excluded</span>
+    </div>
+    <div class="row"><button class="btn" onclick="go(1)">Next: Entry &rarr;</button></div>
+  </div>
+
+  <!-- STEP 2 ENTRY -->
+  <div class="panel" id="p1">
+    <h2>2 · Entry — Momentum rank</h2>
+    <div class="sub">Rank the universe by ROC momentum and hold the top names. RSI / EMA gates are optional.</div>
+    <div class="grid">
+      <div class="fld"><label>ROC lookback</label><select id="e_roc"><option>1M</option><option selected>3M</option><option>6M</option><option>12M</option></select></div>
+      <div class="fld"><label>Hold top X</label><input id="e_topx" type="number" value="10"></div>
+      <div class="fld"><label>Min stocks</label><input id="e_min" type="number" value="5"></div>
+      <div class="fld"><label>Max stocks</label><input id="e_max" type="number" value="20"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="e_rsi_on"> RSI gate</label>
+    <div class="grid" id="e_rsi_box" style="display:none">
+      <div class="fld"><label>Timeframe</label><select id="e_rsi_tf"><option>D</option><option>W</option><option>M</option></select></div>
+      <div class="fld"><label>Period</label><input id="e_rsi_p" type="number" value="14"></div>
+      <div class="fld"><label>Threshold</label><input id="e_rsi_t" type="number" value="50"></div>
+      <div class="fld"><label>Direction</label><select id="e_rsi_dir"><option value="above">Enter above</option><option value="below">Enter below</option></select></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="e_ema_on"> EMA gate (ema1 &gt; ema2 &gt; ema3)</label>
+    <div class="grid" id="e_ema_box" style="display:none">
+      <div class="fld"><label>Timeframe</label><select id="e_ema_tf"><option>D</option><option>W</option><option>M</option></select></div>
+      <div class="fld"><label>EMA 1</label><input id="e_ema1" type="number" value="20"></div>
+      <div class="fld"><label>EMA 2</label><input id="e_ema2" type="number" value="50"></div>
+      <div class="fld"><label>EMA 3 (optional)</label><input id="e_ema3" type="number" placeholder=""></div>
+    </div>
+    <div class="row"><button class="btn ghost" onclick="go(0)">&larr; Back</button><button class="btn" onclick="go(2)">Next: Exit &rarr;</button></div>
+  </div>
+
+  <!-- STEP 3 EXIT -->
+  <div class="panel" id="p2">
+    <h2>3 · Exit rules <span class="pill b">all optional</span></h2>
+    <div class="sub">Evaluated at each rebalance (EOD). Any combination.</div>
+    <div class="grid">
+      <div class="fld"><label>Trailing peak fall % (SL)</label><input id="x_trail" type="number" placeholder="e.g. 15"></div>
+      <div class="fld"><label>Rank-fall exit (drops below Y)</label><input id="x_rank" type="number" placeholder=">= top X"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="x_gate"> Gate mirror — exit if the RSI/EMA entry gate flips</label>
+    <div class="row"><button class="btn ghost" onclick="go(1)">&larr; Back</button><button class="btn" onclick="go(3)">Next: Backtest &rarr;</button></div>
+  </div>
+
+  <!-- STEP 4 BACKTEST -->
+  <div class="panel" id="p3">
+    <h2>4 · Backtest</h2>
+    <div class="sub">Portfolio walk on 5-year EOD prices. Rebalance on schedule, equal-weight, with your costs. Honest: daily-mark drawdown, yearly split, min-n badge.</div>
+    <div class="grid">
+      <div class="fld"><label>Rebalance</label><select id="b_freq"><option>weekly</option><option selected>monthly</option><option>quarterly</option></select></div>
+      <div class="fld"><label>Benchmark</label><select id="b_bench"><option>NIFTY50</option><option>NIFTY100</option><option>NIFTY200</option><option>NIFTY500</option></select></div>
+      <div class="fld"><label>Txn cost %</label><input id="b_txn" type="number" value="0.1"></div>
+      <div class="fld"><label>Slippage %</label><input id="b_slip" type="number" value="0.1"></div>
+      <div class="fld"><label>Start (YYYY-MM-DD)</label><input id="b_start" type="text" placeholder="auto -5y"></div>
+      <div class="fld"><label>End (YYYY-MM-DD)</label><input id="b_end" type="text" placeholder="today"></div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" onclick="go(2)">&larr; Back</button>
+      <button class="btn" id="runBtn" onclick="runBacktest()">Run backtest</button>
+      <span id="b_status" style="font-size:12px;color:var(--mut)"></span>
+    </div>
+    <div id="results"></div>
+  </div>
+
+  <!-- STEP 5 DEPLOY (P2) -->
+  <div class="panel" id="p4">
+    <h2>5 · Deploy <span class="pill a">P2</span></h2>
+    <div class="sub">One-click paper deploy (own book, journal-separated from V8/QB) ships in Phase 2. Build &amp; backtest freely now.</div>
+    <div class="empty">Paper deploy is disabled in P1.</div>
+  </div>
+</div>
+
+<script>
+const API=location.origin;
+const STEP_NAMES=['Universe','Entry','Exit','Backtest','Deploy'];
+let STEP=0, LAST=null;
+function renderSteps(){
+  document.getElementById('steps').innerHTML=STEP_NAMES.map((s,i)=>
+    `<div class="step ${i===STEP?'on':''} ${i===4?'disabled':''}" onclick="${i===4?'':'go('+i+')'}"><span class="n">${i+1}</span>${s}</div>`).join('');
+}
+function go(i){STEP=i;renderSteps();for(let k=0;k<5;k++){const el=document.getElementById('p'+k);if(el)el.classList.toggle('on',k===i);}window.scrollTo({top:0,behavior:'smooth'});}
+document.getElementById('e_rsi_on').addEventListener('change',e=>document.getElementById('e_rsi_box').style.display=e.target.checked?'grid':'none');
+document.getElementById('e_ema_on').addEventListener('change',e=>document.getElementById('e_ema_box').style.display=e.target.checked?'grid':'none');
+
+function num(id){const v=document.getElementById(id).value;return v===''?null:parseFloat(v);}
+function rng(minId,maxId){const o={};const a=num(minId),b=num(maxId);if(a!=null)o.min=a;if(b!=null)o.max=b;return Object.keys(o).length?o:null;}
+
+function buildFilters(){
+  const f={};
+  const gvm=rng('u_gvm_min','u_gvm_max');if(gvm)f.gvm=gvm;
+  const mr=rng('u_mcaprank_min','u_mcaprank_max');if(mr)f.mcap_rank=mr;
+  if(num('u_roe_min')!=null)f.roe={min:num('u_roe_min')};
+  if(num('u_roce_min')!=null)f.roce={min:num('u_roce_min')};
+  if(num('u_de_max')!=null)f.de={max:num('u_de_max')};
+  if(num('u_pg3_min')!=null)f.profit_growth_3y={min:num('u_pg3_min')};
+  if(num('u_promoter_min')!=null)f.promoter={min:num('u_promoter_min')};
+  const seg=document.getElementById('u_segment').value.trim();
+  return {filters:f, segment:seg};
+}
+
+async function previewUniverse(){
+  const {filters,segment}=buildFilters();
+  const body={filters};if(segment)body.filters.segments=[segment];
+  const el=document.getElementById('u_result');el.style.display='inline-block';el.textContent='Previewing…';
+  try{
+    const r=await fetch(API+'/api/v12/universe/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filters:body.filters})});
+    const j=await r.json();
+    if(j.error){el.textContent=j.error;return;}
+    el.textContent=j.total+' stocks';
+    document.getElementById('u_bfsi').style.display=j.bfsi_excluded?'inline-block':'none';
+  }catch(e){el.textContent='error';}
+}
+
+function buildDefinition(){
+  const {filters,segment}=buildFilters();
+  if(segment)filters.segments=[segment];
+  const entry={roc_lookback:document.getElementById('e_roc').value,top_x:parseInt(document.getElementById('e_topx').value||'10'),
+    min_stocks:parseInt(document.getElementById('e_min').value||'5'),max_stocks:parseInt(document.getElementById('e_max').value||'20')};
+  if(document.getElementById('e_rsi_on').checked)entry.rsi_gate={tf:document.getElementById('e_rsi_tf').value,period:parseInt(document.getElementById('e_rsi_p').value||'14'),threshold:parseFloat(document.getElementById('e_rsi_t').value||'50'),dir:document.getElementById('e_rsi_dir').value};
+  if(document.getElementById('e_ema_on').checked){entry.ema_gate={tf:document.getElementById('e_ema_tf').value,ema1:parseInt(document.getElementById('e_ema1').value||'20'),ema2:parseInt(document.getElementById('e_ema2').value||'50')};const e3=num('e_ema3');if(e3!=null)entry.ema_gate.ema3=parseInt(e3);}
+  const exit={};const tr=num('x_trail');if(tr!=null)exit.trailing_peak_pct=tr;const rf=num('x_rank');if(rf!=null)exit.rank_fall_y=parseInt(rf);if(document.getElementById('x_gate').checked)exit.gate_mirror=true;
+  return {meta:{builder:'v12'},universe_ref:{filters},entry,exit,
+    rebalance:{freq:document.getElementById('b_freq').value},
+    costs:{txn_pct:parseFloat(document.getElementById('b_txn').value||'0'),slippage_pct:parseFloat(document.getElementById('b_slip').value||'0')}};
+}
+
+let pollTimer=null;
+async function runBacktest(){
+  const def=buildDefinition();
+  const body={definition:def,benchmark:document.getElementById('b_bench').value};
+  const st=document.getElementById('b_start').value.trim();const en=document.getElementById('b_end').value.trim();
+  if(st)body.start=st;if(en)body.end=en;
+  const stEl=document.getElementById('b_status');const btn=document.getElementById('runBtn');
+  btn.disabled=true;stEl.textContent='Submitting…';document.getElementById('results').innerHTML='';
+  try{
+    const r=await fetch(API+'/api/v12/backtest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j.error){stEl.textContent=j.error+(j.errors?': '+j.errors.join('; '):'');btn.disabled=false;return;}
+    const id=j.backtest_id;stEl.textContent='Running… (backtest #'+id+')';
+    if(pollTimer)clearInterval(pollTimer);
+    pollTimer=setInterval(()=>pollBacktest(id),2500);
+    pollBacktest(id);
+  }catch(e){stEl.textContent='error: '+e.message;btn.disabled=false;}
+}
+async function pollBacktest(id){
+  try{
+    const r=await fetch(API+'/api/v12/backtest/'+id);const j=await r.json();
+    if(j.status==='done'){clearInterval(pollTimer);document.getElementById('runBtn').disabled=false;
+      document.getElementById('b_status').textContent='Done.';renderResults(j.result);}
+    else if(j.status==='error'){clearInterval(pollTimer);document.getElementById('runBtn').disabled=false;
+      document.getElementById('b_status').textContent='Error: '+(j.error||'failed');}
+  }catch(e){}
+}
+
+function sc(v,suffix){if(v==null)return '<span class="nt">--</span>';const c=v>=0?'pos':'neg';return '<span class="'+c+'">'+(v>=0?'+':'')+v+(suffix||'')+'</span>';}
+function card(k,v){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';}
+function svgChart(basket,bench){
+  const W=900,H=240,pad=8;
+  const all=basket.map(p=>p.equity).concat(bench.map(p=>p.equity));
+  const lo=Math.min.apply(null,all),hi=Math.max.apply(null,all);const rng=(hi-lo)||1;
+  const n=basket.length;
+  const path=arr=>arr.map((p,i)=>{const x=pad+i/(n-1)*(W-2*pad);const y=H-pad-((p.equity-lo)/rng)*(H-2*pad);return (i?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);}).join(' ');
+  return '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" style="width:100%;height:240px">'+
+    '<path d="'+path(bench)+'" fill="none" stroke="#5E6B8F" stroke-width="1.5"/>'+
+    '<path d="'+path(basket)+'" fill="none" stroke="#4D7CFE" stroke-width="2"/></svg>';
+}
+function renderResults(res){
+  if(!res){document.getElementById('results').innerHTML='<div class="empty">No result.</div>';return;}
+  if(res.error){document.getElementById('results').innerHTML='<div class="empty">'+res.error+'</div>';return;}
+  const s=res.stats||{};
+  const pit=res.pit_partial?'<span class="pill a" title="Fundamental/GVM filters used the current snapshot; point-in-time GVM (gvm_ft) lands with Phases 2-4">PIT_PARTIAL</span>':'<span class="pill g">PIT exact</span>';
+  const minn=(res.honesty&&res.honesty.min_n_badge)?'<span class="pill a">min-n &lt;50 trades</span>':'';
+  let html='<div class="row" style="margin-top:14px">'+pit+' '+minn+'<span class="pill b">'+res.benchmark+'</span><span class="pill b">'+res.rebalances+' rebalances · '+res.years+'y</span><span class="pill b">'+res.universe_size+' universe</span></div>';
+  html+='<div class="cards">'+
+    card('CAGR',sc(s.cagr_pct,'%'))+card('Absolute',sc(s.absolute_return_pct,'%'))+
+    card('vs '+res.benchmark,sc(s.benchmark_return_pct,'%'))+card('Alpha',sc(s.alpha_pct,'%'))+
+    card('Beta',s.beta==null?'--':s.beta)+card('Max DD',sc(s.max_drawdown_pct,'%'))+
+    card('Sharpe',s.sharpe==null?'--':s.sharpe)+card('Calmar',s.calmar==null?'--':s.calmar)+
+    card('XIRR',sc(s.xirr_pct,'%'))+card('Accuracy',s.accuracy_pct==null?'--':s.accuracy_pct+'%')+
+    card('Trades',s.total_trades)+card('Win/Loss',s.win_trades+' / '+s.loss_trades)+'</div>';
+  html+='<div class="chartwrap">'+svgChart(res.equity_series||[],res.benchmark_series||[])+
+    '<div class="legend"><span><span class="sw" style="background:#4D7CFE"></span>Basket (rebased 100)</span><span><span class="sw" style="background:#5E6B8F"></span>'+res.benchmark+'</span></div></div>';
+  // yearly split
+  if(res.yearly&&res.yearly.length){html+='<h2 style="font-size:13px;margin:14px 0 4px">Yearly split</h2><div class="scroll"><table><thead><tr><th>Year</th><th>Return</th></tr></thead><tbody>'+
+    res.yearly.map(y=>'<tr><td>'+y.year+'</td><td>'+sc(y.return_pct,'%')+'</td></tr>').join('')+'</tbody></table></div>';}
+  // trade log (last 100)
+  const tr=(res.trades||[]).slice(-100).reverse();
+  html+='<h2 style="font-size:13px;margin:14px 0 4px">Trade log <span class="pill b">'+(res.trades||[]).length+'</span></h2>';
+  html+= tr.length? '<div class="scroll"><table><thead><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Entry px</th><th>Exit px</th><th>Return</th></tr></thead><tbody>'+
+    tr.map(t=>'<tr><td>'+t.symbol+'</td><td>'+t.entry_date+'</td><td>'+t.exit_date+'</td><td>'+t.entry_px+'</td><td>'+t.exit_px+'</td><td>'+sc(t.return_pct,'%')+'</td></tr>').join('')+'</tbody></table></div>'
+    : '<div class="empty">No closed trades.</div>';
+  if(res.honesty&&res.honesty.geometry)html+='<div class="sub" style="margin-top:12px">&#9432; '+res.honesty.geometry+'</div>';
+  document.getElementById('results').innerHTML=html;
+}
+renderSteps();go(0);
+</script>
+</body>

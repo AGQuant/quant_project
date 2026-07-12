@@ -173,8 +173,8 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/screener", "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v4scan"}   # cc#392: no-store + theme/logout pills on the registry + scanner
-PROTECTED.add("/v13"); PROTECTED.add("/v4scan")   # cc#392: gate + no-store (kills the stale-cache /v13 bug)
+                     "/v13", "/v4scan", "/v12"}   # cc#392/394: no-store + theme/logout pills
+PROTECTED.add("/v13"); PROTECTED.add("/v4scan"); PROTECTED.add("/v12")   # cc#392/394: gate + no-store
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
 # cc#327 MOBILE_UX_REDEFINE_V1 P1/10: canonical Sora font + shared mobile.css,
@@ -644,6 +644,11 @@ def v13_filter_registry_page():
 def tc_v4_scan_page():
     """cc#387: Trade Check v4 dual-style batch scanner (ranked, 4 cards per stock)."""
     with open("scorr_tc_v4_scan.html", "r", encoding="utf-8") as f: return f.read()
+
+@app.get("/v12", response_class=HTMLResponse)
+def v12_builder_page():
+    """cc#394: V12 Quant Basket Builder — 5-step wizard (universe/entry/exit/backtest/deploy)."""
+    with open("scorr_v12.html", "r", encoding="utf-8") as f: return f.read()
 
 @app.get("/api/health")
 def health(): return {"status": "ok", "version": VERSION}
