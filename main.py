@@ -79,6 +79,7 @@ from fundamentals_scraper import router as fundamentals_scraper_router   # cc#36
 from v13_presets_endpoints import router as v13_presets_router
 from galaxy_endpoints import router as galaxy_router
 from hr_endpoints import router as hr_router   # cc#398 Portfolio Health Report (M1 ingest)
+from hr_report import router as hr_report_router   # cc#398 Portfolio Health Report (M2 report engine)
 import yahoo_ondemand
 import yahoo_index_backfill
 import v8_paper
@@ -103,7 +104,7 @@ from scheduler import _compute_and_store_adr, _compute_and_store_pcr
 # v2.9.52: intraday paper engine wired. v2.9.51: /fpc. v2.9.50: v8_backfill.
 # ============================================================
 
-VERSION = "2.9.62"
+VERSION = "2.9.63"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorr")
@@ -280,7 +281,8 @@ app.include_router(fyers_hist_backfill_router)   # cc#377 Phase B
 app.include_router(fundamentals_scraper_router)   # cc#361 Phase 1 scrape
 app.include_router(v13_presets_router)
 app.include_router(galaxy_router)
-app.include_router(hr_router)   # cc#398 Portfolio Health Report
+app.include_router(hr_router)   # cc#398 Portfolio Health Report (ingest)
+app.include_router(hr_report_router)   # cc#398 Portfolio Health Report (report engine)
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)

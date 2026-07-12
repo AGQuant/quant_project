@@ -152,7 +152,7 @@ def _resolve(cur, holdings):
     return resolved
 
 
-@router.post("/api/hr/upload")
+@router.post("/api/health/upload")
 async def health_upload(file: Optional[UploadFile] = File(None), text: Optional[str] = Form(None)):
     """Parse an uploaded holdings file (xlsx/csv/pdf) or pasted text, resolve symbols, return a grid."""
     warning = None
@@ -185,7 +185,7 @@ class HRSaveReq(BaseModel):
     holdings: List[HRHolding]
 
 
-@router.post("/api/hr/save")
+@router.post("/api/health/save")
 def health_save(body: HRSaveReq):
     """Persist a confirmed holdings set -> hr_portfolios + hr_holdings; returns the portfolio id."""
     valid = [h for h in body.holdings if h.symbol]
@@ -203,7 +203,7 @@ def health_save(body: HRSaveReq):
     return {"portfolio_id": pid, "saved": len(valid), "name": body.name}
 
 
-@router.get("/api/hr/portfolio/{pid}")
+@router.get("/api/health/portfolio/{pid}")
 def health_portfolio(pid: int):
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, name, source, created_at FROM hr_portfolios WHERE id=%s", (pid,))
