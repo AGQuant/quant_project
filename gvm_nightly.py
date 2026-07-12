@@ -407,6 +407,31 @@ def _stock_dict(row, peer_avgs):
     }
 
 
+def sync_gvm_cache(cur) -> Dict:
+    """cc#406: rebuild gvm_cache + peer_averages from the canonical gvm_scores (latest), and stamp
+    cache_metadata fresh. The cache feeds /api/scorr/query (Max, CIO chips, query library); it lost
+    its writer when GVM moved to the gvm_scores/gvm_history model, so it froze on 08-Jun. Runs as a
+    post-step of recompute_gvm (same cursor/txn) and one-shot repair. No GVM math — pure projection."""
+    cur.execute("DELETE FROM gvm_cache")
+    cur.execute("""INSERT INTO gvm_cache (symbol, gvm_score, growth, value, momentum, segment, last_updated)
+                   SELECT symbol, gvm_score, g_score, v_score, m_score, segment, NOW() FROM gvm_scores""")
+    cur.execute("SELECT COUNT(*) FROM gvm_cache"); n_cache = cur.fetchone()[0]
+
+    cur.execute("DELETE FROM peer_averages")
+    cur.execute("""INSERT INTO peer_averages (segment, avg_gvm, avg_growth, avg_value, avg_momentum, stock_count, last_updated)
+                   SELECT segment, ROUND(AVG(gvm_score)::numeric,2), ROUND(AVG(g_score)::numeric,2),
+                          ROUND(AVG(v_score)::numeric,2), ROUND(AVG(m_score)::numeric,2), COUNT(*), NOW()
+                   FROM gvm_scores WHERE segment IS NOT NULL GROUP BY segment""")
+    cur.execute("SELECT COUNT(*) FROM peer_averages"); n_peers = cur.fetchone()[0]
+
+    for k, cnt in (("gvm_cache", n_cache), ("peer_averages", n_peers)):
+        cur.execute("""INSERT INTO cache_metadata (key, last_sync, stock_count, status)
+                       VALUES (%s, NOW(), %s, 'ok')
+                       ON CONFLICT (key) DO UPDATE SET last_sync=NOW(), stock_count=EXCLUDED.stock_count, status='ok'""",
+                    (k, cnt))
+    return {"gvm_cache": n_cache, "peer_averages": n_peers}
+
+
 def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = True) -> Dict:
     target_date = target_date or date.today()
 
@@ -476,6 +501,9 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
                 (symbol, company_name, segment, price, g_score, v_score, m_score, gvm_score, verdict, punchline, market_cap, score_date, upside_raw)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, latest_rows)
+        # cc#406: keep gvm_cache + peer_averages in lock-step with gvm_scores (same txn) so the
+        # Max/query cache can never drift a month behind again.
+        cache_result = sync_gvm_cache(cur)
         conn.commit()
 
     # 3. Recompute sector_ratings from the fresh gvm_scores — always runs after stock scoring.
@@ -486,6 +514,7 @@ def recompute_gvm(target_date: Optional[date] = None, refresh_momentum: bool = T
         "scored": len(history_rows), "errors": errors, "m_missing": m_missing,
         "momentum": mom_result,
         "sector_ratings": sector_result,
+        "cache_sync": cache_result,
         "history_table": "gvm_history (appended)", "latest_table": "gvm_scores (replaced)",
     }
 

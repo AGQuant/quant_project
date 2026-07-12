@@ -767,6 +767,19 @@ def build_health_report() -> dict:
                     else: add_check("data_feeds", {"check": label, "value": "NO DATA", "status": "fail"})
                 except Exception as e: add_check("data_feeds", {"check": label, "value": str(e), "status": "fail"})
 
+            # cc#406: gvm_cache staleness — the Max/query cache must track gvm_scores (>2d warn, >7d fail)
+            try:
+                cur.execute("SELECT last_sync, status FROM cache_metadata WHERE key='gvm_cache'")
+                cm = cur.fetchone()
+                if cm and cm[0]:
+                    cache_age = (now - cm[0]).days if hasattr(cm[0], "date") else (today - cm[0]).days
+                    add_check("data_feeds", _check(f"{cm[0]} ({cache_age}d ago, {cm[1]})", "GVM cache sync",
+                        lambda v, a=cache_age: a <= 2, lambda v, a=cache_age: a <= 7))
+                else:
+                    add_check("data_feeds", {"check": "GVM cache sync", "value": "never synced", "status": "fail"})
+            except Exception as e:
+                add_check("data_feeds", {"check": "GVM cache sync", "value": str(e), "status": "fail"})
+
             report["sections"]["content_refresh"] = {"checks": [], "grade": "A"}
             add_check("content_refresh", _check(_get_config("takeaway_refresh_due","false"), "Takeaway refresh due", lambda v: v=="false", lambda v: True))
             add_check("content_refresh", _check(_get_config("overview_refresh_due","false"), "Overview refresh due", lambda v: v=="false", lambda v: True))
