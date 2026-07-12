@@ -1961,7 +1961,12 @@ function renderGlobalIndices(data){
     if(qd){const q=String(qd).split('-');if(q.length===3)return q[2]+' '+MON[parseInt(q[1],10)-1];}
     return'';
   };
-  const tile=r=>{const clr=Number(r.chg_pct)>=0?'var(--grn)':'var(--red)';
+  const tile=r=>{
+    // cc#428: volatility (VIX) tiles invert — a DECLINE = falling fear = calm = bullish = GREEN,
+    // a RISE = rising fear = RED. All other tiles keep the natural sign colouring.
+    const isVol=r.category==='volatility';const cp=Number(r.chg_pct);
+    const clr=isVol?(cp<=0?'var(--grn)':'var(--red)'):(cp>=0?'var(--grn)':'var(--red)');
+    const chgTip=isVol?' title="VIX down = falling fear = calm = bullish (green); up = rising fear = red"':'';
     // cc#349: three honest states per tile — LIVE (green dot, bar <=15m), PREV CLOSE (had an
     // intraday bar but it aged out: market closed / feed frozen), or DAILY (no intraday bar at all).
     const live=!!r.live, stale=!live&&!!r.ts;
@@ -1972,7 +1977,7 @@ function renderGlobalIndices(data){
     return`<div style="background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px">
       <div style="font-size:12px;color:var(--dim);font-family:Sora;margin-bottom:6px">${r.name}${liveDot}</div>
       <div style="font-size:20px;font-weight:700;font-family:'Space Mono'">${fmtPrice(r.price)}</div>
-      <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px">${sign(r.chg_pct,2)}%</div>
+      <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px"${chgTip}>${sign(r.chg_pct,2)}%</div>
       <div style="font-size:9px;color:var(--dim);font-family:'Space Mono';margin-top:4px">${stamp}</div></div>`;};
   const sections=GROUPS.map(([key,label])=>{
     const items=rows.filter(r=>inGroup(r,key));if(!items.length)return'';
@@ -2049,7 +2054,14 @@ function _pcDayChg(pts,vals){
 // the async chart loaders) blanked on every re-render -> the first-load/refresh flicker.
 const _metricInlineCache={};
 function _setMetricInline(inlineId,last,dc){
-  const html=last==null?'':`${last.toFixed(2)}${dc==null?'':` <span class="${cls(dc)}">${sign(dc,2)}%</span>`}`;
+  // cc#428: colour encodes MARKET MEANING, not sign. India VIX: DOWN = falling fear = calm =
+  // bullish = GREEN, UP = RED (inverted). NIFTY/BankNifty PCR: DOWN = complacency = bearish = RED,
+  // UP = hedging/fear building = GREEN (natural sign). Tooltip on the % explains the logic.
+  const isVix=/vix/i.test(inlineId);
+  const colorCls=dc==null?'':(isVix?(dc<0?'pos':dc>0?'neg':''):cls(dc));
+  const tip=isVix?'VIX down = falling fear = calm = bullish (green); up = rising fear = red'
+                 :'PCR down = complacency = bearish (red); up = hedging / fear building = green';
+  const html=last==null?'':`${last.toFixed(2)}${dc==null?'':` <span class="${colorCls}" title="${tip}">${sign(dc,2)}%</span>`}`;
   _metricInlineCache[inlineId]=html;                    // remember so renderMood can re-inject it
   const el=document.getElementById(inlineId);if(el)el.innerHTML=html;
 }
