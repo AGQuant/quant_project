@@ -16,10 +16,12 @@ NIFTYBEES symbol: NSE:NIFTYBEES-EQ (Yahoo: NIFTYBEES.NS)
 1 unit ≈ 1/10th of Nifty 50 value.
 """
 
+import calendar
+import json
 import logging
 import time
 import urllib.parse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Dict, List, Optional
 
 import requests
@@ -257,3 +259,85 @@ def fix_basket_overdeployment(conn, basket_name: str) -> Dict:
         "warning":           warning,
         "run_at":            now.strftime("%Y-%m-%d %H:%M IST"),
     }
+
+
+def _next_rebalance_date(cur_date: date, freq: str) -> date:
+    """cc#439: advance a rebalance date by its cadence (monthly=+1mo, quarterly=+3mo), clamping the
+    day to the target month's length."""
+    months = 3 if (freq or "").lower().startswith("quarter") else 1
+    y, m = cur_date.year, cur_date.month + months
+    while m > 12:
+        m -= 12; y += 1
+    day = min(cur_date.day, calendar.monthrange(y, m)[1])
+    return date(y, m, day)
+
+
+def run_scheduled_rebalance(conn, basket_name: str) -> Dict:
+    """cc#439 fix_1: scheduled rebalance runner for one basket. SAFE by design — it processes the
+    EXIT + cadence + bookkeeping side of a rebalance and never auto-buys new stocks on a guessed
+    screen (the founder's GVM/ret_1y entry methodology is not encoded here, so auto-entering picks
+    into the ₹5L paper book would be unsafe). Steps:
+      1. run the EOD checker (mark-to-market + HS1/HS2 hard-stop exits),
+      2. re-fix allocation + park the NIFTYBEES cash residual (established convention),
+      3. write a quant_rebalance_log row (exits, held count, portfolio value, entry-review note),
+      4. advance next_rebalance by the basket's rebalance_freq (kept in the future).
+    New-entry selection stays a founder-confirmed step; the log row surfaces the cap + ret_1y rule
+    so the qualifying picks can be reviewed at the surfaced rebalance."""
+    import qb_eod_checker
+    today = datetime.now(IST).date()
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT capital, max_stocks, rebalance_freq, next_rebalance "
+                    "FROM quant_basket_registry WHERE basket_name=%s", (basket_name,))
+        row = cur.fetchone()
+    if not row:
+        return {"error": f"{basket_name} not in registry"}
+    capital, max_stocks, freq, next_reb = float(row[0]), int(row[1]), row[2], row[3]
+
+    # 1) exits (marks + HS1/HS2)
+    eod = qb_eod_checker.run_eod_checker(conn, basket_name=basket_name)
+    hs1 = eod.get("hard_stop_1_exits", []) or []
+    hs2 = eod.get("hard_stop_2_exits", []) or []
+    exits = len(hs1) + len(hs2)
+
+    # 2) allocation fix + NIFTYBEES residual (established convention)
+    alloc = None
+    try:
+        alloc = fix_basket_overdeployment(conn, basket_name)
+    except Exception as e:
+        log.warning(f"run_scheduled_rebalance {basket_name}: alloc fix failed: {e}")
+
+    # 3) held count + portfolio value after exits
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*), COALESCE(SUM(current_value),0) "
+                    "FROM quant_paper_positions WHERE basket_name=%s AND status='open'", (basket_name,))
+        hc = cur.fetchone()
+    held = int(hc[0] or 0); pv = float(hc[1] or 0)
+
+    # 4) advance next_rebalance, keeping it strictly in the future even if long overdue
+    base = next_reb or today
+    new_next = _next_rebalance_date(base, freq)
+    while new_next <= today:
+        new_next = _next_rebalance_date(new_next, freq)
+
+    actions = {
+        "exits_hs1": hs1, "exits_hs2": hs2, "held_after_exits": held,
+        "cap_max_stocks": max_stocks, "entry_priority": "highest ret_1y (1-year return)",
+        "entry_note": (f"Exits + cadence processed. New-entry selection (top {max_stocks} by GVM, "
+                       f">{max_stocks} candidates broken by highest ret_1y) is a founder-confirmed step "
+                       f"— not auto-bought into the ₹5L book here."),
+        "was_due": str(base), "advanced_to": str(new_next),
+        "alloc_residual": (alloc or {}).get("residual"),
+    }
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO quant_rebalance_log "
+                    "(basket_name, rebalance_date, stocks_in, stocks_out, stocks_held, "
+                    " total_portfolio_value, actions) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (basket_name, today, 0, exits, held, pv, json.dumps(actions)))
+        cur.execute("UPDATE quant_basket_registry SET next_rebalance=%s, updated_at=NOW() "
+                    "WHERE basket_name=%s", (new_next, basket_name))
+    conn.commit()
+
+    return {"status": "ok", "basket": basket_name, "exits": exits, "held": held,
+            "portfolio_value": pv, "was_due": str(base), "advanced_to": str(new_next),
+            "cap_max_stocks": max_stocks}

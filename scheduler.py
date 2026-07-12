@@ -989,16 +989,35 @@ def _check_pivots_health():
         _log_alert("pivots_watchdog_error", f"pivot watchdog failed for {today}: {e}")
 
 def _bg_qb_eod():
+    # cc#439 fix_2: this job used to call qb_eod_checker.run_eod_check(conn) — a function that does
+    # NOT exist (the real one is run_eod_checker(conn, basket_name=...)) — so it threw AttributeError
+    # every day (swallowed), which is why QB exit alerts (HS1/HS2) were NEVER processed. Now it runs
+    # the correct checker for EVERY active basket, and fix_1: when a basket's next_rebalance is due it
+    # runs the scheduled rebalance (exits + residual + advance next_rebalance + log). Trading-day guarded.
     global _qb_eod_ran_today, _qb_eod_running
     today = _ist_now().date()
     if _qb_eod_ran_today == today or _qb_eod_running: return
+    if not _is_trading_day(today): return
     _qb_eod_running = True
     try:
-        import qb_eod_checker
+        import qb_eod_checker, qb_rebalance
         with _conn() as conn:
-            result = qb_eod_checker.run_eod_check(conn)
-            _log_health(conn, "qb_eod", {"checked": result.get("checked")})  # cc#255
-        log.info(f"qb_eod: {result.get('checked')} checked")
+            with conn.cursor() as cur:
+                cur.execute("SELECT basket_name, next_rebalance FROM quant_basket_registry "
+                            "WHERE is_active=TRUE ORDER BY basket_name")
+                baskets = [(r[0], r[1]) for r in cur.fetchall()]
+            checked = 0; rebalanced = []
+            for name, next_reb in baskets:
+                try:
+                    if next_reb and next_reb <= today:
+                        qb_rebalance.run_scheduled_rebalance(conn, name)
+                        rebalanced.append(name); checked += 1
+                    else:
+                        qb_eod_checker.run_eod_checker(conn, basket_name=name); checked += 1
+                except Exception as e:
+                    log.error(f"qb_eod {name}: {e}")
+            _log_health(conn, "qb_eod", {"checked": checked, "rebalanced": rebalanced})  # cc#255
+        log.info(f"qb_eod: {checked} baskets checked, rebalanced={rebalanced}")
         _qb_eod_ran_today = today
     except Exception as e: log.error(f"qb_eod: {e}")
     finally: _qb_eod_running = False

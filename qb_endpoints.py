@@ -83,6 +83,33 @@ async def qb_mark_intraday_now(x_admin_token: Optional[str] = Header(None)):
         return qb_eod_checker.qb_intraday_mark(conn)
 
 
+@router.post("/rebalance_now")
+def qb_rebalance_now(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
+    """cc#439: run the scheduled rebalance for ONE basket (exits + NIFTYBEES residual + advance
+    next_rebalance + log). New-stock entries stay a founder-confirmed step (see run_scheduled_rebalance)."""
+    _check_admin(x_admin_token)
+    with _conn() as conn:
+        return qb_rebalance.run_scheduled_rebalance(conn, basket_name=basket_name)
+
+
+@router.post("/rebalance_due")
+def qb_rebalance_due(x_admin_token: Optional[str] = Header(None)):
+    """cc#439: run the scheduled rebalance for every ACTIVE basket whose next_rebalance is due —
+    the founder-approved overdue 06-Jul large_cap + mid_cap catch-up runs here (also runs nightly
+    via scheduler._bg_qb_eod on trading days)."""
+    _check_admin(x_admin_token)
+    out = []
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT basket_name FROM quant_basket_registry "
+                        "WHERE is_active=TRUE AND next_rebalance IS NOT NULL "
+                        "AND next_rebalance <= CURRENT_DATE ORDER BY basket_name")
+            due = [r[0] for r in cur.fetchall()]
+        for b in due:
+            out.append(qb_rebalance.run_scheduled_rebalance(conn, basket_name=b))
+    return {"due": len(out), "results": out}
+
+
 @router.post("/fix_allocations")
 def qb_fix_allocations(basket_name: str = "large_cap", x_admin_token: Optional[str] = Header(None)):
     """Fix allocation column + add NIFTYBEES residual for one basket."""
