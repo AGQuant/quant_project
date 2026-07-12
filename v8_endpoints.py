@@ -504,6 +504,20 @@ def _ist_today_sql() -> str:
     return "(NOW() AT TIME ZONE 'Asia/Kolkata')::date"   # cc#325: closed_at/exit_ts are naive IST
 
 
+def _last_session_sql(source: str = "fyers_eq", timeframe: str = "5m") -> str:
+    """cc#446 fix_3: the ONE shared 'as-of last tick' anchor. Returns a SQL scalar subquery that
+    yields the most recent trading-session date present in intraday_prices for the given feed.
+    Every read surface that must FREEZE at the last available session off-market (weekend / holiday
+    / after 15:30 -> last session's 15:30 final, per the cc#424 convention) routes through this, so
+    the class of "blank/zero field off-market" bug dies by default and every FUTURE field inherits
+    freeze-at-last-tick for free. During live hours MAX(ts::date) is today, so the same expression
+    also resolves the live session — one anchor, both regimes. `source`/`timeframe` are internal
+    constants (never user input), so string interpolation here is safe.
+    Usage: cur.execute(f"... WHERE ts::date = {_last_session_sql()} ...", params)."""
+    return (f"(SELECT MAX(ts::date) FROM intraday_prices "
+            f"WHERE source='{source}' AND timeframe='{timeframe}')")
+
+
 def _load_closed_today(basket: str) -> set:
     """Symbols on this basket's side whose paper trade CLOSED today (IST) — spent for today.
     Side-scoped, not basket-scoped: the engine's traded_today exclusion is symbol+side."""
@@ -2104,7 +2118,11 @@ def funnel_detail(basket: str):
             all_rows = _basket_universe(cur)
             pivots   = _basket_pivots(cur)
             cmp_map  = _basket_cmp(cur)
-            cur.execute("SELECT COUNT(*) FROM v8_qualified WHERE basket=%s AND signal_date=CURRENT_DATE", (basket,))
+            # cc#446 fix_2: anchor to the last session the basket qualified (freeze-at-last-tick), so
+            # the qualified/final counts don't collapse to 0 off-market while the sibling threshold
+            # (below) already shows the last session. MAX(signal_date)=today during live hours.
+            cur.execute("""SELECT COUNT(*) FROM v8_qualified WHERE basket=%s
+                AND signal_date=(SELECT MAX(signal_date) FROM v8_qualified WHERE basket=%s)""", (basket, basket))
             score_qualified = int(cur.fetchone()[0])
             cur.execute("""SELECT counts->>'_score_threshold' FROM v8_funnel_counts
                 WHERE basket=%s ORDER BY score_date DESC, computed_at DESC LIMIT 1""", (basket,))  # cc#424: last-session as-of
@@ -2168,8 +2186,8 @@ def funnel_detail(basket: str):
                 LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
                     AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
                 LEFT JOIN cmp_prices c ON c.symbol=q.symbol
-                WHERE q.basket=%s AND q.signal_date=CURRENT_DATE
-            """, (basket,))
+                WHERE q.basket=%s AND q.signal_date=(SELECT MAX(signal_date) FROM v8_qualified WHERE basket=q.basket)
+            """, (basket,))   # cc#446 fix_2: anchor pivot-room rows to last session (freeze-at-last-tick)
             sq_rows = cur.fetchall()
         pivot_pass = sum(1 for _, pp, r1, s1, cmp in sq_rows if pp and _pivot_room_ok(side, cmp, pp, r1, s1))
         for st in stages:
@@ -2368,10 +2386,10 @@ def so_stock_passcount():
             nifty_ok  = nifty_rsi is not None and nifty_rsi <= 45.0
             syms = [r["symbol"] for r in all_rows]
             sess_high, prev_high = {}, {}
-            cur.execute("""SELECT symbol, MAX(high) FROM intraday_prices WHERE source='fyers_eq'
+            cur.execute(f"""SELECT symbol, MAX(high) FROM intraday_prices WHERE source='fyers_eq'
                 AND timeframe='5m'
-                AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m')
-                AND symbol=ANY(%s) GROUP BY symbol""", (syms,))   # cc#424: anchor session high to last session off-market
+                AND ts::date={_last_session_sql()}
+                AND symbol=ANY(%s) GROUP BY symbol""", (syms,))   # cc#424/#446: anchor session high to last session off-market
             for sym, h in cur.fetchall():
                 if h is not None: sess_high[sym] = float(h)
             cur.execute("""SELECT DISTINCT ON (symbol) symbol, high FROM raw_prices
@@ -2427,9 +2445,9 @@ def so_stock_detail(symbol: str):
             cur.execute("SELECT cmp FROM cmp_prices WHERE symbol=%s AND cmp IS NOT NULL", (sym,))
             cr = cur.fetchone()
             cmp = float(cr[0]) if cr else None
-            cur.execute("""SELECT MAX(high) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m'
-                AND ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m')
-                AND symbol=%s""", (sym,))   # cc#424: anchor session high to last session off-market
+            cur.execute(f"""SELECT MAX(high) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m'
+                AND ts::date={_last_session_sql()}
+                AND symbol=%s""", (sym,))   # cc#424/#446: anchor session high to last session off-market
             sh = cur.fetchone()[0]; sh = float(sh) if sh is not None else None
             cur.execute("""SELECT high FROM raw_prices WHERE symbol=%s AND price_date < CURRENT_DATE
                 ORDER BY price_date DESC LIMIT 1""", (sym,))
@@ -2494,8 +2512,10 @@ def _s1b_funnel_stages():
                     (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
                     (array_agg(close ORDER BY ts DESC))[1] AS live_close,
                     MIN(low) AS today_low
-                -- cc#424: anchor session bars to the last session off-market (frozen-15:30) so the
-                -- s1b funnel isn't blank on weekends/holidays; live day still resolves to today.
+                -- cc#424/#446: anchor session bars to the last session off-market (frozen-15:30) so the
+                -- s1b funnel isn't blank on weekends/holidays; live day still resolves to today. The
+                -- subquery below is the canonical _last_session_sql() anchor (kept inline here to avoid
+                -- an f-string conversion of this large CTE; identical output).
                 FROM intraday_prices WHERE ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m') AND source='fyers_eq' GROUP BY symbol
             ),
             hist AS (
@@ -2656,8 +2676,9 @@ def s1b_stock_passcount():
                         (array_agg(open  ORDER BY ts ASC ))[1] AS day_open,
                         (array_agg(close ORDER BY ts DESC))[1] AS live_close,
                         MIN(low) AS today_low
-                    -- cc#424: anchor session bars to the last session off-market (frozen-15:30) so the
-                    -- s1b pass grid isn't blank on weekends/holidays; live day resolves to today.
+                    -- cc#424/#446: anchor session bars to the last session off-market (frozen-15:30) so the
+                    -- s1b pass grid isn't blank on weekends/holidays; live day resolves to today. Canonical
+                    -- _last_session_sql() anchor kept inline (large CTE; identical output).
                     FROM intraday_prices WHERE ts::date=(SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m') AND source='fyers_eq' GROUP BY symbol
                 ),
                 hist AS (
@@ -2758,7 +2779,8 @@ def buy_s1_bounce_qualified(limit: int = 50):
                 LEFT JOIN gvm_scores g ON g.symbol=q.symbol
                 LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
                     AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
-                WHERE q.basket='buy_s1_bounce' AND q.signal_date=CURRENT_DATE
+                WHERE q.basket='buy_s1_bounce'
+                  AND q.signal_date=(SELECT MAX(signal_date) FROM v8_qualified WHERE basket='buy_s1_bounce')  -- cc#446 fix_2: last-session anchor (was CURRENT_DATE -> blank off-market)
                   AND q.symbol NOT IN (
                       SELECT UPPER(ticker) FROM earnings_calendar
                       WHERE ex_date IN (CURRENT_DATE, CURRENT_DATE + INTERVAL '1 day'))
@@ -2823,7 +2845,8 @@ def sell_overbought(limit: int = 50):
                     AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)
                 LEFT JOIN v8_paper_pivots p ON p.symbol=q.symbol
                     AND p.pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots)
-                WHERE q.basket='sell_overbought' AND q.signal_date=CURRENT_DATE
+                WHERE q.basket='sell_overbought'
+                  AND q.signal_date=(SELECT MAX(signal_date) FROM v8_qualified WHERE basket='sell_overbought')  -- cc#446 fix_2: last-session anchor (was CURRENT_DATE -> blank off-market)
                 ORDER BY q.signal_ts DESC LIMIT %s
             """, (min(max(limit, 1), 200),))
             cols = [d[0] for d in cur.description]
@@ -2986,7 +3009,7 @@ def ohol():
             """)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            cur.execute("SELECT MAX(ts::date) FROM intraday_prices WHERE source='fyers_eq' AND timeframe='5m'")
+            cur.execute(f"SELECT {_last_session_sql()}")   # cc#446: canonical last-session anchor
             sess = cur.fetchone()[0]
     except Exception as e:
         raise HTTPException(500, f"ohol failed: {e}")
