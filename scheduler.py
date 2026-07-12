@@ -91,6 +91,7 @@ _adr_pcr_ran_today: Optional[date] = None
 _yahoo_ran_today: Optional[date] = None
 _yahoo_daily_running = False
 _gvm_ran_today: Optional[date] = None
+_gvm_backfill_running = False   # cc#468/470: 5yr deep-history backfill guard
 _pivots_ran_today: Optional[date] = None
 _upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_pivots rebuild
 _qb_eod_ran_today: Optional[date] = None
@@ -895,6 +896,54 @@ def _bg_gvm():
         log.info("gvm_recompute done")
     except Exception as e: log.error(f"gvm: {e}")
 
+def _bg_gvm_backfill():
+    """cc#468/470: 5yr daily GVM deep-history reconstruction (futures-first, then
+    top-500 by mcap). History-only, resumable, checkpointed. Runs OFF-MARKET only
+    (heavy multi-hour job) and self-limits per invocation; next off-market tick
+    resumes via the app_config checkpoint. Gated by app_config gvm_backfill_run:
+    'pending'/'running' -> run; 'done' -> skip. Single-flight via a run guard."""
+    global _gvm_backfill_running
+    if _gvm_backfill_running:
+        return
+    now = _ist_now()
+    if _is_market_hours(now):   # never compete with the live 5-min path
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='gvm_backfill_run'")
+            r = cur.fetchone()
+        flag = (r[0] if r else None)
+        if flag == "done":
+            return
+        _gvm_backfill_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO app_config (key, value, updated_at) VALUES ('gvm_backfill_run','running',NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import gvm_backfill
+        res = gvm_backfill.run_backfill(time_budget_s=10800)   # 3h/invocation, resume next tick
+        log.info(f"gvm_backfill run: {res}")
+        # if it stopped on budget/max, leave flag 'running' -> next off-market tick resumes.
+        if not res.get("complete"):
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO app_config (key, value, updated_at) VALUES ('gvm_backfill_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+    except Exception as e:
+        log.error(f"gvm_backfill: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO app_config (key, value, updated_at) VALUES ('gvm_backfill_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _gvm_backfill_running = False
+
 def _bg_pivots():
     global _pivots_ran_today
     today = _ist_now().date()
@@ -1369,6 +1418,10 @@ async def _scheduler_loop():
         if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile (V15 MF)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
+        # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market
+        # resume (both no-op once flag='done' or a run is in-flight; off-market gate inside).
+        if h == 2 and m == 20:  _spawn(_bg_gvm_backfill)
+        if m == 25 and not _is_market_hours(now):  _spawn(_bg_gvm_backfill)
 
 
 async def _supervisor():
