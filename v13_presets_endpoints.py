@@ -152,3 +152,132 @@ def delete_preset(request: Request, pid: int):
     if not r:
         raise HTTPException(404, "preset not found")
     return {"status": "ok", "deleted": pid}
+
+
+# ── cc#461: V13 Theme Bridge engine (session_log id=3069) ─────────────────────────────────────────
+# Execute a preset's {fieldkey:{min?,max?}} filters through the REAL metric tables with correct field
+# semantics — dma_* in v8_metrics ARE stored as %-distance from the MA (so a direct column bound is
+# correct), return_3y/pe/roce from the screener_raw wide dump (text -> numeric). This is the first-class
+# engine the Fable bridge validates against instead of approximate raw SQL that mis-handles semantics.
+# Whitelist: key -> (table alias, column). m=v8_metrics(latest), g=gvm_scores(latest), s=screener_raw.
+_FIELD_MAP = {
+    "dma_20": ("m", "dma_20"), "dma_50": ("m", "dma_50"), "dma_200": ("m", "dma_200"),
+    "rsi_month": ("m", "rsi_month"), "rsi_weekly": ("m", "rsi_weekly"), "daily_rsi": ("m", "daily_rsi"),
+    "vol_ratio": ("m", "vol_ratio"), "week_return": ("m", "week_return"), "month_return": ("m", "month_return"),
+    "week_index_52": ("m", "week_index_52"), "mom_2d": ("m", "mom_2d"), "day_1d": ("m", "day_1d"),
+    "sector_week": ("m", "sector_week"), "sector_month": ("m", "sector_month"),
+    "gvm_score": ("g", "gvm_score"), "g_score": ("g", "g_score"), "v_score": ("g", "v_score"),
+    "m_score": ("g", "m_score"), "market_cap": ("g", "market_cap"),
+    "return_1y": ("s", "return_1y"), "return_3y": ("s", "return_3y"),
+    "return_52w_vs_index": ("s", "return_52w_vs_index"), "pe": ("s", "pe"), "roce": ("s", "roce"),
+}
+
+
+def _col_expr(src, col):
+    if src == "s":   # screener_raw is a wide TEXT dump -> strip non-numeric, cast, NULL if not numeric
+        return f"NULLIF(REGEXP_REPLACE(s.\"{col}\"::text, '[^0-9.\\-]', '', 'g'), '')::numeric"
+    return f'{src}."{col}"'
+
+
+def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
+    """Execute {fieldkey:{min?,max?}} against v8_metrics(+gvm_scores+screener_raw). Returns a result dict."""
+    filters = filters or {}
+    unknown = [k for k in filters if k not in _FIELD_MAP]
+    if unknown:
+        return {"error": "unknown filter key(s): " + ", ".join(unknown), "valid_keys": sorted(_FIELD_MAP.keys())}
+    where = ["m.score_date=(SELECT MAX(score_date) FROM v8_metrics)"]
+    params = []
+    for k, crit in filters.items():
+        expr = _col_expr(*_FIELD_MAP[k])
+        if isinstance(crit, dict):
+            if crit.get("min") is not None:
+                where.append(f"{expr} >= %s"); params.append(crit["min"])
+            if crit.get("max") is not None:
+                where.append(f"{expr} <= %s"); params.append(crit["max"])
+    uses_screener = any(_FIELD_MAP[k][0] == "s" for k in filters)
+    join = ("JOIN gvm_scores g ON g.symbol=m.symbol AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores) "
+            "LEFT JOIN screener_raw s ON UPPER(s.nse_code)=UPPER(m.symbol)")
+    wsql = " AND ".join(where)
+    if sort_key and sort_key in _FIELD_MAP:
+        order = f"ORDER BY {_col_expr(*_FIELD_MAP[sort_key])} {'ASC' if sort_dir == 1 else 'DESC'} NULLS LAST"
+    else:
+        order = "ORDER BY g.gvm_score DESC NULLS LAST"
+    lim = max(1, min(int(limit or 10), 100))
+    cur.execute(f"SELECT COUNT(*) FROM v8_metrics m {join} WHERE {wsql}", params)
+    count = int(cur.fetchone()[0])
+    cur.execute(f"""SELECT m.symbol, ROUND(g.gvm_score::numeric,2) gvm_score,
+                    ROUND(m.month_return::numeric,1) month_return, ROUND(m.week_index_52::numeric,0) week_index_52,
+                    ROUND(m.dma_50::numeric,1) dma_50, ROUND(m.dma_200::numeric,1) dma_200
+                    FROM v8_metrics m {join} WHERE {wsql} {order} LIMIT {lim}""", params)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    scope = "futures ~212 (v8_metrics universe)" + (" ∩ screener_raw fundamentals" if uses_screener else "")
+    return {"count": count, "scope_used": scope, "rows": rows,
+            "note": "dma_* = %-distance from the MA; futures-only fields (week_index_52/vol_ratio) limit scope to the ~212 futures universe"}
+
+
+@router.post("/api/v13/theme/run")
+def theme_run(body: dict):
+    """cc#461 tool_1: execute filters through the real engine WITHOUT saving (Fable's pre-save validation)."""
+    with _conn() as conn, conn.cursor() as cur:
+        return _run_screen(cur, body.get("filters") or {}, body.get("sort_key"),
+                           body.get("sort_dir", -1), body.get("limit", 10))
+
+
+@router.post("/api/v13/theme/save")
+def theme_save_validated(body: dict):
+    """cc#461 tool_2: validate keys, run the screen, REFUSE count=0 or >500, upsert v13_presets -> {id,count}."""
+    name = (body.get("name") or "").strip()
+    filters = body.get("filters") or {}
+    if not name:
+        return {"error": "name required"}
+    unknown = [k for k in filters if k not in _FIELD_MAP]
+    if unknown:
+        return {"error": "unknown filter key(s): " + ", ".join(unknown), "valid_keys": sorted(_FIELD_MAP.keys())}
+    sort_key = body.get("sort_key")
+    sort_dir = 1 if body.get("sort_dir") == 1 else -1
+    with _conn() as conn, conn.cursor() as cur:
+        res = _run_screen(cur, filters, sort_key, sort_dir, 5)
+        cnt = res.get("count", 0)
+        if cnt == 0:
+            return {"refused": "count=0 — the filters match no stocks; loosen them", "count": 0}
+        if cnt > 500:
+            return {"refused": f"count={cnt} (>500) — too broad; tighten the filters", "count": cnt}
+        _ensure_table()
+        mode = (body.get("mode") or "insert").lower()
+        pid = body.get("id")
+        if mode == "update" and pid:
+            cur.execute("""UPDATE v13_presets SET name=%s, filters=%s, sort_key=%s, sort_dir=%s,
+                           scope='global', updated_at=NOW() WHERE id=%s RETURNING id""",
+                        [name, json.dumps(filters), sort_key, sort_dir, pid])
+            row = cur.fetchone()
+            if not row:
+                return {"error": f"id {pid} not found for update"}
+            new_id = row[0]
+        else:
+            cur.execute("""INSERT INTO v13_presets (name, filters, sort_key, sort_dir, scope)
+                           VALUES (%s,%s,%s,%s,'global')
+                           ON CONFLICT (scope, name) DO UPDATE SET filters=EXCLUDED.filters,
+                             sort_key=EXCLUDED.sort_key, sort_dir=EXCLUDED.sort_dir, updated_at=NOW()
+                           RETURNING id""", [name, json.dumps(filters), sort_key, sort_dir])
+            new_id = cur.fetchone()[0]
+        conn.commit()
+    return {"id": new_id, "count": cnt, "name": name, "scope_used": res.get("scope_used")}
+
+
+@router.get("/api/v13/theme/list")
+def theme_list():
+    """cc#461 tool_3: all global theme presets with id, name, filter summary."""
+    with _conn() as conn, conn.cursor() as cur:
+        _ensure_table()
+        cur.execute("SELECT id, name, filters, sort_key, sort_dir FROM v13_presets WHERE scope='global' ORDER BY LOWER(name)")
+        out = []
+        for r in cur.fetchall():
+            f = r[2] or {}
+            summ = ", ".join(
+                f"{k}{('>=' + str(v['min'])) if isinstance(v, dict) and v.get('min') is not None else ''}"
+                f"{('<=' + str(v['max'])) if isinstance(v, dict) and v.get('max') is not None else ''}"
+                for k, v in f.items()) if isinstance(f, dict) else str(f)
+            out.append({"id": r[0], "name": r[1], "filters": f, "summary": summ,
+                        "sort_key": r[3], "sort_dir": r[4]})
+    return {"presets": out, "count": len(out)}
