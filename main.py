@@ -3,6 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 import os
+import sys
+# cc#416: worker-runtime modules moved to worker/ for deploy isolation (watch path worker/**). The app
+# still imports a few of them (fyers_hist_backfill router; fundamentals_scraper / fyers_range_backfill
+# lazy-import fyers_feed/fyers_backfill). Add worker/ to sys.path once here so every `import fyers_*`
+# below and in downstream modules resolves; root-staying modules (fyers_backfill, nse_holidays) keep
+# resolving via the repo root the app already runs from.
+_WORKER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "worker")
+if _WORKER_DIR not in sys.path:
+    sys.path.append(_WORKER_DIR)
 import psycopg
 import urllib.parse
 import secrets

@@ -67,6 +67,13 @@ USAGE:
 
 import argparse, bisect, calendar, hashlib, os, sys, json, time, logging, threading, re
 from datetime import datetime, timedelta, time as dt_time, date
+# cc#416: this file now lives in worker/. When run as the worker entry (`python worker/fyers_feed.py`)
+# sys.path[0] is worker/, so the repo-root modules it still uses (nse_holidays, fyers_backfill) are not
+# importable without adding the repo root. Idempotent + harmless when imported by the app (root already
+# on path). Worker-internal siblings (fyers_autologin, fyers_hist_backfill) resolve via worker/.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)
 import pytz, psycopg2, requests
 from nse_holidays import is_trading_day   # cc#188: market-hours gate for subscribe_verify
 
