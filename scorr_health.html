@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Health Report · Scorr</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Sora:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   Scorr /health — Portfolio Health Report
+   Design: founder-approved Claude Design handoff (12-Jul-2026)
+   Adaptations: scoped reset (site pills untouched), dark theme,
+   pill-safe masthead, Scorr conventions, hr-* data hooks.
+   ============================================================ */
+
+/* THEME TOKENS — light default (cc#348), dark via [data-theme="dark"] */
+:root{
+  --bg:#ECEEF3; --paper:#F8F9FC; --mast:#07111F;
+  --ink:#07111F; --faint:#B8BECC; --muted:#5B667D;
+  --rule:rgba(7,17,31,.10); --hover:rgba(7,17,31,.025);
+  --blu:#1847DF; --grn:#0B6E42; --red:#B52432; --amb:#8F5C07;
+  --grn-t:rgba(11,110,66,.10); --red-t:rgba(181,36,50,.10);
+  --amb-t:rgba(143,92,7,.10); --blu-t:rgba(24,71,223,.10);
+  --flagbg:rgba(181,36,50,.03);
+}
+:root[data-theme="dark"]{
+  --bg:#0A0F1E; --paper:#101830; --mast:#060B16;
+  --ink:#E9EEFB; --faint:#5E6B8F; --muted:#8C99BD;
+  --rule:rgba(148,166,210,.14); --hover:rgba(148,166,210,.05);
+  --blu:#4D7CFE; --grn:#2FD48B; --red:#FF5C6C; --amb:#F5B94A;
+  --grn-t:rgba(47,212,139,.12); --red-t:rgba(255,92,108,.12);
+  --amb-t:rgba(245,185,74,.12); --blu-t:rgba(77,124,254,.13);
+  --flagbg:rgba(255,92,108,.05);
+}
+html,body{margin:0;padding:0;background:var(--bg);}
+/* scoped reset — never touches middleware-injected pills / PWA nav */
+.phr, .phr *, .phr *::before, .phr *::after{box-sizing:border-box;margin:0;padding:0;}
+.phr{color:var(--ink);font-family:'IBM Plex Mono',monospace;-webkit-font-smoothing:antialiased;
+     max-width:1180px;margin:0 auto;}
+.phr .pos{color:var(--grn);} .phr .neg{color:var(--red);}
+
+/* chips */
+.phr .chip{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;
+  padding:2px 8px;border-radius:2px;letter-spacing:.2px;}
+.phr .chip.g{background:var(--grn-t);color:var(--grn);}
+.phr .chip.r{background:var(--red-t);color:var(--red);}
+.phr .chip.a{background:var(--amb-t);color:var(--amb);}
+.phr .chip.b{background:var(--blu-t);color:var(--blu);}
+
+/* tables */
+.phr table{border-collapse:collapse;width:100%;}
+.phr thead th{font-size:9px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--faint);
+  text-align:right;padding:6px 12px;border-bottom:1px solid var(--rule);white-space:nowrap;}
+.phr thead th:first-child{text-align:left;}
+.phr tbody td{font-size:11.5px;padding:9px 12px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap;}
+.phr tbody td:first-child{text-align:left;}
+.phr tbody tr:last-child td{border-bottom:none;}
+.phr tbody tr:hover td{background:var(--hover);}
+
+/* bars */
+.phr .btrack{height:3px;background:var(--rule);border-radius:2px;overflow:hidden;flex:1;}
+.phr .bfill{height:3px;border-radius:2px;}
+
+/* misc */
+.phr .lbl{font-size:9px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--faint);}
+.phr .note{font-size:10.5px;color:var(--muted);line-height:1.7;margin-top:9px;}
+.phr .note b{color:var(--ink);font-weight:600;}
+.phr .flag{display:flex;gap:10px;align-items:flex-start;font-size:11px;color:var(--muted);margin:8px 0;line-height:1.6;}
+.phr .flag .dot{width:6px;height:6px;border-radius:50%;margin-top:5px;flex:none;}
+.phr .rrow{display:grid;grid-template-columns:100px 1fr 44px;gap:10px;align-items:center;}
+.phr .rrow .rl{font-size:11.5px;color:var(--muted);}
+.phr .rrow .rv{font-size:12px;font-weight:600;text-align:right;}
+.phr .kv{display:flex;justify-content:space-between;font-size:11px;}
+.phr .kv span:first-child{color:var(--muted);}
+.phr .kv span:last-child{font-weight:600;}
+.phr button{cursor:pointer;}
+
+/* masthead is pill-safe: extra right padding clears the fixed theme/logout pills */
+.phr .mast{background:var(--mast);color:#fff;padding:28px 120px 24px 32px;
+  display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;}
+
+@media print{
+  html,body{background:#fff;}
+  .no-print, #scorr-lo, #scorr-th{display:none !important;}
+  .phr{max-width:100%;}
+  .phr .page{break-inside:avoid;}
+  .phr *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}
+@media (max-width:800px){
+  .phr .mast{padding:70px 20px 20px;flex-direction:column;}
+  .phr .mast .hero{text-align:left !important;}
+  .phr .main-cols{grid-template-columns:1fr !important;}
+  .phr .g4-snap{grid-template-columns:1fr 1fr !important;}
+  .phr .g3-bottom{grid-template-columns:1fr !important;}
+}
+</style>
+</head>
+<body>
+<div class="phr">
+
+<!-- ══════════ MASTHEAD ══════════ -->
+<div class="mast page">
+  <div>
+    <div style="font-size:9px;font-weight:600;letter-spacing:1.2px;color:rgba(255,255,255,.35);text-transform:uppercase;margin-bottom:10px;">
+      Portfolio Health Report · <span id="hr-date">12 Jul 2026</span> · as of <span id="hr-asof">EOD 11 Jul</span>
+    </div>
+    <div style="font-family:'Sora',sans-serif;font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.05;" id="hr-name">Anshu Kansal</div>
+    <div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:6px;letter-spacing:.2px;"><span id="hr-count">16</span> holdings &nbsp;·&nbsp; NSE/BSE &nbsp;·&nbsp; Scorr GVM Engine</div>
+    <div style="display:flex;gap:8px;margin-top:16px;" class="no-print">
+      <button onclick="window.print()" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;padding:8px 16px;border-radius:3px;border:none;background:var(--blu);color:#fff;letter-spacing:.3px;">&#8595; SAVE PDF</button>
+      <button id="hr-refresh" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;padding:8px 16px;border-radius:3px;border:1px solid rgba(255,255,255,.18);background:transparent;color:rgba(255,255,255,.7);letter-spacing:.3px;">&#8635; REFRESH</button>
+    </div>
+  </div>
+  <div class="hero" style="text-align:right;flex:none;">
+    <div style="font-size:9px;font-weight:600;letter-spacing:1px;color:rgba(255,255,255,.35);text-transform:uppercase;margin-bottom:6px;">Overall GVM Rating</div>
+    <div style="font-size:80px;font-weight:700;line-height:.9;color:#fff;letter-spacing:-3px;" id="hr-overall">7.60</div>
+    <div style="margin-top:10px;"><span id="hr-verdict" style="background:var(--grn-t);color:#4ED8A0;font-size:10px;font-weight:600;padding:4px 12px;border-radius:2px;letter-spacing:.4px;">EXCELLENT</span></div>
+    <div style="font-size:9px;color:rgba(255,255,255,.25);margin-top:8px;" id="hr-gvmq">G 8.20 · V 7.10 · M 6.40 · Q 7.70</div>
+  </div>
+</div>
+
+<!-- ══════════ SNAPSHOT STRIP ══════════ -->
+<div class="g4-snap page" style="background:var(--paper);border-bottom:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr 1fr 320px;">
+  <div style="padding:16px 20px;border-right:1px solid var(--rule);">
+    <div class="lbl">Invested</div>
+    <div style="font-size:20px;font-weight:600;margin-top:5px;letter-spacing:-.5px;" id="hr-invested">&#8377;13,77,144</div>
+  </div>
+  <div style="padding:16px 20px;border-right:1px solid var(--rule);">
+    <div class="lbl">Current Value</div>
+    <div style="font-size:20px;font-weight:600;margin-top:5px;letter-spacing:-.5px;" id="hr-current">&#8377;14,19,622</div>
+  </div>
+  <div style="padding:16px 20px;border-right:1px solid var(--rule);">
+    <div class="lbl">P&amp;L</div>
+    <div style="font-size:20px;font-weight:600;margin-top:5px;letter-spacing:-.5px;color:var(--grn);" id="hr-pnl">+&#8377;42,477</div>
+    <div style="font-size:11px;color:var(--grn);font-weight:500;margin-top:1px;" id="hr-pnl-pct">+3.1%</div>
+  </div>
+  <div style="padding:16px 20px;">
+    <div class="lbl">Alpha vs Nifty 500 · 1yr</div>
+    <div style="font-size:20px;font-weight:600;margin-top:5px;letter-spacing:-.5px;color:var(--blu);" id="hr-alpha">+2.4%</div>
+  </div>
+</div>
+
+<!-- ══════════ MAIN 2-COL BODY ══════════ -->
+<div class="main-cols page" style="display:grid;grid-template-columns:1fr 320px;gap:0;background:var(--paper);">
+
+  <!-- LEFT COLUMN -->
+  <div style="border-right:1px solid var(--rule);">
+
+    <div style="padding:22px 24px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:14px;">Scorr Parameters</div>
+      <div style="display:flex;flex-direction:column;gap:10px;" id="hr-params">
+        <div class="rrow"><span class="rl">Growth</span><div class="btrack"><div class="bfill" style="width:82%;background:var(--grn);"></div></div><span class="rv">8.20</span></div>
+        <div class="rrow"><span class="rl">Value</span><div class="btrack"><div class="bfill" style="width:71%;background:#1A9070;"></div></div><span class="rv">7.10</span></div>
+        <div class="rrow"><span class="rl">Momentum</span><div class="btrack"><div class="bfill" style="width:64%;background:var(--blu);"></div></div><span class="rv">6.40</span></div>
+        <div class="rrow"><span class="rl">Quality mix</span><div class="btrack"><div class="bfill" style="width:77%;background:#5340C2;"></div></div><span class="rv">7.70</span></div>
+      </div>
+      <div class="note" id="hr-params-note">Momentum is the softest leg — <b>quality-heavy but late-trend.</b></div>
+    </div>
+
+    <div style="padding:22px 24px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:14px;">1-yr Return vs Benchmarks</div>
+      <div style="display:flex;flex-direction:column;gap:10px;" id="hr-bench">
+        <div class="rrow" style="grid-template-columns:100px 1fr 52px;"><span class="rl">Portfolio</span><div class="btrack"><div class="bfill" style="width:63%;background:var(--blu);"></div></div><span class="rv" style="color:var(--blu);">18.9%</span></div>
+        <div class="rrow" style="grid-template-columns:100px 1fr 52px;"><span class="rl">Nifty 50</span><div class="btrack"><div class="bfill" style="width:4%;background:var(--faint);"></div></div><span class="rv" style="color:var(--faint);">1.3%</span></div>
+        <div class="rrow" style="grid-template-columns:100px 1fr 52px;"><span class="rl">Nifty 500</span><div class="btrack"><div class="bfill" style="width:0%;background:var(--faint);"></div></div><span class="rv" style="color:var(--red);">&#8722;1.5%</span></div>
+      </div>
+    </div>
+
+    <div style="padding:22px 24px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:14px;">Valuation &amp; Yield</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);text-align:center;" id="hr-val">
+        <div style="padding:10px 0;border-right:1px solid var(--rule);"><div style="font-size:20px;font-weight:600;letter-spacing:-.5px;">32.4</div><div class="lbl" style="margin-top:3px;">Portfolio PE</div></div>
+        <div style="padding:10px 0;border-right:1px solid var(--rule);"><div style="font-size:20px;font-weight:600;letter-spacing:-.5px;">37.9</div><div class="lbl" style="margin-top:3px;">Sector PE</div></div>
+        <div style="padding:10px 0;"><div style="font-size:20px;font-weight:600;letter-spacing:-.5px;">21.0</div><div class="lbl" style="margin-top:3px;">Nifty PE</div></div>
+        <div style="padding:10px 0;border-right:1px solid var(--rule);border-top:1px solid var(--rule);"><div style="font-size:20px;font-weight:600;letter-spacing:-.5px;">0.4%</div><div class="lbl" style="margin-top:3px;">Div yield</div></div>
+        <div style="padding:10px 0;border-right:1px solid var(--rule);border-top:1px solid var(--rule);"><div style="font-size:20px;font-weight:600;letter-spacing:-.5px;">0.8%</div><div class="lbl" style="margin-top:3px;">Sector yield</div></div>
+        <div style="padding:10px 0;border-top:1px solid var(--rule);"><div style="font-size:20px;font-weight:600;letter-spacing:-.5px;">1.4%</div><div class="lbl" style="margin-top:3px;">Nifty yield</div></div>
+      </div>
+      <div class="note" id="hr-val-note">Premium to Nifty, <b>discount to own sectors</b> — growth-priced, not bubble-priced.</div>
+    </div>
+
+    <div style="padding:22px 24px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:12px;">Sector Split · <span id="hr-conc">top 5 hold 73%</span></div>
+      <div style="display:flex;height:36px;overflow:hidden;border:1px solid var(--rule);" id="hr-strip">
+        <div style="width:22%;background:#0B6E42;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Batteries 22%</div>
+        <div style="width:20%;background:#2A3650;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">C.Finance 20%</div>
+        <div style="width:14%;background:#1847DF;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Banks 14%</div>
+        <div style="width:10%;background:#9A3C1E;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Ins 10%</div>
+        <div style="width:7%;background:#4532A8;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">SC</div>
+        <div style="width:27%;background:#8892AA;display:flex;align-items:center;padding:0 7px;font-size:9px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;min-width:0;">Others 27%</div>
+      </div>
+    </div>
+
+    <div style="padding:22px 24px 0;"><div class="lbl" style="margin-bottom:12px;">Sector Ratings</div></div>
+    <table id="hr-sectors">
+      <thead><tr><th style="padding-left:24px;">Segment</th><th>Weight</th><th>Rating</th><th>1M</th><th style="padding-right:24px;">Call</th></tr></thead>
+      <tbody>
+        <tr><td style="font-weight:600;padding-left:24px;">Batteries</td><td>22.0%</td><td>6.20</td><td>+0.4%</td><td style="padding-right:24px;"><span class="chip b">Neutral</span></td></tr>
+        <tr><td style="font-weight:600;padding-left:24px;">Consumer Finance — Large</td><td>19.8%</td><td>7.90</td><td class="pos">+3.2%</td><td style="padding-right:24px;"><span class="chip g">Strong</span></td></tr>
+        <tr><td style="font-weight:600;padding-left:24px;">Private Banks — Large</td><td>13.7%</td><td>7.40</td><td class="pos">+1.8%</td><td style="padding-right:24px;"><span class="chip g">Strong</span></td></tr>
+        <tr><td style="font-weight:600;padding-left:24px;">Insurance</td><td>10.0%</td><td>6.80</td><td class="pos">+0.9%</td><td style="padding-right:24px;"><span class="chip b">Neutral</span></td></tr>
+        <tr><td style="font-weight:600;padding-left:24px;">Speciality Chemicals</td><td>7.0%</td><td>5.40</td><td class="neg">&#8722;1.1%</td><td style="padding-right:24px;"><span class="chip a">Caution</span></td></tr>
+        <tr><td style="font-weight:600;padding-left:24px;">Cement — Large</td><td>6.5%</td><td>4.80</td><td class="neg">&#8722;2.6%</td><td style="padding-right:24px;"><span class="chip r">Weak</span></td></tr>
+      </tbody>
+    </table>
+    <div style="padding:8px 24px 18px;"><div class="note" id="hr-sector-note"><b>22% of capital sits in a neutral sector</b> — your largest bet is not your strongest.</div></div>
+
+  </div>
+
+  <!-- RIGHT SIDEBAR -->
+  <div>
+    <div style="padding:22px 20px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:12px;">Winners vs Losers</div>
+      <div style="font-size:32px;font-weight:700;letter-spacing:-1.5px;" id="hr-wl">7 <span style="font-size:20px;color:var(--faint);font-weight:300;">:</span> 3</div>
+      <div style="display:flex;height:4px;overflow:hidden;margin:10px 0 8px;" id="hr-wl-bar">
+        <div style="width:70%;background:var(--grn);"></div><div style="width:1px;background:var(--paper);"></div><div style="width:30%;background:var(--red);"></div>
+      </div>
+      <div class="note" id="hr-wl-note"><b>71% profitable</b> — healthy breadth.</div>
+    </div>
+
+    <div style="padding:22px 20px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:12px;">Cap Diversification</div>
+      <div style="display:flex;height:4px;overflow:hidden;margin-bottom:10px;" id="hr-cap-bar">
+        <div style="width:48%;background:var(--blu);"></div><div style="width:1px;background:var(--paper);"></div>
+        <div style="width:17%;background:var(--amb);"></div><div style="width:1px;background:var(--paper);"></div>
+        <div style="width:35%;background:var(--faint);"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;" id="hr-cap-legend">
+        <div class="kv"><span>Large</span><span>48%</span></div>
+        <div class="kv"><span>Mid</span><span>17%</span></div>
+        <div class="kv"><span>Small</span><span>35%</span></div>
+      </div>
+      <div class="note" style="color:var(--amb);" id="hr-cap-note"><b>Aggressive tilt</b> — largecap under 50%.</div>
+    </div>
+
+    <div style="padding:22px 20px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:12px;">Quality · GVM Bands</div>
+      <div style="display:flex;height:4px;overflow:hidden;margin-bottom:10px;" id="hr-qual-bar">
+        <div style="width:77%;background:var(--grn);"></div><div style="width:1px;background:var(--paper);"></div>
+        <div style="width:17%;background:var(--amb);"></div><div style="width:1px;background:var(--paper);"></div>
+        <div style="width:6%;background:var(--red);"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;" id="hr-qual-legend">
+        <div class="kv"><span>Excellent</span><span style="color:var(--grn);">77%</span></div>
+        <div class="kv"><span>Average</span><span style="color:var(--amb);">17%</span></div>
+        <div class="kv"><span>Weak</span><span style="color:var(--red);">6%</span></div>
+      </div>
+      <div class="note" id="hr-qual-note">Only <b>6% capital in weak-GVM names.</b></div>
+    </div>
+
+    <div style="padding:18px 20px 8px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:10px;color:var(--grn);">Top Gainers</div>
+      <table id="hr-gainers"><tbody>
+        <tr><td style="font-weight:600;padding:7px 0;">BAJFINANCE</td><td style="padding:7px 0;" class="pos">+11.5% · 29,063</td></tr>
+        <tr><td style="font-weight:600;padding:7px 0;">AXISBANK</td><td style="padding:7px 0;" class="pos">+8.9% · 15,798</td></tr>
+        <tr><td style="font-weight:600;padding:7px 0;border-bottom:none;">BALRAMCHIN</td><td style="padding:7px 0;border-bottom:none;" class="pos">+3.3% · 2,547</td></tr>
+      </tbody></table>
+    </div>
+
+    <div style="padding:18px 20px 8px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:10px;color:var(--red);">Top Losers</div>
+      <table id="hr-losers"><tbody>
+        <tr><td style="font-weight:600;padding:7px 0;">ADANIENT</td><td style="padding:7px 0;" class="neg">&#8722;22.7% · (16,255)</td></tr>
+        <tr><td style="font-weight:600;padding:7px 0;">AFFLE</td><td style="padding:7px 0;" class="neg">&#8722;1.5% · (1,485)</td></tr>
+        <tr><td style="font-weight:600;padding:7px 0;border-bottom:none;">AARTIIND</td><td style="padding:7px 0;border-bottom:none;" class="neg">&#8722;0.3% · (343)</td></tr>
+      </tbody></table>
+    </div>
+
+    <div style="padding:18px 20px 8px;border-bottom:1px solid var(--rule);">
+      <div class="lbl" style="margin-bottom:10px;">Upcoming Results</div>
+      <table id="hr-upcoming"><tbody>
+        <tr><td style="font-weight:600;padding:7px 0;">AXISBANK</td><td style="text-align:right;padding:7px 0;color:var(--muted);">17 Jul</td><td style="text-align:right;padding:7px 0;color:var(--faint);">5d</td></tr>
+        <tr><td style="font-weight:600;padding:7px 0;">BAJFINANCE</td><td style="text-align:right;padding:7px 0;color:var(--muted);">24 Jul</td><td style="text-align:right;padding:7px 0;color:var(--faint);">12d</td></tr>
+        <tr><td style="font-weight:600;padding:7px 0;border-bottom:none;">AARTIIND</td><td style="text-align:right;padding:7px 0;color:var(--muted);border-bottom:none;">02 Aug</td><td style="text-align:right;padding:7px 0;color:var(--faint);border-bottom:none;">21d</td></tr>
+      </tbody></table>
+    </div>
+
+    <div style="padding:18px 20px;border-bottom:1px solid var(--rule);background:var(--flagbg);">
+      <div class="lbl" style="margin-bottom:10px;color:var(--red);">Red Flags</div>
+      <div id="hr-flags">
+        <div class="flag"><span class="dot" style="background:var(--red);"></span><div><span style="font-weight:600;">ACC</span> — pledged shares 6.6% of promoter.</div></div>
+        <div class="flag"><span class="dot" style="background:var(--red);"></span><div><span style="font-weight:600;">ADANIENT</span> — 42% below ATH.</div></div>
+        <div class="flag"><span class="dot" style="background:var(--amb);"></span><div><span style="font-weight:600;">BAJAJFINSV</span> — FII stake fell 0.6% last qtr.</div></div>
+      </div>
+    </div>
+
+    <div style="padding:18px 20px;">
+      <div class="lbl" style="margin-bottom:12px;">Replacement Idea</div>
+      <div id="hr-replacements">
+        <div style="background:var(--red-t);border-left:2px solid var(--red);padding:8px 12px;margin-bottom:8px;">
+          <div style="font-size:12px;font-weight:700;">ACC &nbsp;<span style="color:var(--red);font-weight:500;">GVM 4.10</span></div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">Avoid / Exit · 6.5% weight</div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;letter-spacing:.3px;">&#8595; CONSIDER</div>
+        <div style="background:var(--grn-t);border-left:2px solid var(--grn);padding:8px 12px;">
+          <div style="font-size:11.5px;font-weight:600;">ULTRACEMCO <span class="pos">8.10</span> &nbsp;·&nbsp; AMBUJACEM <span class="pos">7.60</span></div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px;">Same segment · upside 18% / 14%</div>
+        </div>
+      </div>
+      <div style="font-size:9px;color:var(--faint);margin-top:10px;line-height:1.6;">Highest-GVM peers, same Scorr segment. Research only — not advice.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════ HOLDINGS TABLE ══════════ -->
+<div class="page" style="background:var(--paper);border-top:1px solid var(--rule);">
+  <div style="padding:18px 24px 10px;"><div class="lbl">Holdings — Full Detail</div></div>
+  <div style="overflow-x:auto;">
+    <table id="hr-holdings">
+      <thead>
+        <tr><th style="padding-left:24px;">Stock</th><th>CMP</th><th>Qty</th><th>Weight</th><th>P&amp;L %</th><th>PE / Seg</th><th>GVM</th><th>Trend</th><th>From ATH</th><th>Upside</th><th style="padding-right:24px;">Verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="font-weight:700;padding-left:24px;">BAJFINANCE</td><td>7,015</td><td>40</td><td>19.8%</td><td class="pos">+11.5</td><td>36.9 / 28.2</td><td style="color:var(--grn);font-weight:700;">8.40</td><td class="pos">&#9650; +0.30</td><td>&#8722;12.8%</td><td>21%</td><td style="padding-right:24px;"><span class="chip g">Buy Systematically</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">AXISBANK</td><td>967</td><td>200</td><td>13.7%</td><td class="pos">+8.9</td><td>13.0 / 23.8</td><td style="color:var(--grn);font-weight:700;">7.80</td><td class="pos">&#9650; +0.10</td><td>&#8722;1.4%</td><td>16%</td><td style="padding-right:24px;"><span class="chip b">Accumulate / Hold</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">AARTIIND</td><td>515</td><td>200</td><td>7.3%</td><td class="neg">&#8722;0.3</td><td>34.3 / 50.0</td><td style="color:var(--amb);font-weight:700;">5.90</td><td class="neg">&#9660; &#8722;0.40</td><td>&#8722;51.4%</td><td>9%</td><td style="padding-right:24px;"><span class="chip a">Wait &amp; Watch</span></td></tr>
+        <tr><td style="font-weight:700;padding-left:24px;">ACC</td><td>1,827</td><td>50</td><td>6.5%</td><td class="pos">+0.8</td><td>56.1 / 52.7</td><td style="color:var(--red);font-weight:700;">4.10</td><td class="neg">&#9660; &#8722;0.20</td><td>&#8722;34.4%</td><td>6%</td><td style="padding-right:24px;"><span class="chip r">Avoid / Exit</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════ FOOTER TRIPTYCH ══════════ -->
+<div class="g3-bottom page" style="background:var(--paper);border-top:1px solid var(--rule);display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
+
+  <div style="padding:22px 24px;border-right:1px solid var(--rule);">
+    <div class="lbl" style="margin-bottom:14px;">Latest Result Analysis <span style="color:var(--faint);text-transform:none;letter-spacing:0;">· last 45 days</span></div>
+    <div id="hr-results">
+      <div class="flag"><span class="dot" style="background:var(--grn);"></span><div><span style="font-weight:700;">BAJFINANCE</span> <span class="chip g" style="margin-left:4px;">Strong</span><br>AUM +26% YoY, credit costs contained; steady NIM guided.</div></div>
+      <div class="flag"><span class="dot" style="background:var(--amb);"></span><div><span style="font-weight:700;">AARTIIND</span> <span class="chip a" style="margin-left:4px;">Moderate</span><br>Volume recovery visible but pricing weak; margins below 5yr avg.</div></div>
+      <div class="flag"><span class="dot" style="background:var(--red);"></span><div><span style="font-weight:700;">ACC</span> <span class="chip r" style="margin-left:4px;">Weak</span><br>Realisations fell QoQ; cost inflation ate the volume gain.</div></div>
+    </div>
+  </div>
+
+  <div style="padding:22px 24px;border-right:1px solid var(--rule);">
+    <div class="lbl" style="margin-bottom:14px;">Key Highlights</div>
+    <div style="display:flex;flex-direction:column;gap:7px;" id="hr-highlights">
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">01</span><span><b style="color:var(--ink);">71% profitable</b> — healthy breadth</span></div>
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">02</span><span>Largecap <b style="color:var(--ink);">below 50%</b> — aggressive tilt</span></div>
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">03</span><span>Only <b style="color:var(--ink);">6% weak-GVM</b> capital</span></div>
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">04</span><span><b style="color:var(--ink);">Beating</b> Nifty 50 and Nifty 500 · 1yr</span></div>
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">05</span><span>PE premium to Nifty, <b style="color:var(--ink);">discount to sectors</b></span></div>
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">06</span><span>Top-5 sector concentration <b style="color:var(--ink);">73%</b> — monitor</span></div>
+      <div style="display:flex;gap:8px;font-size:11px;color:var(--muted);"><span style="color:var(--faint);flex:none;">07</span><span>Avoid-rated holding — <b style="color:var(--ink);">replacements ready</b></span></div>
+    </div>
+  </div>
+
+  <div style="padding:22px 24px;background:var(--mast);color:rgba(255,255,255,.75);">
+    <div style="font-size:9px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:14px;">Expert Take</div>
+    <p style="font-size:11.5px;line-height:1.8;" id="hr-expert">Overall quality is strong — <span style="color:#fff;font-weight:600;">no immediate intervention needed.</span> The one position worth reviewing is the weak-GVM cement holding; consider rotating toward the same-segment leaders. Results season over the next 3 weeks covers <span style="color:#fff;font-weight:600;">60% of your capital</span> — expect verdict updates.</p>
+    <div style="font-size:9px;color:rgba(255,255,255,.25);margin-top:16px;line-height:1.7;">Generated by Scorr · GVM Engine · Data as of report date · Research only, not investment advice. Scorr is a pure-advisory platform.</div>
+    <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,.2);letter-spacing:2px;margin-top:16px;">SCORR</div>
+  </div>
+
+</div>
+</div>
+
+<script>
+/* ============================================================
+   CC WIRING NOTES (cc#398) — data only, DO NOT restyle.
+   - GET /api/health/report/{portfolio_id} fills every hr-* node.
+   - Scalars: hr-name hr-count hr-date hr-asof hr-overall (2dp)
+     hr-verdict hr-gvmq hr-invested hr-current hr-pnl hr-pnl-pct
+     hr-alpha hr-conc hr-wl hr-expert + all *-note insight strings.
+   - Bars: set widths on children of hr-params/hr-bench rows,
+     hr-wl-bar, hr-cap-bar, hr-qual-bar; strip segments in hr-strip.
+   - Tables (render rows): hr-sectors hr-gainers hr-losers
+     hr-upcoming hr-holdings.
+   - Blocks: hr-replacements (one exit->consider pair per Avoid
+     holding), hr-flags, hr-results (ONLY results <45 days old;
+     empty state: "No fresh results in the last 45 days").
+   - Conventions: prices rupee no decimals; GVM/scores 2 decimals;
+     verdict vocabulary exactly: Buy Systematically / Accumulate-Hold /
+     Wait & Watch / Avoid-Exit; GVM color bands >=7 grn, 5-7 amb, <5 red.
+   - hr-refresh: POST /api/health/refresh/{portfolio_id} then re-render.
+   - Theme: site sets [data-theme] on :root; both palettes above.
+   ============================================================ */
+</script>
+</body>
+</html>
