@@ -1030,6 +1030,60 @@ function FibPopout({ symbol, onClose, side = "LONG" }) {
   );
 }
 
+// cc#411: 3M price-trend sparkline for the GVM hero — replaces the G/V/M pillar radar. Reuses the
+// existing fibcheck endpoint for the ~3M EOD close path (no new data/engine). "expand" -> Fibcheck.
+function PriceSparkline({ symbol, onExpand }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let alive = true; setD(null);
+    apiGet(`/api/trade-check/fibcheck?symbol=${encodeURIComponent(symbol)}&lookback=3m`)
+      .then(x => { if (alive && x && !x.error) setD(x); }).catch(() => {});
+    return () => { alive = false; };
+  }, [symbol]);
+  const ser = ((d && d.series) || []).filter(p => p.close != null);
+  const W = 264, H = 74, PAD = 4;
+  const wrap = kids => (
+    <div style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "10px 12px" }}>{kids}</div>
+  );
+  if (ser.length < 2) {
+    return wrap(
+      <React.Fragment>
+        <div style={{ fontSize: 10, letterSpacing: ".08em", color: C.muted, textTransform: "uppercase" }}>Price · 3M</div>
+        <div style={{ fontSize: 11, color: C.muted, padding: "20px 0", textAlign: "center" }}>{d ? "no price path" : "loading…"}</div>
+      </React.Fragment>
+    );
+  }
+  const closes = ser.map(p => p.close);
+  const first = closes[0], last = closes[closes.length - 1];
+  const ret = (first ? (last - first) / first * 100 : null);
+  const col = ret == null ? C.muted : (ret >= 0 ? C.green : C.red);
+  let lo = Math.min(...closes), hi = Math.max(...closes);
+  const pad = (hi - lo) * 0.08 || 1; const ymin = lo - pad, ymax = hi + pad;
+  const xF = i => PAD + i / (closes.length - 1) * (W - 2 * PAD);
+  const yF = v => PAD + (ymax - v) / (ymax - ymin) * (H - 2 * PAD);
+  const line = closes.map((v, i) => (i ? "L" : "M") + xF(i).toFixed(1) + " " + yF(v).toFixed(1)).join(" ");
+  const area = "M" + xF(0).toFixed(1) + " " + (H - PAD) + " " + line.replace(/^M/, "L") + " L" + xF(closes.length - 1).toFixed(1) + " " + (H - PAD) + " Z";
+  const iMin = closes.indexOf(lo), iMax = closes.indexOf(hi);
+  return wrap(
+    <React.Fragment>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 10, letterSpacing: ".08em", color: C.muted, textTransform: "uppercase" }}>Price · 3M</span>
+        {ret != null && <span style={{ fontSize: 11.5, fontWeight: 700, fontFamily: "monospace", color: col }}>{signFmt(ret, 1)}%</span>}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 74, display: "block" }}>
+        <path d={area} fill={col} opacity="0.08" />
+        <path d={line} fill="none" stroke={col} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={xF(iMax).toFixed(1)} cy={yF(hi).toFixed(1)} r="2.2" fill={C.green} />
+        <circle cx={xF(iMin).toFixed(1)} cy={yF(lo).toFixed(1)} r="2.2" fill={C.red} />
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
+        <span style={{ fontSize: 9.5, fontFamily: "monospace", color: C.muted }}>L {fmt(lo, 1)} · H {fmt(hi, 1)}</span>
+        <span onClick={onExpand} style={{ fontSize: 11, color: C.accent, cursor: "pointer" }}>expand</span>
+      </div>
+    </React.Fragment>
+  );
+}
+
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
@@ -1132,18 +1186,13 @@ function GvmReport({ r, hist }) {
                 <TrendChart points={trendPoints} />
               </div>
             )}
-            <div style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "8px 10px 6px" }}>
-              <PillarRadar company={companyPillars} sector={sectorPillars} />
-            </div>
+            <PriceSparkline symbol={r.symbol} onExpand={() => setFibOpen(true)} />
           </div>
 
           <div style={{ textAlign: "right", minWidth: 170 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
               <div style={{ fontSize: 13, color: C.muted }}>{r.price_label || "CMP"}{r.price_label === "Prev Close" && r.price_date ? ` ${r.price_date}` : ""}</div>
-              {/* cc#300: Fibcheck chart-icon popout. cc#343: label = CMP (feed) or Prev Close <date> (non-feed) */}
-              <button onClick={() => setFibOpen(true)} title="Fibonacci retracement"
-                style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer",
-                  fontSize: 13, lineHeight: 1, color: C.accent, padding: "2px 6px" }}>📈</button>
+              {/* cc#411: chart icon removed — the hero 3M sparkline "expand" is the single entry to Fibcheck */}
             </div>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "monospace" }}>₹{fmt(cmp, 1)}</div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>MCap ₹{fmt(r.market_cap / 100, 0)} Cr</div>
