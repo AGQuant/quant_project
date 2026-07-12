@@ -277,7 +277,7 @@ PWA_JS = """
     ['/intraday', '\\u23f1', 'Intraday'],
     ['/v13', '\\u25a4', 'V13'],
     ['/v12', '\\u229f', 'V12'],
-    ['/health', '\\u2695', 'Health Report'],
+    ['/health', '\\u2695', 'Health'],
     ['/cio', '\\u2299', 'Max'],
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],
@@ -361,17 +361,21 @@ PWA_JS = """
     var ncss = ''
       // cc#348: desktop top-nav is theme-aware and self-contained (dark base + light override),
       // so it never disagrees with the page it sits on.
-      + '.scorr-cnav{display:flex;align-items:center;gap:2px;height:46px;background:#121A33;'
-      + '  border-bottom:1px solid rgba(148,166,210,.14);padding:0 16px;overflow-x:auto;scrollbar-width:none;'
+      // cc#438: compact single-row nav that fits ONE screen width (no horizontal scroll needed on
+      // standard desktops). Tighter gap/padding/font + smaller icons; items may shrink slightly so
+      // the full set fits. overflow-x kept (scrollbar hidden) only as a safety net on very narrow
+      // desktop widths; on normal widths the compacted row fits with room to spare.
+      + '.scorr-cnav{display:flex;align-items:center;gap:0;height:44px;background:#121A33;'
+      + '  border-bottom:1px solid rgba(148,166,210,.14);padding:0 8px;overflow-x:auto;scrollbar-width:none;'
       + '  position:sticky;top:0;z-index:40;box-shadow:0 1px 4px rgba(3,7,20,.4)}'
       + '.scorr-cnav::-webkit-scrollbar{display:none}'
-      + '.scorr-cnav a{display:flex;align-items:center;gap:5px;padding:0 11px;height:46px;'
-      + '  text-decoration:none;white-space:nowrap;flex-shrink:0;color:#8C99BD;font-size:11.5px;'
+      + '.scorr-cnav a{display:flex;align-items:center;gap:4px;padding:0 7px;height:44px;min-width:0;'
+      + '  text-decoration:none;white-space:nowrap;flex-shrink:1;color:#8C99BD;font-size:10.5px;'
       + '  font-weight:600;border-bottom:2px solid transparent;transition:.12s}'
       + '.scorr-cnav a:hover{color:#E9EEFB}'
       + '.scorr-cnav a.active{border-bottom-color:#4D7CFE;color:#4D7CFE}'
-      + '.scorr-cnav a .ic{font-size:13px}'
-      + '.scorr-cnav .sep{width:1px;height:20px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 4px}'
+      + '.scorr-cnav a .ic{font-size:11px;flex-shrink:0}'
+      + '.scorr-cnav .sep{width:1px;height:18px;background:rgba(148,166,210,.14);flex-shrink:0;margin:0 2px}'
       + ':root[data-theme="light"] .scorr-cnav{background:#FFFFFF;border-bottom-color:rgba(20,35,80,.1);box-shadow:0 1px 4px rgba(20,35,70,.06)}'
       + ':root[data-theme="light"] .scorr-cnav a{color:#5B6B94}'
       + ':root[data-theme="light"] .scorr-cnav a:hover{color:#0E1630}'
