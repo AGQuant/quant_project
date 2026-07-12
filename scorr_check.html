@@ -1125,15 +1125,17 @@ function renderTcDetail(box, d, uiMode){
   const st=ev.style||{};
   P.push([10,_detPanel('R10','Style extras',cr.R10, REV
     ? _kv(SELL?'Fall from 2d high':'Recovery off 2d low', (SELL?_sgn(st.fall_from_high_2d):_sgn(st.recovery_2d))+'%')
-    : _kv('mom_2d',_sgn(st.mom_2d)+'%')+_kv('52w index',st.week_index_52!=null?st.week_index_52.toFixed(0):'—'))]);
+    : _kv('mom_2d',_sgn(st.mom_2d)+'%')+_kv('52w index',st.week_index_52!=null?(st.week_index_52.toFixed(0)+_wk52tag(st.week_index_52)):'—'))]);   // cc#453 fix_3
 
-  // R11 room ladder (1D)
-  P.push([11,_detPanel('R11','Room · 1D '+(SELL?'(room to fall → S1)':'(room to rise → R1)'),cr.R11,_detLadder(d, SELL))]);
+  // R11 room — cc#453 fix_4: horizontal Pivot Range bar (▼ CMP marker, red←PP→green shading)
+  P.push([11,_detPanel('R11','Room · 1D '+(SELL?'(room to fall → S1)':'(room to rise → R1)'),cr.R11,_detPivotBar(d.pivots, d.cmp, SELL))]);
 
-  // R12 OI
+  // R12 OI — cc#453 fix_5: quadrant tag (today) + 5d rolling OI strip
   const oi=ev.oi||{};
+  const oiQ=oi.quadrant?('<div style="margin:7px 0 2px"><span class="v4-det-mchip '+(oi.quadrant_color==='bull'?'pos':oi.quadrant_color==='bear'?'neg':'')+'">'+oi.quadrant+'</span></div>'):'';
   P.push([12,_detPanel('R12','OI structure',cr.R12,
-    _kv('Day %',_sgn(oi.day_1d)+'%',_sgnCls(oi.day_1d,!SELL))+_kv('OI change',oi.oi_chg!=null?_sgn(oi.oi_chg):'missing (→0.5)'))]);
+    _kv('Day %',_sgn(oi.day_1d)+'%',_sgnCls(oi.day_1d,!SELL))+_kv('OI change',oi.oi_chg!=null?_sgn(oi.oi_chg):'missing (→0.5)')
+    +oiQ+_detOiStrip(oi.oi_5d))]);
 
   // R13 basis
   const bs=ev.basis||{};
@@ -1146,9 +1148,9 @@ function renderTcDetail(box, d, uiMode){
   P.push([15,_detPanel('R15','Relative strength vs Nifty',cr.R15,
     _kv('RS week',_sgn(rr.wk)+'%',_sgnCls(rr.wk,!SELL))+_kv('RS month',_sgn(rr.mo)+'%',_sgnCls(rr.mo,!SELL)))]);
 
-  // R16 fib position (3M swing) — zoned bar + zone chip + fib levels with 6M-confluence MAJOR tags
+  // R16 fib position (3M swing) — cc#453 fix_6: fib ZONE CHART (price line over zone bands + MAJOR badges)
   const fb=ev.fib||{};
-  P.push([16,_detPanel('R16','Fib position (3M swing)',cr.R16,_detFib(fb))]);
+  P.push([16,_detPanel('R16','Fib position (3M swing)',cr.R16,_detFibChart(fb, SELL))]);
 
   P.sort((a,b)=>a[0]-b[0]);
   box.innerHTML=banner+'<div class="v4-det-grid">'+P.map(x=>x[1]).join('')+'</div>';
@@ -1173,10 +1175,44 @@ function _detChart(ev, SELL){
     +'<div class="v4-det-chips" style="margin-top:8px">'
     +'<span class="v4-det-mchip '+(ev.above_vwap===false?(SELL?'pos':'neg'):(SELL?'neg':'pos'))+'">'+(ev.above_vwap===false?'below VWAP':'above VWAP')+'</span>'
     +'<span class="v4-det-mchip">VWAP '+(vwap!=null?vwap:'—')+'</span>'
-    +'<span class="v4-det-mchip">range pos '+(rp!=null?Math.round(rp*100)+'%':'—')+'</span></div>';
+    +'<span class="v4-det-mchip">day-range pos '+(rp!=null?(Math.round(rp*100)+'% ('+(rp*100<=33?'near low':rp*100>=67?'near high':'mid')+')'):'—')+'</span></div>';   // cc#453 fix_2
 }
 
-// R11 room ladder: pivots vs CMP with room bars (LONG=to R-levels, SHORT=to S-levels)
+// cc#453 fix_3: 52-week index interpretation tag (<=20 near low red, >=80 near high green, else none)
+function _wk52tag(v){
+  if(v==null)return '';
+  if(v<=20)return ' <span style="color:var(--red);font-weight:700">· Near 52-week low</span>';
+  if(v>=80)return ' <span style="color:var(--grn);font-weight:700">· Near 52-week high</span>';
+  return '';
+}
+
+// cc#453 fix_4: horizontal Pivot Range bar (translated from the GVM-page PivotLadder). S2-S1-PP-R1-R2
+// on one line, ▼ CMP marker coloured by zone, red shading left of PP / green right, side-aware footer
+// "room to R1 (long) / S1 (short) x.x%". Replaces the old 4-row _detLadder table.
+function _detPivotBar(pivots, cmp, SELL){
+  const p=pivots||{}; const s2=+p.s2,s1=+p.s1,pp=+p.pp,r1=+p.r1,r2=+p.r2;
+  if(![s2,s1,pp,r1,r2].every(isFinite)||r2<=s2)return '<div class="v4-det-note">no pivots</div>';
+  const lo=s2,hi=r2,span=hi-lo;
+  const X=v=>Math.min(99,Math.max(1,(v-lo)/span*100));
+  const ppX=X(pp);
+  const levels=[['S2',s2,'var(--red)'],['S1',s1,'var(--red)'],['PP',pp,'var(--mut)'],['R1',r1,'var(--grn)'],['R2',r2,'var(--grn)']];
+  const cmpV=(cmp!=null&&isFinite(+cmp))?+cmp:null;
+  const cmpX=cmpV!=null?X(cmpV):null;
+  const cmpCol=cmpV==null?'var(--mut)':(cmpV>=r1?'var(--amber)':cmpV>=pp?'var(--grn)':cmpV>=s1?'var(--amber)':'var(--red)');
+  const ticks=levels.map(l=>'<div style="position:absolute;left:'+X(l[1])+'%;top:5px;width:2px;height:11px;background:'+l[2]+';transform:translateX(-50%);opacity:.8"></div>'
+    +'<div style="position:absolute;left:'+X(l[1])+'%;top:26px;transform:translateX(-50%);text-align:center;line-height:1.25"><div style="font-size:11px;font-weight:800;color:'+l[2]+'">'+l[0]+'</div><div style="font-size:11px;color:var(--mut);font-family:var(--mono)">'+l[1].toFixed(0)+'</div></div>').join('');
+  let cmpMark='';
+  if(cmpX!=null){
+    cmpMark='<div style="position:absolute;left:'+cmpX+'%;top:-16px;transform:translateX(-50%);font-size:12px;font-weight:800;color:'+cmpCol+';font-family:var(--mono);white-space:nowrap">▼ ₹'+cmpV.toFixed(1)+'</div>'
+      +'<div style="position:absolute;left:'+cmpX+'%;top:3px;width:3px;height:15px;background:'+cmpCol+';border-radius:2px;transform:translateX(-50%)"></div>';
+  }
+  const track='<div style="position:absolute;top:8px;left:0;right:0;height:5px;border-radius:3px;background:linear-gradient(90deg,rgba(255,92,108,.30) 0%,rgba(255,92,108,.16) '+ppX+'%,rgba(47,212,139,.16) '+ppX+'%,rgba(47,212,139,.30) 100%)"></div>';
+  const roomPct=cmpV!=null?(SELL?((cmpV-s1)/cmpV*100):((r1-cmpV)/cmpV*100)):null;
+  const foot='<div class="v4-det-note" style="margin-top:6px">'+(roomPct!=null?('<b style="color:'+(SELL?'var(--red)':'var(--grn)')+'">room to '+(SELL?'S1':'R1')+' '+roomPct.toFixed(1)+'%</b>'):'—')+' · rolling-5d pivots</div>';
+  return '<div style="position:relative;height:56px;margin-top:18px">'+cmpMark+track+ticks+'</div>'+foot;
+}
+
+// R11 room ladder: pivots vs CMP with room bars (LONG=to R-levels, SHORT=to S-levels)  [cc#453: superseded by _detPivotBar]
 function _detLadder(d, SELL){
   const p=d.pivots||{}, cmp=d.cmp; if(cmp==null)return '<div class="v4-det-note">no CMP</div>';
   const defs=SELL?[['R1',p.r1],['PP',p.pp],['S1',p.s1],['S2',p.s2]]:[['S1',p.s1],['PP',p.pp],['R1',p.r1],['R2',p.r2]];
@@ -1194,8 +1230,72 @@ function _detLadder(d, SELL){
   return '<table class="v4-det-tbl"><thead><tr><th>Level</th><th style="text-align:right">Price</th><th style="text-align:right">Dist</th><th>'+(SELL?'Room to fall':'Room to rise')+'</th></tr></thead><tbody>'+(body||'<tr><td class="v4-det-note">no pivots</td></tr>')+'</tbody></table>';
 }
 
+// cc#453 fix_5: 5-day rolling OI strip on the R12 detail panel (mirrors the Derivative Cockpit cc#445
+// fix_7 component). Each day: date · OI d/d% (green/red) · per-day quadrant tag (coloured). + net chip.
+function _detOiStrip(o5){
+  if(!o5||!o5.series||!o5.series.length)return '';
+  const _dm=s=>String(s||'').slice(5).replace('-','/');
+  const bars=o5.series.map(s=>{
+    const c=(s.chg_pct==null?0:s.chg_pct);
+    const qc=s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)';
+    return '<span title="'+s.date+': OI '+(s.chg_pct==null?'--':_sgn(s.chg_pct,1))+'% · Px '+(s.px_chg==null?'--':_sgn(s.px_chg,1))+'%'+(s.quadrant?(' · '+s.quadrant):'')+'" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.15">'
+      +'<span style="font-size:8px;color:var(--dim)">'+_dm(s.date)+'</span>'
+      +'<span style="font-family:var(--mono);font-size:11px;font-weight:700;color:'+(c>=0?'var(--grn)':'var(--red)')+'">'+(s.chg_pct==null?'·':_sgn(s.chg_pct,1))+'</span>'
+      +'<span style="font-size:7.5px;color:'+qc+'">'+(s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,9):'')+'</span></span>';
+  }).join('<span style="color:var(--line2);margin:0 3px">|</span>');
+  const net=o5.net_pct!=null?('<span class="v4-det-mchip '+(o5.net_pct>=0?'pos':'neg')+'">net '+_sgn(o5.net_pct,1)+'%</span>'):'';
+  return '<div class="v4-det-note" style="margin-top:8px">OI · 5d rolling (oldest→newest)</div>'
+    +'<div style="display:flex;gap:2px;align-items:flex-end;flex-wrap:wrap;margin-top:4px">'+bars+' '+net+'</div>';
+}
+
+// cc#453 fix_6: R16 fib ZONE CHART — translated from the Fib-Strength FibChartSvg (cc#409/#411).
+// Price line over horizontal fib zone bands (Breakout/Resistance Test/Strength/Decision/Weak/Breakdown),
+// fib %+price labels on the right axis, Prev Close dot, MAJOR-confluence badges (●). Score/zone tag kept
+// above. 3M swing per the R16 spec. Falls back to the old zoned bar (_detFib) if no price series.
+const _FIB_ZONE_BANDS=[
+  {top:123.6,bot:100,name:'Breakout',col:'var(--grn)',op:0.16},
+  {top:100,bot:78.6,name:'Resistance Test',col:'var(--red)',op:0.14},
+  {top:78.6,bot:61.8,name:'Strength',col:'var(--grn)',op:0.09},
+  {top:61.8,bot:38.2,name:'Decision',col:'var(--mut)',op:0.07},
+  {top:38.2,bot:23.6,name:'Weak',col:'var(--red)',op:0.07},
+  {top:23.6,bot:0,name:'Breakdown',col:'var(--red)',op:0.15}
+];
+function _detFibChart(fb, SELL){
+  if(!fb||fb.pos==null)return '<div class="v4-det-note">no 3M swing data</div>';
+  const zoneChip='<div style="margin-bottom:8px"><span class="v4-det-mchip '+cr16Pos(fb.pos)+'">'+Number(fb.pos).toFixed(1)+'% — '+(fb.zone||'—')+'</span></div>';
+  if(fb.range_ok===false)return zoneChip+'<div class="v4-det-note">3M range &lt;5% — fib not meaningful (auto 0.5).</div>';
+  const ser=(fb.series||[]).filter(v=>v!=null);
+  const lo=fb.swing_lo, hi=fb.swing_hi;
+  if(ser.length<2||lo==null||hi==null||hi<=lo)return zoneChip+_detFib(fb);   // no price path -> old zoned bar
+  const W=340,H=190,L=6,R=66,T=10,B=10, span=hi-lo;
+  const pxAt=pct=>lo+(pct/100)*span;
+  const p1236=pxAt(123.6);
+  const vals=ser.concat([lo,hi,p1236]); if(fb.cmp!=null)vals.push(fb.cmp);
+  let ymin=Math.min.apply(null,vals),ymax=Math.max.apply(null,vals);
+  const ypad=(ymax-ymin)*0.04||1; ymin-=ypad; ymax+=ypad;
+  const xF=i=>L+(i/(ser.length-1))*(W-L-R);
+  const yF=p=>T+(ymax-p)/(ymax-ymin)*(H-T-B);
+  const clampY=y=>Math.max(T,Math.min(H-B,y));
+  const dpath=ser.map((v,i)=>(i?'L':'M')+xF(i).toFixed(1)+' '+yF(v).toFixed(1)).join(' ');
+  const bands=_FIB_ZONE_BANDS.map(z=>{const yt=clampY(yF(pxAt(z.top))),yb=clampY(yF(pxAt(z.bot)));
+    return '<rect x="'+L+'" y="'+Math.min(yt,yb).toFixed(1)+'" width="'+(W-L-R)+'" height="'+Math.max(0.5,Math.abs(yb-yt)).toFixed(1)+'" fill="'+z.col+'" opacity="'+z.op+'"/>';}).join('');
+  const bandLabels=_FIB_ZONE_BANDS.map(z=>{const ymid=clampY((yF(pxAt(z.top))+yF(pxAt(z.bot)))/2);
+    return '<text x="'+(W-R-4)+'" y="'+(ymid+3).toFixed(1)+'" font-size="7.5" font-family="monospace" fill="var(--dim)" text-anchor="end" opacity="0.75">'+z.name+'</text>';}).join('');
+  const lvLines=(fb.levels||[]).map(f=>{const y=yF(f.price), bold=Math.abs(f.pct-61.8)<0.5;
+    return '<line x1="'+L+'" y1="'+y.toFixed(1)+'" x2="'+(W-R)+'" y2="'+y.toFixed(1)+'" stroke="'+(bold?'var(--txt)':'var(--mut)')+'" stroke-width="'+(bold?'1':'0.6')+'" stroke-dasharray="'+(bold?'5 2.5':'3 2.5')+'" stroke-opacity="'+(bold?'0.55':'0.4')+'"/>'
+      +'<text x="'+(W-R+3)+'" y="'+(y+3).toFixed(1)+'" font-size="8" font-family="monospace" fill="var(--mut)">'+f.pct.toFixed(1)+'% · '+Number(f.price).toFixed(1)+(f.major?' ●':'')+'</text>';}).join('');
+  let cmpDot='';
+  if(fb.cmp!=null){const cx=xF(ser.length-1).toFixed(1),cy=yF(fb.cmp).toFixed(1);
+    cmpDot='<circle cx="'+cx+'" cy="'+cy+'" r="3" fill="var(--blu)" stroke="#fff" stroke-width="1.2"/>'
+      +'<text x="'+(cx-5).toFixed(1)+'" y="'+(cy-6).toFixed(1)+'" font-size="8.5" font-family="monospace" font-weight="700" fill="var(--txt)" text-anchor="end">Prev Close '+Number(fb.cmp).toFixed(1)+'</text>';}
+  const svg='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block;border:1px solid var(--line2);border-radius:8px;background:var(--panel2)">'
+    +bands+bandLabels+lvLines
+    +'<path d="'+dpath+'" fill="none" stroke="var(--blu)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>'+cmpDot+'</svg>';
+  return zoneChip+svg+'<div class="v4-det-note" style="margin-top:6px">3M swing scored (R16). ● = MAJOR (3M level within ~1% of a 6M level).</div>';
+}
+
 // R16 fib panel (cc#410): zoned 0→123.6 bar (Fib Strength Rule colours) + CMP marker + zone chip +
-// 3M fib levels with 6M-confluence MAJOR tags.
+// 3M fib levels with 6M-confluence MAJOR tags.   [cc#453: kept as _detFibChart's no-series fallback]
 const _FIB_DET_ZONES=[
   {lo:0,hi:23.6,name:'Breakdown',col:'var(--red)',op:0.5},
   {lo:23.6,hi:38.2,name:'Weak',col:'var(--red)',op:0.22},

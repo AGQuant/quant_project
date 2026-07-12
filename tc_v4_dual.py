@@ -724,16 +724,39 @@ def _peer_rows(cur, segment, symbol, side):
     if not segment:
         return []
     order = "ASC" if side == "SELL" else "DESC"   # SELL wants the biggest fallers first
+    # cc#453 fix_1: anchor peer day% to the last session that actually HAS day_1d (not a bare
+    # MAX(score_date), which off-market can be a weekend GVM-nightly row with null day_1d -> every
+    # peer row rendered "--"). This is the cc#424/#446 freeze-at-last-tick convention for peer day%.
     cur.execute(f"""
         SELECT g.symbol, v.day_1d
         FROM gvm_scores g JOIN v8_metrics v ON v.symbol = g.symbol
         WHERE g.segment = %s AND g.symbol <> %s
           AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
-          AND v.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+          AND v.score_date = (SELECT MAX(score_date) FROM v8_metrics WHERE day_1d IS NOT NULL)
           AND v.day_1d IS NOT NULL
         ORDER BY v.day_1d {order} LIMIT 8
     """, (segment, symbol))
     return [{"symbol": r[0], "day_1d": _r(r[1])} for r in cur.fetchall()]
+
+
+def _oi_evidence(cur, d, v8):
+    """cc#453 fix_5: R12 OI evidence — today's day%/OI-change + the OI/price quadrant tag (Long/Short
+    Buildup · Short Covering · Long Unwinding) + the 5-day rolling OI strip. Reuses the Derivative
+    Cockpit's deriv_metrics helpers so /check reads identically to the cockpit (cc#445 fix_3/fix_7)."""
+    day_1d = v8.get("day_1d")
+    oi_chg = d.get("oi_chg")
+    blk = {"day_1d": _r(day_1d), "oi_chg": _r(oi_chg),
+           "quadrant": None, "quadrant_color": None, "oi_5d": None}
+    try:
+        from deriv_metrics import _quadrant_tag, _oi_5d_rolling
+        q = _quadrant_tag(oi_chg, day_1d)
+        if q:
+            blk["quadrant"] = q["label"]
+            blk["quadrant_color"] = q["color"]
+        blk["oi_5d"] = _oi_5d_rolling(cur, d.get("symbol"))
+    except Exception:
+        pass   # missing OI feed -> tag/strip simply absent; R12 still shows day%/OI-change
+    return blk
 
 
 def _evidence(cur, d, side):
@@ -757,7 +780,7 @@ def _evidence(cur, d, side):
         "returns": {"wk": _r(v8.get("week_return")), "mo": _r(v8.get("month_return"))},
         "style": {"mom_2d": _r(v8.get("mom_2d")), "week_index_52": _r(v8.get("week_index_52")),
                   "recovery_2d": _r(d.get("recovery_2d")), "fall_from_high_2d": _r(d.get("fall_from_high_2d"))},
-        "oi": {"day_1d": _r(v8.get("day_1d")), "oi_chg": _r(d.get("oi_chg"))},
+        "oi": _oi_evidence(cur, d, v8),   # cc#453 fix_5: + quadrant tag + 5d rolling strip
         "basis": {"now": _r(d.get("basis_now")), "prev": _r(d.get("basis_prev")),
                   "fresh": bool(d.get("basis"))},
         "mood": {"fails": d.get("mood_fails"), "bull": d.get("mood_bull"), "adr": _r(d.get("adr")),
@@ -791,6 +814,8 @@ def _fib_evidence(d):
     return {"pos": _r(d.get("fib_pos")), "zone": _fib_zone_name(d.get("fib_pos")),
             "range_ok": d.get("fib_range_ok"), "swing_hi": _r(h3), "swing_lo": _r(l3),
             "cmp": _r(d.get("cmp")),
+            # cc#453 fix_6: 3M closing-price path for the fib ZONE CHART (price line over the zone bands)
+            "series": [_r(r["close"]) for r in d3 if r.get("close") is not None],
             "levels": [{"pct": x["pct"], "price": x["price"], "major": x["major"]} for x in lv3]}
 
 
