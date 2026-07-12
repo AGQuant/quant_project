@@ -988,6 +988,18 @@ def _check_pivots_health():
         log.error(f"pivots_watchdog: {e}")
         _log_alert("pivots_watchdog_error", f"pivot watchdog failed for {today}: {e}")
 
+def _bg_oi_snapshot():
+    """cc#445 fix_4: persist today's ATM call/put OI per F&O underlying (post-open + EOD) so the
+    Derivative Cockpit ATM OI d/d has a real prior-day snapshot to diff against."""
+    try:
+        import deriv_metrics
+        with _conn() as conn:
+            res = deriv_metrics.snapshot_all_atm_oi(conn)
+        log.info(f"oi_snapshot: {res}")
+    except Exception as e:
+        log.error(f"oi_snapshot: {e}")
+
+
 _v14_running = False
 
 def _bg_v14_cycle():
@@ -1297,6 +1309,9 @@ async def _scheduler_loop():
             _spawn(_premarket_writer_check)   # cc_task #72 bug_1: 09:10 pre-market writer readiness
         if h == 9 and m == 25:
             _spawn(_bg_open_bars_alarm)       # cc#229: 09:25 feed-silent-at-open alarm
+        # cc#445 fix_4: ATM-OI daily snapshot — post-open (09:20) + EOD (15:35), trading days.
+        if now.weekday() < 5 and _is_trading_day(now.date()) and ((h == 9 and m == 20) or (h == 15 and m == 35)):
+            _spawn(_bg_oi_snapshot)
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
         # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.

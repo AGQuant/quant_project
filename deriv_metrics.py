@@ -149,7 +149,8 @@ def _basis_block(cur, sym) -> Dict[str, Any]:
     oi_dd_pct = (round((oi - oi_prev_day) / oi_prev_day * 100.0, 1)
                  if (oi is not None and oi_prev_day and oi_prev_day > 0) else None)
     return {"fut": fut, "spot": spot,
-            "basis": {"value": basis, "pct": basis_pct, "percentile": pct, "spark": spark},
+            "basis": {"value": basis, "pct": basis_pct, "percentile": pct, "spark": spark,
+                      "tag": _basis_tag(pct, (basis is None or basis >= 0))},   # cc#445 fix_2
             "fut_oi": {"oi": oi, "chg_pct": oi_dd_pct}}
 
 
@@ -183,19 +184,38 @@ def _oi_quadrant(oi_chg, price_chg) -> Optional[Dict[str, Any]]:
 
 
 def _oi_5d_rolling(cur, sym) -> Optional[Dict[str, Any]]:
-    """cc#427 fix_8: last-5-session futures OI day-over-day % (one OI per session), plus the net-5d
-    figure. Feeds the "OI · 5d rolling" mini-row. Needs >=2 sessions or returns None (row hidden)."""
+    """cc#427 fix_8 / cc#445 fix_7: last-5-session futures OI d/d %, each labelled with its DATE and
+    tagged with the OI/price quadrant (needs the day's price change alongside the OI change). Net-5d kept."""
     cur.execute("""SELECT DISTINCT ON (ts::date) ts::date, oi FROM futures_basis
                    WHERE symbol=%s AND oi IS NOT NULL
                    ORDER BY ts::date DESC, ts DESC LIMIT 6""", (sym,))
     rows = [(r[0], _f(r[1])) for r in cur.fetchall()][::-1]   # oldest -> newest
     if len(rows) < 2:
         return None
+    # daily closes for the same dates (for price-change -> quadrant)
+    cur.execute("""SELECT price_date, close FROM raw_prices WHERE symbol=%s
+                   AND price_date <= %s ORDER BY price_date DESC LIMIT 7""", (sym, rows[-1][0]))
+    closes = {r[0]: _f(r[1]) for r in cur.fetchall()}
+    _cdates = sorted(closes.keys())
+
+    def _px_chg(d):
+        if d not in closes:
+            return None
+        idx = _cdates.index(d) if d in _cdates else -1
+        if idx <= 0:
+            return None
+        prevc = closes.get(_cdates[idx - 1])
+        c = closes.get(d)
+        return round((c - prevc) / prevc * 100.0, 2) if (prevc and c) else None
+
     series = []
     for i in range(1, len(rows)):
         prev, oi = rows[i - 1][1], rows[i][1]
         pct = round((oi - prev) / prev * 100.0, 1) if (prev and prev > 0) else None
-        series.append({"date": str(rows[i][0]), "chg_pct": pct})
+        px = _px_chg(rows[i][0])
+        q = _quadrant_tag(pct, px)
+        series.append({"date": str(rows[i][0]), "chg_pct": pct, "px_chg": px,
+                       "quadrant": q["label"] if q else None, "quadrant_color": q["color"] if q else None})
     series = series[-5:]
     vals = [s["chg_pct"] for s in series if s["chg_pct"] is not None]
     net = round(sum(vals), 1) if vals else None
@@ -420,6 +440,31 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
         # fall-from-day-high
         if hi and cmp_px:
             out["fall_from_day_high"] = round((cmp_px - hi) / hi * 100.0, 2)
+        # cc#445 fix_8: opening range (09:15-09:30) + CMP position vs range (off-market = last session)
+        _orb = [x for x in tb if x[4].time().hour == 9 and x[4].time().minute < 30]
+        or_hi = max((_f(x[1]) for x in _orb if _f(x[1]) is not None), default=None)
+        or_lo = min((_f(x[2]) for x in _orb if _f(x[2]) is not None), default=None)
+        if or_hi is not None and or_lo is not None and cmp_px:
+            if cmp_px > or_hi:
+                pos, edge = "Above", round((cmp_px - or_hi) / or_hi * 100.0, 2)
+            elif cmp_px < or_lo:
+                pos, edge = "Below", round((or_lo - cmp_px) / or_lo * 100.0, 2)
+            else:
+                pos = "Inside"
+                edge = round(min(abs(cmp_px - or_hi), abs(cmp_px - or_lo)) / cmp_px * 100.0, 2)
+            out["orb"] = {"high": round(or_hi, 2), "low": round(or_lo, 2), "position": pos,
+                          "edge_pct": edge, "session": str(today)}
+        # cc#445 fix_6: intraday ATR(5m, 20)
+        _trs = []
+        for i in range(1, len(tb)):
+            h2 = _f(tb[i][1]); l2 = _f(tb[i][2]); pc2 = _f(tb[i - 1][0])
+            if None in (h2, l2, pc2):
+                continue
+            _trs.append(max(h2 - l2, abs(h2 - pc2), abs(l2 - pc2)))
+        if _trs:
+            _atr5 = sum(_trs[-20:]) / len(_trs[-20:])
+            out["atr_5m"] = round(_atr5, 2)
+            out["atr_5m_pct"] = round(_atr5 / cmp_px * 100.0, 2) if cmp_px else None
         # prior-day naked VPOC (prior VPOC untouched by today's range)
         if len(days) > 1:
             pb = _bars(days[1])
@@ -439,7 +484,13 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
                 if cand and sum((_f(x[3]) or 0) for x in cand) > 0:
                     vx_bars, vx_days = cand, days[j:]
                     break
-        last_t = vx_bars[-1][4].time()
+        # cc#445 fix_5: OFF-MARKET freeze at the last session's FULL-DAY (15:30) VolX — the time-match
+        # to a partial last bar (a Fri feed-freeze at ~10:45) made VolX read 0.0×/-97%. Live -> match to
+        # the current bar time; off-market -> full-session cum vs prior full-session cums.
+        import datetime as _dt
+        _ist_today = (_dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)).date()
+        _is_live = (today == _ist_today)
+        last_t = vx_bars[-1][4].time() if _is_live else _dt.time(23, 59, 59)
         today_cum = sum((_f(x[3]) or 0) for x in vx_bars)
         prior_cums = []
         for d in vx_days[1:6]:
@@ -461,6 +512,137 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
     return out
 
 
+# ── cc#445 cockpit v3 helpers ────────────────────────────────────────────────────
+def _quadrant_tag(oi_chg, px_chg):
+    """OI/price quadrant classification (bullish pair green, bearish red)."""
+    if oi_chg is None or px_chg is None:
+        return None
+    up_oi, up_px = oi_chg > 0, px_chg > 0
+    if up_oi and up_px:
+        return {"label": "Long Buildup", "color": "bull"}
+    if up_oi and not up_px:
+        return {"label": "Short Buildup", "color": "bear"}
+    if not up_oi and up_px:
+        return {"label": "Short Covering", "color": "bull"}
+    return {"label": "Long Unwinding", "color": "bear"}
+
+
+def _basis_tag(pct, is_premium):
+    """cc#445 fix_2: 5d-percentile strength tag from the buy perspective — a premium is strong at a
+    high percentile; a discount inverts (strong discount reads weak for a buyer)."""
+    if pct is None:
+        return None
+    strong, weak = pct >= 70, pct < 30
+    if is_premium:
+        return "STRONG" if strong else "WEAK" if weak else "AVERAGE"
+    return "WEAK" if strong else "STRONG" if weak else "AVERAGE"
+
+
+def _ad_21d(cur, sym):
+    """cc#445 fix_5: 21-day Accumulation/Distribution — up-day volume vs down-day volume balance."""
+    cur.execute("""SELECT close, volume FROM raw_prices WHERE symbol=%s AND close IS NOT NULL
+                   ORDER BY price_date DESC LIMIT 22""", (sym,))
+    rows = [(_f(r[0]), _f(r[1]) or 0.0) for r in cur.fetchall()][::-1]
+    if len(rows) < 3:
+        return None
+    up_vol = dn_vol = 0.0
+    for i in range(1, len(rows)):
+        if rows[i][0] is None or rows[i - 1][0] is None:
+            continue
+        if rows[i][0] > rows[i - 1][0]:
+            up_vol += rows[i][1]
+        elif rows[i][0] < rows[i - 1][0]:
+            dn_vol += rows[i][1]
+    tot = up_vol + dn_vol
+    if tot <= 0:
+        return None
+    up_pct = round(up_vol / tot * 100.0, 0)
+    label = "Accumulation" if up_pct >= 55 else "Distribution" if up_pct <= 45 else "Neutral"
+    return {"up_vol_pct": up_pct, "label": label, "days": len(rows) - 1}
+
+
+def _atr_daily(cur, sym, period=14):
+    """cc#445 fix_6: daily ATR(14) from raw_prices."""
+    cur.execute("""SELECT high, low, close FROM raw_prices WHERE symbol=%s AND close IS NOT NULL
+                   ORDER BY price_date DESC LIMIT %s""", (sym, period + 1))
+    rows = [(_f(r[0]), _f(r[1]), _f(r[2])) for r in cur.fetchall()][::-1]
+    if len(rows) < 2:
+        return None
+    trs = []
+    for i in range(1, len(rows)):
+        h, l, c = rows[i]; pc = rows[i - 1][2]
+        if None in (h, l, pc):
+            continue
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    return round(sum(trs) / len(trs), 2) if trs else None
+
+
+def _ensure_oi_daily(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS options_oi_daily (
+        underlying TEXT NOT NULL, d DATE NOT NULL, atm_strike NUMERIC,
+        call_oi BIGINT, put_oi BIGINT, snapshot_ts TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (underlying, d))""")
+
+
+def persist_atm_oi_daily(cur, sym, atm, call_oi, put_oi):
+    """cc#445 fix_4: upsert today's ATM call/put OI into options_oi_daily (post-open + EOD job) so a
+    real day-over-day is available from the 2nd session onward."""
+    if atm is None or (call_oi is None and put_oi is None):
+        return
+    from datetime import date as _date
+    _ensure_oi_daily(cur)
+    cur.execute("""INSERT INTO options_oi_daily (underlying, d, atm_strike, call_oi, put_oi)
+                   VALUES (%s, CURRENT_DATE, %s, %s, %s)
+                   ON CONFLICT (underlying, d) DO UPDATE SET atm_strike=EXCLUDED.atm_strike,
+                       call_oi=EXCLUDED.call_oi, put_oi=EXCLUDED.put_oi, snapshot_ts=NOW()""",
+                (sym, atm, call_oi, put_oi))
+
+
+def _atm_dd_from_daily(cur, sym, atm, call_oi, put_oi):
+    """cc#445 fix_4: ATM Call/Put OI d/d from options_oi_daily (today vs prev trading-day snapshot).
+    Returns (call_chg, put_chg, first_snapshot, as_of). '1st snapshot' until 2 sessions exist."""
+    _ensure_oi_daily(cur)
+    cur.execute("""SELECT d, call_oi, put_oi FROM options_oi_daily WHERE underlying=%s
+                   ORDER BY d DESC LIMIT 2""", (sym,))
+    rows = cur.fetchall()
+    if not rows:
+        return None, None, True, None
+    latest_d = rows[0][0]
+    if len(rows) < 2:
+        return None, None, True, str(latest_d)
+    prev_c, prev_p = _f(rows[1][1]), _f(rows[1][2])
+    cc = round((call_oi - prev_c) / prev_c * 100.0, 1) if (call_oi is not None and prev_c) else None
+    pc = round((put_oi - prev_p) / prev_p * 100.0, 1) if (put_oi is not None and prev_p) else None
+    return cc, pc, False, str(latest_d)
+
+
+def snapshot_all_atm_oi(conn) -> Dict[str, Any]:
+    """cc#445 fix_4: persist today's ATM call/put OI per F&O underlying into options_oi_daily so the
+    cockpit ATM Call/Put OI d/d has a real prior-day snapshot. Called post-open + EOD (trading days)."""
+    with conn.cursor() as cur:
+        _ensure_oi_daily(cur)
+        cur.execute("SELECT DISTINCT underlying FROM option_chain WHERE ts >= NOW() - INTERVAL '3 days'")
+        unders = [r[0] for r in cur.fetchall()]
+    n = 0
+    for u in unders:
+        try:
+            with conn.cursor() as cur:
+                b = _basis_block(cur, u)
+                cmp_px = b.get("fut") or b.get("spot")
+                if cmp_px is None:
+                    continue
+                opt = _options_block(cur, u, cmp_px)
+                atm = (opt.get("atm_call_oi") or {}).get("strike")
+                coi = (opt.get("atm_call_oi") or {}).get("oi")
+                poi = (opt.get("atm_put_oi") or {}).get("oi")
+                if atm is not None and (coi is not None or poi is not None):
+                    persist_atm_oi_daily(cur, u, atm, coi, poi)
+                    conn.commit(); n += 1
+        except Exception as e:
+            log.warning(f"snapshot_atm {u}: {e}")
+    return {"snapshotted": n, "underlyings": len(unders)}
+
+
 @deriv_router.get("/api/deriv-metrics/{symbol}")
 def deriv_metrics(symbol: str, side: Optional[str] = None):
     sym = (symbol or "").strip().upper()
@@ -478,6 +660,23 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             opt = _options_block(cur, sym, cmp_px)
             intr = _intraday_block(cur, sym, cmp_px)
             oi_5d = _oi_5d_rolling(cur, sym)   # cc#427 fix_8
+            # cc#445 fix_3: futures-OI quadrant tag (OI d/d × price change)
+            _fq = _quadrant_tag(oi_chg, m.get("price_chg"))
+            if basis.get("fut_oi"):
+                basis["fut_oi"]["quadrant"] = _fq["label"] if _fq else None
+                basis["fut_oi"]["quadrant_color"] = _fq["color"] if _fq else None
+                basis["fut_oi"]["price_chg"] = m.get("price_chg")
+            # cc#445 fix_4: ATM Call/Put OI d/d from the daily snapshot store (live vs latest prior day)
+            _coi = (opt.get("atm_call_oi") or {}).get("oi")
+            _poi = (opt.get("atm_put_oi") or {}).get("oi")
+            _cdd, _pdd, _firstsnap, _dd_asof = _atm_dd_from_daily(cur, sym, _coi, _poi)
+            if opt.get("atm_call_oi"):
+                opt["atm_call_oi"].update({"chg_pct": _cdd, "first_snapshot": _firstsnap, "dd_asof": _dd_asof})
+            if opt.get("atm_put_oi"):
+                opt["atm_put_oi"].update({"chg_pct": _pdd, "first_snapshot": _firstsnap, "dd_asof": _dd_asof})
+            # cc#445 fix_5/fix_6: A/D 21d + daily ATR
+            ad = _ad_21d(cur, sym)
+            atr_d = _atr_daily(cur, sym)
             # cc#368: freshness stamp = latest available option_chain snapshot for this underlying.
             # The chain blocks already read MAX(ts) (never today-only), so off-market/weekend still
             # returns the last live snapshot; data_ts lets the UI label it honestly ("as of <ts>")
@@ -501,15 +700,20 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                 "vpoc_today": intr.get("vpoc_today"),
                 "vpoc_prior": intr.get("vpoc_prior"),
                 "vwap": intr.get("vwap"),
+                "orb": intr.get("orb"),   # cc#445 fix_8
             },
             "flow": {
                 "fut_oi": basis.get("fut_oi"),
                 "atm_call_oi": opt.get("atm_call_oi"),
                 "atm_put_oi": opt.get("atm_put_oi"),
                 "basis": basis.get("basis"),
-                "oi_5d": oi_5d,   # cc#427 fix_8: 5-day futures OI rolling
+                "oi_5d": oi_5d,   # cc#427 fix_8: 5-day futures OI rolling (cc#445: dated + quadrant)
             },
-            "energy": {"volx": intr.get("volx"), "volx_pct": intr.get("volx_pct")},
+            "energy": {"volx": intr.get("volx"), "volx_pct": intr.get("volx_pct"),
+                       "ad_21d": ad,   # cc#445 fix_5
+                       "atr_5m": intr.get("atr_5m"), "atr_5m_pct": intr.get("atr_5m_pct"),   # cc#445 fix_6
+                       "atr_daily": atr_d,
+                       "atr_daily_pct": round(atr_d / cmp_px * 100.0, 2) if (atr_d and cmp_px) else None},
             "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
         return resp

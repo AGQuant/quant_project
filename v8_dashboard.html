@@ -938,16 +938,17 @@ function _dcInjectStyle(){
   .dc-vstrip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:9px}
   .dc-vc{border-radius:12px;padding:9px 9px;background:var(--bg2);border:1px solid var(--line);position:relative;overflow:hidden}
   .dc-vc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc,var(--mut));box-shadow:0 0 10px var(--vc,transparent)}
-  .dc-vc .k{font-size:8.5px;font-weight:700;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
-  .dc-vc .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:700;margin-top:3px;line-height:1.1}
-  .dc-vc .vs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--dim);font-weight:600;margin-top:3px}
-  .dc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:8px 13px;margin-top:6px}
-  .dc-row .k{font-size:11.5px;font-weight:700;color:var(--mut)}
-  .dc-row .d{font-size:9px;color:var(--dim);font-weight:600;margin-top:2px}
-  .dc-row .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;font-weight:700;text-align:right;color:var(--txt)}
-  .dc-row .v small{font-size:9.5px;color:var(--dim);font-weight:600;margin-left:5px}
-  .dc-thin{color:var(--mut);font-weight:700;font-size:10.5px;letter-spacing:.04em}
-  .dc-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:8px;white-space:nowrap}
+  /* cc#445 fix_1: font scale MIN 10 / MAX 16 (values 14-16, labels 10-11), roomier rows. */
+  .dc-vc .k{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--dim);text-transform:uppercase}
+  .dc-vc .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:16px;font-weight:700;margin-top:4px;line-height:1.15}
+  .dc-vc .vs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);font-weight:600;margin-top:4px;line-height:1.3}
+  .dc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px 14px;margin-top:7px}
+  .dc-row .k{font-size:11px;font-weight:700;color:var(--mut)}
+  .dc-row .d{font-size:10px;color:var(--dim);font-weight:600;margin-top:3px;line-height:1.35}
+  .dc-row .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:700;text-align:right;color:var(--txt);line-height:1.3}
+  .dc-row .v small{font-size:11px;color:var(--dim);font-weight:600;margin-left:5px}
+  .dc-thin{color:var(--mut);font-weight:700;font-size:11px;letter-spacing:.04em}
+  .dc-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:8px;white-space:nowrap}
   .dc-pos{color:var(--grn)}.dc-neg{color:var(--red)}
   .dc-skel{height:56px;border-radius:12px;margin-top:7px;background:linear-gradient(90deg,var(--panel) 25%,var(--panel2) 37%,var(--panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
   @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}
@@ -1022,30 +1023,47 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const vw=L.vwap;
   grid+=_dcR('VWAP',
     (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')+_dcInterp(vw.dist_pct)):'--','session');
-  // Basis (fix_5: rupee — Fut vs Eq price + rupee spread; 5d percentile secondary)
+  // cc#445 helpers: strength-tag colour + quadrant chip colour
+  const _tagCls=t=>t==='STRONG'?'dc-pos':t==='WEAK'?'dc-neg':'dc-thin';
+  const _qChip=(lbl,col)=>lbl?`<span class="dc-chip ${col==='bull'?'dc-pos':'dc-neg'}">${lbl}</span>`:'';
+  // Basis (fix_2: rupee Fut vs Eq + 5d-percentile STRENGTH tag)
   const b=F.basis, fut=d.fut, spot=d.spot;
   grid+=_dcR('Basis',
-    (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>`:'--',
+    (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>${b.tag?`<span class="dc-chip ${_tagCls(b.tag)}">${b.tag}</span>`:''}`:'--',
     (fut!=null&&spot!=null)?(`Fut ${num(fut,1)} vs Eq ${num(spot,1)}`+((b&&b.percentile!=null)?(' &middot; 5d pct '+num(b.percentile,0)+'%'):''))
                            :((b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):''));
-  // Fut OI (fix_1: clearer label)
+  // Fut OI (fix_3: today's OI/price quadrant tag)
   const fo=F.fut_oi;
   grid+=_dcR('Futures OI &middot; vs prev day',
-    (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>`
-      :'<span class="dc-thin">DATA THIN</span>','');
-  // ATM Call/Put OI (fix_6)
+    (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>${fo.quadrant?_qChip(fo.quadrant,fo.quadrant_color):''}`
+      :'<span class="dc-thin">DATA THIN</span>',
+    (fo&&fo.price_chg!=null)?('Px '+sign(fo.price_chg,1)+'%'):'');
+  // ATM Call/Put OI (fix_4: d/d from daily snapshot store; "1st snapshot" until 2 sessions)
   const ca=F.atm_call_oi, pa=F.atm_put_oi;
-  grid+=_dcR('ATM Call OI &middot; d/d',_dcOiVal(ca),(ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)):'');
+  grid+=_dcR('ATM Call OI &middot; d/d',_dcOiVal(ca),(ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)+(ca.dd_asof?(' &middot; '+ca.dd_asof):'')):'');
   grid+=_dcR('ATM Put OI &middot; d/d',_dcOiVal(pa),(pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
-  // Vol X (fix_7: never 0.0× from a dead session; show % vs typical)
+  // Vol X (fix_5: last-session final off-market) + A/D 21d
   grid+=_dcR('Vol X &middot; time-matched',
     E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--','vs typical session');
+  const ad=E.ad_21d;
+  grid+=_dcR('A/D &middot; 21d',
+    ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',
+    ad?(num(ad.up_vol_pct,0)+'% up-vol'):'');
+  // ATR (fix_6: 5m intraday + daily)
+  grid+=_dcR('ATR',
+    (E.atr_5m!=null||E.atr_daily!=null)?(`5m ${E.atr_5m!=null?num(E.atr_5m,1):'--'}${E.atr_5m_pct!=null?` (${num(E.atr_5m_pct,2)}%)`:''} &middot; D ${E.atr_daily!=null?num(E.atr_daily,1):'--'}${E.atr_daily_pct!=null?` (${num(E.atr_daily_pct,1)}%)`:''}`):'--','5m,20 · daily,14');
+  // ORB (fix_8: opening range + CMP position)
+  const orb=L.orb;
+  grid+=_dcR('ORB &middot; 09:15-30',
+    orb?`<span class="${orb.position==='Above'?'dc-pos':orb.position==='Below'?'dc-neg':'dc-thin'}">${orb.position}</span>${orb.edge_pct!=null?` <small>${sign(orb.edge_pct,2)}%</small>`:''}`:'--',
+    orb?(`H ${num(orb.high,0)} &middot; L ${num(orb.low,0)}`):'');
   let rows=`<div class="dc-grid">${grid}</div>`;
-  // fix_8: OI · 5d rolling (full-width mini-row) — last 5 sessions futures OI d/d + net-5d.
+  // fix_7: OI · 5d rolling — each value DATED + quadrant-tagged (needs price change alongside OI).
   const o5=F.oi_5d;
   if(o5&&o5.series&&o5.series.length){
-    const bars=o5.series.map(s=>`<span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span>`).join('<span style="color:var(--dim);margin:0 1px">·</span>');
-    rows+=`<div class="dc-row"><div><div class="k">OI &middot; 5d rolling</div><div class="d">futures OI d/d, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
+    const _dm=s=>String(s||'').slice(5).replace('-','/');
+    const bars=o5.series.map(s=>`<span title="${s.date}: OI ${s.chg_pct==null?'--':sign(s.chg_pct,1)}% · Px ${s.px_chg==null?'--':sign(s.px_chg,1)}%${s.quadrant?(' · '+s.quadrant):''}" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.15"><span style="font-size:8px;color:var(--dim)">${_dm(s.date)}</span><span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span><span style="font-size:7.5px;color:${s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)'}">${s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,9):''}</span></span>`).join('<span style="color:var(--line2);margin:0 3px">|</span>');
+    rows+=`<div class="dc-row"><div><div class="k">OI &middot; 5d rolling</div><div class="d">dated, quadrant-tagged, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:4px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-end">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
   }
   // RSI Daily · Weekly (unchanged, full-width)
   const rd=R.d,rw=R.w;
