@@ -1450,6 +1450,123 @@ def _seed_cmp_from_rest(conn, token, equity_symbols):
 
 # ── main run ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+# ── cc#390: Phase A 12-mo warehouse INSIDE the worker (main app lacks FYERS_TOTP env; worker has it) ──
+# The whole loop runs on its OWN daemon thread with its OWN db connection + token, so it can NEVER
+# block or corrupt the WS loop's connection. Market-hours safe (pauses to 15:35 if it crosses a live
+# session). Reuses cc#389's fetch_hist_5m + progress/log helpers (import only — no duplicated rules).
+def _phase_a_market_open():
+    now = datetime.now(IST)
+    return now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE
+
+
+def _claim_phase_a_worker():
+    """Atomic FOR UPDATE claim of app_config phase_a_run='pending' -> 'claimed_worker'."""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='phase_a_run' AND value='pending' FOR UPDATE")
+            r = cur.fetchone()
+            if r:
+                cur.execute("UPDATE app_config SET value='claimed_worker', updated_at=NOW() WHERE key='phase_a_run'")
+        conn.commit()
+        return bool(r)
+    except Exception as e:
+        log.error(f"phase_a worker claim failed: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def _worker_run_phase_a():
+    """Full trailing-365d 5m EQ warehouse for every active futures symbol, on the worker's token.
+    Resumable (app_config phase_a_progress); failures logged + skipped; ops_log every 20; completion
+    session_log PHASE_A_WAREHOUSE_COMPLETE. Pauses between symbols if a live session starts."""
+    import fyers_hist_backfill as fhb
+    conn = get_db()
+    started = time.time()
+    try:
+        token = get_valid_token(conn)                       # worker owns the Fyers secrets
+        today = datetime.now(IST).replace(tzinfo=None).date()
+        frm = today - timedelta(days=365)
+        with conn.cursor() as cur:
+            cur.execute("SELECT UPPER(symbol) FROM futures_universe WHERE is_active=TRUE ORDER BY symbol")
+            symbols = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT value FROM app_config WHERE key=%s", (fhb._PHASE_A_PROGRESS,))
+            r = cur.fetchone()
+        progress = (r[0] or "") if r else ""
+        pending = [s for s in symbols if s > progress] if progress else list(symbols)
+        fhb._oplog(conn, "data_infra", "PHASE_A_START",
+                   {"where": "worker", "universe": len(symbols), "to_do": len(pending),
+                    "from": str(frm), "to": str(today), "resuming_after": progress or None})
+        done = bars = fails = 0
+        failures = []
+        for sym in pending:
+            # market-hours guard — never fetch during a live session; resume-safe if it crosses over
+            while _phase_a_market_open():
+                nowt = datetime.now(IST)
+                run_at = nowt.replace(hour=15, minute=35, second=0, microsecond=0)
+                wait_s = max(60, (run_at - nowt).total_seconds())
+                log.info(f"cc#390 Phase A paused for market hours — recheck in {min(wait_s,900)/60:.0f} min")
+                time.sleep(min(wait_s, 900))
+            try:
+                res = fhb.fetch_hist_5m(sym, frm, today, conn=conn, token=token)
+                bars += res["bars"]
+            except Exception as e:
+                fails += 1
+                failures.append({"symbol": sym, "error": str(e)[:200]})
+                log.error(f"cc#390 Phase A {sym} failed: {e}")
+            done += 1
+            try:
+                fhb._set_config(conn, fhb._PHASE_A_PROGRESS, sym)
+            except Exception as e:
+                log.warning(f"phase_a checkpoint {sym}: {e}")
+            if done % 20 == 0:
+                fhb._oplog(conn, "data_infra", "PHASE_A_PROGRESS",
+                           {"where": "worker", "done": done, "of": len(pending), "bars": bars,
+                            "failures": fails, "elapsed_min": round((time.time() - started) / 60, 1),
+                            "last": sym})
+            time.sleep(5)                                    # inter-symbol pacing (chunks already 5s-paced)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*), COUNT(DISTINCT symbol), MIN(ts)::date FROM intraday_prices WHERE source=%s",
+                        (fhb.HIST_SOURCE,))
+            c = cur.fetchone()
+        summary = {"where": "worker", "symbols_processed": done, "universe": len(symbols),
+                   "bars_written_this_run": bars, "failures": fails, "failures_list": failures,
+                   "elapsed_min": round((time.time() - started) / 60, 1),
+                   "warehouse_total_bars": int(c[0] or 0), "warehouse_symbols": int(c[1] or 0),
+                   "warehouse_oldest": str(c[2]) if c[2] else None, "source": fhb.HIST_SOURCE}
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO session_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'data_audit', 'PHASE_A_WAREHOUSE_COMPLETE', %s::jsonb)""",
+                            (json.dumps(summary, default=str),))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"PHASE_A completion log: {e}")
+        try:
+            fhb._set_config(conn, fhb._PHASE_A_FLAG, "done")
+        except Exception:
+            pass
+        log.info(f"cc#390 worker Phase A COMPLETE: {summary}")
+    except Exception as e:
+        log.error(f"cc#390 worker Phase A fatal: {e}")
+    finally:
+        conn.close()
+
+
+def _phase_a_worker_daemon():
+    """Boot + hourly idle check: when off-market, atomically claim phase_a_run and run the warehouse
+    once, then keep idle-checking hourly (so a missed boot claim still fires later)."""
+    while True:
+        try:
+            if not _phase_a_market_open() and _claim_phase_a_worker():
+                log.info("cc#390: phase_a_run claimed on worker — starting 365d warehouse (background)")
+                _worker_run_phase_a()
+        except Exception as e:
+            log.error(f"cc#390 phase_a daemon: {e}")
+        time.sleep(3600)
+
+
 def run(auth_code=None):
     import fyers_backfill
     from fyers_apiv3.FyersWebsocket import data_ws
@@ -1467,6 +1584,7 @@ def run(auth_code=None):
 
     ensure_schemas(conn)
     _boot_gap_report(conn)   # cc#339 fix_3: self-document any outage window at boot
+    threading.Thread(target=_phase_a_worker_daemon, name="cc390-phasea", daemon=True).start()   # cc#390
     log.info(f"Universe: {len(symbols)} equity + {len(fut_codes)} futures "
              f"({len(index_fut_codes)} index: {index_fut_codes}) + options")
 
