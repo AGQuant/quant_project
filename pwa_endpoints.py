@@ -488,12 +488,12 @@ NAV_TOGGLE_JS = """
       + '#scorr-nav-strip .scorr-nav-btn{color:#fff}'
       // cc#126: toggle button is fixed top-right (NOT inline in the nav) so it stays
       // visible no matter how wide the nav grows or whether the nav is hidden.
-      // cc#363: stacked below the Logout (top:12) + theme (top:50) pills so it no
-      // longer overlaps them at the top-right corner; right-aligned to match (14px).
-      + '#scorr-nav-toggle-btn{position:fixed;top:88px;right:14px;z-index:9999;'
+      // cc#433: stacked below the Logout (top:64) + theme (top:102) pills, all now BELOW the
+      // 46px sticky navbar so none overlap the nav tabs; semi-transparent idle -> solid on hover.
+      + '#scorr-nav-toggle-btn{position:fixed;top:140px;right:14px;z-index:9999;'
       + '  background:#2563eb;color:#fff;font-size:11px;font-weight:600;'
       + '  padding:4px 12px;border-radius:12px;border:none;cursor:pointer;margin:0;'
-      + '  box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:.92}'
+      + '  box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:.45;transition:opacity .15s}'
       + '#scorr-nav-toggle-btn:hover{opacity:1}'
       // cc#328: the top-nav is display:none at <=767px (bottom nav is used there),
       // so the Show/Hide pill + reveal strip are dead controls on mobile — kill them.
