@@ -148,6 +148,22 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
                 ORDER BY score_date DESC LIMIT 1
             """, (sym,))
             tr = cur.fetchone()
+            # cc#478: pivot overlay for the GVM-page chart — latest v8_paper_pivots row for the
+            # symbol (read-only; no engine change). Absent row => pivots=None (overlay just omits).
+            pivots = None
+            try:
+                cur.execute("""SELECT pivot_date, pp, r1, r2, s1, s2 FROM v8_paper_pivots
+                               WHERE symbol=%s ORDER BY pivot_date DESC LIMIT 1""", (sym,))
+                pr = cur.fetchone()
+                if pr and any(v is not None for v in pr[1:]):
+                    pivots = {"pivot_date": str(pr[0]),
+                              "pp": float(pr[1]) if pr[1] is not None else None,
+                              "r1": float(pr[2]) if pr[2] is not None else None,
+                              "r2": float(pr[3]) if pr[3] is not None else None,
+                              "s1": float(pr[4]) if pr[4] is not None else None,
+                              "s2": float(pr[5]) if pr[5] is not None else None}
+            except Exception:
+                pivots = None
         tech = {}
         if tr:
             for k, v in zip(["dma_50", "dma_200", "rsi_month", "rsi_weekly",
@@ -186,6 +202,7 @@ def api_fibcheck(symbol: str, entry_price: Optional[float] = None, lookback: str
             "pct_distance_cmp_to_entry": dist_cmp_entry,
             "nearest_level_above": nearest_above,
             "technicals": tech,
+            "pivots": pivots,   # cc#478: GVM-page chart pivot overlay (None if no pivot row)
             "series": series,
             "commentary": commentary,
             "is_live": False,   # cc#343: Fibcheck is always previous-close-anchored (EOD structural view)

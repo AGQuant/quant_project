@@ -863,7 +863,12 @@ function fibZoneInterp(key, SHORT) {
   return "";
 }
 
-function FibChartSvg({ d, side }) {
+function FibChartSvg({ d, side, overlay }) {
+  // cc#478: overlay = 'fib' (default) | 'pivot' | 'both' | 'none'
+  const ov = overlay || "fib";
+  const showFib = ov === "fib" || ov === "both";
+  const showPiv = ov === "pivot" || ov === "both";
+  const piv = d.pivots || null;
   const SHORT = side === "SHORT";
   const W = 680, H = 340, L = 8, R = 92, T = 16, B = 24;
   const ser = (d.series || []).filter(p => p.close != null);
@@ -874,10 +879,15 @@ function FibChartSvg({ d, side }) {
   const span = (hi - lo) || 1;
   const pxAt = p => lo + (p / 100) * span;   // position% -> price (0 = low, 100 = high)
   const p1236 = pxAt(123.6), pNeg = pxAt(-23.6);
-  // cc#409: extend headroom so the 123.6 extension target (and its dashed line) is always visible
-  const vals = ser.map(p => p.close).concat([lo, hi, p1236]);
+  // cc#409: extend headroom so the 123.6 extension target (and its dashed line) is always visible.
+  // cc#478: y-range adapts to whichever overlays are shown so pivot/fib lines stay on-canvas.
+  const vals = ser.map(p => p.close);
   if (cmp != null) vals.push(cmp);
-  if (SHORT) vals.push(pNeg);
+  if (showFib) { vals.push(lo, hi, p1236); if (SHORT) vals.push(pNeg); }
+  const pivRows = (showPiv && piv)
+    ? [["PP", piv.pp], ["R1", piv.r1], ["R2", piv.r2], ["S1", piv.s1], ["S2", piv.s2]].filter(x => x[1] != null)
+    : [];
+  pivRows.forEach(x => vals.push(x[1]));
   let ymin = Math.min(...vals), ymax = Math.max(...vals);
   const ypad = (ymax - ymin) * 0.04 || 1; ymin -= ypad; ymax += ypad;
   const xF = i => L + (i / (n - 1)) * (W - L - R);
@@ -888,18 +898,18 @@ function FibChartSvg({ d, side }) {
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
       style={{ width: "100%", height: "auto", display: "block", border: `1px solid ${C.border}`, borderRadius: 10, background: C.bg }}>
-      {bands.map((z, i) => {
+      {showFib && bands.map((z, i) => {
         const yt = clampY(yF(pxAt(z.top))), yb = clampY(yF(pxAt(z.bot)));
         const zc = fibZoneColor(z.key);
         return <rect key={"z" + i} x={L} y={Math.min(yt, yb).toFixed(1)} width={W - L - R}
           height={Math.max(0.5, Math.abs(yb - yt)).toFixed(1)} fill={zc[0]} opacity={zc[1]} />;
       })}
-      {bands.map((z, i) => {
+      {showFib && bands.map((z, i) => {
         const ymid = clampY((yF(pxAt(z.top)) + yF(pxAt(z.bot))) / 2);
         return <text key={"zt" + i} x={W - R - 4} y={(ymid + 3).toFixed(1)} fontSize="9" fontFamily="monospace"
           fill={C.muted} textAnchor="end" opacity="0.7">{fibZoneName(z.key, SHORT)}</text>;
       })}
-      {fl.map((f, i) => {
+      {showFib && fl.map((f, i) => {
         const y = yF(f.price), bold = Math.abs(f.pct - 61.8) < 0.5;   // 61.8 = bull/bear line, bolder
         return (
           <g key={i}>
@@ -909,7 +919,7 @@ function FibChartSvg({ d, side }) {
           </g>
         );
       })}
-      {(function () {
+      {showFib && (function () {
         const y = yF(p1236);
         return (
           <g>
@@ -918,7 +928,7 @@ function FibChartSvg({ d, side }) {
           </g>
         );
       })()}
-      {SHORT && (function () {
+      {showFib && SHORT && (function () {
         const y = yF(pNeg);
         return (
           <g>
@@ -927,6 +937,17 @@ function FibChartSvg({ d, side }) {
           </g>
         );
       })()}
+      {pivRows.map(([lbl, price], i) => {
+        // cc#478: pivot overlay — dashed AMBER lines, right-edge labels, visually distinct from Fib.
+        const y = clampY(yF(price)), AMBER = "#d98b1f";
+        return (
+          <g key={"piv" + i}>
+            <line x1={L} y1={y.toFixed(1)} x2={W - R} y2={y.toFixed(1)} stroke={AMBER}
+              strokeWidth="1.2" strokeDasharray="5 4" strokeOpacity="0.9" />
+            <text x={W - R + 4} y={(y + 3.5).toFixed(1)} fontSize="10" fontFamily="monospace" fontWeight="700" fill={AMBER}>{lbl} · {price.toFixed(2)}</text>
+          </g>
+        );
+      })}
       <path d={dpath} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       {cmp != null && (
         <g>
@@ -948,6 +969,15 @@ function FibStat({ label, children }) {
 
 function FibPopout({ symbol, onClose, side = "LONG" }) {
   const [lookback, setLookback] = useState("3m");   // default 3M (matches backend default)
+  // cc#478: chart overlay choice persists across symbols + sessions (localStorage). Default 'fib'
+  // preserves the prior behaviour (Fib levels only).
+  const [overlay, setOverlay] = useState(() => {
+    try { return localStorage.getItem("gvm_chart_overlay") || "fib"; } catch (e) { return "fib"; }
+  });
+  const setOverlayPersist = v => {
+    setOverlay(v);
+    try { localStorage.setItem("gvm_chart_overlay", v); } catch (e) {}
+  };
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -978,7 +1008,7 @@ function FibPopout({ symbol, onClose, side = "LONG" }) {
           <button onClick={onClose} title="Close (Esc)"
             style={{ background: "none", border: "none", fontSize: 24, lineHeight: 1, color: C.muted, cursor: "pointer", padding: 0 }}>×</button>
         </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
           {FIB_RANGES.map(([lbl, val]) => (
             <button key={val} onClick={() => setLookback(val)}
               style={{ padding: "5px 13px", borderRadius: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
@@ -988,12 +1018,24 @@ function FibPopout({ symbol, onClose, side = "LONG" }) {
               {lbl}
             </button>
           ))}
+          {/* cc#478: overlay selector — 44px tap target + 16px font (MOBILE_UX_STANDARD_V1) */}
+          <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted }}>
+            Overlay
+            <select value={overlay} onChange={e => setOverlayPersist(e.target.value)}
+              style={{ minHeight: 44, fontSize: 16, padding: "4px 8px", borderRadius: 7,
+                border: `1px solid ${C.border}`, background: C.card, color: C.text, cursor: "pointer" }}>
+              <option value="fib">Fib levels</option>
+              <option value="pivot">Pivot levels</option>
+              <option value="both">Both</option>
+              <option value="none">None</option>
+            </select>
+          </label>
         </div>
         {loading && <div style={{ padding: "40px 0", textAlign: "center", color: C.muted, fontSize: 13 }}>Drawing Fibonacci retracement…</div>}
         {err && !loading && <div style={{ padding: "24px 0", textAlign: "center", color: C.red, fontSize: 13 }}>{err}</div>}
         {data && !loading && !err && (
           <React.Fragment>
-            <FibChartSvg d={data} side={side} />
+            <FibChartSvg d={data} side={side} overlay={overlay} />
             {data.cmp_retracement_pct != null && (function () {
               const zk = fibZoneKey(data.cmp_retracement_pct), zc = fibZoneColor(zk)[0], SH = side === "SHORT";
               return (
