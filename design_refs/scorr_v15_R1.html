@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V15 · MF Intelligence — Design Reference R1</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
+--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+--bull:#2FD48B;--bull-soft:rgba(47,212,139,.14);--bear:#FF5C6C;--bear-soft:rgba(255,92,108,.13);
+--amber:#F5B94A;--amber-soft:rgba(245,185,74,.14);--blue:#4D7CFE;--cyan:#37D3E8;
+--disp:'Sora',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--r:18px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--text);font-family:var(--disp);-webkit-font-smoothing:antialiased;max-width:1080px;margin:0 auto;padding:18px 16px 90px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 2px 14px}
+.brand{font-weight:800;font-size:17px}.brand b{color:var(--blue)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:15px;border:1px solid var(--line);background:var(--surface);font-size:11px;font-weight:600;color:var(--mut)}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--bull);box-shadow:0 0 8px var(--bull);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.search{display:flex;gap:10px;margin:4px 0 18px}
+.search input{flex:1;height:46px;background:var(--surface);border:1px solid var(--line2);border-radius:13px;color:var(--text);font-family:var(--disp);font-size:14px;padding:0 16px}
+.search input::placeholder{color:var(--dim)}
+.search button{height:46px;padding:0 22px;border-radius:13px;border:none;background:var(--blue);color:#fff;font-family:var(--disp);font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 6px 18px rgba(77,124,254,.35)}
+.eyebrow{font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+/* hero */
+.hero{background:linear-gradient(168deg,var(--surface) 0%,#0F1730 100%);border:1px solid var(--line);border-radius:var(--r);padding:20px 18px;box-shadow:0 18px 44px rgba(3,7,20,.5);display:grid;grid-template-columns:auto 1fr auto;gap:22px;align-items:center}
+.mqs-ring{width:108px;height:108px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:conic-gradient(var(--bull) 0 82%,var(--well) 82% 100%);position:relative}
+.mqs-ring::before{content:"";position:absolute;inset:8px;background:var(--surface);border-radius:50%}
+.mqs-ring .v{position:relative;font-family:var(--mono);font-size:30px;font-weight:700;color:var(--bull)}
+.mqs-ring .k{position:relative;font-size:9px;font-weight:700;letter-spacing:.12em;color:var(--dim)}
+.hero h1{font-size:19px;font-weight:800;letter-spacing:-.01em}
+.hero .meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.tag{font-size:10px;font-weight:700;padding:4px 9px;border-radius:8px;background:var(--well);border:1px solid var(--line);color:var(--mut)}
+.tag.gold{color:var(--amber);border-color:rgba(245,185,74,.3);background:var(--amber-soft)}
+.verdict{text-align:right}
+.verdict .v{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--bull);background:var(--bull-soft);border:1px solid rgba(47,212,139,.35);padding:7px 13px;border-radius:11px;display:inline-block}
+.verdict .r{font-size:10px;color:var(--dim);margin-top:7px;font-weight:600}
+/* pillar cards */
+.pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.pc{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:13px 13px 11px;position:relative;overflow:hidden}
+.pc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue);box-shadow:0 0 10px var(--blue)}
+.pc.good::before{background:var(--bull);box-shadow:0 0 10px var(--bull)}
+.pc.warn::before{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+.pc .k{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--dim);text-transform:uppercase;display:flex;justify-content:space-between}
+.pc .i{width:15px;height:15px;border-radius:50%;border:1px solid var(--line2);color:var(--dim);font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.pc .v{font-family:var(--mono);font-size:22px;font-weight:700;margin-top:6px}
+.pc .s{font-size:9.5px;color:var(--mut);margin-top:3px;line-height:1.45}
+/* cards */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;margin-top:14px}
+.card .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
+.card .h .eyebrow{margin:0}
+.badge{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.12);border:1px solid rgba(55,211,232,.3);padding:3px 8px;border-radius:8px}
+table{width:100%;border-collapse:collapse}
+th{font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;text-align:right;padding:0 6px 7px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+td{padding:8px 6px;border-bottom:1px solid var(--line);font-size:12px;text-align:right}
+td.sym{font-weight:700;font-size:12.5px}
+.gvm{font-family:var(--mono);font-weight:700;font-size:11px;padding:2px 8px;border-radius:7px;display:inline-block}
+.g-hi{color:var(--bull);background:var(--bull-soft)}.g-mid{color:var(--amber);background:var(--amber-soft)}.g-lo{color:var(--bear);background:var(--bear-soft)}
+/* segment strip */
+.segrow{display:flex;gap:6px;margin-top:4px}
+.segblk{flex:1;border-radius:10px;padding:8px 9px;background:var(--well);border:1px solid var(--line)}
+.segblk .k{font-size:8.5px;font-weight:700;letter-spacing:.06em;color:var(--dim);text-transform:uppercase}
+.segblk .v{font-family:var(--mono);font-size:13px;font-weight:700;margin-top:3px}
+.segblk .a{font-size:8.5px;font-weight:700;margin-top:2px}
+.al-ok{color:var(--bull)}.al-warn{color:var(--amber)}.al-bad{color:var(--bear)}
+/* returns bars */
+.retgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.ret{background:var(--well);border:1px solid var(--line);border-radius:11px;padding:9px 10px;text-align:center}
+.ret .k{font-size:9px;font-weight:700;color:var(--dim);letter-spacing:.08em}
+.ret .v{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--bull);margin-top:4px}
+.ret .c{font-family:var(--mono);font-size:9px;color:var(--mut);margin-top:2px}
+/* red flags */
+.flag{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);font-size:11.5px;color:var(--mut);line-height:1.5}
+.flag:first-of-type{border-top:none}
+.flag .ic{color:var(--amber);font-size:13px;flex-shrink:0}
+.flag.ok .ic{color:var(--bull)}
+/* screener */
+.tabs{display:flex;gap:8px;overflow-x:auto;margin:20px 0 0;padding-bottom:6px;scrollbar-width:none}
+.tab{flex-shrink:0;height:36px;padding:0 15px;border-radius:18px;border:1px solid var(--line);background:var(--surface);color:var(--mut);font-size:12px;font-weight:700;display:flex;align-items:center;cursor:pointer}
+.tab.on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 6px 18px rgba(77,124,254,.35)}
+.cmp{position:fixed;left:0;right:0;bottom:0;background:rgba(13,20,40,.94);backdrop-filter:blur(18px);border-top:1px solid var(--line2);padding:12px 16px;display:flex;align-items:center;gap:12px;justify-content:center}
+.cmp .t{font-size:11px;font-weight:700;color:var(--mut)}
+.cmp .f{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.12);border:1px solid rgba(55,211,232,.3);padding:5px 11px;border-radius:9px}
+.cmp button{height:36px;padding:0 18px;border-radius:11px;border:none;background:var(--cyan);color:#06222a;font-weight:800;font-family:var(--disp);font-size:12px;cursor:pointer}
+@media(max-width:720px){.pillars{grid-template-columns:1fr 1fr}.retgrid{grid-template-columns:repeat(3,1fr)}.hero{grid-template-columns:auto 1fr}.verdict{grid-column:1/-1;text-align:left}.segrow{flex-wrap:wrap}.segblk{min-width:29%}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="brand">V15 · <b>MF Intelligence</b></div>
+  <div class="chip"><span class="dot"></span>MQS ENGINE · LIVE</div>
+</div>
+
+<div class="search">
+  <input placeholder="Search any mutual fund — name, AMC, or category…">
+  <button>Analyse</button>
+</div>
+
+<!-- ═══ FUND DEEP-DIVE ═══ -->
+<div class="hero">
+  <div class="mqs-ring"><span class="v">8.2</span><span class="k">MQS /10</span></div>
+  <div>
+    <div class="eyebrow">Flexi Cap · Direct · Growth</div>
+    <h1>Parag Parikh Flexi Cap Fund</h1>
+    <div class="meta">
+      <span class="tag">AUM ₹1,02,455 Cr</span>
+      <span class="tag">ER 0.63%</span>
+      <span class="tag gold">FINKHOZ ★★★★★</span>
+      <span class="tag">CRISIL #2</span>
+      <span class="tag">Mgr tenure 12.1y</span>
+    </div>
+  </div>
+  <div class="verdict">
+    <div class="v">BUY SYSTEMATICALLY</div>
+    <div class="r">Rank 2 / 38 in Flexi Cap</div>
+  </div>
+</div>
+
+<div class="pillars">
+  <div class="pc good"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--bull)">8.6</div><div class="s">Look-through GVM 7.4 · Top-10 wt 41% · 96% resolved</div></div>
+  <div class="pc good"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--bull)">8.4</div><div class="s">+4.2% vs category 3Y · 87% rolling windows beat cat</div></div>
+  <div class="pc"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--blue)">7.8</div><div class="s">ER 0.63% = 18th pctile (cheaper than 82% of peers)</div></div>
+  <div class="pc warn"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--amber)">7.1</div><div class="s">AUM near category bloat band · tenure strong 12y</div></div>
+</div>
+
+<div class="card">
+  <div class="h"><span class="eyebrow">Look-Through Holdings × Live GVM</span><span class="badge">DIFFERENTIATOR · SCORR-ONLY</span></div>
+  <table>
+    <tr><th>Stock</th><th>Weight</th><th>GVM</th><th>Segment</th><th>Seg Rating</th></tr>
+    <tr><td class="sym">HDFC BANK</td><td class="num">8.1%</td><td><span class="gvm g-hi">7.9</span></td><td>Private Banks</td><td><span class="al-ok">Strong</span></td></tr>
+    <tr><td class="sym">BAJAJ HOLDINGS</td><td class="num">7.2%</td><td><span class="gvm g-hi">7.4</span></td><td>Holding Cos</td><td><span class="al-ok">Strong</span></td></tr>
+    <tr><td class="sym">POWER GRID</td><td class="num">6.4%</td><td><span class="gvm g-mid">6.6</span></td><td>Power T&D</td><td><span class="al-warn">Neutral</span></td></tr>
+    <tr><td class="sym">ITC</td><td class="num">5.9%</td><td><span class="gvm g-hi">7.1</span></td><td>FMCG</td><td><span class="al-warn">Neutral</span></td></tr>
+    <tr><td class="sym">COAL INDIA</td><td class="num">5.5%</td><td><span class="gvm g-lo">5.8</span></td><td>Mining</td><td><span class="al-bad">Weak</span></td></tr>
+  </table>
+  <div style="font-size:10px;color:var(--dim);margin-top:9px">Weighted portfolio-GVM <b class="num" style="color:var(--bull)">7.4</b> · 96% of weight resolved to live GVM scores · full 62-holding table on tap</div>
+</div>
+
+<div class="card">
+  <div class="h"><span class="eyebrow">Segment Exposure vs Scorr Sector Ratings</span></div>
+  <div class="segrow">
+    <div class="segblk"><div class="k">Pvt Banks</div><div class="v num">21%</div><div class="a al-ok">▲ Strong seg</div></div>
+    <div class="segblk"><div class="k">IT Services</div><div class="v num">14%</div><div class="a al-warn">◆ Neutral</div></div>
+    <div class="segblk"><div class="k">FMCG</div><div class="v num">11%</div><div class="a al-warn">◆ Neutral</div></div>
+    <div class="segblk"><div class="k">Power</div><div class="v num">9%</div><div class="a al-ok">▲ Strong seg</div></div>
+    <div class="segblk"><div class="k">Mining</div><div class="v num">6%</div><div class="a al-bad">▼ Weak seg</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="h"><span class="eyebrow">Returns vs Category (Direct plans)</span></div>
+  <div class="retgrid">
+    <div class="ret"><div class="k">1W</div><div class="v">+0.8%</div><div class="c">cat +0.5%</div></div>
+    <div class="ret"><div class="k">1M</div><div class="v">+2.4%</div><div class="c">cat +1.9%</div></div>
+    <div class="ret"><div class="k">3M</div><div class="v">+7.1%</div><div class="c">cat +5.8%</div></div>
+    <div class="ret"><div class="k">6M</div><div class="v">+12.6%</div><div class="c">cat +10.2%</div></div>
+    <div class="ret"><div class="k">1Y</div><div class="v">+22.4%</div><div class="c">cat +18.1%</div></div>
+    <div class="ret"><div class="k">2Y</div><div class="v">+19.8%</div><div class="c">CAGR · cat 16.4%</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="h"><span class="eyebrow">Red Flags</span></div>
+  <div class="flag ok"><span class="ic">✓</span>Concentration healthy — top-10 at 41% (flag threshold 45%)</div>
+  <div class="flag ok"><span class="ic">✓</span>No manager change in last 12 months</div>
+  <div class="flag"><span class="ic">⚠</span>AUM ₹1.02L Cr approaching flexi-cap bloat band — monitor small/mid allocation flexibility</div>
+</div>
+
+<!-- ═══ CURATED SCREENER ═══ -->
+<div class="eyebrow" style="margin-top:26px">Curated Screener · AUM &gt; ₹5,000 Cr universe</div>
+<div class="tabs">
+  <div class="tab on">Flexi Cap</div><div class="tab">Large Cap</div><div class="tab">Mid Cap</div><div class="tab">Small Cap</div><div class="tab">Index</div><div class="tab">ELSS</div><div class="tab">Hybrid</div>
+</div>
+<div class="card" style="margin-top:10px">
+  <table>
+    <tr><th>Fund</th><th>MQS ▾</th><th>FINKHOZ</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th><th></th></tr>
+    <tr><td class="sym">Parag Parikh Flexi Cap</td><td><span class="gvm g-hi">8.2</span></td><td class="num">★5</td><td class="num" style="color:var(--bull)">+22.4%</td><td class="num" style="color:var(--bull)">+19.1%</td><td class="num">0.63</td><td class="num">1,02,455</td><td><span class="badge">+ CMP</span></td></tr>
+    <tr><td class="sym">HDFC Flexi Cap</td><td><span class="gvm g-hi">7.9</span></td><td class="num">★4</td><td class="num" style="color:var(--bull)">+20.1%</td><td class="num" style="color:var(--bull)">+21.4%</td><td class="num">0.77</td><td class="num">68,340</td><td><span class="badge">+ CMP</span></td></tr>
+    <tr><td class="sym">Franklin India Flexi Cap</td><td><span class="gvm g-mid">6.8</span></td><td class="num">★4</td><td class="num" style="color:var(--bull)">+17.9%</td><td class="num" style="color:var(--bull)">+18.8%</td><td class="num">0.94</td><td class="num">18,221</td><td><span class="badge">+ CMP</span></td></tr>
+    <tr><td class="sym">Quant Flexi Cap</td><td><span class="gvm g-mid">6.1</span></td><td class="num">★3</td><td class="num" style="color:var(--bear)">+11.2%</td><td class="num" style="color:var(--bull)">+16.9%</td><td class="num">0.59</td><td class="num">7,912</td><td><span class="badge">+ CMP</span></td></tr>
+  </table>
+</div>
+
+<div class="cmp">
+  <span class="t">COMPARE</span>
+  <span class="f">Parag Parikh Flexi</span>
+  <span class="f">HDFC Flexi Cap</span>
+  <button>Compare 2 funds → overlap %</button>
+</div>
+</body>
+</html>
