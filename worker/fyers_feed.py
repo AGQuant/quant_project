@@ -1288,6 +1288,12 @@ def poll_futures_oi(token, fut_syms, agg):
                 if first:
                     log.info(f"OI poll debug {fsym}: HTTP {r.status_code} body={r.text[:300]}")
                     first = False
+                # cc#473: feed the dead-token detector — a char-0/401 response here is the
+                # exact expired-token signature that ran silent all 13-Jul morning.
+                if _dead_signal(r):
+                    _note_api(True)
+                    continue
+                _note_api(False)
                 d = r.json()
                 if d.get('s') != 'ok':
                     continue
@@ -1313,6 +1319,55 @@ def poll_futures_oi(token, fut_syms, agg):
 
 _OPT_OI_POLL_LOCK = threading.Lock()
 _STOCK_OPT_OI_POLL_LOCK = threading.Lock()   # cc#375: separate lock so a slow stock OI cycle never blocks the index poll
+
+
+# ── cc#473: in-process DEAD-TOKEN detector ────────────────────────────────────────
+# 13-Jul incident: worker ran all morning on an expired token — every REST poll came
+# back char-0 EMPTY, but there was no in-process detector, so it needed a manual
+# Railway restart at 10:04. Fix: count CONSECUTIVE dead-token REST responses (empty
+# body or HTTP 401) across the OI poll + a 30s canonical probe; at DEAD_TOKEN_THRESHOLD
+# consecutive, raise a dead flag the housekeeping loop consumes to self-heal (inline
+# breaker-safe relogin -> clean reboot that REUSES the fresh same-day token). ANY
+# non-empty/structured response resets the counter (token is alive).
+DEAD_TOKEN_THRESHOLD = 10
+_auth_lock  = threading.Lock()
+_auth_state = {'consec': 0, 'dead_flag': False}
+
+
+def _dead_signal(r):
+    """True iff a REST response is the dead/expired-token signature: an HTTP 401 or a
+    char-0 EMPTY body (the exact 09-Jul/13-Jul signature). A NON-empty body — even an
+    error/rate-limit JSON — is NOT a dead-token signal (token still authenticates)."""
+    try:
+        if r is None:
+            return False
+        if getattr(r, 'status_code', None) == 401:
+            return True
+        return not (r.text or '').strip()
+    except Exception:
+        return False
+
+
+def _note_api(dead: bool):
+    """Feed the consecutive dead-token counter. dead=True increments (and trips the
+    flag at the threshold); dead=False resets it (a live response clears the streak)."""
+    with _auth_lock:
+        if dead:
+            _auth_state['consec'] += 1
+            if _auth_state['consec'] >= DEAD_TOKEN_THRESHOLD:
+                _auth_state['dead_flag'] = True
+        else:
+            _auth_state['consec'] = 0
+
+
+def _consume_dead_flag():
+    """Return True once when the dead-token threshold has been crossed, and reset."""
+    with _auth_lock:
+        if _auth_state['dead_flag']:
+            _auth_state['dead_flag'] = False
+            _auth_state['consec'] = 0
+            return True
+        return False
 
 def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
     """
@@ -1825,6 +1880,39 @@ def run(auth_code=None):
             log.error(f"os.execv failed ({e}) — exiting for Railway to relaunch")
             os._exit(1)
 
+    def _self_heal_token(reason):
+        """cc#473 items 2-4: dead/stale token recovery WITHOUT manual intervention.
+        Inline breaker-safe relogin (fyers_autologin.try_relogin never raises SystemExit,
+        so a cooldown-skip can't crash-loop the loop — item 3). On success, mint is stored
+        and we _hard_restart: the clean reboot's get_valid_token finds the just-minted
+        SAME-DAY token, verifies it live and REUSES it (no second TOTP, no re-auth
+        coin-flip) then rebuilds+re-subscribes the WS — bars resume in seconds. On a
+        breaker-skip or failure we log + back off 90s and let the detector re-trip
+        (never a hard-exit crash-loop). Every event -> ops_log(category=feed_auth)."""
+        import fyers_autologin
+        _ops_log(conn, 'alert', 'feed_auth',
+                 {'event': 'dead_token_detected', 'reason': reason,
+                  'consecutive_threshold': DEAD_TOKEN_THRESHOLD, 'ist': _ist_now_str()})
+        log.critical(f"cc#473 TOKEN SELF-HEAL triggered: {reason} — attempting inline relogin")
+        res = fyers_autologin.try_relogin(conn)
+        if res.get('ok'):
+            _ops_log(conn, 'info', 'feed_auth',
+                     {'event': 'relogin_ok', 'reason': reason, 'recovery': 'reboot_reuses_fresh_token',
+                      'ist': _ist_now_str()})
+            log.info("cc#473 relogin OK — restarting to rebuild WS on the fresh token (reused, no re-auth)")
+            _hard_restart(f"token self-heal — fresh token minted ({reason})")
+            return  # not reached (execv)
+        if res.get('skipped'):
+            _ops_log(conn, 'info', 'feed_auth',
+                     {'event': 'relogin_skipped_cooldown', 'reason': reason, 'ist': _ist_now_str()})
+            log.warning("cc#473 relogin SKIPPED by 90s account-block breaker — backoff 90s, detector will re-trip")
+        else:
+            _ops_log(conn, 'alert', 'feed_auth',
+                     {'event': 'relogin_failed', 'reason': reason,
+                      'error': str(res.get('error'))[:180], 'ist': _ist_now_str()})
+            log.error(f"cc#473 relogin FAILED ({res.get('error')}) — backoff 90s, detector will re-trip")
+        time.sleep(90)
+
     def housekeeping():
         last_atm_check  = None
         last_purge_day  = None
@@ -1841,12 +1929,47 @@ def run(auth_code=None):
         opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
         opt_gate_day         = None   # cc#189: reset the gate each trading day
         starvation_day       = None   # cc#228: fyers_eq starvation check fired once per trading day
+        relogin_day          = None   # cc#473: 09:05 daily staleness re-login fired once per trading day
 
         while True:
             now    = datetime.now(IST)
             today  = now.date()
             now_dt = now.replace(tzinfo=None)
             in_market = (now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE)
+
+            # ── cc#473 item 1: 09:05 IST daily token-staleness re-login (once/day, pre-open).
+            # Never start the trading day on yesterday's token. Boot staleness is already
+            # covered by get_valid_token; this handles a worker that has been running since
+            # before the IST midnight rollover (its in-memory token silently went stale).
+            if (relogin_day != today and is_trading_day(today)
+                    and dt_time(9, 5) <= now.time() < MARKET_OPEN):
+                relogin_day = today
+                try:
+                    row = load_tokens(conn)
+                    created = row[2] if row else None
+                    if not (created and created.date() == today):
+                        _ops_log(conn, 'alert', 'feed_auth',
+                                 {'event': 'stale_token_0905',
+                                  'token_created': str(created) if created else None, 'ist': _ist_now_str()})
+                        log.warning(f"cc#473 09:05 staleness: token created {created} (not today) — re-login before open")
+                        _self_heal_token('09:05 daily staleness — token not from today')
+                    else:
+                        log.info("cc#473 09:05 staleness check OK — token is from today")
+                except Exception as _sc:
+                    log.warning(f"cc#473 09:05 staleness check failed (non-fatal): {_sc}")
+
+            # ── cc#473 item 2: in-process dead-token detector. A 30s canonical REST probe
+            # feeds the same consecutive-empty counter as the OI poll; at DEAD_TOKEN_THRESHOLD
+            # consecutive char-0/401 responses the token is dead -> self-heal. Market hours only
+            # (off-hours the API is quiet and empties are expected).
+            if in_market:
+                try:
+                    _p_ok, _p_detail = _rest_quote_ok(token)
+                    _note_api(dead=((not _p_ok) and _p_detail == 'EMPTY_BODY'))
+                except Exception as _pe:
+                    log.warning(f"cc#473 dead-token probe failed (non-fatal): {_pe}")
+                if _consume_dead_flag():
+                    _self_heal_token(f"{DEAD_TOKEN_THRESHOLD} consecutive dead-token (empty/401) REST responses")
 
             # cc#189: reset the once-per-day 09:30 deadline alert each trading day.
             if opt_gate_day != today:

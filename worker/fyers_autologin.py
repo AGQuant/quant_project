@@ -205,5 +205,24 @@ def auto_login(conn=None):
             conn.close()
 
 
+def try_relogin(conn):
+    """cc#473 item 3: breaker-SAFE wrapper for in-loop self-heal. NEVER raises
+    SystemExit (which, uncaught inside the feed loop, turned the 90s cooldown into a
+    Railway crash-loop on 13-Jul). Returns a dict:
+      {'ok': bool, 'token': str|None, 'skipped': bool, 'error': str|None}
+    'skipped'=True => the 90s ATTEMPT_COOLDOWN breaker refused this attempt; the
+    caller must BACK OFF 90s and retry, not crash. The breaker still guarantees at
+    most one real TOTP attempt per cooldown window (account-block protection)."""
+    try:
+        tok = auto_login(conn)
+        return {'ok': True, 'token': tok, 'skipped': False, 'error': None}
+    except SystemExit as e:
+        msg = str(e)
+        skipped = ('SKIPPED' in msg) or ('cooldown' in msg.lower()) or ('block protection' in msg.lower())
+        return {'ok': False, 'token': None, 'skipped': skipped, 'error': msg}
+    except Exception as e:
+        return {'ok': False, 'token': None, 'skipped': False, 'error': str(e)}
+
+
 if __name__ == '__main__':
     auto_login()
