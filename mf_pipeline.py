@@ -401,79 +401,142 @@ def _parse_aaum_html(body):
     return parsed
 
 
-def fetch_amfi_aum(cur, today=None):
-    """PHASE 1: scheme-wise AAUM from AMFI's quarterly disclosure -> mf_master.aum_cr (lakh->cr),
-    fuzzy-mapped to Direct-Growth mf_master rows. Reads the live form-option IDs first (AMFI uses
-    numeric Year/Quarter IDs), tries the latest quarter option, and dumps diagnostics to ops_log
-    on failure so the real params/format are recoverable via run_sql."""
+# cc#477 unblock_addendum: proxy CANDIDATE SET so NAV+returns (proven mfapi path) run even
+# when AMFI AUM is unavailable. Top AMCs' Direct-Growth equity/hybrid schemes (~600).
+_TOP_AMCS = ["sbi", "hdfc", "icici pru", "nippon india", "kotak", "aditya birla sun life",
+             "aditya birla", "uti", "axis", "mirae asset", "dsp", "tata", "franklin",
+             "canara robeco", "edelweiss", "bandhan", "parag parikh", "quant", "motilal oswal",
+             "invesco", "sundaram", "pgim", "hsbc", "baroda", "union", "mahindra", "ppfas"]
+_EQ_HY_KW = ["flexi cap", "large cap", "large & mid", "large and mid", "mid cap", "small cap",
+             "multi cap", "elss", "tax saver", "focused", "value", "contra", "dividend yield",
+             "index", "nifty", "sensex", "hybrid", "balanced advantage", "aggressive",
+             "equity savings", "multi asset", "arbitrage", "equity"]
+_EXCL_KW = ["debt", "liquid", "overnight", "gilt", "money market", "ultra short", "low duration",
+            "short duration", "corporate bond", "banking & psu", "credit risk", "dynamic bond",
+            "floater", "10 year", "psu bond", "fund of fund", "fof", "etf"]
+
+# cc#477 unblock_addendum strategies 1-2: candidate AMFI/portal AUM endpoints (SPA JSON + legacy ASPX).
+_AUM_PROBE = [
+    ("GET",  "https://www.amfiindia.com/api/aum-data", None),
+    ("GET",  "https://www.amfiindia.com/api/average-aum", None),
+    ("GET",  "https://www.amfiindia.com/api/mutual-fund-scheme-details", None),
+    ("GET",  "https://portal.amfiindia.com/spages/AUMReport.aspx", None),
+    ("GET",  "https://portal.amfiindia.com/spages/AverageAUMReport.aspx", None),
+    ("POST", "https://portal.amfiindia.com/modules/AverageAUMDetails",
+     {"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1", "option": "1"}),
+]
+
+
+def _candidate_scheme_set(cur):
+    """~600 largest-by-proxy schemes: Direct-Growth equity/hybrid of the top AMCs (mf_master name).
+    Used as the NAV/returns universe when AMFI AUM is unavailable (founder unblock fallback)."""
+    cur.execute("SELECT scheme_code, amfi_code, name FROM mf_master "
+                "WHERE name ILIKE '%%direct%%' AND name ILIKE '%%growth%%'")
+    out = []
+    for sc, ac, nm in cur.fetchall():
+        n = (nm or "").lower()
+        if any(x in n for x in _EXCL_KW):
+            continue
+        if not any(a in n for a in _TOP_AMCS):
+            continue
+        if not any(k in n for k in _EQ_HY_KW):
+            continue
+        out.append((sc, ac or sc))
+    return out
+
+
+def _parse_aum_json(obj):
+    """Pull [(scheme_name, aum_cr)] from an unknown JSON shape — find list-of-dicts with a
+    name-like key + an aum-like numeric key. Assumes Rs cr unless values look like lakh (>5e5)."""
+    import json as _json
+    if isinstance(obj, str):
+        try:
+            obj = _json.loads(obj)
+        except Exception:
+            return []
+    stack, rows = [obj], []
+    while stack:
+        cur_o = stack.pop()
+        if isinstance(cur_o, dict):
+            stack.extend(cur_o.values())
+        elif isinstance(cur_o, list):
+            if cur_o and isinstance(cur_o[0], dict):
+                keys = {k.lower(): k for k in cur_o[0].keys()}
+                nk = next((keys[k] for k in keys if "scheme" in k or "name" in k), None)
+                ak = next((keys[k] for k in keys if "aum" in k or "aaum" in k), None)
+                if nk and ak:
+                    for it in cur_o:
+                        try:
+                            nm = str(it.get(nk)).strip()
+                            v = float(str(it.get(ak)).replace(",", ""))
+                            if nm and v > 0:
+                                rows.append((nm, round(v / 100.0 if v > 5e5 else v, 2)))
+                        except Exception:
+                            continue
+            else:
+                stack.extend(cur_o)
+    return rows
+
+
+def _probe_aum_sources(cur, today=None):
+    """Try the founder's AUM endpoints in order (SPA JSON API -> legacy ASPX -> form POST). Logs
+    each probe (status/content-type/len/rows) to ops_log. Returns (parsed[(name,cr)], used_desc)."""
     import requests
+    best, used = [], None
+    for method, url, data in _AUM_PROBE:
+        try:
+            hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "application/json, text/html;q=0.8"}
+            r = (requests.get(url, headers=hdr, timeout=60) if method == "GET"
+                 else requests.post(url, data=data, headers=hdr, timeout=90))
+            ct = (r.headers.get("content-type") or "").lower()
+            body = r.text or ""
+            rows = []
+            if "json" in ct or body[:1] in ("{", "["):
+                rows = _parse_aum_json(body)
+            if not rows and ("html" in ct or "<table" in body.lower()):
+                rows = _parse_aaum_html(body)
+            _oplog(cur, "MF_AUM_PROBE", {"url": url, "method": method, "http": r.status_code,
+                                         "ct": ct[:40], "len": len(body), "rows": len(rows)})
+            if len(rows) > len(best):
+                best, used = rows, {"url": url, "method": method, "rows": len(rows)}
+            if len(best) >= 50:
+                break
+        except Exception as e:
+            _oplog(cur, "MF_AUM_PROBE", {"url": url, "method": method, "error": str(e)[:140]})
+    # last: the form-scrape path (numeric Year/Quarter option IDs), if still nothing
+    if not best:
+        try:
+            selects = _amfi_form_options(cur)
+            yv = next((v for k in selects for v, _ in selects[k] if "year" in k.lower()), "")
+            qv = next((v for k in selects for v, _ in selects[k]
+                       if any(x in k.lower() for x in ("quarter", "aaum", "period"))), "")
+            r = requests.post(_AMFI_AAUM_URL, data={"AUmType": "S", "AumCatType": "Typewise",
+                              "MF_Name": "-1", "Year": yv, "Quarter": qv, "option": "1"},
+                              headers={"User-Agent": "Scorr-MF/1.0"}, timeout=90)
+            rows = _parse_aaum_html(r.text or "")
+            _oplog(cur, "MF_AUM_PROBE", {"url": "form_post", "year": yv, "quarter": qv, "rows": len(rows)})
+            if rows:
+                best, used = rows, {"url": "form_post", "rows": len(rows)}
+        except Exception as e:
+            _oplog(cur, "MF_AUM_PROBE", {"url": "form_post", "error": str(e)[:140]})
+    return best, used
+
+
+def fetch_amfi_aum(cur, today=None):
+    """PHASE 1: scheme-wise AAUM via the multi-source prober (SPA JSON / legacy ASPX / form POST),
+    lakh-or-cr auto-detected, fuzzy-mapped to Direct-Growth mf_master rows. Best-effort — returns
+    an error dict (not fatal) if AMFI is fully closed; the orchestrator then falls back to the
+    proxy candidate set for NAV+returns (founder unblock: never wait on a perfect AUM source)."""
     try:
         import pandas as pd  # noqa: F401
     except Exception as e:
         _oplog(cur, "MF_AUM_ERROR", {"stage": "import pandas", "error": str(e)[:200]})
         return {"error": "pandas unavailable"}
-
-    # 1. discover the real dropdown option IDs
-    selects = {}
-    try:
-        selects = _amfi_form_options(cur)
-    except Exception as e:
-        _oplog(cur, "MF_AUM_ERROR", {"stage": "form_options", "error": str(e)[:200]})
-
-    def _find_select(*keys):
-        for k in selects:
-            lk = k.lower()
-            if any(x in lk for x in keys):
-                return selects[k]
-        return []
-    year_opts = _find_select("year")
-    q_opts = _find_select("quarter", "aaum", "type", "avg", "period")
-
-    # candidate (year_val, quarter_val) pairs to try — latest options first, then a few fallbacks
-    candidates = []
-    yr_vals = [v for v, _ in year_opts][:2] or [""]
-    q_vals = [v for v, _ in q_opts][:4] or [""]
-    for yv in yr_vals:
-        for qv in q_vals:
-            candidates.append((yv, qv))
-    fy, q = _amfi_aaum_quarter(today)
-    candidates.append((fy, q))   # last-ditch human-string attempt
-
-    parsed, used = [], None
-    for yv, qv in candidates:
-        for pkey in ("Quarter", "Type"):
-            data = {"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1",
-                    "Year": yv, pkey: qv, "option": "1"}
-            try:
-                r = requests.post(_AMFI_AAUM_URL, data=data,
-                                  headers={"User-Agent": "Scorr-MF/1.0",
-                                           "Content-Type": "application/x-www-form-urlencoded"}, timeout=90)
-                body = r.text or ""
-                rows = _parse_aaum_html(body) if body.strip() else []
-                if len(rows) > len(parsed):
-                    parsed, used = rows, {"Year": yv, pkey: qv, "http": r.status_code, "len": len(body)}
-                if parsed:
-                    break
-            except Exception as e:
-                _oplog(cur, "MF_AUM_ERROR", {"stage": "post", "data": data, "error": str(e)[:160]})
-        if parsed:
-            break
-
+    parsed, used = _probe_aum_sources(cur, today)
     if not parsed:
-        # dump one raw response snippet so the real format is inspectable via run_sql
-        snippet = ""
-        try:
-            rr = requests.post(_AMFI_AAUM_URL,
-                               data={"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1",
-                                     "Year": (yr_vals[0] if yr_vals else ""), "Quarter": (q_vals[0] if q_vals else ""),
-                                     "option": "1"},
-                               headers={"User-Agent": "Scorr-MF/1.0"}, timeout=90)
-            snippet = (rr.text or "")[:1200]
-        except Exception:
-            pass
-        _oplog(cur, "MF_AUM_ERROR", {"stage": "no_rows", "year_opts": year_opts[:5], "q_opts": q_opts[:5],
-                                     "resp_snippet": snippet})
-        return {"error": "no AAUM rows parsed", "year_opts": year_opts[:5], "q_opts": q_opts[:5]}
+        _oplog(cur, "MF_AUM_ERROR", {"stage": "all_sources_failed",
+                                     "note": "AMFI AUM unavailable — returns run over proxy candidate set"})
+        return {"error": "no AAUM rows parsed", "used": used}
 
     # Map each AAUM scheme -> the Direct-Growth AMFI row in mf_master by token-overlap.
     cur.execute("SELECT scheme_code, name FROM mf_master WHERE source='amfi' "
@@ -622,13 +685,20 @@ def run_mf_returns_backfill(conn=None):
         with conn.cursor() as cur:
             aum = fetch_amfi_aum(cur)
             conn.commit()
-        # qualifying set
+        # qualifying set: AUM>5000 if AMFI AUM landed, ELSE the proxy candidate set (founder
+        # unblock — never wait on a perfect AUM source; NAV+returns via mfapi are independent).
         with conn.cursor() as cur:
             cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s "
                         "ORDER BY aum_cr DESC", (AUM_THRESHOLD_CR,))
             qual = cur.fetchall()
+            universe_mode = "aum_gt_5000"
+            if not qual:
+                qual = _candidate_scheme_set(cur)
+                universe_mode = "proxy_candidate_set"
             cur.execute("SELECT value FROM app_config WHERE key='mf_backfill_progress'")
             r = cur.fetchone()
+            _oplog(cur, "MF_RETURNS_UNIVERSE", {"mode": universe_mode, "size": len(qual)})
+            conn.commit()
         done_prefix = (r[0] if r else "") or ""
         pending = [(sc, ac) for sc, ac in qual if sc > done_prefix]
         # phase 2+3: per-scheme NAV history + returns
@@ -686,6 +756,8 @@ def mf_weekly_refresh(conn=None):
             _ensure_returns_cols(cur)
             cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s", (AUM_THRESHOLD_CR,))
             qual = cur.fetchall()
+            if not qual:
+                qual = _candidate_scheme_set(cur)   # same proxy fallback as the backfill
             conn.commit()
         import time as _t
         n = 0
