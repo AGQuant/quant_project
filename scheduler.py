@@ -1448,6 +1448,77 @@ def _bg_mf_aum_monthly():
         log.error(f"_bg_mf_aum_monthly: {e}")
 
 
+
+# cc#475: feed staleness Telegram alert — INDEPENDENT of the signal-writer watchdogs (which
+# only restart the writer). This checks the FEED WORKER's own output (intraday_prices) from
+# the main app, so it survives the worker dying outright. Per-source alert/recovery state kept
+# in-process (module globals) — cheap, no DB table needed for a 5-min-cadence check.
+_FEED_ALERT_STATE = {}   # source -> {'alerted_at': datetime|None, 'was_stale': bool}
+FEED_STALE_MIN = 15
+FEED_ALERT_THROTTLE_MIN = 30
+FEED_SOURCES = ("fyers_eq", "fyers_fut")
+
+
+def _bg_feed_staleness_watch():
+    """cc#475: every 5 min, 09:20-15:30 IST on trading days — check MAX(ts) per source in
+    intraday_prices. Stale >15min -> Telegram alert (throttled 1/30min/source) + ops_log
+    (category=feed_alert). Recovery message + ops_log when bars resume. 09:35 first-bar-of-day
+    check: zero bars since open -> alert immediately (skip the 15-min wait)."""
+    now = _ist_now()
+    if not (_is_trading_day(now.date()) and dt_time(9, 20) <= now.time() <= dt_time(15, 30)):
+        return
+    try:
+        import v10_st_ema
+        with _conn() as conn, conn.cursor() as cur:
+            for src in FEED_SOURCES:
+                cur.execute("SELECT MAX(ts) FROM intraday_prices WHERE source=%s AND ts::date=%s",
+                            (src, now.date()))
+                last = cur.fetchone()[0]
+                st = _FEED_ALERT_STATE.setdefault(src, {"alerted_at": None, "was_stale": False})
+
+                # first-bar-of-day: 09:35 and NOTHING since open -> alert now, don't wait for 15min math
+                if last is None:
+                    if now.time() >= dt_time(9, 35) and now.time() < dt_time(9, 40) and not st["alerted_at"]:
+                        msg = f"FEED STALE — no {src} bars since 09:15 open ({now.strftime('%H:%M')} IST). Worker likely down — check truthful-friendship."
+                        v10_st_ema.telegram_alert(msg)
+                        st["alerted_at"] = now; st["was_stale"] = True
+                        _log_feed_alert_ops(cur, src, "alert", msg, None)
+                        conn.commit()
+                    continue
+
+                age_min = (now - last).total_seconds() / 60.0
+                if age_min > FEED_STALE_MIN:
+                    can_alert = (st["alerted_at"] is None or
+                                 (now - st["alerted_at"]).total_seconds() >= FEED_ALERT_THROTTLE_MIN * 60)
+                    if can_alert:
+                        msg = (f"FEED STALE — last {src} bar {last.strftime('%H:%M:%S')} IST "
+                               f"({age_min:.0f} min ago). Worker likely down — check truthful-friendship.")
+                        v10_st_ema.telegram_alert(msg)
+                        st["alerted_at"] = now
+                        _log_feed_alert_ops(cur, src, "alert", msg, age_min)
+                        conn.commit()
+                    st["was_stale"] = True
+                elif st["was_stale"]:
+                    msg = f"FEED RECOVERED — {src} flowing, last bar {last.strftime('%H:%M:%S')} IST."
+                    v10_st_ema.telegram_alert(msg)
+                    st["was_stale"] = False
+                    st["alerted_at"] = None
+                    _log_feed_alert_ops(cur, src, "recovery", msg, age_min)
+                    conn.commit()
+    except Exception as e:
+        log.error(f"_bg_feed_staleness_watch: {e}")
+
+
+def _log_feed_alert_ops(cur, source, kind, message, age_min):
+    try:
+        cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                    "VALUES (CURRENT_DATE, NOW(), 'feed_alert', %s, %s)",
+                    (kind, Json({"source": source, "message": message,
+                                 "age_min": round(age_min, 1) if age_min is not None else None})))
+    except Exception as e:
+        log.warning(f"_log_feed_alert_ops: {e}")
+
+
 def _bg_intraday_scan():
     """cc#481: 15-min intraday scanner WRITER. Runs BOTH the BUY and SHORT scans over the full
     active futures universe and records passes to intraday_watchlist (ON CONFLICT keeps one
@@ -1536,6 +1607,7 @@ async def _scheduler_loop():
             _spawn(_bg_oi_snapshot)
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
+            _spawn(_bg_feed_staleness_watch)   # cc#475: independent feed-worker watchdog + Telegram alert
         # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.
         # Read-only on V8/V10; does NOT touch worker/** (Phase A safe).
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
