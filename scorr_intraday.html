@@ -155,27 +155,10 @@
 </div>
 
 <div class="info-ov" id="infoOv" onclick="if(event.target===this)closeInfo()">
-  <div class="info-box">
+  <div class="info-box" id="infoBox">
     <button class="info-close" onclick="closeInfo()">&times;</button>
     <div style="font-family:var(--mono);font-size:15px;font-weight:800;margin-bottom:10px">TC Scanner &middot; how it works</div>
-    <div style="font-size:12.5px;line-height:1.7;color:var(--txt)">
-      Every 15 minutes during market hours, the full active futures universe (~208 symbols) is
-      scored against a 13-check binary bucket, independently for BUY and SELL.
-      <br><br>
-      <b>BUY</b> checks: ADR&ge;1 &middot; sector day&gt;0 &middot; sector week&gt;0 &middot; PP&lt;CMP&le;R1 &middot;
-      time-matched volume&ge;1.25&times; &middot; last 5-min bar green &middot; day-high room&gt;0.3% &middot;
-      week return&gt;0 &middot; weekly RSI 50&ndash;75 &middot; monthly RSI 50&ndash;75 &middot; day 1d change&gt;0 &middot;
-      2-day momentum&gt;0 &middot; room-to-R1&ge;50% of the PP&ndash;R1 band.
-      <br><br>
-      <b>SELL</b> is the exact mirror of every check above.
-      <br><br>
-      A symbol qualifies at &ge;12 of 13 (n&#8722;1); NULL checks are skipped and scored from
-      whatever is available. The <b>first</b> qualification per symbol/side/day is recorded and
-      locked for the day &mdash; it is never re-evaluated or overwritten. Target +3% / stop -3%
-      from the entry futures price (mirrored for SELL) are stamped at entry and checked every
-      15-minute tick against the live futures price, plus one final sweep at day close. Screener
-      only &mdash; no paper engine, no auto-exits, not a live trading signal.
-    </div>
+    <div id="infoBody" style="font-size:12.5px;line-height:1.7;color:var(--txt)">Loading…</div>
   </div>
 </div>
 
@@ -197,7 +180,39 @@ function tick(){
 }
 setInterval(tick, 1000); tick();
 
-function openInfo(){document.getElementById('infoOv').classList.add('open');}
+// cc#465: modal content is FETCHED from /api/scanners/tc/spec — generated server-side from
+// the engine's own live constants (tc_scanner_endpoints.py), so this can never drift from
+// the actual thresholds. No hand-typed numbers here.
+let tcSpecCache = null;
+function _checkRow(c){
+  return '<div style="display:flex;gap:8px;padding:4px 0;border-top:1px solid var(--line)">'
+    +'<span style="font-family:var(--mono);font-weight:700;color:var(--cyan);flex:none;width:30px">'+c.id+'</span>'
+    +'<span><b>'+c.label+'</b> — '+c.rule+(c.note?'<div style="color:var(--dim);font-size:11px;margin-top:2px">'+c.note+'</div>':'')+'</span></div>';
+}
+function renderInfoBody(s){
+  return 'Every '+s.cadence_min+' minutes during market hours, the full '+s.universe+' is scored '
+    +'against a '+s.total_checks+'-check binary bucket, independently for BUY and SELL.'
+    +'<br><br><b>Qualify:</b> '+s.qualify_rule+'.<br><b>NULL handling:</b> '+s.null_handling+'.'
+    +'<br><b>Latch:</b> '+s.latch_rule+'.<br><b>Entry:</b> '+s.entry_definition+'.'
+    +'<br><b>Target / SL:</b> +'+s.target_pct+'% / -'+s.sl_pct+'% from entry. '+s.target_sl_note+'.'
+    +'<br><br><div style="font-weight:700;color:var(--grn);margin-bottom:2px">BUY checks</div>'
+    +(s.buy_checks||[]).map(_checkRow).join('')
+    +'<br><br><div style="font-weight:700;color:var(--red);margin-bottom:2px">SELL checks</div>'
+    +(s.sell_checks||[]).map(_checkRow).join('')
+    +'<div style="margin-top:12px;color:var(--dim);font-size:11px">Screener only — no paper engine, no auto-exits, not a live trading signal.</div>';
+}
+async function openInfo(){
+  document.getElementById('infoOv').classList.add('open');
+  const body=document.getElementById('infoBody');
+  if(tcSpecCache){ body.innerHTML=renderInfoBody(tcSpecCache); return; }
+  body.innerHTML='Loading…';
+  try{
+    const r=await fetch('/api/scanners/tc/spec');
+    const s=await r.json();
+    tcSpecCache=s;
+    body.innerHTML=renderInfoBody(s);
+  }catch(e){ body.innerHTML='<span style="color:var(--red)">Spec unavailable: '+e+'</span>'; }
+}
 function closeInfo(){document.getElementById('infoOv').classList.remove('open');}
 
 function num(v, d=2){ if(v==null||isNaN(v)) return '—'; return Number(v).toFixed(d); }

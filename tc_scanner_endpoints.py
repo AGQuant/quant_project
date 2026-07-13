@@ -60,6 +60,21 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 TARGET_PCT = 0.03
 SL_PCT = 0.03
 
+# ── cc#465: named spec constants. The check functions below reference THESE
+# (never a bare literal), and /api/scanners/tc/spec renders the info-modal
+# straight from them — the modal can never drift from the engine's actual
+# thresholds because there is only one copy of each number.
+ADR_MIN = 1.0
+VOLX_MIN = 1.25
+DAY_ROOM_MIN_PCT = 0.3
+WRSI_BUY = (50.0, 75.0)
+MRSI_BUY = (50.0, 75.0)   # flagged interpretation — see module docstring
+WRSI_SELL = (25.0, 50.0)
+MRSI_SELL = (25.0, 50.0)
+ROOM_TO_LEVEL_MIN_FRAC = 0.5
+N_MINUS = 1               # pass >= evaluated - N_MINUS (12 of 13 at full evaluation)
+TOTAL_CHECKS = 13
+
 
 def _conn():
     return psycopg.connect(DATABASE_URL)
@@ -106,23 +121,23 @@ def _tc13_buy(row: dict, adr: Optional[float]) -> dict:
     day_high_room = ((today_high - cmp) / cmp * 100) if (cmp and today_high and cmp > 0) else None
 
     checks = {
-        "C1_adr": (None if adr is None else adr >= 1.0),
+        "C1_adr": (None if adr is None else adr >= ADR_MIN),
         "C2_sector_day": _f(row.get("sector_day")) is not None and _f(row.get("sector_day")) > 0,
         "C3_sector_week": _f(row.get("sector_week")) is not None and _f(row.get("sector_week")) > 0,
         "C4_pivot_zone": bool(zone),
-        "C5_volx": (None if volx is None else volx >= 1.25),
+        "C5_volx": (None if volx is None else volx >= VOLX_MIN),
         "C6_last_bar_green": (lb_open is not None and lb_close is not None and lb_close > lb_open),
-        "C7_day_high_room": (day_high_room is not None and day_high_room > 0.3),
+        "C7_day_high_room": (day_high_room is not None and day_high_room > DAY_ROOM_MIN_PCT),
         "C8_week_return": _f(row.get("week_return")) is not None and _f(row.get("week_return")) > 0,
-        "C9_wrsi_band": (rsi_w is not None and 50.0 <= rsi_w <= 75.0),
-        "C10_mrsi_band": (rsi_m is not None and 50.0 <= rsi_m <= 75.0),   # flagged interpretation — see module docstring
+        "C9_wrsi_band": (rsi_w is not None and WRSI_BUY[0] <= rsi_w <= WRSI_BUY[1]),
+        "C10_mrsi_band": (rsi_m is not None and MRSI_BUY[0] <= rsi_m <= MRSI_BUY[1]),
         "C11_day_1d": _f(row.get("day_1d")) is not None and _f(row.get("day_1d")) > 0,
         "C12_mom_2d": _f(row.get("mom_2d")) is not None and _f(row.get("mom_2d")) > 0,
-        "C13_room_to_r1": (room_to_r1 is not None and room_to_r1 >= 0.5),   # flagged interpretation
+        "C13_room_to_r1": (room_to_r1 is not None and room_to_r1 >= ROOM_TO_LEVEL_MIN_FRAC),
     }
     evaluated = [v for v in checks.values() if v is not None]
     passed = sum(1 for v in evaluated if v)
-    need = max(1, len(evaluated) - 1)   # n-1
+    need = max(1, len(evaluated) - N_MINUS)
     return {"pass": passed >= need, "score": passed, "evaluated": len(evaluated),
             "need": need, "checks": checks, "entry_price": cmp}
 
@@ -140,23 +155,23 @@ def _tc13_sell(row: dict, adr: Optional[float]) -> dict:
     day_low_room = ((cmp - today_low) / cmp * 100) if (cmp and today_low and cmp > 0) else None
 
     checks = {
-        "C1_adr": (None if adr is None else adr >= 1.0),
+        "C1_adr": (None if adr is None else adr >= ADR_MIN),
         "C2_sector_day": _f(row.get("sector_day")) is not None and _f(row.get("sector_day")) < 0,
         "C3_sector_week": _f(row.get("sector_week")) is not None and _f(row.get("sector_week")) < 0,
         "C4_pivot_zone": bool(zone),
-        "C5_volx": (None if volx is None else volx >= 1.25),
+        "C5_volx": (None if volx is None else volx >= VOLX_MIN),
         "C6_last_bar_red": (lb_open is not None and lb_close is not None and lb_close < lb_open),
-        "C7_day_low_room": (day_low_room is not None and day_low_room > 0.3),
+        "C7_day_low_room": (day_low_room is not None and day_low_room > DAY_ROOM_MIN_PCT),
         "C8_week_return": _f(row.get("week_return")) is not None and _f(row.get("week_return")) < 0,
-        "C9_wrsi_band": (rsi_w is not None and 25.0 <= rsi_w <= 50.0),
-        "C10_mrsi_band": (rsi_m is not None and 25.0 <= rsi_m <= 50.0),
+        "C9_wrsi_band": (rsi_w is not None and WRSI_SELL[0] <= rsi_w <= WRSI_SELL[1]),
+        "C10_mrsi_band": (rsi_m is not None and MRSI_SELL[0] <= rsi_m <= MRSI_SELL[1]),
         "C11_day_1d": _f(row.get("day_1d")) is not None and _f(row.get("day_1d")) < 0,
         "C12_mom_2d": _f(row.get("mom_2d")) is not None and _f(row.get("mom_2d")) < 0,
-        "C13_room_to_s1": (room_to_s1 is not None and room_to_s1 >= 0.5),
+        "C13_room_to_s1": (room_to_s1 is not None and room_to_s1 >= ROOM_TO_LEVEL_MIN_FRAC),
     }
     evaluated = [v for v in checks.values() if v is not None]
     passed = sum(1 for v in evaluated if v)
-    need = max(1, len(evaluated) - 1)
+    need = max(1, len(evaluated) - N_MINUS)
     return {"pass": passed >= need, "score": passed, "evaluated": len(evaluated),
             "need": need, "checks": checks, "entry_price": cmp}
 
@@ -270,6 +285,54 @@ def eod_sweep():
                     (Json(res),))
         conn.commit()
     return res
+
+
+# ── cc#465: info-modal spec, generated FROM the constants above ─────────────
+def _check_defs(side):
+    """The 13 checks for one side, described using the ACTUAL live constants —
+    never a hand-typed number, so this can never drift from the engine."""
+    buy = side == "BUY"
+    return [
+        {"id": "C1", "label": "ADR", "rule": f"ADR >= {ADR_MIN}"},
+        {"id": "C2", "label": "Sector day", "rule": f"sector day return {'> 0' if buy else '< 0'}"},
+        {"id": "C3", "label": "Sector week", "rule": f"sector week return {'> 0' if buy else '< 0'}"},
+        {"id": "C4", "label": "Pivot zone", "rule": "PP < CMP <= R1" if buy else "S1 <= CMP < PP"},
+        {"id": "C5", "label": "VolX (time-matched)", "rule": f"time-matched volume ratio >= {VOLX_MIN}"},
+        {"id": "C6", "label": "Last 5m bar", "rule": "last 5-min bar GREEN" if buy else "last 5-min bar RED"},
+        {"id": "C7", "label": "Room to day extreme", "rule": f"room to today's {'high' if buy else 'low'} > {DAY_ROOM_MIN_PCT}%"},
+        {"id": "C8", "label": "Week return", "rule": f"week return {'> 0' if buy else '< 0'}"},
+        {"id": "C9", "label": "Weekly RSI (wRSI)", "rule": f"{(WRSI_BUY if buy else WRSI_SELL)[0]}-{(WRSI_BUY if buy else WRSI_SELL)[1]}"},
+        {"id": "C10", "label": "Monthly RSI (mRSI)", "rule": f"{(MRSI_BUY if buy else MRSI_SELL)[0]}-{(MRSI_BUY if buy else MRSI_SELL)[1]}",
+         "note": "interpretation flagged — spec gave no explicit band; mirrors the C9 wRSI band"},
+        {"id": "C11", "label": "Day 1D change", "rule": f"day_1d {'> 0' if buy else '< 0'}"},
+        {"id": "C12", "label": "2-day momentum", "rule": f"mom_2d {'> 0' if buy else '< 0'}"},
+        {"id": "C13", "label": f"Room to {'R1' if buy else 'S1'}",
+         "rule": f"room-to-{'R1' if buy else 'S1'} >= {int(ROOM_TO_LEVEL_MIN_FRAC*100)}% of the {'PP-R1' if buy else 'S1-PP'} band",
+         "note": "interpretation flagged — read as (R1-CMP)/(R1-PP)>=0.5, mirrored for SELL"},
+    ]
+
+
+@router.get("/api/scanners/tc/spec")
+def tc_scanner_spec():
+    """cc#465: full qualification logic for the info modal, generated from the same
+    constants the engine evaluates against — cannot drift from the live code."""
+    return {
+        "engine": "TC Scanner — 13-check binary bucket (spec ids 399 BUY / 400 SELL)",
+        "universe": "all active futures_universe symbols",
+        "cadence_min": 15,
+        "total_checks": TOTAL_CHECKS,
+        "qualify_rule": f"pass >= evaluated - {N_MINUS} (i.e. {TOTAL_CHECKS - N_MINUS} of {TOTAL_CHECKS} at full evaluation)",
+        "null_handling": "a check with missing data is SKIPPED (not scored as a fail) and the "
+                          "pass bar becomes (evaluated - N_MINUS) of whatever checks DID evaluate",
+        "latch_rule": "first qualification per symbol/side/day is recorded and LOCKED — "
+                       "never re-evaluated or overwritten for the rest of that day",
+        "entry_definition": "futures CMP (live_close) at the qualifying scan tick",
+        "target_pct": TARGET_PCT * 100,
+        "sl_pct": SL_PCT * 100,
+        "target_sl_note": "stamped once at entry; SELL side is the mirror (target below entry, SL above)",
+        "buy_checks": _check_defs("BUY"),
+        "sell_checks": _check_defs("SELL"),
+    }
 
 
 # ── read endpoint ────────────────────────────────────────────────────────────
