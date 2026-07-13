@@ -625,6 +625,9 @@
         <div style="font-size:10px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Passes</div>
         <div class="inv-passes" id="invPasses"></div>
       </div>
+      <div style="margin-top:10px;font-size:10.5px;color:var(--dim)" id="invFreshness"></div>
+      <div style="margin-top:12px"><button class="v4-detail-btn" id="invDetailBtn">⊞ View Detailed — rule-by-rule evidence</button></div>
+      <div class="v4-detail" id="invDetail"></div>
     </div>
     <div class="foot">Investment Check v1.0 &middot; GVM-native &middot; Medium-long term holding &middot; Not a trade signal</div>
   </div>
@@ -925,6 +928,50 @@ const TC_RULE_DEFS={
     SM:[['1','<23.6 (incl. below swing low)'],['0.5','23.6–38.2'],['0','>38.2']],
     SR:[['1','78.6–100'],['0.5','61.8–78.6 or >100'],['0','<61.8']]}
 };
+// cc#456: Investment Check v1.0 rule definitions (12 rules, single-sided — no B/S variants).
+// Mirrors TC_RULE_DEFS shape (n/m/s/w) but a flat single-band list since every rule is a
+// plain pass/fail threshold (no partial-credit tiers exist in investment_check.py).
+const INVEST_RULE_DEFS={
+  R1:{n:'R1 · GVM Score',m:'Composite Growth+Value+Momentum score.',s:'gvm_scores.gvm_score',w:'A single top-line quality gate before any deeper fundamental check.',
+    b:[['pass','GVM ≥ 7.0'],['fail','GVM < 7.0']]},
+  R2:{n:'R2 · Value Score (V)',m:'GVM\'s valuation pillar — cheapness vs history/peers.',s:'gvm_scores.v_score',w:'Long-term holds should not be bought expensive relative to their own valuation history.',
+    b:[['pass','V-score ≥ 6.0'],['fail','V-score < 6.0']]},
+  R3:{n:'R3 · Momentum Score (M)',m:'GVM\'s momentum pillar — price/technical strength.',s:'gvm_scores.m_score',w:'Even a buy-and-hold entry benefits from not fighting the prevailing trend.',
+    b:[['pass','M-score ≥ 6.0'],['fail','M-score < 6.0']]},
+  R4:{n:'R4 · Sales 5Y CAGR vs Peer',m:'5-year sales CAGR compared with the segment peer average.',s:'screener_raw.sales_growth_5y vs segment peer avg',w:'Growing faster than peers signals share-gain, not just a rising tide.',
+    b:[['pass','stock 5Y sales CAGR > peer segment avg'],['fail','stock ≤ peer avg']]},
+  R5:{n:'R5 · Profit 5Y CAGR',m:'5-year profit CAGR, absolute threshold.',s:'screener_raw.profit_growth_5y',w:'Durable holds need a track record of real earnings growth, not just topline.',
+    b:[['pass','5Y profit CAGR > 10%'],['fail','≤ 10%']]},
+  R6:{n:'R6 · OPM vs Peer',m:'Operating profit margin compared with the segment peer average.',s:'screener_raw.opm vs segment peer avg',w:'Above-peer margins usually mean pricing power or a structural cost edge.',
+    b:[['pass','OPM > peer segment avg'],['fail','OPM ≤ peer avg']]},
+  R7:{n:'R7 · ROCE',m:'Return on capital employed (BFSI segments exempted — ROCE is not meaningful for lenders).',s:'screener_raw.roce',w:'Capital efficiency is the core test of whether a business compounds shareholder value.',
+    b:[['pass','ROCE ≥ 15% (or BFSI segment, exempt)'],['fail','ROCE < 15% and not BFSI']]},
+  R8:{n:'R8 · Last Result',m:'Most recent quarter\'s YoY sales AND profit growth, both required positive.',s:'screener_raw.qoq_sales_growth / qoq_profit_growth',w:'The latest print should not be quietly deteriorating under a good longer-run average.',
+    b:[['pass','QoQ sales > 0 AND QoQ PAT > 0'],['fail','either ≤ 0']]},
+  R9:{n:'R9 · Volume Accumulation',m:'20-session average volume on up-close days vs down-close days.',s:'raw_prices close & volume (20 sessions)',w:'Sustained buying-day volume over selling-day volume suggests quiet accumulation.',
+    b:[['pass','avg up-day volume > avg down-day volume'],['fail','otherwise']]},
+  R10:{n:'R10 · DMA200',m:'Price deviation from the 200-day moving average.',s:'v8_metrics.dma_200',w:'Long-term trend floor — deeply below the 200-DMA is a structural, not tactical, warning.',
+    b:[['pass','> −5% (at/above or only mildly below the 200-DMA)'],['fail','≤ −5%']]},
+  R11:{n:'R11 · RSI Monthly',m:'Monthly RSI band — avoids both washed-out and overheated entries.',s:'v8_metrics.rsi_month',w:'Long-horizon entries are best made outside of monthly extremes in either direction.',
+    b:[['pass','35 – 75'],['fail','< 35 or > 75']]},
+  R12:{n:'R12 · 1Y Return',m:'Trailing 1-year absolute price return.',s:'v8_metrics.year_return',w:'A stock that has already been rewarding holders for a year is showing the market agrees with the thesis.',
+    b:[['pass','1Y return > 0%'],['fail','≤ 0%']]},
+};
+function investRuleInfo(rule){
+  const d=INVEST_RULE_DEFS[rule]; if(!d){return;}
+  const bandHtml=(d.b||[]).map(b=>{const cls=b[0]==='pass'?'g':'r';
+    return '<div class="tcinfo-band '+cls+'"><b>'+(b[0]==='pass'?'✓':'✗')+'</b><span>'+b[1]+'</span></div>';}).join('');
+  document.getElementById('tcInfoBox').innerHTML=
+    '<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
+    +'<div class="tcinfo-h">'+d.n+'</div>'
+    +'<div class="tcinfo-sub">Investment Check v1.0 &middot; pass/fail rule</div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Measures</div><div class="tcinfo-v">'+d.m+'</div></div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Criteria</div>'+bandHtml+'</div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Data source</div><div class="tcinfo-v tcinfo-src">'+d.s+'</div></div>'
+    +'<div class="tcinfo-row"><div class="tcinfo-k">Why it matters</div><div class="tcinfo-v">'+d.w+'</div></div>';
+  document.getElementById('tcInfoOv').classList.add('open');
+}
+
 function tcRuleInfo(rule, side, style){
   const d=TC_RULE_DEFS[rule]; if(!d){return;}
   const vk=(side==='SELL'?'S':'B')+(style==='REVERSAL'?'R':'M');
@@ -1442,8 +1489,11 @@ function renderInvest(d){
   document.getElementById('invCompany').textContent=d.company+' ('+d.symbol+')';
   document.getElementById('invSeg').textContent=d.segment||'';
   const badge=document.getElementById('invBadge');
+  // cc#456 fable_decisions(3): Health Report vocab is the PRIMARY label; legacy band name kept
+  // as a small parenthetical so the old vocabulary is still visible during the transition.
   const verdictMap={'STRONG BUY':'🟢 STRONG BUY','ACCUMULATE':'🟡 ACCUMULATE','WATCH':'🟠 WATCH','AVOID':'🔴 AVOID'};
-  badge.textContent=verdictMap[d.verdict]||d.verdict;
+  const legacy=verdictMap[d.verdict]||d.verdict;
+  badge.textContent=d.verdict_display?(d.emoji||'')+' '+d.verdict_display+' ('+(d.verdict||'')+')':legacy;
   badge.className='inv-badge '+(d.verdict||'').replace(' ','-');
   document.getElementById('invCap').textContent=d.cap_category||'';
   const gvmEl=document.getElementById('invGvm');
@@ -1455,7 +1505,7 @@ function renderInvest(d){
   const sc=document.getElementById('invScoreCard');
   const cssClass={'STRONG BUY':'strong-buy','ACCUMULATE':'accumulate','WATCH':'watch','AVOID':'avoid'}[d.verdict]||'avoid';
   sc.className='inv-score-card '+cssClass;
-  document.getElementById('invVerdictLabel').textContent=verdictMap[d.verdict]||d.verdict;
+  document.getElementById('invVerdictLabel').textContent=d.verdict_display||legacy;
   document.getElementById('invScorePill').textContent=d.score+'/'+d.max_score;
   document.getElementById('invBarFill').style.width=Math.round(d.score/d.max_score*100)+'%';
   document.getElementById('invBarSub').textContent=d.score+' of '+d.max_score+' rules passed';
@@ -1468,13 +1518,128 @@ function renderInvest(d){
     const peer=r.peer!=null?' (peer: '+r.peer+')':'';
     const note=r.note?' · '+r.note:'';
     tbody.insertAdjacentHTML('beforeend',
-      '<tr class="'+(passed?'row-pass':'row-fail')+'">'+'<td class="td-rule">'+r.rule+' '+r.name+'</td>'+'<td class="td-cond">'+r.condition+'</td>'+'<td class="td-val">'+val+peer+note+'</td>'+'<td class="td-state">'+stateBadge(passed?'pass':'fail')+'</td></tr>');
+      '<tr class="'+(passed?'row-pass':'row-fail')+'">'
+      +'<td class="td-rule">'+r.rule+' '+r.name
+      +' <span class="v4-ibtn" onclick="investRuleInfo(\''+r.rule+'\')" title="Rule definition">i</span></td>'
+      +'<td class="td-cond">'+r.condition+'</td>'+'<td class="td-val">'+val+peer+note+'</td>'+'<td class="td-state">'+stateBadge(passed?'pass':'fail')+'</td></tr>');
   });
   const passDiv=document.getElementById('invPasses');passDiv.innerHTML='';
   (d.passes||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-pass-chip">✓ '+n+'</span>');});
   (d.fails||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-fail-chip">✗ '+n+'</span>');});
+  document.getElementById('invFreshness').textContent='';   // populated once /detail loads (freshness lives there)
+  document.getElementById('invDetail').classList.remove('show');
+  document.getElementById('invDetail').innerHTML='';
+  document.getElementById('invDetailBtn').onclick=()=>loadInvestDetail(d.symbol);
   document.getElementById('invResult').classList.add('show');
   document.getElementById('invResult').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// cc#456: INVEST "View Detailed" — one evidence panel per rule, mirroring the TC v4
+// loadDetail/renderTcDetail pattern (same _detPanel/_kv/_sgn helpers, same v4-det-* CSS).
+async function loadInvestDetail(sym){
+  const box=document.getElementById('invDetail'); if(!box) return;
+  if(box.classList.contains('show')){ box.classList.remove('show'); box.innerHTML=''; return; }  // toggle
+  box.classList.add('show');
+  box.innerHTML='<div class="v4-det-msg">Loading detailed evidence for '+sym+'…</div>';
+  try{
+    const r=await fetch('/api/investment-check/detail?symbol='+encodeURIComponent(sym));
+    const d=await r.json();
+    if(d.error){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">'+d.error+'</div>';return;}
+    renderInvestDetail(box, d);
+    box.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){box.innerHTML='<div class="v4-det-msg" style="color:var(--red)">Failed to load detail: '+e+'</div>';}
+}
+
+function _investSpark(series, key, color){
+  const pts=(series||[]).map(p=>p[key]).filter(v=>v!=null);
+  if(pts.length<2)return '<div class="v4-det-note">no trend history</div>';
+  let lo=Math.min.apply(null,pts),hi=Math.max.apply(null,pts); const pad=(hi-lo)*0.1||1; lo-=pad;hi+=pad;
+  const W=100,H=28; const xs=i=>i/(pts.length-1)*W, ys=v=>H-((v-lo)/(hi-lo))*H;
+  const line=pts.map((v,i)=>xs(i).toFixed(1)+','+ys(v).toFixed(1)).join(' ');
+  return '<svg viewBox="0 0 100 28" preserveAspectRatio="none" style="width:100%;height:44px;display:block">'
+    +'<polyline points="'+line+'" fill="none" stroke="'+color+'" stroke-width="1.4"/></svg>'
+    +'<div class="v4-det-note">'+pts.length+'d trend · latest '+pts[pts.length-1].toFixed(2)+'</div>';
+}
+function _investCompareBar(label, stockVal, peerVal, unit, higherIsBetter){
+  if(stockVal==null)return '<div class="v4-det-note">no data</div>';
+  unit=unit||'%'; if(higherIsBetter==null)higherIsBetter=true;
+  const mx=Math.max(Math.abs(stockVal),Math.abs(peerVal||0),1)*1.15;
+  const sw=Math.min(100,Math.abs(stockVal)/mx*100), pw=Math.min(100,Math.abs(peerVal||0)/mx*100);
+  const good=peerVal==null?true:(higherIsBetter?stockVal>peerVal:stockVal<peerVal);
+  return '<div class="v4-det-vbar"><span class="vl">'+label+'</span><div class="vtrack"><div class="vfill '+(good?'pos':'neg')+'" style="width:'+sw+'%"></div></div><span class="vv">'+stockVal.toFixed(1)+unit+'</span></div>'
+    +(peerVal!=null?('<div class="v4-det-vbar"><span class="vl">Peer avg</span><div class="vtrack"><div class="vfill" style="width:'+pw+'%;background:var(--dim)"></div></div><span class="vv">'+peerVal.toFixed(1)+unit+'</span></div>'):'');
+}
+function _investGauge(label, val, lo, hi, unit){
+  unit=unit||'';
+  if(val==null)return '<div class="v4-det-gauge"><div class="gv">—</div><div class="gt">'+label+'</div></div>';
+  const inBand=val>=lo&&val<=hi;
+  const pos=Math.max(0,Math.min(100,((val-lo)/((hi-lo)||1))*100));
+  return '<div class="v4-det-gauge"><div class="gv">'+val.toFixed(1)+unit+'</div><div class="gt">'+label+'</div>'
+    +'<div class="gbar"><div class="gfill" style="width:'+pos+'%;background:'+(inBand?'var(--grn)':'var(--red)')+'"></div></div></div>';
+}
+
+function renderInvestDetail(box, d){
+  const ev=d.evidence||{}, fr=d.freshness||{};
+  const cr={}; (d.rules||[]).forEach(r=>cr[r.rule]=r.pass?1:0);
+  const P=[];
+
+  document.getElementById('invFreshness').textContent=
+    (fr.gvm_score_date?('GVM as of '+fr.gvm_score_date):'')
+    +(fr.screener_loaded_at?(' · Fundamentals (screener) refreshed '+fr.screener_loaded_at):'');
+
+  const vcls=d.score>=10?'strong':d.score>=8?'valid':'reject';
+  const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'
+    +(d.verdict_display||d.verdict)+' ('+d.verdict+')</div><div class="v4-best">'+d.symbol+' · '+d.company
+    +' · '+d.segment+' · score '+d.score+'/'+d.max_score+' · band '+d.band+'</div></div>';
+
+  P.push([1,_detPanel('R1','GVM Score',cr.R1,_investSpark(ev.gvm_trend,'gvm','var(--cyan)')
+    +_kv('GVM score',d.rules.find(r=>r.rule==='R1').value))]);
+  P.push([2,_detPanel('R2','Value Score (V) + valuation',cr.R2,_investSpark(ev.gvm_trend,'gvm','var(--cyan)')
+    +_kv('V-score',d.rules.find(r=>r.rule==='R2').value)
+    +_kv('PE',(ev.valuation||{}).pe)+_kv('Historical PE',(ev.valuation||{}).historical_pe)
+    +_kv('Segment PE',(ev.valuation||{}).segment_pe)
+    +'<div class="v4-det-note">peer PE '+((ev.peer||{}).pe!=null?(ev.peer.pe.toFixed(1)):'—')+'</div>')]);
+  P.push([3,_detPanel('R3','Momentum Score (M)',cr.R3,_investSpark(ev.gvm_trend,'m','var(--grn)')
+    +_kv('M-score',d.rules.find(r=>r.rule==='R3').value))]);
+  const r4=d.rules.find(r=>r.rule==='R4');
+  P.push([4,_detPanel('R4','Sales 5Y CAGR vs Peer',cr.R4,_investCompareBar('Stock',r4.value,r4.peer,'%',true))]);
+  const r5=d.rules.find(r=>r.rule==='R5');
+  P.push([5,_detPanel('R5','Profit 5Y CAGR',cr.R5,_investGauge('5Y Profit CAGR',r5.value,10,Math.max(30,(r5.value||10)+5),'%')
+    +'<div class="v4-det-note">threshold &gt; 10%</div>')]);
+  const r6=d.rules.find(r=>r.rule==='R6');
+  P.push([6,_detPanel('R6','OPM vs Peer',cr.R6,_investCompareBar('Stock OPM',r6.value,r6.peer,'%',true))]);
+  const r7=d.rules.find(r=>r.rule==='R7');
+  P.push([7,_detPanel('R7','ROCE',cr.R7,ev.bfsi
+    ?'<div class="v4-det-note">BFSI segment — ROCE exempted from this rule (not meaningful for lenders).</div>'
+    :_investGauge('ROCE',r7.value,15,Math.max(35,(r7.value||15)+5),'%')+'<div class="v4-det-note">threshold ≥ 15%</div>')]);
+  const r8=d.rules.find(r=>r.rule==='R8');
+  P.push([8,_detPanel('R8','Last Result (QoQ)',cr.R8,'<div class="v4-det-note">'+r8.value+'</div>'
+    +'<div class="v4-det-note">'+(fr.screener_loaded_at?('fundamentals refreshed '+fr.screener_loaded_at):'refresh date unavailable')+'</div>')]);
+  const vol=ev.volume||{}, au=vol.avg_up||0, ad=vol.avg_down||0, vmax=Math.max(au,ad,1);
+  P.push([9,_detPanel('R9','Volume Accumulation (20d)',cr.R9,
+    '<div class="v4-det-vbar"><span class="vl">Up-close</span><div class="vtrack"><div class="vfill pos" style="width:'+(au/vmax*100)+'%"></div></div><span class="vv">'+(au?Math.round(au).toLocaleString('en-IN'):'—')+'</span></div>'
+    +'<div class="v4-det-vbar"><span class="vl">Down-close</span><div class="vtrack"><div class="vfill neg" style="width:'+(ad/vmax*100)+'%"></div></div><span class="vv">'+(ad?Math.round(ad).toLocaleString('en-IN'):'—')+'</span></div>')]);
+  const r10=d.rules.find(r=>r.rule==='R10');
+  P.push([10,_detPanel('R10','DMA200',cr.R10,_investGauge('vs DMA200',r10.value,-5,Math.max(10,(r10.value||0)+5),'%')
+    +'<div class="v4-det-note">threshold &gt; −5%</div>')]);
+  const r11=d.rules.find(r=>r.rule==='R11');
+  P.push([11,_detPanel('R11','RSI Monthly',cr.R11,_investGauge('RSI (monthly)',r11.value,35,75,'')
+    +'<div class="v4-det-note">band 35–75</div>')]);
+  P.push([12,_detPanel('R12','1Y Return · Fib position (1Y swing)',cr.R12,
+    '<div class="v4-det-note">1Y return: '+_sgn(d.rules.find(r=>r.rule==='R12').value,1)+'%</div>'
+    +'<div id="invFib_'+d.symbol+'" class="v4-det-note">Loading 1Y fib swing…</div>')]);
+
+  P.sort((a,b)=>a[0]-b[0]);
+  box.innerHTML=banner+'<div class="v4-det-grid">'+P.map(x=>x[1]).join('')+'</div>';
+
+  // R12 fib panel: lazy-load the EXISTING /api/trade-check/fibcheck (1Y lookback, INVEST is
+  // long-only so SELL=false), reusing _detFibChart verbatim — no new fib math, no duplication.
+  fetch('/api/trade-check/fibcheck?symbol='+encodeURIComponent(d.symbol)+'&lookback=1y')
+    .then(r=>r.json()).then(fb=>{
+      const host=document.getElementById('invFib_'+d.symbol); if(!host)return;
+      if(fb.error){host.textContent='Fib data unavailable: '+fb.error;return;}
+      host.outerHTML='<div>'+_detFibChart(fb,false)+'</div>';
+    }).catch(()=>{const host=document.getElementById('invFib_'+d.symbol); if(host)host.textContent='Fib data unavailable.';});
 }
 
 // Screener

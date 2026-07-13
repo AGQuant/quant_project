@@ -25,15 +25,19 @@ import traceback
 router = APIRouter()
 
 # ── Verdict bands ────────────────────────────────────────────────────────────
+# cc#456 fable_decisions_founder_delegated(3): verdict_display adopts the Health Report
+# vocabulary (Buy Systematically / Accumulate-Hold / Wait & Watch / Avoid-Exit). Additive
+# key only — `verdict` (STRONG BUY/ACCUMULATE/WATCH/AVOID) is UNCHANGED for the screener/
+# summary endpoints and any other existing consumer; thresholds/bands are untouched.
 def get_verdict(score: int) -> dict:
     if score >= 10:
-        return {"verdict": "STRONG BUY", "emoji": "🟢", "band": "10-12"}
+        return {"verdict": "STRONG BUY", "verdict_display": "Buy Systematically", "emoji": "🟢", "band": "10-12"}
     elif score >= 8:
-        return {"verdict": "ACCUMULATE", "emoji": "🟡", "band": "8-9"}
+        return {"verdict": "ACCUMULATE", "verdict_display": "Accumulate-Hold", "emoji": "🟡", "band": "8-9"}
     elif score >= 6:
-        return {"verdict": "WATCH",      "emoji": "🟠", "band": "6-7"}
+        return {"verdict": "WATCH",      "verdict_display": "Wait & Watch",   "emoji": "🟠", "band": "6-7"}
     else:
-        return {"verdict": "AVOID",      "emoji": "🔴", "band": "<6"}
+        return {"verdict": "AVOID",      "verdict_display": "Avoid-Exit",     "emoji": "🔴", "band": "<6"}
 
 def get_cap_category(market_cap: Optional[float]) -> str:
     if not market_cap:
@@ -218,11 +222,182 @@ def investment_check(symbol: str = Query(..., description="NSE symbol")):
             "score": score,
             "max_score": 12,
             "verdict": verdict_info["verdict"],
+            "verdict_display": verdict_info.get("verdict_display"),   # cc#456: Health Report vocab
             "emoji": verdict_info["emoji"],
             "band": verdict_info["band"],
             "rules": rules,
             "passes": [r["name"] for r in rules if r["pass"]],
             "fails":  [r["name"] for r in rules if not r["pass"]],
+        }
+
+    except Exception as e:
+        return {"error": str(e), "trace": traceback.format_exc()}
+    finally:
+        conn.close()
+
+
+# ── cc#456: detailed evidence view (View Detailed drill-down, mirrors TC v4) ────────
+# NEW, ADDITIVE route — a separate computation from investment_check() (not a shared
+# refactor) so the already-live /api/investment-check scorecard endpoint carries zero
+# risk of behavior change. Same 12 rules, same thresholds — this only adds the raw
+# evidence data (peer comparisons, GVM trend series, freshness stamps) each rule's
+# panel needs. scope_guard: no rule logic changes.
+@router.get("/api/investment-check/detail")
+def investment_check_detail(symbol: str = Query(..., description="NSE symbol")):
+    conn = psycopg.connect(os.getenv("DATABASE_URL"))
+    try:
+        symbol = symbol.upper().strip()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT gvm_score, g_score, v_score, m_score, segment, verdict, score_date
+            FROM gvm_scores WHERE symbol = %s
+        """, (symbol,))
+        gvm = cur.fetchone()
+        if not gvm:
+            return {"error": f"Symbol {symbol} not found in GVM universe"}
+        gvm_score, g_score, v_score, m_score, segment, gvm_verdict, gvm_score_date = gvm
+
+        cur.execute("""
+            SELECT sales_growth_5y, profit_growth_5y, opm, roce,
+                   qoq_sales_growth, qoq_profit_growth, market_cap, company_name,
+                   pe, historical_pe, segment_pe, loaded_at
+            FROM screener_raw WHERE nse_code = %s
+        """, (symbol,))
+        scr = cur.fetchone()
+        if not scr:
+            return {"error": f"Symbol {symbol} not found in screener_raw"}
+        (sales_5y, profit_5y, opm, roce, qoq_sales, qoq_profit, market_cap, company_name,
+         pe, historical_pe, segment_pe, loaded_at) = scr
+
+        cur.execute("""
+            SELECT AVG(s.sales_growth_5y), AVG(s.opm), AVG(s.pe)
+            FROM gvm_scores g
+            JOIN screener_raw s ON g.symbol = s.nse_code
+            WHERE g.segment = %s
+        """, (segment,))
+        peer = cur.fetchone()
+        peer_sales_5y = float(peer[0] or 0)
+        peer_opm      = float(peer[1] or 0)
+        peer_pe       = float(peer[2]) if peer and peer[2] is not None else None
+
+        cur.execute("""
+            SELECT dma_200, rsi_month, year_return
+            FROM v8_metrics WHERE symbol = %s
+            ORDER BY computed_at DESC LIMIT 1
+        """, (symbol,))
+        v8 = cur.fetchone()
+        dma_200     = v8[0] if v8 else None
+        rsi_month   = v8[1] if v8 else None
+        year_return = v8[2] if v8 else None
+
+        cur.execute("""
+            WITH lagged AS (
+                SELECT close, volume,
+                    LAG(close) OVER (ORDER BY price_date) as prev_close
+                FROM raw_prices
+                WHERE symbol = %s
+                  AND price_date >= CURRENT_DATE - INTERVAL '25 days'
+            )
+            SELECT
+                AVG(CASE WHEN close > prev_close THEN volume END) as avg_up,
+                AVG(CASE WHEN close < prev_close THEN volume END) as avg_down
+            FROM lagged WHERE prev_close IS NOT NULL
+        """, (symbol,))
+        vol = cur.fetchone()
+        avg_up_vol   = float(vol[0] or 0)
+        avg_down_vol = float(vol[1] or 0)
+
+        # cc#456 fix_2: GVM trend series (last ~130 days) — feeds the R1/R3 sparklines.
+        cur.execute("""
+            SELECT score_date, g_score, m_score, gvm_score FROM gvm_history
+            WHERE symbol=%s ORDER BY score_date DESC LIMIT 130
+        """, (symbol,))
+        trend_rows = cur.fetchall()[::-1]
+        gvm_trend = [{"date": str(r[0]),
+                      "g": float(r[1]) if r[1] is not None else None,
+                      "m": float(r[2]) if r[2] is not None else None,
+                      "gvm": float(r[3]) if r[3] is not None else None} for r in trend_rows]
+
+        bfsi = is_bfsi(segment)
+        cap  = get_cap_category(market_cap)
+
+        rules = [
+            {"rule": "R1", "name": "GVM Score", "condition": "≥ 7.0",
+             "value": round(float(gvm_score), 2) if gvm_score else None,
+             "pass": bool(gvm_score and gvm_score >= 7.0)},
+            {"rule": "R2", "name": "Value Score (V)", "condition": "≥ 6.0",
+             "value": round(float(v_score), 2) if v_score else None,
+             "pass": bool(v_score and v_score >= 6.0)},
+            {"rule": "R3", "name": "Momentum Score (M)", "condition": "≥ 6.0",
+             "value": round(float(m_score), 2) if m_score else None,
+             "pass": bool(m_score and m_score >= 6.0)},
+            {"rule": "R4", "name": "Sales 5Y CAGR vs Peer", "condition": "> peer avg",
+             "value": round(float(sales_5y), 1) if sales_5y else None,
+             "peer": round(peer_sales_5y, 1),
+             "pass": bool(sales_5y and float(sales_5y) > peer_sales_5y)},
+            {"rule": "R5", "name": "Profit 5Y CAGR", "condition": "> 10%",
+             "value": round(float(profit_5y), 1) if profit_5y else None,
+             "pass": bool(profit_5y and float(profit_5y) > 10)},
+            {"rule": "R6", "name": "OPM vs Peer", "condition": "> peer avg",
+             "value": round(float(opm), 1) if opm else None,
+             "peer": round(peer_opm, 1),
+             "pass": bool(opm and float(opm) > peer_opm)},
+            {"rule": "R7", "name": "ROCE", "condition": "≥ 15% (BFSI exempt)",
+             "value": round(float(roce), 1) if roce else None,
+             "pass": bfsi or bool(roce and float(roce) >= 15),
+             "note": "BFSI exempt" if bfsi else None},
+            {"rule": "R8", "name": "Last Result", "condition": "QoQ Sales > 0 AND QoQ PAT > 0",
+             "value": f"Sales {round(float(qoq_sales),1) if qoq_sales else 'N/A'}% | PAT {round(float(qoq_profit),1) if qoq_profit else 'N/A'}%",
+             "pass": bool(qoq_sales and qoq_profit and float(qoq_sales) > 0 and float(qoq_profit) > 0)},
+            {"rule": "R9", "name": "Volume Accumulation", "condition": "Up-day vol > Down-day vol (20d)",
+             "value": f"Up {round(avg_up_vol/1e5,1)}L | Down {round(avg_down_vol/1e5,1)}L",
+             "pass": bool(avg_up_vol and avg_up_vol > avg_down_vol)},
+            {"rule": "R10", "name": "DMA200", "condition": "> -5%",
+             "value": round(float(dma_200), 2) if dma_200 is not None else None,
+             "pass": bool(dma_200 is not None and float(dma_200) > -5)},
+            {"rule": "R11", "name": "RSI Monthly", "condition": "35–75",
+             "value": round(float(rsi_month), 1) if rsi_month else None,
+             "pass": bool(rsi_month and 35 <= float(rsi_month) <= 75)},
+            {"rule": "R12", "name": "1Y Return", "condition": "> 0%",
+             "value": round(float(year_return), 1) if year_return else None,
+             "pass": bool(year_return and float(year_return) > 0)},
+        ]
+
+        score = sum(1 for r in rules if r["pass"])
+        verdict_info = get_verdict(score)
+
+        return {
+            "symbol": symbol,
+            "company": company_name,
+            "segment": segment,
+            "cap_category": cap,
+            "market_cap_cr": round(float(market_cap), 0) if market_cap else None,
+            "gvm_verdict": gvm_verdict,
+            "score": score,
+            "max_score": 12,
+            "verdict": verdict_info["verdict"],
+            "verdict_display": verdict_info.get("verdict_display"),
+            "emoji": verdict_info["emoji"],
+            "band": verdict_info["band"],
+            "rules": rules,
+            # cc#456 fable_decisions_founder_delegated(2): freshness stamps. screener_raw has NO
+            # per-quarter column (verified via schema) — only a whole-file loaded_at upload
+            # timestamp, so fundamentals panels show that honestly rather than a fabricated
+            # "Q4 FY26" label. GVM/price panels use their own real last-tick dates.
+            "freshness": {
+                "gvm_score_date": str(gvm_score_date) if gvm_score_date else None,
+                "screener_loaded_at": str(loaded_at) if loaded_at else None,
+            },
+            "evidence": {
+                "gvm_trend": gvm_trend,
+                "peer": {"sales_5y": peer_sales_5y, "opm": peer_opm, "pe": peer_pe},
+                "valuation": {"pe": float(pe) if pe is not None else None,
+                              "historical_pe": float(historical_pe) if historical_pe is not None else None,
+                              "segment_pe": float(segment_pe) if segment_pe is not None else None},
+                "volume": {"avg_up": avg_up_vol, "avg_down": avg_down_vol},
+                "bfsi": bfsi,
+            },
         }
 
     except Exception as e:
