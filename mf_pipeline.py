@@ -320,6 +320,7 @@ def parse_holdings_xlsx(data):
 # Founder 13-Jul: MF returns 1W/1M/3M/6M/1Y/2Y for funds with AUM > Rs 5,000 cr
 # (LOCKED, revised from 10,000). Month-end NAV comparison (+ Friday weekly for 1W).
 _AMFI_AAUM_URL = "https://www.amfiindia.com/modules/AverageAUMDetails"
+_AMFI_AAUM_PAGE = "https://www.amfiindia.com/research-information/aum-data/average-aum"
 AUM_THRESHOLD_CR = 5000.0        # founder-locked 13-Jul (was 10000)
 NAV_HISTORY_MONTHS = 25          # trailing month-end rows (>=25 for 2Y funds)
 WEEKLY_MONTHS = 14               # trailing weekly (Friday) rows for ret_1w continuity
@@ -354,59 +355,125 @@ def _amfi_aaum_quarter(today=None):
     return fy, q
 
 
+def _amfi_form_options(cur):
+    """GET the AAUM page and extract every <select> name/id -> [(value,text)] pairs. AMFI's
+    Year/Quarter dropdowns use INTERNAL numeric option IDs (not human strings), so we must read
+    the live option values. Dumps them to ops_log so the exact IDs are inspectable via run_sql."""
+    import requests
+    html = requests.get(_AMFI_AAUM_PAGE, headers={"User-Agent": "Scorr-MF/1.0"}, timeout=60).text
+    selects = {}
+    for m in re.finditer(r'<select[^>]*?(?:name|id)="([^"]+)"[^>]*>(.*?)</select>', html, re.S | re.I):
+        nm = m.group(1)
+        opts = re.findall(r'<option[^>]*?value="([^"]*)"[^>]*>(.*?)</option>', m.group(2), re.S | re.I)
+        selects[nm] = [(v.strip(), re.sub(r"<[^>]+>", "", t).strip()) for v, t in opts if v.strip()]
+    _oplog(cur, "MF_AUM_FORM_OPTIONS", {k: v[:8] for k, v in selects.items()})
+    return selects
+
+
+def _parse_aaum_html(body):
+    """Parse an AMFI AAUM HTML response into [(scheme_name, aaum_cr)] (lakh->cr). Returns []
+    if no usable table."""
+    import pandas as pd
+    parsed = []
+    try:
+        tables = pd.read_html(io.StringIO(body))
+    except Exception:
+        return parsed
+    for t in tables:
+        cols = [str(c).strip().lower() for c in t.columns]
+        name_i = next((i for i, c in enumerate(cols) if "scheme" in c or "name" in c), None)
+        aaum_i = next((i for i, c in enumerate(cols)
+                       if ("average" in c and "aum" in c) or "aaum" in c or "excluding fund of funds" in c), None)
+        if name_i is None or aaum_i is None or len(t) < 20:
+            continue
+        rows = []
+        for _, row in t.iterrows():
+            nm = str(row.iloc[name_i]).strip()
+            raw = str(row.iloc[aaum_i]).replace(",", "").strip()
+            if not nm or nm.lower() in ("total", "nan", "scheme name") or raw in ("", "nan"):
+                continue
+            try:
+                rows.append((nm, round(float(raw) / 100.0, 2)))   # AMFI lakh -> cr
+            except Exception:
+                continue
+        if len(rows) > len(parsed):
+            parsed = rows
+    return parsed
+
+
 def fetch_amfi_aum(cur, today=None):
-    """PHASE 1: scheme-wise AAUM from AMFI's quarterly disclosure -> mf_master.aum_cr.
-    AMFI reports AAUM in Rs LAKH -> /100 = Rs CR. Maps to the Direct-Growth mf_master rows by
-    normalised name (token-overlap). Defensive HTML-table parse; logs samples + match rate."""
+    """PHASE 1: scheme-wise AAUM from AMFI's quarterly disclosure -> mf_master.aum_cr (lakh->cr),
+    fuzzy-mapped to Direct-Growth mf_master rows. Reads the live form-option IDs first (AMFI uses
+    numeric Year/Quarter IDs), tries the latest quarter option, and dumps diagnostics to ops_log
+    on failure so the real params/format are recoverable via run_sql."""
     import requests
     try:
-        import pandas as pd
+        import pandas as pd  # noqa: F401
     except Exception as e:
         _oplog(cur, "MF_AUM_ERROR", {"stage": "import pandas", "error": str(e)[:200]})
         return {"error": "pandas unavailable"}
+
+    # 1. discover the real dropdown option IDs
+    selects = {}
+    try:
+        selects = _amfi_form_options(cur)
+    except Exception as e:
+        _oplog(cur, "MF_AUM_ERROR", {"stage": "form_options", "error": str(e)[:200]})
+
+    def _find_select(*keys):
+        for k in selects:
+            lk = k.lower()
+            if any(x in lk for x in keys):
+                return selects[k]
+        return []
+    year_opts = _find_select("year")
+    q_opts = _find_select("quarter", "aaum", "type", "avg", "period")
+
+    # candidate (year_val, quarter_val) pairs to try — latest options first, then a few fallbacks
+    candidates = []
+    yr_vals = [v for v, _ in year_opts][:2] or [""]
+    q_vals = [v for v, _ in q_opts][:4] or [""]
+    for yv in yr_vals:
+        for qv in q_vals:
+            candidates.append((yv, qv))
     fy, q = _amfi_aaum_quarter(today)
-    parsed = []      # (scheme_name, aaum_cr)
-    used = None
-    for variant in ({"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1", "Year": fy,
-                     "Quarter": q, "option": "1"},
-                    {"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1", "Year": fy,
-                     "Type": q, "option": "1"}):
-        try:
-            r = requests.post(_AMFI_AAUM_URL, data=variant,
-                              headers={"User-Agent": "Scorr-MF/1.0",
-                                       "Content-Type": "application/x-www-form-urlencoded"}, timeout=90)
-            body = r.text or ""
-            if not body.strip():
-                continue
-            tables = pd.read_html(io.StringIO(body))
-            for t in tables:
-                cols = [str(c).strip().lower() for c in t.columns]
-                name_i = next((i for i, c in enumerate(cols) if "scheme" in c or "name" in c), None)
-                aaum_i = next((i for i, c in enumerate(cols)
-                               if ("average" in c and "aum" in c) or "aaum" in c or "excluding fund of funds" in c), None)
-                if name_i is None or aaum_i is None or len(t) < 20:
-                    continue
-                rows = []
-                for _, row in t.iterrows():
-                    nm = str(row.iloc[name_i]).strip()
-                    raw = str(row.iloc[aaum_i]).replace(",", "").strip()
-                    if not nm or nm.lower() in ("total", "nan", "scheme name") or raw in ("", "nan"):
-                        continue
-                    try:
-                        aaum_cr = float(raw) / 100.0   # AMFI lakh -> cr
-                    except Exception:
-                        continue
-                    rows.append((nm, round(aaum_cr, 2)))
+    candidates.append((fy, q))   # last-ditch human-string attempt
+
+    parsed, used = [], None
+    for yv, qv in candidates:
+        for pkey in ("Quarter", "Type"):
+            data = {"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1",
+                    "Year": yv, pkey: qv, "option": "1"}
+            try:
+                r = requests.post(_AMFI_AAUM_URL, data=data,
+                                  headers={"User-Agent": "Scorr-MF/1.0",
+                                           "Content-Type": "application/x-www-form-urlencoded"}, timeout=90)
+                body = r.text or ""
+                rows = _parse_aaum_html(body) if body.strip() else []
                 if len(rows) > len(parsed):
-                    parsed, used = rows, variant
-            if parsed:
-                break
-        except Exception as e:
-            _oplog(cur, "MF_AUM_ERROR", {"stage": "fetch/parse", "variant": variant, "error": str(e)[:200]})
+                    parsed, used = rows, {"Year": yv, pkey: qv, "http": r.status_code, "len": len(body)}
+                if parsed:
+                    break
+            except Exception as e:
+                _oplog(cur, "MF_AUM_ERROR", {"stage": "post", "data": data, "error": str(e)[:160]})
+        if parsed:
+            break
+
     if not parsed:
-        _oplog(cur, "MF_AUM_ERROR", {"stage": "no_rows", "fy": fy, "quarter": q,
-                                     "note": "AMFI scheme-wise AAUM parse returned 0 rows"})
-        return {"error": "no AAUM rows parsed", "fy": fy, "quarter": q}
+        # dump one raw response snippet so the real format is inspectable via run_sql
+        snippet = ""
+        try:
+            rr = requests.post(_AMFI_AAUM_URL,
+                               data={"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1",
+                                     "Year": (yr_vals[0] if yr_vals else ""), "Quarter": (q_vals[0] if q_vals else ""),
+                                     "option": "1"},
+                               headers={"User-Agent": "Scorr-MF/1.0"}, timeout=90)
+            snippet = (rr.text or "")[:1200]
+        except Exception:
+            pass
+        _oplog(cur, "MF_AUM_ERROR", {"stage": "no_rows", "year_opts": year_opts[:5], "q_opts": q_opts[:5],
+                                     "resp_snippet": snippet})
+        return {"error": "no AAUM rows parsed", "year_opts": year_opts[:5], "q_opts": q_opts[:5]}
 
     # Map each AAUM scheme -> the Direct-Growth AMFI row in mf_master by token-overlap.
     cur.execute("SELECT scheme_code, name FROM mf_master WHERE source='amfi' "
