@@ -256,7 +256,7 @@ td.sym{font-weight:700;font-size:12.5px}
 (function(){
   var el=document.getElementById('mqs'),t0=null,target=8.2;
   if(matchMedia('(prefers-reduced-motion: reduce)').matches){el.textContent=target.toFixed(1);return}
-  setTimeout(function step(){
+  setTimeout(function step(ts){
     if(!t0)t0=performance.now();
     var p=Math.min((performance.now()-t0)/1400,1);
     el.textContent=(target*(1-Math.pow(1-p,3))).toFixed(1);
