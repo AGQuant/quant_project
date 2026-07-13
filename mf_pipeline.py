@@ -764,6 +764,118 @@ def mf_backfill_curated_nav():
     return {"backfilled": out}
 
 
+# ── cc#480: thin reads for the /v15 page (search / hero / screener) ─────────────────
+_V15_CATS = ["Flexi Cap", "Large & Mid Cap", "Large Cap", "Mid Cap", "Small Cap", "Multi Cap",
+             "ELSS", "Index", "Hybrid", "Focused", "Value", "Contra", "Banking", "Pharma",
+             "Technology", "Infrastructure", "Debt", "Liquid"]
+
+
+def _derive_cat(name, category):
+    """Best-effort category from a real scheme name when mf_master.category is NULL
+    (the AMFI universe carries names but not a category column). Honest — derived from
+    the fund's own name, never invented."""
+    if category:
+        return category
+    n = (name or "").lower()
+    for c in _V15_CATS:
+        if c.lower() in n:
+            return c
+    return None
+
+
+def _derive_plan(name):
+    n = (name or "").lower()
+    kind = "Direct" if "direct" in n else ("Regular" if "regular" in n else None)
+    opt = "Growth" if "growth" in n else ("IDCW" if ("idcw" in n or "dividend" in n) else None)
+    return " · ".join([x for x in (kind, opt) if x]) or None
+
+
+@router.get("/api/v15/search")
+def v15_search(q: str = "", limit: int = 12):
+    """cc#480: fund autocomplete over mf_master (name/amc/category). Prefers Direct-Growth
+    plans. Thin read — no scoring."""
+    q = (q or "").strip()
+    if not q:
+        return {"count": 0, "results": []}
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        cur.execute("""SELECT scheme_code, name, amc, category FROM mf_master
+                       WHERE name ILIKE %s OR amc ILIKE %s OR category ILIKE %s
+                       ORDER BY (name ILIKE '%%direct%%' AND name ILIKE '%%growth%%') DESC,
+                                curated DESC, length(name), name
+                       LIMIT %s""",
+                    (f"%{q}%", f"%{q}%", f"%{q}%", max(1, min(limit, 25))))
+        rows = [{"scheme_code": sc, "name": nm, "amc": amc,
+                 "category": _derive_cat(nm, cat), "plan": _derive_plan(nm)}
+                for sc, nm, amc, cat in cur.fetchall()]
+    return {"count": len(rows), "results": rows}
+
+
+@router.get("/api/v15/fund/{scheme_code}")
+def v15_fund(scheme_code: str):
+    """cc#480: thin hero read — meta + returns bindings (ret_* NULL until cc#477 lands,
+    rendered as em-dash by the page). No MQS/holdings (those are COMING SOON)."""
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        try:
+            _ensure_returns_cols(cur); conn.commit()
+        except Exception:
+            conn.rollback()
+        cur.execute("""SELECT scheme_code, name, amc, category, expense_ratio, aum_cr,
+                              finkhoz_rating, crisil_rank, manager,
+                              ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, ret_2y, ret_3y, returns_asof
+                       FROM mf_master WHERE scheme_code=%s""", (scheme_code,))
+        r = cur.fetchone()
+        if not r:
+            return {"error": "not found"}
+        cols = [d[0] for d in cur.description]
+        m = dict(zip(cols, r))
+    m["category"] = _derive_cat(m.get("name"), m.get("category"))
+    m["plan"] = _derive_plan(m.get("name"))
+    for k in ("expense_ratio", "aum_cr", "finkhoz_rating", "ret_1w", "ret_1m", "ret_3m",
+              "ret_6m", "ret_1y", "ret_2y", "ret_3y"):
+        if m.get(k) is not None:
+            m[k] = float(m[k])
+    m["returns_asof"] = str(m["returns_asof"]) if m.get("returns_asof") else None
+    return {"fund": m}
+
+
+@router.get("/api/v15/screener")
+def v15_screener(category: str = "", sort: str = "1y", limit: int = 40):
+    """cc#480: screener rows for a category tab. Matches mf_master.category OR the scheme name
+    (real AMFI names carry the category), Direct-Growth only. Sort by 1Y desc (NULLs last) then
+    AUM. AUM>5000 filter activates automatically once aum_cr is populated (cc#477)."""
+    cat = (category or "").strip()
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        try:
+            _ensure_returns_cols(cur); conn.commit()
+        except Exception:
+            conn.rollback()
+        where = ["name ILIKE '%%direct%%'", "name ILIKE '%%growth%%'"]
+        params = []
+        if cat:
+            where.append("(category ILIKE %s OR name ILIKE %s)")
+            params += [f"%{cat}%", f"%{cat}%"]
+        order = ("ret_1y DESC NULLS LAST, aum_cr DESC NULLS LAST, name"
+                 if sort == "1y" else "aum_cr DESC NULLS LAST, ret_1y DESC NULLS LAST, name")
+        sql = ("SELECT scheme_code, name, amc, category, finkhoz_rating, crisil_rank, "
+               "expense_ratio, aum_cr, ret_1y, ret_3y FROM mf_master WHERE "
+               + " AND ".join(where) + " ORDER BY " + order + " LIMIT %s")
+        params.append(max(1, min(limit, 80)))
+        cur.execute(sql, params)
+        rows = []
+        for sc, nm, amc, c, fr, cr, er, aum, r1y, r3y in cur.fetchall():
+            rows.append({"scheme_code": sc, "name": nm, "amc": amc,
+                         "category": _derive_cat(nm, c),
+                         "finkhoz_rating": float(fr) if fr is not None else None,
+                         "crisil_rank": cr, "expense_ratio": float(er) if er is not None else None,
+                         "aum_cr": float(aum) if aum is not None else None,
+                         "ret_1y": float(r1y) if r1y is not None else None,
+                         "ret_3y": float(r3y) if r3y is not None else None})
+    return {"category": cat, "count": len(rows), "results": rows}
+
+
 @router.get("/api/v15/mf/search")
 def mf_search(q: str = "", limit: int = 20):
     q = (q or "").strip()

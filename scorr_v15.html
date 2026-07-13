@@ -137,15 +137,16 @@ td.sym{font-weight:700;font-size:12.5px}
 <div class="wrap">
 <div class="hdr rise d1">
   <div class="brand">V15 · <b>MF Intelligence</b><span class="sub">Look-through fund research</span></div>
-  <div class="chip"><span class="dot"></span>MQS ENGINE · LIVE</div>
+  <div class="chip" style="border-color:rgba(245,185,74,.35);background:rgba(245,185,74,.07);color:var(--amber)"><span class="dot" style="background:var(--amber);box-shadow:0 0 10px var(--amber)"></span>MQS ENGINE · COMING SOON</div>
 </div>
 
 <div class="search rise d2">
   <div class="box">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input placeholder="Search any mutual fund — name, AMC, or category…">
+    <input id="q" autocomplete="off" placeholder="Search any mutual fund — name, AMC, or category…">
+    <div id="ac" style="display:none;position:absolute;left:0;right:0;top:56px;z-index:30;background:rgba(18,26,51,.98);border:1px solid var(--line2);border-radius:13px;overflow:hidden;box-shadow:0 18px 44px rgba(3,7,20,.6);backdrop-filter:blur(12px);max-height:340px;overflow-y:auto"></div>
   </div>
-  <button>Analyse fund</button>
+  <button id="go">Analyse fund</button>
 </div>
 
 <div class="hero rise d3">
@@ -159,109 +160,170 @@ td.sym{font-weight:700;font-size:12.5px}
         <line class="tick" x1="66" y1="6" x2="66" y2="13"/><line class="tick" x1="126" y1="66" x2="119" y2="66"/>
         <line class="tick" x1="66" y1="126" x2="66" y2="119"/><line class="tick" x1="6" y1="66" x2="13" y2="66"/>
       </g>
-      <circle class="arc" cx="66" cy="66" r="54"/>
+      <circle class="arc" cx="66" cy="66" r="54" style="animation:none;stroke-dashoffset:339;filter:none;opacity:.25"/>
     </svg>
-    <div class="core"><span class="v num" id="mqs">0.0</span><span class="k">MQS / 10</span></div>
+    <div class="core"><span class="v num" id="mqs" style="color:var(--dim);font-size:26px">—</span><span class="k">AWAITING SCORE</span></div>
   </div>
   <div>
-    <div class="cat">Flexi Cap · Direct · Growth</div>
-    <h1>Parag Parikh Flexi Cap Fund</h1>
-    <div class="meta">
-      <span class="tag">AUM ₹1,02,455 Cr</span>
-      <span class="tag">ER 0.63%</span>
-      <span class="tag gold">FINKHOZ ★★★★★</span>
-      <span class="tag">CRISIL #2</span>
-      <span class="tag">Manager 12.1y</span>
+    <div class="cat" id="f-cat">MF Intelligence</div>
+    <h1 id="f-name">Search a fund to begin</h1>
+    <div class="meta" id="f-meta">
+      <span class="tag" id="f-aum">AUM —</span>
+      <span class="tag" id="f-er">ER —</span>
+      <span class="tag gold" id="f-fk">FINKHOZ —</span>
+      <span class="tag" id="f-cr">CRISIL —</span>
+      <span class="tag" id="f-plan">Plan —</span>
     </div>
   </div>
   <div class="verdict">
-    <div class="v">BUY SYSTEMATICALLY</div>
-    <div class="r">Rank 2 of 38 · Flexi Cap</div>
+    <div class="v" style="background:var(--well);color:var(--dim);box-shadow:none">COMING SOON</div>
+    <div class="r">Verdict awaits the MQS engine</div>
   </div>
 </div>
 
 <div class="pillars rise d4">
-  <div class="pc good"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--bull)">8.6</div><div class="bar"><i style="width:86%"></i></div><div class="s">Look-through GVM 7.4 · top-10 weight 41% · 96% resolved</div></div>
-  <div class="pc good"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--bull)">8.4</div><div class="bar"><i style="width:84%"></i></div><div class="s">+4.2% vs category 3Y · beat category in 87% of rolling windows</div></div>
-  <div class="pc"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--blue)">7.8</div><div class="bar"><i style="width:78%;background:linear-gradient(90deg,rgba(77,124,254,.5),var(--blue))"></i></div><div class="s">ER 0.63% — cheaper than 82% of category peers</div></div>
-  <div class="pc warn"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--amber)">7.1</div><div class="bar"><i style="width:71%;background:linear-gradient(90deg,rgba(245,185,74,.5),var(--amber))"></i></div><div class="s">AUM near category bloat band · manager tenure strong at 12y</div></div>
+  <div class="pc"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
+  <div class="pc"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
+  <div class="pc"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
+  <div class="pc"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
 </div>
 
 <div class="card rise d5">
   <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge">SCORR-ONLY X-RAY</span></div>
-  <table>
-    <tr><th>Stock</th><th>Weight</th><th>GVM</th><th>Segment</th><th>Seg rating</th></tr>
-    <tr><td class="sym">HDFC BANK</td><td><span class="wt"><span class="fill" style="width:100%"></span><b>8.1%</b></span></td><td><span class="gvm g-hi">7.9</span></td><td>Private Banks</td><td><span class="al-ok">Strong</span></td></tr>
-    <tr><td class="sym">BAJAJ HOLDINGS</td><td><span class="wt"><span class="fill" style="width:89%"></span><b>7.2%</b></span></td><td><span class="gvm g-hi">7.4</span></td><td>Holding Cos</td><td><span class="al-ok">Strong</span></td></tr>
-    <tr><td class="sym">POWER GRID</td><td><span class="wt"><span class="fill" style="width:79%"></span><b>6.4%</b></span></td><td><span class="gvm g-mid">6.6</span></td><td>Power T&amp;D</td><td><span class="al-warn">Neutral</span></td></tr>
-    <tr><td class="sym">ITC</td><td><span class="wt"><span class="fill" style="width:73%"></span><b>5.9%</b></span></td><td><span class="gvm g-hi">7.1</span></td><td>FMCG</td><td><span class="al-warn">Neutral</span></td></tr>
-    <tr><td class="sym">COAL INDIA</td><td><span class="wt"><span class="fill" style="width:68%"></span><b>5.5%</b></span></td><td><span class="gvm g-lo">5.8</span></td><td>Mining</td><td><span class="al-bad">Weak</span></td></tr>
-  </table>
-  <div class="foot">Weighted portfolio-GVM <b class="num">7.4</b> · 96% of weight resolved to live GVM · full 62-holding table on tap</div>
+  <div style="padding:26px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">COMING SOON — look-through holdings × live GVM resolve once portfolio disclosures are ingested (V15 data layer, cc#477).</div>
 </div>
 
 <div class="card rise d6">
   <div class="h"><span class="eyebrow" style="flex:1">Segment exposure vs sector ratings</span></div>
-  <div class="segrow">
-    <div class="segblk"><span class="heat" style="width:100%;background:var(--bull)"></span><div class="k">Pvt Banks</div><div class="v num">21%</div><div class="a al-ok">▲ Strong segment</div></div>
-    <div class="segblk"><span class="heat" style="width:67%;background:var(--amber)"></span><div class="k">IT Services</div><div class="v num">14%</div><div class="a al-warn">◆ Neutral</div></div>
-    <div class="segblk"><span class="heat" style="width:52%;background:var(--amber)"></span><div class="k">FMCG</div><div class="v num">11%</div><div class="a al-warn">◆ Neutral</div></div>
-    <div class="segblk"><span class="heat" style="width:43%;background:var(--bull)"></span><div class="k">Power</div><div class="v num">9%</div><div class="a al-ok">▲ Strong segment</div></div>
-    <div class="segblk"><span class="heat" style="width:29%;background:var(--bear)"></span><div class="k">Mining</div><div class="v num">6%</div><div class="a al-bad">▼ Weak segment</div></div>
-  </div>
+  <div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">COMING SOON — segment exposure needs holdings ingestion.</div>
 </div>
 
 <div class="card rise d6">
-  <div class="h"><span class="eyebrow" style="flex:1">Returns vs category · direct plans</span></div>
+  <div class="h"><span class="eyebrow" style="flex:1">Returns · direct plans</span><span class="badge" id="ret-asof" style="color:var(--dim);background:transparent;border-color:var(--line);box-shadow:none">awaiting data</span></div>
   <div class="retgrid">
-    <div class="ret"><div class="k">1W</div><div class="v">+0.8%</div><div class="c">cat +0.5%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,14 12,12 24,15 36,9 48,10 60,5"/></svg></div>
-    <div class="ret"><div class="k">1M</div><div class="v">+2.4%</div><div class="c">cat +1.9%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,16 12,13 24,14 36,10 48,7 60,6"/></svg></div>
-    <div class="ret"><div class="k">3M</div><div class="v">+7.1%</div><div class="c">cat +5.8%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,17 12,15 24,11 36,12 48,8 60,4"/></svg></div>
-    <div class="ret"><div class="k">6M</div><div class="v">+12.6%</div><div class="c">cat +10.2%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,18 12,14 24,13 36,9 48,7 60,3"/></svg></div>
-    <div class="ret"><div class="k">1Y</div><div class="v">+22.4%</div><div class="c">cat +18.1%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,18 12,16 24,12 36,10 48,6 60,2"/></svg></div>
-    <div class="ret"><div class="k">2Y</div><div class="v">+19.8%</div><div class="c">CAGR · cat 16.4%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,17 12,13 24,14 36,8 48,7 60,3"/></svg></div>
+    <div class="ret"><div class="k">1W</div><div class="v" id="r-1w" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
+    <div class="ret"><div class="k">1M</div><div class="v" id="r-1m" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
+    <div class="ret"><div class="k">3M</div><div class="v" id="r-3m" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
+    <div class="ret"><div class="k">6M</div><div class="v" id="r-6m" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
+    <div class="ret"><div class="k">1Y</div><div class="v" id="r-1y" style="color:var(--dim)">—</div><div class="c">point-to-point</div></div>
+    <div class="ret"><div class="k">2Y</div><div class="v" id="r-2y" style="color:var(--dim)">—</div><div class="c">CAGR</div></div>
   </div>
 </div>
 
 <div class="card rise d7">
   <div class="h"><span class="eyebrow" style="flex:1">Red flags</span></div>
-  <div class="flag ok"><span class="ic">✓</span>Concentration healthy — top-10 at 41%, under the 45% flag threshold</div>
-  <div class="flag ok"><span class="ic">✓</span>No manager change in the last 12 months</div>
-  <div class="flag"><span class="ic">!</span>AUM ₹1.02 lakh Cr is approaching the flexi-cap bloat band — watch small &amp; mid-cap allocation flexibility</div>
+  <div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">COMING SOON — red-flag checks need the MQS engine + holdings.</div>
 </div>
 
-<div class="eyebrow rise d7" style="margin-top:30px">Curated screener · AUM &gt; ₹5,000 Cr universe</div>
-<div class="tabs rise d7">
+<div class="eyebrow rise d7" style="margin-top:30px">Screener · AUM &gt; ₹5,000 Cr universe <span style="color:var(--dim);font-weight:600;font-size:9px;letter-spacing:normal;text-transform:none">(AUM filter + MQS/returns activate with cc#477)</span></div>
+<div class="tabs rise d7" id="tabs">
   <div class="tab on">Flexi Cap</div><div class="tab">Large Cap</div><div class="tab">Mid Cap</div><div class="tab">Small Cap</div><div class="tab">Index</div><div class="tab">ELSS</div><div class="tab">Hybrid</div>
 </div>
 <div class="card rise d7" style="margin-top:11px">
   <table>
-    <tr><th>Fund</th><th>MQS ▾</th><th>FINKHOZ</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th><th></th></tr>
-    <tr><td class="sym">Parag Parikh Flexi Cap</td><td><span class="gvm g-hi">8.2</span></td><td class="num">★5</td><td class="num" style="color:var(--bull)">+22.4%</td><td class="num" style="color:var(--bull)">+19.1%</td><td class="num">0.63</td><td class="num">1,02,455</td><td><button class="addcmp">+ Compare</button></td></tr>
-    <tr><td class="sym">HDFC Flexi Cap</td><td><span class="gvm g-hi">7.9</span></td><td class="num">★4</td><td class="num" style="color:var(--bull)">+20.1%</td><td class="num" style="color:var(--bull)">+21.4%</td><td class="num">0.77</td><td class="num">68,340</td><td><button class="addcmp">+ Compare</button></td></tr>
-    <tr><td class="sym">Franklin India Flexi Cap</td><td><span class="gvm g-mid">6.8</span></td><td class="num">★4</td><td class="num" style="color:var(--bull)">+17.9%</td><td class="num" style="color:var(--bull)">+18.8%</td><td class="num">0.94</td><td class="num">18,221</td><td><button class="addcmp">+ Compare</button></td></tr>
-    <tr><td class="sym">Quant Flexi Cap</td><td><span class="gvm g-mid">6.1</span></td><td class="num">★3</td><td class="num" style="color:var(--bear)">+11.2%</td><td class="num" style="color:var(--bull)">+16.9%</td><td class="num">0.59</td><td class="num">7,912</td><td><button class="addcmp">+ Compare</button></td></tr>
+    <thead><tr><th>Fund</th><th>MQS</th><th>FINKHOZ</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th></tr></thead>
+    <tbody id="scrbody"><tr><td colspan="7" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr></tbody>
   </table>
 </div>
 </div>
 
 <div class="cmp">
   <span class="t">COMPARE</span>
-  <span class="f">Parag Parikh Flexi</span>
-  <span class="f">HDFC Flexi Cap</span>
-  <button>Compare 2 funds → overlap %</button>
+  <span class="f" style="color:var(--dim);background:var(--well);border-color:var(--line)">COMING SOON — multi-fund overlap needs the MQS engine</span>
 </div>
 
 <script>
 (function(){
-  var el=document.getElementById('mqs'),t0=null,target=8.2;
-  if(matchMedia('(prefers-reduced-motion: reduce)').matches){el.textContent=target.toFixed(1);return}
-  setTimeout(function step(){
-    if(!t0)t0=performance.now();
-    var p=Math.min((performance.now()-t0)/1400,1);
-    el.textContent=(target*(1-Math.pow(1-p,3))).toFixed(1);
-    if(p<1)requestAnimationFrame(step);
-  },300);
+  var $=function(id){return document.getElementById(id)};
+  // MQS dial stays at 0 / AWAITING SCORE until the engine ships — never a fabricated value.
+  var em="—";
+  function pct(v){
+    if(v===null||v===undefined)return {t:em,c:"var(--dim)"};
+    var s=(v>=0?"+":"")+Number(v).toFixed(1)+"%";
+    return {t:s,c:v>=0?"var(--bull)":"var(--bear)"};
+  }
+  function setRet(id,v){var e=$(id);if(!e)return;var p=pct(v);e.textContent=p.t;e.style.color=p.c;}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]});}
+  function gvmClass(v){return v>=7?"g-hi":v>=6?"g-mid":"g-lo";}
+
+  function loadFund(code){
+    fetch("/api/v15/fund/"+encodeURIComponent(code)).then(function(r){return r.json()}).then(function(d){
+      if(!d||!d.fund)return; var f=d.fund;
+      $("f-name").textContent=f.name||"—";
+      $("f-cat").textContent=[f.category,f.plan].filter(Boolean).join(" · ")||"—";
+      $("f-aum").textContent="AUM "+(f.aum_cr!=null?"₹"+Number(f.aum_cr).toLocaleString("en-IN")+" Cr":em);
+      $("f-er").textContent="ER "+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2)+"%":em);
+      $("f-fk").textContent="FINKHOZ "+(f.finkhoz_rating!=null?"★"+Number(f.finkhoz_rating).toFixed(1):em);
+      $("f-cr").textContent="CRISIL "+(f.crisil_rank!=null?"#"+f.crisil_rank:em);
+      $("f-plan").textContent=f.plan||"Plan "+em;
+      setRet("r-1w",f.ret_1w);setRet("r-1m",f.ret_1m);setRet("r-3m",f.ret_3m);
+      setRet("r-6m",f.ret_6m);setRet("r-1y",f.ret_1y);setRet("r-2y",f.ret_2y);
+      $("ret-asof").textContent=f.returns_asof?("as of "+f.returns_asof):"awaiting data";
+    }).catch(function(){});
+  }
+
+  function rowHtml(f){
+    var r1=pct(f.ret_1y),r3=pct(f.ret_3y);
+    var mqs='<span class="gvm" style="color:var(--dim);background:var(--well)">—</span>';
+    var fk=f.finkhoz_rating!=null?("★"+Number(f.finkhoz_rating).toFixed(1)):em;
+    return '<tr data-code="'+esc(f.scheme_code)+'" style="cursor:pointer">'
+      +'<td class="sym">'+esc(f.name)+'</td>'
+      +'<td>'+mqs+'</td>'
+      +'<td class="num">'+fk+'</td>'
+      +'<td class="num" style="color:'+r1.c+'">'+r1.t+'</td>'
+      +'<td class="num" style="color:'+r3.c+'">'+r3.t+'</td>'
+      +'<td class="num">'+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2):em)+'</td>'
+      +'<td class="num">'+(f.aum_cr!=null?Number(f.aum_cr).toLocaleString("en-IN"):em)+'</td>'
+      +'</tr>';
+  }
+  function loadScreener(cat){
+    var tb=$("scrbody"); tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr>';
+    fetch("/api/v15/screener?category="+encodeURIComponent(cat)+"&sort=1y").then(function(r){return r.json()}).then(function(d){
+      var rows=(d&&d.results)||[];
+      if(!rows.length){tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:22px 0">No funds found for '+esc(cat)+'.</td></tr>';return;}
+      tb.innerHTML=rows.map(rowHtml).join("");
+      Array.prototype.forEach.call(tb.querySelectorAll("tr[data-code]"),function(tr){
+        tr.addEventListener("click",function(){loadFund(tr.getAttribute("data-code"));window.scrollTo({top:0,behavior:"smooth"});});
+      });
+    }).catch(function(){tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--bear);padding:22px 0">Screener unavailable.</td></tr>';});
+  }
+
+  // tabs
+  var tabs=$("tabs");
+  Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(t){
+    t.addEventListener("click",function(){
+      Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(x){x.classList.remove("on")});
+      t.classList.add("on"); loadScreener(t.textContent.trim());
+    });
+  });
+
+  // search autocomplete
+  var q=$("q"),ac=$("ac"),tmr=null;
+  function hideAc(){ac.style.display="none";}
+  function runSearch(){
+    var v=q.value.trim();
+    if(v.length<2){hideAc();return;}
+    fetch("/api/v15/search?q="+encodeURIComponent(v)).then(function(r){return r.json()}).then(function(d){
+      var rs=(d&&d.results)||[];
+      if(!rs.length){hideAc();return;}
+      ac.innerHTML=rs.map(function(f){
+        return '<div data-code="'+esc(f.scheme_code)+'" style="padding:11px 15px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px">'
+          +'<div style="font-weight:700;color:var(--text)">'+esc(f.name)+'</div>'
+          +'<div style="font-size:10px;color:var(--dim);margin-top:2px">'+[esc(f.amc),esc(f.category),esc(f.plan)].filter(Boolean).join(" · ")+'</div></div>';
+      }).join("");
+      Array.prototype.forEach.call(ac.querySelectorAll("[data-code]"),function(it){
+        it.addEventListener("mousedown",function(e){e.preventDefault();var c=it.getAttribute("data-code");q.value=it.querySelector("div").textContent;hideAc();loadFund(c);});
+      });
+      ac.style.display="block";
+    }).catch(hideAc);
+  }
+  q.addEventListener("input",function(){clearTimeout(tmr);tmr=setTimeout(runSearch,180);});
+  q.addEventListener("blur",function(){setTimeout(hideAc,150);});
+  $("go").addEventListener("click",runSearch);
+  q.addEventListener("keydown",function(e){if(e.key==="Enter")runSearch();});
+
+  // initial load
+  loadScreener("Flexi Cap");
 })();
 </script>
 </body>
