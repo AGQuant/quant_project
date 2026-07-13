@@ -92,6 +92,7 @@ _yahoo_ran_today: Optional[date] = None
 _yahoo_daily_running = False
 _gvm_ran_today: Optional[date] = None
 _gvm_backfill_running = False   # cc#468/470: 5yr deep-history backfill guard
+_mf_backfill_running = False    # cc#477: V15 MF returns backfill single-flight guard
 _pivots_ran_today: Optional[date] = None
 _upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_pivots rebuild
 _qb_eod_ran_today: Optional[date] = None
@@ -1390,6 +1391,62 @@ def _bg_mf_nav():
         log.error(f"_bg_mf_nav: {e}")
 
 
+def _bg_mf_returns_backfill():
+    """cc#477: flag-gated one-shot V15 MF returns backfill (AUM>5000cr, monthly+weekly NAV history,
+    1W/1M/3M/6M/1Y/2Y). Runs on the APP server (has AMFI/mfapi outbound), independent of the feed
+    worker. Single-flight; ~8-10 min. Flag app_config mf_returns_backfill_run: 'pending'->run,
+    'done'->skip. Set by POST /api/v15/mf/returns_backfill or manually."""
+    global _mf_backfill_running
+    if _mf_backfill_running:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='mf_returns_backfill_run'")
+            r = cur.fetchone()
+        if not r or r[0] != 'pending':
+            return
+        _mf_backfill_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_returns_backfill_run','running',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import mf_pipeline
+        res = mf_pipeline.run_mf_returns_backfill()
+        log.info(f"_bg_mf_returns_backfill: {res}")
+    except Exception as e:
+        log.error(f"_bg_mf_returns_backfill: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_returns_backfill_run','pending',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _mf_backfill_running = False
+
+
+def _bg_mf_weekly():
+    """cc#477 phase_4: Saturday 06:30 IST — append Friday NAV + recompute returns (ret_1w always;
+    monthly horizons refresh as new month-end rows land) for the AUM>5000cr set."""
+    try:
+        import mf_pipeline
+        res = mf_pipeline.mf_weekly_refresh()
+        log.info(f"_bg_mf_weekly: {res}")
+    except Exception as e:
+        log.error(f"_bg_mf_weekly: {e}")
+
+
+def _bg_mf_aum_monthly():
+    """cc#477 phase_4: monthly (3rd calendar day) AMFI AAUM re-fetch + >5000cr re-qualification."""
+    try:
+        import mf_pipeline
+        res = mf_pipeline.mf_aum_monthly_refresh()
+        log.info(f"_bg_mf_aum_monthly: {res}")
+    except Exception as e:
+        log.error(f"_bg_mf_aum_monthly: {e}")
+
+
 # ── main loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
@@ -1489,6 +1546,11 @@ async def _scheduler_loop():
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile (V15 MF)
+        # cc#477: V15 MF returns. Flag-gated one-shot fires within ~3 min of arming (feed-independent,
+        # app-server only). Weekly refresh Sat 06:30 IST; monthly AUM re-qualify on the 3rd.
+        if m % 3 == 0:          _spawn(_bg_mf_returns_backfill)
+        if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)
+        if now.day == 3 and h == 6 and m == 20:        _spawn(_bg_mf_aum_monthly)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market

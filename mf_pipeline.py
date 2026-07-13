@@ -316,7 +316,358 @@ def parse_holdings_xlsx(data):
     return out, (None if out else "no holdings header found")
 
 
+# ── cc#477: AUM backfill + monthly/weekly NAV history + returns ────────────────────
+# Founder 13-Jul: MF returns 1W/1M/3M/6M/1Y/2Y for funds with AUM > Rs 5,000 cr
+# (LOCKED, revised from 10,000). Month-end NAV comparison (+ Friday weekly for 1W).
+_AMFI_AAUM_URL = "https://www.amfiindia.com/modules/AverageAUMDetails"
+AUM_THRESHOLD_CR = 5000.0        # founder-locked 13-Jul (was 10000)
+NAV_HISTORY_MONTHS = 25          # trailing month-end rows (>=25 for 2Y funds)
+WEEKLY_MONTHS = 14               # trailing weekly (Friday) rows for ret_1w continuity
+
+
+def _ensure_returns_cols(cur):
+    """App-side ADD COLUMN (never via the run_sql lock-blocked path). ret_1y/3y/5y already
+    exist in the base schema; add the new horizons + a nav granularity marker."""
+    cur.execute("""ALTER TABLE mf_master
+        ADD COLUMN IF NOT EXISTS ret_1w NUMERIC,
+        ADD COLUMN IF NOT EXISTS ret_1m NUMERIC,
+        ADD COLUMN IF NOT EXISTS ret_3m NUMERIC,
+        ADD COLUMN IF NOT EXISTS ret_6m NUMERIC,
+        ADD COLUMN IF NOT EXISTS ret_2y NUMERIC,
+        ADD COLUMN IF NOT EXISTS returns_asof DATE""")
+    cur.execute("ALTER TABLE mf_nav_history ADD COLUMN IF NOT EXISTS nav_kind TEXT")
+
+
+def _amfi_aaum_quarter(today=None):
+    """Latest COMPLETED AMFI scheme-wise AAUM quarter (financial year Apr-Mar). AMFI publishes
+    scheme-wise AAUM quarterly (~4-5 wks after quarter end). Returns (fy_str, quarter_str)."""
+    today = today or date.today()
+    y, m = today.year, today.month
+    # completed quarters end Jun/Sep/Dec/Mar; pick the most recent whose end is >=35 days ago
+    ends = [(date(y, 3, 31), f"January - March {y}", f"{y-1}-{y}"),
+            (date(y, 6, 30), f"April - June {y}", f"{y}-{y+1}"),
+            (date(y, 9, 30), f"July - September {y}", f"{y}-{y+1}"),
+            (date(y, 12, 31), f"October - December {y}", f"{y}-{y+1}"),
+            (date(y-1, 12, 31), f"October - December {y-1}", f"{y-1}-{y}")]
+    avail = [(e, q, fy) for (e, q, fy) in ends if (today - e).days >= 35]
+    e, q, fy = max(avail, key=lambda t: t[0])
+    return fy, q
+
+
+def fetch_amfi_aum(cur, today=None):
+    """PHASE 1: scheme-wise AAUM from AMFI's quarterly disclosure -> mf_master.aum_cr.
+    AMFI reports AAUM in Rs LAKH -> /100 = Rs CR. Maps to the Direct-Growth mf_master rows by
+    normalised name (token-overlap). Defensive HTML-table parse; logs samples + match rate."""
+    import requests
+    try:
+        import pandas as pd
+    except Exception as e:
+        _oplog(cur, "MF_AUM_ERROR", {"stage": "import pandas", "error": str(e)[:200]})
+        return {"error": "pandas unavailable"}
+    fy, q = _amfi_aaum_quarter(today)
+    parsed = []      # (scheme_name, aaum_cr)
+    used = None
+    for variant in ({"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1", "Year": fy,
+                     "Quarter": q, "option": "1"},
+                    {"AUmType": "S", "AumCatType": "Typewise", "MF_Name": "-1", "Year": fy,
+                     "Type": q, "option": "1"}):
+        try:
+            r = requests.post(_AMFI_AAUM_URL, data=variant,
+                              headers={"User-Agent": "Scorr-MF/1.0",
+                                       "Content-Type": "application/x-www-form-urlencoded"}, timeout=90)
+            body = r.text or ""
+            if not body.strip():
+                continue
+            tables = pd.read_html(io.StringIO(body))
+            for t in tables:
+                cols = [str(c).strip().lower() for c in t.columns]
+                name_i = next((i for i, c in enumerate(cols) if "scheme" in c or "name" in c), None)
+                aaum_i = next((i for i, c in enumerate(cols)
+                               if ("average" in c and "aum" in c) or "aaum" in c or "excluding fund of funds" in c), None)
+                if name_i is None or aaum_i is None or len(t) < 20:
+                    continue
+                rows = []
+                for _, row in t.iterrows():
+                    nm = str(row.iloc[name_i]).strip()
+                    raw = str(row.iloc[aaum_i]).replace(",", "").strip()
+                    if not nm or nm.lower() in ("total", "nan", "scheme name") or raw in ("", "nan"):
+                        continue
+                    try:
+                        aaum_cr = float(raw) / 100.0   # AMFI lakh -> cr
+                    except Exception:
+                        continue
+                    rows.append((nm, round(aaum_cr, 2)))
+                if len(rows) > len(parsed):
+                    parsed, used = rows, variant
+            if parsed:
+                break
+        except Exception as e:
+            _oplog(cur, "MF_AUM_ERROR", {"stage": "fetch/parse", "variant": variant, "error": str(e)[:200]})
+    if not parsed:
+        _oplog(cur, "MF_AUM_ERROR", {"stage": "no_rows", "fy": fy, "quarter": q,
+                                     "note": "AMFI scheme-wise AAUM parse returned 0 rows"})
+        return {"error": "no AAUM rows parsed", "fy": fy, "quarter": q}
+
+    # Map each AAUM scheme -> the Direct-Growth AMFI row in mf_master by token-overlap.
+    cur.execute("SELECT scheme_code, name FROM mf_master WHERE source='amfi' "
+                "AND name ILIKE '%%direct%%' AND name ILIKE '%%growth%%'")
+    universe = [(sc, nm, set(_norm_fund(nm))) for sc, nm in cur.fetchall()]
+    matched = 0
+    for nm, aaum_cr in parsed:
+        toks = set(_norm_fund(nm))
+        if not toks:
+            continue
+        best = None
+        for sc, aname, aset in universe:
+            if not aset:
+                continue
+            jac = len(toks & aset) / float(len(toks | aset))
+            if best is None or jac > best[0]:
+                best = (jac, sc)
+        if best and best[0] >= 0.5:
+            cur.execute("UPDATE mf_master SET aum_cr=%s, updated_at=NOW() WHERE scheme_code=%s",
+                        (aaum_cr, best[1]))
+            matched += 1
+    cur.execute("SELECT COUNT(*) FROM mf_master WHERE aum_cr > %s", (AUM_THRESHOLD_CR,))
+    qualifying = cur.fetchone()[0]
+    stats = {"fy": fy, "quarter": q, "aaum_rows": len(parsed), "matched": matched,
+             "match_rate": round(matched / len(parsed), 3) if parsed else 0,
+             "qualifying_gt_5000cr": qualifying, "sample": parsed[:3]}
+    _oplog(cur, "MF_AUM_BACKFILL", stats)
+    return stats
+
+
+def _month_end_and_weekly(rows):
+    """From a full [(date,nav)] history (asc), select the last NAV of each calendar month
+    (trailing NAV_HISTORY_MONTHS) tagged 'm', plus the last NAV of each ISO week (trailing
+    WEEKLY_MONTHS) tagged 'w'. Returns {date: (nav, kind)} — month-end wins on a tie."""
+    if not rows:
+        return {}
+    rows = sorted(rows)
+    latest = rows[-1][0]
+    m_cut = date(latest.year - (2 if latest.month <= NAV_HISTORY_MONTHS % 12 else 1), latest.month, 1)  # generous floor
+    by_month, by_week = {}, {}
+    for d, nav in rows:
+        by_month[(d.year, d.month)] = (d, nav)        # last of month (rows asc)
+        iso = d.isocalendar()
+        by_week[(iso[0], iso[1])] = (d, nav)          # last of ISO week
+    out = {}
+    w_floor = date(latest.year - 2, latest.month, 1)
+    for (d, nav) in by_week.values():
+        if d >= w_floor:
+            out[d] = (nav, "w")
+    for (d, nav) in by_month.values():
+        out[d] = (nav, "m")                            # month-end overrides weekly tag on same date
+    # keep only trailing ~NAV_HISTORY_MONTHS+ of month rows; weekly already floored to 2y
+    return out
+
+
+def backfill_scheme_nav(cur, scheme_code, amfi_code):
+    """PHASE 2 (per scheme): fetch full mfapi history, keep month-end + weekly rows only,
+    upsert into mf_nav_history with nav_kind. Returns row count inserted/updated."""
+    code = amfi_code or scheme_code
+    try:
+        d = json.loads(_http_get(_MFAPI.format(code=code)))
+    except Exception as e:
+        return {"scheme_code": scheme_code, "error": str(e)[:160]}
+    rows = []
+    for row in (d.get("data") or []):
+        try:
+            nd = datetime.strptime(row["date"], "%d-%m-%Y").date()
+            nav = float(row["nav"])
+        except Exception:
+            continue
+        rows.append((nd, nav))
+    sel = _month_end_and_weekly(rows)
+    n = 0
+    for nd, (nav, kind) in sel.items():
+        cur.execute("""INSERT INTO mf_nav_history (scheme_code, nav_date, nav, nav_kind)
+                       VALUES (%s,%s,%s,%s)
+                       ON CONFLICT (scheme_code, nav_date)
+                       DO UPDATE SET nav=EXCLUDED.nav,
+                         nav_kind=CASE WHEN EXCLUDED.nav_kind='m' THEN 'm'
+                                       ELSE COALESCE(mf_nav_history.nav_kind, EXCLUDED.nav_kind) END""",
+                    (scheme_code, nd, nav, kind))
+        n += 1
+    return {"scheme_code": scheme_code, "amfi_code": code, "rows": n}
+
+
+def _pct(cur_nav, past_nav):
+    if not past_nav or past_nav <= 0 or not cur_nav:
+        return None
+    return round((cur_nav / past_nav - 1) * 100, 2)
+
+
+def _cagr(cur_nav, past_nav, years):
+    if not past_nav or past_nav <= 0 or not cur_nav or years <= 0:
+        return None
+    return round(((cur_nav / past_nav) ** (1.0 / years) - 1) * 100, 2)
+
+
+def compute_returns_for_scheme(cur, scheme_code):
+    """PHASE 3: point-to-point returns from the stored NAV series. Nearest stored NAV on/before
+    (latest - horizon) within a tolerance. 2Y as CAGR; others simple pct. NULL if insufficient age."""
+    from datetime import timedelta
+    cur.execute("SELECT nav_date, nav FROM mf_nav_history WHERE scheme_code=%s AND nav IS NOT NULL "
+                "ORDER BY nav_date", (scheme_code,))
+    series = [(d, float(n)) for d, n in cur.fetchall()]
+    if len(series) < 2:
+        return None
+    latest_d, latest_nav = series[-1]
+
+    def past(days, tol):
+        target = latest_d - timedelta(days=days)
+        lo = target - timedelta(days=tol)
+        best = None
+        for d, nav in series:
+            if lo <= d <= target + timedelta(days=min(tol, 3)):
+                if best is None or abs((d - target).days) < abs((best[0] - target).days):
+                    best = (d, nav)
+        return best[1] if best else None
+
+    r1w = _pct(latest_nav, past(7, 5))
+    r1m = _pct(latest_nav, past(30, 12))
+    r3m = _pct(latest_nav, past(91, 15))
+    r6m = _pct(latest_nav, past(182, 18))
+    r1y = _pct(latest_nav, past(365, 20))
+    n2y = past(730, 25)
+    r2y = _cagr(latest_nav, n2y, 2.0)
+    cur.execute("""UPDATE mf_master SET ret_1w=%s, ret_1m=%s, ret_3m=%s, ret_6m=%s, ret_1y=%s,
+                   ret_2y=%s, returns_asof=%s, updated_at=NOW() WHERE scheme_code=%s""",
+                (r1w, r1m, r3m, r6m, r1y, r2y, latest_d, scheme_code))
+    return {"ret_1w": r1w, "ret_1m": r1m, "ret_3m": r3m, "ret_6m": r6m, "ret_1y": r1y, "ret_2y": r2y}
+
+
+def run_mf_returns_backfill(conn=None):
+    """cc#477 orchestrator (phases 1-3), server-side. Resumable across the mfapi loop via
+    app_config mf_backfill_progress. ops_log progress. Runs the whole thing in one pass
+    (~400-600 schemes x 1 req/sec ~= 8-10 min)."""
+    import time as _t
+    own = conn is None
+    conn = conn or _conn()
+    t0 = _t.time()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            _ensure_returns_cols(cur)
+            conn.commit()
+        # phase 1: AUM
+        with conn.cursor() as cur:
+            aum = fetch_amfi_aum(cur)
+            conn.commit()
+        # qualifying set
+        with conn.cursor() as cur:
+            cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s "
+                        "ORDER BY aum_cr DESC", (AUM_THRESHOLD_CR,))
+            qual = cur.fetchall()
+            cur.execute("SELECT value FROM app_config WHERE key='mf_backfill_progress'")
+            r = cur.fetchone()
+        done_prefix = (r[0] if r else "") or ""
+        pending = [(sc, ac) for sc, ac in qual if sc > done_prefix]
+        # phase 2+3: per-scheme NAV history + returns
+        n_nav = n_ret = fails = 0
+        for i, (sc, ac) in enumerate(pending):
+            try:
+                with conn.cursor() as cur:
+                    res = backfill_scheme_nav(cur, sc, ac)
+                    if not res.get("error"):
+                        n_nav += res.get("rows", 0)
+                        if compute_returns_for_scheme(cur, sc):
+                            n_ret += 1
+                    else:
+                        fails += 1
+                    cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_backfill_progress',%s,NOW()) "
+                                "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (sc,))
+                    conn.commit()
+            except Exception as e:
+                fails += 1
+                log.warning(f"mf backfill {sc}: {e}")
+                try: conn.rollback()
+                except Exception: pass
+            if (i + 1) % 25 == 0:
+                with conn.cursor() as cur:
+                    _oplog(cur, "MF_RETURNS_PROGRESS", {"done": i + 1, "of": len(pending),
+                            "nav_rows": n_nav, "returns_set": n_ret, "fails": fails,
+                            "elapsed_min": round((_t.time() - t0) / 60, 1)})
+                    conn.commit()
+            _t.sleep(1.0)   # polite mfapi rate-limit (1 req/sec)
+        # done: reset checkpoint + category averages
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM app_config WHERE key='mf_backfill_progress'")
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_returns_backfill_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            summary = {"aum": aum, "qualifying": len(qual), "processed": len(pending),
+                       "nav_rows": n_nav, "returns_set": n_ret, "fails": fails,
+                       "elapsed_min": round((_t.time() - t0) / 60, 1)}
+            _oplog(cur, "MF_RETURNS_BACKFILL_DONE", summary)
+            conn.commit()
+        return summary
+    finally:
+        if own:
+            conn.close()
+
+
+def mf_weekly_refresh(conn=None):
+    """cc#477 phase_4: Saturday 06:30 IST. Refresh AMFI latest NAV (adds Friday rows), then for
+    the qualifying set append the newest weekly NAV + recompute returns (month-end rows are added
+    when a new month has completed — backfill_scheme_nav re-selects them idempotently)."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        run_amfi_nav(conn)   # newest daily/Friday NAV into mf_nav_history
+        with conn.cursor() as cur:
+            _ensure_returns_cols(cur)
+            cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s", (AUM_THRESHOLD_CR,))
+            qual = cur.fetchall()
+            conn.commit()
+        import time as _t
+        n = 0
+        for sc, ac in qual:
+            try:
+                with conn.cursor() as cur:
+                    backfill_scheme_nav(cur, sc, ac)      # re-selects month-end + weekly idempotently
+                    compute_returns_for_scheme(cur, sc)
+                    conn.commit()
+                n += 1
+            except Exception as e:
+                log.warning(f"mf_weekly {sc}: {e}")
+                try: conn.rollback()
+                except Exception: pass
+            _t.sleep(1.0)
+        with conn.cursor() as cur:
+            _oplog(cur, "MF_WEEKLY_REFRESH", {"qualifying": len(qual), "refreshed": n}); conn.commit()
+        return {"qualifying": len(qual), "refreshed": n}
+    finally:
+        if own:
+            conn.close()
+
+
+def mf_aum_monthly_refresh(conn=None):
+    """cc#477 phase_4: monthly (3rd calendar day) AUM re-fetch + >5000cr re-qualification."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur); _ensure_returns_cols(cur)
+            res = fetch_amfi_aum(cur)
+            conn.commit()
+        return res
+    finally:
+        if own:
+            conn.close()
+
+
 # ── admin triggers + read endpoints (cc#467 reads these) ───────────────────────────
+@router.post("/api/v15/mf/returns_backfill")
+def mf_returns_backfill_arm():
+    """cc#477: ARM the server-side returns backfill (scheduler picks up the flag within a tick
+    and runs phases 1-3 off the main request path). Returns immediately."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_returns_backfill_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+        conn.commit()
+    return {"armed": True, "flag": "mf_returns_backfill_run=pending"}
+
 @router.post("/api/v15/mf/ensure")
 def mf_ensure():
     with _conn() as conn, conn.cursor() as cur:
