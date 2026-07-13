@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V15 · MF Intelligence — Design Reference R2</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
+--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+--bull:#2FD48B;--bull-soft:rgba(47,212,139,.14);--bear:#FF5C6C;--bear-soft:rgba(255,92,108,.13);
+--amber:#F5B94A;--amber-soft:rgba(245,185,74,.14);--blue:#4D7CFE;--cyan:#37D3E8;
+--disp:'Sora',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--r:20px}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--ink);color:var(--text);font-family:var(--disp);-webkit-font-smoothing:antialiased;padding:0 16px 110px;position:relative;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:-2;
+background:radial-gradient(52% 38% at 78% -6%,rgba(77,124,254,.16),transparent 62%),
+radial-gradient(44% 34% at 8% 12%,rgba(55,211,232,.10),transparent 60%),
+radial-gradient(60% 50% at 50% 118%,rgba(47,212,139,.07),transparent 60%)}
+body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+background:repeating-linear-gradient(0deg,transparent 0 47px,rgba(148,166,210,.045) 47px 48px),
+repeating-linear-gradient(90deg,transparent 0 47px,rgba(148,166,210,.045) 47px 48px);
+mask:radial-gradient(80% 60% at 50% 0%,#000 30%,transparent 100%)}
+.wrap{max-width:1060px;margin:0 auto}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.rise{opacity:0;transform:translateY(14px);animation:rise .6s cubic-bezier(.22,.9,.3,1) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+.d1{animation-delay:.05s}.d2{animation-delay:.14s}.d3{animation-delay:.23s}.d4{animation-delay:.32s}.d5{animation-delay:.41s}.d6{animation-delay:.5s}.d7{animation-delay:.59s}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:20px 2px 16px}
+.brand{font-weight:800;font-size:17px;letter-spacing:-.01em}.brand b{color:var(--blue)}
+.brand .sub{display:block;font-size:9px;font-weight:700;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 13px;border-radius:16px;border:1px solid rgba(47,212,139,.35);background:rgba(47,212,139,.07);font-size:11px;font-weight:700;color:var(--bull);backdrop-filter:blur(8px)}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--bull);box-shadow:0 0 10px var(--bull);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.search{display:flex;gap:10px;margin:2px 0 20px}
+.search .box{flex:1;position:relative}
+.search input{width:100%;height:50px;background:rgba(18,26,51,.8);border:1px solid var(--line2);border-radius:15px;color:var(--text);font-family:var(--disp);font-size:14px;padding:0 18px 0 44px;backdrop-filter:blur(10px);transition:border-color .2s,box-shadow .2s;outline:none}
+.search input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,124,254,.18)}
+.search .ic{position:absolute;left:16px;top:16px;width:18px;height:18px;color:var(--dim)}
+.search button{height:50px;padding:0 26px;border-radius:15px;border:none;background:linear-gradient(135deg,var(--blue),#3a63d8);color:#fff;font-family:var(--disp);font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 8px 24px rgba(77,124,254,.4);transition:transform .15s,box-shadow .15s}
+.search button:hover{transform:translateY(-1px);box-shadow:0 12px 30px rgba(77,124,254,.5)}
+.eyebrow{font-size:10px;font-weight:700;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;display:flex;align-items:center;gap:9px}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent)}
+.hero{background:linear-gradient(165deg,rgba(24,34,65,.9) 0%,rgba(15,23,48,.94) 100%);border:1px solid var(--line2);border-radius:var(--r);padding:26px 24px;box-shadow:0 24px 60px rgba(3,7,20,.6),inset 0 1px 0 rgba(233,238,251,.05);display:grid;grid-template-columns:auto 1fr auto;gap:26px;align-items:center;position:relative;overflow:hidden;backdrop-filter:blur(12px)}
+.hero::before{content:"";position:absolute;top:-70px;right:-50px;width:280px;height:280px;background:radial-gradient(circle,rgba(47,212,139,.13),transparent 65%);pointer-events:none}
+.dial{position:relative;width:132px;height:132px}
+.dial svg{transform:rotate(-90deg)}
+.dial .track{fill:none;stroke:var(--well);stroke-width:9}
+.dial .tick{stroke:rgba(148,166,210,.25);stroke-width:2}
+.dial .arc{fill:none;stroke:url(#gradArc);stroke-width:9;stroke-linecap:round;stroke-dasharray:339;stroke-dashoffset:339;animation:sweep 1.4s cubic-bezier(.3,.8,.3,1) .3s forwards;filter:drop-shadow(0 0 8px rgba(47,212,139,.55))}
+@keyframes sweep{to{stroke-dashoffset:61}}
+.dial .core{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dial .v{font-family:var(--mono);font-size:34px;font-weight:700;color:var(--bull);letter-spacing:-.03em}
+.dial .k{font-size:9px;font-weight:700;letter-spacing:.16em;color:var(--dim);margin-top:1px}
+.hero .cat{font-size:10px;font-weight:700;letter-spacing:.14em;color:var(--cyan);text-transform:uppercase}
+.hero h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin-top:5px;line-height:1.15}
+.hero .meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.tag{font-size:10px;font-weight:700;padding:5px 10px;border-radius:9px;background:rgba(13,20,40,.7);border:1px solid var(--line);color:var(--mut)}
+.tag.gold{color:var(--amber);border-color:rgba(245,185,74,.35);background:var(--amber-soft)}
+.verdict{text-align:right}
+.verdict .v{font-family:var(--mono);font-size:13px;font-weight:700;color:#06291a;background:linear-gradient(135deg,var(--bull),#25b878);padding:9px 15px;border-radius:12px;display:inline-block;box-shadow:0 8px 22px rgba(47,212,139,.35)}
+.verdict .r{font-size:10px;color:var(--dim);margin-top:8px;font-weight:600}
+.pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-top:15px}
+.pc{background:linear-gradient(180deg,rgba(24,34,65,.65),rgba(18,26,51,.9));border:1px solid var(--line);border-radius:16px;padding:15px 14px 13px;position:relative;overflow:hidden;transition:transform .18s,border-color .18s,box-shadow .18s;backdrop-filter:blur(8px)}
+.pc:hover{transform:translateY(-3px);border-color:var(--line2);box-shadow:0 14px 34px rgba(3,7,20,.55)}
+.pc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue);box-shadow:0 0 12px var(--blue)}
+.pc.good::before{background:var(--bull);box-shadow:0 0 12px var(--bull)}
+.pc.warn::before{background:var(--amber);box-shadow:0 0 12px var(--amber)}
+.pc .k{font-size:9.5px;font-weight:700;letter-spacing:.11em;color:var(--dim);text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+.pc .i{width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);color:var(--dim);font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:color .15s,border-color .15s}
+.pc .i:hover{color:var(--cyan);border-color:var(--cyan)}
+.pc .v{font-family:var(--mono);font-size:25px;font-weight:700;margin-top:7px;letter-spacing:-.02em}
+.pc .bar{height:4px;border-radius:2px;background:var(--well);margin-top:8px;overflow:hidden}
+.pc .bar i{display:block;height:100%;border-radius:2px;background:linear-gradient(90deg,rgba(47,212,139,.5),var(--bull));transform-origin:left;animation:grow 1s cubic-bezier(.3,.8,.3,1) .5s backwards}
+@keyframes grow{from{transform:scaleX(0)}}
+.pc .s{font-size:9.5px;color:var(--mut);margin-top:8px;line-height:1.5}
+.card{background:linear-gradient(180deg,rgba(24,34,65,.55),rgba(18,26,51,.85));border:1px solid var(--line);border-radius:var(--r);padding:17px 18px;margin-top:15px;backdrop-filter:blur(10px)}
+.card .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}
+.badge{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.1);border:1px solid rgba(55,211,232,.35);padding:4px 9px;border-radius:9px;box-shadow:0 0 14px rgba(55,211,232,.15)}
+table{width:100%;border-collapse:collapse}
+th{font-size:9px;font-weight:700;letter-spacing:.09em;color:var(--dim);text-transform:uppercase;text-align:right;padding:0 8px 8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+td{padding:10px 8px;border-bottom:1px solid var(--line);font-size:12.5px;text-align:right;transition:background .12s}
+tr:hover td{background:rgba(148,166,210,.05)}
+td.sym{font-weight:700;font-size:12.5px}
+.wt{position:relative;display:inline-block;min-width:76px}
+.wt .fill{position:absolute;left:0;top:50%;height:16px;border-radius:5px;background:linear-gradient(90deg,rgba(77,124,254,.28),rgba(77,124,254,.1));z-index:0;transform:translateY(-50%);transform-origin:left;animation:growx .9s cubic-bezier(.3,.8,.3,1) .4s backwards}
+@keyframes growx{from{transform:translateY(-50%) scaleX(0)}}
+.wt b{position:relative;z-index:1;font-family:var(--mono);font-weight:700;padding-left:6px}
+.gvm{font-family:var(--mono);font-weight:700;font-size:11px;padding:3px 9px;border-radius:8px;display:inline-block}
+.g-hi{color:var(--bull);background:var(--bull-soft);box-shadow:inset 0 0 0 1px rgba(47,212,139,.25)}
+.g-mid{color:var(--amber);background:var(--amber-soft);box-shadow:inset 0 0 0 1px rgba(245,185,74,.25)}
+.g-lo{color:var(--bear);background:var(--bear-soft);box-shadow:inset 0 0 0 1px rgba(255,92,108,.25)}
+.al-ok{color:var(--bull)}.al-warn{color:var(--amber)}.al-bad{color:var(--bear)}
+.foot{font-size:10.5px;color:var(--dim);margin-top:11px;display:flex;gap:6px;align-items:center}
+.foot b{color:var(--bull)}
+.segrow{display:flex;gap:7px;margin-top:2px}
+.segblk{flex:1;border-radius:12px;padding:10px 11px;background:rgba(13,20,40,.75);border:1px solid var(--line);position:relative;overflow:hidden;transition:transform .15s}
+.segblk:hover{transform:translateY(-2px)}
+.segblk .heat{position:absolute;left:0;bottom:0;top:0;opacity:.14;z-index:0}
+.segblk>div{position:relative;z-index:1}
+.segblk .k{font-size:8.5px;font-weight:700;letter-spacing:.07em;color:var(--dim);text-transform:uppercase}
+.segblk .v{font-family:var(--mono);font-size:15px;font-weight:700;margin-top:4px}
+.segblk .a{font-size:8.5px;font-weight:700;margin-top:3px}
+.retgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}
+.ret{background:rgba(13,20,40,.75);border:1px solid var(--line);border-radius:13px;padding:11px 11px 9px;text-align:left;transition:transform .15s,border-color .15s}
+.ret:hover{transform:translateY(-2px);border-color:var(--line2)}
+.ret .k{font-size:9px;font-weight:700;color:var(--dim);letter-spacing:.1em}
+.ret .v{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--bull);margin-top:4px}
+.ret .c{font-family:var(--mono);font-size:9px;color:var(--mut);margin-top:2px}
+.ret svg{display:block;margin-top:7px;width:100%;height:20px}
+.ret polyline{fill:none;stroke:var(--cyan);stroke-width:1.6;opacity:.8}
+.flag{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);font-size:11.5px;color:var(--mut);line-height:1.55}
+.flag:first-of-type{border-top:none}
+.flag .ic{width:19px;height:19px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700}
+.flag.ok .ic{background:var(--bull-soft);color:var(--bull)}
+.tabs{display:flex;gap:8px;overflow-x:auto;margin:12px 0 0;padding-bottom:8px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex-shrink:0;height:38px;padding:0 17px;border-radius:19px;border:1px solid var(--line);background:rgba(18,26,51,.7);color:var(--mut);font-size:12px;font-weight:700;display:flex;align-items:center;cursor:pointer;transition:all .15s;backdrop-filter:blur(6px)}
+.tab:hover{color:var(--text);border-color:var(--line2)}
+.tab.on{background:linear-gradient(135deg,var(--blue),#3a63d8);border-color:transparent;color:#fff;box-shadow:0 8px 22px rgba(77,124,254,.4)}
+.addcmp{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--cyan);background:transparent;border:1px solid rgba(55,211,232,.35);padding:4px 9px;border-radius:8px;cursor:pointer;transition:all .15s}
+.addcmp:hover{background:rgba(55,211,232,.12);box-shadow:0 0 14px rgba(55,211,232,.2)}
+.cmp{position:fixed;left:0;right:0;bottom:0;background:rgba(13,20,40,.88);backdrop-filter:blur(22px);border-top:1px solid var(--line2);padding:14px 16px calc(14px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:13px;justify-content:center;box-shadow:0 -12px 40px rgba(3,7,20,.6)}
+.cmp .t{font-size:10px;font-weight:700;color:var(--dim);letter-spacing:.14em}
+.cmp .f{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.1);border:1px solid rgba(55,211,232,.35);padding:6px 12px;border-radius:10px}
+.cmp button{height:40px;padding:0 22px;border-radius:13px;border:none;background:linear-gradient(135deg,var(--cyan),#22a8c2);color:#062830;font-weight:800;font-family:var(--disp);font-size:12px;cursor:pointer;box-shadow:0 8px 24px rgba(55,211,232,.35);transition:transform .15s}
+.cmp button:hover{transform:translateY(-1px)}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){.rise,.dial .arc,.pc .bar i,.wt .fill,.chip .dot{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:61!important}}
+@media(max-width:720px){.pillars{grid-template-columns:1fr 1fr}.retgrid{grid-template-columns:repeat(3,1fr)}.hero{grid-template-columns:auto 1fr;gap:18px}.verdict{grid-column:1/-1;text-align:left}.segrow{flex-wrap:wrap}.segblk{min-width:29%}.hero h1{font-size:19px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="hdr rise d1">
+  <div class="brand">V15 · <b>MF Intelligence</b><span class="sub">Look-through fund research</span></div>
+  <div class="chip"><span class="dot"></span>MQS ENGINE · LIVE</div>
+</div>
+
+<div class="search rise d2">
+  <div class="box">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input placeholder="Search any mutual fund — name, AMC, or category…">
+  </div>
+  <button>Analyse fund</button>
+</div>
+
+<div class="hero rise d3">
+  <div class="dial">
+    <svg width="132" height="132" viewBox="0 0 132 132">
+      <defs><linearGradient id="gradArc" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#37D3E8"/><stop offset="100%" stop-color="#2FD48B"/>
+      </linearGradient></defs>
+      <circle class="track" cx="66" cy="66" r="54"/>
+      <g class="ticks">
+        <line class="tick" x1="66" y1="6" x2="66" y2="13"/><line class="tick" x1="126" y1="66" x2="119" y2="66"/>
+        <line class="tick" x1="66" y1="126" x2="66" y2="119"/><line class="tick" x1="6" y1="66" x2="13" y2="66"/>
+      </g>
+      <circle class="arc" cx="66" cy="66" r="54"/>
+    </svg>
+    <div class="core"><span class="v num" id="mqs">0.0</span><span class="k">MQS / 10</span></div>
+  </div>
+  <div>
+    <div class="cat">Flexi Cap · Direct · Growth</div>
+    <h1>Parag Parikh Flexi Cap Fund</h1>
+    <div class="meta">
+      <span class="tag">AUM ₹1,02,455 Cr</span>
+      <span class="tag">ER 0.63%</span>
+      <span class="tag gold">FINKHOZ ★★★★★</span>
+      <span class="tag">CRISIL #2</span>
+      <span class="tag">Manager 12.1y</span>
+    </div>
+  </div>
+  <div class="verdict">
+    <div class="v">BUY SYSTEMATICALLY</div>
+    <div class="r">Rank 2 of 38 · Flexi Cap</div>
+  </div>
+</div>
+
+<div class="pillars rise d4">
+  <div class="pc good"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--bull)">8.6</div><div class="bar"><i style="width:86%"></i></div><div class="s">Look-through GVM 7.4 · top-10 weight 41% · 96% resolved</div></div>
+  <div class="pc good"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--bull)">8.4</div><div class="bar"><i style="width:84%"></i></div><div class="s">+4.2% vs category 3Y · beat category in 87% of rolling windows</div></div>
+  <div class="pc"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--blue)">7.8</div><div class="bar"><i style="width:78%;background:linear-gradient(90deg,rgba(77,124,254,.5),var(--blue))"></i></div><div class="s">ER 0.63% — cheaper than 82% of category peers</div></div>
+  <div class="pc warn"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--amber)">7.1</div><div class="bar"><i style="width:71%;background:linear-gradient(90deg,rgba(245,185,74,.5),var(--amber))"></i></div><div class="s">AUM near category bloat band · manager tenure strong at 12y</div></div>
+</div>
+
+<div class="card rise d5">
+  <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge">SCORR-ONLY X-RAY</span></div>
+  <table>
+    <tr><th>Stock</th><th>Weight</th><th>GVM</th><th>Segment</th><th>Seg rating</th></tr>
+    <tr><td class="sym">HDFC BANK</td><td><span class="wt"><span class="fill" style="width:100%"></span><b>8.1%</b></span></td><td><span class="gvm g-hi">7.9</span></td><td>Private Banks</td><td><span class="al-ok">Strong</span></td></tr>
+    <tr><td class="sym">BAJAJ HOLDINGS</td><td><span class="wt"><span class="fill" style="width:89%"></span><b>7.2%</b></span></td><td><span class="gvm g-hi">7.4</span></td><td>Holding Cos</td><td><span class="al-ok">Strong</span></td></tr>
+    <tr><td class="sym">POWER GRID</td><td><span class="wt"><span class="fill" style="width:79%"></span><b>6.4%</b></span></td><td><span class="gvm g-mid">6.6</span></td><td>Power T&amp;D</td><td><span class="al-warn">Neutral</span></td></tr>
+    <tr><td class="sym">ITC</td><td><span class="wt"><span class="fill" style="width:73%"></span><b>5.9%</b></span></td><td><span class="gvm g-hi">7.1</span></td><td>FMCG</td><td><span class="al-warn">Neutral</span></td></tr>
+    <tr><td class="sym">COAL INDIA</td><td><span class="wt"><span class="fill" style="width:68%"></span><b>5.5%</b></span></td><td><span class="gvm g-lo">5.8</span></td><td>Mining</td><td><span class="al-bad">Weak</span></td></tr>
+  </table>
+  <div class="foot">Weighted portfolio-GVM <b class="num">7.4</b> · 96% of weight resolved to live GVM · full 62-holding table on tap</div>
+</div>
+
+<div class="card rise d6">
+  <div class="h"><span class="eyebrow" style="flex:1">Segment exposure vs sector ratings</span></div>
+  <div class="segrow">
+    <div class="segblk"><span class="heat" style="width:100%;background:var(--bull)"></span><div class="k">Pvt Banks</div><div class="v num">21%</div><div class="a al-ok">▲ Strong segment</div></div>
+    <div class="segblk"><span class="heat" style="width:67%;background:var(--amber)"></span><div class="k">IT Services</div><div class="v num">14%</div><div class="a al-warn">◆ Neutral</div></div>
+    <div class="segblk"><span class="heat" style="width:52%;background:var(--amber)"></span><div class="k">FMCG</div><div class="v num">11%</div><div class="a al-warn">◆ Neutral</div></div>
+    <div class="segblk"><span class="heat" style="width:43%;background:var(--bull)"></span><div class="k">Power</div><div class="v num">9%</div><div class="a al-ok">▲ Strong segment</div></div>
+    <div class="segblk"><span class="heat" style="width:29%;background:var(--bear)"></span><div class="k">Mining</div><div class="v num">6%</div><div class="a al-bad">▼ Weak segment</div></div>
+  </div>
+</div>
+
+<div class="card rise d6">
+  <div class="h"><span class="eyebrow" style="flex:1">Returns vs category · direct plans</span></div>
+  <div class="retgrid">
+    <div class="ret"><div class="k">1W</div><div class="v">+0.8%</div><div class="c">cat +0.5%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,14 12,12 24,15 36,9 48,10 60,5"/></svg></div>
+    <div class="ret"><div class="k">1M</div><div class="v">+2.4%</div><div class="c">cat +1.9%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,16 12,13 24,14 36,10 48,7 60,6"/></svg></div>
+    <div class="ret"><div class="k">3M</div><div class="v">+7.1%</div><div class="c">cat +5.8%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,17 12,15 24,11 36,12 48,8 60,4"/></svg></div>
+    <div class="ret"><div class="k">6M</div><div class="v">+12.6%</div><div class="c">cat +10.2%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,18 12,14 24,13 36,9 48,7 60,3"/></svg></div>
+    <div class="ret"><div class="k">1Y</div><div class="v">+22.4%</div><div class="c">cat +18.1%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,18 12,16 24,12 36,10 48,6 60,2"/></svg></div>
+    <div class="ret"><div class="k">2Y</div><div class="v">+19.8%</div><div class="c">CAGR · cat 16.4%</div><svg viewBox="0 0 60 20" preserveAspectRatio="none"><polyline points="0,17 12,13 24,14 36,8 48,7 60,3"/></svg></div>
+  </div>
+</div>
+
+<div class="card rise d7">
+  <div class="h"><span class="eyebrow" style="flex:1">Red flags</span></div>
+  <div class="flag ok"><span class="ic">✓</span>Concentration healthy — top-10 at 41%, under the 45% flag threshold</div>
+  <div class="flag ok"><span class="ic">✓</span>No manager change in the last 12 months</div>
+  <div class="flag"><span class="ic">!</span>AUM ₹1.02 lakh Cr is approaching the flexi-cap bloat band — watch small &amp; mid-cap allocation flexibility</div>
+</div>
+
+<div class="eyebrow rise d7" style="margin-top:30px">Curated screener · AUM &gt; ₹5,000 Cr universe</div>
+<div class="tabs rise d7">
+  <div class="tab on">Flexi Cap</div><div class="tab">Large Cap</div><div class="tab">Mid Cap</div><div class="tab">Small Cap</div><div class="tab">Index</div><div class="tab">ELSS</div><div class="tab">Hybrid</div>
+</div>
+<div class="card rise d7" style="margin-top:11px">
+  <table>
+    <tr><th>Fund</th><th>MQS ▾</th><th>FINKHOZ</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th><th></th></tr>
+    <tr><td class="sym">Parag Parikh Flexi Cap</td><td><span class="gvm g-hi">8.2</span></td><td class="num">★5</td><td class="num" style="color:var(--bull)">+22.4%</td><td class="num" style="color:var(--bull)">+19.1%</td><td class="num">0.63</td><td class="num">1,02,455</td><td><button class="addcmp">+ Compare</button></td></tr>
+    <tr><td class="sym">HDFC Flexi Cap</td><td><span class="gvm g-hi">7.9</span></td><td class="num">★4</td><td class="num" style="color:var(--bull)">+20.1%</td><td class="num" style="color:var(--bull)">+21.4%</td><td class="num">0.77</td><td class="num">68,340</td><td><button class="addcmp">+ Compare</button></td></tr>
+    <tr><td class="sym">Franklin India Flexi Cap</td><td><span class="gvm g-mid">6.8</span></td><td class="num">★4</td><td class="num" style="color:var(--bull)">+17.9%</td><td class="num" style="color:var(--bull)">+18.8%</td><td class="num">0.94</td><td class="num">18,221</td><td><button class="addcmp">+ Compare</button></td></tr>
+    <tr><td class="sym">Quant Flexi Cap</td><td><span class="gvm g-mid">6.1</span></td><td class="num">★3</td><td class="num" style="color:var(--bear)">+11.2%</td><td class="num" style="color:var(--bull)">+16.9%</td><td class="num">0.59</td><td class="num">7,912</td><td><button class="addcmp">+ Compare</button></td></tr>
+  </table>
+</div>
+</div>
+
+<div class="cmp">
+  <span class="t">COMPARE</span>
+  <span class="f">Parag Parikh Flexi</span>
+  <span class="f">HDFC Flexi Cap</span>
+  <button>Compare 2 funds → overlap %</button>
+</div>
+
+<script>
+(function(){
+  var el=document.getElementById('mqs'),t0=null,target=8.2;
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){el.textContent=target.toFixed(1);return}
+  setTimeout(function step(){
+    if(!t0)t0=performance.now();
+    var p=Math.min((performance.now()-t0)/1400,1);
+    el.textContent=(target*(1-Math.pow(1-p,3))).toFixed(1);
+    if(p<1)requestAnimationFrame(step);
+  },300);
+})();
+</script>
+</body>
+</html>
