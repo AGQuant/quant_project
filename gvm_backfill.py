@@ -37,7 +37,7 @@ import os
 import json
 import time
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import psycopg
 import pandas as pd
@@ -59,6 +59,27 @@ METHOD_FLAG = "backfill_step_partial"   # G/V held-constant, fundamentals shallo
 PROGRESS_KEY = "gvm_backfill_progress"
 UNIVERSE_KEY = "gvm_backfill_universe"
 RUN_FLAG_KEY = "gvm_backfill_run"       # 'pending' | 'running' | 'done'
+
+# cc#471 EXTENSION: same architecture, universe = ALL syms with 5yr raw_prices
+# depth (existing EOD only, no new fetching) minus the already-backfilled set.
+EXT_PROGRESS_KEY = "gvm_backfill_ext_progress"
+EXT_UNIVERSE_KEY = "gvm_backfill_ext_universe"
+EXT_RUN_FLAG_KEY = "gvm_backfill_ext_run"
+DEEP_5YR_CUTOFF = date(2021, 8, 1)      # MIN(price_date) <= this => 5yr-deep (Fable-verified: 1125 syms)
+
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _market_hours_now():
+    """True during NSE market hours (weekday 09:15-15:30 IST). The backfill stops
+    gracefully if it ever enters this window — even if it started pre-market — so
+    the heavy compute never competes with the live 5-min writer. Resumes next
+    off-market tick via the checkpoint."""
+    n = datetime.now(_IST)
+    if n.weekday() >= 5:
+        return False
+    return (9, 15) <= (n.hour, n.minute) <= (15, 30)
 
 
 def _conn():
@@ -127,6 +148,39 @@ def _build_universe(gv_syms):
         conn.commit()
         log.info(f"gvm_backfill universe: {len(futures)} futures + top{TOP_N_BY_MCAP} "
                  f"-> {len(ordered)} scorable symbols")
+        return ordered
+
+
+def _build_universe_5yr(gv_syms):
+    """cc#471: every symbol whose raw_prices already reaches ~5yr (MIN price_date
+    <= 2021-08-01) AND is scoreable (has G/V inputs), EXCLUDING the symbols the
+    top-500 run already backfilled. NO new price fetching — existing EOD only.
+    Persisted for stable resume."""
+    with _conn() as conn, conn.cursor() as cur:
+        cached = _cfg_get(cur, EXT_UNIVERSE_KEY)
+        if cached:
+            try:
+                arr = json.loads(cached)
+                if isinstance(arr, list) and arr:
+                    return [s for s in arr if s in gv_syms]
+            except Exception:
+                pass
+
+        cur.execute("SELECT symbol FROM raw_prices GROUP BY symbol "
+                    "HAVING MIN(price_date) <= %s", (DEEP_5YR_CUTOFF,))
+        deep = [str(r[0]).strip() for r in cur.fetchall()]
+        cur.execute("SELECT DISTINCT symbol FROM gvm_history WHERE method LIKE 'backfill%%'")
+        already = {str(r[0]).strip() for r in cur.fetchall()}
+
+        ordered, seen = [], set()
+        for s in deep:
+            if s and s in gv_syms and s not in already and s not in seen:
+                ordered.append(s); seen.add(s)
+
+        _cfg_set(cur, EXT_UNIVERSE_KEY, json.dumps(ordered))
+        conn.commit()
+        log.info(f"gvm_backfill EXT universe: {len(deep)} deep-5yr - {len(already)} done "
+                 f"-> {len(ordered)} new scorable symbols")
         return ordered
 
 
@@ -213,18 +267,20 @@ def _m_scores_for_date(prices, seg_map, target_date):
 
 
 # ── main backfill loop ──────────────────────────────────────────────────────
-def run_backfill(time_budget_s=10800, max_dates=None):
+def _run_core(build_fn, progress_key, flag_key, label, time_budget_s=10800, max_dates=None):
     """Reconstruct gvm_history for the ordered universe across the 5yr window.
-    Resumable + idempotent (ON CONFLICT DO NOTHING). Returns a summary dict."""
+    Resumable + idempotent (ON CONFLICT DO NOTHING). Returns a summary dict.
+    build_fn/progress_key/flag_key/label parameterize which universe + checkpoint
+    (top-500 run vs cc#471 all-5yr extension); everything else is identical."""
     t0 = time.time()
     _ensure_method_col()
 
     gv = _compute_gv_snapshot()
     if not gv:
         return {"status": "warn", "message": "G/V snapshot empty (screener/input merge)"}
-    universe = _build_universe(set(gv.keys()))
+    universe = build_fn(set(gv.keys()))
     if not universe:
-        return {"status": "warn", "message": "empty universe"}
+        return {"status": "warn", "message": "empty universe", "label": label}
     universe_set = set(universe)
 
     prices = md._load_prices()
@@ -234,7 +290,7 @@ def run_backfill(time_budget_s=10800, max_dates=None):
 
     all_dates = _trading_dates()
     with _conn() as conn, conn.cursor() as cur:
-        prog_raw = _cfg_get(cur, PROGRESS_KEY)
+        prog_raw = _cfg_get(cur, progress_key)
     done = set(json.loads(prog_raw)) if prog_raw else set()
     remaining = [d for d in all_dates if str(d) not in done]
 
@@ -253,6 +309,8 @@ def run_backfill(time_budget_s=10800, max_dates=None):
             stopped = "max_dates"; break
         if time.time() - t0 > time_budget_s:
             stopped = "time_budget"; break
+        if _market_hours_now():          # never compete with the live 5-min writer
+            stopped = "market_hours"; break
 
         mscores = _m_scores_for_date(prices, seg_map, d)
         batch = []
@@ -277,8 +335,9 @@ def run_backfill(time_budget_s=10800, max_dates=None):
 
         if processed % 20 == 0:
             with _conn() as conn, conn.cursor() as cur:
-                _cfg_set(cur, PROGRESS_KEY, json.dumps(sorted(done)))
+                _cfg_set(cur, progress_key, json.dumps(sorted(done)))
                 _ops(cur, "progress", {
+                    "label": label,
                     "processed_this_run": processed, "dates_done_total": len(done),
                     "dates_total": len(all_dates), "rows_written_this_run": rows_written,
                     "last_date": str(d), "universe": len(universe),
@@ -289,10 +348,11 @@ def run_backfill(time_budget_s=10800, max_dates=None):
 
     complete = len(done) >= len(all_dates)
     with _conn() as conn, conn.cursor() as cur:
-        _cfg_set(cur, PROGRESS_KEY, json.dumps(sorted(done)))
+        _cfg_set(cur, progress_key, json.dumps(sorted(done)))
         if complete:
-            _cfg_set(cur, RUN_FLAG_KEY, "done")
+            _cfg_set(cur, flag_key, "done")
         _ops(cur, "run_end", {
+            "label": label,
             "stopped": stopped, "complete": complete,
             "processed_this_run": processed, "dates_done_total": len(done),
             "dates_total": len(all_dates), "rows_written_this_run": rows_written,
@@ -302,7 +362,7 @@ def run_backfill(time_budget_s=10800, max_dates=None):
         conn.commit()
 
     result = {
-        "status": "ok", "stopped": stopped, "complete": complete,
+        "status": "ok", "label": label, "stopped": stopped, "complete": complete,
         "processed_this_run": processed, "dates_done_total": len(done),
         "dates_total": len(all_dates), "rows_written_this_run": rows_written,
         "universe": len(universe), "elapsed_s": round(time.time() - t0, 1),
@@ -310,6 +370,18 @@ def run_backfill(time_budget_s=10800, max_dates=None):
     if complete:
         result["sanity"] = sanity_report()
     return result
+
+
+def run_backfill(time_budget_s=10800, max_dates=None):
+    """cc#468/470: futures-first + top-500 by mcap."""
+    return _run_core(_build_universe, PROGRESS_KEY, RUN_FLAG_KEY, "top500",
+                     time_budget_s=time_budget_s, max_dates=max_dates)
+
+
+def run_backfill_ext(time_budget_s=10800, max_dates=None):
+    """cc#471: extension — ALL 5yr-deep symbols minus already-backfilled."""
+    return _run_core(_build_universe_5yr, EXT_PROGRESS_KEY, EXT_RUN_FLAG_KEY, "all5yr",
+                     time_budget_s=time_budget_s, max_dates=max_dates)
 
 
 # ── overlap sanity: backfilled M vs LIVE M on the live window ────────────────

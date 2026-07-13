@@ -944,6 +944,54 @@ def _bg_gvm_backfill():
     finally:
         _gvm_backfill_running = False
 
+def _bg_gvm_backfill_ext():
+    """cc#471: extension backfill — ALL 5yr-deep symbols minus the already-backfilled
+    top-500. Same engine (run_backfill_ext), separate checkpoint/flag
+    (gvm_backfill_ext_run). Shares the _gvm_backfill_running single-flight guard so it
+    never overlaps the main run; only starts once the main run flag is 'done'
+    (sequence). Off-market only, self-limiting, resumes across nights."""
+    global _gvm_backfill_running
+    if _gvm_backfill_running:
+        return
+    now = _ist_now()
+    if _is_market_hours(now):
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM app_config WHERE key IN ('gvm_backfill_run','gvm_backfill_ext_run')")
+            flags = {k: v for k, v in cur.fetchall()}
+        if flags.get('gvm_backfill_run') != 'done':   # sequence: main run first
+            return
+        if flags.get('gvm_backfill_ext_run') == 'done':
+            return
+        _gvm_backfill_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO app_config (key, value, updated_at) VALUES ('gvm_backfill_ext_run','running',NOW()) "
+                "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import gvm_backfill
+        res = gvm_backfill.run_backfill_ext(time_budget_s=10800)
+        log.info(f"gvm_backfill_ext run: {res}")
+        if not res.get("complete"):
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO app_config (key, value, updated_at) VALUES ('gvm_backfill_ext_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+    except Exception as e:
+        log.error(f"gvm_backfill_ext: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO app_config (key, value, updated_at) VALUES ('gvm_backfill_ext_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _gvm_backfill_running = False
+
 def _bg_pivots():
     global _pivots_ran_today
     today = _ist_now().date()
@@ -1447,6 +1495,10 @@ async def _scheduler_loop():
         # resume (both no-op once flag='done' or a run is in-flight; off-market gate inside).
         if h == 2 and m == 20:  _spawn(_bg_gvm_backfill)
         if m == 25 and not _is_market_hours(now):  _spawn(_bg_gvm_backfill)
+        # cc#471: extension backfill (all 5yr-deep syms). Sequenced after the main run
+        # (gate inside checks gvm_backfill_run='done') + shares the single-flight guard.
+        if h == 2 and m == 40:  _spawn(_bg_gvm_backfill_ext)
+        if m == 45 and not _is_market_hours(now):  _spawn(_bg_gvm_backfill_ext)
 
 
 async def _supervisor():
