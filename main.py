@@ -70,6 +70,7 @@ from pwa_endpoints import router as pwa_router
 from investment_check import router as investment_check_router
 from scanner_endpoints import router as scanner_router
 from intraday_scanner_endpoints import router as intraday_scanner_router  # cc#481: restored (cc#476 kill reversed)
+from tc_scanner_endpoints import router as tc_scanner_router  # cc#464: TC Scanner (13-check binary engine, id=399/400)
 from structure_endpoints import structure_router
 from performance_endpoints import router as performance_router
 from scheduler_health_endpoints import router as scheduler_health_router
@@ -278,6 +279,7 @@ app.include_router(sector_brief_router)
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
 app.include_router(intraday_scanner_router)   # cc#481: restored
+app.include_router(tc_scanner_router)         # cc#464: TC Scanner
 app.include_router(structure_router)
 from deriv_metrics import deriv_router          # cc#346: DERIVATIVE COCKPIT data layer
 app.include_router(deriv_router)
@@ -718,7 +720,7 @@ NAV_REGISTRY = {
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
-    "/intraday":     ("Intraday",             "nav"),
+    "/intraday":     ("TC Scanner",           "nav"),   # cc#464: same-slot rename (id=2987)
     "/sector":       ("Sector",               "nav"),
     "/fpc":          ("FPC",                  "nav"),
     "/scanners":     ("(removed from nav — superseded by V12/V13/Check)", "typed-url"),   # cc#441

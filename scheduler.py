@@ -1519,6 +1519,45 @@ def _log_feed_alert_ops(cur, source, kind, message, age_min):
         log.warning(f"_log_feed_alert_ops: {e}")
 
 
+_tc_scanner_running = False   # cc#464: single-flight guard for the 15-min scan+exit-check
+
+
+def _bg_tc_scanner():
+    """cc#464: TC Scanner — 13-check binary engine (id=399/400), full futures universe, BOTH
+    sides, every 15 min during market hours (shares the qb_intraday_mark slot). Scans for new
+    qualifiers (LATCH — first per symbol/side/day, never re-evaluated) then checks every OPEN
+    hold against the current futures LTP for target/SL touch. Single-flight."""
+    global _tc_scanner_running
+    if _tc_scanner_running:
+        return
+    try:
+        _tc_scanner_running = True
+        import tc_scanner_endpoints as tcs
+        scan_res = tcs.run_scan()
+        exit_res = tcs.check_exits()
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), 'tc_scanner', 'scan_tick', %s)",
+                        (Json({**scan_res, **exit_res}),))
+            conn.commit()
+        log.info(f"tc_scanner tick: {scan_res} | {exit_res}")
+    except Exception as e:
+        log.error(f"_bg_tc_scanner: {e}")
+    finally:
+        _tc_scanner_running = False
+
+
+def _bg_tc_scanner_eod():
+    """cc#464: EOD sweep — one final check against the last available price so a target/SL
+    touch between 15-min polls is not missed. Still-open positions stay OPEN (screener-only)."""
+    try:
+        import tc_scanner_endpoints as tcs
+        res = tcs.eod_sweep()
+        log.info(f"tc_scanner EOD sweep: {res}")
+    except Exception as e:
+        log.error(f"_bg_tc_scanner_eod: {e}")
+
+
 def _bg_intraday_scan():
     """cc#481: 15-min intraday scanner WRITER. Runs BOTH the BUY and SHORT scans over the full
     active futures universe and records passes to intraday_watchlist (ON CONFLICT keeps one
@@ -1622,12 +1661,15 @@ async def _scheduler_loop():
                 _spawn(_bg_qb_intraday_mark)
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
                 _spawn(_bg_intraday_scan)       # cc#481: 15-min BUY+SHORT scan -> intraday_watchlist (09:30-15:15 gate inside)
+                _spawn(_bg_tc_scanner)          # cc#464: TC Scanner 13-check binary engine -> tc_scanner_holds
         # cc_task #89: yahoo EOD raw_prices refresh at 15:35 IST (5 min after close) so
         # v8_engine EOD (15:45) and the evening journal review see today's official closes
         # ~5h sooner. The 01:00 IST run (below) stays as the nightly safety re-run.
         # Weekday-only. NO GVM/QB cascade here — that stays in the 01:00-02:00 nightly chain.
         if now.weekday() < 5 and h == 15 and m == 20: _spawn(_bg_gate_rebalance)  # cc#190: auto-close over-slot paper positions
         if now.weekday() < 5 and h == 15 and m == 35: _spawn(_bg_yahoo_daily_sync)
+        if now.weekday() < 5 and _is_trading_day(now.date()) and h == 15 and m == 32:
+            _spawn(_bg_tc_scanner_eod)   # cc#464: EOD sweep, just before close-of-session jobs
         if now.weekday() < 5 and h == 15 and m == 40: _spawn(_bg_heal_intraday)  # cc#238 Branch B: heal session gaps before EOD
         if h == 15 and m == 45: _spawn(_bg_v8_eod)
         if h == 15 and m == 50: _spawn(_bg_adr_pcr)

@@ -96,7 +96,7 @@ MANIFEST = {
 #    clients serve the old pwa.js/nav forever (root cause: #177 changed the nav
 #    label to V13 but did not bump, so v2 clients never saw it).
 SW_JS = """
-const CACHE = 'scorr-pwa-v12';  // cc#481: /intraday restored to nav (cc#476 kill reversed; cc#178 bump)
+const CACHE = 'scorr-pwa-v13';  // cc#464: /intraday nav label renamed Intraday->TC Scanner (id=2987 same-slot; cc#178 bump)
 const SHELL = ['/', '/pwa.js', '/static/manifest.json',
                '/static/icon-192.png', '/static/icon-512.png'];
 
@@ -273,7 +273,7 @@ PWA_JS = """
     ['/sector', '\\u2297', 'Sector'],
     ['/check', '\\u2713', 'Check'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
-    ['/intraday', '\\u23f1', 'Intraday'],
+    ['/intraday', '\\u23f1', 'TC Scanner'],
     ['/v13', '\\u25a4', 'V13'],
     ['/v12', '\\u229f', 'V12'],
     ['/health', '\\u2695', 'Health'],
