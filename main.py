@@ -69,7 +69,6 @@ from scorr_authset_probe import router as authset_probe_router
 from pwa_endpoints import router as pwa_router
 from investment_check import router as investment_check_router
 from scanner_endpoints import router as scanner_router
-from intraday_scanner_endpoints import router as intraday_scanner_router
 from structure_endpoints import structure_router
 from performance_endpoints import router as performance_router
 from scheduler_health_endpoints import router as scheduler_health_router
@@ -189,7 +188,7 @@ def _is_embedded(request: Request) -> bool:
 # pages never got the PWA bootstrap (no mobile bottom-nav / manifest / SW).
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
-                     "/intraday", "/structure", "/performance", "/ask",
+                     "/structure", "/performance", "/ask",
                      "/v13", "/v12", "/health", "/v15"}   # cc#392/394/398/426/442/467: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
@@ -277,7 +276,6 @@ app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
-app.include_router(intraday_scanner_router)
 app.include_router(structure_router)
 from deriv_metrics import deriv_router          # cc#346: DERIVATIVE COCKPIT data layer
 app.include_router(deriv_router)
@@ -622,10 +620,6 @@ def ask():
 def check():
     with open("scorr_check.html", "r", encoding="utf-8") as f: return f.read()
 
-@app.get("/intraday", response_class=HTMLResponse)
-def intraday():
-    with open("scorr_intraday.html", "r", encoding="utf-8") as f: return f.read()
-
 @app.get("/sector", response_class=HTMLResponse)
 def sector():
     with open("scorr_sector.html", "r", encoding="utf-8") as f: return f.read()
@@ -718,7 +712,6 @@ NAV_REGISTRY = {
     "/cio2":         ("GVM (?model=gvm)",     "nav"),
     "/ask":          ("(removed from nav — superseded by Max)", "typed-url"),   # cc#435
     "/check":        ("Check",                "nav"),
-    "/intraday":     ("Intraday",             "nav"),
     "/sector":       ("Sector",               "nav"),
     "/fpc":          ("FPC",                  "nav"),
     "/scanners":     ("(removed from nav — superseded by V12/V13/Check)", "typed-url"),   # cc#441
