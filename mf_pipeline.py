@@ -685,13 +685,18 @@ def run_mf_returns_backfill(conn=None):
         with conn.cursor() as cur:
             aum = fetch_amfi_aum(cur)
             conn.commit()
-        # qualifying set: AUM>5000 if AMFI AUM landed, ELSE the proxy candidate set (founder
-        # unblock — never wait on a perfect AUM source; NAV+returns via mfapi are independent).
+        # qualifying set: use AUM>5000 ONLY when the AUM probe actually returned fresh AAUM rows;
+        # otherwise a few STALE aum_cr rows would shrink the run (6-fund bug 13-Jul). When AUM is
+        # unavailable, use the proxy candidate set (founder unblock — never wait on a perfect AUM
+        # source; NAV+returns via mfapi are independent).
+        aum_ok = not (isinstance(aum, dict) and aum.get("error"))
         with conn.cursor() as cur:
-            cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s "
-                        "ORDER BY aum_cr DESC", (AUM_THRESHOLD_CR,))
-            qual = cur.fetchall()
-            universe_mode = "aum_gt_5000"
+            qual, universe_mode = [], "proxy_candidate_set"
+            if aum_ok:
+                cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s "
+                            "ORDER BY aum_cr DESC", (AUM_THRESHOLD_CR,))
+                qual = cur.fetchall()
+                universe_mode = "aum_gt_5000"
             if not qual:
                 qual = _candidate_scheme_set(cur)
                 universe_mode = "proxy_candidate_set"
@@ -756,8 +761,8 @@ def mf_weekly_refresh(conn=None):
             _ensure_returns_cols(cur)
             cur.execute("SELECT scheme_code, amfi_code FROM mf_master WHERE aum_cr > %s", (AUM_THRESHOLD_CR,))
             qual = cur.fetchall()
-            if not qual:
-                qual = _candidate_scheme_set(cur)   # same proxy fallback as the backfill
+            if len(qual) < 50:   # AUM unpopulated/stale -> proxy candidate set (same as backfill)
+                qual = _candidate_scheme_set(cur)
             conn.commit()
         import time as _t
         n = 0
