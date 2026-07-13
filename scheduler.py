@@ -1238,6 +1238,30 @@ def _bg_cleanup_news():
         log.info(f"news_retention: {res}")
     except Exception as e: log.error(f"news_retention: {e}")
 
+def _bg_log_retention():
+    """cc#469 audit_1(e): keep tick-class telemetry 30 days, delete older. Only pure
+    heartbeat/telemetry categories are purged — NEVER the memory-taxonomy rows
+    (task/spec_locked/canonical_spec/decision/day_log/... are institutional memory).
+    Idempotent; runs nightly. ops_log(category=log_retention)."""
+    TICK_OPS = ('v10_tick_hb', 'scheduler_health')   # ops_log heartbeats
+    TICK_SESSION = ('v10_tick_hb',)                   # session_log heartbeats only
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM ops_log WHERE category = ANY(%s) "
+                        "AND session_ts < NOW() - INTERVAL '30 days'", (list(TICK_OPS),))
+            n_ops = cur.rowcount
+            cur.execute("DELETE FROM session_log WHERE category = ANY(%s) "
+                        "AND session_ts < NOW() - INTERVAL '30 days'", (list(TICK_SESSION),))
+            n_sess = cur.rowcount
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), 'log_retention', 'tick_purge', %s)",
+                        (Json({"ops_deleted": n_ops, "session_deleted": n_sess,
+                               "categories_ops": list(TICK_OPS), "keep_days": 30}),))
+            conn.commit()
+        log.info(f"log_retention: ops={n_ops} session={n_sess} tick rows purged (>30d)")
+    except Exception as e:
+        log.error(f"log_retention: {e}")
+
 def _bg_fetch_stock_news():
     """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
     universe -> raw_news (source_type='company' + symbol), alias-filtered at ingest. Single
@@ -1415,6 +1439,7 @@ async def _scheduler_loop():
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
+        if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile (V15 MF)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
