@@ -93,6 +93,7 @@ _yahoo_daily_running = False
 _gvm_ran_today: Optional[date] = None
 _gvm_backfill_running = False   # cc#468/470: 5yr deep-history backfill guard
 _mf_backfill_running = False    # cc#477: V15 MF returns backfill single-flight guard
+_intraday_scan_running = False  # cc#481: intraday scanner 15-min auto-scan single-flight guard
 _pivots_ran_today: Optional[date] = None
 _upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_pivots rebuild
 _qb_eod_ran_today: Optional[date] = None
@@ -1447,6 +1448,37 @@ def _bg_mf_aum_monthly():
         log.error(f"_bg_mf_aum_monthly: {e}")
 
 
+def _bg_intraday_scan():
+    """cc#481: 15-min intraday scanner WRITER. Runs BOTH the BUY and SHORT scans over the full
+    active futures universe and records passes to intraday_watchlist (ON CONFLICT keeps one
+    signal per symbol/side/day). The scans self-gate on the 09:30-15:15 IST window; the scheduler
+    just fires m%15 on trading days. Single-flight; feed-independent (app-server, read-only reuse
+    of FILTER_CONFIG)."""
+    global _intraday_scan_running
+    if _intraday_scan_running:
+        return
+    try:
+        _intraday_scan_running = True
+        import intraday_scanner_endpoints as ise
+        buy = ise.scanner_intraday(limit=1)
+        short = ise.scanner_intraday_short(limit=1)
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), 'intraday_scan', 'auto_scan', %s)",
+                        (Json({"buy_status": buy.get("status"), "buy_signals": buy.get("count"),
+                               "buy_recorded": buy.get("recorded_to_watchlist"),
+                               "short_status": short.get("status"), "short_signals": short.get("count"),
+                               "short_recorded": short.get("recorded_to_watchlist"),
+                               "universe": buy.get("universe")}),))
+            conn.commit()
+        log.info(f"intraday_scan: BUY {buy.get('status')} sig={buy.get('count')} rec={buy.get('recorded_to_watchlist')} | "
+                 f"SHORT {short.get('status')} sig={short.get('count')} rec={short.get('recorded_to_watchlist')}")
+    except Exception as e:
+        log.error(f"_bg_intraday_scan: {e}")
+    finally:
+        _intraday_scan_running = False
+
+
 # ── main loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
@@ -1517,6 +1549,7 @@ async def _scheduler_loop():
             if m % 15 == 0:
                 _spawn(_bg_qb_intraday_mark)
                 _spawn(_bg_fetch_market_news)   # task #40: live RSS refresh during market hours
+                _spawn(_bg_intraday_scan)       # cc#481: 15-min BUY+SHORT scan -> intraday_watchlist (09:30-15:15 gate inside)
         # cc_task #89: yahoo EOD raw_prices refresh at 15:35 IST (5 min after close) so
         # v8_engine EOD (15:45) and the evening journal review see today's official closes
         # ~5h sooner. The 01:00 IST run (below) stays as the nightly safety re-run.
