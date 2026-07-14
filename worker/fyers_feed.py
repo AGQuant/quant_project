@@ -134,6 +134,8 @@ OPT_STOCK_SUB_MIN_TIME = dt_time(9, 25)  # cc#241: HARD floor — no stock-optio
 OPT_STOCK_OVERFLOW_FRAC = 0.95           # cc#241: <95% stock underlyings subscribed -> overflow alert
 BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
 OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quotes has NO OI)
+STOCK_OI_POLL_MIN_TIME = dt_time(9, 30)  # cc#482 fix_5: stock ATM OI poll held off till 09:30 (skips
+                                          # the noisiest opening 15 min; index OI poll unaffected, still 09:15)
 CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
 OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
@@ -848,6 +850,33 @@ class OptionSymbolManager:
         idx = set(INDEX_OPTION_UNDERLYINGS)
         return [s for s in syms if s in self.sym_map and (self.sym_map.get(s) or ('',))[0] not in idx]
 
+    def stock_atm_option_syms(self, syms):
+        """cc#482: ATM CE+PE ONLY per stock underlying, for the 5-min OI DEPTH POLL only — the
+        WS tick subscription (build_initial, still ATM+-stock_n) is UNCHANGED. Cuts stock OI
+        poll load ~86% (full chain -> ~2 strikes/stock) after the 13-Jul open-burst empty-body
+        incident. ATM is recomputed FRESH from live CMP on every call (not the 15-min-cached
+        atm_map) since intraday ATM drift matters at 5-min poll granularity."""
+        idx = set(INDEX_OPTION_UNDERLYINGS)
+        stock_syms = [s for s in syms if s in self.sym_map and (self.sym_map.get(s) or ('',))[0] not in idx]
+        by_under = {}
+        for s in stock_syms:
+            und = self.sym_map[s][0]
+            by_under.setdefault(und, []).append(s)
+        out = []
+        for u in self._underlyings:
+            if u.get('kind') != 'stock' or u['name'] not in by_under:
+                continue
+            cmp = self._get_cmp(u['cmp_sym'])
+            if not cmp:
+                continue
+            step = u['step'] or auto_step(cmp)
+            atm = atm_strike(cmp, step)
+            for s in by_under[u['name']]:
+                _, strike, otype, _ = self.sym_map[s]
+                if strike == atm:
+                    out.append(s)
+        return out
+
     def check_atm_drift(self):
         """Returns (add_syms, remove_syms) if any ATM has drifted >= ATM_DRIFT_STRIKES."""
         add, remove = [], []
@@ -1377,6 +1406,14 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
     cc#375: also called for the SUBSCRIBED stock options (bounded by stock_options_limit)
     on a SEPARATE lock/thread, so their option_chain rows carry OI instead of NULL.
     Latest OI -> opt_store.last_oi[fsym] -> attached on next option bar flush.
+
+    cc#482 fix_3: 13-Jul incident — an empty-body/failed depth response was silently
+    swallowed (Python logger only, never persisted), so the caller went on writing
+    stale carried-over OI with no visible trace. Empty/failed responses are now
+    counted and, if any occurred this cycle, logged as an ops_log WARNING
+    (category=data_audit) — the platform's telemetry table (MEMORY_TAXONOMY_V1
+    routes telemetry off session_log to ops_log; functionally the same "not
+    swallowed" requirement).
     """
     lock = lock or _OPT_OI_POLL_LOCK
     if not lock.acquire(blocking=False):
@@ -1386,13 +1423,19 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
         log.info(f"Option OI poll ({label}) starting: {len(opt_syms)} options via depth API")
         headers = {'Authorization': f'{FYERS_CLIENT_ID}:{token}'}
         got = 0
+        empty_fails = []
         for fsym in opt_syms:
             try:
                 r = requests.get(DEPTH_URL,
                                  params={'symbol': fsym, 'ohlcv_flag': 1},
                                  headers=headers, timeout=8)
+                body = (r.text or '').strip()
+                if not body or r.status_code == 401:
+                    empty_fails.append(fsym)
+                    continue
                 d = r.json()
                 if d.get('s') != 'ok':
+                    empty_fails.append(fsym)
                     continue
                 data_d = d.get('d')
                 node = {}
@@ -1406,9 +1449,19 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
                 opt_store.last_oi[fsym] = int(oi)   # GIL-atomic dict write; no lock needed
                 got += 1
             except Exception as e:
+                empty_fails.append(fsym)
                 log.warning(f"poll_options_oi ({label}) {fsym}: {e}")
             time.sleep(OI_CALL_SPACING_SEC)
         log.info(f"Option OI poll ({label}, depth API): {got}/{len(opt_syms)} option OI updated")
+        if empty_fails:
+            try:
+                hc = get_db()
+                _ops_log(hc, 'data_audit', 'oi_poll_empty_response',
+                          {'label': label, 'failed': len(empty_fails), 'total': len(opt_syms),
+                           'sample': empty_fails[:15], 'ist': _ist_now_str()})
+                hc.close()
+            except Exception as _oe:
+                log.warning(f"poll_options_oi ({label}) failed to log empty-response warning: {_oe}")
     finally:
         lock.release()
 
@@ -2094,9 +2147,13 @@ def run(auth_code=None):
                     # never delays the index poll). Without this their WS bars carry no OI -> option_chain
                     # oi stays NULL and the cockpit ATM OI d/d is always '--'. Only when stock options are
                     # actually subscribed; bounded by app_config stock_options_limit (pilot default 20).
-                    if opt_stock_subscribed:
+                    # cc#482 fix_1/fix_5: ATM CE+PE only (not the full subscribed chain — 13-Jul open-burst
+                    # empty-body incident), AND held off until STOCK_OI_POLL_MIN_TIME (09:30) — skips the
+                    # noisiest opening 15 min where Fyers depth-API empty-response rate is highest. Index
+                    # OI poll above is UNCHANGED (still fires at market open, full depth).
+                    if opt_stock_subscribed and now.time() >= STOCK_OI_POLL_MIN_TIME:
                         threading.Thread(target=poll_options_oi,
-                                         args=(token, opt_mgr.stock_option_syms(list(option_syms)), opt_store),
+                                         args=(token, opt_mgr.stock_atm_option_syms(list(option_syms)), opt_store),
                                          kwargs={"lock": _STOCK_OPT_OI_POLL_LOCK, "label": "stock"},
                                          daemon=True).start()
                     last_oi_poll = now_dt
