@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime, date, timedelta, time as dt_time
 import os
 import json
+import time
 import psycopg
 import requests
 import calendar
@@ -28,6 +29,10 @@ router = APIRouter(prefix="/api/fyers", tags=["fyers"])
 
 FYERS_CLIENT_ID = os.getenv("FYERS_CLIENT_ID", "1A4STS8ZGD-100")
 QUOTES_URL      = "https://api-t1.fyers.in/data/quotes"
+DEPTH_URL       = "https://api-t1.fyers.in/data/depth"
+OPTION_MASTER_URL = "https://public.fyers.in/sym_details/NSE_FO.csv"
+FULL_CHAIN_MAX_STRIKES = 80   # ad hoc safety cap (both CE+PE combined) — respects Fyers rate limit
+FULL_CHAIN_CALL_SPACING_SEC = 0.35
 
 
 def _conn():
@@ -59,21 +64,25 @@ def _last_tuesday(y: int, m: int) -> date:
     return d
 
 
+def _current_expiry() -> date:
+    """Current active monthly expiry (last Tuesday), rolling to next month after expiry."""
+    today  = date.today()
+    expiry = _last_tuesday(today.year, today.month)
+    if today > expiry:
+        if today.month == 12:
+            expiry = _last_tuesday(today.year + 1, 1)
+        else:
+            expiry = _last_tuesday(today.year, today.month + 1)
+    return expiry
+
+
 def _futures_symbol(nse_code: str) -> str:
     """
     Build current-month futures Fyers symbol.
     e.g. SBIN -> NSE:SBIN26JUNFUT
     Rolls to next month after last Tuesday expiry.
     """
-    today  = date.today()
-    expiry = _last_tuesday(today.year, today.month)
-
-    if today > expiry:
-        if today.month == 12:
-            expiry = _last_tuesday(today.year + 1, 1)
-        else:
-            expiry = _last_tuesday(today.year, today.month + 1)
-
+    expiry = _current_expiry()
     month_str = expiry.strftime("%b").upper()
     year_str  = expiry.strftime("%y")
     return f"NSE:{nse_code}{year_str}{month_str}FUT"
@@ -217,4 +226,86 @@ def fyers_quote(symbol: str):
         "is_live":      is_live,
         "as_of":        as_of,
         "fetched_at":   _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"),
+    }
+
+
+@router.get("/oi/stock_full/{symbol}")
+def fyers_oi_stock_full(symbol: str):
+    """cc#482 item 4: on-demand FULL stock option chain OI — NOT scheduled, callable when
+    the ATM-only 5-min poll (worker) isn't enough. Fetches the live Fyers NSE_FO master to
+    get the ACTUAL listed strikes for the current expiry (never guessed/synthesized), then
+    depth-polls each via the shared main-app token (same fyers_tokens row the worker mints
+    daily — no worker call needed). Rate-limit safe (paced, capped at
+    FULL_CHAIN_MAX_STRIKES combined CE+PE) since this is an ad hoc tool, not a scheduled job."""
+    symbol = symbol.upper().strip()
+    token = _get_token()
+    expiry = _current_expiry()
+
+    try:
+        r = requests.get(OPTION_MASTER_URL, timeout=30)
+        r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(502, f"NSE_FO master fetch failed: {e}")
+
+    strikes = {"CE": [], "PE": []}
+    prefix = f"NSE:{symbol}"
+    for line in r.text.splitlines():
+        parts = line.split(",")
+        if len(parts) < 17:
+            continue
+        ticker = parts[9].strip()
+        if not ticker.startswith(prefix):
+            continue
+        otype = parts[16].strip().upper()
+        if otype not in ("CE", "PE"):
+            continue
+        try:
+            exp = datetime.fromtimestamp(int(float(parts[8]))).date()
+            if exp != expiry:
+                continue
+            strikes[otype].append((float(parts[15]), ticker))
+        except Exception:
+            continue
+
+    if not strikes["CE"] and not strikes["PE"]:
+        raise HTTPException(404, f"No listed option chain found for {symbol} expiry {expiry} "
+                                  "(check the NSE code and that it has listed F&O options)")
+
+    ladder = sorted(strikes["CE"]) + sorted(strikes["PE"])
+    truncated = len(ladder) > FULL_CHAIN_MAX_STRIKES
+    if truncated:
+        ladder = sorted(strikes["CE"], key=lambda x: x[0])[:FULL_CHAIN_MAX_STRIKES // 2] \
+               + sorted(strikes["PE"], key=lambda x: x[0])[:FULL_CHAIN_MAX_STRIKES // 2]
+
+    headers = {"Authorization": f"{FYERS_CLIENT_ID}:{token}"}
+    out, errors = [], 0
+    for strike, ticker in ladder:
+        otype = "CE" if ticker in [t for _, t in strikes["CE"]] else "PE"
+        try:
+            dr = requests.get(DEPTH_URL, params={"symbol": ticker, "ohlcv_flag": 1},
+                               headers=headers, timeout=8)
+            body = (dr.text or "").strip()
+            if not body:
+                out.append({"symbol": ticker, "strike": strike, "type": otype, "error": "empty response"})
+                errors += 1
+            else:
+                dd = dr.json()
+                node = {}
+                data_d = dd.get("d")
+                if isinstance(data_d, dict):
+                    node = data_d.get(ticker) or (next(iter(data_d.values())) if data_d else {})
+                elif isinstance(data_d, list) and data_d and isinstance(data_d[0], dict):
+                    node = data_d[0].get("v", data_d[0])
+                out.append({"symbol": ticker, "strike": strike, "type": otype,
+                            "oi": node.get("oi"), "ltp": node.get("lp") or node.get("ltp"),
+                            "bid": node.get("bid"), "ask": node.get("ask")})
+        except Exception as e:
+            out.append({"symbol": ticker, "strike": strike, "type": otype, "error": str(e)[:120]})
+            errors += 1
+        time.sleep(FULL_CHAIN_CALL_SPACING_SEC)
+
+    return {
+        "symbol": symbol, "expiry": str(expiry), "requested_strikes": len(ladder),
+        "truncated": truncated, "errors": errors, "chain": out,
+        "fetched_at": _ist_now().strftime("%Y-%m-%d %H:%M:%S IST"),
     }
