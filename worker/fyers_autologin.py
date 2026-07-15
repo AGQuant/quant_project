@@ -179,15 +179,31 @@ def save_token(conn, access, refresh):
     conn.commit()
 
 
+def _ensure_live_conn(conn):
+    """cc#486 item B: the relogin path (breaker check/stamp + save_token) must never
+    depend on a caller-supplied conn that may itself be dead/stale at the moment of
+    failure (confirmed 15-Jul: the housekeeping loop's long-lived conn went stale and
+    every write it tried -- including relogin/ops_log -- failed with "connection
+    already closed", so self-heal could not even record its own attempt). Reuse the
+    given conn if it's alive; otherwise open a fresh private connection so the login
+    attempt is never blocked by state elsewhere in the process."""
+    if conn is not None:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return conn, False
+        except Exception as e:
+            log.warning(f"auto_login: caller conn is dead ({e}) — opening a fresh private connection")
+    return psycopg2.connect(DATABASE_URL), True
+
+
 def auto_login(conn=None):
     """Full headless login -> store token -> return access token.
 
     Circuit-breaker protected: refuses to attempt if another attempt happened
     within ATTEMPT_COOLDOWN seconds (prevents account block from restart loops).
     """
-    own = conn is None
-    if own:
-        conn = psycopg2.connect(DATABASE_URL)
+    conn, own = _ensure_live_conn(conn)
     try:
         _ensure_attempt_col(conn)
         if _too_soon(conn):

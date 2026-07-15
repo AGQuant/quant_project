@@ -382,6 +382,46 @@ def _token_is_live(token):
         log.warning(f"Token liveness check failed: {e}")
         return False
 
+ATTEMPT_COOLDOWN_WAIT = 90   # cc#486: matches fyers_autologin.ATTEMPT_COOLDOWN
+
+
+def _boot_relogin_with_breaker(conn, reason, max_wait_secs=150):
+    """cc#486 items D+F: breaker-SAFE relogin for the BOOT path (get_valid_token,
+    _boot_auth_selfcheck). Both call sites used to call fyers_autologin.auto_login()
+    directly and only caught `except Exception` -- but auto_login raises SystemExit
+    on a cooldown-skip, and SystemExit is a BaseException, NOT an Exception, so it
+    propagated uncaught, crashed the process, and Railway's near-instant restart
+    landed right back inside the SAME 90s cooldown window a previous crash's attempt
+    had started (the confirmed 15-Jul livelock: outer loop -> re-auth -> blocked ->
+    crash -> restart, repeating every ~1.1s for 8+ minutes, never letting the cooldown
+    actually elapse). This wrapper uses try_relogin (never raises SystemExit) and, on
+    a cooldown-skip, actually SLEEPS out the remaining window instead of crashing --
+    bounded by a hard circuit breaker (item F): if a clean success isn't reached
+    within max_wait_secs, stop retrying and raise loudly instead of spinning silently."""
+    import fyers_autologin
+    waited = 0
+    while True:
+        res = fyers_autologin.try_relogin(conn)
+        if res.get('ok'):
+            return res['token']
+        if not res.get('skipped'):
+            raise Exception(f"relogin failed ({reason}): {res.get('error')}")
+        if waited >= max_wait_secs:
+            log.critical(f"BOOT RELOGIN CIRCUIT BREAKER TRIPPED ({reason}) — "
+                         f"{waited}s of cooldown-skips without a clean login, giving up")
+            try:
+                _ops_log(conn, 'alert', 'feed_token_dead',
+                         {'stage': 'boot_circuit_breaker', 'reason': reason,
+                          'waited_s': waited, 'ist': _ist_now_str()})
+            except Exception:
+                pass
+            raise Exception(f"boot relogin circuit breaker tripped after {waited}s ({reason})")
+        log.warning(f"Boot relogin ({reason}) skipped by 90s account-block cooldown — "
+                     f"waiting it out ({waited}s/{max_wait_secs}s)...")
+        time.sleep(ATTEMPT_COOLDOWN_WAIT)
+        waited += ATTEMPT_COOLDOWN_WAIT
+
+
 def get_valid_token(conn, auth_code=None):
     if auth_code:
         try:
@@ -403,9 +443,8 @@ def get_valid_token(conn, auth_code=None):
             log.warning(f"Stored token from {access_created.date()} — re-authing")
 
     try:
-        import fyers_autologin
         log.info("Running TOTP auto-login (headless)...")
-        token = fyers_autologin.auto_login(conn)
+        token = _boot_relogin_with_breaker(conn, "get_valid_token")
         log.info("TOTP auto-login SUCCESS — fresh token stored")
         return token
     except Exception as e:
@@ -455,8 +494,18 @@ def _boot_auth_selfcheck(conn, token):
     """cc#339 fix_2: BEFORE subscribing, prove the token can actually fetch a REST quote. On failure:
     CRITICAL log + ops_log(feed_token_dead) alert, retry auto-login ONCE, and if still dead exit(1)
     so Railway's restart-loop + the alert make it LOUD instead of silent warning spam. Returns the
-    (possibly refreshed) valid token."""
+    (possibly refreshed) valid token.
+
+    cc#486 item E: a token that just SUCCEEDED auto-login (get_valid_token, moments earlier) was
+    observed failing this very first self-test call on 15-Jul -- a token-propagation race at Fyers'
+    edge, not an actually-dead token. One short-grace re-check of the SAME token (no relogin) before
+    escalating avoids kicking off an unnecessary second relogin cascade for a token that was fine."""
     ok, detail = _rest_quote_ok(token)
+    if not ok:
+        log.warning(f"Boot self-test failed on first try (detail={detail}) — grace retry in 3s "
+                    "(cc#486: guards against a fresh-token propagation race)...")
+        time.sleep(3)
+        ok, detail = _rest_quote_ok(token)
     if ok:
         log.info("BOOT AUTH OK — REST quote self-test passed (NSE:SBIN-EQ)")
         _ops_log(conn, 'info', 'feed_boot_ok',
@@ -467,8 +516,7 @@ def _boot_auth_selfcheck(conn, token):
     _ops_log(conn, 'alert', 'feed_token_dead',
              {'selftest': 'NSE:SBIN-EQ', 'stage': 'boot', 'detail': str(detail)[:180], 'ist': _ist_now_str()})
     try:
-        import fyers_autologin
-        token = fyers_autologin.auto_login(conn)
+        token = _boot_relogin_with_breaker(conn, "boot_selfcheck")
         log.info("Auto-login retry SUCCESS — re-testing REST quote...")
     except Exception as e:
         log.critical(f"Auto-login retry FAILED ({e}) — exit(1) for a loud Railway restart")

@@ -382,7 +382,20 @@ def _premarket_writer_check():
         return
     try:
         age = _tick_age_minutes()
-        if age is None or age > 60:
+        stale = age is None or age > 60
+        # cc#486 item 3: unconditional heartbeat. Previously ONLY the stale branch wrote
+        # anything (via _log_alert) -- on a healthy day this function ran and did nothing
+        # observable, so an empty log on 14-Jul/15-Jul was indistinguishable from the job
+        # never firing at all. Log every trading day, stale or not, so firing is provable.
+        try:
+            with _conn() as hconn, hconn.cursor() as cur:
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'info', 'premarket_check_9_10', %s)""",
+                            (Json({"age_min": age, "stale": stale, "ist": _ist_now().isoformat()}),))
+                hconn.commit()
+        except Exception as e:
+            log.error(f"_premarket_writer_check heartbeat log failed: {e}")
+        if stale:
             _log_alert("scheduler_stall_9am",
                        f"09:10 pre-market: v8_metrics stale "
                        f"{f'{age:.0f}min' if age is not None else 'absent'} — forcing live-writer restart before open")
