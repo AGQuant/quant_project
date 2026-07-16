@@ -1248,6 +1248,74 @@ def _bg_earnings_refresh():
                    f"06:15 earnings_calendar refresh raised (prior data kept): {e}")
         log.error(f"earnings_refresh: {e}")
 
+def _bg_feed_daily_log():
+    """cc#495 change_4: daily 16:15 IST post-close feed summary — ONE ops_log entry
+    (category=feed_log, title=daily_summary) rolling up the day's feed health so the
+    founder can review next-day or weekly instead of grepping Railway logs. Pulls from
+    ops_log entries the worker writes live (feed_ws_connect/close, feed_watchdog_*,
+    feed_invalid_symbol_dropped, feed_health_floor_breach, oi_poll_summary — all added
+    or already present as of cc#489/cc#495) plus a direct intraday_prices summary for
+    last-bar-ts and a rough gap count (75 = expected 5-min buckets in 09:15-15:30)."""
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT title, COUNT(*) FROM ops_log
+                           WHERE session_date=CURRENT_DATE
+                             AND title IN ('feed_ws_connect','feed_ws_close',
+                                           'feed_watchdog_reconnect','feed_watchdog_exit')
+                           GROUP BY title""")
+            counts = {row[0]: row[1] for row in cur.fetchall()}
+
+            cur.execute("""SELECT session_ts, details FROM ops_log
+                           WHERE session_date=CURRENT_DATE AND title='feed_invalid_symbol_dropped'
+                           ORDER BY session_ts""")
+            dropped = [{"ts": str(r[0]), "detail": r[1]} for r in cur.fetchall()]
+
+            cur.execute("""SELECT session_ts, details FROM ops_log
+                           WHERE session_date=CURRENT_DATE AND title='feed_health_floor_breach'
+                           ORDER BY session_ts""")
+            floor_breaches = [{"ts": str(r[0]), "detail": r[1]} for r in cur.fetchall()]
+
+            cur.execute("""SELECT details->>'label' AS label,
+                                  ROUND(AVG((details->>'rate')::numeric), 3) AS avg_rate,
+                                  COUNT(*) AS polls
+                           FROM ops_log
+                           WHERE session_date=CURRENT_DATE AND title='oi_poll_summary'
+                             AND details->>'rate' IS NOT NULL
+                           GROUP BY details->>'label'""")
+            oi_rates = {row[0]: {"avg_rate": float(row[1]), "polls": row[2]} for row in cur.fetchall()}
+
+            cur.execute("""SELECT source, MAX(ts) AS last_bar, COUNT(DISTINCT ts) AS buckets
+                           FROM intraday_prices
+                           WHERE ts::date=CURRENT_DATE AND source IN ('fyers_eq','fyers_fut')
+                           GROUP BY source""")
+            EXPECTED_BUCKETS = 75   # 09:15-15:30 IST in 5-min steps
+            bars = {}
+            for source, last_bar, buckets in cur.fetchall():
+                bars[source] = {"last_bar_ts": str(last_bar), "buckets": buckets,
+                                 "gaps": max(0, EXPECTED_BUCKETS - buckets)}
+
+        summary = {
+            "date": str(_ist_now().date()),
+            "ws_connects": counts.get("feed_ws_connect", 0),
+            "ws_closes": counts.get("feed_ws_close", 0),
+            "watchdog_rung1_reconnects": counts.get("feed_watchdog_reconnect", 0),
+            "watchdog_rung2_exits": counts.get("feed_watchdog_exit", 0),
+            "symbols_dropped_blacklisted": dropped,
+            "health_floor_breaches": floor_breaches,
+            "oi_poll_rates": oi_rates,
+            "bars_by_source": bars,
+        }
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                           VALUES (CURRENT_DATE, NOW(), 'feed_log', 'daily_summary', %s)""",
+                        (Json(summary),))
+            conn.commit()
+        log.info(f"feed_daily_log: {summary['ws_connects']} connects, "
+                 f"{summary['watchdog_rung1_reconnects']} reconnects, "
+                 f"{len(dropped)} dropped, {len(floor_breaches)} floor breaches")
+    except Exception as e:
+        log.error(f"feed_daily_log failed: {e}")
+
 def _bg_open_bars_alarm():
     """cc#229: 09:25 IST trading-day feed-silence alarm. If almost no intraday bars landed
     since 09:15, the live feed is silent at open (cold-boot zombie / dead worker) — fire a
@@ -1685,6 +1753,8 @@ async def _scheduler_loop():
             _spawn(_bg_stock_news_watchdog)      # cc#245: stock-news staleness/all-blocked alert
         if now.weekday() < 5 and h == 16 and m == 10:
             _spawn(_bg_v21_killswitch)           # cc#158: V2.1 filter kill-switch check
+        if h == 16 and m == 15:
+            _spawn(_bg_feed_daily_log)           # cc#495 change_4: daily feed health summary (every day, worker runs weekends too)
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
         # window collided with CC deploy pushes — a Railway redeploy kills the
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
