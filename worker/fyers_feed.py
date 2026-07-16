@@ -151,6 +151,7 @@ OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 HEARTBEAT_STALE_MINS    = 10   # window for "wrote a live bar recently"
 HEALTH_LOG_MINS         = 5    # cc#489: also the watchdog's single check interval
 WATCHDOG_MIN_SYMBOLS    = 100  # cc#489 WATCHDOG_SIMPLIFICATION: per-source floor (out of ~210 each)
+HEALTH_FLOOR_TICKING    = 200  # cc#495 change_3: combined (eq+fut) post-connect health floor
 TOTAL_FUTURES           = 212  # denominator for the N/212 health log
 CMP_STALE_GUARD_SECS    = 90   # cc_task #112: only (re)write a cmp_prices row when its tick is
                                # newer than the last flush — no fresh tick => no timestamp update
@@ -1519,15 +1520,20 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
                 log.warning(f"poll_options_oi ({label}) {fsym}: {e}")
             time.sleep(OI_CALL_SPACING_SEC)
         log.info(f"Option OI poll ({label}, depth API): {got}/{len(opt_syms)} option OI updated")
-        if empty_fails:
-            try:
-                hc = get_db()
+        try:
+            # cc#495 change_4: was failure-only — the daily feed log needs a real
+            # success RATE (got/total), not just a count of empty responses.
+            hc = get_db()
+            _ops_log(hc, 'info', 'oi_poll_summary',
+                      {'label': label, 'got': got, 'total': len(opt_syms),
+                       'rate': round(got / len(opt_syms), 3) if opt_syms else None, 'ist': _ist_now_str()})
+            if empty_fails:
                 _ops_log(hc, 'data_audit', 'oi_poll_empty_response',
                           {'label': label, 'failed': len(empty_fails), 'total': len(opt_syms),
                            'sample': empty_fails[:15], 'ist': _ist_now_str()})
-                hc.close()
-            except Exception as _oe:
-                log.warning(f"poll_options_oi ({label}) failed to log empty-response warning: {_oe}")
+            hc.close()
+        except Exception as _oe:
+            log.warning(f"poll_options_oi ({label}) failed to log summary: {_oe}")
     finally:
         lock.release()
 
@@ -1894,22 +1900,77 @@ def run(auth_code=None):
         # re-subscribes the live options too instead of dropping them).
         sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
         log.info(f"WS connected — subscribing {len(sub_list)} symbols ({len(option_syms)} options)")
+        # cc#495 change_4: WS connect/close events weren't in ops_log at all before this —
+        # the daily feed log needs a real disconnect/reconnect count to summarize.
+        _log_feed_incident("feed_ws_connect", f"subscribing {len(sub_list)} symbols")
         _batched_subscribe(fyers_ws, sub_list, action='sub', label='initial')
         threading.Thread(target=_verify_subscribe_survivors, args=('connect',), daemon=True).start()
         fyers_ws.keep_running()
 
+    def _blacklist_symbol(fsym, reason):
+        """cc#495 change_2/1_amended: persist the drop to futures_universe.is_active so
+        it's excluded from EVERY future boot too (equity_fyers_syms/futures_fyers_syms
+        both derive from get_universe()/get_index_futures_universe(), both WHERE
+        is_active=TRUE — this is the same mechanism already used for SAMMAANCAP by
+        Claude web after the 16-Jul incident). Uses its OWN short-lived connection —
+        on_error runs on the WS client's callback thread, never the shared worker conn
+        (same lesson as cc#489's auto_login fix: never touch a conn from another
+        thread's context)."""
+        nse_code = from_fyers_symbol(fsym)
+        try:
+            bconn = get_db()
+            with bconn.cursor() as cur:
+                cur.execute("ALTER TABLE futures_universe ADD COLUMN IF NOT EXISTS blacklist_reason TEXT")
+                cur.execute("""UPDATE futures_universe SET is_active=false, blacklist_reason=%s
+                               WHERE symbol=%s""", (reason, nse_code))
+            bconn.commit()
+            bconn.close()
+        except Exception as e:
+            log.warning(f"_blacklist_symbol({fsym}): persist failed (in-memory drop still applied): {e}")
+        return nse_code
+
     def on_error(msg):
         log.error(f"WS error: {msg}")
-        # cc#489 step_6: invalid-symbol subscribe errors (code -300) were already
-        # non-fatal (this handler doesn't crash the process) but invisible outside
-        # Railway logs. Surface them to ops_log so a bad symbol in futures_universe
-        # (e.g. a corporate-action rename mismatch) is diagnosable without log access.
+        # cc#489 step_6 + cc#495 change_1/1_amended: on a -300 invalid-symbol
+        # rejection, Fyers appears to reject the WHOLE subscribe batch the bad
+        # symbol was in, not just that one symbol (16-Jul: SAMMAANCAP26JULFUT alone
+        # killed the entire futures leg). Drop the invalid symbol(s) from every
+        # in-process tracking structure, persist the drop (blacklist, never
+        # resubscribed again on any future boot), then immediately re-subscribe the
+        # corrected universe so nothing else in that batch stays silently dropped.
         try:
-            if isinstance(msg, dict) and msg.get('code') == -300:
-                _log_feed_incident("feed_invalid_symbol", str(msg)[:300])
-        except Exception:
-            pass
-    def on_close(msg):  log.warning(f"WS closed: {msg}")
+            if not (isinstance(msg, dict) and msg.get('code') == -300):
+                return
+            invalid = msg.get('invalid_symbols') or []
+            if not invalid:
+                return
+            dropped = []
+            for fsym in invalid:
+                if fsym in equity_set:
+                    equity_set.discard(fsym)
+                    if fsym in equity_fyers_syms: equity_fyers_syms.remove(fsym)
+                elif fsym in futures_set:
+                    futures_set.discard(fsym)
+                    if fsym in futures_fyers_syms: futures_fyers_syms.remove(fsym)
+                elif fsym in option_syms:
+                    option_syms.remove(fsym)   # options: in-memory drop only, no persistent table
+                else:
+                    log.warning(f"invalid_symbol {fsym} not found in any active tracking set (already dropped?)")
+                    continue
+                nse_code = _blacklist_symbol(fsym, f"WS -300 invalid_symbols: {msg}"[:200])
+                dropped.append(nse_code)
+                log.warning(f"WS -300: dropped+blacklisted {fsym} (nse_code={nse_code})")
+            if dropped:
+                _log_feed_incident("feed_invalid_symbol_dropped",
+                                   {"dropped": dropped, "raw": str(msg)[:300]})
+                sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
+                log.info(f"WS -300 recovery: re-subscribing corrected universe ({len(sub_list)} symbols)")
+                _batched_subscribe(fyers_ws, sub_list, action='sub', label='invalid_symbol_recovery')
+        except Exception as e:
+            log.warning(f"on_error invalid-symbol handling failed: {e}")
+    def on_close(msg):
+        log.warning(f"WS closed: {msg}")
+        _log_feed_incident("feed_ws_close", str(msg)[:200])   # cc#495 change_4
 
     fyers_ws = data_ws.FyersDataSocket(
         access_token=access, log_path="",
@@ -1992,7 +2053,17 @@ def run(auth_code=None):
         on a trading day — same gate pattern as the ADR fix. A (re)subscribe
         off-hours (e.g. an evening reconnect) naturally shows ~0 ticking because
         the feed is idle; that is NOT an incident, so it must not fire a
-        0/212 alert. Off-hours we log at info level only."""
+        0/212 alert. Off-hours we log at info level only.
+
+        cc#495 change_3: this was observation-only (log, never act) — the 16-Jul
+        incident's futures leg sat dead from 11:15 to EOD with nothing but a quiet
+        ops_log line. Post-connect now ALSO enforces the >200-active-ticking health
+        floor: at/below it during market hours, ERROR log + force a reconnect (the
+        same mechanism the periodic watchdog uses). Deliberately does NOT touch
+        watchdog_rung (that's single-writer from the housekeeping loop thread only —
+        this runs on its own daemon thread); the periodic watchdog's independent
+        5-min-interval rung1->rung2->exit(1) ladder is still the hard safety net if
+        this reconnect doesn't fix it."""
         time.sleep(120)
         try:
             recent = _recent_symbol_count(15)
@@ -2004,6 +2075,11 @@ def run(auth_code=None):
             else:
                 log.info(f"Post-{label} verification (off-hours — no alert): {msg}")
             log.info(f"Post-{label} verification: {recent}/{TOTAL_FUTURES} symbols ticking")
+            if in_market and 0 <= recent <= HEALTH_FLOOR_TICKING:
+                log.error(f"Post-{label} HEALTH FLOOR BREACH: {recent} <= {HEALTH_FLOOR_TICKING} "
+                          "active-ticking symbols — forcing reconnect")
+                _log_feed_incident("feed_health_floor_breach", f"{label}: {recent}/{TOTAL_FUTURES}")
+                _force_reconnect()
         except Exception as e:
             log.warning(f"post-{label} verify failed: {e}")
 
