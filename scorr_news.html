@@ -152,6 +152,7 @@
   .kb-toggle:disabled{opacity:.55;cursor:default}
 
   .msg{text-align:center;color:var(--mut);font-size:13px;padding:60px 20px}
+  .feed-end{text-align:center;color:var(--dim);font-size:12px;padding:24px 20px}
   .foot{font-size:10.5px;color:#b3bccd;text-align:center;margin-top:46px;line-height:1.8}
 
   @media(max-width:520px){
@@ -329,6 +330,9 @@ const CATS = [
 let curCat = "all";
 const SEARCH_TABS = ["domestic"];
 let articles = [];
+// cc#492: infinite scroll — 50 initial, 25/batch background pre-fetch, 500 cap per tab.
+const NEWS_INITIAL = 50, NEWS_BATCH = 25, NEWS_CAP = 500;
+let newsOffset = 0, newsHasMore = true, newsLoadingMore = false, newsCatTotal = Infinity;
 // cc_task #125: Knowledge Hub (Learn tab) — separate feed + lazy-loaded bodies
 let kbArticles = [];
 let kbTotal = 0;                 // cc#204: api.total — source of truth for count assertion + badge
@@ -452,6 +456,12 @@ function pick(cat){
   load();
 }
 
+function _newsCatLabel(cat){
+  // mirrors backend _CANON_CAT (news_endpoints.py) — used to read the right
+  // count out of category_counts for the cap/hasMore calc below.
+  return {ai_editorial:"AI Editorial", domestic:"Domestic", global:"Global", ipo:"IPO"}[cat];
+}
+
 async function load(){
   // cc_task #125: Learn tab uses its own Knowledge Hub feed, not /api/news/polished
   if(curCat === "learn"){ return loadKnowledge(); }
@@ -462,12 +472,15 @@ async function load(){
   const signal = _abortCtrl.signal;
   const activeCat = curCat; // capture at call time
 
+  // cc#492: fresh tab load resets the infinite-scroll pagination state
+  newsOffset = 0; newsHasMore = true; newsLoadingMore = false; newsCatTotal = Infinity;
+
   const btn = document.getElementById("refreshBtn");
   btn.disabled = true;
   document.getElementById("feed").innerHTML = '<div class="msg">Loading&hellip;</div>';
 
   try{
-    const r = await fetch(`${API}/api/news/polished?category=${activeCat}&limit=60`, { signal });
+    const r = await fetch(`${API}/api/news/polished?category=${activeCat}&limit=${NEWS_INITIAL}&offset=0`, { signal });
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
 
@@ -475,8 +488,11 @@ async function load(){
     if(curCat !== activeCat) return;
 
     articles = d.articles || [];
+    newsOffset = articles.length;
     const c = d.category_counts || {};
     const total = (c["AI Editorial"]||0)+(c["Domestic"]||0)+(c["Global"]||0)+(c["IPO"]||0);
+    newsCatTotal = activeCat === "all" ? total : (c[_newsCatLabel(activeCat)] || 0);
+    newsHasMore = articles.length < Math.min(newsCatTotal, NEWS_CAP) && articles.length >= NEWS_INITIAL;
     document.getElementById("meta").textContent =
       `${total} stories · AI Editorial ${c["AI Editorial"]||0} · Domestic ${c["Domestic"]||0} · Global ${c["Global"]||0} · IPO ${c["IPO"]||0}`;
     render();
@@ -489,6 +505,57 @@ async function load(){
     if(curCat === activeCat) btn.disabled = false;
   }
 }
+
+// cc#492: infinite scroll — background pre-fetch triggered when the user scrolls
+// within NEWS_SCROLL_THRESHOLD_PX of the bottom (~5-10 article cards' worth). The
+// newsLoadingMore flag is the debounce: it's set before the fetch starts and only
+// cleared in `finally`, so a fast scroll-to-bottom can never fire overlapping fetches
+// for the same batch — a second scroll event while one is in flight is a no-op.
+const NEWS_SCROLL_THRESHOLD_PX = 1800;
+
+async function loadMore(){
+  if(curCat === "learn" || curCat === "__force__") return;
+  if(newsLoadingMore || !newsHasMore) return;
+  if(articles.length >= NEWS_CAP) { newsHasMore = false; render(); return; }
+  newsLoadingMore = true;
+  const activeCat = curCat;
+  const batch = Math.min(NEWS_BATCH, NEWS_CAP - articles.length);
+  try{
+    const r = await fetch(`${API}/api/news/polished?category=${activeCat}&limit=${batch}&offset=${newsOffset}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    if(curCat !== activeCat) return; // tab switched mid-fetch — discard
+    const got = d.articles || [];
+    // cc#492: de-dupe by polished id — a reschedule/refresh landing between batches
+    // must never produce a duplicate card.
+    const seen = new Set(articles.map(a => a.id));
+    const fresh = got.filter(a => !seen.has(a.id));
+    articles = articles.concat(fresh);
+    newsOffset += got.length;
+    newsHasMore = got.length >= batch && articles.length < Math.min(newsCatTotal, NEWS_CAP);
+    render();
+  } catch(e){
+    // cc#492: a failed background pre-fetch is silent (no error state) — the user
+    // simply gets another chance to trigger it on the next scroll tick.
+  } finally{
+    newsLoadingMore = false;
+  }
+}
+
+function _onNewsScroll(){
+  if(curCat === "learn") return;
+  const scrollBottom = window.scrollY + window.innerHeight;
+  const pageHeight = document.documentElement.scrollHeight;
+  if(pageHeight - scrollBottom <= NEWS_SCROLL_THRESHOLD_PX){
+    loadMore();
+  }
+}
+let _newsScrollTicking = false;
+window.addEventListener("scroll", () => {
+  if(_newsScrollTicking) return;
+  _newsScrollTicking = true;
+  requestAnimationFrame(() => { _onNewsScroll(); _newsScrollTicking = false; });
+}, { passive: true });
 
 function manualRefresh(){
   // Force reload even if same tab
@@ -756,6 +823,11 @@ function render(){
     html = rows.map((a,i) => artFull(a, i===0)).join("");
   } else {
     html = rows.map(a => artCompact(a, false)).join("");
+  }
+  // cc#492: quiet end-of-list state once pagination is exhausted (cap or true end) —
+  // no error, just a soft footer note.
+  if(!newsHasMore){
+    html += `<div class="feed-end">You're all caught up${articles.length>=NEWS_CAP?` — showing the latest ${NEWS_CAP}`:''}.</div>`;
   }
   feed.innerHTML = html;
 }
