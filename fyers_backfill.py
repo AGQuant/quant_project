@@ -130,12 +130,15 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to,
         'range_to':    date_to.strftime('%Y-%m-%d'),
         'cont_flag':   cont_flag,
     }
+    last_status, last_body = None, None
     for attempt in range(HISTORY_RETRIES + 1):
         try:
             r = requests.get(HISTORY_URL, params=params, headers=hdr(token), timeout=10)
+            last_status = r.status_code
             d = r.json()
-        except Exception:
+        except Exception as e:
             d = {}
+            last_body = f"request_exception: {e}"
         candles = d.get('candles') if isinstance(d, dict) else None
         if candles:
             rows = []
@@ -143,8 +146,15 @@ def fetch_history(token, sym, resolution, timeframe, date_from, date_to,
                 ts = datetime.fromtimestamp(c[0], tz=IST).replace(tzinfo=None)
                 rows.append((sym, ts, c[1], c[2], c[3], c[4], int(c[5]), timeframe, source))
             return rows
+        if last_body is None:
+            last_body = str(d)[:300]
         if attempt < HISTORY_RETRIES:
             time.sleep(1 + attempt)
+    # cc#489 step_5: was a silent empty return — diagnosable now (was previously
+    # guessed at rather than confirmed; 15-Jul backfill wrote 0 bars for all ~210
+    # symbols with no visibility into why).
+    log.warning(f"fetch_history EMPTY: {sym} {params['symbol']} {params['range_from']}->"
+                f"{params['range_to']} status={last_status} body={last_body}")
     return []
 
 

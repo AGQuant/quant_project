@@ -184,25 +184,28 @@ def auto_login(conn=None):
 
     Circuit-breaker protected: refuses to attempt if another attempt happened
     within ATTEMPT_COOLDOWN seconds (prevents account block from restart loops).
-    """
-    own = conn is None
-    if own:
-        conn = psycopg2.connect(DATABASE_URL)
+
+    cc#489 fix_1 (16-Jul incident): ALWAYS opens its own short-lived connection
+    for the fyers_tokens writes (breaker stamp + token save) and closes ONLY
+    that one. The `conn` param is accepted for backward-compat call sites but
+    is never touched — this function must NEVER be able to close a
+    caller-supplied connection (root cause of the worker's global DB conn
+    dying right after boot auth on 16-Jul)."""
+    own_conn = psycopg2.connect(DATABASE_URL)
     try:
-        _ensure_attempt_col(conn)
-        if _too_soon(conn):
+        _ensure_attempt_col(own_conn)
+        if _too_soon(own_conn):
             raise SystemExit(
                 f"Auto-login SKIPPED — another attempt < {ATTEMPT_COOLDOWN}s ago "
                 "(account-block protection). Wait, then retry.")
-        _stamp_attempt(conn)   # record BEFORE trying, so a crash still counts
+        _stamp_attempt(own_conn)   # record BEFORE trying, so a crash still counts
         auth_code = get_auth_code()
         access, refresh = exchange_auth_code(auth_code)
-        save_token(conn, access, refresh)
+        save_token(own_conn, access, refresh)
         log.info("Auto-login OK - fresh token stored (valid for today)")
         return access
     finally:
-        if own:
-            conn.close()
+        own_conn.close()
 
 
 def try_relogin(conn):

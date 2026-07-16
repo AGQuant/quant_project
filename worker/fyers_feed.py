@@ -109,7 +109,12 @@ INDEX_LTP_SYMBOLS = {
     'SILVERBEES': 'NSE:SILVERBEES-EQ',
 }
 
-SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX'}
+SKIP_SYMBOLS    = {'NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'BANKEX',
+                    'NIFTY50'}  # cc#489 step_6: distinct row from 'NIFTY' in futures_universe —
+                    # was leaking into get_universe() and producing two invalid Fyers
+                    # subscriptions (NSE:NIFTY50-EQ has no equity listing; NSE:NIFTY5026JULFUT
+                    # is not a real contract — the futures root is 'NIFTY', already covered by
+                    # INDEX_FUTURES_UNIVERSE below).
 SPECIAL_SYMBOLS = {'M&M': 'NSE:M&M-EQ'}
 
 # ── Option chain config ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -144,17 +149,9 @@ OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 # did not auto-reconnect until ~11:25 — a 2h15m data gap that fed stale prices to
 # V8 paper, trade-check and the dashboard. These guard the live stream.
 HEARTBEAT_STALE_MINS    = 10   # window for "wrote a live bar recently"
-HEALTH_LOG_MINS         = 5    # log feed health every N min during market hours
-FEED_CRITICAL_SYMBOLS   = 100  # cc_task #85 PART_3: < this writing in 10 min → log.error CRITICAL
-WATCHDOG_MIN_SYMBOLS    = 50   # cc_task #85 PART_4: < this sustained → force WS reconnect
-WATCHDOG_STALE_MINS     = 15   # consecutive minutes below WATCHDOG_MIN_SYMBOLS before reconnect
+HEALTH_LOG_MINS         = 5    # cc#489: also the watchdog's single check interval
+WATCHDOG_MIN_SYMBOLS    = 100  # cc#489 WATCHDOG_SIMPLIFICATION: per-source floor (out of ~210 each)
 TOTAL_FUTURES           = 212  # denominator for the N/212 health log
-RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
-# cc_task #112: socket-reconnect-only is REJECTED. If N consecutive forced reconnects
-# fail to restore coverage, escalate to a HARD process restart (os.execv) so Railway
-# relaunches a clean worker that re-subscribes all 212 symbols from scratch. This is
-# the auto-restart that was the missing piece in the 4 prior recurrences.
-WATCHDOG_MAX_RECONNECTS = 2    # forced socket reconnects before escalating to hard restart
 CMP_STALE_GUARD_SECS    = 90   # cc_task #112: only (re)write a cmp_prices row when its tick is
                                # newer than the last flush — no fresh tick => no timestamp update
 CMP_SANITY_MAX_DEV      = 0.02 # cc#367: reject a cmp write that deviates >2% from the symbol's most
@@ -234,8 +231,13 @@ def last_tuesday(y, m):
 
 
 def current_expiry() -> date:
-    """Current active monthly expiry (last Tuesday). Rolls to next month after expiry."""
-    today = date.today()
+    """Current active monthly expiry (last Tuesday). Rolls to next month after expiry.
+
+    cc#489 step_5: date.today() uses the container's system clock (Railway = UTC),
+    not IST — during IST 00:00-05:29 (UTC 18:30-23:59 the prior day) this returns
+    the WRONG calendar date, which near a month boundary could resolve the wrong
+    monthly contract. Same naive-IST-vs-UTC bug class as the cmp_prices fixes above."""
+    today = datetime.now(IST).replace(tzinfo=None).date()
     exp = last_tuesday(today.year, today.month)
     if today > exp:
         if today.month == 12:
@@ -402,20 +404,26 @@ def get_valid_token(conn, auth_code=None):
         else:
             log.warning(f"Stored token from {access_created.date()} — re-authing")
 
-    try:
-        import fyers_autologin
-        log.info("Running TOTP auto-login (headless)...")
-        token = fyers_autologin.auto_login(conn)
+    # cc#489 fix_1 (round 2): try_relogin() swap-in, re-landed. fyers_autologin.auto_login()
+    # is now fixed (cc#489) to always use its OWN short-lived DB connection — it never
+    # touches this conn — so this call site can never kill the worker's global conn.
+    import fyers_autologin
+    log.info("Running TOTP auto-login (headless)...")
+    res = fyers_autologin.try_relogin(conn)
+    if res.get('skipped'):
+        log.warning("Auto-login SKIPPED (90s account-block cooldown) — sleeping 90s then retrying once...")
+        time.sleep(90)
+        res = fyers_autologin.try_relogin(conn)
+    if res.get('ok'):
         log.info("TOTP auto-login SUCCESS — fresh token stored")
-        return token
-    except Exception as e:
-        raise SystemExit(
-            f"\nAUTO-LOGIN FAILED ({e}).\n"
-            "Check env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
-            "Manual fallback:\n"
-            f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
-            "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
-            "  2. python fyers_feed.py --auth-code <code>\n")
+        return res['token']
+    raise SystemExit(
+        f"\nAUTO-LOGIN FAILED ({res.get('error')}).\n"
+        "Check env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
+        "Manual fallback:\n"
+        f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
+        "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
+        "  2. python fyers_feed.py --auth-code <code>\n")
 
 
 # ── universe ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -466,11 +474,18 @@ def _boot_auth_selfcheck(conn, token):
                  "Retrying auto-login ONCE...")
     _ops_log(conn, 'alert', 'feed_token_dead',
              {'selftest': 'NSE:SBIN-EQ', 'stage': 'boot', 'detail': str(detail)[:180], 'ist': _ist_now_str()})
-    try:
-        import fyers_autologin
-        token = fyers_autologin.auto_login(conn)
+    # cc#489 fix_1 (round 2, call site 2): try_relogin() swap-in, re-landed.
+    import fyers_autologin
+    res = fyers_autologin.try_relogin(conn)
+    if res.get('skipped'):
+        log.warning("Auto-login retry SKIPPED (90s account-block cooldown) — sleeping 90s then retrying once...")
+        time.sleep(90)
+        res = fyers_autologin.try_relogin(conn)
+    if res.get('ok'):
+        token = res['token']
         log.info("Auto-login retry SUCCESS — re-testing REST quote...")
-    except Exception as e:
+    else:
+        e = res.get('error')
         log.critical(f"Auto-login retry FAILED ({e}) — exit(1) for a loud Railway restart")
         _ops_log(conn, 'alert', 'feed_token_dead',
                  {'stage': 'relogin_exception', 'detail': str(e)[:180], 'ist': _ist_now_str()})
@@ -608,22 +623,29 @@ def _stock_options_config(conn):
 def _cmp_fresh_fraction(conn, opt_mgr, kind=None):
     """cc#189: fraction of option underlyings whose cmp_prices row was updated
     within the last OPT_FRESH_WINDOW_MIN minutes. Drives the 'subscribe options
-    ONLY when live prices are fresh' gate. cmp_prices.updated_at and NOW() are
-    both the DB clock, so the window is timezone-agnostic. cc#241: kind filters to
-    index-only / stock-only underlyings so the index gate is never blocked by stock
-    cmp freshness (and vice-versa)."""
+    ONLY when live prices are fresh' gate. cc#241: kind filters to index-only /
+    stock-only underlyings so the index gate is never blocked by stock cmp
+    freshness (and vice-versa).
+
+    cc#489 step_5: the old `updated_at >= NOW() - INTERVAL` claimed to be
+    "timezone-agnostic" because both sides are "the DB clock" — false whenever
+    the session timezone isn't IST (Railway Postgres defaults to UTC). updated_at
+    is stored naive-IST; Postgres casts that naive value as if it WERE the
+    session tz, making it look ~5.5h more recent than it really is, so a row
+    hours stale could still pass this gate. Compute the cutoff in Python using
+    the same naive-IST convention used everywhere else in this file instead."""
     if not opt_mgr._underlyings:
         opt_mgr._build_underlyings()
     syms = [u['cmp_sym'] for u in opt_mgr._underlyings if (kind is None or u.get('kind') == kind)]
     if not syms:
         return 0.0
     try:
+        cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=OPT_FRESH_WINDOW_MIN)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(DISTINCT symbol) FROM cmp_prices "
-                "WHERE symbol = ANY(%s) AND updated_at >= NOW() - INTERVAL '"
-                + str(int(OPT_FRESH_WINDOW_MIN)) + " minutes'",
-                (syms,))
+                "WHERE symbol = ANY(%s) AND updated_at >= %s",
+                (syms, cutoff))
             fresh = cur.fetchone()[0] or 0
     except Exception as e:
         log.warning(f"_cmp_fresh_fraction: {e}")
@@ -935,6 +957,7 @@ class BarAggregator:
         # RLock (re-entrant): flush_all holds it while _flush → _compute_basis
         # runs; a plain Lock here deadlocked the whole feed (v6.1 fix).
         self.lock     = threading.RLock()
+        self._db_reconnect_attempted = False  # cc#489 step_4: DB-write resilience
 
     def _bucket(self, ts):
         # 5-min bucket: round down to nearest 5-min boundary
@@ -990,8 +1013,31 @@ class BarAggregator:
                 """, (sym, bar['ts'], bar['o'], bar['h'], bar['l'], bar['c'],
                       int(bar['v']), source))
             self.conn.commit()
+            self._db_reconnect_attempted = False   # a clean write proves the conn is healthy
             if source == 'fyers_fut':
                 self._compute_basis(sym, bar['ts'], bar['c'], bar.get('oi'))
+        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+            # cc#489 step_4: a dead DB conn must never survive more than one flush
+            # cycle silently (16-Jul incident: this exact error was swallowed by a
+            # bare "except Exception: log.warning" forever). Reconnect ONCE; if the
+            # reconnect itself fails, or the NEXT flush hits this branch again
+            # (meaning the reconnected conn also died), exit(1) for a clean restart.
+            if self._db_reconnect_attempted:
+                log.critical(f"flush {sym} ({source}): DB conn still dead after reconnect "
+                             f"({e}) — exit(1) for a clean Railway restart")
+                sys.exit(1)
+            log.error(f"flush {sym} ({source}): DB conn error ({e}) — reconnecting once...")
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            try:
+                self.conn = psycopg2.connect(DATABASE_URL)
+                self._db_reconnect_attempted = True
+            except Exception as e2:
+                log.critical(f"flush {sym} ({source}): DB reconnect FAILED ({e2}) — "
+                             "exit(1) for a clean Railway restart")
+                sys.exit(1)
         except Exception as e:
             log.warning(f"flush {sym} ({source}): {e}")
 
@@ -1152,6 +1198,7 @@ class OptionBarStore:
         self.bars    = {}
         self.lock    = threading.RLock()
         self.last_oi = {}   # fyers_option_symbol -> latest OI from DEPTH poll (WS strips OI)
+        self._db_reconnect_attempted = False  # cc#489 step_4: DB-write resilience
 
     def _bucket(self, ts):
         # 5-min bucket
@@ -1202,6 +1249,25 @@ class OptionBarStore:
                 """, (fsym, underlying, strike, otype, expiry,
                       bar['ltp'], oi, bar['vol'], bar['bid'], bar['ask'], bar['bkt']))
             self.conn.commit()
+            self._db_reconnect_attempted = False
+        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+            # cc#489 step_4: same DB-write resilience as BarAggregator._flush.
+            if self._db_reconnect_attempted:
+                log.critical(f"option_bar flush {fsym}: DB conn still dead after reconnect "
+                             f"({e}) — exit(1) for a clean Railway restart")
+                sys.exit(1)
+            log.error(f"option_bar flush {fsym}: DB conn error ({e}) — reconnecting once...")
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            try:
+                self.conn = psycopg2.connect(DATABASE_URL)
+                self._db_reconnect_attempted = True
+            except Exception as e2:
+                log.critical(f"option_bar flush {fsym}: DB reconnect FAILED ({e2}) — "
+                             "exit(1) for a clean Railway restart")
+                sys.exit(1)
         except Exception as e:
             log.warning(f"option_bar flush {fsym}: {e}")
 
@@ -1506,9 +1572,17 @@ def _seed_cmp_from_rest(conn, token, equity_symbols):
     change the subscribe logic, so it cannot break the feed."""
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*), EXTRACT(EPOCH FROM (NOW() - MAX(updated_at)))/60 FROM cmp_prices")
-            n, age_min = cur.fetchone()
+            # cc#489 step_5: was `EXTRACT(EPOCH FROM (NOW() - MAX(updated_at)))/60` — NOW()
+            # is tz-aware (UTC-based session), but updated_at is stored naive-IST (the
+            # codebase convention: datetime.now(IST).replace(tzinfo=None)), so Postgres
+            # compared a UTC instant against a value ~5.5h off from what it actually meant
+            # -> negative/wrong ages ("cmp_prices fresh (222 rows, -279m old)" in the 16-Jul
+            # boot log). Compute age in Python using the same naive-IST convention instead.
+            cur.execute("SELECT COUNT(*), MAX(updated_at) FROM cmp_prices")
+            n, max_updated_at = cur.fetchone()
         n = n or 0
+        age_min = ((datetime.now(IST).replace(tzinfo=None) - max_updated_at).total_seconds() / 60
+                   if max_updated_at else None)
         if n > 0 and age_min is not None and age_min <= CMP_BOOT_STALE_MIN:
             log.info(f"boot cmp seed: cmp_prices fresh ({n} rows, {age_min:.0f}m old) — skip REST seed")
             return
@@ -1824,7 +1898,17 @@ def run(auth_code=None):
         threading.Thread(target=_verify_subscribe_survivors, args=('connect',), daemon=True).start()
         fyers_ws.keep_running()
 
-    def on_error(msg):  log.error(f"WS error: {msg}")
+    def on_error(msg):
+        log.error(f"WS error: {msg}")
+        # cc#489 step_6: invalid-symbol subscribe errors (code -300) were already
+        # non-fatal (this handler doesn't crash the process) but invisible outside
+        # Railway logs. Surface them to ops_log so a bad symbol in futures_universe
+        # (e.g. a corporate-action rename mismatch) is diagnosable without log access.
+        try:
+            if isinstance(msg, dict) and msg.get('code') == -300:
+                _log_feed_incident("feed_invalid_symbol", str(msg)[:300])
+        except Exception:
+            pass
     def on_close(msg):  log.warning(f"WS closed: {msg}")
 
     fyers_ws = data_ws.FyersDataSocket(
@@ -1835,22 +1919,33 @@ def run(auth_code=None):
     )
 
     # ── feed heartbeat helpers (cc_task #84) ──────────────────────────────────
-    def _recent_symbol_count(minutes=HEARTBEAT_STALE_MINS):
-        """Distinct symbols whose latest live 5-min bar bucket falls within the last
-        `minutes`. Read on the housekeeping thread's own conn (single-thread = safe).
-        Returns -1 on DB error so a failed read never triggers a false reconnect."""
+    def _recent_symbol_counts_by_source(minutes=HEARTBEAT_STALE_MINS):
+        """Per-source distinct symbol counts (eq, fut) whose latest live 5-min bar
+        bucket falls within the last `minutes`. Read on the housekeeping thread's
+        own conn (single-thread = safe). Returns {'fyers_eq': -1, 'fyers_fut': -1}
+        on DB error so a failed read never triggers a false watchdog action."""
         try:
             cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT COUNT(DISTINCT symbol) FROM intraday_prices
+                    SELECT source, COUNT(DISTINCT symbol) FROM intraday_prices
                     WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
                       AND ts >= %s
+                    GROUP BY source
                 """, (cutoff,))
-                return cur.fetchone()[0] or 0
+                counts = {'fyers_eq': 0, 'fyers_fut': 0}
+                counts.update({row[0]: row[1] for row in cur.fetchall()})
+                return counts
         except Exception as e:
-            log.warning(f"_recent_symbol_count: {e}")
-            return -1
+            log.warning(f"_recent_symbol_counts_by_source: {e}")
+            return {'fyers_eq': -1, 'fyers_fut': -1}
+
+    def _recent_symbol_count(minutes=HEARTBEAT_STALE_MINS):
+        """Combined total (eq+fut), used only for the post-subscribe verification
+        log line below — the watchdog itself uses per-source counts."""
+        counts = _recent_symbol_counts_by_source(minutes)
+        eq, fut = counts.get('fyers_eq', -1), counts.get('fyers_fut', -1)
+        return -1 if (eq < 0 or fut < 0) else eq + fut
 
     def _heal_gap_bg():
         """change_2: REST-backfill each symbol from its newest stored bar -> now, on a
@@ -1974,9 +2069,7 @@ def run(auth_code=None):
         last_oi_poll    = None
         last_cmp_flush  = None
         last_health_log = None        # cc_task #84
-        last_reconnect  = None        # cc_task #84
-        watchdog_stale_since = None   # cc_task #85: when coverage first dropped below WATCHDOG_MIN_SYMBOLS
-        reconnect_attempts   = 0      # cc_task #112: forced reconnects since coverage last healthy
+        watchdog_rung   = 0           # cc#489: 0=healthy, 1=reconnect already tried this failure episode
         opt_subscribed       = False  # cc#189: INDEX options subscribed once live prices went fresh
         opt_stock_subscribed = False  # cc#241: STOCK options subscribed once >=09:25 + cmp fresh
         opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
@@ -2173,57 +2266,36 @@ def run(auth_code=None):
                         log.warning(f"ATM drift check failed: {e}")
                     last_atm_check = now_dt
 
-                # ── feed health + watchdog (cc_task #84 + #85) ────────────────
-                # PART_3: every HEALTH_LOG_MINS log how many symbols are writing;
-                #   < FEED_CRITICAL_SYMBOLS → log.error (visible in Railway logs).
-                # PART_4: if < WATCHDOG_MIN_SYMBOLS for WATCHDOG_STALE_MINS straight,
-                #   force a full WS reconnect (close_connection → SDK reconnect) + REST
-                #   gap-heal. Suppressed for STARTUP_GRACE_MINS after 09:15 so first
-                #   bars can form.
+                # ── feed watchdog (cc#489 WATCHDOG_SIMPLIFICATION, ARPIT DIRECTIVE) ──
+                # ONE linear model, every HEALTH_LOG_MINS: check per-source counts ->
+                # if either < WATCHDOG_MIN_SYMBOLS, reconnect once -> if still bad on
+                # the NEXT check, sys.exit(1) and let Railway restart clean. No other
+                # recovery paths. Suppressed for STARTUP_GRACE_MINS after 09:15 so the
+                # first bar cycle has time to form.
                 mins_open = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
-                if mins_open >= STARTUP_GRACE_MINS:
-                    recent = _recent_symbol_count(HEARTBEAT_STALE_MINS)
-                    if (last_health_log is None or
-                            (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60):
-                        if 0 <= recent < FEED_CRITICAL_SYMBOLS:
-                            log.error(f"FEED CRITICAL: only {recent}/{TOTAL_FUTURES} symbols writing bars")
-                        else:
-                            log.info(f"Feed health: {recent} symbols wrote a 5m bar in last {HEARTBEAT_STALE_MINS} min")
-                        last_health_log = now_dt
-                    # PART_4 watchdog: sustained low coverage -> force reconnect + heal
-                    if 0 <= recent < WATCHDOG_MIN_SYMBOLS:
-                        if watchdog_stale_since is None:
-                            watchdog_stale_since = now_dt
-                        stale_mins = (now_dt - watchdog_stale_since).total_seconds() / 60
-                        if (stale_mins >= WATCHDOG_STALE_MINS and
-                                (last_reconnect is None or
-                                 (now_dt - last_reconnect).total_seconds() >= RECONNECT_COOLDOWN_MINS * 60)):
-                            # cc_task #112: escalate. The first WATCHDOG_MAX_RECONNECTS actions
-                            # try a socket reconnect; if coverage is STILL dead after that, a
-                            # reconnect clearly isn't fixing it (4 prior recurrences) -> hard
-                            # restart the whole process for a guaranteed clean re-subscribe.
-                            if reconnect_attempts >= WATCHDOG_MAX_RECONNECTS:
-                                _hard_restart(
-                                    f"{recent}/{TOTAL_FUTURES} symbols writing after "
-                                    f"{reconnect_attempts} reconnects, {stale_mins:.0f}min gap")
-                                # process is being replaced; nothing below runs
-                            log.error(f"FEED WATCHDOG: forcing reconnect after {stale_mins:.0f}min gap "
-                                      f"(<{WATCHDOG_MIN_SYMBOLS} symbols writing, "
-                                      f"attempt {reconnect_attempts + 1}/{WATCHDOG_MAX_RECONNECTS})")
-                            _force_reconnect()
-                            _log_feed_incident("feed_watchdog_reconnect",
-                                               f"{recent}/{TOTAL_FUTURES} writing; {stale_mins:.0f}min gap")
-                            reconnect_attempts += 1
-                            # cc_task #87: heal_gap must NEVER run during market hours
-                            # (09:15-15:30 IST). The force-reconnect restores the live WS
-                            # feed immediately; the outage gap is backfilled by the 18:00
-                            # IST daily heal_gap (REST writes are post-market only).
-                            log.info("Watchdog: live feed reconnect issued; gap-heal deferred to 18:00 IST")
-                            last_reconnect = now_dt
-                            watchdog_stale_since = now_dt   # restart the window after acting
+                if mins_open >= STARTUP_GRACE_MINS and (
+                        last_health_log is None or
+                        (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60):
+                    last_health_log = now_dt
+                    src_counts = _recent_symbol_counts_by_source(HEARTBEAT_STALE_MINS)
+                    eq, fut = src_counts.get('fyers_eq', -1), src_counts.get('fyers_fut', -1)
+                    if eq < 0 or fut < 0:
+                        log.warning("Watchdog check skipped — DB read failed (no false action on a bad read)")
                     else:
-                        watchdog_stale_since = None         # recovered -> reset the timer
-                        reconnect_attempts   = 0            # cc_task #112: clear escalation counter
+                        healthy = eq >= WATCHDOG_MIN_SYMBOLS and fut >= WATCHDOG_MIN_SYMBOLS
+                        log.info(f"Feed health: eq={eq} fut={fut} (floor={WATCHDOG_MIN_SYMBOLS} each)")
+                        if healthy:
+                            watchdog_rung = 0
+                        elif watchdog_rung == 0:
+                            log.error(f"FEED WATCHDOG rung 1: eq={eq} fut={fut} below floor — forcing reconnect")
+                            _force_reconnect()
+                            _log_feed_incident("feed_watchdog_reconnect", f"eq={eq} fut={fut}")
+                            watchdog_rung = 1
+                        else:
+                            log.critical(f"FEED WATCHDOG rung 2: eq={eq} fut={fut} still below floor "
+                                         "after reconnect — exiting for a clean Railway restart")
+                            _log_feed_incident("feed_watchdog_exit", f"eq={eq} fut={fut}")
+                            sys.exit(1)
 
             # Monthly roll — once per day
             if last_roll_check != today:
