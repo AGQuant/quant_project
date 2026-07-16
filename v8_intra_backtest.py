@@ -206,10 +206,45 @@ def load_all(conn):
     return bars, met, pivots
 
 
+# ── pre-indexing (build once, reuse across every sweep simulation) ────────
+
+def build_bar_index(bars: pd.DataFrame) -> dict:
+    """
+    Pre-group intraday bars by symbol into plain tuples.
+    simulate_basket() used to re-filter the full bars frame per symbol
+    (`all_bars[all_bars['symbol']==sym]`) on every single call — this runs
+    once per dataset instead of once per sweep simulation (~80x for a full
+    optimizer run).
+    """
+    idx = {}
+    for sym, g in bars.sort_values(['symbol', 'ts']).groupby('symbol', sort=False):
+        idx[sym] = [
+            (ts, d, _mins(ts), float(o), float(h), float(l), float(c))
+            for ts, d, o, h, l, c in zip(
+                g['ts'], g['date'], g['open'], g['high'], g['low'], g['close'])
+        ]
+    return idx
+
+
+def build_met_index(met: pd.DataFrame) -> dict:
+    """
+    (symbol, score_date) -> row dict. Built once via itertuples (row.iterrows()
+    was rebuilt from scratch inside simulate_basket on every sweep call, and
+    iterrows() is far slower than itertuples() since it materializes a Series
+    per row).
+    """
+    cols = met.columns.tolist()
+    idx = {}
+    for tup in met.itertuples(index=False, name=None):
+        row = dict(zip(cols, tup))
+        idx[(row['symbol'], row['score_date'])] = row
+    return idx
+
+
 # ── simulation core ───────────────────────────────────────────────────────
 
-def simulate_basket(bars: pd.DataFrame,
-                    met: pd.DataFrame,
+def simulate_basket(bar_idx: dict,
+                    met_idx: dict,
                     pivots: dict,
                     config: dict,
                     score_thresh_offset: int = -2,
@@ -240,17 +275,9 @@ def simulate_basket(bars: pd.DataFrame,
     if write_db and conn and not run_id:
         run_id = f"{basket}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
 
-    # Build metric lookup: (symbol, date) → row dict
-    met_idx = {}
-    for _, row in met.iterrows():
-        met_idx[(row['symbol'], row['score_date'])] = row.to_dict()
+    trades = []
 
-    all_bars = bars.sort_values(['symbol', 'ts'])
-    syms     = all_bars['symbol'].unique()
-    trades   = []
-
-    for sym in syms:
-        sb = all_bars[all_bars['symbol'] == sym].reset_index(drop=True)
+    for sym, rows in bar_idx.items():
         pv = pivots.get(sym)
         if not pv:
             continue
@@ -261,20 +288,13 @@ def simulate_basket(bars: pd.DataFrame,
         trade_entry = None
         db_row_id   = None   # ID of the v8_backtest_log row for this trade
 
-        for i in range(len(sb)):
-            bar  = sb.iloc[i]
-            ts   = bar['ts']
-            d    = ts.date()
-            mins = _mins(ts)
-
+        for ts, d, mins, o, hi, lo, close in rows:
             # Skip pre/post market entirely
             if mins < MKT_OPEN or mins > MKT_CLOSE:
                 continue
 
             # ── EXIT logic (while in_trade) ───────────────────────────────
             if in_trade:
-                hi, lo = float(bar['high']), float(bar['low'])
-
                 result = exit_price = exit_ts = None
 
                 if hi >= r1:
@@ -285,7 +305,7 @@ def simulate_basket(bars: pd.DataFrame,
                     days_held = (d - trade_entry['date']).days
                     if days_held >= MAX_HOLD_DAYS:
                         result = 'OPEN'
-                        exit_price = float(bar['close'])
+                        exit_price = close
                         exit_ts    = ts
 
                 if result:
@@ -323,7 +343,6 @@ def simulate_basket(bars: pd.DataFrame,
                 continue
 
             # Pivot-room entry condition
-            close = float(bar['close'])
             if not _pivot_room_ok(close, pp, r1):
                 continue
 
@@ -354,9 +373,8 @@ def simulate_basket(bars: pd.DataFrame,
 
         # ── end of data: flush open trade ─────────────────────────────────
         if in_trade and trade_entry:
-            last       = sb.iloc[-1]
-            exit_price = float(last['close'])
-            exit_ts    = last['ts']
+            exit_price = rows[-1][6]
+            exit_ts    = rows[-1][0]
             pnl        = (exit_price - trade_entry['price']) / trade_entry['price'] * 100
             trade      = {
                 **trade_entry,
@@ -451,21 +469,25 @@ def stats(trades: list, label: str = "") -> dict:
 
 # ── per-filter sweep (optimizer — no DB writes) ───────────────────────────
 
-def sweep_one_filter(param: str, bars, met, pivots,
-                     score_offset: int = -2) -> list:
+def sweep_one_filter(param: str, bar_idx, met_idx, pivots,
+                     score_offset: int = -2,
+                     baseline_stats: dict = None) -> list:
     results = []
     for (mn, mx) in SWEEP.get(param, []):
         cfg = dict(BASELINE)
         cfg[param] = (mn, mx)
-        trades = simulate_basket(bars, met, pivots, cfg, score_offset)
+        trades = simulate_basket(bar_idx, met_idx, pivots, cfg, score_offset)
         s = stats(trades, label=f"[{mn},{mx}]")
         s.update({'param': param, 'min': mn, 'max': mx})
         results.append(s)
 
-    # Baseline for comparison
-    cfg    = dict(BASELINE)
-    trades = simulate_basket(bars, met, pivots, cfg, score_offset)
-    s = stats(trades, label=f"baseline {BASELINE[param]}")
+    # Baseline for comparison — reuse the caller's baseline run when given
+    # instead of re-simulating the identical BASELINE config for every param.
+    if baseline_stats is None:
+        trades = simulate_basket(bar_idx, met_idx, pivots, dict(BASELINE), score_offset)
+        baseline_stats = stats(trades)
+    s = dict(baseline_stats)
+    s['label'] = f"baseline {BASELINE[param]}"
     s.update({'param': param, 'min': BASELINE[param][0],
               'max': BASELINE[param][1], 'is_baseline': True})
     results.append(s)
@@ -482,14 +504,20 @@ def run_optimizer(basket: str = 'buy_reversal',
         ensure_table(conn)
         bars, met, pivots = load_all(conn)
 
-    baseline_trades = simulate_basket(bars, met, pivots, BASELINE, score_offset)
+    # Built once, reused across every sweep simulation (see build_bar_index /
+    # build_met_index docstrings for why this used to be the hot spot).
+    bar_idx = build_bar_index(bars)
+    met_idx = build_met_index(met)
+
+    baseline_trades = simulate_basket(bar_idx, met_idx, pivots, BASELINE, score_offset)
     baseline_stats  = stats(baseline_trades, "BASELINE")
     print(f"Baseline: {baseline_stats}")
 
     all_results = {}
     for param in SWEEP:
         print(f"Sweeping {param}...")
-        results = sweep_one_filter(param, bars, met, pivots, score_offset)
+        results = sweep_one_filter(param, bar_idx, met_idx, pivots, score_offset,
+                                   baseline_stats=baseline_stats)
         all_results[param] = results
         best = results[0]
         print(f"  best [{best['min']},{best['max']}] "
@@ -520,7 +548,7 @@ def run_optimizer(basket: str = 'buy_reversal',
     run_id = f"{basket}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     with psycopg.connect(DATABASE_URL) as conn:
         rec_trades = simulate_basket(
-            bars, met, pivots, recommended, score_offset,
+            bar_idx, met_idx, pivots, recommended, score_offset,
             write_db=write_db, conn=conn if write_db else None,
             basket=basket, run_id=run_id
         )
@@ -555,8 +583,10 @@ def run_simulation(basket: str = 'buy_reversal',
     with psycopg.connect(DATABASE_URL) as conn:
         ensure_table(conn)
         bars, met, pivots = load_all(conn)
+        bar_idx = build_bar_index(bars)
+        met_idx = build_met_index(met)
         trades = simulate_basket(
-            bars, met, pivots, cfg, score_offset,
+            bar_idx, met_idx, pivots, cfg, score_offset,
             write_db=write_db, conn=conn if write_db else None,
             basket=basket, run_id=run_id,
         )
