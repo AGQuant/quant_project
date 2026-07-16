@@ -147,8 +147,6 @@ HEARTBEAT_STALE_MINS    = 10   # window for "wrote a live bar recently"
 HEALTH_LOG_MINS         = 5    # log feed health every N min during market hours
 FEED_CRITICAL_SYMBOLS   = 100  # cc_task #85 PART_3: < this writing in 10 min → log.error CRITICAL
 WATCHDOG_MIN_SYMBOLS    = 50   # cc_task #85 PART_4: < this sustained → force WS reconnect
-WATCHDOG_MIN_SYMBOLS_EQ = 100  # cc#488 fix_2: per-source gate — fyers_eq sustained < this → reconnect
-WATCHDOG_MIN_SYMBOLS_FUT = 100 # cc#488 fix_2: per-source gate — fyers_fut sustained < this → reconnect
 WATCHDOG_STALE_MINS     = 15   # consecutive minutes below WATCHDOG_MIN_SYMBOLS before reconnect
 TOTAL_FUTURES           = 212  # denominator for the N/212 health log
 RECONNECT_COOLDOWN_MINS = 10   # min gap between forced reconnects (anti-thrash)
@@ -404,29 +402,20 @@ def get_valid_token(conn, auth_code=None):
         else:
             log.warning(f"Stored token from {access_created.date()} — re-authing")
 
-    # cc#488 fix_1: swap-in the EXISTING breaker-safe try_relogin() (built cc#473, sat unused —
-    # this is the cc#486 fix that was diagnosed but never actually pushed, per cc#487). Raw
-    # auto_login() raises a bare SystemExit on its 90s-cooldown-skip path, which is NOT an
-    # Exception subclass — an "except Exception" here never catches it, so it propagated
-    # straight out and crashed the process; Railway's ~1s relaunch then landed back inside the
-    # still-running cooldown, causing the livelock. try_relogin() never raises SystemExit.
-    import fyers_autologin
-    log.info("Running TOTP auto-login (headless)...")
-    res = fyers_autologin.try_relogin(conn)
-    if res.get('skipped'):
-        log.warning("Auto-login SKIPPED (90s account-block cooldown) — sleeping 90s then retrying once...")
-        time.sleep(90)
-        res = fyers_autologin.try_relogin(conn)
-    if res.get('ok'):
+    try:
+        import fyers_autologin
+        log.info("Running TOTP auto-login (headless)...")
+        token = fyers_autologin.auto_login(conn)
         log.info("TOTP auto-login SUCCESS — fresh token stored")
-        return res['token']
-    raise SystemExit(
-        f"\nAUTO-LOGIN FAILED ({res.get('error')}).\n"
-        "Check env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
-        "Manual fallback:\n"
-        f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
-        "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
-        "  2. python fyers_feed.py --auth-code <code>\n")
+        return token
+    except Exception as e:
+        raise SystemExit(
+            f"\nAUTO-LOGIN FAILED ({e}).\n"
+            "Check env vars: FYERS_TOTP_SECRET, FYERS_PIN, FYERS_SECRET, FYERS_FY_ID.\n"
+            "Manual fallback:\n"
+            f"  1. https://api-t1.fyers.in/api/v3/generate-authcode?client_id={FYERS_CLIENT_ID}"
+            "&redirect_uri=http%3A%2F%2F127.0.0.1&response_type=code&state=None\n"
+            "  2. python fyers_feed.py --auth-code <code>\n")
 
 
 # ── universe ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -477,20 +466,11 @@ def _boot_auth_selfcheck(conn, token):
                  "Retrying auto-login ONCE...")
     _ops_log(conn, 'alert', 'feed_token_dead',
              {'selftest': 'NSE:SBIN-EQ', 'stage': 'boot', 'detail': str(detail)[:180], 'ist': _ist_now_str()})
-    # cc#488 fix_1 (call site 2): same breaker-safe try_relogin() swap-in as get_valid_token() —
-    # raw auto_login() raises a bare SystemExit on its 90s-cooldown-skip path, which an
-    # "except Exception" here does not catch, so it propagated out and crashed the boot self-check.
-    import fyers_autologin
-    res = fyers_autologin.try_relogin(conn)
-    if res.get('skipped'):
-        log.warning("Auto-login retry SKIPPED (90s account-block cooldown) — sleeping 90s then retrying once...")
-        time.sleep(90)
-        res = fyers_autologin.try_relogin(conn)
-    if res.get('ok'):
-        token = res['token']
+    try:
+        import fyers_autologin
+        token = fyers_autologin.auto_login(conn)
         log.info("Auto-login retry SUCCESS — re-testing REST quote...")
-    else:
-        e = res.get('error')
+    except Exception as e:
         log.critical(f"Auto-login retry FAILED ({e}) — exit(1) for a loud Railway restart")
         _ops_log(conn, 'alert', 'feed_token_dead',
                  {'stage': 'relogin_exception', 'detail': str(e)[:180], 'ist': _ist_now_str()})
@@ -1855,35 +1835,22 @@ def run(auth_code=None):
     )
 
     # ── feed heartbeat helpers (cc_task #84) ──────────────────────────────────
-    def _recent_symbol_counts_by_source(minutes=HEARTBEAT_STALE_MINS):
-        """cc#488 fix_2: per-source distinct symbol counts (was one pooled total, which
-        hid a single dead source behind a healthy one). Read on the housekeeping thread's
-        own conn (single-thread = safe). Returns {'fyers_eq': -1, 'fyers_fut': -1} on DB
-        error so a failed read never triggers a false reconnect."""
+    def _recent_symbol_count(minutes=HEARTBEAT_STALE_MINS):
+        """Distinct symbols whose latest live 5-min bar bucket falls within the last
+        `minutes`. Read on the housekeeping thread's own conn (single-thread = safe).
+        Returns -1 on DB error so a failed read never triggers a false reconnect."""
         try:
             cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT source, COUNT(DISTINCT symbol) FROM intraday_prices
+                    SELECT COUNT(DISTINCT symbol) FROM intraday_prices
                     WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
                       AND ts >= %s
-                    GROUP BY source
                 """, (cutoff,))
-                counts = {'fyers_eq': 0, 'fyers_fut': 0}
-                counts.update({row[0]: row[1] for row in cur.fetchall()})
-                return counts
+                return cur.fetchone()[0] or 0
         except Exception as e:
-            log.warning(f"_recent_symbol_counts_by_source: {e}")
-            return {'fyers_eq': -1, 'fyers_fut': -1}
-
-    def _recent_symbol_count(minutes=HEARTBEAT_STALE_MINS):
-        """Combined total, kept for the existing N/TOTAL_FUTURES health-log line.
-        Returns -1 on DB error so a failed read never triggers a false reconnect."""
-        counts = _recent_symbol_counts_by_source(minutes)
-        eq, fut = counts.get('fyers_eq', -1), counts.get('fyers_fut', -1)
-        if eq < 0 or fut < 0:
+            log.warning(f"_recent_symbol_count: {e}")
             return -1
-        return eq + fut
 
     def _heal_gap_bg():
         """change_2: REST-backfill each symbol from its newest stored bar -> now, on a
@@ -2215,48 +2182,37 @@ def run(auth_code=None):
                 #   bars can form.
                 mins_open = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
                 if mins_open >= STARTUP_GRACE_MINS:
-                    src_counts = _recent_symbol_counts_by_source(HEARTBEAT_STALE_MINS)
-                    recent_eq, recent_fut = src_counts.get('fyers_eq', -1), src_counts.get('fyers_fut', -1)
-                    recent = -1 if (recent_eq < 0 or recent_fut < 0) else recent_eq + recent_fut
+                    recent = _recent_symbol_count(HEARTBEAT_STALE_MINS)
                     if (last_health_log is None or
                             (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60):
                         if 0 <= recent < FEED_CRITICAL_SYMBOLS:
-                            log.error(f"FEED CRITICAL: only {recent}/{TOTAL_FUTURES} symbols writing bars "
-                                      f"(eq={recent_eq}, fut={recent_fut})")
+                            log.error(f"FEED CRITICAL: only {recent}/{TOTAL_FUTURES} symbols writing bars")
                         else:
-                            log.info(f"Feed health: {recent} symbols wrote a 5m bar in last {HEARTBEAT_STALE_MINS} min "
-                                      f"(eq={recent_eq}, fut={recent_fut})")
+                            log.info(f"Feed health: {recent} symbols wrote a 5m bar in last {HEARTBEAT_STALE_MINS} min")
                         last_health_log = now_dt
-                    # cc#488 fix_2 PART_4 watchdog: gate on EACH source individually — a pooled
-                    # total hides one dead source behind a healthy other. Sustained low coverage
-                    # on either source -> force reconnect + heal.
-                    eq_low = 0 <= recent_eq < WATCHDOG_MIN_SYMBOLS_EQ
-                    fut_low = 0 <= recent_fut < WATCHDOG_MIN_SYMBOLS_FUT
-                    if eq_low or fut_low:
+                    # PART_4 watchdog: sustained low coverage -> force reconnect + heal
+                    if 0 <= recent < WATCHDOG_MIN_SYMBOLS:
                         if watchdog_stale_since is None:
                             watchdog_stale_since = now_dt
                         stale_mins = (now_dt - watchdog_stale_since).total_seconds() / 60
                         if (stale_mins >= WATCHDOG_STALE_MINS and
                                 (last_reconnect is None or
                                  (now_dt - last_reconnect).total_seconds() >= RECONNECT_COOLDOWN_MINS * 60)):
-                            low_sources = ",".join(s for s, low in (("fyers_eq", eq_low), ("fyers_fut", fut_low)) if low)
                             # cc_task #112: escalate. The first WATCHDOG_MAX_RECONNECTS actions
                             # try a socket reconnect; if coverage is STILL dead after that, a
                             # reconnect clearly isn't fixing it (4 prior recurrences) -> hard
                             # restart the whole process for a guaranteed clean re-subscribe.
                             if reconnect_attempts >= WATCHDOG_MAX_RECONNECTS:
                                 _hard_restart(
-                                    f"eq={recent_eq}/fut={recent_fut} symbols writing (low: {low_sources}) after "
+                                    f"{recent}/{TOTAL_FUTURES} symbols writing after "
                                     f"{reconnect_attempts} reconnects, {stale_mins:.0f}min gap")
                                 # process is being replaced; nothing below runs
                             log.error(f"FEED WATCHDOG: forcing reconnect after {stale_mins:.0f}min gap "
-                                      f"(low sources: {low_sources}, eq={recent_eq}/{WATCHDOG_MIN_SYMBOLS_EQ}, "
-                                      f"fut={recent_fut}/{WATCHDOG_MIN_SYMBOLS_FUT}, "
+                                      f"(<{WATCHDOG_MIN_SYMBOLS} symbols writing, "
                                       f"attempt {reconnect_attempts + 1}/{WATCHDOG_MAX_RECONNECTS})")
                             _force_reconnect()
                             _log_feed_incident("feed_watchdog_reconnect",
-                                               f"low sources: {low_sources}; eq={recent_eq} fut={recent_fut}; "
-                                               f"{stale_mins:.0f}min gap")
+                                               f"{recent}/{TOTAL_FUTURES} writing; {stale_mins:.0f}min gap")
                             reconnect_attempts += 1
                             # cc_task #87: heal_gap must NEVER run during market hours
                             # (09:15-15:30 IST). The force-reconnect restores the live WS
