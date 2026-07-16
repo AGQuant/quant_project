@@ -1228,15 +1228,21 @@ def _bg_earnings_refresh():
     readiness check), so the blackout logic sees a fresh calendar at open. Reuses the same
     code path as the load_earnings_from_screener MCP tool via admin_data.refresh_earnings_calendar,
     which NEVER wipes the table on a scrape error / 0 rows (prior data kept). Fires an alert on
-    failure or empty load (same pattern as the ADR gate)."""
+    failure or empty load (same pattern as the ADR gate).
+
+    cc#490: success now also counts nse_rows_inserted — the NSE board-meetings fetch (forward
+    dates) can legitimately land 0 NEW same-day Screener rows on a quiet day while still
+    successfully loading fresh forward dates, which must not fire a false failure alert."""
     try:
         import admin_data
         res = asyncio.run(admin_data.refresh_earnings_calendar())
-        if not isinstance(res, dict) or res.get("status") != "ok" or not res.get("rows_inserted"):
+        total_inserted = (res.get("rows_inserted") or 0) + (res.get("nse_rows_inserted") or 0) if isinstance(res, dict) else 0
+        if not isinstance(res, dict) or res.get("status") != "ok" or not total_inserted:
             _log_alert("earnings_refresh_failed",
                        f"06:15 earnings_calendar refresh loaded no rows — prior data kept: {res}")
         else:
-            log.info(f"earnings_refresh: {res.get('rows_inserted')} rows loaded (loaded_at=today)")
+            log.info(f"earnings_refresh: {res.get('rows_inserted')} screener + "
+                     f"{res.get('nse_rows_inserted')} nse rows loaded (loaded_at=today)")
     except Exception as e:
         _log_alert("earnings_refresh_failed",
                    f"06:15 earnings_calendar refresh raised (prior data kept): {e}")

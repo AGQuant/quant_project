@@ -42,6 +42,12 @@ SCREENER_BASE = "https://www.screener.in"
 SCREENER_LOGIN_URL = f"{SCREENER_BASE}/login/"
 SCREENER_UPCOMING_URL = f"{SCREENER_BASE}/upcoming-results/"
 
+# cc#490: NSE's official corporate board-meetings feed — the canonical, machine-readable
+# source for FORWARD-dated results. Screener.in's "upcoming-results" page only ever
+# surfaced same-day rows (verified 16-Jul: 25 rows scraped, all ex_date=today, 0 future).
+NSE_BASE = "https://www.nseindia.com"
+NSE_BOARD_MEETINGS_URL = f"{NSE_BASE}/api/corporate-board-meetings?index=equities"
+
 
 def _conn():
     return psycopg.connect(os.getenv("DATABASE_URL"))
@@ -152,6 +158,88 @@ async def _scrape_upcoming_results(client):
     return rows_out
 
 
+async def _fetch_nse_board_meetings():
+    """cc#490: NSE's official corporate board-meetings feed, filtered to purpose containing
+    "Financial Results" — official forward-dated results, unlike Screener's same-day-only
+    upcoming-results page. Best-effort: NSE's anti-bot layer can block a datacenter IP, so
+    any failure returns [] and the caller degrades gracefully rather than crashing (same
+    cookie-seed pattern already proven working in global_indices.py's VIX fetch)."""
+    hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{NSE_BASE}/companies-listing/corporate-filings-board-meetings"}
+    try:
+        async with httpx.AsyncClient(timeout=45, headers=hdrs, follow_redirects=True) as client:
+            await client.get(NSE_BASE + "/")             # seed cookies (NSE anti-bot requirement)
+            r = await client.get(NSE_BOARD_MEETINGS_URL)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        log.warning(f"NSE board-meetings fetch failed (best-effort, degrading gracefully): {e}")
+        return []
+    if not isinstance(data, list):
+        log.warning(f"NSE board-meetings: unexpected response shape ({type(data).__name__}) — "
+                    f"schema may have changed, sample: {str(data)[:300]}")
+        return []
+    rows_out = []
+    for d in data:
+        purpose = str(d.get("bm_purpose") or "")
+        if "financial result" not in purpose.lower():
+            continue
+        ticker = str(d.get("bm_symbol") or "").strip().upper()
+        ex_date = _parse_screener_date(d.get("bm_date"))
+        if not ticker or not ex_date:
+            continue
+        rows_out.append({"company_name": str(d.get("sm_name") or ticker).strip(),
+                          "ticker": ticker, "ex_date": ex_date, "record_date": None,
+                          "event_type": "Financial Results"})
+    return rows_out
+
+
+def _upsert_earnings_row(cur, r, changed_at, verified):
+    """cc#490: shared upsert/reschedule logic for one earnings_calendar row, factored out of
+    refresh_earnings_calendar() so both the Screener scrape and the NSE board-meetings fetch
+    go through identical accumulate/reschedule semantics (id=1770). Returns
+    'inserted'/'updated'/'rescheduled'/'skipped'."""
+    if r["ex_date"] is None:
+        return "skipped"
+    cur.execute("SELECT 1 FROM earnings_calendar WHERE ticker=%s AND ex_date=%s",
+                (r["ticker"], r["ex_date"]))
+    new_date_exists = cur.fetchone() is not None
+    prior = None
+    if not new_date_exists:
+        # same ticker+event still 'upcoming' but at a DIFFERENT date => a reschedule
+        cur.execute("""SELECT id, ex_date FROM earnings_calendar
+                       WHERE ticker=%s AND event_type=%s AND status='upcoming'
+                         AND ex_date <> %s ORDER BY ex_date DESC LIMIT 1""",
+                    (r["ticker"], r["event_type"], r["ex_date"]))
+        prior = cur.fetchone()
+    if prior:
+        prior_id, old_date = prior
+        entry = {"old_date": str(old_date), "new_date": str(r["ex_date"]), "changed_at": changed_at}
+        cur.execute("""UPDATE earnings_calendar
+            SET ex_date=%s, event_type=%s, company_name=%s, verified=%s, last_updated=NOW(),
+                reschedule_log = COALESCE(reschedule_log,'[]'::jsonb) || %s::jsonb
+            WHERE id=%s""",
+            (r["ex_date"], r["event_type"], r["company_name"], verified, json.dumps([entry]), prior_id))
+        _oplog(cur, "alert", "earnings_reschedule", {"ticker": r["ticker"], **entry})
+        return "rescheduled"
+    cur.execute("""INSERT INTO earnings_calendar
+        (company_name, ticker, ex_date, record_date, event_type, status, verified,
+         first_seen, last_updated)
+        VALUES (%(company_name)s,%(ticker)s,%(ex_date)s,%(record_date)s,%(event_type)s,
+                'upcoming',%(verified)s,NOW(),NOW())
+        ON CONFLICT (ticker, ex_date) DO UPDATE SET
+            event_type=EXCLUDED.event_type,
+            company_name=EXCLUDED.company_name,
+            -- cc#490: NSE ('confirmed') is the canonical source — never let a later
+            -- Screener re-scrape ('estimated') downgrade an already-confirmed row.
+            verified=CASE WHEN earnings_calendar.verified='confirmed' THEN 'confirmed'
+                          ELSE EXCLUDED.verified END,
+            last_updated=NOW()
+        RETURNING (xmax=0) AS was_insert""", {**r, "verified": verified})
+    return "inserted" if cur.fetchone()[0] else "updated"
+
+
 def _ensure_earnings_schema(cur):
     """cc#252 (spec 1770): idempotent V2 migration — unique key + lifecycle columns. Safe to
     run on every load (all IF-NOT-EXISTS / guarded). The unique (ticker, ex_date) key is what
@@ -195,70 +283,56 @@ async def refresh_earnings_calendar():
     events to 'reported', purges reported/analyzed >60d, and writes an ops_log
     (title=earnings_refresh) on EVERY run — success included. Shared by the admin endpoint AND
     the cc#225 daily 06:15 IST scheduler job.
-    GUARD: the scrape runs BEFORE any write; on scrape error it raises before touching the
-    table, and on 0 rows it returns early — the existing table is NEVER wiped on failure."""
+
+    cc#490: ALSO pulls NSE's official board-meetings feed for FORWARD-dated results (Screener's
+    upcoming-results page only ever had same-day rows). Both sources go through the same
+    _upsert_earnings_row accumulate/reschedule semantics; NSE rows are tagged verified='confirmed'
+    and never get downgraded by a later Screener re-scrape of the same ticker+date.
+
+    GUARD: each source is fetched BEFORE any write for that source; a Screener failure still
+    raises (existing behavior — table never wiped on failure), but the NSE fetch is fully
+    best-effort (returns [] on any error) so an NSE outage/block never breaks the Screener path."""
     client = await _screener_login_session()
     try:
-        rows = await _scrape_upcoming_results(client)
+        screener_rows = await _scrape_upcoming_results(client)
     finally:
         await client.aclose()
-    if not rows:
+    nse_rows = await _fetch_nse_board_meetings()
+
+    if not screener_rows and not nse_rows:
         return {"status": "warn", "rows_scraped": 0}
-    scraped = len(rows)
+
     inserted = updated = rescheduled = skipped = 0
     changed_at = datetime.utcnow().isoformat() + "Z"
     with _conn() as conn, conn.cursor() as cur:
         _ensure_earnings_schema(cur)
-        for r in rows:
-            if r["ex_date"] is None:
-                skipped += 1                      # undated scrape row can't be deduped — skip
-                continue
-            cur.execute("SELECT 1 FROM earnings_calendar WHERE ticker=%s AND ex_date=%s",
-                        (r["ticker"], r["ex_date"]))
-            new_date_exists = cur.fetchone() is not None
-            prior = None
-            if not new_date_exists:
-                # same ticker+event still 'upcoming' but at a DIFFERENT date => a reschedule
-                cur.execute("""SELECT id, ex_date FROM earnings_calendar
-                               WHERE ticker=%s AND event_type=%s AND status='upcoming'
-                                 AND ex_date <> %s ORDER BY ex_date DESC LIMIT 1""",
-                            (r["ticker"], r["event_type"], r["ex_date"]))
-                prior = cur.fetchone()
-            if prior:
-                prior_id, old_date = prior
-                entry = {"old_date": str(old_date), "new_date": str(r["ex_date"]),
-                         "changed_at": changed_at}
-                cur.execute("""UPDATE earnings_calendar
-                    SET ex_date=%s, event_type=%s, company_name=%s, last_updated=NOW(),
-                        reschedule_log = COALESCE(reschedule_log,'[]'::jsonb) || %s::jsonb
-                    WHERE id=%s""",
-                    (r["ex_date"], r["event_type"], r["company_name"], json.dumps([entry]), prior_id))
-                rescheduled += 1
-                _oplog(cur, "alert", "earnings_reschedule", {"ticker": r["ticker"], **entry})
-                continue
-            cur.execute("""INSERT INTO earnings_calendar
-                (company_name, ticker, ex_date, record_date, event_type, status, verified,
-                 first_seen, last_updated)
-                VALUES (%(company_name)s,%(ticker)s,%(ex_date)s,%(record_date)s,%(event_type)s,
-                        'upcoming','estimated',NOW(),NOW())
-                ON CONFLICT (ticker, ex_date) DO UPDATE SET
-                    event_type=EXCLUDED.event_type,
-                    company_name=EXCLUDED.company_name,
-                    last_updated=NOW()
-                RETURNING (xmax=0) AS was_insert""", r)
-            if cur.fetchone()[0]:
-                inserted += 1
-            else:
-                updated += 1
+        for r in screener_rows:
+            outcome = _upsert_earnings_row(cur, r, changed_at, verified='estimated')
+            if outcome == "skipped": skipped += 1
+            elif outcome == "inserted": inserted += 1
+            elif outcome == "updated": updated += 1
+            elif outcome == "rescheduled": rescheduled += 1
+        nse_inserted = nse_updated = nse_rescheduled = nse_skipped = 0
+        for r in nse_rows:
+            outcome = _upsert_earnings_row(cur, r, changed_at, verified='confirmed')
+            if outcome == "skipped": nse_skipped += 1
+            elif outcome == "inserted": nse_inserted += 1
+            elif outcome == "updated": nse_updated += 1
+            elif outcome == "rescheduled": nse_rescheduled += 1
         reported, purged = _earnings_lifecycle(cur)
-        summary = {"scraped": scraped, "inserted": inserted, "updated": updated,
+        summary = {"scraped": len(screener_rows), "inserted": inserted, "updated": updated,
                    "rescheduled": rescheduled, "reported": reported, "purged": purged,
-                   "skipped_no_date": skipped}
+                   "skipped_no_date": skipped,
+                   "nse_fetched": len(nse_rows), "nse_inserted": nse_inserted,
+                   "nse_updated": nse_updated, "nse_rescheduled": nse_rescheduled,
+                   "nse_skipped_no_date": nse_skipped}
         _oplog(cur, "info", "earnings_refresh", summary)
         conn.commit()
-    return {"status": "ok", "rows_scraped": scraped, "rows_inserted": inserted,
+    return {"status": "ok", "rows_scraped": len(screener_rows), "rows_inserted": inserted,
             "rows_updated": updated, "rescheduled": rescheduled,
-            "reported": reported, "purged": purged, "skipped_no_date": skipped}
+            "reported": reported, "purged": purged, "skipped_no_date": skipped,
+            "nse_rows_fetched": len(nse_rows), "nse_rows_inserted": nse_inserted,
+            "nse_rows_updated": nse_updated, "nse_rescheduled": nse_rescheduled}
 
 
 @router.post("/api/admin/load_earnings_from_screener")
