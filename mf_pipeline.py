@@ -484,11 +484,86 @@ def _parse_aum_json(obj):
     return rows
 
 
+def _discover_amfi_endpoints(cur, page_url, hint):
+    """cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: AMFI relaunched amfiindia.com as a Next.js
+    SPA (2025-26 redesign) — every legacy scrape URL below is dead (verified both browser-side by
+    Claude web AND server-side by a live Railway run: styled-404 pages, 0 data rows). Only
+    NAVAll.txt and mfapi.in survive as stable legacy endpoints; everything else now loads via an
+    internal API the SPA calls client-side.
+
+    Self-discovery instead of blind guessing: fetch the SPA page RAW (keeping <script> tags),
+    pull the __NEXT_DATA__ JSON payload (Next.js often embeds initial data straight in the page)
+    plus every /_next/static/*.js bundle it references, fetch a handful of those bundles, and
+    regex-harvest every quoted string that looks like a real data endpoint (/api/,
+    portal.amfiindia.com, or a .xlsx/.csv/.pdf link) — the same page the browser uses must call
+    SOME data URL; find it in the bundle rather than guessing. `hint` is unused for filtering
+    (kept for the ops_log label) since bundles are shared across pages. Logs every candidate to
+    ops_log — inspectable via run_sql without repo access. Best-effort, never raises."""
+    import requests
+    hdr = {"User-Agent": "Mozilla/5.0 (compatible; Scorr-MF/1.0)"}
+    candidates = []
+    try:
+        r = requests.get(page_url, headers=hdr, timeout=30)
+        html = r.text or ""
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+        if m:
+            for u in re.findall(r'"(https?://[^"]*?(?:/api/[^"]*|\.(?:xlsx?|csv|pdf))[^"]*)"', m.group(1)):
+                candidates.append(u)
+        base_m = re.match(r'(https?://[^/]+)', page_url)
+        base = base_m.group(1) if base_m else "https://www.amfiindia.com"
+        bundles = re.findall(r'"(/_next/static/[^"]+?\.js)"', html)
+        for b in bundles[:10]:
+            try:
+                br = requests.get(base + b, headers=hdr, timeout=20)
+                body = br.text or ""
+                for u in re.findall(r'["\'](/api/[a-zA-Z0-9\-/_.]*)["\']', body):
+                    candidates.append(base + u)
+                for u in re.findall(r'["\'](https?://portal\.amfiindia\.com/[a-zA-Z0-9\-/_.]*)["\']', body):
+                    candidates.append(u)
+            except Exception:
+                continue
+    except Exception as e:
+        _oplog(cur, "MF_AMFI_DISCOVERY_ERROR", {"page": page_url, "hint": hint, "error": str(e)[:200]})
+        return []
+    seen, uniq = set(), []
+    for u in candidates:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    _oplog(cur, "MF_AMFI_DISCOVERY", {"page": page_url, "hint": hint, "n_candidates": len(uniq),
+                                       "sample": uniq[:20]})
+    return uniq
+
+
 def _probe_aum_sources(cur, today=None):
     """Try the founder's AUM endpoints in order (SPA JSON API -> legacy ASPX -> form POST). Logs
-    each probe (status/content-type/len/rows) to ops_log. Returns (parsed[(name,cr)], used_desc)."""
+    each probe (status/content-type/len/rows) to ops_log. Returns (parsed[(name,cr)], used_desc).
+
+    cc#491 VERIFIED_SOURCE_INTEL_17JUL: every URL in _AUM_PROBE below is now confirmed DEAD (the
+    Next.js SPA relaunch) — tries live-discovered candidates from _discover_amfi_endpoints FIRST;
+    _AUM_PROBE stays only as a last-resort fallback in case AMFI restores an old path."""
     import requests
     best, used = [], None
+    for u in _discover_amfi_endpoints(cur, _AMFI_AAUM_PAGE, 'aum'):
+        try:
+            hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "application/json, text/html;q=0.8"}
+            r = requests.get(u, headers=hdr, timeout=45)
+            ct = (r.headers.get("content-type") or "").lower()
+            body = r.text or ""
+            rows = []
+            if "json" in ct or body[:1] in ("{", "["):
+                rows = _parse_aum_json(body)
+            if not rows and ("html" in ct or "<table" in body.lower()):
+                rows = _parse_aaum_html(body)
+            _oplog(cur, "MF_AUM_PROBE_DISCOVERED", {"url": u, "http": r.status_code, "rows": len(rows)})
+            if len(rows) > len(best):
+                best, used = rows, {"url": u, "source": "discovery"}
+            if len(best) >= 50:
+                break
+        except Exception as e:
+            _oplog(cur, "MF_AUM_PROBE_DISCOVERED", {"url": u, "error": str(e)[:140]})
+    if best:
+        return best, used
     for method, url, data in _AUM_PROBE:
         try:
             hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "application/json, text/html;q=0.8"}
@@ -1088,6 +1163,10 @@ _AMFI_TER_PROBE = [
     ("https://www.amfiindia.com/investor-corner/knowledge-center/total-expense-ratio.html", None),
     ("https://www.amfiindia.com/research-information/other-data/total-expense-ratio", None),
 ]
+# cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: the REAL live TER page (verified browser-side
+# 17-Jul) — form-driven (FY/Month/FundType/Category/MF -> Go), data loads via an internal JSON
+# API discovered from this page's bundle, not a static URL. _AMFI_TER_PROBE above is all-dead.
+_AMFI_TER_PAGE = "https://www.amfiindia.com/ter-of-mf-schemes"
 
 
 def _parse_ter_html(body):
@@ -1127,10 +1206,26 @@ def fetch_expense_ratio(cur):
     """step_2: best-effort AMFI TER sweep — same probe/fuzzy-match pattern as fetch_amfi_aum,
     same overwrite guard (WHERE expense_ratio IS NULL — the ~97 already-curated ER values
     must never be touched). Honest about coverage: returns actual match counts, documents
-    failure rather than fabricating success if AMFI's TER page is unreachable/restructured."""
+    failure rather than fabricating success if AMFI's TER page is unreachable/restructured.
+
+    cc#491 VERIFIED_SOURCE_INTEL_17JUL: tries live-discovered candidates from the real TER page
+    (_AMFI_TER_PAGE) first — _AMFI_TER_PROBE's static URLs are all confirmed dead (SPA relaunch),
+    kept only as a last-resort fallback."""
     import requests
     best, used = [], None
-    for url, _unused in _AMFI_TER_PROBE:
+    for u in _discover_amfi_endpoints(cur, _AMFI_TER_PAGE, 'ter'):
+        try:
+            hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "application/json, text/html;q=0.8"}
+            r = requests.get(u, headers=hdr, timeout=45)
+            ct = (r.headers.get("content-type") or "").lower()
+            body = r.text or ""
+            rows = _parse_ter_html(body) if ("html" in ct or "<table" in body.lower()) else []
+            _oplog(cur, "MF_TER_PROBE_DISCOVERED", {"url": u, "http": r.status_code, "rows": len(rows)})
+            if len(rows) > len(best):
+                best, used = rows, {"url": u, "source": "discovery"}
+        except Exception as e:
+            _oplog(cur, "MF_TER_PROBE_DISCOVERED", {"url": u, "error": str(e)[:140]})
+    for url, _unused in ([] if best else _AMFI_TER_PROBE):
         try:
             hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "text/html,application/json;q=0.8"}
             r = requests.get(url, headers=hdr, timeout=60)
@@ -1178,72 +1273,106 @@ def fetch_expense_ratio(cur):
 
 # ── step_3: AMC holdings orchestration ──────────────────────────────────────────────
 # Framework fully wired (download -> parse_holdings_xlsx -> _resolve_nse -> mf_holdings, all
-# cc#466-built pieces reused unchanged). cc#491 course-correct (session_log id=4734): the empty
-# registry below was never a real AMFI dead-end — every AMFI/mfapi probe in this codebase has
-# failed from CC's OWN session (restricted outbound egress), not because AMFI is unreachable
-# (the Railway app fetches Yahoo/RSS/Google News all day without issue). Fix: crawl AMFI's own
-# portfolio-disclosure aggregator page SERVER-SIDE as part of the same Railway-executed monthly
-# job (_crawl_amc_holdings_urls below) instead of waiting on a founder-supplied URL list.
+# cc#466-built pieces reused unchanged).
 AMC_HOLDINGS_URLS = {
     # Founder/manually-confirmed overrides — take precedence over the crawled registry below
     # when both exist for the same AMC.
 }
 
-_AMFI_PORTFOLIO_DISCLOSURE_PAGE = "https://www.amfiindia.com/research-information/other-data/mf-scheme-portfolio-disclosure"
 _ANCHOR_RE = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.I | re.S)
 _FILE_LINK_RE = re.compile(r'href="([^"]+\.(?:xlsx?|pdf))"', re.I)
 _IS_FILE_URL = re.compile(r'\.(?:xlsx?|pdf)(?:$|\?)', re.I)
 
+# cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: AMFI's portfolio-disclosure AGGREGATOR page is
+# also a dead Next.js SPA (same 2025-26 relaunch as the AUM/TER pages) — skip it entirely and go
+# straight to each AMC's OWN SEBI-mandated disclosure page. Domains below are this session's
+# best-effort AMC-name -> primary-website match (standard, well-known domains) — NOT verified
+# live from this sandbox (no outbound internet here). Seeded into mf_amc_holdings_registry as a
+# discovery STARTING POINT only; a wrong domain is a one-row UPDATE away for the founder/Claude
+# web to correct, and the seed never overwrites an already-resolved row (ON CONFLICT DO NOTHING).
+_AMC_DOMAIN_SEED = {
+    "SBI Mutual Fund": "https://www.sbimf.com",
+    "HDFC Mutual Fund": "https://www.hdfcfund.com",
+    "ICICI Prudential Mutual Fund": "https://www.icicipruamc.com",
+    "Nippon India Mutual Fund": "https://mf.nipponindiaim.com",
+    "Kotak Mutual Fund": "https://www.kotakmf.com",
+    "Aditya Birla Sun Life Mutual Fund": "https://mutualfund.adityabirlacapital.com",
+    "UTI Mutual Fund": "https://www.utimf.com",
+    "Axis Mutual Fund": "https://www.axismf.com",
+    "Mirae Asset Mutual Fund": "https://www.miraeassetmf.co.in",
+    "DSP Mutual Fund": "https://www.dspim.com",
+    "Tata Mutual Fund": "https://www.tatamutualfund.com",
+    "Franklin Templeton Mutual Fund": "https://www.franklintempletonindia.com",
+    "Canara Robeco Mutual Fund": "https://www.canararobeco.com",
+    "Edelweiss Mutual Fund": "https://www.edelweissmf.com",
+    "Bandhan Mutual Fund": "https://bandhanmutual.com",
+    "PPFAS Mutual Fund": "https://www.ppfas.com",
+    "Quant Mutual Fund": "https://www.quantmutual.com",
+    "Motilal Oswal Mutual Fund": "https://www.motilaloswalmf.com",
+    "Invesco Mutual Fund": "https://www.invescomutualfund.com",
+    "Sundaram Mutual Fund": "https://www.sundarammutual.com",
+    "PGIM India Mutual Fund": "https://www.pgimindiamf.com",
+    "HSBC Mutual Fund": "https://www.assetmanagement.hsbc.co.in",
+    "Baroda BNP Paribas Mutual Fund": "https://www.barodabnpparibasmf.in",
+    "Union Mutual Fund": "https://www.unionmf.com",
+    "Mahindra Manulife Mutual Fund": "https://www.mahindramanulife.com",
+    "JM Financial Mutual Fund": "https://www.jmfinancialmf.com",
+    "LIC Mutual Fund": "https://www.licmf.com",
+}
+
 
 def _crawl_amc_holdings_urls(cur):
-    """cc#491 course-correct: discover each AMC's monthly portfolio-disclosure link by crawling
-    AMFI's own aggregator page (Railway-side, real internet). Two-stage, since AMFI's aggregator
-    typically links to each AMC's OWN disclosure landing page rather than a direct file: a
-    discovered link that isn't itself an xls/xlsx/pdf gets one follow-up fetch to find the actual
-    file link on that AMC's page (first one found — AMCs generally list the latest month first).
-    Best-effort, never raises — every stage is ops_log'd so a Railway-side failure is diagnosable
-    rather than silently returning nothing, same discipline as the AUM/TER probes."""
+    """cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: crawl each AMC's OWN disclosure site
+    directly (AMFI's aggregator is dead — see _AMC_DOMAIN_SEED comment). First seeds any AMC not
+    already in mf_amc_holdings_registry with its guessed root domain (ON CONFLICT DO NOTHING —
+    never clobbers a previously-resolved or founder-corrected row). Then, three stages per AMC:
+    (1) fetch the root domain, (2) find an anchor whose link text or href mentions
+    portfolio+disclosure, (3) fetch that page and find the actual xlsx/csv/pdf link (first one —
+    AMCs generally list the latest month first). Best-effort, never raises — every stage is
+    ops_log'd so a Railway-side failure is diagnosable rather than silently returning nothing."""
     import requests
-    hdr = {"User-Agent": "Scorr-MF/1.0"}
+    hdr = {"User-Agent": "Mozilla/5.0 (compatible; Scorr-MF/1.0)"}
+    for amc, domain in _AMC_DOMAIN_SEED.items():
+        cur.execute("""INSERT INTO mf_amc_holdings_registry (amc, disclosure_url, source_page, discovered_at)
+                       VALUES (%s,%s,'domain_seed',NOW()) ON CONFLICT (amc) DO NOTHING""", (amc, domain))
     found = {}
-    try:
-        r = requests.get(_AMFI_PORTFOLIO_DISCLOSURE_PAGE, headers=hdr, timeout=60)
-        html = r.text or ""
-    except Exception as e:
-        _oplog(cur, "MF_HOLDINGS_CRAWL_ERROR", {"stage": "amfi_page", "error": str(e)[:200]})
-        return found
-    candidates = []
-    for href, text in _ANCHOR_RE.findall(html):
-        clean_text = re.sub(r"<[^>]+>", "", text).strip()
-        low = clean_text.lower()
-        amc_match = next((a for a in _TOP_AMCS if a in low), None)
-        if amc_match and href:
-            full = href if href.startswith("http") else (
-                "https://www.amfiindia.com" + href if href.startswith("/") else href)
-            candidates.append((clean_text or amc_match, full))
-    for label, link in candidates:
-        if label in found:
-            continue
+    for amc, domain in _AMC_DOMAIN_SEED.items():
         try:
-            if _IS_FILE_URL.search(link):
-                found[label] = link
+            r = requests.get(domain, headers=hdr, timeout=30)
+            html = r.text or ""
+            disclosure_link = None
+            for href, text in _ANCHOR_RE.findall(html):
+                clean = re.sub(r"<[^>]+>", "", text).strip().lower()
+                hlow = (href or "").lower()
+                if ("portfolio" in clean and "disclos" in clean) or \
+                   ("portfolio" in hlow and "disclos" in hlow):
+                    disclosure_link = href
+                    break
+            if not disclosure_link:
                 continue
-            r2 = requests.get(link, headers=hdr, timeout=60)
+            full = disclosure_link if disclosure_link.startswith("http") else (
+                domain.rstrip("/") + "/" + disclosure_link.lstrip("/"))
+            if _IS_FILE_URL.search(full):
+                found[amc] = full
+                continue
+            r2 = requests.get(full, headers=hdr, timeout=30)
             files = _FILE_LINK_RE.findall(r2.text or "")
             if files:
                 f = files[0]
                 if not f.startswith("http"):
-                    f = link.rsplit("/", 1)[0] + "/" + f.lstrip("/")
-                found[label] = f
+                    f = full.rsplit("/", 1)[0] + "/" + f.lstrip("/")
+                found[amc] = f
         except Exception as e:
-            _oplog(cur, "MF_HOLDINGS_CRAWL_ERROR", {"stage": "amc_page", "amc": label, "error": str(e)[:160]})
+            _oplog(cur, "MF_HOLDINGS_CRAWL_ERROR", {"stage": "amc_site", "amc": amc, "domain": domain,
+                                                     "error": str(e)[:160]})
     for amc, url in found.items():
         cur.execute("""INSERT INTO mf_amc_holdings_registry (amc, disclosure_url, source_page, discovered_at)
                        VALUES (%s,%s,%s,NOW())
                        ON CONFLICT (amc) DO UPDATE SET disclosure_url=EXCLUDED.disclosure_url,
                          source_page=EXCLUDED.source_page, discovered_at=NOW()""",
-                    (amc, url, _AMFI_PORTFOLIO_DISCLOSURE_PAGE))
-    _oplog(cur, "MF_HOLDINGS_URL_CRAWL", {"amcs_found": len(found), "sample": list(found.items())[:5]})
+                    (amc, url, _AMC_DOMAIN_SEED.get(amc, "")))
+    _oplog(cur, "MF_HOLDINGS_URL_CRAWL", {"amcs_seeded": len(_AMC_DOMAIN_SEED), "amcs_resolved": len(found),
+                                           "sample": list(found.items())[:5]})
     return found
 
 
@@ -1301,27 +1430,34 @@ def fetch_amc_holdings(cur, amc, url, as_of_month=None):
 
 
 def run_holdings_curated(conn=None):
-    """step_3, cc#491 course-correct: crawl AMFI's portfolio-disclosure page for AMC links
-    (_crawl_amc_holdings_urls), merge with any founder-confirmed AMC_HOLDINGS_URLS overrides,
-    then fetch every discovered AMC across the FULL canonical equity universe (not just the 11
-    curated funds). Still returns status=skipped honestly if the crawl found nothing this run —
-    never fabricates holdings."""
+    """step_3, cc#491 VERIFIED_SOURCE_INTEL_17JUL bugfix: crawl each AMC's own site
+    (_crawl_amc_holdings_urls), THEN READ THE mf_amc_holdings_registry TABLE itself (not just
+    this run's in-memory crawl result — the prior version ignored anything already persisted
+    there, so a previously-discovered or founder/Claude-web-corrected URL was silently never
+    used unless THIS exact run's crawl re-found it fresh). Founder AMC_HOLDINGS_URLS overrides
+    still win. Rows that never resolved past the raw domain-seed (no real file found yet) are
+    filtered out — not fetchable, would just 404/parse-fail. Still returns status=skipped
+    honestly if nothing resolved — never fabricates holdings."""
     own = conn is None
     conn = conn or _conn()
     try:
         with conn.cursor() as cur:
             ensure_tables(cur)
-            crawled = _crawl_amc_holdings_urls(cur)
+            _crawl_amc_holdings_urls(cur)
             conn.commit()
-        registry = dict(crawled)
+        with conn.cursor() as cur:
+            cur.execute("SELECT amc, disclosure_url FROM mf_amc_holdings_registry "
+                        "WHERE disclosure_url IS NOT NULL")
+            registry = dict(cur.fetchall())
         registry.update({k: v for k, v in AMC_HOLDINGS_URLS.items() if v})   # founder overrides win
+        registry = {k: v for k, v in registry.items() if v and _IS_FILE_URL.search(v)}
         if not registry:
             with conn.cursor() as cur:
                 _oplog(cur, "MF_HOLDINGS_SKIPPED",
-                       {"note": "no AMC portfolio-disclosure URLs found — AMFI aggregator crawl "
-                                "returned nothing this run and AMC_HOLDINGS_URLS has no overrides"})
+                       {"note": "no AMC disclosure URL resolved to an actual xlsx/csv/pdf yet — "
+                                "registry may hold only unresolved domain seeds"})
                 conn.commit()
-            return {"status": "skipped", "reason": "empty_url_registry", "results": []}
+            return {"status": "skipped", "reason": "no_resolved_file_urls", "results": []}
         results = []
         with conn.cursor() as cur:
             for amc, url in registry.items():
