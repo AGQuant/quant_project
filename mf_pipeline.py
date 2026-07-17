@@ -1315,6 +1315,32 @@ def _amfi_ter_page(cur, mf_id, subcat_id, month, page, page_size=500):
         return [], {}
 
 
+def _ter_diagnostic_probe(cur, mf_id, month):
+    """cc#498 attempt_5 diagnostic: every (AMC, month) combination tried across 4 live attempts
+    has returned a well-formed but EMPTY result, including a real major AMC (Aditya Birla Sun
+    Life) across all 5 listed months on Large Cap — deeper than the publication-lag hypothesis
+    alone explains. Logs the FULL raw response body (not just parsed meta) for a handful of
+    parameter variations (drop strCat, strCat as int, strType=0, drop strType entirely) so the
+    actual failure mode is inspectable via ops_log rather than guessed at blind."""
+    import requests
+    hdr = {"User-Agent": "Scorr-MF/1.0"}
+    variants = [
+        ("no_strCat", {"MF_ID": mf_id, "Month": month, "strType": 1, "page": 1, "pageSize": 20}),
+        ("strCat_int", {"MF_ID": mf_id, "Month": month, "strCat": 74, "strType": 1, "page": 1, "pageSize": 20}),
+        ("strType_0", {"MF_ID": mf_id, "Month": month, "strCat": 74, "strType": 0, "page": 1, "pageSize": 20}),
+        ("no_strType", {"MF_ID": mf_id, "Month": month, "strCat": 74, "page": 1, "pageSize": 20}),
+    ]
+    for label, params in variants:
+        try:
+            r = requests.get(_AMFI_TER_DATA_URL, params=params, headers=hdr, timeout=30)
+            _oplog(cur, "MF_TER_API_DIAGNOSTIC", {"variant": label, "params": params,
+                   "http": r.status_code, "body": (r.text or "")[:800]})
+        except Exception as e:
+            _oplog(cur, "MF_TER_API_DIAGNOSTIC", {"variant": label, "params": params, "error": str(e)[:160]})
+        import time as _t
+        _t.sleep(0.5)
+
+
 def _num_or_none(v):
     try:
         return float(str(v).replace('%', '').replace(',', '').strip())
@@ -1408,6 +1434,10 @@ def fetch_expense_ratio(cur):
             break
         time.sleep(0.5)
     if not month:
+        # cc#498 attempt_5: every real (month, category) combo tried so far has been empty for
+        # a real, major AMC -- run the raw-body diagnostic before giving up, so the actual
+        # failure mode (wrong param name/type/value) is inspectable via ops_log.
+        _ter_diagnostic_probe(cur, 3, months[0])
         _oplog(cur, "MF_TER_ERROR", {"stage": "no_published_month", "months_tried": months,
                "note": "every listed month returned empty for a known AMC (ABSL, mfId=3) x "
                        "Large Cap — TER data may not be published for any listed month yet"})
