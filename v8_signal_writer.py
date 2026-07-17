@@ -1,6 +1,6 @@
 """
-V8 Signal Writer -- Single Live Engine (v2.4.0)
-===============================================
+V8 Signal Writer -- Single Live Engine (v2.5.0, cc#502 V8 SUITE REBUILD 18-Jul-2026)
+=====================================================================================
 Unified 5-min engine. Replaces v8_live.py + old v8_signal_writer.py.
 
 What it does every 5-min during market hours:
@@ -9,47 +9,45 @@ What it does every 5-min during market hours:
   3. Recomputes all live-moving metrics from intraday close spliced onto EOD history
   4. Only EOD-frozen metric: gvm_score (22:00 nightly). All others now live.
   5. Upserts v8_metrics (today's row) with live values
-  6. Applies score-based FILTER_CONFIG -> writes v8_qualified (latch semantics)
+  6. Runs the four dedicated basket handlers -> writes v8_qualified (latch semantics)
   7. On first qualification: auto-logs paper trade in v8_paper_positions
-  8. Writes v8_funnel_counts (strict cumulative -- diagnostic only)
-  9. Writes adr_intraday (live ADR every 5-min tick) -- 11-Jun-2026
+  8. Writes v8_funnel_counts (independent per-filter pass counts, cc#364 convention)
+  9. Writes adr_intraday (live ADR every 5-min tick)
 
-Score-based qualification (15-Jun-2026, tightened 16-Jun-2026):
-  BUY threshold (buy_momentum -- 18-Jun-2026):
-    Strong Bullish (0 fails) + Bullish (1 fail): n   (strict AND -- fewer, higher quality)
-    Neutral (2 fails) + Bearish (3+ fails):       n-1 (1 miss allowed -- genuine setups rarer)
-  SELL threshold (sell_reversal=5, sell_momentum=6):
-    Strong Bullish (0 fails) + Bullish (1 fail): n-1 (1 miss allowed -- 18-Jun-2026)
-    Neutral (2 fails) + Bearish (3+ fails):       n   (strict AND)
-    Rationale: in bull markets genuine weakness is rarer; n-1 still a
-    meaningful signal. In bear markets signals fire freely -- keep strict.
+cc#502 V8 SUITE REBUILD (18-Jul-2026, CLEAN CONSOLIDATED SPEC v2): Sell Overbought and Buy S1
+Bounce are REMOVED entirely (handlers, auto-entry fns, ring-fenced slot pools, funnel rows).
+All four remaining baskets are dedicated strict-AND handlers -- the generic FILTER_CONFIG
+score-gate loop (_write_qualified's old per-basket scoring body, and _gate_threshold) is
+retired; FILTER_CONFIG (v8_endpoints.py) now exists for display/endpoint parity only. Metric
+convention: wRSI everywhere = _true_weekly_rsi() (calendar-weekly Wilder-14, current week
+bucket = live CMP) -- NEVER the synthetic v8_metrics.rsi_weekly (5-day-stride approximation,
+cc#353). Each handler runs its cheap gates first (independent per-filter funnel counts across
+the universe, not cumulative survivors), then the heavy true_weekly_rsi stage only on the
+strict-intersection survivors.
 
-buy_reversal V3 (10-Jul-2026, spec id=2818 -- supersedes V2 dynamic-regime, id=355 archived):
-  TRUE REVERSAL inverse-sandwich dip-buy. NOT in the score-gate loop; dedicated strict-AND of 8
-  fixed conditions via _write_buy_reversal_v3_qualified (NO Nifty regime, NO R2):
-    daily_rsi<=40, true_weekly_rsi>=60 (TRUE calendar weekly, basket-local), dma_200>=0,
-    gvm_score>=6.5, mom_2d 0-3, hourly_pct 0.1-1.0 (NULL first hr), CMP>PP, room-to-R1>2%.
-  Entry live CMP, target R1 only, stop 1:1 mirror, max hold 15 trading days. Standard slot pool.
+  BUY_MOMENTUM V3 (_write_buy_momentum_v3_qualified): HARD gates (dma_50 5-12, dma_20>0,
+    week_index_52>=75, gvm_score>=7, day_1d>0, hourly_pct>0 AND NOT NULL, FINAL heavy
+    true_weekly_rsi 70-85) AND SCORE>=7-of-10 V2 bands (fixed threshold, no mood-dependent
+    n/n-1). Exits fixed +/-3.0%, standard slot pool.
+  BUY_REVERSAL V5 (_write_buy_reversal_v5_qualified, replaces the V3 inverse-sandwich): 7
+    conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d>=-0.5,
+    week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5, FINAL heavy
+    true_weekly_rsi>=70. Entry all-day live CMP, no CMP>PP/room/hourly gate. Exits fixed
+    +3%/-3% frozen, max hold 15 trading days, standard slot pool.
+  SELL_REVERSAL V6.1 (_write_sell_reversal_v61_qualified, replaces V5-D): 10 conditions --
+    R1-touch last 3 days (per-day pair vs that day's pivot), day_1d [-2,0], dma_20/50/200<0,
+    week_index_52<50, sector_week<0 strict, mom_2d [-4,-1], month_return>=-10, FINAL heavy
+    true_weekly_rsi<=45. Target S1-or-S2 dynamic (room>=2%), stop 1:1 mirror, RAW (no market
+    gate, no kill-switch), standard SELL slot pool.
+  SELL_MOMENTUM V4 (_write_sell_momentum_v4_qualified, renamed from V3): same 9 conditions as
+    V3 with twr<=40 (was <=45) and mom_2d [-4,-2] (was [-4,-1]) -- mRSI<40 strict, dma_200<=+2,
+    week_return [-10,-0.5], sector_week<0 strict, CMP<PP, week_index_52 [20,60], S2-clearance
+    >=3%. Exits fixed +/-3.0%, standard SELL slot pool.
 
-Slot architecture (v2.3.0, 16-Jun-2026):
-  Standard pool (4 baskets: buy_reversal, buy_momentum, sell_reversal, sell_momentum):
+Slot architecture (cc#502): SO/S1B ring-fenced pools removed -- ONE standard pool, 20 slots
+total (was 24; the 4 freed slots are NOT redistributed):
     Strong Bullish: 15B / 5S  | Bullish:  14B / 6S
     Neutral:        12B / 8S  | Bearish:   8B / 13S
-  Sell Overbought dedicated ring-fenced pool (never competes with standard sell):
-    Strong Bullish: 4 | Bullish: 4 | Neutral: 4 | Bearish: 3
-  Total slots always = 24.
-
-buy_s1_bounce V1 (17-Jun-2026):
-  Bounce from pivot S1 support. 7 strict filters (1 gate + 6 stages):
-    nifty_rsi>=55 (gate), week_return 0-3%, dma_50>0%, vol_ratio>=1.5,
-    recovery_2d 2-8%, day_ret>0.5% (implies close>open), week_low<=S1.
-  Fixed +1.5%/-1.5% target/stop. Dedicated ring-fenced slots: 3/3/3/2.
-  Backtest (Jun25-May26, 211 futures): 88 sigs/yr, 73.9% WR, EV +0.72%.
-  New metrics: recovery_2d, week_low, day_ret (live), nifty_rsi (market gate).
-  NOTE: buy_s1_bounce is EXCLUDED from score-gate main loop (_write_qualified).
-  It is handled exclusively by _write_buy_s1_bounce_qualified (strict AND).
-  buy_s1_bounce appears in FILTER_CONFIG (v8_endpoints.py) for endpoint display
-  only -- the exclusion here prevents score-gate contamination (18-Jun-2026 fix).
 
 Sector aggregates (18-Jun-2026):
   All 3 sector metrics are now fully LIVE for the 209-symbol futures universe:
@@ -94,15 +92,16 @@ def _ops_log(conn, category: str, title: str, details: dict) -> None:
 
 # cc#256: per-tick slot_full accumulator. signal_ts_ist is one shared value per
 # _write_qualified() tick, so that call IS the natural tick boundary — reset here at its
-# start, the 4 auto-entry slot_full branches append, and _flush_slot_blocks emits a single
-# ops_log alert at tick end when any pool's blocked count exceeds the app_config threshold.
-# (07-Jul recovery tick silently slot_full-blocked 10 SHORT candidates with zero visibility.)
+# start, the standard LONG/SHORT auto-entry slot_full branch appends, and _flush_slot_blocks
+# emits a single ops_log alert at tick end when the pool's blocked count exceeds the
+# app_config threshold. (07-Jul recovery tick silently slot_full-blocked 10 SHORT candidates
+# with zero visibility.) cc#502: SO/S1B ring-fenced pools removed with those two baskets.
 _slot_full_blocks: Dict[str, list] = {}
 
 
 def _reset_slot_blocks() -> None:
     global _slot_full_blocks
-    _slot_full_blocks = {"LONG": [], "SHORT": [], "SO": [], "S1B": []}
+    _slot_full_blocks = {"LONG": [], "SHORT": []}
 
 
 def _record_slot_block(pool: str, sym: str, open_cnt: int, cap: int) -> None:
@@ -235,16 +234,6 @@ def _bar_cutoff(sim_ts=None) -> datetime:
     return n - timedelta(minutes=5) if sim_ts is not None else n
 
 
-# -- Pivot-room gate ----------------------------------------------------------
-
-BASKET_SIDE = {
-    "buy_reversal":  "BUY",
-    "buy_momentum":  "BUY",
-    "sell_reversal": "SELL",
-    "sell_momentum": "SELL",
-}
-
-
 def _load_pivots(conn, sim_ts=None) -> Dict[str, dict]:
     # cc#218: live uses the latest pivot set (today's, computed pre-open). In sim, pin to
     # the sim day's pivots (pivot_date = sim_date) — a belt in case the harness schema does
@@ -269,23 +258,6 @@ def _load_pivots(conn, sim_ts=None) -> Dict[str, dict]:
         return {r[0]: {"pp": float(r[1]), "r1": float(r[2]), "s1": float(r[3]),
                        "s2": float(r[4]) if r[4] is not None else None}
                 for r in cur.fetchall()}
-
-
-def _pivot_room_ok(side: str, cmp: Optional[float],
-                    pp: Optional[float], r1: Optional[float],
-                    s1: Optional[float]) -> bool:
-    if cmp is None or pp is None:
-        return False
-    if side == "BUY":
-        if r1 is None:
-            return False
-        band = r1 - pp
-        return band > 0 and pp < cmp <= r1 and (r1 - cmp) >= 0.5 * band
-    else:
-        if s1 is None:
-            return False
-        band = pp - s1
-        return band > 0 and s1 <= cmp < pp and (cmp - s1) >= 0.5 * band
 
 
 # -- ADR intraday write -------------------------------------------------------
@@ -715,51 +687,9 @@ def _load_hourly_fut(conn, symbols: List[str], sim_ts=None) -> Dict[str, Optiona
     return out
 
 
-def _load_hourly_fut_v3(conn, symbols: List[str], sim_ts=None) -> Dict[str, tuple]:
-    """cc#355: buy_reversal_v3 hourly with NO null-pass window. Returns {sym: (hourly_pct, n_bars)}:
-      - n_bars = settled fyers_fut 5m bars so far today (the first settles at 09:20).
-      - hourly_pct: >=13 bars (~10:15+) -> standard 12-bar (60-min) rolling change (last vs 12-ago);
-                    1..12 bars (09:20-~10:15) -> PARTIAL window = (last close / earliest settled bar
-                    of the day - 1)*100; 0 bars (09:15-09:20) -> None (the only exempt window).
-    The handler enforces 0.1-1.0 whenever n_bars>=1 (i.e. from 09:20 on). In sim/replay with no
-    recent fut bars n_bars=0 -> exempt (hourly stays a live-only trigger, per spec id 1263-1267)."""
-    today = _today(sim_ts)
-    cut   = _bar_cutoff(sim_ts)
-    out: Dict[str, tuple] = {}
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                WITH ranked AS (
-                    SELECT symbol, close,
-                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY ts DESC) AS rn,
-                           COUNT(*)     OVER (PARTITION BY symbol)                  AS n
-                    FROM intraday_prices
-                    WHERE source='fyers_fut' AND timeframe='5m'
-                      AND ts::date = %s AND symbol = ANY(%s) AND ts <= %s
-                )
-                SELECT symbol,
-                       MAX(n)                                    AS n_bars,
-                       MAX(close) FILTER (WHERE rn = 1)          AS last_close,
-                       MAX(close) FILTER (WHERE rn = 13)         AS close_12_ago,
-                       MAX(close) FILTER (WHERE rn = n)          AS first_close
-                FROM ranked GROUP BY symbol
-            """, (today, symbols, cut))
-            for sym, n_bars, last_close, close_12_ago, first_close in cur.fetchall():
-                n_bars = int(n_bars or 0)
-                hourly = None
-                if last_close is not None:
-                    if n_bars >= 13 and close_12_ago and float(close_12_ago) > 0:
-                        hourly = (float(last_close) / float(close_12_ago) - 1) * 100
-                    elif n_bars >= 1 and first_close and float(first_close) > 0:
-                        hourly = (float(last_close) / float(first_close) - 1) * 100
-                out[sym] = (hourly, n_bars)
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        log.warning(f"_load_hourly_fut_v3: {e} -- hourly exempt this tick")
-    return out
+# cc#502: _load_hourly_fut_v3 removed -- its only caller was the retired buy_reversal V3
+# inverse-sandwich handler; BUY_REVERSAL_V5 has no hourly gate at all, and BUY_MOMENTUM_V3
+# explicitly uses the standard _load_hourly_fut (NULL-blocking) instead.
 
 
 def _load_filter_state(conn, sim_ts=None) -> Dict[str, bool]:
@@ -937,6 +867,11 @@ def _compute_live_metrics(hist: dict, bar: dict, cmp: Optional[float],
     # cc#158: hourly_pct is injected in run_live_signal_writer from the fyers_fut
     # 5m loader (single tick at qualification, NULL first hour / <12 bars).
     out["hourly_pct"] = None
+
+    # cc#502: today's live session low, straight from the bar -- BUY_REVERSAL_V5's S1-touch
+    # filter needs it (today's day_low <= S1 is a legitimate live leg alongside the prior-4-day
+    # check; entry can only happen AFTER the pierce by construction, never a lookahead).
+    out["day_low"] = today_bar_low
 
     out["_live"] = live
     return out
@@ -1239,30 +1174,8 @@ def _market_gate_fails(conn, sim_ts=None) -> int:
         return 2
 
 
-def _gate_threshold(fails: int, n_filters: int, side: str = "BUY") -> int:
-    """
-    Minimum filter passes to qualify.
-
-    SELL (sell_reversal=5, sell_momentum=6  --  n_filters <= 6):
-      Strong Bullish (0 fails) + Bullish (1 fail)  -> n-1  (1 miss allowed)
-      Neutral (2 fails) + Bearish (3+ fails)        -> n    (strict AND)
-    sell_overbought / buy_s1_bounce use dedicated handlers -- never reach here.
-
-    BUY (buy_reversal, buy_momentum -- 18-Jun-2026):
-      Strong Bullish (0 fails) + Bullish (1 fail)  -> n    (strict AND -- only best setups)
-      Neutral (2 fails) + Bearish (3+ fails)        -> n-1  (1 miss allowed -- genuine setups rarer)
-    """
-    if side == "SELL":
-        if n_filters <= 6:
-            if fails <= 1:
-                return n_filters - 1  # 1 miss allowed in Strong Bullish / Bullish
-            return n_filters           # strict AND in Neutral / Bearish
-        return max(n_filters - 2 + min(fails, 2), 1)
-    # BUY (buy_reversal, buy_momentum):
-    if fails <= 1:
-        return n_filters      # strict AND in Strong Bullish / Bullish -- only best setups
-    return n_filters - 1      # 1 miss allowed in Neutral / Bearish -- genuine setups rarer
-
+# cc#502: _gate_threshold removed -- its only caller was the generic score-gate loop body,
+# retired now that all four baskets are dedicated strict-AND handlers.
 
 # -- Slot architecture --------------------------------------------------------
 
@@ -1271,15 +1184,6 @@ def _mood_slots(gate_fails: int) -> tuple:
     if gate_fails == 1: return 14, 6
     if gate_fails == 2: return 12, 8
     return 8, 13
-
-
-def _so_slots(gate_fails: int) -> int:
-    return 3 if gate_fails >= 3 else 4
-
-
-def _s1b_slots(gate_fails: int) -> int:
-    """Buy S1 Bounce dedicated slots -- ring-fenced. 3/3/3/2."""
-    return 2 if gate_fails >= 3 else 3
 
 
 # -- Dynamic buy_reversal Nifty-linked filters --------------------------------
@@ -1305,25 +1209,6 @@ def _get_nifty_1m_return(conn, sim_ts=None) -> float:
     except Exception as e:
         log.warning(f"_get_nifty_1m_return: {e}")
     return 0.0
-
-
-def _get_nifty_rsi(conn, sim_ts=None) -> Optional[float]:
-    """Wilder RSI(14) on NIFTY50 daily closes -- market health gate for buy_s1_bounce."""
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT close FROM raw_prices
-                WHERE symbol='NIFTY50' AND price_date < %s
-                ORDER BY price_date DESC LIMIT 30
-            """, (_today(sim_ts),))
-            closes = [float(r[0]) for r in cur.fetchall()]
-        if len(closes) < 15:
-            return None
-        closes.reverse()
-        return _wilder_rsi(pd.Series(closes), 14)
-    except Exception as e:
-        log.warning(f"_get_nifty_rsi: {e}")
-        return None
 
 
 # cc#354: _get_dynamic_buy_reversal_overrides (V2 Nifty-regime bounds) removed — buy_reversal V3
@@ -1400,10 +1285,10 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT side, COUNT(*) FROM v8_paper_positions
-                WHERE status='OPEN' AND basket NOT IN ('sell_overbought','buy_s1_bounce')
+                WHERE status='OPEN'
                 GROUP BY side
-            """)   # cc#216: both dedicated pools (SO + S1B) are ring-fenced — was excluding
-                   # only sell_overbought, so buy_s1_bounce positions inflated standard slots
+            """)   # cc#502: sell_overbought + buy_s1_bounce (the only ring-fenced pools) are
+                   # removed -- every open position now belongs to the single standard pool.
             counts = {r[0]: int(r[1]) for r in cur.fetchall()}
         long_open  = counts.get("LONG",  0)
         short_open = counts.get("SHORT", 0)
@@ -1430,6 +1315,10 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         # cc#380 V3 (spec id=2901): fixed -/+3.0% 1:1 SHORT (target below, stop above); replaces V2 pivot.
         target = round(entry * 0.97, 2)
         stop   = round(entry * 1.03, 2)
+    elif basket == "buy_reversal":
+        # cc#502 BUY_REVERSAL_V5: fixed +3.0%/-3.0% 1:1, frozen at entry (replaces R1-target/mirror).
+        target = round(entry * 1.03, 2)
+        stop   = round(entry * 0.97, 2)
     elif paper_side == "LONG":
         target = round(r1, 2)
         stop   = round(entry - (r1 - entry), 2)
@@ -1465,142 +1354,18 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
         log.warning(f"auto_paper insert {sym} {paper_side}: {e}")
 
 
-# -- Auto paper entry (sell_overbought) ----------------------------------------
-
-def _auto_paper_entry_so(conn, sym: str, cmp: Optional[float],
-                          pv: Optional[dict], d: date, gate_fails: int, sim_ts=None):
-    if not cmp or not pv:
-        return
-
-    now_ist = _now(sim_ts)   # cc#218
-    if not guards.in_entry_window(now_ist):   # cc#217 P2
-        return
-
-    # cc#217 P2: shared blackout + same-side-open + traded-today (SO pool) + conflict policy
-    if not _entry_guards(conn, sym, "SHORT", "sell_overbought", d, cmp, sim_ts=sim_ts, basket_scoped=True):
-        return
-
-    so_cap = _so_slots(gate_fails)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) FROM v8_paper_positions
-                WHERE status='OPEN' AND basket='sell_overbought' AND side='SHORT'
-            """)
-            so_open = int(cur.fetchone()[0])
-        if so_open >= so_cap:
-            log.info(f"auto_paper_so {sym}: SO slot_full ({so_open}/{so_cap})")
-            _record_slot_block("SO", sym, so_open, so_cap)   # cc#256
-            return
-    except Exception as e:
-        log.warning(f"auto_paper_so slot check {sym}: {e}"); return
-
-    pp = pv["pp"]
-    entry  = round(cmp, 2)
-    # cc#382 V3 (spec id=2912): fixed -/+2.0% 1:1 SHORT (target below, stop above), frozen at entry —
-    # replaces the V2 S1-target / R2-stop pivot formulas.
-    target = round(entry * 0.98, 2)
-    stop   = round(entry * 1.02, 2)
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (sym,))
-            r = cur.fetchone()
-            qty = int(r[0]) if r and r[0] else 1
-    except Exception:
-        qty = 1
-
-    entry_ts_ist = _now_ist(sim_ts)   # cc#218
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_paper_positions
-                (symbol, side, basket, entry_price, entry_ts, qty, target, stop_loss, pp, pivot_date, status)
-                VALUES (%s, 'SHORT', 'sell_overbought', %s, %s, %s, %s, %s, %s, %s, 'OPEN')
-                ON CONFLICT (symbol, side, status) DO NOTHING
-            """, (sym, entry, entry_ts_ist, qty, target, stop, pp, d))
-            inserted = cur.rowcount
-        conn.commit()
-        if inserted:
-            log.info(f"auto_paper_so entry: {sym} SHORT @ {entry} "
-                     f"entry_ts={entry_ts_ist.strftime('%H:%M')} IST "
-                     f"target(-2%)={target} sl(+2%)={stop} so_slots={so_open+1}/{so_cap}")
-    except Exception as e:
-        log.warning(f"auto_paper_so insert {sym}: {e}")
-
-
-# -- Auto paper entry (buy_s1_bounce) -----------------------------------------
-
-def _auto_paper_entry_s1b(conn, sym: str, cmp: Optional[float], d: date, gate_fails: int, sim_ts=None):
-    """Fixed +1.5% target / -1.5% stop. Dedicated ring-fenced slots 3/3/3/2."""
-    if not cmp:
-        return
-
-    now_ist = _now(sim_ts)   # cc#218
-    if not guards.in_entry_window(now_ist):   # cc#217 P2
-        return
-
-    # cc#217 P2: shared blackout + same-side-open + traded-today (S1B pool) + conflict policy
-    if not _entry_guards(conn, sym, "LONG", "buy_s1_bounce", d, cmp, sim_ts=sim_ts, basket_scoped=True):
-        return
-
-    s1b_cap = _s1b_slots(gate_fails)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT COUNT(*) FROM v8_paper_positions
-                WHERE status='OPEN' AND basket='buy_s1_bounce' AND side='LONG'
-            """)
-            s1b_open = int(cur.fetchone()[0])
-        if s1b_open >= s1b_cap:
-            log.info(f"auto_paper_s1b {sym}: slot_full ({s1b_open}/{s1b_cap})")
-            _record_slot_block("S1B", sym, s1b_open, s1b_cap)   # cc#256
-            return
-    except Exception as e:
-        log.warning(f"auto_paper_s1b slot check {sym}: {e}"); return
-
-    entry  = round(cmp, 2)
-    target = round(entry * 1.020, 2)   # cc#358 V2: +2.0% (was +1.5%)
-    stop   = round(entry * 0.980, 2)   # cc#358 V2: -2.0% (was -1.5%)
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT lot_size FROM futures_universe WHERE symbol=%s", (sym,))
-            r = cur.fetchone()
-            qty = int(r[0]) if r and r[0] else 1
-    except Exception:
-        qty = 1
-
-    entry_ts_ist = _now_ist(sim_ts)   # cc#218
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO v8_paper_positions
-                (symbol, side, basket, entry_price, entry_ts, qty,
-                 target, stop_loss, pp, pivot_date, status)
-                VALUES (%s,'LONG','buy_s1_bounce',%s,%s,%s,%s,%s,%s,%s,'OPEN')
-                ON CONFLICT (symbol, side, status) DO NOTHING
-            """, (sym, entry, entry_ts_ist, qty, target, stop, entry, d))
-            inserted = cur.rowcount
-        conn.commit()
-        if inserted:
-            log.info(f"auto_paper_s1b: {sym} LONG @ {entry} "
-                     f"tgt={target}(+2.0%) sl={stop}(-2.0%) "
-                     f"slots={s1b_open+1}/{s1b_cap} ts={entry_ts_ist.strftime('%H:%M')} IST")
-    except Exception as e:
-        log.warning(f"auto_paper_s1b insert {sym}: {e}")
-
-
 # -- Step 8: Write v8_qualified + funnel --------------------------------------
 
-# -- BUY_REVERSAL_V3 (inverse-sandwich dip-buy, canonical spec id=2818) --------
+# -- V8 SUITE (cc#502, 18-Jul-2026): 4 dedicated strict-AND handlers -----------
 
 def _true_weekly_rsi(conn, symbol: str, live_cmp: Optional[float], sim_ts=None) -> Optional[float]:
-    """cc#354: TRUE calendar-weekly Wilder RSI-14 for the buy_reversal V3 basket ONLY.
+    """cc#354, widened cc#502: TRUE calendar-weekly Wilder RSI-14, the shared FINAL heavy stage
+    for ALL FOUR dedicated basket handlers (never the shared synthetic v8_metrics.rsi_weekly).
     Resamples raw_prices daily closes to week-end (W, Mon-Sun) last-close, then sets the
-    CURRENT (partial) week's running close to the live CMP — filters define the dip, the live
-    tick catches the turn. Computed BASKET-LOCALLY; it must NEVER read/write the shared synthetic
-    rsi_weekly column (cc#353 audit: that column is a 5-day-stride approximation, ~16pt off)."""
+    CURRENT (partial) week's running close to the live CMP — filters define the setup, the live
+    tick catches the turn. Computed BASKET-CALL-LOCALLY (each handler calls it per-symbol on its
+    own survivor set); it must NEVER read/write the shared synthetic rsi_weekly column (cc#353
+    audit: that column is a 5-day-stride approximation, ~16pt off)."""
     try:
         with conn.cursor() as cur:
             cur.execute("""SELECT price_date, close FROM raw_prices
@@ -1630,80 +1395,94 @@ def _true_weekly_rsi(conn, symbol: str, live_cmp: Optional[float], sim_ts=None) 
         return None
 
 
-def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date: date,
+def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date: date,
                                      gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#354 BUY_REVERSAL_V3 — TRUE REVERSAL inverse-sandwich dip-buy (spec id=2818, supersedes
-    the archived V2 id=355). buy_reversal is REMOVED from the standard score-gate + dynamic-regime
-    loop; this is a strict-AND of 8 conditions with no regime overrides and no R2 anywhere:
-      (a) daily_rsi <= 40           (cold short-term dip)
-      (b) true_weekly_rsi >= 60     (strong larger frame — TRUE calendar weekly, cc#353)
-      (c) dma_200 >= 0              (long-term uptrend)
-      (d) gvm_score >= 6.5          (quality)
-      (e) mom_2d in [0, 3]          (2-day momentum turned up — dip has started recovering)
-      (f) hourly_pct in [0.1, 1.0]  (fyers_fut hourly turning up, not spiking; cc#355: partial-window
-                                     from 09:20, ENFORCED — only the 09:15-09:20 single-bar window is exempt)
-      (g) CMP > PP                  (holding above pivot)
-      (h) room-to-R1 > 2%          (QUALIFICATION gate — no room, no signal; never fall back to R2)
-    Entry = standard _auto_paper_entry (live CMP, target R1, 1:1 mirror stop, standard slot pool)."""
+    """cc#502 BUY_REVERSAL_V5 — replaces the V3 inverse-sandwich handler entirely. Dedicated
+    strict-AND of 7 conditions, standard slot pool + all standard guards:
+      (1) S1-touch: MIN(prior-4-trading-day raw_prices low) <= today's S1, OR today's live
+          session day_low <= today's S1. [Evidence floor 356tr/62.9% used prior-touch only; the
+          live today-low leg is a legitimate live addition — entry can only happen AFTER the
+          pierce by construction, never a lookahead.]
+      (2) mom_2d >= -0.5
+      (3) week_return >= -2
+      (4) rsi_month in [60, 90]
+      (5) sector_week > 0 strict
+      (6) month_return < 5
+      (7) FINAL heavy stage: true_weekly_rsi >= 70 (TRUE calendar weekly, cc#353)
+    Entry live CMP, all-day (no CMP>PP, no room-to-R1, no hourly gate — none of these exist in
+    V5). Exits fixed +3%/-3% frozen at entry (_auto_paper_entry's buy_reversal branch), max hold
+    15 trading days (existing basket-keyed exit logic, unchanged)."""
     basket, side = "buy_reversal", "BUY"
-    # cc#355: v3 hourly — enforced 0.1-1.0 from the first settled fut bar (09:20); partial window
-    # (last/earliest-of-day) until the 12-bar rolling value exists (~10:15). Only the 09:15-09:20
-    # window (0 settled bars) is exempt. Batched once for the whole universe.
-    hourly_v3 = _load_hourly_fut_v3(conn, [s["symbol"] for s in all_metrics], sim_ts=sim_ts)
-    # cc#357: base universe = symbols with a live CMP + valid pivots; annotate room + v3 hourly once.
+
+    # (1) S1-touch leg 1: prior-4-trading-day low, batched once for the whole universe via a
+    # single ranked query (no correlated per-symbol subqueries).
+    syms = [s["symbol"] for s in all_metrics]
+    prior4_low = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT symbol, low,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+                    FROM raw_prices
+                    WHERE symbol = ANY(%s) AND price_date < %s
+                )
+                SELECT symbol, MIN(low) FROM ranked WHERE rn <= 4 GROUP BY symbol
+            """, (syms, target_date))
+            for sym, lo in cur.fetchall():
+                if lo is not None:
+                    prior4_low[sym] = float(lo)
+    except Exception as e:
+        log.warning(f"buy_reversal_v5 prior4_low: {e}")
+
     base = []
     for s in all_metrics:
         cmp = s.get("_cmp")
         pv  = pivots.get(s["symbol"])
         if not cmp or not pv:
             continue
-        pp, r1 = pv.get("pp"), pv.get("r1")
-        if pp is None or r1 is None:
+        s1 = pv.get("s1")
+        if s1 is None:
             continue
-        s["_pp"] = pp
-        s["_room_r1_pct"] = round((r1 - cmp) / cmp * 100.0, 3)
-        hourly, n_bars = hourly_v3.get(s["symbol"], (None, 0))
-        s["_hourly_v3"] = round(hourly, 3) if hourly is not None else None
-        # (f) exempt ONLY in the 09:15-09:20 single-bar window (n_bars==0); else ENFORCE 0.1-1.0
-        s["_hourly_ok"] = (n_bars == 0) or (hourly is not None and 0.1 <= hourly <= 1.0)
+        p4lo     = prior4_low.get(s["symbol"])
+        today_lo = s.get("day_low")   # leg 2: today's live session low (cc#502)
+        s["_s1_touch"] = (p4lo is not None and p4lo <= s1) or (today_lo is not None and today_lo <= s1)
         base.append(s)
 
-    # cc#364: INDEPENDENT per-filter pass counts across `base` (buy_momentum convention) — each of
-    # the 7 cheap gates counted ALONE over the whole base, NOT cumulative survivors. true_weekly_rsi
-    # (stage 8, DB-heavy) is counted only over the strict-intersection stage-7 survivors below.
-    # Final = strict-AND of all 8 (unchanged). Counts feed v8_funnel_counts / br_funnel_detail.
+    def _sw_gt0(s):     # sector_week > 0 (STRICT)
+        v = s.get("sector_week")
+        return v is not None and float(v) > 0.0
+
+    # cc#364-style INDEPENDENT per-filter pass counts across `base` — each of the 6 cheap gates
+    # counted ALONE over the whole base, NOT cumulative survivors. true_weekly_rsi (heavy) is
+    # counted only over the strict-intersection of the 6 cheap gates below.
     funnel = {"_universe": len(base)}
-    funnel["daily_rsi"]  = sum(1 for s in base if _passes(s.get("daily_rsi"), None, 40.0))   # (a)
-    funnel["dma_200"]    = sum(1 for s in base if _passes(s.get("dma_200"), 0.0, None))       # (c)
-    funnel["gvm_score"]  = sum(1 for s in base if _passes(s.get("gvm_score"), 6.5, None))     # (d)
-    funnel["mom_2d"]     = sum(1 for s in base if _passes(s.get("mom_2d"), 0.0, 3.0))         # (e)
-    funnel["hourly_pct"] = sum(1 for s in base if s["_hourly_ok"])                            # (f)
-    funnel["cmp_gt_pp"]  = sum(1 for s in base if s["_cmp"] > s["_pp"])                       # (g)
-    funnel["room_r1"]    = sum(1 for s in base if s["_room_r1_pct"] > 2.0)                     # (h)
-    # strict intersection of the 7 cheap gates — only these reach the heavy stage-8 wRSI read
-    # (identical set to the old cumulative pre-filter, so qualification is byte-for-byte unchanged).
+    funnel["s1_touch"]     = sum(1 for s in base if s["_s1_touch"])                             # (1)
+    funnel["mom_2d"]       = sum(1 for s in base if _passes(s.get("mom_2d"), -0.5, None))       # (2)
+    funnel["week_return"]  = sum(1 for s in base if _passes(s.get("week_return"), -2.0, None))  # (3)
+    funnel["rsi_month"]    = sum(1 for s in base if _passes(s.get("rsi_month"), 60.0, 90.0))    # (4)
+    funnel["sector_week"]  = sum(1 for s in base if _sw_gt0(s))                                 # (5)
+    funnel["month_return"] = sum(1 for s in base if _passes(s.get("month_return"), None, 5.0))  # (6)
     surv = [s for s in base
-            if _passes(s.get("daily_rsi"), None, 40.0)
-            and _passes(s.get("dma_200"), 0.0, None)
-            and _passes(s.get("gvm_score"), 6.5, None)
-            and _passes(s.get("mom_2d"), 0.0, 3.0)
-            and s["_hourly_ok"]
-            and s["_cmp"] > s["_pp"]
-            and s["_room_r1_pct"] > 2.0]
-    funnel["_stage7_survivors"] = len(surv)   # denominator for the stage-8 true_weekly_rsi row
-    log.info(f"buy_reversal_v3: {len(surv)} after 7-condition cheap pre-filter")
+            if s["_s1_touch"]
+            and _passes(s.get("mom_2d"), -0.5, None)
+            and _passes(s.get("week_return"), -2.0, None)
+            and _passes(s.get("rsi_month"), 60.0, 90.0)
+            and _sw_gt0(s)
+            and _passes(s.get("month_return"), None, 5.0)]
+    funnel["_stage6_survivors"] = len(surv)   # denominator for the stage-7 true_weekly_rsi row
+    log.info(f"buy_reversal_v5: {len(surv)} after 6-condition cheap pre-filter")
 
     qualified = []
     for s in surv:
         twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
         s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr >= 60.0:               # 8 (b)
+        if twr is not None and twr >= 70.0:               # (7)
             qualified.append(s)
     funnel["true_weekly_rsi"] = len(qualified)
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"buy_reversal_v3: {len(qualified)} qualified (true_weekly_rsi>=60) [spec id=2818]")
+    log.info(f"buy_reversal_v5: {len(qualified)} qualified (true_weekly_rsi>=70) [cc#502]")
 
-    # cc#357: persist the 8-stage funnel so /funnel_detail/buy_reversal (br_funnel_detail) can render it.
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1714,20 +1493,20 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
-        log.warning(f"buy_reversal_v3 funnel: {e}")
+        log.warning(f"buy_reversal_v5 funnel: {e}")
 
     for s in qualified:
         sym  = s["symbol"]
         snap = {
-            "true_weekly_rsi": s.get("_true_weekly_rsi"),   # step_5 audit fields
-            "daily_rsi":       s.get("daily_rsi"),
+            "true_weekly_rsi": s.get("_true_weekly_rsi"),
             "mom_2d":          s.get("mom_2d"),
-            "hourly_pct":      s.get("_hourly_v3"),   # cc#355: enforced v3 hourly (partial from 09:20)
-            "room_r1_pct":     s.get("_room_r1_pct"),
-            "gvm_score":       s.get("gvm_score"),
-            "dma_200":         s.get("dma_200"),
-            "filter_score": 8, "filter_total": 8,
-            "spec": "BUY_REVERSAL_V3_INVERSE_SANDWICH id=2818",
+            "week_return":     s.get("week_return"),
+            "rsi_month":       s.get("rsi_month"),
+            "sector_week":     s.get("sector_week"),
+            "month_return":    s.get("month_return"),
+            "s1_touch":        s.get("_s1_touch"),
+            "filter_score": 7, "filter_total": 7,
+            "spec": "BUY_REVERSAL_V5 cc#502",
         }
         try:
             with conn.cursor() as cur:
@@ -1754,24 +1533,53 @@ def _write_buy_reversal_v3_qualified(conn, all_metrics: List[dict], target_date:
             _auto_paper_entry(conn, sym, basket, side, s.get("_cmp"), pivots.get(sym),
                               target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
-            log.warning(f"buy_reversal_v3 insert {sym}: {e}")
+            log.warning(f"buy_reversal_v5 insert {sym}: {e}")
 
 
-def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_date: date,
+def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_date: date,
                                        gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#378 SELL_REVERSAL_V5D (spec id=2894, supersedes archived V4 id=357). The SELL mirror of
-    BUY_REVERSAL_V3: sell_reversal is REMOVED from the standard score-gate loop; strict-AND of 6
-    conditions, RAW — NO market gate, NO auto kill-switch (founder-locked 11-Jul):
-      (a) daily_rsi   >= 60         (hot bounce)
-      (b) true_weekly_rsi <= 40     (weak larger frame — TRUE calendar weekly, basket-local; cc#353)
-      (c) rsi_month   < 50          (weak monthly)
-      (d) dma_200     <= 0          (below the 200-DMA)
-      (e) CMP < PP                  (below the rolling-5d pivot)
-      (f) room gate: target (S1 if (cmp-S1)/cmp >= 2% else S2, never beyond S2) >= 2% away, else NO signal.
-    Target = that S1-or-S2 level; Stop = 1:1 mirror = entry + (entry - target). Entry = _auto_paper_entry
-    with the handler-computed FROZEN levels, standard SELL slot pool + all standard guards."""
+    """cc#502 SELL_REVERSAL_V6.1 — replaces V5-D. Dedicated strict-AND of 10 conditions, RAW —
+    NO market gate, NO auto kill-switch (founder-locked pattern retained from V5-D):
+      (1) R1-touch last 3 days: any of days d-1,d-2,d-3 had that SAME day's raw_prices HIGH
+          >= that SAME day's r1 (per-day pair from v8_paper_pivots history; BOOL_OR over the 3;
+          excludes today per backtest convention)
+      (2) day_1d in [-2, 0]         (moderate red, live bar level)
+      (3) dma_20 < 0
+      (4) dma_50 < 0
+      (5) dma_200 < 0
+      (6) week_index_52 < 50
+      (7) sector_week < 0 strict
+      (8) mom_2d in [-4, -1]
+      (9) month_return >= -10
+      (10) FINAL heavy stage: true_weekly_rsi <= 45 (TRUE calendar weekly, cc#353)
+    Target = S1 if (cmp-S1)/cmp>=2% else S2 (never beyond S2), else NO signal; Stop = 1:1 mirror
+    above entry (unchanged from V5-D). Entry = _auto_paper_entry with the handler-computed FROZEN
+    levels, standard SELL slot pool + all standard guards."""
     basket, side = "sell_reversal", "SELL"
-    # cc#378: base universe = symbols with a live CMP + valid pivots; annotate dynamic target + room once.
+
+    # (1) R1-touch last 3 trading days: per-day pair (that day's high vs that SAME day's r1),
+    # batched once for the whole universe via a single query joining raw_prices to the pivot
+    # history on matching dates. Excludes today (backtest convention).
+    syms = [s["symbol"] for s in all_metrics]
+    r1_touch = set()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH days AS (
+                    SELECT DISTINCT price_date AS d FROM raw_prices
+                    WHERE price_date < %s
+                    ORDER BY d DESC LIMIT 3
+                )
+                SELECT DISTINCT rp.symbol
+                FROM raw_prices rp
+                JOIN v8_paper_pivots pv ON pv.symbol = rp.symbol AND pv.pivot_date = rp.price_date
+                WHERE rp.price_date IN (SELECT d FROM days) AND rp.symbol = ANY(%s)
+                  AND pv.r1 IS NOT NULL AND rp.high >= pv.r1
+            """, (target_date, syms))
+            r1_touch = {r[0] for r in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"sell_reversal_v61 r1_touch: {e}")
+
     base = []
     for s in all_metrics:
         cmp = s.get("_cmp")
@@ -1779,9 +1587,9 @@ def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_dat
         if not cmp or not pv:
             continue
         pp, s1, s2 = pv.get("pp"), pv.get("s1"), pv.get("s2")
-        if pp is None or s1 is None:
+        if s1 is None:
             continue
-        # (f) dynamic target: S1 if >=2% below entry, else S2 (needs s2); chosen target must be >=2%.
+        # dynamic target: S1 if >=2% below entry, else S2 (needs s2); chosen target must be >=2%.
         room_s1 = round((cmp - s1) / cmp * 100.0, 3)
         room_s2 = round((cmp - s2) / cmp * 100.0, 3) if s2 is not None else None
         if room_s1 >= 2.0:
@@ -1794,37 +1602,49 @@ def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_dat
         s["_sr_target"] = tgt
         s["_sr_room_pct"] = room
         s["_sr_room_ok"] = tgt is not None
+        s["_r1_touch"] = s["symbol"] in r1_touch
         base.append(s)
 
-    # cc#378: INDEPENDENT per-filter pass counts across `base` (buy_momentum convention, cc#364 style).
-    # true_weekly_rsi (heavy) is counted only over the strict-intersection of the 5 cheap gates.
-    def _rm_lt50(s):   # rsi_month < 50 (STRICT — _passes is inclusive, so handle it directly)
-        v = s.get("rsi_month")
-        return v is not None and float(v) < 50.0
+    def _sw_lt0(s):   # sector_week < 0 (STRICT)
+        v = s.get("sector_week")
+        return v is not None and float(v) < 0.0
+
+    # cc#364-style INDEPENDENT per-filter pass counts across `base`. true_weekly_rsi (heavy) is
+    # counted only over the strict-intersection of the 9 cheap gates below (incl. the room gate).
     funnel = {"_universe": len(base)}
-    funnel["daily_rsi"] = sum(1 for s in base if _passes(s.get("daily_rsi"), 60.0, None))   # (a)
-    funnel["rsi_month"] = sum(1 for s in base if _rm_lt50(s))                                # (c)
-    funnel["dma_200"]   = sum(1 for s in base if _passes(s.get("dma_200"), None, 0.0))       # (d)
-    funnel["cmp_lt_pp"] = sum(1 for s in base if s["_cmp"] < s["_pp"])                        # (e)
-    funnel["room"]      = sum(1 for s in base if s["_sr_room_ok"])                            # (f)
+    funnel["r1_touch"]      = sum(1 for s in base if s["_r1_touch"])                              # (1)
+    funnel["day_1d"]        = sum(1 for s in base if _passes(s.get("day_1d"), -2.0, 0.0))         # (2)
+    funnel["dma_20"]        = sum(1 for s in base if _passes(s.get("dma_20"), None, 0.0))         # (3)
+    funnel["dma_50"]        = sum(1 for s in base if _passes(s.get("dma_50"), None, 0.0))         # (4)
+    funnel["dma_200"]       = sum(1 for s in base if _passes(s.get("dma_200"), None, 0.0))        # (5)
+    funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), None, 50.0)) # (6)
+    funnel["sector_week"]   = sum(1 for s in base if _sw_lt0(s))                                  # (7)
+    funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -1.0))        # (8)
+    funnel["month_return"]  = sum(1 for s in base if _passes(s.get("month_return"), -10.0, None)) # (9)
+    funnel["room"]          = sum(1 for s in base if s["_sr_room_ok"])
     surv = [s for s in base
-            if _passes(s.get("daily_rsi"), 60.0, None)
-            and _rm_lt50(s)
+            if s["_r1_touch"]
+            and _passes(s.get("day_1d"), -2.0, 0.0)
+            and _passes(s.get("dma_20"), None, 0.0)
+            and _passes(s.get("dma_50"), None, 0.0)
             and _passes(s.get("dma_200"), None, 0.0)
-            and s["_cmp"] < s["_pp"]
+            and _passes(s.get("week_index_52"), None, 50.0)
+            and _sw_lt0(s)
+            and _passes(s.get("mom_2d"), -4.0, -1.0)
+            and _passes(s.get("month_return"), -10.0, None)
             and s["_sr_room_ok"]]
-    funnel["_stage5_survivors"] = len(surv)   # denominator for the stage-6 true_weekly_rsi row
-    log.info(f"sell_reversal_v5d: {len(surv)} after 5-condition cheap pre-filter")
+    funnel["_stage9_survivors"] = len(surv)   # denominator for the stage-10 true_weekly_rsi row
+    log.info(f"sell_reversal_v61: {len(surv)} after 9-condition cheap pre-filter")
 
     qualified = []
     for s in surv:
         twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
         s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr <= 40.0:               # (b)
+        if twr is not None and twr <= 45.0:               # (10)
             qualified.append(s)
     funnel["true_weekly_rsi"] = len(qualified)
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"sell_reversal_v5d: {len(qualified)} qualified (true_weekly_rsi<=40) [spec id=2894]")
+    log.info(f"sell_reversal_v61: {len(qualified)} qualified (true_weekly_rsi<=45) [cc#502]")
 
     try:
         with conn.cursor() as cur:
@@ -1836,7 +1656,7 @@ def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_dat
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
-        log.warning(f"sell_reversal_v5d funnel: {e}")
+        log.warning(f"sell_reversal_v61 funnel: {e}")
 
     for s in qualified:
         sym   = s["symbol"]
@@ -1846,14 +1666,20 @@ def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_dat
         stop  = round(entry + (entry - tgt), 2)   # 1:1 mirror ABOVE entry (SELL)
         snap = {
             "true_weekly_rsi": s.get("_true_weekly_rsi"),
-            "daily_rsi":       s.get("daily_rsi"),
-            "rsi_month":       s.get("rsi_month"),
+            "r1_touch":        s.get("_r1_touch"),
+            "day_1d":          s.get("day_1d"),
+            "dma_20":          s.get("dma_20"),
+            "dma_50":          s.get("dma_50"),
             "dma_200":         s.get("dma_200"),
+            "week_index_52":   s.get("week_index_52"),
+            "sector_week":     s.get("sector_week"),
+            "mom_2d":          s.get("mom_2d"),
+            "month_return":    s.get("month_return"),
             "room_pct":        s.get("_sr_room_pct"),
             "target":          tgt,
             "stop":            stop,
-            "filter_score": 6, "filter_total": 6,
-            "spec": "SELL_REVERSAL_V5D id=2894",
+            "filter_score": 10, "filter_total": 10,
+            "spec": "SELL_REVERSAL_V6.1 cc#502",
         }
         try:
             with conn.cursor() as cur:
@@ -1877,20 +1703,21 @@ def _write_sell_reversal_v5d_qualified(conn, all_metrics: List[dict], target_dat
                     s.get("daily_rsi"), json.dumps(snap),
                 ))
             conn.commit()
-            # cc#378: entry with the handler-computed FROZEN S1/S2 target + 1:1 mirror stop.
+            # entry with the handler-computed FROZEN S1/S2 target + 1:1 mirror stop.
             _auto_paper_entry(conn, sym, basket, side, cmp, pivots.get(sym),
                               target_date, gate_fails, sim_ts=sim_ts, target=tgt, stop=stop)
         except Exception as e:
-            log.warning(f"sell_reversal_v5d insert {sym}: {e}")
+            log.warning(f"sell_reversal_v61 insert {sym}: {e}")
 
 
-def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date: date,
+def _write_sell_momentum_v4_qualified(conn, all_metrics: List[dict], target_date: date,
                                       gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#380 SELL_MOMENTUM_V3 (N5, spec id=2901, supersedes V2). Dedicated strict-AND handler —
-    sell_momentum is REMOVED from the standard score-gate loop. Strict AND of 9:
-      (1) true_weekly_rsi <= 45     (TRUE calendar weekly — basket-local, never shared rsi_weekly)
+    """cc#502 SELL_MOMENTUM_V4 (renamed from V3). Dedicated strict-AND handler — sell_momentum
+    is REMOVED from the standard score-gate loop. Strict AND of 9:
+      (1) true_weekly_rsi <= 40     (TRUE calendar weekly — basket-local, never shared rsi_weekly;
+                                     tightened from <=45)
       (2) rsi_month       < 40      (deeply weak monthly)
-      (3) mom_2d in [-4, -1]        (recent down-momentum, not a crash)
+      (3) mom_2d in [-4, -2]        (recent down-momentum, not a crash; tightened from [-4,-1])
       (4) dma_200         <= +2     (below / near the 200-DMA)
       (5) week_return in [-10, -0.5](weak week, not capitulation)
       (6) sector_week     < 0       (weak sector)
@@ -1926,7 +1753,7 @@ def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date
     # (heavy) is counted only over the strict-intersection of the 8 cheap gates.
     funnel = {"_universe": len(base)}
     funnel["rsi_month"]     = sum(1 for s in base if _rm_lt40(s))                              # (2)
-    funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -1.0))     # (3)
+    funnel["mom_2d"]        = sum(1 for s in base if _passes(s.get("mom_2d"), -4.0, -2.0))     # (3)
     funnel["dma_200"]       = sum(1 for s in base if _passes(s.get("dma_200"), None, 2.0))     # (4)
     funnel["week_return"]   = sum(1 for s in base if _passes(s.get("week_return"), -10.0, -0.5))  # (5)
     funnel["sector_week"]   = sum(1 for s in base if _sw_lt0(s))                               # (6)
@@ -1935,7 +1762,7 @@ def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date
     funnel["s2_clearance"]  = sum(1 for s in base if _s2c_ok(s))                               # (9)
     surv = [s for s in base
             if _rm_lt40(s)
-            and _passes(s.get("mom_2d"), -4.0, -1.0)
+            and _passes(s.get("mom_2d"), -4.0, -2.0)
             and _passes(s.get("dma_200"), None, 2.0)
             and _passes(s.get("week_return"), -10.0, -0.5)
             and _sw_lt0(s)
@@ -1943,17 +1770,17 @@ def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date
             and s["_cmp"] < s["_pp"]
             and _s2c_ok(s)]
     funnel["_stage8_survivors"] = len(surv)   # denominator for the stage-9 true_weekly_rsi row
-    log.info(f"sell_momentum_v3: {len(surv)} after 8-condition cheap pre-filter")
+    log.info(f"sell_momentum_v4: {len(surv)} after 8-condition cheap pre-filter")
 
     qualified = []
     for s in surv:
         twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
         s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr <= 45.0:               # (1)
+        if twr is not None and twr <= 40.0:               # (1)
             qualified.append(s)
     funnel["true_weekly_rsi"] = len(qualified)
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"sell_momentum_v3: {len(qualified)} qualified (true_weekly_rsi<=45) [spec id=2901]")
+    log.info(f"sell_momentum_v4: {len(qualified)} qualified (true_weekly_rsi<=40) [cc#502]")
 
     try:
         with conn.cursor() as cur:
@@ -1965,7 +1792,7 @@ def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
-        log.warning(f"sell_momentum_v3 funnel: {e}")
+        log.warning(f"sell_momentum_v4 funnel: {e}")
 
     for s in qualified:
         sym = s["symbol"]
@@ -1981,7 +1808,7 @@ def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date
             "s2_clearance_pct": s.get("_s2c_pct"),
             "target": round(round(cmp, 2) * 0.97, 2), "stop": round(round(cmp, 2) * 1.03, 2),
             "filter_score": 9, "filter_total": 9,
-            "spec": "SELL_MOMENTUM_V3_N5 id=2901",
+            "spec": "SELL_MOMENTUM_V4 cc#502",
         }
         try:
             with conn.cursor() as cur:
@@ -2009,240 +1836,112 @@ def _write_sell_momentum_v3_qualified(conn, all_metrics: List[dict], target_date
             _auto_paper_entry(conn, sym, basket, side, cmp, pivots.get(sym),
                               target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
-            log.warning(f"sell_momentum_v3 insert {sym}: {e}")
+            log.warning(f"sell_momentum_v4 insert {sym}: {e}")
 
 
-def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
-    from v8_endpoints import FILTER_CONFIG, v21_hard_gate_pass
+def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date: date,
+                                     gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
+    """cc#502 BUY_MOMENTUM_V3 — leaves the generic score-gate loop entirely; NEW dedicated
+    handler. Two independent layers, both must pass:
+      HARD gates (all strict-AND): dma_50 in [5,12], dma_20 > 0, week_index_52 >= 75,
+        gvm_score >= 7, day_1d > 0, hourly_pct > 0 AND NOT NULL (existing 12-bar _load_hourly_fut
+        -- NULL blocks, so no entries before ~10:15; the v3 partial-window loader is NOT used
+        here), FINAL heavy stage: true_weekly_rsi in [70, 85].
+      SCORE >= 7 of 10 V2 bands (FIXED threshold, NO mood-dependent n/n-1): gvm 7-10, dma50
+        8-25, dma200 8-40, rsi_month 70-100, wRSI 60-85 (the SAME true_weekly_rsi value from the
+        hard-gate heavy stage), week_return 0.5-12, month_return 2-30, mom_2d 0-6, sector_week
+        0-6, sector_month 0-6.
+    NO pivot-room gate (not in evidence; exits fixed). Exits FIXED +/-3.0% via _auto_paper_entry's
+    buy_momentum branch; standard BUY slot pool + all standard guards."""
+    basket, side = "buy_momentum", "BUY"
 
-    gate_fails = _market_gate_fails(conn, sim_ts=sim_ts)
-    pivots     = _load_pivots(conn, sim_ts=sim_ts)
-    # cc#324: point-in-time V2.1 enable state in sim (was reading TODAY's state during replays).
-    enabled_v21 = _load_filter_state(conn, sim_ts=sim_ts)
+    def _hourly_ok(s):   # NULL-blocks (no entries before ~10:15); strict > 0
+        v = s.get("hourly_pct")
+        return v is not None and float(v) > 0.0
+    def _day1d_gt0(s):    # day_1d > 0 (STRICT)
+        v = s.get("day_1d")
+        return v is not None and float(v) > 0.0
+    def _dma20_gt0(s):    # dma_20 > 0 (STRICT)
+        v = s.get("dma_20")
+        return v is not None and float(v) > 0.0
 
-    signal_ts_ist = _now_ist(sim_ts)   # cc#218
-    _reset_slot_blocks()   # cc#256: fresh per-tick slot_full accumulator
+    base = list(all_metrics)
+    funnel = {"_universe": len(base)}
+    funnel["dma_50"]        = sum(1 for s in base if _passes(s.get("dma_50"), 5.0, 12.0))
+    funnel["dma_20"]        = sum(1 for s in base if _dma20_gt0(s))
+    funnel["week_index_52"] = sum(1 for s in base if _passes(s.get("week_index_52"), 75.0, None))
+    funnel["gvm_score"]     = sum(1 for s in base if _passes(s.get("gvm_score"), 7.0, None))
+    funnel["day_1d"]        = sum(1 for s in base if _day1d_gt0(s))
+    funnel["hourly_pct"]    = sum(1 for s in base if _hourly_ok(s))
+    surv = [s for s in base
+            if _passes(s.get("dma_50"), 5.0, 12.0)
+            and _dma20_gt0(s)
+            and _passes(s.get("week_index_52"), 75.0, None)
+            and _passes(s.get("gvm_score"), 7.0, None)
+            and _day1d_gt0(s)
+            and _hourly_ok(s)]
+    funnel["_stage6_survivors"] = len(surv)   # denominator for the stage-7 true_weekly_rsi row
+    log.info(f"buy_momentum_v3: {len(surv)} after 6-condition cheap hard-gate pre-filter")
 
-    for basket, filters in FILTER_CONFIG.items():
-        # cc#354: buy_reversal left the standard score-gate + dynamic-regime loop entirely —
-        # it now runs as BUY_REVERSAL_V3 via its own dedicated strict-AND handler (spec id=2818).
-        # cc#378: sell_reversal likewise left the loop — SELL_REVERSAL_V5D dedicated handler (id=2894).
-        # cc#380: sell_momentum left the loop too — SELL_MOMENTUM_V3 dedicated handler (id=2901).
-        if basket in ("sell_overbought", "buy_s1_bounce", "buy_reversal", "sell_reversal", "sell_momentum"):
-            continue
+    hard_qualified = []
+    for s in surv:
+        twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
+        s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
+        if twr is not None and 70.0 <= twr <= 85.0:        # FINAL heavy hard-gate stage
+            hard_qualified.append(s)
+    funnel["true_weekly_rsi"] = len(hard_qualified)
+    log.info(f"buy_momentum_v3: {len(hard_qualified)} pass hard gates (true_weekly_rsi in [70,85])")
 
-        active_filters = filters
-
-        # cc#158: sell_momentum V2.1 w52 is a MODIFY of a locked score-gate
-        # filter (<=20 -> <=30), not a hard-gate add. Swap the bound in-place
-        # only when enabled; n_filters (and thus the gate threshold) is
-        # unchanged. Old <=20 path stays until enable (spec id=1267).
-        if basket == "sell_momentum" and enabled_v21.get("sell_momentum"):
-            active_filters = dict(active_filters)
-            active_filters["week_index_52"] = [None, 30.0]
-
-        n_filters = len(active_filters)
-        side      = BASKET_SIDE.get(basket, "BUY")
-        need      = _gate_threshold(gate_fails, n_filters, side)
-
-        universe = []
-        for s in all_metrics:
-            score = sum(
-                1 for metric, bounds in active_filters.items()
-                if _passes(s.get(metric),
-                           *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1])))
-            )
-            s["_filter_score"] = score
-            if score >= need:
-                universe.append(s)
-
-        funnel    = {}
-        survivors = all_metrics[:]
-        for metric, bounds in active_filters.items():
-            mn, mx    = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-            survivors = [s for s in survivors if _passes(s.get(metric), mn, mx)]
-            funnel[metric] = len(survivors)
-        funnel["_score_threshold"] = need
-        funnel["_score_qualified"] = len(universe)
-
-        log.info(f"{basket}: score-gate need={need}/{n_filters} "
-                 f"gate_fails={gate_fails} -> {len(universe)} score-qualified")
-
-        # cc#158: V2.1 hard-gate layer — applied AFTER the score-gate, never
-        # counted into the threshold. Disabled basket -> no-op (locked behavior).
-        v21_on = enabled_v21.get(basket, False)
-        if v21_on:
-            before = len(universe)
-            universe = [s for s in universe if v21_hard_gate_pass(basket, s, True, backtest=v21_backtest)]
-            log.info(f"{basket}: V2.1 hard-gate ON ({'backtest' if v21_backtest else 'live/parity'})"
-                     f" -> {len(universe)}/{before} pass")
-
-        universe = [
-            s for s in universe
-            if (pv := pivots.get(s["symbol"])) and _pivot_room_ok(
-                side, s.get("_cmp"), pv["pp"], pv["r1"], pv["s1"]
-            )
-        ]
-        log.info(f"{basket}: pivot-room gate ({side}) -> {len(universe)} with room")
-
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (basket, score_date) DO UPDATE SET
-                        counts = EXCLUDED.counts, computed_at = NOW()
-                """, (basket, target_date, json.dumps(funnel)))
-            conn.commit()
-        except Exception as e:
-            log.warning(f"funnel {basket}: {e}")
-
-        for s in universe:
-            sym  = s["symbol"]
-            snap = {k: s.get(k) for k in [
-                "gvm_score", "dma_50", "dma_200", "dma_20",
-                "rsi_month", "rsi_weekly", "daily_rsi",
-                "month_return", "week_return", "year_return", "mom_2d",
-                "week_index_52", "ma9_vs_ma21", "vol_ratio",
-                "sector_week", "sector_month", "sector_day",
-            ]}
-            snap["vol_ratio_legacy"]          = s.get("vol_ratio_legacy")
-            snap["vol_ratio_time_normalized"] = s.get("vol_ratio_time_normalized")
-            snap["vol_ratio_days_available"]  = s.get("vol_ratio_days_available")
-            snap["vol_ratio_fallback"]        = s.get("vol_ratio_fallback")     # cc#170
-            snap["filter_score"] = s.get("_filter_score")
-            snap["filter_total"] = n_filters
-            snap["hourly_pct"]          = s.get("hourly_pct")           # cc#158
-            snap["fall_from_day_high"]  = s.get("fall_from_day_high")   # cc#158
-            snap["v21_enabled"]         = v21_on                        # cc#158
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        INSERT INTO v8_qualified
-                        (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
-                         mom_2d, week_return, month_return, dma_200, dma_50,
-                         rsi_month, rsi_weekly, sector_week, sector_day,
-                         month_index, week_index_52, daily_rsi,
-                         metrics, source)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (symbol, basket, signal_date) DO NOTHING
-                    """, (
-                        sym, basket, target_date,
-                        signal_ts_ist,
-                        s.get("gvm_score"), s.get("_cmp"),
-                        s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
-                        s.get("dma_200"), s.get("dma_50"),
-                        s.get("rsi_month"), s.get("rsi_weekly"),
-                        s.get("sector_week"), s.get("sector_day"),
-                        s.get("month_index"), s.get("week_index_52"),
-                        s.get("daily_rsi"),
-                        json.dumps(snap), "live_5min",
-                    ))
-                    first_qualification = cur.rowcount > 0   # v8_qualified daily latch (display)
-                conn.commit()
-                # cc#254: attempt entry on EVERY tick the symbol is in `universe` (i.e. it passes
-                # the live score-gate + V2.1 + pivot-room right NOW), not only its FIRST
-                # qualification of the day — so a symbol blocked purely by slot_full earlier enters
-                # when a slot frees later the same day. _auto_paper_entry re-checks entry window,
-                # blackout, same-side-open, traded_today and slot live, so re-calling is idempotent
-                # (already-open / already-traded-today symbols are skipped).
-                _auto_paper_entry(conn, sym, basket, side,
-                                  s.get("_cmp"), pivots.get(sym),
-                                  target_date, gate_fails, sim_ts=sim_ts)
-            except Exception as e:
-                log.warning(f"qualified insert {basket} {sym}: {e}")
-
-    _write_buy_reversal_v3_qualified(conn, all_metrics, target_date,
-                                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-    _write_sell_reversal_v5d_qualified(conn, all_metrics, target_date,
-                                       gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-    _write_sell_momentum_v3_qualified(conn, all_metrics, target_date,
-                                      gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-    _write_buy_s1_bounce_qualified(conn, all_metrics, target_date,
-                                    gate_fails, pivots, signal_ts_ist, enabled_v21,
-                                    sim_ts=sim_ts, v21_backtest=v21_backtest)
-    _write_sell_overbought_v3_qualified(conn, all_metrics, target_date,
-                                        gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-
-    # cc#256: tick complete — flush a slot_full_burst alert if any pool piled up. Live only
-    # (sim_ts is None); replay/bt7 ticks accumulate harmlessly but never emit alerts.
-    if sim_ts is None:
-        _flush_slot_blocks(conn, signal_ts_ist)
-
-
-def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: date,
-                                    gate_fails: int, pivots: dict, signal_ts_ist,
-                                    enabled_v21: Optional[dict] = None, sim_ts=None,
-                                    v21_backtest=False):
-    """
-    Buy S1 Bounce V1 (17-Jun-2026). 8 strict filters (nifty_rsi gate + gvm>=7 + 6 stages).
-    Dedicated ring-fenced slots 3/3/3/2. Backtest: 88 sigs/yr, 73.9% WR (predates gvm>=7
-    gate — cc#234; live-with-gvm>=7 is tighter, Claude web re-backtests to confirm WR).
-    cc#158: V2.1 hard gate (hourly_pct >0..1.0, week_index_52 50..90) layered
-    as extra strict-AND conditions when enabled (spec id=1265).
-    """
-    from v8_endpoints import v21_hard_gate_pass
-    enabled_v21 = enabled_v21 or {}
-    s1b_on = enabled_v21.get("buy_s1_bounce", False)
-    nifty_rsi = _get_nifty_rsi(conn, sim_ts=sim_ts)
-    if nifty_rsi is None or nifty_rsi < 55.0:
-        log.debug(f"buy_s1_bounce: Nifty RSI={nifty_rsi} < 55 -- gated OFF")
-        return
-
-    s1b_cap = _s1b_slots(gate_fails)
-    log.info(f"buy_s1_bounce: Nifty RSI={nifty_rsi:.1f} gated ON -- slots={s1b_cap}")
-
-    candidates = [
-        s for s in all_metrics
-        # cc#234: gvm>=7.0 hard gate (filter #0). cc#76 added this to the /buy_s1_bounce
-        # endpoint + funnel but NOT the writer, so the writer auto-entered paper for
-        # gvm<7 stocks the qualified list then hid (ghost entries). Now writer==funnel==endpoint.
-        if _passes(s.get("gvm_score"),    7.0, None)
-        and _passes(s.get("week_return"),  0.0, 2.5)   # cc#358 V2: cap 2.5 (was 3.0)
-        and _passes(s.get("dma_50"),      0.0, None)
-        and _passes(s.get("vol_ratio"),   1.5, None)
-        and _passes(s.get("recovery_2d"), 2.0, 8.0)
-        and _passes(s.get("day_ret"),     0.5, None)
-    ]
-    log.info(f"buy_s1_bounce: {len(candidates)} after metric pre-filter")
-    if not candidates:
-        return
-
+    # SCORE >= 7 of 10 V2 bands, FIXED threshold (no mood-dependent n/n-1). wRSI band reuses the
+    # SAME true_weekly_rsi value just computed for the hard gate (spec: "use the SAME value").
+    SCORE_BANDS = {
+        "gvm_score":    (7.0, 10.0),
+        "dma_50":       (8.0, 25.0),
+        "dma_200":      (8.0, 40.0),
+        "rsi_month":    (70.0, 100.0),
+        "week_return":  (0.5, 12.0),
+        "month_return": (2.0, 30.0),
+        "mom_2d":       (0.0, 6.0),
+        "sector_week":  (0.0, 6.0),
+        "sector_month": (0.0, 6.0),
+    }
     qualified = []
-    for s in candidates:
-        sym = s["symbol"]
-        pv  = pivots.get(sym)
-        if not pv:
-            continue
-        week_low = s.get("week_low")
-        if week_low is None or float(week_low) > float(pv["s1"]):
-            continue
-        if not s.get("_cmp"):
-            continue
-        qualified.append(s)
+    for s in hard_qualified:
+        score = sum(1 for metric, (mn, mx) in SCORE_BANDS.items() if _passes(s.get(metric), mn, mx))
+        twr = s.get("_true_weekly_rsi")
+        if twr is not None and 60.0 <= twr <= 85.0:
+            score += 1
+        s["_score"] = score
+        if score >= 7:
+            qualified.append(s)
+    funnel["_score_qualified"] = len(qualified)
+    log.info(f"buy_momentum_v3: {len(qualified)} qualified (score>=7/10) [cc#502]")
 
-    log.info(f"buy_s1_bounce: {len(qualified)} qualified after week_low<=S1")
-
-    # cc#158: V2.1 hard-gate layer (strict-AND) — hourly_pct + week_index_52.
-    if s1b_on:
-        before = len(qualified)
-        qualified = [s for s in qualified if v21_hard_gate_pass("buy_s1_bounce", s, True, backtest=v21_backtest)]
-        log.info(f"buy_s1_bounce: V2.1 hard-gate ON -> {len(qualified)}/{before} pass")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO v8_funnel_counts (basket, score_date, counts)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (basket, score_date) DO UPDATE SET
+                    counts = EXCLUDED.counts, computed_at = NOW()
+            """, (basket, target_date, json.dumps(funnel)))
+        conn.commit()
+    except Exception as e:
+        log.warning(f"buy_momentum_v3 funnel: {e}")
 
     for s in qualified:
         sym  = s["symbol"]
         snap = {
-            "week_return": s.get("week_return"), "dma_50": s.get("dma_50"),
-            "vol_ratio": s.get("vol_ratio"), "recovery_2d": s.get("recovery_2d"),
-            "day_ret": s.get("day_ret"), "week_low": s.get("week_low"),
-            "nifty_rsi": round(nifty_rsi, 1), "filter_score": 8, "filter_total": 8,
-            "vol_ratio_legacy": s.get("vol_ratio_legacy"),
-            "vol_ratio_time_normalized": s.get("vol_ratio_time_normalized"),
-            "vol_ratio_days_available": s.get("vol_ratio_days_available"),
-            "vol_ratio_fallback": s.get("vol_ratio_fallback"),   # cc#170
-            "hourly_pct": s.get("hourly_pct"),            # cc#158
-            "week_index_52": s.get("week_index_52"),      # cc#158
-            "v21_enabled": s1b_on,                        # cc#158
+            "true_weekly_rsi": s.get("_true_weekly_rsi"),
+            "dma_50":  s.get("dma_50"), "dma_20": s.get("dma_20"), "dma_200": s.get("dma_200"),
+            "week_index_52": s.get("week_index_52"), "gvm_score": s.get("gvm_score"),
+            "day_1d": s.get("day_1d"), "hourly_pct": s.get("hourly_pct"),
+            "rsi_month": s.get("rsi_month"), "week_return": s.get("week_return"),
+            "month_return": s.get("month_return"), "mom_2d": s.get("mom_2d"),
+            "sector_week": s.get("sector_week"), "sector_month": s.get("sector_month"),
+            "score": s.get("_score"), "score_threshold": 7, "score_total": 10,
+            "filter_score": s.get("_score"), "filter_total": 10,
+            "spec": "BUY_MOMENTUM_V3 cc#502",
         }
         try:
             with conn.cursor() as cur:
@@ -2253,8 +1952,7 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                      rsi_month, rsi_weekly, sector_week, sector_day,
                      month_index, week_index_52, daily_rsi,
                      metrics, source)
-                    VALUES
-                    (%s,'buy_s1_bounce',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,'buy_momentum',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
                     ON CONFLICT (symbol, basket, signal_date) DO NOTHING
                 """, (
                     sym, target_date, signal_ts_ist,
@@ -2264,149 +1962,44 @@ def _write_buy_s1_bounce_qualified(conn, all_metrics: List[dict], target_date: d
                     s.get("rsi_month"), s.get("rsi_weekly"),
                     s.get("sector_week"), s.get("sector_day"),
                     s.get("month_index"), s.get("week_index_52"),
-                    s.get("daily_rsi"),
-                    json.dumps(snap), "live_5min",
-                ))
-                first_qual = cur.rowcount > 0   # daily latch (display)
-            conn.commit()
-            # cc#254: retry entry every tick it still passes the s1b strict gate, not just first
-            # qualification — _auto_paper_entry_s1b re-checks window/guards/slot live (idempotent).
-            _auto_paper_entry_s1b(conn, sym, s.get("_cmp"), target_date, gate_fails, sim_ts=sim_ts)
-        except Exception as e:
-            log.warning(f"buy_s1_bounce insert {sym}: {e}")
-
-
-def _write_sell_overbought_v3_qualified(conn, all_metrics: List[dict], target_date: date,
-                                        gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#382 SELL_OVERBOUGHT_V3 (spec id=2912) — replaces the never-firing V2 (wRSI>=80 + mRSI>=70
-    was unreachable, ZERO signals ever). Fresh same-day R1 rejection short (S1-Bounce mirror). Strict
-    AND of 5, all cheap/live (no heavy weekly-RSI stage):
-      (1) NIFTY daily RSI <= 45     (bear-regime market gate)
-      (2) day session HIGH >= R1    (rolling-5d pivot r1, TOUCHED TODAY — live session high)
-      (3) fall from 2-day high in [1, 10]%  (rejected, not crashed)
-      (4) day change < 0            (red today)
-      (5) week_return in [-2.5, 0]  (mild weekly weakness)
-    Exits FIXED +/-2.0% (true 1:1) via _auto_paper_entry_so; max hold 15 trading days. Ring-fenced SO
-    slot pool unchanged. Independent per-filter funnel counts (cc#364 convention)."""
-    basket = "sell_overbought"
-    so_cap = _so_slots(gate_fails)
-    nifty_rsi = _get_nifty_rsi(conn, sim_ts=sim_ts)
-    nifty_ok = nifty_rsi is not None and nifty_rsi <= 45.0
-    log.info(f"sell_overbought_v3: SO slots={so_cap}, nifty_rsi={nifty_rsi} gate={'ON' if nifty_ok else 'OFF'}")
-
-    base = []
-    for s in all_metrics:
-        cmp = s.get("_cmp")
-        pv  = pivots.get(s["symbol"])
-        if not cmp or not pv:
-            continue
-        r1 = pv.get("r1")
-        if r1 is None:
-            continue
-        s["_so_r1"] = r1
-        base.append(s)
-    syms = [s["symbol"] for s in base]
-
-    # (2)/(3): today's LIVE session high (touched R1?) + the prior day's high (for the 2-day high).
-    sess_high, prev_high = {}, {}
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""SELECT symbol, MAX(high) FROM intraday_prices
-                WHERE source='fyers_eq' AND timeframe='5m' AND ts::date=%s AND symbol=ANY(%s)
-                GROUP BY symbol""", (target_date, syms))
-            for sym, h in cur.fetchall():
-                if h is not None:
-                    sess_high[sym] = float(h)
-            cur.execute("""SELECT DISTINCT ON (symbol) symbol, high FROM raw_prices
-                WHERE symbol=ANY(%s) AND price_date < %s ORDER BY symbol, price_date DESC""",
-                (syms, target_date))
-            for sym, h in cur.fetchall():
-                if h is not None:
-                    prev_high[sym] = float(h)
-    except Exception as e:
-        log.warning(f"sell_overbought_v3 high load: {e}")
-
-    for s in base:
-        sym = s["symbol"]
-        cmp = s["_cmp"]
-        sh = sess_high.get(sym)
-        ph = prev_high.get(sym)
-        s["_so_high_ge_r1"] = (sh is not None and sh >= s["_so_r1"])
-        h2 = max([x for x in (sh, ph) if x is not None], default=None)   # 2-day high (today live + prior day)
-        s["_so_fall2d"] = round((h2 - cmp) / h2 * 100.0, 3) if (h2 and cmp) else None
-
-    def _fall_ok(s):
-        f = s["_so_fall2d"]
-        return f is not None and 1.0 <= f <= 10.0
-    def _day_red(s):
-        v = s.get("day_1d")
-        return v is not None and float(v) < 0.0
-
-    # cc#382: INDEPENDENT per-filter counts (cc#364 style). The NIFTY gate is market-wide: all `base`
-    # pass it iff nifty_ok. Final = strict-AND of all 5. No heavy stage.
-    funnel = {"_universe": len(base)}
-    funnel["nifty_rsi"]   = len(base) if nifty_ok else 0                                       # (1)
-    funnel["high_ge_r1"]  = sum(1 for s in base if s["_so_high_ge_r1"])                        # (2)
-    funnel["fall_2d"]     = sum(1 for s in base if _fall_ok(s))                                # (3)
-    funnel["day_red"]     = sum(1 for s in base if _day_red(s))                                # (4)
-    funnel["week_return"] = sum(1 for s in base if _passes(s.get("week_return"), -2.5, 0.0))   # (5)
-    surv = [s for s in base
-            if nifty_ok
-            and s["_so_high_ge_r1"]
-            and _fall_ok(s)
-            and _day_red(s)
-            and _passes(s.get("week_return"), -2.5, 0.0)]
-    funnel["_score_qualified"] = len(surv)
-    log.info(f"sell_overbought_v3: {len(surv)} qualified [spec id=2912]")
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""INSERT INTO v8_funnel_counts (basket, score_date, counts)
-                VALUES (%s,%s,%s) ON CONFLICT (basket, score_date) DO UPDATE SET
-                    counts=EXCLUDED.counts, computed_at=NOW()""",
-                (basket, target_date, json.dumps(funnel)))
-        conn.commit()
-    except Exception as e:
-        log.warning(f"sell_overbought_v3 funnel: {e}")
-
-    for s in surv:
-        sym = s["symbol"]
-        cmp = s.get("_cmp")
-        entry = round(cmp, 2)
-        snap = {
-            "nifty_rsi": round(nifty_rsi, 1) if nifty_rsi is not None else None,
-            "high_ge_r1": s["_so_high_ge_r1"], "r1": s["_so_r1"],
-            "fall_2d_pct": s.get("_so_fall2d"), "day_1d": s.get("day_1d"),
-            "week_return": s.get("week_return"),
-            "target": round(entry * 0.98, 2), "stop": round(entry * 1.02, 2),
-            "filter_score": 5, "filter_total": 5, "so_slots": so_cap,
-            "spec": "SELL_OVERBOUGHT_V3 id=2912",
-        }
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO v8_qualified
-                    (symbol, basket, signal_date, signal_ts, gvm_score, cmp,
-                     mom_2d, week_return, month_return, dma_200, dma_50,
-                     rsi_month, rsi_weekly, sector_week, sector_day,
-                     month_index, week_index_52, daily_rsi,
-                     metrics, source)
-                    VALUES (%s,'sell_overbought',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'live_5min')
-                    ON CONFLICT (symbol, basket, signal_date) DO NOTHING
-                """, (
-                    sym, target_date, signal_ts_ist,
-                    s.get("gvm_score"), cmp,
-                    s.get("mom_2d"), s.get("week_return"), s.get("month_return"),
-                    s.get("dma_200"), s.get("dma_50"),
-                    s.get("rsi_month"), s.get("rsi_weekly"),
-                    s.get("sector_week"), s.get("sector_day"),
-                    s.get("month_index"), s.get("week_index_52"),
                     s.get("daily_rsi"), json.dumps(snap),
                 ))
             conn.commit()
-            _auto_paper_entry_so(conn, sym, cmp, pivots.get(sym), target_date, gate_fails, sim_ts=sim_ts)
+            _auto_paper_entry(conn, sym, basket, side, s.get("_cmp"), pivots.get(sym),
+                              target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
-            log.warning(f"sell_overbought_v3 insert {sym}: {e}")
+            log.warning(f"buy_momentum_v3 insert {sym}: {e}")
+
+
+def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
+    """cc#502: the generic FILTER_CONFIG score-gate loop is retired — all four baskets are now
+    dedicated strict-AND handlers (zero baskets were left running through it). This is now just
+    the shared per-tick setup (mood gate for slots, pivots, slot-block accumulator) followed by
+    the four dedicated handler calls and the end-of-tick slot-burst flush. v21_backtest is kept
+    on the signature for external callers (BT7/replay) even though nothing here reads it anymore
+    -- the V2.1 hard-gate subsystem (v8_endpoints.V21_FILTERS / v21_hard_gate_pass) is untouched
+    infrastructure, simply no longer called by any basket handler."""
+    gate_fails = _market_gate_fails(conn, sim_ts=sim_ts)
+    pivots     = _load_pivots(conn, sim_ts=sim_ts)
+
+    signal_ts_ist = _now_ist(sim_ts)   # cc#218
+    _reset_slot_blocks()   # cc#256: fresh per-tick slot_full accumulator
+
+    _write_buy_reversal_v5_qualified(conn, all_metrics, target_date,
+                                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+    _write_sell_reversal_v61_qualified(conn, all_metrics, target_date,
+                                       gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+    _write_sell_momentum_v4_qualified(conn, all_metrics, target_date,
+                                      gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+    _write_buy_momentum_v3_qualified(conn, all_metrics, target_date,
+                                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+
+    # cc#256: tick complete — flush a slot_full_burst alert if any pool piled up. Live only
+    # (sim_ts is None); replay/bt7 ticks accumulate harmlessly but never emit alerts.
+    if sim_ts is None:
+        _flush_slot_blocks(conn, signal_ts_ist)
+
+
 
 
 # -- Main entry point ---------------------------------------------------------

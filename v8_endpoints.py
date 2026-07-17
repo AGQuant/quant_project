@@ -54,63 +54,66 @@ def _market_open() -> bool:
 
 
 FILTER_CONFIG = {
-    # cc#354/355 V3: dedicated strict-AND handler in the writer. Only the 4 v8_metrics-computable
-    # gates live here (for the funnel); true_weekly_rsi>=60, hourly 0.1-1.0, CMP>PP, room>2% are the
-    # live/pivot gates enforced in _write_buy_reversal_v3_qualified. No regime overrides.
+    # cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce entries REMOVED
+    # (both baskets retired entirely). All four remaining baskets are dedicated strict-AND
+    # handlers in v8_signal_writer.py -- this dict is DISPLAY/ENDPOINT REFERENCE ONLY (the
+    # generic score-gate loop that used to read it live is retired). Each entry carries the
+    # v8_metrics-computable subset of that basket's filters; live/pivot/price-history gates and
+    # the heavy true_weekly_rsi (wRSI) FINAL stage are handler-enforced only and noted in comments
+    # -- wRSI is NEVER the shared synthetic v8_metrics.rsi_weekly (cc#353: ~16pt off), always the
+    # basket-call-local _true_weekly_rsi().
     "buy_reversal": {
-        "daily_rsi":  [None, 40.0],   # cold short-term dip
-        "dma_200":    [0.0,  None],   # long-term uptrend
-        "gvm_score":  [6.5,  None],   # quality
-        "mom_2d":     [0.0,   3.0],   # 2-day momentum turned up
+        # BUY_REVERSAL_V5 (replaces the V3 inverse-sandwich). Live/pivot gates NOT shown here:
+        # S1-touch (prior-4-day raw_prices low OR today's live day_low <= S1) and the FINAL heavy
+        # stage true_weekly_rsi>=70 -- both handler-enforced in _write_buy_reversal_v5_qualified.
+        "mom_2d":       [-0.5, None],
+        "week_return":  [-2.0, None],
+        "rsi_month":    [60.0, 90.0],
+        "sector_week":  [0.0,  None],   # engine enforces STRICT >0
+        "month_return": [None, 5.0],
     },
     "buy_momentum": {
-        # V2 filter optimisation (cc_task #74, 24-Jun-2026): EOD backtest across 9
-        # scenarios -> rsi_weekly 60-85->62-82, mom_2d 0->0.5 min, gvm revert 6.0->7.0.
-        # WR 65.2->71.4%, EV +0.322->+0.517%, signals 288->~135/yr.
+        # BUY_MOMENTUM_V3: TWO independent layers, both handler-enforced. The 9 bands below are
+        # the SCORE layer (SCORE>=7-of-10 fixed threshold, no mood-dependent n/n-1; the 10th band
+        # is wRSI 60-85 via true_weekly_rsi, not a stored column). A SEPARATE, stricter HARD-gate
+        # layer (all strict-AND, not shown here) also applies: dma_50 in [5,12] (tighter than the
+        # score band below), dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0, hourly_pct>0 AND
+        # NOT NULL (blocks entries before ~10:15), FINAL heavy true_weekly_rsi in [70,85].
         "gvm_score":    [7.0,  10.0],
         "dma_50":       [8.0,  25.0],
         "dma_200":      [8.0,  40.0],
         "rsi_month":    [70.0, 100.0],
-        "rsi_weekly":   [62.0, 82.0],
         "month_return": [2.0,  30.0],
         "week_return":  [0.5,  12.0],
-        "mom_2d":       [0.5,   6.0],
+        "mom_2d":       [0.0,   6.0],
         "sector_week":  [0.0,   6.0],
         "sector_month": [0.0,   6.0],
     },
     "sell_reversal": {
-        # cc#378 SELL_REVERSAL_V5D (spec id=2894, supersedes V4 id=357). Dedicated strict-AND handler
-        # (_write_sell_reversal_v5d_qualified) — OUT of the score-gate loop. These are the 3
-        # v8_metrics-computable gates shown in the funnel; the live/pivot gates (TRUE weekly RSI<=40,
-        # CMP<PP, room-to-S1/S2>=2%) are enforced in the handler and rendered via sr_funnel_detail.
-        "daily_rsi":  [60.0, None],   # hot bounce
-        "rsi_month":  [None, 50.0],   # weak monthly (engine enforces STRICT <50)
-        "dma_200":    [None, 0.0],    # below the 200-DMA
+        # SELL_REVERSAL_V6.1 (replaces V5-D). Live/pivot gates NOT shown here: R1-touch last 3
+        # days (per-day high vs that day's r1) and the FINAL heavy stage true_weekly_rsi<=45 --
+        # both handler-enforced in _write_sell_reversal_v61_qualified. RAW: no market gate, no
+        # kill-switch. Target S1-or-S2 dynamic (room>=2%), stop 1:1 mirror (handler-computed).
+        "day_1d":        [-2.0,  0.0],
+        "dma_20":        [None,  0.0],
+        "dma_50":        [None,  0.0],
+        "dma_200":       [None,  0.0],
+        "week_index_52": [None, 50.0],
+        "sector_week":   [None,  0.0],   # engine enforces STRICT <0
+        "mom_2d":        [-4.0, -1.0],
+        "month_return":  [-10.0, None],
     },
     "sell_momentum": {
-        # cc#380 SELL_MOMENTUM_V3 (N5, spec id=2901, supersedes V2). Dedicated strict-AND handler
-        # (_write_sell_momentum_v3_qualified) — OUT of the score-gate loop. These are the 6
-        # v8_metrics-computable gates shown in the funnel; the live/pivot gates (TRUE weekly RSI<=45,
-        # CMP<PP, S2-clearance>=3%) are enforced in the handler and rendered via sm_funnel_detail.
+        # SELL_MOMENTUM_V4 (renamed from V3): twr tightened <=45 -> <=40, mom_2d tightened
+        # [-4,-1] -> [-4,-2] (both cc#502). Live/pivot gates NOT shown here: CMP<PP,
+        # S2-clearance>=3%, FINAL heavy true_weekly_rsi<=40 -- handler-enforced in
+        # _write_sell_momentum_v4_qualified.
         "rsi_month":     [None, 40.0],    # weak monthly (engine enforces STRICT <40)
-        "mom_2d":        [-4.0, -1.0],    # recent down-momentum
+        "mom_2d":        [-4.0, -2.0],    # recent down-momentum
         "dma_200":       [None,  2.0],    # below / near 200-DMA
         "week_return":   [-10.0, -0.5],   # weak week
         "sector_week":   [None,  0.0],    # weak sector (engine enforces STRICT <0)
         "week_index_52": [20.0,  60.0],   # mid 52-week band
-    },
-    # cc#382 SELL_OVERBOUGHT_V3 (spec id=2912, replaces the never-firing V2). Dedicated handler
-    # (_write_sell_overbought_v3_qualified). The 1 v8_metrics gate shown for reference; the live gates
-    # (NIFTY RSI<=45, day HIGH>=R1, fall-from-2d-high 1-10%, day change<0) are handler-enforced and
-    # rendered via so_funnel_detail. week_return here is the only v8_metrics-computable filter.
-    "sell_overbought": {
-        "week_return":  [-2.5, 0.0],   # mild weekly weakness
-    },
-    # buy_s1_bounce: 7 filters (1 gate + 6 stages). Reference cols only.
-    "buy_s1_bounce": {
-        "week_return":  [0.0,  2.5],   # cc#358 V2: cap 2.5 (was 3.0)
-        "vol_ratio":    [1.5, None],
-        "dma_50":       [0.0, None],
     },
 }
 
