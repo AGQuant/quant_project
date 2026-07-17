@@ -1243,9 +1243,14 @@ _EQUITY_SUBCATS = {
 }
 
 
-def _amfi_ter_latest_month(cur):
-    """cc#498 step_1: GET populate-ter-month for the current FY, return the most recently
-    published MM-YYYY string. AMFI FY runs Apr-Mar."""
+def _amfi_ter_months_desc(cur):
+    """cc#498 step_1: GET populate-ter-month for the current FY, return ALL listed months
+    parsed and sorted NEWEST-first. TER publication lags the calendar month by several weeks
+    (SEBI compliance cycle) — the newest LISTED month in the dropdown is not reliably the
+    newest PUBLISHED one (live-observed 17-Jul: July-2026 was listed but returned a
+    well-formed EMPTY result for every one of 150+ AMC x subcategory combos tried), so callers
+    should probe candidates in order and verify data exists rather than assuming the first one
+    works. AMFI FY runs Apr-Mar."""
     import requests
     today = date.today()
     fy = f"{today.year}-{today.year+1}" if today.month >= 4 else f"{today.year-1}-{today.year}"
@@ -1260,27 +1265,22 @@ def _amfi_ter_latest_month(cur):
             months = [r0.get("MonthNumber") or r0.get("monthNumber") or r0.get("Month")
                       for r0 in rows if isinstance(r0, dict)]
             months = [m for m in months if m]
-            # cc#498 live bug fix: populate-ter-month returns NEWEST-first (verified 17-Jul:
-            # [July-2026, June-2026, May-2026, ...]) — months[-1] silently picked the OLDEST
-            # month in the list. Parse "MM-YYYY" and take the actual max rather than trust
-            # either end of the list's order.
+
             def _month_key(m):
                 try:
                     mm, yyyy = m.split('-')
                     return (int(yyyy), int(mm))
                 except Exception:
                     return (0, 0)
-            if months:
-                return max(months, key=_month_key)
+            return sorted(set(months), key=_month_key, reverse=True)
     except Exception as e:
         _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "months", "fy": fy, "error": str(e)[:200]})
-    return None
+    return []
 
 
 def _discover_ter_mf_ids(cur):
     """cc#498 step_1: find the MF_ID<->AMC map via the established populate-* naming
-    convention. Only needed as a fallback if the MF_ID wildcard test in fetch_expense_ratio
-    fails — a working wildcard avoids needing this map at all."""
+    convention (populate-mf, verified live)."""
     import requests
     hdr = {"User-Agent": "Scorr-MF/1.0"}
     for url in _AMFI_MF_ID_URLS:
@@ -1363,40 +1363,55 @@ def _ter_row_is_direct(row):
 
 def fetch_expense_ratio(cur):
     """step_2, cc#498: real AMFI TER API (founder DevTools capture, verified live 17-Jul —
-    supersedes cc#491's dead-URL/discovery-probe attempts). Iterates the latest published
-    month x 13 equity subcategories x MF_ID (wildcard tried first per step_1 — if AMFI accepts
-    MF_ID=-1 for "all AMCs", per-AMC iteration is skipped entirely; else falls back to the
-    discovered MF_ID<->AMC map), paginating via meta.pageCount. Extracts scheme name + TOTAL
-    TER (schema-defensive per _ter_row_total), fuzzy-matches to mf_master exactly like the AUM
-    sweep, prefers a Direct-plan row when both exist for the same scheme name. Same overwrite
-    guard as before: WHERE expense_ratio IS NULL on this initial pass (existing curated values
+    supersedes cc#491's dead-URL/discovery-probe attempts). MF_ID=-1 wildcard is confirmed NOT
+    supported (live-tested), so this discovers the real MF_ID<->AMC map and probes candidate
+    months (newest-listed first, verifying against a known AMC since TER publication lags the
+    calendar month) before committing to the full crawl: all discovered AMCs x 13 equity
+    subcategories x the confirmed-published month, paginating via meta.pageCount. Extracts
+    scheme name + TOTAL TER (schema-defensive per _ter_row_total), fuzzy-matches to mf_master
+    exactly like the AUM sweep, prefers a Direct-plan row when both exist for the same scheme
+    name. Same overwrite guard as before: WHERE expense_ratio IS NULL on this initial pass
+    (existing curated values
     untouched)."""
     import time
-    month = _amfi_ter_latest_month(cur)
-    if not month:
+    months = _amfi_ter_months_desc(cur)
+    if not months:
         _oplog(cur, "MF_TER_ERROR", {"stage": "no_month", "note": "populate-ter-month returned nothing usable"})
         return {"error": "no month found"}
 
-    probe_rows, probe_meta = _amfi_ter_page(cur, -1, _EQUITY_SUBCATS["Large Cap"], month, 1, 100)
-    wildcard_ok = len(probe_rows) >= 10
-    _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "wildcard_probe", "mf_id": -1, "subcat": "Large Cap",
-           "month": month, "rows": len(probe_rows), "meta": probe_meta, "wildcard_ok": wildcard_ok})
+    discovered = _discover_ter_mf_ids(cur)
+    # cc#498 live bug fix: the real populate-mf response uses "mfId" (verified 17-Jul:
+    # [{'tableId': 'Table1', 'mfId': '62', 'mfName': '360 ONE Mutual Fund'}, ...]) — none of
+    # the originally-guessed key spellings matched it.
+    mf_ids = [d.get("mfId") or d.get("MF_ID") or d.get("mf_id") or d.get("id")
+              for d in discovered if isinstance(d, dict)]
+    mf_ids = [m for m in mf_ids if m is not None]
+    if not mf_ids:
+        _oplog(cur, "MF_TER_ERROR", {"stage": "no_mf_id_source",
+               "note": "no MF_ID<->AMC map endpoint discovered among the populate-* candidates tried"})
+        return {"error": "no MF_ID source"}
 
-    if wildcard_ok:
-        mf_ids = [-1]
-    else:
-        discovered = _discover_ter_mf_ids(cur)
-        # cc#498 live bug fix: the real populate-mf response uses "mfId" (verified 17-Jul:
-        # [{'tableId': 'Table1', 'mfId': '62', 'mfName': '360 ONE Mutual Fund'}, ...]) — none
-        # of the originally-guessed key spellings matched it.
-        mf_ids = [d.get("mfId") or d.get("MF_ID") or d.get("mf_id") or d.get("id")
-                  for d in discovered if isinstance(d, dict)]
-        mf_ids = [m for m in mf_ids if m is not None]
-        if not mf_ids:
-            _oplog(cur, "MF_TER_ERROR", {"stage": "no_mf_id_source", "month": month,
-                   "note": "wildcard MF_ID=-1 failed and no MF_ID<->AMC map endpoint discovered "
-                           "among the populate-* candidates tried"})
-            return {"error": "no MF_ID source", "month": month}
+    # cc#498 attempt_4 live bug fix: MF_ID=-1 wildcard is CONFIRMED not to work (live-tested:
+    # a well-formed empty response for Large Cap across every listed month) — drop it entirely,
+    # go straight to per-AMC. Probe candidate months (newest first) against a known-major AMC
+    # (Aditya Birla Sun Life, mfId=3, present in every populate-mf sample seen) x Large Cap
+    # until one actually returns data, rather than committing a ~10min full crawl to a month
+    # AMFI hasn't finished compiling yet (live-observed: July-2026 was LISTED but 150+
+    # combinations all came back empty — TER publication lags the calendar month).
+    month = None
+    for candidate in months:
+        probe_rows, probe_meta = _amfi_ter_page(cur, 3, _EQUITY_SUBCATS["Large Cap"], candidate, 1, 10)
+        _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "month_probe", "month": candidate,
+               "mf_id": 3, "rows": len(probe_rows), "meta": probe_meta})
+        if probe_rows:
+            month = candidate
+            break
+        time.sleep(0.5)
+    if not month:
+        _oplog(cur, "MF_TER_ERROR", {"stage": "no_published_month", "months_tried": months,
+               "note": "every listed month returned empty for a known AMC (ABSL, mfId=3) x "
+                       "Large Cap — TER data may not be published for any listed month yet"})
+        return {"error": "no published month found", "months_tried": months}
 
     all_rows, logged_sample = [], False
     n_combos = 0
@@ -1435,9 +1450,8 @@ def fetch_expense_ratio(cur):
             time.sleep(0.6)
 
     if not all_rows:
-        _oplog(cur, "MF_TER_ERROR", {"stage": "no_rows", "month": month, "wildcard": wildcard_ok,
-               "mf_ids_tried": len(mf_ids)})
-        return {"error": "no TER rows returned from the live API", "month": month, "wildcard": wildcard_ok}
+        _oplog(cur, "MF_TER_ERROR", {"stage": "no_rows", "month": month, "mf_ids_tried": len(mf_ids)})
+        return {"error": "no TER rows returned from the live API", "month": month}
 
     parsed = {}   # scheme name -> (ter, is_direct)
     for row in all_rows:
@@ -1470,7 +1484,7 @@ def fetch_expense_ratio(cur):
                 matched += 1
             else:
                 skipped_existing += 1
-    stats = {"month": month, "wildcard_mode": wildcard_ok, "ter_rows_raw": len(all_rows),
+    stats = {"month": month, "ter_rows_raw": len(all_rows),
              "ter_rows_parsed": len(parsed), "matched": matched, "skipped_existing_curated": skipped_existing}
     _oplog(cur, "MF_TER_BACKFILL", stats)
     return stats
