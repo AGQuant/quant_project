@@ -1606,6 +1606,51 @@ def _bg_mf_aum_monthly():
         log.error(f"_bg_mf_aum_monthly: {e}")
 
 
+_mc_discover_running = False   # cc#500: Moneycontrol discovery-probe single-flight guard
+
+
+def _bg_mf_mc_discover():
+    """cc#500 step_1: flag-gated one-shot Moneycontrol discovery probe (seconds, not minutes) —
+    checked every tick (no m%3 offset) so the dev session gets fast turnaround while iterating
+    on URL/field discovery. Flag app_config mf_mc_discover_run: 'pending'->run, 'done'->skip.
+    Set by POST /api/v15/mf/mc_discover_run."""
+    global _mc_discover_running
+    if _mc_discover_running:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='mf_mc_discover_run'")
+            r = cur.fetchone()
+        if not r or r[0] != 'pending':
+            return
+        _mc_discover_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_discover_run','running',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import mf_pipeline
+        with mf_pipeline._conn() as conn, conn.cursor() as cur:
+            mf_pipeline.ensure_tables(cur)
+            res = mf_pipeline._discover_mc_search_api(cur)
+            conn.commit()
+        log.info(f"_bg_mf_mc_discover: {res}")
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_discover_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+    except Exception as e:
+        log.error(f"_bg_mf_mc_discover: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_discover_run','pending',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _mc_discover_running = False
+
+
 
 # cc#475: feed staleness Telegram alert — INDEPENDENT of the signal-writer watchdogs (which
 # only restart the writer). This checks the FEED WORKER's own output (intraday_prices) from
@@ -1861,6 +1906,7 @@ async def _scheduler_loop():
         if m % 3 == 2:          _spawn(_bg_mf_weekly_manual)  # cc#491 course-correct: manual /run_weekly trigger poll
         if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)
         if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)
+        _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market

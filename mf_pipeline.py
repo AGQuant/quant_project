@@ -2131,3 +2131,15 @@ def mf_mc_discover():
         res = _discover_mc_search_api(cur)
         conn.commit()
     return {"discovery": res}
+
+
+@router.post("/api/v15/mf/mc_discover_run")
+def mf_mc_discover_run_arm():
+    """Same probe as GET /mc_discover, but ARMED for the scheduler to run server-side — the
+    dev session itself has no outbound path to scorr.in, so this is how the probe gets
+    triggered and its ops_log evidence inspected via run_sql (same pattern as /wire_all)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_discover_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+        conn.commit()
+    return {"armed": True, "flag": "mf_mc_discover_run=pending"}
