@@ -1772,6 +1772,11 @@ def run(auth_code=None):
     import fyers_backfill
     from fyers_apiv3.FyersWebsocket import data_ws
 
+    # cc#497 root_cause_3_HOTFIX_FIRST (verified live 10:27 IST from Railway logs): captured
+    # once, before anything else, so the watchdog grace-period fix below can never predate the
+    # CURRENT process's actual boot.
+    boot_time = datetime.now(IST)
+
     conn    = get_db()
     token   = get_valid_token(conn, auth_code)
     token   = _boot_auth_selfcheck(conn, token)   # cc#339 fix_2: prove REST auth BEFORE subscribing
@@ -2348,10 +2353,21 @@ def run(auth_code=None):
                 # the NEXT check, sys.exit(1) and let Railway restart clean. No other
                 # recovery paths. Suppressed for STARTUP_GRACE_MINS after 09:15 so the
                 # first bar cycle has time to form.
-                mins_open = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
-                if mins_open >= STARTUP_GRACE_MINS and (
-                        last_health_log is None or
-                        (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60):
+                #
+                # cc#497 root_cause_3_HOTFIX_FIRST (verified live 10:27 IST): mins_open is
+                # wall-clock-relative to 09:15, NOT boot-relative — a MID-MARKET boot got ZERO
+                # grace (mins_open was already >> STARTUP_GRACE_MINS the instant it started), so
+                # the watchdog fired on an 8-second-old process before its first tick could land,
+                # AND the HEARTBEAT_STALE_MINS lookback window still reflected the PRE-restart
+                # dead session. rung 1 then hung the process (close_connection SDK quirk), rung 2
+                # never fired, and every restart looped identically. Gate on mins_since_boot too,
+                # so the lookback window can never predate the current boot.
+                mins_open       = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
+                mins_since_boot = (now_dt - boot_time.replace(tzinfo=None)).total_seconds() / 60
+                if (mins_open >= STARTUP_GRACE_MINS
+                        and mins_since_boot >= max(STARTUP_GRACE_MINS, HEARTBEAT_STALE_MINS)
+                        and (last_health_log is None or
+                             (now_dt - last_health_log).total_seconds() >= HEALTH_LOG_MINS * 60)):
                     last_health_log = now_dt
                     src_counts = _recent_symbol_counts_by_source(HEARTBEAT_STALE_MINS)
                     eq, fut = src_counts.get('fyers_eq', -1), src_counts.get('fyers_fut', -1)
