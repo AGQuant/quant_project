@@ -17,7 +17,7 @@ import re
 import io
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import psycopg
 from fastapi import APIRouter
@@ -63,6 +63,10 @@ def ensure_tables(cur):
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_category_averages (
         category TEXT PRIMARY KEY, avg_expense_ratio NUMERIC, avg_ret_1y NUMERIC,
         avg_ret_3y NUMERIC, avg_ret_5y NUMERIC, n_funds INTEGER, updated_at TIMESTAMPTZ DEFAULT NOW())""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS mf_monthly_snapshot (
+        scheme_code TEXT NOT NULL, snapshot_month DATE NOT NULL,
+        aum_cr NUMERIC, expense_ratio NUMERIC,
+        PRIMARY KEY (scheme_code, snapshot_month))""")
 
 
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
@@ -316,14 +320,13 @@ def parse_holdings_xlsx(data):
     return out, (None if out else "no holdings header found")
 
 
-# ── cc#477: AUM backfill + monthly/weekly NAV history + returns ────────────────────
-# Founder 13-Jul: MF returns 1W/1M/3M/6M/1Y/2Y for funds with AUM > Rs 5,000 cr
-# (LOCKED, revised from 10,000). Month-end NAV comparison (+ Friday weekly for 1W).
+# ── cc#477/491: AUM backfill + weekly-rolling-12mo NAV history + returns ───────────
+# Founder 13-Jul: MF returns 1W/1M/3M/6M/1Y/2Y(+3Y/5Y) for funds with AUM > Rs 5,000 cr
+# (LOCKED, revised from 10,000). NAV storage cadence superseded 17-Jul by
+# CADENCE_RETENTION_FINAL_FOUNDER_17JUL — see _weekly_rolling_12mo.
 _AMFI_AAUM_URL = "https://www.amfiindia.com/modules/AverageAUMDetails"
 _AMFI_AAUM_PAGE = "https://www.amfiindia.com/research-information/aum-data/average-aum"
 AUM_THRESHOLD_CR = 5000.0        # founder-locked 13-Jul (was 10000)
-NAV_HISTORY_MONTHS = 25          # trailing month-end rows (>=25 for 2Y funds)
-WEEKLY_MONTHS = 14               # trailing weekly (Friday) rows for ret_1w continuity
 
 
 def _ensure_returns_cols(cur):
@@ -580,59 +583,26 @@ def fetch_amfi_aum(cur, today=None):
     return stats
 
 
-def _month_end_and_weekly(rows):
-    """From a full [(date,nav)] history (asc), select the last NAV of each calendar month
-    (trailing NAV_HISTORY_MONTHS) tagged 'm', plus the last NAV of each ISO week (trailing
-    WEEKLY_MONTHS) tagged 'w'. Returns {date: (nav, kind)} — month-end wins on a tie."""
+def _weekly_rolling_12mo(rows):
+    """cc#491 CADENCE_RETENTION_FINAL_FOUNDER_17JUL (explicitly labeled FINAL; supersedes the
+    earlier same-day nav_policy's daily-overwrite framing AND the prior month-end+2yr-weekly
+    _month_end_and_weekly policy): ONE NAV row per scheme per ISO week, trailing 12 months only
+    — no month-end special-casing, no long-term accumulation. Storage stays bounded regardless
+    of how long a scheme has existed; long-horizon (3y/5y) returns are computed separately from
+    the FULL fetched mfapi series (see _compute_returns_from_series), never from this truncated
+    stored subset."""
     if not rows:
         return {}
     rows = sorted(rows)
     latest = rows[-1][0]
-    m_cut = date(latest.year - (2 if latest.month <= NAV_HISTORY_MONTHS % 12 else 1), latest.month, 1)  # generous floor
-    by_month, by_week = {}, {}
+    floor = latest - timedelta(days=366)
+    by_week = {}
     for d, nav in rows:
-        by_month[(d.year, d.month)] = (d, nav)        # last of month (rows asc)
-        iso = d.isocalendar()
-        by_week[(iso[0], iso[1])] = (d, nav)          # last of ISO week
-    out = {}
-    w_floor = date(latest.year - 2, latest.month, 1)
-    for (d, nav) in by_week.values():
-        if d >= w_floor:
-            out[d] = (nav, "w")
-    for (d, nav) in by_month.values():
-        out[d] = (nav, "m")                            # month-end overrides weekly tag on same date
-    # keep only trailing ~NAV_HISTORY_MONTHS+ of month rows; weekly already floored to 2y
-    return out
-
-
-def backfill_scheme_nav(cur, scheme_code, amfi_code):
-    """PHASE 2 (per scheme): fetch full mfapi history, keep month-end + weekly rows only,
-    upsert into mf_nav_history with nav_kind. Returns row count inserted/updated."""
-    code = amfi_code or scheme_code
-    try:
-        d = json.loads(_http_get(_MFAPI.format(code=code)))
-    except Exception as e:
-        return {"scheme_code": scheme_code, "error": str(e)[:160]}
-    rows = []
-    for row in (d.get("data") or []):
-        try:
-            nd = datetime.strptime(row["date"], "%d-%m-%Y").date()
-            nav = float(row["nav"])
-        except Exception:
+        if d < floor:
             continue
-        rows.append((nd, nav))
-    sel = _month_end_and_weekly(rows)
-    n = 0
-    for nd, (nav, kind) in sel.items():
-        cur.execute("""INSERT INTO mf_nav_history (scheme_code, nav_date, nav, nav_kind)
-                       VALUES (%s,%s,%s,%s)
-                       ON CONFLICT (scheme_code, nav_date)
-                       DO UPDATE SET nav=EXCLUDED.nav,
-                         nav_kind=CASE WHEN EXCLUDED.nav_kind='m' THEN 'm'
-                                       ELSE COALESCE(mf_nav_history.nav_kind, EXCLUDED.nav_kind) END""",
-                    (scheme_code, nd, nav, kind))
-        n += 1
-    return {"scheme_code": scheme_code, "amfi_code": code, "rows": n}
+        iso = d.isocalendar()
+        by_week[(iso[0], iso[1])] = (d, nav)
+    return {d: nav for d, nav in by_week.values()}
 
 
 def _pct(cur_nav, past_nav):
@@ -647,22 +617,11 @@ def _cagr(cur_nav, past_nav, years):
     return round(((cur_nav / past_nav) ** (1.0 / years) - 1) * 100, 2)
 
 
-def compute_returns_for_scheme(cur, scheme_code):
-    """PHASE 3: point-to-point returns from the stored NAV series. Nearest stored NAV on/before
-    (latest - horizon) within a tolerance. CAGR from 2Y out; others simple pct. NULL if
-    insufficient age/history.
-
-    cc#491 amendment (id=4334): also compute ret_3y/ret_5y where mf_nav_history depth allows —
-    the month-end selection in _month_end_and_weekly keeps EVERY month-end row from the full
-    mfapi history (the m_cut variable there is computed but unused — a pre-existing no-op, not
-    a real 25-month prune), so older funds' stored history already reaches back far enough for
-    this without any change to backfill_scheme_nav's storage. mf_master.ret_3y/ret_5y already
-    exist in the base schema (ensure_tables) — this just wires them, per spec: score on 3Y/5Y
-    where available, fall back to whatever horizon exists (never block on the longest one)."""
-    from datetime import timedelta
-    cur.execute("SELECT nav_date, nav FROM mf_nav_history WHERE scheme_code=%s AND nav IS NOT NULL "
-                "ORDER BY nav_date", (scheme_code,))
-    series = [(d, float(n)) for d, n in cur.fetchall()]
+def _compute_returns_from_series(series):
+    """Pure function: 1w/1m/3m/6m/1y/2y/3y/5y returns from an in-memory (date,nav) series (asc,
+    de-duped). Nearest point on/before (latest - horizon) within a tolerance; CAGR from 2y out,
+    simple pct below. Computed from the FULL fetched history, not the weekly-rolling-12mo
+    storage subset, so 3y/5y stay computable even though only 12 months are persisted."""
     if len(series) < 2:
         return None
     latest_d, latest_nav = series[-1]
@@ -682,18 +641,123 @@ def compute_returns_for_scheme(cur, scheme_code):
     r3m = _pct(latest_nav, past(91, 15))
     r6m = _pct(latest_nav, past(182, 18))
     r1y = _pct(latest_nav, past(365, 20))
-    n2y = past(730, 25)
-    r2y = _cagr(latest_nav, n2y, 2.0)
-    n3y = past(1095, 30)
-    r3y = _cagr(latest_nav, n3y, 3.0)
-    n5y = past(1826, 35)
-    r5y = _cagr(latest_nav, n5y, 5.0)
-    cur.execute("""UPDATE mf_master SET ret_1w=%s, ret_1m=%s, ret_3m=%s, ret_6m=%s, ret_1y=%s,
-                   ret_2y=%s, ret_3y=%s, ret_5y=%s, returns_asof=%s, updated_at=NOW()
-                   WHERE scheme_code=%s""",
-                (r1w, r1m, r3m, r6m, r1y, r2y, r3y, r5y, latest_d, scheme_code))
-    return {"ret_1w": r1w, "ret_1m": r1m, "ret_3m": r3m, "ret_6m": r6m, "ret_1y": r1y,
-            "ret_2y": r2y, "ret_3y": r3y, "ret_5y": r5y}
+    r2y = _cagr(latest_nav, past(730, 25), 2.0)
+    r3y = _cagr(latest_nav, past(1095, 30), 3.0)
+    r5y = _cagr(latest_nav, past(1826, 35), 5.0)
+    return {"latest_d": latest_d, "ret_1w": r1w, "ret_1m": r1m, "ret_3m": r3m, "ret_6m": r6m,
+            "ret_1y": r1y, "ret_2y": r2y, "ret_3y": r3y, "ret_5y": r5y}
+
+
+def sync_scheme_nav_and_returns(cur, scheme_code, amfi_code):
+    """Replaces the old backfill_scheme_nav()+compute_returns_for_scheme() pair (cc#491
+    CADENCE_RETENTION_FINAL_FOUNDER_17JUL): fetch the mfapi full history ONCE, compute returns
+    from the FULL in-memory series, persist only the weekly-rolling-12-month subset, and PRUNE
+    any existing stored rows for this scheme outside that window on every run — storage never
+    grows unbounded regardless of run cadence."""
+    code = amfi_code or scheme_code
+    try:
+        d = json.loads(_http_get(_MFAPI.format(code=code)))
+    except Exception as e:
+        return {"scheme_code": scheme_code, "error": str(e)[:160]}
+    rows = []
+    for row in (d.get("data") or []):
+        try:
+            nd = datetime.strptime(row["date"], "%d-%m-%Y").date()
+            nav = float(row["nav"])
+        except Exception:
+            continue
+        rows.append((nd, nav))
+    rows.sort()
+    ret = _compute_returns_from_series(rows) if rows else None
+    if ret:
+        cur.execute("""UPDATE mf_master SET ret_1w=%s, ret_1m=%s, ret_3m=%s, ret_6m=%s,
+                       ret_1y=%s, ret_2y=%s, ret_3y=%s, ret_5y=%s, returns_asof=%s, updated_at=NOW()
+                       WHERE scheme_code=%s""",
+                    (ret["ret_1w"], ret["ret_1m"], ret["ret_3m"], ret["ret_6m"], ret["ret_1y"],
+                     ret["ret_2y"], ret["ret_3y"], ret["ret_5y"], ret["latest_d"], scheme_code))
+    weekly = _weekly_rolling_12mo(rows)
+    n = 0
+    for nd, nav in weekly.items():
+        cur.execute("""INSERT INTO mf_nav_history (scheme_code, nav_date, nav, nav_kind)
+                       VALUES (%s,%s,%s,'w')
+                       ON CONFLICT (scheme_code, nav_date) DO UPDATE SET nav=EXCLUDED.nav, nav_kind='w'""",
+                    (scheme_code, nd, nav))
+        n += 1
+    floor = (max(weekly.keys()) if weekly else date.today()) - timedelta(days=366)
+    cur.execute("DELETE FROM mf_nav_history WHERE scheme_code=%s AND nav_date < %s", (scheme_code, floor))
+    return {"scheme_code": scheme_code, "amfi_code": code, "nav_rows_kept": n, "returns": ret is not None}
+
+
+def prune_nav_history_to_policy(conn=None):
+    """One-time cleanup (cc#491 CADENCE_RETENTION_FINAL_FOUNDER_17JUL): shrink the existing
+    mf_nav_history (built under the prior month-end+2yr-weekly policy) to the new
+    weekly-rolling-12-month shape immediately, per-scheme, without waiting for every scheme's
+    next sync_scheme_nav_and_returns() run."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM mf_nav_history")
+            before = cur.fetchone()[0]
+            cur.execute("""
+                DELETE FROM mf_nav_history h
+                WHERE nav_date < (SELECT MAX(nav_date) FROM mf_nav_history h2
+                                   WHERE h2.scheme_code = h.scheme_code) - INTERVAL '366 days'
+            """)
+            cur.execute("SELECT COUNT(*) FROM mf_nav_history")
+            after = cur.fetchone()[0]
+            conn.commit()
+            _oplog(cur, "MF_NAV_HISTORY_PRUNED", {"before": before, "after": after, "removed": before - after})
+            conn.commit()
+        return {"before": before, "after": after, "removed": before - after}
+    finally:
+        if own:
+            conn.close()
+
+
+def ensure_monthly_snapshot_table(cur):
+    """cc#491 CADENCE_RETENTION_FINAL_FOUNDER_17JUL: monthly-rolling-12-month AUM/TER snapshot,
+    one row per scheme per calendar month, for trend/stake-change analysis without accumulating
+    mf_master's point-in-time columns indefinitely."""
+    cur.execute("""CREATE TABLE IF NOT EXISTS mf_monthly_snapshot (
+        scheme_code TEXT NOT NULL, snapshot_month DATE NOT NULL,
+        aum_cr NUMERIC, expense_ratio NUMERIC,
+        PRIMARY KEY (scheme_code, snapshot_month))""")
+
+
+def _snapshot_current_month(cur):
+    """Upsert this calendar month's AUM/TER snapshot for every scheme, from mf_master's current
+    point-in-time values. Called after the AUM + TER sweeps each run."""
+    month = date.today().replace(day=1)
+    cur.execute("""INSERT INTO mf_monthly_snapshot (scheme_code, snapshot_month, aum_cr, expense_ratio)
+                   SELECT scheme_code, %s, aum_cr, expense_ratio FROM mf_master
+                   WHERE aum_cr IS NOT NULL OR expense_ratio IS NOT NULL
+                   ON CONFLICT (scheme_code, snapshot_month) DO UPDATE SET
+                       aum_cr=COALESCE(EXCLUDED.aum_cr, mf_monthly_snapshot.aum_cr),
+                       expense_ratio=COALESCE(EXCLUDED.expense_ratio, mf_monthly_snapshot.expense_ratio)""",
+                (month,))
+    return cur.rowcount
+
+
+def prune_monthly_snapshots(conn=None):
+    """Rolling 12-month cap (cc#491 CADENCE_RETENTION_FINAL_FOUNDER_17JUL) on mf_monthly_snapshot
+    AND mf_holdings — both are monthly-cadence tables that would otherwise accumulate forever."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_monthly_snapshot_table(cur)
+            for tbl, col in (("mf_monthly_snapshot", "snapshot_month"), ("mf_holdings", "as_of_month")):
+                cur.execute(f"""
+                    DELETE FROM {tbl} t
+                    WHERE {col} < (SELECT MAX({col}) FROM {tbl} t2
+                                    WHERE t2.scheme_code = t.scheme_code) - INTERVAL '366 days'
+                """)
+            conn.commit()
+        return {"pruned": True}
+    finally:
+        if own:
+            conn.close()
 
 
 def run_mf_returns_backfill(conn=None):
@@ -739,10 +803,10 @@ def run_mf_returns_backfill(conn=None):
         for i, (sc, ac) in enumerate(pending):
             try:
                 with conn.cursor() as cur:
-                    res = backfill_scheme_nav(cur, sc, ac)
+                    res = sync_scheme_nav_and_returns(cur, sc, ac)
                     if not res.get("error"):
-                        n_nav += res.get("rows", 0)
-                        if compute_returns_for_scheme(cur, sc):
+                        n_nav += res.get("nav_rows_kept", 0)
+                        if res.get("returns"):
                             n_ret += 1
                     else:
                         fails += 1
@@ -779,8 +843,8 @@ def run_mf_returns_backfill(conn=None):
 
 def mf_weekly_refresh(conn=None):
     """cc#477 phase_4: Saturday 06:30 IST. Refresh AMFI latest NAV (adds Friday rows), then for
-    the qualifying set append the newest weekly NAV + recompute returns (month-end rows are added
-    when a new month has completed — backfill_scheme_nav re-selects them idempotently)."""
+    the qualifying set re-sync the weekly-rolling-12-month NAV window + recompute returns from
+    the full mfapi series (sync_scheme_nav_and_returns re-selects + prunes idempotently)."""
     own = conn is None
     conn = conn or _conn()
     try:
@@ -797,8 +861,7 @@ def mf_weekly_refresh(conn=None):
         for sc, ac in qual:
             try:
                 with conn.cursor() as cur:
-                    backfill_scheme_nav(cur, sc, ac)      # re-selects month-end + weekly idempotently
-                    compute_returns_for_scheme(cur, sc)
+                    sync_scheme_nav_and_returns(cur, sc, ac)   # re-syncs weekly window + prunes idempotently
                     conn.commit()
                 n += 1
             except Exception as e:
@@ -815,18 +878,13 @@ def mf_weekly_refresh(conn=None):
 
 
 def mf_aum_monthly_refresh(conn=None):
-    """cc#477 phase_4: monthly (3rd calendar day) AUM re-fetch + >5000cr re-qualification."""
-    own = conn is None
-    conn = conn or _conn()
-    try:
-        with conn.cursor() as cur:
-            ensure_tables(cur); _ensure_returns_cols(cur)
-            res = fetch_amfi_aum(cur)
-            conn.commit()
-        return res
-    finally:
-        if own:
-            conn.close()
+    """cc#477 phase_4, repointed by cc#491 CADENCE_RETENTION_FINAL_FOUNDER_17JUL: the monthly
+    (3rd calendar day) cadence now runs the full comprehensive monthly job — AUM, TER, holdings,
+    monthly AUM/TER snapshot, rolling-12-month prune — via run_v15_wiring(), instead of just the
+    AUM re-fetch, so the automated monthly cadence and the manual /wire_all ARM trigger share one
+    implementation rather than duplicating logic. Scoring/category-averages stay excluded per
+    SCOPE_RESHAPE_FOUNDER_17JUL (see run_v15_wiring's own docstring)."""
+    return run_v15_wiring(conn)
 
 
 # ── admin triggers + read endpoints (cc#467 reads these) ───────────────────────────
@@ -1337,10 +1395,18 @@ def compute_mf_scores(conn=None):
 
 # ── orchestrator + admin trigger ────────────────────────────────────────────────────
 def run_v15_wiring(conn=None):
-    """cc#491: one-shot orchestrator for steps 1-5. AUTO_MODE_GRANT_17JUL. Each step is
-    independently best-effort (a failure in one does not block the others) and ops_log
-    instrumented individually (see MF_AUM_*, MF_TER_*, MF_HOLDINGS_*, MF_SCORES_COMPUTED,
-    MF_CATEGORY_AVERAGES above) plus one final rollup entry."""
+    """cc#491: monthly-cadence orchestrator — AUM + TER + holdings + monthly snapshot + rolling
+    prune. AUTO_MODE_GRANT_17JUL.
+
+    SCOPE_RESHAPE_FOUNDER_17JUL (amendment, postdates the original steps 1-5 spec): MQS scoring
+    (step_4, compute_mf_scores) and category averages (step_5, compute_mf_category_averages) are
+    DEFERRED OUT of automated execution — "do not build them" — so this orchestrator no longer
+    calls either. Both functions and their already-computed data (242 scored funds / 11 category
+    rows from this task's earlier pass, before the amendment landed) are left in place, untouched,
+    for the founder to review or re-arm manually later; they are simply no longer part of the
+    automated wiring chain. Each remaining step is independently best-effort (a failure in one
+    does not block the others) and ops_log instrumented individually (see MF_AUM_*, MF_TER_*,
+    MF_HOLDINGS_*, MF_NAV_HISTORY_PRUNED above) plus one final rollup entry."""
     own = conn is None
     conn = conn or _conn()
     try:
@@ -1365,14 +1431,16 @@ def run_v15_wiring(conn=None):
             results["holdings"] = run_holdings_curated(conn)
         except Exception as e:
             results["holdings"] = {"error": str(e)[:200]}
+        with conn.cursor() as cur:
+            try:
+                results["monthly_snapshot"] = {"rows": _snapshot_current_month(cur)}
+            except Exception as e:
+                results["monthly_snapshot"] = {"error": str(e)[:200]}
+            conn.commit()
         try:
-            results["category_averages"] = compute_mf_category_averages(conn)
+            results["prune"] = prune_monthly_snapshots(conn)
         except Exception as e:
-            results["category_averages"] = {"error": str(e)[:200]}
-        try:
-            results["scores"] = compute_mf_scores(conn)
-        except Exception as e:
-            results["scores"] = {"error": str(e)[:200]}
+            results["prune"] = {"error": str(e)[:200]}
         with conn.cursor() as cur:
             _oplog(cur, "MF_V15_WIRING_DONE", results)
             conn.commit()
