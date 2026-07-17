@@ -2211,7 +2211,14 @@ def run(auth_code=None):
             _log_feed_incident("feed_subscribe_canary", f"{label}: {len(canary_syms)} symbols")
             _batched_subscribe(fyers_ws, canary_syms, action='sub', label=f'canary-{label}')
             time.sleep(75)   # ~60-90s verification window
-            recent = _recent_symbol_count(2)
+            # cc#497 live-tested bugfix (17-Jul, same-day midmarket-boot run): a 2-min lookback
+            # is too tight against 5-min BUCKETED bars — a bucket is keyed by its START time, so
+            # a bar for the CURRENT bucket (e.g. ts=14:00:00, actively upserted as ticks land)
+            # ages out of a 2-min window before the bucket period even ends, producing a false
+            # "zero ticks" reading ~75s after a genuinely healthy subscribe. Widened to match
+            # _verify_subscribe_survivors' existing 15-min window margin (also used elsewhere in
+            # this file for exactly this reason) — comfortably covers one full bucket + slack.
+            recent = _recent_symbol_count(8)
             ticking = recent > 0
             log.info(f"subscribe sequence ({label}): canary check — {recent} symbols writing bars "
                      f"({'OK' if ticking else 'ZERO TICKS'})")
