@@ -2047,12 +2047,29 @@ def mf_fund(scheme_code: str):
 _MC_SEARCH_CANDIDATES = [
     # historical/best-effort conventions — NOT verified live from this sandbox (no outbound
     # internet here); each is tried and its full raw response logged, same as the AMFI probes.
+    # priceapi.moneycontrol.com is a spec-named hint (cc#500 step_1_url_resolution: "probe the
+    # mfsearch widget / priceapi.moneycontrol.com suggestion API") — exact path unverified, so
+    # several plausible ones are tried and logged rather than picking one blind.
     ("mc_autosuggest_type3", "https://www.moneycontrol.com/mccode/common/autosuggesion.php",
      {"query": "{q}", "type": "3", "format": "json"}),
     ("mc_autosuggest_type9", "https://www.moneycontrol.com/mccode/common/autosuggesion.php",
      {"query": "{q}", "type": "9", "format": "json"}),
     ("mc_unified_search", "https://www.moneycontrol.com/mcapi/v1/search/search_by_category",
      {"query": "{q}", "type": "mf"}),
+    ("mc_priceapi_mfsearch", "https://priceapi.moneycontrol.com/mfsearch/searchSuggestion",
+     {"query": "{q}"}),
+    ("mc_priceapi_suggestion", "https://priceapi.moneycontrol.com/techCharts/suggestions",
+     {"q": "{q}", "type": "mf"}),
+    ("mc_priceapi_search", "https://priceapi.moneycontrol.com/pricefeed/mf/search",
+     {"query": "{q}"}),
+]
+# spec: "the search box on moneycontrol.com/mutualfundindia or /mutual-funds fires it" — try
+# both landing pages, not just the /find-fund listing (the search widget may only be wired on
+# one of them).
+_MC_DISCOVERY_PAGES = [
+    "https://www.moneycontrol.com/mutual-funds/",
+    "https://www.moneycontrol.com/mutualfundindia/",
+    "https://www.moneycontrol.com/mutual-funds/find-fund/equity",
 ]
 _MC_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -2069,43 +2086,50 @@ def _discover_mc_search_api(cur):
     discipline: never assume a field-name convention ahead of live evidence). Best-effort,
     never raises."""
     import requests
-    page_url = "https://www.moneycontrol.com/mutual-funds/find-fund/equity"
+    import time
+    base = "https://www.moneycontrol.com"
     candidates = []
-    diag = {"html_len": 0, "script_tags": 0, "bundles_found": 0, "bundles_fetched_ok": 0}
-    try:
-        r = requests.get(page_url, headers=_MC_HDR, timeout=30)
-        html = r.text or ""
-        diag["html_len"] = len(html)
-        diag["http"] = r.status_code
-        diag["script_tags"] = len(re.findall(r'<script\b', html, re.I))
-        base = "https://www.moneycontrol.com"
-        bundles = re.findall(r'<script[^>]+src="([^"]+\.js[^"]*)"', html, re.I)
-        diag["bundles_found"] = len(bundles)
-        for b in bundles[:12]:
-            b_url = b if b.startswith("http") else (base + b if b.startswith("/") else base + "/" + b)
-            try:
-                br = requests.get(b_url, headers=_MC_HDR, timeout=20)
-                body = br.text or ""
-                diag["bundles_fetched_ok"] += 1
-                for u in re.findall(r'["\'](/mcapi/[a-zA-Z0-9\-/_.]*)["\']', body):
-                    candidates.append(base + u)
-                for u in re.findall(r'["\'](https?://api\.moneycontrol\.com/[a-zA-Z0-9\-/_.]*)["\']', body):
-                    candidates.append(u)
-                for u in re.findall(r'["\'](/[a-zA-Z0-9\-/_.]*(?:search|suggest)[a-zA-Z0-9\-/_.]*)["\']', body, re.I):
-                    candidates.append(base + u)
-            except Exception:
-                continue
-    except Exception as e:
-        _oplog(cur, "MF_MC_DISCOVERY_ERROR", {"page": page_url, "error": str(e)[:200]})
-        candidates = []
+    page_diags = []
+    for page_url in _MC_DISCOVERY_PAGES:
+        diag = {"page": page_url, "html_len": 0, "script_tags": 0, "bundles_found": 0, "bundles_fetched_ok": 0}
+        try:
+            r = requests.get(page_url, headers=_MC_HDR, timeout=30)
+            html = r.text or ""
+            diag["html_len"] = len(html)
+            diag["http"] = r.status_code
+            diag["script_tags"] = len(re.findall(r'<script\b', html, re.I))
+            # any moneycontrol-family domain (incl. priceapi./api. subdomains) whose path/query
+            # looks like an api/search/suggest endpoint — broadened past a single guessed host
+            # so the real convention (whatever it is) gets caught by the harvest itself.
+            for u in re.findall(r'["\'](https?://[a-zA-Z0-9.\-]*moneycontrol\.com/[a-zA-Z0-9\-/_.]*'
+                                 r'(?:api|search|suggest)[a-zA-Z0-9\-/_.]*(?:\?[^"\']*)?)["\']', html, re.I):
+                candidates.append(u)
+            bundles = re.findall(r'<script[^>]+src="([^"]+\.js[^"]*)"', html, re.I)
+            diag["bundles_found"] = len(bundles)
+            for b in bundles[:12]:
+                b_url = b if b.startswith("http") else (base + b if b.startswith("/") else base + "/" + b)
+                try:
+                    br = requests.get(b_url, headers=_MC_HDR, timeout=20)
+                    body = br.text or ""
+                    diag["bundles_fetched_ok"] += 1
+                    for u in re.findall(r'["\'](/mcapi/[a-zA-Z0-9\-/_.]*)["\']', body):
+                        candidates.append(base + u)
+                    for u in re.findall(r'["\'](https?://[a-zA-Z0-9.\-]*moneycontrol\.com/[a-zA-Z0-9\-/_.]*'
+                                         r'(?:api|search|suggest)[a-zA-Z0-9\-/_.]*)["\']', body, re.I):
+                        candidates.append(u)
+                except Exception:
+                    continue
+        except Exception as e:
+            diag["error"] = str(e)[:200]
+        page_diags.append(diag)
+        time.sleep(0.3)
     seen, uniq = set(), []
     for u in candidates:
         if u not in seen:
             seen.add(u)
             uniq.append(u)
-    _oplog(cur, "MF_MC_DISCOVERY", {"page": page_url, "n_candidates": len(uniq), "diag": diag, "sample": uniq[:20]})
+    _oplog(cur, "MF_MC_DISCOVERY", {"pages": page_diags, "n_candidates": len(uniq), "sample": uniq[:25]})
 
-    import time as _t
     probe_results = []
     for label, url, params_tpl in _MC_SEARCH_CANDIDATES:
         params = {k: (v.format(q="HDFC Top 100 Fund") if isinstance(v, str) else v) for k, v in params_tpl.items()}
@@ -2117,8 +2141,8 @@ def _discover_mc_search_api(cur):
                    "ct": ct[:40], "body": (r.text or "")[:800]})
         except Exception as e:
             _oplog(cur, "MF_MC_SEARCH_PROBE", {"label": label, "url": url, "error": str(e)[:160]})
-        _t.sleep(0.5)
-    return {"bundle_candidates": uniq[:20], "diag": diag, "search_probes": probe_results}
+        time.sleep(0.5)
+    return {"bundle_candidates": uniq[:20], "page_diags": page_diags, "search_probes": probe_results}
 
 
 @router.get("/api/v15/mf/mc_discover")
