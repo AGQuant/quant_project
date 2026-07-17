@@ -94,6 +94,7 @@ _gvm_ran_today: Optional[date] = None
 _gvm_backfill_running = False   # cc#468/470: 5yr deep-history backfill guard
 _mf_backfill_running = False    # cc#477: V15 MF returns backfill single-flight guard
 _mf_wiring_running = False      # cc#491: V15 MF wire-all (AUM/ER/holdings/scores) single-flight guard
+_mf_weekly_manual_running = False   # cc#491 course-correct: manual /run_weekly single-flight guard
 _intraday_scan_running = False  # cc#481: intraday scanner 15-min auto-scan single-flight guard
 _pivots_ran_today: Optional[date] = None
 _upivots_ran_today: Optional[date] = None   # cc#342: full-universe v8_paper_pivots rebuild
@@ -1542,8 +1543,8 @@ def _bg_mf_v15_wiring():
 
 
 def _bg_mf_weekly():
-    """cc#477 phase_4: Saturday 06:30 IST — append Friday NAV + recompute returns (ret_1w always;
-    monthly horizons refresh as new month-end rows land) for the AUM>5000cr set."""
+    """cc#477 phase_4: Saturday 06:30 IST — weekly-rolling-12mo NAV sync + returns recompute
+    (from the full mfapi series, cc#491 CADENCE_RETENTION_FINAL) for the AUM>5000cr set."""
     try:
         import mf_pipeline
         res = mf_pipeline.mf_weekly_refresh()
@@ -1552,8 +1553,51 @@ def _bg_mf_weekly():
         log.error(f"_bg_mf_weekly: {e}")
 
 
+def _bg_mf_weekly_manual():
+    """cc#491 course-correct: manual POST /api/v15/mf/run_weekly trigger — same weekly NAV+returns
+    sync as the Saturday cron, on demand. Flag-gated single-flight, app_config mf_weekly_run:
+    'pending'->run, 'done'->skip. Exists because CC's own session has restricted egress and
+    cannot run this fetch itself — this lets the founder/Claude.ai fire it and have it execute
+    server-side on Railway, which has full internet."""
+    global _mf_weekly_manual_running
+    if _mf_weekly_manual_running:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='mf_weekly_run'")
+            r = cur.fetchone()
+        if not r or r[0] != 'pending':
+            return
+        _mf_weekly_manual_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_weekly_run','running',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import mf_pipeline
+        res = mf_pipeline.mf_weekly_refresh()
+        log.info(f"_bg_mf_weekly_manual: {res}")
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_weekly_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+    except Exception as e:
+        log.error(f"_bg_mf_weekly_manual: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_weekly_run','pending',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _mf_weekly_manual_running = False
+
+
 def _bg_mf_aum_monthly():
-    """cc#477 phase_4: monthly (3rd calendar day) AMFI AAUM re-fetch + >5000cr re-qualification."""
+    """cc#477 phase_4, cadence moved to the 12th by cc#491 course-correct (session_log id=4734):
+    monthly comprehensive job — AUM, TER, holdings (crawled AMC registry), monthly AUM/TER
+    snapshot, rolling-12mo prune — via mf_pipeline.run_v15_wiring() (mf_aum_monthly_refresh is
+    now a thin repoint to it, see mf_pipeline.py)."""
     try:
         import mf_pipeline
         res = mf_pipeline.mf_aum_monthly_refresh()
@@ -1810,11 +1854,13 @@ async def _scheduler_loop():
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile (V15 MF)
         # cc#477: V15 MF returns. Flag-gated one-shot fires within ~3 min of arming (feed-independent,
-        # app-server only). Weekly refresh Sat 06:30 IST; monthly AUM re-qualify on the 3rd.
+        # app-server only, real internet). Weekly cron Sat 06:30 IST; monthly comprehensive job on
+        # the 12th (cc#491 course-correct, moved off the 3rd — session_log id=4734).
         if m % 3 == 0:          _spawn(_bg_mf_returns_backfill)
-        if m % 3 == 1:          _spawn(_bg_mf_v15_wiring)  # cc#491: AUM/ER/holdings/scores wire-all, offset from returns backfill
+        if m % 3 == 1:          _spawn(_bg_mf_v15_wiring)  # cc#491: AUM/ER/holdings wire-all, offset from returns backfill
+        if m % 3 == 2:          _spawn(_bg_mf_weekly_manual)  # cc#491 course-correct: manual /run_weekly trigger poll
         if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)
-        if now.day == 3 and h == 6 and m == 20:        _spawn(_bg_mf_aum_monthly)
+        if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market

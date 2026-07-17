@@ -67,6 +67,9 @@ def ensure_tables(cur):
         scheme_code TEXT NOT NULL, snapshot_month DATE NOT NULL,
         aum_cr NUMERIC, expense_ratio NUMERIC,
         PRIMARY KEY (scheme_code, snapshot_month))""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS mf_amc_holdings_registry (
+        amc TEXT PRIMARY KEY, disclosure_url TEXT, source_page TEXT,
+        discovered_at TIMESTAMPTZ DEFAULT NOW())""")
 
 
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
@@ -1175,28 +1178,94 @@ def fetch_expense_ratio(cur):
 
 # ── step_3: AMC holdings orchestration ──────────────────────────────────────────────
 # Framework fully wired (download -> parse_holdings_xlsx -> _resolve_nse -> mf_holdings, all
-# cc#466-built pieces reused unchanged). What's genuinely missing is per-AMC URL knowledge:
-# SEBI mandates monthly portfolio disclosure, but there is NO single aggregated source across
-# AMCs — each AMC hosts its own excel on its own site, and this sandbox has no outbound
-# internet access to discover or verify current URLs. Registry starts EMPTY rather than
-# guessing URLs that would silently 404 — flagged clearly in the task closure for the founder
-# to supply live-verified links (or for a session with internet access to discover them).
+# cc#466-built pieces reused unchanged). cc#491 course-correct (session_log id=4734): the empty
+# registry below was never a real AMFI dead-end — every AMFI/mfapi probe in this codebase has
+# failed from CC's OWN session (restricted outbound egress), not because AMFI is unreachable
+# (the Railway app fetches Yahoo/RSS/Google News all day without issue). Fix: crawl AMFI's own
+# portfolio-disclosure aggregator page SERVER-SIDE as part of the same Railway-executed monthly
+# job (_crawl_amc_holdings_urls below) instead of waiting on a founder-supplied URL list.
 AMC_HOLDINGS_URLS = {
-    # "Edelweiss": "https://...",       # TODO: needs a founder-confirmed or live-tested URL
-    # "SBI": "https://...",
-    # "HDFC": "https://...",
-    # "Nippon India": "https://...",
-    # "ICICI Prudential": "https://...",
-    # "Union": "https://...",
-    # "Bandhan": "https://...",
-    # "UTI": "https://...",
+    # Founder/manually-confirmed overrides — take precedence over the crawled registry below
+    # when both exist for the same AMC.
 }
+
+_AMFI_PORTFOLIO_DISCLOSURE_PAGE = "https://www.amfiindia.com/research-information/other-data/mf-scheme-portfolio-disclosure"
+_ANCHOR_RE = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.I | re.S)
+_FILE_LINK_RE = re.compile(r'href="([^"]+\.(?:xlsx?|pdf))"', re.I)
+_IS_FILE_URL = re.compile(r'\.(?:xlsx?|pdf)(?:$|\?)', re.I)
+
+
+def _crawl_amc_holdings_urls(cur):
+    """cc#491 course-correct: discover each AMC's monthly portfolio-disclosure link by crawling
+    AMFI's own aggregator page (Railway-side, real internet). Two-stage, since AMFI's aggregator
+    typically links to each AMC's OWN disclosure landing page rather than a direct file: a
+    discovered link that isn't itself an xls/xlsx/pdf gets one follow-up fetch to find the actual
+    file link on that AMC's page (first one found — AMCs generally list the latest month first).
+    Best-effort, never raises — every stage is ops_log'd so a Railway-side failure is diagnosable
+    rather than silently returning nothing, same discipline as the AUM/TER probes."""
+    import requests
+    hdr = {"User-Agent": "Scorr-MF/1.0"}
+    found = {}
+    try:
+        r = requests.get(_AMFI_PORTFOLIO_DISCLOSURE_PAGE, headers=hdr, timeout=60)
+        html = r.text or ""
+    except Exception as e:
+        _oplog(cur, "MF_HOLDINGS_CRAWL_ERROR", {"stage": "amfi_page", "error": str(e)[:200]})
+        return found
+    candidates = []
+    for href, text in _ANCHOR_RE.findall(html):
+        clean_text = re.sub(r"<[^>]+>", "", text).strip()
+        low = clean_text.lower()
+        amc_match = next((a for a in _TOP_AMCS if a in low), None)
+        if amc_match and href:
+            full = href if href.startswith("http") else (
+                "https://www.amfiindia.com" + href if href.startswith("/") else href)
+            candidates.append((clean_text or amc_match, full))
+    for label, link in candidates:
+        if label in found:
+            continue
+        try:
+            if _IS_FILE_URL.search(link):
+                found[label] = link
+                continue
+            r2 = requests.get(link, headers=hdr, timeout=60)
+            files = _FILE_LINK_RE.findall(r2.text or "")
+            if files:
+                f = files[0]
+                if not f.startswith("http"):
+                    f = link.rsplit("/", 1)[0] + "/" + f.lstrip("/")
+                found[label] = f
+        except Exception as e:
+            _oplog(cur, "MF_HOLDINGS_CRAWL_ERROR", {"stage": "amc_page", "amc": label, "error": str(e)[:160]})
+    for amc, url in found.items():
+        cur.execute("""INSERT INTO mf_amc_holdings_registry (amc, disclosure_url, source_page, discovered_at)
+                       VALUES (%s,%s,%s,NOW())
+                       ON CONFLICT (amc) DO UPDATE SET disclosure_url=EXCLUDED.disclosure_url,
+                         source_page=EXCLUDED.source_page, discovered_at=NOW()""",
+                    (amc, url, _AMFI_PORTFOLIO_DISCLOSURE_PAGE))
+    _oplog(cur, "MF_HOLDINGS_URL_CRAWL", {"amcs_found": len(found), "sample": list(found.items())[:5]})
+    return found
+
+
+def _schemes_for_amc(cur, amc_label):
+    """Match canonical-universe schemes to an AMC by name-substring: mf_master.amc is populated
+    only for the 11 curated seed funds, while the 519-row AMFI universe carries the AMC only
+    inside the scheme name — so holdings coverage across the full universe needs a name match,
+    not an amc-column equality."""
+    toks = _norm_fund(amc_label)
+    key = max(toks, key=len) if toks else None
+    if not key:
+        return []
+    cur.execute("""SELECT scheme_code FROM mf_master WHERE category IS NOT NULL
+                   AND category <> 'Banking & PSU' AND name ILIKE %s""", (f"%{key}%",))
+    return [row[0] for row in cur.fetchall()]
 
 
 def fetch_amc_holdings(cur, amc, url, as_of_month=None):
     """Download one AMC's monthly portfolio-disclosure excel, parse via parse_holdings_xlsx(),
-    resolve each holding to an NSE symbol via _resolve_nse(), upsert into mf_holdings for
-    every curated scheme belonging to that AMC. Best-effort — never raises."""
+    resolve each holding to an NSE symbol via _resolve_nse(), upsert into mf_holdings for every
+    canonical-universe scheme belonging to that AMC (broadened from curated-only by cc#491
+    course-correct — see _schemes_for_amc). Best-effort — never raises."""
     import requests
     as_of_month = as_of_month or date.today().replace(day=1)
     try:
@@ -1209,10 +1278,9 @@ def fetch_amc_holdings(cur, amc, url, as_of_month=None):
     if err:
         _oplog(cur, "MF_HOLDINGS_ERROR", {"amc": amc, "url": url, "parse_error": err})
         return {"amc": amc, "error": err}
-    cur.execute("SELECT scheme_code FROM mf_master WHERE amc=%s AND curated", (amc,))
-    schemes = [row[0] for row in cur.fetchall()]
+    schemes = _schemes_for_amc(cur, amc)
     if not schemes:
-        return {"amc": amc, "rows": len(rows), "schemes": 0, "note": "no curated scheme for this AMC"}
+        return {"amc": amc, "rows": len(rows), "schemes": 0, "note": "no matching scheme for this AMC"}
     resolved = 0
     for sc in schemes:
         for h in rows:
@@ -1233,25 +1301,33 @@ def fetch_amc_holdings(cur, amc, url, as_of_month=None):
 
 
 def run_holdings_curated(conn=None):
-    """step_3: iterate AMC_HOLDINGS_URLS for the 11 curated funds. See the registry's own
-    docstring above — this returns status=skipped honestly if the registry is empty rather
-    than silently doing nothing."""
+    """step_3, cc#491 course-correct: crawl AMFI's portfolio-disclosure page for AMC links
+    (_crawl_amc_holdings_urls), merge with any founder-confirmed AMC_HOLDINGS_URLS overrides,
+    then fetch every discovered AMC across the FULL canonical equity universe (not just the 11
+    curated funds). Still returns status=skipped honestly if the crawl found nothing this run —
+    never fabricates holdings."""
     own = conn is None
     conn = conn or _conn()
     try:
         with conn.cursor() as cur:
-            if not AMC_HOLDINGS_URLS:
+            ensure_tables(cur)
+            crawled = _crawl_amc_holdings_urls(cur)
+            conn.commit()
+        registry = dict(crawled)
+        registry.update({k: v for k, v in AMC_HOLDINGS_URLS.items() if v})   # founder overrides win
+        if not registry:
+            with conn.cursor() as cur:
                 _oplog(cur, "MF_HOLDINGS_SKIPPED",
-                       {"note": "AMC_HOLDINGS_URLS registry is empty — no live-verified AMC "
-                                "portfolio-disclosure URLs available from this environment"})
+                       {"note": "no AMC portfolio-disclosure URLs found — AMFI aggregator crawl "
+                                "returned nothing this run and AMC_HOLDINGS_URLS has no overrides"})
                 conn.commit()
-                return {"status": "skipped", "reason": "empty_url_registry", "results": []}
+            return {"status": "skipped", "reason": "empty_url_registry", "results": []}
         results = []
         with conn.cursor() as cur:
-            for amc, url in AMC_HOLDINGS_URLS.items():
+            for amc, url in registry.items():
                 results.append(fetch_amc_holdings(cur, amc, url))
                 conn.commit()
-        return {"status": "ok", "results": results}
+        return {"status": "ok", "amcs": len(registry), "results": results}
     finally:
         if own:
             conn.close()
@@ -1452,13 +1528,61 @@ def run_v15_wiring(conn=None):
 
 @router.post("/api/v15/mf/wire_all")
 def mf_wire_all_arm():
-    """cc#491: ARM the one-shot V15 wiring run (steps 1-5), picked up by the scheduler within
-    a tick — same flag-gated single-flight pattern as cc#477's returns backfill."""
+    """cc#491: ARM the one-shot V15 wiring run (AUM/TER/holdings/snapshot/prune), picked up by
+    the scheduler within a tick — same flag-gated single-flight pattern as cc#477's returns
+    backfill. Same flag/job as /run_monthly below (spec-named alias)."""
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_v15_wiring_run','pending',NOW()) "
                     "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
         conn.commit()
     return {"armed": True, "flag": "mf_v15_wiring_run=pending"}
+
+
+@router.post("/api/v15/mf/run_monthly")
+def mf_run_monthly_arm():
+    """cc#491 course-correct (session_log id=4734): the founder-facing name for the monthly
+    Railway-side job — AUM + TER + holdings (AMFI-crawled AMC registry) + monthly snapshot +
+    rolling-12mo prune, no scoring/category-averages. Same flag/job as /wire_all."""
+    return mf_wire_all_arm()
+
+
+@router.post("/api/v15/mf/run_weekly")
+def mf_run_weekly_arm():
+    """cc#491 course-correct: ARM the weekly NAV+returns sync (weekly-rolling-12mo window,
+    returns from the full mfapi series) on demand — same job as the Saturday 06:30 IST cron,
+    fired manually so it runs server-side on Railway instead of from this session."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_weekly_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+        conn.commit()
+    return {"armed": True, "flag": "mf_weekly_run=pending"}
+
+
+@router.get("/api/v15/mf/coverage_report")
+def mf_coverage_report():
+    """cc#491 course-correct acceptance criterion: per-category coverage over the canonical
+    equity universe (519 schemes, category IS NOT NULL AND <> 'Banking & PSU') — how many
+    schemes have aum_cr / expense_ratio / returns / holdings populated. Meaningful only after
+    a Railway-executed run_monthly/run_weekly (this session's own probes cannot populate it)."""
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        cur.execute("""
+            SELECT category, COUNT(*) AS n, COUNT(aum_cr) AS n_aum, COUNT(expense_ratio) AS n_er,
+                   COUNT(ret_1y) AS n_ret_1y, COUNT(ret_3y) AS n_ret_3y, COUNT(ret_5y) AS n_ret_5y
+            FROM mf_master
+            WHERE category IS NOT NULL AND category <> 'Banking & PSU'
+            GROUP BY category ORDER BY n DESC""")
+        cols = [d[0] for d in cur.description]
+        by_category = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.execute("""SELECT COUNT(*) FROM mf_master
+                       WHERE category IS NOT NULL AND category <> 'Banking & PSU'""")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(DISTINCT scheme_code) FROM mf_holdings")
+        n_holdings = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(DISTINCT amc) FROM mf_amc_holdings_registry")
+        n_amcs = cur.fetchone()[0]
+    return {"total_universe": total, "schemes_with_holdings": n_holdings,
+            "amcs_in_registry": n_amcs, "by_category": by_category}
 
 
 @router.get("/api/v15/mf/curated")
