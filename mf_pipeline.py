@@ -1302,8 +1302,13 @@ AMC_HOLDINGS_URLS = {
 }
 
 _ANCHOR_RE = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.I | re.S)
-_FILE_LINK_RE = re.compile(r'href="([^"]+\.(?:xlsx?|pdf))"', re.I)
-_IS_FILE_URL = re.compile(r'\.(?:xlsx?|pdf)(?:$|\?)', re.I)
+# cc#491 attempt_3: restricted to xlsx/xls/csv — dropped .pdf. parse_holdings_xlsx() uses
+# pandas.read_excel(), which cannot read a PDF at all; both attempt_2 false positives (Canara
+# Robeco's investor-SOP doc, Quant's Ready Reckoner) were .pdf files that matched the file-link
+# regex but were never going to parse. A monthly portfolio disclosure is an Excel/CSV file by
+# SEBI convention anyway, never a PDF.
+_FILE_LINK_RE = re.compile(r'href="([^"]+\.(?:xlsx?|csv))"', re.I)
+_IS_FILE_URL = re.compile(r'\.(?:xlsx?|csv)(?:$|\?)', re.I)
 
 # cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: AMFI's portfolio-disclosure AGGREGATOR page is
 # also a dead Next.js SPA (same 2025-26 relaunch as the AUM/TER pages) — skip it entirely and go
