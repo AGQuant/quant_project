@@ -506,21 +506,21 @@ def _boot_auth_selfcheck(conn, token):
         log.info("Auto-login retry SUCCESS — re-testing REST quote...")
     else:
         e = res.get('error')
-        log.critical(f"Auto-login retry FAILED ({e}) — exit(1) for a loud Railway restart")
+        log.critical(f"Auto-login retry FAILED ({e}) — os._exit(1) for a loud Railway restart")
         _ops_log(conn, 'alert', 'feed_token_dead',
                  {'stage': 'relogin_exception', 'detail': str(e)[:180], 'ist': _ist_now_str()})
-        sys.exit(1)
+        os._exit(1)
     ok2, detail2 = _rest_quote_ok(token)
     if ok2:
         log.info("BOOT AUTH OK after re-login — REST quote self-test passed")
         _ops_log(conn, 'info', 'feed_boot_ok',
                  {'selftest': 'NSE:SBIN-EQ', 'result': 'ok_after_relogin', 'ist': _ist_now_str()})
         return token
-    log.critical("TOKEN STILL DEAD after re-login — exit(1) so the failure is LOUD (Railway "
+    log.critical("TOKEN STILL DEAD after re-login — os._exit(1) so the failure is LOUD (Railway "
                  "restart-loop + feed_token_dead alert) rather than 2900 silent 'Expecting value' warns")
     _ops_log(conn, 'alert', 'feed_token_dead',
              {'selftest': 'NSE:SBIN-EQ', 'stage': 'post_relogin', 'detail': str(detail2)[:180], 'ist': _ist_now_str()})
-    sys.exit(1)
+    os._exit(1)
 
 
 def _boot_gap_report(conn):
@@ -1079,8 +1079,8 @@ class BarAggregator:
             # (meaning the reconnected conn also died), exit(1) for a clean restart.
             if self._db_reconnect_attempted:
                 log.critical(f"flush {sym} ({source}): DB conn still dead after reconnect "
-                             f"({e}) — exit(1) for a clean Railway restart")
-                sys.exit(1)
+                             f"({e}) — os._exit(1) for a clean Railway restart")
+                os._exit(1)
             log.error(f"flush {sym} ({source}): DB conn error ({e}) — reconnecting once...")
             try:
                 self.conn.close()
@@ -1091,8 +1091,8 @@ class BarAggregator:
                 self._db_reconnect_attempted = True
             except Exception as e2:
                 log.critical(f"flush {sym} ({source}): DB reconnect FAILED ({e2}) — "
-                             "exit(1) for a clean Railway restart")
-                sys.exit(1)
+                             "os._exit(1) for a clean Railway restart")
+                os._exit(1)
         except Exception as e:
             log.warning(f"flush {sym} ({source}): {e}")
 
@@ -1309,8 +1309,8 @@ class OptionBarStore:
             # cc#489 step_4: same DB-write resilience as BarAggregator._flush.
             if self._db_reconnect_attempted:
                 log.critical(f"option_bar flush {fsym}: DB conn still dead after reconnect "
-                             f"({e}) — exit(1) for a clean Railway restart")
-                sys.exit(1)
+                             f"({e}) — os._exit(1) for a clean Railway restart")
+                os._exit(1)
             log.error(f"option_bar flush {fsym}: DB conn error ({e}) — reconnecting once...")
             try:
                 self.conn.close()
@@ -1321,8 +1321,8 @@ class OptionBarStore:
                 self._db_reconnect_attempted = True
             except Exception as e2:
                 log.critical(f"option_bar flush {fsym}: DB reconnect FAILED ({e2}) — "
-                             "exit(1) for a clean Railway restart")
-                sys.exit(1)
+                             "os._exit(1) for a clean Railway restart")
+                os._exit(1)
         except Exception as e:
             log.warning(f"option_bar flush {fsym}: {e}")
 
@@ -2582,7 +2582,7 @@ def run(auth_code=None):
                 # ── feed watchdog (cc#489 WATCHDOG_SIMPLIFICATION, ARPIT DIRECTIVE) ──
                 # ONE linear model, every HEALTH_LOG_MINS: check per-source counts ->
                 # if either < WATCHDOG_MIN_SYMBOLS, reconnect once -> if still bad on
-                # the NEXT check, sys.exit(1) and let Railway restart clean. No other
+                # the NEXT check, os._exit(1) and let Railway restart clean. No other
                 # recovery paths. Suppressed for STARTUP_GRACE_MINS after 09:15 so the
                 # first bar cycle has time to form.
                 #
@@ -2617,9 +2617,11 @@ def run(auth_code=None):
                             watchdog_rung = 1
                         else:
                             log.critical(f"FEED WATCHDOG rung 2: eq={eq} fut={fut} still below floor "
-                                         "after reconnect — exiting for a clean Railway restart")
+                                         "after reconnect — os._exit(1) for a clean Railway restart "
+                                         "(cc#501 finding_2_17jul_1550: sys.exit(1) from this housekeeping "
+                                         "thread only kills the thread, leaving a zombie process)")
                             _log_feed_incident("feed_watchdog_exit", f"eq={eq} fut={fut}")
-                            sys.exit(1)
+                            os._exit(1)
 
             # Monthly roll — once per day
             if last_roll_check != today:
@@ -2685,14 +2687,14 @@ def run(auth_code=None):
                     log.error(f"housekeeping loop: reconnect FAILED ({e2})")
                 if consecutive_db_failures >= 3:
                     log.critical(f"housekeeping loop: DB conn still dead after "
-                                 f"{consecutive_db_failures} consecutive failures — exit(1) for a "
+                                 f"{consecutive_db_failures} consecutive failures — os._exit(1) for a "
                                  "clean Railway restart")
                     try:
                         _log_feed_incident("housekeeping_db_dead_exit",
                             f"{consecutive_db_failures} consecutive failures, latest at {where}: {_e}")
                     except Exception:
                         pass
-                    sys.exit(1)
+                    os._exit(1)
             else:
                 consecutive_db_failures = 0
 

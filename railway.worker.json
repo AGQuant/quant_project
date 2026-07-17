@@ -6,5 +6,9 @@
       "fyers_backfill.py",
       "nse_holidays.py"
     ]
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
   }
 }
