@@ -2057,26 +2057,15 @@ _MC_TEST_ISIN = "INF179K01XQ0"   # HDFC Mid-Cap Opportunities Fund — real, in 
 _MC_TEST_IMID = "MHD1161"
 _MC_TEST_SLUG = "hdfc-mid-cap-opportunities-fund-direct-plan/MHD1161"
 _MC_SEARCH_CANDIDATES = [
+    # attempt_5: getSchemeSnapshot/Performance/BasicDetails/FundDetails/MfOverview all confirmed
+    # dead ("Not Found" from the API itself) — dropped. The real overview data turned out to be
+    # embedded server-side in the fund-detail page's __NEXT_DATA__ blob (see page_diags), not a
+    # separate client-side API call at all. Keeping only the 3 confirmed-live ones as sanity
+    # checks; the __NEXT_DATA__ dump below is now the primary target.
     ("mc_mapping_by_isin", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getMcMfMapping",
      {"searchKey": "ISIN", "value": _MC_TEST_ISIN, "responseType": "json"}),
     ("mc_investment_by_stock_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getInvestmentByStock",
      {"responseType": "json", "deviceType": "W", "page": "1", "pageSize": "50", "imid": _MC_TEST_IMID}),
-    # attempt_4: getSchemeDetails guessed wrong (confirmed "Not Found" from the API itself, not a
-    # transport error) — same swiftapi/v1/mutualfunds/ family, trying siblings for the overview
-    # fields (AUM/TER/returns/manager/inception). getSchemeInvCategory was seen in the original
-    # bundle-harvest sample (real, not guessed).
-    ("mc_scheme_snapshot_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getSchemeSnapshot",
-     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
-    ("mc_scheme_inv_category_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getSchemeInvCategory",
-     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
-    ("mc_scheme_performance_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getSchemePerformance",
-     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
-    ("mc_scheme_basic_details_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getSchemeBasicDetails",
-     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
-    ("mc_fund_details_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getFundDetails",
-     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
-    ("mc_mf_overview_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getMfOverview",
-     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
 ]
 _MC_DISCOVERY_PAGES = [
     f"https://www.moneycontrol.com/mutual-funds/nav/{_MC_TEST_SLUG}",
@@ -2120,8 +2109,9 @@ def _discover_mc_search_api(cur):
             for marker in ("__NEXT_DATA__", "__INITIAL_STATE__", "__PRELOADED_STATE__", "__NUXT__"):
                 mi = html.find(marker)
                 if mi >= 0:
+                    span = 7000 if marker == "__NEXT_DATA__" else 300
                     diag.setdefault("embedded_json_markers", []).append(
-                        {"marker": marker, "context": html[mi:mi + 300]})
+                        {"marker": marker, "context": html[mi:mi + span]})
             bundles = re.findall(r'<script[^>]+src="([^"]+\.js[^"]*)"', html, re.I)
             diag["bundles_found"] = len(bundles)
             for b in bundles[:12]:
