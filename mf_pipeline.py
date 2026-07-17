@@ -70,6 +70,9 @@ def ensure_tables(cur):
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_amc_holdings_registry (
         amc TEXT PRIMARY KEY, disclosure_url TEXT, source_page TEXT,
         discovered_at TIMESTAMPTZ DEFAULT NOW())""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS mf_mc_map (
+        scheme_code TEXT PRIMARY KEY, mc_id TEXT, mc_slug TEXT, matched_name TEXT,
+        match_score NUMERIC, resolved_at TIMESTAMPTZ DEFAULT NOW())""")
 
 
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
@@ -2031,3 +2034,100 @@ def mf_fund(scheme_code: str):
     return {"master": master, "holdings": holdings, "nav": nav,
             "portfolio_weighted_gvm": round(pw_gvm, 2) if pw_gvm is not None else None,
             "resolved_pct": round(wsum, 1) if holdings else None}
+
+
+# ── cc#500: ONE-TIME Moneycontrol full-set fill (AUM/TER/returns/holdings/manager/inception) ──
+# No founder DevTools capture exists for Moneycontrol (unlike cc#498's AMFI TER API) and this
+# sandbox has no outbound internet to inspect the live site — so step_1 is a pure discovery
+# probe (same discipline as _discover_amfi_endpoints / _ter_diagnostic_probe): try the known
+# historical URL conventions AND harvest embedded API URLs from the live page itself, log the
+# FULL raw evidence to ops_log, and let a live Railway run decide what step_2/3 build on, rather
+# than guessing field names blind. mc_discover is a small standalone GET so it can be triggered
+# and inspected on demand before resolve_mc_map commits to any one convention at scale.
+_MC_SEARCH_CANDIDATES = [
+    # historical/best-effort conventions — NOT verified live from this sandbox (no outbound
+    # internet here); each is tried and its full raw response logged, same as the AMFI probes.
+    ("mc_autosuggest_type3", "https://www.moneycontrol.com/mccode/common/autosuggesion.php",
+     {"query": "{q}", "type": "3", "format": "json"}),
+    ("mc_autosuggest_type9", "https://www.moneycontrol.com/mccode/common/autosuggesion.php",
+     {"query": "{q}", "type": "9", "format": "json"}),
+    ("mc_unified_search", "https://www.moneycontrol.com/mcapi/v1/search/search_by_category",
+     {"query": "{q}", "type": "mf"}),
+]
+_MC_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+           "Accept-Language": "en-US,en;q=0.9",
+           "Referer": "https://www.moneycontrol.com/"}
+
+
+def _discover_mc_search_api(cur):
+    """Fetch the MC mutual-fund listing page raw, harvest embedded <script src> bundle URLs,
+    fetch a handful, regex-harvest quoted strings that look like a real search/suggest API on
+    the moneycontrol.com domain — plus directly probe _MC_SEARCH_CANDIDATES with a real,
+    well-known scheme name and log the FULL raw body of each (diagnostic-first, cc#498
+    discipline: never assume a field-name convention ahead of live evidence). Best-effort,
+    never raises."""
+    import requests
+    page_url = "https://www.moneycontrol.com/mutual-funds/find-fund/equity"
+    candidates = []
+    diag = {"html_len": 0, "script_tags": 0, "bundles_found": 0, "bundles_fetched_ok": 0}
+    try:
+        r = requests.get(page_url, headers=_MC_HDR, timeout=30)
+        html = r.text or ""
+        diag["html_len"] = len(html)
+        diag["http"] = r.status_code
+        diag["script_tags"] = len(re.findall(r'<script\b', html, re.I))
+        base = "https://www.moneycontrol.com"
+        bundles = re.findall(r'<script[^>]+src="([^"]+\.js[^"]*)"', html, re.I)
+        diag["bundles_found"] = len(bundles)
+        for b in bundles[:12]:
+            b_url = b if b.startswith("http") else (base + b if b.startswith("/") else base + "/" + b)
+            try:
+                br = requests.get(b_url, headers=_MC_HDR, timeout=20)
+                body = br.text or ""
+                diag["bundles_fetched_ok"] += 1
+                for u in re.findall(r'["\'](/mcapi/[a-zA-Z0-9\-/_.]*)["\']', body):
+                    candidates.append(base + u)
+                for u in re.findall(r'["\'](https?://api\.moneycontrol\.com/[a-zA-Z0-9\-/_.]*)["\']', body):
+                    candidates.append(u)
+                for u in re.findall(r'["\'](/[a-zA-Z0-9\-/_.]*(?:search|suggest)[a-zA-Z0-9\-/_.]*)["\']', body, re.I):
+                    candidates.append(base + u)
+            except Exception:
+                continue
+    except Exception as e:
+        _oplog(cur, "MF_MC_DISCOVERY_ERROR", {"page": page_url, "error": str(e)[:200]})
+        candidates = []
+    seen, uniq = set(), []
+    for u in candidates:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    _oplog(cur, "MF_MC_DISCOVERY", {"page": page_url, "n_candidates": len(uniq), "diag": diag, "sample": uniq[:20]})
+
+    import time as _t
+    probe_results = []
+    for label, url, params_tpl in _MC_SEARCH_CANDIDATES:
+        params = {k: (v.format(q="HDFC Top 100 Fund") if isinstance(v, str) else v) for k, v in params_tpl.items()}
+        try:
+            r = requests.get(url, params=params, headers=_MC_HDR, timeout=20)
+            ct = (r.headers.get("content-type") or "").lower()
+            probe_results.append({"label": label, "url": r.url, "http": r.status_code, "ct": ct[:40]})
+            _oplog(cur, "MF_MC_SEARCH_PROBE", {"label": label, "url": r.url, "http": r.status_code,
+                   "ct": ct[:40], "body": (r.text or "")[:800]})
+        except Exception as e:
+            _oplog(cur, "MF_MC_SEARCH_PROBE", {"label": label, "url": url, "error": str(e)[:160]})
+        _t.sleep(0.5)
+    return {"bundle_candidates": uniq[:20], "diag": diag, "search_probes": probe_results}
+
+
+@router.get("/api/v15/mf/mc_discover")
+def mf_mc_discover():
+    """cc#500 step_1: run the Moneycontrol discovery probe synchronously (one page fetch + a
+    few candidate GETs — seconds, not minutes) and return its findings directly. Inspect
+    ops_log (MF_MC_DISCOVERY / MF_MC_SEARCH_PROBE) for the full raw evidence."""
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        res = _discover_mc_search_api(cur)
+        conn.commit()
+    return {"discovery": res}
