@@ -1260,8 +1260,18 @@ def _amfi_ter_latest_month(cur):
             months = [r0.get("MonthNumber") or r0.get("monthNumber") or r0.get("Month")
                       for r0 in rows if isinstance(r0, dict)]
             months = [m for m in months if m]
+            # cc#498 live bug fix: populate-ter-month returns NEWEST-first (verified 17-Jul:
+            # [July-2026, June-2026, May-2026, ...]) — months[-1] silently picked the OLDEST
+            # month in the list. Parse "MM-YYYY" and take the actual max rather than trust
+            # either end of the list's order.
+            def _month_key(m):
+                try:
+                    mm, yyyy = m.split('-')
+                    return (int(yyyy), int(mm))
+                except Exception:
+                    return (0, 0)
             if months:
-                return months[-1]
+                return max(months, key=_month_key)
     except Exception as e:
         _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "months", "fy": fy, "error": str(e)[:200]})
     return None
@@ -1376,8 +1386,11 @@ def fetch_expense_ratio(cur):
         mf_ids = [-1]
     else:
         discovered = _discover_ter_mf_ids(cur)
-        mf_ids = [d.get("MF_ID") or d.get("mf_id") or d.get("id") for d in discovered
-                  if isinstance(d, dict)]
+        # cc#498 live bug fix: the real populate-mf response uses "mfId" (verified 17-Jul:
+        # [{'tableId': 'Table1', 'mfId': '62', 'mfName': '360 ONE Mutual Fund'}, ...]) — none
+        # of the originally-guessed key spellings matched it.
+        mf_ids = [d.get("mfId") or d.get("MF_ID") or d.get("mf_id") or d.get("id")
+                  for d in discovered if isinstance(d, dict)]
         mf_ids = [m for m in mf_ids if m is not None]
         if not mf_ids:
             _oplog(cur, "MF_TER_ERROR", {"stage": "no_mf_id_source", "month": month,
