@@ -500,25 +500,47 @@ def _discover_amfi_endpoints(cur, page_url, hint):
     (kept for the ops_log label) since bundles are shared across pages. Logs every candidate to
     ops_log — inspectable via run_sql without repo access. Best-effort, never raises."""
     import requests
-    hdr = {"User-Agent": "Mozilla/5.0 (compatible; Scorr-MF/1.0)"}
+    # cc#491 attempt_2 (17-Jul, same-day live-tested): attempt_1's generic UA ("compatible;
+    # Scorr-MF/1.0") got a real HTTP response but found 0 candidates on BOTH pages — a
+    # browser-realistic header set is the standard fix for a bot-detection / SSR-shell page
+    # serving different (JS-free) content to non-browser clients. Diagnostics added below
+    # (html length, __NEXT_DATA__ found, script-tag/bundle counts) so a failure is now
+    # DIAGNOSABLE from ops_log alone, without needing another blind guess-and-redeploy cycle.
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+           "Accept-Language": "en-US,en;q=0.9",
+           "Referer": "https://www.amfiindia.com/"}
     candidates = []
+    diag = {"html_len": 0, "next_data_found": False, "script_tags": 0, "bundles_found": 0, "bundles_fetched_ok": 0}
     try:
         r = requests.get(page_url, headers=hdr, timeout=30)
         html = r.text or ""
+        diag["html_len"] = len(html)
+        diag["http"] = r.status_code
+        diag["script_tags"] = len(re.findall(r'<script\b', html, re.I))
         m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+        diag["next_data_found"] = bool(m)
         if m:
             for u in re.findall(r'"(https?://[^"]*?(?:/api/[^"]*|\.(?:xlsx?|csv|pdf))[^"]*)"', m.group(1)):
                 candidates.append(u)
         base_m = re.match(r'(https?://[^/]+)', page_url)
         base = base_m.group(1) if base_m else "https://www.amfiindia.com"
-        bundles = re.findall(r'"(/_next/static/[^"]+?\.js)"', html)
-        for b in bundles[:10]:
+        # any <script src="..."> — not just the /_next/static/*.js Next.js convention, in case
+        # the real build uses a different bundler/path scheme than assumed.
+        bundles = re.findall(r'<script[^>]+src="([^"]+\.js[^"]*)"', html, re.I)
+        diag["bundles_found"] = len(bundles)
+        for b in bundles[:12]:
+            b_url = b if b.startswith("http") else (base + b if b.startswith("/") else base + "/" + b)
             try:
-                br = requests.get(base + b, headers=hdr, timeout=20)
+                br = requests.get(b_url, headers=hdr, timeout=20)
                 body = br.text or ""
+                diag["bundles_fetched_ok"] += 1
                 for u in re.findall(r'["\'](/api/[a-zA-Z0-9\-/_.]*)["\']', body):
                     candidates.append(base + u)
                 for u in re.findall(r'["\'](https?://portal\.amfiindia\.com/[a-zA-Z0-9\-/_.]*)["\']', body):
+                    candidates.append(u)
+                for u in re.findall(r'["\'](https?://[a-zA-Z0-9.\-]*amfiindia\.com/[a-zA-Z0-9\-/_.]*api[a-zA-Z0-9\-/_.]*)["\']', body):
                     candidates.append(u)
             except Exception:
                 continue
@@ -530,7 +552,7 @@ def _discover_amfi_endpoints(cur, page_url, hint):
         if u not in seen:
             seen.add(u)
             uniq.append(u)
-    _oplog(cur, "MF_AMFI_DISCOVERY", {"page": page_url, "hint": hint, "n_candidates": len(uniq),
+    _oplog(cur, "MF_AMFI_DISCOVERY", {"page": page_url, "hint": hint, "n_candidates": len(uniq), "diag": diag,
                                        "sample": uniq[:20]})
     return uniq
 
@@ -1331,7 +1353,10 @@ def _crawl_amc_holdings_urls(cur):
     AMCs generally list the latest month first). Best-effort, never raises — every stage is
     ops_log'd so a Railway-side failure is diagnosable rather than silently returning nothing."""
     import requests
-    hdr = {"User-Agent": "Mozilla/5.0 (compatible; Scorr-MF/1.0)"}
+    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+           "Accept-Language": "en-US,en;q=0.9"}
     for amc, domain in _AMC_DOMAIN_SEED.items():
         cur.execute("""INSERT INTO mf_amc_holdings_registry (amc, disclosure_url, source_page, discovered_at)
                        VALUES (%s,%s,'domain_seed',NOW()) ON CONFLICT (amc) DO NOTHING""", (amc, domain))
@@ -1356,9 +1381,21 @@ def _crawl_amc_holdings_urls(cur):
                 found[amc] = full
                 continue
             r2 = requests.get(full, headers=hdr, timeout=30)
-            files = _FILE_LINK_RE.findall(r2.text or "")
-            if files:
-                f = files[0]
+            body2 = r2.text or ""
+            # cc#491 attempt_2: prefer a file link whose OWN anchor text/href mentions
+            # "portfolio" over just grabbing files[0] — the first-run test picked up an
+            # unrelated PDF (a "Ready Reckoner" doc) sitting earlier on the disclosure page
+            # than the actual monthly portfolio file.
+            f = None
+            for href2, text2 in _ANCHOR_RE.findall(body2):
+                clean2 = re.sub(r"<[^>]+>", "", text2).strip().lower()
+                if _IS_FILE_URL.search(href2 or "") and "portfolio" in (clean2 + " " + (href2 or "").lower()):
+                    f = href2
+                    break
+            if not f:
+                files = _FILE_LINK_RE.findall(body2)
+                f = files[0] if files else None
+            if f:
                 if not f.startswith("http"):
                     f = full.rsplit("/", 1)[0] + "/" + f.lstrip("/")
                 found[amc] = f
