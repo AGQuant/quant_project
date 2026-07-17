@@ -2045,27 +2045,29 @@ def mf_fund(scheme_code: str):
 # than guessing field names blind. mc_discover is a small standalone GET so it can be triggered
 # and inspected on demand before resolve_mc_map commits to any one convention at scale.
 _MC_TEST_ISIN = "INF179K01XQ0"   # HDFC Mid-Cap Opportunities Fund — real, in mf_master, for probing only
+# attempt_3 (10:30 run): getMcMfMapping?searchKey=ISIN CONFIRMED LIVE — exact match, no fuzzy
+# name-matching needed at all for step_1 resolution:
+#   {"success":1,"data":{"morningstarid":"HDFCMUTF13-2057G","imid":"MHD1161","isin":"INF179K01XQ0",
+#    "slugUrl":"hdfc-mid-cap-opportunities-fund-direct-plan/MHD1161"}}
+# getStockHoldings turned out to be the REVERSE lookup (stock ISIN -> funds holding it, not
+# fund -> its holdings) — the isin=<scheme ISIN> call returned other schemes' holding data, not
+# this scheme's portfolio. Chasing the real fund-detail + fund-holdings endpoints next by
+# fetching the resolved fund's own detail page and harvesting ITS page-specific bundles (same
+# discovery pattern, pointed at a page whose JS actually calls those endpoints).
+_MC_TEST_IMID = "MHD1161"
+_MC_TEST_SLUG = "hdfc-mid-cap-opportunities-fund-direct-plan/MHD1161"
 _MC_SEARCH_CANDIDATES = [
-    # attempt_1 (10:24 run): autosuggesion.php (both type=3/9) 404'd — dead/wrong path.
-    # mcapi/v1/search/search_by_category and priceapi.moneycontrol.com/mfsearch|techCharts all
-    # 503/404'd (Akamai edge errors) — none of the blind guesses are real. attempt_2 (10:26 run)
-    # bundle-harvest found REAL live endpoints instead — probing those now with real params.
-    ("mc_swift_mf_list", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/get-mf-list",
-     {"str": "{q}", "limit": "20", "deviceType": "W", "responseType": "json"}),
     ("mc_mapping_by_isin", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getMcMfMapping",
      {"searchKey": "ISIN", "value": _MC_TEST_ISIN, "responseType": "json"}),
-    ("mc_stock_holdings_by_isin", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getStockHoldings",
-     {"isin": _MC_TEST_ISIN, "responseType": "json", "deviceType": "W", "holdingsType": "exploreScheme"}),
-    ("mc_mfsearch_php", "https://www.moneycontrol.com/mf/mf_info/mfsearch.php",
-     {"str": "{q}"}),
+    ("mc_investment_by_stock_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getInvestmentByStock",
+     {"responseType": "json", "deviceType": "W", "page": "1", "pageSize": "50", "imid": _MC_TEST_IMID}),
+    ("mc_investment_by_sector_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getInvestmentBySector",
+     {"responseType": "json", "deviceType": "W", "page": "1", "pageSize": "50", "imid": _MC_TEST_IMID}),
+    ("mc_scheme_details_imid", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getSchemeDetails",
+     {"responseType": "json", "deviceType": "W", "imid": _MC_TEST_IMID}),
 ]
-# spec: "the search box on moneycontrol.com/mutualfundindia or /mutual-funds fires it" — try
-# both landing pages, not just the /find-fund listing (the search widget may only be wired on
-# one of them).
 _MC_DISCOVERY_PAGES = [
-    "https://www.moneycontrol.com/mutual-funds/",
-    "https://www.moneycontrol.com/mutualfundindia/",
-    "https://www.moneycontrol.com/mutual-funds/find-fund/equity",
+    f"https://www.moneycontrol.com/mutual-funds/nav/{_MC_TEST_SLUG}",
 ]
 _MC_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
