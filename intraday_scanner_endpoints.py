@@ -672,16 +672,22 @@ def scanner_intraday_tc(symbol: str, side: str = "long"):
 
 
 @router.get("/api/scanners/intraday/watchlist")
-def scanner_intraday_watchlist(date: Optional[str] = None, direction: Optional[str] = None):
+def scanner_intraday_watchlist(date: Optional[str] = None, direction: Optional[str] = None,
+                                basket: Optional[str] = None):
     """Today's recorded signals (BUY+SHORT) with live CMP, PnL%, time since signal.
 
     PnL% is direction-aware: SHORT profits when price falls.
+    cc#484: basket filter added (additive, display-layer only) so ORB AG's own tab
+    can pull just its rows from the shared intraday_watchlist table.
     """
     clauses = ["w.signal_date = %s" if date else "w.signal_date = CURRENT_DATE"]
     params = [date] if date else []
     if direction:
         clauses.append("w.direction = %s")
         params.append(direction.upper())
+    if basket:
+        clauses.append("w.basket = %s")
+        params.append(basket)
     where = " AND ".join(clauses)
     with _conn() as conn, conn.cursor() as cur:
         cur.execute("ALTER TABLE intraday_watchlist ADD COLUMN IF NOT EXISTS target NUMERIC, "
@@ -713,3 +719,140 @@ def scanner_intraday_watchlist(date: Optional[str] = None, direction: Optional[s
 
     return {"scanner": "intraday_watchlist",
             "date": date or "today", "count": len(rows), "rows": rows}
+
+
+# ── ORB AG strategy (cc#484) ──────────────────────────────────────────────────
+# Additive, standalone bucket — distinct from the Tier1/Tier2 buckets above and
+# from TC Scanner (tc_scanner_endpoints.py). Does not touch either. Confirmed
+# with Arpit (17-Jul): condition 3+4 (pivot) is a POSITIONAL band (PP < CMP <
+# R1), not a fresh same-day cross.
+#
+# All 6 conditions required:
+#   1. CMP > 20-DMA (v8_metrics.dma_20)
+#   2. CMP > 9-DMA (computed here — v8_metrics only carries 20/50/200)
+#   3+4. PP < CMP < R1 (daily pivot positional band, v8_paper_pivots)
+#   5. Sector month return > 0 (v8_metrics.sector_month)
+#   6. Opening Range Breakout: range = 09:15-10:00 IST (45min — deliberately
+#      wider than V14's 09:15-09:30 ORB, a different window, not the same signal).
+#      Breakout = CMP clears the range HIGH; only evaluated after 10:00.
+#   7. Breakout-bar volume >= 1.2x the historical average volume for that SAME
+#      5-min time-of-day slot over the last 8 trading days — this is what makes
+#      it "time-proportional" (an early bar is compared against other early
+#      bars, not a flat full-day average, since it fires early in the session).
+
+ORB_WINDOW_START = dtime(9, 15)
+ORB_WINDOW_END   = dtime(10, 0)
+ORB_SCAN_START   = dtime(10, 0)   # breakout only evaluable once the range has closed
+ORB_SCAN_END     = dtime(15, 20)
+
+_ORB_SQL = """
+WITH orb AS (
+    SELECT symbol, MAX(high) AS orb_high, MIN(low) AS orb_low
+    FROM intraday_prices
+    WHERE source='fyers_fut' AND timeframe='5m' AND ts::date=CURRENT_DATE
+      AND ts::time >= %(orb_start)s AND ts::time < %(orb_end)s
+    GROUP BY symbol
+),
+dma9 AS (
+    SELECT symbol, AVG(close) AS dma_9
+    FROM (
+        SELECT symbol, close, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+        FROM raw_prices WHERE price_date < CURRENT_DATE
+    ) x WHERE rn <= 9
+    GROUP BY symbol
+)
+SELECT
+    m.symbol, m.dma_20, m.sector_month,
+    p.pp, p.r1,
+    o.orb_high, o.orb_low,
+    d9.dma_9,
+    cur.cmp, cur.cur_ts, cur.cur_vol,
+    hbv.hist_bar_vol
+FROM v8_metrics m
+JOIN futures_universe f ON f.symbol = m.symbol AND f.is_active = TRUE
+LEFT JOIN v8_paper_pivots p ON p.symbol = m.symbol
+    AND p.pivot_date = (SELECT MAX(pivot_date) FROM v8_paper_pivots)
+LEFT JOIN orb o ON o.symbol = m.symbol
+LEFT JOIN dma9 d9 ON d9.symbol = m.symbol
+LEFT JOIN LATERAL (
+    SELECT close AS cmp, ts AS cur_ts, volume AS cur_vol
+    FROM intraday_prices
+    WHERE symbol=m.symbol AND source='fyers_fut' AND timeframe='5m' AND ts::date=CURRENT_DATE
+    ORDER BY ts DESC LIMIT 1
+) cur ON true
+LEFT JOIN LATERAL (
+    SELECT AVG(volume) AS hist_bar_vol
+    FROM intraday_prices
+    WHERE symbol=m.symbol AND source='fyers_fut' AND timeframe='5m'
+      AND ts::date BETWEEN CURRENT_DATE-8 AND CURRENT_DATE-1
+      AND ts::time = cur.cur_ts::time
+) hbv ON true
+WHERE m.score_date = (SELECT MAX(score_date) FROM v8_metrics)
+"""
+
+
+def _orb_ag_eval(row: dict) -> dict:
+    cmp   = _f(row.get("cmp"))
+    dma20 = _f(row.get("dma_20"))
+    dma9  = _f(row.get("dma_9"))
+    pp, r1 = _f(row.get("pp")), _f(row.get("r1"))
+    sector_month = _f(row.get("sector_month"))
+    orb_high = _f(row.get("orb_high"))
+    cur_vol  = _f(row.get("cur_vol"))
+    hist_bar_vol = _f(row.get("hist_bar_vol"))
+
+    checks = {
+        "above_dma20":     cmp is not None and dma20 is not None and cmp > dma20,
+        "above_dma9":      cmp is not None and dma9 is not None and cmp > dma9,
+        "pivot_band_pp_r1": cmp is not None and pp is not None and r1 is not None and pp < cmp < r1,
+        "sector_month_positive": sector_month is not None and sector_month > 0,
+        "orb_breakout":    cmp is not None and orb_high is not None and cmp > orb_high,
+        "volume_1.2x_timeprop": (cur_vol is not None and hist_bar_vol is not None
+                                  and hist_bar_vol > 0 and cur_vol >= 1.2 * hist_bar_vol),
+    }
+    score = sum(1 for v in checks.values() if v)
+    return {
+        "symbol": row["symbol"], "signal": all(checks.values()), "checks": checks,
+        "score": score, "total": len(checks),
+        "cmp": cmp, "dma_20": dma20, "dma_9": dma9, "pp": pp, "r1": r1,
+        "sector_month": sector_month, "orb_high": orb_high,
+        "cur_vol": cur_vol, "hist_bar_vol": hist_bar_vol,
+    }
+
+
+@router.get("/api/scanners/orb_ag")
+def scanner_orb_ag(limit: int = 40):
+    """cc#484: ORB AG — standalone additive strategy. All 6 conditions must pass.
+    Evaluated only 10:00-15:20 IST (opening range 09:15-10:00 must be closed first).
+    Recorded to the shared intraday_watchlist table with basket='orb_ag',
+    direction='LONG' — reuses the existing recording/PnL/target-stop infra
+    (_record_watchlist, _target_stop) unchanged; nothing here touches Tier1/Tier2
+    or TC Scanner."""
+    now = _ist_now()
+    if now.weekday() >= 5 or not (ORB_SCAN_START <= now.time() <= ORB_SCAN_END):
+        return {"scanner": "orb_ag", "status": "outside_window",
+                "window": "10:00-15:20 IST (range=09:15-10:00)",
+                "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+                "signals": [], "count": 0}
+
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(_ORB_SQL, {"orb_start": ORB_WINDOW_START, "orb_end": ORB_WINDOW_END})
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    scored = [_orb_ag_eval(r) for r in rows]
+    signals = [s for s in scored if s["signal"]]
+    signals.sort(key=lambda s: s["score"], reverse=True)
+
+    to_record = [{"symbol": s["symbol"], "basket": "orb_ag", "gate1_score": s["score"],
+                  "gate2_ma_pass": True, "gate3_tc_score": s["score"], "gate4_room_pct": None,
+                  "checks": s["checks"], "entry_price": s["cmp"]} for s in signals]
+    recorded = _record_watchlist(to_record, now, direction="LONG")
+
+    top_signals = signals[:max(1, limit)]
+    return {
+        "scanner": "orb_ag", "side": "LONG", "spec": "cc#484 v1", "status": "ok",
+        "now": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "universe": len(rows), "count": len(signals), "recorded_to_watchlist": recorded,
+        "signals": top_signals,
+    }

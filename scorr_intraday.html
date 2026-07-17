@@ -143,13 +143,15 @@
   <div class="tabs">
     <div class="tab active" id="tabBUY" onclick="selectTab('BUY')">▲ Buy</div>
     <div class="tab" id="tabSELL" onclick="selectTab('SELL')">▼ Sell</div>
+    <div class="tab" id="tabORB" onclick="selectTab('ORB')">◆ ORB AG</div>
   </div>
 
   <div class="panel active" id="panelBUY"></div>
   <div class="panel" id="panelSELL"></div>
+  <div class="panel" id="panelORB"></div>
 
   <footer>
-    <span>TC Scanner &middot; full futures universe &middot; 13-check binary bucket (id=399/400), pass &ge;12/13 &middot; target +3% / SL -3% &middot; latch-once-per-symbol-per-day &middot; screener only, not a live signal</span>
+    <span id="footerLegend">TC Scanner &middot; full futures universe &middot; 13-check binary bucket (id=399/400), pass &ge;12/13 &middot; target +3% / SL -3% &middot; latch-once-per-symbol-per-day &middot; screener only, not a live signal</span>
     <span id="footerRefresh">Auto-refresh 30s</span>
   </footer>
 </div>
@@ -228,8 +230,17 @@ function selectTab(side){
   currentSide = side;
   document.getElementById('tabBUY').className = 'tab' + (side==='BUY'?' active':'');
   document.getElementById('tabSELL').className = 'tab' + (side==='SELL'?' active':'');
+  document.getElementById('tabORB').className = 'tab' + (side==='ORB'?' active':'');
   document.getElementById('panelBUY').className = 'panel' + (side==='BUY'?' active':'');
   document.getElementById('panelSELL').className = 'panel' + (side==='SELL'?' active':'');
+  document.getElementById('panelORB').className = 'panel' + (side==='ORB'?' active':'');
+  document.getElementById('footerLegend').textContent = side==='ORB'
+    ? 'ORB AG · full futures universe · 6-condition strategy (20-DMA, 9-DMA, PP-R1 band, sector month, 09:15-10:00 opening-range breakout, 1.2x time-proportional volume) · target +3% / SL -3% · screener only, not a live signal'
+    : 'TC Scanner · full futures universe · 13-check binary bucket (id=399/400), pass ≥12/13 · target +3% / SL -3% · latch-once-per-symbol-per-day · screener only, not a live signal';
+  if(side==='ORB'){
+    if(orbData) document.getElementById('panelORB').innerHTML = renderOrbPanel();
+    else loadOrb(false);
+  }
 }
 
 function renderSummary(){
@@ -353,9 +364,73 @@ async function load(silent){
   }catch(e){ if(!silent) console.error('TC Scanner error', e); }
 }
 
+// cc#484: ORB AG — separate endpoint/table from TC Scanner above, own tab, own
+// refresh cycle piggybacked on the same AUTO_MS interval below.
+let orbData = null;
+
+function renderOrbPanel(){
+  if(!orbData) return '<div class="empty" style="padding:40px">Loading…</div>';
+  if(orbData.status === 'outside_window'){
+    return `<div class="ptitle">ORB AG <span class="ct">range 09:15-10:00 IST</span></div>`
+      + `<div class="empty" style="padding:40px">Scanner active 10:00-15:20 IST (the opening range must close first) — currently outside window</div>`;
+  }
+  const rows = orbData.rows || [];
+  const summary = `<div class="ptitle">ORB AG <span class="ct">${rows.length} qualified today &middot; range 09:15-10:00 IST</span></div>`;
+  const openRows = rows.map(p=>`<tr>
+    <td class="sym">${p.symbol}</td>
+    <td>${p.gate1_score}/6</td>
+    <td>${num(p.entry_price)}</td>
+    <td>${num(p.cmp)}</td>
+    <td class="${p.pnl_pct!=null?cls(p.pnl_pct):''}">${pct(p.pnl_pct)}</td>
+    <td class="pos">${num(p.target)}</td>
+    <td class="neg">${num(p.stop)}</td>
+    <td style="font-size:11px;color:var(--dim)">${p.mins_since!=null?Math.round(p.mins_since)+'m ago':''}</td>
+  </tr>`).join('');
+  const openMob = rows.map(p=>`<div class="mob-card">
+    <div class="mob-card-head"><span class="mob-sym">${p.symbol}</span><span class="badge b-buy">${p.gate1_score}/6</span></div>
+    <div class="mob-chips">
+      <span class="mob-chip">Entry ${num(p.entry_price)}</span>
+      <span class="mob-chip">CMP ${num(p.cmp)}</span>
+      <span class="mob-chip ${p.pnl_pct!=null?cls(p.pnl_pct):''}">${pct(p.pnl_pct)}</span>
+      <span class="mob-chip" style="color:var(--grn)">Tgt ${num(p.target)}</span>
+      <span class="mob-chip" style="color:var(--red)">SL ${num(p.stop)}</span>
+    </div></div>`).join('');
+  const table = `
+    <div class="scroll desktop-tbl">
+      <table><thead><tr>
+        <th>Symbol</th><th>Score</th><th>Entry</th><th>CMP</th><th>P&amp;L%</th><th>Target</th><th>Stop</th><th>Signalled</th>
+      </tr></thead><tbody>
+        ${openRows||`<tr><td colspan="8" class="empty">No ORB AG signals today &middot; scans continuously, 10:00-15:20 IST</td></tr>`}
+      </tbody></table>
+    </div>
+    <div class="mob-cards">${rows.length?openMob:'<div class="empty">No ORB AG signals today</div>'}</div>`;
+  return summary + table;
+}
+
+async function loadOrb(silent){
+  if(!silent && currentSide==='ORB'){
+    document.getElementById('panelORB').innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
+  }
+  try{
+    const r1 = await fetch('/api/scanners/orb_ag');   // triggers a fresh scan + records qualifiers
+    if(!r1.ok){ if(!silent) console.error('ORB AG scan', r1.status); return; }
+    const scan = await r1.json();
+    if(scan.status === 'outside_window'){
+      orbData = { status: 'outside_window', rows: [] };
+    } else {
+      const r2 = await fetch('/api/scanners/intraday/watchlist?direction=LONG&basket=orb_ag');
+      if(!r2.ok){ if(!silent) console.error('ORB AG watchlist', r2.status); return; }
+      const wl = await r2.json();
+      orbData = { status: 'ok', rows: wl.rows || [] };
+    }
+    if(currentSide==='ORB') document.getElementById('panelORB').innerHTML = renderOrbPanel();
+  }catch(e){ if(!silent) console.error('ORB AG error', e); }
+}
+
 load(false);
-setInterval(()=>load(true), AUTO_MS);
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(true); });
+loadOrb(false);
+setInterval(()=>{ load(true); loadOrb(true); }, AUTO_MS);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ load(true); loadOrb(true); } });
 </script>
 
 <script>
