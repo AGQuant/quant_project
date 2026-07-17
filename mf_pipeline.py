@@ -2077,6 +2077,52 @@ _MC_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
            "Referer": "https://www.moneycontrol.com/"}
 
 
+def _mc_fetch_scheme_page(isin):
+    """Two-stage real fetch, reusable by both the discovery probe and the eventual step_2/3
+    scraper: ISIN -> getMcMfMapping (imid + slugUrl) -> fund-detail page -> parsed __NEXT_DATA__
+    props.pageProps.data dict. Returns (data_dict_or_None, diag). Never raises."""
+    import requests
+    diag = {"isin": isin}
+    try:
+        r = requests.get("https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getMcMfMapping",
+                          params={"searchKey": "ISIN", "value": isin, "responseType": "json"},
+                          headers=_MC_HDR, timeout=20)
+        m = r.json() if r.status_code == 200 else {}
+        diag["mapping_http"] = r.status_code
+        slug = (m.get("data") or {}).get("slugUrl")
+        imid = (m.get("data") or {}).get("imid")
+        diag["imid"], diag["slug"] = imid, slug
+        if not slug:
+            diag["error"] = "no slugUrl in mapping response"
+            return None, diag
+    except Exception as e:
+        diag["error"] = f"mapping fetch: {str(e)[:160]}"
+        return None, diag
+    try:
+        r = requests.get(f"https://www.moneycontrol.com/mutual-funds/nav/{slug}", headers=_MC_HDR, timeout=30)
+        diag["page_http"] = r.status_code
+        html = r.text or ""
+        diag["html_len"] = len(html)
+        mi = html.find("__NEXT_DATA__")
+        if mi < 0:
+            diag["error"] = "no __NEXT_DATA__ marker"
+            return None, diag
+        start = html.find(">", mi) + 1
+        end = html.find("</script>", start)
+        blob = json.loads(html[start:end])
+        data = (((blob.get("props") or {}).get("pageProps") or {}).get("data") or {})
+        return data, diag
+    except Exception as e:
+        diag["error"] = f"page fetch/parse: {str(e)[:160]}"
+        return None, diag
+
+
+_MC_STRUCTURE_TEST_ISINS = [
+    ("INF179K01XQ0", "HDFC Mid-Cap Opportunities Fund (likely top-performer content)"),
+    ("INF767K01GW5", "LIC MF Infrastructure Fund (obscure AMC, sectoral — structure-universality check)"),
+]
+
+
 def _discover_mc_search_api(cur):
     """Fetch the MC mutual-fund listing page raw, harvest embedded <script src> bundle URLs,
     fetch a handful, regex-harvest quoted strings that look like a real search/suggest API on
@@ -2150,6 +2196,30 @@ def _discover_mc_search_api(cur):
         except Exception as e:
             _oplog(cur, "MF_MC_SEARCH_PROBE", {"label": label, "url": url, "error": str(e)[:160]})
         time.sleep(0.5)
+
+    # attempt_6: __NEXT_DATA__ confirmed as the real source for AUM/TER/CAGR/manager/inception
+    # (see MF_MC_STRUCTURE_PROBE) — structure-universality check across a top-performer fund AND
+    # an obscure sectoral one, via _mc_fetch_scheme_page (the same helper the real scraper uses),
+    # logging the ACTUAL parsed overview/about/kbyi sub-objects (not raw text slices) so field
+    # presence is verified exactly, not eyeballed from a truncated string.
+    for isin, note in _MC_STRUCTURE_TEST_ISINS:
+        data, diag2 = _mc_fetch_scheme_page(isin)
+        entry = {"isin": isin, "note": note, "diag": diag2}
+        if data:
+            ov = data.get("overview") or {}
+            entry["overview_keys"] = sorted(ov.keys())
+            entry["overview_sample"] = {k: ov.get(k) for k in
+                ("aum", "expenseRatio", "cagr_3y", "cagr_5y", "cagr_7y", "cagr_10y",
+                 "cagr_since_inception", "companyName", "categoryName")}
+            entry["kbyi_present"] = bool(data.get("kbyi"))
+            ab = data.get("about") or {}
+            entry["about_keys"] = sorted(ab.keys())
+            entry["about_sample"] = {"lanch_date": ab.get("lanch_date"),
+                                      "fund_managers_details": ab.get("fund_managers_details"),
+                                      "benchmark": ab.get("benchmark")}
+        _oplog(cur, "MF_MC_STRUCTURE_PROBE", entry)
+        time.sleep(0.6)
+
     return {"bundle_candidates": uniq[:20], "page_diags": page_diags, "search_probes": probe_results}
 
 
