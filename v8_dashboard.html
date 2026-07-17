@@ -387,14 +387,13 @@ const EP={
   segmentDay:"/api/v8/segment_day",          // cc#429: mcap-weighted futures-segment day change
   adrHistory:"/api/v8/adr_history?days=5",    // cc#443: 5 trading-day ADR trend for the mood panel
   qualified:b=>`/api/v8/qualified/${b}`,
-  sellOB:"/api/v8/sell_overbought?limit=25",
   paper:"/api/paper/status",
   funnelDetail:b=>`/api/v8/funnel_detail/${b}`,
   passCount:b=>`/api/v8/stock_passcount/${b}`,
   brStockDetail:s=>`/api/v8/br_stock_detail/${encodeURIComponent(s)}`,   // cc#366
   srStockDetail:s=>`/api/v8/sr_stock_detail/${encodeURIComponent(s)}`,   // cc#378
   smStockDetail:s=>`/api/v8/sm_stock_detail/${encodeURIComponent(s)}`,   // cc#380
-  soStockDetail:s=>`/api/v8/so_stock_detail/${encodeURIComponent(s)}`,   // cc#382
+  bmStockDetail:s=>`/api/v8/bm_stock_detail/${encodeURIComponent(s)}`,   // cc#502
   tcLite:"/api/scanners/tc_lite",
   daylog:"/api/v8/daylog",
   forthcoming:"/api/v8/forthcoming-results",   // cc#226
@@ -406,18 +405,14 @@ const EP={
   bankniftyPcr:"/api/pcr/intraday_hourly?underlying=BANKNIFTY", // cc#290
   positionNews:"/api/news/position",                           // cc#294
 };
+// cc#502: buy_s1_bounce (panel3) + sell_overbought (panel6) retired -- panel ids kept dormant,
+// NOT renumbered, per this file's existing panel-stability convention (cc#263/426/447). Each
+// entry carries its own fixed panel number so the render loops below never shift.
 const BASKETS=[
-  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
-  {id:"buy_s1_bounce",label:"Buy S1 Bounce"},
-  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
+  {id:"buy_reversal",label:"Buy Reversal",panel:1},{id:"buy_momentum",label:"Buy Momentum",panel:2},
+  {id:"sell_reversal",label:"Sell Reversal",panel:4},{id:"sell_momentum",label:"Sell Momentum",panel:5},
 ];
-const ALL5=[
-  {id:"buy_reversal",label:"Buy Reversal"},{id:"buy_momentum",label:"Buy Momentum"},
-  {id:"buy_s1_bounce",label:"Buy S1 Bounce"},
-  {id:"sell_reversal",label:"Sell Reversal"},{id:"sell_momentum",label:"Sell Momentum"},
-  {id:"sell_overbought",label:"Sell Overbought"},
-];
-const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
+const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Basket Rules","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
   "Forthcoming Results","Global Indices","Position News","Matrix","V9 Pairs","OH-OL"];   // cc#294: Position News = 14 · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17 (open=high/open=low scanner)
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
@@ -428,158 +423,179 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounc
 // cc#426: V9 Pairs (16) extracted to its own /v9 page — removed from the tab row (label kept at
 // index 16 for panel-id stability, no button). Matrix (15) moved to the LAST position (after
 // Position News, 14). OH-OL (17) stays pinned right after Master.
-const TAB_ORDER=[0,1,2,3,4,5,6,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
+// cc#502: Buy S1 Bounce + Sell Overbought baskets retired. Index 6 (was Sell Overbought) dropped
+// from TAB_ORDER, panel6 stays dormant (label kept for panel-id stability, no button). Index 3
+// (was Buy S1 Bounce) REPURPOSED cc#503 as the new static "Basket Rules" tab (renderBasketRules(),
+// panel3) — no live handler ever used that slot again, so reusing it avoids expanding the panel
+// numbering scheme.
+const TAB_ORDER=[0,1,2,3,4,5,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
 
 // -- Basket info --------------------------------------------------------------
+// cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce RETIRED (ring-fenced
+// pools removed). All four remaining baskets rebuilt as dedicated strict-AND handlers with a
+// shared FINAL heavy stage (true_weekly_rsi, the TRUE calendar-weekly Wilder RSI-14 -- never the
+// synthetic v8_metrics.rsi_weekly column). win_pct/ev/sigs are honest TBD pending fresh live/BT7
+// evidence for the rebuilt specs -- old numbers described retired handlers and are not carried
+// forward.
 const BASKET_INFO={
   buy_reversal:{
-    label:"Buy Reversal V3",side:"BUY",version:"V3",
-    thesis:"TRUE REVERSAL -- buy the sharp dip in a strong quality stock (inverse sandwich). A quality name in a confirmed long-term uptrend takes a sharp short-term dip (cold daily RSI) while its larger weekly frame stays strong; 2-day and hourly momentum have just turned up (the dip has STARTED recovering -- not a falling knife) and price holds above the pivot with real room to R1. Inverse of the SELL sandwich. Supersedes V2, which bought rising continuation mislabeled as reversal (retired -- 28% instant-win contamination). 1yr honest 1:1 backtest: ~35-55 trades/yr, 62-64% WR, +1.0-1.2% EV. Live-path sim 03-09 Jul: PREMIERENE win, BSE + POWERINDIA open.",
+    label:"Buy Reversal V5",side:"BUY",version:"V5",
+    thesis:"S1-touch bounce with a strong larger frame. A stock dipped to touch its pivot S1 support in the last 4 trading days (or today's live session low), while its weekly frame is genuinely strong (TRUE weekly RSI>=70) and daily momentum has just turned up. Cheap gates (mom_2d, week_return, monthly RSI band, sector strength, month_return cap) run on the whole universe; the heavy true_weekly_rsi stage only evaluates the cheap-gate survivors. Replaces the V3 inverse-sandwich (cc#502, 18-Jul-2026). Fixed +/-3.0% exits (1:1), replacing the old R1-target/mirror-stop mechanism.",
     filters:[
-      {m:"daily_rsi",c:"<= 40  (cold short-term dip)",dyn:false},
-      {m:"true_weekly_rsi",c:">= 60  (strong larger frame · TRUE calendar weekly RSI-14, not the synthetic)",dyn:false},
-      {m:"dma_200",c:">= 0%  (long-term uptrend)",dyn:false},
-      {m:"gvm_score",c:">= 6.5  (quality gate)",dyn:false},
-      {m:"mom_2d",c:"0.0 - 3.0%  (2-day momentum turned up)",dyn:false},
-      {m:"hourly_pct",c:"0.1 - 1.0% — active from 09:20; first hour measured vs earliest bar of day, full 60-min rolling from 10:15. Only 09:15-09:20 unchecked.",dyn:false},
-      {m:"CMP vs PP",c:"CMP > PP  (holding above pivot)",dyn:false},
-      {m:"room to R1",c:"> 2%  ((R1-CMP)/CMP · QUALIFICATION gate: no room = no signal)",dyn:false},
+      {m:"s1_touch",c:"prior-4-day low <= S1  OR  today's live day_low <= S1",dyn:false},
+      {m:"mom_2d",c:">= -0.5%",dyn:false},
+      {m:"week_return",c:">= -2.0%",dyn:false},
+      {m:"rsi_month",c:"60 - 90",dyn:false},
+      {m:"sector_week",c:"> 0  (strict)",dyn:false},
+      {m:"month_return",c:"< 5.0%",dyn:false},
+      {m:"true_weekly_rsi",c:">= 70  (FINAL heavy stage · TRUE calendar weekly RSI-14, not the synthetic)",dyn:false},
     ],
-    gateType:"strict AND -- all 8 must pass · no regime · standard slot pool",
-    target:"R1 only (never R2)",stop:"1:1 mirror = entry x (1 - room%/100)",
-    pivotEntry:"Entry: live 5-min CMP on first qualification (standard V8 path). Target = R1 ONLY. Stop = exact 1:1 mirror below entry (same distance as R1). R2 is never a target or fallback. Max hold 15 trading days (EOD sweep). Target (R1) and Stop are FIXED at entry — they never move with the nightly pivot rebuild.",
-    wr:"62-64",ev:"1.0-1.2",sigs:"35-55",spd:"~35-55 trades/yr",
+    gateType:"strict AND -- all 7 must pass · no regime · standard slot pool",
+    target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
+    pivotEntry:"Entry: live 5-min CMP on first qualification. Target +3.0% / stop -3.0%, both FIXED at entry (never move). Max hold 15 trading days (EOD sweep).",
+    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
   },
   buy_momentum:{
-    label:"Buy Momentum V2",side:"BUY",version:"V2",
-    thesis:"Strong uptrend continuation -- stock well above key MAs, RSI elevated. Brief pullback to pivot PP zone is the entry, then ride the trend to a fixed target. High-frequency basket (engine of buy-side P&L). V2 (10-Jul-2026) swaps the old R2/regime target for symmetric fixed +3.0%/-3.0% exits. Live 30d: 12 trades, 67% WR at 1:1; V2 fixed-3% replay: 81.8%.",
+    label:"Buy Momentum V3",side:"BUY",version:"V3",
+    thesis:"Strong uptrend continuation, TWO independent layers both required. 6 HARD gates (dma_50 band, dma_20>0, 52w index>=75, GVM>=7, day green, hourly momentum positive from ~10:15) plus a FINAL heavy wRSI[70,85] stage must ALL pass; separately, the stock must also score >=7-of-10 on a fixed-threshold V2 band set (no mood-dependent n/n-1 anymore). High-frequency basket (engine of buy-side P&L). Fixed +/-3.0% exits (1:1), frozen at entry. cc#502 rebuild (18-Jul-2026) leaves the generic score-gate loop entirely for a dedicated handler.",
     filters:[
-      {m:"gvm_score",c:"7.0 - 10.0",dyn:false},
-      {m:"dma_50",c:"8.0 - 25.0%",dyn:false},
-      {m:"dma_200",c:"8.0 - 40.0%",dyn:false},
-      {m:"rsi_month",c:"70 - 100",dyn:false},
-      {m:"rsi_weekly",c:"60 - 85",dyn:false},
-      {m:"month_return",c:"2.0 - 30.0%",dyn:false},
-      {m:"week_return",c:"0.5 - 12.0%",dyn:false},
-      {m:"mom_2d",c:"0.0 - 6.0%",dyn:false},
-      {m:"sector_week",c:"0.0 - 6.0",dyn:false},
-      {m:"sector_month",c:"0.0 - 6.0",dyn:false},
+      {m:"dma_50",c:"HARD: 5% - 12%",dyn:false},
+      {m:"dma_20",c:"HARD: > 0%",dyn:false},
+      {m:"week_index_52",c:"HARD: >= 75",dyn:false},
+      {m:"gvm_score",c:"HARD: >= 7",dyn:false},
+      {m:"day_1d",c:"HARD: > 0%",dyn:false},
+      {m:"hourly_pct",c:"HARD: > 0% AND NOT NULL (blocks entries before ~10:15)",dyn:false},
+      {m:"true_weekly_rsi",c:"HARD FINAL: 70 - 85",dyn:false},
+      {m:"gvm_score_score",c:"SCORE band: 7.0 - 10.0",dyn:false},
+      {m:"dma_50_score",c:"SCORE band: 8.0 - 25.0%",dyn:false},
+      {m:"dma_200",c:"SCORE band: 8.0 - 40.0%",dyn:false},
+      {m:"rsi_month",c:"SCORE band: 70 - 100",dyn:false},
+      {m:"week_return",c:"SCORE band: 0.5 - 12.0%",dyn:false},
+      {m:"month_return",c:"SCORE band: 2.0 - 30.0%",dyn:false},
+      {m:"mom_2d",c:"SCORE band: 0.0 - 6.0%",dyn:false},
+      {m:"sector_week",c:"SCORE band: 0.0 - 6.0",dyn:false},
+      {m:"sector_month",c:"SCORE band: 0.0 - 6.0",dyn:false},
+      {m:"true_weekly_rsi_score",c:"SCORE band: 60 - 85 (reuses the HARD-gate wRSI value)",dyn:false},
     ],
-    gateType:"score-based · adaptive",
-    regimes:[
-      {r:"BULL",c:"Nifty 1M > +2%",n:"15 buy slots"},
-      {r:"NEUTRAL",c:"Nifty 1M 0-2%",n:"12 buy slots"},
-      {r:"BEAR",c:"Nifty 1M < 0%",n:"8 buy slots"},
-    ],
-    target:"+3.0% / -3.0% fixed, 1:1, frozen at entry · V2 locked 10-Jul-2026",stop:"-3.0% fixed from entry",
-    pivotEntry:"BUY zone: PP < CMP <= R1  AND  (R1-CMP) >= 0.5x(R1-PP). Entry live CMP; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
-    wr:"67 live / 81.8 replay",ev:"1:1 fixed",sigs:"~2/day",spd:"~2/day · Live 30d 12 trades 67% WR",
-  },
-  buy_s1_bounce:{
-    label:"Buy S1 Bounce V2",side:"BUY",version:"V2",
-    thesis:"Quality futures stock tested pivot S1 support in the past week and is now bouncing with volume confirmation on a bullish day while Nifty is healthy (RSI>=55) and stock is above 50DMA. Enter the confirmed recovery, not the panic. Market bottom detection basket.",
-    filters:[
-      {m:"week_low vs S1",c:"low_5d <= S1 (touched support)",dyn:false},
-      {m:"recovery_2d",c:"2.0 - 8.0% (bouncing, not chasing)",dyn:false},
-      {m:"week_return",c:"0.0 - 2.5%",dyn:false},
-      {m:"close > open",c:"bullish candle",dyn:false},
-      {m:"day_ret",c:"> 0.5%",dyn:false},
-      {m:"vol_ratio",c:">= 1.5x 10d avg",dyn:false},
-      {m:"nifty_rsi",c:">= 55 (market gate)",dyn:false},
-      {m:"dma_50",c:"> 0% (above 50DMA)",dyn:false},
-    ],
-    gateType:"strict AND -- all 8 must pass · dedicated ring-fenced pool",
-    slots:{"Strong Bullish":3,"Bullish":3,"Neutral":3,"Bearish":2},
-    target:"Fixed +2.0% from entry",stop:"Fixed -2.0% from entry",
-    pivotEntry:"No pivot room gate. Entry on the live signal tick. Fixed +2.0% target / -2.0% stop, 1:1, frozen at entry. V2 locked 10-Jul-2026.",
-    wr:73.9,ev:0.716,sigs:88,spd:"~0.3/day · fires in clusters at market bottoms",
+    gateType:"6 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
+    target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
+    pivotEntry:"Entry live CMP once both layers clear; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
+    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
   },
   sell_reversal:{
-    label:"Sell Reversal V5-D",side:"SELL",version:"V5-D",
-    thesis:"TRUE reversal (SELL mirror of Buy Reversal V3): a hot short-term bounce (daily RSI>=60) in a weak larger frame (true weekly RSI<=40, monthly RSI<50) below the 200-DMA and below the rolling pivot. Fade the bounce back to support. RAW gate: no market gate, no auto kill-switch (founder-locked 11-Jul, spec id=2894). Deployed into a currently-losing regime for live reps — human weekly review only.",
+    label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
+    thesis:"R1-rejection short with a weak larger frame. A stock touched (day HIGH >= R1) its pivot resistance in the last 3 trading days and is now fading -- weak day change, below its 20/50/200-DMA, weak 52-week index, weak sector, negative 2-day momentum, weak month, with real room to a dynamic S1/S2 target and a genuinely weak weekly frame (TRUE weekly RSI<=45). RAW gate: no market gate, no auto kill-switch (founder-locked, dedicated handler). Replaces V5-D (cc#502, 18-Jul-2026: twr tightened 40->45 stays the mirror cap, new R1-touch condition added).",
     filters:[
-      {m:"daily_rsi",c:">= 60",dyn:false},
-      {m:"true_weekly_rsi",c:"<= 40 (TRUE calendar weekly)",dyn:false},
-      {m:"rsi_month",c:"< 50",dyn:false},
-      {m:"dma_200",c:"<= 0",dyn:false},
-      {m:"cmp_lt_pp",c:"CMP < PP",dyn:false},
+      {m:"r1_touch",c:"day HIGH >= R1 in the last 3 trading days",dyn:false},
+      {m:"day_1d",c:"-2.0% to 0.0%",dyn:false},
+      {m:"dma_20",c:"< 0",dyn:false},
+      {m:"dma_50",c:"< 0",dyn:false},
+      {m:"dma_200",c:"< 0",dyn:false},
+      {m:"week_index_52",c:"< 50",dyn:false},
+      {m:"sector_week",c:"< 0  (strict)",dyn:false},
+      {m:"mom_2d",c:"-4.0% to -1.0%",dyn:false},
+      {m:"month_return",c:">= -10.0%",dyn:false},
       {m:"room",c:"target (S1 or S2) >= 2% away",dyn:false},
+      {m:"true_weekly_rsi",c:"<= 45  (FINAL heavy stage · TRUE calendar weekly RSI-14)",dyn:false},
     ],
-    gateType:"strict AND -- all 6 must pass · dedicated handler, no score fallback",
+    gateType:"strict AND -- all 10 must pass · dedicated handler, no score fallback",
     target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    wr:73.3,ev:2.00,sigs:126,spd:"~0.5/day · 12mo episode-level 1:1 backtest",
+    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
   },
   sell_momentum:{
-    label:"Sell Momentum V3-N5",side:"SELL",version:"V3-N5",
-    thesis:"Structural downtrend caught with true 1:1 geometry. Weak larger frame (true weekly RSI<=45, monthly RSI<40) below/near the 200-DMA, weak week + sector, mid 52-week band, below the rolling pivot — and support (S2) must sit >=3% below so it can't block the fall to the fixed 3% target. Merge of old Sell Reversal V4 + SellMom V2 + founder filters (spec id=2901, founder-locked 11-Jul as live base; iteration continues after Phase B 5-min replay).",
+    label:"Sell Momentum V4",side:"SELL",version:"V4",
+    thesis:"Structural downtrend caught with true 1:1 geometry. Weak monthly RSI, negative 2-day momentum, at/below the 200-DMA, weak week + sector, mid 52-week band, below the rolling pivot -- and support (S2) must sit >=3% below so it can't block the fall to the fixed 3% target, confirmed by a genuinely weak weekly frame (TRUE weekly RSI<=40). cc#502 (18-Jul-2026) rename from V3-N5: wRSI tightened 45->40, mom_2d tightened [-4,-1]->[-4,-2].",
     filters:[
-      {m:"true_weekly_rsi",c:"<= 45 (TRUE calendar weekly)",dyn:false},
-      {m:"rsi_month",c:"< 40",dyn:false},
-      {m:"mom_2d",c:"-4% to -1%",dyn:false},
-      {m:"dma_200",c:"<= +2%",dyn:false},
-      {m:"week_return",c:"-10% to -0.5%",dyn:false},
-      {m:"sector_week",c:"< 0",dyn:false},
+      {m:"rsi_month",c:"< 40  (strict)",dyn:false},
+      {m:"mom_2d",c:"-4.0% to -2.0%",dyn:false},
+      {m:"dma_200",c:"<= 2.0%",dyn:false},
+      {m:"week_return",c:"-10.0% to -0.5%",dyn:false},
+      {m:"sector_week",c:"< 0  (strict)",dyn:false},
+      {m:"week_index_52",c:"20 - 60",dyn:false},
       {m:"cmp_lt_pp",c:"CMP < PP",dyn:false},
-      {m:"week_index_52",c:"20 to 60",dyn:false},
       {m:"s2_clearance",c:"(CMP-S2)/CMP >= 3%",dyn:false},
+      {m:"true_weekly_rsi",c:"<= 40  (FINAL heavy stage · TRUE calendar weekly RSI-14)",dyn:false},
     ],
     gateType:"strict AND -- all 9 must pass · dedicated handler, no score fallback",
     target:"-3.0% fixed = entry x 0.97",stop:"+3.0% fixed = entry x 1.03 (true 1:1)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    wr:64.0,ev:0.80,sigs:183,spd:"~0.5/day · 1yr episode-level EOD backtest (+147pts)",
-  },
-  sell_overbought:{
-    label:"Sell Overbought V3",side:"SELL",version:"V3",
-    thesis:"Fresh same-day R1 rejection short (S1-Bounce mirror). In a bear regime (NIFTY daily RSI<=45) a stock touches R1 intraday, gets rejected (now 1-10% below its 2-day high, red on the day, mildly weak week). Fade the rejection to a fixed 2% target. Replaces the never-firing V2 (wRSI>=80+mRSI>=70 was unreachable — ZERO signals ever). Founder-locked 11-Jul (spec id=2912); refinement gated on Phase B 5-min replay.",
-    filters:[
-      {m:"nifty_rsi",c:"<= 45 (NIFTY daily RSI market gate)",dyn:false},
-      {m:"high_ge_r1",c:"day session HIGH >= R1 (touched today)",dyn:false},
-      {m:"fall_2d",c:"fall from 2-day high 1% to 10%",dyn:false},
-      {m:"day_red",c:"day change < 0",dyn:false},
-      {m:"week_return",c:"-2.5% to 0%",dyn:false},
-    ],
-    gateType:"strict AND -- all 5 must pass · dedicated ring-fenced pool",
-    slots:{"Strong Bullish":4,"Bullish":4,"Neutral":4,"Bearish":3},
-    target:"-2.0% fixed = entry x 0.98",stop:"+2.0% fixed = entry x 1.02 (true 1:1)",
-    pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    wr:59.0,ev:0.36,sigs:112,spd:"~0.4/day · 1yr episode-level EOD backtest (+40pts)",
+    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
   },
 };
 
-// -- Matrix tab (cc#383) ------------------------------------------------------
-// All 6 baskets side-by-side. ROWS = filter dimensions (union across baskets) +
-// exits + performance; COLUMNS = 6 baskets. Cells read from BASKET_INFO (the code
-// constant kept current with every V3/V5-D/N5 spec) so the grid can never drift
-// from the i-button modals. `map` value forms: "m" (look up that filter's constraint),
-// ["m1","m2"] (join several), {lit:"..."} (literal for entry-zone rules not in filters[]).
-const MATRIX_COLS=["buy_reversal","buy_momentum","buy_s1_bounce","sell_reversal","sell_momentum","sell_overbought"];
-const MATRIX_BUY=new Set(["buy_reversal","buy_momentum","buy_s1_bounce"]);
-const MATRIX_SHORT={buy_reversal:"Buy Reversal",buy_momentum:"Buy Momentum",buy_s1_bounce:"Buy S1 Bounce",
-  sell_reversal:"Sell Reversal",sell_momentum:"Sell Momentum",sell_overbought:"Sell Overbought"};
+// -- Basket Rules tab (cc#503, 18-Jul-2026, repurposes dormant panel3) --------
+// Static, founder-facing reference rendering all 4 locked cc#502 specs VERBATIM from BASKET_INFO
+// (the same source the i-button modals and Matrix tab read) so this page can never drift from
+// them -- one constant, three views. No fetch: BASKET_INFO is a code constant, so this renders
+// instantly on load like Matrix/OH-OL.
+function renderBasketRules(){
+  const ids=["buy_reversal","buy_momentum","sell_reversal","sell_momentum"];
+  const cards=ids.map(id=>{
+    const info=BASKET_INFO[id];
+    const buy=info.side==='BUY';
+    const fg=buy?'var(--grn)':'var(--red)',bg=buy?'var(--grn-d)':'var(--red-d)';
+    const filters=info.filters.map(f=>`<div class="frow">
+        <span class="fm">${f.m.replace(/_/g,' ')}</span>
+        <span class="fc">${f.c}</span>
+      </div>`).join('');
+    return `<div class="msec" style="border-left:3px solid ${fg}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-family:Sora;font-weight:800;font-size:15px;color:var(--txt)">${info.label}</span>
+        <span class="sp" style="background:${bg};color:${fg}">${info.side}</span>
+        <span class="sp" style="background:var(--panel2);color:var(--cyan)">${info.version}</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--mut);line-height:1.6;margin-bottom:10px">${info.thesis}</div>
+      <div class="msec-title">Filters · <span style="color:var(--amber)">${info.gateType}</span></div>
+      <div style="background:var(--panel2);border-radius:10px;padding:4px 12px;margin-bottom:10px">${filters}</div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1;background:var(--grn-d);border-radius:8px;padding:9px 12px">
+          <div style="font-size:10px;color:var(--mut);margin-bottom:3px">TARGET</div>
+          <div style="font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--grn)">${info.target}</div>
+        </div>
+        <div style="flex:1;background:var(--red-d);border-radius:8px;padding:9px 12px">
+          <div style="font-size:10px;color:var(--mut);margin-bottom:3px">STOP LOSS</div>
+          <div style="font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--red)">${info.stop}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="ptitle">Basket Rules <span class="ct">4 baskets · founder-locked specs, verbatim (cc#502, 18-Jul-2026)</span></div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 14px;line-height:1.55">Static reference -- every filter/target/stop here reads directly from the same BASKET_INFO constant powering the i-button modals and the Strategy Matrix tab, so it can never fall out of sync with the live engine's dedicated handlers in v8_signal_writer.py. sell_overbought and buy_s1_bounce were retired entirely in the cc#502 suite rebuild.</div>
+    ${cards}`;
+}
+
+// -- Matrix tab (cc#383, updated cc#502) --------------------------------------
+// All 4 baskets side-by-side (sell_overbought + buy_s1_bounce retired 18-Jul-2026).
+// ROWS = filter dimensions (union across baskets) + exits + performance; COLUMNS = 4
+// baskets. Cells read from BASKET_INFO (the code constant kept current with every
+// V5/V3/V6.1/V4 spec) so the grid can never drift from the i-button modals. `map`
+// value forms: "m" (look up that filter's constraint), ["m1","m2"] (join several),
+// {lit:"..."} (literal for entry-zone rules not in filters[]).
+const MATRIX_COLS=["buy_reversal","buy_momentum","sell_reversal","sell_momentum"];
+const MATRIX_BUY=new Set(["buy_reversal","buy_momentum"]);
+const MATRIX_SHORT={buy_reversal:"Buy Reversal",buy_momentum:"Buy Momentum",
+  sell_reversal:"Sell Reversal",sell_momentum:"Sell Momentum"};
 const MATRIX_ROWS=[
   {sec:"Quality & trend"},
-  {label:"GVM score",       map:{buy_reversal:"gvm_score",buy_momentum:"gvm_score"}},
-  {label:"50-DMA distance", map:{buy_momentum:"dma_50",buy_s1_bounce:"dma_50"}},
-  {label:"200-DMA distance",map:{buy_reversal:"dma_200",buy_momentum:"dma_200",sell_reversal:"dma_200",sell_momentum:"dma_200"}},
+  {label:"GVM score",       map:{buy_momentum:"gvm_score_score"}},
+  {label:"50-DMA distance", map:{buy_momentum:"dma_50_score"}},
+  {label:"200-DMA distance",map:{buy_momentum:"dma_200",sell_reversal:"dma_200",sell_momentum:"dma_200"}},
   {sec:"RSI & momentum"},
-  {label:"Daily RSI",       map:{buy_reversal:"daily_rsi",sell_reversal:"daily_rsi"}},
-  {label:"Weekly RSI",      map:{buy_reversal:"true_weekly_rsi",buy_momentum:"rsi_weekly",sell_reversal:"true_weekly_rsi",sell_momentum:"true_weekly_rsi"}},
-  {label:"Monthly RSI",     map:{buy_momentum:"rsi_month",sell_reversal:"rsi_month",sell_momentum:"rsi_month"}},
-  {label:"Nifty market gate",map:{buy_s1_bounce:"nifty_rsi",sell_overbought:"nifty_rsi"}},
-  {label:"2-day momentum",  map:{buy_reversal:"mom_2d",buy_momentum:"mom_2d",buy_s1_bounce:"recovery_2d",sell_momentum:"mom_2d"}},
-  {label:"Hourly momentum", map:{buy_reversal:"hourly_pct"}},
+  {label:"Weekly RSI (FINAL heavy)",map:{buy_reversal:"true_weekly_rsi",buy_momentum:"true_weekly_rsi",sell_reversal:"true_weekly_rsi",sell_momentum:"true_weekly_rsi"}},
+  {label:"Monthly RSI",     map:{buy_reversal:"rsi_month",buy_momentum:"rsi_month",sell_momentum:"rsi_month"}},
+  {label:"2-day momentum",  map:{buy_reversal:"mom_2d",buy_momentum:"mom_2d",sell_reversal:"mom_2d",sell_momentum:"mom_2d"}},
+  {label:"Hourly momentum", map:{buy_momentum:"hourly_pct"}},
   {sec:"Returns, sector & volume"},
-  {label:"Week return",     map:{buy_momentum:"week_return",buy_s1_bounce:"week_return",sell_momentum:"week_return",sell_overbought:"week_return"}},
-  {label:"Month return",    map:{buy_momentum:"month_return"}},
-  {label:"Sector (week)",   map:{buy_momentum:"sector_week",sell_momentum:"sector_week"}},
+  {label:"Week return",     map:{buy_reversal:"week_return",buy_momentum:"week_return",sell_momentum:"week_return"}},
+  {label:"Month return",    map:{buy_reversal:"month_return",buy_momentum:"month_return",sell_reversal:"month_return"}},
+  {label:"Sector (week)",   map:{buy_reversal:"sector_week",buy_momentum:"sector_week",sell_reversal:"sector_week",sell_momentum:"sector_week"}},
   {label:"Sector (month)",  map:{buy_momentum:"sector_month"}},
-  {label:"52-week index",   map:{sell_momentum:"week_index_52"}},
-  {label:"Volume ratio",    map:{buy_s1_bounce:"vol_ratio"}},
-  {label:"Day change / candle",map:{buy_s1_bounce:["day_ret","close > open"],sell_overbought:"day_red"}},
+  {label:"52-week index",   map:{buy_momentum:"week_index_52",sell_reversal:"week_index_52",sell_momentum:"week_index_52"}},
+  {label:"Day change (1D)", map:{sell_reversal:"day_1d"}},
   {sec:"Pivot geometry"},
-  {label:"Pivot position",  map:{buy_reversal:"CMP vs PP",buy_momentum:{lit:"PP < CMP ≤ R1"},sell_reversal:"cmp_lt_pp",sell_momentum:"cmp_lt_pp"}},
-  {label:"Support / rejection trigger",map:{buy_reversal:"room to R1",buy_s1_bounce:"week_low vs S1",sell_reversal:"room",sell_momentum:"s2_clearance",sell_overbought:["high_ge_r1","fall_2d"]}},
+  {label:"Pivot position",  map:{sell_reversal:"cmp_lt_pp",sell_momentum:"cmp_lt_pp"}},
+  {label:"Support / rejection trigger",map:{buy_reversal:"s1_touch",sell_reversal:["r1_touch","room"],sell_momentum:"s2_clearance"}},
   {sec:"Exits (frozen at entry)",exits:true},
   {label:"Target",   pull:"target"},
   {label:"Stop",     pull:"stop"},
@@ -633,7 +649,7 @@ function renderMatrix(){
     }).join("");
     body+=`<tr><td class="mxlabel">${r.label}</td>${tds}</tr>`;
   });
-  return `<div class="ptitle">Strategy Matrix <span class="ct">6 baskets · filters, exits & edge</span></div>
+  return `<div class="ptitle">Strategy Matrix <span class="ct">4 baskets · filters, exits & edge</span></div>
     <div style="font-size:11px;color:var(--dim);margin:-4px 0 12px;line-height:1.55">All active baskets side-by-side. Filter &amp; exit rows mirror each basket's i-button spec; backtest rows are episode-level EOD figures; <b style="color:var(--mut)">Live WR</b> is computed from the closed paper trades (same P&amp;L-sign classifier as the Trade Log accuracy box). Tap <span class="info-btn" style="width:16px;height:16px;font-size:9px;vertical-align:middle">i</span> in any column header for the full strategy detail. — = filter not used by that basket.</div>
     <div class="scroll" style="overflow-x:auto"><table style="min-width:900px"><thead><tr>
       <th style="text-align:left;min-width:150px;position:sticky;left:0;background:var(--panel);z-index:2">Dimension</th>${th}
@@ -735,12 +751,15 @@ function openInfo(basket){
   if(!info)return;
   const sc=info.side==='BUY';
   document.getElementById('mTitle').textContent=info.label;
-  document.getElementById('mSub').textContent=`${info.side} · ${info.spd} · ${info.sigs} signals/yr · WR ${info.wr}% · EV +${info.ev}%`;
+  const isNum=v=>typeof v==='number';
+  const wrTxt=isNum(info.wr)?`${info.wr}%`:info.wr;
+  const evTxt=isNum(info.ev)?`+${info.ev}%`:info.ev;
+  document.getElementById('mSub').textContent=`${info.side} · ${info.spd} · ${info.sigs} signals/yr · WR ${wrTxt} · EV ${evTxt}`;
 
   let html='';
   html+=`<div class="stat-pills">
-    <span class="sp sp-g">WR ${info.wr}%</span>
-    <span class="sp sp-b">EV +${info.ev}%/trade</span>
+    <span class="sp sp-g">WR ${wrTxt}</span>
+    <span class="sp sp-b">EV ${evTxt}/trade</span>
     <span class="sp sp-a">${info.sigs} sigs/yr</span>
     <span class="sp ${sc?'sp-g':'sp-r'}">${info.side}</span>
     <span class="sp sp-c">${info.version}</span>
@@ -757,34 +776,6 @@ function openInfo(basket){
     </div>`).join('')}
     </div>
   </div>`;
-  if(info.regimes){
-    html+=`<div class="msec"><div class="msec-title">Dynamic regime rules (Nifty 1M)</div>
-      <div style="background:var(--panel2);border-radius:10px;padding:4px 12px">
-      ${info.regimes.map(r=>`<div class="frow">
-        <span style="min-width:70px;font-weight:700;font-family:'Space Mono';font-size:11px;color:var(--txt)">${r.r}</span>
-        <span style="flex:1;font-size:11px;color:var(--mut)">${r.c}</span>
-        <span style="font-size:11px;color:var(--cyan);font-family:'Space Mono'">${r.n}</span>
-      </div>`).join('')}
-      </div>
-    </div>`;
-  }
-  if(info.slots){
-    const isS1B=basket==='buy_s1_bounce';
-    const slotColor=isS1B?'var(--grn)':'var(--red)';
-    const slotNote=isS1B
-      ?'Ring-fenced -- never competes with standard buy pool. Fires only when Nifty RSI >= 55. Fixed +1.5%/-1.5% stops.'
-      :'Never competes with standard buy/sell pool. WR 88.9% in bull mood, 66.7% in bear -- pool intentionally restricts in bear.';
-    html+=`<div class="msec"><div class="msec-title">Dedicated slot architecture (ring-fenced)</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${Object.entries(info.slots).map(([k,v])=>`<div style="background:var(--panel2);border:1px solid var(--line2);border-radius:9px;padding:8px 14px;text-align:center;min-width:90px">
-        <div style="font-size:10px;color:var(--mut);margin-bottom:3px">${k}</div>
-        <div style="font-family:'Space Mono';font-weight:800;font-size:22px;color:${slotColor}">${v}</div>
-        <div style="font-size:9px;color:var(--dim)">slots</div>
-      </div>`).join('')}
-      </div>
-      <div style="font-size:11px;color:var(--dim);margin-top:8px">${slotNote}</div>
-    </div>`;
-  }
   html+=`<div class="msec"><div class="msec-title">Entry / Exit</div>
     <div class="pf">${info.pivotEntry}</div>
     <div style="display:flex;gap:10px;margin-top:10px">
@@ -800,7 +791,7 @@ function openInfo(basket){
   </div>`;
   html+=`<div class="msec"><div class="msec-title">Market mood gate · slot allocation</div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
-    ${[['Strong Bullish','0 fails','15B/5S · SO4 · S1B3'],['Bullish','1 fail','14B/6S · SO4 · S1B3'],['Neutral','2 fails','12B/8S · SO4 · S1B3'],['Bearish','3+ fails','8B/13S · SO3 · S1B2']].map(([mood,f,s])=>`
+    ${[['Strong Bullish','0 fails','15B/5S'],['Bullish','1 fail','14B/6S'],['Neutral','2 fails','12B/8S'],['Bearish','3+ fails','8B/13S']].map(([mood,f,s])=>`
       <div style="background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:8px 6px;text-align:center">
         <div style="font-size:10px;font-weight:700;color:var(--txt)">${mood}</div>
         <div style="font-size:9px;color:var(--dim);margin:2px 0">${f}</div>
@@ -813,44 +804,51 @@ function openInfo(basket){
   document.getElementById('infoModal').classList.add('open');
 }
 function closeInfo(){document.getElementById('infoModal').classList.remove('open');}
-// cc#366: buy_reversal pass-count box click -> per-stock 8-filter breakdown (actual vs required,
-// pass/fail) in the shared infoModal, so each V3 engine decision can be verified by hand. The
-// green-row count matches the n/8 on the box (endpoint mirrors the writer's pass logic exactly).
+// cc#366: pass-count box click -> per-stock filter breakdown (actual vs required, pass/fail) in
+// the shared infoModal, so each engine decision can be verified by hand. The green-row count
+// matches the n/total on the box (endpoint mirrors the writer's pass logic exactly).
 async function openBrDetail(symbol,basket){
-  // cc#378: generalized to buy_reversal V3 (8 gates) AND sell_reversal V5-D (6 gates). Rows share
-  // the {filter,required,actual,pass} shape; only the endpoint + header levels differ by basket.
-  const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum', isSO=basket==='sell_overbought';
-  const lbl=isSR?' · Sell Reversal V5-D':isSM?' · Sell Momentum V3-N5':isSO?' · Sell Overbought V3':' · Buy Reversal V3';
-  const nf=isSR?6:isSM?9:isSO?5:8;
+  // cc#378/502: generalized to all 4 dedicated-handler baskets. Rows share the
+  // {filter,required,actual,pass} shape; only the endpoint + header levels differ by basket.
+  // buy_momentum (isBM) is dual-layer (7 HARD gates + a separate SCORE/10) so it also renders a
+  // second score_rows table below the main one.
+  const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum', isBM=basket==='buy_momentum';
+  const lbl=isSR?' · Sell Reversal V6.1':isSM?' · Sell Momentum V4':isBM?' · Buy Momentum V3':' · Buy Reversal V5';
+  const nf=isSR?10:isSM?9:isBM?7:7;
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
   document.getElementById('infoModal').classList.add('open');
-  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):isSM?EP.smStockDetail(symbol):isSO?EP.soStockDetail(symbol):EP.brStockDetail(symbol));}
+  let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):isSM?EP.smStockDetail(symbol):isBM?EP.bmStockDetail(symbol):EP.brStockDetail(symbol));}
   catch(e){document.getElementById('mBody').innerHTML=`<div class="err">Could not load detail for ${symbol}.</div>`;return;}
   const hdr=(isSR
     ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S1',num(d.s1,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['Target',d.target!=null?num(d.target,2):'--'],['Room',d.room_pct!=null?sign(d.room_pct,2)+'%':'--']]
     : isSM
     ? [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S2',d.s2!=null?num(d.s2,2):'--'],['S2 clr',d.s2_clearance_pct!=null?sign(d.s2_clearance_pct,2)+'%':'--']]
-    : isSO
-    ? [['CMP',num(d.cmp,2)],['R1',num(d.r1,2)],['Sess High',d.session_high!=null?num(d.session_high,2):'--'],['NIFTY RSI',d.nifty_rsi!=null?num(d.nifty_rsi,1):'--'],['Fall 2d',d.fall_2d_pct!=null?sign(d.fall_2d_pct,2)+'%':'--']]
-    : [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['R1',num(d.r1,2)],['Room&rarr;R1',d.room_r1_pct!=null?sign(d.room_r1_pct,2)+'%':'--']])
+    : isBM
+    ? [['CMP',num(d.cmp,2)],['Score',d.score!=null?d.score+'/'+d.score_total:'-- (hard gates not cleared)'],['Score OK',d.score_qualified?'YES':'NO']]
+    : [['CMP',num(d.cmp,2)],['PP',num(d.pp,2)],['S1',num(d.s1,2)]])
     .map(([k,v])=>`<span style="margin-right:14px;white-space:nowrap"><span style="color:var(--dim)">${k}</span> <b>${v}</b></span>`).join('');
   const pcCol=d.passed===d.total?'var(--grn)':(d.passed>=d.total-1?'var(--amber)':'var(--red)');
   document.getElementById('mSub').innerHTML=`${hdr}<span style="white-space:nowrap">&middot; <b style="color:${pcCol}">${d.passed}/${d.total} pass</b></span>`;
   // cc#378/423: PASS/FAIL as a compact P/F pill + a full-row tint. cc#423: table-layout:fixed with
   // colgroup widths + wrapping REQUIRED/ACTUAL so all 4 columns fit the modal with ZERO horizontal
   // scroll on desktop AND mobile (the STATUS column no longer gets cut off).
-  const rows=(d.rows||[]).map(r=>`<tr style="border-top:1px solid var(--line);background:${r.pass?'rgba(47,212,139,.06)':'rgba(255,92,108,.06)'}">
+  const rowsHtml=rows=>(rows||[]).map(r=>`<tr style="border-top:1px solid var(--line);background:${r.pass?'rgba(47,212,139,.06)':'rgba(255,92,108,.06)'}">
     <td style="padding:7px 7px;font-weight:600;white-space:normal;word-break:break-word">${r.filter.replace(/_/g,' ')}</td>
     <td style="padding:7px 7px;color:var(--mut);white-space:normal;word-break:break-word">${r.required}</td>
     <td style="padding:7px 7px;font-family:'Space Mono';white-space:normal;word-break:break-word">${r.actual}${r.note?`<div style="font-size:9.5px;color:var(--dim);margin-top:2px">${r.note}</div>`:''}</td>
     <td style="padding:7px 4px;text-align:center;white-space:nowrap"><span title="${r.pass?'PASS':'FAIL'}" style="font-weight:800;font-size:10px;padding:3px 8px;border-radius:6px;color:${r.pass?'var(--grn)':'var(--red)'};background:${r.pass?'rgba(47,212,139,.16)':'rgba(255,92,108,.16)'}">${r.pass?'P':'F'}</span></td></tr>`).join('');
-  document.getElementById('mBody').innerHTML=`<div style="overflow-x:hidden"><table style="width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed">
+  const table=rows=>`<table style="width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed">
     <colgroup><col style="width:27%"><col style="width:28%"><col style="width:30%"><col style="width:15%"></colgroup>
     <thead><tr style="text-align:left;color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.3px">
       <th style="padding:6px 7px">Filter</th><th style="padding:6px 7px">Required</th><th style="padding:6px 7px">Actual</th><th style="padding:6px 4px;text-align:center">Status</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${rowsHtml(rows)}</tbody></table>`;
+  let body=table(d.rows);
+  if(isBM&&d.score_rows){
+    body+=`<div style="margin-top:12px;font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.3px">Score band breakdown (${d.score}/${d.score_total}, need >=7)</div>`+table(d.score_rows);
+  }
+  document.getElementById('mBody').innerHTML=`<div style="overflow-x:hidden">${body}</div>`;
 }
 // cc#275: VIX popout open/close. Chart.js instance is never rebuilt — opening just reveals the
 // live canvas and resizes it (it was 0-sized while the overlay was display:none), so the current
@@ -1213,6 +1211,7 @@ TAB_ORDER.forEach(panelIdx=>{
   b.onclick=()=>selectTab(panelIdx);
   tabsEl.appendChild(b);
 });
+try{document.getElementById('panel3').innerHTML=renderBasketRules();}catch(e){}   // cc#503: static, renders instantly (repurposed panel3)
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
 // cc#426: V9 Pairs moved to standalone /v9 — panel16 no longer rendered here (tab removed).
 try{document.getElementById('panel17').innerHTML=renderOHOL();}catch(e){}   // cc#388 · cc#447: static INACTIVE banner (no live poll)
@@ -1317,9 +1316,6 @@ function renderMood(m){
   // cc#271: value (ADR ratio / signed %) rendered big in its own <b class="chk-val">, matching
   // the Buy/Sell slot number size; the ADR/Day/Week/Month label and the Y/N suffix stay small.
   const pills=(m.checks||[]).map(c=>{const v=gval(c);const st=(short(c.filter)==='ADR')?adrStamp:'';return`<div class="chk ${c.pass?'pass':'fail'}">${short(c.filter)}${v?` <b class="chk-val">${v}</b>`:''}${st} ${c.pass?'Y':'N'}</div>`;}).join('');
-  // cc#221: ring-fenced pools (used/cap) from market_mood — SO is a short basket, S1B a long one
-  const soP=m.so_pool||{cap:m.so_slots,used:0};
-  const s1bP=m.s1b_pool||{cap:m.s1b_slots,used:0};
   // cc#293: each metric row shows Label -> last value -> day-change% (coloured) -> icon. The
   // #*Inline spans are (re)populated by the chart-load fns (loadVixChart/loadNiftyPcrChart/
   // loadBankniftyPcrChart) from the SAME series they already fetch — one source of truth per metric.
@@ -1333,7 +1329,7 @@ function renderMood(m){
       ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
     <div class="mood-right">
       <div class="moodChecks">${pills}</div>
-      <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span><span class="sell">Sell Overbought <b>${soP.used}/${soP.cap}</b></span><span class="buy">Buy S1 Bounce <b>${s1bP.used}/${s1bP.cap}</b></span></div>
+      <div class="slots"><span class="buy">Buy slots <b>${_lo}/${m.buy_slots}</b></span><span class="sell">Sell slots <b>${_so}/${m.sell_slots}</b></span></div>
     </div>`;
   // cc#310: the innerHTML above ships EMPTY #vixInline/#niftyPcrInline/#bankniftyPcrInline
   // spans. Immediately re-inject the last known VIX/PCR values so a re-render never blanks
@@ -1627,10 +1623,11 @@ function renderMaster(){
       : "");
 }
 
-// cc#379: canonical basket-table column set + row renderers, shared by ALL six baskets
-// (renderFunnel for the 5 BASKETS + renderSellOB). Reference = Buy Momentum layout. A value that
-// is momentarily unavailable renders -- (the column is NEVER dropped). Sell baskets use the exact
-// same set — no mirrored/alternate columns. Display-only; per-basket gates are untouched.
+// cc#379: canonical basket-table column set + row renderers, shared by ALL four baskets
+// (renderFunnel for the 4 BASKETS; sell_overbought retired cc#502). Reference = Buy Momentum
+// layout. A value that is momentarily unavailable renders -- (the column is NEVER dropped). Sell
+// baskets use the exact same set — no mirrored/alternate columns. Display-only; per-basket gates
+// are untouched.
 const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]];
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
@@ -1682,26 +1679,6 @@ function renderFunnel(b){
   // per-basket Filter Funnel sections are unchanged; only these position/signal table columns unify.
   const desktopTable=sortTbl('bk_'+b.id,BK_COLS,sorted,bkRow,{sortKey:'gvm_score',dir:-1,empty:"No qualified names"});
   const mobileCards=bkMobile(sorted,isSell);
-  return meta+legend+desktopTable+mobileCards;
-}
-
-function renderSellOB(){
-  const d=cache.sellOB;if(!d)return'<div class="loading">...</div>';
-  const stocks=d.stocks||[];
-  const meta=`<div class="ptitle">Sell Overbought <button class="info-btn" onclick="openInfo('sell_overbought')" title="Strategy rules & filters">i</button> <span class="ct">count ${d.count??0} · win ${d.win_pct_may2026||'--'}</span></div>`;
-  if(!stocks.length)return meta+`<div class="empty">No overbought signals</div>`;
-  const statusOrder={OPEN:0,SIGNAL:1,NEAR_MISS:2};
-  const sorted=[...stocks].sort((a,b)=>(statusOrder[a.status]??1)-(statusOrder[b.status]??1));
-  const legend=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
-    <span class="badge b-open">&#9679; OPEN</span><span style="color:var(--dim)">Position live</span>
-    <span style="color:var(--dim);margin:0 4px">·</span>
-    <span class="badge b-qualified">SIGNAL</span><span style="color:var(--dim)">Qualified today, entry gated (reason shown)</span>
-  </div>`;
-  // cc#379: sell_overbought uses the SAME canonical column set as the other five baskets (no
-  // mirrored/alternate columns). Target/Tgt% now live in the i-button modal + Filter Funnel, not
-  // the position table. Payload enriched (v8_endpoints sell_overbought) to carry the canonical fields.
-  const desktopTable=sortTbl('sellob',BK_COLS,sorted,bkRow,{sortKey:'gvm_score',dir:-1,empty:"No overbought signals"});
-  const mobileCards=bkMobile(sorted,true);
   return meta+legend+desktopTable+mobileCards;
 }
 
@@ -1856,7 +1833,7 @@ async function loadFunnelInline(basketId,panelIdx){
   if(pc&&pc.stocks){
     // cc#366/378: buy_reversal (8) AND sell_reversal (6) boxes are click-through to the per-stock
     // filter breakdown modal (openBrDetail is basket-generalized).
-    const isDetail=(basketId==='buy_reversal'||basketId==='sell_reversal'||basketId==='sell_momentum'||basketId==='sell_overbought');
+    const isDetail=(basketId==='buy_reversal'||basketId==='buy_momentum'||basketId==='sell_reversal'||basketId==='sell_momentum');
     inner+=`<div class="ptitle" style="margin-top:16px">Stock Pass Count <span class="ct">${pc.universe} stocks · max ${pc.filter_count}${isDetail?' · tap a box for the filter breakdown':''}</span></div>`;
     const sorted=[...pc.stocks].sort((a,b)=>(b.passed||0)-(a.passed||0));
     inner+=`<div class="pc-grid">${sorted.map(x=>{const sc_cls=scoreClass(x.passed,x.total);const fails=(x.failed_filters||[]).slice(0,3).map(f=>f.replace(/_/g,' ')).join(', ');
@@ -2364,16 +2341,14 @@ function loadAdrChart(){
 
 function paint(){
   document.getElementById('panel0').innerHTML=renderMaster();
-  BASKETS.forEach((b,i)=>document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b));
-  document.getElementById('panel6').innerHTML=renderSellOB();
+  BASKETS.forEach(b=>document.getElementById('panel'+b.panel).innerHTML=renderFunnel(b));
   document.getElementById('panel7').innerHTML=renderTradeLog();
   document.getElementById('panel9').innerHTML=renderRaw();
   document.getElementById('panel15').innerHTML=renderMatrix();   // cc#383
   document.getElementById('panel16').innerHTML=renderV9Pairs();  // cc#385
   // cc#447: OH-OL inactive — panel17 shows a static banner set at init; no live re-render.
   // cc_task #96: embed the per-basket Filter Funnel inline below each basket table.
-  BASKETS.forEach((b,i)=>loadFunnelInline(b.id,i+1));
-  loadFunnelInline('sell_overbought',6);
+  BASKETS.forEach(b=>loadFunnelInline(b.id,b.panel));
 }
 
 function showSkeletons(){
@@ -2395,14 +2370,13 @@ async function loadAll(){
   const jobs=[
     run('mood',()=>getJSON(EP.mood),()=>{if(cache.mood)renderMood(cache.mood);loadVixChart();loadNiftyPcrChart();loadBankniftyPcrChart();}),   // cc#266/#290: VIX + PCR charts on the gate cadence
     run('metricsAll',()=>getJSON(EP.metricsAll),()=>{renderMasterPanels();}),
-    run('sellOB',()=>getJSON(EP.sellOB),()=>{document.getElementById('panel6').innerHTML=renderSellOB();}),
     run('paper',()=>getJSON(EP.paper),()=>{renderMasterPanels();if(cache.mood)renderMood(cache.mood);}),   // cc#310: refresh mood slots once paper lands
     run('segmentDay',()=>getJSON(EP.segmentDay),()=>{renderMasterPanels();}),   // cc#429: Sector Day % for Open Positions
     run('adrHistory',()=>getJSON(EP.adrHistory),()=>{if(cache.mood)renderMood(cache.mood);loadAdrChart();}),   // cc#443/#448: ADR trend row + popout chart
     run('nifty50',()=>getJSON('/api/v8/nifty50_sectors'),()=>{renderMasterPanels();}),   // cc#319: NIFTY 50 Sectors section
     run('themeSectors',()=>getJSON('/api/v8/theme_sectors'),()=>{renderMasterPanels();}),   // cc#338: Sector Cards by Scorr theme
-    ...BASKETS.map((b,i)=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
-      ()=>{document.getElementById('panel'+(i+1)).innerHTML=renderFunnel(b);})),
+    ...BASKETS.map(b=>run('q_'+b.id,()=>getJSON(EP.qualified(b.id)),
+      ()=>{document.getElementById('panel'+b.panel).innerHTML=renderFunnel(b);})),
     // cc#426: V9 Pairs fetch removed — it lives on the standalone /v9 page now.
     // cc#447: OH-OL fetch removed — scanner INACTIVE (superseded by V14 ORB). Endpoint + data preserved.
   ];
