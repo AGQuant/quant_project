@@ -1399,6 +1399,7 @@ def fetch_expense_ratio(cur):
             return {"error": "no MF_ID source", "month": month}
 
     all_rows, logged_sample = [], False
+    n_combos = 0
     for subcat_name, subcat_id in _EQUITY_SUBCATS.items():
         for mf_id in mf_ids:
             page = 1
@@ -1408,11 +1409,29 @@ def fetch_expense_ratio(cur):
                     _oplog(cur, "MF_TER_API_SCHEMA_SAMPLE", {"row": rows[0], "meta": meta})
                     logged_sample = True
                 all_rows.extend(rows)
-                page_count = meta.get("pageCount") or meta.get("PageCount") or 1
+                try:
+                    page_count = int(meta.get("pageCount") or meta.get("PageCount") or 1)
+                except (TypeError, ValueError):
+                    page_count = 1
                 if not rows or page >= page_count:
                     break
                 page += 1
                 time.sleep(0.6)
+            n_combos += 1
+            # cc#498 live bug fix: this loop is HTTP-only for potentially many minutes when
+            # mf_ids has dozens of AMCs (non-wildcard path) — with zero DB activity in between,
+            # the connection sat idle-in-transaction past this DB's 5-min auto-kill guard
+            # (idle_in_transaction_session_timeout=300000, CLAUDE.md-documented), crashing the
+            # whole run_v15_wiring call before any TER write ever happened (observed live: a
+            # ~12-min silent run that reset mf_v15_wiring_run back to 'pending' with zero rows
+            # written). A no-op commit every AMC keeps the connection alive through the crawl.
+            try:
+                cur.connection.commit()
+            except Exception:
+                pass
+            if n_combos % 25 == 0:
+                _oplog(cur, "MF_TER_API_CRAWL_PROGRESS", {"combos_done": n_combos,
+                       "combos_total": len(_EQUITY_SUBCATS) * len(mf_ids), "rows_so_far": len(all_rows)})
             time.sleep(0.6)
 
     if not all_rows:
