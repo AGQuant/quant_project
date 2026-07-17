@@ -526,12 +526,19 @@ def fetch_amfi_aum(cur, today=None):
     """PHASE 1: scheme-wise AAUM via the multi-source prober (SPA JSON / legacy ASPX / form POST),
     lakh-or-cr auto-detected, fuzzy-mapped to Direct-Growth mf_master rows. Best-effort — returns
     an error dict (not fatal) if AMFI is fully closed; the orchestrator then falls back to the
-    proxy candidate set for NAV+returns (founder unblock: never wait on a perfect AUM source)."""
+    proxy candidate set for NAV+returns (founder unblock: never wait on a perfect AUM source).
+
+    cc#491: fixed a pre-existing NameError (fy/q were referenced in the stats dict but never
+    assigned — this function has never actually reached that line without crashing whenever
+    parsed was non-empty). Also added the HARD overwrite guard (id=4334): never clobber an
+    existing non-NULL aum_cr — several schemes carry manually-sourced curated values that
+    were accidentally wiped once already (cc#477 dup incident)."""
     try:
         import pandas as pd  # noqa: F401
     except Exception as e:
         _oplog(cur, "MF_AUM_ERROR", {"stage": "import pandas", "error": str(e)[:200]})
         return {"error": "pandas unavailable"}
+    fy, q = _amfi_aaum_quarter(today)
     parsed, used = _probe_aum_sources(cur, today)
     if not parsed:
         _oplog(cur, "MF_AUM_ERROR", {"stage": "all_sources_failed",
@@ -542,7 +549,7 @@ def fetch_amfi_aum(cur, today=None):
     cur.execute("SELECT scheme_code, name FROM mf_master WHERE source='amfi' "
                 "AND name ILIKE '%%direct%%' AND name ILIKE '%%growth%%'")
     universe = [(sc, nm, set(_norm_fund(nm))) for sc, nm in cur.fetchall()]
-    matched = 0
+    matched = skipped_existing = 0
     for nm, aaum_cr in parsed:
         toks = set(_norm_fund(nm))
         if not toks:
@@ -555,12 +562,18 @@ def fetch_amfi_aum(cur, today=None):
             if best is None or jac > best[0]:
                 best = (jac, sc)
         if best and best[0] >= 0.5:
-            cur.execute("UPDATE mf_master SET aum_cr=%s, updated_at=NOW() WHERE scheme_code=%s",
+            # cc#491 overwrite guard: WHERE aum_cr IS NULL — never touch a curated value.
+            cur.execute("UPDATE mf_master SET aum_cr=%s, updated_at=NOW() "
+                        "WHERE scheme_code=%s AND aum_cr IS NULL",
                         (aaum_cr, best[1]))
-            matched += 1
+            if cur.rowcount:
+                matched += 1
+            else:
+                skipped_existing += 1
     cur.execute("SELECT COUNT(*) FROM mf_master WHERE aum_cr > %s", (AUM_THRESHOLD_CR,))
     qualifying = cur.fetchone()[0]
     stats = {"fy": fy, "quarter": q, "aaum_rows": len(parsed), "matched": matched,
+             "skipped_existing_curated": skipped_existing,
              "match_rate": round(matched / len(parsed), 3) if parsed else 0,
              "qualifying_gt_5000cr": qualifying, "sample": parsed[:3]}
     _oplog(cur, "MF_AUM_BACKFILL", stats)
@@ -636,7 +649,16 @@ def _cagr(cur_nav, past_nav, years):
 
 def compute_returns_for_scheme(cur, scheme_code):
     """PHASE 3: point-to-point returns from the stored NAV series. Nearest stored NAV on/before
-    (latest - horizon) within a tolerance. 2Y as CAGR; others simple pct. NULL if insufficient age."""
+    (latest - horizon) within a tolerance. CAGR from 2Y out; others simple pct. NULL if
+    insufficient age/history.
+
+    cc#491 amendment (id=4334): also compute ret_3y/ret_5y where mf_nav_history depth allows —
+    the month-end selection in _month_end_and_weekly keeps EVERY month-end row from the full
+    mfapi history (the m_cut variable there is computed but unused — a pre-existing no-op, not
+    a real 25-month prune), so older funds' stored history already reaches back far enough for
+    this without any change to backfill_scheme_nav's storage. mf_master.ret_3y/ret_5y already
+    exist in the base schema (ensure_tables) — this just wires them, per spec: score on 3Y/5Y
+    where available, fall back to whatever horizon exists (never block on the longest one)."""
     from datetime import timedelta
     cur.execute("SELECT nav_date, nav FROM mf_nav_history WHERE scheme_code=%s AND nav IS NOT NULL "
                 "ORDER BY nav_date", (scheme_code,))
@@ -662,10 +684,16 @@ def compute_returns_for_scheme(cur, scheme_code):
     r1y = _pct(latest_nav, past(365, 20))
     n2y = past(730, 25)
     r2y = _cagr(latest_nav, n2y, 2.0)
+    n3y = past(1095, 30)
+    r3y = _cagr(latest_nav, n3y, 3.0)
+    n5y = past(1826, 35)
+    r5y = _cagr(latest_nav, n5y, 5.0)
     cur.execute("""UPDATE mf_master SET ret_1w=%s, ret_1m=%s, ret_3m=%s, ret_6m=%s, ret_1y=%s,
-                   ret_2y=%s, returns_asof=%s, updated_at=NOW() WHERE scheme_code=%s""",
-                (r1w, r1m, r3m, r6m, r1y, r2y, latest_d, scheme_code))
-    return {"ret_1w": r1w, "ret_1m": r1m, "ret_3m": r3m, "ret_6m": r6m, "ret_1y": r1y, "ret_2y": r2y}
+                   ret_2y=%s, ret_3y=%s, ret_5y=%s, returns_asof=%s, updated_at=NOW()
+                   WHERE scheme_code=%s""",
+                (r1w, r1m, r3m, r6m, r1y, r2y, r3y, r5y, latest_d, scheme_code))
+    return {"ret_1w": r1w, "ret_1m": r1m, "ret_3m": r3m, "ret_6m": r6m, "ret_1y": r1y,
+            "ret_2y": r2y, "ret_3y": r3y, "ret_5y": r5y}
 
 
 def run_mf_returns_backfill(conn=None):
@@ -969,6 +997,400 @@ def mf_search(q: str = "", limit: int = 20):
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     return {"count": len(rows), "results": rows}
+
+
+# ── cc#491: wire the remaining V15 data layers over the canonical equity universe ──────
+# (AUM sweep fix, expense ratio, holdings orchestration framework, MQS scoring, category
+# averages). AUTO_MODE_GRANT_17JUL: claim -> implement all 5 steps -> push -> verify ->
+# finalize, no per-step OKs. Sequenced after #493/#495/#496 per the founder's queue.
+
+def _canonical_equity_universe(cur):
+    """V15_EQUITY_UNIVERSE_V1 (session_log id=4334, locked 16-Jul, AFTER this task was filed):
+    mf_master rows with a non-NULL category, excluding Banking & PSU (a debt category, out of
+    scope for the equity-focused V15 MQS). Supersedes the original 635-fund proxy candidate
+    set from the pre-amendment spec. Verified live 17-Jul: 519 rows match this filter."""
+    cur.execute("""SELECT scheme_code, amfi_code, name, category FROM mf_master
+                   WHERE category IS NOT NULL AND category <> 'Banking & PSU'""")
+    return cur.fetchall()
+
+
+# ── step_2: expense ratio (TER) ─────────────────────────────────────────────────────
+# cc#466's own docstring named Moneycontrol as the intended ER cross-check source, but no
+# Moneycontrol scraper exists anywhere in this codebase yet, and this environment has no
+# outbound internet access to discover/verify a current scrape target's HTML structure —
+# building one blind risks the exact same "probed everything, 0 rows" outcome the AMFI AUM
+# source hit before cc#477's unblock. AMFI itself publishes a SEBI-mandated Total Expense
+# Ratio disclosure — try that first, per the spec's own explicit fallback: "use AMFI TER
+# disclosure if available, else document the best available source and coverage %."
+_AMFI_TER_PROBE = [
+    ("https://www.amfiindia.com/api/total-expense-ratio", None),
+    ("https://www.amfiindia.com/investor-corner/knowledge-center/total-expense-ratio.html", None),
+    ("https://www.amfiindia.com/research-information/other-data/total-expense-ratio", None),
+]
+
+
+def _parse_ter_html(body):
+    """Same shape-detection approach as _parse_aaum_html — scan every table on the page for a
+    scheme/name column plus a TER/expense-ratio column. Sanity floor 0<TER<10% rejects
+    obviously mis-picked numeric columns (TER is never double-digit)."""
+    import pandas as pd
+    parsed = []
+    try:
+        tables = pd.read_html(io.StringIO(body))
+    except Exception:
+        return parsed
+    for t in tables:
+        cols = [str(c).strip().lower() for c in t.columns]
+        name_i = next((i for i, c in enumerate(cols) if "scheme" in c or "name" in c), None)
+        ter_i = next((i for i, c in enumerate(cols) if "expense" in c or "ter" in c), None)
+        if name_i is None or ter_i is None or len(t) < 20:
+            continue
+        rows = []
+        for _, row in t.iterrows():
+            nm = str(row.iloc[name_i]).strip()
+            raw = str(row.iloc[ter_i]).replace("%", "").replace(",", "").strip()
+            if not nm or nm.lower() in ("total", "nan", "scheme name") or raw in ("", "nan"):
+                continue
+            try:
+                v = float(raw)
+                if 0 < v < 10:
+                    rows.append((nm, v))
+            except Exception:
+                continue
+        if len(rows) > len(parsed):
+            parsed = rows
+    return parsed
+
+
+def fetch_expense_ratio(cur):
+    """step_2: best-effort AMFI TER sweep — same probe/fuzzy-match pattern as fetch_amfi_aum,
+    same overwrite guard (WHERE expense_ratio IS NULL — the ~97 already-curated ER values
+    must never be touched). Honest about coverage: returns actual match counts, documents
+    failure rather than fabricating success if AMFI's TER page is unreachable/restructured."""
+    import requests
+    best, used = [], None
+    for url, _unused in _AMFI_TER_PROBE:
+        try:
+            hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "text/html,application/json;q=0.8"}
+            r = requests.get(url, headers=hdr, timeout=60)
+            ct = (r.headers.get("content-type") or "").lower()
+            body = r.text or ""
+            rows = _parse_ter_html(body) if ("html" in ct or "<table" in body.lower()) else []
+            _oplog(cur, "MF_TER_PROBE", {"url": url, "http": r.status_code, "ct": ct[:40],
+                                         "len": len(body), "rows": len(rows)})
+            if len(rows) > len(best):
+                best, used = rows, {"url": url, "rows": len(rows)}
+        except Exception as e:
+            _oplog(cur, "MF_TER_PROBE", {"url": url, "error": str(e)[:140]})
+    if not best:
+        _oplog(cur, "MF_TER_ERROR", {"stage": "all_sources_failed",
+                                     "note": "no clean AMFI TER source found this run — "
+                                             "expense_ratio coverage stays at whatever was "
+                                             "already curated (97 schemes as of 17-Jul)"})
+        return {"error": "no TER rows parsed"}
+
+    universe = [(sc, nm, set(_norm_fund(nm))) for sc, _ac, nm, _cat in _canonical_equity_universe(cur)]
+    matched = skipped_existing = 0
+    for nm, ter in best:
+        toks = set(_norm_fund(nm))
+        if not toks:
+            continue
+        cand = None
+        for sc, aname, aset in universe:
+            if not aset:
+                continue
+            jac = len(toks & aset) / float(len(toks | aset))
+            if cand is None or jac > cand[0]:
+                cand = (jac, sc)
+        if cand and cand[0] >= 0.5:
+            cur.execute("UPDATE mf_master SET expense_ratio=%s, updated_at=NOW() "
+                        "WHERE scheme_code=%s AND expense_ratio IS NULL", (ter, cand[1]))
+            if cur.rowcount:
+                matched += 1
+            else:
+                skipped_existing += 1
+    stats = {"ter_rows": len(best), "matched": matched,
+             "skipped_existing_curated": skipped_existing, "used": used}
+    _oplog(cur, "MF_TER_BACKFILL", stats)
+    return stats
+
+
+# ── step_3: AMC holdings orchestration ──────────────────────────────────────────────
+# Framework fully wired (download -> parse_holdings_xlsx -> _resolve_nse -> mf_holdings, all
+# cc#466-built pieces reused unchanged). What's genuinely missing is per-AMC URL knowledge:
+# SEBI mandates monthly portfolio disclosure, but there is NO single aggregated source across
+# AMCs — each AMC hosts its own excel on its own site, and this sandbox has no outbound
+# internet access to discover or verify current URLs. Registry starts EMPTY rather than
+# guessing URLs that would silently 404 — flagged clearly in the task closure for the founder
+# to supply live-verified links (or for a session with internet access to discover them).
+AMC_HOLDINGS_URLS = {
+    # "Edelweiss": "https://...",       # TODO: needs a founder-confirmed or live-tested URL
+    # "SBI": "https://...",
+    # "HDFC": "https://...",
+    # "Nippon India": "https://...",
+    # "ICICI Prudential": "https://...",
+    # "Union": "https://...",
+    # "Bandhan": "https://...",
+    # "UTI": "https://...",
+}
+
+
+def fetch_amc_holdings(cur, amc, url, as_of_month=None):
+    """Download one AMC's monthly portfolio-disclosure excel, parse via parse_holdings_xlsx(),
+    resolve each holding to an NSE symbol via _resolve_nse(), upsert into mf_holdings for
+    every curated scheme belonging to that AMC. Best-effort — never raises."""
+    import requests
+    as_of_month = as_of_month or date.today().replace(day=1)
+    try:
+        r = requests.get(url, headers={"User-Agent": "Scorr-MF/1.0"}, timeout=90)
+        r.raise_for_status()
+        rows, err = parse_holdings_xlsx(r.content)
+    except Exception as e:
+        _oplog(cur, "MF_HOLDINGS_ERROR", {"amc": amc, "url": url, "error": str(e)[:200]})
+        return {"amc": amc, "error": str(e)[:200]}
+    if err:
+        _oplog(cur, "MF_HOLDINGS_ERROR", {"amc": amc, "url": url, "parse_error": err})
+        return {"amc": amc, "error": err}
+    cur.execute("SELECT scheme_code FROM mf_master WHERE amc=%s AND curated", (amc,))
+    schemes = [row[0] for row in cur.fetchall()]
+    if not schemes:
+        return {"amc": amc, "rows": len(rows), "schemes": 0, "note": "no curated scheme for this AMC"}
+    resolved = 0
+    for sc in schemes:
+        for h in rows:
+            nse_sym, method = _resolve_nse(cur, h["company"])
+            if nse_sym:
+                resolved += 1
+            cur.execute("""INSERT INTO mf_holdings
+                (scheme_code, as_of_month, isin, company_name, pct_weight, resolved_nse_symbol, resolve_method)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (scheme_code, as_of_month, company_name) DO UPDATE SET
+                    isin=EXCLUDED.isin, pct_weight=EXCLUDED.pct_weight,
+                    resolved_nse_symbol=EXCLUDED.resolved_nse_symbol, resolve_method=EXCLUDED.resolve_method""",
+                (sc, as_of_month, h.get("isin"), h["company"], h.get("pct"), nse_sym, method))
+    stats = {"amc": amc, "url": url, "holdings_rows": len(rows), "schemes": len(schemes),
+             "resolved_nse": resolved}
+    _oplog(cur, "MF_HOLDINGS_BACKFILL", stats)
+    return stats
+
+
+def run_holdings_curated(conn=None):
+    """step_3: iterate AMC_HOLDINGS_URLS for the 11 curated funds. See the registry's own
+    docstring above — this returns status=skipped honestly if the registry is empty rather
+    than silently doing nothing."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            if not AMC_HOLDINGS_URLS:
+                _oplog(cur, "MF_HOLDINGS_SKIPPED",
+                       {"note": "AMC_HOLDINGS_URLS registry is empty — no live-verified AMC "
+                                "portfolio-disclosure URLs available from this environment"})
+                conn.commit()
+                return {"status": "skipped", "reason": "empty_url_registry", "results": []}
+        results = []
+        with conn.cursor() as cur:
+            for amc, url in AMC_HOLDINGS_URLS.items():
+                results.append(fetch_amc_holdings(cur, amc, url))
+                conn.commit()
+        return {"status": "ok", "results": results}
+    finally:
+        if own:
+            conn.close()
+
+
+# ── step_5: category averages ───────────────────────────────────────────────────────
+def compute_mf_category_averages(conn=None):
+    """Recompute mf_category_averages over the canonical equity universe. AVG() ignores
+    NULLs naturally, so a category with partial expense_ratio/returns coverage still gets a
+    meaningful average over whatever's populated."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT category, AVG(expense_ratio), AVG(ret_1y), AVG(ret_3y), AVG(ret_5y), COUNT(*)
+                FROM mf_master
+                WHERE category IS NOT NULL AND category <> 'Banking & PSU'
+                GROUP BY category
+            """)
+            rows = cur.fetchall()
+            for cat, avg_er, avg_1y, avg_3y, avg_5y, n in rows:
+                cur.execute("""INSERT INTO mf_category_averages
+                    (category, avg_expense_ratio, avg_ret_1y, avg_ret_3y, avg_ret_5y, n_funds, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                    ON CONFLICT (category) DO UPDATE SET
+                        avg_expense_ratio=EXCLUDED.avg_expense_ratio, avg_ret_1y=EXCLUDED.avg_ret_1y,
+                        avg_ret_3y=EXCLUDED.avg_ret_3y, avg_ret_5y=EXCLUDED.avg_ret_5y,
+                        n_funds=EXCLUDED.n_funds, updated_at=NOW()""",
+                    (cat, avg_er, avg_1y, avg_3y, avg_5y, n))
+            conn.commit()
+            _oplog(cur, "MF_CATEGORY_AVERAGES", {"categories": len(rows)})
+            conn.commit()
+        return {"categories": len(rows)}
+    finally:
+        if own:
+            conn.close()
+
+
+# ── step_4: MQS scoring ──────────────────────────────────────────────────────────────
+def _f2(v):
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _clip(v, lo=0.0, hi=100.0):
+    return max(lo, min(hi, v))
+
+
+def compute_mf_scores(conn=None):
+    """step_4: MQS (Mutual Fund Quality Score) — FQS pillar weights per the founder's
+    MF_Analysis_Working_Model.xlsx: Quality 35% / Returns 30% / Cost 15% / Size 20%.
+
+    cc#491 honesty note: this environment has no access to the actual Excel model (an
+    external deliverable never in this repo) to copy its exact pillar formulas verbatim, so
+    this is a reasonable, DOCUMENTED relative-to-category-peer scoring — not a guaranteed
+    match to the Excel's precise math. Flagging for founder validation against the working
+    model rather than claiming exact fidelity to an artifact never seen, per "do not
+    fabricate/guess" — the pillar STRUCTURE (4 pillars, these weights) is followed exactly;
+    the per-pillar formula is this session's best-effort interpretation.
+
+    Missing pillars are EXCLUDED and weights renormalized among what IS available, rather
+    than fabricating a neutral fill-in for missing data — a fund with no finkhoz_rating gets
+    an MQS from R/C/S only (weights renormalized to sum to 1), not a Quality=50 guess.
+
+      Quality (35%): finkhoz_rating (0-10) -> 0-100. NULL (uncurated fund) -> pillar skipped.
+      Returns (30%): ret_1y (fallback ret_3y, then ret_5y CAGR) vs the SAME horizon's category
+        average -> 50 +/- 3x the pct-point delta, clipped 0-100.
+      Cost    (15%): expense_ratio vs category average -> 50 - 20x the delta (cheaper=higher).
+      Size    (20%): aum_cr vs category average, log-scaled (AUM is right-skewed) -> 50 +/-
+        15x log(fund/avg) — flagged as the pillar most likely to need founder correction,
+        since "size" could equally be read as a Goldilocks/penalize-too-large signal rather
+        than bigger-is-better.
+    """
+    import math as _m
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT category, avg_expense_ratio, avg_ret_1y, avg_ret_3y, avg_ret_5y
+                           FROM mf_category_averages""")
+            cat_avg = {r[0]: {"er": _f2(r[1]), "r1y": _f2(r[2]), "r3y": _f2(r[3]), "r5y": _f2(r[4])}
+                       for r in cur.fetchall()}
+            cur.execute("""SELECT category, AVG(aum_cr) FROM mf_master
+                           WHERE category IS NOT NULL AND category <> 'Banking & PSU'
+                             AND aum_cr IS NOT NULL GROUP BY category""")
+            cat_aum_avg = {r[0]: _f2(r[1]) for r in cur.fetchall()}
+
+            cur.execute("""SELECT scheme_code, category, finkhoz_rating, expense_ratio, aum_cr,
+                                  ret_1y, ret_3y, ret_5y
+                           FROM mf_master
+                           WHERE category IS NOT NULL AND category <> 'Banking & PSU'""")
+            rows = cur.fetchall()
+            scored = 0
+            for sc, cat, rating, er, aum, r1y, r3y, r5y in rows:
+                ca = cat_avg.get(cat, {})
+                pillars, weights = {}, {}
+
+                if rating is not None:
+                    pillars["q"] = _clip(float(rating) * 10.0)
+                    weights["q"] = 0.35
+
+                fund_ret = r1y if r1y is not None else (r3y if r3y is not None else r5y)
+                cat_ret = (ca.get("r1y") if r1y is not None
+                           else (ca.get("r3y") if r3y is not None else ca.get("r5y")))
+                if fund_ret is not None and cat_ret is not None:
+                    pillars["r"] = _clip(50 + (float(fund_ret) - cat_ret) * 3)
+                    weights["r"] = 0.30
+
+                if er is not None and ca.get("er") is not None:
+                    pillars["c"] = _clip(50 - (float(er) - ca["er"]) * 20)
+                    weights["c"] = 0.15
+
+                aum_avg = cat_aum_avg.get(cat)
+                if aum is not None and aum_avg and aum_avg > 0 and float(aum) > 0:
+                    pillars["s"] = _clip(50 + _m.log(float(aum) / aum_avg) * 15)
+                    weights["s"] = 0.20
+
+                if not pillars:
+                    continue
+                wsum = sum(weights.values())
+                mqs = sum(pillars[k] * weights[k] for k in pillars) / wsum
+                cur.execute("""INSERT INTO mf_scores (scheme_code, mqs, q_score, r_score, c_score, s_score, computed_at)
+                               VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                               ON CONFLICT (scheme_code) DO UPDATE SET
+                                   mqs=EXCLUDED.mqs, q_score=EXCLUDED.q_score, r_score=EXCLUDED.r_score,
+                                   c_score=EXCLUDED.c_score, s_score=EXCLUDED.s_score, computed_at=NOW()""",
+                            (sc, round(mqs, 2), pillars.get("q"), pillars.get("r"),
+                             pillars.get("c"), pillars.get("s")))
+                scored += 1
+            conn.commit()
+            _oplog(cur, "MF_SCORES_COMPUTED", {"universe": len(rows), "scored": scored})
+            conn.commit()
+        return {"universe": len(rows), "scored": scored}
+    finally:
+        if own:
+            conn.close()
+
+
+# ── orchestrator + admin trigger ────────────────────────────────────────────────────
+def run_v15_wiring(conn=None):
+    """cc#491: one-shot orchestrator for steps 1-5. AUTO_MODE_GRANT_17JUL. Each step is
+    independently best-effort (a failure in one does not block the others) and ops_log
+    instrumented individually (see MF_AUM_*, MF_TER_*, MF_HOLDINGS_*, MF_SCORES_COMPUTED,
+    MF_CATEGORY_AVERAGES above) plus one final rollup entry."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            _ensure_returns_cols(cur)
+            conn.commit()
+        results = {}
+        with conn.cursor() as cur:
+            try:
+                results["aum"] = fetch_amfi_aum(cur)
+            except Exception as e:
+                results["aum"] = {"error": str(e)[:200]}
+            conn.commit()
+        with conn.cursor() as cur:
+            try:
+                results["expense_ratio"] = fetch_expense_ratio(cur)
+            except Exception as e:
+                results["expense_ratio"] = {"error": str(e)[:200]}
+            conn.commit()
+        try:
+            results["holdings"] = run_holdings_curated(conn)
+        except Exception as e:
+            results["holdings"] = {"error": str(e)[:200]}
+        try:
+            results["category_averages"] = compute_mf_category_averages(conn)
+        except Exception as e:
+            results["category_averages"] = {"error": str(e)[:200]}
+        try:
+            results["scores"] = compute_mf_scores(conn)
+        except Exception as e:
+            results["scores"] = {"error": str(e)[:200]}
+        with conn.cursor() as cur:
+            _oplog(cur, "MF_V15_WIRING_DONE", results)
+            conn.commit()
+        return results
+    finally:
+        if own:
+            conn.close()
+
+
+@router.post("/api/v15/mf/wire_all")
+def mf_wire_all_arm():
+    """cc#491: ARM the one-shot V15 wiring run (steps 1-5), picked up by the scheduler within
+    a tick — same flag-gated single-flight pattern as cc#477's returns backfill."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_v15_wiring_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+        conn.commit()
+    return {"armed": True, "flag": "mf_v15_wiring_run=pending"}
 
 
 @router.get("/api/v15/mf/curated")
