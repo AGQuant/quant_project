@@ -76,7 +76,7 @@ from datetime import datetime, timedelta, time as dt_time, date
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.append(_REPO_ROOT)
-import pytz, psycopg2, requests
+import pytz, psycopg2, psycopg2.errors, requests
 from nse_holidays import is_trading_day   # cc#188: market-hours gate for subscribe_verify
 
 FYERS_CLIENT_ID = os.environ.get('FYERS_CLIENT_ID', '1A4STS8ZGD-100')
@@ -151,14 +151,12 @@ OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 HEARTBEAT_STALE_MINS    = 10   # window for "wrote a live bar recently"
 HEALTH_LOG_MINS         = 5    # cc#489: also the watchdog's single check interval
 WATCHDOG_MIN_SYMBOLS    = 100  # cc#489 WATCHDOG_SIMPLIFICATION: per-source floor (out of ~210 each)
-HEALTH_FLOOR_TICKING    = 200  # cc#495 change_3: combined (eq+fut) post-connect health floor
 TOTAL_FUTURES           = 212  # denominator for the N/212 health log
 CMP_STALE_GUARD_SECS    = 90   # cc_task #112: only (re)write a cmp_prices row when its tick is
                                # newer than the last flush — no fresh tick => no timestamp update
 CMP_SANITY_MAX_DEV      = 0.02 # cc#367: reject a cmp write that deviates >2% from the symbol's most
                                # recent completed equity 5m bar (same session) — a polluted spot tick.
 STARTUP_GRACE_MINS      = 10   # suppress the watchdog this long after 09:15 (bars need time to form)
-OPEN_RACE_GUARD_SECS    = 60   # hold the first subscription until N s after 09:15 (NSE feed-init race)
 WS_SUB_BATCH            = 200  # cc_task #88: subscribe in 200-symbol batches (Fyers silently drops bulk subs at open)
 WS_SUB_BATCH_SLEEP_SEC  = 2    # seconds between subscription batches
 
@@ -434,15 +432,36 @@ def _ist_now_str():
 
 
 def _ops_log(conn, category, title, details):
-    """cc#339: one ops_log row (category=alert/info). Best-effort — never raises into the boot path."""
+    """cc#339: one ops_log row (category=alert/info). Best-effort — never raises into the boot
+    path. cc#497 fix_2a: falls back to a FRESH short-lived connection if the passed conn's write
+    fails, so an alert is never silently lost just because that particular conn happens to be
+    dead (the 17-Jul zombie: every conn-based alert path went quiet the same morning)."""
+    payload = json.dumps(details)
     try:
         with conn.cursor() as c:
             c.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
                          VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
-                      (category, title, json.dumps(details)))
+                      (category, title, payload))
         conn.commit()
+        return
     except Exception as e:
-        log.warning(f"_ops_log({title}) failed: {e}")
+        log.warning(f"_ops_log({title}) failed: {e} — retrying on a fresh connection")
+    hc = None
+    try:
+        hc = get_db()
+        with hc.cursor() as c:
+            c.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                         VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
+                      (category, title, payload))
+        hc.commit()
+    except Exception as e2:
+        log.warning(f"_ops_log({title}) fresh-conn fallback also failed: {e2}")
+    finally:
+        if hc is not None:
+            try:
+                hc.close()
+            except Exception:
+                pass
 
 
 def _rest_quote_ok(token):
@@ -557,6 +576,28 @@ def get_index_futures_universe(conn):
         return sorted(r[0] for r in cur.fetchall())
 
 
+def _canary_symbols(conn, nse_codes, n):
+    """cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: top-liquidity NSE codes (mcap-rank order) for
+    the two-stage subscribe's canary batch — subscribe a small, high-signal batch first and
+    verify it actually ticks before piling the full universe onto a session that might already
+    be dead. Falls back to the first n of the (already-sorted) universe if input_raw.mcap_rank
+    is unavailable/incomplete — never blocks the canary stage on a missing join."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT fu.symbol FROM futures_universe fu
+                JOIN input_raw ir ON ir.nse_code = fu.symbol
+                WHERE fu.is_active = TRUE AND fu.symbol = ANY(%s) AND ir.mcap_rank IS NOT NULL
+                ORDER BY ir.mcap_rank ASC LIMIT %s
+            """, (nse_codes, n))
+            ranked = [r[0] for r in cur.fetchall()]
+        if len(ranked) >= min(n, len(nse_codes)):
+            return ranked
+    except Exception as e:
+        log.warning(f"_canary_symbols: mcap-rank lookup failed ({e}) — falling back to first {n} of universe")
+    return nse_codes[:n]
+
+
 def get_top50_option_underlyings(conn):
     """Top 50 futures stocks by mcap rank from input_raw."""
     try:
@@ -621,7 +662,7 @@ def _stock_options_config(conn):
         return False, 20, STOCK_N_STRIKES
 
 
-def _cmp_fresh_fraction(conn, opt_mgr, kind=None):
+def _cmp_fresh_fraction(opt_mgr, kind=None):
     """cc#189: fraction of option underlyings whose cmp_prices row was updated
     within the last OPT_FRESH_WINDOW_MIN minutes. Drives the 'subscribe options
     ONLY when live prices are fresh' gate. cc#241: kind filters to index-only /
@@ -634,15 +675,22 @@ def _cmp_fresh_fraction(conn, opt_mgr, kind=None):
     is stored naive-IST; Postgres casts that naive value as if it WERE the
     session tz, making it look ~5.5h more recent than it really is, so a row
     hours stale could still pass this gate. Compute the cutoff in Python using
-    the same naive-IST convention used everywhere else in this file instead."""
+    the same naive-IST convention used everywhere else in this file instead.
+
+    cc#497 fix_2c: now opens its OWN fresh short-lived connection instead of taking the shared
+    housekeeping conn as a parameter — a dead shared conn silently zeroed this gate all morning
+    on 17-Jul (fresh=0.0 forever -> options never subscribed -> no CRITICAL alert either, since
+    the alert path shared the same dead conn)."""
     if not opt_mgr._underlyings:
         opt_mgr._build_underlyings()
     syms = [u['cmp_sym'] for u in opt_mgr._underlyings if (kind is None or u.get('kind') == kind)]
     if not syms:
         return 0.0
+    hc = None
     try:
         cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=OPT_FRESH_WINDOW_MIN)
-        with conn.cursor() as cur:
+        hc = get_db()
+        with hc.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(DISTINCT symbol) FROM cmp_prices "
                 "WHERE symbol = ANY(%s) AND updated_at >= %s",
@@ -651,6 +699,12 @@ def _cmp_fresh_fraction(conn, opt_mgr, kind=None):
     except Exception as e:
         log.warning(f"_cmp_fresh_fraction: {e}")
         return 0.0
+    finally:
+        if hc is not None:
+            try:
+                hc.close()
+            except Exception:
+                pass
     return fresh / len(syms)
 
 
@@ -1301,6 +1355,12 @@ def update_index_ltp(conn, token, agg=None):
                 cur.executemany("""INSERT INTO cmp_prices (symbol,cmp,updated_at,source) VALUES (%s,%s,%s,'fyers')
                     ON CONFLICT (symbol) DO UPDATE SET cmp=EXCLUDED.cmp, updated_at=EXCLUDED.updated_at, source='fyers'""", rows)
             conn.commit()
+    except (psycopg2.InterfaceError, psycopg2.OperationalError, psycopg2.errors.InFailedSqlTransaction):
+        # cc#497 fix_2b: a dead shared conn must propagate to the caller (housekeeping's
+        # _mark_db_error) instead of being swallowed here forever — this call runs every
+        # in-market loop tick, so it was one of the paths silently disabled by the 17-Jul conn
+        # death alongside the watchdog/options-gate/alerting paths.
+        raise
     except Exception as e:
         log.warning(f"Index LTP: {e}")
 
@@ -1772,10 +1832,14 @@ def run(auth_code=None):
     import fyers_backfill
     from fyers_apiv3.FyersWebsocket import data_ws
 
-    # cc#497 root_cause_3_HOTFIX_FIRST (verified live 10:27 IST from Railway logs): captured
-    # once, before anything else, so the watchdog grace-period fix below can never predate the
-    # CURRENT process's actual boot.
-    boot_time = datetime.now(IST)
+    # cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: boot_time anchors the pre-open-vs-midmarket boot
+    # decision (root_cause_1_ws_premarket_zombie + midmarket_boot_rule) — captured once, before
+    # anything else, since it must reflect when the WORKER started, not when the WS happens to
+    # (re)connect. _sub_state tracks whether today's initial subscribe sequence has completed,
+    # shared (by mutation, no nonlocal needed) between on_connect/housekeeping/the sequence
+    # runner below.
+    boot_time  = datetime.now(IST)
+    _sub_state = {'day': None, 'done': False}
 
     conn    = get_db()
     token   = get_valid_token(conn, auth_code)
@@ -1886,30 +1950,32 @@ def run(auth_code=None):
             log.warning(f"on_message: {e}")
 
     def on_connect():
-        # cc_task #84 change_3: avoid the NSE-feed-init race at the open. When we
-        # connect inside the first OPEN_RACE_GUARD_SECS after 09:15, hold the first
-        # subscription until the exchange feed is fully up (prevents the open crash).
-        now_t   = datetime.now(IST)
-        open_dt = now_t.replace(hour=9, minute=15, second=0, microsecond=0)
-        if open_dt <= now_t < open_dt + timedelta(seconds=OPEN_RACE_GUARD_SECS):
-            wait_s = OPEN_RACE_GUARD_SECS - (now_t - open_dt).total_seconds()
-            if wait_s > 0:
-                log.info(f"on_connect: holding subscription {wait_s:.0f}s (NSE open-race guard)")
-                time.sleep(wait_s)
-        # cc_task #88 GAP_2 / cc#151: subscribe in WS_SUB_BATCH-sized chunks via the
-        # shared _batched_subscribe helper — a single bulk subscribe of ~1460 symbols
-        # was silently dropped by the Fyers server under open-load (212 futures got
-        # zero data on 25-Jun).
-        # cc#189: subscribe eq + fut + ANY already-live-gated options (option_syms
-        # is empty on a cold boot, populated after the gate fires — so a reconnect
-        # re-subscribes the live options too instead of dropping them).
-        sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
-        log.info(f"WS connected — subscribing {len(sub_list)} symbols ({len(option_syms)} options)")
-        # cc#495 change_4: WS connect/close events weren't in ops_log at all before this —
-        # the daily feed log needs a real disconnect/reconnect count to summarize.
-        _log_feed_incident("feed_ws_connect", f"subscribing {len(sub_list)} symbols")
-        _batched_subscribe(fyers_ws, sub_list, action='sub', label='initial')
-        threading.Thread(target=_verify_subscribe_survivors, args=('connect',), daemon=True).start()
+        # cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL (root_cause_1_ws_premarket_zombie):
+        # boot-time/connect-time auto-subscribe is REMOVED ENTIRELY. Subscriptions made on a
+        # PRE-OPEN Fyers WS session silently do not survive to market open — the OPEN_RACE_GUARD
+        # wait-then-subscribe-here pattern this replaced was exactly that trap on any pre-open or
+        # overnight connect. Subscription is now owned by the two-stage canary/full sequence
+        # (_run_subscribe_sequence, fired by housekeeping's wall-clock/boot-time triggers), NOT
+        # by this callback — EXCEPT once we're already on the safe side of the pre-open trap:
+        # either the market is currently open (any reconnect there, e.g. the watchdog's rung1,
+        # must resubscribe immediately to actually recover — waiting on _sub_state['done'] would
+        # make a rung1 reconnect a no-op if the initial sequence hadn't formally finished yet),
+        # or today's initial sequence already completed (a later off-hours reconnect, e.g. an
+        # 18:00 heal-adjacent blip, is also safe to just resubscribe).
+        now_t     = datetime.now(IST)
+        in_market = now_t.weekday() < 5 and MARKET_OPEN <= now_t.time() <= MARKET_CLOSE
+        if in_market or (_sub_state.get('day') == now_t.date() and _sub_state.get('done')):
+            sub_list = equity_fyers_syms + futures_fyers_syms + list(option_syms)
+            log.info(f"WS reconnected at {now_t.strftime('%H:%M:%S')} IST — re-subscribing "
+                     f"{len(sub_list)} symbols ({len(option_syms)} options; post-sequence "
+                     "reconnect, safe side of the pre-open trap)")
+            _log_feed_incident("feed_ws_connect", f"reconnect re-subscribe: {len(sub_list)} symbols")
+            _batched_subscribe(fyers_ws, sub_list, action='sub', label='reconnect')
+            threading.Thread(target=_verify_subscribe_survivors, args=('reconnect',), daemon=True).start()
+        else:
+            log.info(f"WS connected at {now_t.strftime('%H:%M:%S')} IST — NOT subscribing yet "
+                     "(cc#497: the scheduled canary/full sequence owns today's initial subscribe)")
+            _log_feed_incident("feed_ws_connect", f"connected pre-sequence at {now_t.strftime('%H:%M:%S')}")
         fyers_ws.keep_running()
 
     def _blacklist_symbol(fsym, reason):
@@ -1987,12 +2053,21 @@ def run(auth_code=None):
     # ── feed heartbeat helpers (cc_task #84) ──────────────────────────────────
     def _recent_symbol_counts_by_source(minutes=HEARTBEAT_STALE_MINS):
         """Per-source distinct symbol counts (eq, fut) whose latest live 5-min bar
-        bucket falls within the last `minutes`. Read on the housekeeping thread's
-        own conn (single-thread = safe). Returns {'fyers_eq': -1, 'fyers_fut': -1}
-        on DB error so a failed read never triggers a false watchdog action."""
+        bucket falls within the last `minutes`. Returns {'fyers_eq': -1, 'fyers_fut': -1}
+        on DB error so a failed read never triggers a false watchdog action.
+
+        cc#497 fix_2a: this is THE watchdog's own health read — it now uses its OWN fresh
+        short-lived connection (open/query/close) every call, never the shared housekeeping
+        conn. Root cause of the 17-Jul zombie: the shared conn died once, silently, and this
+        (plus every other conn-based path) returned -1/-1 forever after — the watchdog's own
+        "no false action on a bad read" safety rail became the thing that blinded it, because
+        every read was bad for the same reason all day. A fresh conn per call means a failed
+        read now genuinely means the DB/network is down, not a stale shared conn."""
+        hc = None
         try:
             cutoff = datetime.now(IST).replace(tzinfo=None) - timedelta(minutes=minutes)
-            with conn.cursor() as cur:
+            hc = get_db()
+            with hc.cursor() as cur:
                 cur.execute("""
                     SELECT source, COUNT(DISTINCT symbol) FROM intraday_prices
                     WHERE timeframe='5m' AND source IN ('fyers_eq','fyers_fut')
@@ -2005,6 +2080,12 @@ def run(auth_code=None):
         except Exception as e:
             log.warning(f"_recent_symbol_counts_by_source: {e}")
             return {'fyers_eq': -1, 'fyers_fut': -1}
+        finally:
+            if hc is not None:
+                try:
+                    hc.close()
+                except Exception:
+                    pass
 
     def _recent_symbol_count(minutes=HEARTBEAT_STALE_MINS):
         """Combined total (eq+fut), used only for the post-subscribe verification
@@ -2036,39 +2117,59 @@ def run(auth_code=None):
 
     def _log_feed_incident(kind, detail):
         """cc_task #112: record each watchdog action to ops_log (category=alert)
-        so every recurrence is visible after the fact. Uses the housekeeping conn.
-        cc#156: telemetry categories moved off session_log to ops_log."""
+        so every recurrence is visible after the fact. cc#156: telemetry categories
+        moved off session_log to ops_log.
+
+        cc#497 fix_2a: tries the shared housekeeping conn first (cheap, avoids opening a new
+        conn on every alert), but falls back to a FRESH short-lived connection if that write
+        fails — so an incident is never silently lost just because the shared conn happens to
+        be dead (the exact mechanism that hid the 17-Jul zombie: the watchdog's own alert path
+        shared the same dead conn as the read it was trying to alert about)."""
+        payload = json.dumps({"detail": detail, "ist": datetime.now(IST).isoformat()})
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO ops_log (session_date, session_ts, category, title, details) "
-                    "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)",
-                    (kind, json.dumps({"detail": detail, "ist": datetime.now(IST).isoformat()})))
+                    "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)", (kind, payload))
             conn.commit()
+            return
         except Exception as e:
-            log.warning(f"_log_feed_incident: {e}")
+            log.warning(f"_log_feed_incident (shared conn): {e} — retrying on a fresh connection")
+        hc = None
+        try:
+            hc = get_db()
+            with hc.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                    "VALUES (CURRENT_DATE, NOW(), 'alert', %s, %s::jsonb)", (kind, payload))
+            hc.commit()
+        except Exception as e2:
+            log.warning(f"_log_feed_incident (fresh conn fallback also failed): {e2}")
+        finally:
+            if hc is not None:
+                try:
+                    hc.close()
+                except Exception:
+                    pass
 
     def _verify_subscribe_survivors(label):
-        """cc#151: after ANY batched (re)subscribe — on_connect boot/reconnect or the
-        monthly-roll path — confirm futures are actually ticking and log it to ops_log,
-        so every re-subscribe is auditable instead of just assumed. Acceptance:
-        >=205/212 futures ticking within 15min; this samples the last 15min window.
+        """cc#151: after ANY batched (re)subscribe — on_connect reconnect or the monthly-roll
+        path — confirm futures are actually ticking and log it to ops_log, so every re-subscribe
+        is auditable instead of just assumed. Acceptance: >=205/212 futures ticking within
+        15min; this samples the last 15min window.
 
-        cc#188: only raise the ops_log alert during market hours (09:15-15:30 IST)
-        on a trading day — same gate pattern as the ADR fix. A (re)subscribe
-        off-hours (e.g. an evening reconnect) naturally shows ~0 ticking because
-        the feed is idle; that is NOT an incident, so it must not fire a
-        0/212 alert. Off-hours we log at info level only.
+        cc#188: only raise the ops_log alert during market hours (09:15-15:30 IST) on a trading
+        day — same gate pattern as the ADR fix. A (re)subscribe off-hours (e.g. an evening
+        reconnect) naturally shows ~0 ticking because the feed is idle; that is NOT an incident,
+        so it must not fire a 0/212 alert. Off-hours we log at info level only.
 
-        cc#495 change_3: this was observation-only (log, never act) — the 16-Jul
-        incident's futures leg sat dead from 11:15 to EOD with nothing but a quiet
-        ops_log line. Post-connect now ALSO enforces the >200-active-ticking health
-        floor: at/below it during market hours, ERROR log + force a reconnect (the
-        same mechanism the periodic watchdog uses). Deliberately does NOT touch
-        watchdog_rung (that's single-writer from the housekeeping loop thread only —
-        this runs on its own daemon thread); the periodic watchdog's independent
-        5-min-interval rung1->rung2->exit(1) ladder is still the hard safety net if
-        this reconnect doesn't fix it."""
+        cc#495 change_3 (the >200-combined-floor forced-reconnect this function used to also do
+        on top of its own logging) is REMOVED by cc#497's course-correct (CLAUDE_WEB_REVIEW
+        17-Jul): the two-stage canary/full subscribe sequence (_run_subscribe_sequence) already
+        verifies+retries the FRESH subscribe itself, and the periodic per-source watchdog
+        (rung1 reconnect -> rung2 exit(1)) is the one ongoing-health enforcement path — a THIRD,
+        overlapping floor-check-and-reconnect here was exactly the redundant complexity the
+        founder killed. Observation/logging only, same as before cc#495."""
         time.sleep(120)
         try:
             recent = _recent_symbol_count(15)
@@ -2080,13 +2181,72 @@ def run(auth_code=None):
             else:
                 log.info(f"Post-{label} verification (off-hours — no alert): {msg}")
             log.info(f"Post-{label} verification: {recent}/{TOTAL_FUTURES} symbols ticking")
-            if in_market and 0 <= recent <= HEALTH_FLOOR_TICKING:
-                log.error(f"Post-{label} HEALTH FLOOR BREACH: {recent} <= {HEALTH_FLOOR_TICKING} "
-                          "active-ticking symbols — forcing reconnect")
-                _log_feed_incident("feed_health_floor_breach", f"{label}: {recent}/{TOTAL_FUTURES}")
-                _force_reconnect()
         except Exception as e:
             log.warning(f"post-{label} verify failed: {e}")
+
+    def _run_subscribe_sequence(trigger):
+        """cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: the two-stage subscribe that replaces the old
+        on_connect-driven immediate subscribe. Runs on its own daemon thread (fired by
+        housekeeping's wall-clock/boot-time triggers below, NEVER by on_connect):
+
+          stage 1 — subscribe a canary batch (~WS_SUB_BATCH top-liquidity equity symbols by
+            mcap-rank), wait for the ~60-90s verification window, confirm at least some of them
+            are actually ticking.
+          stage 2 — canary ticked: subscribe the rest of the universe (remaining equity + the
+            full futures leg). Options are NOT touched here — they keep their own separate
+            cc#189/cc#241 live-price gates in housekeeping(), unchanged.
+            canary did NOT tick: do not pile the full universe onto a dead session — force ONE
+            fresh reconnect and retry the whole sequence once. If the retry also shows zero
+            ticks, hand off to the periodic watchdog ladder (rung1 reconnect -> rung2 exit(1))
+            rather than retrying forever here.
+
+        `trigger` is a label for logging/ops_log only, e.g. 'scheduled-0920', 'midmarket-boot'."""
+        canary_codes = _canary_symbols(conn, symbols, WS_SUB_BATCH)
+        canary_syms  = [fyers_eq_symbol(s) for s in canary_codes]
+        canary_set   = set(canary_syms)
+
+        def _attempt(label):
+            remaining = [s for s in equity_fyers_syms if s not in canary_set] + list(futures_fyers_syms)
+            log.info(f"subscribe sequence ({label}): canary batch ({len(canary_syms)} top-liquidity equity)")
+            _log_feed_incident("feed_subscribe_canary", f"{label}: {len(canary_syms)} symbols")
+            _batched_subscribe(fyers_ws, canary_syms, action='sub', label=f'canary-{label}')
+            time.sleep(75)   # ~60-90s verification window
+            recent = _recent_symbol_count(2)
+            ticking = recent > 0
+            log.info(f"subscribe sequence ({label}): canary check — {recent} symbols writing bars "
+                     f"({'OK' if ticking else 'ZERO TICKS'})")
+            if not ticking:
+                return False
+            log.info(f"subscribe sequence ({label}): canary ticking — subscribing remaining "
+                     f"{len(remaining)} symbols")
+            _log_feed_incident("feed_subscribe_full", f"{label}: {len(remaining)} remaining symbols")
+            _batched_subscribe(fyers_ws, remaining, action='sub', label=f'full-{label}')
+            threading.Thread(target=_verify_subscribe_survivors, args=(label,), daemon=True).start()
+            return True
+
+        try:
+            _sub_state['day'] = datetime.now(IST).date()
+            if _attempt(trigger):
+                _sub_state['done'] = True
+                return
+            log.error(f"subscribe sequence ({trigger}): canary showed ZERO ticks — forcing "
+                      "reconnect and retrying once")
+            _log_feed_incident("feed_subscribe_canary_dead",
+                               f"{trigger}: zero ticks, forcing reconnect + retry")
+            _force_reconnect()
+            time.sleep(15)   # let the SDK's reconnect=True actually re-establish first
+            if _attempt(f"{trigger}-retry"):
+                _sub_state['done'] = True
+            else:
+                log.error(f"subscribe sequence ({trigger}): retry ALSO showed zero ticks — "
+                          "handing off to the periodic watchdog ladder")
+                _log_feed_incident("feed_subscribe_retry_failed", f"{trigger}: retry also zero ticks")
+        except Exception as e:
+            log.error(f"subscribe sequence ({trigger}) failed: {e}")
+            try:
+                _log_feed_incident("feed_subscribe_sequence_error", f"{trigger}: {str(e)[:200]}")
+            except Exception:
+                pass
 
     def _hard_restart(reason):
         """cc_task #112 — the missing auto-restart. Socket-reconnect failed to revive
@@ -2143,6 +2303,7 @@ def run(auth_code=None):
         time.sleep(90)
 
     def housekeeping():
+        nonlocal conn
         last_atm_check  = None
         last_purge_day  = None
         last_heal_day   = None
@@ -2157,12 +2318,67 @@ def run(auth_code=None):
         opt_gate_day         = None   # cc#189: reset the gate each trading day
         starvation_day       = None   # cc#228: fyers_eq starvation check fired once per trading day
         relogin_day          = None   # cc#473: 09:05 daily staleness re-login fired once per trading day
+        consecutive_db_failures = 0   # cc#497 fix_2b: un-blind the watchdog — see _mark_db_error below
+        sub_bounce_day       = None   # cc#497 fix_1_TIMING_FINAL: 09:14 pre-open socket bounce, once/day
+        sub_seq_day          = None   # cc#497 fix_1_TIMING_FINAL: canary/full sequence trigger, once/day
+
+        def _mark_db_error(e, where):
+            """cc#497 fix_2b: the 17-Jul root cause — every conn-based call in this loop caught
+            its OWN exception locally and just logged+returned a degraded value forever, so a
+            single dead shared conn silently disabled the watchdog, the options gate, the 09:05
+            staleness check and all alerting for the rest of the day, with nothing ever
+            escalating. This flags a psycopg2 connection-class error (as opposed to some other,
+            unrelated exception) so the loop bottom can reconnect once and count consecutive
+            failures toward a loud exit — 'the -1 skip rail may remain for a single bad read but
+            must escalate, never loop forever.' Returns True if it recognized/flagged a DB error
+            (caller should skip its own generic log.warning to avoid double-logging)."""
+            if isinstance(e, (psycopg2.InterfaceError, psycopg2.OperationalError,
+                              psycopg2.errors.InFailedSqlTransaction)):
+                log.error(f"{where}: DB conn error ({e}) — flagged for reconnect")
+                nonlocal db_error_this_iter
+                db_error_this_iter = (where, e)
+                return True
+            return False
 
         while True:
+            db_error_this_iter = None
             now    = datetime.now(IST)
             today  = now.date()
             now_dt = now.replace(tzinfo=None)
             in_market = (now.weekday() < 5 and MARKET_OPEN <= now.time() <= MARKET_CLOSE)
+
+            # ── cc#497 fix_1_TIMING_FINAL_FOUNDER_17JUL: subscription sequencing ──────────────
+            # (replaces the old on_connect auto-subscribe; root_cause_1_ws_premarket_zombie).
+            if is_trading_day(today):
+                # 09:14 IST: bounce a socket that's been open since before 09:00 (pre-open/
+                # overnight) once, so the canary stage rides a fresh at-open session instead of
+                # a stale one Fyers may have silently dropped subscriptions on. A boot that
+                # happens AFTER 09:00 never needs this — its own session is already fresh.
+                if (sub_bounce_day != today and boot_time.time() < dt_time(9, 0)
+                        and now.time() >= dt_time(9, 14)):
+                    sub_bounce_day = today
+                    log.info("cc#497: 09:14 pre-open socket bounce — forcing a fresh session "
+                             "before the canary subscribe")
+                    _log_feed_incident("feed_preopen_bounce", "09:14 fresh-session bounce")
+                    _force_reconnect()
+
+                # 09:20 IST scheduled canary+full sequence — pre-open/overnight boots only.
+                if (sub_seq_day != today and boot_time.time() < MARKET_OPEN
+                        and now.time() >= dt_time(9, 20)):
+                    sub_seq_day = today
+                    threading.Thread(target=_run_subscribe_sequence, args=('scheduled-0920',),
+                                     daemon=True).start()
+
+                # midmarket_boot_rule: the worker booted AT OR AFTER market open (already on the
+                # safe side of the pre-open trap — a boot at say 09:17 needs the SAME immediate
+                # treatment, not just >=09:22 as the spec's literal example states, since there's
+                # no "wait for 09:20" scheduled path left to catch it). Run canary->full NOW
+                # instead of waiting for tomorrow — this also makes a same-day cc#497 deploy
+                # itself the recovery restart for an already-dead feed.
+                elif (sub_seq_day != today and boot_time.time() >= MARKET_OPEN and in_market):
+                    sub_seq_day = today
+                    threading.Thread(target=_run_subscribe_sequence, args=('midmarket-boot',),
+                                     daemon=True).start()
 
             # ── cc#473 item 1: 09:05 IST daily token-staleness re-login (once/day, pre-open).
             # Never start the trading day on yesterday's token. Boot staleness is already
@@ -2183,7 +2399,8 @@ def run(auth_code=None):
                     else:
                         log.info("cc#473 09:05 staleness check OK — token is from today")
                 except Exception as _sc:
-                    log.warning(f"cc#473 09:05 staleness check failed (non-fatal): {_sc}")
+                    if not _mark_db_error(_sc, '09:05 staleness check'):
+                        log.warning(f"cc#473 09:05 staleness check failed (non-fatal): {_sc}")
 
             # ── cc#473 item 2: in-process dead-token detector. A 30s canonical REST probe
             # feeds the same consecutive-empty counter as the OI poll; at DEAD_TOKEN_THRESHOLD
@@ -2228,10 +2445,15 @@ def run(auth_code=None):
                     else:
                         log.info(f"fyers_eq starvation check OK: {eq_bars} 5m bars by 11:00 IST")
                 except Exception as _sv:
-                    log.warning(f"fyers_eq starvation watchdog: {_sv}")
+                    if not _mark_db_error(_sv, 'fyers_eq starvation watchdog'):
+                        log.warning(f"fyers_eq starvation watchdog: {_sv}")
 
             if in_market:
-                update_index_ltp(conn, token, agg)
+                try:
+                    update_index_ltp(conn, token, agg)
+                except Exception as e:
+                    if not _mark_db_error(e, 'update_index_ltp'):
+                        log.warning(f"update_index_ltp failed: {e}")
                 agg.flush_all()
                 # CMP flush throttled 30s -> 5-min (14-Jun-2026): cmp_prices is a
                 # 218-row UPSERT (no growth); sub-minute freshness not needed
@@ -2251,7 +2473,7 @@ def run(auth_code=None):
                 # every loop (30s); a CRITICAL alert fires if still unsubscribed by
                 # 09:30. On a gap day live prices beat yesterday-close for ATM too.
                 if not opt_subscribed:
-                    fresh = _cmp_fresh_fraction(conn, opt_mgr, kind='index')
+                    fresh = _cmp_fresh_fraction(opt_mgr, kind='index')
                     if fresh >= OPT_FRESH_MIN_FRAC:
                         try:
                             new_opts = opt_mgr.build_initial(kind='index')   # ATM from LIVE cmp_prices
@@ -2269,7 +2491,8 @@ def run(auth_code=None):
                             else:
                                 log.warning("cc#189 gate: cmp fresh but build produced 0 option symbols")
                         except Exception as e:
-                            log.warning(f"cc#189 options live-subscribe failed: {e}")
+                            if not _mark_db_error(e, 'cc#189 options live-subscribe'):
+                                log.warning(f"cc#189 options live-subscribe failed: {e}")
                     elif now.time() >= OPT_SUB_DEADLINE and not opt_deadline_alerted:
                         _log_feed_incident("options_not_subscribed_0930",
                             f"CRITICAL: options unsubscribed at {now.time().strftime('%H:%M')} — cmp_prices "
@@ -2283,7 +2506,7 @@ def run(auth_code=None):
                 if (not opt_stock_subscribed) and opt_subscribed and now.time() >= OPT_STOCK_SUB_MIN_TIME:
                     s_enabled, s_limit, _s_n = _stock_options_config(conn)
                     if s_enabled:
-                        s_fresh = _cmp_fresh_fraction(conn, opt_mgr, kind='stock')
+                        s_fresh = _cmp_fresh_fraction(opt_mgr, kind='stock')
                         if s_fresh >= OPT_FRESH_MIN_FRAC:
                             try:
                                 new_stock = opt_mgr.build_initial(kind='stock')   # ATM off 09:25 print
@@ -2305,7 +2528,8 @@ def run(auth_code=None):
                                 else:
                                     log.warning("cc#241 stock gate: enabled + fresh but built 0 stock option symbols")
                             except Exception as e:
-                                log.warning(f"cc#241 stock options subscribe failed: {e}")
+                                if not _mark_db_error(e, 'cc#241 stock options subscribe'):
+                                    log.warning(f"cc#241 stock options subscribe failed: {e}")
 
                 # Futures OI poll every OI_POLL_MINS via DEPTH API (quotes has NO OI).
                 # Background thread: 208 depth calls ≈ 75s — must not block flushes.
@@ -2344,7 +2568,8 @@ def run(auth_code=None):
                                 option_syms.extend(add_syms)
                             log.info(f"ATM rebalance: +{len(add_syms)} -{len(rem_syms)}")
                     except Exception as e:
-                        log.warning(f"ATM drift check failed: {e}")
+                        if not _mark_db_error(e, 'ATM drift check'):
+                            log.warning(f"ATM drift check failed: {e}")
                     last_atm_check = now_dt
 
                 # ── feed watchdog (cc#489 WATCHDOG_SIMPLIFICATION, ARPIT DIRECTIVE) ──
@@ -2359,9 +2584,9 @@ def run(auth_code=None):
                 # grace (mins_open was already >> STARTUP_GRACE_MINS the instant it started), so
                 # the watchdog fired on an 8-second-old process before its first tick could land,
                 # AND the HEARTBEAT_STALE_MINS lookback window still reflected the PRE-restart
-                # dead session. rung 1 then hung the process (close_connection SDK quirk), rung 2
-                # never fired, and every restart looped identically. Gate on mins_since_boot too,
-                # so the lookback window can never predate the current boot.
+                # dead session. rung 1 then hung the process (close_connection SDK quirk),
+                # rung 2 never fired, and every restart looped identically. Gate on
+                # mins_since_boot too, so the lookback window can never predate the current boot.
                 mins_open       = (now_dt - now_dt.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds() / 60
                 mins_since_boot = (now_dt - boot_time.replace(tzinfo=None)).total_seconds() / 60
                 if (mins_open >= STARTUP_GRACE_MINS
@@ -2409,7 +2634,8 @@ def run(auth_code=None):
                         log.info(f"Monthly roll complete: {new_expiry}")
                         threading.Thread(target=_verify_subscribe_survivors, args=('roll',), daemon=True).start()
                 except Exception as e:
-                    log.warning(f"Monthly roll check failed: {e}")
+                    if not _mark_db_error(e, 'Monthly roll check'):
+                        log.warning(f"Monthly roll check failed: {e}")
                 last_roll_check = today
 
             # Daily 18:00 IST — heal equity gaps
@@ -2419,11 +2645,49 @@ def run(auth_code=None):
                     fyers_backfill.heal_gap(token, conn, symbols)
                     last_heal_day = today
                 except Exception as e:
-                    log.error(f"Daily heal_gap failed: {e}")
+                    if not _mark_db_error(e, 'Daily heal_gap'):
+                        log.error(f"Daily heal_gap failed: {e}")
 
             if last_purge_day != today:
-                purge_old_bars(conn)
-                last_purge_day = today
+                try:
+                    purge_old_bars(conn)
+                    last_purge_day = today
+                except Exception as e:
+                    if not _mark_db_error(e, 'purge_old_bars'):
+                        log.error(f"purge_old_bars failed: {e}")
+
+            # cc#497 fix_2b: un-blind the watchdog. Every conn-based call above that hit a
+            # psycopg2 connection-class error flagged it via _mark_db_error instead of silently
+            # swallowing it — reconnect the shared conn ONCE per bad iteration, and escalate to a
+            # loud exit(1) (Railway restart) after 3 CONSECUTIVE bad iterations rather than
+            # looping blind forever (the 17-Jul root cause). A clean iteration resets the count.
+            if db_error_this_iter is not None:
+                where, _e = db_error_this_iter
+                consecutive_db_failures += 1
+                log.error(f"housekeeping loop: {consecutive_db_failures}/3 consecutive DB-conn "
+                          f"failures (latest: {where}) — reconnecting shared conn")
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                try:
+                    conn = get_db()
+                    opt_mgr.conn = conn   # opt_mgr was built on the same originally-shared conn
+                    log.info("housekeeping loop: shared conn reconnected")
+                except Exception as e2:
+                    log.error(f"housekeeping loop: reconnect FAILED ({e2})")
+                if consecutive_db_failures >= 3:
+                    log.critical(f"housekeeping loop: DB conn still dead after "
+                                 f"{consecutive_db_failures} consecutive failures — exit(1) for a "
+                                 "clean Railway restart")
+                    try:
+                        _log_feed_incident("housekeeping_db_dead_exit",
+                            f"{consecutive_db_failures} consecutive failures, latest at {where}: {_e}")
+                    except Exception:
+                        pass
+                    sys.exit(1)
+            else:
+                consecutive_db_failures = 0
 
             time.sleep(30)
 
