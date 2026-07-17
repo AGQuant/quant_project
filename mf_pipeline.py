@@ -2044,24 +2044,20 @@ def mf_fund(scheme_code: str):
 # FULL raw evidence to ops_log, and let a live Railway run decide what step_2/3 build on, rather
 # than guessing field names blind. mc_discover is a small standalone GET so it can be triggered
 # and inspected on demand before resolve_mc_map commits to any one convention at scale.
+_MC_TEST_ISIN = "INF179K01XQ0"   # HDFC Mid-Cap Opportunities Fund — real, in mf_master, for probing only
 _MC_SEARCH_CANDIDATES = [
-    # historical/best-effort conventions — NOT verified live from this sandbox (no outbound
-    # internet here); each is tried and its full raw response logged, same as the AMFI probes.
-    # priceapi.moneycontrol.com is a spec-named hint (cc#500 step_1_url_resolution: "probe the
-    # mfsearch widget / priceapi.moneycontrol.com suggestion API") — exact path unverified, so
-    # several plausible ones are tried and logged rather than picking one blind.
-    ("mc_autosuggest_type3", "https://www.moneycontrol.com/mccode/common/autosuggesion.php",
-     {"query": "{q}", "type": "3", "format": "json"}),
-    ("mc_autosuggest_type9", "https://www.moneycontrol.com/mccode/common/autosuggesion.php",
-     {"query": "{q}", "type": "9", "format": "json"}),
-    ("mc_unified_search", "https://www.moneycontrol.com/mcapi/v1/search/search_by_category",
-     {"query": "{q}", "type": "mf"}),
-    ("mc_priceapi_mfsearch", "https://priceapi.moneycontrol.com/mfsearch/searchSuggestion",
-     {"query": "{q}"}),
-    ("mc_priceapi_suggestion", "https://priceapi.moneycontrol.com/techCharts/suggestions",
-     {"q": "{q}", "type": "mf"}),
-    ("mc_priceapi_search", "https://priceapi.moneycontrol.com/pricefeed/mf/search",
-     {"query": "{q}"}),
+    # attempt_1 (10:24 run): autosuggesion.php (both type=3/9) 404'd — dead/wrong path.
+    # mcapi/v1/search/search_by_category and priceapi.moneycontrol.com/mfsearch|techCharts all
+    # 503/404'd (Akamai edge errors) — none of the blind guesses are real. attempt_2 (10:26 run)
+    # bundle-harvest found REAL live endpoints instead — probing those now with real params.
+    ("mc_swift_mf_list", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/get-mf-list",
+     {"str": "{q}", "limit": "20", "deviceType": "W", "responseType": "json"}),
+    ("mc_mapping_by_isin", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getMcMfMapping",
+     {"searchKey": "ISIN", "value": _MC_TEST_ISIN, "responseType": "json"}),
+    ("mc_stock_holdings_by_isin", "https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getStockHoldings",
+     {"isin": _MC_TEST_ISIN, "responseType": "json", "deviceType": "W", "holdingsType": "exploreScheme"}),
+    ("mc_mfsearch_php", "https://www.moneycontrol.com/mf/mf_info/mfsearch.php",
+     {"str": "{q}"}),
 ]
 # spec: "the search box on moneycontrol.com/mutualfundindia or /mutual-funds fires it" — try
 # both landing pages, not just the /find-fund listing (the search widget may only be wired on
