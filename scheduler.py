@@ -1651,6 +1651,51 @@ def _bg_mf_mc_discover():
         _mc_discover_running = False
 
 
+_mc_oneshot_running = False   # cc#500: Moneycontrol full-set fill single-flight guard
+
+
+def _bg_mf_mc_oneshot():
+    """cc#500: flag-gated ONE-TIME Moneycontrol full-set fill (AUM/TER/ret_3y/5y/manager/
+    inception/holdings + ret_1y via the existing mfapi pipeline) over the 519-scheme canonical
+    equity universe. Resumable via app_config mf_mc_oneshot_cursor if interrupted mid-run
+    (~30-45 min full pass, same single-flight/checkpoint pattern as cc#477's returns backfill).
+    Flag app_config mf_mc_oneshot_run: 'pending'->run, 'done'->skip. Set by
+    POST /api/v15/mf/run_mc_oneshot. A stop_event in the result (step_5_stop_rules) still marks
+    the run 'done' — reported, not silently auto-retried."""
+    global _mc_oneshot_running
+    if _mc_oneshot_running:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='mf_mc_oneshot_run'")
+            r = cur.fetchone()
+        if not r or r[0] != 'pending':
+            return
+        _mc_oneshot_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_run','running',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import mf_pipeline
+        res = mf_pipeline.run_mc_oneshot()
+        log.info(f"_bg_mf_mc_oneshot: {res}")
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+    except Exception as e:
+        log.error(f"_bg_mf_mc_oneshot: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_run','pending',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _mc_oneshot_running = False
+
+
 
 # cc#475: feed staleness Telegram alert — INDEPENDENT of the signal-writer watchdogs (which
 # only restart the writer). This checks the FEED WORKER's own output (intraday_prices) from
@@ -1907,6 +1952,7 @@ async def _scheduler_loop():
         if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)
         if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
+        _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market

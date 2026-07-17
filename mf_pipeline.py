@@ -2077,30 +2077,34 @@ _MC_HDR = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
            "Referer": "https://www.moneycontrol.com/"}
 
 
-def _mc_fetch_scheme_page(isin):
-    """Two-stage real fetch, reusable by both the discovery probe and the eventual step_2/3
-    scraper: ISIN -> getMcMfMapping (imid + slugUrl) -> fund-detail page -> parsed __NEXT_DATA__
-    props.pageProps.data dict. Returns (data_dict_or_None, diag). Never raises."""
+def _mc_resolve_isin(isin):
+    """Stage 1: ISIN -> (imid, slugUrl, diag) via getMcMfMapping (exact match, verified live
+    17-Jul). Never raises."""
     import requests
     diag = {"isin": isin}
     try:
         r = requests.get("https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getMcMfMapping",
                           params={"searchKey": "ISIN", "value": isin, "responseType": "json"},
                           headers=_MC_HDR, timeout=20)
-        m = r.json() if r.status_code == 200 else {}
         diag["mapping_http"] = r.status_code
-        slug = (m.get("data") or {}).get("slugUrl")
-        imid = (m.get("data") or {}).get("imid")
-        diag["imid"], diag["slug"] = imid, slug
-        if not slug:
-            diag["error"] = "no slugUrl in mapping response"
-            return None, diag
+        m = r.json() if r.status_code == 200 else {}
+        d = m.get("data") or {}
+        return d.get("imid"), d.get("slugUrl"), diag
     except Exception as e:
         diag["error"] = f"mapping fetch: {str(e)[:160]}"
-        return None, diag
+        return None, None, diag
+
+
+def _mc_fetch_by_slug(slug):
+    """Stage 2: slugUrl -> parsed __NEXT_DATA__.props.pageProps.data dict (fund-detail page is
+    Next.js SSR — overview/about are embedded server-side, no separate client-side API call).
+    Returns (data_dict_or_None, diag). Never raises. Skipped entirely once a scheme's slug is
+    already cached in mf_mc_map (step_2/3 reuse this directly without re-resolving the ISIN)."""
+    import requests
+    diag = {"slug": slug}
     try:
         r = requests.get(f"https://www.moneycontrol.com/mutual-funds/nav/{slug}", headers=_MC_HDR, timeout=30)
-        diag["page_http"] = r.status_code
+        diag["http"] = r.status_code
         html = r.text or ""
         diag["html_len"] = len(html)
         mi = html.find("__NEXT_DATA__")
@@ -2115,6 +2119,293 @@ def _mc_fetch_scheme_page(isin):
     except Exception as e:
         diag["error"] = f"page fetch/parse: {str(e)[:160]}"
         return None, diag
+
+
+def _mc_fetch_scheme_page(isin):
+    """Two-stage convenience wrapper (discovery probe only — step_2/3 call the stages
+    separately since mf_mc_map already caches the slug)."""
+    imid, slug, diag = _mc_resolve_isin(isin)
+    diag["imid"], diag["slug"] = imid, slug
+    if not slug:
+        diag.setdefault("error", "no slugUrl in mapping response")
+        return None, diag
+    data, diag2 = _mc_fetch_by_slug(slug)
+    diag.update(diag2)
+    return data, diag
+
+
+def _mc_fetch_holdings(imid):
+    """getInvestmentByStock -> (rows[{isin,name,marketCap,portfolioDate,marketValue,
+    percentToNAV}], portfolio_month_date_or_None, diag). pageSize=300 to avoid needing
+    pagination for any realistically-sized equity portfolio. Never raises."""
+    import requests
+    diag = {"imid": imid}
+    try:
+        r = requests.get("https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getInvestmentByStock",
+                          params={"responseType": "json", "deviceType": "W", "page": "1",
+                                   "pageSize": "300", "imid": imid},
+                          headers=_MC_HDR, timeout=30)
+        diag["http"] = r.status_code
+        if r.status_code != 200:
+            return [], None, diag
+        j = r.json()
+        d = j.get("data") or {}
+        rows = d.get("investmentByStock") or []
+        month = None
+        pdate = d.get("portfolioDate")
+        if pdate:
+            try:
+                month = datetime.strptime(pdate, "%b %Y").date().replace(day=1)
+            except Exception:
+                pass
+        diag["n_rows"] = len(rows)
+        diag["portfolio_date"] = pdate
+        return rows, month, diag
+    except Exception as e:
+        diag["error"] = str(e)[:160]
+        return [], None, diag
+
+
+def _mc_num(s):
+    if s is None:
+        return None
+    try:
+        return float(str(s).replace(",", "").replace("%", "").strip())
+    except Exception:
+        return None
+
+
+def _mc_parse_inception(s):
+    try:
+        return datetime.strptime(str(s).strip(), "%d %b, %Y").date()
+    except Exception:
+        return None
+
+
+def resolve_mc_map(conn=None):
+    """cc#500 step_1_url_resolution: exact ISIN -> MC imid/slug for every canonical-universe
+    scheme not yet in mf_mc_map. getMcMfMapping?searchKey=ISIN is a verified exact match (no
+    fuzzy name-matching needed — every scheme in the 519-universe already carries a real ISIN).
+    Logs unresolved ISINs to ops_log, never forces a bad match. Idempotent — a resumed run only
+    processes schemes still missing from mf_mc_map."""
+    import time as _t
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            cur.execute("""SELECT m.scheme_code, m.isin, m.name FROM mf_master m
+                           WHERE m.category IS NOT NULL AND m.category <> 'Banking & PSU'
+                             AND m.isin IS NOT NULL
+                             AND NOT EXISTS (SELECT 1 FROM mf_mc_map mm WHERE mm.scheme_code = m.scheme_code)
+                           ORDER BY m.scheme_code""")
+            pending = cur.fetchall()
+        resolved = unresolved = 0
+        for sc, isin, name in pending:
+            imid, slug, diag = _mc_resolve_isin(isin)
+            with conn.cursor() as cur:
+                if imid and slug:
+                    cur.execute("""INSERT INTO mf_mc_map (scheme_code, mc_id, mc_slug, matched_name, match_score, resolved_at)
+                                   VALUES (%s,%s,%s,%s,1.0,NOW())
+                                   ON CONFLICT (scheme_code) DO UPDATE SET
+                                       mc_id=EXCLUDED.mc_id, mc_slug=EXCLUDED.mc_slug,
+                                       matched_name=EXCLUDED.matched_name, match_score=1.0, resolved_at=NOW()""",
+                                (sc, imid, slug, name))
+                    resolved += 1
+                else:
+                    unresolved += 1
+                    _oplog(cur, "MF_MC_MAP_UNRESOLVED", {"scheme_code": sc, "isin": isin, "name": name, "diag": diag})
+                conn.commit()
+            if (resolved + unresolved) % 25 == 0:
+                with conn.cursor() as cur:
+                    _oplog(cur, "MF_MC_MAP_PROGRESS", {"done": resolved + unresolved, "of": len(pending),
+                           "resolved": resolved, "unresolved": unresolved})
+                    conn.commit()
+            _t.sleep(0.4)
+        stats = {"pending": len(pending), "resolved": resolved, "unresolved": unresolved}
+        with conn.cursor() as cur:
+            _oplog(cur, "MF_MC_MAP_DONE", stats)
+            conn.commit()
+        return stats
+    finally:
+        if own:
+            conn.close()
+
+
+def write_mc_overview(cur, scheme_code, data):
+    """cc#500 step_3_write_rules: WHERE-NULL fill for aum_cr/expense_ratio/ret_3y/ret_5y
+    (curated + AMFI-TER values are NEVER overwritten); manager/inception fill via COALESCE(new,
+    existing) — spec calls this a "plain write" since both are 100% NULL today, COALESCE just
+    makes a resumed re-fetch that happens to fail not null out an earlier good value. Sanity
+    check (spec): reject aum > Rs 500,000cr as an AMC-aggregate, not a scheme-level number (the
+    Groww bug class)."""
+    ov = data.get("overview") or {}
+    ab = data.get("about") or {}
+    aum = _mc_num(ov.get("aum"))
+    if aum is not None and aum > 500000:
+        aum = None
+    ter = _mc_num(ov.get("expenseRatio"))
+    ret3 = _mc_num(ov.get("cagr_3y"))
+    ret5 = _mc_num(ov.get("cagr_5y"))
+    mgrs = ab.get("fund_managers_details") or []
+    manager = ", ".join(m.get("name") for m in mgrs if m.get("name")) or None
+    # "lanch_date" (sic) confirmed live on 2 real schemes — falls back to the correctly-spelled
+    # key in case it's inconsistent across funds/backends.
+    inception = _mc_parse_inception(ab.get("lanch_date") or ab.get("launch_date"))
+    cur.execute("""UPDATE mf_master SET
+        aum_cr = COALESCE(aum_cr, %s), expense_ratio = COALESCE(expense_ratio, %s),
+        ret_3y = COALESCE(ret_3y, %s), ret_5y = COALESCE(ret_5y, %s),
+        manager = COALESCE(%s, manager), inception = COALESCE(%s, inception), updated_at = NOW()
+        WHERE scheme_code = %s""",
+        (aum, ter, ret3, ret5, manager, inception, scheme_code))
+    return {"aum": aum, "ter": ter, "ret3": ret3, "ret5": ret5, "manager": manager,
+            "inception": str(inception) if inception else None}
+
+
+def write_mc_holdings(cur, scheme_code, rows, as_of_month):
+    """step_3: upsert into mf_holdings, resolving each holding to an NSE symbol via the
+    existing _resolve_nse (same tiered company-name matching used by the AMC-holdings path)."""
+    as_of_month = as_of_month or date.today().replace(day=1)
+    resolved = 0
+    for h in rows:
+        name = h.get("name")
+        if not name:
+            continue
+        nse_sym, method = _resolve_nse(cur, name)
+        if nse_sym:
+            resolved += 1
+        cur.execute("""INSERT INTO mf_holdings
+            (scheme_code, as_of_month, isin, company_name, pct_weight, resolved_nse_symbol, resolve_method)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (scheme_code, as_of_month, company_name) DO UPDATE SET
+                isin=EXCLUDED.isin, pct_weight=EXCLUDED.pct_weight,
+                resolved_nse_symbol=EXCLUDED.resolved_nse_symbol, resolve_method=EXCLUDED.resolve_method""",
+            (scheme_code, as_of_month, h.get("isin"), name, h.get("percentToNAV"), nse_sym, method))
+    return {"rows": len(rows), "resolved_nse": resolved}
+
+
+def run_mc_oneshot(conn=None):
+    """cc#500: ONE-TIME Moneycontrol full-set fill over the 519-scheme canonical equity
+    universe. Resumable via app_config mf_mc_oneshot_cursor (same checkpoint pattern as
+    cc#477's mf_backfill_progress) — a redeploy mid-run picks back up from the last completed
+    scheme_code, not from scratch. Per scheme: resolve (via resolve_mc_map, cached in
+    mf_mc_map) -> overview fetch (AUM/TER/ret_3y/5y/manager/inception) -> holdings fetch+NSE
+    resolve+upsert -> ret_1y fill via the EXISTING mfapi.in returns pipeline (WHERE ret_1y IS
+    NULL only) since Moneycontrol's embedded overview object has no universal 1Y field
+    (confirmed live on 2 real schemes incl. a non-top-performer — only cagr_3y/5y/7y/10y are
+    always present). step_5_stop_rules: 3 consecutive 403/no-__NEXT_DATA__ (captcha-shaped)
+    responses -> stop; >20% unparseable in the first 50 -> stop and report, never fight
+    anti-bot or silently continue past a broken selector."""
+    import time as _t
+    own = conn is None
+    conn = conn or _conn()
+    t0 = _t.time()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            _ensure_returns_cols(cur)
+            conn.commit()
+
+        map_stats = resolve_mc_map(conn)
+
+        with conn.cursor() as cur:
+            cur.execute("""SELECT m.scheme_code, m.amfi_code, mm.mc_id, mm.mc_slug, m.ret_1y
+                           FROM mf_master m JOIN mf_mc_map mm ON mm.scheme_code = m.scheme_code
+                           WHERE m.category IS NOT NULL AND m.category <> 'Banking & PSU'
+                           ORDER BY m.scheme_code""")
+            universe = cur.fetchall()
+            cur.execute("SELECT value FROM app_config WHERE key='mf_mc_oneshot_cursor'")
+            r = cur.fetchone()
+        done_prefix = (r[0] if r else "") or ""
+        pending = [row for row in universe if row[0] > done_prefix]
+
+        n_overview = n_holdings = n_ret1y = fails = 0
+        consecutive_bad = unparseable_first50 = 0
+        stop_event = None
+        i = -1
+        for i, (sc, amfi_code, mc_id, mc_slug, ret_1y) in enumerate(pending):
+            try:
+                data, diag = _mc_fetch_by_slug(mc_slug)
+                bad_response = diag.get("error") == "no __NEXT_DATA__ marker" or diag.get("http") == 403
+                if data is None:
+                    fails += 1
+                    if i < 50:
+                        unparseable_first50 += 1
+                    consecutive_bad = consecutive_bad + 1 if bad_response else 0
+                else:
+                    consecutive_bad = 0
+                    with conn.cursor() as cur:
+                        write_mc_overview(cur, sc, data)
+                        n_overview += 1
+                        conn.commit()
+                    hrows, hmonth, _hdiag = _mc_fetch_holdings(mc_id)
+                    if hrows:
+                        with conn.cursor() as cur:
+                            write_mc_holdings(cur, sc, hrows, hmonth)
+                            n_holdings += 1
+                            conn.commit()
+                    if ret_1y is None:
+                        with conn.cursor() as cur:
+                            rres = sync_scheme_nav_and_returns(cur, sc, amfi_code)
+                            if rres.get("returns"):
+                                n_ret1y += 1
+                            conn.commit()
+                        _t.sleep(1.0)   # mfapi polite rate-limit, same as run_mf_returns_backfill
+            except Exception as e:
+                fails += 1
+                log.warning(f"mc_oneshot {sc}: {e}")
+                try: conn.rollback()
+                except Exception: pass
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_cursor',%s,NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (sc,))
+                conn.commit()
+            if (i + 1) % 25 == 0:
+                with conn.cursor() as cur:
+                    _oplog(cur, "MF_MC_ONESHOT_PROGRESS", {"done": i + 1, "of": len(pending),
+                           "overview": n_overview, "holdings": n_holdings, "ret1y_filled": n_ret1y,
+                           "fails": fails, "elapsed_min": round((_t.time() - t0) / 60, 1)})
+                    conn.commit()
+            if consecutive_bad >= 3:
+                stop_event = {"reason": "3_consecutive_403_or_captcha", "at_scheme": sc, "index": i + 1}
+                break
+            if i + 1 == 50 and unparseable_first50 / 50.0 > 0.20:
+                stop_event = {"reason": "over_20pct_unparseable_first_50", "unparseable": unparseable_first50}
+                break
+            _t.sleep(1.7)   # spec pacing: 1.5-2s between schemes
+
+        with conn.cursor() as cur:
+            snap_rows = _snapshot_current_month(cur)
+            conn.commit()
+        summary = {"map": map_stats, "universe": len(universe), "processed": i + 1,
+                   "overview_filled": n_overview, "holdings_filled": n_holdings, "ret1y_filled": n_ret1y,
+                   "fails": fails, "stop_event": stop_event, "monthly_snapshot_rows": snap_rows,
+                   "elapsed_min": round((_t.time() - t0) / 60, 1)}
+        if not stop_event:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM app_config WHERE key='mf_mc_oneshot_cursor'")
+                conn.commit()
+        with conn.cursor() as cur:
+            _oplog(cur, "MF_MC_ONESHOT_DONE", summary)
+            conn.commit()
+        return summary
+    finally:
+        if own:
+            conn.close()
+
+
+@router.post("/api/v15/mf/run_mc_oneshot")
+def mf_run_mc_oneshot_arm():
+    """cc#500 step_4_run_mechanics: ARM the one-time Moneycontrol full-set fill. Scheduler
+    picks it up single-flight (same pattern as /wire_all). Resumable via app_config
+    mf_mc_oneshot_cursor if interrupted mid-run. ONE run only — no recurring schedule (cc#499
+    keeps all MF scraping cadence deactivated; this is on-demand only, same as the other manual
+    /run_* triggers)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_run','pending',NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+        conn.commit()
+    return {"armed": True, "flag": "mf_mc_oneshot_run=pending"}
 
 
 _MC_STRUCTURE_TEST_ISINS = [
