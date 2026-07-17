@@ -557,15 +557,52 @@ def _discover_amfi_endpoints(cur, page_url, hint):
     return uniq
 
 
+# cc#498 step_4_aaum_bonus: the TER populate-* endpoints turned out to be real (founder
+# DevTools capture) — probe the obvious AAUM equivalents on the same convention. Bounded effort
+# only, per spec ("do not burn the session guessing"): a handful of quick GETs, every candidate
+# logged to ops_log, and if none hit, stop rather than open-ended guessing.
+_AMFI_AAUM_POPULATE_CANDIDATES = [
+    "https://www.amfiindia.com/api/populate-aaum",
+    "https://www.amfiindia.com/api/populate-aum-data",
+    "https://www.amfiindia.com/api/populate-average-aum",
+    "https://www.amfiindia.com/api/populate-aaum-data",
+    "https://www.amfiindia.com/api/populate-aum",
+]
+
+
+def _probe_aaum_populate_api(cur):
+    """cc#498 step_4_aaum_bonus: try the AAUM variants of the now-verified TER populate-*
+    convention. Every candidate is logged (stage=aaum_bonus) so a miss leaves a concrete
+    "tried X, Y, Z" trail for the founder's next DevTools capture, not silence."""
+    import requests
+    hdr = {"User-Agent": "Scorr-MF/1.0"}
+    for url in _AMFI_AAUM_POPULATE_CANDIDATES:
+        try:
+            r = requests.get(url, headers=hdr, timeout=20)
+            ct = (r.headers.get("content-type") or "").lower()
+            ok = r.status_code == 200 and "json" in ct
+            rows = _parse_aum_json(r.text) if ok else []
+            _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "aaum_bonus", "url": url,
+                   "http": r.status_code, "ct": ct[:40], "rows": len(rows)})
+            if rows:
+                return rows, {"url": url, "source": "populate_api"}
+        except Exception as e:
+            _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "aaum_bonus", "url": url, "error": str(e)[:160]})
+    return [], None
+
+
 def _probe_aum_sources(cur, today=None):
     """Try the founder's AUM endpoints in order (SPA JSON API -> legacy ASPX -> form POST). Logs
     each probe (status/content-type/len/rows) to ops_log. Returns (parsed[(name,cr)], used_desc).
 
+    cc#498: tries the populate-* AAUM bonus probe FIRST (see _probe_aaum_populate_api).
     cc#491 VERIFIED_SOURCE_INTEL_17JUL: every URL in _AUM_PROBE below is now confirmed DEAD (the
-    Next.js SPA relaunch) — tries live-discovered candidates from _discover_amfi_endpoints FIRST;
-    _AUM_PROBE stays only as a last-resort fallback in case AMFI restores an old path."""
+    Next.js SPA relaunch) — falls to live-discovered candidates from _discover_amfi_endpoints
+    next; _AUM_PROBE stays only as a last-resort fallback in case AMFI restores an old path."""
     import requests
-    best, used = [], None
+    best, used = _probe_aaum_populate_api(cur)
+    if best:
+        return best, used
     for u in _discover_amfi_endpoints(cur, _AMFI_AAUM_PAGE, 'aum'):
         try:
             hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "application/json, text/html;q=0.8"}
@@ -1180,96 +1217,210 @@ def _canonical_equity_universe(cur):
 # source hit before cc#477's unblock. AMFI itself publishes a SEBI-mandated Total Expense
 # Ratio disclosure — try that first, per the spec's own explicit fallback: "use AMFI TER
 # disclosure if available, else document the best available source and coverage %."
-_AMFI_TER_PROBE = [
-    ("https://www.amfiindia.com/api/total-expense-ratio", None),
-    ("https://www.amfiindia.com/investor-corner/knowledge-center/total-expense-ratio.html", None),
-    ("https://www.amfiindia.com/research-information/other-data/total-expense-ratio", None),
+# cc#498 VERIFIED_17JUL_FOUNDER_DEVTOOLS: the REAL live AMFI TER API, captured via founder
+# Chrome DevTools 17-Jul and confirmed server-callable by Claude web (plain GET, JSON, no
+# auth/cookies beyond a normal UA) — supersedes every dead-URL/discovery-probe attempt from
+# cc#491 (the SPA relaunch killed the static pages, but this is the actual API the SPA itself
+# calls, not a guess).
+_AMFI_TER_MONTH_URL = "https://www.amfiindia.com/api/populate-ter-month"
+_AMFI_TER_DATA_URL = "https://www.amfiindia.com/api/populate-te-rdata-revised"
+_AMFI_SUBCAT_URL = "https://www.amfiindia.com/api/populate-sub-category"
+# populate-* naming convention is established (populate-ter-month, populate-te-rdata-revised,
+# populate-sub-category all real) — these are step_1's candidates for the MF_ID<->AMC map,
+# untested until this runs live on Railway.
+_AMFI_MF_ID_URLS = [
+    "https://www.amfiindia.com/api/populate-mutual-fund",
+    "https://www.amfiindia.com/api/populate-mf",
+    "https://www.amfiindia.com/api/populate-mutualfund",
+    "https://www.amfiindia.com/api/populate-amc",
 ]
-# cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: the REAL live TER page (verified browser-side
-# 17-Jul) — form-driven (FY/Month/FundType/Category/MF -> Go), data loads via an internal JSON
-# API discovered from this page's bundle, not a static URL. _AMFI_TER_PROBE above is all-dead.
-_AMFI_TER_PAGE = "https://www.amfiindia.com/ter-of-mf-schemes"
+# Verified live 17-Jul (populate-sub-category?category=Equity%20Schemes) — full equity
+# subcategory ID map, hardcoded to skip a redundant discovery round-trip each run.
+_EQUITY_SUBCATS = {
+    "Multi Cap": 73, "Large Cap": 74, "Large & Mid Cap": 75, "Mid Cap": 76, "Small Cap": 77,
+    "Flexi Cap": 78, "Dividend Yield": 79, "Value": 80, "Contra": 81, "Focused": 82,
+    "Sectoral": 83, "Thematic": 84, "ELSS": 85,
+}
 
 
-def _parse_ter_html(body):
-    """Same shape-detection approach as _parse_aaum_html — scan every table on the page for a
-    scheme/name column plus a TER/expense-ratio column. Sanity floor 0<TER<10% rejects
-    obviously mis-picked numeric columns (TER is never double-digit)."""
-    import pandas as pd
-    parsed = []
+def _amfi_ter_latest_month(cur):
+    """cc#498 step_1: GET populate-ter-month for the current FY, return the most recently
+    published MM-YYYY string. AMFI FY runs Apr-Mar."""
+    import requests
+    today = date.today()
+    fy = f"{today.year}-{today.year+1}" if today.month >= 4 else f"{today.year-1}-{today.year}"
     try:
-        tables = pd.read_html(io.StringIO(body))
+        r = requests.get(_AMFI_TER_MONTH_URL, params={"year": fy},
+                          headers={"User-Agent": "Scorr-MF/1.0"}, timeout=30)
+        rows = r.json()
+        _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "months", "fy": fy, "http": r.status_code,
+               "n": len(rows) if isinstance(rows, list) else None,
+               "sample": rows[:3] if isinstance(rows, list) else str(rows)[:300]})
+        if isinstance(rows, list) and rows:
+            months = [r0.get("MonthNumber") or r0.get("monthNumber") or r0.get("Month")
+                      for r0 in rows if isinstance(r0, dict)]
+            months = [m for m in months if m]
+            if months:
+                return months[-1]
+    except Exception as e:
+        _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "months", "fy": fy, "error": str(e)[:200]})
+    return None
+
+
+def _discover_ter_mf_ids(cur):
+    """cc#498 step_1: find the MF_ID<->AMC map via the established populate-* naming
+    convention. Only needed as a fallback if the MF_ID wildcard test in fetch_expense_ratio
+    fails — a working wildcard avoids needing this map at all."""
+    import requests
+    hdr = {"User-Agent": "Scorr-MF/1.0"}
+    for url in _AMFI_MF_ID_URLS:
+        try:
+            r = requests.get(url, headers=hdr, timeout=30)
+            ct = (r.headers.get("content-type") or "").lower()
+            ok = r.status_code == 200 and "json" in ct
+            data = r.json() if ok else None
+            _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "mf_id_map", "url": url,
+                   "http": r.status_code, "ct": ct[:40],
+                   "sample": str(data)[:400] if data is not None else None})
+            if ok and isinstance(data, list) and data:
+                return data
+        except Exception as e:
+            _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "mf_id_map", "url": url, "error": str(e)[:160]})
+    return []
+
+
+def _amfi_ter_page(cur, mf_id, subcat_id, month, page, page_size=500):
+    """cc#498: one page of populate-te-rdata-revised. Returns (rows, meta); ([], {}) on error."""
+    import requests
+    params = {"MF_ID": mf_id, "Month": month, "strCat": subcat_id, "strType": 1,
+              "page": page, "pageSize": page_size}
+    try:
+        r = requests.get(_AMFI_TER_DATA_URL, params=params,
+                          headers={"User-Agent": "Scorr-MF/1.0"}, timeout=45)
+        d = r.json()
+        return (d.get("data") or []), (d.get("meta") or {})
+    except Exception as e:
+        _oplog(cur, "MF_TER_API_ERROR", {"mf_id": mf_id, "subcat": subcat_id, "month": month,
+               "page": page, "error": str(e)[:160]})
+        return [], {}
+
+
+def _num_or_none(v):
+    try:
+        return float(str(v).replace('%', '').replace(',', '').strip())
     except Exception:
-        return parsed
-    for t in tables:
-        cols = [str(c).strip().lower() for c in t.columns]
-        name_i = next((i for i, c in enumerate(cols) if "scheme" in c or "name" in c), None)
-        ter_i = next((i for i, c in enumerate(cols) if "expense" in c or "ter" in c), None)
-        if name_i is None or ter_i is None or len(t) < 20:
-            continue
-        rows = []
-        for _, row in t.iterrows():
-            nm = str(row.iloc[name_i]).strip()
-            raw = str(row.iloc[ter_i]).replace("%", "").replace(",", "").strip()
-            if not nm or nm.lower() in ("total", "nan", "scheme name") or raw in ("", "nan"):
-                continue
-            try:
-                v = float(raw)
-                if 0 < v < 10:
-                    rows.append((nm, v))
-            except Exception:
-                continue
-        if len(rows) > len(parsed):
-            parsed = rows
-    return parsed
+        return None
+
+
+def _ter_row_total(row):
+    """cc#498: extract the TOTAL TER from one API row. Schema is only known from the page's
+    displayed table headers, not the raw JSON keys (verbatim field names weren't captured) —
+    tries several plausible spellings for a single total field first; falls back to summing
+    every Reg 66 component field (Base/brokerage/statutory) per the page's own disclaimer
+    definition, documenting that choice here rather than guessing a formula. The first live
+    row is logged in full to MF_TER_API_SCHEMA_SAMPLE so a follow-up pass can correct the exact
+    keys if this guess is wrong."""
+    for key in ("Total TER", "TotalTER", "Total_TER", "TER", "Total Expense Ratio",
+                "TotalExpenseRatio", "TotalTer", "Total"):
+        if key in row:
+            n = _num_or_none(row[key])
+            if n is not None:
+                return n
+    comp_keys = [k for k in row.keys()
+                 if any(t in k.lower() for t in ('ter', 'brokerage', 'statutory', 'expense'))]
+    total, found = 0.0, False
+    for k in comp_keys:
+        n = _num_or_none(row.get(k))
+        if n is not None:
+            total += n
+            found = True
+    return round(total, 4) if found else None
+
+
+def _ter_row_scheme_name(row):
+    for key in ("Scheme Name", "SchemeName", "scheme_name", "Scheme_Name"):
+        if key in row and row[key]:
+            return str(row[key]).strip()
+    return None
+
+
+def _ter_row_is_direct(row):
+    for key in ("Plan", "SchemePlan", "Scheme Plan"):
+        if key in row and row[key]:
+            return "direct" in str(row[key]).strip().lower()
+    return "direct" in (_ter_row_scheme_name(row) or "").lower()
 
 
 def fetch_expense_ratio(cur):
-    """step_2: best-effort AMFI TER sweep — same probe/fuzzy-match pattern as fetch_amfi_aum,
-    same overwrite guard (WHERE expense_ratio IS NULL — the ~97 already-curated ER values
-    must never be touched). Honest about coverage: returns actual match counts, documents
-    failure rather than fabricating success if AMFI's TER page is unreachable/restructured.
+    """step_2, cc#498: real AMFI TER API (founder DevTools capture, verified live 17-Jul —
+    supersedes cc#491's dead-URL/discovery-probe attempts). Iterates the latest published
+    month x 13 equity subcategories x MF_ID (wildcard tried first per step_1 — if AMFI accepts
+    MF_ID=-1 for "all AMCs", per-AMC iteration is skipped entirely; else falls back to the
+    discovered MF_ID<->AMC map), paginating via meta.pageCount. Extracts scheme name + TOTAL
+    TER (schema-defensive per _ter_row_total), fuzzy-matches to mf_master exactly like the AUM
+    sweep, prefers a Direct-plan row when both exist for the same scheme name. Same overwrite
+    guard as before: WHERE expense_ratio IS NULL on this initial pass (existing curated values
+    untouched)."""
+    import time
+    month = _amfi_ter_latest_month(cur)
+    if not month:
+        _oplog(cur, "MF_TER_ERROR", {"stage": "no_month", "note": "populate-ter-month returned nothing usable"})
+        return {"error": "no month found"}
 
-    cc#491 VERIFIED_SOURCE_INTEL_17JUL: tries live-discovered candidates from the real TER page
-    (_AMFI_TER_PAGE) first — _AMFI_TER_PROBE's static URLs are all confirmed dead (SPA relaunch),
-    kept only as a last-resort fallback."""
-    import requests
-    best, used = [], None
-    for u in _discover_amfi_endpoints(cur, _AMFI_TER_PAGE, 'ter'):
-        try:
-            hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "application/json, text/html;q=0.8"}
-            r = requests.get(u, headers=hdr, timeout=45)
-            ct = (r.headers.get("content-type") or "").lower()
-            body = r.text or ""
-            rows = _parse_ter_html(body) if ("html" in ct or "<table" in body.lower()) else []
-            _oplog(cur, "MF_TER_PROBE_DISCOVERED", {"url": u, "http": r.status_code, "rows": len(rows)})
-            if len(rows) > len(best):
-                best, used = rows, {"url": u, "source": "discovery"}
-        except Exception as e:
-            _oplog(cur, "MF_TER_PROBE_DISCOVERED", {"url": u, "error": str(e)[:140]})
-    for url, _unused in ([] if best else _AMFI_TER_PROBE):
-        try:
-            hdr = {"User-Agent": "Scorr-MF/1.0", "Accept": "text/html,application/json;q=0.8"}
-            r = requests.get(url, headers=hdr, timeout=60)
-            ct = (r.headers.get("content-type") or "").lower()
-            body = r.text or ""
-            rows = _parse_ter_html(body) if ("html" in ct or "<table" in body.lower()) else []
-            _oplog(cur, "MF_TER_PROBE", {"url": url, "http": r.status_code, "ct": ct[:40],
-                                         "len": len(body), "rows": len(rows)})
-            if len(rows) > len(best):
-                best, used = rows, {"url": url, "rows": len(rows)}
-        except Exception as e:
-            _oplog(cur, "MF_TER_PROBE", {"url": url, "error": str(e)[:140]})
-    if not best:
-        _oplog(cur, "MF_TER_ERROR", {"stage": "all_sources_failed",
-                                     "note": "no clean AMFI TER source found this run — "
-                                             "expense_ratio coverage stays at whatever was "
-                                             "already curated (97 schemes as of 17-Jul)"})
-        return {"error": "no TER rows parsed"}
+    probe_rows, probe_meta = _amfi_ter_page(cur, -1, _EQUITY_SUBCATS["Large Cap"], month, 1, 100)
+    wildcard_ok = len(probe_rows) >= 10
+    _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "wildcard_probe", "mf_id": -1, "subcat": "Large Cap",
+           "month": month, "rows": len(probe_rows), "meta": probe_meta, "wildcard_ok": wildcard_ok})
+
+    if wildcard_ok:
+        mf_ids = [-1]
+    else:
+        discovered = _discover_ter_mf_ids(cur)
+        mf_ids = [d.get("MF_ID") or d.get("mf_id") or d.get("id") for d in discovered
+                  if isinstance(d, dict)]
+        mf_ids = [m for m in mf_ids if m is not None]
+        if not mf_ids:
+            _oplog(cur, "MF_TER_ERROR", {"stage": "no_mf_id_source", "month": month,
+                   "note": "wildcard MF_ID=-1 failed and no MF_ID<->AMC map endpoint discovered "
+                           "among the populate-* candidates tried"})
+            return {"error": "no MF_ID source", "month": month}
+
+    all_rows, logged_sample = [], False
+    for subcat_name, subcat_id in _EQUITY_SUBCATS.items():
+        for mf_id in mf_ids:
+            page = 1
+            while True:
+                rows, meta = _amfi_ter_page(cur, mf_id, subcat_id, month, page, 500)
+                if rows and not logged_sample:
+                    _oplog(cur, "MF_TER_API_SCHEMA_SAMPLE", {"row": rows[0], "meta": meta})
+                    logged_sample = True
+                all_rows.extend(rows)
+                page_count = meta.get("pageCount") or meta.get("PageCount") or 1
+                if not rows or page >= page_count:
+                    break
+                page += 1
+                time.sleep(0.6)
+            time.sleep(0.6)
+
+    if not all_rows:
+        _oplog(cur, "MF_TER_ERROR", {"stage": "no_rows", "month": month, "wildcard": wildcard_ok,
+               "mf_ids_tried": len(mf_ids)})
+        return {"error": "no TER rows returned from the live API", "month": month, "wildcard": wildcard_ok}
+
+    parsed = {}   # scheme name -> (ter, is_direct)
+    for row in all_rows:
+        nm = _ter_row_scheme_name(row)
+        ter = _ter_row_total(row)
+        if not nm or ter is None or not (0 < ter < 10):
+            continue
+        is_direct = _ter_row_is_direct(row)
+        prev = parsed.get(nm)
+        if prev is None or (is_direct and not prev[1]):
+            parsed[nm] = (ter, is_direct)
 
     universe = [(sc, nm, set(_norm_fund(nm))) for sc, _ac, nm, _cat in _canonical_equity_universe(cur)]
     matched = skipped_existing = 0
-    for nm, ter in best:
+    for nm, (ter, _is_direct) in parsed.items():
         toks = set(_norm_fund(nm))
         if not toks:
             continue
@@ -1287,8 +1438,8 @@ def fetch_expense_ratio(cur):
                 matched += 1
             else:
                 skipped_existing += 1
-    stats = {"ter_rows": len(best), "matched": matched,
-             "skipped_existing_curated": skipped_existing, "used": used}
+    stats = {"month": month, "wildcard_mode": wildcard_ok, "ter_rows_raw": len(all_rows),
+             "ter_rows_parsed": len(parsed), "matched": matched, "skipped_existing_curated": skipped_existing}
     _oplog(cur, "MF_TER_BACKFILL", stats)
     return stats
 
