@@ -1234,9 +1234,14 @@ _AMFI_MF_ID_URLS = [
     "https://www.amfiindia.com/api/populate-mutualfund",
     "https://www.amfiindia.com/api/populate-amc",
 ]
-# Verified live 17-Jul (populate-sub-category?category=Equity%20Schemes) — full equity
-# subcategory ID map, hardcoded to skip a redundant discovery round-trip each run.
-_EQUITY_SUBCATS = {
+# cc#498 attempt_6: the populate-sub-category IDs below (Large Cap=74 etc.) were LIVE-PROVEN
+# not to be what populate-te-rdata-revised's strCat parameter expects — a real, major AMC with
+# real large-cap schemes returned zero rows filtered by strCat=74 but real data with strCat
+# omitted entirely. fetch_expense_ratio no longer uses strCat at all (filters equity
+# client-side on SchemeCat_Desc instead — see _ter_row_is_equity). Left unused rather than
+# deleted in case a verified correct mapping surfaces later: _AMFI_SUBCAT_URL is real and
+# live (verified 17-Jul), only the ID-to-strCat correspondence assumed here was wrong.
+_EQUITY_SUBCATS_UNVERIFIED_FOR_STRCAT = {
     "Multi Cap": 73, "Large Cap": 74, "Large & Mid Cap": 75, "Mid Cap": 76, "Small Cap": 77,
     "Flexi Cap": 78, "Dividend Yield": 79, "Value": 80, "Contra": 81, "Focused": 82,
     "Sectoral": 83, "Thematic": 84, "ELSS": 85,
@@ -1299,11 +1304,20 @@ def _discover_ter_mf_ids(cur):
     return []
 
 
-def _amfi_ter_page(cur, mf_id, subcat_id, month, page, page_size=500):
-    """cc#498: one page of populate-te-rdata-revised. Returns (rows, meta); ([], {}) on error."""
+def _amfi_ter_page(cur, mf_id, month, page, page_size=500, subcat_id=None):
+    """cc#498: one page of populate-te-rdata-revised. Returns (rows, meta); ([], {}) on error.
+
+    cc#498 attempt_6 live bug fix: strCat is OMITTED by default now — the raw-body diagnostic
+    (17-Jul) proved strCat=74 (this file's guessed "Large Cap" id, sourced from the unrelated
+    populate-sub-category endpoint) filters to ZERO rows even for a real, major AMC with real
+    large-cap schemes, while the SAME request with strCat dropped entirely returns real data
+    immediately. subcat_id is kept as an optional param in case a verified mapping surfaces
+    later, but fetch_expense_ratio no longer passes one — equity filtering happens client-side
+    on the real `SchemeCat_Desc` field instead (see _ter_row_is_equity)."""
     import requests
-    params = {"MF_ID": mf_id, "Month": month, "strCat": subcat_id, "strType": 1,
-              "page": page, "pageSize": page_size}
+    params = {"MF_ID": mf_id, "Month": month, "strType": 1, "page": page, "pageSize": page_size}
+    if subcat_id is not None:
+        params["strCat"] = subcat_id
     try:
         r = requests.get(_AMFI_TER_DATA_URL, params=params,
                           headers={"User-Agent": "Scorr-MF/1.0"}, timeout=45)
@@ -1349,56 +1363,48 @@ def _num_or_none(v):
 
 
 def _ter_row_total(row):
-    """cc#498: extract the TOTAL TER from one API row. Schema is only known from the page's
-    displayed table headers, not the raw JSON keys (verbatim field names weren't captured) —
-    tries several plausible spellings for a single total field first; falls back to summing
-    every Reg 66 component field (Base/brokerage/statutory) per the page's own disclaimer
-    definition, documenting that choice here rather than guessing a formula. The first live
-    row is logged in full to MF_TER_API_SCHEMA_SAMPLE so a follow-up pass can correct the exact
-    keys if this guess is wrong."""
-    for key in ("Total TER", "TotalTER", "Total_TER", "TER", "Total Expense Ratio",
-                "TotalExpenseRatio", "TotalTer", "Total"):
+    """cc#498 attempt_6: REAL field names confirmed live (17-Jul raw response) — D_TER (direct
+    plan total TER) and R_TER (regular plan total TER) are separate columns on the SAME row
+    (one row = one scheme, not one row per plan), not a single generic "Total TER" field. The
+    original guessed key list never matched, silently falling through to a component-summing
+    fallback that would have SUMMED regular+direct+brokerage+statutory together into one
+    inflated, wrong number. Prefers D_TER (Direct plan, matches this pipeline's existing
+    Direct-Growth convention elsewhere) then R_TER."""
+    for key in ("D_TER", "R_TER"):
         if key in row:
             n = _num_or_none(row[key])
             if n is not None:
                 return n
-    comp_keys = [k for k in row.keys()
-                 if any(t in k.lower() for t in ('ter', 'brokerage', 'statutory', 'expense'))]
-    total, found = 0.0, False
-    for k in comp_keys:
-        n = _num_or_none(row.get(k))
-        if n is not None:
-            total += n
-            found = True
-    return round(total, 4) if found else None
+    return None
 
 
 def _ter_row_scheme_name(row):
-    for key in ("Scheme Name", "SchemeName", "scheme_name", "Scheme_Name"):
+    for key in ("Scheme_Name", "Scheme Name", "SchemeName", "scheme_name"):
         if key in row and row[key]:
             return str(row[key]).strip()
     return None
 
 
-def _ter_row_is_direct(row):
-    for key in ("Plan", "SchemePlan", "Scheme Plan"):
-        if key in row and row[key]:
-            return "direct" in str(row[key]).strip().lower()
-    return "direct" in (_ter_row_scheme_name(row) or "").lower()
+def _ter_row_is_equity(row):
+    """cc#498 attempt_6: strCat-based server-side filtering is dropped (see _amfi_ter_page) —
+    equity filtering now happens client-side on the real SchemeCat_Desc field (confirmed live,
+    e.g. "Other Scheme - FoF Domestic" for a non-equity fund)."""
+    cat = str(row.get("SchemeCat_Desc") or "").lower()
+    return "equity" in cat
 
 
 def fetch_expense_ratio(cur):
     """step_2, cc#498: real AMFI TER API (founder DevTools capture, verified live 17-Jul —
-    supersedes cc#491's dead-URL/discovery-probe attempts). MF_ID=-1 wildcard is confirmed NOT
-    supported (live-tested), so this discovers the real MF_ID<->AMC map and probes candidate
-    months (newest-listed first, verifying against a known AMC since TER publication lags the
-    calendar month) before committing to the full crawl: all discovered AMCs x 13 equity
-    subcategories x the confirmed-published month, paginating via meta.pageCount. Extracts
-    scheme name + TOTAL TER (schema-defensive per _ter_row_total), fuzzy-matches to mf_master
-    exactly like the AUM sweep, prefers a Direct-plan row when both exist for the same scheme
-    name. Same overwrite guard as before: WHERE expense_ratio IS NULL on this initial pass
-    (existing curated values
-    untouched)."""
+    supersedes cc#491's dead-URL/discovery-probe attempts). cc#498 attempt_6: strCat-based
+    server-side category filtering is DROPPED (live-proven wrong ID mapping — see
+    _amfi_ter_page) in favor of fetching each AMC's FULL scheme list (all categories) for the
+    confirmed-published month, then filtering to equity client-side on the real SchemeCat_Desc
+    field. This also cuts the crawl from 728 combos (56 AMCs x 13 guessed subcats) to 56 (one
+    per AMC), since no subcategory iteration is needed at all. Extracts D_TER (Direct plan)
+    preferring it over R_TER (Regular) — confirmed live: both are separate columns on the SAME
+    row (one row = one scheme), not one row per plan. Fuzzy-matches to mf_master exactly like
+    the AUM sweep. Same overwrite guard as before: WHERE expense_ratio IS NULL on this initial
+    pass (existing curated values untouched)."""
     import time
     months = _amfi_ter_months_desc(cur)
     if not months:
@@ -1417,16 +1423,13 @@ def fetch_expense_ratio(cur):
                "note": "no MF_ID<->AMC map endpoint discovered among the populate-* candidates tried"})
         return {"error": "no MF_ID source"}
 
-    # cc#498 attempt_4 live bug fix: MF_ID=-1 wildcard is CONFIRMED not to work (live-tested:
-    # a well-formed empty response for Large Cap across every listed month) — drop it entirely,
-    # go straight to per-AMC. Probe candidate months (newest first) against a known-major AMC
-    # (Aditya Birla Sun Life, mfId=3, present in every populate-mf sample seen) x Large Cap
-    # until one actually returns data, rather than committing a ~10min full crawl to a month
-    # AMFI hasn't finished compiling yet (live-observed: July-2026 was LISTED but 150+
-    # combinations all came back empty — TER publication lags the calendar month).
+    # Probe candidate months (newest first) against a known-major AMC (Aditya Birla Sun Life,
+    # mfId=3, present in every populate-mf sample seen), NO strCat filter (attempt_6 fix) —
+    # TER publication lags the calendar month by several weeks, so the newest LISTED month
+    # (live-observed: July-2026) is not reliably the newest PUBLISHED one.
     month = None
     for candidate in months:
-        probe_rows, probe_meta = _amfi_ter_page(cur, 3, _EQUITY_SUBCATS["Large Cap"], candidate, 1, 10)
+        probe_rows, probe_meta = _amfi_ter_page(cur, 3, candidate, 1, 10)
         _oplog(cur, "MF_TER_API_DISCOVERY", {"stage": "month_probe", "month": candidate,
                "mf_id": 3, "rows": len(probe_rows), "meta": probe_meta})
         if probe_rows:
@@ -1434,69 +1437,62 @@ def fetch_expense_ratio(cur):
             break
         time.sleep(0.5)
     if not month:
-        # cc#498 attempt_5: every real (month, category) combo tried so far has been empty for
-        # a real, major AMC -- run the raw-body diagnostic before giving up, so the actual
-        # failure mode (wrong param name/type/value) is inspectable via ops_log.
         _ter_diagnostic_probe(cur, 3, months[0])
         _oplog(cur, "MF_TER_ERROR", {"stage": "no_published_month", "months_tried": months,
-               "note": "every listed month returned empty for a known AMC (ABSL, mfId=3) x "
-                       "Large Cap — TER data may not be published for any listed month yet"})
+               "note": "every listed month returned empty for a known AMC (ABSL, mfId=3), no "
+                       "strCat filter — TER data may not be published for any listed month yet"})
         return {"error": "no published month found", "months_tried": months}
 
     all_rows, logged_sample = [], False
-    n_combos = 0
-    for subcat_name, subcat_id in _EQUITY_SUBCATS.items():
-        for mf_id in mf_ids:
-            page = 1
-            while True:
-                rows, meta = _amfi_ter_page(cur, mf_id, subcat_id, month, page, 500)
-                if rows and not logged_sample:
-                    _oplog(cur, "MF_TER_API_SCHEMA_SAMPLE", {"row": rows[0], "meta": meta})
-                    logged_sample = True
-                all_rows.extend(rows)
-                try:
-                    page_count = int(meta.get("pageCount") or meta.get("PageCount") or 1)
-                except (TypeError, ValueError):
-                    page_count = 1
-                if not rows or page >= page_count:
-                    break
-                page += 1
-                time.sleep(0.6)
-            n_combos += 1
-            # cc#498 live bug fix: this loop is HTTP-only for potentially many minutes when
-            # mf_ids has dozens of AMCs (non-wildcard path) — with zero DB activity in between,
-            # the connection sat idle-in-transaction past this DB's 5-min auto-kill guard
-            # (idle_in_transaction_session_timeout=300000, CLAUDE.md-documented), crashing the
-            # whole run_v15_wiring call before any TER write ever happened (observed live: a
-            # ~12-min silent run that reset mf_v15_wiring_run back to 'pending' with zero rows
-            # written). A no-op commit every AMC keeps the connection alive through the crawl.
+    n_amcs = 0
+    for mf_id in mf_ids:
+        page = 1
+        while True:
+            rows, meta = _amfi_ter_page(cur, mf_id, month, page, 500)
+            if rows and not logged_sample:
+                _oplog(cur, "MF_TER_API_SCHEMA_SAMPLE", {"row": rows[0], "meta": meta})
+                logged_sample = True
+            all_rows.extend(rows)
             try:
-                cur.connection.commit()
-            except Exception:
-                pass
-            if n_combos % 25 == 0:
-                _oplog(cur, "MF_TER_API_CRAWL_PROGRESS", {"combos_done": n_combos,
-                       "combos_total": len(_EQUITY_SUBCATS) * len(mf_ids), "rows_so_far": len(all_rows)})
+                page_count = int(meta.get("pageCount") or meta.get("PageCount") or 1)
+            except (TypeError, ValueError):
+                page_count = 1
+            if not rows or page >= page_count:
+                break
+            page += 1
             time.sleep(0.6)
+        n_amcs += 1
+        # cc#498 live bug fix: this loop is HTTP-only for a stretch with zero DB activity on
+        # the held cursor's transaction — this DB enforces idle_in_transaction_session_timeout
+        # =300000 (5 min, CLAUDE.md-documented), which killed an earlier, slower version of
+        # this crawl (728 combos) mid-run before any write happened. A no-op commit every AMC
+        # keeps the connection alive (56 AMCs now, so this is a large safety margin, not just
+        # a fix for the case that broke it).
+        try:
+            cur.connection.commit()
+        except Exception:
+            pass
+        if n_amcs % 10 == 0:
+            _oplog(cur, "MF_TER_API_CRAWL_PROGRESS", {"amcs_done": n_amcs, "amcs_total": len(mf_ids),
+                   "rows_so_far": len(all_rows)})
+        time.sleep(0.6)
 
     if not all_rows:
         _oplog(cur, "MF_TER_ERROR", {"stage": "no_rows", "month": month, "mf_ids_tried": len(mf_ids)})
         return {"error": "no TER rows returned from the live API", "month": month}
 
-    parsed = {}   # scheme name -> (ter, is_direct)
-    for row in all_rows:
+    equity_rows = [r for r in all_rows if _ter_row_is_equity(r)]
+    parsed = {}   # scheme name -> ter
+    for row in equity_rows:
         nm = _ter_row_scheme_name(row)
         ter = _ter_row_total(row)
         if not nm or ter is None or not (0 < ter < 10):
             continue
-        is_direct = _ter_row_is_direct(row)
-        prev = parsed.get(nm)
-        if prev is None or (is_direct and not prev[1]):
-            parsed[nm] = (ter, is_direct)
+        parsed[nm] = ter
 
     universe = [(sc, nm, set(_norm_fund(nm))) for sc, _ac, nm, _cat in _canonical_equity_universe(cur)]
     matched = skipped_existing = 0
-    for nm, (ter, _is_direct) in parsed.items():
+    for nm, ter in parsed.items():
         toks = set(_norm_fund(nm))
         if not toks:
             continue
@@ -1514,7 +1510,7 @@ def fetch_expense_ratio(cur):
                 matched += 1
             else:
                 skipped_existing += 1
-    stats = {"month": month, "ter_rows_raw": len(all_rows),
+    stats = {"month": month, "ter_rows_raw": len(all_rows), "ter_rows_equity": len(equity_rows),
              "ter_rows_parsed": len(parsed), "matched": matched, "skipped_existing_curated": skipped_existing}
     _oplog(cur, "MF_TER_BACKFILL", stats)
     return stats
