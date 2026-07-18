@@ -124,16 +124,31 @@ def _in_mkt(ts):
 
 def probe(token, conn):
     """HARD GATE. July (recent) contract first, then expired June, on RELIANCE.
-    Returns {july:{...}, june:{...}, verdict}. verdict in {both, july_only, none}."""
+    Per-contract status distinguishes a genuine no-OI response from a transport/auth
+    error (e.g. an expired Fyers token off-market) so the latter never masquerades as
+    'OI unavailable' and false-aborts the backfill:
+      ok_oi     -> candles returned WITH the 7th OI column
+      ok_no_oi  -> candles returned but NO OI column (genuine 'API serves bars, not OI')
+      err       -> API error / no candles (auth/transport — retest when a token exists)
+    verdict in {both, july_only, june_only, none, auth_error}. Only 'none' is a real
+    'Fyers serves no OI for expired futures' finding; 'auth_error' means untested."""
     out = {}
     for tag, code, rng in (("july", _JUL_CODE, ("2026-07-06", "2026-07-08")),
                            ("june", _JUN_CODE, ("2026-06-24", "2026-06-26"))):
         sym = _fut_symbol("RELIANCE", code)
         candles, raw = _fetch_fut_history(token, sym, rng[0], rng[1])
         has_c = bool(candles)
+        api_ok = (raw or {}).get("s") == "ok"
         has_oi = bool(has_c and len(candles[0]) >= 7 and candles[0][6] is not None)
+        if not has_c:
+            status = "err"           # no candles (auth/transport) — NOT a no-OI verdict
+        elif has_oi:
+            status = "ok_oi"
+        else:
+            status = "ok_no_oi"      # served bars but no OI column (genuine)
         out[tag] = {
             "symbol": sym, "range": list(rng), "api_s": (raw or {}).get("s"),
+            "status": status, "api_ok": api_ok,
             "n_candles": len(candles or []),
             "cols": (len(candles[0]) if has_c else 0),
             "oi_present": has_oi,
@@ -141,8 +156,20 @@ def probe(token, conn):
             "api_msg": (raw or {}).get("message") or (raw or {}).get("s"),
         }
         time.sleep(_PACE_S)
-    july_oi, june_oi = out["july"]["oi_present"], out["june"]["oi_present"]
-    out["verdict"] = "both" if (july_oi and june_oi) else ("july_only" if july_oi else "none")
+
+    def _oi(tag):  return out[tag]["status"] == "ok_oi"
+    def _err(tag): return out[tag]["status"] == "err"
+    if _err("july") and _err("june"):
+        verdict = "auth_error"       # neither testable (e.g. expired token) — retry later
+    elif _oi("july") and _oi("june"):
+        verdict = "both"
+    elif _oi("july"):
+        verdict = "july_only"
+    elif _oi("june"):
+        verdict = "june_only"        # June (the join target) has OI even if July errored
+    else:
+        verdict = "none"             # genuine: bars served, no OI column
+    out["verdict"] = verdict
     with conn.cursor() as cur:
         _oplog(cur, "BT14_FUT_OI_PROBE", out)
         conn.commit()
@@ -253,6 +280,16 @@ def run_backfill(time_budget_s=1800):
                        {"reason": "no probe on record — run probe first"})
                 conn.commit()
             return {"complete": True, "aborted": "no_probe"}
+        if verdict == "auth_error":
+            # probe could not be tested (e.g. expired Fyers token off-market). This is NOT
+            # a 'no OI' finding — block WITHOUT writing or marking done, so re-arming 'probe'
+            # once a fresh token exists (Mon pre-market autologin) can retest cleanly.
+            with conn.cursor() as cur:
+                _oplog(cur, "BT14_FUT_OI_BLOCKED",
+                       {"reason": "last probe verdict=auth_error — Fyers token unavailable; "
+                                  "re-arm 'probe' when a fresh token exists, then 'backfill'"})
+                conn.commit()
+            return {"complete": False, "blocked": "auth"}
         if verdict == "none":
             with conn.cursor() as cur:
                 _oplog(cur, "BT14_FUT_OI_ABORT",
@@ -260,6 +297,7 @@ def run_backfill(time_budget_s=1800):
                                   "expired stock-futures; basis/OI stay live-forward-only"})
                 conn.commit()
             return {"complete": True, "aborted": "no_oi"}
+        # else verdict in {both, july_only, june_only} -> proceed with the backfill
 
         token = pcr_backfill._load_token(conn)
         syms = _top_symbols(conn)

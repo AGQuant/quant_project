@@ -1052,12 +1052,24 @@ def _bg_bt14_fut_oi():
         _bt14_fut_oi_running = True
         import bt14_fut_oi
         if flag == "probe":
-            res = bt14_fut_oi.run_probe()
-            log.info(f"bt14_fut_oi probe: verdict={res.get('verdict')}")
+            # pace retries: skip if a probe ran within the last 30 min. An expired Fyers
+            # token (weekends: no autologin) yields verdict=auth_error; we keep 'probe'
+            # armed and retest ~half-hourly until a fresh token exists (Mon pre-market),
+            # rather than spamming Fyers auth every 60s tick.
             with _conn() as conn, conn.cursor() as cur:
-                cur.execute("INSERT INTO app_config (key,value,updated_at) "
-                            "VALUES ('bt14_fut_oi_run','probe_done',NOW()) "
-                            "ON CONFLICT (key) DO UPDATE SET value='probe_done', updated_at=NOW()")
+                cur.execute("SELECT EXTRACT(EPOCH FROM (NOW() - MAX(session_ts))) "
+                            "FROM ops_log WHERE title='BT14_FUT_OI_PROBE'")
+                age = cur.fetchone()[0]
+            if age is not None and age < 1800:
+                return _SKIPPED
+            res = bt14_fut_oi.run_probe()
+            verdict = res.get("verdict")
+            log.info(f"bt14_fut_oi probe: verdict={verdict}")
+            # auth_error => leave 'probe' armed to retest later; any real verdict => latch
+            nxt = "probe" if verdict == "auth_error" else "probe_done"
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('bt14_fut_oi_run',%s,NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (nxt,))
                 conn.commit()
         else:
             res = bt14_fut_oi.run_backfill(time_budget_s=1800)
