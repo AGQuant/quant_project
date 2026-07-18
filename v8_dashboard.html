@@ -288,6 +288,13 @@
   </div>
 
   <div class="mood" id="mood"><div class="loading">Loading market gate&#8230;</div></div>
+  <!-- cc#536: read-only display bridge to V10 index open positions (no V10 compute in V8;
+       fetches the existing GET /api/v10/positions on each open). Sits right after the mood gate. -->
+  <div style="margin:-4px 0 10px">
+    <button id="idxPosBtn" onclick="openIdxPos()" style="display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--txt);background:var(--panel2);border:1px solid var(--line2);border-radius:30px;padding:7px 15px;cursor:pointer;transition:.15s"
+      onmouseover="this.style.borderColor='var(--blu)'" onmouseout="this.style.borderColor='var(--line2)'">
+      <span style="width:7px;height:7px;border-radius:50%;background:var(--blu);display:inline-block"></span>Index Open Position</button>
+  </div>
   <!-- cc#266: India VIX 5-day hourly line chart. cc#275: was an always-visible card; now a
        popout overlay triggered by the small chart button next to the mood FAILS pill. The
        #vixCard element (and its <canvas id="vixChart">) is NEVER removed/rebuilt — it just
@@ -347,6 +354,20 @@
       <div class="modal-body"><div style="height:280px;position:relative"><canvas id="adrChart"></canvas></div></div>
     </div>
   </div>
+  <!-- cc#536: V10 index open-positions popup (read-only). Same .modal-overlay/.open pattern as
+       the VIX/PCR/ADR/info modals above. Fetched fresh on each open. -->
+  <div class="modal-overlay" id="idxPosCard" onclick="if(event.target===this)closeIdxPos()">
+    <div class="modal-box" style="max-width:820px;width:96%">
+      <div class="modal-head">
+        <div style="flex:1;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+          <div style="font-size:16px;font-weight:800;color:var(--txt)">OPEN POSITIONS <span id="idxPosCount" style="color:var(--mut)"></span></div>
+          <div id="idxPosTotal" style="font-size:12px;font-weight:700"></div>
+        </div>
+        <button onclick="closeIdxPos()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
+      </div>
+      <div class="modal-body" id="idxPosBody" style="overflow-x:auto"><div class="loading">Loading&#8230;</div></div>
+    </div>
+  </div>
   <div class="tabs" id="tabs"></div>
   <div id="panels"></div>
 
@@ -402,6 +423,7 @@ const EP={
   niftyPcr:"/api/pcr/intraday_hourly?underlying=NIFTY",         // cc#290
   bankniftyPcr:"/api/pcr/intraday_hourly?underlying=BANKNIFTY", // cc#290
   positionNews:"/api/news/position",                           // cc#294
+  v10Positions:"/api/v10/positions",                           // cc#536: read-only V10 open-positions bridge
 };
 // cc#502: buy_s1_bounce (panel3) + sell_overbought (panel6) retired -- panel ids kept dormant,
 // NOT renumbered, per this file's existing panel-stability convention (cc#263/426/447). Each
@@ -855,7 +877,66 @@ function openBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard')
 function openAdr(){const el=document.getElementById('adrCard');if(!el)return;el.classList.add('open');try{loadAdrChart();}catch(e){}if(typeof ADR_CHART!=='undefined'&&ADR_CHART&&ADR_CHART.resize)ADR_CHART.resize();}
 function closeAdr(){const el=document.getElementById('adrCard');if(el)el.classList.remove('open');}
 function closeBankniftyPcr(){const el=document.getElementById('bankniftyPcrCard');if(el)el.classList.remove('open');}
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();closeNiftyPcr();closeBankniftyPcr();}});
+// cc#536: V10 index open-positions popup — read-only display bridge, fetches the existing
+// /api/v10/positions fresh on each open. No V10 compute in V8; pure fetch + render.
+function closeIdxPos(){const el=document.getElementById('idxPosCard');if(el)el.classList.remove('open');}
+async function openIdxPos(){
+  const card=document.getElementById('idxPosCard'), body=document.getElementById('idxPosBody');
+  document.getElementById('idxPosCount').textContent='';
+  document.getElementById('idxPosTotal').textContent='';
+  body.innerHTML='<div class="loading">Loading&#8230;</div>';
+  card.classList.add('open');
+  let rows;
+  try{
+    const r=await fetch(API_BASE+EP.v10Positions);
+    const d=await r.json();
+    rows=(d&&d.open_positions)||[];
+  }catch(e){
+    body.innerHTML='<div style="padding:22px 4px;text-align:center;color:var(--mut);font-size:13px">V10 positions unavailable</div>';
+    return;
+  }
+  renderIdxPos(rows);
+}
+function renderIdxPos(rows){
+  const cnt=document.getElementById('idxPosCount'), tot=document.getElementById('idxPosTotal'), body=document.getElementById('idxPosBody');
+  cnt.textContent='('+rows.length+')';
+  if(!rows.length){ tot.textContent=''; body.innerHTML='<div style="padding:22px 4px;text-align:center;color:var(--mut);font-size:13px">No open index positions.</div>'; return; }
+  let total=0, anyPnl=false;
+  rows.forEach(p=>{ const v=p.unrealised_pnl; if(v!==null&&v!==undefined&&!isNaN(v)){ total+=Number(v); anyPnl=true; } });
+  tot.innerHTML = anyPnl ? ('TOTAL P&amp;L <span style="color:'+(total>=0?'var(--grn)':'var(--red)')+'">'+inr(total)+'</span>') : '';
+  const L='style="text-align:left"';
+  const sideChip=s=>{const isL=(s||'').toUpperCase()==='BUY';return '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;background:'+(isL?'var(--grn-d)':'var(--red-d)')+';color:'+(isL?'var(--grn)':'var(--red)')+'">'+(isL?'LONG':'SHORT')+'</span>';};
+  const engChip='<span style="font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line2);color:var(--mut)">V10</span>';
+  const pnlCell=v=>{ if(v===null||v===undefined||isNaN(v))return '<td>--</td>'; return '<td style="color:'+(v>=0?'var(--grn)':'var(--red)')+'">'+inr(v)+'</td>'; };
+  const pctCell=p=>{ const e=p.entry_price,l=p.lot_size,v=p.unrealised_pnl; if([e,l,v].some(x=>x===null||x===undefined||isNaN(x))||!e||!l)return '<td>--</td>'; const pct=(Number(v)/(Number(e)*Number(l)))*100; return '<td style="color:'+(pct>=0?'var(--grn)':'var(--red)')+'">'+pct.toFixed(2)+'%</td>'; };
+  const trs=rows.map(p=>{
+    const isFut=(p.leg||'').toUpperCase()==='FUT';
+    const symLabel=isFut?p.symbol:(p.symbol+'  '+(p.opt_strike!=null?p.opt_strike:'')+' '+(p.opt_type||'')+' wrt');
+    const typeLabel=isFut?'FUT':'OPT&middot;wrt';
+    return '<tr>'
+      +'<td>'+engChip+'</td>'
+      +'<td '+L+'><span class="sym">'+symLabel+'</span></td>'
+      +'<td '+L+'>'+sideChip(p.side)+'</td>'
+      +'<td '+L+' style="color:var(--mut);font-size:11px;text-align:left">'+typeLabel+'</td>'
+      +'<td>'+num(p.entry_price)+'</td>'
+      +'<td style="color:'+(p.cmp!=null?'var(--blu)':'var(--mut)')+'">'+(p.cmp!=null?num(p.cmp):'--')+'</td>'
+      +'<td>'+(isFut?num(p.target):'--')+'</td>'
+      +'<td>'+(isFut?num(p.stop):'--')+'</td>'
+      +'<td>'+(p.lot_size!=null?p.lot_size:'--')+'</td>'
+      +pnlCell(p.unrealised_pnl)
+      +pctCell(p)
+      +'</tr>';
+  }).join('');
+  body.innerHTML='<table style="width:100%;border-collapse:collapse;min-width:660px">'
+    +'<thead><tr>'
+    +'<th style="text-align:left;cursor:default">ENG</th><th style="text-align:left;cursor:default">SYMBOL</th>'
+    +'<th style="text-align:left;cursor:default">SIDE</th><th style="text-align:left;cursor:default">TYPE</th>'
+    +'<th style="cursor:default">ENTRY</th><th style="cursor:default">CMP</th><th style="cursor:default">TARGET</th>'
+    +'<th style="cursor:default">STOP</th><th style="cursor:default">QTY</th><th style="cursor:default">P&amp;L</th>'
+    +'<th style="cursor:default">P&amp;L% <span title="P&amp;L% is on entry notional (entry price x qty)" style="cursor:help;opacity:.7">&#9432;</span></th>'
+    +'</tr></thead><tbody>'+trs+'</tbody></table>';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeInfo();closeVix();closeNiftyPcr();closeBankniftyPcr();closeIdxPos();}});
 
 // cc#273: sector card click-through — reuse the infoModal to list every stock in the clicked
 // sector with its own 1D/1W/1M returns, from cache.metricsAll (NO new fetch). sortTbl-driven,
