@@ -1767,6 +1767,72 @@ def _log_feed_alert_ops(cur, source, kind, message, age_min):
         log.warning(f"_log_feed_alert_ops: {e}")
 
 
+# cc#501 item_4 (merges cc#475's alert scope, weekend-gated, 18-Jul-2026 = Saturday): relay
+# worker-written ops_log(category='alert') incidents to Telegram -- feed_watchdog_reconnect,
+# feed_watchdog_exit, feed_boot_gap>15min during market hours, and the housekeeping 3-strikes
+# exit (housekeeping_db_dead_exit). feed_silent_at_open is already covered by
+# _bg_feed_staleness_watch's 09:35 first-bar-of-day check above -- not duplicated here. Runs in
+# the MAIN APP (not the worker) so the relay survives the worker dying outright -- same principle
+# as cc#475's staleness watch. High-water-mark persisted in app_config (NOT an in-process global
+# like _FEED_ALERT_STATE) so a main-app redeploy (auto-deploy fires ~90s after every push) never
+# replays old incidents; the first-ever run seeds the mark to the current max id with no alerts
+# (avoids a backlog blast on rollout) and only relays rows written after that.
+_FEED_INCIDENT_TITLES = ("feed_watchdog_reconnect", "feed_watchdog_exit",
+                         "housekeeping_db_dead_exit", "feed_boot_gap")
+_FEED_INCIDENT_LAST_ID_KEY = "feed_incident_relay_last_ops_log_id"
+
+def _bg_feed_incident_relay():
+    try:
+        import v10_st_ema
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT NOW())""")
+            conn.commit()
+            cur.execute("SELECT value FROM app_config WHERE key=%s", (_FEED_INCIDENT_LAST_ID_KEY,))
+            row = cur.fetchone()
+            if not row or row[0] is None:
+                cur.execute("SELECT COALESCE(MAX(id), 0) FROM ops_log")
+                seed_id = cur.fetchone()[0]
+                cur.execute("""INSERT INTO app_config (key, value, updated_at) VALUES (%s,%s,NOW())
+                               ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
+                            (_FEED_INCIDENT_LAST_ID_KEY, str(seed_id)))
+                conn.commit()
+                return
+            last_id = int(row[0])
+
+            cur.execute("""SELECT id, title, details FROM ops_log
+                           WHERE category='alert' AND title = ANY(%s) AND id > %s
+                           ORDER BY id ASC LIMIT 50""", (list(_FEED_INCIDENT_TITLES), last_id))
+            rows = cur.fetchall()
+            max_id = last_id
+            for rid, title, details in rows:
+                max_id = max(max_id, rid)
+                d = details if isinstance(details, dict) else {}
+                if title == "feed_boot_gap":
+                    gap = d.get("gap_min")
+                    if not (d.get("market_open") and gap is not None and float(gap) > 15):
+                        continue   # cc#501: only >15min during market hours, not every boot gap
+                    msg = f"FEED BOOT GAP — {float(gap):.0f} min since last bar at boot (market open). Check truthful-friendship."
+                elif title == "feed_watchdog_reconnect":
+                    msg = f"FEED WATCHDOG — forced reconnect ({d.get('detail','')})."
+                elif title == "feed_watchdog_exit":
+                    msg = f"FEED WATCHDOG — exiting for a Railway restart ({d.get('detail','')})."
+                elif title == "housekeeping_db_dead_exit":
+                    msg = f"FEED WORKER — housekeeping DB conn dead after 3 consecutive failures, exiting ({d.get('detail','')})."
+                else:
+                    continue
+                v10_st_ema.telegram_alert(msg)
+                _log_feed_alert_ops(cur, "worker", title, msg, None)
+                conn.commit()
+            if max_id != last_id:
+                cur.execute("""INSERT INTO app_config (key, value, updated_at) VALUES (%s,%s,NOW())
+                               ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
+                            (_FEED_INCIDENT_LAST_ID_KEY, str(max_id)))
+                conn.commit()
+    except Exception as e:
+        log.error(f"_bg_feed_incident_relay: {e}")
+
+
 _tc_scanner_running = False   # cc#464: single-flight guard for the 15-min scan+exit-check
 
 
@@ -1895,6 +1961,10 @@ async def _scheduler_loop():
         if _is_market_hours(now) and m % 5 == 0:
             _spawn(_bg_signal_writer)
             _spawn(_bg_feed_staleness_watch)   # cc#475: independent feed-worker watchdog + Telegram alert
+        if m % 5 == 0:
+            # cc#501 item_4: NOT market-hours-gated — worker incidents (reconnect/exit/housekeeping
+            # 3-strikes) can happen any time the always-on worker is running, incl. pre/post-market.
+            _spawn(_bg_feed_incident_relay)
         # cc#442: V14 intraday engine 5-min cycle (paper) — app-side, trading days only, market hours.
         # Read-only on V8/V10; does NOT touch worker/** (Phase A safe).
         if _is_market_hours(now) and _is_trading_day(now.date()) and m % 5 == 0:
