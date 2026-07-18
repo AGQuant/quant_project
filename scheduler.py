@@ -1628,6 +1628,19 @@ def _bg_mf_weekly_manual():
         _mf_weekly_manual_running = False
 
 
+def _bg_mf_score_nightly():
+    """cc#520 step_4: nightly MQS recompute (category averages + scores) -- pure reads of already-
+    stored mf_master data, zero external HTTP calls. Distinct from cc#499's disabled scraping jobs:
+    the founder explicitly wants the score COMPUTE to keep running nightly even with scraping off
+    ("cc#499 deactivates SCRAPERS only, the score compute from stored data stays")."""
+    try:
+        import mf_pipeline
+        res = mf_pipeline.run_mf_score_nightly()
+        log.info(f"_bg_mf_score_nightly: {res}")
+    except Exception as e:
+        log.error(f"_bg_mf_score_nightly: {e}")
+
+
 def _bg_mf_aum_monthly():
     """cc#477 phase_4, cadence moved to the 12th by cc#491 course-correct (session_log id=4734):
     monthly comprehensive job — AUM, TER, holdings (crawled AMC registry), monthly AUM/TER
@@ -2062,6 +2075,7 @@ async def _scheduler_loop():
         # an app_config flag to 'pending', these poll and pick it up within ~3 min) and per spec
         # "manual trigger endpoints STAY -- they become on-demand-only", so they stay registered.
         # if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile -- DISABLED cc#499
+        if h == 1 and m == 20:  _spawn(_bg_mf_score_nightly)   # cc#520: MQS recompute stays on -- pure compute, no scraping
         if m % 3 == 0:          _spawn(_bg_mf_returns_backfill)  # flag-gated -- manual /returns_backfill arm only
         if m % 3 == 1:          _spawn(_bg_mf_v15_wiring)  # flag-gated -- manual /wire_all or /run_monthly arm only
         if m % 3 == 2:          _spawn(_bg_mf_weekly_manual)  # flag-gated -- manual /run_weekly arm only

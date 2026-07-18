@@ -78,6 +78,18 @@ def ensure_tables(cur):
         match_score NUMERIC, resolved_at TIMESTAMPTZ DEFAULT NOW())""")
 
 
+# cc#520: hard category whitelist -- AMFI's 11 equity-oriented open-ended categories, verbatim as
+# they appear in mf_master.category after _derive_cat() normalization. "Banking & PSU" (debt) is
+# the only category currently present in mf_master outside this whitelist -- excluded everywhere a
+# fund enters the equity universe (scoring, category averages, screener, search) via this ONE
+# constant rather than a scattered "<> 'Banking & PSU'" string check repeated per call site.
+EQUITY_CATEGORY_WHITELIST = (
+    "Dividend Yield Fund", "ELSS", "Flexi Cap Fund", "Focused Fund", "Large Cap Fund",
+    "Large & Mid Cap Fund", "Mid Cap Fund", "Multi Cap Fund", "Sectoral/Thematic Fund",
+    "Small Cap Fund", "Value Fund/Contra Fund",
+)
+
+
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
 # Nippon India Large Cap appeared TWICE (rows 4 & 6) in the founder sheet — seeded once, flagged for
 # resolution. cc#505 (18-Jul-2026): the seed sheet's rating column (brand retired) is no longer
@@ -1104,12 +1116,14 @@ def v15_search(q: str = "", limit: int = 12):
         return {"count": 0, "results": []}
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
+        # cc#520: debt strays (Banking & PSU) must not appear in search results.
         cur.execute("""SELECT scheme_code, name, amc, category FROM mf_master
-                       WHERE name ILIKE %s OR amc ILIKE %s OR category ILIKE %s
+                       WHERE (name ILIKE %s OR amc ILIKE %s OR category ILIKE %s)
+                         AND category = ANY(%s)
                        ORDER BY (name ILIKE '%%direct%%' AND name ILIKE '%%growth%%') DESC,
                                 curated DESC, length(name), name
                        LIMIT %s""",
-                    (f"%{q}%", f"%{q}%", f"%{q}%", max(1, min(limit, 25))))
+                    (f"%{q}%", f"%{q}%", f"%{q}%", list(EQUITY_CATEGORY_WHITELIST), max(1, min(limit, 25))))
         rows = [{"scheme_code": sc, "name": nm, "amc": amc,
                  "category": _derive_cat(nm, cat), "plan": _derive_plan(nm)}
                 for sc, nm, amc, cat in cur.fetchall()]
@@ -1157,8 +1171,9 @@ def v15_screener(category: str = "", sort: str = "1y", limit: int = 40):
             _ensure_returns_cols(cur); conn.commit()
         except Exception:
             conn.rollback()
-        where = ["name ILIKE '%%direct%%'", "name ILIKE '%%growth%%'"]
-        params = []
+        # cc#520: debt strays (Banking & PSU) must not appear in the screener.
+        where = ["name ILIKE '%%direct%%'", "name ILIKE '%%growth%%'", "category = ANY(%s)"]
+        params = [list(EQUITY_CATEGORY_WHITELIST)]
         if cat:
             where.append("(category ILIKE %s OR name ILIKE %s)")
             params += [f"%{cat}%", f"%{cat}%"]
@@ -1205,11 +1220,11 @@ def mf_search(q: str = "", limit: int = 20):
 
 def _canonical_equity_universe(cur):
     """V15_EQUITY_UNIVERSE_V1 (session_log id=4334, locked 16-Jul, AFTER this task was filed):
-    mf_master rows with a non-NULL category, excluding Banking & PSU (a debt category, out of
-    scope for the equity-focused V15 MQS). Supersedes the original 635-fund proxy candidate
-    set from the pre-amendment spec. Verified live 17-Jul: 519 rows match this filter."""
+    mf_master rows in the cc#520 hard category whitelist (the 11 equity-oriented categories,
+    excluding Banking & PSU debt -- out of scope for the equity-focused V15 MQS). Supersedes the
+    original 635-fund proxy candidate set from the pre-amendment spec."""
     cur.execute("""SELECT scheme_code, amfi_code, name, category FROM mf_master
-                   WHERE category IS NOT NULL AND category <> 'Banking & PSU'""")
+                   WHERE category = ANY(%s)""", (list(EQUITY_CATEGORY_WHITELIST),))
     return cur.fetchall()
 
 
@@ -1750,9 +1765,9 @@ def compute_mf_category_averages(conn=None):
             cur.execute("""
                 SELECT category, AVG(expense_ratio), AVG(ret_1y), AVG(ret_3y), AVG(ret_5y), COUNT(*)
                 FROM mf_master
-                WHERE category IS NOT NULL AND category <> 'Banking & PSU'
+                WHERE category = ANY(%s)
                 GROUP BY category
-            """)
+            """, (list(EQUITY_CATEGORY_WHITELIST),))
             rows = cur.fetchall()
             for cat, avg_er, avg_1y, avg_3y, avg_5y, n in rows:
                 cur.execute("""INSERT INTO mf_category_averages
@@ -1763,10 +1778,17 @@ def compute_mf_category_averages(conn=None):
                         avg_ret_3y=EXCLUDED.avg_ret_3y, avg_ret_5y=EXCLUDED.avg_ret_5y,
                         n_funds=EXCLUDED.n_funds, updated_at=NOW()""",
                     (cat, avg_er, avg_1y, avg_3y, avg_5y, n))
+            # cc#520: purge stray/stale category rows outside the whitelist (Banking & PSU debt +
+            # old-naming-convention rows from the pre-_derive_cat 12-fund seed era, e.g. bare
+            # "Flexi Cap" alongside the real "Flexi Cap Fund") -- these must not linger and feed a
+            # red-flag TER check or a screener tab that no longer matches any real fund.
+            cur.execute("DELETE FROM mf_category_averages WHERE NOT (category = ANY(%s))",
+                        (list(EQUITY_CATEGORY_WHITELIST),))
+            purged = cur.rowcount
             conn.commit()
-            _oplog(cur, "MF_CATEGORY_AVERAGES", {"categories": len(rows)})
+            _oplog(cur, "MF_CATEGORY_AVERAGES", {"categories": len(rows), "purged_stale": purged})
             conn.commit()
-        return {"categories": len(rows)}
+        return {"categories": len(rows), "purged_stale": purged}
     finally:
         if own:
             conn.close()
@@ -1804,6 +1826,20 @@ def compute_mf_scores(conn=None):
     Missing pillars are EXCLUDED and weights renormalized among what IS available, rather
     than fabricating a neutral fill-in for missing data.
 
+    cc#520 FORMULA VERIFICATION (18-Jul-2026, before the full re-run): read end-to-end -- ZERO
+    read/write of finkhoz_rating anywhere in this function (grepped the whole file: the column
+    name appears exactly once, in ensure_tables()'s DEPRECATED DDL comment, never in scoring
+    logic). No other retired input is read (only mf_master.expense_ratio/aum_cr/ret_1y/ret_3y/
+    ret_5y + mf_category_averages, all live/current columns). The locked target weights (Q0.35/
+    R0.30/C0.15/S0.20) match the ORIGINAL Excel-model intent cited above; Q has been permanently
+    absent since cc#505 (its only data source, the rating brand, was retired with no
+    replacement) -- every fund renormalizes across whichever of R/C/S it has data for via
+    `wsum = sum(weights.values())` below, which is exactly the founder's "missing external rating
+    NEVER zeroes a pillar" rule applied consistently (Q is missing for 100% of funds, not a
+    per-fund gap, so every fund's weights renormalize the same way: R/C/S -> ~46.2%/23.1%/30.8%
+    of the total when all three are present). No code change was needed to satisfy this rule --
+    already correct.
+
       Returns (30%): ret_1y (fallback ret_3y, then ret_5y CAGR) vs the SAME horizon's category
         average -> 50 +/- 3x the pct-point delta, clipped 0-100.
       Cost    (15%): expense_ratio vs category average -> 50 - 20x the delta (cheaper=higher).
@@ -1822,14 +1858,15 @@ def compute_mf_scores(conn=None):
             cat_avg = {r[0]: {"er": _f2(r[1]), "r1y": _f2(r[2]), "r3y": _f2(r[3]), "r5y": _f2(r[4])}
                        for r in cur.fetchall()}
             cur.execute("""SELECT category, AVG(aum_cr) FROM mf_master
-                           WHERE category IS NOT NULL AND category <> 'Banking & PSU'
-                             AND aum_cr IS NOT NULL GROUP BY category""")
+                           WHERE category = ANY(%s)
+                             AND aum_cr IS NOT NULL GROUP BY category""",
+                        (list(EQUITY_CATEGORY_WHITELIST),))
             cat_aum_avg = {r[0]: _f2(r[1]) for r in cur.fetchall()}
 
             cur.execute("""SELECT scheme_code, category, expense_ratio, aum_cr,
                                   ret_1y, ret_3y, ret_5y
                            FROM mf_master
-                           WHERE category IS NOT NULL AND category <> 'Banking & PSU'""")
+                           WHERE category = ANY(%s)""", (list(EQUITY_CATEGORY_WHITELIST),))
             rows = cur.fetchall()
             scored = 0
             for sc, cat, er, aum, r1y, r3y, r5y in rows:
@@ -1864,10 +1901,35 @@ def compute_mf_scores(conn=None):
                             (sc, round(mqs, 2), pillars.get("q"), pillars.get("r"),
                              pillars.get("c"), pillars.get("s")))
                 scored += 1
+            # cc#520: purge any stray mf_scores rows for schemes outside the whitelist (Banking &
+            # PSU debt funds scored by an older pre-exclusion pass) -- they must not surface in the
+            # screener/search MQS column.
+            cur.execute("""DELETE FROM mf_scores WHERE scheme_code IN (
+                               SELECT scheme_code FROM mf_master WHERE NOT (category = ANY(%s))
+                           )""", (list(EQUITY_CATEGORY_WHITELIST),))
+            purged = cur.rowcount
             conn.commit()
-            _oplog(cur, "MF_SCORES_COMPUTED", {"universe": len(rows), "scored": scored})
+            _oplog(cur, "MF_SCORES_COMPUTED", {"universe": len(rows), "scored": scored, "purged_stale": purged})
             conn.commit()
-        return {"universe": len(rows), "scored": scored}
+        return {"universe": len(rows), "scored": scored, "purged_stale": purged}
+    finally:
+        if own:
+            conn.close()
+
+
+def run_mf_score_nightly(conn=None):
+    """cc#520 step_4: nightly MQS recompute -- category averages then scores, both PURE reads of
+    already-stored mf_master data (zero external HTTP calls). Distinct from the scraping jobs
+    cc#499 disabled: cc#499 turned off fetching NEW data from AMFI/mfapi/Moneycontrol on a timer;
+    this recomputes scores FROM whatever data already sits in mf_master, which the founder
+    explicitly wants to stay on a real nightly cadence ("the score compute from stored data
+    stays"). Safe to schedule unconditionally -- idempotent, no network, sub-second for ~519 rows."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        avgs = compute_mf_category_averages(conn)
+        scores = compute_mf_scores(conn)
+        return {"averages": avgs, "scores": scores}
     finally:
         if own:
             conn.close()
@@ -1928,6 +1990,16 @@ def run_v15_wiring(conn=None):
     finally:
         if own:
             conn.close()
+
+
+@router.post("/api/v15/mf/score_recompute")
+def mf_score_recompute():
+    """cc#520: synchronous MQS recompute (category averages + scores) -- pure DB compute, no
+    external HTTP calls, sub-second for ~519 rows, so this runs directly rather than via the
+    flag-arm-and-poll pattern the scraping jobs use. Same function the nightly 01:20 IST scheduler
+    slot calls; exposed here so the full re-run can be forced on demand (verification, or after a
+    manual data fix) instead of waiting for the nightly slot."""
+    return run_mf_score_nightly()
 
 
 @router.post("/api/v15/mf/wire_all")
