@@ -539,6 +539,19 @@ def _section_scheduler(cur) -> Dict:
     age, ts = _ops_age_min(cur, 'v21_killswitch', 'scheduler_health')
     checks.append(_sched_row('V2.1 kill-switch (16:10)', age, ts, 'weekdays 16:10 IST', yellow_h=74.0))
 
+    # cc#524 QUARTERLY UPDATE FRAMEWORK coverage -- T+1 (daily), Saturday scoped retry
+    # (weekly), season-close sweep (quarterly: Sep/Dec/Mar/Jun 1st).
+    age, ts = _ops_age_min(cur, 'OPS_METRICS_T1_RUN', 'ops_metrics_pull')
+    checks.append(_sched_row('Ops-metrics T+1 refresh (~08:00)', age, ts, 'daily ~08:00 IST'))
+
+    age, ts = _ops_age_min(cur, 'OPS_METRICS_SATURDAY_RETRY', 'ops_metrics_pull')
+    checks.append(_sched_row('Ops-metrics Saturday retry (10:00)', age, ts,
+                             'Saturdays 10:00 IST', green_h=170.0, yellow_h=200.0))
+
+    age, ts = _ops_age_min(cur, 'OPS_METRICS_SEASON_SWEEP_DONE', 'ops_metrics_pull')
+    checks.append(_sched_row('Ops-metrics season sweep', age, ts,
+                             'Sep/Dec/Mar/Jun 1st 10:00 IST', green_h=2400.0, yellow_h=3120.0))
+
     return {'name': 'Scheduler', 'checks': checks, 'status': _status(checks)}
 
 

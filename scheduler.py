@@ -1789,30 +1789,77 @@ def _bg_ops_metrics_backfill():
         _ops_metrics_running = False
 
 
-_ops_metrics_monthly_armed_month = None   # cc#523: day-lock so the 5th only arms once per calendar month
+# cc#524 QUARTERLY UPDATE FRAMEWORK (OPS_METRICS_FRAMEWORK_V1) supersedes cc#523's simple
+# "monthly 5th" re-arm (spec: "the earlier off-season monthly 5th sweep is REPLACED by the four
+# season-close bulk sweeps"). Three day-locked triggers below: daily T+1, Saturday scoped retry,
+# and the Sep/Dec/Mar/Jun season-close sweep. Each just calls into ops_metrics_pipeline's
+# already-built run_t1_refresh/run_saturday_retry/run_season_sweep -- scheduler.py only owns
+# the cadence, not the logic (same split as every other _bg_* wrapper in this file).
+
+_ops_metrics_t1_armed_day = None
+_ops_metrics_saturday_armed_day = None
+_ops_metrics_season_armed_month = None
 
 
-def _bg_ops_metrics_monthly():
-    """cc#523 spec item 4 (SOURCE DISCOVERY addendum): monthly incremental re-run, 5th of each
-    month -- results are "mostly filed by then". Just re-arms the SAME backfill flag
-    _bg_ops_metrics_backfill polls every tick; run_company's idempotency check means companies
-    with no new filing since last run cost nothing (status='already_current'), only genuinely
-    new quarters get extracted. Day-locked to fire once per month (mirrors the existing
-    now.day==N convention used elsewhere in this file, e.g. the disabled cc#499 day==12 job)."""
-    global _ops_metrics_monthly_armed_month
+def _bg_ops_metrics_t1():
+    """cc#524 item 1: T+1 -- once daily ~08:00 IST, refresh every company whose
+    earnings_calendar row flipped to status='reported' yesterday (fundamentals re-scrape +
+    ops-metrics doc discovery/extraction, one screener visit per company)."""
+    global _ops_metrics_t1_armed_day
     now = datetime.now(IST)
-    month_key = f"{now.year}-{now.month:02d}"
-    if _ops_metrics_monthly_armed_month == month_key:
+    if not (now.hour == 8 and now.minute < 10):
         return
+    day_key = now.date().isoformat()
+    if _ops_metrics_t1_armed_day == day_key:
+        return
+    _ops_metrics_t1_armed_day = day_key
     try:
-        with _conn() as conn, conn.cursor() as cur:
-            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','pending',NOW()) "
-                        "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
-            conn.commit()
-        _ops_metrics_monthly_armed_month = month_key
-        log.info(f"_bg_ops_metrics_monthly: armed for {month_key}")
+        import ops_metrics_pipeline
+        res = ops_metrics_pipeline.run_t1_refresh()
+        log.info(f"_bg_ops_metrics_t1: {res}")
     except Exception as e:
-        log.error(f"_bg_ops_metrics_monthly: {e}")
+        log.error(f"_bg_ops_metrics_t1: {e}")
+
+
+def _bg_ops_metrics_saturday():
+    """cc#524 item 2: Saturday 10:00 IST SCOPED retry -- only earnings-calendar-dated
+    companies whose T+1 run failed or found docs unpublished."""
+    global _ops_metrics_saturday_armed_day
+    now = datetime.now(IST)
+    if not (now.weekday() == 5 and now.hour == 10 and now.minute < 10):
+        return
+    day_key = now.date().isoformat()
+    if _ops_metrics_saturday_armed_day == day_key:
+        return
+    _ops_metrics_saturday_armed_day = day_key
+    try:
+        import ops_metrics_pipeline
+        res = ops_metrics_pipeline.run_saturday_retry()
+        log.info(f"_bg_ops_metrics_saturday: {res}")
+    except Exception as e:
+        log.error(f"_bg_ops_metrics_saturday: {e}")
+
+
+def _bg_ops_metrics_season_sweep():
+    """cc#524 item 3: one paced sweep each in Sep/Dec/Mar/Jun (1st of month, 10:00 IST) for
+    companies with no tracked earnings_calendar result date -- staleness predicate on the
+    latest stored fundamentals_history quarter (~120 days), not a blind scrape."""
+    global _ops_metrics_season_armed_month
+    now = datetime.now(IST)
+    if now.month not in (3, 6, 9, 12):
+        return
+    if not (now.day == 1 and now.hour == 10 and now.minute < 10):
+        return
+    month_key = f"{now.year}-{now.month:02d}"
+    if _ops_metrics_season_armed_month == month_key:
+        return
+    _ops_metrics_season_armed_month = month_key
+    try:
+        import ops_metrics_pipeline
+        res = ops_metrics_pipeline.run_season_sweep(dry_run=False)
+        log.info(f"_bg_ops_metrics_season_sweep: {res}")
+    except Exception as e:
+        log.error(f"_bg_ops_metrics_season_sweep: {e}")
 
 
 # cc#475: feed staleness Telegram alert — INDEPENDENT of the signal-writer watchdogs (which
@@ -2153,8 +2200,10 @@ async def _scheduler_loop():
         # if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)   # unconditional monthly cron -- DISABLED cc#499
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
-        _spawn(_bg_ops_metrics_backfill)   # cc#523: flag-gated, checked every tick (500-company first leg + monthly re-arms)
-        if now.day == 5:  _spawn(_bg_ops_metrics_monthly)   # cc#523: monthly incremental re-run, results mostly filed by the 5th
+        _spawn(_bg_ops_metrics_backfill)   # cc#523/524: flag-gated, checked every tick (500-company x 4Q first leg)
+        _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
+        _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
+        _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market
