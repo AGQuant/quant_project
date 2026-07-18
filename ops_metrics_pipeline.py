@@ -106,18 +106,25 @@ def ensure_tables(cur):
         tier TEXT NOT NULL DEFAULT 'core',                 -- 'core' | 'extended'
         UNIQUE(sector, metric_name))""")
 
+    # cc#527: this table already existed live (pre-dates this session, seeded 14-Jun-2026)
+    # with a schema that does not match what earlier code assumed -- CREATE TABLE IF NOT
+    # EXISTS was a silent no-op against it the whole time. Rewritten here to match the real
+    # live columns (id SERIAL PK, created_at/updated_at not computed_at, confidence CHECK
+    # requires UPPERCASE, plus company_name/discrepancy_flag/verified_at) so a fresh DB would
+    # create something compatible with what write_extraction() below actually writes.
     cur.execute("""CREATE TABLE IF NOT EXISTS sector_ops_metrics (
-        id BIGSERIAL PRIMARY KEY, symbol TEXT NOT NULL, sector TEXT,
+        id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, sector TEXT,
         metric_name TEXT NOT NULL, metric_value NUMERIC, unit TEXT, quarter TEXT NOT NULL,
-        confidence TEXT,           -- 'high' | 'medium' | 'low' | NULL (no data either pass)
+        confidence TEXT CHECK (confidence IN ('HIGH','MEDIUM','LOW')),
         source_1 TEXT,             -- presentation quote, <=300 chars
         source_1_value NUMERIC,
         source_2 TEXT,             -- transcript quote, <=300 chars
         source_2_value NUMERIC,
         discrepancy_pct NUMERIC,   -- |v1-v2| / max(|v1|,|v2|) * 100, both-present only
         notes TEXT,
-        computed_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(symbol, metric_name, quarter))""")
+        company_name TEXT, discrepancy_flag BOOLEAN DEFAULT FALSE, verified_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT now(), updated_at TIMESTAMP DEFAULT now(),
+        UNIQUE(symbol, quarter, metric_name))""")
     cur.execute("CREATE INDEX IF NOT EXISTS ix_som_symbol_q ON sector_ops_metrics(symbol, quarter)")
 
     # cc#524 widened the PK from (symbol, doc_type) to (symbol, doc_type, quarter) so the depth
@@ -164,6 +171,17 @@ def ensure_tables(cur):
         symbol TEXT NOT NULL, ex_date DATE NOT NULL, queued_at TIMESTAMPTZ DEFAULT NOW(),
         processed_at TIMESTAMPTZ, status TEXT DEFAULT 'pending',   -- 'pending'|'done'|'failed'
         PRIMARY KEY(symbol, ex_date))""")
+
+    # cc#527 PHASE-SPLIT: storage-guard AMENDMENT (founder-approved 18-Jul) -- truncated PLAIN
+    # TEXT (never raw PDF bytes) may be persisted here so extraction can run later as pure DB
+    # reads, decoupled from the fragile scrape step. Rows are deletable once their extraction
+    # is confirmed good, but nothing auto-deletes them -- founder decides retention later.
+    cur.execute("""CREATE TABLE IF NOT EXISTS doc_texts (
+        symbol TEXT NOT NULL, doc_type TEXT NOT NULL, quarter TEXT NOT NULL,
+        url TEXT, text_content TEXT, char_count INTEGER,
+        fetched_at TIMESTAMPTZ DEFAULT NOW(),
+        extract_status TEXT DEFAULT 'stored',   -- 'stored'|'extracted'|'failed_fetch'
+        PRIMARY KEY(symbol, doc_type, quarter))""")
 
 
 # ── 2. SECTOR TAXONOMY (see HONESTY NOTE 1) ─────────────────────────────────────
@@ -728,17 +746,24 @@ def run_extraction(symbol, sector, registry, pres_text, trans_text, quarter_hint
 
 
 def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
+    # cc#527 fix: the live sector_ops_metrics table (pre-existing, see ensure_tables note above)
+    # has no computed_at column -- it has created_at/updated_at instead -- and its confidence
+    # CHECK constraint requires UPPERCASE 'HIGH'/'MEDIUM'/'LOW'. Every write_extraction() call
+    # since cc#523 was failing with "column computed_at does not exist" on this exact INSERT;
+    # internal confidence comparisons (_merge_pass/_should_escalate) stay lowercase, only the
+    # value written to the DB is upper-cased here.
     for name, m in metrics.items():
+        confidence = m["confidence"].upper() if m["confidence"] else None
         cur.execute("""INSERT INTO sector_ops_metrics
             (symbol, sector, metric_name, metric_value, unit, quarter, confidence,
-             source_1, source_1_value, source_2, source_2_value, discrepancy_pct, computed_at)
+             source_1, source_1_value, source_2, source_2_value, discrepancy_pct, updated_at)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
-            ON CONFLICT (symbol, metric_name, quarter) DO UPDATE SET
+            ON CONFLICT (symbol, quarter, metric_name) DO UPDATE SET
               metric_value=EXCLUDED.metric_value, unit=EXCLUDED.unit, confidence=EXCLUDED.confidence,
               source_1=EXCLUDED.source_1, source_1_value=EXCLUDED.source_1_value,
               source_2=EXCLUDED.source_2, source_2_value=EXCLUDED.source_2_value,
-              discrepancy_pct=EXCLUDED.discrepancy_pct, computed_at=NOW()""",
-                    (symbol, sector, name, m["value"], m["unit"], quarter, m["confidence"],
+              discrepancy_pct=EXCLUDED.discrepancy_pct, updated_at=NOW()""",
+                    (symbol, sector, name, m["value"], m["unit"], quarter, confidence,
                      m["source_1"], m["source_1_value"], m["source_2"], m["source_2_value"],
                      m["discrepancy_pct"]))
     if concall is not None and (concall.get("summary") or concall.get("guidance")):
@@ -950,6 +975,166 @@ def run_company_depth(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
         except Exception as e2:
             log.error(f"run_company_depth: _record_failure ALSO failed for {symbol}: {e2}")
         return {"symbol": symbol, "status": "error", "error": err_text[:200], "quarters": []}
+    finally:
+        if own:
+            conn.close()
+
+
+def run_company_text_fetch(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
+    """cc#527 PHASE-SPLIT: fetch + store TEXT ONLY -- discover docs, fetch each PDF, extract
+    plain text, write to doc_texts. NO anthropic_call, NO write_extraction, NO
+    post_extraction_chain -- this is the fragile scrape step decoupled from extraction so a
+    future extraction pass is a pure DB read with zero re-scraping. Registry-independent (no
+    _registry_for_sector gate) since fetching docs has nothing to do with what metrics a
+    sector's KPI registry defines. ~3-4x faster per company than run_company_depth (no LLM
+    calls in the loop)."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            sector = _sector_for_symbol(cur, symbol)
+
+            try:
+                docs_multi = _discover_docs_multi(symbol, max_quarters=max_quarters)
+                _upsert_doc_registry(cur, symbol, docs_multi)
+                conn.commit()
+            except Exception as e:
+                err_text = f"discovery failed: {type(e).__name__}: {e}"
+                log.warning(f"run_company_text_fetch discovery failed for {symbol}: {err_text}")
+                _record_failure(cur, symbol, err_text)
+                conn.commit()
+                return {"symbol": symbol, "status": "fetch_blocked", "sector": sector,
+                        "error": err_text[:200], "quarters": []}
+
+            by_quarter = {}
+            for dt in ("presentation", "transcript"):
+                for entry in docs_multi.get(dt) or []:
+                    q = entry.get("quarter") or "unspecified"
+                    by_quarter.setdefault(q, {})[dt] = entry
+
+            quarters_done = []
+            any_ok = False
+            for quarter, entries in list(by_quarter.items())[:max_quarters]:
+                for dt in ("presentation", "transcript"):
+                    entry = entries.get(dt)
+                    if not entry or not entry.get("url"):
+                        continue
+                    url = entry["url"]
+                    text = _fetch_pdf_text(url, dt)
+                    if not text:
+                        cur.execute("""INSERT INTO doc_texts (symbol, doc_type, quarter, url, text_content,
+                                       char_count, fetched_at, extract_status)
+                                       VALUES (%s,%s,%s,%s,NULL,0,NOW(),'failed_fetch')
+                                       ON CONFLICT (symbol, doc_type, quarter) DO UPDATE SET
+                                         url=EXCLUDED.url, text_content=NULL, char_count=0,
+                                         fetched_at=NOW(), extract_status='failed_fetch'""",
+                                    (symbol, dt, quarter, url))
+                        continue
+                    cur.execute("""INSERT INTO doc_texts (symbol, doc_type, quarter, url, text_content,
+                                   char_count, fetched_at, extract_status)
+                                   VALUES (%s,%s,%s,%s,%s,%s,NOW(),'stored')
+                                   ON CONFLICT (symbol, doc_type, quarter) DO UPDATE SET
+                                     url=EXCLUDED.url, text_content=EXCLUDED.text_content,
+                                     char_count=EXCLUDED.char_count, fetched_at=NOW(), extract_status='stored'""",
+                                (symbol, dt, quarter, url, text, len(text)))
+                    cur.execute("""UPDATE doc_registry SET extracted_at=NOW(), extract_status='ok'
+                                   WHERE symbol=%s AND doc_type=%s AND quarter=%s""", (symbol, dt, quarter))
+                    any_ok = True
+                conn.commit()
+                quarters_done.append({"quarter": quarter, "status": "ok" if any_ok else "no_docs"})
+                time.sleep(0.5)   # polite pacing between quarters of the same company
+
+            if any_ok:
+                _clear_failure(cur, symbol)
+            else:
+                no_docs_reason = ("no presentation/transcript filings discovered at all" if not by_quarter
+                                   else f"discovered {len(by_quarter)} quarter(s) but no PDF text extracted")
+                _record_failure(cur, symbol, no_docs_reason)
+            conn.commit()
+            return {"symbol": symbol, "status": "ok" if any_ok else "no_docs", "sector": sector,
+                    "quarters": quarters_done}
+    except Exception as e:
+        err_text = f"{type(e).__name__}: {e}"
+        log.error(f"run_company_text_fetch failed for {symbol}: {err_text}", exc_info=True)
+        try:
+            with conn.cursor() as cur:
+                _record_failure(cur, symbol, err_text)
+                conn.commit()
+        except Exception as e2:
+            log.error(f"run_company_text_fetch: _record_failure ALSO failed for {symbol}: {e2}")
+        return {"symbol": symbol, "status": "error", "error": err_text[:200], "quarters": []}
+    finally:
+        if own:
+            conn.close()
+
+
+TEXT_FETCH_CURSOR_KEY = "ops_text_fetch_cursor"
+TEXT_FETCH_RUN_FLAG_KEY = "ops_text_fetch_run"   # 'pending' | 'running' | 'done'
+
+
+def run_text_fetch_backfill(conn=None, stop_event=None):
+    """cc#527 PHASE-SPLIT phase 1 runner: identical skeleton to run_ops_metrics_backfill --
+    SAME universe builder (_build_universe, shared cache/key: it's just "which 500 companies in
+    priority order", not run-state) but its OWN cursor/flag app_config keys -- the old
+    ops_metrics_backfill_run/cursor stay completely untouched, this is a separate resumable job,
+    not a variant of the old one. Fetch-only: no LLM calls in the loop, ~3-4x faster per company."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            universe = _build_universe(cur)
+            cursor = _cfg_get(cur, TEXT_FETCH_CURSOR_KEY)
+            start_idx = (universe.index(cursor) + 1) if (cursor and cursor in universe) else 0
+            pending = universe[start_idx:]
+            conn.commit()
+
+        ok = miss = err = blocked = 0
+        sample_error = None
+        for i, sym in enumerate(pending):
+            if stop_event is not None and stop_event.is_set():
+                break
+            r = run_company_text_fetch(sym)
+            if r["status"] == "ok":
+                ok += 1
+            elif r["status"] == "no_docs":
+                miss += 1
+            elif r["status"] == "fetch_blocked":
+                blocked += 1
+                if sample_error is None:
+                    sample_error = r.get("error")
+            elif r["status"] == "error":
+                err += 1
+                if sample_error is None:
+                    sample_error = r.get("error")
+            with conn.cursor() as cur:
+                _cfg_set(cur, TEXT_FETCH_CURSOR_KEY, sym)
+                conn.commit()
+            if (i + 1) % 25 == 0:
+                with conn.cursor() as cur:
+                    _oplog(cur, "OPS_TEXT_FETCH_PROGRESS",
+                           {"done": i + 1, "total": len(pending), "ok": ok, "no_docs": miss,
+                            "fetch_blocked": blocked, "errors": err, "sample_error": sample_error})
+                    conn.commit()
+                sample_error = None
+            time.sleep(OPS_THROTTLE)
+
+        with conn.cursor() as cur:
+            summary = {"universe": len(universe), "processed": len(pending), "ok": ok,
+                       "no_docs": miss, "fetch_blocked": blocked, "errors": err,
+                       "stopped_early": bool(stop_event and stop_event.is_set())}
+            _oplog(cur, "OPS_TEXT_FETCH_DONE", summary)
+            if not (stop_event and stop_event.is_set()):
+                cur.execute("DELETE FROM app_config WHERE key=%s", (TEXT_FETCH_CURSOR_KEY,))
+            conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_total_relation_size('doc_texts')")
+            sz = cur.fetchone()[0] or 0
+            storage = {"doc_texts_bytes": sz, "doc_texts_mb": round(sz / 1048576, 2)}
+            _oplog(cur, "OPS_TEXT_FETCH_STORAGE", storage)
+            conn.commit()
+        return summary
     finally:
         if own:
             conn.close()
@@ -1309,10 +1494,10 @@ def get_company_ops_metrics(symbol: str):
         segment = r[0] if r else None
 
         cur.execute("""SELECT som.symbol, som.metric_name, som.metric_value, som.unit, som.quarter,
-                              som.confidence, som.source_1, som.source_2, som.discrepancy_pct, som.computed_at
+                              som.confidence, som.source_1, som.source_2, som.discrepancy_pct, som.updated_at
                        FROM sector_ops_metrics som JOIN gvm_scores g ON g.symbol = som.symbol
                        WHERE g.segment = %s
-                       ORDER BY som.computed_at ASC""", (segment,))
+                       ORDER BY som.updated_at ASC""", (segment,))
         rows = cur.fetchall()
         registry = _registry_for_sector(cur, sector)
 
@@ -1485,6 +1670,23 @@ def admin_arm_backfill(token: str = ""):
     return {"armed": True, "flag": f"{RUN_FLAG_KEY}=pending"}
 
 
+@router.post("/api/admin/ops_metrics/run_text_fetch/{symbol}")
+def admin_run_text_fetch(symbol: str, token: str = ""):
+    """cc#527: manual single-symbol trigger for the fetch-only phase."""
+    _check_admin(token)
+    return run_company_text_fetch(symbol.strip().upper())
+
+
+@router.post("/api/admin/ops_metrics/arm_text_fetch")
+def admin_arm_text_fetch(token: str = ""):
+    _check_admin(token)
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        _cfg_set(cur, TEXT_FETCH_RUN_FLAG_KEY, "pending")
+        conn.commit()
+    return {"armed": True, "flag": f"{TEXT_FETCH_RUN_FLAG_KEY}=pending"}
+
+
 @router.get("/api/admin/ops_metrics/status")
 def admin_status():
     with _conn() as conn, conn.cursor() as cur:
@@ -1505,14 +1707,25 @@ def admin_status():
         cur.execute("SELECT value FROM app_config WHERE key=%s", (CURSOR_KEY,))
         r = cur.fetchone()
         cursor = r[0] if r else None
+        cur.execute("SELECT COUNT(DISTINCT symbol) FROM doc_texts WHERE text_content IS NOT NULL")
+        n_text_syms = cur.fetchone()[0]
+        cur.execute("SELECT value FROM app_config WHERE key=%s", (TEXT_FETCH_RUN_FLAG_KEY,))
+        r = cur.fetchone()
+        text_fetch_flag = r[0] if r else None
+        cur.execute("SELECT value FROM app_config WHERE key=%s", (TEXT_FETCH_CURSOR_KEY,))
+        r = cur.fetchone()
+        text_fetch_cursor = r[0] if r else None
     return {"registry_rows": n_registry, "doc_registry_symbols": n_doc_syms, "docs_found": n_docs,
             "companies_with_metrics": n_metric_syms, "companies_with_concall": n_concalls,
-            "backfill_run_flag": run_flag, "backfill_cursor": cursor}
+            "backfill_run_flag": run_flag, "backfill_cursor": cursor,
+            "companies_with_stored_text": n_text_syms,
+            "text_fetch_run_flag": text_fetch_flag, "text_fetch_cursor": text_fetch_cursor}
 
 
 _OPS_METRICS_TABLES = ["sector_kpi_registry", "sector_ops_metrics", "doc_registry",
                         "concall_summaries", "sector_ops_trends", "guidance_tracker",
-                        "ops_divergence_flags", "ops_metrics_failures", "ops_metrics_t1_queue"]
+                        "ops_divergence_flags", "ops_metrics_failures", "ops_metrics_t1_queue",
+                        "doc_texts"]
 
 
 def measure_storage_delta(conn=None):

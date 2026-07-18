@@ -97,6 +97,8 @@ _CADENCE_OVERRIDES = {
     "bg_ops_metrics_season_sweep": "1st of Sep/Dec/Mar/Jun, 10:00-10:10 IST (self-gated inside the function; month-locked)",
     "bg_mf_mc_discover": "armed-flag-only (app_config mf_mc_discover_run); checked every tick, runs only when armed",
     "bg_mf_mc_oneshot": "armed-flag-only (app_config mf_mc_oneshot_run); checked every tick, runs only when armed",
+    "bg_ops_text_fetch": "armed-flag-only (app_config ops_text_fetch_run='pending'), window-gated "
+                          "23:00-06:00 IST; checked every tick, runs only when armed and in-window",
 }
 
 

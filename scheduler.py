@@ -1842,6 +1842,61 @@ def _bg_ops_metrics_backfill():
         _ops_metrics_running = False
 
 
+_ops_text_fetch_running = False
+
+
+def _bg_ops_text_fetch():
+    """cc#527 PHASE-SPLIT: flag-gated fetch-only backfill runner -- same pending/running/done +
+    stale-running(>20min)-recovery mechanism as _bg_ops_metrics_backfill above, but its OWN flag
+    key (ops_text_fetch_run, NOT ops_metrics_backfill_run -- that job stays disarmed/untouched
+    for this one-time text fetch) and a WIDER window: 23:00-06:00 IST (founder explicitly wants
+    a 23:00 start tonight; the 01:00 start on the extraction job was CC-inferred politeness, the
+    founder overrides that for this one-time fetch pass)."""
+    global _ops_text_fetch_running
+    if _ops_text_fetch_running:
+        return _SKIPPED
+    now_ist = datetime.now(IST)
+    in_window = now_ist.hour >= 23 or now_ist.hour < 6
+    if not in_window:
+        return _SKIPPED
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("""SELECT value, EXTRACT(EPOCH FROM (NOW()-updated_at))/60.0
+                           FROM app_config WHERE key='ops_text_fetch_run'""")
+            r = cur.fetchone()
+        STALE_RUNNING_MIN = 20
+        is_pending = r and r[0] == 'pending'
+        is_stale_running = r and r[0] == 'running' and r[1] is not None and r[1] > STALE_RUNNING_MIN
+        if not (is_pending or is_stale_running):
+            return _SKIPPED
+        if is_stale_running:
+            log.warning(f"_bg_ops_text_fetch: flag stuck at 'running' for {r[1]:.0f} min -- "
+                        f"treating as an orphaned run and resuming")
+        _ops_text_fetch_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_text_fetch_run','running',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import ops_metrics_pipeline
+        res = ops_metrics_pipeline.run_text_fetch_backfill()
+        log.info(f"_bg_ops_text_fetch: {res}")
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_text_fetch_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+    except Exception as e:
+        log.error(f"_bg_ops_text_fetch: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_text_fetch_run','pending',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _ops_text_fetch_running = False
+
+
 # cc#524 QUARTERLY UPDATE FRAMEWORK (OPS_METRICS_FRAMEWORK_V1) supersedes cc#523's simple
 # "monthly 5th" re-arm (spec: "the earlier off-season monthly 5th sweep is REPLACED by the four
 # season-close bulk sweeps"). Three day-locked triggers below: daily T+1, Saturday scoped retry,
@@ -2254,6 +2309,7 @@ async def _scheduler_loop():
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         _spawn(_bg_ops_metrics_backfill)   # cc#523/524: flag-gated, checked every tick (500-company x 4Q first leg)
+        _spawn(_bg_ops_text_fetch)         # cc#527: flag-gated fetch-only phase, 23:00-06:00 IST window
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
