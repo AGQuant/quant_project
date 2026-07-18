@@ -545,6 +545,63 @@ def _close_position(conn, pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt,
     return {"symbol":sym,"side":side,"result":result,"exit":exit_px,"pnl":round(pnl,2)}
 
 
+REBUILD_CUTOVER_KEY = "v8_paper_rebuild_cutover_ts"
+
+def rebuild_cutover(conn, sim_ts=None):
+    """cc#504 V8 SUITE REBUILD (18-Jul-2026): one-time, idempotent flatten of every OPEN paper
+    position at live CMP, tagged result='SUITE_REBUILD' in v8_paper_trades (closed via the SAME
+    _close_position() every other exit path uses -- keeps full history, nothing deleted from
+    v8_paper_trades). Era is a ZERO-SCHEMA-CHANGE split: app_config.v8_paper_rebuild_cutover_ts
+    stores the cutover moment; anything with entry_ts >= that timestamp is 'rebuild_jul26' era,
+    everything before is 'pre_rebuild' -- no new column, no ALTER TABLE (MAINTENANCE_LOCK_RULE:
+    schema-altering ops are Railway-console-only). Runs once at app startup (main.py); the
+    app_config key's presence is the idempotency guard, so a redeploy is always a no-op after the
+    first successful run. Slot occupancy needs no separate reset -- every slot-occupancy read in
+    this codebase is a live COUNT(*) WHERE status='OPEN', so closing/deleting the old rows IS the
+    reset."""
+    ensure_schema(conn)
+    with conn.cursor() as cur:
+        cur.execute("""CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT NOW())""")
+        conn.commit()
+        cur.execute("SELECT value FROM app_config WHERE key=%s", (REBUILD_CUTOVER_KEY,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return {"already_done": True, "cutover_ts": row[0]}
+
+        cur.execute("""SELECT id, symbol, side, basket, entry_price, entry_ts, qty,
+                              target, stop_loss, pivot_date
+                       FROM v8_paper_positions WHERE status='OPEN'""")
+        open_rows = cur.fetchall()
+        cur.execute("SELECT symbol, cmp FROM cmp_prices WHERE cmp IS NOT NULL")
+        cmp_map = {r[0]: float(r[1]) for r in cur.fetchall()}
+
+    cutover_ts = _now_ist(sim_ts)
+    flattened, skipped = [], []
+    for pid, sym, side, basket, entry, ets, qty, tgt, sl, pdt in open_rows:
+        cmp = cmp_map.get(sym)
+        if cmp is None:
+            skipped.append(sym)   # no live/last price on record -- leave OPEN, log for manual follow-up
+            continue
+        try:
+            _close_position(conn, pid, sym, side, basket, float(entry), ets, qty,
+                             float(tgt), float(sl), pdt, cmp, cutover_ts, "SUITE_REBUILD")
+            flattened.append(sym)
+        except Exception as e:
+            log.error(f"rebuild_cutover: flatten {sym} failed: {e}")
+            skipped.append(sym)
+
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO app_config (key, value, updated_at) VALUES (%s,%s,NOW())
+                       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()""",
+                    (REBUILD_CUTOVER_KEY, cutover_ts.isoformat()))
+        conn.commit()
+    log.info(f"rebuild_cutover: flattened {len(flattened)} positions at {cutover_ts.isoformat()}, "
+             f"{len(skipped)} skipped (no CMP): {skipped}")
+    return {"already_done": False, "cutover_ts": cutover_ts.isoformat(),
+            "flattened": flattened, "skipped_no_cmp": skipped}
+
+
 def _open_short(conn, sym, basket, entry, cur_ts, target, stop, pp, d):
     """Insert a SHORT paper position. Shared by zone-short and sell_overbought."""
     qty = _lot(conn, sym)

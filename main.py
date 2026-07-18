@@ -590,10 +590,29 @@ async def startup():
         except Exception as e:
             log.error(f"[startup] sector_brief auto-fill failed: {e}")
 
+    async def _v8_paper_rebuild_cutover():
+        # cc#504 V8 SUITE REBUILD (18-Jul-2026): one-time flatten of every OPEN paper position at
+        # live CMP (result='SUITE_REBUILD'), zero-schema-change era split via app_config -- see
+        # v8_paper.rebuild_cutover() docstring. Idempotent (app_config key = the guard), so every
+        # redeploy after the first successful run is a no-op single SELECT.
+        await asyncio.sleep(20)
+        try:
+            with get_conn() as conn:
+                result = await asyncio.to_thread(v8_paper.rebuild_cutover, conn)
+            if result.get("already_done"):
+                log.info(f"[startup] v8_paper_rebuild_cutover: already done at {result.get('cutover_ts')}")
+            else:
+                log.info(f"[startup] v8_paper_rebuild_cutover: flattened "
+                         f"{len(result.get('flattened', []))} position(s) at {result.get('cutover_ts')}")
+        except Exception as e:
+            log.error(f"[startup] v8_paper_rebuild_cutover failed: {e}")
+
     t0 = asyncio.create_task(_init_tables())
     _BG_TASKS.add(t0); t0.add_done_callback(_BG_TASKS.discard)
     t1 = asyncio.create_task(_auto_fill_briefs())
     _BG_TASKS.add(t1); t1.add_done_callback(_BG_TASKS.discard)
+    t2 = asyncio.create_task(_v8_paper_rebuild_cutover())
+    _BG_TASKS.add(t2); t2.add_done_callback(_BG_TASKS.discard)
     scheduler.start_background(app, BASE_URL, ADMIN_TOKEN)
     log.info(f"Scorr API v{VERSION} started — DEPLOY_GUARD={DEPLOY_GUARD}")
 
@@ -1316,7 +1335,18 @@ def paper_status():
     # (lp.ts::date), NOT before CURRENT_DATE. Off-market the CMP is the last (e.g. Friday) tick, so a
     # "< today" base returned that same Friday session -> DAY% compared Friday against itself (~0.0x%).
     # Anchoring to lp.ts::date gives Thu-close base for a Fri CMP, and Fri-close base for a Mon live CMP.
-    open_positions = api_query("""
+    # cc#504: fresh-book-only default — recent_trades/summary filter to entry_ts >= the SUITE_REBUILD
+    # cutover (app_config.v8_paper_rebuild_cutover_ts, zero-schema-change era split). Pre-rebuild
+    # trades stay in v8_paper_trades (kept, never deleted) but drop out of the default view; era=NULL
+    # (cutover hasn't run yet, e.g. first boot before the startup task lands) -> no filter, full
+    # history shown rather than an empty dashboard. open_positions needs no filter in practice (every
+    # pre-cutover OPEN row was closed by the cutover itself) but carries the same guard for safety.
+    cutover = api_query("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'", single=True)
+    cutover_ts = (cutover or {}).get("value")
+    era_clause = "entry_ts >= %s::timestamp" if cutover_ts else "TRUE"
+    era_params = (cutover_ts,) if cutover_ts else ()
+
+    open_positions = api_query(f"""
         SELECT p.symbol, p.side, p.basket, p.entry_price, p.entry_ts,
             p.target, p.stop_loss, p.qty, p.pivot_date,
             COALESCE(lp.cmp, p.entry_price) AS cmp,
@@ -1334,18 +1364,27 @@ def paper_status():
               AND price_date < COALESCE(lp.ts::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)
             ORDER BY price_date DESC LIMIT 1
         ) pc ON true
-        WHERE p.status = 'OPEN' ORDER BY p.entry_ts DESC
-    """)
+        WHERE p.status = 'OPEN' AND {era_clause} ORDER BY p.entry_ts DESC
+    """, era_params)
     return {
         "open_positions": open_positions,
-        "recent_trades": api_query("SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades ORDER BY closed_at DESC LIMIT 100"),
+        "recent_trades": api_query(f"SELECT symbol,side,basket,entry_price,exit_price,pnl,return_pct,result,entry_ts,exit_ts FROM v8_paper_trades WHERE {era_clause} ORDER BY closed_at DESC LIMIT 100", era_params),
         "missed": api_query("SELECT miss_date,symbol,side,basket,expected_entry,reason FROM v8_paper_missed ORDER BY ts DESC LIMIT 100"),
-        "summary": api_query("SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades", single=True)
+        "summary": api_query(f"SELECT COUNT(*) AS trades, COUNT(*) FILTER (WHERE result='TARGET') AS wins, COUNT(*) FILTER (WHERE result='SL') AS losses, ROUND(SUM(pnl)::numeric,2) AS total_pnl, ROUND(AVG(return_pct)::numeric,3) AS avg_ret FROM v8_paper_trades WHERE {era_clause}", era_params, single=True),
+        "rebuild_cutover_ts": cutover_ts,
     }
 
 @app.get("/api/paper/pivots")
 def paper_pivots(limit: int = 250):
     return api_query("SELECT symbol,pp,r1,s1,r2,s2,pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
+
+@app.post("/api/paper/rebuild_cutover")
+def paper_rebuild_cutover(x_admin_token: Optional[str] = Header(None)):
+    # cc#504: manual re-arm/visibility for the startup cutover task (idempotent — a second call
+    # after the first successful run just returns already_done). Lets the flatten be checked or
+    # (re)triggered without waiting for the next deploy.
+    _check_admin(x_admin_token)
+    with get_conn() as conn: return v8_paper.rebuild_cutover(conn)
 
 @app.post("/api/admin/fetch_global")
 async def fetch_global_now(x_admin_token: Optional[str] = Header(None)):
