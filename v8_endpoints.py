@@ -1737,10 +1737,14 @@ _SR_V61_PASSCOUNT_GATES = [
 ]
 
 def sr_stock_passcount():
-    """cc#502: SELL_REVERSAL_V6.1 pass-count = n/10, cheap-first (mirror cc#364). 9 cheap gates
-    for ALL stocks; true_weekly_rsi (stage 10, heavy) only for stocks clearing the first 9.
-    Off-market / missing pivot|CMP: the room check NULL-passes. Display only — mirrors the
-    handler, never qualifies."""
+    """cc#502/509: SELL_REVERSAL_V6.1 pass-count = n/11 (10 cheap gates -- 7 metric gates +
+    sector_week + r1_touch + room -- plus the true_weekly_rsi heavy stage). 10 cheap gates for
+    ALL stocks; true_weekly_rsi (stage 11, heavy) only for stocks clearing all 10. cc#509 fix:
+    the heavy-stage trigger was `len(passed)==9`, an off-by-one against these 10 cheap labels --
+    a stock failing exactly one cheap gate still got true_weekly_rsi evaluated and could display
+    max/max with a failed gate listed (FORCEMOT); a true full qualifier also capped at the same
+    max, indistinguishable from a one-gate-short near miss. Off-market / missing pivot|CMP: the
+    room check NULL-passes. Display only — mirrors the handler, never qualifies."""
     from v8_signal_writer import _true_weekly_rsi
     try:
         with _conn() as conn, conn.cursor() as cur:
@@ -1765,18 +1769,18 @@ def sr_stock_passcount():
                 tgt, _ = _sr_dynamic_target(cmp, s1, s2)
                 room_ok = (cmp is None or s1 is None) or (tgt is not None)
                 (passed if room_ok else failed).append("room")
-                if len(passed) == 9:
+                if len(passed) == 10:   # cc#509: was ==9, off-by-one against these 10 cheap labels
                     twr = _true_weekly_rsi(conn, sym, cmp)
                     (passed if (twr is not None and twr <= 45.0) else failed).append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")
-                out.append({"symbol": sym, "passed": len(passed), "total": 10,
+                out.append({"symbol": sym, "passed": len(passed), "total": 11,
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                             "v21_pass": None})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_reversal", "score_date": str(date.today()),
-                "universe": len(out), "filter_count": 10, "stocks": out,
+                "universe": len(out), "filter_count": 11, "stocks": out,
                 "v21_enabled": False, **BASKET_META.get("sell_reversal", {})}
     except Exception as e:
         raise HTTPException(500, f"sr_stock_passcount failed: {e}")
@@ -1784,10 +1788,10 @@ def sr_stock_passcount():
 
 @router.get("/sr_stock_detail/{symbol}")
 def sr_stock_detail(symbol: str):
-    """cc#502: per-stock 10-filter breakdown for SELL_REVERSAL_V6.1 — ACTUAL vs REQUIRED +
-    PASS/FAIL. Mirrors sr_stock_passcount / _write_sell_reversal_v61_qualified so the green-row
-    count equals n/10. true_weekly_rsi always computed here (one stock) so the row is never
-    blank."""
+    """cc#502/509: per-stock 11-filter breakdown for SELL_REVERSAL_V6.1 (10 cheap gates + the
+    true_weekly_rsi heavy stage) — ACTUAL vs REQUIRED + PASS/FAIL. Mirrors sr_stock_passcount /
+    _write_sell_reversal_v61_qualified so the green-row count equals n/11 and the card and modal
+    always agree. true_weekly_rsi always computed here (one stock) so the row is never blank."""
     from v8_signal_writer import _true_weekly_rsi
     sym = symbol.upper()
     try:
@@ -1824,7 +1828,7 @@ def sr_stock_detail(symbol: str):
         p_mom  = _passes_filter(mom2d, -4.0, -1.0)
         p_mret = _passes_filter(mret, -10.0, None)
         p_room = (cmp is None or s1 is None) or (tgt is not None)
-        cleared = all([r1_ok, p_d1d, p_d20, p_d50, p_d200, p_w52, p_sw, p_mom, p_mret, p_room])   # 9 cheap gates
+        cleared = all([r1_ok, p_d1d, p_d20, p_d50, p_d200, p_w52, p_sw, p_mom, p_mret, p_room])   # 10 cheap gates
         p_twr  = cleared and (twr is not None and twr <= 45.0)
 
         tgt_lbl = "S1" if (tgt is not None and s1 is not None and abs(tgt - s1) < 1e-6) else ("S2" if tgt is not None else "--")
@@ -1842,10 +1846,10 @@ def sr_stock_detail(symbol: str):
             {"filter": "true_weekly_rsi", "required": "<= 45",     "actual": _fmt(twr, 1),         "pass": p_twr},
         ]
         if not cleared:
-            rows[-1]["note"] = "engine evaluates true weekly RSI only after all 9 cheap gates pass"
+            rows[-1]["note"] = "engine evaluates true weekly RSI only after all 10 cheap gates pass"
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1, "s2": s2,
-                "target": tgt, "room_pct": room, "passed": passed, "total": 10, "rows": rows,
+                "target": tgt, "room_pct": room, "passed": passed, "total": 11, "rows": rows,
                 "spec": "SELL_REVERSAL_V6.1 cc#502"}
     except HTTPException:
         raise

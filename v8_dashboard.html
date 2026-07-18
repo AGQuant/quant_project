@@ -811,7 +811,7 @@ async function openBrDetail(symbol,basket){
   // second score_rows table below the main one.
   const isSR=basket==='sell_reversal', isSM=basket==='sell_momentum', isBM=basket==='buy_momentum';
   const lbl=isSR?' · Sell Reversal V6.1':isSM?' · Sell Momentum V4':isBM?' · Buy Momentum V3':' · Buy Reversal V5';
-  const nf=isSR?10:isSM?9:isBM?7:7;
+  const nf=isSR?11:isSM?9:isBM?7:7;   // cc#509: sell_reversal is 11 (10 cheap gates + true_weekly_rsi)
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
