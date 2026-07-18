@@ -1744,6 +1744,76 @@ def _bg_mf_mc_oneshot():
         _mc_oneshot_running = False
 
 
+_ops_metrics_running = False   # cc#523: ops-metrics backfill/monthly single-flight guard
+
+
+def _bg_ops_metrics_backfill():
+    """cc#523: flag-gated ops-metrics backfill runner -- same mechanism as cc#500's
+    _bg_mf_mc_oneshot (checked every tick, no-ops unless app_config['ops_metrics_backfill_run']
+    is 'pending'). Serves BOTH the one-time 500-company first leg (armed via
+    POST /api/admin/ops_metrics/run_backfill) AND the monthly incremental re-run (armed by
+    _bg_ops_metrics_monthly below on the 5th of each month) -- run_company()'s idempotency
+    check (doc URL unchanged + already extracted -> 'already_current', no LLM re-spend) is what
+    makes reusing the identical runner safe for both call sites."""
+    global _ops_metrics_running
+    if _ops_metrics_running:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='ops_metrics_backfill_run'")
+            r = cur.fetchone()
+        if not r or r[0] != 'pending':
+            return
+        _ops_metrics_running = True
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','running',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='running', updated_at=NOW()")
+            conn.commit()
+        import ops_metrics_pipeline
+        res = ops_metrics_pipeline.run_ops_metrics_backfill()
+        log.info(f"_bg_ops_metrics_backfill: {res}")
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+    except Exception as e:
+        log.error(f"_bg_ops_metrics_backfill: {e}")
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','pending',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+                conn.commit()
+        except Exception:
+            pass
+    finally:
+        _ops_metrics_running = False
+
+
+_ops_metrics_monthly_armed_month = None   # cc#523: day-lock so the 5th only arms once per calendar month
+
+
+def _bg_ops_metrics_monthly():
+    """cc#523 spec item 4 (SOURCE DISCOVERY addendum): monthly incremental re-run, 5th of each
+    month -- results are "mostly filed by then". Just re-arms the SAME backfill flag
+    _bg_ops_metrics_backfill polls every tick; run_company's idempotency check means companies
+    with no new filing since last run cost nothing (status='already_current'), only genuinely
+    new quarters get extracted. Day-locked to fire once per month (mirrors the existing
+    now.day==N convention used elsewhere in this file, e.g. the disabled cc#499 day==12 job)."""
+    global _ops_metrics_monthly_armed_month
+    now = datetime.now(IST)
+    month_key = f"{now.year}-{now.month:02d}"
+    if _ops_metrics_monthly_armed_month == month_key:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','pending',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='pending', updated_at=NOW()")
+            conn.commit()
+        _ops_metrics_monthly_armed_month = month_key
+        log.info(f"_bg_ops_metrics_monthly: armed for {month_key}")
+    except Exception as e:
+        log.error(f"_bg_ops_metrics_monthly: {e}")
+
 
 # cc#475: feed staleness Telegram alert — INDEPENDENT of the signal-writer watchdogs (which
 # only restart the writer). This checks the FEED WORKER's own output (intraday_prices) from
@@ -2083,6 +2153,8 @@ async def _scheduler_loop():
         # if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)   # unconditional monthly cron -- DISABLED cc#499
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
+        _spawn(_bg_ops_metrics_backfill)   # cc#523: flag-gated, checked every tick (500-company first leg + monthly re-arms)
+        if now.day == 5:  _spawn(_bg_ops_metrics_monthly)   # cc#523: monthly incremental re-run, results mostly filed by the 5th
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market

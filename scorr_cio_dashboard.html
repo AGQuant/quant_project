@@ -874,64 +874,154 @@ function SegmentRankLadder({ ladder, segment, stockSym }) {
   );
 }
 
-const OPS_LOWER_BETTER = new Set([
-  "gnpa_pct", "nnpa_pct", "cost_to_income", "credit_cost", "slippage_ratio",
-  "gross_npa", "net_npa", "pcr_ex", "opex_ratio",
-  "claims_ratio", "combined_ratio", "expense_ratio",
-  "debt_to_equity", "net_debt_to_ebitda", "inventory_days", "receivable_days", "churn_pct",
-]);
 const OPS_MIN_PEERS = 3;
+
+// cc#523: 8-quarter mini sparkline for one metric's trend. Bars, latest bar highlighted.
+function OpsTrend({ trend, lowerBetter }) {
+  const vals = trend.map(t => t.value).filter(v => v != null);
+  if (vals.length < 2) return null;
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const rng = (hi - lo) || Math.abs(hi) || 1;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 22, marginTop: 4 }}>
+      {trend.map((t, i) => {
+        const isLast = i === trend.length - 1;
+        const h = t.value == null ? 2 : Math.max(3, ((t.value - lo) / rng) * 18 + 3);
+        return (
+          <div key={i} title={`${t.quarter}: ${t.value != null ? t.value : "—"}`}
+            style={{ width: 6, height: h, borderRadius: 1.5,
+              background: t.value == null ? "rgba(148,166,210,.18)" : (isLast ? "#8C99BD" : "#8C99BD70") }} />
+        );
+      })}
+    </div>
+  );
+}
+
+// cc#523: latest-quarter concall summary card, collapsible, placed above OpsMetrics.
+function ConcallSummary({ symbol }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!symbol) return;
+    setLoading(true);
+    setData(null);
+    mcpCall("run_sql", {
+      query: `SELECT quarter, summary, guidance, tone, computed_at FROM concall_summaries
+              WHERE symbol='${symbol}' ORDER BY computed_at DESC LIMIT 1`
+    }).then(d => setData((d?.rows || [])[0] || null)).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [symbol]);
+
+  if (loading || !data || !data.summary) return null;
+
+  const toneColor = { confident: C.green, cautious: C.gold, defensive: C.red, mixed: C.gold }[data.tone] || C.muted;
+  const bullets = (data.summary || "").split("\n").map(s => s.replace(/^-\s*/, "").trim()).filter(Boolean);
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+        onClick={() => setOpen(o => !o)}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Concall Summary · {data.quarter}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+            {data.tone && <span style={{ color: toneColor, fontWeight: 700, textTransform: "capitalize" }}>{data.tone}</span>}
+            {data.tone && " tone · "}{bullets.length} highlights{open ? "" : " · tap to expand"}
+          </div>
+        </div>
+        <span style={{ color: C.muted, fontSize: 18 }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: C.text, lineHeight: 1.7 }}>
+            {bullets.map((b, i) => <li key={i}>{b}</li>)}
+          </ul>
+          {data.guidance && (
+            <div style={{ marginTop: 10, padding: "10px 12px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 9 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, marginBottom: 3, letterSpacing: ".04em" }}>GUIDANCE</div>
+              <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.6 }}>{data.guidance}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function OpsMetrics({ symbol, segment }) {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [curQ, setCurQ] = useState(null);
+  const [nReported, setNReported] = useState(null);
 
   useEffect(() => {
     if (!symbol) return;
     setLoading(true);
     setMetrics(null);
-    mcpCall("run_sql", {
-      query: `SELECT som.symbol, som.metric_name, som.metric_value, som.unit,
-                     som.confidence, som.quarter, som.notes
-              FROM sector_ops_metrics som
-              JOIN gvm_scores g ON g.symbol = som.symbol
-              WHERE g.segment = (SELECT segment FROM gvm_scores WHERE symbol='${symbol}')
-                AND som.quarter = (SELECT MAX(quarter) FROM sector_ops_metrics)
-              ORDER BY som.metric_name ASC`
-    }).then(d => {
-      const raw = d?.rows || [];
-      if (raw.length) setCurQ(raw[0].quarter);
+    Promise.all([
+      mcpCall("run_sql", {
+        query: `SELECT som.symbol, som.metric_name, som.metric_value, som.unit, som.quarter,
+                       som.confidence, som.source_1, som.source_2, som.discrepancy_pct, som.computed_at
+                FROM sector_ops_metrics som
+                WHERE som.sector = (SELECT sector FROM sector_ops_metrics WHERE symbol='${symbol}' LIMIT 1)
+                ORDER BY som.computed_at ASC`
+      }),
+      mcpCall("run_sql", {
+        query: `SELECT metric_name, display_name, unit, direction, tier FROM sector_kpi_registry
+                WHERE sector = (SELECT sector FROM sector_ops_metrics WHERE symbol='${symbol}' LIMIT 1)
+                ORDER BY tier, metric_name`
+      }),
+    ]).then(([rawD, regD]) => {
+      const raw = rawD?.rows || [];
+      const registry = regD?.rows || [];
       const byMetric = {};
       raw.forEach(r => {
         const k = r.metric_name;
         if (!byMetric[k]) byMetric[k] = [];
         const v = r.metric_value != null ? Number(r.metric_value) : null;
-        if (v != null && !isNaN(v)) byMetric[k].push({ sym: r.symbol, v, unit: r.unit, conf: r.confidence, notes: r.notes });
+        byMetric[k].push({ sym: r.symbol, v, unit: r.unit, conf: r.confidence,
+          quarter: r.quarter, s1: r.source_1, s2: r.source_2, disc: r.discrepancy_pct, computed_at: r.computed_at });
       });
+      // cc#523: NO DATA cards stay in the grid (per spec, showing which peers DID report)
+      // instead of silently vanishing -- so iterate the full REGISTRY, not just byMetric's keys.
+      const names = registry.length ? registry.map(r => r.metric_name) : Object.keys(byMetric);
       const out = [];
-      Object.keys(byMetric).forEach(k => {
-        const peers = byMetric[k];
-        if (peers.length < OPS_MIN_PEERS) return;
-        const lowerBetter = OPS_LOWER_BETTER.has(k.toLowerCase());
+      let latestQOverall = null;
+      names.forEach(k => {
+        const reg = registry.find(r => r.metric_name === k);
+        const entries = byMetric[k] || [];
+        const selfEntries = entries.filter(e => e.sym === symbol);
+        const trend = selfEntries.slice(-8).map(e => ({ quarter: e.quarter, value: e.v }));
+        const latestQ = selfEntries.length ? selfEntries[selfEntries.length - 1].quarter
+          : (entries.length ? entries[entries.length - 1].quarter : null);
+        if (selfEntries.length) latestQOverall = latestQ;
+        const peers = entries.filter(e => e.quarter === latestQ && e.v != null);
+        const lowerBetter = reg ? reg.direction === "lower_better" : false;
         const self = peers.find(p => p.sym === symbol) || null;
+        const hasEnoughPeers = peers.length >= OPS_MIN_PEERS;
         const vals = peers.map(p => p.v);
-        const peerAvg = vals.reduce((a, b) => a + b, 0) / vals.length;
-        const sorted = [...peers].sort((a, b) => lowerBetter ? a.v - b.v : b.v - a.v);
-        const best = sorted[0], worst = sorted[sorted.length - 1];
-        const rank = self ? sorted.findIndex(p => p.sym === symbol) + 1 : null;
+        const peerMedian = hasEnoughPeers ? [...vals].sort((a, b) => a - b)[Math.floor(vals.length / 2)] : null;
+        const sorted = hasEnoughPeers ? [...peers].sort((a, b) => lowerBetter ? a.v - b.v : b.v - a.v) : [];
+        const rank = (self && hasEnoughPeers) ? sorted.findIndex(p => p.sym === symbol) + 1 : null;
         out.push({
-          metric_name: k, unit: self?.unit || peers[0].unit,
-          confidence: self?.conf || null, notes: self?.notes || null,
-          company: self ? self.v : null,
-          peer_avg: Math.round(peerAvg * 100) / 100,
+          metric_name: k, display_name: reg?.display_name, unit: self?.unit || reg?.unit || (peers[0] || {}).unit,
+          confidence: self?.conf || null, source_1: self?.s1 || null, source_2: self?.s2 || null,
+          discrepancy_pct: self?.disc ?? null,
+          company: self ? self.v : null, quarter: latestQ, trend,
+          peer_avg: peerMedian != null ? Math.round(peerMedian * 100) / 100 : null,
           rank, peer_n: peers.length,
-          best: { sym: best.sym, v: best.v }, worst: { sym: worst.sym, v: worst.v },
+          reported_peers: peers.filter(p => p.sym !== symbol).map(p => p.sym),
+          best: sorted.length ? { sym: sorted[0].sym, v: sorted[0].v } : null,
+          worst: sorted.length ? { sym: sorted[sorted.length - 1].sym, v: sorted[sorted.length - 1].v } : null,
           lower_better: lowerBetter,
         });
       });
       out.sort((a, b) => (b.company != null) - (a.company != null) || b.peer_n - a.peer_n || a.metric_name.localeCompare(b.metric_name));
       setMetrics(out);
+      setCurQ(latestQOverall);
+      if (latestQOverall) {
+        setNReported(new Set(raw.filter(r => r.quarter === latestQOverall).map(r => r.symbol)).size);
+      }
     }).catch(() => setMetrics([])).finally(() => setLoading(false));
   }, [symbol]);
 
@@ -942,7 +1032,9 @@ function OpsMetrics({ symbol, segment }) {
     </div>
   );
 
-  if (!metrics || !metrics.length) return null;
+  // Only show the section once the sector has SOME real pipeline data -- an empty registry
+  // (pre-backfill) with every metric NO DATA would otherwise clutter every report page.
+  if (!metrics || !metrics.length || !metrics.some(m => m.company != null || m.peer_n > 0)) return null;
 
   const fmtVal = (v, u) => {
     if (v == null) return "—";
@@ -957,7 +1049,7 @@ function OpsMetrics({ symbol, segment }) {
   };
 
   const cellTone = (m) => {
-    if (m.company == null) return { bg: "rgba(148,166,210,.1)", bd: "rgba(148,166,210,.24)", fg: "#8C99BD" };
+    if (m.company == null || m.peer_avg == null) return { bg: "rgba(148,166,210,.1)", bd: "rgba(148,166,210,.24)", fg: "#8C99BD" };
     const better = m.lower_better ? m.company < m.peer_avg : m.company > m.peer_avg;
     const worse  = m.lower_better ? m.company > m.peer_avg : m.company < m.peer_avg;
     if (better) return { bg: "rgba(47,212,139,.14)", bd: "#2FD48B", fg: "#2FD48B" };
@@ -971,15 +1063,16 @@ function OpsMetrics({ symbol, segment }) {
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: C.purple }}>Operational Metrics · Peer Benchmarked</div>
           <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>
-            {metrics.length} metrics · {curQ || "—"} · {segment || "segment"} · ≥{OPS_MIN_PEERS} peers · earnings calls & filings
+            {metrics.length} metrics · as of {curQ || "—"}{nReported != null ? ` · ${nReported} companies reported` : ""} · ≥{OPS_MIN_PEERS} peers · earnings calls &amp; filings
           </div>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(205px, 1fr))", gap: 10 }}>
         {metrics.map((m, i) => {
           const c = cellTone(m);
-          const label = (m.metric_name || "").replace(/_/g, " ").replace(/\bpct\b/i, "%").replace(/\b\w/g, l => l.toUpperCase());
+          const label = m.display_name || (m.metric_name || "").replace(/_/g, " ").replace(/\bpct\b/i, "%").replace(/\b\w/g, l => l.toUpperCase());
           const dirHint = m.lower_better ? "lower is better" : "higher is better";
+          const quote = m.source_1 || m.source_2 || "";
           let verdict = { txt: "NO DATA", col: C.muted };
           if (m.company != null && m.peer_avg != null) {
             const better = m.lower_better ? m.company < m.peer_avg : m.company > m.peer_avg;
@@ -989,7 +1082,7 @@ function OpsMetrics({ symbol, segment }) {
                     : { txt: "IN-LINE", col: "#F5B94A" };
           }
           return (
-            <div key={i} title={m.notes || ""}
+            <div key={i} title={quote}
               style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 11, padding: "13px 15px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6, gap: 6 }}>
                 <div style={{ fontSize: 14, fontWeight: 800, color: c.fg, lineHeight: 1.25 }}>{label}</div>
@@ -1001,22 +1094,36 @@ function OpsMetrics({ symbol, segment }) {
                 {m.company != null ? fmtVal(m.company, m.unit) : "—"}
               </div>
               <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 5, letterSpacing: ".02em" }}>{dirHint}</div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, color: "#8C99BD", fontFamily: "monospace" }}>
-                <span>peer {fmtVal(m.peer_avg, m.unit)} <span style={{color:"#b0b8c8",fontSize:12}}>({m.peer_n})</span></span>
-                {m.company != null && m.peer_avg != null && m.peer_avg !== 0 && (() => {
-                  const diff = m.lower_better
-                    ? (m.peer_avg - m.company) / Math.abs(m.peer_avg) * 100
-                    : (m.company - m.peer_avg) / Math.abs(m.peer_avg) * 100;
-                  return <span style={{fontWeight:700, color: diff >= 0 ? "#2FD48B" : "#FF5C6C", fontSize:13.5}}>
-                    {diff >= 0 ? `▲${diff.toFixed(1)}%` : `▼${(-diff).toFixed(1)}%`}
-                  </span>;
-                })()}
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#9aa4b5", fontFamily: "monospace", marginTop: 3,
-                borderTop: `1px solid ${c.bd}`, paddingTop: 3 }}>
-                <span style={{ color: C.green }}>▲ {m.best.sym} {fmtVal(m.best.v, "")}</span>
-                <span style={{ color: C.red }}>▼ {m.worst.sym} {fmtVal(m.worst.v, "")}</span>
-              </div>
+              {m.peer_avg != null ? (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, color: "#8C99BD", fontFamily: "monospace" }}>
+                  <span>peer med {fmtVal(m.peer_avg, m.unit)} <span style={{color:"#b0b8c8",fontSize:12}}>(#{m.rank ?? "—"}/{m.peer_n})</span></span>
+                  {m.company != null && m.peer_avg !== 0 && (() => {
+                    const diff = m.lower_better
+                      ? (m.peer_avg - m.company) / Math.abs(m.peer_avg) * 100
+                      : (m.company - m.peer_avg) / Math.abs(m.peer_avg) * 100;
+                    return <span style={{fontWeight:700, color: diff >= 0 ? "#2FD48B" : "#FF5C6C", fontSize:13.5}}>
+                      {diff >= 0 ? `▲${diff.toFixed(1)}%` : `▼${(-diff).toFixed(1)}%`}
+                    </span>;
+                  })()}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: "#9aa4b5" }}>
+                  {m.reported_peers.length ? `reported: ${m.reported_peers.join(", ")}` : "no peers reported yet"}
+                </div>
+              )}
+              <OpsTrend trend={m.trend} lowerBetter={m.lower_better} />
+              {m.best && m.worst && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: "#9aa4b5", fontFamily: "monospace", marginTop: 3,
+                  borderTop: `1px solid ${c.bd}`, paddingTop: 3 }}>
+                  <span style={{ color: C.green }}>▲ {m.best.sym} {fmtVal(m.best.v, "")}</span>
+                  <span style={{ color: C.red }}>▼ {m.worst.sym} {fmtVal(m.worst.v, "")}</span>
+                </div>
+              )}
+              {m.confidence && (
+                <div style={{ fontSize: 10.5, color: "#9aa4b5", marginTop: 3 }}>
+                  {m.confidence} confidence{m.discrepancy_pct != null ? ` · ${m.discrepancy_pct}% source discrepancy` : ""}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1775,6 +1882,7 @@ function GvmReport({ r, hist }) {
       {r.content?.key_takeaway && <ContentCard title="Key Takeaways" color={C.gold} body={r.content.key_takeaway} updated={r.content.last_takeaway_updated} />}
       {r.content?.result_analysis && <ContentCard title="Result Analysis" color={C.green} body={r.content.result_analysis} updated={r.content.last_result_analysis_updated} />}
 
+      <ConcallSummary symbol={r.symbol} />
       <OpsMetrics symbol={r.symbol} segment={r.segment} />
       <SectorBrief segment={r.segment} />
 
