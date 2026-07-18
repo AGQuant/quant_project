@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>V15 · MF Intelligence — Design Reference R2</title>
+<title>V15 · MF Intelligence</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
@@ -68,6 +68,12 @@ mask:radial-gradient(80% 60% at 50% 0%,#000 30%,transparent 100%)}
 .pc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue);box-shadow:0 0 12px var(--blue)}
 .pc.good::before{background:var(--bull);box-shadow:0 0 12px var(--bull)}
 .pc.warn::before{background:var(--amber);box-shadow:0 0 12px var(--amber)}
+.pc.bad::before{background:var(--bear);box-shadow:0 0 12px var(--bear)}
+.dial .arc{transition:stroke-dashoffset 1.1s cubic-bezier(.3,.8,.3,1),filter .3s}
+.verdict .v.elite{color:#06291a;background:linear-gradient(135deg,var(--bull),#25b878);box-shadow:0 8px 22px rgba(47,212,139,.35)}
+.verdict .v.strong{color:var(--bull);background:var(--bull-soft);box-shadow:none;border:1px solid rgba(47,212,139,.3)}
+.verdict .v.average{color:var(--amber);background:var(--amber-soft);box-shadow:none;border:1px solid rgba(245,185,74,.3)}
+.verdict .v.weak{color:var(--bear);background:var(--bear-soft);box-shadow:none;border:1px solid rgba(255,92,108,.3)}
 .pc .k{font-size:9.5px;font-weight:700;letter-spacing:.11em;color:var(--dim);text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
 .pc .i{width:16px;height:16px;border-radius:50%;border:1px solid var(--line2);color:var(--dim);font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:color .15s,border-color .15s}
 .pc .i:hover{color:var(--cyan);border-color:var(--cyan)}
@@ -137,7 +143,7 @@ td.sym{font-weight:700;font-size:12.5px}
 <div class="wrap">
 <div class="hdr rise d1">
   <div class="brand">V15 · <b>MF Intelligence</b><span class="sub">Look-through fund research</span></div>
-  <div class="chip" style="border-color:rgba(245,185,74,.35);background:rgba(245,185,74,.07);color:var(--amber)"><span class="dot" style="background:var(--amber);box-shadow:0 0 10px var(--amber)"></span>MQS ENGINE · COMING SOON</div>
+  <div class="chip" id="hdr-chip"><span class="dot"></span><span id="hdr-chip-txt">MQS · loading…</span></div>
 </div>
 
 <div class="search rise d2">
@@ -160,7 +166,7 @@ td.sym{font-weight:700;font-size:12.5px}
         <line class="tick" x1="66" y1="6" x2="66" y2="13"/><line class="tick" x1="126" y1="66" x2="119" y2="66"/>
         <line class="tick" x1="66" y1="126" x2="66" y2="119"/><line class="tick" x1="6" y1="66" x2="13" y2="66"/>
       </g>
-      <circle class="arc" cx="66" cy="66" r="54" style="animation:none;stroke-dashoffset:339;filter:none;opacity:.25"/>
+      <circle class="arc" id="dial-arc" cx="66" cy="66" r="54" style="animation:none;stroke-dashoffset:339;filter:none;opacity:.25"/>
     </svg>
     <div class="core"><span class="v num" id="mqs" style="color:var(--dim);font-size:26px">—</span><span class="k">AWAITING SCORE</span></div>
   </div>
@@ -175,26 +181,26 @@ td.sym{font-weight:700;font-size:12.5px}
     </div>
   </div>
   <div class="verdict">
-    <div class="v" style="background:var(--well);color:var(--dim);box-shadow:none">COMING SOON</div>
-    <div class="r">Verdict awaits the MQS engine</div>
+    <div class="v" id="verdict-chip" style="background:var(--well);color:var(--dim);box-shadow:none">—</div>
+    <div class="r" id="verdict-sub">Search a fund to begin</div>
   </div>
 </div>
 
 <div class="pillars rise d4">
-  <div class="pc"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
-  <div class="pc"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
-  <div class="pc"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
-  <div class="pc"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">COMING SOON — MQS engine</div></div>
+  <div class="pc" id="pc-q"><div class="k">Q · PORTFOLIO <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Retired cc#505 — rating brand gone, no replacement. 35% of MQS when present.</div></div>
+  <div class="pc" id="pc-r"><div class="k">R · RETURNS <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
+  <div class="pc" id="pc-c"><div class="k">C · COST <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
+  <div class="pc" id="pc-s"><div class="k">S · STABILITY <span class="i">i</span></div><div class="v num" style="color:var(--dim)">—</div><div class="bar"><i style="width:0%"></i></div><div class="s">Not yet scored</div></div>
 </div>
 
 <div class="card rise d5">
   <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge">SCORR-ONLY X-RAY</span></div>
-  <div style="padding:26px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">COMING SOON — look-through holdings × live GVM resolve once portfolio disclosures are ingested (V15 data layer, cc#477).</div>
+  <div style="padding:26px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">DATA-QUALITY HOLD — the holdings scrape currently returns the same stock list for every fund (flagged 18-Jul-2026, cc#519). X-ray activates once per-fund holdings are verified.</div>
 </div>
 
 <div class="card rise d6">
   <div class="h"><span class="eyebrow" style="flex:1">Segment exposure vs sector ratings</span></div>
-  <div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">COMING SOON — segment exposure needs holdings ingestion.</div>
+  <div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">DATA-QUALITY HOLD — segment exposure depends on the same holdings data flagged above.</div>
 </div>
 
 <div class="card rise d6">
@@ -211,12 +217,12 @@ td.sym{font-weight:700;font-size:12.5px}
 
 <div class="card rise d7">
   <div class="h"><span class="eyebrow" style="flex:1">Red flags</span></div>
-  <div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">COMING SOON — red-flag checks need the MQS engine + holdings.</div>
+  <div id="flags-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">Search a fund to check for red flags.</div></div>
 </div>
 
-<div class="eyebrow rise d7" style="margin-top:30px">Screener · AUM &gt; ₹5,000 Cr universe <span style="color:var(--dim);font-weight:600;font-size:9px;letter-spacing:normal;text-transform:none">(AUM filter + MQS/returns activate with cc#477)</span></div>
+<div class="eyebrow rise d7" style="margin-top:30px">Screener · equity-oriented mutual fund universe</div>
 <div class="tabs rise d7" id="tabs">
-  <div class="tab on">Flexi Cap</div><div class="tab">Large Cap</div><div class="tab">Mid Cap</div><div class="tab">Small Cap</div><div class="tab">Index</div><div class="tab">ELSS</div><div class="tab">Hybrid</div>
+  <div class="tab on" data-cat="Flexi Cap Fund">Flexi Cap</div><div class="tab" data-cat="Large Cap Fund">Large Cap</div><div class="tab" data-cat="Large & Mid Cap Fund">Large &amp; Mid Cap</div><div class="tab" data-cat="Mid Cap Fund">Mid Cap</div><div class="tab" data-cat="Small Cap Fund">Small Cap</div><div class="tab" data-cat="Multi Cap Fund">Multi Cap</div><div class="tab" data-cat="Sectoral/Thematic Fund">Sectoral/Thematic</div><div class="tab" data-cat="Focused Fund">Focused</div><div class="tab" data-cat="ELSS">ELSS</div><div class="tab" data-cat="Value Fund/Contra Fund">Value/Contra</div><div class="tab" data-cat="Dividend Yield Fund">Dividend Yield</div>
 </div>
 <div class="card rise d7" style="margin-top:11px">
   <table>
@@ -234,8 +240,8 @@ td.sym{font-weight:700;font-size:12.5px}
 <script>
 (function(){
   var $=function(id){return document.getElementById(id)};
-  // MQS dial stays at 0 / AWAITING SCORE until the engine ships — never a fabricated value.
   var em="—";
+  var ARC_C=339; // circumference of the dial's r=54 circle (2*pi*54 ~= 339.29, matches stroke-dasharray)
   function pct(v){
     if(v===null||v===undefined)return {t:em,c:"var(--dim)"};
     var s=(v>=0?"+":"")+Number(v).toFixed(1)+"%";
@@ -243,7 +249,67 @@ td.sym{font-weight:700;font-size:12.5px}
   }
   function setRet(id,v){var e=$(id);if(!e)return;var p=pct(v);e.textContent=p.t;e.style.color=p.c;}
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]});}
-  function gvmClass(v){return v>=7?"g-hi":v>=6?"g-mid":"g-lo";}
+  function band(v){return v>=70?"bull":v>=45?"amber":"bear";}
+  function pillarClass(v){return v>=70?"good":v>=45?"warn":"bad";}
+  function mqsChip(v){
+    if(v==null)return '<span class="gvm" style="color:var(--dim);background:var(--well)">—</span>';
+    var c=v>=70?"g-hi":v>=45?"g-mid":"g-lo";
+    return '<span class="gvm '+c+'">'+v.toFixed(1)+'</span>';
+  }
+
+  function setDial(mqs){
+    var arc=$("dial-arc"),v=$("mqs"),k=arc.parentElement.parentElement.querySelector(".k");
+    if(mqs==null){
+      arc.style.strokeDashoffset=ARC_C; arc.style.opacity=.25; arc.style.filter="none";
+      v.textContent=em; v.style.color="var(--dim)"; v.style.fontSize="26px";
+      k.textContent="AWAITING SCORE"; return;
+    }
+    var b=band(mqs), col="var(--"+b+")";
+    arc.style.opacity=1; arc.style.filter="drop-shadow(0 0 8px "+col+")";
+    arc.style.strokeDashoffset=ARC_C*(1-mqs/100);
+    v.textContent=mqs.toFixed(1); v.style.color=col; v.style.fontSize="34px";
+    k.textContent="MQS / 100";
+  }
+
+  function setVerdict(mqs,computedAt){
+    var chip=$("verdict-chip"),sub=$("verdict-sub");
+    chip.className="v";
+    if(mqs==null){
+      chip.textContent="NOT YET SCORED"; chip.style.background="var(--well)"; chip.style.color="var(--dim)"; chip.style.boxShadow="none"; chip.style.border="none";
+      sub.textContent="This fund hasn't been scored by the nightly MQS run yet."; return;
+    }
+    chip.style.background=""; chip.style.color=""; chip.style.boxShadow=""; chip.style.border="";
+    var label=mqs>=80?"ELITE":mqs>=65?"STRONG":mqs>=45?"AVERAGE":"WEAK";
+    var cls=mqs>=80?"elite":mqs>=65?"strong":mqs>=45?"average":"weak";
+    chip.classList.add(cls); chip.textContent=label;
+    sub.textContent="MQS "+mqs.toFixed(1)+"/100"+(computedAt?(" · scored "+computedAt):"");
+  }
+
+  function setPillar(id,val,weightPct,retiredNote){
+    var el=$(id); if(!el)return;
+    var v=el.querySelector(".v"), bar=el.querySelector(".bar i"), s=el.querySelector(".s");
+    el.classList.remove("good","warn","bad");
+    if(val==null){
+      v.textContent=em; v.style.color="var(--dim)"; bar.style.width="0%";
+      s.textContent=retiredNote||("Not yet scored"+(weightPct?" · "+weightPct+"% of MQS":""));
+      return;
+    }
+    el.classList.add(pillarClass(val));
+    v.textContent=val.toFixed(1); v.style.color="";
+    bar.style.width=Math.max(0,Math.min(100,val))+"%";
+    s.textContent=weightPct+"% of MQS";
+  }
+
+  function setFlags(flags){
+    var box=$("flags-body");
+    if(!flags||!flags.length){
+      box.innerHTML='<div class="flag ok"><span class="ic">&#10003;</span><span>No red flags on the checks available today (cost vs category, AUM floor).</span></div>';
+      return;
+    }
+    box.innerHTML=flags.map(function(f){
+      return '<div class="flag"><span class="ic">!</span><span>'+esc(f.text)+'</span></div>';
+    }).join("");
+  }
 
   function loadFund(code){
     fetch("/api/v15/fund/"+encodeURIComponent(code)).then(function(r){return r.json()}).then(function(d){
@@ -257,15 +323,20 @@ td.sym{font-weight:700;font-size:12.5px}
       setRet("r-1w",f.ret_1w);setRet("r-1m",f.ret_1m);setRet("r-3m",f.ret_3m);
       setRet("r-6m",f.ret_6m);setRet("r-1y",f.ret_1y);setRet("r-2y",f.ret_2y);
       $("ret-asof").textContent=f.returns_asof?("as of "+f.returns_asof):"awaiting data";
+      setDial(f.mqs); setVerdict(f.mqs,f.computed_at);
+      setPillar("pc-q",f.q_score,35,"Retired cc#505 — rating brand gone, no replacement.");
+      setPillar("pc-r",f.r_score,30);
+      setPillar("pc-c",f.c_score,15);
+      setPillar("pc-s",f.s_score,20);
+      setFlags(f.red_flags);
     }).catch(function(){});
   }
 
   function rowHtml(f){
     var r1=pct(f.ret_1y),r3=pct(f.ret_3y);
-    var mqs='<span class="gvm" style="color:var(--dim);background:var(--well)">—</span>';
     return '<tr data-code="'+esc(f.scheme_code)+'" style="cursor:pointer">'
       +'<td class="sym">'+esc(f.name)+'</td>'
-      +'<td>'+mqs+'</td>'
+      +'<td>'+mqsChip(f.mqs)+'</td>'
       +'<td class="num" style="color:'+r1.c+'">'+r1.t+'</td>'
       +'<td class="num" style="color:'+r3.c+'">'+r3.t+'</td>'
       +'<td class="num">'+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2):em)+'</td>'
@@ -274,7 +345,7 @@ td.sym{font-weight:700;font-size:12.5px}
   }
   function loadScreener(cat){
     var tb=$("scrbody"); tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr>';
-    fetch("/api/v15/screener?category="+encodeURIComponent(cat)+"&sort=1y").then(function(r){return r.json()}).then(function(d){
+    fetch("/api/v15/screener?category="+encodeURIComponent(cat)+"&sort=mqs").then(function(r){return r.json()}).then(function(d){
       var rows=(d&&d.results)||[];
       if(!rows.length){tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:22px 0">No funds found for '+esc(cat)+'.</td></tr>';return;}
       tb.innerHTML=rows.map(rowHtml).join("");
@@ -284,12 +355,19 @@ td.sym{font-weight:700;font-size:12.5px}
     }).catch(function(){tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--bear);padding:22px 0">Screener unavailable.</td></tr>';});
   }
 
+  function loadStats(){
+    fetch("/api/v15/stats").then(function(r){return r.json()}).then(function(d){
+      var t=$("hdr-chip-txt"); if(!t||!d)return;
+      t.textContent="MQS · "+(d.scored!=null?d.scored:"—")+" funds scored · nightly";
+    }).catch(function(){});
+  }
+
   // tabs
   var tabs=$("tabs");
   Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(t){
     t.addEventListener("click",function(){
       Array.prototype.forEach.call(tabs.querySelectorAll(".tab"),function(x){x.classList.remove("on")});
-      t.classList.add("on"); loadScreener(t.textContent.trim());
+      t.classList.add("on"); loadScreener(t.getAttribute("data-cat")||t.textContent.trim());
     });
   });
 
@@ -319,7 +397,8 @@ td.sym{font-weight:700;font-size:12.5px}
   q.addEventListener("keydown",function(e){if(e.key==="Enter")runSearch();});
 
   // initial load
-  loadScreener("Flexi Cap");
+  loadStats();
+  loadScreener("Flexi Cap Fund");
 })();
 </script>
 </body>

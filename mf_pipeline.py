@@ -1132,38 +1132,86 @@ def v15_search(q: str = "", limit: int = 12):
 
 @router.get("/api/v15/fund/{scheme_code}")
 def v15_fund(scheme_code: str):
-    """cc#480: thin hero read — meta + returns bindings (ret_* NULL until cc#477 lands,
-    rendered as em-dash by the page). No MQS/holdings (those are COMING SOON)."""
+    """cc#480: thin hero read — meta + returns bindings.
+    cc#519 GO-LIVE: adds MQS/pillar scores (mf_scores, null when unscored -- page shows
+    "Not yet scored", never a fabricated value) and deterministic red flags computed from
+    real mf_master/mf_category_averages data only. Holdings-derived flags (single-stock
+    weight, top-10 concentration, GVM-weighted portfolio avg) are intentionally NOT computed
+    here -- cc#519 investigation found mf_holdings' June-2026 bulk load returns the identical
+    ~305-stock list for all 518 schemes (a Consumption fund and a Large&Mid-Cap fund show the
+    same top-10 weights to 2dp), i.e. template/placeholder data, not real per-fund disclosures.
+    Wiring red flags to it would present fabricated concentration numbers as real -- flagged
+    for founder re-scrape, not silently shipped."""
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
         try:
             _ensure_returns_cols(cur); conn.commit()
         except Exception:
             conn.rollback()
-        cur.execute("""SELECT scheme_code, name, amc, category, expense_ratio, aum_cr,
-                              crisil_rank, manager,
-                              ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, ret_2y, ret_3y, returns_asof
-                       FROM mf_master WHERE scheme_code=%s""", (scheme_code,))
+        cur.execute("""SELECT m.scheme_code, m.name, m.amc, m.category, m.expense_ratio, m.aum_cr,
+                              m.crisil_rank, m.manager,
+                              m.ret_1w, m.ret_1m, m.ret_3m, m.ret_6m, m.ret_1y, m.ret_2y, m.ret_3y,
+                              m.returns_asof,
+                              s.mqs, s.q_score, s.r_score, s.c_score, s.s_score, s.computed_at,
+                              ca.avg_expense_ratio
+                       FROM mf_master m
+                       LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code
+                       LEFT JOIN mf_category_averages ca ON ca.category = m.category
+                       WHERE m.scheme_code=%s""", (scheme_code,))
         r = cur.fetchone()
         if not r:
             return {"error": "not found"}
         cols = [d[0] for d in cur.description]
         m = dict(zip(cols, r))
+    cat_avg_er = m.pop("avg_expense_ratio", None)
     m["category"] = _derive_cat(m.get("name"), m.get("category"))
     m["plan"] = _derive_plan(m.get("name"))
-    for k in ("expense_ratio", "aum_cr", "ret_1w", "ret_1m", "ret_3m",
-              "ret_6m", "ret_1y", "ret_2y", "ret_3y"):
+    for k in ("expense_ratio", "aum_cr", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y",
+              "ret_2y", "ret_3y", "mqs", "q_score", "r_score", "c_score", "s_score"):
         if m.get(k) is not None:
             m[k] = float(m[k])
     m["returns_asof"] = str(m["returns_asof"]) if m.get("returns_asof") else None
+    m["computed_at"] = str(m["computed_at"]) if m.get("computed_at") else None
+
+    flags = []
+    er, aum = m.get("expense_ratio"), m.get("aum_cr")
+    if er is not None and cat_avg_er is not None and er > float(cat_avg_er):
+        flags.append({"kind": "cost",
+                       "text": f"Expense ratio {er:.2f}% is above the category average "
+                               f"{float(cat_avg_er):.2f}%."})
+    if aum is not None and aum < 500:
+        flags.append({"kind": "size",
+                       "text": f"AUM ₹{aum:,.0f} Cr is below ₹500 Cr -- smaller "
+                               f"funds carry higher volatility/liquidity risk."})
+    m["red_flags"] = flags
     return {"fund": m}
 
 
+@router.get("/api/v15/stats")
+def v15_stats():
+    """cc#519: live scored-fund count for the page header chip -- avoids hardcoding a count
+    that goes stale after the next nightly recompute."""
+    with _conn() as conn, conn.cursor() as cur:
+        ensure_tables(cur)
+        cur.execute("SELECT COUNT(*) FROM mf_scores")
+        scored = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM mf_master WHERE category = ANY(%s)",
+                    (list(EQUITY_CATEGORY_WHITELIST),))
+        universe = cur.fetchone()[0]
+    return {"scored": scored, "universe": universe}
+
+
 @router.get("/api/v15/screener")
-def v15_screener(category: str = "", sort: str = "1y", limit: int = 40):
+def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
     """cc#480: screener rows for a category tab. Matches mf_master.category OR the scheme name
-    (real AMFI names carry the category), Direct-Growth only. Sort by 1Y desc (NULLs last) then
-    AUM. AUM>5000 filter activates automatically once aum_cr is populated (cc#477)."""
+    (real AMFI names carry the category), Direct-Growth only. AUM>5000 filter activates
+    automatically once aum_cr is populated (cc#477).
+    cc#519: joins mf_scores for the MQS column; default sort is now mqs desc (was 1y) now that
+    the column has real data. cc#519 fix: when `category` is one of the 11 canonical whitelist
+    values, filter with an EXACT match instead of ILIKE substring -- ILIKE '%Mid Cap Fund%' also
+    matches 'Large & Mid Cap Fund' (it ends with that exact substring), which would leak
+    Large&Mid rows into the plain Mid Cap tab. Free-text category input (legacy callers) keeps
+    the ILIKE substring fallback."""
     cat = (category or "").strip()
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
@@ -1172,26 +1220,35 @@ def v15_screener(category: str = "", sort: str = "1y", limit: int = 40):
         except Exception:
             conn.rollback()
         # cc#520: debt strays (Banking & PSU) must not appear in the screener.
-        where = ["name ILIKE '%%direct%%'", "name ILIKE '%%growth%%'", "category = ANY(%s)"]
+        where = ["m.name ILIKE '%%direct%%'", "m.name ILIKE '%%growth%%'", "m.category = ANY(%s)"]
         params = [list(EQUITY_CATEGORY_WHITELIST)]
-        if cat:
-            where.append("(category ILIKE %s OR name ILIKE %s)")
+        if cat in EQUITY_CATEGORY_WHITELIST:
+            where.append("m.category = %s")
+            params.append(cat)
+        elif cat:
+            where.append("(m.category ILIKE %s OR m.name ILIKE %s)")
             params += [f"%{cat}%", f"%{cat}%"]
-        order = ("ret_1y DESC NULLS LAST, aum_cr DESC NULLS LAST, name"
-                 if sort == "1y" else "aum_cr DESC NULLS LAST, ret_1y DESC NULLS LAST, name")
-        sql = ("SELECT scheme_code, name, amc, category, crisil_rank, "
-               "expense_ratio, aum_cr, ret_1y, ret_3y FROM mf_master WHERE "
+        if sort == "1y":
+            order = "ret_1y DESC NULLS LAST, aum_cr DESC NULLS LAST, name"
+        elif sort == "aum":
+            order = "aum_cr DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
+        else:
+            order = "mqs DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
+        sql = ("SELECT m.scheme_code, m.name, m.amc, m.category, m.crisil_rank, "
+               "m.expense_ratio, m.aum_cr, m.ret_1y, m.ret_3y, s.mqs "
+               "FROM mf_master m LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code WHERE "
                + " AND ".join(where) + " ORDER BY " + order + " LIMIT %s")
         params.append(max(1, min(limit, 80)))
         cur.execute(sql, params)
         rows = []
-        for sc, nm, amc, c, cr, er, aum, r1y, r3y in cur.fetchall():
+        for sc, nm, amc, c, cr, er, aum, r1y, r3y, mqs in cur.fetchall():
             rows.append({"scheme_code": sc, "name": nm, "amc": amc,
                          "category": _derive_cat(nm, c),
                          "crisil_rank": cr, "expense_ratio": float(er) if er is not None else None,
                          "aum_cr": float(aum) if aum is not None else None,
                          "ret_1y": float(r1y) if r1y is not None else None,
-                         "ret_3y": float(r3y) if r3y is not None else None})
+                         "ret_3y": float(r3y) if r3y is not None else None,
+                         "mqs": float(mqs) if mqs is not None else None})
     return {"category": cat, "count": len(rows), "results": rows}
 
 
