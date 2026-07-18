@@ -986,17 +986,8 @@ function _dcFmtDate(s){
   const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m[2],10)-1];
   return `${m[3]}-${mon}`;
 }
-// cc#515: Results chip — NEVER absent (a calendar gap is itself information). Amber <=7d, red <=3d
-// (mirrors TC's G2 blackout window); recent-past and n/a states render dim/neutral.
-function _dcResultsChip(r){
-  if(!r||r.status==='none')return `<div class="dc-sub" style="margin:-4px 0 10px;color:var(--dim)">Result date n/a</div>`;
-  if(r.status==='upcoming'){
-    const d=r.days_to;
-    const color=d<=3?'var(--red)':d<=7?'var(--amber)':'var(--mut)';
-    return `<div class="dc-sub" style="margin:-4px 0 10px;color:${color};font-weight:700">Results ${_dcFmtDate(r.next_date)} (${d}d)</div>`;
-  }
-  return `<div class="dc-sub" style="margin:-4px 0 10px;color:var(--mut)">Results announced ${_dcFmtDate(r.recent_date)}</div>`;
-}
+// cc#515/516: Results chip logic moved into _dcSetupContext() (Part A structure redesign folds it
+// into the SETUP CONTEXT strip alongside the TC/V8-basket chips, rather than a standalone line).
 // cc#515: composite plain-language READ tile — one deterministic desk read, always first. Every
 // number in read.sentence already came from deriv_metrics.py's _composite_read() citing the SAME
 // payload fields the tiles below render (no client-side recompute).
@@ -1027,8 +1018,15 @@ function _dcVC(k,label,color,sub,tip){
   return `<div class="dc-vc" style="--vc:${_dcColor(color)}"${tt}><div class="k">${k}</div>`+
     `<div class="v" style="color:${_dcColor(color)}">${label}</div>${sub?`<div class="vs">${sub}</div>`:''}</div>`;
 }
-function _dcR(k,vhtml,dhtml){
-  return `<div class="dc-row"><div><div class="k">${k}</div>${dhtml?`<div class="d">${dhtml}</div>`:''}</div><div class="v">${vhtml}</div></div>`;
+function _dcR(k,vhtml,dhtml,meaning){
+  // cc#516 Part B: optional 4th arg renders the server-built interpretation line (dim, italic)
+  // under the row's existing sub-description -- template-driven server-side, never client recompute.
+  const mHtml=meaning?`<div class="d" style="font-style:italic;margin-top:2px">${meaning}</div>`:'';
+  return `<div class="dc-row"><div><div class="k">${k}</div>${dhtml?`<div class="d">${dhtml}</div>`:''}${mHtml}</div><div class="v">${vhtml}</div></div>`;
+}
+// cc#516 Part A: section header for the FLOW/LEVELS/ENERGY/OPTIONS regroup.
+function _dcSection(title){
+  return `<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 5px;padding-top:10px;border-top:1px solid var(--line)">${title}</div>`;
 }
 // cc#427 fix_4: per-row STRONG/NEUTRAL/WEAK chip from the BUY perspective — CMP above this level
 // (dist>0) = STRONG, below = WEAK, within ±0.15% = NEUTRAL.
@@ -1046,102 +1044,142 @@ function _dcOiVal(x){
   if(x&&x.oi_unfed)return `<span class="dc-thin" title="Option OI is fed for indices (NIFTY/BankNifty) only; single-stock option OI is not in the feed">OI n/f</span>`;
   return '--';
 }
-function _dcRender(sym,side,qty,entry,cmp,d){
-  const V=d.verdict||{},L=d.levels||{},F=d.flow||{},E=d.energy||{},R=d.rsi||{};
-  // ── Verdict strip: OI Quadrant · Options Cost · TC Score (always 3 chips) ──
-  const q=V.oi_quadrant, o=V.options_cost, t=V.tc_score;
-  let vc='';
-  // fix_1: OI Quadrant — show the classifying numbers (Fut OI d/d% · price change%) beneath the label.
-  // cc#515: q is now always a dict (never bare null); stale (feed gap >1 session) reads "OI STALE
-  // since <date>" instead of an unexplained bare "DATA THIN".
-  if(q&&q.label){
-    vc+=_dcVC('OI Quadrant',q.label,q.color,
-             `OI ${sign(q.oi_chg_pct,1)}% &middot; Px ${sign(q.price_chg_pct,1)}%`,
-             'OI Quadrant = futures OI d/d × price change. Long/Short Buildup, Long Unwind, Short Covering.');
-  }else if(q&&q.stale&&q.stale_since){
-    vc+=_dcVC('OI Quadrant','OI STALE','amber',`since ${_dcFmtDate(q.stale_since)}`,
-             'Futures OI has not updated in over a session for this symbol — quadrant unavailable, not just thin.');
-  }else{
-    vc+=_dcVC('OI Quadrant','DATA THIN','mut','');
+// cc#516 Part A: SETUP CONTEXT strip — Results chip (cc#515) + TC chip (cc#513, moved out of the
+// old generic "verdict strip") + V8 basket status chip (display-only context, filled in later by
+// _dcFetchBasketStatus -- never mixed into scoring, per context-isolation).
+function _dcSetupContext(d){
+  const chips=[];
+  const r=d.results;
+  if(r){
+    if(r.status==='upcoming'){
+      const c=r.days_to<=3?'bear':r.days_to<=7?'amber':'mut';
+      chips.push(`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:${_dcColor(c)}">Results ${_dcFmtDate(r.next_date)} (${r.days_to}d)</span>`);
+    }else if(r.status==='recent'){
+      chips.push(`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:var(--mut)">Results ${_dcFmtDate(r.recent_date)}</span>`);
+    }else{
+      chips.push(`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:var(--dim)">Result n/a</span>`);
+    }
   }
-  // fix_2: Options Cost — working = ATM strike, current ATM-CE premium vs BS fair premium, ratio.
+  const t=(d.verdict||{}).tc_score;
+  if(t)chips.push(`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:${_dcColor(t.color)}">${t.style||t.label||'TC'} ${t.score!=null?num(t.score,1):'--'}/${t.total||''}</span>`);
+  return `<div id="dcSetupCtx" style="margin:0 0 10px">${chips.join('')}</div>`;
+}
+// cc#516 Part A: best-effort, non-blocking V8 basket-status context chip. Reuses the existing
+// stock_passcount payloads (no new endpoint); "display-only" per spec -- appended into #dcSetupCtx
+// once resolved, never awaited by the main render (a slow/failed fetch just means no chip).
+async function _dcFetchBasketStatus(sym){
+  const baskets=[['buy_reversal','BuyRev'],['buy_momentum','BuyMom'],['sell_reversal','SellRev'],['sell_momentum','SellMom']];
+  try{
+    const results=await Promise.all(baskets.map(([b])=>getJSON(EP.passCount(b)).catch(()=>null)));
+    let best=null;
+    results.forEach((pc,i)=>{
+      if(!pc||!pc.stocks)return;
+      const row=pc.stocks.find(x=>x.symbol===sym);
+      if(row&&(!best||row.passed>best.row.passed))best={label:baskets[i][1],row};
+    });
+    if(!best)return;
+    const missing=(best.row.failed_filters||[])[0];
+    const txt=`${best.label} ${best.row.passed}/${best.row.total}${missing?(' &middot; missing '+missing.replace(/_/g,' ')):''}`;
+    const el=document.getElementById('dcSetupCtx');
+    if(el)el.insertAdjacentHTML('beforeend',`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:var(--mut)">${txt}</span>`);
+  }catch(e){/* display-only context — silent on failure */}
+}
+function _dcRender(sym,side,qty,entry,cmp,d){
+  const V=d.verdict||{},L=d.levels||{},F=d.flow||{},E=d.energy||{},R=d.rsi||{},M=d.meanings||{};
+  const q=V.oi_quadrant, o=V.options_cost;
+  const _sm=(x,dg)=>`<small class="${x>=0?'dc-pos':'dc-neg'}">${sign(x,dg)}%</small>`;
+  const _tagCls=tg=>tg==='STRONG'?'dc-pos':tg==='WEAK'?'dc-neg':'dc-thin';
+  const _qChip=(lbl,col)=>lbl?`<span class="dc-chip ${col==='bull'?'dc-pos':'dc-neg'}">${lbl}</span>`:'';
+
+  // ── FLOW: OI Quadrant tile + Futures/ATM OI + Basis + 5d rolling ──
+  let flow=_dcSection('Flow');
+  // cc#515/516: q is always a dict (never bare null); stale reads "OI STALE since <date>"; a
+  // labeled PROXY (basis+price inferred, cc#516 Part C.3) is visually distinct and never presented
+  // as the real quadrant.
+  if(q&&q.label&&!q.proxy){
+    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant',q.label,q.color,
+             `OI ${sign(q.oi_chg_pct,1)}% &middot; Px ${sign(q.price_chg_pct,1)}%${q.source==='eod'?' &middot; EOD':''}`,
+             'OI Quadrant = futures OI d/d × price change. Long/Short Buildup, Long Unwind, Short Covering.')}</div>`;
+  }else if(q&&q.label&&q.proxy){
+    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant',q.label+' (proxy)','amber',
+             M.oi_quadrant||'inferred from basis + price — OI dark',
+             'PROXY: derived from basis + price direction because both live and EOD futures OI are dark. Never the real OI quadrant.')}</div>`;
+  }else if(q&&q.stale&&q.stale_since){
+    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant','OI STALE','amber',`since ${_dcFmtDate(q.stale_since)}`,
+             'Futures OI has not updated in over a session for this symbol — quadrant unavailable, not just thin.')}</div>`;
+  }else{
+    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant','DATA THIN','mut','')}</div>`;
+  }
+  const b=F.basis, fut=d.fut, spot=d.spot;
+  flow+=_dcR('Basis',
+    (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>${b.tag?`<span class="dc-chip ${_tagCls(b.tag)}">${b.tag}</span>`:''}`:'--',
+    (fut!=null&&spot!=null)?(`Fut ${num(fut,1)} vs Eq ${num(spot,1)}`+((b&&b.percentile!=null)?(' &middot; 5d pct '+num(b.percentile,0)+'%'):''))
+                           :((b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):''),
+    M.basis);
+  const fo=F.fut_oi;
+  flow+=_dcR('Futures OI &middot; vs prev day',
+    (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>${fo.quadrant?_qChip(fo.quadrant,fo.quadrant_color):''}`
+      :((fo&&fo.stale&&fo.stale_since)?`<span class="dc-thin">OI stale since ${_dcFmtDate(fo.stale_since)}</span>`:'<span class="dc-thin">DATA THIN</span>'),
+    (fo&&fo.price_chg!=null)?('Px '+sign(fo.price_chg,1)+'%'):'');
+  const ca=F.atm_call_oi, pa=F.atm_put_oi;
+  flow+=_dcR('ATM Call OI &middot; d/d',_dcOiVal(ca),(ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)+(ca.dd_asof?(' &middot; '+ca.dd_asof):'')):'');
+  flow+=_dcR('ATM Put OI &middot; d/d',_dcOiVal(pa),(pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
+  const o5=F.oi_5d;
+  if(o5&&o5.series&&o5.series.length){
+    const _dm=s=>String(s||'').slice(5).replace('-','/');
+    const bars=o5.series.map(s=>`<span title="${s.date}: OI ${s.chg_pct==null?'--':sign(s.chg_pct,1)}% · Px ${s.px_chg==null?'--':sign(s.px_chg,1)}%${s.quadrant?(' · '+s.quadrant):''}" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.4;gap:3px"><span style="font-size:11px;color:var(--dim)">${_dm(s.date)}</span><span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span><span style="font-size:10px;color:${s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)'}">${s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,12):''}</span></span>`).join('<span style="color:var(--line2);margin:0 5px;align-self:center">|</span>');
+    flow+=`<div class="dc-row" style="padding:12px 0"><div><div class="k">OI &middot; 5d rolling</div><div class="d">dated, quadrant-tagged, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:7px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-end;min-height:60px">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
+  }
+
+  // ── LEVELS: VPOC today/prior · VWAP · fall-from-high ──
+  let levels=_dcSection('Levels')+'<div class="dc-grid">';
+  const vp=L.vpoc_today;
+  levels+=_dcR('VPOC &middot; today',
+    (vp&&vp.value!=null)?(num(vp.value,0)+(vp.dist_pct!=null?_sm(vp.dist_pct,1):'')+_dcInterp(vp.dist_pct)):'--',
+    (L.vpoc_prior&&L.vpoc_prior.naked)?('prior '+num(L.vpoc_prior.value,0)+' naked'):'',
+    M.vpoc_today);
+  if(L.vpoc_prior&&L.vpoc_prior.value!=null)
+    levels+=_dcR('VPOC &middot; prior',num(L.vpoc_prior.value,0)+(L.vpoc_prior.naked?' <span class="dc-chip dc-neg">naked</span>':' <span class="dc-chip dc-pos">tested</span>'),'',M.vpoc_prior);
+  const vw=L.vwap;
+  levels+=_dcR('VWAP',
+    (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')+_dcInterp(vw.dist_pct)):'--','session',M.vwap);
+  if(E.fall_from_day_high!=null||M.fall_from_day_high)
+    levels+=_dcR('Fall &middot; from day high',E.fall_from_day_high!=null?`<span class="${E.fall_from_day_high>=0?'dc-pos':'dc-neg'}">${sign(E.fall_from_day_high,2)}%</span>`:'--','',M.fall_from_day_high);
+  levels+='</div>';
+
+  // ── ENERGY: Vol X · Recent participation (3d/21d, cc#516 Part D) · A/D · ATR · RSI ──
+  let energy=_dcSection('Energy')+'<div class="dc-grid">';
+  energy+=_dcR('Vol X &middot; time-matched',
+    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--',
+    'vs typical session'+(E.volx_asof?(' &middot; as of '+E.volx_asof):''),M.volx);
+  const r3=E.recent3d_vol_ratio;
+  energy+=_dcR('Recent participation &middot; 3d/21d',
+    r3!=null?`<span class="${r3>=1?'dc-pos':'dc-neg'}">${num(r3,2)}×</span>`:'--','vol(t-1..t-3) vs vol(t-1..t-21)',M.recent3d_vol_ratio);
+  const ad=E.ad_21d;
+  energy+=_dcR('A/D &middot; 21d',
+    ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',
+    ad?(num(ad.up_vol_pct,0)+'% up-vol'):'',M.ad_21d);
+  energy+=_dcR('ATR',
+    (E.atr_5m!=null||E.atr_daily!=null)?(`5m ${E.atr_5m!=null?num(E.atr_5m,1):'--'}${E.atr_5m_pct!=null?` (${num(E.atr_5m_pct,2)}%)`:''} &middot; D ${E.atr_daily!=null?num(E.atr_daily,1):'--'}${E.atr_daily_pct!=null?` (${num(E.atr_daily_pct,1)}%)`:''}`):'--','5m,20 · daily,14',M.atr);
+  const rd=R.d,rw=R.w;
+  energy+=_dcR('RSI &middot; D/W',
+    (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','daily · weekly');
+  energy+='</div>';
+
+  // ── OPTIONS: Options Cost tile + freshness ──
+  let options=_dcSection('Options');
   let oSub='';
   if(o){const w=o.working;
     oSub = w ? `${num(w.strike,0)} CE @ ${num(w.ce_ltp,0)} vs fair ${num(w.ce_fair,0)} &middot; ${num(w.ce_ratio,2)}×`
              : (o.basis==='IVP'?('IVP '+num(o.ivp,0)):(o.iv_rv!=null?num(o.iv_rv,2)+'×':''));}
-  vc+= o ? _dcVC('Options Cost',o.label,o.color,oSub,
+  options+=`<div class="dc-vstrip">${o ? _dcVC('Options Cost',o.label,o.color,oSub,
              'Options Cost: ATM straddle implied vol vs 20d realised (RV20). Working shows the ATM-CE market premium vs the Black-Scholes fair premium (σ=RV20); ratio <1× = cheap.')
-         : _dcVC('Options Cost','DATA THIN','mut','');
-  // fix_3: TC Score — TC v4 dual HIGHEST card: style tag (e.g. SELL-REV) + side colour + X/16(BUY)|X/14(SELL).
-  vc+= t ? _dcVC('TC Score', (t.style||t.label||'--'), t.color,
-             (t.score!=null?num(t.score,1):'--')+'/'+(t.total||'')+(t.verdict?(' &middot; '+t.verdict):''),
-             'TC Score = the highest-scoring TC v4 dual card (Momentum/Reversal × BUY/SELL). Score out of 16 (BUY) or 14 (SELL).')
-         : _dcVC('TC Score','DATA THIN','mut', side?'':'no side');
-  const verdict=`<div class="dc-vstrip">${vc}</div>`;
-  // ── metric grid: VPOC · VWAP · Basis · Fut OI · ATM Call OI · ATM Put OI · Vol X (2-col) ──
-  const _sm=(x,dg)=>`<small class="${x>=0?'dc-pos':'dc-neg'}">${sign(x,dg)}%</small>`;
-  let grid='';
-  // VPOC (fix_4 STRONG/NEUTRAL/WEAK chip vs its own level)
-  const vp=L.vpoc_today;
-  grid+=_dcR('VPOC &middot; today',
-    (vp&&vp.value!=null)?(num(vp.value,0)+(vp.dist_pct!=null?_sm(vp.dist_pct,1):'')+_dcInterp(vp.dist_pct)):'--',
-    (L.vpoc_prior&&L.vpoc_prior.naked)?('prior '+num(L.vpoc_prior.value,0)+' naked'):'');
-  // VWAP (fix_4)
-  const vw=L.vwap;
-  grid+=_dcR('VWAP',
-    (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')+_dcInterp(vw.dist_pct)):'--','session');
-  // cc#445 helpers: strength-tag colour + quadrant chip colour
-  const _tagCls=t=>t==='STRONG'?'dc-pos':t==='WEAK'?'dc-neg':'dc-thin';
-  const _qChip=(lbl,col)=>lbl?`<span class="dc-chip ${col==='bull'?'dc-pos':'dc-neg'}">${lbl}</span>`:'';
-  // Basis (fix_2: rupee Fut vs Eq + 5d-percentile STRENGTH tag)
-  const b=F.basis, fut=d.fut, spot=d.spot;
-  grid+=_dcR('Basis',
-    (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>${b.tag?`<span class="dc-chip ${_tagCls(b.tag)}">${b.tag}</span>`:''}`:'--',
-    (fut!=null&&spot!=null)?(`Fut ${num(fut,1)} vs Eq ${num(spot,1)}`+((b&&b.percentile!=null)?(' &middot; 5d pct '+num(b.percentile,0)+'%'):''))
-                           :((b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):''));
-  // Fut OI (fix_3: today's OI/price quadrant tag). cc#515: stale (not just missing-today) reads
-  // "OI stale since <date>" instead of a bare DATA THIN.
-  const fo=F.fut_oi;
-  grid+=_dcR('Futures OI &middot; vs prev day',
-    (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>${fo.quadrant?_qChip(fo.quadrant,fo.quadrant_color):''}`
-      :((fo&&fo.stale&&fo.stale_since)?`<span class="dc-thin">OI stale since ${_dcFmtDate(fo.stale_since)}</span>`:'<span class="dc-thin">DATA THIN</span>'),
-    (fo&&fo.price_chg!=null)?('Px '+sign(fo.price_chg,1)+'%'):'');
-  // ATM Call/Put OI (fix_4: d/d from daily snapshot store; "1st snapshot" until 2 sessions)
-  const ca=F.atm_call_oi, pa=F.atm_put_oi;
-  grid+=_dcR('ATM Call OI &middot; d/d',_dcOiVal(ca),(ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)+(ca.dd_asof?(' &middot; '+ca.dd_asof):'')):'');
-  grid+=_dcR('ATM Put OI &middot; d/d',_dcOiVal(pa),(pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
-  // Vol X (fix_5: last-session final off-market) + A/D 21d
-  grid+=_dcR('Vol X &middot; time-matched',
-    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--',
-    'vs typical session'+(E.volx_asof?(' &middot; as of '+E.volx_asof):''));   // cc#454: stamp the anchored session
-  const ad=E.ad_21d;
-  grid+=_dcR('A/D &middot; 21d',
-    ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',
-    ad?(num(ad.up_vol_pct,0)+'% up-vol'):'');
-  // ATR (fix_6: 5m intraday + daily)
-  grid+=_dcR('ATR',
-    (E.atr_5m!=null||E.atr_daily!=null)?(`5m ${E.atr_5m!=null?num(E.atr_5m,1):'--'}${E.atr_5m_pct!=null?` (${num(E.atr_5m_pct,2)}%)`:''} &middot; D ${E.atr_daily!=null?num(E.atr_daily,1):'--'}${E.atr_daily_pct!=null?` (${num(E.atr_daily_pct,1)}%)`:''}`):'--','5m,20 · daily,14');
-  // cc#454 fix_2a: ORB row removed (opening-range momentum now lives in V14 ORB); RSI moves UP into
-  // this grid slot (no longer a bottom full-width row).
-  const rd=R.d,rw=R.w;
-  grid+=_dcR('RSI &middot; D/W',
-    (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','daily · weekly');
-  let rows=_dcReadTile(d.read)+`<div class="dc-grid">${grid}</div>`;
-  // fix_7: OI · 5d rolling — each value DATED + quadrant-tagged (needs price change alongside OI).
-  const o5=F.oi_5d;
-  if(o5&&o5.series&&o5.series.length){
-    const _dm=s=>String(s||'').slice(5).replace('-','/');
-    // cc#454 fix_2b: doubled row height + larger fonts (dates 11px · values 14px · tags 10px) for readability.
-    const bars=o5.series.map(s=>`<span title="${s.date}: OI ${s.chg_pct==null?'--':sign(s.chg_pct,1)}% · Px ${s.px_chg==null?'--':sign(s.px_chg,1)}%${s.quadrant?(' · '+s.quadrant):''}" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.4;gap:3px"><span style="font-size:11px;color:var(--dim)">${_dm(s.date)}</span><span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span><span style="font-size:10px;color:${s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)'}">${s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,12):''}</span></span>`).join('<span style="color:var(--line2);margin:0 5px;align-self:center">|</span>');
-    rows+=`<div class="dc-row" style="padding:12px 0"><div><div class="k">OI &middot; 5d rolling</div><div class="d">dated, quadrant-tagged, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:7px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-end;min-height:60px">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
-  }
-  // cc#454 fix_2a: RSI moved into the grid above (was here as a bottom full-width row).
-  // cc#368: honest freshness line — off-market/weekend shows the last chain snapshot ts ("as of
-  // <ts>"); zero chain rows shows an explicit "No option data" state (never an infinite skeleton).
-  let fresh='';
-  if(!d.has_options && !d.data_ts) fresh=`<div class="dc-sub" style="color:var(--amber);margin:-2px 0 8px">&#9888; No option data for ${sym}</div>`;
-  else if(d.data_ts) fresh=`<div class="dc-sub" style="margin:-2px 0 8px">Options as of ${_dcFmtTs(d.data_ts)} IST</div>`;
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+_dcResultsChip(d.results)+fresh+verdict+rows;
+         : _dcVC('Options Cost','DATA THIN','mut','')}</div>`;
+  if(M.options_cost)options+=`<div class="dc-row" style="border-style:dashed"><div><div class="d" style="font-style:italic">${M.options_cost}</div></div><div class="v"></div></div>`;
+  if(!d.has_options && !d.data_ts) options+=`<div class="dc-sub" style="color:var(--amber);margin:6px 0 0">&#9888; No option data for ${sym}</div>`;
+  else if(d.data_ts) options+=`<div class="dc-sub" style="margin:6px 0 0">Options as of ${_dcFmtTs(d.data_ts)} IST</div>`;
+
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+_dcSetupContext(d)+_dcReadTile(d.read)+flow+levels+energy+options;
 }
 // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
 // Date()/timezone drift (the server stamp is already IST).
@@ -1169,6 +1207,7 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
     const det=(!isTo&&e&&e.message)?`<div style="color:var(--mut);font-size:11px;margin-top:6px">${String(e.message).slice(0,240)}</div>`:'';
     sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+`<div class="empty" style="padding:18px;color:var(--red);font-size:12px">${msg}${det}</div>`;return;}
   sheet.innerHTML=_dcRender(sym,side,qty,entry,cmp,d||{});
+  _dcFetchBasketStatus(sym);   // cc#516: non-blocking, patches #dcSetupCtx in place when it resolves
 }
 // cc#514: Derivative Cockpit deep-link — /dashboard?dc=SYMBOL opens the sheet in a NEW tab from
 // any other page/modal (the filter-breakdown modal's Cockpit button uses this). Same query-param

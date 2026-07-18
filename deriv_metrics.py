@@ -424,7 +424,7 @@ def _options_block(cur, sym, cmp_px) -> Dict[str, Any]:
             "strike": atm,
             "ce_ltp": ce_ltp, "ce_bid": _f(ce[4]) if ce else None, "ce_ask": _f(ce[5]) if ce else None,
             "pe_ltp": pe_ltp, "pe_bid": _f(pe[4]) if pe else None, "pe_ask": _f(pe[5]) if pe else None,
-            "gap": gap,
+            "gap": gap, "expiry": str(expiry) if expiry else None,   # cc#516: options-cost meaning line needs this
         },
         "options_cost": cost,
     }
@@ -473,9 +473,21 @@ def _intraday_block(cur, sym, cmp_px) -> Dict[str, Any]:
             vwap = num / den
             out["vwap"] = {"value": round(vwap, 2),
                            "dist_pct": round((cmp_px - vwap) / vwap * 100.0, 2) if cmp_px else None}
-        # fall-from-day-high
+        # fall-from-day-high. cc#516: day_hi kept for the interpretation-layer line ("rallied to X,
+        # faded -Y% into close").
+        out["day_hi"] = hi
         if hi and cmp_px:
             out["fall_from_day_high"] = round((cmp_px - hi) / hi * 100.0, 2)
+        # cc#516: today's daily true range (vs the prior session's close) -- compared to the daily
+        # ATR14 (computed separately) for the ATR tile's "compressed range / coiling" and "ignition"
+        # interpretation lines.
+        if hi is not None and lo is not None:
+            cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND close IS NOT NULL
+                           AND price_date < %s ORDER BY price_date DESC LIMIT 1""", (sym, today))
+            _pc = cur.fetchone()
+            prev_close = _f(_pc[0]) if _pc else None
+            out["tr_today"] = round(max(hi - lo, abs(hi - prev_close), abs(lo - prev_close)), 2) \
+                if prev_close is not None else round(hi - lo, 2)
         # cc#445 fix_8: opening range (09:15-09:30) + CMP position vs range (off-market = last session)
         _orb = [x for x in tb if x[4].time().hour == 9 and x[4].time().minute < 30]
         or_hi = max((_f(x[1]) for x in _orb if _f(x[1]) is not None), default=None)
@@ -599,12 +611,13 @@ _QUADRANT_PHRASE = {
 }
 
 
-def _composite_read(quad, results, basis_block, m, opt, ad, intr) -> Dict[str, Any]:
+def _composite_read(quad, results, basis_block, m, opt, ad, intr, recent3d=None) -> Dict[str, Any]:
     """cc#515: ONE deterministic, plain-language desk read synthesizing the tiles the founder
     currently combines mentally -- no LLM, every number quoted comes from the same payload fields
     the tiles themselves render (zero recompute, zero drift). Votes collected: OI quadrant,
-    intraday basis direction, ATM put-vs-call OI skew (when fed), A/D 21d label, VolX>=1.3 (energy
-    confirming the day's price direction). DATA THIN votes are excluded from the denominator and
+    intraday basis direction, ATM put-vs-call OI skew (when fed), A/D 21d label, VolX>=1.3 and
+    recent3d/21d volume participation>=1.3 (both energy CONFIRMING the day's price direction, not
+    directional alone -- cc#516). DATA THIN votes are excluded from the denominator and
     listed under "dark". A PRICE/FLOW CONFLICT (price direction disagrees with the vote majority)
     forces the label to MIXED regardless of the raw vote count -- the single highest-value read for
     the user, per the founder's MOTHERSON worked example (18-Jul-2026)."""
@@ -666,6 +679,14 @@ def _composite_read(quad, results, basis_block, m, opt, ad, intr) -> Dict[str, A
         elif volx < 0.8:
             cautions.append(f"VolX {volx}x — quiet, move not energy-backed")
 
+    # 6) cc#516: recent3d/21d volume participation -- rising participation confirms the day's price
+    # direction (same "confirms, doesn't set" pattern as VolX); drying-up participation is a caution.
+    if recent3d is not None and price_chg is not None:
+        if recent3d >= 1.3:
+            votes.append(("bull" if price_chg > 0 else "bear", f"participation rising ({recent3d}x)"))
+        elif recent3d <= 0.8:
+            cautions.append(f"participation drying up ({recent3d}x)")
+
     n_bull = sum(1 for v in votes if v[0] == "bull")
     n_bear = sum(1 for v in votes if v[0] == "bear")
     m_total = len(votes)
@@ -694,6 +715,139 @@ def _composite_read(quad, results, basis_block, m, opt, ad, intr) -> Dict[str, A
     return {"label": f"{direction} FLOW {n}/{m_total}" if m_total else "NO READ 0/0",
             "direction": direction, "n": n, "m": m_total, "conflict": conflict,
             "sentence": sentence, "cautions": cautions, "dark": dark}
+
+
+def _eod_fut_oi_fallback(cur, sym) -> Optional[Dict[str, Any]]:
+    """cc#516 Part C.1b/C.2: read fut_oi_eod (cc#517's nightly NSE bhavcopy job) when the live feed's
+    OI is stale/missing. Table-existence-checked first (via information_schema, which never aborts
+    the transaction even when the table is absent) so this is forward-compatible -- it activates
+    automatically once cc#517 ships and its first nightly run lands a row, no further cc#516 change
+    needed. Returns None before that (today: proxy quadrant / stale badge is the honest fallback)."""
+    cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name='fut_oi_eod'")
+    if not cur.fetchone():
+        return None
+    cur.execute("SELECT oi, oi_chg_pct, d FROM fut_oi_eod WHERE symbol=%s ORDER BY d DESC LIMIT 1", (sym,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    return {"oi": _f(r[0]), "chg_pct": _f(r[1]), "d": str(r[2])}
+
+
+def _proxy_quadrant(basis_block, price_chg) -> Optional[Dict[str, Any]]:
+    """cc#516 Part C.3: when both live and EOD futures OI are dark, derive a LABELED PROXY from
+    basis direction + price direction ("price up + premium widening ~ long-buildup-like"). Always
+    tagged proxy=True -- never presented as the real OI quadrant (a different color/style + a
+    'proxy' suffix in the UI keeps it visually distinct)."""
+    bb = (basis_block or {}).get("basis") or {}
+    bopen, bnow = bb.get("intraday_open_pct"), bb.get("pct")
+    if bopen is None or bnow is None or price_chg is None:
+        return None
+    delta = bnow - bopen
+    price_up = price_chg > 0
+    premium_widening = bnow >= 0 and delta > 0
+    premium_fading = bnow >= 0 and delta < 0
+    discount_widening = bnow < 0 and delta < 0
+    if price_up and premium_widening:
+        label, color = "Long-buildup-like", "bull"
+    elif (not price_up) and premium_widening:
+        label, color = "Short-buildup-like", "bear"
+    elif (not price_up) and discount_widening:
+        label, color = "Long-unwind-like", "bear"
+    elif price_up and (premium_fading or (bnow < 0 and delta > 0)):
+        label, color = "Short-covering-like", "bull"
+    else:
+        return None
+    return {"label": label, "color": color, "proxy": True,
+            "basis_from": bopen, "basis_to": bnow, "price_chg_pct": price_chg}
+
+
+def _fmt2(v):
+    return "--" if v is None else f"{v:.2f}"
+
+
+def _build_meanings(quad, basis_block, m, opt, ad, intr, atr_d, results, recent3d) -> Dict[str, Optional[str]]:
+    """cc#516 Part B: ONE deterministic "meaning" line per tile, template-driven from the SAME
+    payload values the tiles themselves render -- no recompute, no LLM. Returned as a flat dict;
+    the frontend renders each value (when non-None) as small dim text under its tile."""
+    out: Dict[str, Optional[str]] = {}
+
+    vw = (intr or {}).get("vwap") or {}
+    if vw.get("dist_pct") is not None:
+        out["vwap"] = ("holding above average price" if vw["dist_pct"] >= 0 else "soft finish")
+
+    vt = (intr or {}).get("vpoc_today") or {}
+    if vt.get("dist_pct") is not None and vt.get("value") is not None:
+        out["vpoc_today"] = (f"overhead supply near {_fmt2(vt['value'])}" if vt["dist_pct"] < 0
+                              else f"volume support below at {_fmt2(vt['value'])}")
+    vp = (intr or {}).get("vpoc_prior")
+    if vp and vp.get("value") is not None:
+        out["vpoc_prior"] = (f"naked — magnet at {_fmt2(vp['value'])}" if vp.get("naked")
+                              else "tested, support acknowledged")
+
+    fall = (intr or {}).get("fall_from_day_high")
+    day_hi = (intr or {}).get("day_hi")
+    if fall is not None and fall <= -0.8 and day_hi is not None:
+        out["fall_from_day_high"] = f"rallied to {_fmt2(day_hi)}, faded {fall:.2f}% into close"
+
+    volx = (intr or {}).get("volx")
+    if volx is not None:
+        if volx < 0.8:
+            out["volx"] = "quiet — move not energy-backed"
+        elif volx >= 1.3:
+            out["volx"] = "energy confirming"
+
+    if ad:
+        if ad["label"] == "Accumulation":
+            out["ad_21d"] = "accumulation"
+        elif ad["label"] == "Distribution":
+            out["ad_21d"] = "distribution-leaning — dip not being bought"
+
+    bb = (basis_block or {}).get("basis") or {}
+    bopen, bnow = bb.get("intraday_open_pct"), bb.get("pct")
+    if bopen is not None and bnow is not None:
+        delta = bnow - bopen
+        if bnow >= 0 and delta > 0:
+            out["basis"] = "futures buyers paying up (premium widening)"
+        elif bnow >= 0 and delta < 0:
+            out["basis"] = "premium fading"
+        elif bnow < 0 and delta < 0:
+            out["basis"] = "discount widening — futures sellers pressing"
+        elif bnow < 0 and delta > 0:
+            out["basis"] = "discount fading — sellers losing conviction"
+
+    cost = (opt or {}).get("options_cost")
+    if cost:
+        atm_expiry = ((opt or {}).get("atm") or {}).get("expiry")
+        result_within_expiry = (results and results.get("status") == "upcoming"
+                                 and atm_expiry and results.get("next_date")
+                                 and results["next_date"] <= atm_expiry)
+        if cost.get("label") == "EXPENSIVE":
+            if result_within_expiry:
+                out["options_cost"] = f"event premium for results {results['next_date']}"
+            else:
+                out["options_cost"] = "event premium priced with no known result date — confirm results before trading"
+        elif cost.get("label") == "CHEAP" and (intr or {}).get("volx") is not None and intr["volx"] >= 1.3:
+            out["options_cost"] = "cheap options into rising energy"
+
+    tr_today = (intr or {}).get("tr_today")
+    if tr_today is not None and atr_d:
+        if tr_today < 0.6 * atr_d:
+            out["atr"] = f"compressed range (TR {_fmt2(tr_today)} vs ATR {_fmt2(atr_d)}) — coiling"
+        elif tr_today >= 1.3 * atr_d:
+            out["atr"] = f"ignition (TR {_fmt2(tr_today)} vs ATR {_fmt2(atr_d)})"
+
+    if recent3d is not None:
+        if recent3d >= 1.3:
+            out["recent3d_vol_ratio"] = "participation rising"
+        elif recent3d <= 0.8:
+            out["recent3d_vol_ratio"] = "participation drying up"
+        elif recent3d < 1.0:
+            out["recent3d_vol_ratio"] = "slightly below baseline"
+
+    if quad and quad.get("proxy"):
+        out["oi_quadrant"] = "proxy read — OI dark, inferred from basis + price"
+
+    return out
 
 
 def _basis_tag(pct, is_premium):
@@ -728,6 +882,20 @@ def _ad_21d(cur, sym):
     up_pct = round(up_vol / tot * 100.0, 0)
     label = "Accumulation" if up_pct >= 55 else "Distribution" if up_pct <= 45 else "Neutral"
     return {"up_vol_pct": up_pct, "label": label, "days": len(rows) - 1}
+
+
+def _recent3d_vol_ratio(cur, sym) -> Optional[float]:
+    """cc#516 Part D (founder-specified): AVG(volume, t-1..t-3) / AVG(volume, t-1..t-21) -- the base
+    average INCLUDES the recent 3 sessions, per the founder's exact formula. >=1.3 = participation
+    rising, 0.8-1.3 = neutral, <=0.8 = participation drying up (ENERGY tile "Recent participation")."""
+    cur.execute("""SELECT volume FROM raw_prices WHERE symbol=%s AND volume IS NOT NULL
+                   ORDER BY price_date DESC LIMIT 21""", (sym,))
+    vols = [_f(r[0]) for r in cur.fetchall()]
+    if len(vols) < 21:
+        return None
+    avg3 = sum(vols[:3]) / 3.0
+    avg21 = sum(vols[:21]) / 21.0
+    return round(avg3 / avg21, 2) if avg21 else None
 
 
 def _atr_daily(cur, sym, period=14):
@@ -892,6 +1060,11 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             # cc#445 fix_5/fix_6: A/D 21d + daily ATR
             ad = _safe("ad_21d", lambda: _ad_21d(cur, sym))
             atr_d = _safe("atr_daily", lambda: _atr_daily(cur, sym))
+            # cc#516 Part D: 3d/21d volume participation ratio
+            recent3d = _safe("recent3d_vol_ratio", lambda: _recent3d_vol_ratio(cur, sym))
+            # cc#516 Part C.1b/C.2: EOD futures-OI fallback (cc#517's nightly bhavcopy job) --
+            # forward-compatible no-op until that table exists / carries a row for this symbol.
+            eod_fut_oi = _safe("eod_fut_oi", lambda: _eod_fut_oi_fallback(cur, sym))
             # cc#368: freshness stamp = latest available option_chain snapshot for this underlying.
             # The chain blocks already read MAX(ts) (never today-only), so off-market/weekend still
             # returns the last live snapshot; data_ts lets the UI label it honestly ("as of <ts>")
@@ -907,20 +1080,38 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
         # cc#515: verdict.oi_quadrant now ALWAYS returns a dict (never bare None) so the tile can
         # show "OI stale since <date>" instead of an unexplained "DATA THIN" when the quadrant is
         # unavailable specifically because the OI feed has gone stale (not just missing today).
+        # cc#516 Part C: fallback chain when live is dark -- EOD bhavcopy (cc#517, once it exists) ->
+        # labeled proxy (basis+price) -> honest stale/DATA THIN. The proxy is NEVER presented as the
+        # real quadrant (proxy=True + a distinct label suffix, enforced client-side too).
         _quad_raw = _safe("oi_quadrant", lambda: _oi_quadrant(oi_chg, m.get("price_chg")))
         _fut_oi = basis.get("fut_oi") or {}
+        _quad_eod = None
+        if _quad_raw is None and eod_fut_oi and eod_fut_oi.get("chg_pct") is not None:
+            _quad_eod = _safe("oi_quadrant_eod", lambda: _quadrant_tag(eod_fut_oi["chg_pct"], m.get("price_chg")))
+            if _quad_eod:
+                _quad_eod = {"label": _quad_eod["label"].upper(), "color": _quad_eod["color"]}
+        _quad_proxy = None
+        if _quad_raw is None and _quad_eod is None:
+            _quad_proxy = _safe("proxy_quadrant", lambda: _proxy_quadrant(basis, m.get("price_chg")))
+        _quad_display = _quad_raw or _quad_eod
         oi_quadrant_resp = {
-            "label": _quad_raw["label"] if _quad_raw else None,
-            "color": _quad_raw["color"] if _quad_raw else None,
+            "label": _quad_display["label"] if _quad_display else (_quad_proxy["label"] if _quad_proxy else None),
+            "color": _quad_display["color"] if _quad_display else (_quad_proxy["color"] if _quad_proxy else None),
             "oi_chg_pct": oi_chg, "price_chg_pct": m.get("price_chg"),
             "stale": bool(_fut_oi.get("stale")), "stale_since": _fut_oi.get("stale_since"),
+            "source": "live" if _quad_raw else ("eod" if _quad_eod else ("proxy" if _quad_proxy else None)),
+            "proxy": bool(_quad_proxy is not None and _quad_display is None),
         }
-        # cc#515: composite plain-language READ tile -- one deterministic desk synthesis of the
+        # cc#515/516: composite plain-language READ tile -- one deterministic desk synthesis of the
         # tiles above, cited from these SAME already-computed values (no recompute, no drift).
         read = _safe("composite_read",
-                      lambda: _composite_read(_quad_raw, results, basis, m, opt, ad, intr),
+                      lambda: _composite_read(_quad_raw, results, basis, m, opt, ad, intr, recent3d),
                       {"label": "NO READ", "direction": "MIXED", "n": 0, "m": 0, "conflict": False,
                        "sentence": "insufficient data.", "cautions": [], "dark": []})
+        # cc#516 Part B: per-tile interpretation lines
+        meanings = _safe("meanings",
+                          lambda: _build_meanings(oi_quadrant_resp, basis, m, opt, ad, intr, atr_d, results, recent3d),
+                          {})
 
         resp = {
             "symbol": sym, "cmp": cmp_px, "fut": fut, "spot": spot, "side": (side or "").upper() or None,
@@ -928,6 +1119,7 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             "data_ts": chain_ts,   # cc#368: latest option_chain snapshot ts (None = no chain rows)
             "results": results,   # cc#515: Results chip
             "read": read,         # cc#515: composite READ tile
+            "meanings": meanings, # cc#516 Part B: per-tile interpretation lines
             "verdict": {
                 "oi_quadrant": oi_quadrant_resp,
                 "options_cost": opt.get("options_cost"),
@@ -950,8 +1142,9 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                        "volx_asof": intr.get("volx_asof"),   # cc#454: session VolX is anchored to
                        "ad_21d": ad,   # cc#445 fix_5
                        "atr_5m": intr.get("atr_5m"), "atr_5m_pct": intr.get("atr_5m_pct"),   # cc#445 fix_6
-                       "atr_daily": atr_d,
-                       "atr_daily_pct": round(atr_d / cmp_px * 100.0, 2) if (atr_d and cmp_px) else None},
+                       "atr_daily": atr_d, "tr_today": intr.get("tr_today"),
+                       "atr_daily_pct": round(atr_d / cmp_px * 100.0, 2) if (atr_d and cmp_px) else None,
+                       "recent3d_vol_ratio": recent3d},   # cc#516 Part D
             "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
         return resp
