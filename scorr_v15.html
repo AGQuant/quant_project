@@ -170,7 +170,6 @@ td.sym{font-weight:700;font-size:12.5px}
     <div class="meta" id="f-meta">
       <span class="tag" id="f-aum">AUM —</span>
       <span class="tag" id="f-er">ER —</span>
-      <span class="tag gold" id="f-fk">FINKHOZ —</span>
       <span class="tag" id="f-cr">CRISIL —</span>
       <span class="tag" id="f-plan">Plan —</span>
     </div>
@@ -221,8 +220,8 @@ td.sym{font-weight:700;font-size:12.5px}
 </div>
 <div class="card rise d7" style="margin-top:11px">
   <table>
-    <thead><tr><th>Fund</th><th>MQS</th><th>FINKHOZ</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th></tr></thead>
-    <tbody id="scrbody"><tr><td colspan="7" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr></tbody>
+    <thead><tr><th>Fund</th><th>MQS</th><th>1Y</th><th>3Y</th><th>ER</th><th>AUM Cr</th></tr></thead>
+    <tbody id="scrbody"><tr><td colspan="6" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr></tbody>
   </table>
 </div>
 </div>
@@ -253,7 +252,6 @@ td.sym{font-weight:700;font-size:12.5px}
       $("f-cat").textContent=[f.category,f.plan].filter(Boolean).join(" · ")||"—";
       $("f-aum").textContent="AUM "+(f.aum_cr!=null?"₹"+Number(f.aum_cr).toLocaleString("en-IN")+" Cr":em);
       $("f-er").textContent="ER "+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2)+"%":em);
-      $("f-fk").textContent="FINKHOZ "+(f.finkhoz_rating!=null?"★"+Number(f.finkhoz_rating).toFixed(1):em);
       $("f-cr").textContent="CRISIL "+(f.crisil_rank!=null?"#"+f.crisil_rank:em);
       $("f-plan").textContent=f.plan||"Plan "+em;
       setRet("r-1w",f.ret_1w);setRet("r-1m",f.ret_1m);setRet("r-3m",f.ret_3m);
@@ -265,11 +263,9 @@ td.sym{font-weight:700;font-size:12.5px}
   function rowHtml(f){
     var r1=pct(f.ret_1y),r3=pct(f.ret_3y);
     var mqs='<span class="gvm" style="color:var(--dim);background:var(--well)">—</span>';
-    var fk=f.finkhoz_rating!=null?("★"+Number(f.finkhoz_rating).toFixed(1)):em;
     return '<tr data-code="'+esc(f.scheme_code)+'" style="cursor:pointer">'
       +'<td class="sym">'+esc(f.name)+'</td>'
       +'<td>'+mqs+'</td>'
-      +'<td class="num">'+fk+'</td>'
       +'<td class="num" style="color:'+r1.c+'">'+r1.t+'</td>'
       +'<td class="num" style="color:'+r3.c+'">'+r3.t+'</td>'
       +'<td class="num">'+(f.expense_ratio!=null?Number(f.expense_ratio).toFixed(2):em)+'</td>'
@@ -277,15 +273,15 @@ td.sym{font-weight:700;font-size:12.5px}
       +'</tr>';
   }
   function loadScreener(cat){
-    var tb=$("scrbody"); tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr>';
+    var tb=$("scrbody"); tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:22px 0">Loading…</td></tr>';
     fetch("/api/v15/screener?category="+encodeURIComponent(cat)+"&sort=1y").then(function(r){return r.json()}).then(function(d){
       var rows=(d&&d.results)||[];
-      if(!rows.length){tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--dim);padding:22px 0">No funds found for '+esc(cat)+'.</td></tr>';return;}
+      if(!rows.length){tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:22px 0">No funds found for '+esc(cat)+'.</td></tr>';return;}
       tb.innerHTML=rows.map(rowHtml).join("");
       Array.prototype.forEach.call(tb.querySelectorAll("tr[data-code]"),function(tr){
         tr.addEventListener("click",function(){loadFund(tr.getAttribute("data-code"));window.scrollTo({top:0,behavior:"smooth"});});
       });
-    }).catch(function(){tb.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--bear);padding:22px 0">Screener unavailable.</td></tr>';});
+    }).catch(function(){tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--bear);padding:22px 0">Screener unavailable.</td></tr>';});
   }
 
   // tabs

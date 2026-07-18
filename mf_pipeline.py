@@ -6,7 +6,6 @@ Data layer ONLY (no scoring math, no page — those are cc#467 + next session). 
   • mfapi.in         — per-scheme historical NAV JSON (clean free backfill).
   • AMFI portfolio-disclosure — monthly holdings AMC excels (curated universe first).
   • Moneycontrol     — weekly cross-check (ER, category, manager, AUM, 1/3/5Y returns).
-  • FINKHOZ MCP      — rating pull where the connector is available.
 
 All scrapes are scheduled + resumable + ops_log-instrumented (earnings_refresh convention).
 NSE-symbol resolution on holdings reuses the cc#462 tiered name-matching against screener_raw.
@@ -47,7 +46,11 @@ def ensure_tables(cur):
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_master (
         scheme_code TEXT PRIMARY KEY, amfi_code TEXT, isin TEXT, name TEXT NOT NULL, amc TEXT,
         category TEXT, plan TEXT, expense_ratio NUMERIC, aum_cr NUMERIC, crisil_rank INTEGER,
-        finkhoz_rating NUMERIC, manager TEXT, inception DATE, ret_1y NUMERIC, ret_3y NUMERIC,
+        finkhoz_rating NUMERIC, -- DEPRECATED (cc#505, 18-Jul-2026): brand retired, DO NOT
+                                 -- read/write this column. Column kept in place (data already
+                                 -- nulled) rather than dropped, per MAINTENANCE_LOCK_RULE
+                                 -- (schema-altering ops are Railway-console-only).
+        manager TEXT, inception DATE, ret_1y NUMERIC, ret_3y NUMERIC,
         ret_5y NUMERIC, source TEXT, flags TEXT, curated BOOLEAN DEFAULT FALSE,
         updated_at TIMESTAMPTZ DEFAULT NOW())""")
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_nav_history (
@@ -77,33 +80,32 @@ def ensure_tables(cur):
 
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
 # Nippon India Large Cap appeared TWICE (rows 4 & 6) in the founder sheet — seeded once, flagged for
-# resolution (rating not cleanly given on the duplicate). Banking&PSU pair ratings not given in seed.
+# resolution. cc#505 (18-Jul-2026): the seed sheet's rating column (brand retired) is no longer
+# read or written here — see the deprecated column note in ensure_tables() above.
 SEED_FUNDS = [
-    ("V15S01", "Edelweiss ELSS Tax Saver", "Edelweiss", "ELSS", 7.45, None),
-    ("V15S02", "SBI Long Term Equity Fund (ELSS)", "SBI", "ELSS", 7.29, None),
-    ("V15S03", "HDFC Flexi Cap Fund", "HDFC", "Flexi Cap", 7.22, None),
-    ("V15S04", "Nippon India Large Cap Fund", "Nippon India", "Large Cap", None,
-     "DUP_ANOMALY: appeared twice (rows 4 & 6) in founder sheet — seeded once; FINKHOZ rating not cleanly given for the duplicate; resolve rating + confirm single scheme"),
-    ("V15S05", "ICICI Prudential Large Cap Fund", "ICICI Prudential", "Large Cap", 7.19, None),
-    ("V15S06", "ICICI Prudential Midcap Fund", "ICICI Prudential", "Mid Cap", 7.46, None),
-    ("V15S07", "HDFC Mid-Cap Opportunities Fund", "HDFC", "Mid Cap", 7.33, None),
-    ("V15S08", "Union Small Cap Fund", "Union", "Small Cap", 7.74, None),
-    ("V15S09", "Bandhan Small Cap Fund", "Bandhan", "Small Cap", 7.13, None),
-    ("V15S10", "Bandhan Banking & PSU Debt Fund", "Bandhan", "Banking & PSU", None,
-     "FINKHOZ rating not given in seed sheet"),
-    ("V15S11", "UTI Banking & PSU Debt Fund", "UTI", "Banking & PSU", None,
-     "FINKHOZ rating not given in seed sheet"),
+    ("V15S01", "Edelweiss ELSS Tax Saver", "Edelweiss", "ELSS", None),
+    ("V15S02", "SBI Long Term Equity Fund (ELSS)", "SBI", "ELSS", None),
+    ("V15S03", "HDFC Flexi Cap Fund", "HDFC", "Flexi Cap", None),
+    ("V15S04", "Nippon India Large Cap Fund", "Nippon India", "Large Cap",
+     "DUP_ANOMALY: appeared twice (rows 4 & 6) in founder sheet — seeded once; resolve + confirm single scheme"),
+    ("V15S05", "ICICI Prudential Large Cap Fund", "ICICI Prudential", "Large Cap", None),
+    ("V15S06", "ICICI Prudential Midcap Fund", "ICICI Prudential", "Mid Cap", None),
+    ("V15S07", "HDFC Mid-Cap Opportunities Fund", "HDFC", "Mid Cap", None),
+    ("V15S08", "Union Small Cap Fund", "Union", "Small Cap", None),
+    ("V15S09", "Bandhan Small Cap Fund", "Bandhan", "Small Cap", None),
+    ("V15S10", "Bandhan Banking & PSU Debt Fund", "Bandhan", "Banking & PSU", None),
+    ("V15S11", "UTI Banking & PSU Debt Fund", "UTI", "Banking & PSU", None),
 ]
 
 
 def seed_curated(cur):
-    for code, name, amc, cat, rating, flags in SEED_FUNDS:
-        cur.execute("""INSERT INTO mf_master (scheme_code, name, amc, category, finkhoz_rating, curated, source, flags)
-                       VALUES (%s,%s,%s,%s,%s,TRUE,'founder_seed_12jul',%s)
+    for code, name, amc, cat, flags in SEED_FUNDS:
+        cur.execute("""INSERT INTO mf_master (scheme_code, name, amc, category, curated, source, flags)
+                       VALUES (%s,%s,%s,%s,TRUE,'founder_seed_12jul',%s)
                        ON CONFLICT (scheme_code) DO UPDATE SET name=EXCLUDED.name, amc=EXCLUDED.amc,
-                         category=EXCLUDED.category, finkhoz_rating=EXCLUDED.finkhoz_rating,
+                         category=EXCLUDED.category,
                          flags=EXCLUDED.flags, curated=TRUE, updated_at=NOW()""",
-                    (code, name, amc, cat, rating, flags))
+                    (code, name, amc, cat, flags))
 
 
 # ── AMFI daily NAV (cc#466 build_2) ────────────────────────────────────────────────
@@ -1125,7 +1127,7 @@ def v15_fund(scheme_code: str):
         except Exception:
             conn.rollback()
         cur.execute("""SELECT scheme_code, name, amc, category, expense_ratio, aum_cr,
-                              finkhoz_rating, crisil_rank, manager,
+                              crisil_rank, manager,
                               ret_1w, ret_1m, ret_3m, ret_6m, ret_1y, ret_2y, ret_3y, returns_asof
                        FROM mf_master WHERE scheme_code=%s""", (scheme_code,))
         r = cur.fetchone()
@@ -1135,7 +1137,7 @@ def v15_fund(scheme_code: str):
         m = dict(zip(cols, r))
     m["category"] = _derive_cat(m.get("name"), m.get("category"))
     m["plan"] = _derive_plan(m.get("name"))
-    for k in ("expense_ratio", "aum_cr", "finkhoz_rating", "ret_1w", "ret_1m", "ret_3m",
+    for k in ("expense_ratio", "aum_cr", "ret_1w", "ret_1m", "ret_3m",
               "ret_6m", "ret_1y", "ret_2y", "ret_3y"):
         if m.get(k) is not None:
             m[k] = float(m[k])
@@ -1162,16 +1164,15 @@ def v15_screener(category: str = "", sort: str = "1y", limit: int = 40):
             params += [f"%{cat}%", f"%{cat}%"]
         order = ("ret_1y DESC NULLS LAST, aum_cr DESC NULLS LAST, name"
                  if sort == "1y" else "aum_cr DESC NULLS LAST, ret_1y DESC NULLS LAST, name")
-        sql = ("SELECT scheme_code, name, amc, category, finkhoz_rating, crisil_rank, "
+        sql = ("SELECT scheme_code, name, amc, category, crisil_rank, "
                "expense_ratio, aum_cr, ret_1y, ret_3y FROM mf_master WHERE "
                + " AND ".join(where) + " ORDER BY " + order + " LIMIT %s")
         params.append(max(1, min(limit, 80)))
         cur.execute(sql, params)
         rows = []
-        for sc, nm, amc, c, fr, cr, er, aum, r1y, r3y in cur.fetchall():
+        for sc, nm, amc, c, cr, er, aum, r1y, r3y in cur.fetchall():
             rows.append({"scheme_code": sc, "name": nm, "amc": amc,
                          "category": _derive_cat(nm, c),
-                         "finkhoz_rating": float(fr) if fr is not None else None,
                          "crisil_rank": cr, "expense_ratio": float(er) if er is not None else None,
                          "aum_cr": float(aum) if aum is not None else None,
                          "ret_1y": float(r1y) if r1y is not None else None,
@@ -1185,12 +1186,12 @@ def mf_search(q: str = "", limit: int = 20):
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
         if q:
-            cur.execute("""SELECT scheme_code, name, amc, category, finkhoz_rating, curated
+            cur.execute("""SELECT scheme_code, name, amc, category, curated
                            FROM mf_master WHERE name ILIKE %s OR amc ILIKE %s OR category ILIKE %s
                            ORDER BY curated DESC, name LIMIT %s""",
                         (f"%{q}%", f"%{q}%", f"%{q}%", max(1, min(limit, 50))))
         else:
-            cur.execute("""SELECT scheme_code, name, amc, category, finkhoz_rating, curated
+            cur.execute("""SELECT scheme_code, name, amc, category, curated
                            FROM mf_master WHERE curated ORDER BY category, name LIMIT %s""", (max(1, min(limit, 50)),))
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -1784,22 +1785,25 @@ def _clip(v, lo=0.0, hi=100.0):
 
 
 def compute_mf_scores(conn=None):
-    """step_4: MQS (Mutual Fund Quality Score) — FQS pillar weights per the founder's
-    MF_Analysis_Working_Model.xlsx: Quality 35% / Returns 30% / Cost 15% / Size 20%.
+    """step_4: MQS (Mutual Fund Quality Score) — pillar weights per the founder's
+    MF_Analysis_Working_Model.xlsx: originally Quality 35% / Returns 30% / Cost 15% / Size 20%.
+
+    cc#505 (18-Jul-2026): the rating-based Quality pillar is RETIRED (brand gone, no replacement
+    -- see the deprecated column note in ensure_tables()). Scoring runs on Returns/Cost/Size
+    only; weights renormalize among whichever of those three are available for a given fund
+    (the existing missing-pillar renormalization already handles this with zero further code
+    change — see below).
 
     cc#491 honesty note: this environment has no access to the actual Excel model (an
     external deliverable never in this repo) to copy its exact pillar formulas verbatim, so
     this is a reasonable, DOCUMENTED relative-to-category-peer scoring — not a guaranteed
     match to the Excel's precise math. Flagging for founder validation against the working
     model rather than claiming exact fidelity to an artifact never seen, per "do not
-    fabricate/guess" — the pillar STRUCTURE (4 pillars, these weights) is followed exactly;
-    the per-pillar formula is this session's best-effort interpretation.
+    fabricate/guess".
 
     Missing pillars are EXCLUDED and weights renormalized among what IS available, rather
-    than fabricating a neutral fill-in for missing data — a fund with no finkhoz_rating gets
-    an MQS from R/C/S only (weights renormalized to sum to 1), not a Quality=50 guess.
+    than fabricating a neutral fill-in for missing data.
 
-      Quality (35%): finkhoz_rating (0-10) -> 0-100. NULL (uncurated fund) -> pillar skipped.
       Returns (30%): ret_1y (fallback ret_3y, then ret_5y CAGR) vs the SAME horizon's category
         average -> 50 +/- 3x the pct-point delta, clipped 0-100.
       Cost    (15%): expense_ratio vs category average -> 50 - 20x the delta (cheaper=higher).
@@ -1822,19 +1826,15 @@ def compute_mf_scores(conn=None):
                              AND aum_cr IS NOT NULL GROUP BY category""")
             cat_aum_avg = {r[0]: _f2(r[1]) for r in cur.fetchall()}
 
-            cur.execute("""SELECT scheme_code, category, finkhoz_rating, expense_ratio, aum_cr,
+            cur.execute("""SELECT scheme_code, category, expense_ratio, aum_cr,
                                   ret_1y, ret_3y, ret_5y
                            FROM mf_master
                            WHERE category IS NOT NULL AND category <> 'Banking & PSU'""")
             rows = cur.fetchall()
             scored = 0
-            for sc, cat, rating, er, aum, r1y, r3y, r5y in rows:
+            for sc, cat, er, aum, r1y, r3y, r5y in rows:
                 ca = cat_avg.get(cat, {})
                 pillars, weights = {}, {}
-
-                if rating is not None:
-                    pillars["q"] = _clip(float(rating) * 10.0)
-                    weights["q"] = 0.35
 
                 fund_ret = r1y if r1y is not None else (r3y if r3y is not None else r5y)
                 cat_ret = (ca.get("r1y") if r1y is not None
@@ -1994,7 +1994,7 @@ def mf_curated():
     """The founder 12-fund curated screener rows (cc#467 screener table)."""
     with _conn() as conn, conn.cursor() as cur:
         ensure_tables(cur)
-        cur.execute("""SELECT scheme_code, name, amc, category, finkhoz_rating, crisil_rank,
+        cur.execute("""SELECT scheme_code, name, amc, category, crisil_rank,
                        expense_ratio, aum_cr, ret_1y, ret_3y, ret_5y, flags
                        FROM mf_master WHERE curated ORDER BY category, name""")
         cols = [d[0] for d in cur.description]
