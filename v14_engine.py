@@ -4,6 +4,13 @@ v14_engine.py — V14 INTRADAY ENGINE (P1, PAPER ONLY)
 Canonical spec: session_log id=3060 (V14_INTRADAY_ENGINE_SPEC_V1_LOCKED, 12-Jul-2026).
 Thresholds below are SPEC-LOCKED — tune only via founder-approved BT7 evidence later.
 
+cc#534 (18-Jul-2026, founder-locked from a 15-day 5-min live-parity backtest,
+session_log id=5735): ORB tag rebuilt end-to-end — its own 09:15-09:45 opening range,
+per-side entry clocks and gates, TIME_STOP_MIN 30->150 (the single biggest backtest
+lever), a 5-per-side daily entry cap (replaces the old global 4-concurrent slot rule),
+an OI-must-be-real gate, and a side-column case-normalization fix. VWAP-RECLAIM and
+R1-REJ are UNTOUCHED by this change.
+
 Three tagged intraday setups, all sides paper-traded within clock windows:
   ORB           — opening-range breakout (both sides)
   VWAP-RECLAIM  — reclaim of VWAP after a shallow dip (both sides)
@@ -24,19 +31,29 @@ import psycopg
 log = logging.getLogger("scorr.v14")
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# ── spec-locked constants (id=3060) ──────────────────────────────────────────────
-MAX_SLOTS        = 4            # G4: max concurrent
+# ── spec-locked constants (id=3060, cc#534 amendments noted) ────────────────────
+MAX_SLOTS        = 10           # cc#534: raised safety ceiling (was 4) -- ORB's real cap is
+                                 # ORB_DAILY_PER_SIDE below; VWAP-RECLAIM/R1-REJ gates untouched,
+                                 # they just share the same higher concurrent-position headroom.
 ATR_PERIOD       = 20           # ATR(5m, 20)
 ATR_MULT         = 1.0          # target = entry +/- 1.0x ATR, capped at nearest pivot
-TIME_STOP_MIN    = 30           # <+0.3% after 30 min -> market exit
+TIME_STOP_MIN    = 150          # cc#534: was 30 -- backtest's single biggest lever
+                                 # (identical config 30min=-2.69 vs 150min=+33.18 over 15d)
 TIME_STOP_PCT    = 0.3
 TRAIL_TRIGGER    = 0.5          # at +0.5% move stop to breakeven
 SQUAREOFF        = (15, 15)     # hard square-off 15:15 IST
 COST_FLAT        = 500.0        # Rs per trade
 COST_SLIPPAGE    = 0.05         # % round-trip slippage
 TOP_N_TURNOVER   = 80           # G2 liquidity: top-80 by turnover
-# G3 clock windows (entries only)
+# G3 clock windows (entries only) — VWAP-RECLAIM / R1-REJ only; ORB has its own windows below.
 CLOCK_WINDOWS    = [((9, 30), (11, 0)), ((13, 45), (14, 45))]
+# cc#534: ORB per-side entry clocks (both are subsets of CLOCK_WINDOWS above, so the outer
+# _in_clock() gate in run_v14_cycle already permits them -- these are the narrower ORB-specific
+# checks applied inside the ORB gate itself).
+ORB_LONG_WINDOWS  = [((9, 45), (10, 30))]
+ORB_SHORT_WINDOWS = [((9, 45), (11, 0)), ((13, 45), (14, 45))]
+ORB_DAILY_PER_SIDE = 5           # cc#534: max 5 ORB longs + 5 ORB shorts opened per trade_date
+                                  # (the binding rule; natural backtest rate was ~2/side/day)
 TAGS             = ("ORB", "VWAP-RECLAIM", "R1-REJ")
 
 
@@ -80,6 +97,12 @@ def ensure_tables(conn):
             CREATE INDEX IF NOT EXISTS ix_v14_trades_date ON v14_trades(trade_date);
             CREATE INDEX IF NOT EXISTS ix_v14_trades_status ON v14_trades(status);
         """)
+        # cc#534 change 7: writer mixed long/LONG (and short/SHORT) case historically -- every
+        # exit-side comparison in this file (manage_open, _close_trade) is a strict `side=="long"`
+        # check, so an uppercase row silently computed P&L as the OPPOSITE side. open_trade() now
+        # lowercases at write; this one-time (cheap, WHERE-scoped) backfill fixes existing rows.
+        # No-op once applied -- the WHERE clause only matches non-lowercase values.
+        cur.execute("UPDATE v14_trades SET side=LOWER(side) WHERE side <> LOWER(side)")
     conn.commit()
 
 
@@ -133,11 +156,13 @@ def _atr(bars: List[Tuple], period: int = ATR_PERIOD) -> Optional[float]:
 
 
 def _opening_range(bars: List[Tuple]) -> Tuple[Optional[float], Optional[float]]:
-    """09:15-09:30 opening range high/low (the 09:15, 09:20, 09:25 bars)."""
+    """cc#534: 09:15-09:45 opening range high/low (the 09:15/20/25/30/35/40 bars, 6 bars --
+    was 09:15-09:30/3 bars). ORB is the only tag reading this, so widening it here is safe;
+    VWAP-RECLAIM/R1-REJ never call it."""
     hi = lo = None
     for ts, o, h, l, c, v in bars:
         t = ts.time()
-        if t.hour == 9 and t.minute < 30:
+        if t.hour == 9 and t.minute < 45:
             h = _f(h); l = _f(l)
             if h is not None:
                 hi = h if hi is None else max(hi, h)
@@ -251,7 +276,8 @@ def load_context(cur) -> Dict:
     v10 NIFTY regime, sector day%, top-80 turnover set, blackout set."""
     d = _asof_date(cur)
     ctx: Dict = {"asof": d, "prev_close": {}, "pivots": {}, "basis": {}, "sector_day": {},
-                 "seg_by_sym": {}, "top80": set(), "blackout": set(), "v10_long": None, "v10_short": None}
+                 "seg_by_sym": {}, "dma20": {}, "top80": set(), "blackout": set(),
+                 "v10_long": None, "v10_short": None}
     if d is None:
         return ctx
     # prev-day closes
@@ -279,6 +305,11 @@ def load_context(cur) -> Dict:
     ctx["sector_day"] = {r[0]: _f(r[1]) for r in cur.fetchall()}
     cur.execute("SELECT symbol, segment FROM gvm_scores WHERE segment IS NOT NULL")
     ctx["seg_by_sym"] = {r[0]: r[1] for r in cur.fetchall()}
+    # cc#534: prior-day dma_20 (v8_metrics %-distance-from-20DMA convention, positive = above)
+    # for ORB's trend gate (dma20>=0 longs, dma20<0 shorts).
+    cur.execute("""SELECT symbol, dma_20 FROM v8_metrics
+                   WHERE score_date=(SELECT MAX(score_date) FROM v8_metrics) AND dma_20 IS NOT NULL""")
+    ctx["dma20"] = {r[0]: _f(r[1]) for r in cur.fetchall()}
     # G2: top-80 by today's turnover (as-of session)
     cur.execute("""SELECT symbol FROM (
                      SELECT symbol, SUM(close*volume) turnover FROM intraday_prices
@@ -307,6 +338,27 @@ def _in_clock() -> bool:
     return False
 
 
+def _in_windows(windows) -> bool:
+    """cc#534: generic clock-window check, used for ORB's own per-side entry windows."""
+    n = _now(); hm = (n.hour, n.minute)
+    for (a, b) in windows:
+        if a <= hm < b:
+            return True
+    return False
+
+
+def _oplog(cur, title: str, details: Dict, category: str = "v14"):
+    """cc#534: ORB gate-funnel visibility (ACCEPTANCE: log per-gate funnel counts so the
+    expected ~2L+2S/day is verifiable). Never raises -- a logging failure must not break a
+    trading cycle."""
+    try:
+        cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                       VALUES (CURRENT_DATE, NOW(), %s, %s, %s::jsonb)""",
+                    (category, title, json.dumps(details, default=str)))
+    except Exception as e:
+        log.warning(f"v14 _oplog {title}: {e}")
+
+
 def _regime_ok(ctx: Dict, side: str) -> bool:
     # G1: long only when V10 NIFTY long; short only when V10 NIFTY short. Unknown -> block (safe).
     if side == "long":
@@ -319,9 +371,11 @@ def _rnd(v, d=2):
 
 
 # The real per-symbol evaluation (all three setups) lives here so VolX/ATR are computed once.
-def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
+def evaluate_symbol(cur, sym: str, ctx: Dict, orb_funnel: Optional[Dict] = None) -> List[Dict]:
     """Return a list of candidate entries (dicts with tag, side, entry_px, snapshot) that pass the
-    setup rules AND common gates G1/G2/G5 (G3 clock + G4 slots are enforced by the caller)."""
+    setup rules AND common gates G1/G2/G5 (G3 clock + G4 slots are enforced by the caller).
+    orb_funnel (cc#534): optional mutable dict the caller aggregates across the whole cycle's
+    symbol universe -- ORB gate-by-gate pass counts for the day-1 acceptance funnel log."""
     d = ctx["asof"]
     bars = _bars(cur, sym, d)
     if len(bars) < 4:
@@ -339,6 +393,7 @@ def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
     pp, r1, s1 = piv.get("pp"), piv.get("r1"), piv.get("s1")
     b = ctx["basis"].get(sym, {})
     basis = b.get("basis"); oi_chg = b.get("oi_chg")
+    dma20 = ctx["dma20"].get(sym)
     seg = ctx["seg_by_sym"].get(sym)
     sec_day = ctx["sector_day"].get(seg) if seg else None
     if None in (cur_c, vwap):
@@ -352,7 +407,7 @@ def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
             "or_high": _rnd(or_hi), "or_low": _rnd(or_lo), "sess_high": _rnd(sess_hi),
             "day_pct": _rnd(day_pct), "gap_pct": _rnd(gap_pct), "vwap_touch": touch,
             "pp": _rnd(pp), "r1": _rnd(r1), "s1": _rnd(s1),
-            "basis": _rnd(basis), "oi_chg": _rnd(oi_chg), "sector_day": _rnd(sec_day),
+            "basis": _rnd(basis), "oi_chg": _rnd(oi_chg), "sector_day": _rnd(sec_day), "dma20": _rnd(dma20),
             "turnover_top80": True, "v10_long": ctx.get("v10_long"), "v10_short": ctx.get("v10_short"),
             "segment": seg, "bar_ts": bars[-1][0].isoformat()}
     out: List[Dict] = []
@@ -369,18 +424,55 @@ def evaluate_symbol(cur, sym: str, ctx: Dict) -> List[Dict]:
             return False
         return cur_c > pp if side == "long" else cur_c < pp
 
-    # ── ORB (id=3063) ─────────────────────────────────────────────────────────────
-    # long: VolX>=1.25, gap-up<=2%. short: NO volume rule, gap-down<=3%.
+    # ── ORB (cc#534 V2, session_log id=5735, 15-day live-parity backtest) ───────────
+    def _funnel(prefix, checks):
+        """Walk an ordered (label, bool) sequence with TRUE funnel semantics: a stage only
+        counts if every earlier stage in the sequence also passed. Returns the final AND."""
+        ok = True
+        for label, cond in checks:
+            ok = ok and bool(cond)
+            if ok and orb_funnel is not None:
+                key = f"{prefix}_{label}"
+                orb_funnel[key] = orb_funnel.get(key, 0) + 1
+        return ok
+
+    oi_real = oi_chg is not None and oi_chg != 0
     if None not in (or_hi, or_lo, day_pct) and gap_pct is not None:
-        long_ok = (cur_c > or_hi and cur_c > vwap and (basis is not None and basis >= 0)
-                   and 0.3 <= day_pct <= 3.0 and (volx is not None and volx >= 1.25)
-                   and gap_pct <= 2.0 and _pp_ok("long") and _regime_ok(ctx, "long"))
-        if long_ok:
+        if orb_funnel is not None:
+            orb_funnel["candidates"] = orb_funnel.get("candidates", 0) + 1
+
+        long_checks = [
+            ("or_break", cur_c > or_hi * 1.0025),                         # >=0.25% beyond OR-high
+            ("vwap", cur_c > vwap),
+            ("day_pct", day_pct is not None and 0.3 <= day_pct <= 3.0),
+            ("gap", gap_pct <= 2.0),
+            ("volx", volx is not None and volx >= 1.5),
+            ("pp", _pp_ok("long")),
+            ("r1_room", r1 is not None and cur_c < r1),                   # R1 null -> block
+            ("dma20", dma20 is not None and dma20 >= 0),
+            ("oi_real", oi_real),
+            ("clock", _in_windows(ORB_LONG_WINDOWS)),                     # 09:45-10:30 ONLY
+            ("basis", basis is not None and basis >= 0),
+            ("regime", _regime_ok(ctx, "long")),
+        ]
+        if _funnel("l", long_checks):
             out.append({"tag": "ORB", "side": "long", "entry_px": cur_c, "snapshot": {**base}})
-        short_ok = (cur_c < or_lo and cur_c < vwap and (basis is not None and basis < 0)
-                    and -3.0 <= day_pct <= -0.3 and gap_pct >= -3.0
-                    and _pp_ok("short") and _regime_ok(ctx, "short"))
-        if short_ok:
+
+        short_checks = [
+            ("or_break", cur_c < or_lo * 0.9975),                         # >=0.25% beyond OR-low
+            ("vwap", cur_c < vwap),
+            ("day_pct", day_pct is not None and -2.0 <= day_pct <= -1.0),  # tightened from -3..-0.3
+            ("gap", gap_pct >= -3.0),
+            ("pp", _pp_ok("short")),
+            ("sector_red", sec_day is not None and sec_day < -0.3),
+            ("dma20", dma20 is not None and dma20 < 0),
+            ("s1_room", s1 is not None and (cur_c - s1) / cur_c * 100 >= 0.7),  # S1 null -> block
+            ("oi_real", oi_real),
+            ("clock", _in_windows(ORB_SHORT_WINDOWS)),                    # 09:45-11:00 + 13:45-14:45
+            ("basis", basis is not None and basis < 0),
+            ("regime", _regime_ok(ctx, "short")),
+        ]   # NO VolX on shorts -- backtest scan showed non-monotonic noise
+        if _funnel("s", short_checks):
             out.append({"tag": "ORB", "side": "short", "entry_px": cur_c, "snapshot": {**base}})
 
     # ── VWAP-RECLAIM (id=3063) ────────────────────────────────────────────────────
@@ -439,7 +531,7 @@ def open_trade(conn, ctx: Dict, cand: Dict) -> Optional[int]:
     """cc#444: signal fires on EQUITY; EXECUTION prices on the concurrent FUTURES 5m close.
     Target = equity-derived min-1% distance (id=3064) applied to the futures entry; 1:1 mirror stop.
     Records the entry basis (fut-eq Rs/%/sign/dir) + next results date for evening analysis."""
-    sym = cand["symbol"]; side = cand["side"]; tag = cand["tag"]
+    sym = cand["symbol"]; side = (cand["side"] or "").lower(); tag = cand["tag"]  # cc#534 change 7
     eq_px = float(cand["entry_px"]); atr = cand["snapshot"].get("atr")
     piv = ctx["pivots"].get(sym, {})
     today = _now().date()
@@ -489,8 +581,8 @@ def _close_trade(conn, trade: Dict, exit_px: float, reason: str, basis_ctx: Opti
 
 
 def manage_open(conn, ctx: Dict) -> Dict:
-    """Uniform bracket exits for every open trade: target, 1:1 stop, 30-min time stop, breakeven
-    trail at +0.5%, hard square-off 15:15."""
+    """Uniform bracket exits for every open trade: target, 1:1 stop, TIME_STOP_MIN-minute time
+    stop (150min as of cc#534, was 30), breakeven trail at +0.5%, hard square-off 15:15."""
     d = ctx["asof"]; now = _now(); closed = []
     with conn.cursor() as cur:
         cur.execute("SELECT id, tag, symbol, side, entry_ts, entry_px, stop_px, target_px "
@@ -547,11 +639,19 @@ def run_v14_cycle(conn) -> Dict:
     exits = manage_open(conn, ctx)
 
     opened = []
+    orb_funnel: Dict = {}
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM v14_trades WHERE status='open'")
         n_open = int(cur.fetchone()[0])
         cur.execute("SELECT symbol FROM v14_trades WHERE trade_date=%s", (ctx["asof"],))
         traded_today = {r[0] for r in cur.fetchall()}   # G4: 1 trade/symbol/day, no re-entry
+        # cc#534 change 5: ORB's binding cap is 5 longs + 5 shorts opened PER DAY (not the
+        # shared concurrent-slot count above, which is just a safety ceiling).
+        cur.execute("SELECT side, COUNT(*) FROM v14_trades WHERE trade_date=%s AND tag='ORB' "
+                    "GROUP BY side", (ctx["asof"],))
+        orb_day_count = {"long": 0, "short": 0}
+        for s, n in cur.fetchall():
+            orb_day_count[(s or "").lower()] = int(n)
 
     if _in_clock() and n_open < MAX_SLOTS:
         universe = sorted(ctx["top80"])
@@ -561,19 +661,30 @@ def run_v14_cycle(conn) -> Dict:
             if sym in traded_today:
                 continue
             with conn.cursor() as cur:
-                cands = evaluate_symbol(cur, sym, ctx)
+                cands = evaluate_symbol(cur, sym, ctx, orb_funnel)
             for c in cands:
                 c["symbol"] = sym
                 if n_open >= MAX_SLOTS:
                     break
+                if c["tag"] == "ORB" and orb_day_count.get(c["side"], 0) >= ORB_DAILY_PER_SIDE:
+                    continue   # daily per-side cap reached -- skip this candidate, try the next
                 tid = open_trade(conn, ctx, c)
                 if tid:
                     opened.append({"id": tid, "tag": c["tag"], "side": c["side"], "symbol": sym})
                     traded_today.add(sym); n_open += 1
+                    if c["tag"] == "ORB":
+                        orb_day_count[c["side"]] = orb_day_count.get(c["side"], 0) + 1
                     break   # one trade/symbol/day
 
+    if orb_funnel:
+        with conn.cursor() as cur:
+            _oplog(cur, "V14_ORB_FUNNEL", {"asof": str(ctx["asof"]), "funnel": orb_funnel,
+                                            "orb_day_count": orb_day_count})
+        conn.commit()
+
     return {"status": "ok", "asof": str(ctx["asof"]), "in_clock": _in_clock(),
-            "open_slots_used": n_open, "opened": opened, "exits": exits}
+            "open_slots_used": n_open, "opened": opened, "exits": exits,
+            "orb_day_count": orb_day_count}
 
 
 # ── read helpers for the /v14 page ──────────────────────────────────────────────────
