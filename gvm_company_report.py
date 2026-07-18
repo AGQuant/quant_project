@@ -373,6 +373,196 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
     }
 
 
+# ─── cc#518: FINANCIALS section (screener.in-style horizontal tables) ──────────────────────────
+# "Indians love screener because of this simplicity" (founder, 18-Jul-2026) -- periods as columns
+# (oldest left -> newest right), line items as rows. Data source: fundamentals_history ONLY
+# (symbol, consolidated, section, period_type, period_label, period_end, metrics jsonb). Zero new
+# scraping. One SQL pass per symbol (6 small indexed section reads) -- no N+1 queries.
+
+def _parse_metric(v) -> Optional[float]:
+    """fundamentals_history.metrics values are strings like "34,309", "11%", "1.42", "-16" --
+    strip formatting uniformly. The unit (Rs Cr / % / days / EPS) is a property of the ROW
+    definition below, not re-derived from the string each time."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s in ("", "--", "-"):
+        return None
+    s = s.rstrip("%").replace(",", "").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+# (row_key, unit, chart_type) -- row_key is the metrics dict key VERBATIM (already screener's own
+# names, per spec: "render mapping table in code, not string transforms").
+# unit: "cr" (Rs Cr, Indian comma grouping) | "pct" | "eps" | "days"
+# chart_type: "bar" (absolute Rs values) | "line" (%, days, EPS)
+_QUARTER_ROW_DEFS = [
+    ("Sales",             "cr",  "bar"),
+    ("Expenses",          "cr",  "bar"),
+    ("Operating Profit",  "cr",  "bar"),
+    ("OPM %",             "pct", "line"),
+    ("Other Income",      "cr",  "bar"),
+    ("Interest",          "cr",  "bar"),
+    ("Depreciation",      "cr",  "bar"),
+    ("Profit before tax", "cr",  "bar"),
+    ("Tax %",             "pct", "line"),
+    ("Net Profit",        "cr",  "bar"),
+    ("EPS in Rs",         "eps", "line"),
+]
+_PL_ROW_DEFS = _QUARTER_ROW_DEFS   # same key set, annual + TTM
+# cc#518 REVISION (founder, same session): P&L display trims to 6 key rows -- the rest stay in the
+# payload (display=False) for the row charts / future use, never dropped from computation.
+_PL_DISPLAY_KEYS = ("Sales", "Operating Profit", "OPM %", "Interest", "Net Profit", "EPS in Rs")
+
+_BS_ROW_DEFS = [
+    ("Equity Capital",    "cr", "bar"),
+    ("Reserves",          "cr", "bar"),
+    ("Borrowings",        "cr", "bar"),
+    ("Other Liabilities", "cr", "bar"),
+    ("Total Liabilities", "cr", "bar"),
+    ("Fixed Assets",      "cr", "bar"),
+    ("CWIP",              "cr", "bar"),
+    ("Investments",       "cr", "bar"),
+    ("Other Assets",      "cr", "bar"),
+    ("Total Assets",      "cr", "bar"),
+]
+_BS_DISPLAY_KEYS = ("Equity Capital", "Reserves", "Borrowings", "Fixed Assets", "Investments", "Total Assets")
+
+_CF_ROW_DEFS = [
+    ("Cash from Operating Activity", "cr",  "bar"),
+    ("Cash from Investing Activity", "cr",  "bar"),
+    ("Cash from Financing Activity", "cr",  "bar"),
+    ("Net Cash Flow",                "cr",  "bar"),
+    ("Free Cash Flow",               "cr",  "bar"),
+    ("CFO/OP",                       "pct", "line"),
+]
+
+_RATIO_ROW_DEFS = [
+    ("ROCE %",                "pct",  "line"),
+    ("Debtor Days",           "days", "line"),
+    ("Inventory Days",        "days", "line"),
+    ("Days Payable",          "days", "line"),
+    ("Cash Conversion Cycle", "days", "line"),
+    ("Working Capital Days",  "days", "line"),
+]
+
+# Shareholding has no fixed row set ("whatever keys exist") -- this is a sort order, not a filter.
+_SHAREHOLDING_ORDER = ["Promoters", "FIIs", "DIIs", "Public", "Others", "No. of Shareholders"]
+
+
+def _fh_rows(cur, symbol: str, section: str, period_type: str, limit: int):
+    """One indexed read for one section. consolidated=true preferred, standalone fallback -- the
+    choice is made PER SYMBOL (a company's rows don't mix consolidated/standalone across periods)."""
+    cur.execute("""SELECT consolidated, period_label, period_end, metrics FROM fundamentals_history
+                   WHERE symbol=%s AND section=%s AND period_type=%s
+                   ORDER BY period_end ASC""", (symbol, section, period_type))
+    rows = cur.fetchall()
+    if not rows:
+        return [], None
+    has_consolidated = any(bool(r[0]) for r in rows)
+    basis = "Consolidated" if has_consolidated else "Standalone"
+    filtered = [r for r in rows if bool(r[0]) == has_consolidated][-limit:]
+    return [{"period_label": r[1], "period_end": str(r[2]), "metrics": r[3] or {}} for r in filtered], basis
+
+
+def _build_table(periods: List[Dict[str, Any]], row_defs, display_keys=None) -> Dict[str, Any]:
+    """periods: oldest -> newest. A row absent for EVERY period is dropped entirely (never an
+    all-blank row); a row present for SOME periods keeps "--" cells for the missing ones."""
+    rows = []
+    for key, unit, chart_type in row_defs:
+        values = [_parse_metric(p["metrics"].get(key)) for p in periods]
+        if all(v is None for v in values):
+            continue
+        rows.append({"label": key, "unit": unit, "chart_type": chart_type,
+                     "display": (display_keys is None or key in display_keys), "values": values})
+    return {"periods": [p["period_label"] for p in periods], "rows": rows}
+
+
+def _build_ttm(quarters: List[Dict[str, Any]]) -> Optional[Dict[str, Optional[float]]]:
+    """TTM = SUM of the last 4 quarters (Sales/Expenses/.../Net Profit/EPS); TTM OPM% = TTM OP /
+    TTM Sales. Tax% and Dividend Payout% stay blank in TTM (spec). Only when 4 full quarters exist."""
+    if len(quarters) < 4:
+        return None
+    last4 = quarters[-4:]
+
+    def _sum(key):
+        vals = [_parse_metric(q["metrics"].get(key)) for q in last4]
+        return round(sum(vals), 2) if len(vals) == 4 and all(v is not None for v in vals) else None
+
+    ttm = {k: _sum(k) for k in ("Sales", "Expenses", "Operating Profit", "Other Income", "Interest",
+                                 "Depreciation", "Profit before tax", "Net Profit", "EPS in Rs")}
+    ttm["OPM %"] = (round(ttm["Operating Profit"] / ttm["Sales"] * 100.0, 2)
+                     if (ttm.get("Operating Profit") is not None and ttm.get("Sales")) else None)
+    ttm["Tax %"] = None
+    ttm["Dividend Payout %"] = None
+    return ttm
+
+
+def _shareholding_table(periods: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    all_keys = set()
+    for p in periods:
+        all_keys.update(p["metrics"].keys())
+    if not all_keys:
+        return None
+    order = lambda k: (_SHAREHOLDING_ORDER.index(k) if k in _SHAREHOLDING_ORDER else len(_SHAREHOLDING_ORDER), k)
+    rows = []
+    for key in sorted(all_keys, key=order):
+        unit = "count" if key == "No. of Shareholders" else "pct"
+        values = [_parse_metric(p["metrics"].get(key)) for p in periods]
+        rows.append({"label": key, "unit": unit, "chart_type": "line", "display": True, "values": values})
+    return {"periods": [p["period_label"] for p in periods], "rows": rows}
+
+
+def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
+    """cc#518: screener.in-style horizontal financial tables, one SQL pass per symbol (6 section
+    reads, no N+1). Each table is None when that section has no rows for this symbol -- shareholding
+    is the common case (Phase 1B backfill covers 1,021/1,799 symbols so far); the frontend hides an
+    absent section entirely rather than showing an error or an empty table."""
+    symbol = (symbol or "").strip().upper()
+    out: Dict[str, Any] = {"basis": None, "quarterly": None, "profit_loss": None,
+                            "balance_sheet": None, "cash_flow": None, "ratios": None,
+                            "shareholding": None}
+    with conn.cursor() as cur:
+        q_rows,  q_basis  = _fh_rows(cur, symbol, "quarters",       "quarter", 13)
+        pl_rows, pl_basis = _fh_rows(cur, symbol, "profit-loss",    "annual",  12)
+        bs_rows, bs_basis = _fh_rows(cur, symbol, "balance-sheet",  "annual",  12)
+        cf_rows, cf_basis = _fh_rows(cur, symbol, "cash-flow",      "annual",  12)
+        ra_rows, ra_basis = _fh_rows(cur, symbol, "ratios",         "annual",  12)
+        sh_rows, sh_basis = _fh_rows(cur, symbol, "shareholding",   "quarter", 12)
+
+    out["basis"] = q_basis or pl_basis or bs_basis or cf_basis or ra_basis or sh_basis
+
+    if q_rows:
+        out["quarterly"] = _build_table(q_rows, _QUARTER_ROW_DEFS)
+
+    if pl_rows:
+        pl_table = _build_table(pl_rows, _PL_ROW_DEFS, display_keys=_PL_DISPLAY_KEYS)
+        ttm = _build_ttm(q_rows) if q_rows else None
+        pl_table["ttm"] = ttm is not None
+        if ttm is not None:
+            pl_table["periods"].append("TTM")
+            for row in pl_table["rows"]:
+                row["values"].append(ttm.get(row["label"]))
+        out["profit_loss"] = pl_table
+
+    if bs_rows:
+        out["balance_sheet"] = _build_table(bs_rows, _BS_ROW_DEFS, display_keys=_BS_DISPLAY_KEYS)
+
+    if cf_rows:
+        out["cash_flow"] = _build_table(cf_rows, _CF_ROW_DEFS)
+
+    if ra_rows:
+        out["ratios"] = _build_table(ra_rows, _RATIO_ROW_DEFS)
+
+    if sh_rows:
+        out["shareholding"] = _shareholding_table(sh_rows)
+
+    return out
+
+
 def search_companies(conn, q: str, limit: int = 12) -> List[Dict[str, Any]]:
     """Autocomplete search by symbol or company name."""
     q = (q or "").strip()

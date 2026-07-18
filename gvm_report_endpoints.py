@@ -18,7 +18,7 @@ import psycopg
 import os
 import logging
 
-from gvm_company_report import build_company_report, search_companies
+from gvm_company_report import build_company_report, search_companies, build_financials_block
 from gvm_page_extras import build_page_extras
 from gvm_engine import param_score, score_relative_inverse, score_peg
 
@@ -542,6 +542,15 @@ def gvm_company_report(symbol: str):
         log.warning(f"content fetch failed for {sym}: {e}")
         persist_error = str(e)
 
+    # --- 7b. cc#518: FINANCIALS section (screener.in-style tables), one SQL pass, own file ---
+    try:
+        with _conn() as conn:
+            financials = build_financials_block(conn, sym)
+    except Exception as e:
+        log.warning(f"financials block failed for {sym}: {e}")
+        financials = {"basis": None, "quarterly": None, "profit_loss": None,
+                      "balance_sheet": None, "cash_flow": None, "ratios": None, "shareholding": None}
+
     # cc#343: unify the card price with Fibcheck via the ONE shared resolver — FEED symbols show
     # live CMP, NON-FEED symbols the latest COMPLETED close (Prev Close, never a partial row), so
     # the card, fibcheck and pivot-range dot can never disagree again (RAMCOIND 362.65 vs 336.1).
@@ -585,6 +594,7 @@ def gvm_company_report(symbol: str):
         "ladder":       ladder,
         "extras":       extras,
         "content":      content,
+        "financials":   financials,   # cc#518: screener.in-style FINANCIALS section
         "generated_at": _ist_now(),
         "persisted":    persist_error is None,
         "persist_error": persist_error,

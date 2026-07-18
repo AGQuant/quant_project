@@ -1290,6 +1290,160 @@ function PriceSparkline({ symbol, onExpand }) {
   );
 }
 
+// cc#518: FINANCIALS section -- screener.in-style horizontal tables (periods as columns, line
+// items as rows, sticky first column, horizontal scroll). Data = fundamentals_history via
+// build_financials_block() (gvm_company_report.py), already in the report payload (r.financials) --
+// no second fetch. "Indians love screener because of this simplicity" (founder, 18-Jul-2026).
+function _finFmt(v, unit) {
+  if (v == null) return "—";
+  if (unit === "eps") return fmt(v, 2);
+  if (unit === "pct") return fmt(v, 1) + "%";
+  return fmt(v, 0);   // "cr" | "days" | "count"
+}
+
+// cc#518 Part 2 (row-chart): renders from the SAME row.values the table cell renders -- no second
+// fetch. Bar for absolute Rs rows, line for %/days/EPS rows; the TTM point (when present) renders
+// visually distinct (gold, dashed baseline / hollow-ish ring) and labelled TTM on the x-axis.
+function FinRowChart({ row, periods }) {
+  const W = 640, H = 130, padL = 10, padR = 10, padT = 12, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = row.values.length;
+  const vals = row.values.filter(v => v != null);
+  if (!vals.length) return <div style={{ fontSize: 11, color: C.muted, padding: "6px 2px" }}>No data.</div>;
+  const lo = Math.min(0, ...vals), hi = Math.max(...vals);
+  const span = (hi - lo) || 1;
+  const yAt = v => padT + plotH - ((v - lo) / span) * plotH;
+  const xStep = plotW / n;
+  const xAt = i => padL + xStep * i + xStep / 2;
+  const isTtmCol = i => periods[i] === "TTM";
+
+  const axis = (
+    <React.Fragment>
+      {periods.map((p, i) => (
+        <text key={i} x={xAt(i)} y={H - 6} fontSize="8.5" fill={C.muted} textAnchor="middle">{p === "TTM" ? "TTM" : String(p).slice(0, 6)}</text>
+      ))}
+    </React.Fragment>
+  );
+
+  if (row.chart_type === "bar") {
+    const bw = Math.min(26, xStep * 0.6);
+    const y0 = yAt(0);
+    return (
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+        <line x1={padL} x2={W - padR} y1={y0} y2={y0} stroke={C.gridLine} strokeWidth="1" />
+        {row.values.map((v, i) => {
+          if (v == null) return null;
+          const ttm = isTtmCol(i);
+          return <rect key={i} x={xAt(i) - bw / 2} y={Math.min(yAt(v), y0)} width={bw} height={Math.max(1, Math.abs(yAt(v) - y0))}
+            fill={ttm ? C.gold + "55" : (v >= 0 ? C.accent + "85" : C.red + "85")}
+            stroke={ttm ? C.gold : "none"} strokeWidth={ttm ? 1.3 : 0} strokeDasharray={ttm ? "3,2" : "0"} rx="2" />;
+        })}
+        {axis}
+      </svg>
+    );
+  }
+  // line chart -- segments break across null gaps rather than interpolating through missing data.
+  const segs = [];
+  let cur = [];
+  row.values.forEach((v, i) => {
+    if (v == null) { if (cur.length > 1) segs.push(cur); cur = []; return; }
+    cur.push([xAt(i), yAt(v)]);
+  });
+  if (cur.length > 1) segs.push(cur);
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      {segs.map((seg, si) => <path key={si} fill="none" stroke={C.accent} strokeWidth="1.8"
+        d={"M" + seg.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" L")} />)}
+      {row.values.map((v, i) => {
+        if (v == null) return null;
+        const ttm = isTtmCol(i);
+        return <circle key={i} cx={xAt(i)} cy={yAt(v)} r={ttm ? 4 : 2.5}
+          fill={ttm ? C.gold : C.accent} stroke={ttm ? "#fff" : "none"} strokeWidth={ttm ? 1 : 0} />;
+      })}
+      {axis}
+    </svg>
+  );
+}
+
+function FinTable({ title, table }) {
+  const [openRow, setOpenRow] = useState(null);   // one open row-chart per table at a time
+  if (!table || !table.rows || !table.rows.length) return null;
+  const displayRows = table.rows.filter(rw => rw.display !== false);
+  if (!displayRows.length) return null;
+  const periods = table.periods;
+  const ttmIdx = table.ttm ? periods.length - 1 : -1;
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text, marginBottom: 8 }}>{title}</div>
+      <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: periods.length * 76 + 170, fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              <th style={{ position: "sticky", left: 0, background: C.card, zIndex: 2, textAlign: "left",
+                padding: "8px 12px", borderBottom: `1px solid ${C.border}`, minWidth: 170, color: C.muted, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                {title}
+              </th>
+              {periods.map((p, i) => (
+                <th key={i} style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`,
+                  color: i === ttmIdx ? C.gold : C.muted, fontWeight: i === ttmIdx ? 800 : 700, fontSize: 11,
+                  background: i === ttmIdx ? C.gold + "12" : "transparent", whiteSpace: "nowrap" }}>{p}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map(row => (
+              <React.Fragment key={row.label}>
+                <tr style={{ borderBottom: `1px solid ${C.gridLine}` }}>
+                  <td style={{ position: "sticky", left: 0, background: C.card, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontWeight: 600 }}>
+                      <ChartIcon onClick={() => setOpenRow(openRow === row.label ? null : row.label)} title={`${row.label} — tap for trend`} />
+                      {row.label}
+                    </span>
+                  </td>
+                  {row.values.map((v, i) => (
+                    <td key={i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
+                      color: i === ttmIdx ? C.gold : C.text, fontWeight: i === ttmIdx ? 800 : 500,
+                      background: i === ttmIdx ? C.gold + "08" : "transparent" }}>{_finFmt(v, row.unit)}</td>
+                  ))}
+                </tr>
+                {openRow === row.label && (
+                  <tr>
+                    <td colSpan={periods.length + 1} style={{ padding: "6px 12px 16px", background: C.bg }}>
+                      <FinRowChart row={row} periods={periods} />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function FinancialsSection({ financials }) {
+  if (!financials) return null;
+  const any = financials.quarterly || financials.profit_loss || financials.balance_sheet
+    || financials.cash_flow || financials.ratios || financials.shareholding;
+  if (!any) return null;
+  return (
+    <div id="financials" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>Financials</div>
+        {financials.basis && <Tag color={C.muted}>{financials.basis}</Tag>}
+      </div>
+      <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>Tap the chart icon on any row for its trend across all periods.</div>
+      <FinTable title="Quarterly Results" table={financials.quarterly} />
+      <FinTable title="Profit & Loss" table={financials.profit_loss} />
+      <FinTable title="Balance Sheet" table={financials.balance_sheet} />
+      <FinTable title="Cash Flow" table={financials.cash_flow} />
+      <FinTable title="Ratios" table={financials.ratios} />
+      {financials.shareholding && <FinTable title="Shareholding Pattern" table={financials.shareholding} />}
+    </div>
+  );
+}
+
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
@@ -1559,6 +1713,9 @@ function GvmReport({ r, hist }) {
 
       <OpsMetrics symbol={r.symbol} segment={r.segment} />
       <SectorBrief segment={r.segment} />
+
+      {/* cc#518: FINANCIALS -- screener.in-style horizontal tables, placed LAST, above the footer */}
+      <FinancialsSection financials={r.financials} />
 
       <div style={{ fontSize: 12, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}
