@@ -2,7 +2,7 @@
 Scheduler — Scorr background tasks (restored 18-Jun-2026).
 Deactivation: _bg_intraday_paper commented out — on-demand only via /api/intraday/tick.
 """
-import asyncio, logging, os
+import asyncio, logging, os, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -49,11 +49,34 @@ def _conn(statement_timeout_ms: int = 0):
                          f"-c idle_in_transaction_session_timeout={statement_timeout_ms}")
     return psycopg.connect(DATABASE_URL, **kw)
 
+def _run_recorded(fn, args):
+    """cc#525 run recorder: wraps the job call so every _spawn dispatch upserts
+    last_run_at/last_status/last_error/last_duration_ms into scheduler_master, with ZERO
+    behavior change to fn itself (same call, same args, same return/raise). Recorder failures
+    never break the job -- scheduler_master.record_run already swallows its own exceptions."""
+    t0 = time.time()
+    try:
+        result = fn(*args)
+    except Exception as e:
+        try:
+            import scheduler_master
+            scheduler_master.record_run(fn.__name__, "error", str(e), int((time.time() - t0) * 1000))
+        except Exception:
+            pass
+        raise
+    try:
+        import scheduler_master
+        scheduler_master.record_run(fn.__name__, "ok", None, int((time.time() - t0) * 1000))
+    except Exception:
+        pass
+    return result
+
+
 def _spawn(fn, *args):
     """Dispatch a blocking job on the dedicated scheduler pool (never the shared
     default executor) and keep a reference so the task isn't GC'd mid-flight."""
     loop = asyncio.get_running_loop()
-    t = asyncio.ensure_future(loop.run_in_executor(_EXECUTOR, fn, *args))
+    t = asyncio.ensure_future(loop.run_in_executor(_EXECUTOR, _run_recorded, fn, args))
     _bg_tasks.add(t); t.add_done_callback(_bg_tasks.discard)
     return t
 
@@ -2204,6 +2227,7 @@ async def _scheduler_loop():
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
+        if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market
@@ -2232,8 +2256,44 @@ def start_background(app=None, base_url: str = "", admin_token: str = ""):
     _stop_event = asyncio.Event()
     t = asyncio.create_task(_supervisor())
     _bg_tasks.add(t); t.add_done_callback(_bg_tasks.discard)
+    # cc#525: seed + drift-audit the scheduler_master registry on every startup (Railway
+    # auto-deploys ~90s per push, so this doubles as the "on app startup" half of the daily
+    # 08:45 IST cadence -- most deploys land well inside a day of any registration drift).
+    _spawn(_bg_scheduler_master_startup_audit)
     log.info("scheduler.start_background: launched")
     return t
+
+
+def _bg_scheduler_master_startup_audit():
+    try:
+        import scheduler_master
+        scheduler_master.seed_registry()
+        res = scheduler_master.run_drift_audit()
+        log.info(f"scheduler_master startup audit: {res}")
+    except Exception as e:
+        log.error(f"scheduler_master startup audit failed: {e}")
+
+
+_scheduler_master_audit_armed_day = None
+
+
+def _bg_scheduler_master_daily_audit():
+    """cc#525 item 4: daily 08:45 IST drift audit (the startup audit above covers the
+    "on app startup" half of the requirement; this covers days with no deploy)."""
+    global _scheduler_master_audit_armed_day
+    now = datetime.now(IST)
+    if not (now.hour == 8 and now.minute == 45):
+        return
+    day_key = now.date().isoformat()
+    if _scheduler_master_audit_armed_day == day_key:
+        return
+    _scheduler_master_audit_armed_day = day_key
+    try:
+        import scheduler_master
+        res = scheduler_master.run_drift_audit()
+        log.info(f"scheduler_master daily audit: {res}")
+    except Exception as e:
+        log.error(f"scheduler_master daily audit failed: {e}")
 
 
 async def stop_background():

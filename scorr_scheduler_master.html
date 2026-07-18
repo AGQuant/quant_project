@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scheduler Master · Scorr</title>
+<style>
+:root{--bg:#0A0F1E;--card:#121A33;--well:#0D1428;--line:rgba(148,166,210,.14);
+--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--green:#2FD48B;--amber:#F5B94A;--red:#FF5C6C}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Mono',ui-monospace,monospace;padding:20px 16px 60px}
+.wrap{max-width:1100px;margin:0 auto}
+h1{font-size:18px;font-weight:700;margin-bottom:4px}
+.sub{font-size:12px;color:var(--mut);margin-bottom:16px}
+.counts{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+.cnt{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:12px}
+.cnt b{font-size:16px;display:block}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;font-size:12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.none{background:var(--dim)}
+.tag{font-size:10px;padding:2px 7px;border-radius:6px;background:var(--well);color:var(--mut);border:1px solid var(--line)}
+.cad{color:var(--mut);font-size:11px;max-width:340px;word-break:break-word}
+#msg{color:var(--dim);padding:20px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Scheduler Master Registry</h1>
+  <div class="sub">Every scheduled job, enumerated from scheduler.py's own source (cc#525) · not hand-maintained docs</div>
+  <div class="counts" id="counts"></div>
+  <div id="msg">Loading…</div>
+  <table id="tbl" style="display:none">
+    <thead><tr><th>Job</th><th>Cadence</th><th>Service</th><th>Category</th><th>Last run</th><th>Status</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+<script>
+(function(){
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function ago(ts){
+    if(!ts)return null;
+    var d=new Date(ts.replace(" ","T")+(ts.indexOf("Z")<0&&ts.indexOf("+")<0?"Z":""));
+    var mins=(Date.now()-d.getTime())/60000;
+    if(isNaN(mins))return ts;
+    if(mins<60)return Math.round(mins)+"m ago";
+    if(mins<1440)return (mins/60).toFixed(1)+"h ago";
+    return (mins/1440).toFixed(1)+"d ago";
+  }
+  function statusOf(j){
+    if(!j.last_run_at)return {cls:"none",txt:"never run"};
+    if(j.last_status==="error")return {cls:"err",txt:"error"};
+    var mins=(Date.now()-new Date(j.last_run_at.replace(" ","T")+"Z").getTime())/60000;
+    if(isNaN(mins))return {cls:"ok",txt:j.last_status||"ok"};
+    if(mins>2880)return {cls:"warn",txt:"stale (>48h)"};
+    return {cls:"ok",txt:j.last_status||"ok"};
+  }
+  fetch("/api/scheduler/master").then(function(r){return r.json()}).then(function(d){
+    var jobs=(d&&d.jobs)||[];
+    document.getElementById("msg").style.display="none";
+    var byService={};
+    jobs.forEach(function(j){byService[j.service]=(byService[j.service]||0)+1;});
+    var countsHtml='<div class="cnt"><b>'+jobs.length+'</b>total jobs</div>';
+    Object.keys(byService).sort().forEach(function(s){
+      countsHtml+='<div class="cnt"><b>'+byService[s]+'</b>'+esc(s)+'</div>';
+    });
+    var everRun=jobs.filter(function(j){return j.last_run_at;}).length;
+    countsHtml+='<div class="cnt"><b>'+everRun+'/'+jobs.length+'</b>have run at least once</div>';
+    document.getElementById("counts").innerHTML=countsHtml;
+
+    var tb=document.getElementById("tbody");
+    tb.innerHTML=jobs.map(function(j){
+      var st=statusOf(j);
+      var lastRun=j.last_run_at?ago(j.last_run_at):"—";
+      return "<tr><td><b>"+esc(j.job_name)+"</b><br><span class='tag'>"+esc(j.module||"")+"</span></td>"
+        +"<td class='cad'>"+esc(j.cadence_human||"—")+"</td>"
+        +"<td>"+esc(j.service)+"</td>"
+        +"<td>"+esc(j.category)+"</td>"
+        +"<td>"+esc(lastRun)+(j.last_duration_ms!=null?" · "+j.last_duration_ms+"ms":"")+"</td>"
+        +"<td><span class='dot "+st.cls+"'></span>"+esc(st.txt)+(j.last_error?" — "+esc(j.last_error.slice(0,80)):"")+"</td></tr>";
+    }).join("");
+    document.getElementById("tbl").style.display="table";
+  }).catch(function(){
+    document.getElementById("msg").textContent="Failed to load /api/scheduler/master";
+  });
+})();
+</script>
+</body>
+</html>

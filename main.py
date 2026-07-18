@@ -65,6 +65,7 @@ from check_endpoint import router as check_router
 from sector_endpoints import router as sector_router
 from sector_brief_endpoints import router as sector_brief_router, _batch_job as _sector_brief_batch
 from ops_metrics_pipeline import router as ops_metrics_router   # cc#523: sector KPI registry + concall pipeline
+from scheduler_master import router as scheduler_master_router   # cc#525: scheduled-job registry + drift audit
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
 from scorr_authset_probe import router as authset_probe_router
 from pwa_endpoints import router as pwa_router
@@ -192,9 +193,10 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health", "/v15"}   # cc#392/394/398/426/442/467: no-store + theme/logout pills
+                     "/v13", "/v12", "/health", "/v15", "/scheduler-master"}   # cc#392/394/398/426/442/467/525: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
+PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -278,6 +280,7 @@ app.include_router(check_router)
 app.include_router(sector_router)
 app.include_router(sector_brief_router)
 app.include_router(ops_metrics_router)   # cc#523
+app.include_router(scheduler_master_router)   # cc#525
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
 app.include_router(intraday_scanner_router)   # cc#481: restored
@@ -712,6 +715,13 @@ def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
     with open("scorr_holdings.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/scheduler-master", response_class=HTMLResponse)
+def scheduler_master_page():
+    """cc#525: Master Scheduler Registry -- every scheduled job (AST-enumerated from
+    scheduler.py, not hand-maintained docs), last run/status, drift-audited daily. Reads
+    /api/scheduler/master (scheduler_master.py)."""
+    with open("scorr_scheduler_master.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/v13", response_class=HTMLResponse)
 def v13_filter_registry_page():
     """cc#384: V13 filter registry — reality-verified inventory of every platform metric."""
@@ -755,6 +765,7 @@ NAV_REGISTRY = {
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
     "/v14":          ("V14 · Intraday",       "nav"),        # cc#442 rule id=2987 (intraday engine)
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
+    "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
