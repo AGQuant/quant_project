@@ -159,10 +159,30 @@ def _basis_block(cur, sym) -> Dict[str, Any]:
     oi_prev_day = _f(_pr[0]) if _pr else None
     oi_dd_pct = (round((oi - oi_prev_day) / oi_prev_day * 100.0, 1)
                  if (oi is not None and oi_prev_day and oi_prev_day > 0) else None)
+    # cc#515: OI-staleness honesty. futures_basis.oi has been observed NULL for several sessions
+    # (e.g. MOTHERSON since 15-Jul) while the quadrant tile just showed bare "DATA THIN" -- surface
+    # the actual staleness date so it reads as a known feed gap, not a silent degrade.
+    cur.execute("SELECT MAX(ts::date) FROM futures_basis WHERE symbol=%s", (sym,))
+    _ld = cur.fetchone()
+    latest_session = _ld[0] if _ld else None
+    cur.execute("SELECT MAX(ts::date) FROM futures_basis WHERE symbol=%s AND oi IS NOT NULL", (sym,))
+    _od = cur.fetchone()
+    oi_last_session = _od[0] if _od else None
+    oi_stale = (oi_last_session is None) or (latest_session is not None and oi_last_session < latest_session)
+    # cc#515: today's intraday basis trend (first tick of the session vs the latest/current tick) --
+    # drives the composite READ's basis-direction vote ("premium widening/fading" language describes
+    # movement DURING a session, not the 5-day daily spark used for the percentile tag above).
+    cur.execute("""SELECT basis_pct FROM futures_basis WHERE symbol=%s
+                   AND ts::date = (SELECT MAX(ts::date) FROM futures_basis WHERE symbol=%s)
+                   ORDER BY ts ASC LIMIT 1""", (sym, sym))
+    _r0 = cur.fetchone()
+    basis_open_pct = _f(_r0[0]) if _r0 else None
     return {"fut": fut, "spot": spot,
             "basis": {"value": basis, "pct": basis_pct, "percentile": pct, "spark": spark,
+                      "intraday_open_pct": basis_open_pct,
                       "tag": _basis_tag(pct, (basis is None or basis >= 0))},   # cc#445 fix_2
-            "fut_oi": {"oi": oi, "chg_pct": oi_dd_pct}}
+            "fut_oi": {"oi": oi, "chg_pct": oi_dd_pct, "stale": oi_stale,
+                       "stale_since": str(oi_last_session) if oi_last_session else None}}
 
 
 def _metrics(cur, sym) -> Dict[str, Any]:
@@ -546,6 +566,136 @@ def _quadrant_tag(oi_chg, px_chg):
     return {"label": "Long Unwinding", "color": "bear"}
 
 
+def _results_block(cur, sym) -> Dict[str, Any]:
+    """cc#515: Results chip from earnings_calendar (cc#490 forward-date scraper). Never absent --
+    a calendar gap (no row at all) is itself information, distinct from a genuinely-fed "no results
+    within 3d" gate. status: 'upcoming' (next_date/days_to set), 'recent' (recent_date set, within
+    the last 10 days), or 'none' (no row either direction)."""
+    cur.execute("""SELECT ex_date FROM earnings_calendar
+                   WHERE UPPER(ticker)=UPPER(%s) AND ex_date >= CURRENT_DATE
+                   ORDER BY ex_date ASC LIMIT 1""", (sym,))
+    nxt = cur.fetchone()
+    if nxt and nxt[0]:
+        d = nxt[0]
+        days_to = (d - date.today()).days
+        return {"next_date": str(d), "days_to": days_to, "recent_date": None, "status": "upcoming"}
+    cur.execute("""SELECT ex_date FROM earnings_calendar
+                   WHERE UPPER(ticker)=UPPER(%s) AND ex_date < CURRENT_DATE
+                     AND ex_date >= CURRENT_DATE - INTERVAL '10 days'
+                   ORDER BY ex_date DESC LIMIT 1""", (sym,))
+    rec = cur.fetchone()
+    if rec and rec[0]:
+        return {"next_date": None, "days_to": None, "recent_date": str(rec[0]), "status": "recent"}
+    return {"next_date": None, "days_to": None, "recent_date": None, "status": "none"}
+
+
+def _fmt_pct(v):
+    return "n/a" if v is None else f"{v:+.2f}"
+
+
+_QUADRANT_PHRASE = {
+    "LONG BUILDUP": "long buildup", "SHORT COVERING": "short covering — price recovering",
+    "SHORT BUILDUP": "short buildup — price pressured", "LONG UNWIND": "long unwinding",
+}
+
+
+def _composite_read(quad, results, basis_block, m, opt, ad, intr) -> Dict[str, Any]:
+    """cc#515: ONE deterministic, plain-language desk read synthesizing the tiles the founder
+    currently combines mentally -- no LLM, every number quoted comes from the same payload fields
+    the tiles themselves render (zero recompute, zero drift). Votes collected: OI quadrant,
+    intraday basis direction, ATM put-vs-call OI skew (when fed), A/D 21d label, VolX>=1.3 (energy
+    confirming the day's price direction). DATA THIN votes are excluded from the denominator and
+    listed under "dark". A PRICE/FLOW CONFLICT (price direction disagrees with the vote majority)
+    forces the label to MIXED regardless of the raw vote count -- the single highest-value read for
+    the user, per the founder's MOTHERSON worked example (18-Jul-2026)."""
+    votes: List[tuple] = []   # (direction "bull"/"bear", phrase)
+    cautions: List[str] = []
+    dark: List[str] = []
+
+    # 1) OI quadrant (futures OI x price)
+    if quad:
+        qdir = "bull" if quad["label"] in ("LONG BUILDUP", "SHORT COVERING") else "bear"
+        votes.append((qdir, _QUADRANT_PHRASE.get(quad["label"], quad["label"].lower())))
+    else:
+        fut_oi = (basis_block or {}).get("fut_oi") or {}
+        stale_since = fut_oi.get("stale_since")
+        dark.append(f"fut OI (stale since {stale_since})" if (fut_oi.get("stale") and stale_since) else "fut OI")
+
+    # 2) basis direction -- today's intraday open-tick vs latest-tick trend
+    bb = (basis_block or {}).get("basis") or {}
+    bopen, bnow = bb.get("intraday_open_pct"), bb.get("pct")
+    if bopen is not None and bnow is not None:
+        delta = bnow - bopen
+        if bnow >= 0 and delta > 0:
+            votes.append(("bull", f"basis premium widening ({_fmt_pct(bopen)}->{_fmt_pct(bnow)}%)"))
+        elif bnow < 0 and delta < 0:
+            votes.append(("bear", f"basis discount widening ({_fmt_pct(bopen)}->{_fmt_pct(bnow)}%)"))
+        elif bnow >= 0 and delta < 0:
+            votes.append(("bear", f"basis premium fading ({_fmt_pct(bopen)}->{_fmt_pct(bnow)}%)"))
+        else:
+            votes.append(("bull", f"basis discount fading ({_fmt_pct(bopen)}->{_fmt_pct(bnow)}%)"))
+    else:
+        dark.append("basis")
+
+    # 3) ATM put-vs-call OI d/d skew (when fed -- single-stock option chains are frequently unfed)
+    ac, ap = (opt or {}).get("atm_call_oi") or {}, (opt or {}).get("atm_put_oi") or {}
+    if ac.get("oi_unfed") or (ac.get("chg_pct") is None and ap.get("chg_pct") is None):
+        dark.append("option OI n/f")
+    else:
+        cc_, pc_ = ac.get("chg_pct"), ap.get("chg_pct")
+        if cc_ is not None and pc_ is not None and cc_ != pc_:
+            if cc_ > pc_:
+                votes.append(("bull", f"call OI building faster than puts ({_fmt_pct(cc_)}% vs {_fmt_pct(pc_)}%)"))
+            else:
+                votes.append(("bear", f"put OI building faster than calls ({_fmt_pct(pc_)}% vs {_fmt_pct(cc_)}%)"))
+
+    # 4) A/D 21d -- Accumulation/Distribution vote; Neutral is a caution, not a vote
+    if ad:
+        if ad["label"] == "Accumulation":
+            votes.append(("bull", f"accumulation (A/D {ad['up_vol_pct']}%)"))
+        elif ad["label"] == "Distribution":
+            votes.append(("bear", f"distribution-leaning — dip not being bought (A/D {ad['up_vol_pct']}%)"))
+        else:
+            cautions.append(f"A/D {ad['up_vol_pct']}% (no accumulation)")
+
+    # 5) VolX -- energy CONFIRMING the day's own price direction (not directional on its own)
+    volx, price_chg = (intr or {}).get("volx"), m.get("price_chg")
+    if volx is not None and price_chg is not None:
+        if volx >= 1.3:
+            votes.append(("bull" if price_chg > 0 else "bear", f"VolX {volx}x — energy confirming"))
+        elif volx < 0.8:
+            cautions.append(f"VolX {volx}x — quiet, move not energy-backed")
+
+    n_bull = sum(1 for v in votes if v[0] == "bull")
+    n_bear = sum(1 for v in votes if v[0] == "bear")
+    m_total = len(votes)
+    if n_bull > n_bear:
+        direction, n = "BULLISH", n_bull
+    elif n_bear > n_bull:
+        direction, n = "BEARISH", n_bear
+    else:
+        direction, n = "MIXED", max(n_bull, n_bear)
+
+    conflict = False
+    if price_chg is not None and m_total > 0 and n_bull != n_bear:
+        price_dir = "bull" if price_chg > 0 else ("bear" if price_chg < 0 else None)
+        vote_dir = "bull" if n_bull > n_bear else "bear"
+        if price_dir and price_dir != vote_dir:
+            conflict = True
+            direction = "MIXED"
+
+    parts = [f"{n}/{m_total} constructive: " + "; ".join(v[1] for v in votes)] if votes else ["no directional votes with data"]
+    if cautions:
+        parts.append("caution: " + "; ".join(cautions))
+    if dark:
+        parts.append("dark: " + ", ".join(dark))
+    sentence = "; ".join(parts) + "."
+
+    return {"label": f"{direction} FLOW {n}/{m_total}" if m_total else "NO READ 0/0",
+            "direction": direction, "n": n, "m": m_total, "conflict": conflict,
+            "sentence": sentence, "cautions": cautions, "dark": dark}
+
+
 def _basis_tag(pct, is_premium):
     """cc#445 fix_2: 5d-percentile strength tag from the buy perspective — a premium is strong at a
     high percentile; a discount inverts (strong discount reads weak for a buyer)."""
@@ -662,6 +812,35 @@ def snapshot_all_atm_oi(conn) -> Dict[str, Any]:
     return {"snapshotted": n, "underlyings": len(unders)}
 
 
+def check_oi_feed_degradation(conn) -> Dict[str, Any]:
+    """cc#515: universe-wide OI-staleness diagnostic. Per-symbol staleness is already surfaced
+    honestly in the cockpit (fut_oi.stale/stale_since above); this catches the FEED-WIDE case (like
+    the 16-Jul incident) where a large slice of the universe goes stale together -- that reads as
+    "every cockpit quietly degraded" one symbol at a time unless something raises a single alert.
+    "> 2 sessions old" = the latest non-null OI predates the 3rd-most-recent session with any
+    futures_basis rows. Pure diagnostic -- returns stats only; the caller (scheduler.py's
+    _bg_oi_feed_health, via _log_alert) decides whether/how to alert and at what cadence."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT symbol FROM futures_universe WHERE is_active=TRUE")
+        universe = [r[0] for r in cur.fetchall()]
+        if not universe:
+            return {"checked": 0, "stale": 0, "pct": 0.0}
+        cur.execute("""SELECT DISTINCT ts::date FROM futures_basis
+                       ORDER BY ts::date DESC LIMIT 3""")
+        sessions = [r[0] for r in cur.fetchall()]
+        cutoff = sessions[2] if len(sessions) >= 3 else (sessions[-1] if sessions else None)
+        stale = 0
+        for sym in universe:
+            cur.execute("SELECT MAX(ts::date) FROM futures_basis WHERE symbol=%s AND oi IS NOT NULL", (sym,))
+            r = cur.fetchone()
+            last = r[0] if r else None
+            if last is None or (cutoff is not None and last < cutoff):
+                stale += 1
+        pct = round(stale / len(universe) * 100.0, 1)
+        return {"checked": len(universe), "stale": stale, "pct": pct,
+                "cutoff_session": str(cutoff) if cutoff else None}
+
+
 @deriv_router.get("/api/deriv-metrics/{symbol}")
 def deriv_metrics(symbol: str, side: Optional[str] = None):
     sym = (symbol or "").strip().upper()
@@ -685,6 +864,9 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                 basis["fut_oi"]["quadrant"] = _fq["label"] if _fq else None
                 basis["fut_oi"]["quadrant_color"] = _fq["color"] if _fq else None
                 basis["fut_oi"]["price_chg"] = m.get("price_chg")
+            # cc#515: Results chip (earnings_calendar) — never absent; a calendar gap is itself info.
+            results = _safe("results", lambda: _results_block(cur, sym),
+                             {"next_date": None, "days_to": None, "recent_date": None, "status": "none"})
             # cc#449/cc#446 fix_1: ATM Call/Put OI d/d — the option_chain latest-2-days d/d computed in
             # _options_block (atm_call_oi/atm_put_oi.chg_pct + first_snapshot) is the PRIMARY source
             # (chain has 4-5 snapshot days per underlying). The options_oi_daily store is only a FALLBACK
@@ -722,12 +904,32 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
 
         tc = _safe("tc_score", lambda: _tc_score(sym, side))   # opens its own connection — kept outside the block above
 
+        # cc#515: verdict.oi_quadrant now ALWAYS returns a dict (never bare None) so the tile can
+        # show "OI stale since <date>" instead of an unexplained "DATA THIN" when the quadrant is
+        # unavailable specifically because the OI feed has gone stale (not just missing today).
+        _quad_raw = _safe("oi_quadrant", lambda: _oi_quadrant(oi_chg, m.get("price_chg")))
+        _fut_oi = basis.get("fut_oi") or {}
+        oi_quadrant_resp = {
+            "label": _quad_raw["label"] if _quad_raw else None,
+            "color": _quad_raw["color"] if _quad_raw else None,
+            "oi_chg_pct": oi_chg, "price_chg_pct": m.get("price_chg"),
+            "stale": bool(_fut_oi.get("stale")), "stale_since": _fut_oi.get("stale_since"),
+        }
+        # cc#515: composite plain-language READ tile -- one deterministic desk synthesis of the
+        # tiles above, cited from these SAME already-computed values (no recompute, no drift).
+        read = _safe("composite_read",
+                      lambda: _composite_read(_quad_raw, results, basis, m, opt, ad, intr),
+                      {"label": "NO READ", "direction": "MIXED", "n": 0, "m": 0, "conflict": False,
+                       "sentence": "insufficient data.", "cautions": [], "dark": []})
+
         resp = {
             "symbol": sym, "cmp": cmp_px, "fut": fut, "spot": spot, "side": (side or "").upper() or None,
             "has_options": opt.get("has_options", False),
             "data_ts": chain_ts,   # cc#368: latest option_chain snapshot ts (None = no chain rows)
+            "results": results,   # cc#515: Results chip
+            "read": read,         # cc#515: composite READ tile
             "verdict": {
-                "oi_quadrant": _safe("oi_quadrant", lambda: _oi_quadrant(oi_chg, m.get("price_chg"))),
+                "oi_quadrant": oi_quadrant_resp,
                 "options_cost": opt.get("options_cost"),
                 "tc_score": tc,
             },

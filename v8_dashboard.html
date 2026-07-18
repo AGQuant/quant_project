@@ -978,6 +978,41 @@ function _dcInjectStyle(){
   const st=document.createElement('style');st.id='dc-style';st.textContent=css;document.head.appendChild(st);
 }
 function _dcClose(){const o=document.getElementById('dcOv');if(o)o.classList.remove('open');}
+// cc#515: plain "YYYY-MM-DD" -> "DD-Mon" (Results chip dates; distinct from _dcFmtTs which parses
+// full timestamps).
+function _dcFmtDate(s){
+  const m=String(s||'').match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(!m)return String(s||'');
+  const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m[2],10)-1];
+  return `${m[3]}-${mon}`;
+}
+// cc#515: Results chip — NEVER absent (a calendar gap is itself information). Amber <=7d, red <=3d
+// (mirrors TC's G2 blackout window); recent-past and n/a states render dim/neutral.
+function _dcResultsChip(r){
+  if(!r||r.status==='none')return `<div class="dc-sub" style="margin:-4px 0 10px;color:var(--dim)">Result date n/a</div>`;
+  if(r.status==='upcoming'){
+    const d=r.days_to;
+    const color=d<=3?'var(--red)':d<=7?'var(--amber)':'var(--mut)';
+    return `<div class="dc-sub" style="margin:-4px 0 10px;color:${color};font-weight:700">Results ${_dcFmtDate(r.next_date)} (${d}d)</div>`;
+  }
+  return `<div class="dc-sub" style="margin:-4px 0 10px;color:var(--mut)">Results announced ${_dcFmtDate(r.recent_date)}</div>`;
+}
+// cc#515: composite plain-language READ tile — one deterministic desk read, always first. Every
+// number in read.sentence already came from deriv_metrics.py's _composite_read() citing the SAME
+// payload fields the tiles below render (no client-side recompute).
+function _dcReadTile(read){
+  if(!read)return '';
+  const dirColor=read.direction==='BULLISH'?'var(--grn)':read.direction==='BEARISH'?'var(--red)':'var(--amber)';
+  const conflict=read.conflict?`<div class="dc-chip dc-neg" style="display:inline-block;margin-bottom:7px">&#9888; PRICE/FLOW CONFLICT</div>`:'';
+  return `<div class="dc-row" style="flex-direction:column;align-items:stretch;gap:5px;border-color:${dirColor};margin-top:0;margin-bottom:9px">
+    ${conflict}
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+      <span class="k">READ</span>
+      <span class="v" style="color:${dirColor}">${read.label}</span>
+    </div>
+    <div class="d" style="font-size:11px;line-height:1.5">${read.sentence}</div>
+  </div>`;
+}
 function _dcHeader(sym,side,qty,entry,cmp,dcmp){
   const isShort=(side||'').toUpperCase()==='SHORT';
   const c=(cmp!=null?cmp:dcmp);
@@ -1017,10 +1052,18 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const q=V.oi_quadrant, o=V.options_cost, t=V.tc_score;
   let vc='';
   // fix_1: OI Quadrant — show the classifying numbers (Fut OI d/d% · price change%) beneath the label.
-  vc+= q ? _dcVC('OI Quadrant',q.label,q.color,
+  // cc#515: q is now always a dict (never bare null); stale (feed gap >1 session) reads "OI STALE
+  // since <date>" instead of an unexplained bare "DATA THIN".
+  if(q&&q.label){
+    vc+=_dcVC('OI Quadrant',q.label,q.color,
              `OI ${sign(q.oi_chg_pct,1)}% &middot; Px ${sign(q.price_chg_pct,1)}%`,
-             'OI Quadrant = futures OI d/d × price change. Long/Short Buildup, Long Unwind, Short Covering.')
-         : _dcVC('OI Quadrant','DATA THIN','mut','');
+             'OI Quadrant = futures OI d/d × price change. Long/Short Buildup, Long Unwind, Short Covering.');
+  }else if(q&&q.stale&&q.stale_since){
+    vc+=_dcVC('OI Quadrant','OI STALE','amber',`since ${_dcFmtDate(q.stale_since)}`,
+             'Futures OI has not updated in over a session for this symbol — quadrant unavailable, not just thin.');
+  }else{
+    vc+=_dcVC('OI Quadrant','DATA THIN','mut','');
+  }
   // fix_2: Options Cost — working = ATM strike, current ATM-CE premium vs BS fair premium, ratio.
   let oSub='';
   if(o){const w=o.working;
@@ -1056,11 +1099,12 @@ function _dcRender(sym,side,qty,entry,cmp,d){
     (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>${b.tag?`<span class="dc-chip ${_tagCls(b.tag)}">${b.tag}</span>`:''}`:'--',
     (fut!=null&&spot!=null)?(`Fut ${num(fut,1)} vs Eq ${num(spot,1)}`+((b&&b.percentile!=null)?(' &middot; 5d pct '+num(b.percentile,0)+'%'):''))
                            :((b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):''));
-  // Fut OI (fix_3: today's OI/price quadrant tag)
+  // Fut OI (fix_3: today's OI/price quadrant tag). cc#515: stale (not just missing-today) reads
+  // "OI stale since <date>" instead of a bare DATA THIN.
   const fo=F.fut_oi;
   grid+=_dcR('Futures OI &middot; vs prev day',
     (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>${fo.quadrant?_qChip(fo.quadrant,fo.quadrant_color):''}`
-      :'<span class="dc-thin">DATA THIN</span>',
+      :((fo&&fo.stale&&fo.stale_since)?`<span class="dc-thin">OI stale since ${_dcFmtDate(fo.stale_since)}</span>`:'<span class="dc-thin">DATA THIN</span>'),
     (fo&&fo.price_chg!=null)?('Px '+sign(fo.price_chg,1)+'%'):'');
   // ATM Call/Put OI (fix_4: d/d from daily snapshot store; "1st snapshot" until 2 sessions)
   const ca=F.atm_call_oi, pa=F.atm_put_oi;
@@ -1082,7 +1126,7 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const rd=R.d,rw=R.w;
   grid+=_dcR('RSI &middot; D/W',
     (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','daily · weekly');
-  let rows=`<div class="dc-grid">${grid}</div>`;
+  let rows=_dcReadTile(d.read)+`<div class="dc-grid">${grid}</div>`;
   // fix_7: OI · 5d rolling — each value DATED + quadrant-tagged (needs price change alongside OI).
   const o5=F.oi_5d;
   if(o5&&o5.series&&o5.series.length){
@@ -1097,7 +1141,7 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   let fresh='';
   if(!d.has_options && !d.data_ts) fresh=`<div class="dc-sub" style="color:var(--amber);margin:-2px 0 8px">&#9888; No option data for ${sym}</div>`;
   else if(d.data_ts) fresh=`<div class="dc-sub" style="margin:-2px 0 8px">Options as of ${_dcFmtTs(d.data_ts)} IST</div>`;
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+fresh+verdict+rows;
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+_dcResultsChip(d.results)+fresh+verdict+rows;
 }
 // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
 // Date()/timezone drift (the server stamp is already IST).

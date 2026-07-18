@@ -1101,6 +1101,26 @@ def _bg_oi_snapshot():
         log.error(f"oi_snapshot: {e}")
 
 
+def _bg_oi_feed_health():
+    """cc#515: universe-wide futures OI-staleness check (deriv_metrics.check_oi_feed_degradation).
+    Per-symbol staleness is already surfaced honestly in the cockpit itself; this is the feed-wide
+    tripwire — if >20% of active futures symbols have OI >2 sessions stale (the 16-Jul-incident
+    shape), fire ONE oi_feed_degraded alert instead of every cockpit silently degrading one symbol
+    at a time. Runs once/day (EOD) — cadence controlled here, not inside the diagnostic itself."""
+    try:
+        import deriv_metrics
+        with _conn() as conn:
+            res = deriv_metrics.check_oi_feed_degradation(conn)
+        log.info(f"oi_feed_health: {res}")
+        if res.get("pct", 0.0) > 20.0:
+            _log_alert("oi_feed_degraded",
+                       f"{res['stale']}/{res['checked']} active futures symbols ({res['pct']}%) have "
+                       f"futures_basis.oi stale beyond session {res.get('cutoff_session')} — feed-wide "
+                       f"OI gap, not isolated symbols.")
+    except Exception as e:
+        log.error(f"oi_feed_health: {e}")
+
+
 _v14_running = False
 
 def _bg_v14_cycle():
@@ -1999,6 +2019,7 @@ async def _scheduler_loop():
             _spawn(_bg_v21_killswitch)           # cc#158: V2.1 filter kill-switch check
         if h == 16 and m == 15:
             _spawn(_bg_feed_daily_log)           # cc#495 change_4: daily feed health summary (every day, worker runs weekends too)
+            _spawn(_bg_oi_feed_health)           # cc#515: universe-wide futures OI-staleness tripwire (>20% -> oi_feed_degraded)
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
         # window collided with CC deploy pushes — a Railway redeploy kills the
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.
