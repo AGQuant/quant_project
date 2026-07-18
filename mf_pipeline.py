@@ -1130,6 +1130,20 @@ def v15_search(q: str = "", limit: int = 12):
     return {"count": len(rows), "results": rows}
 
 
+def _ret_window_state(value, inception, years_needed):
+    """cc#528 item 3: honest empty state for a returns window. 'value' when we have the
+    number; 'too_young' when inception proves the fund hasn't existed long enough to have it
+    (a fact, not missing data); 'not_sourced' when the fund is old enough but we don't have it
+    (real gap, not yet scraped) -- including when inception itself is unknown, since we can't
+    prove either way."""
+    if value is not None:
+        return "value"
+    if inception is None:
+        return "not_sourced"
+    age_years = (date.today() - inception).days / 365.25
+    return "too_young" if age_years < years_needed else "not_sourced"
+
+
 @router.get("/api/v15/fund/{scheme_code}")
 def v15_fund(scheme_code: str):
     """cc#480: thin hero read — meta + returns bindings.
@@ -1149,9 +1163,9 @@ def v15_fund(scheme_code: str):
         except Exception:
             conn.rollback()
         cur.execute("""SELECT m.scheme_code, m.name, m.amc, m.category, m.expense_ratio, m.aum_cr,
-                              m.crisil_rank, m.manager,
+                              m.crisil_rank, m.manager, m.inception,
                               m.ret_1w, m.ret_1m, m.ret_3m, m.ret_6m, m.ret_1y, m.ret_2y, m.ret_3y,
-                              m.returns_asof,
+                              m.ret_5y, m.returns_asof,
                               s.mqs, s.q_score, s.r_score, s.c_score, s.s_score, s.computed_at,
                               ca.avg_expense_ratio
                        FROM mf_master m
@@ -1167,11 +1181,24 @@ def v15_fund(scheme_code: str):
     m["category"] = _derive_cat(m.get("name"), m.get("category"))
     m["plan"] = _derive_plan(m.get("name"))
     for k in ("expense_ratio", "aum_cr", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y",
-              "ret_2y", "ret_3y", "mqs", "q_score", "r_score", "c_score", "s_score"):
+              "ret_2y", "ret_3y", "ret_5y", "mqs", "q_score", "r_score", "c_score", "s_score"):
         if m.get(k) is not None:
             m[k] = float(m[k])
+    m["ret_3y_state"] = _ret_window_state(m.get("ret_3y"), m.get("inception"), 3)
+    m["ret_5y_state"] = _ret_window_state(m.get("ret_5y"), m.get("inception"), 5)
+    m["inception"] = str(m["inception"]) if m.get("inception") else None
     m["returns_asof"] = str(m["returns_asof"]) if m.get("returns_asof") else None
     m["computed_at"] = str(m["computed_at"]) if m.get("computed_at") else None
+    # cc#528 item 7: Portfolio GVM (weighted-avg look-through GVM of holdings) was specced as
+    # feasible off mf_holdings, but re-verifying against live data found the June-2026 bulk
+    # holdings load is still the same fabricated/placeholder set cc#519 already flagged
+    # (identical top-5 holdings + weights to 2dp across unrelated categories, e.g. a Large Cap
+    # and a Small Cap fund). Computing a number off it would present fake portfolio composition
+    # as real -- same DATA-QUALITY HOLD this page already applies to the X-ray/segment cards
+    # below, not a fabricated score.
+    m["portfolio_gvm"] = None
+    m["portfolio_gvm_coverage_pct"] = None
+    m["portfolio_gvm_state"] = "data_quality_hold"
 
     flags = []
     er, aum = m.get("expense_ratio"), m.get("aum_cr")
@@ -1235,19 +1262,20 @@ def v15_screener(category: str = "", sort: str = "mqs", limit: int = 40):
         else:
             order = "mqs DESC NULLS LAST, ret_1y DESC NULLS LAST, name"
         sql = ("SELECT m.scheme_code, m.name, m.amc, m.category, m.crisil_rank, "
-               "m.expense_ratio, m.aum_cr, m.ret_1y, m.ret_3y, s.mqs "
+               "m.expense_ratio, m.aum_cr, m.ret_1y, m.ret_3y, m.inception, s.mqs "
                "FROM mf_master m LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code WHERE "
                + " AND ".join(where) + " ORDER BY " + order + " LIMIT %s")
         params.append(max(1, min(limit, 80)))
         cur.execute(sql, params)
         rows = []
-        for sc, nm, amc, c, cr, er, aum, r1y, r3y, mqs in cur.fetchall():
+        for sc, nm, amc, c, cr, er, aum, r1y, r3y, inception, mqs in cur.fetchall():
             rows.append({"scheme_code": sc, "name": nm, "amc": amc,
                          "category": _derive_cat(nm, c),
                          "crisil_rank": cr, "expense_ratio": float(er) if er is not None else None,
                          "aum_cr": float(aum) if aum is not None else None,
                          "ret_1y": float(r1y) if r1y is not None else None,
                          "ret_3y": float(r3y) if r3y is not None else None,
+                         "ret_3y_state": _ret_window_state(float(r3y) if r3y is not None else None, inception, 3),
                          "mqs": float(mqs) if mqs is not None else None})
     return {"category": cat, "count": len(rows), "results": rows}
 
