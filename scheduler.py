@@ -125,6 +125,7 @@ _yahoo_daily_running = False
 _gvm_ran_today: Optional[date] = None
 _gvm_backfill_running = False   # cc#468/470: 5yr deep-history backfill guard
 _mf_backfill_running = False    # cc#477: V15 MF returns backfill single-flight guard
+_bt14_fut_oi_running = False    # cc#538: ORB basis/OI research backfill single-flight guard
 _mf_wiring_running = False      # cc#491: V15 MF wire-all (AUM/ER/holdings/scores) single-flight guard
 _mf_weekly_manual_running = False   # cc#491 course-correct: manual /run_weekly single-flight guard
 _intraday_scan_running = False  # cc#481: intraday scanner 15-min auto-scan single-flight guard
@@ -1027,6 +1028,49 @@ def _bg_gvm_backfill_ext():
             pass
     finally:
         _gvm_backfill_running = False
+
+def _bg_bt14_fut_oi():
+    """cc#538: probe-gated ORB basis/OI RESEARCH backfill into the DROPPABLE scratch table
+    bt14_fut_oi (top-200 stock-futures OHLC+OI for the June/July ORB window, basis derived
+    vs bt14_bars spot). Off-market only, single-flight. Flag app_config.bt14_fut_oi_run:
+      'probe'    -> run the Step-0 hard-gate probe, log BT14_FUT_OI_PROBE, set 'probe_done'
+      'backfill' -> resumable chunk (cursor bt14_fut_oi_cursor); gated on last probe verdict
+                    (!=none). Stays 'backfill' until complete, then 'done'.
+      else       -> skip. Touches nothing live; ORB logic unaffected."""
+    global _bt14_fut_oi_running
+    if _bt14_fut_oi_running:
+        return
+    if _is_market_hours(_ist_now()):   # never fetch/compete during market hours
+        return _SKIPPED
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='bt14_fut_oi_run'")
+            r = cur.fetchone()
+        flag = (r[0] if r else None)
+        if flag not in ("probe", "backfill"):
+            return _SKIPPED
+        _bt14_fut_oi_running = True
+        import bt14_fut_oi
+        if flag == "probe":
+            res = bt14_fut_oi.run_probe()
+            log.info(f"bt14_fut_oi probe: verdict={res.get('verdict')}")
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) "
+                            "VALUES ('bt14_fut_oi_run','probe_done',NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value='probe_done', updated_at=NOW()")
+                conn.commit()
+        else:
+            res = bt14_fut_oi.run_backfill(time_budget_s=1800)
+            log.info(f"bt14_fut_oi backfill: {res}")
+            nxt = "done" if res.get("complete") else "backfill"
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('bt14_fut_oi_run',%s,NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (nxt,))
+                conn.commit()
+    except Exception as e:
+        log.error(f"bt14_fut_oi: {e}")
+    finally:
+        _bt14_fut_oi_running = False
 
 def _bg_pivots():
     global _pivots_ran_today
@@ -2308,6 +2352,7 @@ async def _scheduler_loop():
         # if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)   # unconditional monthly cron -- DISABLED cc#499
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
+        _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
         _spawn(_bg_ops_metrics_backfill)   # cc#523/524: flag-gated, checked every tick (500-company x 4Q first leg)
         _spawn(_bg_ops_text_fetch)         # cc#527: flag-gated fetch-only phase, 23:00-06:00 IST window
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
