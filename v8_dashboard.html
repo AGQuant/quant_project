@@ -129,8 +129,6 @@
   tr.row-open:hover{background:rgba(47,212,139,.14)}
   tr.row-slotfull{background:rgba(245,185,74,.09)}
   tr.row-slotfull:hover{background:rgba(245,185,74,.15)}
-  tr.row-nearmiss{background:rgba(148,166,210,.05)}
-  tr.row-nearmiss:hover{background:rgba(148,166,210,.1)}
   .mob-cards{display:none;flex-direction:column;gap:8px}
   .mob-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
   .mob-card.mob-open{border-color:var(--grn);background:var(--grn-d)}
@@ -193,7 +191,6 @@
   .b-sl{background:var(--red-d);color:var(--red)}
   .b-open{background:rgba(47,212,139,.14);color:var(--grn);border:1px solid rgba(47,212,139,.35)}
   .b-slotfull{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
-  .b-nearmiss{background:rgba(148,166,210,.1);color:var(--mut);border:1px solid var(--line2)}
   .b-qualified{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
   .sig-reason{font-size:9px;font-weight:600;color:#94a3b8;margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
@@ -1169,20 +1166,17 @@ function basketLabel(b){return({buy_reversal:'Buy Reversal',buy_momentum:'Buy Mo
 function basketPill(b){const buy=(b||'').startsWith('buy');const bg=buy?'#eaf3de':'#fcebeb',fg=buy?'#3B6D11':'#A32D2D';return`<span style="background:${bg};border:1px solid ${fg};color:${fg};border-radius:5px;padding:1px 6px;font-size:10px;font-family:Sora">${basketLabel(b)}</span>`;}
 function fmtSince(ts){if(!ts)return"--";const p=_parseISTNaive(ts);if(!p)return"--";return String(p.day).padStart(2,'0')+'/'+MON[p.mon]+' '+String(p.hr).padStart(2,'0')+':'+String(p.min).padStart(2,'0');}
 function scoreClass(s,t){const p=t?s/t:0;return p>=.8?"score-hi":p>=.5?"score-mid":"score-lo";}
-// cc#326: 3-status taxonomy — OPEN (green) / SIGNAL·reason (amber) / NEAR MISS (grey).
+// cc#326: 2-status taxonomy — OPEN (green) / SIGNAL·reason (amber). NEAR_MISS retired from the
+// basket tabs (cc#508, 18-Jul-2026): /qualified/{basket} never returns a NEAR_MISS row anymore
+// (empty is honest when nothing qualified today) -- the score-gate near-miss watchlist stays
+// available only inside the STOCK PASS COUNT / funnel views, which never called this renderer.
 // SLOT_FULL folded into SIGNAL·slots; reason is a muted tag appended to the SIGNAL badge.
-function statusBadge(status,reason,missText){
+function statusBadge(status,reason){
   if(status==='OPEN')return`<span class="badge b-open">&#9679; OPEN</span>`;
-  if(status==='NEAR_MISS'){
-    // cc#425: chip tooltip = which gate(s) missed + by how much (miss_text from the API).
-    const mt=missText?String(missText).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'):'';
-    const ttl=mt?` title="misses: ${mt}"`:'';
-    const cue=mt?`<span style="color:var(--dim);font-weight:400">&#9432;</span>`:'';
-    return`<span class="badge b-nearmiss"${ttl} style="cursor:${mt?'help':'default'}">NEAR MISS ${cue}</span>`;}
   const rt=reason?`<span class="sig-reason">&middot;${String(reason).toUpperCase()}</span>`:'';
   return`<span class="badge b-qualified">SIGNAL</span>${rt}`;}
-function rowClass(status){if(status==='OPEN')return'row-open';if(status==='NEAR_MISS')return'row-nearmiss';return'';}
-function mobCardClass(status){if(status==='OPEN')return'mob-open';if(status==='NEAR_MISS')return'mob-nearmiss';return'';}
+function rowClass(status){if(status==='OPEN')return'row-open';return'';}
+function mobCardClass(status){if(status==='OPEN')return'mob-open';return'';}
 
 function tick(){
   const ist=new Date(Date.now()+(5*60+30)*60000);
@@ -1211,7 +1205,15 @@ TAB_ORDER.forEach(panelIdx=>{
   b.onclick=()=>selectTab(panelIdx);
   tabsEl.appendChild(b);
 });
-try{document.getElementById('panel3').innerHTML=renderBasketRules();}catch(e){}   // cc#503: static, renders instantly (repurposed panel3)
+// cc#508 (18-Jul-2026): the founder saw this tab stuck on "Loading..." -- root cause was a
+// PRE-cc#503 implementation that looped filter_config fetches over the old 6-basket list (2 of
+// which 404 since cc#502 retired sell_overbought/buy_s1_bounce), hanging on the rejected
+// promises. cc#503 already replaced that with this fully static, zero-fetch render (BASKET_INFO
+// is a code constant, no network call at all) -- verified no fetch/await anywhere in
+// renderBasketRules(). Hardened the failure path anyway: a real exception now shows a visible
+// error card instead of silently leaving the "Loading..." skeleton forever.
+try{document.getElementById('panel3').innerHTML=renderBasketRules();}
+catch(e){const el=document.getElementById('panel3');if(el)el.innerHTML=`<div class="err">Basket Rules failed to render: ${String(e&&e.message||e)}</div>`;}
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
 // cc#426: V9 Pairs moved to standalone /v9 — panel16 no longer rendered here (tab removed).
 try{document.getElementById('panel17').innerHTML=renderOHOL();}catch(e){}   // cc#388 · cc#447: static INACTIVE banner (no live poll)
@@ -1632,7 +1634,7 @@ const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_5
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason,x.miss_text)}</td>
+    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -1647,8 +1649,7 @@ function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen
     <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
     return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
-      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason,x.miss_text)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
-      ${st==='NEAR_MISS'&&x.miss_text?`<div style="font-size:10px;color:var(--dim);margin:2px 0 4px">misses: ${String(x.miss_text).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>`:''}
+      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
       <div class="mob-chips">
         <span class="mob-chip ${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'% 1D':'1D --'}</span>
         <span class="mob-chip ${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'% 2D':'2D --'}</span>
@@ -1664,14 +1665,12 @@ function renderFunnel(b){
   const meta=`<div class="ptitle">${b.label} <button class="info-btn" onclick="openInfo('${b.id}')" title="Strategy rules & filters">i</button> <span class="ct">${d.side||''} · target ${d.target||''} · win ${d.win_pct||'--'}</span></div>`;
   const stocks=d.stocks||[];
   if(!stocks.length)return meta+`<div class="empty">No qualified names -- gate may be closed for this side.</div>`;
-  const statusOrder={OPEN:0,SIGNAL:1,NEAR_MISS:2};
+  const statusOrder={OPEN:0,SIGNAL:1};
   const sorted=[...stocks].sort((a,b)=>{const so=(statusOrder[a.status]??1)-(statusOrder[b.status]??1);if(so!==0)return so;return(b.gvm_score||0)-(a.gvm_score||0);});
   const legend=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:11px">
     <span class="badge b-open">&#9679; OPEN</span><span style="color:var(--dim)">Position live</span>
     <span style="color:var(--dim);margin:0 4px">·</span>
     <span class="badge b-qualified">SIGNAL</span><span style="color:var(--dim)">Qualified today, entry gated (&middot;slots / &middot;conflict / &middot;cutoff / &middot;blackout)</span>
-    <span style="color:var(--dim);margin:0 4px">·</span>
-    <span class="badge b-nearmiss">NEAR MISS</span><span style="color:var(--dim)">Score-gate fallback &middot; hover &#9432; for the missed gate(s)</span>
   </div>`;
   // cc#379: ONE canonical column set across all six baskets (Buy Momentum reference layout).
   // Supersedes cc#360's buy_reversal-only V3 columns — the founder wants identical headers/order/

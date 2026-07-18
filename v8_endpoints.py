@@ -371,111 +371,6 @@ def _normalize_basket_to_strategy(basket: Optional[str]) -> str:
             'sell_reversal':'Sell Reversal','sell_momentum':'Sell Momentum',
             'sell_overbought':'Sell Overbought','buy_s1_bounce':'Buy S1 Bounce'}.get(basket.lower(), basket)
 
-# cc#425: short labels for NEAR_MISS chip tooltips (which gate missed + by how much).
-_MISS_LABEL = {
-    "daily_rsi": "dRSI", "rsi_month": "RSIm", "rsi_weekly": "RSIw", "mom_2d": "2D mom",
-    "week_return": "wk ret", "month_return": "mo ret", "year_return": "yr ret",
-    "gvm_score": "GVM", "dma_50": "DMA50", "dma_200": "DMA200", "week_index_52": "52w idx",
-    "vol_ratio": "vol", "sector_week": "sec wk", "sector_month": "sec mo", "day_1d": "1D%",
-}
-
-
-def _fallback_miss_reasons(r: dict, config: dict) -> list:
-    """cc#425: for a NEAR_MISS row, list the config gates it FAILS plus the gap to the nearest
-    bound, so the dashboard chip can explain the miss (e.g. "dRSI 58 < 60"). Evaluated on the
-    same last-session v8_metrics values that scored the row (cc#424 as-of convention)."""
-    misses = []
-    for metric, bounds in config.items():
-        mn, mx = bounds if isinstance(bounds, list) else (bounds[0], bounds[1])
-        val = r.get(metric)
-        if _passes_filter(val, mn, mx):
-            continue
-        lbl = _MISS_LABEL.get(metric, metric)
-        if val is None:
-            misses.append({"filter": metric, "label": lbl, "text": f"{lbl} n/a"})
-        elif mn is not None and float(val) < mn:
-            misses.append({"filter": metric, "label": lbl, "value": round(float(val), 1),
-                           "bound": mn, "op": "<", "gap": round(mn - float(val), 1),
-                           "text": f"{lbl} {round(float(val), 1)} < {mn}"})
-        elif mx is not None and float(val) > mx:
-            misses.append({"filter": metric, "label": lbl, "value": round(float(val), 1),
-                           "bound": mx, "op": ">", "gap": round(float(val) - mx, 1),
-                           "text": f"{lbl} {round(float(val), 1)} > {mx}"})
-    return misses
-
-
-def _live_qualified_fallback(basket: str, limit: int):
-    if basket == "buy_reversal":
-        config, _, _ = _get_buy_reversal_live_filters()
-    else:
-        config = FILTER_CONFIG[basket]
-    n_filters = len(config)
-    # cc#360: buy_reversal V3 is strict-AND — its NEAR_MISS watchlist must pass ALL 4 daily gates
-    # (daily_rsi<=40, dma_200>=0, gvm>=6.5, mom_2d 0-3), not the n-1 fallback (which surfaced
-    # hot-RSI names that are the opposite of a dip). Other baskets keep the n-1 near-miss.
-    need      = n_filters if basket == "buy_reversal" else max(n_filters - 1, 1)
-
-    with _conn() as conn, conn.cursor() as cur:
-        cur.execute(f"""
-            SELECT symbol, gvm_score, dma_50, dma_200, rsi_month, rsi_weekly, daily_rsi,
-                   week_return, month_return, year_return, mom_2d, day_1d,
-                   week_index_52, vol_ratio, sector_week, sector_month
-            FROM v8_metrics
-            WHERE score_date = (SELECT MAX(score_date) FROM v8_metrics)
-              AND {_BLACKOUT_SQL}
-        """)
-        cols     = [d[0] for d in cur.description]
-        all_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        pivots   = _basket_pivots(cur)
-        cmp_map  = _basket_cmp(cur)
-
-    rows = []
-    for r in all_rows:
-        score = sum(1 for metric, bounds in config.items()
-                    if _passes_filter(r.get(metric),
-                                      *(bounds if isinstance(bounds, list) else (bounds[0], bounds[1]))))
-        r["filter_score"] = score
-        r["filter_total"] = n_filters
-        r["status"] = "NEAR_MISS"
-        if score >= need:
-            rows.append(r)
-
-    side = "BUY" if basket.startswith("buy") else "SELL"
-    out = []
-    for r in rows:
-        pv  = pivots.get(r["symbol"])
-        cmp = cmp_map.get(r["symbol"])
-        r["cmp"] = cmp
-        # cc#425: which config gate(s) this near-miss fails + gap (last-session values, cc#424).
-        misses = _fallback_miss_reasons(r, config)
-        if pv:
-            r["pp"] = pv.get("pp"); r["r1"] = pv.get("r1"); r["s1"] = pv.get("s1")
-            if cmp and pv.get("r1"):   # cc#360: room-to-R1 % for the V3 buy_reversal column
-                r["room_r1_pct"] = round((pv["r1"] - cmp) / cmp * 100, 2)
-        # cc#425: pivot-room is a soft near-miss gate — surface it as a reason (with the room %)
-        # instead of silently dropping the row, so a room-tight name still shows and explains why.
-        if cmp is not None and pv is not None and not _pivot_room_ok(side, cmp, pv.get("pp"), pv.get("r1"), pv.get("s1")):
-            try:
-                if side == "BUY" and pv.get("r1"):
-                    room = (float(pv["r1"]) - float(cmp)) / float(cmp) * 100
-                    misses.append({"filter": "pivot_room", "label": "room", "value": round(room, 1),
-                                   "text": f"room→R1 {round(room, 1)}% (½-band gate)"})
-                elif side == "SELL" and pv.get("s1"):
-                    room = (float(cmp) - float(pv["s1"])) / float(cmp) * 100
-                    misses.append({"filter": "pivot_room", "label": "room", "value": round(room, 1),
-                                   "text": f"room→S1 {round(room, 1)}% (½-band gate)"})
-                else:
-                    misses.append({"filter": "pivot_room", "label": "room", "text": "no pivot room"})
-            except (TypeError, ValueError):
-                misses.append({"filter": "pivot_room", "label": "room", "text": "no pivot room"})
-        r["miss_reasons"] = misses
-        r["miss_text"] = " · ".join(m["text"] for m in misses)
-        out.append(r)
-
-    out.sort(key=lambda x: (x.get("filter_score", 0), x.get("gvm_score") or 0), reverse=True)
-    return out[:min(max(limit, 1), 200)]
-
-
 def _load_open_positions(basket: str) -> dict:
     side = "LONG" if basket.startswith("buy") else "SHORT"
     try:
@@ -621,9 +516,8 @@ def _enrich_with_status(stocks: list, basket: str, open_pos: dict, slot_full: se
         # cc#326: traded+closed today on this side -> spent, drop entirely (day log / trades is its home)
         if sym in closed_today:
             continue
-        if s.get("status") == "NEAR_MISS":
-            out.append(s)
-            continue
+        # cc#508: NEAR_MISS branch removed -- /qualified/{basket} (this function's only caller)
+        # never feeds it a NEAR_MISS row anymore (_live_qualified_fallback unwired + deleted).
         # everything surviving here qualified today but did not enter -> SIGNAL, gated
         s["status"] = "SIGNAL"
         s["signal_reason"] = _signal_reason(sym, s.get("signal_ts"), slot_full, missed, conflict_syms)
@@ -1401,8 +1295,17 @@ def qualified(basket: str, response: Response, limit: int = 50):
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         if not rows:
-            rows = _live_qualified_fallback(basket, limit)
-            source_note = 'live_fallback'
+            # cc#508 (18-Jul-2026, founder-directed): NEAR_MISS score-gate fallback rows were
+            # flooding the basket tabs (12+ near-miss rows drowning the actionable OPEN/SIGNAL
+            # rows). Extends the cc#326 3-status doctrine (OPEN / SIGNAL only) -- zero
+            # v8_qualified rows today means an honest empty list, not a near-miss watchlist.
+            # _inject_open_positions (below, unconditional) still surfaces any OPEN position on
+            # this basket even when nothing qualified today. _live_qualified_fallback /
+            # _fallback_miss_reasons / _MISS_LABEL deleted outright (confirmed zero remaining
+            # callers -- the STOCK PASS COUNT / funnel views compute their own independent
+            # passed/failed-filter breakdowns and never called these).
+            rows = []
+            source_note = 'empty_no_qualified'
         else:
             source_note = rows[0].get('source', 'precomputed') if rows else 'precomputed'
             with _conn() as conn, conn.cursor() as cur:
