@@ -2345,8 +2345,19 @@ def run_mc_oneshot(conn=None):
     (confirmed live on 2 real schemes incl. a non-top-performer — only cagr_3y/5y/7y/10y are
     always present). step_5_stop_rules: 3 consecutive 403/no-__NEXT_DATA__ (captcha-shaped)
     responses -> stop; >20% unparseable in the first 50 -> stop and report, never fight
-    anti-bot or silently continue past a broken selector."""
+    anti-bot or silently continue past a broken selector.
+
+    cc#533 addition: the 17-Jul run of this exact function completed cleanly by every existing
+    stop-rule's measure (no stop_event, holdings_filled=517/519) yet wrote a byte-identical
+    holdings signature to 509 of those 517 schemes -- MC was returning HTTP 200 + valid,
+    well-formed JSON, just with generic/duplicate content (a soft block, not the 403/no-
+    __NEXT_DATA__ "hard block" shape the existing consecutive_bad rule detects). Added a rolling
+    holdings-signature check: if the last SIG_WINDOW schemes that got holdings written all share
+    one MD5(top-5 names) signature, treat it as a new stop_event and abort -- catches the soft-
+    block within ~SIG_WINDOW schemes instead of silently re-poisoning all 519."""
     import time as _t
+    import hashlib
+    SIG_WINDOW = 15
     own = conn is None
     conn = conn or _conn()
     t0 = _t.time()
@@ -2372,6 +2383,7 @@ def run_mc_oneshot(conn=None):
         n_overview = n_holdings = n_ret1y = fails = 0
         consecutive_bad = unparseable_first50 = 0
         stop_event = None
+        recent_holdings_sigs = []
         i = -1
         for i, (sc, amfi_code, mc_id, mc_slug, ret_1y) in enumerate(pending):
             try:
@@ -2394,6 +2406,18 @@ def run_mc_oneshot(conn=None):
                             write_mc_holdings(cur, sc, hrows, hmonth)
                             n_holdings += 1
                             conn.commit()
+                        top5 = sorted(h.get("name") or "" for h in hrows)[:5]
+                        sig = hashlib.md5(",".join(top5).encode()).hexdigest()
+                        recent_holdings_sigs.append(sig)
+                        if len(recent_holdings_sigs) > SIG_WINDOW:
+                            recent_holdings_sigs.pop(0)
+                        if len(recent_holdings_sigs) == SIG_WINDOW and len(set(recent_holdings_sigs)) == 1:
+                            stop_event = {"reason": "holdings_signature_collapsed", "at_scheme": sc,
+                                          "index": i + 1, "sig_window": SIG_WINDOW,
+                                          "note": "last N schemes with holdings all returned an "
+                                                  "identical top-5-name signature -- MC is likely "
+                                                  "soft-blocking (200 OK, valid JSON, generic/cached "
+                                                  "content) rather than hard-blocking"}
                     if ret_1y is None:
                         with conn.cursor() as cur:
                             rres = sync_scheme_nav_and_returns(cur, sc, amfi_code)
@@ -2421,6 +2445,8 @@ def run_mc_oneshot(conn=None):
                 break
             if i + 1 == 50 and unparseable_first50 / 50.0 > 0.20:
                 stop_event = {"reason": "over_20pct_unparseable_first_50", "unparseable": unparseable_first50}
+                break
+            if stop_event:   # holdings_signature_collapsed, set above
                 break
             _t.sleep(1.7)   # spec pacing: 1.5-2s between schemes
 
