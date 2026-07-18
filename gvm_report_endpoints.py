@@ -10,7 +10,7 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 import math
 import statistics
@@ -147,6 +147,66 @@ def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
     }
 
 
+_PE_VERDICT_BANDS = (
+    (1.5, "Expensive", "red"),
+    (1.0, "Reasonable", "amber"),
+)   # ratio < 1.0 falls through to Cheap/green
+
+def _pe_verdict(ratio: Optional[float]) -> Optional[Dict[str, str]]:
+    """cc#512: current_pe/historical_pe ratio -> founder-locked verdict band.
+    >1.5 Expensive (red) | 1.0-1.5 Reasonable (amber) | <1.0 Cheap (green)."""
+    if ratio is None:
+        return None
+    for bound, label, color in _PE_VERDICT_BANDS:
+        if ratio > bound:
+            return {"label": label, "color": color}
+    return {"label": "Cheap", "color": "green"}
+
+
+def _pe_trend(cur, sym: str) -> List[Dict[str, Any]]:
+    """cc#512: 5-yr annual PE trend -- EPS from fundamentals_history (section=profit-loss,
+    period_type=annual, "EPS in Rs", consolidated preferred), price = nearest raw_prices close
+    on/before each fiscal period_end. Skips EPS<=0 (never plots a negative PE). Both sources are
+    snapshot data (cc#506 rule); raw_prices is the momentum-pipeline exception, EOD closes only.
+    Flags any point >3x the series median as a likely data artifact (hollow point client-side)."""
+    try:
+        cur.execute("""
+            SELECT period_end, metrics->>'EPS in Rs' AS eps, consolidated
+            FROM fundamentals_history
+            WHERE symbol=%s AND section='profit-loss' AND period_type='annual'
+              AND period_end >= %s
+            ORDER BY period_end ASC, consolidated DESC
+        """, (sym, date(2020, 3, 31)))
+        by_period: Dict[Any, Any] = {}
+        for period_end, eps, consolidated in cur.fetchall():
+            if period_end not in by_period:   # first hit per period wins -- consolidated sorts first
+                by_period[period_end] = eps
+
+        points = []
+        for period_end in sorted(by_period.keys()):
+            eps_raw = by_period[period_end]
+            eps_f = _f(str(eps_raw).replace(",", "")) if eps_raw is not None else None
+            if eps_f is None or eps_f <= 0:
+                continue   # skip years with EPS<=0 -- never plot a negative PE
+            cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND price_date<=%s
+                           ORDER BY price_date DESC LIMIT 1""", (sym, period_end))
+            r = cur.fetchone()
+            close = _f(r[0]) if r else None
+            if close is None:
+                continue
+            points.append({"fy": period_end.strftime("%b %Y"), "period_end": str(period_end),
+                            "eps": eps_f, "close": close, "pe": round(close / eps_f, 2)})
+
+        if points:
+            med = statistics.median([p["pe"] for p in points])
+            for p in points:
+                p["is_artifact"] = bool(med > 0 and p["pe"] > 3 * med)
+        return points
+    except Exception as e:
+        log.warning(f"_pe_trend failed for {sym}: {e}")
+        return []
+
+
 def _insert_after_valuation(benchmark: List[Dict[str, Any]], block: Dict[str, Any]) -> None:
     """Insert a block right after the last existing Valuation-pillar row so the
     V section stays contiguous; else append."""
@@ -279,11 +339,14 @@ def gvm_company_report(symbol: str):
     except Exception as e:
         log.warning(f"forward_pe benchmark failed for {sym}: {e}")
 
-    # --- 4b. Historical PE (5Y avg) — context row, NOT scored (cc#507). RE-RATING chip =
-    # (pe/historical_pe - 1)*100; rank/best/worst are computed on that re-rating %, not the raw
-    # historical_pe value (the raw value only anchors the PEER column + the chart ladder).
-    # Does NOT enter the V pillar average -- pillars were already computed inside
-    # build_company_report() before this block ever touches `benchmark`.
+    # --- 4b. Historical PE (5Y avg) — context row, NOT scored (cc#507/512). Does NOT enter the V
+    # pillar average -- pillars were already computed inside build_company_report() before this
+    # block ever touches `benchmark`. cc#512: the comparison column is the COMPANY'S OWN CURRENT
+    # PE (not the segment median of historical_pe, which was low-relevance) -- "peer_avg" here
+    # means "current PE" for this row only, relabeled client-side. RANK/best/worst still rank on
+    # re-rating % vs peers (most de-rated = best), unchanged from cc#507. A verdict chip
+    # (Cheap/Reasonable/Expensive, ratio = current_pe/historical_pe) replaces the plain re-rating
+    # chip, and a 5-yr PE trend line (pe_trend) replaces the peer-ladder chart for this row only.
     try:
         if ladder_syms:
             with _conn() as conn, conn.cursor() as cur:
@@ -292,9 +355,12 @@ def gvm_company_report(symbol: str):
                     WHERE nse_code = ANY(%s)
                 """, (ladder_syms,))
                 hist_map: Dict[str, float] = {}
+                pe_map: Dict[str, float] = {}
                 rerating_map: Dict[str, float] = {}
                 for code, pe_v, hpe_v in cur.fetchall():
                     pe_f, hpe_f = _f(pe_v), _f(hpe_v)
+                    if pe_f is not None:
+                        pe_map[code] = pe_f
                     if hpe_f is not None and hpe_f > 0:
                         hist_map[code] = hpe_f
                         if pe_f is not None:
@@ -302,9 +368,10 @@ def gvm_company_report(symbol: str):
 
             hist_pairs = [(s, v) for s, v in hist_map.items()]
             if len(hist_pairs) >= 2:
-                peer_median_hist = round(statistics.median([v for _, v in hist_pairs]), 2)
                 sym_hist         = hist_map.get(sym)
+                sym_current_pe   = pe_map.get(sym)
                 sym_rerating     = rerating_map.get(sym)
+                sym_ratio        = (sym_current_pe / sym_hist) if (sym_current_pe is not None and sym_hist) else None
                 rerate_pairs     = [(s, v) for s, v in rerating_map.items()]
                 rank_h = best_h = worst_h = None
                 if rerate_pairs:
@@ -314,6 +381,13 @@ def gvm_company_report(symbol: str):
                     if sym_rerating is not None:
                         rank_h = next((i + 1 for i, (s_i, _) in enumerate(sorted_rerate) if s_i == sym), None)
 
+                pe_trend = []
+                try:
+                    with _conn() as _ptc, _ptc.cursor() as _ptcur:
+                        pe_trend = _pe_trend(_ptcur, sym)
+                except Exception as _pte:
+                    log.warning(f"pe_trend fetch failed for {sym}: {_pte}")
+
                 hist_pe_bench = {
                     "key":        "hist_pe",
                     "label":      "Historical PE (5Y avg)",
@@ -321,16 +395,21 @@ def gvm_company_report(symbol: str):
                     "pillar":     "V",
                     "unit":       "x",
                     "company":    round(sym_hist, 2) if sym_hist is not None else None,
-                    "peer_avg":   peer_median_hist,
-                    "peer_median": peer_median_hist,
+                    "peer_avg":   round(sym_current_pe, 2) if sym_current_pe is not None else None,
+                    "peer_median": round(sym_current_pe, 2) if sym_current_pe is not None else None,
+                    "peer_label": "current PE",   # cc#512: relabel -- this row's compare column is NOT a peer stat
                     "rating":     None,      # context row -- see docstring above
                     "is_context": True,
                     "rerating_pct": sym_rerating,
+                    "verdict":    _pe_verdict(sym_ratio),
                     "rank":       rank_h,
                     "peer_n":     len(hist_pairs),
                     "best":       best_h,
                     "worst":      worst_h,
-                    "peers":      [{"symbol": s, "value": round(v, 2)} for s, v in sorted(hist_pairs, key=lambda x: x[1])],
+                    "chart_type": "pe_trend",
+                    "pe_trend":   pe_trend,
+                    "current_pe": round(sym_current_pe, 2) if sym_current_pe is not None else None,
+                    "historical_pe": round(sym_hist, 2) if sym_hist is not None else None,
                     "beats_peer": None,
                 }
                 anchor_key = "fwd_pe" if any(b.get("key") == "fwd_pe" for b in benchmark) else "pe"

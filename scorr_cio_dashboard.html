@@ -504,6 +504,74 @@ function PeerLadderModal({ b, sym, onClose }) {
     padding: "18px 20px", width: "min(560px, 100%)", maxHeight: "82vh", overflowY: "auto",
     boxShadow: "0 20px 60px rgba(0,0,0,.35)" };
 
+  // cc#512: Historical PE row swaps the peer-ladder bars for a 5-yr PE line chart with dashed
+  // baselines at the company's current PE and historical (5Y avg) PE. Points >3x the series
+  // median (server-flagged is_artifact) render hollow instead of filled.
+  if (b.chart_type === "pe_trend") {
+    const pts = b.pe_trend || [];
+    if (!pts.length) {
+      return (
+        <div style={overlay} onClick={onClose}>
+          <div style={box} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
+              <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
+            </div>
+            <div style={{ fontSize: 13, color: C.muted }}>No PE trend data available for this metric.</div>
+          </div>
+        </div>
+      );
+    }
+    const curPe = b.current_pe, histPe = b.historical_pe;
+    const vals = pts.map(p => p.pe).concat(curPe != null ? [curPe] : []).concat(histPe != null ? [histPe] : []);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.12 || Math.abs(lo) * 0.12 || 1;
+    const yMin = Math.max(0, lo - pad), yMax = hi + pad;
+    const W = 480, H = 220, padL = 34, padR = 12, padT = 12, padB = 28;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const xAt = i => padL + (pts.length > 1 ? (i / (pts.length - 1)) * plotW : plotW / 2);
+    const yAt = v => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+    const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(p.pe).toFixed(1)}`).join(" ");
+
+    return (
+      <div style={overlay} onClick={onClose}>
+        <div style={box} onClick={e => e.stopPropagation()}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
+            <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>
+            5-yr annual PE trend
+            {curPe != null && <span> · current {curPe.toFixed(2)}x</span>}
+            {histPe != null && <span> · 5Y avg {histPe.toFixed(2)}x</span>}
+          </div>
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+            {curPe != null && (
+              <line x1={padL} x2={W - padR} y1={yAt(curPe)} y2={yAt(curPe)} stroke={C.accent} strokeWidth={1.5} strokeDasharray="4,3" />
+            )}
+            {histPe != null && (
+              <line x1={padL} x2={W - padR} y1={yAt(histPe)} y2={yAt(histPe)} stroke={C.gold} strokeWidth={1.5} strokeDasharray="4,3" />
+            )}
+            <path d={linePath} fill="none" stroke={C.accent} strokeWidth={2} />
+            {pts.map((p, i) => (
+              <circle key={i} cx={xAt(i)} cy={yAt(p.pe)} r={p.is_artifact ? 4 : 3.5}
+                fill={p.is_artifact ? "transparent" : C.accent}
+                stroke={C.accent} strokeWidth={p.is_artifact ? 1.5 : 0} />
+            ))}
+            {pts.map((p, i) => (
+              <text key={`t${i}`} x={xAt(i)} y={H - 8} fontSize={9.5} fill={C.muted} textAnchor="middle" fontFamily="monospace">{p.fy}</text>
+            ))}
+          </svg>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
+            <span style={{ color: C.accent }}>— current PE</span>{"  "}
+            <span style={{ color: C.gold }}>- - 5Y avg PE</span>
+            {pts.some(p => p.is_artifact) && <span> · hollow point = possible data artifact (&gt;3× median)</span>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!peers.length) {
     return (
       <div style={overlay} onClick={onClose}>
@@ -571,13 +639,17 @@ function PeerLadderModal({ b, sym, onClose }) {
   );
 }
 
+// cc#512: verdict.color (red/amber/green, founder-locked bands) -> theme constant.
+const VERDICT_COLOR = { red: () => C.red, amber: () => C.gold, green: () => C.green };
+function _verdictColor(v) { return v && VERDICT_COLOR[v.color] ? VERDICT_COLOR[v.color]() : C.muted; }
+
 function BenchCell({ b, onChart }) {
   const c = cellColor(b.rating);
   const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
   const peer = b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—";
-  // cc#507: Historical PE is a context row -- RE-RATING chip instead of a scored rating pill.
-  const rerate = b.is_context ? b.rerating_pct : null;
-  const rerateColor = rerate == null ? c.fg : rerate < 0 ? C.green : C.red;
+  // cc#512: Historical PE (is_context) shows a Cheap/Reasonable/Expensive verdict chip (+
+  // re-rating % as secondary text) instead of the plain cc#507 re-rating-only chip.
+  const vColor = _verdictColor(b.verdict);
   return (
     <div title={`Best: ${b.best?.symbol||"—"} ${b.best?.value??""} · Worst: ${b.worst?.symbol||"—"} ${b.worst?.value??""}`}
       style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
@@ -586,13 +658,15 @@ function BenchCell({ b, onChart }) {
         <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {onChart && <ChartIcon onClick={() => onChart(b)} />}
           {b.is_context
-            ? <span style={{ fontSize: 12, fontWeight: 800, color: rerateColor, fontFamily: "monospace" }}>{rerate != null ? signFmt(rerate,1)+"%" : "—"}</span>
+            ? <span style={{ fontSize: 12, fontWeight: 800, color: vColor, fontFamily: "monospace" }}>
+                {b.verdict ? b.verdict.label : "—"}{b.rerating_pct != null ? ` · ${signFmt(b.rerating_pct,1)}%` : ""}
+              </span>
             : <span style={{ fontSize: 12, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>}
         </span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8C99BD", fontFamily: "monospace" }}>
-        <span>peer {peer}</span><span>#{b.rank ?? "—"}/{b.peer_n}</span>
+        <span>{b.peer_label || "peer"} {peer}</span><span>#{b.rank ?? "—"}/{b.peer_n}</span>
       </div>
     </div>
   );
@@ -602,10 +676,9 @@ function MatrixRow({ b, pillar, onChart }) {
   const c = cellColor(b.rating);
   const barW = b.rating != null ? Math.min(100, Math.max(4, b.rating * 10)) : 0;
   const pInfo = PILLAR_INFO[pillar];
-  // cc#507: Historical PE is a context row -- RE-RATING chip in the rating bar's place instead
-  // of a scored 0-10 pill.
-  const rerate = b.is_context ? b.rerating_pct : null;
-  const rerateColor = rerate == null ? C.muted : rerate < 0 ? C.green : C.red;
+  // cc#512: Historical PE is a context row -- verdict chip (Cheap/Reasonable/Expensive +
+  // re-rating %) in the rating bar's place instead of a scored 0-10 pill.
+  const vColor = _verdictColor(b.verdict);
   return (
     <tr style={{ borderBottom: `1px solid ${C.gridLine}` }}>
       <td style={{ padding: "8px 10px", fontSize: 13, color: C.muted, fontWeight: 700 }}>
@@ -626,8 +699,8 @@ function MatrixRow({ b, pillar, onChart }) {
       <td style={{ padding: "8px 14px", minWidth: 120 }}>
         {b.is_context ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 20,
-            fontSize: 13, fontWeight: 800, color: rerateColor, fontFamily: "monospace" }}>
-            {rerate != null ? `${signFmt(rerate, 1)}% re-rating` : "—"}
+            fontSize: 13, fontWeight: 800, color: vColor, fontFamily: "monospace" }}>
+            {b.verdict ? b.verdict.label : "—"}{b.rerating_pct != null ? ` · ${signFmt(b.rerating_pct, 1)}%` : ""}
           </div>
         ) : (
           <div style={{ position: "relative", height: 20, background: C.bg, borderRadius: 4, border: `1px solid ${C.gridLine}` }}>
