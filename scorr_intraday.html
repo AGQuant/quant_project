@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TC Scanner</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   /* cc#464: TC Scanner — dark terminal skin, reused from the prior Intraday page */
 :root{
     --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
@@ -16,7 +16,7 @@
     --blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;
     --purp:#9B7CFF;--purp-d:#f0ebff;
     --shadow:0 2px 10px rgba(25,40,70,.06);
-    --font:'Sora',sans-serif;--mono:'Space Mono',monospace;
+    --font:'Sora',sans-serif;--mono:'Sora',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -32,17 +32,17 @@
   .logo b{color:var(--purp)}
   .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
   .spacer{flex:1}
-  .clock{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .clock{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
   .clock b{color:var(--txt)}
   .live-pill{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mut);
-    font-family:var(--mono);background:var(--panel2);border:1px solid var(--line2);
+    font-family:var(--mono);font-variant-numeric:tabular-nums;background:var(--panel2);border:1px solid var(--line2);
     border-radius:20px;padding:4px 11px}
   .live-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);
     animation:pulse 1.8s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
   .ibtn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;
     background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:10px;font-weight:700;
-    font-family:var(--mono);cursor:pointer;margin-left:8px}
+    font-family:var(--mono);font-variant-numeric:tabular-nums;cursor:pointer;margin-left:8px}
   .ibtn:hover{color:var(--cyan);border-color:var(--cyan)}
   .info-ov{display:none;position:fixed;inset:0;background:rgba(10,15,30,.6);z-index:95;align-items:center;justify-content:center;padding:20px}
   .info-ov.open{display:flex}
@@ -52,8 +52,8 @@
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow)}
   .card .k{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
-  .card .v{font-size:22px;font-weight:800;font-family:var(--mono);line-height:1}
-  .card .vs{font-size:10px;color:var(--dim);margin-top:3px;font-family:var(--mono)}
+  .card .v{font-size:22px;font-weight:700;font-family:var(--mono);font-variant-numeric:tabular-nums;line-height:1}
+  .card .vs{font-size:10px;color:var(--dim);margin-top:3px;font-family:var(--mono);font-variant-numeric:tabular-nums}
 
   .tabs{display:flex;gap:3px;border-bottom:1px solid var(--line);margin-bottom:0;padding-bottom:0}
   .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;padding:9px 16px;
@@ -68,7 +68,7 @@
 
   .ptitle{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--cyan);
     text-transform:uppercase;margin:4px 0 10px;display:flex;gap:8px;align-items:center}
-  .ptitle .ct{font-family:var(--mono);font-size:10.5px;color:var(--dim);
+  .ptitle .ct{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--dim);
     border:1px solid var(--line);padding:2px 8px;border-radius:20px;text-transform:none;letter-spacing:0}
 
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:var(--shadow)}
@@ -76,10 +76,10 @@
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
     text-align:right;padding:9px 12px;border-bottom:1px solid var(--line2);
     white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;
-    font-family:var(--mono)}
+    font-family:var(--mono);font-variant-numeric:tabular-nums}
   th:first-child,td:first-child{text-align:left}
   td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);
-    white-space:nowrap;font-family:var(--mono);font-size:12px;vertical-align:middle}
+    white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;vertical-align:middle}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:var(--bg2)}
   tr.row-win:hover{background:rgba(47,212,139,.10)}
@@ -100,7 +100,7 @@
   .mob-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .mob-sym{font-weight:700;font-size:14px;color:var(--txt)}
   .mob-chips{display:flex;flex-wrap:wrap;gap:5px}
-  .mob-chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:6px;
+  .mob-chip{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11px;padding:3px 8px;border-radius:6px;
     background:var(--bg2);border:1px solid var(--line2);color:var(--txt)}
 
   footer{margin-top:24px;padding-top:12px;border-top:1px solid var(--line);
@@ -159,7 +159,7 @@
 <div class="info-ov" id="infoOv" onclick="if(event.target===this)closeInfo()">
   <div class="info-box" id="infoBox">
     <button class="info-close" onclick="closeInfo()">&times;</button>
-    <div style="font-family:var(--mono);font-size:15px;font-weight:800;margin-bottom:10px">TC Scanner &middot; how it works</div>
+    <div style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;margin-bottom:10px">TC Scanner &middot; how it works</div>
     <div id="infoBody" style="font-size:12.5px;line-height:1.7;color:var(--txt)">Loading…</div>
   </div>
 </div>
@@ -188,7 +188,7 @@ setInterval(tick, 1000); tick();
 let tcSpecCache = null;
 function _checkRow(c){
   return '<div style="display:flex;gap:8px;padding:4px 0;border-top:1px solid var(--line)">'
-    +'<span style="font-family:var(--mono);font-weight:700;color:var(--cyan);flex:none;width:30px">'+c.id+'</span>'
+    +'<span style="font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:700;color:var(--cyan);flex:none;width:30px">'+c.id+'</span>'
     +'<span><b>'+c.label+'</b> — '+c.rule+(c.note?'<div style="color:var(--dim);font-size:11px;margin-top:2px">'+c.note+'</div>':'')+'</span></div>';
 }
 function renderInfoBody(s){

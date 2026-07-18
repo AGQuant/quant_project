@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V8 Dashboard</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
   /* cc#344 page 1: DARK TERMINAL re-skin. The page is variable-driven, so remapping :root to the
      R2 palette flips the whole surface to the dark institutional terminal. Semantic names kept so
      no downstream selector changes; values are the design_refs/scorr_v8_R2 tokens. */
@@ -37,7 +37,7 @@
   .logo b{color:var(--blu)}
   .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
   .spacer{flex:1}
-  .clock{font-family:'Space Mono';font-size:12px;color:var(--mut)}
+  .clock{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut)}
   .clock b{color:var(--txt)}
   .btn{font:inherit;font-size:12px;font-weight:600;cursor:pointer;background:var(--panel2);color:var(--txt);border:1px solid var(--line2);padding:8px 14px;border-radius:8px;transition:.15s}
   .btn:hover{border-color:var(--blu);color:var(--blu)}
@@ -61,13 +61,13 @@
   .mood .big{font-size:22px;font-weight:800;letter-spacing:.5px}
   .mood .pill{font-size:11px;font-weight:700;padding:5px 12px;border-radius:30px;text-transform:uppercase;letter-spacing:1px}
   .moodChecks{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
-  .chk{font-size:12px;font-family:'Space Mono';padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--bg2)}
+  .chk{font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;padding:6px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--bg2)}
   .chk.pass{color:var(--grn);border-color:var(--grn-d)}
   .chk.fail{color:var(--red);border-color:var(--red-d)}
   /* cc#271: mirror the two-tier .slots pattern — value big (18px), label/Y-N stay small */
   .chk .chk-val{font-size:18px;font-weight:700}
   .slots{display:flex;gap:14px;font-size:12px;color:var(--mut)}
-  .slots b{font-size:18px;font-family:'Space Mono'}
+  .slots b{font-size:18px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums}
   .slots .buy b{color:var(--grn)}.slots .sell b{color:var(--red)}
   .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:10px 0 0;border-bottom:1px solid var(--line);padding-bottom:0}
   .tab{font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer;padding:9px 13px;border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;position:relative;top:1px;transition:.15s}
@@ -85,19 +85,19 @@
   .news-row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:9px 4px;border-bottom:1px solid var(--line)}
   .news-row:last-child{border-bottom:none}
   .news-hl{font-size:13px;color:var(--txt);line-height:1.45;flex:1}
-  .news-meta{font-size:11px;color:var(--dim);white-space:nowrap;font-family:'Space Mono',monospace;flex-shrink:0}
+  .news-meta{font-size:11px;color:var(--dim);white-space:nowrap;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;flex-shrink:0}
   .panel{display:none;animation:fade .25s ease;padding-top:16px}
   .panel.active{display:block}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
   .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:4px 0 12px;display:flex;gap:8px;align-items:center}
-  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
-  .info-btn{font-size:11px;font-weight:700;width:20px;height:20px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-family:'Space Mono';vertical-align:middle;transition:.15s;flex-shrink:0}
+  .ptitle .ct{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+  .info-btn{font-size:11px;font-weight:700;width:20px;height:20px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;vertical-align:middle;transition:.15s;flex-shrink:0}
   .info-btn:hover{border-color:var(--blu);color:var(--blu);background:rgba(77,124,254,.14)}
   .sec-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:4px}
   .sec-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;position:relative;cursor:default}
-  .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Space Mono';font-size:10px;color:var(--dim)}
+  .sec-card .sc-num{position:absolute;top:8px;left:10px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;color:var(--dim)}
   .sec-card .sc-name{font-size:11px;font-weight:600;color:var(--txt);margin-top:2px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;min-height:2.6em}   /* cc#283: reserve 2 lines (2*1.3em) so the 1D/1W/1M stack starts at the same y on every card */
-  .sec-card .sc-pct{font-family:'Space Mono';font-size:16px;font-weight:700;margin-top:6px}   /* cc#273: 1D dominant (13->16px) */
+  .sec-card .sc-pct{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;margin-top:6px}   /* cc#273: 1D dominant (13->16px) */
   .sec-card .sc-top{font-size:10px;color:var(--mut);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sec-card .sc-stocks{font-size:10px;color:var(--dim)}
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
@@ -105,7 +105,7 @@
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;padding:10px 12px;border-bottom:1px solid var(--line2);white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;user-select:none}
   th:first-child,td:first-child{text-align:left}
   th:hover{color:var(--txt)}
-  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px}
   /* cc#129 bug_3: Open Positions (Master) table — bump cell text +3 notches (12->15px)
      for readability; scoped to .mtbl so the dense funnel tables stay compact. */
   .mtbl td{font-size:15px}
@@ -138,7 +138,7 @@
   .mob-sym{font-family:'Sora';font-weight:700;font-size:14px;color:var(--txt)}
   .mob-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;font-family:'Sora'}
   .mob-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .mob-chip{font-family:'Space Mono';font-size:11px;padding:3px 8px;border-radius:6px;background:var(--bg2);border:1px solid var(--line2);color:var(--txt)}
+  .mob-chip{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;padding:3px 8px;border-radius:6px;background:var(--bg2);border:1px solid var(--line2);color:var(--txt)}
   .mob-pivot{margin-top:4px}
   @media(max-width:720px){
     .scroll table{min-width:unset}
@@ -194,15 +194,15 @@
   .b-qualified{background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.35)}
   .sig-reason{font-size:9px;font-weight:600;color:#94a3b8;margin-left:3px;letter-spacing:.3px}
   .empty{padding:30px;text-align:center;color:var(--dim);font-size:13px}
-  .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Space Mono';border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
+  .err{padding:14px;color:var(--amber);font-size:12px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;border:1px dashed var(--amber);border-radius:10px;background:rgba(245,185,74,.12);margin-bottom:10px}
   .score-hi{color:var(--grn)}.score-mid{color:var(--amber)}.score-lo{color:var(--red)}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   .card .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
-  .card .v{font-size:24px;font-weight:800;font-family:'Space Mono';margin-top:6px}
-  .card .v-sub{font-size:10px;color:var(--dim);margin-top:3px;font-family:'Space Mono'}
+  .card .v{font-size:24px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;margin-top:6px}
+  .card .v-sub{font-size:10px;color:var(--dim);margin-top:3px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums}
   .funnelGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
-  .loading{color:var(--dim);font-size:12px;padding:20px;text-align:center;font-family:'Space Mono'}
+  .loading{color:var(--dim);font-size:12px;padding:20px;text-align:center;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums}
   .subnav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
   .subnav .btn.on{background:var(--blu);border-color:var(--blu);color:#fff}
   .funnel-stages{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
@@ -210,13 +210,13 @@
   .fs-name{flex:1;font-size:12px;color:var(--txt)}
   .fs-bar{width:80px;height:6px;background:var(--line2);border-radius:3px;overflow:hidden;flex-shrink:0}
   .fs-bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
-  .fs-surv{font-family:'Space Mono';font-size:11px;color:var(--grn);min-width:28px;text-align:right}
-  .fs-kill{font-family:'Space Mono';font-size:11px;color:var(--red);min-width:36px;text-align:right}
-  .fs-cond{font-family:'Space Mono';font-size:10px;color:var(--dim);min-width:58px;text-align:center}
+  .fs-surv{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--grn);min-width:28px;text-align:right}
+  .fs-kill{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--red);min-width:36px;text-align:right}
+  .fs-cond{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;color:var(--dim);min-width:58px;text-align:center}
   .pc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:7px}
   .pc-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   .pc-card .pc-sym{font-weight:700;font-size:12px;color:var(--txt);margin-bottom:4px}
-  .pc-card .pc-score{font-family:'Space Mono';font-size:14px;font-weight:700}
+  .pc-card .pc-score{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:14px;font-weight:700}
   .pc-card .pc-fail{font-size:10px;color:var(--mut);margin-top:3px;line-height:1.3}
   footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
   /* Canonical Scorr model-nav */
@@ -255,7 +255,7 @@
   .fm{flex:1;font-weight:600;color:var(--txt);font-family:'Sora',sans-serif;font-size:13px}
   .fc{color:var(--cyan);font-family:'Sora',sans-serif;font-size:13px;min-width:130px}
   .fdyn{font-size:9px;padding:1px 6px;border-radius:4px;background:rgba(245,185,74,.12);color:var(--amber);border:1px solid #fde68a;white-space:nowrap;font-weight:700}
-  .pf{font-family:'Space Mono';font-size:11px;color:var(--txt);background:var(--panel2);border-radius:8px;padding:10px 13px;line-height:2}
+  .pf{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--txt);background:var(--panel2);border-radius:8px;padding:10px 13px;line-height:2}
   .stat-pills{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
   .sp{font-size:11px;font-weight:700;padding:4px 11px;border-radius:6px}
   .sp-g{background:var(--grn-d);color:var(--grn)}
@@ -299,7 +299,7 @@
       <div class="modal-head">
         <div style="flex:1">
           <div style="font-size:16px;font-weight:800;color:var(--txt)">India VIX</div>
-          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="vixLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="vixLast" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--txt)">--</b></div>
         </div>
         <button onclick="closeVix()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
       </div>
@@ -313,7 +313,7 @@
       <div class="modal-head">
         <div style="flex:1">
           <div style="font-size:16px;font-weight:800;color:var(--txt)">NIFTY PCR</div>
-          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="niftyPcrLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="niftyPcrLast" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--txt)">--</b></div>
         </div>
         <button onclick="closeNiftyPcr()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
       </div>
@@ -325,7 +325,7 @@
       <div class="modal-head">
         <div style="flex:1">
           <div style="font-size:16px;font-weight:800;color:var(--txt)">BankNifty PCR</div>
-          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="bankniftyPcrLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5-day rolling · hourly · last <b id="bankniftyPcrLast" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--txt)">--</b></div>
         </div>
         <button onclick="closeBankniftyPcr()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
       </div>
@@ -340,7 +340,7 @@
       <div class="modal-head">
         <div style="flex:1">
           <div style="font-size:16px;font-weight:800;color:var(--txt)">ADR &middot; Advance/Decline</div>
-          <div style="font-size:11px;color:var(--mut);margin-top:3px">5 trading-day trend &middot; &gt;2 bullish &middot; 0.5&ndash;2 neutral &middot; &lt;0.5 weak &middot; last <b id="adrLast" style="font-family:'Space Mono';color:var(--txt)">--</b></div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">5 trading-day trend &middot; &gt;2 bullish &middot; 0.5&ndash;2 neutral &middot; &lt;0.5 weak &middot; last <b id="adrLast" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--txt)">--</b></div>
         </div>
         <button onclick="closeAdr()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
       </div>
@@ -662,7 +662,7 @@ function renderV9Pairs(){
       [["segment","Sector (GVM segment)"],["stock_count","Stocks"]],
       secs,x=>`<tr>
         <td class="sym" style="font-family:'Sora',sans-serif;font-weight:600">${x.segment}</td>
-        <td><span style="font-family:'Space Mono';font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
+        <td><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
       {sortKey:'stock_count',dir:-1,empty:"No eligible sectors",wrapClass:''});
   }
   return card+table;
@@ -742,11 +742,11 @@ function openInfo(basket){
     <div style="display:flex;gap:10px">
       <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">5-YR EOD</div>
-        <div style="font-family:'Space Mono';font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR &middot; +${info.ev_eod}% EV</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR &middot; +${info.ev_eod}% EV</div>
       </div>
       <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">1-YR 5-MIN (live-parity)</div>
-        <div style="font-family:'Space Mono';font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR &middot; +${info.ev_5m}% EV</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR &middot; +${info.ev_5m}% EV</div>
       </div>
     </div>
     <div style="font-size:10.5px;color:var(--dim);margin-top:6px">Backtest evidence for the cc#502 rebuilt specs (locked 17-18 Jul) &middot; 5-min = 1-yr live-parity sequential sim &middot; live book fresh from 20-Jul.</div>
@@ -765,11 +765,11 @@ function openInfo(basket){
     <div style="display:flex;gap:10px;margin-top:10px">
       <div style="flex:1;background:var(--grn-d);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">TARGET</div>
-        <div style="font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--grn)">${info.target}</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;color:var(--grn)">${info.target}</div>
       </div>
       <div style="flex:1;background:var(--red-d);border-radius:8px;padding:9px 12px">
         <div style="font-size:10px;color:var(--mut);margin-bottom:3px">STOP LOSS</div>
-        <div style="font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--red)">${info.stop}</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;color:var(--red)">${info.stop}</div>
       </div>
     </div>
   </div>`;
@@ -779,7 +779,7 @@ function openInfo(basket){
       <div style="background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:8px 6px;text-align:center">
         <div style="font-size:10px;font-weight:700;color:var(--txt)">${mood}</div>
         <div style="font-size:9px;color:var(--dim);margin:2px 0">${f}</div>
-        <div style="font-family:'Space Mono';font-size:10px;font-weight:700;color:var(--mut)">${s}</div>
+        <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;font-weight:700;color:var(--mut)">${s}</div>
       </div>`).join('')}
     </div>
     <div style="font-size:11px;color:var(--dim);margin-top:8px">ADR >= 1.0 · Nifty Day >= 0% · Nifty Week >= 0% · Nifty Month >= 0% · Entry cutoff 15:20 IST · 1 entry/symbol/side/day</div>
@@ -827,7 +827,7 @@ async function openBrDetail(symbol,basket){
   const rowsHtml=rows=>(rows||[]).map(r=>`<tr style="border-top:1px solid var(--line);background:${r.pass?'rgba(47,212,139,.06)':'rgba(255,92,108,.06)'}">
     <td style="padding:7px 7px;font-weight:600;white-space:normal;word-break:break-word">${r.filter.replace(/_/g,' ')}</td>
     <td style="padding:7px 7px;color:var(--mut);white-space:normal;word-break:break-word">${r.required}</td>
-    <td style="padding:7px 7px;font-family:'Space Mono';white-space:normal;word-break:break-word">${r.actual}${r.note?`<div style="font-size:9.5px;color:var(--dim);margin-top:2px">${r.note}</div>`:''}</td>
+    <td style="padding:7px 7px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;white-space:normal;word-break:break-word">${r.actual}${r.note?`<div style="font-size:9.5px;color:var(--dim);margin-top:2px">${r.note}</div>`:''}</td>
     <td style="padding:7px 4px;text-align:center;white-space:nowrap"><span title="${r.pass?'PASS':'FAIL'}" style="font-weight:800;font-size:10px;padding:3px 8px;border-radius:6px;color:${r.pass?'var(--grn)':'var(--red)'};background:${r.pass?'rgba(47,212,139,.16)':'rgba(255,92,108,.16)'}">${r.pass?'P':'F'}</span></td></tr>`).join('');
   const table=rows=>`<table style="width:100%;border-collapse:collapse;font-size:11.5px;table-layout:fixed">
     <colgroup><col style="width:27%"><col style="width:28%"><col style="width:30%"><col style="width:15%"></colgroup>
@@ -874,7 +874,7 @@ function openSectorDetail(segment){
     [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
     rows,x=>`<tr>
       <td class="sym">${x.symbol}</td>
-      <td title="${x.verdict||''}" style="font-family:'Space Mono'"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${gvmCol(x.verdict)};margin-right:5px;vertical-align:middle"></span>${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
+      <td title="${x.verdict||''}" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${gvmCol(x.verdict)};margin-right:5px;vertical-align:middle"></span>${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
@@ -900,7 +900,7 @@ async function openNifty50Detail(theme){
     [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
     rows,x=>`<tr>
       <td class="sym" title="${(x.company||'').replace(/"/g,'&quot;')}">${x.symbol}</td>
-      <td style="font-family:'Space Mono'">${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
+      <td style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
@@ -925,7 +925,7 @@ async function openThemeDetail(theme){
     [["symbol","Symbol"],["gvm_score","GVM"],["day_1d","1D%"],["week_return","1W%"],["month_return","1M%"]],
     rows,x=>`<tr>
       <td class="sym">${x.symbol}</td>
-      <td style="font-family:'Space Mono'">${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
+      <td style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${x.gvm_score==null?'--':num(x.gvm_score,2)}</td>
       <td class="${cls(x.day_1d)}">${sign(x.day_1d,2)}%</td>
       <td class="${cls(x.week_return)}">${sign(x.week_return,2)}%</td>
       <td class="${cls(x.month_return)}">${sign(x.month_return,2)}%</td></tr>`,
@@ -1363,7 +1363,7 @@ function pivotBar(cmp,pp,r1,s1){
   const arrowColor=c>=hi?'var(--grn)':c>=mid?'var(--amber)':'var(--red)';
   const arrow=c>=mid?'^':'v';const cmpFmt=c>=1000?Math.round(c):c.toFixed(1);
   return`<div class="pivot-bar-wrap" style="display:inline-block;width:140px;vertical-align:middle">
-    <div style="font-family:'Space Mono';font-size:9px;color:${arrowColor};margin-left:calc(${cmpPct.toFixed(0)}% - 14px);white-space:nowrap">${arrow}${cmpFmt}</div>
+    <div style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:9px;color:${arrowColor};margin-left:calc(${cmpPct.toFixed(0)}% - 14px);white-space:nowrap">${arrow}${cmpFmt}</div>
     <div style="position:relative;height:14px">
       <div style="position:absolute;top:5px;left:0;right:0;height:3px;background:var(--line2);border-radius:2px"></div>
       <div style="position:absolute;top:5px;left:0;width:${ppPct}%;height:3px;background:var(--red-d);border-radius:2px 0 0 2px"></div>
@@ -1372,7 +1372,7 @@ function pivotBar(cmp,pp,r1,s1){
       <div style="position:absolute;top:3px;left:${ppPct}%;width:2px;height:7px;background:var(--mut);border-radius:1px;transform:translateX(-50%)"></div>
       <div style="position:absolute;top:3px;right:0;width:2px;height:7px;background:var(--grn);border-radius:1px"></div>
     </div>
-    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';line-height:1.3">
+    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;line-height:1.3">
       <span style="color:var(--red)">${Math.round(lo)}</span>
       <span style="color:var(--mut)">${Math.round(mid)}</span>
       <span style="color:var(--grn)">${Math.round(hi)}</span>
@@ -1410,7 +1410,7 @@ function renderMood(m){
   // cc#293: each metric row shows Label -> last value -> day-change% (coloured) -> icon. The
   // #*Inline spans are (re)populated by the chart-load fns (loadVixChart/loadNiftyPcrChart/
   // loadBankniftyPcrChart) from the SAME series they already fetch — one source of truth per metric.
-  const metricRow=(fn,label,inlineId)=>`<div style="margin-top:6px"><span onclick="${fn}" title="${label} chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">${label} <span id="${inlineId}" style="font-family:'Space Mono';font-weight:700"></span> <span class="info-btn">&#128200;</span></span></div>`;
+  const metricRow=(fn,label,inlineId)=>`<div style="margin-top:6px"><span onclick="${fn}" title="${label} chart" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--mut)">${label} <span id="${inlineId}" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:700"></span> <span class="info-btn">&#128200;</span></span></div>`;
   document.getElementById('mood').innerHTML=`
     <div class="mood-left"><div class="tag" style="margin-bottom:4px">Market Mood Gate · ${m.checked_at||''}</div>
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
@@ -1442,7 +1442,7 @@ function sectorCards(sectors,title,label,clickFn){
     // coloured by its own sign. Click-through (openSectorDetail) unchanged.
     const mrow=(lbl,v,vSize)=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">`+
       `<span style="color:var(--dim);font-size:10.5px">${lbl}</span>`+
-      `<b style="font-family:'Space Mono';font-size:${vSize}px;color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
+      `<b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:${vSize}px;color:${v==null?'var(--dim)':(v>=0?'var(--grn)':'var(--red)')}">${v==null?'--':sign(v,2)+'%'}</b></div>`;
     return`<div class="sec-card" style="cursor:pointer" data-seg="${s.segment}" onclick="${clickFn}(this.dataset.seg)"><div class="sc-num">${i+1}</div>`+
       `<div class="sc-name" style="margin-top:14px">${s.segment}</div>`+
       `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px">`+
@@ -1466,7 +1466,7 @@ function posBar(x){
   return`<div style="width:130px">
     <div style="position:relative;height:8px;background:var(--line2);border-radius:4px;overflow:hidden">
       <div style="position:absolute;left:0;top:0;height:100%;width:${prog}%;background:${fill};border-radius:4px;transition:width .4s ease"></div></div>
-    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Space Mono';color:var(--dim);margin-top:2px">
+    <div style="display:flex;justify-content:space-between;font-size:9px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--dim);margin-top:2px">
       <span>${num(leftLbl,0)}</span><span>${num(rightLbl,0)}</span></div></div>`;
 }
 
@@ -1485,7 +1485,7 @@ function posBarDetail(x){
   const potLeft=isShort?(cmp-tgt)*qty:(tgt-cmp)*qty;
   const potPct=isShort?((cmp-tgt)/cmp*100):((tgt-cmp)/cmp*100);
   return`<div style="padding:10px 4px 4px">
-    <div style="display:flex;gap:14px;flex-wrap:wrap;font-family:'Space Mono';font-size:11px;margin-bottom:8px">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;margin-bottom:8px">
       <span style="color:var(--dim)">Entry <b style="color:var(--txt)">${num(entry)}</b></span>
       <span style="color:var(--dim)">CMP <b style="color:var(--txt)">${num(cmp)}</b></span>
       <span style="color:var(--dim)">SL <b style="color:var(--red)">${num(stop)}</b></span>
@@ -1496,7 +1496,7 @@ function posBarDetail(x){
     <div style="max-width:420px">
       <div style="position:relative;height:10px;background:var(--line2);border-radius:5px;overflow:hidden">
         <div style="position:absolute;left:0;top:0;height:100%;width:${prog}%;background:${fill};border-radius:5px;transition:width .4s ease"></div></div>
-      <div style="display:flex;justify-content:space-between;font-size:10px;font-family:'Space Mono';margin-top:3px">
+      <div style="display:flex;justify-content:space-between;font-size:10px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;margin-top:3px">
         <span style="color:${leftClr}">${num(leftLbl,0)}</span>
         <span style="color:var(--dim)">${prog.toFixed(0)}% to target</span>
         <span style="color:${rightClr}">${num(rightLbl,0)}</span></div></div></div>`;
@@ -1551,7 +1551,7 @@ function renderMaster(){
     if(on&&key==='all')s='background:var(--panel2);color:var(--txt);border:1px solid var(--line2)';
     else if(on&&key==='long')s='background:rgba(47,212,139,.14);color:var(--grn);border:1px solid rgba(47,212,139,.4)';
     else if(on&&key==='short')s='background:rgba(255,92,108,.13);color:var(--red);border:1px solid rgba(255,92,108,.4)';
-    return`<button onclick="setMasterSide('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s">${label} <b style="font-family:'Space Mono'">${cnt}</b></button>`;
+    return`<button onclick="setMasterSide('${key}')" style="${s};font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:8px;transition:.15s">${label} <b style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${cnt}</b></button>`;
   };
   const toggle=`<div style="display:flex;gap:6px;margin-bottom:12px">${tgl('all','All',allOpen.length)}${tgl('long','Long',cntLong)}${tgl('short','Short',cntShort)}</div>`;
   // cc#260: enrich each open row with the derived fields the redesigned table sorts on —
@@ -1591,18 +1591,18 @@ function renderMaster(){
     [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
     openRows,x=>`<tr>
       <td class="sym"><span class="dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
-      <td style="color:var(--mut);font-family:'Space Mono';font-size:11px">${fmtTs(x.entry_ts)}</td>
+      <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${fmtTs(x.entry_ts)}</td>
       <td style="text-align:center">${x.days}</td>
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
-      <td style="text-align:right;font-family:'Space Mono'">${num(x.entry_price)}</td>
-      <td style="text-align:right;font-family:'Space Mono'">${num(x.cmp)}</td>
-      <td style="text-align:right;font-family:'Space Mono';color:var(--grn)">${num(x.target)}</td>
-      <td style="text-align:right;font-family:'Space Mono';color:var(--red)">${num(x.stop_loss)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${num(x.entry_price)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${num(x.cmp)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--grn)">${num(x.target)}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--red)">${num(x.stop_loss)}</td>
       <td style="text-align:right" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</td>
-      <td style="text-align:right;font-family:'Space Mono'" class="${cls(x.net_pnl_pct)}">${x.net_pnl_pct==null?'--':sign(x.net_pnl_pct,2)+'%'}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${cls(x.net_pnl_pct)}">${x.net_pnl_pct==null?'--':sign(x.net_pnl_pct,2)+'%'}</td>
       <td style="text-align:right" class="${cls(x.potential_left)}">${inr(x.potential_left)} <span style="font-size:10px;color:var(--dim)">(${sign(x.pot_pct,1)}%)</span></td>
-      <td data-pri="2" style="text-align:right;font-family:'Space Mono'" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${x.day_pnl_pct==null?'--':sign(x.day_pnl_pct,2)+'%'}</td>
-      <td style="text-align:right;font-family:'Space Mono';font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
+      <td data-pri="2" style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${cls(x.day_pnl_pct)}" title="Position day P&L — side-adjusted (SHORT inverts the stock day move)">${x.day_pnl_pct==null?'--':sign(x.day_pnl_pct,2)+'%'}</td>
+      <td style="text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px" class="${cls(x.sector_day)}"${x.sector_sd?` title="${(x.sector_seg||'').replace(/"/g,'&quot;')} · mcap-weighted day% · top ${x.sector_sd.top_mover||''} ${x.sector_sd.top_day==null?'':sign(x.sector_sd.top_day,2)+'%'} (${x.sector_sd.n} stocks)"`:''}>${x.sector_day==null?'--':sign(x.sector_day,2)+'%'}</td></tr>`,
     {sortKey:'net_pnl',dir:-1,empty:"No open positions"});
   // cc#280: lean bar-only component shared by the desktop Ladder rows and the mobile cards.
   // Direction-aware (LONG: SL-left/TGT-right; SHORT: TGT-left/SL-right). Positions are price-linear
@@ -1615,14 +1615,14 @@ function renderMaster(){
     const posOf=p=>{const v=(p-lp)/(rp-lp)*100;return isFinite(v)?Math.max(0,Math.min(100,v)):0;};
     const dot=posOf(cmp),tick=posOf(entry),fillClr=Number(x.net_pnl)>=0?'#639922':'#E24B4A';
     const fillStyle=isShort?`left:${dot}%;width:${100-dot}%`:`left:0;width:${dot}%`;
-    const slPill=`<span style="background:var(--red-d);color:var(--red);padding:2px 7px;border-radius:5px;font-family:'Space Mono';font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${num(stop,0)}</span>`;
-    const tgtPill=`<span style="background:var(--grn-d);color:var(--grn);padding:2px 7px;border-radius:5px;font-family:'Space Mono';font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${num(tgt,0)}</span>`;
+    const slPill=`<span style="background:var(--red-d);color:var(--red);padding:2px 7px;border-radius:5px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${num(stop,0)}</span>`;
+    const tgtPill=`<span style="background:var(--grn-d);color:var(--grn);padding:2px 7px;border-radius:5px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;font-weight:700;white-space:nowrap;flex-shrink:0">${num(tgt,0)}</span>`;
     const track=`<div style="position:relative;flex:1;height:8px;min-width:80px">
       <div style="position:absolute;top:2px;left:0;right:0;height:4px;background:var(--line2);border-radius:2px"></div>
       <div style="position:absolute;top:2px;${fillStyle};height:4px;background:${fillClr};border-radius:2px"></div>
       <div style="position:absolute;top:-2px;left:${tick}%;width:2px;height:12px;background:var(--mut);transform:translateX(-50%)" title="Entry ${num(entry)}"></div>
       <div style="position:absolute;top:0;left:${dot}%;width:8px;height:8px;border-radius:50%;background:${fillClr};border:1.5px solid var(--panel);transform:translateX(-50%)"></div>
-      <div style="position:absolute;bottom:13px;left:${dot}%;transform:translateX(-50%);white-space:nowrap;font-family:'Space Mono';font-size:10px;font-weight:700;background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;box-shadow:0 2px 6px rgba(0,0,0,.14)"><span style="color:var(--txt)">${num(cmp)}</span></div></div>`;
+      <div style="position:absolute;bottom:13px;left:${dot}%;transform:translateX(-50%);white-space:nowrap;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;font-weight:700;background:var(--panel);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;box-shadow:0 2px 6px rgba(0,0,0,.14)"><span style="color:var(--txt)">${num(cmp)}</span></div></div>`;
     return`<div style="display:flex;align-items:center;gap:8px;flex:1">${isShort?tgtPill:slPill}${track}${isShort?slPill:tgtPill}</div>`;
   };
   // cc#280: mobile keeps its vertical card shape but gets the same lean content — the Net P&L /
@@ -1632,17 +1632,17 @@ function renderMaster(){
   const openPosMobile=`<div class="mob-cards">${openRows.length?openRows.map(x=>`
     <div class="mob-card"><div class="mob-card-header"><span style="display:flex;align-items:baseline;gap:8px;min-width:0">
         <span class="mob-sym dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
-        <span style="font-family:'Space Mono';font-size:10px;color:var(--dim);white-space:nowrap">${fmtTs(x.entry_ts)} · D${x.days}</span></span>
+        <span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;color:var(--dim);white-space:nowrap">${fmtTs(x.entry_ts)} · D${x.days}</span></span>
       <span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">${basketPill(x.basket)}
-      <span style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'Space Mono';font-size:14px;font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span><span style="font-family:'Space Mono';font-size:10px;font-weight:700" class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></span></div>
+      <span style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:14px;font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;font-weight:700" class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></span></div>
     ${ladderTrack(x)}</div>`).join(''):'<div class="empty">No open positions</div>'}</div>`;
   // cc#288: desktop Ladder View rebuilt to the founder's Claude Design reference (supersedes
   // cc#280's ladderRow/ladderTrack; cc#286/287 cancelled — the 210px info panel avoids the
   // Symbol/Side overlap and the bar stays flex:1 by design). Structure/mechanics kept exactly as
   // designed; ONLY the generic Tailwind colors are swapped for the app tokens (which happen to
   // equal the reference's intended hexes: --grn #0a9e63, --red #dd3a4a, --line #e2e7ee, etc.).
-  // Fonts: app's Space Mono + Sora only (no JetBrains Mono / Space Grotesk). App tokens only.
+  // Fonts: app's Sora only (cc#531: Space Mono retired site-wide; no JetBrains Mono / Space Grotesk). App tokens only.
   const ladderRow=x=>{
     const isShort=x.isShort,cmp=Number(x.cmp),stop=Number(x.stop_loss),tgt=Number(x.target),entry=Number(x.entry_price);
     const minP=Math.min(stop,tgt),maxP=Math.max(stop,tgt);
@@ -1663,28 +1663,28 @@ function renderMaster(){
           <span class="dc-link" style="font-size:15px;font-weight:700;letter-spacing:.04em" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
           <span style="font-size:9px;font-weight:700;letter-spacing:.09em;padding:2px 6px;border-radius:3px;background:${badgeBg};color:${badgeFg}">${x.side}</span></div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-          ${basketPill(x.basket)}<span style="font-size:10px;color:var(--mut)">${fmtTs(x.entry_ts)}</span><span style="font-size:10px;color:var(--mut);font-family:'Space Mono'">D${x.days}</span></div></div>
+          ${basketPill(x.basket)}<span style="font-size:10px;color:var(--mut)">${fmtTs(x.entry_ts)}</span><span style="font-size:10px;color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">D${x.days}</span></div></div>
       <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0">
-        <span style="width:48px;flex-shrink:0;text-align:right;font-family:'Space Mono';font-size:11px;color:var(--mut)">${num(minP,0)}</span>
+        <span style="width:48px;flex-shrink:0;text-align:right;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--mut)">${num(minP,0)}</span>
         <div style="position:relative;height:44px;flex:1;min-width:0">
           <div style="position:absolute;top:50%;left:0;right:0;height:3px;transform:translateY(-50%);background:#dde3ea;border-radius:2px"></div>
           <div style="position:absolute;top:50%;${fillStyle};height:3px;transform:translateY(-50%);background:${fill};opacity:.75;border-radius:2px"></div>
           <div style="position:absolute;top:50%;left:${entryPct}%;width:2px;height:18px;transform:translate(-50%,-50%);background:#1c2536"></div>
           <div style="position:absolute;top:50%;left:${cmpPct}%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);background:${fill};box-shadow:0 0 0 2px #fff"></div>
-          <div style="position:absolute;bottom:calc(50% + 10px);left:${tipLeft}%;transform:translateX(-50%);white-space:nowrap;background:var(--surface2);border:1px solid var(--line);border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.35);padding:3px 8px;font-family:'Space Mono';font-size:11px">
+          <div style="position:absolute;bottom:calc(50% + 10px);left:${tipLeft}%;transform:translateX(-50%);white-space:nowrap;background:var(--surface2);border:1px solid var(--line);border-radius:5px;box-shadow:0 2px 6px rgba(0,0,0,.35);padding:3px 8px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">
             <span style="color:var(--mut)">${num(cmp)}</span> <span style="font-weight:700" class="${pnlCls(x.net_pnl)}">${inr(x.net_pnl)}</span> <span class="${cls(x.day_pct)}">${x.day_pct==null?'':sign(x.day_pct,2)+'%'}</span></div>
         </div>
-        <span style="width:48px;flex-shrink:0;text-align:left;font-family:'Space Mono';font-size:11px;color:var(--mut)">${num(maxP,0)}</span>
+        <span style="width:48px;flex-shrink:0;text-align:left;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--mut)">${num(maxP,0)}</span>
       </div></div>`;};
   // cc#288: aggregate header — total Net P&L + total Potential Left call-outs, right-aligned meta.
   const totNet=openRows.reduce((a,x)=>a+Number(x.net_pnl||0),0);
   const totPot=openRows.reduce((a,x)=>a+Number(x.potential_left||0),0);
   const ladderHeader=`<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px">
     <div style="display:flex;gap:28px">
-      <div><div style="font-size:10px;color:var(--dim)">NET P&L</div><div style="font-size:22px;font-weight:700;font-family:'Space Mono'" class="${pnlCls(totNet)}">${inr(totNet)}</div></div>
-      <div><div style="font-size:10px;color:var(--dim)">POTENTIAL LEFT</div><div style="font-size:22px;font-weight:700;font-family:'Space Mono';color:var(--mut)">${inr(totPot)}</div></div>
+      <div><div style="font-size:10px;color:var(--dim)">NET P&L</div><div style="font-size:22px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums" class="${pnlCls(totNet)}">${inr(totNet)}</div></div>
+      <div><div style="font-size:10px;color:var(--dim)">POTENTIAL LEFT</div><div style="font-size:22px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--mut)">${inr(totPot)}</div></div>
     </div>
-    <div style="text-align:right;font-size:10px;color:var(--dim);font-family:'Space Mono'">${openRows.length} position${openRows.length===1?'':'s'} · sorted by Net P&L</div></div>`;
+    <div style="text-align:right;font-size:10px;color:var(--dim);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${openRows.length} position${openRows.length===1?'':'s'} · sorted by Net P&L</div></div>`;
   const openPosLadder=openRows.length
     ? ladderHeader+`<div style="display:flex;flex-direction:column;gap:4px">${openRows.map(ladderRow).join('')}</div>`
     : '<div class="empty">No open positions</div>';
@@ -1984,7 +1984,7 @@ function toggleFunnelFilterDetail(basketId,key,rid){
   if(stage&&stage.denominator!=null)head+=`<div style="color:var(--dim);margin-bottom:6px">${stage.note||('evaluated on '+stage.denominator+' cheap-gate survivors')}</div>`;
   const fmtVal=v=>v==null?'--':(typeof v==='boolean'?(v?'yes':'no'):(typeof v==='number'?Number(v).toFixed(2):v));
   const list=rows.length
-    ?`<div style="display:flex;flex-wrap:wrap;gap:6px">${rows.map(r=>`<span style="background:var(--panel);border:1px solid var(--line2);border-radius:6px;padding:3px 8px;font-family:'Space Mono',monospace">${r.symbol} <b>${fmtVal(r.val)}</b></span>`).join('')}</div>`
+    ?`<div style="display:flex;flex-wrap:wrap;gap:6px">${rows.map(r=>`<span style="background:var(--panel);border:1px solid var(--line2);border-radius:6px;padding:3px 8px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${r.symbol} <b>${fmtVal(r.val)}</b></span>`).join('')}</div>`
     :`<span style="color:var(--dim)">No symbols currently pass this filter.</span>`;
   box.style.display='block';
   box.innerHTML=head+list;
@@ -2217,9 +2217,9 @@ function renderGlobalIndices(data){
       :giAgo(r.ts,r.quote_date);
     return`<div style="background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px">
       <div style="font-size:12px;color:var(--dim);font-family:Sora;margin-bottom:6px">${r.name}${liveDot}</div>
-      <div style="font-size:20px;font-weight:700;font-family:'Space Mono'">${fmtPrice(r.price)}</div>
-      <div style="font-size:13px;font-weight:700;font-family:'Space Mono';color:${clr};margin-top:2px"${chgTip}>${sign(r.chg_pct,2)}%</div>
-      <div style="font-size:9px;color:var(--dim);font-family:'Space Mono';margin-top:4px">${stamp}</div></div>`;};
+      <div style="font-size:20px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${fmtPrice(r.price)}</div>
+      <div style="font-size:13px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:${clr};margin-top:2px"${chgTip}>${sign(r.chg_pct,2)}%</div>
+      <div style="font-size:9px;color:var(--dim);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;margin-top:4px">${stamp}</div></div>`;};
   const sections=GROUPS.map(([key,label])=>{
     const items=rows.filter(r=>inGroup(r,key));if(!items.length)return'';
     return`<div class="ptitle" style="margin-top:14px">${label} <span class="ct">${items.length}</span></div>
@@ -2230,7 +2230,7 @@ function renderGlobalIndices(data){
   const upd=data.data_ts?String(data.data_ts).slice(11,19)+' IST':'no live ticks';
   const closed=(data.markets_closed!==undefined)?data.markets_closed:!rows.some(r=>r.live&&r.category!=='crypto');
   const updTxt=upd+(closed?' · markets closed':'');
-  return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Space Mono'">Freshest tick ${updTxt}</span></div>
+  return`<div class="ptitle">Global Indices <span class="ct" style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">Freshest tick ${updTxt}</span></div>
     <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Each tile shows its own last tick · <span style="color:var(--grn)">●</span> live (≤15m) · <span style="color:var(--amber)">PREV CLOSE</span> = market closed / stale · US indices live ≈19:00-01:40 IST · US VIX = CBOE ^VIX, not the India VIX gate</div>`+sections;
 }
 
@@ -2284,7 +2284,7 @@ function renderPositionNews(d){
       `<div style="font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center;flex-wrap:wrap">`+
         `<span>${newsEsc(it.source||'')}</span>`+
         (age?`<span>· ${newsEsc(age)}</span>`:'')+
-        (it.symbol?`<span style="font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border-radius:6px;padding:1px 7px;font-family:'Space Mono'">${newsEsc(it.symbol)}</span>`:'')+
+        (it.symbol?`<span style="font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border-radius:6px;padding:1px 7px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${newsEsc(it.symbol)}</span>`:'')+
       `</div></div>`;
   });
   return html;

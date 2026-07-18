@@ -13,9 +13,9 @@
     --grn:#2FD48B; --grn-d:rgba(47,212,139,.14); --red:#FF5C6C; --red-d:rgba(255,92,108,.13);
     --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
     --font:'Sora',system-ui,-apple-system,sans-serif;
-    --mono:'Space Mono','SF Mono',Consolas,monospace;
+    --mono:'Sora',sans-serif;
   }
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.55}
 
@@ -71,12 +71,12 @@
   .md p{margin:5px 0}.md ul,.md ol{margin:5px 0;padding-left:20px}.md li{margin:2px 0}
   .md strong{font-weight:700;color:var(--txt)}.md em{font-style:italic;color:var(--mut)}
   .md code.inline{background:var(--bg2);border:1px solid var(--line2);border-radius:4px;
-    padding:1px 5px;font-family:var(--mono);font-size:12px;color:var(--cyan)}
+    padding:1px 5px;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cyan)}
   .md table{border-collapse:collapse;width:100%;margin:8px 0;font-size:11.5px;display:block;
     overflow-x:auto;-webkit-overflow-scrolling:touch}
   .md th{background:var(--panel2);color:var(--mut);padding:6px 9px;text-align:left;
-    border:1px solid var(--line2);font-weight:600;white-space:nowrap;font-family:var(--mono)}
-  .md td{padding:5px 9px;border:1px solid var(--line);white-space:nowrap;font-family:var(--mono)}
+    border:1px solid var(--line2);font-weight:600;white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .md td{padding:5px 9px;border:1px solid var(--line);white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums}
   .pnl-pos{color:var(--grn);font-weight:700}.pnl-neg{color:var(--red);font-weight:700}
 
   .typing{display:none;align-items:center;gap:6px;padding:10px 14px}

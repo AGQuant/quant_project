@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V14 · Intraday</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   /* cc#442: V14 intraday engine page — dark terminal skin (V-family, design_refs/scorr_v8_R2). */
   :root{
     --bg:#0A0F1E;--bg2:#0D1428;--panel:#121A33;--panel2:#182241;
@@ -22,10 +22,10 @@
   .logo{font-weight:800;letter-spacing:.5px;font-size:20px}.logo b{color:var(--blu)}
   .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
   .spacer{flex:1}
-  .clock{font-family:'Space Mono';font-size:11px;color:var(--mut)}
+  .clock{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--mut)}
   .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:16px 0 10px;display:flex;gap:8px;align-items:center}
-  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
-  .chip{display:inline-flex;align-items:center;font-family:'Space Mono';font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid;white-space:nowrap}
+  .ptitle .ct{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+  .chip{display:inline-flex;align-items:center;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid;white-space:nowrap}
   .c-orb{color:var(--blu);border-color:var(--blu);background:rgba(77,124,254,.12)}
   .c-vwap{color:var(--cyan);border-color:var(--cyan);background:rgba(55,211,232,.12)}
   .c-r1{color:var(--violet);border-color:var(--violet);background:rgba(155,124,255,.12)}
@@ -34,12 +34,12 @@
   .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:6px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px}
   .card .k{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
-  .card .v{font-family:'Space Mono';font-size:18px;font-weight:800;margin-top:4px}
+  .card .v{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:18px;font-weight:700;margin-top:4px}
   .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:12px}
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;padding:9px 11px;border-bottom:1px solid var(--line2);white-space:nowrap;font-size:10px;letter-spacing:.3px;text-transform:uppercase}
   th:first-child,td:first-child{text-align:left}
-  td{padding:8px 11px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  td{padding:8px 11px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px}
   td.sym{font-family:'Sora';font-weight:700}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:rgba(148,166,210,.06)}
@@ -48,35 +48,35 @@
   .empty{color:var(--dim);font-size:13px;padding:20px 12px;text-align:center}
   .note{font-size:10px;color:var(--dim);margin:4px 0 0}
   /* cc#458: Replay Day */
-  .rbtn{font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border:1px solid var(--blu);border-radius:8px;padding:6px 12px;cursor:pointer;letter-spacing:.3px}
+  .rbtn{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border:1px solid var(--blu);border-radius:8px;padding:6px 12px;cursor:pointer;letter-spacing:.3px}
   .rbtn:hover{background:rgba(77,124,254,.22)}
   .rp-ov{position:fixed;inset:0;background:rgba(6,10,22,.94);z-index:200;display:none;overflow-y:auto;padding:18px}
   .rp-ov.open{display:block}
   .rp-wrap{max-width:1180px;margin:0 auto}
   .rp-top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}
-  .rp-clock{font-family:'Space Mono';font-size:34px;font-weight:800;color:var(--txt);letter-spacing:1px}
+  .rp-clock{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:34px;font-weight:700;color:var(--txt);letter-spacing:1px}
   .rp-clock small{font-size:13px;color:var(--dim);font-weight:700;margin-left:4px}
   .rp-bar{flex:1;min-width:160px;height:6px;background:var(--panel2);border-radius:4px;overflow:hidden}
   .rp-bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--blu),var(--cyan));width:0%}
   .rp-speed{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
-  .rp-speed button{font-family:'Space Mono';font-size:11px;color:var(--mut);background:var(--panel);border:0;padding:6px 11px;cursor:pointer}
+  .rp-speed button{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--mut);background:var(--panel);border:0;padding:6px 11px;cursor:pointer}
   .rp-speed button.on{background:var(--blu);color:#fff}
-  .rp-x{font-family:'Space Mono';font-size:12px;color:var(--mut);background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;cursor:pointer}
-  .rp-toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--blu);color:var(--txt);font-family:'Space Mono';font-size:13px;font-weight:700;padding:12px 22px;border-radius:10px;box-shadow:var(--shadow);opacity:0;transition:opacity .3s;z-index:210;pointer-events:none}
+  .rp-x{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;color:var(--mut);background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;cursor:pointer}
+  .rp-toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--blu);color:var(--txt);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;font-weight:700;padding:12px 22px;border-radius:10px;box-shadow:var(--shadow);opacity:0;transition:opacity .3s;z-index:210;pointer-events:none}
   .rp-toast.show{opacity:1}
   /* cc#457: trade logic-memory i-button + popover */
-  .ibtn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:9px;font-weight:700;font-family:'Space Mono';cursor:pointer;vertical-align:middle;margin-left:6px}
+  .ibtn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:9px;font-weight:700;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;cursor:pointer;vertical-align:middle;margin-left:6px}
   .ibtn:hover{border-color:var(--blu);color:var(--blu)}
   .ti-ov{position:fixed;inset:0;background:rgba(6,10,22,.78);z-index:220;display:none;align-items:center;justify-content:center;padding:18px}
   .ti-ov.open{display:flex}
   .ti-box{background:var(--panel);border:1px solid var(--line2);border-radius:14px;max-width:460px;width:100%;max-height:88vh;overflow-y:auto;padding:18px 20px 20px;box-shadow:var(--shadow);position:relative}
   .ti-close{position:absolute;top:12px;right:12px;width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px}
-  .ti-h{font-family:'Space Mono';font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:30px}
+  .ti-h{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:30px}
   .ti-sec{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--cyan);margin:15px 0 5px}
   .ti-row{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)}
   .ti-row:last-child{border-bottom:none}
   .ti-row .k{color:var(--mut)}
-  .ti-row .v{font-family:'Space Mono';color:var(--txt);font-weight:700;text-align:right}
+  .ti-row .v{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;color:var(--txt);font-weight:700;text-align:right}
 </style>
 </head>
 <body>

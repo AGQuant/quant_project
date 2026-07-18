@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Max</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
 
   /* cc#344: DARK TERMINAL re-skin (design_refs R2 palette) */
 :root{
@@ -18,7 +18,7 @@
     --cyan:#37D3E8; --cyan-d:rgba(55,211,232,.14);
     --amber:#F5B94A; --amber-d:rgba(245,185,74,.14); --amber-b:#fcd89a;
     --font:'Sora',system-ui,-apple-system,sans-serif;
-    --mono:'Space Mono','SF Mono',Consolas,monospace;
+    --mono:'Sora',sans-serif;
     --shadow:0 1px 4px rgba(20,35,70,.06);
     --shadow-md:0 4px 16px rgba(20,35,70,.09);
   }
@@ -147,7 +147,7 @@
   .tools-used{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
   .tool-badge{padding:2px 8px;border-radius:4px;background:var(--cyan-d);
     border:1px solid #b7e0eb;font-size:9.5px;color:var(--cyan);font-weight:600;
-    font-family:var(--mono)}
+    font-family:var(--mono);font-variant-numeric:tabular-nums}
 
   .md h1,.md h2,.md h3{font-weight:700;margin:10px 0 5px;color:var(--txt);line-height:1.3}
   .md h1{font-size:16px}.md h2{font-size:14px}.md h3{font-size:13px}
@@ -156,18 +156,18 @@
   .md ul,.md ol{margin:5px 0;padding-left:20px}.md li{margin:2px 0}
   .md strong{font-weight:700;color:var(--txt)}.md em{font-style:italic;color:var(--mut)}
   .md code.inline{background:var(--bg2);border:1px solid var(--line2);border-radius:4px;
-    padding:1px 5px;font-family:var(--mono);font-size:12px;color:var(--cyan)}
+    padding:1px 5px;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--cyan)}
   .md pre{background:#1a1f2e;color:#e8e8e8;border-radius:8px;padding:10px 12px;
-    overflow-x:auto;margin:7px 0;font-family:var(--mono);font-size:11.5px;line-height:1.5}
+    overflow-x:auto;margin:7px 0;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11.5px;line-height:1.5}
   .md hr{border:none;border-top:1px solid var(--line);margin:10px 0}
   .md blockquote{border-left:3px solid var(--line2);padding-left:10px;margin:6px 0;color:var(--mut)}
   .md a{color:var(--blu);text-decoration:underline}
   .md table{border-collapse:collapse;width:100%;margin:8px 0;font-size:11.5px;display:block;
     overflow-x:auto;-webkit-overflow-scrolling:touch}
   .md th{background:var(--panel2);color:var(--mut);padding:6px 9px;text-align:left;
-    border:1px solid var(--line2);font-weight:600;white-space:nowrap;font-family:var(--mono);
+    border:1px solid var(--line2);font-weight:600;white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums;
     font-size:10.5px;letter-spacing:.3px}
-  .md td{padding:5px 9px;border:1px solid var(--line);white-space:nowrap;font-family:var(--mono);
+  .md td{padding:5px 9px;border:1px solid var(--line);white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums;
     font-size:11px}
   .pnl-pos{color:var(--grn);font-weight:700}
   .pnl-neg{color:var(--red);font-weight:700}

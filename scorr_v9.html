@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V9 · Pairs</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
   /* cc#426: standalone V9 Sector Pairs page — extracted from the V8 dashboard tab.
      Dark terminal palette mirrors the V8/V10 V-family surfaces (design_refs/scorr_v8_R2). */
   :root{
@@ -27,14 +27,14 @@
   .tag{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase}
   .spacer{flex:1}
   .ptitle{font-size:13px;font-weight:700;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin:16px 0 12px;display:flex;gap:8px;align-items:center}
-  .ptitle .ct{font-family:'Space Mono';font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
+  .ptitle .ct{font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);border:1px solid var(--line);padding:2px 8px;border-radius:20px}
   .chip-info{font-family:'Sora',sans-serif;font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;white-space:nowrap}
   .scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;padding:10px 12px;border-bottom:1px solid var(--line2);white-space:nowrap;font-size:11px;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;user-select:none}
   th:first-child,td:first-child{text-align:left}
   th:hover{color:var(--txt)}
-  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Space Mono';font-size:12px}
+  td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:12px}
   td.sym{font-family:'Sora',sans-serif;font-weight:600}
   tr:last-child td{border-bottom:none}
   tbody tr:hover{background:rgba(148,166,210,.07)}
@@ -110,7 +110,7 @@ function renderV9Pairs(){
       [["segment","Sector (GVM segment)"],["stock_count","Stocks"]],
       secs,x=>`<tr>
         <td class="sym">${x.segment}</td>
-        <td><span style="font-family:'Space Mono';font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
+        <td><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
       {sortKey:'stock_count',dir:-1,empty:"No eligible sectors",wrapClass:''});
   }
   return card+table;
