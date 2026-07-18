@@ -1527,7 +1527,7 @@ def br_funnel_detail():
             # is that survivor count, not the full universe (the heavy read is skipped for the rest).
             denom = (stage6 if stage6 is not None else universe) if key == "true_weekly_rsi" else universe
             fails = max(denom - passes, 0)
-            stage = {"metric": label, "condition_min": cmin, "condition_max": cmax,
+            stage = {"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
                      "passes": passes, "fails": fails,
                      "survivors": passes, "killed": fails,
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
@@ -1576,29 +1576,39 @@ def br_stock_passcount():
             for s in all_rows:
                 sym = s["symbol"]
                 passed, failed = [], []
+                actuals = {}
                 for metric, mn, mx in _BR_V5_PASSCOUNT_GATES:
+                    actuals[metric] = s.get(metric)
                     (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
                 mr = s.get("month_return")
+                actuals["month_return"] = mr
                 (passed if (mr is not None and float(mr) < 5.0) else failed).append("month_return")
                 sw = s.get("sector_week")
+                actuals["sector_week"] = sw
                 (passed if (sw is not None and float(sw) > 0.0) else failed).append("sector_week")
                 pv   = pivots.get(sym)
                 s1   = pv.get("s1") if pv else None
                 p4lo = prior4_low.get(sym)
                 tlo  = today_low.get(sym)
                 s1_ok = s1 is not None and ((p4lo is not None and p4lo <= s1) or (tlo is not None and tlo <= s1))
+                # cc#514: actual = the 5d/today low tested against S1 (whichever cleared it, else the
+                # 5d low as the representative value shown in the funnel-row expansion).
+                actuals["s1_touch"] = (p4lo if (p4lo is not None and s1 is not None and p4lo <= s1)
+                                        else (tlo if (tlo is not None and s1 is not None and tlo <= s1)
+                                              else (p4lo if p4lo is not None else tlo)))
                 (passed if s1_ok else failed).append("s1_touch")
                 # heavy true_weekly_rsi — ONLY for stocks that cleared all 6 cheap gates
                 if len(passed) == 6:
                     cmp = cmp_map.get(sym)
                     twr = _true_weekly_rsi(conn, sym, cmp)
+                    actuals["true_weekly_rsi"] = twr
                     (passed if (twr is not None and twr >= 70.0) else failed).append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")   # skipped — not evaluated, caps at <=6/7
                 out.append({"symbol": sym, "passed": len(passed), "total": 7,
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
-                            "v21_pass": None})
+                            "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_reversal", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 7, "stocks": out,
@@ -1685,38 +1695,46 @@ _SR_V61_STAGES = [
     ("sector_week",     "sector week",            "",       "< 0"),
     ("mom_2d",          "mom 2d",                 ">= -4",  "<= -1"),
     ("month_return",    "month return",           ">= -10", ""),
+    ("room",            "room to S1/S2",          ">= 2%",  ""),
     ("true_weekly_rsi", "true weekly RSI",        "",       "<= 45"),
 ]
 
 def sr_funnel_detail():
-    """cc#502: 10-stage funnel for SELL_REVERSAL_V6.1, reshaped from the handler-written
+    """cc#502/514: 11-stage funnel for SELL_REVERSAL_V6.1, reshaped from the handler-written
     v8_funnel_counts row. INDEPENDENT per-filter pass counts across the universe (buy_momentum
-    convention); true_weekly_rsi (stage 10) is passes vs the stocks clearing all 9 cheap gates.
-    Final = strict-AND of all 10. Empty until the first live tick writes."""
+    convention); true_weekly_rsi (stage 11) is passes vs the stocks clearing all 10 cheap gates.
+    Final = strict-AND of all 11. Empty until the first live tick writes.
+    cc#514: the "room" gate (engine funnel["room"], AND'd into `surv` in v8_signal_writer.py's
+    sell_reversal handler) was missing from _SR_V61_STAGES entirely -- the funnel showed only 9
+    cheap stages though sr_stock_passcount/sr_stock_detail already counted 10 (cc#509). Added here
+    so the funnel-row click-through (cc#514) reconciles with the pass-count box on every basket,
+    not just the 3 already fixed by cc#509. The `_stage9_survivors` DB key name is an engine-side
+    log/naming quirk (already noted out-of-scope in cc#509) -- its VALUE is the correct 10-cheap-
+    gate survivor count; only this display list was missing the stage."""
     try:
         with _conn() as conn, conn.cursor() as cur:
             counts, _asof = _latest_funnel_counts(cur, "sell_reversal")   # cc#424: last-session as-of
         universe = int(counts.get("_universe", 0) or 0)
-        stage9   = counts.get("_stage9_survivors")
-        stage9   = int(stage9) if stage9 is not None else None
+        stage10  = counts.get("_stage9_survivors")   # cc#514: value is correct (10 cheap gates); key name is a legacy quirk
+        stage10  = int(stage10) if stage10 is not None else None
         final    = int(counts.get("_score_qualified", 0) or 0)
         stages = []
         for key, label, cmin, cmax in _SR_V61_STAGES:
             passes = int(counts.get(key, 0) or 0)
-            denom = (stage9 if stage9 is not None else universe) if key == "true_weekly_rsi" else universe
+            denom = (stage10 if stage10 is not None else universe) if key == "true_weekly_rsi" else universe
             fails = max(denom - passes, 0)
-            stage = {"metric": label, "condition_min": cmin, "condition_max": cmax,
+            stage = {"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
                      "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
             if key == "true_weekly_rsi":
                 stage["denominator"] = denom
-                stage["note"] = f"of {denom} stocks passing all 9 cheap gates"
+                stage["note"] = f"of {denom} stocks passing all 10 cheap gates"
             stages.append(stage)
         return {
             "basket": "sell_reversal", "score_date": str(_asof or date.today()),
-            "universe": universe, "final": final, "filter_count": 10, "n_filters": 10,
-            "stage9_survivors": stage9,
-            "gate_type": "independent per-filter counts; final = strict AND of all 10",
+            "universe": universe, "final": final, "filter_count": 11, "n_filters": 11,
+            "stage9_survivors": stage10,
+            "gate_type": "independent per-filter counts; final = strict AND of all 11",
             "score_qualified": final, "pivot_pass": final,
             "stages": stages, **BASKET_META.get("sell_reversal", {}),
         }
@@ -1757,27 +1775,33 @@ def sr_stock_passcount():
             for s in all_rows:
                 sym = s["symbol"]
                 passed, failed = [], []
+                actuals = {}
                 for metric, mn, mx in _SR_V61_PASSCOUNT_GATES:
+                    actuals[metric] = s.get(metric)
                     (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
                 sw = s.get("sector_week")
+                actuals["sector_week"] = sw
                 (passed if (sw is not None and float(sw) < 0.0) else failed).append("sector_week")
+                actuals["r1_touch"] = sym in r1_touch
                 (passed if sym in r1_touch else failed).append("r1_touch")
                 cmp = cmp_map.get(sym)
                 pv  = pivots.get(sym)
                 s1  = pv.get("s1") if pv else None
                 s2  = pv.get("s2") if pv else None
-                tgt, _ = _sr_dynamic_target(cmp, s1, s2)
+                tgt, room = _sr_dynamic_target(cmp, s1, s2)
+                actuals["room"] = room
                 room_ok = (cmp is None or s1 is None) or (tgt is not None)
                 (passed if room_ok else failed).append("room")
                 if len(passed) == 10:   # cc#509: was ==9, off-by-one against these 10 cheap labels
                     twr = _true_weekly_rsi(conn, sym, cmp)
+                    actuals["true_weekly_rsi"] = twr
                     (passed if (twr is not None and twr <= 45.0) else failed).append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")
                 out.append({"symbol": sym, "passed": len(passed), "total": 11,
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
-                            "v21_pass": None})
+                            "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_reversal", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 11, "stocks": out,
@@ -1889,7 +1913,7 @@ def sm_funnel_detail():
             passes = int(counts.get(key, 0) or 0)
             denom = (stage8 if stage8 is not None else universe) if key == "true_weekly_rsi" else universe
             fails = max(denom - passes, 0)
-            stage = {"metric": label, "condition_min": cmin, "condition_max": cmax,
+            stage = {"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
                      "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
             if key == "true_weekly_rsi":
@@ -1931,11 +1955,15 @@ def sm_stock_passcount():
             for s in all_rows:
                 sym = s["symbol"]
                 passed, failed = [], []
+                actuals = {}
                 for metric, mn, mx in _SM_V3_PASSCOUNT_GATES:
+                    actuals[metric] = s.get(metric)
                     (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
                 rm = s.get("rsi_month")
+                actuals["rsi_month"] = rm
                 (passed if (rm is not None and float(rm) < 40.0) else failed).append("rsi_month")
                 sw = s.get("sector_week")
+                actuals["sector_week"] = sw
                 (passed if (sw is not None and float(sw) < 0.0) else failed).append("sector_week")
                 cmp = cmp_map.get(sym)
                 pv  = pivots.get(sym)
@@ -1944,17 +1972,20 @@ def sm_stock_passcount():
                 cmp_ok = (cmp is None or pp is None) or (cmp < pp)
                 s2c = ((cmp - s2) / cmp * 100.0) if (cmp and s2 is not None) else None
                 s2c_ok = (cmp is None or s2 is None) or (s2c is not None and s2c >= 3.0)
+                actuals["cmp_lt_pp"] = cmp
+                actuals["s2_clearance"] = s2c
                 (passed if cmp_ok else failed).append("cmp_lt_pp")
                 (passed if s2c_ok else failed).append("s2_clearance")
                 if len(passed) == 8:
                     twr = _true_weekly_rsi(conn, sym, cmp)
+                    actuals["true_weekly_rsi"] = twr
                     (passed if (twr is not None and twr <= 40.0) else failed).append("true_weekly_rsi")
                 else:
                     failed.append("true_weekly_rsi")
                 out.append({"symbol": sym, "passed": len(passed), "total": 9,
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
-                            "v21_pass": None})
+                            "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "sell_momentum", "score_date": str(date.today()),
                 "universe": len(out), "filter_count": 9, "stocks": out,
@@ -2060,7 +2091,7 @@ def bm_funnel_detail():
             passes = int(counts.get(key, 0) or 0)
             denom = (stage6 if stage6 is not None else universe) if key == "true_weekly_rsi" else universe
             fails = max(denom - passes, 0)
-            stage = {"metric": label, "condition_min": cmin, "condition_max": cmax,
+            stage = {"metric": label, "key": key, "condition_min": cmin, "condition_max": cmax,
                      "passes": passes, "fails": fails, "survivors": passes, "killed": fails,
                      "pass_pct": round(passes / denom * 100, 1) if denom else 0}
             if key == "true_weekly_rsi":
@@ -2068,7 +2099,9 @@ def bm_funnel_detail():
                 stage["note"] = f"of {denom} stocks passing all 6 cheap hard gates"
             stages.append(stage)
         stages.append({
-            "metric": "score >= 7 of 10 (V2 bands)", "condition_min": "fixed threshold", "condition_max": "",
+            # cc#514: not a passed_filters/failed_filters entry -- the funnel-row click-through
+            # special-cases this key to list stocks by score_qualified/score instead.
+            "metric": "score >= 7 of 10 (V2 bands)", "key": "_score_band", "condition_min": "fixed threshold", "condition_max": "",
             "passes": final, "fails": max(hard_qualified - final, 0),
             "survivors": final, "killed": max(hard_qualified - final, 0),
             "pass_pct": round(final / hard_qualified * 100, 1) if hard_qualified else 0,
@@ -2128,18 +2161,24 @@ def bm_stock_passcount():
             for s in all_rows:
                 sym = s["symbol"]
                 passed, failed = [], []
+                actuals = {}
                 for metric, mn, mx in _BM_V3_PASSCOUNT_GATES:
+                    actuals[metric] = s.get(metric)
                     (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
                 d20 = s.get("dma_20")
+                actuals["dma_20"] = d20
                 (passed if (d20 is not None and float(d20) > 0.0) else failed).append("dma_20")
                 d1d = s.get("day_1d")
+                actuals["day_1d"] = d1d
                 (passed if (d1d is not None and float(d1d) > 0.0) else failed).append("day_1d")
                 hp = v21_metrics.get(sym, {}).get("hourly_pct")
+                actuals["hourly_pct"] = hp
                 (passed if (hp is not None and float(hp) > 0.0) else failed).append("hourly_pct")
                 score = None
                 if len(passed) == 6:
                     cmp = cmp_map.get(sym)
                     twr = _true_weekly_rsi(conn, sym, cmp)
+                    actuals["true_weekly_rsi"] = twr
                     if twr is not None and 70.0 <= twr <= 85.0:
                         passed.append("true_weekly_rsi")
                         score = sum(1 for metric, mn, mx in _BM_SCORE_BANDS
@@ -2155,7 +2194,7 @@ def bm_stock_passcount():
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                             "score": score, "score_total": 10,
                             "score_qualified": bool(score is not None and score >= 7),
-                            "v21_pass": None})
+                            "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["score"] if x["score"] is not None else -1,
                                  x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_momentum", "score_date": str(date.today()),

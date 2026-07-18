@@ -358,6 +358,7 @@
           <div id="mTitle" style="font-size:16px;font-weight:800;color:var(--txt)"></div>
           <div id="mSub" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
         </div>
+        <span id="mDcBtn"></span>
         <button onclick="closeInfo()" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">&#10005;</button>
       </div>
       <div class="modal-body" id="mBody"></div>
@@ -724,6 +725,7 @@ function openInfo(basket){
   const sc=info.side==='BUY';
   document.getElementById('mTitle').textContent=info.label;
   document.getElementById('mSub').textContent=`${info.side} · 5-min ${info.wr_5m}% WR (${info.sigs_5m}) · 5yr EOD ${info.wr_eod}% WR (${info.sigs_eod})`;
+  document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
 
   let html='';
   html+=`<div class="stat-pills">
@@ -800,6 +802,12 @@ async function openBrDetail(symbol,basket){
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
+  // cc#514: Derivative Cockpit button — present on the filter-breakdown modal for all 4 baskets,
+  // opens /dashboard?dc=SYMBOL in a new tab (that route auto-triggers openDerivCockpit on load).
+  document.getElementById('mDcBtn').innerHTML=
+    `<button onclick="openDerivCockpitTab('${symbol}')" title="Open Derivative Cockpit for ${symbol}"
+      style="font-size:11px;font-weight:700;color:var(--mut);border:1px solid var(--line2);background:var(--panel2);
+      border-radius:8px;padding:7px 11px;cursor:pointer;white-space:nowrap;margin-right:8px">&#8646; Cockpit</button>`;
   document.getElementById('infoModal').classList.add('open');
   let d;try{d=await getJSON(isSR?EP.srStockDetail(symbol):isSM?EP.smStockDetail(symbol):isBM?EP.bmStockDetail(symbol):EP.brStockDetail(symbol));}
   catch(e){document.getElementById('mBody').innerHTML=`<div class="err">Could not load detail for ${symbol}.</div>`;return;}
@@ -857,6 +865,7 @@ function openSectorDetail(segment){
   const rows=(cache.metricsAll||[]).filter(x=>x.segment===segment);
   document.getElementById('mTitle').textContent=segment;
   document.getElementById('mSub').textContent=`${rows.length} stock${rows.length===1?'':'s'} · GVM · 1D / 1W / 1M returns`;
+  document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
   // cc#298: GVM (Scorr's proprietary quality signal) verdict band colors — deep-green Excellent >
   // green Good > amber Average > red Weak. Makes the return-vs-quality gap visually instant (a
   // stock high on 1D but red/Weak GVM stands out). gvm_score/verdict now ride on metricsAll.
@@ -881,6 +890,7 @@ async function openNifty50Detail(theme){
   document.getElementById('mTitle').textContent=theme;
   document.getElementById('mSub').textContent='NIFTY 50 · loading…';
   document.getElementById('mBody').innerHTML='';
+  document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
   document.getElementById('infoModal').classList.add('open');
   let d;try{d=await getJSON('/api/v8/nifty50_sectors/'+encodeURIComponent(theme)+'/holdings');}
   catch(e){document.getElementById('mBody').innerHTML='<div class="empty">Could not load holdings.</div>';return;}
@@ -905,6 +915,7 @@ async function openThemeDetail(theme){
   document.getElementById('mTitle').textContent=theme;
   document.getElementById('mSub').textContent='Sector · loading…';
   document.getElementById('mBody').innerHTML='';
+  document.getElementById('mDcBtn').innerHTML='';   // cc#514: not a per-symbol modal
   document.getElementById('infoModal').classList.add('open');
   let d;try{d=await getJSON('/api/v8/theme_sectors/'+encodeURIComponent(theme)+'/holdings');}
   catch(e){document.getElementById('mBody').innerHTML='<div class="empty">Could not load holdings.</div>';return;}
@@ -1114,6 +1125,13 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
     const det=(!isTo&&e&&e.message)?`<div style="color:var(--mut);font-size:11px;margin-top:6px">${String(e.message).slice(0,240)}</div>`:'';
     sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+`<div class="empty" style="padding:18px;color:var(--red);font-size:12px">${msg}${det}</div>`;return;}
   sheet.innerHTML=_dcRender(sym,side,qty,entry,cmp,d||{});
+}
+// cc#514: Derivative Cockpit deep-link — /dashboard?dc=SYMBOL opens the sheet in a NEW tab from
+// any other page/modal (the filter-breakdown modal's Cockpit button uses this). Same query-param
+// convention as the existing ?embed flag on this page.
+function openDerivCockpitTab(sym){
+  if(!sym)return;
+  window.open('/dashboard?dc='+encodeURIComponent(sym), '_blank');
 }
 
 // -- Core utils --------------------------------------------------------------
@@ -1799,12 +1817,19 @@ async function loadFunnelInline(basketId,panelIdx){
   try{fd=await getJSON(EP.funnelDetail(basketId));}catch(e){}
   try{pc=await getJSON(EP.passCount(basketId));}catch(e){}
   if(!det.isConnected)return;   // panel was re-painted mid-fetch -> a newer shell owns this panel
+  // cc#514: cache both payloads keyed by basket so the funnel-row click handler (fired later, on a
+  // user click, not during this render pass) can look them up without a second fetch.
+  cache['fd_'+basketId]=fd; cache['pc_'+basketId]=pc;
   let inner='';
   if(fd&&fd.stages){
     const maxSurv=Math.max(...fd.stages.map(s=>s.survivors||0),1);
     inner+=`<div class="ptitle" style="margin-top:4px">Filter Funnel · ${fd.basket.replace(/_/g,' ')} <span class="ct">universe ${fd.universe} -> final ${fd.final} · ${fd.filter_count} filters</span></div>`;
+    inner+=`<div style="font-size:10px;color:var(--dim);margin-bottom:4px">Tap any row to list the passing symbols with their actual values.</div>`;
     inner+=`<div class="funnel-stages">${fd.stages.map(s=>{const pct=Math.round((s.survivors/maxSurv)*100);const kc=s.killed>0?'var(--red)':'var(--dim)';const bc=s.killed>0?'var(--amber)':'var(--grn)';
-      return`<div class="funnel-stage"><div class="fs-name">${s.metric.replace(/_/g,' ')}</div><div class="fs-cond">${s.condition_min||'-'}</div><div class="fs-cond">${s.condition_max||'-'}</div><div class="fs-bar"><div class="fs-bar-fill" style="width:${pct}%;background:${bc}"></div></div><div class="fs-surv">${s.survivors}</div><div class="fs-kill" style="color:${kc}">${s.killed>0?'-'+s.killed:''}</div></div>`;
+      const rid=`fs-${basketId}-${s.key||s.metric}`.replace(/[^a-zA-Z0-9_-]/g,'_');
+      return`<div class="funnel-stage" style="cursor:pointer" onclick="toggleFunnelFilterDetail('${basketId}','${s.key||''}','${rid}')" title="Tap to list passing symbols">
+        <div class="fs-name">${s.metric.replace(/_/g,' ')}</div><div class="fs-cond">${s.condition_min||'-'}</div><div class="fs-cond">${s.condition_max||'-'}</div><div class="fs-bar"><div class="fs-bar-fill" style="width:${pct}%;background:${bc}"></div></div><div class="fs-surv">${s.survivors}</div><div class="fs-kill" style="color:${kc}">${s.killed>0?'-'+s.killed:''}</div></div>
+        <div id="${rid}" class="fs-detail" style="display:none;margin:0 0 8px;padding:8px 10px;background:var(--panel2);border-radius:8px;font-size:11px"></div>`;
     }).join('')}</div>`;
   }else inner+=`<div class="err">funnel_detail not available for ${basketId}</div>`;
   if(pc&&pc.stocks){
@@ -1822,6 +1847,51 @@ async function loadFunnelInline(basketId,panelIdx){
   const body=det.querySelector(':scope > .fi-body');if(body)body.innerHTML=inner;
   const sum=det.querySelector(':scope > summary');
   if(sum){sum.style.color='var(--cyan)';sum.style.cursor='pointer';sum.style.pointerEvents='auto';sum.textContent=`Filter Funnel · ${label}`;}
+}
+// cc#514: Filter Funnel rows -> clickable. Derives the passing-symbol list CLIENT-SIDE from the
+// already-fetched stock_passcount payload (a stock passes filter F iff F is in its passed_filters;
+// cc#514 also added per-filter `actuals` values + a `key` on every funnel_detail stage so this can
+// match rows to filters exactly, no new endpoint). Reconciles the count against the funnel bar's
+// own `survivors` number — a mismatch is SURFACED (red), never silently hidden (founder directive).
+function toggleFunnelFilterDetail(basketId,key,rid){
+  const box=document.getElementById(rid);if(!box)return;
+  if(box.style.display!=='none'&&box.innerHTML){box.style.display='none';box.innerHTML='';return;}
+  const pc=cache['pc_'+basketId],fd=cache['fd_'+basketId];
+  if(!key||!pc||!pc.stocks||!fd||!fd.stages){
+    box.style.display='block';box.innerHTML='<span style="color:var(--dim)">No per-filter detail available for this row.</span>';return;
+  }
+  const stage=fd.stages.find(s=>(s.key||'')===key);
+  let rows;
+  if(key==='_score_band'){
+    // cc#514: buy_momentum's 8th row is the score>=7/10 band, not a passed_filters entry.
+    rows=pc.stocks.filter(x=>x.score_qualified).map(x=>({symbol:x.symbol,val:x.score}));
+    rows.sort((a,b)=>(b.val??-Infinity)-(a.val??-Infinity));
+  }else{
+    rows=pc.stocks.filter(x=>(x.passed_filters||[]).includes(key)).map(x=>({symbol:x.symbol,val:(x.actuals||{})[key]}));
+    // best-first: only-a-floor (condition_min set, no ceiling) -> higher is better (desc); only-a-
+    // ceiling (condition_max set, no floor) -> lower is better (asc); range/neither -> desc default.
+    const hasMin=stage&&stage.condition_min,hasMax=stage&&stage.condition_max;
+    const asc=(!hasMin&&hasMax);
+    rows.sort((a,b)=>{
+      const av=typeof a.val==='boolean'?(a.val?1:0):(a.val==null?-Infinity:Number(a.val));
+      const bv=typeof b.val==='boolean'?(b.val?1:0):(b.val==null?-Infinity:Number(b.val));
+      return asc?(av-bv):(bv-av);
+    });
+  }
+  const n=rows.length,surv=stage?stage.survivors:null;
+  const mismatch=(surv!=null&&n!==surv);
+  let head=mismatch
+    ?`<div style="font-weight:700;margin-bottom:2px;color:var(--red)">${n} of ${pc.universe} pass — funnel bar shows ${surv} (display-convention mismatch, flag to founder)</div>`
+    :`<div style="font-weight:700;margin-bottom:6px">${n} of ${pc.universe} pass</div>`;
+  // cc#514: heavy-stage rows (true_weekly_rsi, score band) carry a server-set denominator note so
+  // the smaller base is never mistaken for a bug ("evaluated on M cheap-gate survivors").
+  if(stage&&stage.denominator!=null)head+=`<div style="color:var(--dim);margin-bottom:6px">${stage.note||('evaluated on '+stage.denominator+' cheap-gate survivors')}</div>`;
+  const fmtVal=v=>v==null?'--':(typeof v==='boolean'?(v?'yes':'no'):(typeof v==='number'?Number(v).toFixed(2):v));
+  const list=rows.length
+    ?`<div style="display:flex;flex-wrap:wrap;gap:6px">${rows.map(r=>`<span style="background:var(--panel);border:1px solid var(--line2);border-radius:6px;padding:3px 8px;font-family:'Space Mono',monospace">${r.symbol} <b>${fmtVal(r.val)}</b></span>`).join('')}</div>`
+    :`<span style="color:var(--dim)">No symbols currently pass this filter.</span>`;
+  box.style.display='block';
+  box.innerHTML=head+list;
 }
 
 // ---- Live News tab (raw RSS headlines, task #46) ---------------------------
@@ -2411,6 +2481,12 @@ setInterval(pollFeedHealth,60*1000);
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
   var _mn=document.getElementById('scorr-nav');if(_mn)_mn.style.display='none';
 }
+// cc#514: ?dc=SYMBOL deep-link -> auto-open the Derivative Cockpit sheet for that symbol (the
+// counterpart to openDerivCockpitTab(), which opens this URL in a new tab from other modals).
+(function(){
+  const _dcSym=new URLSearchParams(location.search).get('dc');
+  if(_dcSym && typeof openDerivCockpit==='function') openDerivCockpit(_dcSym.toUpperCase());
+})();
 </script>
 <script src="/nav_toggle.js" defer></script>
 </body>
