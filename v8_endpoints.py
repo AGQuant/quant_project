@@ -1327,6 +1327,22 @@ def qualified(basket: str, response: Response, limit: int = 50):
             rows = _inject_open_positions(cur, rows, basket, open_pos)
         rows = _enrich_with_status(rows, basket, open_pos, slot_full,
                                    closed_today, conflict_syms, missed)   # cc#326
+        # cc#517 Part D: F&O ban chip (display-only) -- the real entry-skip gate lives in
+        # v8_signal_writer.py's _auto_paper_entry. Table-exists-safe (no-op before cc#517's first run).
+        try:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name='fo_ban'")
+                if cur.fetchone():
+                    cur.execute("SELECT symbol FROM fo_ban WHERE d=(SELECT MAX(d) FROM fo_ban)")
+                    banned = {r[0] for r in cur.fetchall()}
+                    for r in rows:
+                        r["banned"] = r["symbol"] in banned
+                else:
+                    for r in rows:
+                        r["banned"] = False
+        except Exception:
+            for r in rows:
+                r["banned"] = False
         extra = {}
         if basket == "buy_momentum":
             # cc#502 BUY_MOMENTUM_V3: fixed +3.0%/-3.0% (1:1), frozen at entry -- no Nifty-regime

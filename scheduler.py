@@ -1101,6 +1101,21 @@ def _bg_oi_snapshot():
         log.error(f"oi_snapshot: {e}")
 
 
+def _bg_nse_eod_ingest():
+    """cc#517: NSE EOD ingest suite -- delivery, FII/DII cash, participant-wise OI, F&O ban list.
+    Scheduled 18:30 IST trading days with retries at 19:30/20:30 (NSE's own publication windows
+    drift; idempotent upserts make re-running safe -- a retry just re-fills whatever the first
+    pass found not-yet-published)."""
+    try:
+        if not _is_trading_day(_ist_now().date()):
+            return
+        import nse_eod_ingest
+        res = nse_eod_ingest.run_nightly()
+        log.info(f"nse_eod_ingest: {res}")
+    except Exception as e:
+        log.error(f"nse_eod_ingest: {e}")
+
+
 def _bg_oi_feed_health():
     """cc#515: universe-wide futures OI-staleness check (deriv_metrics.check_oi_feed_degradation).
     Per-symbol staleness is already surfaced honestly in the cockpit itself; this is the feed-wide
@@ -2020,6 +2035,11 @@ async def _scheduler_loop():
         if h == 16 and m == 15:
             _spawn(_bg_feed_daily_log)           # cc#495 change_4: daily feed health summary (every day, worker runs weekends too)
             _spawn(_bg_oi_feed_health)           # cc#515: universe-wide futures OI-staleness tripwire (>20% -> oi_feed_degraded)
+        # cc#517: NSE EOD ingest suite, 18:30 IST + retries 19:30/20:30 (idempotent upserts --
+        # a retry just fills whatever NSE hadn't published yet on the prior pass).
+        if now.weekday() < 5 and h == 18 and m == 30: _spawn(_bg_nse_eod_ingest)
+        if now.weekday() < 5 and h == 19 and m == 30: _spawn(_bg_nse_eod_ingest)
+        if now.weekday() < 5 and h == 20 and m == 30: _spawn(_bg_nse_eod_ingest)
         # Nightly batch shifted to 01:00–01:45 IST (task #31). The old 21:00–22:05
         # window collided with CC deploy pushes — a Railway redeploy kills the
         # scheduler mid-job (caused the 18-Jun raw_prices gap). 1 AM = no-push window.

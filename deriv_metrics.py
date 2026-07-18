@@ -611,7 +611,7 @@ _QUADRANT_PHRASE = {
 }
 
 
-def _composite_read(quad, results, basis_block, m, opt, ad, intr, recent3d=None) -> Dict[str, Any]:
+def _composite_read(quad, results, basis_block, m, opt, ad, intr, recent3d=None, delivery=None) -> Dict[str, Any]:
     """cc#515: ONE deterministic, plain-language desk read synthesizing the tiles the founder
     currently combines mentally -- no LLM, every number quoted comes from the same payload fields
     the tiles themselves render (zero recompute, zero drift). Votes collected: OI quadrant,
@@ -686,6 +686,15 @@ def _composite_read(quad, results, basis_block, m, opt, ad, intr, recent3d=None)
             votes.append(("bull" if price_chg > 0 else "bear", f"participation rising ({recent3d}x)"))
         elif recent3d <= 0.8:
             cautions.append(f"participation drying up ({recent3d}x)")
+
+    # 7) cc#517 Part A: delivery-confirmed direction -- conviction volume (ratio>=1.2 vs the
+    # symbol's own 21d avg) confirms the day's price direction; churn is a caution.
+    if delivery and delivery.get("ratio") is not None and price_chg is not None:
+        if delivery["label"] == "conviction":
+            votes.append(("bull" if price_chg > 0 else "bear",
+                           f"delivery conviction ({delivery['deliv_pct']}% vs {delivery['avg21']}% avg)"))
+        elif delivery["label"] == "churn":
+            cautions.append(f"delivery churn ({delivery['deliv_pct']}% vs {delivery['avg21']}% avg)")
 
     n_bull = sum(1 for v in votes if v[0] == "bull")
     n_bear = sum(1 for v in votes if v[0] == "bear")
@@ -765,7 +774,7 @@ def _fmt2(v):
     return "--" if v is None else f"{v:.2f}"
 
 
-def _build_meanings(quad, basis_block, m, opt, ad, intr, atr_d, results, recent3d) -> Dict[str, Optional[str]]:
+def _build_meanings(quad, basis_block, m, opt, ad, intr, atr_d, results, recent3d, delivery=None) -> Dict[str, Optional[str]]:
     """cc#516 Part B: ONE deterministic "meaning" line per tile, template-driven from the SAME
     payload values the tiles themselves render -- no recompute, no LLM. Returned as a flat dict;
     the frontend renders each value (when non-None) as small dim text under its tile."""
@@ -847,6 +856,27 @@ def _build_meanings(quad, basis_block, m, opt, ad, intr, atr_d, results, recent3
     if quad and quad.get("proxy"):
         out["oi_quadrant"] = "proxy read — OI dark, inferred from basis + price"
 
+    # cc#517 Part A: delivery meaning + the founder-specified 2x2 with recent3d participation
+    # (the decisive corners: quiet+high delivery / loud+low / loud+high / quiet+low).
+    if delivery and delivery.get("ratio") is not None:
+        if delivery["label"] == "conviction":
+            out["delivery"] = "conviction volume — positions carried home"
+        elif delivery["label"] == "churn":
+            out["delivery"] = "churn"
+        else:
+            out["delivery"] = f"avg building ({delivery.get('avg21_n', 0)}/21)" if delivery.get("avg21_n", 21) < 21 else None
+        if recent3d is not None:
+            loud, quiet = recent3d >= 1.3, recent3d <= 0.8
+            high, low = delivery["ratio"] >= 1.2, delivery["ratio"] <= 0.7
+            if quiet and high:
+                out["delivery_combo"] = "quiet accumulation"
+            elif loud and low:
+                out["delivery_combo"] = "speculative churn"
+            elif loud and high:
+                out["delivery_combo"] = "institutional-grade move"
+    elif delivery and delivery.get("avg21_n") is not None and delivery.get("avg21_n", 0) < 21:
+        out["delivery"] = f"avg building ({delivery['avg21_n']}/21)"
+
     return out
 
 
@@ -896,6 +926,41 @@ def _recent3d_vol_ratio(cur, sym) -> Optional[float]:
     avg3 = sum(vols[:3]) / 3.0
     avg21 = sum(vols[:21]) / 21.0
     return round(avg3 / avg21, 2) if avg21 else None
+
+
+def _delivery_block(cur, sym) -> Optional[Dict[str, Any]]:
+    """cc#517 Part A: latest delivery% vs the symbol's OWN 21d average (never an absolute band).
+    Reads delivery_eod (cc#517's nightly NSE ingest) -- returns None gracefully before that table
+    has rows for this symbol (pre-first-run, or a non-EQ/non-F&O name)."""
+    try:
+        from nse_eod_ingest import delivery_21d_avg
+    except Exception:
+        return None
+    cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name='delivery_eod'")
+    if not cur.fetchone():
+        return None
+    cur.execute("SELECT d, deliv_pct, traded_qty FROM delivery_eod WHERE symbol=%s ORDER BY d DESC LIMIT 1", (sym,))
+    r = cur.fetchone()
+    if not r or r[1] is None:
+        return None
+    d_latest, deliv_pct, traded_qty = r[0], float(r[1]), r[2]
+    avg21, n = delivery_21d_avg(cur, sym, d_latest)
+    ratio = round(deliv_pct / avg21, 2) if avg21 else None
+    label = None
+    if ratio is not None:
+        label = "conviction" if ratio >= 1.2 else ("churn" if ratio <= 0.7 else None)
+    return {"d": str(d_latest), "deliv_pct": deliv_pct, "avg21": avg21, "avg21_n": n,
+            "ratio": ratio, "label": label, "traded_qty": traded_qty}
+
+
+def _fo_banned_today(cur, sym) -> bool:
+    """cc#517 Part D: SETUP CONTEXT chip only (display) -- the real entry-skip gate lives in
+    v8_signal_writer.py. Table-exists-checked first so this is a no-op before fo_ban's first row."""
+    cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name='fo_ban'")
+    if not cur.fetchone():
+        return False
+    cur.execute("SELECT 1 FROM fo_ban WHERE d=(SELECT MAX(d) FROM fo_ban) AND symbol=%s", (sym,))
+    return cur.fetchone() is not None
 
 
 def _atr_daily(cur, sym, period=14):
@@ -1065,6 +1130,11 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             # cc#516 Part C.1b/C.2: EOD futures-OI fallback (cc#517's nightly bhavcopy job) --
             # forward-compatible no-op until that table exists / carries a row for this symbol.
             eod_fut_oi = _safe("eod_fut_oi", lambda: _eod_fut_oi_fallback(cur, sym))
+            # cc#517 Part A: delivery vs own 21d avg
+            delivery = _safe("delivery", lambda: _delivery_block(cur, sym))
+            # cc#517 Part D: F&O ban SETUP CONTEXT chip (display-only; the actual entry-skip gate
+            # lives in v8_signal_writer.py's _auto_paper_entry)
+            fo_banned = _safe("fo_banned", lambda: _fo_banned_today(cur, sym), False)
             # cc#368: freshness stamp = latest available option_chain snapshot for this underlying.
             # The chain blocks already read MAX(ts) (never today-only), so off-market/weekend still
             # returns the last live snapshot; data_ts lets the UI label it honestly ("as of <ts>")
@@ -1105,12 +1175,12 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
         # cc#515/516: composite plain-language READ tile -- one deterministic desk synthesis of the
         # tiles above, cited from these SAME already-computed values (no recompute, no drift).
         read = _safe("composite_read",
-                      lambda: _composite_read(_quad_raw, results, basis, m, opt, ad, intr, recent3d),
+                      lambda: _composite_read(_quad_raw, results, basis, m, opt, ad, intr, recent3d, delivery),
                       {"label": "NO READ", "direction": "MIXED", "n": 0, "m": 0, "conflict": False,
                        "sentence": "insufficient data.", "cautions": [], "dark": []})
         # cc#516 Part B: per-tile interpretation lines
         meanings = _safe("meanings",
-                          lambda: _build_meanings(oi_quadrant_resp, basis, m, opt, ad, intr, atr_d, results, recent3d),
+                          lambda: _build_meanings(oi_quadrant_resp, basis, m, opt, ad, intr, atr_d, results, recent3d, delivery),
                           {})
 
         resp = {
@@ -1120,6 +1190,7 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
             "results": results,   # cc#515: Results chip
             "read": read,         # cc#515: composite READ tile
             "meanings": meanings, # cc#516 Part B: per-tile interpretation lines
+            "fo_banned": fo_banned,   # cc#517 Part D: SETUP CONTEXT "F&O BAN" chip (display only)
             "verdict": {
                 "oi_quadrant": oi_quadrant_resp,
                 "options_cost": opt.get("options_cost"),
@@ -1144,7 +1215,8 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                        "atr_5m": intr.get("atr_5m"), "atr_5m_pct": intr.get("atr_5m_pct"),   # cc#445 fix_6
                        "atr_daily": atr_d, "tr_today": intr.get("tr_today"),
                        "atr_daily_pct": round(atr_d / cmp_px * 100.0, 2) if (atr_d and cmp_px) else None,
-                       "recent3d_vol_ratio": recent3d},   # cc#516 Part D
+                       "recent3d_vol_ratio": recent3d,     # cc#516 Part D
+                       "delivery": delivery},              # cc#517 Part A
             "rsi": {"d": m.get("rsi_d"), "w": m.get("rsi_w")},
         }
         return resp

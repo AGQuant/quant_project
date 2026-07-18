@@ -1268,6 +1268,19 @@ def _auto_paper_entry(conn, sym: str, basket: str, side: str, cmp: Optional[floa
     if not cmp or not pv:
         return
 
+    # cc#517: F&O ban list gate -- exchange forbids fresh positions in a banned symbol; paper must
+    # not take entries a real account couldn't. Exits are untouched (only this NEW-entry path is
+    # gated). Fails OPEN (doesn't block) on any lookup error / before fo_ban has its first nightly
+    # row -- an infra hiccup here must never become a new source of missed entries.
+    try:
+        from nse_eod_ingest import is_banned_today
+        with conn.cursor() as cur:
+            if is_banned_today(cur, sym):
+                log.info(f"auto_paper {sym}: skipped -- F&O ban list (cc#517)")
+                return
+    except Exception as e:
+        log.debug(f"auto_paper {sym}: fo_ban check skipped ({e})")
+
     now_ist = _now(sim_ts)   # cc#218: sim_ts=None => naive datetime.now(IST); gate logic identical
     if not guards.in_entry_window(now_ist):   # cc#217 P2: was inline 09:15-15:20 block
         log.debug(f"auto_paper {sym}: skipped -- outside market hours {now_ist.strftime('%H:%M')} IST")

@@ -1062,6 +1062,8 @@ function _dcSetupContext(d){
   }
   const t=(d.verdict||{}).tc_score;
   if(t)chips.push(`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:${_dcColor(t.color)}">${t.style||t.label||'TC'} ${t.score!=null?num(t.score,1):'--'}/${t.total||''}</span>`);
+  // cc#517 Part D: F&O BAN chip — display-only context; the real entry-skip gate is in v8_signal_writer.py.
+  if(d.fo_banned)chips.push(`<span class="dc-chip dc-neg" style="background:rgba(255,92,108,.16)">&#9888; F&amp;O BAN</span>`);
   return `<div id="dcSetupCtx" style="margin:0 0 10px">${chips.join('')}</div>`;
 }
 // cc#516 Part A: best-effort, non-blocking V8 basket-status context chip. Reuses the existing
@@ -1155,6 +1157,14 @@ function _dcRender(sym,side,qty,entry,cmp,d){
   const r3=E.recent3d_vol_ratio;
   energy+=_dcR('Recent participation &middot; 3d/21d',
     r3!=null?`<span class="${r3>=1?'dc-pos':'dc-neg'}">${num(r3,2)}×</span>`:'--','vol(t-1..t-3) vs vol(t-1..t-21)',M.recent3d_vol_ratio);
+  // cc#517 Part A: Delivery — latest deliv% vs the symbol's OWN 21d avg (never an absolute band).
+  const dv=E.delivery;
+  const dvMeaning=[M.delivery,M.delivery_combo].filter(Boolean).join(' &middot; ');
+  energy+=_dcR('Delivery &middot; vs own 21d avg',
+    dv&&dv.ratio!=null?`<span class="${dv.ratio>=1?'dc-pos':'dc-neg'}">${num(dv.deliv_pct,1)}%</span> <small class="${dv.ratio>=1?'dc-pos':'dc-neg'}">${num(dv.ratio,2)}×</small>`
+      :(dv&&dv.deliv_pct!=null?`${num(dv.deliv_pct,1)}%`:'--'),
+    dv&&dv.avg21!=null?`avg ${num(dv.avg21,1)}% (${dv.avg21_n}/21)`:'',
+    dvMeaning||undefined);
   const ad=E.ad_21d;
   energy+=_dcR('A/D &middot; 21d',
     ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',
@@ -1711,9 +1721,12 @@ function renderMaster(){
 // are untouched.
 const BK_COLS=[["symbol","Symbol"],["day_1d","1D%"],["mom_2d","2D Mom%"],["dma_50","DMA50"],["rsi_month","RSIm"],["gvm_score","GVM"],["cmp","CMP"],["pp","PP"],["r1","R1"],["s1","S1"],["entry_price","Entry"],["open_pnl_pct","P&L%"],["signal_ts","Since"]];
 function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?'score-mid':'neg';}
+// cc#517 Part D: F&O ban chip -- exchange forbids fresh positions; the writer already skips new
+// entries (v8_signal_writer.py), this just makes the restriction visible on the row.
+function _banChip(x){return x&&x.banned?' <span class="badge" style="background:rgba(255,92,108,.16);color:var(--red)" title="F&O ban list -- no new entries today">BAN</span>':'';}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}</td>
+    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -1728,7 +1741,7 @@ function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen
     <td style="color:var(--dim);font-size:11px">${fmtSince(x.signal_ts)}</td></tr>`;}
 function bkMobile(sorted,isSell){return`<div class="mob-cards">${sorted.map(x=>{const st=x.status||'SIGNAL';const isOpen=st==='OPEN';const bc=isSell?'b-short':'b-long';
     return`<div class="mob-card ${mobCardClass(st)}"><div class="mob-card-header"><span class="mob-sym">${x.symbol}</span>
-      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
+      <div style="display:flex;gap:6px;align-items:center">${statusBadge(st,x.signal_reason)}${_banChip(x)}<span class="mob-badge ${bc}">${isSell?'SELL':'BUY'}</span></div></div>
       <div class="mob-chips">
         <span class="mob-chip ${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'% 1D':'1D --'}</span>
         <span class="mob-chip ${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'% 2D':'2D --'}</span>

@@ -283,6 +283,8 @@ app.include_router(tc_scanner_router)         # cc#464: TC Scanner
 app.include_router(structure_router)
 from deriv_metrics import deriv_router          # cc#346: DERIVATIVE COCKPIT data layer
 app.include_router(deriv_router)
+from nse_eod_ingest import nse_eod_router       # cc#517: NSE EOD ingest suite (delivery/FII-DII/participant OI/F&O ban)
+app.include_router(nse_eod_router)
 app.include_router(performance_router)
 app.include_router(scheduler_health_router)
 app.include_router(news_router)
@@ -976,6 +978,20 @@ def _build_digest_daily() -> dict:
                 cur.execute("SELECT price_date::text, put_oi, call_oi, pcr FROM pcr_daily WHERE underlying=%s ORDER BY price_date DESC LIMIT 5", (und,))
                 cols2 = [d[0] for d in cur.description]; pcr_out[und] = [dict(zip(cols2, row)) for row in cur.fetchall()]
             result["sections"]["5_pcr_trend"] = {"label": "PCR Trend (5-day rolling)", "NIFTY": pcr_out.get("NIFTY",[]), "BANKNIFTY": pcr_out.get("BANKNIFTY",[])}
+            # cc#517: FII/DII cash + FII index-futures positioning (participant-wise OI). Computed
+            # in nse_eod_ingest.py (single source, no recompute here); a blank section before the
+            # first nightly run is expected, not an error.
+            try:
+                from nse_eod_ingest import fii_dii_streak_and_5d, fii_index_futures_positioning
+                fii = fii_dii_streak_and_5d(cur, "FII")
+                dii = fii_dii_streak_and_5d(cur, "DII")
+                positioning = fii_index_futures_positioning(cur)
+                result["sections"]["6_market_positioning"] = {
+                    "label": "FII/DII + Positioning (NSE EOD)",
+                    "fii_dii": {"FII": fii, "DII": dii}, "fii_index_futures": positioning,
+                }
+            except Exception as e:
+                log.warning(f"digest market_positioning section: {e}")
     except Exception as e:
         log.error(f"_build_digest_daily failed: {e}"); result["error"] = str(e)
     return result
