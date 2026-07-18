@@ -49,6 +49,14 @@ def _conn(statement_timeout_ms: int = 0):
                          f"-c idle_in_transaction_session_timeout={statement_timeout_ms}")
     return psycopg.connect(DATABASE_URL, **kw)
 
+_SKIPPED = "SKIPPED"   # cc#526: sentinel a flag-gated job returns from a no-op tick so the
+                        # recorder can tell "did nothing" apart from "ran and succeeded" --
+                        # scheduler_master previously stamped last_status='ok' on every single
+                        # no-op tick of a flag-gated job (e.g. the 4 ops-metrics jobs, checked
+                        # every 60s but only ever DOING something when their flag is 'pending'),
+                        # which made a job that hadn't actually run in days look perfectly healthy.
+
+
 def _run_recorded(fn, args):
     """cc#525 run recorder: wraps the job call so every _spawn dispatch upserts
     last_run_at/last_status/last_error/last_duration_ms into scheduler_master, with ZERO
@@ -66,7 +74,8 @@ def _run_recorded(fn, args):
         raise
     try:
         import scheduler_master
-        scheduler_master.record_run(fn.__name__, "ok", None, int((time.time() - t0) * 1000))
+        status = "skipped" if result == _SKIPPED else "ok"
+        scheduler_master.record_run(fn.__name__, status, None, int((time.time() - t0) * 1000))
     except Exception:
         pass
     return result
@@ -1777,16 +1786,37 @@ def _bg_ops_metrics_backfill():
     POST /api/admin/ops_metrics/run_backfill) AND the monthly incremental re-run (armed by
     _bg_ops_metrics_monthly below on the 5th of each month) -- run_company()'s idempotency
     check (doc URL unchanged + already extracted -> 'already_current', no LLM re-spend) is what
-    makes reusing the identical runner safe for both call sites."""
+    makes reusing the identical runner safe for both call sites.
+
+    cc#526 item 2: window-gated to 01:00-06:00 IST, same overnight slot cc#361's fundamentals
+    backfill used successfully on 11-Jul -- this pipeline hits the same screener.in pages, so
+    it should share the same politeness window rather than scraping at arbitrary times of day.
+    A stale-running resume (see below) also waits for this window rather than firing immediately."""
     global _ops_metrics_running
     if _ops_metrics_running:
-        return
+        return _SKIPPED
+    now_ist = datetime.now(IST)
+    if not (1 <= now_ist.hour < 6):
+        return _SKIPPED
     try:
         with _conn() as conn, conn.cursor() as cur:
-            cur.execute("SELECT value FROM app_config WHERE key='ops_metrics_backfill_run'")
+            # cc#526 BUG FIX: a Railway redeploy mid-run kills this process with a SIGTERM, not
+            # a catchable Python exception -- the 'except Exception' below that resets the flag
+            # back to 'pending' on failure never runs, so the flag was found stuck at 'running'
+            # forever (confirmed live: value='running' since 06:12, cursor frozen at company
+            # 275/500, 18-Jul). Any 'running' value older than STALE_RUNNING_MIN is now treated
+            # as an orphaned/crashed run and retried rather than blocking indefinitely.
+            cur.execute("""SELECT value, EXTRACT(EPOCH FROM (NOW()-updated_at))/60.0
+                           FROM app_config WHERE key='ops_metrics_backfill_run'""")
             r = cur.fetchone()
-        if not r or r[0] != 'pending':
-            return
+        STALE_RUNNING_MIN = 20
+        is_pending = r and r[0] == 'pending'
+        is_stale_running = r and r[0] == 'running' and r[1] is not None and r[1] > STALE_RUNNING_MIN
+        if not (is_pending or is_stale_running):
+            return _SKIPPED
+        if is_stale_running:
+            log.warning(f"_bg_ops_metrics_backfill: flag stuck at 'running' for {r[1]:.0f} min -- "
+                        f"treating as an orphaned run (likely killed by a mid-run redeploy) and resuming")
         _ops_metrics_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('ops_metrics_backfill_run','running',NOW()) "
@@ -1831,10 +1861,10 @@ def _bg_ops_metrics_t1():
     global _ops_metrics_t1_armed_day
     now = datetime.now(IST)
     if not (now.hour == 8 and now.minute < 10):
-        return
+        return _SKIPPED
     day_key = now.date().isoformat()
     if _ops_metrics_t1_armed_day == day_key:
-        return
+        return _SKIPPED
     _ops_metrics_t1_armed_day = day_key
     try:
         import ops_metrics_pipeline
@@ -1850,10 +1880,10 @@ def _bg_ops_metrics_saturday():
     global _ops_metrics_saturday_armed_day
     now = datetime.now(IST)
     if not (now.weekday() == 5 and now.hour == 10 and now.minute < 10):
-        return
+        return _SKIPPED
     day_key = now.date().isoformat()
     if _ops_metrics_saturday_armed_day == day_key:
-        return
+        return _SKIPPED
     _ops_metrics_saturday_armed_day = day_key
     try:
         import ops_metrics_pipeline
@@ -1870,12 +1900,12 @@ def _bg_ops_metrics_season_sweep():
     global _ops_metrics_season_armed_month
     now = datetime.now(IST)
     if now.month not in (3, 6, 9, 12):
-        return
+        return _SKIPPED
     if not (now.day == 1 and now.hour == 10 and now.minute < 10):
-        return
+        return _SKIPPED
     month_key = f"{now.year}-{now.month:02d}"
     if _ops_metrics_season_armed_month == month_key:
-        return
+        return _SKIPPED
     _ops_metrics_season_armed_month = month_key
     try:
         import ops_metrics_pipeline

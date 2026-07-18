@@ -526,6 +526,7 @@ def _fetch_pdf_text(url, doc_type):
 # ── 5. EXTRACTION (anthropic call, two-pass) ────────────────────────────────────
 
 _ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+_warned_no_anthropic_key = False
 # cc#524 cost control: HAIKU is the default extraction model (strict JSON schema + mandatory
 # source quotes keep it reliable for this structured task); SONNET is the escalation tier, used
 # only when Haiku's own result signals trouble (see _should_escalate below) -- never routine.
@@ -542,6 +543,21 @@ def _anthropic_call(prompt, max_tokens=2000, model=HAIKU_MODEL):
     failure, so callers can accumulate real token spend (cc#524: "log actual token spend...
     so the number is known, not guessed")."""
     if not _ANTHROPIC_KEY:
+        # cc#526 item 2: this used to fail silent -- a missing ANTHROPIC_API_KEY would make
+        # every extraction pass quietly return None with no diagnostic trail at all. Now logged
+        # once per process (not once per call, which would spam ops_log every company) so a
+        # missing key is immediately visible instead of looking identical to "no docs found".
+        global _warned_no_anthropic_key
+        if not _warned_no_anthropic_key:
+            _warned_no_anthropic_key = True
+            log.error("ANTHROPIC_API_KEY not set -- ops-metrics extraction will no-op for every company")
+            try:
+                with _conn() as _c, _c.cursor() as _cur:
+                    _oplog(_cur, "OPS_METRICS_NO_API_KEY",
+                           {"message": "ANTHROPIC_API_KEY missing -- extraction calls no-op"})
+                    _c.commit()
+            except Exception:
+                pass
         return None, {}
     try:
         r = httpx.post("https://api.anthropic.com/v1/messages", timeout=60,
@@ -757,7 +773,16 @@ def run_company(symbol, conn=None, force=False):
             if not registry:
                 return {"symbol": symbol, "status": "no_registry", "sector": sector}
 
-            docs = _discover_docs(symbol)
+            # cc#526 item 2b: discovery gets its own try/except -- see run_company_depth's
+            # identical rationale.
+            try:
+                docs = _discover_docs(symbol)
+            except Exception as e:
+                err_text = f"discovery failed: {type(e).__name__}: {e}"
+                log.warning(f"run_company discovery failed for {symbol}: {err_text}")
+                _record_failure(cur, symbol, err_text)
+                conn.commit()
+                return {"symbol": symbol, "status": "fetch_blocked", "sector": sector, "error": err_text[:200]}
             quarter_hint = (docs.get("transcript") or docs.get("presentation") or {}).get("quarter") or "unspecified"
 
             if not force:
@@ -774,8 +799,15 @@ def run_company(symbol, conn=None, force=False):
                 if unchanged and any(existing.get(dt, (None, None))[1] == "ok" for dt in ("presentation", "transcript")):
                     return {"symbol": symbol, "status": "already_current", "sector": sector}
 
-            _upsert_doc_registry(cur, symbol, docs)
-            conn.commit()
+            try:
+                _upsert_doc_registry(cur, symbol, docs)
+                conn.commit()
+            except Exception as e:
+                err_text = f"doc_registry upsert failed: {type(e).__name__}: {e}"
+                log.warning(f"run_company upsert failed for {symbol}: {err_text}")
+                _record_failure(cur, symbol, err_text)
+                conn.commit()
+                return {"symbol": symbol, "status": "fetch_blocked", "sector": sector, "error": err_text[:200]}
 
             pres_url = (docs.get("presentation") or {}).get("url")
             trans_url = (docs.get("transcript") or {}).get("url")
@@ -791,7 +823,7 @@ def run_company(symbol, conn=None, force=False):
                                        ON CONFLICT (symbol, doc_type, quarter) DO UPDATE SET extract_status='absent'""",
                                     (symbol, dt, q))
                 conn.commit()
-                _record_failure(cur, symbol)
+                _record_failure(cur, symbol, "no presentation/transcript text extracted (docs missing or PDF unreadable)")
                 conn.commit()
                 return {"symbol": symbol, "status": "no_docs", "sector": sector}
 
@@ -813,14 +845,15 @@ def run_company(symbol, conn=None, force=False):
                     "metrics_found": n_found, "metrics_total": len(registry),
                     "has_concall": result["concall"] is not None, "model_used": result["model_used"]}
     except Exception as e:
-        log.error(f"run_company failed for {symbol}: {e}", exc_info=True)
+        err_text = f"{type(e).__name__}: {e}"
+        log.error(f"run_company failed for {symbol}: {err_text}", exc_info=True)
         try:
             with conn.cursor() as cur:
-                _record_failure(cur, symbol)
+                _record_failure(cur, symbol, err_text)
                 conn.commit()
-        except Exception:
-            pass
-        return {"symbol": symbol, "status": "error", "error": str(e)[:200]}
+        except Exception as e2:
+            log.error(f"run_company: _record_failure ALSO failed for {symbol}: {e2}")
+        return {"symbol": symbol, "status": "error", "error": err_text[:200]}
     finally:
         if own:
             conn.close()
@@ -845,9 +878,23 @@ def run_company_depth(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
             if not registry:
                 return {"symbol": symbol, "status": "no_registry", "sector": sector, "quarters": []}
 
-            docs_multi = _discover_docs_multi(symbol, max_quarters=max_quarters)
-            _upsert_doc_registry(cur, symbol, docs_multi)
-            conn.commit()
+            # cc#526 item 2b: the discovery step (screener fetch + doc_registry upsert) gets its
+            # own try/except -- a fetch/parse/DB exception here must never be conflated with a
+            # generic "error" that looks the same as an extraction failure. Classified as
+            # 'fetch_blocked': the symbol stays resumable (cursor still advances so the backfill
+            # doesn't stall, but next run's idempotency check will naturally retry it since no
+            # doc_registry row got marked 'ok').
+            try:
+                docs_multi = _discover_docs_multi(symbol, max_quarters=max_quarters)
+                _upsert_doc_registry(cur, symbol, docs_multi)
+                conn.commit()
+            except Exception as e:
+                err_text = f"discovery failed: {type(e).__name__}: {e}"
+                log.warning(f"run_company_depth discovery failed for {symbol}: {err_text}")
+                _record_failure(cur, symbol, err_text)
+                conn.commit()
+                return {"symbol": symbol, "status": "fetch_blocked", "sector": sector,
+                        "error": err_text[:200], "quarters": []}
 
             # Pair up presentation/transcript entries by quarter label (best-effort match --
             # screener usually lists both for the same quarter adjacently, but a doc missing
@@ -887,19 +934,22 @@ def run_company_depth(symbol, conn=None, max_quarters=DEPTH_QUARTERS):
                 _clear_failure(cur, symbol)
                 post_extraction_chain(cur, symbol, sector)
             else:
-                _record_failure(cur, symbol)
+                no_docs_reason = ("no presentation/transcript filings discovered at all" if not by_quarter
+                                   else f"discovered {len(by_quarter)} quarter(s) but none had readable text")
+                _record_failure(cur, symbol, no_docs_reason)
             conn.commit()
             return {"symbol": symbol, "status": "ok" if any_ok else "no_docs", "sector": sector,
                     "quarters": quarters_done}
     except Exception as e:
-        log.error(f"run_company_depth failed for {symbol}: {e}", exc_info=True)
+        err_text = f"{type(e).__name__}: {e}"
+        log.error(f"run_company_depth failed for {symbol}: {err_text}", exc_info=True)
         try:
             with conn.cursor() as cur:
-                _record_failure(cur, symbol)
+                _record_failure(cur, symbol, err_text)
                 conn.commit()
-        except Exception:
-            pass
-        return {"symbol": symbol, "status": "error", "error": str(e)[:200], "quarters": []}
+        except Exception as e2:
+            log.error(f"run_company_depth: _record_failure ALSO failed for {symbol}: {e2}")
+        return {"symbol": symbol, "status": "error", "error": err_text[:200], "quarters": []}
     finally:
         if own:
             conn.close()
@@ -940,12 +990,20 @@ def _build_universe(cur):
     return ordered
 
 
+OPS_THROTTLE = 5.0   # cc#526: dedicated, more polite than fundamentals_scraper's THROTTLE (2.5s)
+                      # -- this pipeline hits the same screener.in pages fundamentals_scraper
+                      # does, PLUS a PDF fetch on top, so it should be gentler, not equally fast.
+
+
 def run_ops_metrics_backfill(conn=None, stop_event=None):
     """cc#524: first-leg 500-company backfill, now DEPTH_QUARTERS (4) quarters per company
     (was 1 under cc#523) via run_company_depth. Checkpointed like cc#500's mc_oneshot: cursor =
     last-completed symbol, advanced after every single item so a crash mid-run loses at most
-    one company's progress. Polite pacing (THROTTLE from fundamentals_scraper, same session/
-    backoff) between companies. Token spend rolled up to ops_log every 100 companies."""
+    one company's progress. OPS_THROTTLE pacing between companies. Token spend rolled up to
+    ops_log every 100 companies.
+
+    cc#526: progress logs now carry a sample_error (first error string seen in that 25-batch)
+    so a systematic failure is diagnosable from ops_log alone, without needing a manual repro."""
     own = conn is None
     conn = conn or _conn()
     try:
@@ -957,7 +1015,8 @@ def run_ops_metrics_backfill(conn=None, stop_event=None):
             pending = universe[start_idx:]
             conn.commit()
 
-        ok = miss = err = 0
+        ok = miss = err = blocked = 0
+        sample_error = None
         for i, sym in enumerate(pending):
             if stop_event is not None and stop_event.is_set():
                 break
@@ -966,23 +1025,31 @@ def run_ops_metrics_backfill(conn=None, stop_event=None):
                 ok += 1
             elif r["status"] == "no_docs":
                 miss += 1
+            elif r["status"] == "fetch_blocked":
+                blocked += 1
+                if sample_error is None:
+                    sample_error = r.get("error")
             elif r["status"] == "error":
                 err += 1
+                if sample_error is None:
+                    sample_error = r.get("error")
             with conn.cursor() as cur:
                 _cfg_set(cur, CURSOR_KEY, sym)
                 conn.commit()
             if (i + 1) % 25 == 0:
                 with conn.cursor() as cur:
                     _oplog(cur, "OPS_METRICS_BACKFILL_PROGRESS",
-                           {"done": i + 1, "total": len(pending), "ok": ok, "no_docs": miss, "errors": err})
+                           {"done": i + 1, "total": len(pending), "ok": ok, "no_docs": miss,
+                            "fetch_blocked": blocked, "errors": err, "sample_error": sample_error})
                     conn.commit()
+                sample_error = None   # fresh sample per batch, not one stale error forever
             if (i + 1) % 100 == 0:
                 log_token_rollup(conn)
-            time.sleep(THROTTLE)
+            time.sleep(OPS_THROTTLE)
 
         with conn.cursor() as cur:
             summary = {"universe": len(universe), "processed": len(pending), "ok": ok,
-                       "no_docs": miss, "errors": err,
+                       "no_docs": miss, "fetch_blocked": blocked, "errors": err,
                        "stopped_early": bool(stop_event and stop_event.is_set())}
             _oplog(cur, "OPS_METRICS_BACKFILL_DONE", summary)
             if not (stop_event and stop_event.is_set()):
@@ -999,19 +1066,32 @@ def run_ops_metrics_backfill(conn=None, stop_event=None):
 # ── 6b. ANALYTICS LAYER (cc#524) -- all computed from data already sitting in
 # sector_ops_metrics/concall_summaries, zero new scraping/data ────────────────
 
-def _record_failure(cur, symbol):
+def _record_failure(cur, symbol, error=None):
     """cc#524 failure rule: 2 consecutive failed extractions -> persistent ops_log warning
-    (not silent NO DATA forever)."""
-    cur.execute("""INSERT INTO ops_metrics_failures (symbol, consecutive_failures, last_failure_at)
-                   VALUES (%s, 1, NOW())
+    (not silent NO DATA forever).
+
+    cc#526 BUG FIX: this never wrote last_error (column existed, was never populated in the
+    INSERT), and worse -- callers invoke this from an `except Exception:` handler on the SAME
+    connection whose transaction may already be ABORTED by whatever raised. Postgres refuses
+    every subsequent statement on an aborted transaction (InFailedSqlTransaction) until a
+    ROLLBACK, so the original cc#524 code's own failure-recording call was itself silently
+    swallowed by the caller's `except Exception: pass` around it -- explaining why
+    ops_metrics_failures had ZERO rows despite 267 real errors in the 18-Jul backfill run.
+    Rolling back here first makes this call succeed regardless of the connection's prior state."""
+    try:
+        cur.connection.rollback()
+    except Exception:
+        pass
+    cur.execute("""INSERT INTO ops_metrics_failures (symbol, consecutive_failures, last_failure_at, last_error)
+                   VALUES (%s, 1, NOW(), %s)
                    ON CONFLICT (symbol) DO UPDATE SET
                      consecutive_failures = ops_metrics_failures.consecutive_failures + 1,
-                     last_failure_at = NOW()
-                   RETURNING consecutive_failures""", (symbol,))
+                     last_failure_at = NOW(), last_error = EXCLUDED.last_error
+                   RETURNING consecutive_failures""", (symbol, (error or "")[:300] if error else None))
     n = cur.fetchone()[0]
     if n >= 2:
         _oplog(cur, "OPS_METRICS_PERSISTENT_FAILURE",
-               {"symbol": symbol, "consecutive_failures": n,
+               {"symbol": symbol, "consecutive_failures": n, "last_error": (error or "")[:300] if error else None,
                 "message": f"{symbol} has failed ops-metrics extraction {n} runs in a row"})
 
 

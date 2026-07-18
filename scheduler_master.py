@@ -82,6 +82,24 @@ def _walk_spawns(node, conditions, out):
             _walk_spawns(child, conditions, out)
 
 
+# cc#526 item 4: a handful of jobs are dispatched UNCONDITIONALLY every tick (no if-gate at the
+# _spawn call site) but self-gate INSIDE their own function body against an app_config flag or
+# an internal day/hour check -- the simple AST walker above only sees the dispatch call, not
+# the body, so it reported "every tick (unconditional)" for these, which is technically true of
+# the dispatch but misleading about the job's real cadence. Manual override for the jobs whose
+# real gate lives inside the function (checked against scheduler.py by hand; update this map if
+# one of these functions' internal gating ever changes).
+_CADENCE_OVERRIDES = {
+    "bg_ops_metrics_backfill": "armed-flag-only (app_config ops_metrics_backfill_run='pending'); "
+                                "checked every tick, runs only when armed",
+    "bg_ops_metrics_t1": "daily ~08:00-08:10 IST (self-gated inside the function; day-locked)",
+    "bg_ops_metrics_saturday": "Saturdays 10:00-10:10 IST (self-gated inside the function; day-locked)",
+    "bg_ops_metrics_season_sweep": "1st of Sep/Dec/Mar/Jun, 10:00-10:10 IST (self-gated inside the function; month-locked)",
+    "bg_mf_mc_discover": "armed-flag-only (app_config mf_mc_discover_run); checked every tick, runs only when armed",
+    "bg_mf_mc_oneshot": "armed-flag-only (app_config mf_mc_oneshot_run); checked every tick, runs only when armed",
+}
+
+
 def enumerate_scheduler_jobs():
     """AST-parses scheduler.py's _scheduler_loop for every _spawn(fn) call site, paired with
     its enclosing if-condition chain (the job's real cadence, straight from the dispatch
@@ -103,7 +121,8 @@ def enumerate_scheduler_jobs():
         by_job.setdefault(r["job"], []).append(" AND ".join(r["conditions"]) or "every tick (unconditional)")
     jobs = []
     for job, conds in by_job.items():
-        jobs.append({"job_name": job, "cadence_human": "; ".join(sorted(set(conds))),
+        cadence = _CADENCE_OVERRIDES.get(job, "; ".join(sorted(set(conds))))
+        jobs.append({"job_name": job, "cadence_human": cadence,
                      "module": "scheduler.py", "function": job, "service": "app",
                      "category": "scheduler_loop"})
     return jobs
