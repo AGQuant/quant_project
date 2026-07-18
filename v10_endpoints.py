@@ -79,6 +79,34 @@ def v10_trades(limit: int = 200):
     return {"closed_trades": v10_st_ema.get_closed_trades(limit)}
 
 
+@router.get("/candles")
+def v10_candles(symbol: str = "NIFTY50", days: int = 30):
+    """cc#537: read-only 5-min OHLC candles for the V10 chart overlay. NIFTY50 -> nifty_5m_test_data,
+    BANKNIFTY -> banknifty_5m_test_data (same schema). Both index-SPOT series (the V10 signal is a
+    spot event; markers snap to these bars client-side). TIME BASE (verified live): the *_5m_test_data
+    bar `ts` is already IST wall-clock tagged +00 (first bar of a day = 09:15 = NSE open), so the raw
+    EXTRACT(EPOCH FROM ts) IS the IST wall-clock epoch that TradingView Lightweight Charts -- which
+    renders UTCTimestamp in UTC -- shows correctly on the axis. No shift is applied here. The v10_trades
+    timestamps, by contrast, are genuine UTC, so the client shifts a trade ts by +5.5h (UTC->IST) before
+    snapping it to a bar, so candles + markers align exactly (verified: 16/16 NIFTY FUT entries snap to
+    their bar within 51s). Windowed to the last `days` days of AVAILABLE data (test tables are historical,
+    so anchored to MAX(ts), not NOW()). DISTINCT ON (ts) guards LWC's strictly-ascending-unique-time
+    requirement against any duplicate bar. No auth (display-only)."""
+    sym = (symbol or "NIFTY50").upper()
+    table = "banknifty_5m_test_data" if sym in ("BANKNIFTY", "BANKNIFTY50", "NIFTYBANK", "BNF") else "nifty_5m_test_data"
+    days = max(1, min(int(days or 30), 365))
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(f"""SELECT EXTRACT(EPOCH FROM ts)::bigint AS t, open, high, low, close
+                        FROM (
+                          SELECT DISTINCT ON (ts) ts, open, high, low, close FROM {table}
+                          WHERE ts >= (SELECT MAX(ts) FROM {table}) - (%s || ' days')::interval
+                          ORDER BY ts, close
+                        ) x ORDER BY t ASC""", (days,))
+        candles = [{"time": int(r[0]), "open": float(r[1]), "high": float(r[2]),
+                    "low": float(r[3]), "close": float(r[4])} for r in cur.fetchall()]
+    return {"symbol": sym, "table": table, "days": days, "count": len(candles), "candles": candles}
+
+
 @router.get("/summary")
 def v10_summary():
     """Running settings + aggregate paper P&L summary."""

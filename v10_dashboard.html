@@ -201,6 +201,23 @@
   <div class="loading">Loading V10 Dashboard…</div>
 </div>
 
+<!-- cc#537: full-screen candlestick overlay (sibling of #app so render()'s innerHTML rewrite
+     never wipes it). TradingView Lightweight Charts (MIT, open-source lib -- NOT the widget). -->
+<div id="v10ChartOv" style="display:none;position:fixed;inset:0;z-index:9998;background:#0A0F1E;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+    <div id="v10ChartTitle" style="font-size:15px;font-weight:800;color:var(--txt)">NIFTY 50 · 5min · V10 trades</div>
+    <div style="display:flex;gap:4px;background:var(--well);border:1px solid var(--line);border-radius:8px;padding:3px">
+      <button id="v10tg-NIFTY50" onclick="setV10Sym('NIFTY50')" style="border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;background:var(--blu);color:#fff;font-family:inherit">NIFTY 50</button>
+      <button id="v10tg-BANKNIFTY" onclick="setV10Sym('BANKNIFTY')" style="border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--mut);font-family:inherit">BANKNIFTY</button>
+    </div>
+    <div style="flex:1;min-width:10px"></div>
+    <div style="font-size:10px;color:var(--mut)">▲ entry · ▼ exit · green win / red loss · pins on spot bar</div>
+    <button onclick="closeV10Chart()" title="Close (Esc)" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--line2);background:var(--surface2);color:var(--mut);cursor:pointer;font-size:14px;flex:none">&#10005;</button>
+  </div>
+  <div id="v10ChartBox" style="flex:1;min-height:0;position:relative"></div>
+</div>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
 <script>
 /* ════════════════════════════════════════════════════════════════
    SCORR V10 DASHBOARD — vanilla JS, light theme, zero framework
@@ -591,7 +608,8 @@ function sigCol(sym, s, ix){
   }
   return `<div class="sig-col" style="border-color:${c}44">
     <div class="sig-col-hd">
-      <div class="sig-sym" style="color:${c}">${esc(sym)}</div>${bdg(tag,c,true)}</div>
+      <div class="sig-sym" style="color:${c}">${esc(sym)}</div>
+      <div style="display:flex;align-items:center;gap:8px">${bdg(tag,c,true)}${v10ChartIcon(fullSym)}</div></div>
     <div class="sig-tags" style="margin:0 0 8px">
       <span style="font-size:9px;color:var(--mut)">ST</span>${bdg(s.st,s.st==='BUY'?UP:DN,true)}
       <span style="font-size:9px;color:var(--mut)">EMA</span>${bdg(s.ema,s.ema==='BUY'?UP:DN,true)}</div>
@@ -731,7 +749,7 @@ function rClosed(){
   const more = all.length>15 ? `<div style="text-align:center;padding:9px"><span onclick="CLOSED_ALL=!CLOSED_ALL;render()" style="cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blu)">${CLOSED_ALL?'▲ Show last 15':'▼ View all '+all.length+' legs'}</span></div>` : '';
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div class="t">Closed Trades (${CLOSED_ALL?all.length:('last '+shown.length+' of '+all.length)})</div>
-      <div style="display:flex;gap:8px;align-items:center">${bdg('WR '+wr+'% · all-time',UP)}
+      <div style="display:flex;gap:8px;align-items:center">${v10ChartIcon('NIFTY50')}${bdg('WR '+wr+'% · all-time',UP)}
         <span class="td-mono" style="font-size:15px;font-weight:800;color:${cx(tot)}" title="all-time realized P&L across ${all.length} legs">₹${fK(tot)}</span></div></div>
     <div class="tbl-scroll"><table class="pos-tbl"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${more}
   </div>`;
@@ -852,6 +870,110 @@ function rDivergence(){
     ${note}
   </div>`;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   cc#537: full-screen candlestick chart (Lightweight Charts) with V10
+   entry/exit markers. Candles = index SPOT (nifty/banknifty_5m_test_data);
+   markers come from FUT-leg trade ROWS but are PLOTTED on the spot bar
+   (addendum 2: the V10 signal is a spot event). Read-only, no writes.
+════════════════════════════════════════════════════════════════ */
+function v10ChartIcon(sym){
+  return `<span onclick="openV10Chart('${sym}')" title="Full-screen 5-min chart with V10 trade markers" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;border:1px solid var(--line2);color:var(--mut);flex:none" onmouseover="this.style.color='var(--blu)';this.style.borderColor='var(--blu)'" onmouseout="this.style.color='var(--mut)';this.style.borderColor='var(--line2)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 20V11M5 8V4M12 20v-4M12 13V4M19 20v-9M19 8V4"/></svg></span>`;
+}
+let _v10chart=null,_v10series=null,_v10ro=null,_v10sym='NIFTY50';
+function openV10Chart(sym){
+  _v10sym=(sym||'NIFTY50').toUpperCase();
+  const ov=document.getElementById('v10ChartOv'); if(ov) ov.style.display='flex';
+  syncV10Toggle(); loadV10Chart();
+}
+function closeV10Chart(){
+  const ov=document.getElementById('v10ChartOv'); if(ov) ov.style.display='none';
+  if(_v10ro){try{_v10ro.disconnect();}catch(e){} _v10ro=null;}
+  if(_v10chart){try{_v10chart.remove();}catch(e){} _v10chart=null;_v10series=null;}
+}
+function setV10Sym(sym){ _v10sym=(sym||'NIFTY50').toUpperCase(); syncV10Toggle(); loadV10Chart(); }
+function syncV10Toggle(){
+  ['NIFTY50','BANKNIFTY'].forEach(s=>{
+    const b=document.getElementById('v10tg-'+s); if(!b)return;
+    const on=(s===_v10sym);
+    b.style.background=on?'var(--blu)':'transparent';
+    b.style.color=on?'#fff':'var(--mut)';
+  });
+  const t=document.getElementById('v10ChartTitle');
+  if(t) t.textContent=(_v10sym==='BANKNIFTY'?'BANKNIFTY':'NIFTY 50')+' · 5min · V10 trades';
+}
+// snap a trade ISO ts (genuine UTC) DOWN to the containing 5-min spot bar; return that candle (time+close).
+// The *_5m_test_data bars are IST-wall-clock tagged, so /candles emits their raw epoch (IST-epoch space).
+// v10_trades ts are true UTC, so we add +19800 (UTC->IST) here to land in that same IST-epoch space; pins
+// then snap exactly (verified: 16/16 NIFTY FUT entries within 51s of their bar).
+function _v10SnapBar(candles, iso){
+  if(!iso) return null;
+  const ms=Date.parse(String(iso).replace(' ','T'));
+  if(isNaN(ms)) return null;
+  const target=Math.floor(ms/1000)+19800;
+  let lo=0,hi=candles.length-1,idx=-1;
+  while(lo<=hi){const m=(lo+hi)>>1; if(candles[m].time<=target){idx=m;lo=m+1;}else{hi=m-1;}}
+  return idx<0?null:candles[idx];   // before first bar (older than window) -> skip marker
+}
+function buildV10Markers(candles, open, closed){
+  const sym=_v10sym, out=[];
+  const isFut=r=>(((r.leg||r.type||'')+'').toUpperCase()==='FUT');
+  const symMatch=r=>(((r.symbol||r.sym||'')+'').toUpperCase()===sym);
+  const isLongSide=s=>{s=(s||'').toUpperCase();return s==='BUY'||s==='LONG';};
+  (closed||[]).filter(r=>symMatch(r)&&isFut(r)).forEach(r=>{
+    const isLong=isLongSide(r.side);
+    const eBar=_v10SnapBar(candles,r.entry_ts);
+    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?'#2FD48B':'#FF5C6C',
+      shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)});
+    const xBar=_v10SnapBar(candles,r.exit_ts);
+    if(xBar){ const p=Number(r.pnl), win=!isNaN(p)&&p>=0, rsn=r.exit_reason||'EXIT';
+      out.push({time:xBar.time,position:isLong?'aboveBar':'belowBar',color:win?'#2FD48B':'#FF5C6C',
+        shape:isLong?'arrowDown':'arrowUp',text:rsn+(isNaN(p)?'':' '+(p>=0?'+':'')+num(p,0))}); }
+  });
+  (open||[]).filter(r=>symMatch(r)&&isFut(r)).forEach(r=>{
+    const isLong=isLongSide(r.side);
+    const eBar=_v10SnapBar(candles,r.entry_ts);
+    if(eBar) out.push({time:eBar.time,position:isLong?'belowBar':'aboveBar',color:isLong?'#2FD48B':'#FF5C6C',
+      shape:isLong?'arrowUp':'arrowDown',text:(isLong?'BUY ':'SELL ')+num(eBar.close,0)+' •open'});
+  });
+  return out.sort((a,b)=>a.time-b.time);   // LWC requires ascending-by-time markers
+}
+async function loadV10Chart(){
+  const box=document.getElementById('v10ChartBox'); if(!box) return;
+  box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Loading chart…</div>';
+  if(_v10ro){try{_v10ro.disconnect();}catch(e){} _v10ro=null;}
+  if(_v10chart){try{_v10chart.remove();}catch(e){} _v10chart=null;_v10series=null;}
+  let candles,open,closed;
+  try{
+    const [cr,pr,tr]=await Promise.all([
+      fetch('/api/v10/candles?symbol='+encodeURIComponent(_v10sym)+'&days=30').then(r=>r.json()),
+      fetch('/api/v10/positions').then(r=>r.json()),
+      fetch('/api/v10/trades?limit=500').then(r=>r.json())
+    ]);
+    candles=(cr&&cr.candles)||[]; open=(pr&&pr.open_positions)||[]; closed=(tr&&tr.closed_trades)||[];
+  }catch(e){
+    box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Chart unavailable</div>'; return;
+  }
+  if(!window.LightweightCharts){ box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">Chart library unavailable</div>'; return; }
+  if(!candles.length){ box.innerHTML='<div style="padding:40px;text-align:center;color:var(--mut);font-size:13px">No candle data for '+_v10sym+'</div>'; return; }
+  box.innerHTML='';
+  const chart=LightweightCharts.createChart(box,{
+    width:box.clientWidth, height:box.clientHeight,
+    layout:{background:{type:'solid',color:'#0A0F1E'},textColor:'#8C99BD',fontSize:11,fontFamily:"'Sora',system-ui,sans-serif"},
+    grid:{vertLines:{color:'rgba(148,166,210,.06)'},horzLines:{color:'rgba(148,166,210,.06)'}},
+    rightPriceScale:{borderColor:'rgba(148,166,210,.14)'},
+    timeScale:{borderColor:'rgba(148,166,210,.14)',timeVisible:true,secondsVisible:false},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+  });
+  const series=chart.addCandlestickSeries({upColor:'#2FD48B',downColor:'#FF5C6C',borderVisible:false,wickUpColor:'#2FD48B',wickDownColor:'#FF5C6C'});
+  series.setData(candles); _v10chart=chart; _v10series=series;
+  const markers=buildV10Markers(candles, open, closed);
+  if(markers.length) series.setMarkers(markers);
+  chart.timeScale().fitContent();
+  _v10ro=new ResizeObserver(()=>{ if(_v10chart) _v10chart.applyOptions({width:box.clientWidth,height:box.clientHeight}); });
+  _v10ro.observe(box);
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ const ov=document.getElementById('v10ChartOv'); if(ov&&ov.style.display!=='none') closeV10Chart(); } });
 
 function render(){
   document.getElementById('app').innerHTML =
