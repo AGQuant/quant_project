@@ -340,16 +340,29 @@
   .v4-badge.STRONG{background:var(--grn-d);color:var(--grn)}
   .v4-badge.VALID{background:var(--amber-d);color:var(--amber)}
   .v4-badge.REJECT{background:var(--red-d);color:var(--red)}
-  .v4-crow{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 6px;border-bottom:.5px solid var(--line);border-radius:5px}
-  .v4-crow:last-child{border-bottom:none}
-  .v4-crow .rl{color:var(--mut)}
-  .v4-crow .rc{font-family:var(--mono);font-weight:700}
-  .v4-crow .c1{color:var(--grn)} .v4-crow .c05{color:var(--amber)} .v4-crow .c0{color:var(--dim)}
-  /* cc#452: row tint by score — 1.0 green · 0.5 amber · 0 light red (founder_revision) */
-  .v4-crow.rg{background:rgba(47,212,139,.09)}
-  .v4-crow.ra{background:rgba(245,185,74,.09)}
-  .v4-crow.rr{background:rgba(255,92,108,.07)}
-  .v4-crow .rcw{display:inline-flex;align-items:center;gap:7px;flex:none}
+  /* cc#513: 4-column rule table (RULE | REQUIRED | ACTUAL | POINTS) — V8 stock-detail modal format */
+  .v4-rtable{margin-top:6px}
+  .v4-rhead{display:grid;grid-template-columns:76px 1fr 112px 44px;gap:8px;font-size:9px;font-weight:700;
+    color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:3px 6px 5px}
+  .v4-rrow{display:grid;grid-template-columns:76px 1fr 112px 44px;gap:8px;align-items:center;
+    font-size:11px;padding:5px 6px;border-bottom:.5px solid var(--line);border-radius:5px}
+  .v4-rrow:last-child{border-bottom:none}
+  .v4-rrow.rg{background:rgba(47,212,139,.09)}
+  .v4-rrow.ra{background:rgba(245,185,74,.09)}
+  .v4-rrow.rr{background:rgba(255,92,108,.07)}
+  .v4-rrow .rl{color:var(--txt);font-weight:600;display:flex;align-items:center;gap:5px;min-width:0}
+  .v4-rrow .rreq{color:var(--mut);font-size:10px;line-height:1.3}
+  .v4-rrow .ract{color:var(--txt);font-family:var(--mono);font-size:10px}
+  .v4-rrow .rc{font-family:var(--mono);font-weight:700;text-align:right}
+  .v4-rrow .rc.c1{color:var(--grn)} .v4-rrow .rc.c05{color:var(--amber)} .v4-rrow .rc.c0{color:var(--dim)}
+  @media(max-width:680px){
+    .v4-rhead{display:none}
+    .v4-rrow{grid-template-columns:1fr 40px;column-gap:8px;row-gap:1px}
+    .v4-rrow .rl{grid-column:1;grid-row:1}
+    .v4-rrow .rreq{grid-column:1;grid-row:2}
+    .v4-rrow .ract{grid-column:1;grid-row:3}
+    .v4-rrow .rc{grid-column:2;grid-row:1/4;align-self:center}
+  }
   /* cc#452: per-rule (i) button — V13-style (cc#395), opens the definition popover */
   .v4-ibtn{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--panel2);border:1px solid var(--line2);color:var(--mut);font-size:9px;font-weight:700;font-family:var(--mono);cursor:pointer;line-height:1;flex:none}
   .v4-ibtn:hover{border-color:var(--blu);color:var(--blu)}
@@ -831,6 +844,15 @@ function _v4scoreCol(s,verdict){
   return s>=12?'var(--grn)':s>=10?'var(--amber)':'var(--dim)';
 }
 function _v4creditCls(c){c=parseFloat(c);return c>=1?'c1':c>=0.5?'c05':'c0';}
+// cc#513: compact ACTUAL-column formatter for the 4-col rule table — r.value is either a scalar
+// (R1/R5/R6/R14) or a small {key:val} dict (most rules); render "key val" pairs, drop nulls.
+function _v4Actual(val){
+  if(val==null) return '—';
+  if(typeof val!=='object') return String(val);
+  const parts=Object.entries(val).filter(([k,v])=>v!=null).map(([k,v])=>
+    k+' '+(typeof v==='boolean'?(v?'✓':'✗'):v));
+  return parts.length?parts.join(' · '):'—';
+}
 function _v4chip(lbl){const buy=(lbl||'').indexOf('BUY')===0;return '<span class="v4-chip '+(buy?'buy':'sell')+'">'+lbl+'</span>';}
 function _vClassFor(v){return v==='STRONG'?'strong':v==='VALID'?'valid':'reject';}
 function v4ToggleLoser(btn){
@@ -1017,19 +1039,29 @@ function renderV4Dual(d, uiMode){
   const cards=(d.cards||[]);
   const cardHtml=c=>{
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
+    // cc#513: gates render in the same 4-col table, above the scored rules.
+    const gateRows=(gate.gates||[]).map(g=>
+      '<div class="v4-rrow '+(g.pass?'rg':'rr')+'"><span class="rl">'+g.gate+'</span>'
+        +'<span class="rreq">'+g.label+'</span>'
+        +'<span class="ract">'+(g.value!=null?g.value:'—')+'</span>'
+        +'<span class="rc" style="color:'+(g.pass?'var(--grn)':'var(--red)')+'">'+(g.pass?'✓':'✗')+'</span></div>').join('');
     const rules=(c.rules||[]).map(r=>{
-      const zone=(r.rule==='R16'&&r.value&&r.value.zone)?' · '+(r.value.pos!=null?Number(r.value.pos).toFixed(1)+'% ':'')+r.value.zone:'';
-      // cc#452: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
+      // cc#452/cc#513: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
       const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
-      return '<div class="v4-crow '+rt+'"><span class="rl">'+r.rule+' '+r.label+zone+'</span>'
-        +'<span class="rcw"><span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span>'
-        +'<span class="v4-ibtn" onclick="tcRuleInfo(\''+r.rule+'\',\''+side+'\',\''+c.style+'\')" title="Rule definition">i</span></span></div>';
+      return '<div class="v4-rrow '+rt+'">'
+        +'<span class="rl">'+r.rule
+          +'<span class="v4-ibtn" onclick="tcRuleInfo(\''+r.rule+'\',\''+side+'\',\''+c.style+'\')" title="Rule definition">i</span></span>'
+        +'<span class="rreq">'+r.label+' — '+(r.required||'—')+'</span>'
+        +'<span class="ract">'+_v4Actual(r.value)+'</span>'
+        +'<span class="rc '+_v4creditCls(r.credit)+'">'+Number(r.credit).toFixed(2)+'</span></div>';
     }).join('');
     const recal=c.recal?'<span class="v4-recal">'+c.recal+'</span>':'';
     return '<div class="v4-card'+win+'"><div class="v4-chead">'+_v4styleChip(c.label)
       +'<span class="v4-cscore" style="color:'+_v4scoreCol(c.score,c.verdict)+'">'+Number(c.score).toFixed(2)+'</span>'
       +'<span style="font-size:11px;color:var(--dim)">/'+(c.max||15)+'</span>'
-      +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span>'+recal+'</div>'+rules+'</div>';
+      +'<span class="v4-badge '+c.verdict+'">'+c.verdict+'</span>'+recal+'</div>'
+      +'<div class="v4-rtable"><div class="v4-rhead"><span>Rule</span><span>Required</span><span>Actual</span><span>Pts</span></div>'
+      +gateRows+rules+'</div></div>';
   };
   // cc#412: restore the spec-2926 display contract — ONE full card per side (higher score; tie -> MOM);
   // the losing style collapses to a one-line summary with an inline "view" toggle.

@@ -56,10 +56,26 @@
   .card{border:1px solid var(--line2);border-radius:12px;padding:12px 14px;background:var(--panel2)}
   .card.win{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan) inset}
   .card h3{margin:0 0 8px;font-size:13px;display:flex;align-items:center;gap:8px}
-  .rrow{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;border-bottom:.5px solid var(--line)}
-  .rrow .rl{color:var(--mut)}
-  .rrow .rc{font-family:'IBM Plex Mono',monospace;font-weight:700}
+  /* cc#513: 4-column rule table (RULE | REQUIRED | ACTUAL | POINTS), same layout as /check */
+  .rhead{display:grid;grid-template-columns:60px 1fr 96px 38px;gap:6px;font-size:8.5px;font-weight:700;
+    color:var(--dim);text-transform:uppercase;letter-spacing:.04em;padding:3px 0 4px}
+  .rrow{display:grid;grid-template-columns:60px 1fr 96px 38px;gap:6px;align-items:center;
+    font-size:10.5px;padding:4px 4px;border-bottom:.5px solid var(--line);border-radius:4px}
+  .rrow:last-child{border-bottom:none}
+  .rrow.rg{background:rgba(47,212,139,.09)}
+  .rrow.ra{background:rgba(245,185,74,.09)}
+  .rrow.rr{background:rgba(255,92,108,.07)}
+  .rrow .rl{color:var(--txt);font-weight:700}
+  .rrow .rreq{color:var(--mut);font-size:9.5px;line-height:1.3}
+  .rrow .ract{color:var(--txt);font-family:'IBM Plex Mono',monospace;font-size:9.5px}
+  .rrow .rc{font-family:'IBM Plex Mono',monospace;font-weight:700;text-align:right}
   .c1{color:var(--grn)}.c05{color:var(--amber)}.c0{color:var(--dim)}
+  @media(max-width:680px){
+    .rhead{display:none}
+    .rrow{grid-template-columns:1fr 36px;column-gap:6px;row-gap:1px}
+    .rrow .rl{grid-column:1;grid-row:1} .rrow .rreq{grid-column:1;grid-row:2}
+    .rrow .ract{grid-column:1;grid-row:3} .rrow .rc{grid-column:2;grid-row:1/4;align-self:center}
+  }
   .close{float:right;width:28px;height:28px;border-radius:50%;border:1px solid var(--line2);background:var(--panel2);color:var(--mut);cursor:pointer}
   .empty{padding:24px;text-align:center;color:var(--dim)}
 </style>
@@ -144,10 +160,26 @@ async function openM(sym){
   let d;try{d=await getJSON(`/api/trade-check/v4/dual?symbol=${encodeURIComponent(sym)}&side=ALL`);}catch(e){box.innerHTML=`<button class="close" onclick="closeM()">&times;</button><div class="empty">${e.message}</div>`;return;}
   if(d.error){box.innerHTML=`<button class="close" onclick="closeM()">&times;</button><h2>${sym}</h2><div class="empty">${d.error}</div>`;return;}
   const cc=c=>parseFloat(c)>=1?'c1':parseFloat(c)>=0.5?'c05':'c0';
-  const cardHtml=c=>`<div class="card ${d.best&&c.style===d.best.style&&c.side===d.best.side?'win':''}">
-    <h3>${chip(c.label)} <span class="bg" style="font-size:14px;color:${scoreCol(c.score)}">${c.score}</span>/15 <span class="badge ${c.verdict}">${c.verdict}</span></h3>
-    ${c.rules.map(r=>`<div class="rrow"><span class="rl">${r.rule} ${r.label}</span><span class="rc ${cc(r.credit)}">${r.credit}</span></div>`).join('')}
+  // cc#513: 4-col ACTUAL formatter — value is a scalar (R1/R5/R6/R14) or a small {key:val} dict.
+  const actual=v=>{
+    if(v==null) return '&mdash;';
+    if(typeof v!=='object') return String(v);
+    const parts=Object.entries(v).filter(([k,x])=>x!=null).map(([k,x])=>k+' '+(typeof x==='boolean'?(x?'&check;':'&cross;'):x));
+    return parts.length?parts.join(' &middot; '):'&mdash;';
+  };
+  const cardHtml=c=>{
+    const sideGates=(d.gates&&d.gates[c.side]&&d.gates[c.side].gates)||[];
+    const gateRows=sideGates.map(g=>`<div class="rrow ${g.pass?'rg':'rr'}"><span class="rl">${g.gate}</span><span class="rreq">${g.label}</span><span class="ract">${g.value!=null?g.value:'&mdash;'}</span><span class="rc" style="color:${g.pass?'var(--grn)':'var(--red)'}">${g.pass?'&check;':'&cross;'}</span></div>`).join('');
+    const ruleRows=c.rules.map(r=>{
+      const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
+      return `<div class="rrow ${rt}"><span class="rl">${r.rule}</span><span class="rreq">${r.label} &mdash; ${r.required||'&mdash;'}</span><span class="ract">${actual(r.value)}</span><span class="rc ${cc(r.credit)}">${r.credit}</span></div>`;
+    }).join('');
+    return `<div class="card ${d.best&&c.style===d.best.style&&c.side===d.best.side?'win':''}">
+    <h3>${chip(c.label)} <span class="bg" style="font-size:14px;color:${scoreCol(c.score)}">${c.score}</span>/${c.max||15} <span class="badge ${c.verdict}">${c.verdict}</span></h3>
+    <div class="rhead"><span>Rule</span><span>Required</span><span>Actual</span><span>Pts</span></div>
+    ${gateRows}${ruleRows}
   </div>`;
+  };
   const gates=Object.entries(d.gates||{}).map(([s,g])=>`<span class="chip ${s==='BUY'?'buy':'sell'}" style="opacity:${g.pass?1:.45}">${s} gates ${g.pass?'PASS':'REJECT'}</span>`).join(' ');
   box.innerHTML=`<button class="close" onclick="closeM()">&times;</button>
     <h2>${sym} <span class="num" style="font-size:13px;color:var(--mut)">${d.cmp??''}</span></h2>

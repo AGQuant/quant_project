@@ -38,8 +38,9 @@ router = APIRouter()
 
 _DB = os.getenv("DATABASE_URL", "")
 
-VERSION = "v4-dual.2-sell-recal"
-SPEC_REF = "session_log id=2926 (v4 dual) + id=3010 (SELL recalibration, locked 12-Jul-2026)"
+VERSION = "v4-dual.3-basket-aligned"
+SPEC_REF = ("session_log id=2926 (v4 dual) + id=3010 (SELL recalibration, locked 12-Jul-2026) + "
+            "cc#513 (18-Jul-2026, shared-field alignment to locked cc#502 basket specs)")
 
 STYLES = ("MOMENTUM", "REVERSAL")
 SIDES = ("BUY", "SELL")
@@ -82,8 +83,11 @@ def _band(x, hi, mid_lo):
     return 0.0
 
 
-def _R(rid, label, credit, value):
-    return {"rule": rid, "label": label, "credit": round(float(credit), 2), "value": value}
+def _R(rid, label, credit, value, required=None):
+    """cc#513: `required` is the exact style/side-aware condition string for the 4-column rule
+    table (RULE | REQUIRED | ACTUAL | POINTS). Always built from the same threshold constants the
+    credit branch above it just used -- never a hand-typed duplicate that can drift from the logic."""
+    return {"rule": rid, "label": label, "credit": round(float(credit), 2), "value": value, "required": required}
 
 
 # cc#410 (session_log id=3019) — Fib Strength Rule zones (position in swing range: 0=low, 100=high).
@@ -195,6 +199,12 @@ def _derive(d):
     d["recovery_2d"] = ((cmp_v - lo2) / lo2 * 100.0) if (cmp_v is not None and lo2) else None
     d["fall_from_high_2d"] = ((hi2 - cmp_v) / hi2 * 100.0) if (cmp_v is not None and hi2) else None
 
+    # cc#513 R10 REV-BUY: 5-session low (last 5 daily lows + today's live low from bars).
+    lows5 = [r["low"] for r in daily[-5:] if r["low"] is not None]
+    if day_lo is not None:
+        lows5 = lows5 + [day_lo]
+    d["low_5d"] = min(lows5) if lows5 else None
+
     # R15 — relative strength vs Nifty (stock return − nifty return), weekly & monthly
     wk, mo = v8.get("week_return"), v8.get("month_return")
     nwk, nmo = d.get("nifty_wk"), d.get("nifty_mo")
@@ -203,10 +213,12 @@ def _derive(d):
 
     # R11 — pivot location + room to the next level (%)
     piv = d.get("pivots") or {}
-    pp, r1, s1 = piv.get("pp"), piv.get("r1"), piv.get("s1")
+    pp, r1, s1, s2 = piv.get("pp"), piv.get("r1"), piv.get("s1"), piv.get("s2")
     d["above_pp"] = (cmp_v is not None and pp is not None and cmp_v > pp)
     d["room_r1"] = ((r1 - cmp_v) / cmp_v * 100.0) if (cmp_v and r1 is not None) else None
     d["room_s1"] = ((cmp_v - s1) / cmp_v * 100.0) if (cmp_v and s1 is not None) else None
+    # cc#513 SELL-MOM R11: distance from CMP down to S2, as %-clearance (V4's own s2c gate).
+    d["room_s2"] = ((cmp_v - s2) / cmp_v * 100.0) if (cmp_v and s2 is not None) else None
 
     # R1 — market-mood tally (breadth + nifty D/W/M). BUY counts fails, SELL counts bullish extremes.
     adr = d.get("adr")
@@ -397,24 +409,29 @@ def _rules(d, style, side):
     # R1 — market mood
     if BUY:
         f = d.get("mood_fails", 0)
-        out.append(_R("R1", "Mood (fails)", 1.0 if f <= 1 else (0.5 if f == 2 else 0.0), f))
+        out.append(_R("R1", "Mood (fails)", 1.0 if f <= 1 else (0.5 if f == 2 else 0.0), f,
+                      required="mood fails <= 1 (2 = 0.5, >=3 = 0)"))
     else:
         # 3010: binary — any mood check bearish -> 1; all-bullish -> 0
         f = d.get("mood_fails", 0)
-        out.append(_R("R1", "Mood (any bearish)", 1.0 if f >= 1 else 0.0, f))
+        out.append(_R("R1", "Mood (any bearish)", 1.0 if f >= 1 else 0.0, f,
+                      required="any mood check bearish (fails >= 1)"))
 
     # R2 — sector (unchanged; already matches 3010)
     sw, sm = v8.get("sector_week"), v8.get("sector_month")
     if MOM:
         c = _both((sw or 0) > 0, (sm or 0) > 0) if BUY else _both((sw or 0) < 0, (sm or 0) < 0)
+        req = f"sector wk & mo {'> 0' if BUY else '< 0'} (one leg = 0.5)"
     else:
         pos = (sm is not None and (sm > 0 if BUY else sm < 0))
         c = 1.0 if pos else 0.0
-    out.append(_R("R2", f"Sector {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(sw), "mo": _r(sm)}))
+        req = f"sector mo {'> 0' if BUY else '< 0'}"
+    out.append(_R("R2", f"Sector {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(sw), "mo": _r(sm)}, required=req))
 
     # R3 — peers in same segment (<3 peers -> auto 0.5). 3010 SELL MOM uses down>0.5% for the strong tier.
     if d.get("peer_count", 0) < 3:
         c = 0.5
+        req = "peer_count >= 3 (else auto 0.5)"
     else:
         if BUY:
             strong, any_dir = d.get("peers_up1", 0), d.get("peers_up", 0)
@@ -422,59 +439,88 @@ def _rules(d, style, side):
             strong, any_dir = d.get("peers_dn05", 0), d.get("peers_dn", 0)
         if MOM:
             c = 1.0 if strong >= 2 else (0.5 if any_dir >= 1 else 0.0)
+            req = f"{'>=2 peers up >1%' if BUY else '>=2 peers dn >0.5%'} (>=1 any-dir = 0.5)"
         else:
             c = 1.0 if any_dir >= 2 else (0.5 if any_dir >= 1 else 0.0)
+            req = f"{'>=2 peers up' if BUY else '>=2 peers dn'} (1 = 0.5)"
     out.append(_R("R3", "Peers", c, {"strong": (d.get("peers_up1") if BUY else d.get("peers_dn05")),
                                      "dir": (d.get("peers_up") if BUY else d.get("peers_dn")),
-                                     "n": d.get("peer_count")}))
+                                     "n": d.get("peer_count")}, required=req))
 
-    # R4 — moving averages (unchanged; matches 3010)
+    # R4 — moving averages. cc#513: BUY-MOM full credit now requires dma_20>0 among the 2-of-3
+    # (BuyMom V3's own dma_20>0 hard gate) -- SELL-MOM / REV (both sides) UNCHANGED.
     above = [(v8.get("dma_20") or 0) > 0, (v8.get("dma_50") or 0) > 0, (v8.get("dma_200") or 0) > 0]
     below = [(v8.get("dma_20") or 0) < 0, (v8.get("dma_50") or 0) < 0, (v8.get("dma_200") or 0) < 0]
     if MOM:
-        n = sum(above) if BUY else sum(below)
-        c = 1.0 if n >= 2 else (0.5 if n == 1 else 0.0)
+        if BUY:
+            d20ok = (v8.get("dma_20") or 0) > 0
+            n = sum(above)
+            c = 1.0 if (n >= 2 and d20ok) else (0.5 if n >= 1 else 0.0)
+            req = "2-of-3 DMAs up incl. dma_20>0 (1-of-3 or missing dma_20 = 0.5)"
+        else:
+            n = sum(below)
+            c = 1.0 if n >= 2 else (0.5 if n == 1 else 0.0)
+            req = "2-of-3 DMAs down (1-of-3 = 0.5)"
     else:
         d200 = v8.get("dma_200")
         c = 1.0 if (d200 is not None and (d200 > 0 if BUY else d200 < 0)) else 0.0
+        req = f"dma_200 {'> 0' if BUY else '< 0'}"
     out.append(_R("R4", f"MAs {'2of3' if MOM else 'DMA200'}", c,
-                  {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))}))
+                  {"d20": _r(v8.get("dma_20")), "d50": _r(v8.get("dma_50")), "d200": _r(v8.get("dma_200"))},
+                  required=req))
 
     # R5 — 1-month up/down close volume ratio. BUY band (1.1,0.9); SELL relaxed to (1.05,0.95) per 3010.
     if BUY:
-        ratio, c = d.get("vol21_up_dn"), _band(d.get("vol21_up_dn"), 1.1, 0.9)
+        hi5, lo5 = 1.1, 0.9
+        ratio, c = d.get("vol21_up_dn"), _band(d.get("vol21_up_dn"), hi5, lo5)
     else:
-        ratio, c = d.get("vol21_dn_up"), _band(d.get("vol21_dn_up"), 1.05, 0.95)
-    out.append(_R("R5", "Vol 1M (up/dn)", c, _r(ratio)))
+        hi5, lo5 = 1.05, 0.95
+        ratio, c = d.get("vol21_dn_up"), _band(d.get("vol21_dn_up"), hi5, lo5)
+    out.append(_R("R5", "Vol 1M (up/dn)", c, _r(ratio), required=f">= {hi5} ({lo5}-{hi5} = 0.5)"))
 
     # R6 — today's time-adjusted volume ratio. BUY only; DROPPED on SELL (3010).
     if BUY:
-        out.append(_R("R6", "Vol today", _band(d.get("vol_ratio_today"), 1.5, 1.1), _r(d.get("vol_ratio_today"))))
+        out.append(_R("R6", "Vol today", _band(d.get("vol_ratio_today"), 1.5, 1.1), _r(d.get("vol_ratio_today")),
+                      required=">= 1.5x (1.1-1.5x = 0.5)"))
 
-    # R7 — RSI frame (MOM) / sandwich (REV)
-    dr, mr, wr = v8.get("daily_rsi"), v8.get("rsi_month"), v8.get("rsi_weekly")
+    # R7 — RSI. cc#513 cross-cutting fix: MOM (both sides) now reads true_weekly_rsi, not the
+    # synthetic rsi_weekly (~16pt off, cc#353) -- synthetic must not appear in any rule after this.
+    # REV drops the dRSI leg entirely -> a pure weekly-heat/weekly-cool band on true_weekly_rsi.
+    mr = v8.get("rsi_month")
     twr = d.get("true_weekly_rsi")
     if MOM:
         if BUY:
-            c = _both((mr or 0) >= 50, (wr or 0) >= 50)
+            mr_ok = (mr is not None and mr >= 50)
+            twr_band = (1.0 if (twr is not None and 70 <= twr <= 85)
+                        else (0.5 if (twr is not None and ((60 <= twr < 70) or (85 < twr <= 90))) else 0.0))
+            c = twr_band if mr_ok else min(twr_band, 0.5)
+            req = "mRSI>=50 AND twr in [70,85] (twr [60,70)/(85,90] or mRSI<50 = 0.5 cap)"
         else:
-            c = _both(wr is not None and wr < 50, mr is not None and mr < 50)   # 3010: wRSI<50 AND mRSI<50
-        val = {"mRSI": _r(mr), "wRSI": _r(wr)}
+            c = _both(mr is not None and mr < 40, twr is not None and twr <= 40)
+            req = "mRSI<40 AND twr<=40 (one leg = 0.5)"
+        val = {"mRSI": _r(mr), "trueWk": _r(twr)}
     else:
         if BUY:
-            c = _both((twr or 0) >= 60, (dr or 100) <= 40)
+            c = 1.0 if (twr is not None and twr >= 70) else (0.5 if (twr is not None and 60 <= twr < 70) else 0.0)
+            req = "twr >= 70 (60-70 = 0.5)"
         else:
-            c = _both(twr is not None and twr < 50, dr is not None and dr > 50)  # 3010 sandwich: wk<50 & daily>50
-        val = {"trueWk": _r(twr), "dRSI": _r(dr)}
-    out.append(_R("R7", f"RSI {'frame' if MOM else 'sandwich'}", c, val))
+            c = 1.0 if (twr is not None and twr <= 45) else (0.5 if (twr is not None and 45 < twr <= 50) else 0.0)
+            req = "twr <= 45 (45-50 = 0.5)"
+        val = {"trueWk": _r(twr)}
+    out.append(_R("R7", f"RSI {'frame' if MOM else 'weekly heat'}", c, val, required=req))
 
-    # R8 — returns (unchanged; matches 3010)
+    # R8 — returns. cc#513 BUY-REV: V5's own month_return cap + sanity floor replaces mo>0.
     wk, mo = v8.get("week_return"), v8.get("month_return")
     if MOM:
         c = _both((wk or 0) > 0, (mo or 0) > 0) if BUY else _both((wk or 0) < 0, (mo or 0) < 0)
+        req = f"wk & mo {'> 0' if BUY else '< 0'} (one leg = 0.5)"
+    elif BUY:
+        c = 1.0 if (mo is not None and -10 <= mo < 5) else 0.0
+        req = "mret in [-10, 5)"
     else:
-        c = 1.0 if (mo is not None and (mo > 0 if BUY else mo < 0)) else 0.0
-    out.append(_R("R8", f"Returns {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(wk), "mo": _r(mo)}))
+        c = 1.0 if (mo is not None and mo < 0) else 0.0
+        req = "mo < 0"
+    out.append(_R("R8", f"Returns {'wk&mo' if MOM else 'mo'}", c, {"wk": _r(wk), "mo": _r(mo)}, required=req))
 
     # R9 — 5-min structure + VWAP (session-anchored via last-session bars). 3010 SELL: below-VWAP is the
     #      gate for any credit — full (below-VWAP + weak structure) ->1, below-VWAP only ->0.5, else 0.
@@ -485,85 +531,105 @@ def _rules(d, style, side):
     if BUY:
         if MOM:
             c = _both(av, upper)
+            req = "above VWAP AND upper day-range (one leg = 0.5)"
         else:
             c = _both((d.get("recovery_2d") or 0) > 0, av)
+            req = "recovering off low AND above VWAP (one leg = 0.5)"
     else:
         second = lower if MOM else ((d.get("fall_from_high_2d") or 0) > 0)
         c = 1.0 if (below_vwap and second) else (0.5 if below_vwap else 0.0)
-    out.append(_R("R9", "5m + VWAP", c, {"vwap": _r(d.get("vwap")), "rangePos": _r(d.get("range_pos"))}))
+        req = f"below VWAP AND {'lower day-range' if MOM else 'falling from high'} (below-VWAP only = 0.5)"
+    out.append(_R("R9", "5m + VWAP", c, {"vwap": _r(d.get("vwap")), "rangePos": _r(d.get("range_pos"))}, required=req))
 
-    # R10 — style extras
+    # R10 — style extras. cc#513: BUY-MOM w52 gets the V3 hard-gate tier (>=75 full); BUY-REV swaps
+    # recovery-2-8% for S1-context (5d low vs S1); SELL-MOM/-REV bands refreshed to V4/V6.1.
     m2 = v8.get("mom_2d")
     w52 = v8.get("week_index_52")
     if MOM:
         if BUY:
-            c = _both(m2 is not None and 0 <= m2 <= 6, w52 is not None and 40 <= w52 <= 90)
+            mom_ok = (m2 is not None and 0 <= m2 <= 6)
+            w52_band = (1.0 if (w52 is not None and w52 >= 75) else (0.5 if (w52 is not None and 40 <= w52 < 75) else 0.0))
+            c = w52_band if mom_ok else min(w52_band, 0.5)
+            req = "mom_2d in [0,6] AND w52>=75 (w52 [40,75) or mom_2d fail = 0.5 cap)"
         else:
-            c = _both(m2 is not None and -6 <= m2 <= 0, w52 is not None and 10 <= w52 <= 60)
+            c = _both(m2 is not None and -4 <= m2 <= -2, w52 is not None and 20 <= w52 <= 60)
+            req = "mom_2d in [-4,-2] AND w52 in [20,60] (one leg = 0.5)"
         val = {"mom_2d": _r(m2), "w52": _r(w52)}
     else:
         if BUY:
-            rec = d.get("recovery_2d")
-            c = 1.0 if (rec is not None and 2 <= rec <= 8) else 0.0
-            val = {"recovery_2d": _r(rec)}
+            low5d, s1 = d.get("low_5d"), (d.get("pivots") or {}).get("s1")
+            if low5d is not None and s1 is not None:
+                if low5d <= s1:
+                    c = 1.0
+                elif s1 != 0 and abs(low5d - s1) / abs(s1) <= 0.01:
+                    c = 0.5
+                else:
+                    c = 0.0
+            else:
+                c = 0.0
+            val = {"low_5d": _r(low5d), "s1": _r(s1)}
+            req = "5d low <= S1 (within 1% of S1 = 0.5)"
         else:
-            # 3010: fall 2-8% ->1, 1-2% or 8-12% ->0.5, else 0
+            # 3010 base band + cc#513 day_1d co-condition for the 1.0 tier
             fall = d.get("fall_from_high_2d")
-            if fall is not None and 2 <= fall <= 8:
+            day1d = v8.get("day_1d")
+            day_ok = (day1d is not None and -2 <= day1d <= 0)
+            if fall is not None and 2 <= fall <= 8 and day_ok:
                 c = 1.0
-            elif fall is not None and ((1 <= fall < 2) or (8 < fall <= 12)):
+            elif fall is not None and ((1 <= fall < 2) or (8 < fall <= 12) or (2 <= fall <= 8)):
                 c = 0.5
             else:
                 c = 0.0
-            val = {"fall_2d": _r(fall)}
-    out.append(_R("R10", "Style extra", c, val))
+            val = {"fall_2d": _r(fall), "day_1d": _r(day1d)}
+            req = "fall 2-8% AND day_1d in [-2,0] (fall 1-2%/8-12%, or 2-8% w/o day_1d = 0.5)"
+    out.append(_R("R10", "Style extra", c, val, required=req))
 
-    # R11 — location + room. 3010 SELL MOM: below PP, S1-room >=2% ->1, 1-2% ->0.5, above PP ->0.
-    #        SELL REV: S1-room >=2% ->1, 1-2% ->0.5, else 0.
-    room_next = d.get("room_r1") if BUY else d.get("room_s1")
-    if MOM:
-        if BUY:
-            if not d.get("above_pp"):
-                c = 0.0
-            elif room_next is not None and room_next >= 2:
-                c = 1.0
-            else:
-                c = 0.5
+    # R11 — location + room. cc#513 BUY-REV: room-to-R1 removed (V5 = fixed +/-3 exits) -> V5 turn
+    # conditions (mom_2d/week_return). SELL-MOM: S1-room replaced by S2-clearance (V4's own s2c gate).
+    if MOM and BUY:
+        room_next = d.get("room_r1")
+        if not d.get("above_pp"):
+            c = 0.0
+        elif room_next is not None and room_next >= 2:
+            c = 1.0
         else:
-            if d.get("above_pp"):
-                c = 0.0
-            elif room_next is not None and room_next >= 2:
-                c = 1.0
-            elif room_next is not None and room_next >= 1:
-                c = 0.5
-            else:
-                c = 0.0
-    else:
-        if BUY:
-            if room_next is None:
-                c = 0.0
-            elif room_next >= 3:
-                c = 1.0
-            elif room_next >= 2:
-                c = 0.5
-            else:
-                c = 0.0
+            c = 0.5
+        val = {"abovePP": d.get("above_pp"), "room": _r(room_next)}
+        req = "above PP AND room-to-R1 >= 2% (above PP only = 0.5)"
+    elif MOM and (not BUY):
+        rs2 = d.get("room_s2")
+        if d.get("above_pp"):
+            c = 0.0
         else:
-            if room_next is None:
-                c = 0.0
-            elif room_next >= 2:
-                c = 1.0
-            elif room_next >= 1:
-                c = 0.5
-            else:
-                c = 0.0
-    out.append(_R("R11", "Location + room", c, {"abovePP": d.get("above_pp"), "room": _r(room_next)}))
+            c = 1.0 if (rs2 is not None and rs2 >= 3) else 0.0
+        val = {"abovePP": d.get("above_pp"), "room_s2": _r(rs2)}
+        req = "below PP AND S2-clearance >= 3%"
+    elif (not MOM) and BUY:
+        m2r, wkr = v8.get("mom_2d"), v8.get("week_return")
+        n = sum(1 for x in [(m2r is not None and m2r >= -0.5), (wkr is not None and wkr >= -2)] if x)
+        c = 1.0 if n == 2 else (0.5 if n == 1 else 0.0)
+        val = {"mom_2d": _r(m2r), "week_return": _r(wkr)}
+        req = "mom_2d >= -0.5 AND week_return >= -2 (one leg = 0.5)"
+    else:   # SELL-REV — unchanged (S1-room band)
+        room_next = d.get("room_s1")
+        if room_next is None:
+            c = 0.0
+        elif room_next >= 2:
+            c = 1.0
+        elif room_next >= 1:
+            c = 0.5
+        else:
+            c = 0.0
+        val = {"abovePP": d.get("above_pp"), "room": _r(room_next)}
+        req = "S1-room >= 2% (1-2% = 0.5)"
+    out.append(_R("R11", "Location + room", c, val, required=req))
 
     # R12 — OI structure. 3010 SELL: short-buildup OR long-unwinding (price down) ->1; OI missing/stale ->0.5.
     day = v8.get("day_1d")
     oic = d.get("oi_chg")
     if BUY:
         c = 1.0 if (day is not None and day > 0 and oic is not None) else 0.0
+        req = "day_1d > 0 AND OI-change present"
     else:
         if oic is None:
             c = 0.5
@@ -571,18 +637,20 @@ def _rules(d, style, side):
             c = 1.0
         else:
             c = 0.0
-    out.append(_R("R12", "OI structure", c, {"day": _r(day), "oi_chg": _r(oic)}))
+        req = "day_1d < 0 (OI missing/stale = 0.5)"
+    out.append(_R("R12", "OI structure", c, {"day": _r(day), "oi_chg": _r(oic)}, required=req))
 
-    # R13 — basis. 3010 SELL: MOM discount widening ->1 / discount present ->0.5; REV premium fading ->1 /
-    #        premium present (flat) ->0.5; basis missing ->0.5.
+    # R13 — basis. cc#513 cross-cutting: missing-basis credit now symmetric -> 0.5 BOTH sides
+    # (was BUY 0 / SELL 0.5).
     now, prev = d.get("basis_now"), d.get("basis_prev")
     if BUY:
         if now is None or prev is None:
-            c = 0.0
+            c = 0.5
         elif MOM:
             c = 1.0 if (now > prev and now > 0) else 0.0
         else:
             c = 1.0 if (now > prev and now < 0) else 0.0
+        req = f"basis {'widening premium' if MOM else 'fading discount'} (missing = 0.5)"
     else:
         if now is None or prev is None:
             c = 0.5
@@ -590,42 +658,55 @@ def _rules(d, style, side):
             c = 1.0 if (now < prev and now < 0) else (0.5 if now < 0 else 0.0)
         else:
             c = 1.0 if (now < prev and now > 0) else (0.5 if now > 0 else 0.0)
-    out.append(_R("R13", "Basis", c, {"now": _r(now), "prev": _r(prev)}))
+        req = f"basis {'widening discount' if MOM else 'fading premium'} (missing = 0.5)"
+    out.append(_R("R13", "Basis", c, {"now": _r(now), "prev": _r(prev)}, required=req))
 
     # R14 — ATR ignition. BUY only; DROPPED on SELL (3010).
     if BUY:
         out.append(_R("R14", "ATR ignition", 1.0 if d.get("ignition") else 0.0,
-                      {"tr": _r(d.get("tr_today")), "atr14": _r(d.get("atr14"))}))
+                      {"tr": _r(d.get("tr_today")), "atr14": _r(d.get("atr14"))},
+                      required="TR today >= 1.3x ATR14"))
 
-    # R15 — relative strength vs Nifty (unchanged; matches 3010)
+    # R15 — relative strength vs Nifty. cc#513 BUY-REV: rs_mo band relaxed one notch (dip candidates
+    # lag by construction).
     rw, rm = d.get("rs_wk"), d.get("rs_mo")
     if MOM:
         c = _both((rw or 0) > 0, (rm or 0) > 0) if BUY else _both((rw or 0) < 0, (rm or 0) < 0)
         val = {"rs_wk": _r(rw), "rs_mo": _r(rm)}
+        req = f"rs_wk & rs_mo {'> 0' if BUY else '< 0'} (one leg = 0.5)"
     else:
         if rm is None:
             c = 0.0
+            req = "rs_mo required"
         elif BUY:
-            c = 1.0 if rm > 0 else (0.5 if -1 <= rm <= 0 else 0.0)
+            c = 1.0 if rm > -1 else (0.5 if -3 <= rm <= -1 else 0.0)
+            req = "rs_mo > -1 (-3 to -1 = 0.5)"
         else:
             c = 1.0 if rm < 0 else (0.5 if 0 <= rm <= 1 else 0.0)
+            req = "rs_mo < 0 (0 to 1 = 0.5)"
         val = {"rs_mo": _r(rm)}
-    out.append(_R("R15", "RS vs Nifty", c, val))
+    out.append(_R("R15", "RS vs Nifty", c, val, required=req))
 
-    # R16 — Fib position (3M swing). cc#410/id=3019: fib is now SCORED, style/side-aware zones.
+    # R16 — Fib position (3M swing). cc#410/id=3019 zones; cc#513 BUY-REV widened (spring fires from
+    # Decision AND Strength zones).
     pos = d.get("fib_pos")
     if not d.get("fib_range_ok") or pos is None:
         c = 0.5   # 3M range <5% (or no swing) -> meaningless -> auto 0.5
+        req = "3M range >= 5% (else auto 0.5)"
     elif MOM and BUY:      # BUY-MOM: 1 >100 or 61.8-78.6 | 0.5 78.6-100 or 50-61.8 | 0 <50
         c = 1.0 if (pos > 100 or (61.8 <= pos < 78.6)) else (0.5 if ((78.6 <= pos <= 100) or (50 <= pos < 61.8)) else 0.0)
-    elif (not MOM) and BUY:  # BUY-REV: 1 38.2-61.8 | 0 only <23.6 | else 0.5 (overshoot=caution)
-        c = 0.0 if pos < 23.6 else (1.0 if (38.2 <= pos <= 61.8) else 0.5)
+        req = "pos > 100 or 61.8-78.6% (78.6-100% or 50-61.8% = 0.5)"
+    elif (not MOM) and BUY:  # cc#513 BUY-REV: 1.0 for 38.2-78.6 (Decision + Strength), 0.5 above, 0 only <23.6
+        c = 0.0 if pos < 23.6 else (1.0 if 38.2 <= pos <= 78.6 else 0.5)
+        req = "pos 38.2-78.6% (0 only < 23.6%)"
     elif MOM and (not BUY):  # SELL-MOM: 1 <23.6 | 0.5 23.6-38.2 | 0 >38.2
         c = 1.0 if pos < 23.6 else (0.5 if (23.6 <= pos <= 38.2) else 0.0)
+        req = "pos < 23.6% (23.6-38.2% = 0.5)"
     else:                    # SELL-REV: 1 78.6-100 | 0 only <61.8 | else 0.5 (>100 breakout=caution)
         c = 0.0 if pos < 61.8 else (1.0 if (78.6 <= pos <= 100) else 0.5)
+        req = "pos 78.6-100% (0 only < 61.8%)"
     out.append(_R("R16", "Fib position (3M)", c,
-                  {"pos": _r(pos), "zone": _fib_zone_name(pos), "range_ok": d.get("fib_range_ok")}))
+                  {"pos": _r(pos), "zone": _fib_zone_name(pos), "range_ok": d.get("fib_range_ok")}, required=req))
 
     return out
 
