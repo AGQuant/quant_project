@@ -432,9 +432,10 @@ const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab re
 // cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce RETIRED (ring-fenced
 // pools removed). All four remaining baskets rebuilt as dedicated strict-AND handlers with a
 // shared FINAL heavy stage (true_weekly_rsi, the TRUE calendar-weekly Wilder RSI-14 -- never the
-// synthetic v8_metrics.rsi_weekly column). win_pct/ev/sigs are honest TBD pending fresh live/BT7
-// evidence for the rebuilt specs -- old numbers described retired handlers and are not carried
-// forward.
+// synthetic v8_metrics.rsi_weekly column). cc#511 (18-Jul-2026): sigs_eod/wr_eod/ev_eod (5yr EOD)
+// and sigs_5m/wr_5m/ev_5m (1yr 5-min live-parity sim) carry the founder-locked backtest evidence
+// for these rebuilt specs (session_log ids 4514/5626/5647/5650 + SUITE_FINAL_LOCK_18JUL_0030) --
+// no TBD remains. Live WR (trade log) stays computed live from closed paper trades, unchanged.
 const BASKET_INFO={
   buy_reversal:{
     label:"Buy Reversal V5",side:"BUY",version:"V5",
@@ -451,7 +452,8 @@ const BASKET_INFO={
     gateType:"strict AND -- all 7 must pass · no regime · standard slot pool",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry: live 5-min CMP on first qualification. Target +3.0% / stop -3.0%, both FIXED at entry (never move). Max hold 15 trading days (EOD sweep).",
-    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
+    sigs_eod:"~195/yr (978 total 5yr)",wr_eod:61.6,ev_eod:0.69,
+    sigs_5m:"192/yr",wr_5m:62.0,ev_5m:0.85,
   },
   buy_momentum:{
     label:"Buy Momentum V3",side:"BUY",version:"V3",
@@ -478,7 +480,8 @@ const BASKET_INFO={
     gateType:"6 HARD gates + FINAL heavy wRSI (strict AND), PLUS SCORE >= 7-of-10 fixed-threshold V2 bands -- BOTH layers required to qualify",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry live CMP once both layers clear; target +3.0% / stop -3.0%, both FIXED at entry (never move).",
-    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
+    sigs_eod:"~292/yr (1524 total 5yr)",wr_eod:60.3,ev_eod:0.62,
+    sigs_5m:"408/yr",wr_5m:61.0,ev_5m:0.74,
   },
   sell_reversal:{
     label:"Sell Reversal V6.1",side:"SELL",version:"V6.1",
@@ -499,7 +502,8 @@ const BASKET_INFO={
     gateType:"strict AND -- all 10 must pass · dedicated handler, no score fallback",
     target:"S1 if (CMP-S1)/CMP >= 2% else S2 (never beyond S2)",stop:"1:1 mirror = entry + (entry - target)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
+    sigs_eod:"~57/yr (286 total 5yr)",wr_eod:60.5,ev_eod:0.71,
+    sigs_5m:"159/yr",wr_5m:71.7,ev_5m:1.55,
   },
   sell_momentum:{
     label:"Sell Momentum V4",side:"SELL",version:"V4",
@@ -518,7 +522,8 @@ const BASKET_INFO={
     gateType:"strict AND -- all 9 must pass · dedicated handler, no score fallback",
     target:"-3.0% fixed = entry x 0.97",stop:"+3.0% fixed = entry x 1.03 (true 1:1)",
     pivotEntry:"live 5-min CMP; target/stop frozen at entry, max hold 15 trading days",
-    wr:"TBD",ev:"TBD",sigs:"TBD",spd:"TBD (cc#502 rebuild, pending BT7 audit)",
+    sigs_eod:"~71/yr (356 total 5yr)",wr_eod:56.7,ev_eod:0.40,
+    sigs_5m:"205/yr",wr_5m:61.5,ev_5m:0.83,
   },
 };
 
@@ -554,7 +559,7 @@ const MATRIX_ROWS=[
   {label:"Sector (week)",   map:{buy_reversal:"sector_week",buy_momentum:"sector_week",sell_reversal:"sector_week",sell_momentum:"sector_week"}},
   {label:"Sector (month)",  map:{buy_momentum:"sector_month"}},
   {label:"52-week index",   map:{buy_momentum:"week_index_52",sell_reversal:"week_index_52",sell_momentum:"week_index_52"}},
-  {label:"Day change (1D)", map:{sell_reversal:"day_1d"}},
+  {label:"Day change (1D)", map:{buy_momentum:"day_1d",sell_reversal:"day_1d"}},
   {sec:"Pivot geometry"},
   {label:"Pivot position",  map:{sell_reversal:"cmp_lt_pp",sell_momentum:"cmp_lt_pp"}},
   {label:"Support / rejection trigger",map:{buy_reversal:"s1_touch",sell_reversal:["r1_touch","room"],sell_momentum:"s2_clearance"}},
@@ -562,11 +567,14 @@ const MATRIX_ROWS=[
   {label:"Target",   pull:"target"},
   {label:"Stop",     pull:"stop"},
   {label:"Max hold", lit:"15 trading days"},
-  {sec:"Performance",perf:true},
-  {label:"Backtest trades/yr (EOD)",pull:"sigs"},
-  {label:"Backtest WR (EOD)",       pull:"wr",pct:true},
-  {label:"EV / trade (EOD)",        pull:"ev",ev:true},
-  {label:"Live WR (trade log)",     live:true},
+  {sec:"Performance",perf:true,note:"Backtest evidence for the cc#502 rebuilt specs (locked 17-18 Jul) · 5-min = 1-yr live-parity sequential sim · live book fresh from 20-Jul"},
+  {label:"Backtest trades/yr (5yr EOD)",    pull:"sigs_eod"},
+  {label:"Backtest WR (5yr EOD)",           pull:"wr_eod",pct:true},
+  {label:"EV/trade (5yr EOD)",              pull:"ev_eod",ev:true},
+  {label:"Backtest trades/yr (1yr 5-min)",  pull:"sigs_5m"},
+  {label:"Backtest WR (1yr 5-min)",         pull:"wr_5m",pct:true},
+  {label:"EV/trade (1yr 5-min)",            pull:"ev_5m",ev:true},
+  {label:"Live WR (trade log)",             live:true},
 ];
 function _mxShort(c){return String(c).split(/\s*(?:\(|--|—|·|,)/)[0].trim();}
 function _mxCell(basketId,spec){
@@ -596,7 +604,9 @@ function renderMatrix(){
   const cell=(id,v,extra)=>`<td style="text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--txt);${colTint(id)};${extra||""}">${v==null?EM:v}</td>`;
   let body="";
   MATRIX_ROWS.forEach(r=>{
-    if(r.sec){body+=`<tr><td colspan="${MATRIX_COLS.length+1}" style="font-family:Sora;font-weight:700;font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--cyan);background:var(--panel2);padding:7px 12px;border-bottom:1px solid var(--line)">${r.sec}</td></tr>`;return;}
+    if(r.sec){body+=`<tr><td colspan="${MATRIX_COLS.length+1}" style="font-family:Sora;font-weight:700;font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--cyan);background:var(--panel2);padding:7px 12px;border-bottom:1px solid var(--line)">${r.sec}</td></tr>`;
+      if(r.note)body+=`<tr><td colspan="${MATRIX_COLS.length+1}" style="font-size:10px;color:var(--dim);background:var(--panel2);padding:0 12px 7px;border-bottom:1px solid var(--line)">${r.note}</td></tr>`;
+      return;}
     const tds=MATRIX_COLS.map(id=>{
       const inf=BASKET_INFO[id];
       if(r.live){const w=_mxLiveWR(id);if(!w)return cell(id,null);const col=w.acc>=60?"var(--grn)":w.acc>=45?"var(--amber)":"var(--red)";return cell(id,`<span style="color:${col};font-weight:700">${w.acc.toFixed(1)}%</span> <span style="color:var(--dim);font-size:9px">(${w.n})</span>`);}
@@ -713,21 +723,31 @@ function openInfo(basket){
   if(!info)return;
   const sc=info.side==='BUY';
   document.getElementById('mTitle').textContent=info.label;
-  const isNum=v=>typeof v==='number';
-  const wrTxt=isNum(info.wr)?`${info.wr}%`:info.wr;
-  const evTxt=isNum(info.ev)?`+${info.ev}%`:info.ev;
-  document.getElementById('mSub').textContent=`${info.side} · ${info.spd} · ${info.sigs} signals/yr · WR ${wrTxt} · EV ${evTxt}`;
+  document.getElementById('mSub').textContent=`${info.side} · 5-min ${info.wr_5m}% WR (${info.sigs_5m}) · 5yr EOD ${info.wr_eod}% WR (${info.sigs_eod})`;
 
   let html='';
   html+=`<div class="stat-pills">
-    <span class="sp sp-g">WR ${wrTxt}</span>
-    <span class="sp sp-b">EV ${evTxt}/trade</span>
-    <span class="sp sp-a">${info.sigs} sigs/yr</span>
+    <span class="sp sp-g">5-min WR ${info.wr_5m}%</span>
+    <span class="sp sp-b">5-min EV +${info.ev_5m}%/trade</span>
+    <span class="sp sp-a">${info.sigs_5m} sigs</span>
     <span class="sp ${sc?'sp-g':'sp-r'}">${info.side}</span>
     <span class="sp sp-c">${info.version}</span>
   </div>`;
   html+=`<div class="msec"><div class="msec-title">Strategy thesis</div>
     <div style="font-size:13px;color:var(--txt);line-height:1.65">${info.thesis}</div>
+  </div>`;
+  html+=`<div class="msec"><div class="msec-title">Backtest evidence</div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
+        <div style="font-size:10px;color:var(--mut);margin-bottom:3px">5-YR EOD</div>
+        <div style="font-family:'Space Mono';font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_eod} &middot; ${info.wr_eod}% WR &middot; +${info.ev_eod}% EV</div>
+      </div>
+      <div style="flex:1;background:var(--panel2);border-radius:8px;padding:9px 12px">
+        <div style="font-size:10px;color:var(--mut);margin-bottom:3px">1-YR 5-MIN (live-parity)</div>
+        <div style="font-family:'Space Mono';font-size:12px;font-weight:700;color:var(--txt)">${info.sigs_5m} &middot; ${info.wr_5m}% WR &middot; +${info.ev_5m}% EV</div>
+      </div>
+    </div>
+    <div style="font-size:10.5px;color:var(--dim);margin-top:6px">Backtest evidence for the cc#502 rebuilt specs (locked 17-18 Jul) &middot; 5-min = 1-yr live-parity sequential sim &middot; live book fresh from 20-Jul.</div>
   </div>`;
   html+=`<div class="msec"><div class="msec-title">Filters · <span style="color:var(--amber)">${info.gateType}</span></div>
     <div style="background:var(--panel2);border-radius:10px;padding:4px 12px">
