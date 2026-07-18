@@ -62,7 +62,16 @@ def ensure_tables(cur):
         PRIMARY KEY (scheme_code, as_of_month, company_name))""")
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_scores (
         scheme_code TEXT PRIMARY KEY, mqs NUMERIC, q_score NUMERIC, r_score NUMERIC,
-        c_score NUMERIC, s_score NUMERIC, computed_at TIMESTAMPTZ)""")
+        c_score NUMERIC, s_score NUMERIC, computed_at TIMESTAMPTZ,
+        basis_pct NUMERIC, basis_label TEXT)""")
+    # cc#528 reopened: honest MQS disclosure when a pillar (Q, permanently since cc#505) is
+    # missing -- basis_pct/basis_label record what fraction of the locked Q0.35/R0.30/C0.15/
+    # S0.20 model actually backs a given fund's mqs, so the page can say "62.4 on R+C+S (65%
+    # basis)" instead of a bare misleading /100. Additive nullable columns, same pattern as
+    # _ensure_returns_cols below -- not a MAINTENANCE_LOCK_RULE table rewrite.
+    cur.execute("""ALTER TABLE mf_scores
+        ADD COLUMN IF NOT EXISTS basis_pct NUMERIC,
+        ADD COLUMN IF NOT EXISTS basis_label TEXT""")
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_category_averages (
         category TEXT PRIMARY KEY, avg_expense_ratio NUMERIC, avg_ret_1y NUMERIC,
         avg_ret_3y NUMERIC, avg_ret_5y NUMERIC, n_funds INTEGER, updated_at TIMESTAMPTZ DEFAULT NOW())""")
@@ -1167,6 +1176,7 @@ def v15_fund(scheme_code: str):
                               m.ret_1w, m.ret_1m, m.ret_3m, m.ret_6m, m.ret_1y, m.ret_2y, m.ret_3y,
                               m.ret_5y, m.returns_asof,
                               s.mqs, s.q_score, s.r_score, s.c_score, s.s_score, s.computed_at,
+                              s.basis_pct, s.basis_label,
                               ca.avg_expense_ratio
                        FROM mf_master m
                        LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code
@@ -1181,7 +1191,8 @@ def v15_fund(scheme_code: str):
     m["category"] = _derive_cat(m.get("name"), m.get("category"))
     m["plan"] = _derive_plan(m.get("name"))
     for k in ("expense_ratio", "aum_cr", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y",
-              "ret_2y", "ret_3y", "ret_5y", "mqs", "q_score", "r_score", "c_score", "s_score"):
+              "ret_2y", "ret_3y", "ret_5y", "mqs", "q_score", "r_score", "c_score", "s_score",
+              "basis_pct"):
         if m.get(k) is not None:
             m[k] = float(m[k])
     m["ret_3y_state"] = _ret_window_state(m.get("ret_3y"), m.get("inception"), 3)
@@ -1978,13 +1989,21 @@ def compute_mf_scores(conn=None):
                     continue
                 wsum = sum(weights.values())
                 mqs = sum(pillars[k] * weights[k] for k in pillars) / wsum
-                cur.execute("""INSERT INTO mf_scores (scheme_code, mqs, q_score, r_score, c_score, s_score, computed_at)
-                               VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                # cc#528 reopened: full locked model is Q0.35/R0.30/C0.15/S0.20 = 1.0, so wsum
+                # IS the basis fraction directly -- no fabricated fill-in, just an honest label
+                # of which pillars actually back this fund's mqs (Q is 0/14238 funds today).
+                basis_label = "+".join(k.upper() for k in ("q", "r", "c", "s") if k in pillars)
+                cur.execute("""INSERT INTO mf_scores (scheme_code, mqs, q_score, r_score, c_score, s_score,
+                                   basis_pct, basis_label, computed_at)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                                ON CONFLICT (scheme_code) DO UPDATE SET
                                    mqs=EXCLUDED.mqs, q_score=EXCLUDED.q_score, r_score=EXCLUDED.r_score,
-                                   c_score=EXCLUDED.c_score, s_score=EXCLUDED.s_score, computed_at=NOW()""",
+                                   c_score=EXCLUDED.c_score, s_score=EXCLUDED.s_score,
+                                   basis_pct=EXCLUDED.basis_pct, basis_label=EXCLUDED.basis_label,
+                                   computed_at=NOW()""",
                             (sc, round(mqs, 2), pillars.get("q"), pillars.get("r"),
-                             pillars.get("c"), pillars.get("s")))
+                             pillars.get("c"), pillars.get("s"),
+                             round(wsum * 100, 1), basis_label))
                 scored += 1
             # cc#520: purge any stray mf_scores rows for schemes outside the whitelist (Banking &
             # PSU debt funds scored by an older pre-exclusion pass) -- they must not surface in the

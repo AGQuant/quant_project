@@ -12,6 +12,15 @@
 --bull:#2FD48B;--bull-soft:rgba(47,212,139,.14);--bear:#FF5C6C;--bear-soft:rgba(255,92,108,.13);
 --amber:#F5B94A;--amber-soft:rgba(245,185,74,.14);--blue:#4D7CFE;--cyan:#37D3E8;
 --disp:'Sora',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--r:20px}
+/* cc#528 reopened: V15 has no light stylesheet yet -- the shared pwa.js toggle only restyles
+   the injected nav chrome, so setting data-theme="light" left this page's own body dark-token
+   but ghosted (title/pillar text unreadable). Until a real light theme is designed, pin every
+   token back to its dark value under the light attribute so the toggle is a no-op HERE only. */
+:root[data-theme="light"]{--ink:#0A0F1E;--surface:#121A33;--surface2:#182241;--well:#0D1428;
+--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+--bull:#2FD48B;--bull-soft:rgba(47,212,139,.14);--bear:#FF5C6C;--bear-soft:rgba(255,92,108,.13);
+--amber:#F5B94A;--amber-soft:rgba(245,185,74,.14);--blue:#4D7CFE;--cyan:#37D3E8}
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
 body{background:var(--ink);color:var(--text);font-family:var(--disp);-webkit-font-smoothing:antialiased;padding:0 16px 110px;position:relative;overflow-x:hidden}
@@ -276,7 +285,7 @@ td.sym{font-weight:700;font-size:12.5px}
     return '<span class="gvm '+c+'">'+v.toFixed(1)+'</span>';
   }
 
-  function setDial(mqs){
+  function setDial(mqs,basisPct){
     var arc=$("dial-arc"),v=$("mqs"),k=arc.parentElement.parentElement.querySelector(".k");
     if(mqs==null){
       arc.style.strokeDashoffset=ARC_C; arc.style.opacity=.25; arc.style.stroke="var(--dim)";
@@ -287,10 +296,13 @@ td.sym{font-weight:700;font-size:12.5px}
     arc.style.opacity=1; arc.style.stroke=col;
     arc.style.strokeDashoffset=ARC_C*(1-mqs/100);
     v.textContent=mqs.toFixed(1); v.style.color=col; v.style.fontSize="34px";
-    k.textContent="MQS / 100";
+    // cc#528 reopened: Q pillar is permanently absent (0/14238 funds have a live rating
+    // source since cc#505) -- a bare "/100" implies the full 4-pillar model backs this
+    // number when it never does. Disclose the real basis instead of a misleading full score.
+    k.textContent=(basisPct!=null&&basisPct<100)?("PARTIAL BASIS · "+Math.round(basisPct)+"%"):"MQS / 100";
   }
 
-  function setVerdict(mqs,computedAt){
+  function setVerdict(mqs,computedAt,basisPct,basisLabel){
     var chip=$("verdict-chip"),sub=$("verdict-sub");
     chip.className="v";
     if(mqs==null){
@@ -301,7 +313,10 @@ td.sym{font-weight:700;font-size:12.5px}
     var label=mqs>=80?"ELITE":mqs>=65?"STRONG":mqs>=45?"AVERAGE":"WEAK";
     var cls=mqs>=80?"elite":mqs>=65?"strong":mqs>=45?"average":"weak";
     chip.classList.add(cls); chip.textContent=label;
-    sub.textContent="MQS "+mqs.toFixed(1)+"/100"+(computedAt?(" · scored "+computedAt):"");
+    var basisTxt=(basisPct!=null&&basisPct<100)
+      ?("MQS "+mqs.toFixed(1)+" on "+(basisLabel||"partial")+" ("+Math.round(basisPct)+"% basis)")
+      :("MQS "+mqs.toFixed(1)+"/100");
+    sub.textContent=basisTxt+(computedAt?(" · scored "+computedAt):"");
   }
 
   function setPillar(id,val,weightPct,retiredNote){
@@ -359,7 +374,7 @@ td.sym{font-weight:700;font-size:12.5px}
       setRetState("r-3y","3Y",f.ret_3y,f.ret_3y_state);
       setRetState("r-5y","5Y",f.ret_5y,f.ret_5y_state);
       $("ret-asof").textContent=f.returns_asof?("as of "+f.returns_asof):"awaiting data";
-      setDial(f.mqs); setVerdict(f.mqs,f.computed_at);
+      setDial(f.mqs,f.basis_pct); setVerdict(f.mqs,f.computed_at,f.basis_pct,f.basis_label);
       setPillar("pc-q",f.q_score,35);
       setPillar("pc-r",f.r_score,30);
       setPillar("pc-c",f.c_score,15);
