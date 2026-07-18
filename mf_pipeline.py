@@ -2184,35 +2184,129 @@ def _mc_fetch_scheme_page(isin):
     return data, diag
 
 
-def _mc_fetch_holdings(imid):
-    """getInvestmentByStock -> (rows[{isin,name,marketCap,portfolioDate,marketValue,
-    percentToNAV}], portfolio_month_date_or_None, diag). pageSize=300 to avoid needing
-    pagination for any realistically-sized equity portfolio. Never raises."""
+# cc#533 (addendum 18-Jul evening): the REAL per-fund holdings API is the ISIN-keyed
+# swiftapi/v1/mutualfunds/holdings?isin=... endpoint (captured live from the fund-page popout),
+# NOT getInvestmentByStock (a reverse lookup that served generic content -> the 17-Jul poisoning).
+# Per founder discipline we do NOT hardcode a single guessed field name: instead we (a) log a
+# full raw sample to ops_log on the first fetch of every run (MF_MC_HOLDINGS_SCHEMA_SAMPLE) and
+# (b) match each field by case-insensitive key-fragment so a minor key-name variation across
+# MC's response never silently drops data. Weight excludes value/change columns explicitly so
+# the rupee-value or "1M HLD Chg" column is never mistaken for the NAV weightage.
+_MC_HOLD_NAME_FRAGS   = ("companyname", "stockname", "scripname", "securityname", "company",
+                          "stock", "scrip", "security", "holdingname", "sname", "name")
+_MC_HOLD_WEIGHT_FRAGS = ("weightage", "percenttonav", "peraum", "percentageaum",
+                          "holdingpercentage", "pernav", "weight", "percentage", "percent")
+_MC_HOLD_ISIN_FRAGS   = ("isin",)
+_MC_HOLD_SECTOR_FRAGS = ("sector",)
+_MC_HOLD_WEIGHT_EXCL  = ("change", "chg", "diff", "value", "marketvalue", "amount", "cr", "mktval")
+
+
+def _mc_norm_key(k):
+    return re.sub(r"[^a-z0-9]", "", (k or "").lower())
+
+
+def _mc_pick_field(row, frags, exclude=()):
+    """First (key, value) in row whose normalized key contains any of `frags` and none of
+    `exclude`. `frags` is tried in priority order so specific names win over generic ones."""
+    norm = {k: _mc_norm_key(k) for k in row.keys()}
+    for f in frags:
+        for k, nk in norm.items():
+            if any(x in nk for x in exclude):
+                continue
+            if f in nk:
+                return k, row.get(k)
+    return None, None
+
+
+def _mc_find_holdings_array(obj, depth=0):
+    """Recursively locate the first list-of-dicts that looks like holdings (each dict exposes a
+    name-ish AND a weight-ish key). Robust to whatever wrapper shape the endpoint returns."""
+    if depth > 6:
+        return None
+    if isinstance(obj, list):
+        dict_rows = [x for x in obj if isinstance(x, dict)]
+        if dict_rows:
+            nk, _ = _mc_pick_field(dict_rows[0], _MC_HOLD_NAME_FRAGS, exclude=_MC_HOLD_SECTOR_FRAGS)
+            wk, _ = _mc_pick_field(dict_rows[0], _MC_HOLD_WEIGHT_FRAGS, exclude=_MC_HOLD_WEIGHT_EXCL)
+            if nk and wk:
+                return dict_rows
+        for x in obj:
+            got = _mc_find_holdings_array(x, depth + 1)
+            if got:
+                return got
+        return None
+    if isinstance(obj, dict):
+        for v in obj.values():
+            got = _mc_find_holdings_array(v, depth + 1)
+            if got:
+                return got
+    return None
+
+
+def _mc_fetch_holdings(isin, sample_cb=None):
+    """cc#533: per-fund holdings from the ISIN-keyed endpoint. Returns
+    (rows[{name,isin,pct_weight,sector}], portfolio_month_or_None, diag). Never raises.
+    sample_cb, if given, is invoked once (first fetch of a run) with a raw-schema dict the
+    caller logs to ops_log so the real JSON keys are verifiable before trusting the data."""
     import requests
-    diag = {"imid": imid}
+    diag = {"isin": isin}
     try:
-        r = requests.get("https://api.moneycontrol.com/swiftapi/v1/mutualfunds/getInvestmentByStock",
-                          params={"responseType": "json", "deviceType": "W", "page": "1",
-                                   "pageSize": "300", "imid": imid},
+        r = requests.get("https://api.moneycontrol.com/swiftapi/v1/mutualfunds/holdings",
+                          params={"isin": isin, "deviceType": "W", "responseType": "json"},
                           headers=_MC_HDR, timeout=30)
         diag["http"] = r.status_code
         if r.status_code != 200:
+            if sample_cb:
+                sample_cb({"isin": isin, "http": r.status_code, "located": False,
+                           "raw_head": (r.text or "")[:800]})
             return [], None, diag
-        j = r.json()
-        d = j.get("data") or {}
-        rows = d.get("investmentByStock") or []
+        payload = r.json()
+        arr = _mc_find_holdings_array(payload)
+        if not arr:
+            diag["error"] = "no holdings array located in response"
+            if sample_cb:
+                sample_cb({"isin": isin, "http": r.status_code, "located": False,
+                           "top_level_keys": list(payload.keys()) if isinstance(payload, dict) else "not_a_dict",
+                           "raw_head": json.dumps(payload)[:1500]})
+            return [], None, diag
+        first = arr[0]
+        nk, _ = _mc_pick_field(first, _MC_HOLD_NAME_FRAGS, exclude=_MC_HOLD_SECTOR_FRAGS)
+        wk, _ = _mc_pick_field(first, _MC_HOLD_WEIGHT_FRAGS, exclude=_MC_HOLD_WEIGHT_EXCL)
+        ik, _ = _mc_pick_field(first, _MC_HOLD_ISIN_FRAGS)
+        sk, _ = _mc_pick_field(first, _MC_HOLD_SECTOR_FRAGS)
+        rows = []
+        for row in arr:
+            if not isinstance(row, dict):
+                continue
+            rows.append({"name": (row.get(nk) if nk else None),
+                         "pct_weight": _mc_num(row.get(wk)) if wk else None,
+                         "isin": (row.get(ik) if ik else None),
+                         "sector": (row.get(sk) if sk else None)})
+        # portfolio month: look for a date-ish top-level value
         month = None
-        pdate = d.get("portfolioDate")
+        pdate = None
+        data = payload.get("data") if (isinstance(payload, dict) and isinstance(payload.get("data"), dict)) else payload
+        if isinstance(data, dict):
+            for cand in ("portfolioDate", "asOnDate", "portfolioAsOn", "asOn", "date"):
+                if data.get(cand):
+                    pdate = data.get(cand); break
         if pdate:
-            try:
-                month = datetime.strptime(pdate, "%b %Y").date().replace(day=1)
-            except Exception:
-                pass
-        diag["n_rows"] = len(rows)
-        diag["portfolio_date"] = pdate
+            for fmt in ("%b %Y", "%d %b %Y", "%Y-%m-%d", "%d-%m-%Y", "%d %B %Y"):
+                try:
+                    month = datetime.strptime(str(pdate), fmt).date().replace(day=1); break
+                except Exception:
+                    continue
+        diag.update({"n_rows": len(rows), "portfolio_date": pdate,
+                     "picked": {"name": nk, "weight": wk, "isin": ik, "sector": sk}})
+        if sample_cb:
+            sample_cb({"isin": isin, "http": r.status_code, "located": True, "n_rows": len(rows),
+                       "top_level_keys": list(payload.keys()) if isinstance(payload, dict) else "list",
+                       "sample_row": first, "picked": diag["picked"], "portfolio_date": pdate})
         return rows, month, diag
     except Exception as e:
         diag["error"] = str(e)[:160]
+        if sample_cb:
+            sample_cb({"isin": isin, "located": False, "error": str(e)[:200]})
         return [], None, diag
 
 
@@ -2314,7 +2408,9 @@ def write_mc_overview(cur, scheme_code, data):
 
 def write_mc_holdings(cur, scheme_code, rows, as_of_month):
     """step_3: upsert into mf_holdings, resolving each holding to an NSE symbol via the
-    existing _resolve_nse (same tiered company-name matching used by the AMC-holdings path)."""
+    existing _resolve_nse (same tiered company-name matching used by the AMC-holdings path).
+    cc#533: rows are now the normalized {name, pct_weight, isin, sector} dicts produced by the
+    ISIN-endpoint _mc_fetch_holdings (was getInvestmentByStock's raw percentToNAV shape)."""
     as_of_month = as_of_month or date.today().replace(day=1)
     resolved = 0
     for h in rows:
@@ -2330,7 +2426,7 @@ def write_mc_holdings(cur, scheme_code, rows, as_of_month):
             ON CONFLICT (scheme_code, as_of_month, company_name) DO UPDATE SET
                 isin=EXCLUDED.isin, pct_weight=EXCLUDED.pct_weight,
                 resolved_nse_symbol=EXCLUDED.resolved_nse_symbol, resolve_method=EXCLUDED.resolve_method""",
-            (scheme_code, as_of_month, h.get("isin"), name, h.get("percentToNAV"), nse_sym, method))
+            (scheme_code, as_of_month, h.get("isin"), name, h.get("pct_weight"), nse_sym, method))
     return {"rows": len(rows), "resolved_nse": resolved}
 
 
@@ -2370,7 +2466,7 @@ def run_mc_oneshot(conn=None):
         map_stats = resolve_mc_map(conn)
 
         with conn.cursor() as cur:
-            cur.execute("""SELECT m.scheme_code, m.amfi_code, mm.mc_id, mm.mc_slug, m.ret_1y
+            cur.execute("""SELECT m.scheme_code, m.amfi_code, m.isin, mm.mc_id, mm.mc_slug, m.ret_1y
                            FROM mf_master m JOIN mf_mc_map mm ON mm.scheme_code = m.scheme_code
                            WHERE m.category IS NOT NULL AND m.category <> 'Banking & PSU'
                            ORDER BY m.scheme_code""")
@@ -2380,12 +2476,28 @@ def run_mc_oneshot(conn=None):
         done_prefix = (r[0] if r else "") or ""
         pending = [row for row in universe if row[0] > done_prefix]
 
+        # cc#533 addendum: log the raw holdings-response schema for the first few fetches of this
+        # run (MF_MC_HOLDINGS_SCHEMA_SAMPLE) so the exact JSON keys + which fields the extractor
+        # picked are verifiable before trusting any downstream distinct-signature count -- and so
+        # a Direct-plan-ISIN 404 (addendum point 5) surfaces on the first few schemes, not silently.
+        _sample_count = [0]
+        def _holdings_sample_cb(sample):
+            if _sample_count[0] >= 5:
+                return
+            _sample_count[0] += 1
+            try:
+                with conn.cursor() as cur:
+                    _oplog(cur, "MF_MC_HOLDINGS_SCHEMA_SAMPLE", {"seq": _sample_count[0], **sample})
+                    conn.commit()
+            except Exception as e:
+                log.warning(f"holdings sample log: {e}")
+
         n_overview = n_holdings = n_ret1y = fails = 0
         consecutive_bad = unparseable_first50 = 0
         stop_event = None
         recent_holdings_sigs = []
         i = -1
-        for i, (sc, amfi_code, mc_id, mc_slug, ret_1y) in enumerate(pending):
+        for i, (sc, amfi_code, isin, mc_id, mc_slug, ret_1y) in enumerate(pending):
             try:
                 data, diag = _mc_fetch_by_slug(mc_slug)
                 bad_response = diag.get("error") == "no __NEXT_DATA__ marker" or diag.get("http") == 403
@@ -2400,7 +2512,7 @@ def run_mc_oneshot(conn=None):
                         write_mc_overview(cur, sc, data)
                         n_overview += 1
                         conn.commit()
-                    hrows, hmonth, _hdiag = _mc_fetch_holdings(mc_id)
+                    hrows, hmonth, _hdiag = _mc_fetch_holdings(isin, sample_cb=_holdings_sample_cb)
                     if hrows:
                         with conn.cursor() as cur:
                             write_mc_holdings(cur, sc, hrows, hmonth)
