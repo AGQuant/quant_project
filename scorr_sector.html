@@ -599,7 +599,7 @@ function App() {
     <div style={{minHeight:"100vh",background:C.bg}}>
       <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 20px"}}>
         <div style={{display:"flex",alignItems:"center",gap:20,flexWrap:"wrap"}}>
-          <div><span style={{fontSize:13,fontWeight:800,color:C.text}}>SCORR · Sector Analysis</span><span style={{fontSize:10,color:C.muted,marginLeft:10}}>{d.total_segments} segments · {d.score_date} · 5-signal percentile composite</span></div>
+          <div><span style={{fontSize:13,fontWeight:800,color:C.text}}>Sector Analysis</span><span style={{fontSize:10,color:C.muted,marginLeft:10}}>{d.total_segments} segments · {d.score_date} · 5-signal percentile composite</span></div>
           <div style={{marginLeft:"auto",display:"flex",gap:16,fontSize:11}}><span>Buy+: <b style={{color:C.green}}>{stats.buy}</b></span><span>Score≥7: <b style={{color:C.green}}>{stats.hi}</b></span><span>Cold&lt;4: <b style={{color:C.red}}>{stats.cold}</b></span></div>
         </div>
         <div style={{display:"flex",marginTop:10,borderBottom:`1px solid ${C.border}`,marginLeft:-20,paddingLeft:20,marginBottom:-13}}>
