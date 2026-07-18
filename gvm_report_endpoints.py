@@ -383,14 +383,20 @@ def gvm_company_report(symbol: str):
                 sym_current_pe   = pe_map.get(sym)
                 sym_rerating     = rerating_map.get(sym)
                 sym_ratio        = (sym_current_pe / sym_hist) if (sym_current_pe is not None and sym_hist) else None
-                rerate_pairs     = [(s, v) for s, v in rerating_map.items()]
-                rank_h = best_h = worst_h = None
-                if rerate_pairs:
-                    sorted_rerate = sorted(rerate_pairs, key=lambda x: x[1])   # lower (more de-rated) = "best"
-                    best_h  = {"symbol": sorted_rerate[0][0],  "value": sorted_rerate[0][1]}
-                    worst_h = {"symbol": sorted_rerate[-1][0], "value": sorted_rerate[-1][1]}
-                    if sym_rerating is not None:
-                        rank_h = next((i + 1 for i, (s_i, _) in enumerate(sorted_rerate) if s_i == sym), None)
+
+                # cc#522: peer column + rank/best/worst switched to the SAME basis as every other
+                # V row -- peers' own 5Y-avg historical PE (hist_pairs, lower = cheaper = better),
+                # not the company's own current PE (that was a table-grammar bug: every other row
+                # reads Company | Segment-peer, this one was reading Company | own current PE) and
+                # not the re-rating % (that story now lives only in the verdict chip). hist_pairs
+                # already excludes peers lacking a usable hist PE (hpe_f>0 filter above), so the
+                # peer_n shown here is honest about how many peers actually have 5Y hist PE data.
+                peer_median_hist = round(statistics.median([v for _, v in hist_pairs]), 2)
+                sorted_hist = sorted(hist_pairs, key=lambda x: x[1])   # lower hist PE = "best" (cheaper peer)
+                best_h  = {"symbol": sorted_hist[0][0],  "value": round(sorted_hist[0][1], 2)}
+                worst_h = {"symbol": sorted_hist[-1][0], "value": round(sorted_hist[-1][1], 2)}
+                rank_h  = (next((i + 1 for i, (s_i, _) in enumerate(sorted_hist) if s_i == sym), None)
+                           if sym_hist is not None else None)
 
                 pe_trend = []
                 try:
@@ -407,9 +413,9 @@ def gvm_company_report(symbol: str):
                     "pillar":     "V",
                     "unit":       "x",
                     "company":    round(sym_hist, 2) if sym_hist is not None else None,
-                    "peer_avg":   round(sym_current_pe, 2) if sym_current_pe is not None else None,
-                    "peer_median": round(sym_current_pe, 2) if sym_current_pe is not None else None,
-                    "peer_label": "current PE",   # cc#512: relabel -- this row's compare column is NOT a peer stat
+                    "peer_avg":   peer_median_hist,
+                    "peer_median": peer_median_hist,
+                    "peer_label": "peer median",   # cc#522: fixed -- was showing the company's own current PE
                     "rating":     None,      # context row -- see docstring above
                     "is_context": True,
                     "rerating_pct": sym_rerating,
@@ -418,12 +424,13 @@ def gvm_company_report(symbol: str):
                     "peer_n":     len(hist_pairs),
                     "best":       best_h,
                     "worst":      worst_h,
+                    "peers":      [{"symbol": s, "value": round(v, 2)} for s, v in sorted_hist],
                     "chart_type": "pe_trend",
                     "pe_trend":   pe_trend,
                     "median_pe":  median_pe,
                     "current_pe": round(sym_current_pe, 2) if sym_current_pe is not None else None,
                     "historical_pe": round(sym_hist, 2) if sym_hist is not None else None,
-                    "beats_peer": None,
+                    "beats_peer": (sym_hist is not None and sym_hist <= peer_median_hist),
                 }
                 anchor_key = "fwd_pe" if any(b.get("key") == "fwd_pe" for b in benchmark) else "pe"
                 anchor_idx = next((i for i, b in enumerate(benchmark) if b.get("key") == anchor_key), -1)

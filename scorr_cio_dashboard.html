@@ -757,9 +757,14 @@ function MatrixRow({ b, pillar, onChart }) {
       </td>
       <td style={{ padding: "8px 14px", minWidth: 120 }}>
         {b.is_context ? (
+          // cc#522: wrap the verdict text in the same bordered box (height/border/radius) the
+          // score bar below uses, tinted by verdict color, so this row's baseline matches every
+          // other row instead of rendering bare text.
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 20,
-            fontSize: 13, fontWeight: 800, color: vColor, fontFamily: "monospace" }}>
-            {b.verdict ? b.verdict.label : "—"}{b.rerating_pct != null ? ` · ${signFmt(b.rerating_pct, 1)}%` : ""}
+            borderRadius: 4, border: `1px solid ${vColor}`, background: `${vColor}22` }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: vColor, fontFamily: "monospace" }}>
+              {b.verdict ? b.verdict.label : "—"}{b.rerating_pct != null ? ` · ${signFmt(b.rerating_pct, 1)}%` : ""}
+            </span>
           </div>
         ) : (
           <div style={{ position: "relative", height: 20, background: C.bg, borderRadius: 4, border: `1px solid ${C.gridLine}` }}>
