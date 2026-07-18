@@ -108,11 +108,13 @@ BFSI_SEGMENTS = {
 }
 
 # G + V peer params only (M now comes from momentum_scores).
+# cc#506: "pe" added -- feeds the LIVE segment MEDIAN PE that replaces the stale/mean-based
+# screener_raw.segment_pe ("Industry PE") as score_pe's segment benchmark. See _stock_dict().
 PEER_PARAMS = [
     "sales_growth_5y", "sales_growth_3y", "profit_growth_5y", "profit_growth_3y",
     "qoq_sales_growth", "qoq_profit_growth", "opm", "opm_expansion", "fixed_asset_growth",
     "inst_holding_abs", "inst_holding_change", "roce", "interest_coverage",
-    "dividend_yield", "potential_upside",
+    "dividend_yield", "potential_upside", "pe",
 ]
 
 
@@ -348,20 +350,18 @@ def _load_merged_df(target_date: date) -> pd.DataFrame:
 
 
 def _peer_averages(df: pd.DataFrame) -> Dict:
+    """cc#506: MEDIAN peers (was a 10-90 percentile trimmed MEAN). Median is inherently robust
+    to outliers, so the old trim-then-mean two-step collapses to a single vals.median() -- same
+    goal (don't let one extreme peer skew the benchmark), simpler mechanism. Every caller of
+    these values (gvm_engine.py's score_relative/param_score/score_pe/etc.) takes peer input as
+    a plain scalar, so this one change is sufficient to flow medians through the whole engine."""
     out = {}
     for seg, grp in df.groupby("gvm_segment"):
         avgs = {}
         for p in PEER_PARAMS:
             if p in grp.columns:
                 vals = pd.to_numeric(grp[p], errors="coerce").dropna()
-                if len(vals) >= 3:
-                    lo, hi = vals.quantile(0.10), vals.quantile(0.90)
-                    trimmed = vals[(vals >= lo) & (vals <= hi)]
-                    avgs[p] = round(trimmed.mean(), 4) if len(trimmed) else round(vals.mean(), 4)
-                elif len(vals):
-                    avgs[p] = round(vals.mean(), 4)
-                else:
-                    avgs[p] = None
+                avgs[p] = round(vals.median(), 4) if len(vals) else None
         out[seg] = avgs
     return out
 
@@ -402,7 +402,10 @@ def _stock_dict(row, peer_avgs):
         "roce": v("roce"), "peer_roce": p("roce"),
         "interest_coverage": v("interest_coverage"), "peer_interest_coverage": p("interest_coverage"),
         "dividend_yield": v("dividend_yield"), "peer_dividend_yield": p("dividend_yield"),
-        "pe": v("pe"), "historical_pe": v("historical_pe"), "segment_pe": v("segment_pe"),
+        # cc#506: segment_pe is now the LIVE segment MEDIAN pe (p("pe"), computed above from the
+        # SAME peer set every other param uses) -- replaces the stale/mean-based screener_raw
+        # "Industry PE" passthrough. historical_pe is unaffected (still each stock's own value).
+        "pe": v("pe"), "historical_pe": v("historical_pe"), "segment_pe": p("pe"),
         "potential_upside": v("potential_upside"), "peer_potential_upside": p("potential_upside"),
     }
 

@@ -56,6 +56,27 @@ def score_relative(stock_val, peer_avg):
     else:             return 2.5
 
 
+def score_relative_inverse(stock_val, peer_median):
+    """cc#506: lower-is-better relative scorer for report-only metrics with no absolute-band
+    spec (Forward PE, Price/Book, and the same _peer_block-driven EV/EBITDA + Annual Upside
+    blocks in gvm_report_endpoints.py). F1 is a neutral 5.0 placeholder (no absolute band spec
+    exists for these); F2 bands on (peer_median/stock_val)*100 -- mirrors score_pe's pe_factor
+    inverse cutoffs exactly (smaller stock_val vs peer scores higher)."""
+    if _is_blank(stock_val):
+        return BLANK_SCORE
+    stock_val = float(stock_val)
+    f1 = 5.0
+    if peer_median is None or _is_blank(peer_median) or float(peer_median) == 0 or stock_val == 0:
+        f2 = BLANK_SCORE
+    else:
+        ratio = (float(peer_median) / stock_val) * 100
+        if ratio > 125:   f2 = 10.0
+        elif ratio > 100: f2 = 7.5
+        elif ratio > 75:  f2 = 5.0
+        else:             f2 = 2.5
+    return round((f1 + f2) / 2, 2)
+
+
 def param_score(stock_val, peer_avg):
     if _is_blank(stock_val): return BLANK_SCORE
     stock_val = float(stock_val)

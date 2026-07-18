@@ -13,12 +13,14 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from decimal import Decimal
 import math
+import statistics
 import psycopg
 import os
 import logging
 
 from gvm_company_report import build_company_report, search_companies
 from gvm_page_extras import build_page_extras
+from gvm_engine import param_score, score_relative_inverse
 
 log = logging.getLogger("scorr.gvm_report")
 router = APIRouter(tags=["gvm_report"])
@@ -79,6 +81,7 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
         "unit":       p.get("unit", ""),
         "company":    p.get("raw"),       # raw = company's own value
         "peer_avg":   p.get("peer_avg"),
+        "peer_median": p.get("peer_median", p.get("peer_avg")),
         "rating":     p.get("rating"),
         "rank":       p.get("rank"),
         "peer_n":     p.get("peer_count"),
@@ -91,25 +94,32 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
 def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
                 sym: str, lower_is_better: bool) -> Optional[Dict[str, Any]]:
     """Build a self-contained, peer-benchmarked Valuation block from a
-    {symbol: value} map. Mirrors the Forward PE rating logic. pillar=V.
-    Returns None if fewer than 2 peers have a value."""
+    {symbol: value} map. pillar=V. Returns None if fewer than 2 peers have a value.
+
+    cc#506: rating source switched from percentile-rank to gvm_engine, same as every other
+    report parameter -- score_relative_inverse (lower-is-better: Price/Book, EV/EBITDA) or
+    param_score (higher-is-better: Annual Upside), fed the segment MEDIAN. Powers Price/Book,
+    EV/EBITDA, and Annual Upside (FY27e); Forward PE has its own inline block below (needs a
+    peer map built from a derived value, not a straight screener_raw column) but uses the same
+    two engine functions for "ONE rating methodology everywhere" (cc#506 spec)."""
     pairs = [(s, v) for s, v in value_map.items() if v is not None]
     if len(pairs) < 2:
         return None
-    vals     = [v for _, v in pairs]
-    peer_avg = round(sum(vals) / len(vals), 2)
-    ordered  = sorted(pairs, key=lambda x: x[1], reverse=not lower_is_better)  # best first
-    best     = {"symbol": ordered[0][0],  "value": round(ordered[0][1], 2)}
-    worst    = {"symbol": ordered[-1][0], "value": round(ordered[-1][1], 2)}
-    n        = len(ordered)
-    sym_val  = value_map.get(sym)
+    vals        = [v for _, v in pairs]
+    peer_median = round(statistics.median(vals), 2)
+    ordered     = sorted(pairs, key=lambda x: x[1], reverse=not lower_is_better)  # best first
+    best        = {"symbol": ordered[0][0],  "value": round(ordered[0][1], 2)}
+    worst       = {"symbol": ordered[-1][0], "value": round(ordered[-1][1], 2)}
+    n           = len(ordered)
+    sym_val     = value_map.get(sym)
     rank = rating = None
     beats = False
     if sym_val is not None:
         pos    = next((i for i, (s_i, _) in enumerate(ordered) if s_i == sym), 0)
         rank   = pos + 1
-        rating = round(10.0 - (pos / max(1, n - 1)) * 8.0, 2)
-        beats  = (sym_val <= peer_avg) if lower_is_better else (sym_val >= peer_avg)
+        rating = (score_relative_inverse(sym_val, peer_median) if lower_is_better
+                  else param_score(sym_val, peer_median))
+        beats  = (sym_val <= peer_median) if lower_is_better else (sym_val >= peer_median)
     return {
         "key":        key,
         "label":      label,
@@ -117,7 +127,8 @@ def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
         "pillar":     "V",
         "unit":       unit,
         "company":    round(sym_val, 2) if sym_val is not None else None,
-        "peer_avg":   peer_avg,
+        "peer_avg":   peer_median,
+        "peer_median": peer_median,
         "rating":     rating,
         "rank":       rank,
         "peer_n":     n,
@@ -221,17 +232,17 @@ def gvm_company_report(symbol: str):
             fwd_pairs = [(s, v) for s, v in fwd_pe_map.items() if v is not None]
             if len(fwd_pairs) >= 2:
                 vals            = [v for _, v in fwd_pairs]
-                peer_avg_fwd    = round(sum(vals) / len(vals), 1)
+                peer_median_fwd = round(statistics.median(vals), 1)
                 sym_fwd         = fwd_pe_map.get(sym)
                 sorted_asc      = sorted(fwd_pairs, key=lambda x: x[1])   # lower = better
                 best_fwd        = {"symbol": sorted_asc[0][0],  "value": sorted_asc[0][1]}
                 worst_fwd       = {"symbol": sorted_asc[-1][0], "value": sorted_asc[-1][1]}
                 rank_fwd        = next((i + 1 for i, (s_i, _) in enumerate(sorted_asc) if s_i == sym), None)
                 n               = len(sorted_asc)
-                rating_fwd      = None
-                if sym_fwd is not None:
-                    pos         = next((i for i, (s_i, _) in enumerate(sorted_asc) if s_i == sym), 0)
-                    rating_fwd  = round(10.0 - (pos / max(1, n - 1)) * 8.0, 2)
+                # cc#506: rating source = gvm_engine.score_relative_inverse (lower-is-better,
+                # segment median), same "ONE rating methodology everywhere" as the rest of the
+                # report -- retires the old percentile-rank formula.
+                rating_fwd      = score_relative_inverse(sym_fwd, peer_median_fwd) if sym_fwd is not None else None
 
                 fwd_pe_bench = {
                     "key":        "fwd_pe",
@@ -240,13 +251,14 @@ def gvm_company_report(symbol: str):
                     "pillar":     "V",
                     "unit":       "x",
                     "company":    sym_fwd,
-                    "peer_avg":   peer_avg_fwd,
+                    "peer_avg":   peer_median_fwd,
+                    "peer_median": peer_median_fwd,
                     "rating":     rating_fwd,
                     "rank":       rank_fwd,
                     "peer_n":     n,
                     "best":       best_fwd,
                     "worst":      worst_fwd,
-                    "beats_peer": (sym_fwd is not None and sym_fwd <= peer_avg_fwd),
+                    "beats_peer": (sym_fwd is not None and sym_fwd <= peer_median_fwd),
                 }
                 # Insert right after PE
                 pe_idx = next((i for i, b in enumerate(benchmark) if b.get("key") == "pe"), -1)

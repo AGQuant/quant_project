@@ -1,17 +1,31 @@
 """
 gvm_company_report.py — Full company analytics report with peer benchmarking.
 
-This is Scorr's ORIGINAL quant idea: rate every company against the average of
-its listed peers in the same fine-grained segment (gvm_scores.segment), across
-~16 fundamental + technical parameters. Each parameter yields:
+This is Scorr's ORIGINAL quant idea: rate every company against its listed peers in the same
+fine-grained segment (gvm_scores.segment), across ~16 fundamental + technical parameters. Each
+parameter yields:
     raw    = the company's own value
-    peer   = segment peer average
-    rank   = company's rank within segment (1 = best)
-    rating = 0..10 score (percentile within segment, direction-aware)
+    peer   = segment peer MEDIAN (key: peer_avg for back-compat + peer_median)
+    rank   = company's rank within segment (1 = best) -- positional, informational only
+    rating = 0..10 score, computed by the SAME gvm_engine.py functions the nightly G/V/M engine
+             uses (param_score / score_pe / score_opm_expansion / score_inst_holding_abs /
+             score_interest_coverage / score_dma), fed the segment MEDIAN as peer input.
+
+cc#506 (18-Jul-2026, founder-locked): retired the old percentile-rank rating (_rate_within,
+worst->~2/best->10 positional score) -- it measured "beat how many peers" rather than "how good
+is this number", and drifted from the nightly engine's own G/V/M inputs. Rating is now identical
+in philosophy AND arithmetic to the nightly engine: absolute-value bands blended with a
+peer-median-relative band. Report ratings and nightly engine pillar inputs are the SAME numbers
+by construction (same functions, same median).
 
 Source of truth:
     - gvm_scores.segment  -> peer grouping (fine-grained, e.g. "IT - Large")
-    - screener_raw        -> raw fundamentals (joined on nse_code = symbol)
+    - screener_raw        -> raw fundamentals (joined on nse_code = symbol) -- ALL fundamental +
+      valuation parameters compute EXCLUSIVELY from this weekly snapshot table (cc#506 data
+      source rule): no live/intraday inputs, no market-hours dependency. screener_raw.pe used
+      AS-IS; segment medians are computed over these same snapshot columns at scoring time.
+    - momentum_scores      -> the 5 M-pillar technicals (ret_1m, dma_50, dma_200, rsi_month,
+      vol_trend) -- EXCEPTION to the screener_raw-only rule, unchanged momentum pipeline.
     - get_gvm payload      -> overview / key_takeaway / result_analysis / verdict
 
 The computed detail is ALSO persisted back into the (currently empty) detail
@@ -22,8 +36,14 @@ Coverage are IRRELEVANT and are dropped from the parameter set.
 """
 
 import logging
+import statistics
 from datetime import date
 from typing import Optional, Dict, Any, List
+
+from gvm_engine import (
+    param_score, score_pe, score_opm_expansion, score_inst_holding_abs,
+    score_interest_coverage, score_dma,
+)
 
 log = logging.getLogger("scorr.gvm_report")
 
@@ -104,18 +124,8 @@ def _f(v) -> Optional[float]:
         return None
 
 
-def _rate_within(values: List[Optional[float]], idx: int, higher_is_better: bool) -> Optional[float]:
-    """0..10 rating = percentile of company among non-null segment peers."""
-    vals = [(i, v) for i, v in enumerate(values) if v is not None]
-    me = values[idx]
-    if me is None or len(vals) < 2:
-        return None
-    ordered = sorted(vals, key=lambda x: x[1], reverse=higher_is_better)
-    pos = next(i for i, (oi, _) in enumerate(ordered) if oi == idx)  # 0 = best
-    n = len(ordered)
-    # best -> 10, worst -> ~2 (keep a floor so worst isn't a flat 0)
-    rating = 10.0 - (pos / max(1, n - 1)) * 8.0
-    return round(rating, 2)
+def _median(values: List[float]) -> Optional[float]:
+    return round(statistics.median(values), 4) if values else None
 
 
 def _rank_within(values: List[Optional[float]], idx: int, higher_is_better: bool) -> Optional[int]:
@@ -151,7 +161,9 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
 
         # Pull every peer in the same segment + raw fundamentals. cc#223: the two Net
         # institutional columns are computed inline (screener_raw only stores fii/dii apart).
-        screener_cols = list({p[3] for p in PARAMS})
+        # cc#506: "historical_pe" added -- not a PARAMS row itself, only needed as score_pe's
+        # first (vs-own-history) benchmark for the "pe" row's special-case scoring below.
+        screener_cols = list({p[3] for p in PARAMS} | {"historical_pe"})
         col_sql = ", ".join(
             (f'{_COMPUTED_COLS[c]} AS "{c}"' if c in _COMPUTED_COLS else f's."{c}" AS "{c}"')
             for c in screener_cols
@@ -175,6 +187,12 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
         except ValueError:
             me_idx = None
 
+        # cc#506: LIVE segment median PE -- score_pe's second (vs-segment) benchmark. Computed
+        # once from the SAME peer set as every other param (never the stale screener_raw
+        # "Industry PE" / segment_pe column).
+        pe_non_null = [v for v in (_f(p.get("pe")) for p in peers) if v is not None]
+        live_segment_median_pe = _median(pe_non_null)
+
         # Build per-parameter benchmark
         params_out = []
         pillar_acc: Dict[str, List[float]] = {}
@@ -186,14 +204,26 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
 
             col_vals = [_f(p.get(scol)) for p in peers]
             non_null = [v for v in col_vals if v is not None]
-            peer_avg = round(sum(non_null) / len(non_null), 2) if non_null else None
+            peer_median = _median(non_null)
 
             raw = rating = rank = None
             best_sym = worst_sym = None
             if me_idx is not None:
                 raw = col_vals[me_idx]
-                rating = _rate_within(col_vals, me_idx, hib)
                 rank = _rank_within(col_vals, me_idx, hib)
+                # cc#506: rating source = gvm_engine, same functions the nightly G/V/M engine
+                # uses, fed the segment MEDIAN -- retires the old percentile-rank _rate_within.
+                if key == "pe":
+                    hist_pe = _f(peers[me_idx].get("historical_pe"))
+                    rating = score_pe(raw, hist_pe, live_segment_median_pe)
+                elif key == "opm_exp":
+                    rating = score_opm_expansion(raw, peer_median)
+                elif key == "inst_abs":
+                    rating = score_inst_holding_abs(raw)
+                elif key == "int_cov":
+                    rating = score_interest_coverage(raw, peer_median, bfsi)
+                else:
+                    rating = param_score(raw, peer_median)
             # best / worst peer for the ladder
             if non_null:
                 pairs = [(p["symbol"], _f(p.get(scol))) for p in peers if _f(p.get(scol)) is not None]
@@ -204,18 +234,18 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
             params_out.append({
                 "key": key, "label": label, "group": group, "unit": unit,
                 "raw": round(raw, 2) if raw is not None else None,
-                "peer_avg": peer_avg,
+                "peer_avg": peer_median, "peer_median": peer_median,
                 "rank": rank, "peer_count": len(non_null),
                 "rating": rating, "higher_is_better": hib,
                 "best": best_sym, "worst": worst_sym,
-                "beats_peer": (raw is not None and peer_avg is not None and
-                               ((raw >= peer_avg) if hib else (raw <= peer_avg))),
+                "beats_peer": (raw is not None and peer_median is not None and
+                               ((raw >= peer_median) if hib else (raw <= peer_median))),
             })
 
             if rating is not None:
                 pillar_acc.setdefault(group, []).append(rating)
                 persist_vals[f"{prefix}_raw"] = round(raw, 2) if raw is not None else None
-                persist_vals[f"{prefix}_peer"] = peer_avg
+                persist_vals[f"{prefix}_peer"] = peer_median
                 persist_vals[f"{prefix}_rating"] = rating
 
         # ── Missing M metrics: DMA50/200, RSI Monthly, 1M Return, Volume Trend ──
@@ -233,10 +263,23 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                 _ci = _mcols.index(_col)
                 _cv = [_f(_mom[s][_ci]) if s in _mom else None for s in symbols]
                 _nn = [v for v in _cv if v is not None]
-                _avg = round(sum(_nn) / len(_nn), 2) if _nn else None
+                _median_v = _median(_nn)
                 _raw = _cv[me_idx] if me_idx is not None else None
-                _rat = _rate_within(_cv, me_idx, _hib) if me_idx is not None else None
                 _rnk = _rank_within(_cv, me_idx, _hib) if me_idx is not None else None
+                _rat = None
+                if me_idx is not None:
+                    # cc#506: DMA 50/200 -> gvm_engine.score_dma (absolute deviation bands, no
+                    # peer input). momentum_scores.dma_50/200 already STORE a deviation % (not a
+                    # raw MA price level), so synthesize a price/dma pair that reduces score_dma's
+                    # own (price-dma)/dma*100 formula back to exactly that stored deviation --
+                    # reuses the engine's bands without re-deriving raw price history here. RSI
+                    # Monthly / Vol Trend / 1M Return have no dedicated engine fn -> param_score
+                    # vs the segment median, same as the fundamentals above (data source for all
+                    # 5 stays momentum_scores/raw_prices, unchanged per the momentum exception).
+                    if _key in ("dma_50", "dma_200"):
+                        _rat = score_dma(100 + _raw, 100) if _raw is not None else 5.0
+                    else:
+                        _rat = param_score(_raw, _median_v)
                 _best = _worst = None
                 if _nn:
                     _pp = sorted([(symbols[i], v) for i, v in enumerate(_cv) if v is not None],
@@ -246,12 +289,12 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                 params_out.append({
                     "key": _key, "label": _label, "group": "Technicals", "unit": _unit,
                     "raw": round(_raw, 2) if _raw is not None else None,
-                    "peer_avg": _avg,
+                    "peer_avg": _median_v, "peer_median": _median_v,
                     "rank": _rnk, "peer_count": len(_nn),
                     "rating": _rat, "higher_is_better": _hib,
                     "best": _best, "worst": _worst,
-                    "beats_peer": (_raw is not None and _avg is not None and
-                                   ((_raw >= _avg) if _hib else (_raw <= _avg))),
+                    "beats_peer": (_raw is not None and _median_v is not None and
+                                   ((_raw >= _median_v) if _hib else (_raw <= _median_v))),
                 })
                 if _rat is not None:
                     pillar_acc.setdefault("Technicals", []).append(_rat)
