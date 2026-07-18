@@ -4,7 +4,7 @@ Deactivation: _bg_intraday_paper commented out — on-demand only via /api/intra
 """
 import asyncio, logging, os, time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, time as dt_time
 from typing import Optional
 
 import psycopg
@@ -405,7 +405,7 @@ def _premarket_writer_check():
     global _premarket_check_ran
     today = _ist_now().date()
     if _premarket_check_ran == today:
-        return
+        return _SKIPPED
     _premarket_check_ran = today
     # cc#206/#211: canonical trading-day guard (single _is_trading_day helper, nse_holidays
     # based — no duplicate inline check). The 09:10 readiness restart fired on SAT 04-Jul
@@ -413,7 +413,7 @@ def _premarket_writer_check():
     # cold-boot risk (id=166 class). No live writer runs off-session, so skip weekends +
     # NSE holidays entirely. (Writes are also gated at the writer choke point in cc#211.)
     if not _is_trading_day(today):
-        return
+        return _SKIPPED
     try:
         age = _tick_age_minutes()
         if age is None or age > 60:
@@ -451,7 +451,7 @@ def _bg_v8_paper_exit_eod():
     loop missed (e.g. the writer was down). Uses the latest completed trading day."""
     global _v8_paper_exit_eod_ran
     today = _ist_now().date()
-    if _v8_paper_exit_eod_ran == today: return
+    if _v8_paper_exit_eod_ran == today: return _SKIPPED
     try:
         import v8_paper
         with _conn() as conn:
@@ -459,7 +459,7 @@ def _bg_v8_paper_exit_eod():
                 cur.execute("SELECT MAX(price_date) FROM raw_prices")
                 d = cur.fetchone()[0]
             if d is None:
-                return
+                return _SKIPPED
             res = v8_paper.run_paper_exits(conn, target_date=d, mode="eod")
         _v8_paper_exit_eod_ran = today
         with _conn() as _c:   # cc#255: write a ran-ok health row regardless of close count
@@ -621,7 +621,7 @@ def _bg_v21_killswitch():
     20-trading-day / 15-signal sample-discipline warmup). Never auto-re-enables."""
     global _v21_ks_ran_today
     today = _ist_now().date()
-    if _v21_ks_ran_today == today: return
+    if _v21_ks_ran_today == today: return _SKIPPED
     try:
         import v8_filter_killswitch
         with _conn() as conn: res = v8_filter_killswitch.run_killswitch_check(conn)
@@ -637,7 +637,7 @@ def _bg_v21_killswitch():
 def _bg_v8_eod():
     global _eod_running, _eod_ran_today
     today = _ist_now().date()
-    if _eod_ran_today == today or _eod_running: return
+    if _eod_ran_today == today or _eod_running: return _SKIPPED
     _eod_running = True
     try:
         import v8_engine
@@ -659,7 +659,7 @@ def _bg_heal_intraday():
     global _heal_ran_today
     today = _ist_now().date()
     if _heal_ran_today == today:
-        return
+        return _SKIPPED
     try:
         import main
         res = main._heal_morning_gaps()
@@ -685,7 +685,7 @@ def _bg_gate_rebalance():
     global _gate_rebalance_ran_today
     today = _ist_now().date()
     if _gate_rebalance_ran_today == today:
-        return
+        return _SKIPPED
     try:
         # stale-mood guard — compute age in IST (adr_intraday.ts is naive IST)
         with _conn() as conn, conn.cursor() as cur:
@@ -700,7 +700,7 @@ def _bg_gate_rebalance():
             _log_alert("gate_rebalance_stale_mood",
                        f"skipped 15:20 gate rebalance — adr_intraday stale "
                        f"(last={last_ts}, age={round(age_min,1) if age_min is not None else 'n/a'} min)")
-            return
+            return _SKIPPED
 
         import v8_endpoints, v8_paper
         mood = v8_endpoints.market_mood()
@@ -708,7 +708,7 @@ def _bg_gate_rebalance():
         if buy_slots is None or sell_slots is None:
             _log_alert("gate_rebalance_no_mood",
                        f"skipped 15:20 gate rebalance — mood missing slots (mood={mood.get('mood')})")
-            return
+            return _SKIPPED
 
         with _conn() as conn:
             res = v8_paper.run_gate_rebalance(conn, buy_slots, sell_slots)
@@ -829,8 +829,8 @@ def _bg_adr_pcr():
     # those phantom 0-rows displaced Friday's real ADR as "latest" and broke the mood gate.
     if not _is_trading_day(today):
         log.debug(f"adr_pcr: skip — {today} is not a trading day")
-        return
-    if _adr_pcr_ran_today == today: return
+        return _SKIPPED
+    if _adr_pcr_ran_today == today: return _SKIPPED
     try:
         with _conn() as conn:
             _compute_and_store_adr(conn)
@@ -855,8 +855,8 @@ def _bg_adr_pcr_retry():
     """task #59: 10-min retry — if the 15:50 run didn't produce today's ADR, redo
     it once at 16:00 (covers a transient feed/scheduler hiccup)."""
     today = _ist_now().date()
-    if not _is_trading_day(today): return                 # cc#417: no retry on non-trading days
-    if _adr_pcr_ran_today == today: return                # already verified-complete
+    if not _is_trading_day(today): return _SKIPPED         # cc#417: no retry on non-trading days
+    if _adr_pcr_ran_today == today: return _SKIPPED        # already verified-complete
     log.warning("adr_pcr: 15:50 run incomplete — retrying at 16:00")
     _bg_adr_pcr()
 
@@ -922,7 +922,7 @@ def _bg_yahoo_daily_sync():
 def _bg_gvm():
     global _gvm_ran_today
     today = _ist_now().date()
-    if _gvm_ran_today == today: return
+    if _gvm_ran_today == today: return _SKIPPED
     try:
         import gvm_nightly
         with _conn() as conn:
@@ -943,14 +943,14 @@ def _bg_gvm_backfill():
         return
     now = _ist_now()
     if _is_market_hours(now):   # never compete with the live 5-min path
-        return
+        return _SKIPPED
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT value FROM app_config WHERE key='gvm_backfill_run'")
             r = cur.fetchone()
         flag = (r[0] if r else None)
         if flag == "done":
-            return
+            return _SKIPPED
         _gvm_backfill_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -991,15 +991,15 @@ def _bg_gvm_backfill_ext():
         return
     now = _ist_now()
     if _is_market_hours(now):
-        return
+        return _SKIPPED
     try:
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT key, value FROM app_config WHERE key IN ('gvm_backfill_run','gvm_backfill_ext_run')")
             flags = {k: v for k, v in cur.fetchall()}
         if flags.get('gvm_backfill_run') != 'done':   # sequence: main run first
-            return
+            return _SKIPPED
         if flags.get('gvm_backfill_ext_run') == 'done':
-            return
+            return _SKIPPED
         _gvm_backfill_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -1031,7 +1031,7 @@ def _bg_gvm_backfill_ext():
 def _bg_pivots():
     global _pivots_ran_today
     today = _ist_now().date()
-    if _pivots_ran_today == today: return
+    if _pivots_ran_today == today: return _SKIPPED
     try:
         import v8_paper
         with _conn() as conn:
@@ -1057,7 +1057,7 @@ def _bg_universe_pivots():
     Same table + ON CONFLICT (symbol, pivot_date) upsert — idempotent, complements _bg_pivots."""
     global _upivots_ran_today
     today = _ist_now().date()
-    if _upivots_ran_today == today: return
+    if _upivots_ran_today == today: return _SKIPPED
     try:
         import gvm_universe_pivots
         res = gvm_universe_pivots.compute_universe_pivots(today)
@@ -1083,7 +1083,7 @@ def _bg_universe_technicals():
     in the real 01:00-02:00 nightly chain instead, after the last existing job."""
     global _ut_ran_today
     today = _ist_now().date()
-    if _ut_ran_today == today: return
+    if _ut_ran_today == today: return _SKIPPED
     try:
         import universe_technicals
         with _conn() as conn:
@@ -1140,7 +1140,7 @@ def _bg_nse_eod_ingest():
     pass found not-yet-published)."""
     try:
         if not _is_trading_day(_ist_now().date()):
-            return
+            return _SKIPPED
         import nse_eod_ingest
         res = nse_eod_ingest.run_nightly()
         log.info(f"nse_eod_ingest: {res}")
@@ -1198,8 +1198,8 @@ def _bg_qb_eod():
     # runs the scheduled rebalance (exits + residual + advance next_rebalance + log). Trading-day guarded.
     global _qb_eod_ran_today, _qb_eod_running
     today = _ist_now().date()
-    if _qb_eod_ran_today == today or _qb_eod_running: return
-    if not _is_trading_day(today): return
+    if _qb_eod_ran_today == today or _qb_eod_running: return _SKIPPED
+    if not _is_trading_day(today): return _SKIPPED
     _qb_eod_running = True
     try:
         import qb_eod_checker, qb_rebalance
@@ -1227,7 +1227,7 @@ def _bg_qb_eod():
 def _bg_fu_sync():
     global _fu_sync_ran_this_week
     today = _ist_now().date()
-    if _fu_sync_ran_this_week == today: return
+    if _fu_sync_ran_this_week == today: return _SKIPPED
     try:
         import fyers_sync
         with _conn() as conn:
@@ -1247,7 +1247,7 @@ def _bg_lot_sync():
     stale after an expiry-day lot revision -> mis-sized V8 paper + client qty). Idempotent."""
     global _lot_sync_ran_today
     today = _ist_now().date()
-    if _lot_sync_ran_today == today: return
+    if _lot_sync_ran_today == today: return _SKIPPED
     try:
         import lot_sync
         with _conn() as conn:
@@ -1396,7 +1396,7 @@ def _bg_open_bars_alarm():
     try:
         now = _ist_now()
         if not _is_trading_day(now.date()):
-            return
+            return _SKIPPED
         open_ts = now.replace(hour=9, minute=15, second=0, microsecond=0).replace(tzinfo=None)
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM intraday_prices WHERE ts >= %s AND timeframe='5m'",
@@ -1548,7 +1548,7 @@ def _bg_mf_returns_backfill():
             cur.execute("SELECT value FROM app_config WHERE key='mf_returns_backfill_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return
+            return _SKIPPED
         _mf_backfill_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_returns_backfill_run','running',NOW()) "
@@ -1583,7 +1583,7 @@ def _bg_mf_v15_wiring():
             cur.execute("SELECT value FROM app_config WHERE key='mf_v15_wiring_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return
+            return _SKIPPED
         _mf_wiring_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_v15_wiring_run','running',NOW()) "
@@ -1634,7 +1634,7 @@ def _bg_mf_weekly_manual():
             cur.execute("SELECT value FROM app_config WHERE key='mf_weekly_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return
+            return _SKIPPED
         _mf_weekly_manual_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_weekly_run','running',NOW()) "
@@ -1702,7 +1702,7 @@ def _bg_mf_mc_discover():
             cur.execute("SELECT value FROM app_config WHERE key='mf_mc_discover_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return
+            return _SKIPPED
         _mc_discover_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_discover_run','running',NOW()) "
@@ -1750,7 +1750,7 @@ def _bg_mf_mc_oneshot():
             cur.execute("SELECT value FROM app_config WHERE key='mf_mc_oneshot_run'")
             r = cur.fetchone()
         if not r or r[0] != 'pending':
-            return
+            return _SKIPPED
         _mc_oneshot_running = True
         with _conn() as conn, conn.cursor() as cur:
             cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('mf_mc_oneshot_run','running',NOW()) "
@@ -1987,7 +1987,7 @@ def _bg_feed_staleness_watch():
     check: zero bars since open -> alert immediately (skip the 15-min wait)."""
     now = _ist_now()
     if not (_is_trading_day(now.date()) and dt_time(9, 20) <= now.time() <= dt_time(15, 30)):
-        return
+        return _SKIPPED
     try:
         import v10_st_ema
         with _conn() as conn, conn.cursor() as cur:
@@ -2369,10 +2369,10 @@ def _bg_scheduler_master_daily_audit():
     global _scheduler_master_audit_armed_day
     now = datetime.now(IST)
     if not (now.hour == 8 and now.minute == 45):
-        return
+        return _SKIPPED
     day_key = now.date().isoformat()
     if _scheduler_master_audit_armed_day == day_key:
-        return
+        return _SKIPPED
     _scheduler_master_audit_armed_day = day_key
     try:
         import scheduler_master

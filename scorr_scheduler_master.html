@@ -6,7 +6,7 @@
 <title>Scheduler Master · Scorr</title>
 <style>
 :root{--bg:#0A0F1E;--card:#121A33;--well:#0D1428;--line:rgba(148,166,210,.14);
---text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--green:#2FD48B;--amber:#F5B94A;--red:#FF5C6C}
+--text:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--green:#2FD48B;--amber:#F5B94A;--red:#FF5C6C;--blue:#4D7CFE}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'IBM Plex Mono',ui-monospace,monospace;padding:20px 16px 60px}
 .wrap{max-width:1100px;margin:0 auto}
@@ -15,15 +15,26 @@ h1{font-size:18px;font-weight:700;margin-bottom:4px}
 .counts{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
 .cnt{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:12px}
 .cnt b{font-size:16px;display:block}
+.filters{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+.fgroup{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fgroup .fl{font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-right:2px}
+.chip{font-size:11px;padding:5px 11px;border-radius:14px;background:var(--card);color:var(--mut);border:1px solid var(--line);cursor:pointer;user-select:none}
+.chip:hover{color:var(--text);border-color:rgba(148,166,210,.3)}
+.chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;white-space:nowrap}
+th:hover{color:var(--mut)}
+th.active{color:var(--blue)}
+th .arrow{font-size:9px;margin-left:3px;opacity:.85}
 td{padding:8px 10px;font-size:12px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:none}
+tr.hidden{display:none}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.none{background:var(--dim)}
+.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.none{background:var(--dim)}.dot.skip{background:var(--mut)}
 .tag{font-size:10px;padding:2px 7px;border-radius:6px;background:var(--well);color:var(--mut);border:1px solid var(--line)}
 .cad{color:var(--mut);font-size:11px;max-width:340px;word-break:break-word}
 #msg{color:var(--dim);padding:20px 0}
+#empty{color:var(--dim);padding:20px 10px;display:none}
 </style>
 </head>
 <body>
@@ -31,11 +42,33 @@ tr:last-child td{border-bottom:none}
   <h1>Scheduler Master Registry</h1>
   <div class="sub">Every scheduled job, enumerated from scheduler.py's own source (cc#525) · not hand-maintained docs</div>
   <div class="counts" id="counts"></div>
+  <div class="filters" id="filters" style="display:none">
+    <div class="fgroup"><span class="fl">Status</span>
+      <span class="chip on" data-f="status" data-v="all">All</span>
+      <span class="chip" data-f="status" data-v="ok">OK</span>
+      <span class="chip" data-f="status" data-v="skipped">Skipped</span>
+      <span class="chip" data-f="status" data-v="error">Error</span>
+      <span class="chip" data-f="status" data-v="never-run">Never run</span>
+    </div>
+    <div class="fgroup"><span class="fl">Service</span>
+      <span class="chip on" data-f="service" data-v="all">All</span>
+      <span class="chip" data-f="service" data-v="app">App</span>
+      <span class="chip" data-f="service" data-v="worker">Worker</span>
+    </div>
+  </div>
   <div id="msg">Loading…</div>
   <table id="tbl" style="display:none">
-    <thead><tr><th>Job</th><th>Cadence</th><th>Service</th><th>Category</th><th>Last run</th><th>Status</th></tr></thead>
+    <thead><tr>
+      <th data-k="job_name" data-t="alpha">Job</th>
+      <th data-k="cadence_human" data-t="alpha">Cadence</th>
+      <th data-k="service" data-t="alpha">Service</th>
+      <th data-k="category" data-t="alpha">Category</th>
+      <th data-k="last_run_at" data-t="time">Last run</th>
+      <th data-k="_status_txt" data-t="alpha">Status</th>
+    </tr></thead>
     <tbody id="tbody"></tbody>
   </table>
+  <div id="empty">No jobs match the current filters.</div>
 </div>
 <script>
 (function(){
@@ -49,30 +82,64 @@ tr:last-child td{border-bottom:none}
     if(mins<1440)return (mins/60).toFixed(1)+"h ago";
     return (mins/1440).toFixed(1)+"d ago";
   }
-  function statusOf(j){
-    if(!j.last_run_at)return {cls:"none",txt:"never run"};
-    if(j.last_status==="error")return {cls:"err",txt:"error"};
-    var mins=(Date.now()-new Date(j.last_run_at.replace(" ","T")+"Z").getTime())/60000;
-    if(isNaN(mins))return {cls:"ok",txt:j.last_status||"ok"};
-    if(mins>2880)return {cls:"warn",txt:"stale (>48h)"};
-    return {cls:"ok",txt:j.last_status||"ok"};
+  function lastRunMs(j){
+    if(!j.last_run_at)return null;
+    var d=new Date(j.last_run_at.replace(" ","T")+(j.last_run_at.indexOf("Z")<0&&j.last_run_at.indexOf("+")<0?"Z":""));
+    var t=d.getTime();
+    return isNaN(t)?null:t;
   }
-  fetch("/api/scheduler/master").then(function(r){return r.json()}).then(function(d){
-    var jobs=(d&&d.jobs)||[];
-    document.getElementById("msg").style.display="none";
-    var byService={};
-    jobs.forEach(function(j){byService[j.service]=(byService[j.service]||0)+1;});
-    var countsHtml='<div class="cnt"><b>'+jobs.length+'</b>total jobs</div>';
-    Object.keys(byService).sort().forEach(function(s){
-      countsHtml+='<div class="cnt"><b>'+byService[s]+'</b>'+esc(s)+'</div>';
-    });
-    var everRun=jobs.filter(function(j){return j.last_run_at;}).length;
-    countsHtml+='<div class="cnt"><b>'+everRun+'/'+jobs.length+'</b>have run at least once</div>';
-    document.getElementById("counts").innerHTML=countsHtml;
+  function statusOf(j){
+    if(!j.last_run_at)return {cls:"none",txt:"never run",bucket:"never-run"};
+    if(j.last_status==="error")return {cls:"err",txt:"error",bucket:"error"};
+    if(j.last_status==="skipped")return {cls:"skip",txt:"skipped",bucket:"skipped"};
+    var mins=(Date.now()-lastRunMs(j))/60000;
+    if(!isNaN(mins)&&mins>2880)return {cls:"warn",txt:"stale (>48h)",bucket:"ok"};
+    return {cls:"ok",txt:j.last_status||"ok",bucket:"ok"};
+  }
 
+  var ALL_JOBS=[], sortKey="last_run_at", sortDir="desc";
+  var activeFilter={status:"all",service:"all"};
+
+  function applySortFilter(){
+    var rows=ALL_JOBS.filter(function(j){
+      if(activeFilter.status!=="all"&&j._status.bucket!==activeFilter.status)return false;
+      if(activeFilter.service!=="all"&&j.service!==activeFilter.service)return false;
+      return true;
+    });
+    var th=document.querySelector('th[data-k="'+sortKey+'"]');
+    var type=th?th.getAttribute("data-t"):"alpha";
+    rows.sort(function(a,b){
+      var av,bv;
+      if(type==="time"){
+        av=lastRunMs(a); bv=lastRunMs(b);
+        if(av==null&&bv==null)return 0;
+        if(av==null)return 1;   // never-run always at the end, both directions
+        if(bv==null)return -1;
+        return sortDir==="asc"?av-bv:bv-av;
+      }
+      av=String(sortKey==="_status_txt"?a._status.txt:a[sortKey]||"").toLowerCase();
+      bv=String(sortKey==="_status_txt"?b._status.txt:b[sortKey]||"").toLowerCase();
+      if(av<bv)return sortDir==="asc"?-1:1;
+      if(av>bv)return sortDir==="asc"?1:-1;
+      return 0;
+    });
+    render(rows);
+    Array.prototype.forEach.call(document.querySelectorAll("th[data-k]"),function(h){
+      h.classList.toggle("active",h.getAttribute("data-k")===sortKey);
+      var ar=h.querySelector(".arrow"); if(ar)ar.remove();
+      if(h.getAttribute("data-k")===sortKey){
+        var s=document.createElement("span"); s.className="arrow"; s.textContent=sortDir==="asc"?"▲":"▼";
+        h.appendChild(s);
+      }
+    });
+  }
+
+  function render(rows){
     var tb=document.getElementById("tbody");
-    tb.innerHTML=jobs.map(function(j){
-      var st=statusOf(j);
+    document.getElementById("empty").style.display=rows.length?"none":"block";
+    document.getElementById("tbl").style.display=rows.length?"table":"none";
+    tb.innerHTML=rows.map(function(j){
+      var st=j._status;
       var lastRun=j.last_run_at?ago(j.last_run_at):"—";
       return "<tr><td><b>"+esc(j.job_name)+"</b><br><span class='tag'>"+esc(j.module||"")+"</span></td>"
         +"<td class='cad'>"+esc(j.cadence_human||"—")+"</td>"
@@ -81,7 +148,42 @@ tr:last-child td{border-bottom:none}
         +"<td>"+esc(lastRun)+(j.last_duration_ms!=null?" · "+j.last_duration_ms+"ms":"")+"</td>"
         +"<td><span class='dot "+st.cls+"'></span>"+esc(st.txt)+(j.last_error?" — "+esc(j.last_error.slice(0,80)):"")+"</td></tr>";
     }).join("");
-    document.getElementById("tbl").style.display="table";
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll("th[data-k]"),function(h){
+    h.addEventListener("click",function(){
+      var k=h.getAttribute("data-k");
+      if(sortKey===k){sortDir=sortDir==="asc"?"desc":"asc";}
+      else{sortKey=k; sortDir=(k==="last_run_at")?"desc":"asc";}
+      applySortFilter();
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".chip"),function(c){
+    c.addEventListener("click",function(){
+      var f=c.getAttribute("data-f"), v=c.getAttribute("data-v");
+      activeFilter[f]=v;
+      Array.prototype.forEach.call(document.querySelectorAll('.chip[data-f="'+f+'"]'),function(x){x.classList.remove("on")});
+      c.classList.add("on");
+      applySortFilter();
+    });
+  });
+
+  fetch("/api/scheduler/master").then(function(r){return r.json()}).then(function(d){
+    var jobs=(d&&d.jobs)||[];
+    document.getElementById("msg").style.display="none";
+    document.getElementById("filters").style.display="flex";
+    var byService={};
+    jobs.forEach(function(j){byService[j.service]=(byService[j.service]||0)+1; j._status=statusOf(j);});
+    var countsHtml='<div class="cnt"><b>'+jobs.length+'</b>total jobs</div>';
+    Object.keys(byService).sort().forEach(function(s){
+      countsHtml+='<div class="cnt"><b>'+byService[s]+'</b>'+esc(s)+'</div>';
+    });
+    var everRun=jobs.filter(function(j){return j.last_run_at;}).length;
+    countsHtml+='<div class="cnt"><b>'+everRun+'/'+jobs.length+'</b>have run at least once</div>';
+    document.getElementById("counts").innerHTML=countsHtml;
+
+    ALL_JOBS=jobs;
+    applySortFilter();
   }).catch(function(){
     document.getElementById("msg").textContent="Failed to load /api/scheduler/master";
   });
