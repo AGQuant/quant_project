@@ -495,6 +495,126 @@ function ChartIcon({ onClick, title }) {
 // cc#507: the ONE reusable peer-benchmark visualization for every scored (and context) row --
 // horizontal bars, all segment peers sorted best->worst, company's bar highlighted, a dashed
 // line at the segment median, plus metric-specific extra markers.
+const _PE_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function _peMonthYear(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  return `${_PE_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// cc#521: quarterly TTM PE dual-axis chart (EPS bars + PE line) replacing the cc#512 5-pt annual
+// line. Standalone component (not inline in PeerLadderModal) so it can hold its own hover/touch
+// state -- Rules of Hooks forbids a conditional useState inside the parent's branch.
+function PeTrendChart({ b, onClose }) {
+  const pts = b.pe_trend || [];
+  const [hoverI, setHoverI] = useState(null);
+  const svgRef = useRef(null);
+
+  if (!pts.length) {
+    return (
+      <>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
+          <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
+        </div>
+        <div style={{ fontSize: 13, color: C.muted }}>No PE trend data available for this metric.</div>
+      </>
+    );
+  }
+
+  const curPe = b.current_pe, medPe = b.median_pe;
+  const peVals = pts.map(p => p.pe).concat(curPe != null ? [curPe] : []).concat(medPe != null ? [medPe] : []);
+  const peLo = Math.min(...peVals), peHi = Math.max(...peVals);
+  const pePad = (peHi - peLo) * 0.15 || Math.abs(peLo) * 0.15 || 1;
+  const peMin = Math.max(0, peLo - pePad), peMax = peHi + pePad;
+  const epsMax = Math.max(...pts.map(p => p.ttm_eps), 0) * 1.2 || 1;
+
+  const W = 520, H = 250, padL = 40, padR = 40, padT = 14, padB = 32;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xAt = i => padL + (pts.length > 1 ? (i / (pts.length - 1)) * plotW : plotW / 2);
+  const yPe = v => padT + plotH - ((v - peMin) / (peMax - peMin || 1)) * plotH;
+  const yEps = v => padT + plotH - (Math.max(0, v) / epsMax) * plotH;
+  const barW = Math.max(4, (plotW / pts.length) * 0.46);
+
+  // gap detection: a >100-day jump between consecutive plotted quarters means a quarter was
+  // skipped server-side (TTM EPS<=0 or missing price) -- break the line there instead of
+  // silently joining across it (cc#521 "render gap" requirement).
+  const segments = [];
+  let cur = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const gapDays = (new Date(pts[i].period_end) - new Date(pts[i - 1].period_end)) / 86400000;
+    if (gapDays > 100) { segments.push(cur); cur = [i]; } else cur.push(i);
+  }
+  segments.push(cur);
+  const linePaths = segments.map(seg => seg.map((i, k) => `${k === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yPe(pts[i].pe).toFixed(1)}`).join(" "));
+
+  const labelStep = Math.max(1, Math.ceil(pts.length / 8));
+  const hp = hoverI != null ? pts[hoverI] : null;
+
+  function moveTo(clientX) {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const localX = (clientX - rect.left) * (W / rect.width);
+    let best = 0, bestDist = Infinity;
+    pts.forEach((p, i) => { const d = Math.abs(xAt(i) - localX); if (d < bestDist) { bestDist = d; best = i; } });
+    setHoverI(best);
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
+        <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
+      </div>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
+        {curPe != null && <span>current {curPe.toFixed(1)}x</span>}
+        {medPe != null && <span> · median {medPe.toFixed(1)}x</span>}
+        <span> · {pts.length} quarters</span>
+      </div>
+      <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block", touchAction: "pan-y" }}
+        onMouseMove={e => moveTo(e.clientX)}
+        onMouseLeave={() => setHoverI(null)}
+        onTouchStart={e => moveTo(e.touches[0].clientX)}
+        onTouchMove={e => { e.preventDefault(); moveTo(e.touches[0].clientX); }}>
+        {pts.map((p, i) => (
+          <rect key={`b${i}`} x={xAt(i) - barW / 2} y={yEps(p.ttm_eps)} width={barW}
+            height={Math.max(0, yEps(0) - yEps(p.ttm_eps))} fill="#8C99BD" opacity={0.28} rx={1.5} />
+        ))}
+        {medPe != null && (
+          <line x1={padL} x2={W - padR} y1={yPe(medPe)} y2={yPe(medPe)} stroke={C.gold} strokeWidth={1.5} strokeDasharray="4,3" />
+        )}
+        {curPe != null && (
+          <line x1={padL} x2={W - padR} y1={yPe(curPe)} y2={yPe(curPe)} stroke={C.accent} strokeWidth={1.5} />
+        )}
+        {linePaths.map((d, i) => <path key={`l${i}`} d={d} fill="none" stroke={C.accent} strokeWidth={2} />)}
+        {pts.map((p, i) => (
+          <circle key={`c${i}`} cx={xAt(i)} cy={yPe(p.pe)} r={p.is_artifact ? 4 : (i === hoverI ? 4.5 : 3)}
+            fill={p.is_artifact ? "transparent" : (i === hoverI ? C.text : C.accent)}
+            stroke={C.accent} strokeWidth={p.is_artifact ? 1.5 : (i === hoverI ? 2 : 0)} />
+        ))}
+        {hp && (
+          <line x1={xAt(hoverI)} x2={xAt(hoverI)} y1={padT} y2={padT + plotH} stroke={C.muted} strokeWidth={1} strokeDasharray="2,2" opacity={0.6} />
+        )}
+        {pts.map((p, i) => (i % labelStep === 0 || i === pts.length - 1) && (
+          <text key={`t${i}`} x={xAt(i)} y={H - 6} fontSize={9} fill={C.muted} textAnchor="middle" fontFamily="monospace">{p.q}</text>
+        ))}
+      </svg>
+      {hp && (
+        <div style={{ fontSize: 11.5, fontFamily: "monospace", color: C.text, background: C.bg,
+          border: `1px solid ${C.border}`, borderRadius: 7, padding: "5px 9px", display: "inline-block", marginTop: 4 }}>
+          {_peMonthYear(hp.period_end)} · PE {hp.pe.toFixed(1)}x · TTM EPS {hp.ttm_eps.toFixed(2)}
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: C.muted, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <span><span style={{ color: C.accent }}>—</span> PE line</span>
+        <span><span style={{ color: C.gold }}>- -</span> Median PE</span>
+        <span><span style={{ color: "#8C99BD" }}>▮</span> TTM EPS bars</span>
+        {pts.some(p => p.is_artifact) && <span>hollow point = possible data artifact (&gt;3× median)</span>}
+      </div>
+    </>
+  );
+}
+
 function PeerLadderModal({ b, sym, onClose }) {
   if (!b) return null;
   const peers = b.peers || [];
@@ -504,69 +624,13 @@ function PeerLadderModal({ b, sym, onClose }) {
     padding: "18px 20px", width: "min(560px, 100%)", maxHeight: "82vh", overflowY: "auto",
     boxShadow: "0 20px 60px rgba(0,0,0,.35)" };
 
-  // cc#512: Historical PE row swaps the peer-ladder bars for a 5-yr PE line chart with dashed
-  // baselines at the company's current PE and historical (5Y avg) PE. Points >3x the series
-  // median (server-flagged is_artifact) render hollow instead of filled.
+  // cc#521: Historical PE row swaps the peer-ladder bars for a quarterly TTM PE dual-axis chart
+  // (EPS bars + PE line, hover/touch tooltip) -- see PeTrendChart above.
   if (b.chart_type === "pe_trend") {
-    const pts = b.pe_trend || [];
-    if (!pts.length) {
-      return (
-        <div style={overlay} onClick={onClose}>
-          <div style={box} onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
-              <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
-            </div>
-            <div style={{ fontSize: 13, color: C.muted }}>No PE trend data available for this metric.</div>
-          </div>
-        </div>
-      );
-    }
-    const curPe = b.current_pe, histPe = b.historical_pe;
-    const vals = pts.map(p => p.pe).concat(curPe != null ? [curPe] : []).concat(histPe != null ? [histPe] : []);
-    const lo = Math.min(...vals), hi = Math.max(...vals);
-    const pad = (hi - lo) * 0.12 || Math.abs(lo) * 0.12 || 1;
-    const yMin = Math.max(0, lo - pad), yMax = hi + pad;
-    const W = 480, H = 220, padL = 34, padR = 12, padT = 12, padB = 28;
-    const plotW = W - padL - padR, plotH = H - padT - padB;
-    const xAt = i => padL + (pts.length > 1 ? (i / (pts.length - 1)) * plotW : plotW / 2);
-    const yAt = v => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
-    const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(p.pe).toFixed(1)}`).join(" ");
-
     return (
       <div style={overlay} onClick={onClose}>
-        <div style={box} onClick={e => e.stopPropagation()}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
-            <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
-            <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>
-            5-yr annual PE trend
-            {curPe != null && <span> · current {curPe.toFixed(2)}x</span>}
-            {histPe != null && <span> · 5Y avg {histPe.toFixed(2)}x</span>}
-          </div>
-          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
-            {curPe != null && (
-              <line x1={padL} x2={W - padR} y1={yAt(curPe)} y2={yAt(curPe)} stroke={C.accent} strokeWidth={1.5} strokeDasharray="4,3" />
-            )}
-            {histPe != null && (
-              <line x1={padL} x2={W - padR} y1={yAt(histPe)} y2={yAt(histPe)} stroke={C.gold} strokeWidth={1.5} strokeDasharray="4,3" />
-            )}
-            <path d={linePath} fill="none" stroke={C.accent} strokeWidth={2} />
-            {pts.map((p, i) => (
-              <circle key={i} cx={xAt(i)} cy={yAt(p.pe)} r={p.is_artifact ? 4 : 3.5}
-                fill={p.is_artifact ? "transparent" : C.accent}
-                stroke={C.accent} strokeWidth={p.is_artifact ? 1.5 : 0} />
-            ))}
-            {pts.map((p, i) => (
-              <text key={`t${i}`} x={xAt(i)} y={H - 8} fontSize={9.5} fill={C.muted} textAnchor="middle" fontFamily="monospace">{p.fy}</text>
-            ))}
-          </svg>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
-            <span style={{ color: C.accent }}>— current PE</span>{"  "}
-            <span style={{ color: C.gold }}>- - 5Y avg PE</span>
-            {pts.some(p => p.is_artifact) && <span> · hollow point = possible data artifact (&gt;3× median)</span>}
-          </div>
+        <div style={{ ...box, width: "min(600px, 100%)" }} onClick={e => e.stopPropagation()}>
+          <PeTrendChart b={b} onClose={onClose} />
         </div>
       </div>
     );
@@ -610,14 +674,9 @@ function PeerLadderModal({ b, sym, onClose }) {
           {markers.map((m, i) => <span key={i}> · {m.label} {fmtV(m.value)}</span>)}
         </div>
         <div style={{ position: "relative" }}>
-          {median != null && (
-            <div title={`median ${fmtV(median)}`} style={{ position: "absolute", top: 0, bottom: 0,
-              left: `${pct(median)}%`, borderLeft: `2px dashed ${C.muted}`, zIndex: 1 }} />
-          )}
-          {markers.map((m, i) => (
-            <div key={i} title={`${m.label} ${fmtV(m.value)}`} style={{ position: "absolute", top: 0, bottom: 0,
-              left: `${pct(m.value)}%`, borderLeft: `2px dashed ${C.gold}`, zIndex: 1 }} />
-          ))}
+          {/* cc#521: the segment-median and own-5y-avg dashed vertical lines were removed from
+              every ladder chart (founder: visual clutter over the bars) -- median/marker values
+              stay in the header text line above, just no overlay lines in the chart area. */}
           {peers.map(p => {
             const isSelf = p.symbol === sym;
             return (

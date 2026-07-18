@@ -164,38 +164,48 @@ def _pe_verdict(ratio: Optional[float]) -> Optional[Dict[str, str]]:
 
 
 def _pe_trend(cur, sym: str) -> List[Dict[str, Any]]:
-    """cc#512: 5-yr annual PE trend -- EPS from fundamentals_history (section=profit-loss,
-    period_type=annual, "EPS in Rs", consolidated preferred), price = nearest raw_prices close
-    on/before each fiscal period_end. Skips EPS<=0 (never plots a negative PE). Both sources are
-    snapshot data (cc#506 rule); raw_prices is the momentum-pipeline exception, EOD closes only.
+    """cc#521: quarterly TTM PE trend (upgrades cc#512's 5-pt annual line to a Trendlyne-style
+    quarterly view). EPS from fundamentals_history (section=quarters, period_type=quarter,
+    "EPS in Rs"); TTM EPS at quarter i = sum of quarters [i-3..i] (needs 4 consecutive quarters,
+    so the first 3 stored quarters never produce a point). Price = nearest raw_prices close
+    on/before each quarter's period_end (same EOD-snapshot rule as the retired annual version).
+    Skips points where TTM EPS<=0 (never plots a negative PE -- renders as a gap, matching the
+    cc#512 negative-EPS convention). Depth auto-extends with whatever fundamentals_history has
+    stored (~13 quarters today -> ~9-10 plottable points); no hardcoded count.
     Flags any point >3x the series median as a likely data artifact (hollow point client-side)."""
     try:
         cur.execute("""
             SELECT period_end, metrics->>'EPS in Rs' AS eps, consolidated
             FROM fundamentals_history
-            WHERE symbol=%s AND section='profit-loss' AND period_type='annual'
-              AND period_end >= %s
+            WHERE symbol=%s AND section='quarters' AND period_type='quarter'
             ORDER BY period_end ASC, consolidated DESC
-        """, (sym, date(2020, 3, 31)))
+        """, (sym,))
         by_period: Dict[Any, Any] = {}
         for period_end, eps, consolidated in cur.fetchall():
             if period_end not in by_period:   # first hit per period wins -- consolidated sorts first
                 by_period[period_end] = eps
 
+        periods = sorted(by_period.keys())
+        eps_f = [(_f(str(by_period[p]).replace(",", "")) if by_period[p] is not None else None)
+                 for p in periods]
+
         points = []
-        for period_end in sorted(by_period.keys()):
-            eps_raw = by_period[period_end]
-            eps_f = _f(str(eps_raw).replace(",", "")) if eps_raw is not None else None
-            if eps_f is None or eps_f <= 0:
-                continue   # skip years with EPS<=0 -- never plot a negative PE
+        for i in range(3, len(periods)):
+            window = eps_f[i - 3:i + 1]
+            if any(v is None for v in window):
+                continue   # incomplete trailing-4 window -- skip, not fabricate
+            ttm_eps = sum(window)
+            if ttm_eps <= 0:
+                continue   # skip TTM-loss quarters -- never plot a negative PE
+            period_end = periods[i]
             cur.execute("""SELECT close FROM raw_prices WHERE symbol=%s AND price_date<=%s
                            ORDER BY price_date DESC LIMIT 1""", (sym, period_end))
             r = cur.fetchone()
             close = _f(r[0]) if r else None
             if close is None:
                 continue
-            points.append({"fy": period_end.strftime("%b %Y"), "period_end": str(period_end),
-                            "eps": eps_f, "close": close, "pe": round(close / eps_f, 2)})
+            points.append({"q": period_end.strftime("%b %y"), "period_end": str(period_end),
+                            "ttm_eps": round(ttm_eps, 2), "close": close, "pe": round(close / ttm_eps, 2)})
 
         if points:
             med = statistics.median([p["pe"] for p in points])
@@ -346,7 +356,8 @@ def gvm_company_report(symbol: str):
     # means "current PE" for this row only, relabeled client-side. RANK/best/worst still rank on
     # re-rating % vs peers (most de-rated = best), unchanged from cc#507. A verdict chip
     # (Cheap/Reasonable/Expensive, ratio = current_pe/historical_pe) replaces the plain re-rating
-    # chip, and a 5-yr PE trend line (pe_trend) replaces the peer-ladder chart for this row only.
+    # chip, and a quarterly TTM PE trend chart (pe_trend, cc#521 dual-axis upgrade of the cc#512
+    # 5-pt annual line) replaces the peer-ladder chart for this row only.
     try:
         if ladder_syms:
             with _conn() as conn, conn.cursor() as cur:
@@ -387,6 +398,7 @@ def gvm_company_report(symbol: str):
                         pe_trend = _pe_trend(_ptcur, sym)
                 except Exception as _pte:
                     log.warning(f"pe_trend fetch failed for {sym}: {_pte}")
+                median_pe = round(statistics.median([p["pe"] for p in pe_trend]), 2) if pe_trend else None
 
                 hist_pe_bench = {
                     "key":        "hist_pe",
@@ -408,6 +420,7 @@ def gvm_company_report(symbol: str):
                     "worst":      worst_h,
                     "chart_type": "pe_trend",
                     "pe_trend":   pe_trend,
+                    "median_pe":  median_pe,
                     "current_pe": round(sym_current_pe, 2) if sym_current_pe is not None else None,
                     "historical_pe": round(sym_hist, 2) if sym_hist is not None else None,
                     "beats_peer": None,
