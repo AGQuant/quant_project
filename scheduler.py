@@ -2053,15 +2053,20 @@ async def _scheduler_loop():
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
-        if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile (V15 MF)
-        # cc#477: V15 MF returns. Flag-gated one-shot fires within ~3 min of arming (feed-independent,
-        # app-server only, real internet). Weekly cron Sat 06:30 IST; monthly comprehensive job on
-        # the 12th (cc#491 course-correct, moved off the 3rd — session_log id=4734).
-        if m % 3 == 0:          _spawn(_bg_mf_returns_backfill)
-        if m % 3 == 1:          _spawn(_bg_mf_v15_wiring)  # cc#491: AUM/ER/holdings wire-all, offset from returns backfill
-        if m % 3 == 2:          _spawn(_bg_mf_weekly_manual)  # cc#491 course-correct: manual /run_weekly trigger poll
-        if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)
-        if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)
+        # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --
+        # the scrape build was a one-time model exercise, go-forward = data vendor. The three
+        # UNCONDITIONAL jobs below (no flag gate -- they ran on their timer regardless of any human
+        # action) are disabled here. The FLAG-GATED jobs (_bg_mf_returns_backfill/_bg_mf_v15_wiring/
+        # _bg_mf_weekly_manual/_bg_mf_mc_discover/_bg_mf_mc_oneshot) are NOT scraping-on-a-timer --
+        # they are the execution mechanism the /api/v15/mf/* manual arm endpoints rely on (arm sets
+        # an app_config flag to 'pending', these poll and pick it up within ~3 min) and per spec
+        # "manual trigger endpoints STAY -- they become on-demand-only", so they stay registered.
+        # if h == 1 and m == 10:  _spawn(_bg_mf_nav)             # cc#466: AMFI daily NAV + seed reconcile -- DISABLED cc#499
+        if m % 3 == 0:          _spawn(_bg_mf_returns_backfill)  # flag-gated -- manual /returns_backfill arm only
+        if m % 3 == 1:          _spawn(_bg_mf_v15_wiring)  # flag-gated -- manual /wire_all or /run_monthly arm only
+        if m % 3 == 2:          _spawn(_bg_mf_weekly_manual)  # flag-gated -- manual /run_weekly arm only
+        # if now.weekday() == 5 and h == 6 and m == 30:  _spawn(_bg_mf_weekly)        # unconditional Sat cron -- DISABLED cc#499
+        # if now.day == 12 and h == 6 and m == 20:       _spawn(_bg_mf_aum_monthly)   # unconditional monthly cron -- DISABLED cc#499
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
