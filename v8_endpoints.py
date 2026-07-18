@@ -2680,15 +2680,28 @@ def v8_trades(limit: int = 200):
 
 
 @router.get("/daylog")
-def v8_daylog():
-    """Day-wise aggregated performance table. Capital base Rs.50,00,000. Brokerage Rs.500/closed trade."""
+def v8_daylog(era: str = "fresh"):
+    """Day-wise aggregated performance table. Capital base Rs.50,00,000. Brokerage Rs.500/closed trade.
+    cc#510: defaults to the REBUILT-SUITE era only -- every CTE is restricted to
+    entry_ts >= app_config.v8_paper_rebuild_cutover_ts (cc#504's cutover). This excludes the
+    SUITE_REBUILD flatten rows (old entry_ts -- an administrative close of pre-rebuild positions,
+    not fresh-era performance) and all pre-rebuild history. History is never deleted (cc#504
+    doctrine); pass ?era=all to see the full legacy+fresh book unfiltered."""
     try:
         with _conn() as conn, conn.cursor() as cur:
+            cutover_ts = None
+            if era != "all":
+                cur.execute("SELECT value FROM app_config WHERE key='v8_paper_rebuild_cutover_ts'")
+                row = cur.fetchone()
+                cutover_ts = row[0] if row and row[0] else None
             cur.execute("""
                 WITH all_dates AS (
                     SELECT DISTINCT entry_ts::date AS d FROM v8_paper_positions
+                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
                     UNION SELECT DISTINCT entry_ts::date FROM v8_paper_trades
+                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
                     UNION SELECT DISTINCT COALESCE(closed_at::date, exit_ts::date) FROM v8_paper_trades
+                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
                 ),
                 opened AS (
                     SELECT entry_ts::date AS d,
@@ -2696,7 +2709,9 @@ def v8_daylog():
                         COUNT(*) FILTER (WHERE side='SHORT') AS short_opened,
                         COUNT(*) AS total_opened
                     FROM (SELECT entry_ts, side FROM v8_paper_positions
-                          UNION ALL SELECT entry_ts, side FROM v8_paper_trades) e
+                          WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                          UNION ALL SELECT entry_ts, side FROM v8_paper_trades
+                          WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp) e
                     GROUP BY entry_ts::date
                 ),
                 closed AS (
@@ -2708,7 +2723,9 @@ def v8_daylog():
                         ROUND(AVG(pnl)::numeric,2) AS avg_pnl,
                         COUNT(*)*500 AS brokerage,
                         ROUND((SUM(pnl)-COUNT(*)*500)::numeric,2) AS net_pnl
-                    FROM v8_paper_trades GROUP BY COALESCE(closed_at::date, exit_ts::date)
+                    FROM v8_paper_trades
+                    WHERE %(cut)s::timestamp IS NULL OR entry_ts >= %(cut)s::timestamp
+                    GROUP BY COALESCE(closed_at::date, exit_ts::date)
                 ),
                 cumulative AS (
                     SELECT ad.d,
@@ -2732,7 +2749,7 @@ def v8_daylog():
                       - SUM(closed) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS net_open,
                     ROUND((net_pnl/5000000.0*100)::numeric,2) AS return_pct
                 FROM cumulative ORDER BY d DESC
-            """)
+            """, {"cut": cutover_ts})
             cols = [d[0] for d in cur.description]
             rows = []
             for r in cur.fetchall():
@@ -2760,6 +2777,8 @@ def v8_daylog():
                 "overall_return_pct": round(total_net / 5_000_000 * 100, 2),
             },
             "capital_base": 5_000_000,
+            "era": "all" if era == "all" else "fresh",
+            "rebuild_cutover_ts": str(cutover_ts) if cutover_ts else None,
         }
     except Exception as e:
         raise HTTPException(500, f"v8_daylog failed: {e}")

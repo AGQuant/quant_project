@@ -409,7 +409,7 @@ const BASKETS=[
   {id:"buy_reversal",label:"Buy Reversal",panel:1},{id:"buy_momentum",label:"Buy Momentum",panel:2},
   {id:"sell_reversal",label:"Sell Reversal",panel:4},{id:"sell_momentum",label:"Sell Momentum",panel:5},
 ];
-const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Basket Rules","Sell Reversal",
+const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Buy S1 Bounce","Sell Reversal",
   "Sell Momentum","Sell Overbought","Trade Log","Day Log","Raw Data","Paper Missed","Live News",
   "Forthcoming Results","Global Indices","Position News","Matrix","V9 Pairs","OH-OL"];   // cc#294: Position News = 14 · cc#383: Matrix = 15 · cc#385: V9 Pairs = 16 · cc#388: OH-OL = 17 (open=high/open=low scanner)
 // cc#263: "Paper Missed" (index 10) removed from the tab bar — cc#256's slot_full_burst
@@ -420,12 +420,13 @@ const TAB_LABELS=["Master Dashboard","Buy Reversal","Buy Momentum","Basket Rules
 // cc#426: V9 Pairs (16) extracted to its own /v9 page — removed from the tab row (label kept at
 // index 16 for panel-id stability, no button). Matrix (15) moved to the LAST position (after
 // Position News, 14). OH-OL (17) stays pinned right after Master.
-// cc#502: Buy S1 Bounce + Sell Overbought baskets retired. Index 6 (was Sell Overbought) dropped
-// from TAB_ORDER, panel6 stays dormant (label kept for panel-id stability, no button). Index 3
-// (was Buy S1 Bounce) REPURPOSED cc#503 as the new static "Basket Rules" tab (renderBasketRules(),
-// panel3) — no live handler ever used that slot again, so reusing it avoids expanding the panel
-// numbering scheme.
-const TAB_ORDER=[0,1,2,3,4,5,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
+// cc#502: Buy S1 Bounce + Sell Overbought baskets retired. Index 6 (Sell Overbought) and index 3
+// (Buy S1 Bounce) both dropped from TAB_ORDER, panel3/panel6 stay dormant (labels kept for
+// panel-id stability, no buttons). cc#503 briefly repurposed panel3/index3 as a static "Basket
+// Rules" tab; cc#510 (founder decision, 18-Jul-2026) removed it again -- the per-basket i-button
+// popover (BASKET_INFO, openInfo()) already surfaces the same 4 rebuilt specs, so the dedicated
+// tab was redundant. renderBasketRules() deleted; index 3 reverts to its cc#502 dormant state.
+const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab removed — INACTIVE, superseded by V14 ORB (panel17 stays dormant, data preserved) · cc#383/426 Matrix last
 
 // -- Basket info --------------------------------------------------------------
 // cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce RETIRED (ring-fenced
@@ -521,46 +522,10 @@ const BASKET_INFO={
   },
 };
 
-// -- Basket Rules tab (cc#503, 18-Jul-2026, repurposes dormant panel3) --------
-// Static, founder-facing reference rendering all 4 locked cc#502 specs VERBATIM from BASKET_INFO
-// (the same source the i-button modals and Matrix tab read) so this page can never drift from
-// them -- one constant, three views. No fetch: BASKET_INFO is a code constant, so this renders
-// instantly on load like Matrix/OH-OL.
-function renderBasketRules(){
-  const ids=["buy_reversal","buy_momentum","sell_reversal","sell_momentum"];
-  const cards=ids.map(id=>{
-    const info=BASKET_INFO[id];
-    const buy=info.side==='BUY';
-    const fg=buy?'var(--grn)':'var(--red)',bg=buy?'var(--grn-d)':'var(--red-d)';
-    const filters=info.filters.map(f=>`<div class="frow">
-        <span class="fm">${f.m.replace(/_/g,' ')}</span>
-        <span class="fc">${f.c}</span>
-      </div>`).join('');
-    return `<div class="msec" style="border-left:3px solid ${fg}">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-        <span style="font-family:Sora;font-weight:800;font-size:15px;color:var(--txt)">${info.label}</span>
-        <span class="sp" style="background:${bg};color:${fg}">${info.side}</span>
-        <span class="sp" style="background:var(--panel2);color:var(--cyan)">${info.version}</span>
-      </div>
-      <div style="font-size:12.5px;color:var(--mut);line-height:1.6;margin-bottom:10px">${info.thesis}</div>
-      <div class="msec-title">Filters · <span style="color:var(--amber)">${info.gateType}</span></div>
-      <div style="background:var(--panel2);border-radius:10px;padding:4px 12px;margin-bottom:10px">${filters}</div>
-      <div style="display:flex;gap:10px">
-        <div style="flex:1;background:var(--grn-d);border-radius:8px;padding:9px 12px">
-          <div style="font-size:10px;color:var(--mut);margin-bottom:3px">TARGET</div>
-          <div style="font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--grn)">${info.target}</div>
-        </div>
-        <div style="flex:1;background:var(--red-d);border-radius:8px;padding:9px 12px">
-          <div style="font-size:10px;color:var(--mut);margin-bottom:3px">STOP LOSS</div>
-          <div style="font-family:'Space Mono';font-size:11px;font-weight:700;color:var(--red)">${info.stop}</div>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-  return `<div class="ptitle">Basket Rules <span class="ct">4 baskets · founder-locked specs, verbatim (cc#502, 18-Jul-2026)</span></div>
-    <div style="font-size:11px;color:var(--dim);margin:-4px 0 14px;line-height:1.55">Static reference -- every filter/target/stop here reads directly from the same BASKET_INFO constant powering the i-button modals and the Strategy Matrix tab, so it can never fall out of sync with the live engine's dedicated handlers in v8_signal_writer.py. sell_overbought and buy_s1_bounce were retired entirely in the cc#502 suite rebuild.</div>
-    ${cards}`;
-}
+// cc#510 (18-Jul-2026): the Basket Rules tab (cc#503) was removed by founder decision -- the
+// per-basket i-button popover (BASKET_INFO, openInfo()) already surfaces the same 4 rebuilt
+// specs, so the dedicated tab was redundant. renderBasketRules() deleted; panel3 reverts to its
+// cc#502 dormant state (see TAB_ORDER comment above).
 
 // -- Matrix tab (cc#383, updated cc#502) --------------------------------------
 // All 4 baskets side-by-side (sell_overbought + buy_s1_bounce retired 18-Jul-2026).
@@ -1205,15 +1170,8 @@ TAB_ORDER.forEach(panelIdx=>{
   b.onclick=()=>selectTab(panelIdx);
   tabsEl.appendChild(b);
 });
-// cc#508 (18-Jul-2026): the founder saw this tab stuck on "Loading..." -- root cause was a
-// PRE-cc#503 implementation that looped filter_config fetches over the old 6-basket list (2 of
-// which 404 since cc#502 retired sell_overbought/buy_s1_bounce), hanging on the rejected
-// promises. cc#503 already replaced that with this fully static, zero-fetch render (BASKET_INFO
-// is a code constant, no network call at all) -- verified no fetch/await anywhere in
-// renderBasketRules(). Hardened the failure path anyway: a real exception now shows a visible
-// error card instead of silently leaving the "Loading..." skeleton forever.
-try{document.getElementById('panel3').innerHTML=renderBasketRules();}
-catch(e){const el=document.getElementById('panel3');if(el)el.innerHTML=`<div class="err">Basket Rules failed to render: ${String(e&&e.message||e)}</div>`;}
+// cc#510: Basket Rules tab (and its panel3 render call) removed — see the TAB_ORDER comment
+// above. This also permanently disposes of the cc#508 stuck-loading issue on that tab.
 try{document.getElementById('panel15').innerHTML=renderMatrix();}catch(e){}   // cc#383: static grid renders instantly (Live WR fills once paper lands)
 // cc#426: V9 Pairs moved to standalone /v9 — panel16 no longer rendered here (tab removed).
 try{document.getElementById('panel17').innerHTML=renderOHOL();}catch(e){}   // cc#388 · cc#447: static INACTIVE banner (no live poll)
