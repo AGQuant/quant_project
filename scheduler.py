@@ -1065,8 +1065,16 @@ def _bg_bt14_fut_oi():
             res = bt14_fut_oi.run_probe()
             verdict = res.get("verdict")
             log.info(f"bt14_fut_oi probe: verdict={verdict}")
-            # auth_error => leave 'probe' armed to retest later; any real verdict => latch
-            nxt = "probe" if verdict == "auth_error" else "probe_done"
+            # AUTO MODE self-drive: auth_error => keep 'probe' (retest when a token exists);
+            # OI available (both/july_only/june_only) => auto-arm 'backfill' so the pipeline
+            # completes unattended; genuine 'none' => latch 'probe_done' (valid finding, no
+            # backfill). The backfill is safe to auto-run: scratch-only, disk-guarded, resumable.
+            if verdict == "auth_error":
+                nxt = "probe"
+            elif verdict in ("both", "july_only", "june_only"):
+                nxt = "backfill"
+            else:   # 'none'
+                nxt = "probe_done"
             with _conn() as conn, conn.cursor() as cur:
                 cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES ('bt14_fut_oi_run',%s,NOW()) "
                             "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()", (nxt,))
