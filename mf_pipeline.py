@@ -1687,166 +1687,38 @@ _AMC_DOMAIN_SEED = {
 
 
 def _crawl_amc_holdings_urls(cur):
-    """cc#491 VERIFIED_SOURCE_INTEL_17JUL_CLAUDE_WEB: crawl each AMC's OWN disclosure site
-    directly (AMFI's aggregator is dead — see _AMC_DOMAIN_SEED comment). First seeds any AMC not
-    already in mf_amc_holdings_registry with its guessed root domain (ON CONFLICT DO NOTHING —
-    never clobbers a previously-resolved or founder-corrected row). Then, three stages per AMC:
-    (1) fetch the root domain, (2) find an anchor whose link text or href mentions
-    portfolio+disclosure, (3) fetch that page and find the actual xlsx/csv/pdf link (first one —
-    AMCs generally list the latest month first). Best-effort, never raises — every stage is
-    ops_log'd so a Railway-side failure is diagnosable rather than silently returning nothing."""
-    import requests
-    hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-           "Accept-Language": "en-US,en;q=0.9"}
-    for amc, domain in _AMC_DOMAIN_SEED.items():
-        cur.execute("""INSERT INTO mf_amc_holdings_registry (amc, disclosure_url, source_page, discovered_at)
-                       VALUES (%s,%s,'domain_seed',NOW()) ON CONFLICT (amc) DO NOTHING""", (amc, domain))
-    found = {}
-    for amc, domain in _AMC_DOMAIN_SEED.items():
-        try:
-            r = requests.get(domain, headers=hdr, timeout=30)
-            html = r.text or ""
-            disclosure_link = None
-            for href, text in _ANCHOR_RE.findall(html):
-                clean = re.sub(r"<[^>]+>", "", text).strip().lower()
-                hlow = (href or "").lower()
-                if ("portfolio" in clean and "disclos" in clean) or \
-                   ("portfolio" in hlow and "disclos" in hlow):
-                    disclosure_link = href
-                    break
-            if not disclosure_link:
-                continue
-            full = disclosure_link if disclosure_link.startswith("http") else (
-                domain.rstrip("/") + "/" + disclosure_link.lstrip("/"))
-            if _IS_FILE_URL.search(full):
-                found[amc] = full
-                continue
-            r2 = requests.get(full, headers=hdr, timeout=30)
-            body2 = r2.text or ""
-            # cc#491 attempt_2: prefer a file link whose OWN anchor text/href mentions
-            # "portfolio" over just grabbing files[0] — the first-run test picked up an
-            # unrelated PDF (a "Ready Reckoner" doc) sitting earlier on the disclosure page
-            # than the actual monthly portfolio file.
-            f = None
-            for href2, text2 in _ANCHOR_RE.findall(body2):
-                clean2 = re.sub(r"<[^>]+>", "", text2).strip().lower()
-                if _IS_FILE_URL.search(href2 or "") and "portfolio" in (clean2 + " " + (href2 or "").lower()):
-                    f = href2
-                    break
-            if not f:
-                files = _FILE_LINK_RE.findall(body2)
-                f = files[0] if files else None
-            if f:
-                if not f.startswith("http"):
-                    f = full.rsplit("/", 1)[0] + "/" + f.lstrip("/")
-                found[amc] = f
-        except Exception as e:
-            _oplog(cur, "MF_HOLDINGS_CRAWL_ERROR", {"stage": "amc_site", "amc": amc, "domain": domain,
-                                                     "error": str(e)[:160]})
-    for amc, url in found.items():
-        cur.execute("""INSERT INTO mf_amc_holdings_registry (amc, disclosure_url, source_page, discovered_at)
-                       VALUES (%s,%s,%s,NOW())
-                       ON CONFLICT (amc) DO UPDATE SET disclosure_url=EXCLUDED.disclosure_url,
-                         source_page=EXCLUDED.source_page, discovered_at=NOW()""",
-                    (amc, url, _AMC_DOMAIN_SEED.get(amc, "")))
-    _oplog(cur, "MF_HOLDINGS_URL_CRAWL", {"amcs_seeded": len(_AMC_DOMAIN_SEED), "amcs_resolved": len(found),
-                                           "sample": list(found.items())[:5]})
-    return found
-
-
-def _schemes_for_amc(cur, amc_label):
-    """Match canonical-universe schemes to an AMC by name-substring: mf_master.amc is populated
-    only for the 11 curated seed funds, while the 519-row AMFI universe carries the AMC only
-    inside the scheme name — so holdings coverage across the full universe needs a name match,
-    not an amc-column equality."""
-    toks = _norm_fund(amc_label)
-    key = max(toks, key=len) if toks else None
-    if not key:
-        return []
-    cur.execute("""SELECT scheme_code FROM mf_master WHERE category IS NOT NULL
-                   AND category <> 'Banking & PSU' AND name ILIKE %s""", (f"%{key}%",))
-    return [row[0] for row in cur.fetchall()]
+    """RETIRED cc#533: this fed fetch_amc_holdings(), which by construction writes ONE AMC-level
+    disclosure file to EVERY scheme of that AMC -- not per-fund granularity. 509 of 518 schemes
+    in mf_holdings ended up with a byte-identical holdings list from this path (wiped 18-Jul,
+    see MF_HOLDINGS_FANOUT_WIPE in ops_log). Superseded by the Moneycontrol per-fund path
+    (resolve_mc_map -> write_mc_holdings, cc#500). Kept in place (not deleted) so the crawl
+    logic is available for reference/reuse if a real per-AMC-file-but-per-fund-allocation
+    approach is ever built, but it must never run standalone again."""
+    return {}
 
 
 def fetch_amc_holdings(cur, amc, url, as_of_month=None):
-    """Download one AMC's monthly portfolio-disclosure excel, parse via parse_holdings_xlsx(),
-    resolve each holding to an NSE symbol via _resolve_nse(), upsert into mf_holdings for every
-    canonical-universe scheme belonging to that AMC (broadened from curated-only by cc#491
-    course-correct — see _schemes_for_amc). Best-effort — never raises."""
-    import requests
-    as_of_month = as_of_month or date.today().replace(day=1)
-    try:
-        r = requests.get(url, headers={"User-Agent": "Scorr-MF/1.0"}, timeout=90)
-        r.raise_for_status()
-        rows, err = parse_holdings_xlsx(r.content)
-    except Exception as e:
-        _oplog(cur, "MF_HOLDINGS_ERROR", {"amc": amc, "url": url, "error": str(e)[:200]})
-        return {"amc": amc, "error": str(e)[:200]}
-    if err:
-        _oplog(cur, "MF_HOLDINGS_ERROR", {"amc": amc, "url": url, "parse_error": err})
-        return {"amc": amc, "error": err}
-    schemes = _schemes_for_amc(cur, amc)
-    if not schemes:
-        return {"amc": amc, "rows": len(rows), "schemes": 0, "note": "no matching scheme for this AMC"}
-    resolved = 0
-    for sc in schemes:
-        for h in rows:
-            nse_sym, method = _resolve_nse(cur, h["company"])
-            if nse_sym:
-                resolved += 1
-            cur.execute("""INSERT INTO mf_holdings
-                (scheme_code, as_of_month, isin, company_name, pct_weight, resolved_nse_symbol, resolve_method)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (scheme_code, as_of_month, company_name) DO UPDATE SET
-                    isin=EXCLUDED.isin, pct_weight=EXCLUDED.pct_weight,
-                    resolved_nse_symbol=EXCLUDED.resolved_nse_symbol, resolve_method=EXCLUDED.resolve_method""",
-                (sc, as_of_month, h.get("isin"), h["company"], h.get("pct"), nse_sym, method))
-    stats = {"amc": amc, "url": url, "holdings_rows": len(rows), "schemes": len(schemes),
-             "resolved_nse": resolved}
-    _oplog(cur, "MF_HOLDINGS_BACKFILL", stats)
-    return stats
+    """RETIRED cc#533: this wrote the SAME AMC-level disclosure file to EVERY scheme of that
+    AMC (for sc in schemes: for h in rows: INSERT) -- incapable of per-fund granularity by
+    construction. Root cause of the 509/518 identical-holdings poisoning (wiped 18-Jul, see
+    ops_log MF_HOLDINGS_FANOUT_WIPE). Superseded by the Moneycontrol per-fund path
+    (resolve_mc_map -> write_mc_holdings, cc#500)."""
+    return {"amc": amc, "status": "retired_see_cc533",
+            "reason": "AMC-file fanout writes identical holdings to every scheme of an AMC -- "
+                      "superseded by per-fund Moneycontrol path"}
 
 
 def run_holdings_curated(conn=None):
-    """step_3, cc#491 VERIFIED_SOURCE_INTEL_17JUL bugfix: crawl each AMC's own site
-    (_crawl_amc_holdings_urls), THEN READ THE mf_amc_holdings_registry TABLE itself (not just
-    this run's in-memory crawl result — the prior version ignored anything already persisted
-    there, so a previously-discovered or founder/Claude-web-corrected URL was silently never
-    used unless THIS exact run's crawl re-found it fresh). Founder AMC_HOLDINGS_URLS overrides
-    still win. Rows that never resolved past the raw domain-seed (no real file found yet) are
-    filtered out — not fetchable, would just 404/parse-fail. Still returns status=skipped
-    honestly if nothing resolved — never fabricates holdings."""
-    own = conn is None
-    conn = conn or _conn()
-    try:
-        with conn.cursor() as cur:
-            ensure_tables(cur)
-            _crawl_amc_holdings_urls(cur)
-            conn.commit()
-        with conn.cursor() as cur:
-            cur.execute("SELECT amc, disclosure_url FROM mf_amc_holdings_registry "
-                        "WHERE disclosure_url IS NOT NULL")
-            registry = dict(cur.fetchall())
-        registry.update({k: v for k, v in AMC_HOLDINGS_URLS.items() if v})   # founder overrides win
-        registry = {k: v for k, v in registry.items() if v and _IS_FILE_URL.search(v)}
-        if not registry:
-            with conn.cursor() as cur:
-                _oplog(cur, "MF_HOLDINGS_SKIPPED",
-                       {"note": "no AMC disclosure URL resolved to an actual xlsx/csv/pdf yet — "
-                                "registry may hold only unresolved domain seeds"})
-                conn.commit()
-            return {"status": "skipped", "reason": "no_resolved_file_urls", "results": []}
-        results = []
-        with conn.cursor() as cur:
-            for amc, url in registry.items():
-                results.append(fetch_amc_holdings(cur, amc, url))
-                conn.commit()
-        return {"status": "ok", "amcs": len(registry), "results": results}
-    finally:
-        if own:
-            conn.close()
+    """RETIRED cc#533: was step_3's AMC-file-fanout orchestrator (_crawl_amc_holdings_urls ->
+    fetch_amc_holdings per AMC). That path is structurally incapable of per-fund granularity --
+    it downloads ONE AMC-level disclosure file and writes the SAME rows to every scheme of that
+    AMC. 509 of 518 mf_holdings schemes ended up with a byte-identical holdings list as a
+    result (wiped 18-Jul, see ops_log MF_HOLDINGS_FANOUT_WIPE + MF_HOLDINGS_FULL_TRUNCATE).
+    No longer called from run_v15_wiring(). Superseded by the Moneycontrol per-fund path
+    (resolve_mc_map -> write_mc_holdings -> run_mc_oneshot, cc#500)."""
+    return {"status": "retired_see_cc533",
+            "reason": "AMC-file fanout writes identical holdings to every scheme of an AMC -- "
+                      "superseded by per-fund Moneycontrol path"}
 
 
 # ── step_5: category averages ───────────────────────────────────────────────────────
@@ -2052,7 +1924,13 @@ def run_v15_wiring(conn=None):
     for the founder to review or re-arm manually later; they are simply no longer part of the
     automated wiring chain. Each remaining step is independently best-effort (a failure in one
     does not block the others) and ops_log instrumented individually (see MF_AUM_*, MF_TER_*,
-    MF_HOLDINGS_*, MF_NAV_HISTORY_PRUNED above) plus one final rollup entry."""
+    MF_NAV_HISTORY_PRUNED above) plus one final rollup entry.
+
+    cc#533: holdings is NO LONGER part of this chain — run_holdings_curated()'s AMC-file-fanout
+    wrote identical holdings to every scheme of an AMC (509/518 mf_holdings schemes ended up
+    byte-identical). Holdings now come exclusively from the Moneycontrol per-fund one-shot
+    (run_mc_oneshot, cc#500), run on demand via /api/v15/mf/run_mc_oneshot, not on this
+    monthly-wiring cadence."""
     own = conn is None
     conn = conn or _conn()
     try:
@@ -2073,10 +1951,6 @@ def run_v15_wiring(conn=None):
             except Exception as e:
                 results["expense_ratio"] = {"error": str(e)[:200]}
             conn.commit()
-        try:
-            results["holdings"] = run_holdings_curated(conn)
-        except Exception as e:
-            results["holdings"] = {"error": str(e)[:200]}
         with conn.cursor() as cur:
             try:
                 results["monthly_snapshot"] = {"rows": _snapshot_current_month(cur)}
