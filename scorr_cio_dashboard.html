@@ -455,46 +455,12 @@ function VolumePanel({ va, volRatio }) {
   );
 }
 
-function FlowStrip({ flow, val }) {
-  if (!flow && !val) return null;
-  const cell = (k, v, sub, color) => (
-    <div key={k} style={{ background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 8, padding: "8px 12px", minWidth: 96 }}>
-      <div style={{ fontSize: 11.5, color: C.muted, textTransform: "uppercase", letterSpacing: ".05em" }}>{k}</div>
-      <div style={{ fontSize: 14, fontWeight: 800, fontFamily: "monospace", color: color || C.text }}>{v}</div>
-      {sub && <div style={{ fontSize: 12, color: C.muted, fontFamily: "monospace" }}>{sub}</div>}
-    </div>
-  );
-  const cells = [];
-  if (flow) {
-    const ic = flow.inst_chg;
-    const ic_c = ic == null ? C.text : ic >= 0 ? C.green : C.red;
-    cells.push(cell("FII Hold", flow.fii != null ? flow.fii + "%" : "—", flow.fii_chg != null ? `Δ ${signFmt(flow.fii_chg)}%` : null,
-      flow.fii_chg == null ? C.text : flow.fii_chg >= 0 ? C.green : C.red));
-    cells.push(cell("DII Hold", flow.dii != null ? flow.dii + "%" : "—", flow.dii_chg != null ? `Δ ${signFmt(flow.dii_chg)}%` : null,
-      flow.dii_chg == null ? C.text : flow.dii_chg >= 0 ? C.green : C.red));
-    if (ic != null) cells.push(cell("Net FII+DII", signFmt(ic) + "%", "net institutional flow", ic_c));
-    cells.push(cell("Promoter", flow.promoter != null ? flow.promoter + "%" : "—", null, C.text));
-  }
-  if (val) {
-    const rc = val.rerating_pct == null ? C.text : val.rerating_pct > 25 ? C.red : val.rerating_pct > 0 ? C.gold : C.green;
-    cells.push(cell("PE", val.pe != null ? val.pe + "x" : "—",
-      val.historical_pe != null ? `hist ${val.historical_pe}x · seg ${val.segment_pe != null ? val.segment_pe + "x" : "—"}` : null, C.text));
-    if (val.rerating_pct != null) cells.push(cell("Re-rating", signFmt(val.rerating_pct, 1) + "%", "vs own history", rc));
-    if (val.annual_upside != null) cells.push(cell("Annual Upside", signFmt(val.annual_upside, 1) + "%",
-      val.fy27_growth != null ? `FY27 growth ${val.fy27_growth}%` : null,
-      val.annual_upside >= 15 ? C.green : val.annual_upside >= 0 ? C.gold : C.red));
-    if (val.pb != null) cells.push(cell("P/B", val.pb + "x", null, C.text));
-    if (val.peg != null) cells.push(cell("PEG", val.peg, null, val.peg > 2 ? C.red : val.peg > 1 ? C.gold : C.green));
-    if (val.ev_ebitda != null) cells.push(cell("EV/EBITDA", val.ev_ebitda + "x", null, C.text));
-  }
-  if (!cells.length) return null;
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-      <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 10 }}>Ownership Flow & Valuation Context</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{cells}</div>
-    </div>
-  );
-}
+// cc#507: FlowStrip ("Ownership Flow & Valuation Context") RETIRED entirely (founder-directed
+// 18-Jul-2026). Every chip it showed is now either a scored table row (FII+DII rows already in
+// G; PE/Forward PE/Historical PE/P-B/EV-EBITDA/PEG/Annual Upside rows in V) or a marker inside
+// the PE row's peer-ladder chart (historical PE / re-rating -- see PeerLadderModal). Promoter
+// Holding has no replacement surface (it was never a scored G/V/M metric, cc#223) and is
+// intentionally dropped with the strip, per the founder's explicit removal instruction.
 
 function cellColor(rating) {
   if (rating == null) return { bg: "rgba(148,166,210,.1)", bd: "rgba(148,166,210,.24)", fg: "#8C99BD" };
@@ -503,16 +469,126 @@ function cellColor(rating) {
   return { bg: "rgba(255,92,108,.13)", bd: "#FF5C6C", fg: "#FF5C6C" };
 }
 
-function BenchCell({ b }) {
+// cc#507: fixed zone-line markers for metrics with a universal (not per-company) threshold.
+// PE's "own 5y avg" marker is dynamic (backend-supplied via b.extra_marker) and handled separately.
+const PEER_LADDER_FIXED_MARKERS = {
+  annual_upside: [{ label: "0", value: 0 }],
+  dma_50:        [{ label: "0", value: 0 }],
+  dma_200:       [{ label: "0", value: 0 }],
+  rsi_month:     [{ label: "40", value: 40 }, { label: "70", value: 70 }],
+};
+
+function ChartIcon({ onClick, title }) {
+  return (
+    <span onClick={onClick} title={title || "Peer ladder chart"}
+      style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 20, height: 20, borderRadius: 5, color: C.muted, opacity: 0.75, flexShrink: 0 }}
+      onMouseEnter={e => e.currentTarget.style.opacity = 1}
+      onMouseLeave={e => e.currentTarget.style.opacity = 0.75}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+        <line x1="4" y1="20" x2="4" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="20" y1="20" x2="20" y2="14" />
+      </svg>
+    </span>
+  );
+}
+
+// cc#507: the ONE reusable peer-benchmark visualization for every scored (and context) row --
+// horizontal bars, all segment peers sorted best->worst, company's bar highlighted, a dashed
+// line at the segment median, plus metric-specific extra markers.
+function PeerLadderModal({ b, sym, onClose }) {
+  if (!b) return null;
+  const peers = b.peers || [];
+  const overlay = { position: "fixed", inset: 0, background: "rgba(6,10,22,.55)", zIndex: 500,
+    display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
+  const box = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+    padding: "18px 20px", width: "min(560px, 100%)", maxHeight: "82vh", overflowY: "auto",
+    boxShadow: "0 20px 60px rgba(0,0,0,.35)" };
+
+  if (!peers.length) {
+    return (
+      <div style={overlay} onClick={onClose}>
+        <div style={box} onClick={e => e.stopPropagation()}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
+            <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
+          </div>
+          <div style={{ fontSize: 13, color: C.muted }}>No peer data available for this metric.</div>
+        </div>
+      </div>
+    );
+  }
+
+  const median  = b.peer_median != null ? b.peer_median : b.peer_avg;
+  const markers = [];
+  if (b.key === "pe" && b.extra_marker) markers.push(b.extra_marker);
+  (PEER_LADDER_FIXED_MARKERS[b.key] || []).forEach(m => markers.push(m));
+
+  const vals   = peers.map(p => p.value).concat(median != null ? [median] : []).concat(markers.map(m => m.value));
+  const lo     = Math.min(...vals), hi = Math.max(...vals);
+  const pad    = (hi - lo) * 0.1 || Math.abs(lo) * 0.1 || 1;
+  const min    = lo - pad, max = hi + pad;
+  const pct    = v => Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100));
+  const fmtV   = v => `${Number(v).toFixed(2)}${b.unit || ""}`;
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={box} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: C.text }}>{b.label}</span>
+          <span onClick={onClose} style={{ cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1 }}>×</span>
+        </div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>
+          {peers.length} peers · median {median != null ? fmtV(median) : "—"}
+          {markers.map((m, i) => <span key={i}> · {m.label} {fmtV(m.value)}</span>)}
+        </div>
+        <div style={{ position: "relative" }}>
+          {median != null && (
+            <div title={`median ${fmtV(median)}`} style={{ position: "absolute", top: 0, bottom: 0,
+              left: `${pct(median)}%`, borderLeft: `2px dashed ${C.muted}`, zIndex: 1 }} />
+          )}
+          {markers.map((m, i) => (
+            <div key={i} title={`${m.label} ${fmtV(m.value)}`} style={{ position: "absolute", top: 0, bottom: 0,
+              left: `${pct(m.value)}%`, borderLeft: `2px dashed ${C.gold}`, zIndex: 1 }} />
+          ))}
+          {peers.map(p => {
+            const isSelf = p.symbol === sym;
+            return (
+              <div key={p.symbol} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 14, margin: "4px 0" }}>
+                <span style={{ width: 76, flexShrink: 0, fontSize: 11.5, fontWeight: isSelf ? 800 : 600,
+                  color: isSelf ? C.accent : C.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.symbol}</span>
+                <div style={{ flex: 1, position: "relative", height: 14, background: C.bg, borderRadius: 3, border: `1px solid ${C.gridLine}` }}>
+                  <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${pct(p.value)}%`,
+                    background: isSelf ? C.accent : "#8C99BD90", borderRadius: 3 }} />
+                </div>
+                <span style={{ width: 64, flexShrink: 0, fontSize: 11.5, textAlign: "right", fontFamily: "monospace",
+                  fontWeight: isSelf ? 800 : 500, color: isSelf ? C.accent : C.muted }}>{fmtV(p.value)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BenchCell({ b, onChart }) {
   const c = cellColor(b.rating);
   const val = b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—";
   const peer = b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—";
+  // cc#507: Historical PE is a context row -- RE-RATING chip instead of a scored rating pill.
+  const rerate = b.is_context ? b.rerating_pct : null;
+  const rerateColor = rerate == null ? c.fg : rerate < 0 ? C.green : C.red;
   return (
     <div title={`Best: ${b.best?.symbol||"—"} ${b.best?.value??""} · Worst: ${b.worst?.symbol||"—"} ${b.worst?.value??""}`}
       style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 9, padding: "10px 11px", display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: c.fg, lineHeight: 1.25 }}>{b.label}</span>
-        <span style={{ fontSize: 12, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {onChart && <ChartIcon onClick={() => onChart(b)} />}
+          {b.is_context
+            ? <span style={{ fontSize: 12, fontWeight: 800, color: rerateColor, fontFamily: "monospace" }}>{rerate != null ? signFmt(rerate,1)+"%" : "—"}</span>
+            : <span style={{ fontSize: 12, fontWeight: 800, color: c.fg, fontFamily: "monospace" }}>{b.rating != null ? b.rating.toFixed(1) : "—"}</span>}
+        </span>
       </div>
       <div style={{ fontSize: 14, fontWeight: 800, color: "#1c2536", fontFamily: "monospace" }}>{val}</div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8C99BD", fontFamily: "monospace" }}>
@@ -522,17 +598,25 @@ function BenchCell({ b }) {
   );
 }
 
-function MatrixRow({ b, pillar }) {
+function MatrixRow({ b, pillar, onChart }) {
   const c = cellColor(b.rating);
   const barW = b.rating != null ? Math.min(100, Math.max(4, b.rating * 10)) : 0;
   const pInfo = PILLAR_INFO[pillar];
+  // cc#507: Historical PE is a context row -- RE-RATING chip in the rating bar's place instead
+  // of a scored 0-10 pill.
+  const rerate = b.is_context ? b.rerating_pct : null;
+  const rerateColor = rerate == null ? C.muted : rerate < 0 ? C.green : C.red;
   return (
     <tr style={{ borderBottom: `1px solid ${C.gridLine}` }}>
       <td style={{ padding: "8px 10px", fontSize: 13, color: C.muted, fontWeight: 700 }}>
         <span style={{ fontSize: 11.5, fontWeight: 800, padding: "2px 5px", borderRadius: 3,
           background: pInfo?.bg, color: pInfo?.color, letterSpacing: ".05em" }}>{pillar}</span>
       </td>
-      <td style={{ padding: "8px 10px", fontSize: 13.5, color: C.text, fontWeight: 600 }}>{b.label}</td>
+      <td style={{ padding: "8px 10px", fontSize: 13.5, color: C.text, fontWeight: 600 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {onChart && <ChartIcon onClick={() => onChart(b)} />}{b.label}
+        </span>
+      </td>
       <td style={{ padding: "8px 10px", fontSize: 13.5, fontFamily: "monospace", fontWeight: 700, color: c.fg }}>
         {b.company != null ? `${b.company.toFixed(2)}${b.unit}` : "—"}
       </td>
@@ -540,17 +624,24 @@ function MatrixRow({ b, pillar }) {
         {b.peer_avg != null ? `${b.peer_avg.toFixed(2)}${b.unit}` : "—"}
       </td>
       <td style={{ padding: "8px 14px", minWidth: 120 }}>
-        <div style={{ position: "relative", height: 20, background: C.bg, borderRadius: 4, border: `1px solid ${C.gridLine}` }}>
-          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${barW}%`,
-            background: `${ratingColor(b.rating)}30`, borderRight: `2px solid ${ratingColor(b.rating)}`,
-            borderRadius: 4, transition: "width .4s ease" }} />
-          <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0,
-            display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: ratingColor(b.rating), fontFamily: "monospace" }}>
-              {b.rating != null ? b.rating.toFixed(1) : "—"}
-            </span>
+        {b.is_context ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 20,
+            fontSize: 13, fontWeight: 800, color: rerateColor, fontFamily: "monospace" }}>
+            {rerate != null ? `${signFmt(rerate, 1)}% re-rating` : "—"}
           </div>
-        </div>
+        ) : (
+          <div style={{ position: "relative", height: 20, background: C.bg, borderRadius: 4, border: `1px solid ${C.gridLine}` }}>
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${barW}%`,
+              background: `${ratingColor(b.rating)}30`, borderRight: `2px solid ${ratingColor(b.rating)}`,
+              borderRadius: 4, transition: "width .4s ease" }} />
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0,
+              display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: ratingColor(b.rating), fontFamily: "monospace" }}>
+                {b.rating != null ? b.rating.toFixed(1) : "—"}
+              </span>
+            </div>
+          </div>
+        )}
       </td>
       <td style={{ padding: "8px 10px", fontSize: 12, color: C.muted }}>#{b.rank ?? "—"}/{b.peer_n}</td>
       <td style={{ padding: "8px 10px", fontSize: 12, color: C.green, fontFamily: "monospace" }}>
@@ -1129,6 +1220,7 @@ function PriceSparkline({ symbol, onExpand }) {
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
+  const [chartRow, setChartRow] = useState(null);  // cc#507: per-metric peer-ladder chart modal
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
   const x = r.extras || {};
@@ -1170,6 +1262,7 @@ function GvmReport({ r, hist }) {
   return (
     <div style={{ paddingBottom: 80 }}>
       {fibOpen && <FibPopout symbol={r.symbol} onClose={() => setFibOpen(false)} />}
+      {chartRow && <PeerLadderModal b={chartRow} sym={r.symbol} onClose={() => setChartRow(null)} />}
       <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <button onClick={() => window.print()}
           style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
@@ -1336,7 +1429,7 @@ function GvmReport({ r, hist }) {
                         {score != null && <span style={{ float: "right", fontSize: 14, fontWeight: 900, color: gvmColor(score), fontFamily: "monospace" }}>{score.toFixed(2)}</span>}
                       </td>
                     </tr>,
-                    ...items.map(b => <MatrixRow key={b.key} b={b} pillar={pillar} />)
+                    ...items.map(b => <MatrixRow key={b.key} b={b} pillar={pillar} onChart={setChartRow} />)
                   ];
                 })}
               </tbody>
@@ -1365,7 +1458,7 @@ function GvmReport({ r, hist }) {
                 )}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
-                {items.map(b => <BenchCell key={b.key} b={b} />)}
+                {items.map(b => <BenchCell key={b.key} b={b} onChart={setChartRow} />)}
               </div>
             </div>
           );
@@ -1385,7 +1478,6 @@ function GvmReport({ r, hist }) {
         </div>
       </div>
 
-      <FlowStrip flow={x.flow} val={x.valuation} />
       <SegmentRankLadder ladder={r.ladder} segment={r.segment} stockSym={r.symbol} />
 
       {r.content?.overview && <ContentCard title="Company Overview" color={C.accent} body={r.content.overview} updated={r.content.last_overview_updated} />}

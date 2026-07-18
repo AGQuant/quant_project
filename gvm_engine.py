@@ -56,24 +56,46 @@ def score_relative(stock_val, peer_avg):
     else:             return 2.5
 
 
+def _inverse_relative_band(stock_val, peer_median):
+    """Shared lower-is-better relative band (F2 half): ratio=(peer_median/stock_val)*100 --
+    mirrors score_pe's pe_factor inverse cutoffs exactly (smaller stock_val vs peer scores
+    higher). Blank/zero peer or zero stock -> BLANK_SCORE. Shared by score_relative_inverse
+    (neutral F1) and score_peg (custom F1, cc#507)."""
+    if peer_median is None or _is_blank(peer_median) or float(peer_median) == 0 or stock_val == 0:
+        return BLANK_SCORE
+    ratio = (float(peer_median) / float(stock_val)) * 100
+    if ratio > 125:   return 10.0
+    elif ratio > 100: return 7.5
+    elif ratio > 75:  return 5.0
+    else:             return 2.5
+
+
 def score_relative_inverse(stock_val, peer_median):
     """cc#506: lower-is-better relative scorer for report-only metrics with no absolute-band
     spec (Forward PE, Price/Book, and the same _peer_block-driven EV/EBITDA + Annual Upside
     blocks in gvm_report_endpoints.py). F1 is a neutral 5.0 placeholder (no absolute band spec
-    exists for these); F2 bands on (peer_median/stock_val)*100 -- mirrors score_pe's pe_factor
-    inverse cutoffs exactly (smaller stock_val vs peer scores higher)."""
+    exists for these); F2 is the shared inverse-relative band."""
     if _is_blank(stock_val):
         return BLANK_SCORE
     stock_val = float(stock_val)
     f1 = 5.0
-    if peer_median is None or _is_blank(peer_median) or float(peer_median) == 0 or stock_val == 0:
-        f2 = BLANK_SCORE
-    else:
-        ratio = (float(peer_median) / stock_val) * 100
-        if ratio > 125:   f2 = 10.0
-        elif ratio > 100: f2 = 7.5
-        elif ratio > 75:  f2 = 5.0
-        else:             f2 = 2.5
+    f2 = _inverse_relative_band(stock_val, peer_median)
+    return round((f1 + f2) / 2, 2)
+
+
+def score_peg(peg, peer_median):
+    """cc#507: PEG Ratio (V group, report-only), lower is better. F1 = custom absolute bands
+    (peg<0 -- loss-making / earnings-artifact -- scored the same worst tier as an expensive
+    PEG>2); F2 = the shared inverse-relative band vs the segment median PEG."""
+    if _is_blank(peg):
+        return BLANK_SCORE
+    peg = float(peg)
+    if peg < 0:      f1 = 2.5
+    elif peg < 1.0:  f1 = 10.0
+    elif peg < 1.5:  f1 = 7.5
+    elif peg <= 2.0: f1 = 5.0
+    else:            f1 = 2.5
+    f2 = _inverse_relative_band(peg, peer_median)
     return round((f1 + f2) / 2, 2)
 
 

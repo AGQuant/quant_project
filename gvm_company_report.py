@@ -224,23 +224,34 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                     rating = score_interest_coverage(raw, peer_median, bfsi)
                 else:
                     rating = param_score(raw, peer_median)
-            # best / worst peer for the ladder
+            # best / worst peer for the ladder + cc#507: full sorted peer list for the
+            # per-metric peer-ladder chart (best -> worst, direction-aware).
+            peers_list = []
             if non_null:
                 pairs = [(p["symbol"], _f(p.get(scol))) for p in peers if _f(p.get(scol)) is not None]
                 pairs.sort(key=lambda x: x[1], reverse=hib)
                 best_sym = {"symbol": pairs[0][0], "value": round(pairs[0][1], 2)}
                 worst_sym = {"symbol": pairs[-1][0], "value": round(pairs[-1][1], 2)}
+                peers_list = [{"symbol": s, "value": round(v, 2)} for s, v in pairs]
 
-            params_out.append({
+            row = {
                 "key": key, "label": label, "group": group, "unit": unit,
                 "raw": round(raw, 2) if raw is not None else None,
                 "peer_avg": peer_median, "peer_median": peer_median,
                 "rank": rank, "peer_count": len(non_null),
                 "rating": rating, "higher_is_better": hib,
-                "best": best_sym, "worst": worst_sym,
+                "best": best_sym, "worst": worst_sym, "peers": peers_list,
                 "beats_peer": (raw is not None and peer_median is not None and
                                ((raw >= peer_median) if hib else (raw <= peer_median))),
-            })
+            }
+            # cc#507: PE row carries an extra chart marker at the company's OWN historical PE
+            # (the "own 5y avg" dashed line) -- the re-rating story the deleted Ownership Flow
+            # strip used to carry now lives here + the new Historical PE table row.
+            if key == "pe" and me_idx is not None:
+                hist_pe_marker = _f(peers[me_idx].get("historical_pe"))
+                if hist_pe_marker is not None:
+                    row["extra_marker"] = {"label": "own 5y avg", "value": round(hist_pe_marker, 2)}
+            params_out.append(row)
 
             if rating is not None:
                 pillar_acc.setdefault(group, []).append(rating)
@@ -281,18 +292,20 @@ def build_company_report(conn, symbol: str) -> Dict[str, Any]:
                     else:
                         _rat = param_score(_raw, _median_v)
                 _best = _worst = None
+                _peers_list = []
                 if _nn:
                     _pp = sorted([(symbols[i], v) for i, v in enumerate(_cv) if v is not None],
                                  key=lambda x: x[1], reverse=_hib)
                     _best  = {"symbol": _pp[0][0],  "value": round(_pp[0][1], 2)}
                     _worst = {"symbol": _pp[-1][0], "value": round(_pp[-1][1], 2)}
+                    _peers_list = [{"symbol": s, "value": round(v, 2)} for s, v in _pp]
                 params_out.append({
                     "key": _key, "label": _label, "group": "Technicals", "unit": _unit,
                     "raw": round(_raw, 2) if _raw is not None else None,
                     "peer_avg": _median_v, "peer_median": _median_v,
                     "rank": _rnk, "peer_count": len(_nn),
                     "rating": _rat, "higher_is_better": _hib,
-                    "best": _best, "worst": _worst,
+                    "best": _best, "worst": _worst, "peers": _peers_list,
                     "beats_peer": (_raw is not None and _median_v is not None and
                                    ((_raw >= _median_v) if _hib else (_raw <= _median_v))),
                 })

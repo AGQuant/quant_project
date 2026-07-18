@@ -318,15 +318,20 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"percentile/z failed {symbol}: {e}")
                 extras["percentile"] = None
 
-            # ── 6. Flow + valuation extras + ladder enrichment ────────────
-            # Also pull fy27_growth from input_raw for Annual Upside formula.
+            # ── 6. Ladder enrichment ────────────────────────────────────────
+            # cc#507 (18-Jul-2026, founder-directed): the "Ownership Flow & Valuation Context"
+            # strip is RETIRED -- extras["flow"] / extras["valuation"] are no longer computed.
+            # Every datum they carried is now either a scored table row (FII+DII in G; PE/
+            # Forward PE/Historical PE/P-B/EV-EBITDA/PEG/Annual Upside in V, all in
+            # gvm_company_report.py / gvm_report_endpoints.py) or a marker inside the PE row's
+            # peer-ladder chart. Promoter Holding has no replacement surface (never a scored G/V/M
+            # metric, cc#223) and is intentionally dropped with the strip. Also pull fy27_growth
+            # from input_raw for the ladder's Annual Upside column.
             try:
                 cur.execute("""
-                    SELECT s.nse_code, s.pe, s.historical_pe, s.segment_pe,
-                           s."Price to book value", s."PEG Ratio", s."EVEBITDA",
-                           s."Cfo by Pat", s.dividend_yield,
-                           s.fii_holding, s.fii_change, s.dii_holding, s.dii_change,
-                           s."Promoter holding", s.return_1y, s."Return on equity",
+                    SELECT s.nse_code, s.pe, s.historical_pe,
+                           s."Price to book value", s.dividend_yield,
+                           s.return_1y, s."Return on equity",
                            s.opm, s.price, s.dma_50, s.dma_200,
                            i.fy27_growth
                     FROM screener_raw s
@@ -334,8 +339,7 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                     WHERE s.nse_code = ANY(%s)
                 """, (syms,))
                 for r in cur.fetchall():
-                    (s, pe, hpe, spe, pb, peg, ev, cfo, dy,
-                     fii, fii_c, dii, dii_c, prom, r1y, roe, opm,
+                    (s, pe, hpe, pb, dy, r1y, roe, opm,
                      price, dma50, dma200, fy27) = r
                     ladder_extra.setdefault(s, {})
                     upside = _compute_upside(fy27, pe, hpe)
@@ -352,28 +356,8 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                         "upside": upside,
                         "dma_50_dev": dma50_dev, "dma_200_dev": dma200_dev,
                     })
-                    if s == symbol:
-                        pe_f, hpe_f = _f(pe), _f(hpe)
-                        extras["flow"] = {
-                            "fii": _r(fii, 2), "fii_chg": _r(fii_c, 2),
-                            "dii": _r(dii, 2), "dii_chg": _r(dii_c, 2),
-                            "inst_chg": (round((_f(fii_c) or 0) + (_f(dii_c) or 0), 2)
-                                          if fii_c is not None or dii_c is not None else None),
-                            "promoter": _r(prom, 2),
-                        }
-                        extras["valuation"] = {
-                            "pe": _r(pe, 2), "historical_pe": _r(hpe, 2),
-                            "segment_pe": _r(spe, 2),
-                            "rerating_pct": (round((pe_f / hpe_f - 1) * 100, 1)
-                                             if pe_f and hpe_f else None),
-                            "pb": _r(pb, 2), "peg": _r(peg, 2),
-                            "ev_ebitda": _r(ev, 2), "cfo_pat": _r(cfo, 2),
-                            "div_yield": _r(dy, 2),
-                            "annual_upside": upside,
-                            "fy27_growth": _r(fy27, 1),
-                        }
             except Exception as e:
-                log.warning(f"flow/valuation failed: {e}")
+                log.warning(f"ladder enrichment failed: {e}")
 
             # ── 7. Earnings blackout ──────────────────────────────────────
             try:

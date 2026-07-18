@@ -20,7 +20,7 @@ import logging
 
 from gvm_company_report import build_company_report, search_companies
 from gvm_page_extras import build_page_extras
-from gvm_engine import param_score, score_relative_inverse
+from gvm_engine import param_score, score_relative_inverse, score_peg
 
 log = logging.getLogger("scorr.gvm_report")
 router = APIRouter(tags=["gvm_report"])
@@ -87,21 +87,26 @@ def _transform_param(p: Dict[str, Any]) -> Dict[str, Any]:
         "peer_n":     p.get("peer_count"),
         "best":       p.get("best"),
         "worst":      p.get("worst"),
+        "peers":      p.get("peers", []),          # cc#507: peer-ladder chart data
+        "extra_marker": p.get("extra_marker"),     # cc#507: e.g. PE row's "own 5y avg" line
         "beats_peer": p.get("beats_peer"),
     }
 
 
 def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
-                sym: str, lower_is_better: bool) -> Optional[Dict[str, Any]]:
+                sym: str, lower_is_better: bool, rate_fn=None) -> Optional[Dict[str, Any]]:
     """Build a self-contained, peer-benchmarked Valuation block from a
     {symbol: value} map. pillar=V. Returns None if fewer than 2 peers have a value.
 
     cc#506: rating source switched from percentile-rank to gvm_engine, same as every other
     report parameter -- score_relative_inverse (lower-is-better: Price/Book, EV/EBITDA) or
-    param_score (higher-is-better: Annual Upside), fed the segment MEDIAN. Powers Price/Book,
-    EV/EBITDA, and Annual Upside (FY27e); Forward PE has its own inline block below (needs a
-    peer map built from a derived value, not a straight screener_raw column) but uses the same
-    two engine functions for "ONE rating methodology everywhere" (cc#506 spec)."""
+    param_score (higher-is-better: Annual Upside) by default, fed the segment MEDIAN. Forward PE
+    has its own inline block below (needs a peer map built from a derived value, not a straight
+    screener_raw column) but uses the same engine functions for "ONE rating methodology
+    everywhere" (cc#506 spec).
+    cc#507: rate_fn lets a caller override the default rating function (PEG uses score_peg,
+    its own custom absolute bands + the shared inverse-relative half). Also emits "peers" --
+    the full sorted {symbol,value} list -- for the per-metric peer-ladder chart."""
     pairs = [(s, v) for s, v in value_map.items() if v is not None]
     if len(pairs) < 2:
         return None
@@ -117,8 +122,11 @@ def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
     if sym_val is not None:
         pos    = next((i for i, (s_i, _) in enumerate(ordered) if s_i == sym), 0)
         rank   = pos + 1
-        rating = (score_relative_inverse(sym_val, peer_median) if lower_is_better
-                  else param_score(sym_val, peer_median))
+        if rate_fn is not None:
+            rating = rate_fn(sym_val, peer_median)
+        else:
+            rating = (score_relative_inverse(sym_val, peer_median) if lower_is_better
+                      else param_score(sym_val, peer_median))
         beats  = (sym_val <= peer_median) if lower_is_better else (sym_val >= peer_median)
     return {
         "key":        key,
@@ -134,6 +142,7 @@ def _peer_block(key: str, label: str, unit: str, value_map: Dict[str, float],
         "peer_n":     n,
         "best":       best,
         "worst":      worst,
+        "peers":      [{"symbol": s, "value": round(v, 2)} for s, v in ordered],
         "beats_peer": beats,
     }
 
@@ -258,6 +267,7 @@ def gvm_company_report(symbol: str):
                     "peer_n":     n,
                     "best":       best_fwd,
                     "worst":      worst_fwd,
+                    "peers":      [{"symbol": s, "value": v} for s, v in sorted_asc],
                     "beats_peer": (sym_fwd is not None and sym_fwd <= peer_median_fwd),
                 }
                 # Insert right after PE
@@ -269,24 +279,93 @@ def gvm_company_report(symbol: str):
     except Exception as e:
         log.warning(f"forward_pe benchmark failed for {sym}: {e}")
 
-    # --- 4b. PB + EV/EBITDA + Annual Upside (FY27e) — peer-benchmarked V blocks ---
+    # --- 4b. Historical PE (5Y avg) — context row, NOT scored (cc#507). RE-RATING chip =
+    # (pe/historical_pe - 1)*100; rank/best/worst are computed on that re-rating %, not the raw
+    # historical_pe value (the raw value only anchors the PEER column + the chart ladder).
+    # Does NOT enter the V pillar average -- pillars were already computed inside
+    # build_company_report() before this block ever touches `benchmark`.
+    try:
+        if ladder_syms:
+            with _conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT nse_code, pe, historical_pe FROM screener_raw
+                    WHERE nse_code = ANY(%s)
+                """, (ladder_syms,))
+                hist_map: Dict[str, float] = {}
+                rerating_map: Dict[str, float] = {}
+                for code, pe_v, hpe_v in cur.fetchall():
+                    pe_f, hpe_f = _f(pe_v), _f(hpe_v)
+                    if hpe_f is not None and hpe_f > 0:
+                        hist_map[code] = hpe_f
+                        if pe_f is not None:
+                            rerating_map[code] = round((pe_f / hpe_f - 1) * 100, 1)
+
+            hist_pairs = [(s, v) for s, v in hist_map.items()]
+            if len(hist_pairs) >= 2:
+                peer_median_hist = round(statistics.median([v for _, v in hist_pairs]), 2)
+                sym_hist         = hist_map.get(sym)
+                sym_rerating     = rerating_map.get(sym)
+                rerate_pairs     = [(s, v) for s, v in rerating_map.items()]
+                rank_h = best_h = worst_h = None
+                if rerate_pairs:
+                    sorted_rerate = sorted(rerate_pairs, key=lambda x: x[1])   # lower (more de-rated) = "best"
+                    best_h  = {"symbol": sorted_rerate[0][0],  "value": sorted_rerate[0][1]}
+                    worst_h = {"symbol": sorted_rerate[-1][0], "value": sorted_rerate[-1][1]}
+                    if sym_rerating is not None:
+                        rank_h = next((i + 1 for i, (s_i, _) in enumerate(sorted_rerate) if s_i == sym), None)
+
+                hist_pe_bench = {
+                    "key":        "hist_pe",
+                    "label":      "Historical PE (5Y avg)",
+                    "group":      "Valuation",
+                    "pillar":     "V",
+                    "unit":       "x",
+                    "company":    round(sym_hist, 2) if sym_hist is not None else None,
+                    "peer_avg":   peer_median_hist,
+                    "peer_median": peer_median_hist,
+                    "rating":     None,      # context row -- see docstring above
+                    "is_context": True,
+                    "rerating_pct": sym_rerating,
+                    "rank":       rank_h,
+                    "peer_n":     len(hist_pairs),
+                    "best":       best_h,
+                    "worst":      worst_h,
+                    "peers":      [{"symbol": s, "value": round(v, 2)} for s, v in sorted(hist_pairs, key=lambda x: x[1])],
+                    "beats_peer": None,
+                }
+                anchor_key = "fwd_pe" if any(b.get("key") == "fwd_pe" for b in benchmark) else "pe"
+                anchor_idx = next((i for i, b in enumerate(benchmark) if b.get("key") == anchor_key), -1)
+                if anchor_idx >= 0:
+                    benchmark.insert(anchor_idx + 1, hist_pe_bench)
+                else:
+                    benchmark.append(hist_pe_bench)
+    except Exception as e:
+        log.warning(f"historical_pe benchmark failed for {sym}: {e}")
+
+    # --- 4c. PB + EV/EBITDA + PEG + Annual Upside (FY27e) — peer-benchmarked V blocks.
+    # Inserted in THIS order (each _insert_after_valuation lands right after the previous one,
+    # so calling them in sequence fixes the final row order per cc#507 spec item 4:
+    # PE -> Forward PE -> Historical PE -> Price/Book -> EV/EBITDA -> PEG -> Annual Upside).
     try:
         if ladder_syms:
             pb_map: Dict[str, float] = {}
             ev_map: Dict[str, float] = {}
+            peg_map: Dict[str, float] = {}
             ups_map: Dict[str, float] = {}
             with _conn() as conn, conn.cursor() as cur:
                 cur.execute("""
-                    SELECT nse_code, "Price to book value", "EVEBITDA"
+                    SELECT nse_code, "Price to book value", "EVEBITDA", "PEG Ratio"
                     FROM screener_raw
                     WHERE nse_code = ANY(%s)
                 """, (ladder_syms,))
-                for code, pb_v, ev_v in cur.fetchall():
-                    pb_f, ev_f = _f(pb_v), _f(ev_v)
+                for code, pb_v, ev_v, peg_v in cur.fetchall():
+                    pb_f, ev_f, peg_f = _f(pb_v), _f(ev_v), _f(peg_v)
                     if pb_f is not None and pb_f > 0:
                         pb_map[code] = pb_f
                     if ev_f is not None and ev_f > 0:
                         ev_map[code] = ev_f
+                    if peg_f is not None:
+                        peg_map[code] = peg_f   # cc#507: PEG can be legitimately negative (loss-making) -- keep
                 cur.execute("""
                     SELECT nse_code, fy27_growth
                     FROM input_raw
@@ -299,8 +378,9 @@ def gvm_company_report(symbol: str):
 
             pb_block  = _peer_block("pb", "Price / Book", "x", pb_map, sym, lower_is_better=True)
             ev_block  = _peer_block("ev_ebitda", "EV / EBITDA", "x", ev_map, sym, lower_is_better=True)
+            peg_block = _peer_block("peg", "PEG Ratio", "x", peg_map, sym, lower_is_better=True, rate_fn=score_peg)
             ups_block = _peer_block("annual_upside", "Annual Upside (FY27e)", "%", ups_map, sym, lower_is_better=False)
-            for blk in (pb_block, ev_block, ups_block):
+            for blk in (pb_block, ev_block, peg_block, ups_block):
                 if blk:
                     _insert_after_valuation(benchmark, blk)
     except Exception as e:
