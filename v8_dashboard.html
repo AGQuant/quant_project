@@ -473,6 +473,57 @@
 .v8toptab:hover{color:var(--txt)}
 .v8toptab.active{color:var(--blu);border-bottom-color:var(--blu)}
 
+/* cc#544: V6 BT playground pane (read-mostly dev-tooling; v8 tokens + JetBrains Mono numerics) */
+#pane-bt{padding:14px 0 40px;font-size:13px;color:var(--txt)}
+#pane-bt .bt-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+#pane-bt .bt-title{font-size:18px;font-weight:800;color:var(--txt)}
+#pane-bt .bt-title b{color:var(--blu)}
+#pane-bt .bt-warehouse{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+#pane-bt .bt-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:14px}
+#pane-bt .bt-card-t{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.8px;font-weight:700;margin-bottom:12px}
+#pane-bt .bt-run-row{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+#pane-bt .bt-fld{display:flex;flex-direction:column;gap:4px}
+#pane-bt .bt-fld label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+#pane-bt select, #pane-bt input[type=number]{background:var(--well);border:1px solid var(--line2);border-radius:7px;color:var(--txt);font-family:var(--mono);font-size:13px;font-weight:700;padding:7px 10px;outline:none}
+#pane-bt select:focus, #pane-bt input[type=number]:focus{border-color:var(--blu)}
+#pane-bt input[type=number]{width:82px}
+#pane-bt select:disabled{opacity:.5}
+#pane-bt .bt-params{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+#pane-bt .bt-spec{font-family:var(--mono);font-size:11px;color:var(--mut);padding-bottom:8px}
+#pane-bt .bt-btn{font:inherit;font-size:12px;font-weight:800;letter-spacing:.3px;color:#fff;background:var(--blu);border:1px solid var(--blu);border-radius:8px;padding:9px 20px;cursor:pointer}
+#pane-bt .bt-btn:hover{filter:brightness(1.08)}
+#pane-bt .bt-btn:disabled{opacity:.55;cursor:not-allowed}
+#pane-bt .bt-btn.ghost{background:transparent;color:var(--mut);border-color:var(--line2)}
+#pane-bt .bt-btn.ghost:hover{color:var(--txt);border-color:var(--blu)}
+#pane-bt .bt-spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:btspin .7s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes btspin{to{transform:rotate(360deg)}}
+#pane-bt .bt-err{color:var(--red);font-family:var(--mono);font-size:11px;margin-top:10px;white-space:pre-wrap;display:none}
+#pane-bt .bt-msg{color:var(--mut);font-family:var(--mono);font-size:11px;margin-top:10px;display:none}
+#pane-bt .bt-chip{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--cyan);background:rgba(55,211,232,.1);border:1px solid rgba(55,211,232,.3);border-radius:5px;padding:1px 6px;margin:0 3px 3px 0}
+#pane-bt .tbl-scroll{overflow-x:auto}
+#pane-bt table{width:100%;border-collapse:collapse;font-size:12px}
+#pane-bt thead th{padding:6px 9px;color:var(--mut);font-weight:700;text-align:left;text-transform:uppercase;letter-spacing:.4px;font-size:9px;border-bottom:1px solid var(--line2);white-space:nowrap}
+#pane-bt tbody td{padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+#pane-bt tbody tr.bt-run-tr{cursor:pointer}
+#pane-bt tbody tr.bt-run-tr:hover td{background:rgba(77,124,254,.06)}
+#pane-bt tbody tr.bt-run-tr.sel td{background:rgba(77,124,254,.12)}
+#pane-bt .td-mono{font-family:var(--mono)}
+#pane-bt .bt-pos{color:var(--grn)}
+#pane-bt .bt-neg{color:var(--red)}
+#pane-bt .bt-st{font-family:var(--mono);font-size:10px;font-weight:700;border-radius:5px;padding:1px 7px}
+#pane-bt .bt-st.done{color:var(--grn);background:var(--grn-d)}
+#pane-bt .bt-st.running{color:var(--amber);background:rgba(245,185,74,.13)}
+#pane-bt .bt-st.error{color:var(--red);background:var(--red-d)}
+#pane-bt .bt-trash{cursor:pointer;color:var(--dim);font-size:13px;border:none;background:transparent}
+#pane-bt .bt-trash:hover{color:var(--red)}
+#pane-bt .bt-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#pane-bt .bt-sbox{background:var(--well);border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:88px}
+#pane-bt .bt-sbox .l{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+#pane-bt .bt-sbox .v{font-family:var(--mono);font-size:16px;font-weight:800;margin-top:2px}
+#pane-bt .bt-reason{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--mut);background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:1px 7px}
+#pane-bt .bt-empty{padding:16px 8px;text-align:center;color:var(--dim);font-size:11px}
+#pane-bt .bt-loading{padding:30px 8px;text-align:center;color:var(--mut);font-size:12px}
+
 </style>
 
 <nav class="model-nav" id="scorr-nav"></nav>
@@ -493,6 +544,7 @@
     <button class="v8toptab active" data-pane="v8" onclick="showV8Pane('v8')">V8</button>
     <button class="v8toptab" data-pane="index" onclick="showV8Pane('index')">Index Intel</button>
     <button class="v8toptab" data-pane="v14" onclick="showV8Pane('v14')">V14 Intraday</button>
+    <button class="v8toptab" data-pane="bt" onclick="showV8Pane('bt')">V6 BT</button>
   </div>
   <div id="pane-v8">
 
@@ -635,6 +687,63 @@
     <div class="rp-toast" id="rpToast"></div>
     <div class="ti-ov" id="tiOv" onclick="if(event.target===this)closeTradeInfo()"><div class="ti-box" id="tiBox"></div></div>
   </div>
+  <!-- cc#544: V6 BT playground pane (read-mostly wrapper over the existing bt6 engine) -->
+  <div id="pane-bt" style="display:none">
+    <div class="bt-head">
+      <div class="bt-title">V6 <b>Backtest</b> Playground</div>
+      <span class="bt-warehouse">Warehouse bars: 14-Jul-25 .. 10-Jul-26</span>
+    </div>
+    <div class="bt-card">
+      <div class="bt-card-t">Run</div>
+      <div class="bt-run-row">
+        <div class="bt-fld">
+          <label>Basket</label>
+          <select id="btBasket" onchange="btOnBasket()">
+            <option value="SELL_REV">SELL_REV</option>
+            <option value="SELL_MOM">SELL_MOM</option>
+            <option value="BUY_REV" disabled>BUY_REV (coming)</option>
+            <option value="BUY_MOM" disabled>BUY_MOM (coming)</option>
+          </select>
+        </div>
+        <div class="bt-spec" id="btSpec" style="display:none">params: spec-baked (none)</div>
+        <div class="bt-params" id="btParams" style="display:none">
+          <div class="bt-fld"><label>tgt</label><input type="number" id="bt_tgt" step="0.5"></div>
+          <div class="bt-fld"><label>drsi_hi</label><input type="number" id="bt_drsi_hi" step="1"></div>
+          <div class="bt-fld"><label>mom_lo</label><input type="number" id="bt_mom_lo" step="0.5" placeholder="engine default"></div>
+          <div class="bt-fld"><label>mom_hi</label><input type="number" id="bt_mom_hi" step="0.5" placeholder="engine default"></div>
+          <button class="bt-btn ghost" type="button" onclick="btResetParams()">Reset</button>
+        </div>
+        <button class="bt-btn" id="btRunBtn" type="button" onclick="btRun()">Run backtest</button>
+      </div>
+      <div class="bt-err" id="btErr"></div>
+      <div class="bt-msg" id="btMsg"></div>
+    </div>
+    <div class="bt-card">
+      <div class="bt-card-t">Run history</div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>run</th><th>basket</th><th>params</th><th>trades</th><th>WR%</th>
+            <th>avg ret</th><th>net ret</th><th>started</th><th>status</th><th></th>
+          </tr></thead>
+          <tbody id="btRunsBody"><tr><td colspan="10" class="bt-loading">Loading&#8230;</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="bt-card" id="btTradesCard" style="display:none">
+      <div class="bt-card-t" id="btTradesTitle">Trade log</div>
+      <div class="bt-summary" id="btSummary"></div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>symbol</th><th>entry ts</th><th>entry px</th><th>exit ts</th>
+            <th>exit px</th><th>exit reason</th><th>ret%</th>
+          </tr></thead>
+          <tbody id="btTradesBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div><!--/pane-bt-->
 
   <footer>
     <span id="apiNote">API: <span id="apiBase">&#8212;</span></span>
@@ -4026,16 +4135,162 @@ window.v14Boot=function(){
 <script>
 /* cc#542+543: top-level V8 | Index Intel | V14 tab controller */
 function showV8Pane(name){
-  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14'};
+  var panes={v8:'pane-v8',index:'pane-index',v14:'pane-v14',bt:'pane-bt'};
   Object.keys(panes).forEach(function(k){var el=document.getElementById(panes[k]);if(el)el.style.display=(k===name)?'':'none';});
   var btns=document.querySelectorAll('.v8toptab');
   for(var i=0;i<btns.length;i++){btns[i].classList.toggle('active',btns[i].getAttribute('data-pane')===name);}
   try{history.replaceState(null,'',(name==='v8')?(location.pathname+location.search):('#'+name));}catch(e){}
   if(name==='index'&&window.idxBoot)window.idxBoot();
   if(name==='v14'&&window.v14Boot)window.v14Boot();
+  if(name==='bt'&&window.btBoot)window.btBoot();
 }
-(function(){var h=(location.hash||'').replace('#','');if(h==='index'||h==='v14'){showV8Pane(h);}})();
-window.addEventListener('hashchange',function(){var h=(location.hash||'').replace('#','');showV8Pane((h==='index'||h==='v14')?h:'v8');});
+(function(){var h=(location.hash||'').replace('#','');if(h==='index'||h==='v14'||h==='bt'){showV8Pane(h);}})();
+window.addEventListener('hashchange',function(){var h=(location.hash||'').replace('#','');showV8Pane((h==='index'||h==='v14'||h==='bt')?h:'v8');});
+</script>
+<script>
+/* cc#544: V6 BT playground — namespaced IIFE, lazy-boots on first activation.
+   Read-mostly wrapper over the existing bt6 engine (/api/bt6/*). */
+(function(){
+  var BASE='/api/bt6';
+  // SELL_MOM defaults observed from an existing run (bt6_runs run_id=2 params). mom_lo/mom_hi were
+  // not present in any observed SELL_MOM run, so they are left blank -> engine uses its own defaults.
+  var MOM_DEFAULTS={tgt:3, drsi_hi:45, mom_lo:'', mom_hi:''};
+  var _booted=false, _sel=null, _running=false;
+
+  function el(id){return document.getElementById(id);}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function num(v,d){if(v==null||v==='')return '--';var n=Number(v);return isNaN(n)?'--':n.toFixed(d==null?2:d);}
+  function cls(v){return (v!=null&&Number(v)<0)?'bt-neg':(v!=null&&Number(v)>0?'bt-pos':'');}
+  function when(s){if(!s)return '--';var m=String(s).replace('T',' ').match(/(\d{4})-(\d{2})-(\d{2})[ ]?(\d{2}:\d{2})?/);if(!m)return esc(s);var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m[2],10)-1];return m[3]+'-'+mo+(m[4]?' '+m[4]:'');}
+
+  function chips(p){
+    if(!p||typeof p!=='object'){return '<span style="color:var(--dim)">--</span>';}
+    var ks=Object.keys(p);
+    if(!ks.length)return '<span style="color:var(--dim)">spec-baked</span>';
+    return ks.map(function(k){return '<span class="bt-chip">'+esc(k)+':'+esc(p[k])+'</span>';}).join('');
+  }
+
+  window.btOnBasket=function(){
+    var b=el('btBasket').value;
+    var isMom=(b==='SELL_MOM');
+    el('btParams').style.display=isMom?'flex':'none';
+    el('btSpec').style.display=(b==='SELL_REV')?'block':'none';
+    if(isMom) btResetParams();
+  };
+
+  window.btResetParams=function(){
+    el('bt_tgt').value=MOM_DEFAULTS.tgt;
+    el('bt_drsi_hi').value=MOM_DEFAULTS.drsi_hi;
+    el('bt_mom_lo').value=MOM_DEFAULTS.mom_lo;
+    el('bt_mom_hi').value=MOM_DEFAULTS.mom_hi;
+  };
+
+  function collectParams(){
+    if(el('btBasket').value!=='SELL_MOM')return {};
+    var p={}, ids={tgt:'bt_tgt',drsi_hi:'bt_drsi_hi',mom_lo:'bt_mom_lo',mom_hi:'bt_mom_hi'};
+    Object.keys(ids).forEach(function(k){var v=el(ids[k]).value;if(v!==''&&v!=null)p[k]=Number(v);});
+    return p;
+  }
+
+  window.btRun=function(){
+    if(_running)return;
+    _running=true;
+    var btn=el('btRunBtn'), errEl=el('btErr'), msgEl=el('btMsg');
+    errEl.style.display='none'; errEl.textContent='';
+    msgEl.style.display='none'; msgEl.textContent='';
+    btn.disabled=true; btn.innerHTML='<span class="bt-spin"></span>Running&#8230;';
+    var body={basket:el('btBasket').value, params:collectParams()};
+    fetch(BASE+'/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j};});})
+      .then(function(res){
+        if(!res.ok){
+          var m=(res.j&&res.j.error)?res.j.error:('HTTP '+res.status);
+          errEl.textContent=m; errEl.style.display='block';
+        } else {
+          msgEl.textContent='Run #'+res.j.run_id+' complete.'; msgEl.style.display='block';
+          btLoadRuns();
+        }
+      })
+      .catch(function(e){errEl.textContent='Request failed: '+e; errEl.style.display='block';})
+      .then(function(){
+        _running=false; btn.disabled=false; btn.textContent='Run backtest';
+      });
+  };
+
+  window.btLoadRuns=function(){
+    var tb=el('btRunsBody');
+    fetch(BASE+'/runs').then(function(r){return r.json();}).then(function(d){
+      var rows=(d&&d.runs)||[];
+      if(!rows.length){tb.innerHTML='<tr><td colspan="10" class="bt-empty">No runs yet.</td></tr>';return;}
+      tb.innerHTML=rows.map(function(r){
+        var st=(r.status||'').toLowerCase();
+        var stcls=st.indexOf('done')>-1||st==='ok'?'done':(st.indexOf('err')>-1||st.indexOf('fail')>-1?'error':(st==='running'?'running':''));
+        return '<tr class="bt-run-tr'+(_sel===r.run_id?' sel':'')+'" onclick="btSelectRun('+r.run_id+')">'
+          +'<td class="td-mono">#'+esc(r.run_id)+'</td>'
+          +'<td>'+esc(r.basket)+'</td>'
+          +'<td>'+chips(r.params)+'</td>'
+          +'<td class="td-mono">'+(r.n_trades==null?'--':esc(r.n_trades))+'</td>'
+          +'<td class="td-mono">'+num(r.wr_pct,1)+'</td>'
+          +'<td class="td-mono '+cls(r.avg_ret_pct)+'">'+num(r.avg_ret_pct)+'</td>'
+          +'<td class="td-mono '+cls(r.net_ret_pct)+'">'+num(r.net_ret_pct)+'</td>'
+          +'<td class="td-mono" style="color:var(--mut)">'+when(r.started_at)+'</td>'
+          +'<td><span class="bt-st '+stcls+'">'+esc(r.status||'--')+'</span></td>'
+          +'<td><button class="bt-trash" title="Delete run" onclick="event.stopPropagation();btDelete('+r.run_id+')">&#128465;</button></td>'
+          +'</tr>';
+      }).join('');
+    }).catch(function(e){tb.innerHTML='<tr><td colspan="10" class="bt-empty">Failed to load runs: '+esc(e)+'</td></tr>';});
+  };
+
+  window.btDelete=function(id){
+    fetch(BASE+'/run/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){
+      if(_sel===id){_sel=null;el('btTradesCard').style.display='none';}
+      btLoadRuns();
+    }).catch(function(){btLoadRuns();});
+  };
+
+  window.btSelectRun=function(id){
+    _sel=id;
+    var card=el('btTradesCard'), body=el('btTradesBody'), sum=el('btSummary');
+    // re-highlight selected row
+    var trs=document.querySelectorAll('#btRunsBody .bt-run-tr');
+    for(var i=0;i<trs.length;i++){trs[i].classList.remove('sel');}
+    card.style.display='';
+    el('btTradesTitle').textContent='Trade log · run #'+id;
+    sum.innerHTML=''; body.innerHTML='<tr><td colspan="7" class="bt-loading">Loading trades&#8230;</td></tr>';
+    // pull the run row for summary from the runs list
+    fetch(BASE+'/runs').then(function(r){return r.json();}).then(function(d){
+      var run=((d&&d.runs)||[]).filter(function(x){return x.run_id===id;})[0]||{};
+      sum.innerHTML=sbox('Basket',esc(run.basket||'--'))
+        +sbox('Trades',run.n_trades==null?'--':esc(run.n_trades))
+        +sbox('WR%',num(run.wr_pct,1))
+        +sbox('Avg ret',num(run.avg_ret_pct),cls(run.avg_ret_pct))
+        +sbox('Net ret',num(run.net_ret_pct),cls(run.net_ret_pct));
+    });
+    fetch(BASE+'/trades?run_id='+id).then(function(r){return r.json();}).then(function(d){
+      var t=(d&&d.trades)||[];
+      if(!t.length){body.innerHTML='<tr><td colspan="7" class="bt-empty">No trades for this run.</td></tr>';return;}
+      body.innerHTML=t.map(function(x){
+        return '<tr>'
+          +'<td>'+esc(x.symbol)+'</td>'
+          +'<td class="td-mono" style="color:var(--mut)">'+when(x.entry_ts)+'</td>'
+          +'<td class="td-mono">'+num(x.entry_px)+'</td>'
+          +'<td class="td-mono" style="color:var(--mut)">'+when(x.exit_ts)+'</td>'
+          +'<td class="td-mono">'+num(x.exit_px)+'</td>'
+          +'<td><span class="bt-reason">'+esc(x.exit_reason||'--')+'</span></td>'
+          +'<td class="td-mono '+cls(x.ret_pct)+'">'+num(x.ret_pct)+'</td>'
+          +'</tr>';
+      }).join('');
+    }).catch(function(e){body.innerHTML='<tr><td colspan="7" class="bt-empty">Failed: '+esc(e)+'</td></tr>';});
+  };
+
+  function sbox(l,v,c){return '<div class="bt-sbox"><div class="l">'+l+'</div><div class="v '+(c||'')+'">'+v+'</div></div>';}
+
+  window.btBoot=function(){
+    if(_booted)return; _booted=true;
+    btOnBasket();
+    btLoadRuns();
+  };
+})();
 </script>
 <script>
 if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){

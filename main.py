@@ -47,6 +47,7 @@ from diagnosis import router as diagnosis_router
 from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
+from bt6_endpoints import router as bt6_router   # cc#544: V6 BT playground (read-mostly wrapper)
 from pcr_endpoints import router as pcr_router
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
@@ -264,6 +265,7 @@ app.include_router(diagnosis_router)
 app.include_router(v9_router)
 app.include_router(v10_router)
 app.include_router(v14_router)   # cc#442
+app.include_router(bt6_router)   # cc#544: /api/bt6/* V6 BT playground
 app.include_router(pcr_router)
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
@@ -766,6 +768,7 @@ NAV_REGISTRY = {
     "/v14":          ("(-> /dashboard#v14 · V14 Intraday tab; standalone retired)", "typed-url"),   # cc#543
     "/dashboard#index": ("Index Intel (V8 tab)", "nav"),     # cc#542 rule id=2987 (folded into V8)
     "/dashboard#v14":   ("V14 · Intraday (V8 tab)", "nav"),  # cc#543 rule id=2987 (folded into V8)
+    "/dashboard#bt":    ("V6 BT (V8 tab · backtest playground)", "nav"),  # cc#544 rule id=2987 (folded into V8)
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
     "/holdings":     ("Holdings",             "nav"),

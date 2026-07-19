@@ -284,6 +284,7 @@ PWA_JS = """
     ['/dashboard#index', '\\u25b3', 'Index Intel'],
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
     ['/dashboard#v14', '\\u26a1', 'V14 \\u00b7 Intraday'],
+    ['/dashboard#bt', '\\u25a9', 'V6 BT'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler']
   ];
