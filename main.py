@@ -1409,8 +1409,16 @@ def paper_status():
     }
 
 @app.get("/api/paper/pivots")
-def paper_pivots(limit: int = 250):
-    return api_query("SELECT symbol,pp,r1,s1,r2,s2,pivot_date FROM v8_paper_pivots WHERE pivot_date=(SELECT MAX(pivot_date) FROM v8_paper_pivots) ORDER BY symbol LIMIT %s", (limit,))
+def paper_pivots(limit: int = 250, symbol: Optional[str] = None):
+    # cc#547: return the LATEST pivot row PER symbol (v8_paper_pivots holds history).
+    # The old query filtered on a single global MAX(pivot_date) and then ORDER BY symbol
+    # LIMIT — index symbols like NIFTY50 sit deep in the alphabetical order (~1085th of
+    # ~1750 rows) and were silently truncated by the LIMIT, showing "pivots pending".
+    # An optional comma-separated `symbol` filter fetches specific symbols un-truncated.
+    if symbol:
+        syms = [s.strip().upper() for s in symbol.split(",") if s.strip()]
+        return api_query("SELECT DISTINCT ON (symbol) symbol,pp,r1,s1,r2,s2,pivot_date FROM v8_paper_pivots WHERE UPPER(symbol)=ANY(%s) ORDER BY symbol, pivot_date DESC", (syms,))
+    return api_query("SELECT DISTINCT ON (symbol) symbol,pp,r1,s1,r2,s2,pivot_date FROM v8_paper_pivots ORDER BY symbol, pivot_date DESC LIMIT %s", (limit,))
 
 @app.post("/api/paper/rebuild_cutover")
 def paper_rebuild_cutover(x_admin_token: Optional[str] = Header(None)):

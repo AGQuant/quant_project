@@ -364,9 +364,9 @@
 #pane-index .adr-pct{display:flex;justify-content:space-between;margin-top:3px;font-size:8px}
 #pane-index .pvt-row{display:flex;justify-content:space-between;align-items:center;
     padding:3px 5px;border-radius:4px;margin-bottom:2px}
-#pane-index .pvt-l{font-family:var(--mono);font-size:11px;font-weight:800;width:26px}
-#pane-index .pvt-v{font-family:var(--mono);font-size:11px;color:var(--txt)}
-#pane-index .pvt-d{font-family:var(--mono);font-size:9px;color:var(--mut)}
+#pane-index .pvt-l{font-family:var(--mono);font-size:11px;font-weight:800;width:32px}
+#pane-index .pvt-v{font-family:var(--mono);font-size:17px;font-weight:800;color:var(--txt);letter-spacing:-.3px}
+#pane-index .pvt-d{font-family:var(--mono);font-size:12px;color:var(--mut)}
 #pane-index .pvt-cmp{display:flex;justify-content:space-between;padding:6px 5px 0;
     border-top:1px solid var(--line);margin-top:4px}
 #pane-index .oi-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
@@ -3785,7 +3785,7 @@ function v10RowIcon(sym,ts){var s=(sym||'NIFTY50');return `<span onclick="openV1
 D.pivots={ NIFTY:null, BANKNIFTY:null };
 async function loadPivots(){
   try{
-    const pv=await getJSON('/api/paper/pivots?limit=300');
+    const pv=await getJSON('/api/paper/pivots?symbol=NIFTY50,BANKNIFTY');
     const rows=rowsOf(pv);
     const map={NIFTY:'NIFTY50',BANKNIFTY:'BANKNIFTY'};
     for(const k of ['NIFTY','BANKNIFTY']){
@@ -3806,16 +3806,17 @@ function pivotLadder(name,pvt,cmp){
       <span class="pvt-v">${v?num(v):'—'}</span>
       <span class="pvt-d">${near!=null?(near>=0?'+':'')+near.toFixed(2)+'%':''}</span></div>`;
   }).join('');
-  return `<div style="margin-bottom:6px"><div style="font-size:11px;font-weight:800;margin-bottom:4px">${name}
-    <span class="td-mono" style="color:var(--mut);font-weight:400;font-size:10px">CMP ${cmp?num(cmp):'—'}</span></div>
+  return `<div style="margin-bottom:2px"><div style="font-size:14px;font-weight:800;margin-bottom:6px;display:flex;align-items:baseline;gap:8px">${name}
+    <span class="td-mono" style="color:var(--mut);font-weight:400;font-size:14px">CMP ${cmp?num(cmp):'—'}</span></div>
     ${rowsH}</div>`;
 }
 function rPivots(){
   return `<div class="card" style="margin-bottom:10px">
     <div class="card-hd"><div><div class="t">Support / Resistance · Pivots</div>
       <div class="s">rolling-5-day pivots · nearest level highlighted</div></div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div style="display:flex;flex-direction:column;gap:16px">
       ${pivotLadder('NIFTY', D.pivots.NIFTY, D.idx.NIFTY.cmp)}
+      <div style="border-top:1px solid var(--line)"></div>
       ${pivotLadder('BANKNIFTY', D.pivots.BANKNIFTY, D.idx.BANKNIFTY.cmp)}
     </div></div>`;
 }
