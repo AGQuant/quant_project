@@ -1309,6 +1309,10 @@ def run_company_extract_from_doctexts(symbol, conn=None, force=False):
                     conn.commit()
                 continue
             doc_urls = [u for u in (pres_url, trans_url) if u]
+            # COMMIT the metrics per-quarter FIRST (mirrors run_company_depth). post_extraction_chain
+            # runs AFTER the loop in its OWN transaction: if the analytics chain silently aborts the
+            # txn (a swallowed internal error), a single shared commit would roll the metrics back too
+            # — the cc#541 phase-2 persistence bug (status=ok but zero rows written).
             with conn.cursor() as cur:
                 write_extraction(cur, symbol, sector, result["quarter"] or quarter,
                                  result["metrics"], result["concall"], doc_urls)
@@ -1316,17 +1320,25 @@ def run_company_extract_from_doctexts(symbol, conn=None, force=False):
                                WHERE symbol=%s AND quarter=%s AND extract_status='stored'""",
                             (symbol, quarter))
                 _log_token_usage(cur, symbol, result["model_used"], result["usage"])
-                post_extraction_chain(cur, symbol, sector)
                 conn.commit()
             n = sum(1 for m in result["metrics"].values() if m["value"] is not None)
             total_found += n
             quarters_done.append({"quarter": result["quarter"] or quarter,
                                   "metrics_found": n, "model": result["model_used"]})
 
-        with conn.cursor() as cur:
-            if quarters_done:
-                _clear_failure(cur, symbol)
-            conn.commit()
+        # analytics chain + failure-clear, isolated so a chain error can't discard the committed metrics
+        if quarters_done:
+            try:
+                with conn.cursor() as cur:
+                    _clear_failure(cur, symbol)
+                    post_extraction_chain(cur, symbol, sector)
+                    conn.commit()
+            except Exception as _pe:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                log.warning(f"post_extraction_chain failed for {symbol} (metrics already committed): {_pe}")
         if not quarters_done and not errored:
             return {"symbol": symbol, "status": "no_text", "sector": sector}
         return {"symbol": symbol, "status": "ok" if quarters_done else "error", "sector": sector,
