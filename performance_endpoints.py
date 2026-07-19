@@ -81,13 +81,20 @@ def performance_alpha():
         """, (BENCH_BASE_DATE,))
         br = cur.fetchone()
         benchmark = _num(br[0]) if br and br[0] is not None else None
+        # cc#553 (spec id=6086): alpha_multicap return % is on the FULL Rs 5L capital (cash slots
+        # earn 0), not on deployed cost -- so unfilled slots correctly drag the return. The other 3
+        # baskets keep the deployed-capital convention.
         cur.execute("""
-            SELECT basket_name AS basket,
-                   ROUND(SUM(pnl)::numeric, 0) AS pnl,
-                   ROUND((SUM(pnl)/NULLIF(SUM(entry_price*qty),0)*100)::numeric, 2) AS return_pct,
+            SELECT p.basket_name AS basket,
+                   ROUND(SUM(p.pnl)::numeric, 0) AS pnl,
+                   ROUND((SUM(p.pnl)/NULLIF(
+                       CASE WHEN p.basket_name='alpha_multicap' THEN MAX(reg.capital)
+                            ELSE SUM(p.entry_price*p.qty) END, 0)*100)::numeric, 2) AS return_pct,
                    COUNT(*) AS positions
-            FROM quant_paper_positions WHERE status='open'
-            GROUP BY basket_name ORDER BY return_pct DESC NULLS LAST
+            FROM quant_paper_positions p
+            LEFT JOIN quant_basket_registry reg ON reg.basket_name=p.basket_name
+            WHERE p.status='open'
+            GROUP BY p.basket_name ORDER BY return_pct DESC NULLS LAST
         """)
         baskets = _rows(cur)
         cur.execute("""

@@ -24,6 +24,7 @@ import os
 
 import qb_eod_checker
 import qb_rebalance
+import qb_alpha_select   # cc#553: Alpha Multicap V2 FINAL selection/proposal engine (spec id=6086)
 
 router = APIRouter(prefix="/api/qb", tags=["quant_basket"])
 
@@ -181,3 +182,16 @@ def qb_registry(basket_name: Optional[str] = None):
     return api_query(
         "SELECT basket_name, cap_type, capital, max_stocks, rebalance_freq, weight_band, "
         "next_rebalance, is_active, notes FROM quant_basket_registry ORDER BY basket_name")
+
+
+@router.get("/alpha/propose")
+def qb_alpha_propose(as_of: Optional[str] = None):
+    """cc#553 (spec id=6086): DRY-RUN Alpha Multicap V2 FINAL rebalance proposal — top-12 entries
+    (0.5*GVM+0.5*M, gates GVM>=7.5/V>=7.5/M>7/dGVM_180d>+0.5, Nifty500), cash slots when <12 pass,
+    plus the monthly max-3 exit (held names ranked outside composite top-25, worst first) and
+    gate-passing refills. READ-ONLY — execution stays founder-confirmed. `as_of` defaults to today.
+    Reproduces the manual SQL replication exactly (acceptance)."""
+    try:
+        return qb_alpha_select.propose_rebalance(as_of=as_of)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

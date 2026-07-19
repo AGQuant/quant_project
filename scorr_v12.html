@@ -69,6 +69,9 @@
     <a class="backlink" href="/dashboard">&#8592; V8 Dashboard</a>
   </header>
 
+  <!-- cc#553: preset starter strategies (Alpha Multicap, locked to spec id=6086) -->
+  <div id="presets"></div>
+
   <div class="steps" id="steps"></div>
 
   <!-- STEP 1 UNIVERSE -->
@@ -282,6 +285,53 @@ function renderResults(res){
   if(res.honesty&&res.honesty.geometry)html+='<div class="sub" style="margin-top:12px">&#9432; '+res.honesty.geometry+'</div>';
   document.getElementById('results').innerHTML=html;
 }
-renderSteps();go(0);
+// cc#553: preset starter strategies (Alpha Multicap, locked to spec id=6086). Applying a preset
+// pre-fills the wizard's supported fields; the composite/ΔGVM/max-3 Alpha rules are shown on the
+// card as locked provenance (the V12 ROC backtest can't natively re-sim them).
+let PRESETS=[];
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function pstat(k,v){return '<div class="card"><div class="k">'+esc(k)+'</div><div class="v">'+v+'</div></div>';}
+function presetCard(p){
+  const lr=p.locked_rules||{}, pv=p.provenance||{};
+  const rules=['universe','score','hard_gates','selection','exit'].filter(k=>lr[k]).map(k=>
+    '<div style="font-size:11.5px;color:var(--mut);margin:2px 0"><b style="color:var(--txt)">'+esc(k.replace(/_/g,' '))+':</b> '+esc(lr[k])+'</div>').join('');
+  const stats='<div class="cards" style="margin-top:8px">'+
+    pstat('CAGR','<span class="pos">+'+pv.cagr_pct+'%</span>')+
+    pstat('Worst mo','<span class="neg">'+pv.worst_month_pct+'%</span>')+
+    pstat('Positive mo',pv.positive_months_pct+'%')+
+    pstat('Swaps/mo','~'+pv.swaps_per_month)+
+    pstat('vs '+esc(pv.benchmark),'<span class="pos">+'+pv.benchmark_cagr_pct+'%</span>')+'</div>';
+  return '<div class="panel on" style="border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px">'+
+    '<div class="row" style="align-items:baseline;gap:10px;flex-wrap:wrap"><div style="font-size:15px;font-weight:800">'+esc(p.name)+'</div>'+
+    '<span class="pill b">'+esc(p.tagline)+'</span>'+
+    '<span class="pill a" title="'+esc(pv.caveat||'')+'">'+esc(pv.label||'BACKTESTED')+' · '+esc(pv.period||'')+' · '+esc(pv.convention||'')+'</span></div>'+
+    '<div style="margin-top:10px">'+rules+'</div>'+stats+
+    '<div class="sub" style="margin-top:8px;font-size:11px">&#9432; '+esc(p.engine_notes||'')+'</div>'+
+    '<div class="row" style="margin-top:10px"><button class="btn" onclick="applyPreset(\''+esc(p.id)+'\')">Use this preset &rarr;</button>'+
+    '<span class="pill a" title="'+esc(pv.caveat||'')+'">survivorship caveat</span>'+
+    '<span style="font-size:11px;color:var(--mut)">'+esc(p.spec||'')+'</span></div></div>';
+}
+async function loadPresets(){
+  try{
+    const r=await fetch(API+'/api/v12/presets');const j=await r.json();
+    PRESETS=(j&&j.presets)||[];
+    const box=document.getElementById('presets');if(!box)return;
+    box.innerHTML=PRESETS.length?
+      ('<div class="sub" style="margin:0 0 8px">Start from a preset strategy — pre-fills the wizard; tweak any step before backtesting.</div>'+PRESETS.map(presetCard).join('')):'';
+  }catch(e){}
+}
+function _setVal(id,v){const el=document.getElementById(id);if(el&&v!=null)el.value=v;}
+function applyPreset(id){
+  const p=PRESETS.find(x=>x.id===id);if(!p)return;const d=p.definition||{};
+  const f=(d.universe_ref&&d.universe_ref.filters)||{};
+  if(f.gvm)_setVal('u_gvm_min',f.gvm.min);
+  if(f.mcap_rank){_setVal('u_mcaprank_min',f.mcap_rank.min);_setVal('u_mcaprank_max',f.mcap_rank.max);}
+  const e=d.entry||{};_setVal('e_roc',e.roc_lookback);_setVal('e_topx',e.top_x);_setVal('e_min',e.min_stocks);_setVal('e_max',e.max_stocks);
+  const x=d.exit||{};_setVal('x_trail',x.trailing_peak_pct);_setVal('x_rank',x.rank_fall_y);
+  if(d.rebalance)_setVal('b_freq',d.rebalance.freq);
+  const c=d.costs||{};_setVal('b_txn',c.txn_pct);_setVal('b_slip',c.slippage_pct);
+  go(0);
+}
+renderSteps();go(0);loadPresets();
 </script>
 </body>

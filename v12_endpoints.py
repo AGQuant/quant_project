@@ -21,6 +21,56 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 router = APIRouter()
+
+# ── cc#553: V12 preset strategies (spec id=6086) ──────────────────────────────────────────────
+# ONE named starter strategy: "Alpha Multicap". The named preset stays LOCKED to the spec-6086
+# values; a user who applies it can then tweak per the normal wizard flow. Honesty note: Alpha's
+# dGVM-180d filter, the 0.5*GVM+0.5*M composite ranking, and the max-3-exits-per-rebalance cap are
+# Alpha-book (QB) rules the V12 momentum-ROC backtester does NOT natively execute — so the stats
+# below are the LOCKED Alpha backtest (id=6086), surfaced as provenance, not a V12 re-sim. The
+# wizard pre-fills only the fields V12 supports (GVM floor, Nifty-500 mcap band, top-12 monthly,
+# rank-fall 25, -20% trail); the composite/dGVM/max-3 rules are shown on the card as locked rules.
+V12_PRESETS = [
+    {
+        "id": "alpha_multicap",
+        "name": "Alpha Multicap",
+        "tagline": "GVM + Momentum composite · Nifty 500 · monthly rotation",
+        "spec": "session_log id=6086 (locked 19-Jul-2026)",
+        "definition": {
+            "meta": {"builder": "v12", "preset": "alpha_multicap", "locked_spec": "id=6086"},
+            "universe_ref": {"filters": {"mcap_rank": {"max": 500}, "gvm": {"min": 7.5},
+                                         "v_score": {"min": 7.5}, "m_score": {"min": 7.01}}},
+            "entry": {"roc_lookback": "6M", "top_x": 12, "min_stocks": 1, "max_stocks": 12},
+            "exit": {"rank_fall_y": 25, "trailing_peak_pct": 20},
+            "rebalance": {"freq": "monthly"},
+            "costs": {"txn_pct": 0.1, "slippage_pct": 0.1},
+        },
+        "locked_rules": {
+            "universe": "Nifty 500 (top-500 mcap)",
+            "score": "0.5·GVM + 0.5·M",
+            "hard_gates": "GVM ≥ 7.5 · V ≥ 7.5 · M > 7 · ΔGVM(180d) > +0.5",
+            "selection": "top-12 by composite, equal weight; fewer qualify → cash slots",
+            "exit": "monthly (6th): max 3 outside composite top-25, worst first · HS1 −20% only",
+        },
+        "engine_notes": ("ΔGVM-180d, the 0.5·GVM+0.5·M composite ranking, and the max-3-exit cap "
+                         "are Alpha-book rules the V12 ROC backtest does not natively run — the "
+                         "stats shown are the locked Alpha backtest, not a V12 re-sim."),
+        "provenance": {
+            "label": "BACKTESTED", "period": "Nov-21 … Jul-26", "convention": "full-capital",
+            "cagr_pct": 34.1, "worst_month_pct": -14.7, "positive_months_pct": 59,
+            "swaps_per_month": 3, "benchmark": "Nifty", "benchmark_cagr_pct": 9.1,
+            "caveat": ("Survivorship-inflated absolutes; current-universe backtest; no costs/stops "
+                       "modeled. The rule RANKING is the finding, not the absolute CAGR."),
+        },
+    },
+]
+
+
+@router.get("/api/v12/presets")
+def v12_presets():
+    """cc#553: named V12 starter strategies (currently just Alpha Multicap, locked to spec id=6086).
+    Served from a code constant — zero Anthropic/API calls (rule id=6062)."""
+    return {"presets": V12_PRESETS}
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 

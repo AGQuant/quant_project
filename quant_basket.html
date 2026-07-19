@@ -179,7 +179,7 @@ const BRULE  = {
   large_cap:'GVM ≥ 7.4 · Mcap Top 100 · Monthly rebalance',
   mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · V ≥ 5.0 · Rank 101–250 · Monthly rebalance',
   small_cap:'GVM ≥ 8.0 · 5 Thematic segments · Quarterly rebalance',
-  alpha_multicap:'GVM×0.6 + Mom×0.4 · GVM ≥ 7.5 · Mom ≥ 8 · Nifty 500 · Quarterly'
+  alpha_multicap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.5 · V ≥ 7.5 · Mom > 7 · ΔGVM(180d) > +0.5 · Nifty 500 · Monthly'
 };
 const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF'};
 const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap'];
@@ -198,8 +198,8 @@ const BCRITERIA = {
     exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −5% from entry · Filter: fails GVM or theme screen at Monday open · Quarterly rebalance'
   },
   alpha_multicap: {
-    entry: 'Composite score = GVM×0.6 + Momentum×0.4 · GVM ≥ 7.5 AND Momentum ≥ 8 · Tiers: Large 35% (5 stocks) · Mid 35% (6 stocks) · Small 25% (5 stocks) · GOLDBEES buffer ~14% · Drift band ±5% per tier',
-    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −8% (wider — alpha-chasing basket) · Quarterly rebalance · Drift rebalance if tier drifts >5%'
+    entry: 'Composite score = GVM×0.5 + Momentum×0.5 · Universe Nifty 500 · Hard gates: GVM ≥ 7.5 AND V ≥ 7.5 AND M > 7 AND ΔGVM(180d) > +0.5 (gvm_now − gvm_180d_ago) · Top-12 by composite, equal weight (~₹41k/slot on ₹5L) · Fewer than 12 qualify → hold cash for empty slots (returns computed on full 12-slot capital)',
+    exit:  'HS1: −20% from entry (nightly 01:15) · Monthly (6th): exit max 3 holdings ranked outside composite top-25, worst rank first; refills must pass all entry gates incl ΔGVM · No HS2, no trailing stop'
   }
 };
 
