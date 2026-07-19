@@ -1308,6 +1308,17 @@ def run_company_extract_from_doctexts(symbol, conn=None, force=False):
                     _record_failure(cur, symbol, f"extraction failed q={quarter}: {type(e).__name__}: {e}")
                     conn.commit()
                 continue
+            # cc#541 resilience: empty usage => EVERY LLM call for this quarter failed at the
+            # backend (e.g. Anthropic 400 out-of-credits, 429, timeout) — _anthropic_call swallows
+            # these and returns (None, {}). Writing the resulting all-NULL metrics would pollute
+            # sector_ops_metrics and flipping the doc to 'extracted' would mark it done despite no
+            # real extraction. Skip: leave the doc 'stored' for a clean retry once the backend recovers.
+            if not result.get("usage"):
+                errored = True
+                with conn.cursor() as cur:
+                    _record_failure(cur, symbol, f"LLM backend returned no usage q={quarter} (credits/rate/timeout) — left stored for retry")
+                    conn.commit()
+                continue
             doc_urls = [u for u in (pres_url, trans_url) if u]
             # COMMIT the metrics per-quarter FIRST (mirrors run_company_depth). post_extraction_chain
             # runs AFTER the loop in its OWN transaction: if the analytics chain silently aborts the
