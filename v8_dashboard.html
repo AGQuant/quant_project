@@ -3344,7 +3344,7 @@ function rTopBar(){
 }
 
 function rMood(){
-  const {gate,fails,adr,nD,nW,nM,bSlots,sSlots,soSlots}=D.mood;
+  const {gate,fails,adr,nD,nW,nM}=D.mood;   // cc#549: slot boxes (bSlots/sSlots/soSlots) dropped — V8-master only
   const mc = fails===0?UP:fails===1?C.amber:fails>=3?DN:'#F5B94A';
   const conds=[['ADR',adr.toFixed(2),adr>=1.0],['Nifty D',pct(nD),nD>=0],['Nifty W',pct(nW),nW>=0],['Nifty M',pct(nM),nM>=0]];
   const condHtml = conds.map(([l,v,ok])=>{
@@ -3353,9 +3353,6 @@ function rMood(){
       <span class="v" style="color:${col}">${v}</span>
       <span style="font-size:10px;color:${col}">${ok?'✓':'✗'}</span></div>`;
   }).join('');
-  const slots=[[bSlots+'B',UP,'BUY'],[sSlots+'S',DN,'SELL'],[soSlots+'SO',C.amber,'OB POOL']];
-  const slotHtml=slots.map(([n,col,l])=>
-    `<div class="slot" style="background:${col}14;border-color:${col}44"><div class="n" style="color:${col}">${n}</div><div class="l">${l}</div></div>`).join('');
   const dots=[0,1,2].map(()=>`<div class="pdot" style="background:${mc}"></div>`).join('');
   return `<div class="mood" style="border-color:${mc}55;background:linear-gradient(90deg,var(--card) 0%,${mc}0a 100%)">
     <div style="display:flex;align-items:center;gap:8px">
@@ -3363,9 +3360,7 @@ function rMood(){
       <span class="mood-gate" style="color:${mc}">${esc(gate)}</span>
       <span style="font-size:9px;color:var(--mut)">(${fails} fail)</span>
     </div>
-    <div class="mood-conds">${condHtml}</div>
-    <button class="idxpos-btn" onclick="openIdxPos()" title="V10 index open positions" style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--blu);border-radius:9px;padding:5px 12px;font-size:11.5px;font-weight:700;color:var(--txt);background:rgba(77,124,254,.10);cursor:pointer"><span style="width:6px;height:6px;border-radius:50%;background:var(--blu)"></span>Index Positions <span style="font-family:var(--mono);font-size:11px;color:var(--blu);font-weight:700">${D.open.length}</span></button>
-    <div class="mood-slots">${slotHtml}</div></div>`;
+    <div class="mood-conds">${condHtml}</div></div>`;   // cc#549: Index Positions button + slot boxes removed (redundant on index page)
 }
 
 function sigCol(sym, s, ix){
@@ -3477,31 +3472,8 @@ function rPCR(){
   </div>`;
 }
 
-function rMaxPain(){
-  const m=D.maxpain;
-  if(m.status!=='ok' || !m.strike){
-    return `<div class="card">
-      <div class="card-hd"><div><div class="t">Nifty Max Pain</div>
-        <div class="s">Nearest expiry · latest OI</div></div></div>
-      <div class="mp-pending">Option chain data pending</div>
-    </div>`;
-  }
-  const above = m.distance>=0;            // strike above spot
-  const badge = above?'ABOVE SPOT':'BELOW SPOT';
-  const bc = above?DN:UP;                  // max pain above spot = bearish pull, below = bullish
-  return `<div class="card">
-    <div class="card-hd"><div><div class="t">Nifty Max Pain</div>
-      <div class="s">Nearest expiry · latest OI</div></div>${bdg(badge,bc)}</div>
-    <div style="display:flex;align-items:baseline;gap:8px;margin:2px 0 10px">
-      <span class="mp-big" style="color:${C.blu}">${num(m.strike)}</span>
-      <span style="font-size:9px;color:var(--mut)">max-pain strike</span></div>
-    <div class="mp-row"><span class="mp-l">Spot</span><span class="mp-v">${num(m.spot)}</span></div>
-    <div class="mp-row"><span class="mp-l">Distance</span>
-      <span class="mp-v" style="color:${bc}">${sgn(m.distance,0)} (${sgn(m.distance_pct,2)}%)</span></div>
-    <div class="mp-row"><span class="mp-l">Expiry</span>
-      <span class="mp-v">${m.expiry?esc(String(m.expiry)):'—'}</span></div>
-  </div>`;
-}
+// cc#549: rMaxPain (compact Nifty Max Pain card) removed — the strike-wise OI card (rStrikeOI)
+// now carries both indices with full histogram + MP/spot/ATM readout; expiry moved into that card.
 
 function rOpen(){
   const tot=D.open.reduce((a,p)=>a+p.pnl,0);
@@ -3861,7 +3833,8 @@ function oiHisto(name, oi, mp){
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-family:var(--mono);font-size:9.5px;color:var(--mut)">
       <span>MP <b style="color:var(--amber)">${mpStrike!=null?num(mpStrike):'—'}</b></span>
       <span>Spot <b style="color:var(--txt)">${spot?num(spot):'—'}</b></span>
-      <span>ATM <b style="color:var(--txt)">${oi.atm_strike!=null?num(oi.atm_strike):'—'}</b></span></div>
+      <span>ATM <b style="color:var(--txt)">${oi.atm_strike!=null?num(oi.atm_strike):'—'}</b></span>
+      <span>Exp <b style="color:var(--txt)">${(mp&&mp.expiry)?esc(String(mp.expiry)):'—'}</b></span></div>   <!-- cc#549: expiry moved here from removed compact max-pain card, per-index -->
   </div>`;
 }
 function rStrikeOI(){
@@ -3878,7 +3851,7 @@ function render(){
   document.getElementById('idx-app').innerHTML =
     rTopBar() + rMood() +
     `<div class="row r-2-16">${rSignal()}${rVix()}</div>` +
-    `<div class="row r-3">${rADR()}${rPCR()}${rMaxPain()}</div>` +
+    `<div class="row" style="grid-template-columns:1fr 1.4fr">${rADR()}${rPCR()}</div>` +   // cc#549: compact max-pain card removed (strike-wise OI card covers it); ADR+PCR share the row wider
     `<div class="row" style="grid-template-columns:1fr 1fr">${rPivots()}${rStrikeOI()}</div>` +
     rOpen() + rClosed() + rSettings() + rPerf() + rBuildup() + rDivergence() +
     `<div class="foot">SCORR · Index Intelligence · V10 engine (paper) · folded into V8 (cc#542)</div>`;
