@@ -774,7 +774,7 @@ NAV_REGISTRY = {
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
-    "/v12":          ("V12 · Quant Basket Builder", "nav"),
+    "/v12":          ("V12 · Quant Basket Builder — QB-page button (removed from top nav)", "tab"),  # cc#557: folded into /quant-basket
     "/screener":     ("(-> /v13 · RETIRED)",  "redirect"),   # cc#407 301 (V13 = single screener)
     "/health":       ("Health Report",        "nav"),        # cc#398 rule id=2987
     "/filters":      ("(-> /v13)",            "redirect"),   # cc#393 301
