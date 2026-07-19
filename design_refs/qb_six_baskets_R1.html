@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QB · Six Baskets · R1 Design Reference</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
+  :root{--bg:#0A0F1E;--card:#121A33;--panel:#121A33;--well:#0D1428;
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;--line:rgba(148,166,210,.14);--line2:rgba(148,166,210,.24);
+    --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--cyan:#37D3E8;--amber:#F5B94A;--violet:#9B7CFF;--orange:#FF8A5C;
+    --font:'Sora',system-ui,sans-serif}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px;line-height:1.55;padding-bottom:60px}
+
+  .r1tag{position:fixed;top:10px;right:12px;z-index:99;font-size:10px;font-weight:800;letter-spacing:1px;
+    background:rgba(245,185,74,.14);color:var(--amber);border:1px solid rgba(245,185,74,.4);border-radius:7px;padding:4px 10px}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 16px 0}
+
+  .ph{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:8px}
+  .ph-title{font-size:20px;font-weight:800}
+  .ph-sub{font-size:12px;color:var(--mut);margin-top:3px}
+  .builder-btn{display:inline-flex;align-items:center;gap:7px;margin-top:12px;border:1px solid var(--blu);
+    border-radius:9px;padding:7px 14px;font-size:12.5px;font-weight:700;color:var(--blu);
+    background:rgba(77,124,254,.10);text-decoration:none}
+  .ph-stats{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .ph-stat{padding:10px 18px;border-right:1px solid var(--line);text-align:right}
+  .ph-stat:last-child{border-right:none}
+  .ph-stat .sk{font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px}
+  .ph-stat .sv{font-size:16px;font-weight:700}
+  .pos{color:var(--grn)}.neg{color:var(--red)}
+
+  /* R1 DECISION 1 — cycle strip: the six baskets read left→right as the market cycle */
+  .cycle{display:flex;align-items:center;gap:10px;margin:18px 0 14px;flex-wrap:wrap}
+  .cy-step{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
+    padding:5px 12px;border-radius:20px;border:1px solid var(--line2);color:var(--mut)}
+  .cy-step b{font-weight:800}
+  .cy-step.turn{border-color:rgba(255,138,92,.5);color:var(--orange)}
+  .cy-step.confirm{border-color:rgba(55,211,232,.5);color:var(--cyan)}
+  .cy-step.trend{border-color:rgba(47,212,139,.4);color:var(--grn)}
+  .cy-arrow{color:var(--dim);font-size:13px}
+
+  /* R1 DECISION 2 — 3×2 grid (4-col breaks with 6 cards; 3+3 is the clean read) */
+  .basket-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:880px){.basket-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:540px){.basket-grid{grid-template-columns:1fr}}
+
+  .bcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;
+    border-top:3px solid var(--blu);display:flex;flex-direction:column;transition:.15s;cursor:pointer}
+  .bcard:hover{transform:translateY(-2px);border-color:var(--line2)}
+  .bc-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px}
+  .bc-name{font-size:13px;font-weight:700}
+  .bc-role{font-size:8.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
+    padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .role-turn{background:rgba(255,138,92,.13);color:var(--orange)}
+  .role-confirm{background:rgba(55,211,232,.12);color:var(--cyan)}
+  .role-trend{background:rgba(47,212,139,.10);color:var(--grn)}
+  .bc-rule{font-size:10px;color:var(--dim);margin-bottom:13px;line-height:1.45}
+  .bc-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:11px}
+  .bc-m .mk{font-size:9px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px}
+  .bc-m .mv{font-size:15px;font-weight:700}
+  .bc-foot{display:flex;justify-content:space-between;align-items:center;gap:6px;
+    border-top:1px solid var(--line);padding-top:10px}
+  .bc-info{font-size:10px;color:var(--mut)}
+  .bc-info b{color:var(--txt)}
+  .bc-badge{font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px;border:1px solid}
+  .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:rgba(47,212,139,.35)}
+  .bc-badge.seed{background:rgba(245,185,74,.1);color:var(--amber);border-color:rgba(245,185,74,.4)}
+
+  .bc-criteria{margin-top:11px;padding-top:10px;border-top:1px solid var(--line)}
+  .bc-crit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
+  .bc-crit-row:last-child{margin-bottom:0}
+  .bc-crit-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+    padding:2px 6px;border-radius:5px;white-space:nowrap;margin-top:1px}
+  .bc-crit-label.entry{background:rgba(77,124,254,.14);color:var(--blu)}
+  .bc-crit-label.exit{background:rgba(255,92,108,.10);color:var(--red)}
+  .bc-crit-text{font-size:10px;color:var(--mut);line-height:1.5}
+  /* R1 DECISION 3 — special-exit chips: the two new baskets' signature exits get visual identity */
+  .chip{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.4px;padding:1px 6px;
+    border-radius:5px;margin-left:4px;vertical-align:1px}
+  .chip.profit{background:rgba(47,212,139,.15);color:var(--grn)}
+  .chip.nightly{background:rgba(255,92,108,.12);color:var(--red)}
+</style>
+</head>
+<body>
+<div class="r1tag">R1 · DESIGN REF · MOCK DATA</div>
+
+<div class="wrap">
+  <div class="ph">
+    <div>
+      <div class="ph-title">Quant Basket</div>
+      <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · <b style="color:var(--txt)">6 Baskets</b> · Full market cycle</div>
+      <a class="builder-btn" href="#">⊟ Basket Builder →</a>
+    </div>
+    <div class="ph-stats">
+      <div class="ph-stat"><div class="sk">Capital</div><div class="sv">₹30,00,000</div></div>
+      <div class="ph-stat"><div class="sk">Total P&amp;L</div><div class="sv pos">+₹1.48L</div></div>
+      <div class="ph-stat"><div class="sk">Portfolio Alpha</div><div class="sv pos">+4.1% vs N500</div></div>
+      <div class="ph-stat"><div class="sk">Positions</div><div class="sv">70</div></div>
+    </div>
+  </div>
+
+  <!-- cycle strip: the page tells the story the baskets implement -->
+  <div class="cycle">
+    <span class="cy-step turn"><b>1 · BUY THE TURN</b> — Contra</span>
+    <span class="cy-arrow">→</span>
+    <span class="cy-step confirm"><b>2 · BUY CONFIRMATION</b> — 52W Breakout</span>
+    <span class="cy-arrow">→</span>
+    <span class="cy-step trend"><b>3 · HOLD THE TREND</b> — Large · Mid · Small · Alpha</span>
+  </div>
+
+  <div class="basket-grid">
+
+    <!-- CONTRA VALUE — cycle position 1 -->
+    <div class="bcard" style="border-top-color:var(--orange)">
+      <div class="bc-top">
+        <div class="bc-name">Contra Value</div>
+        <span class="bc-role role-turn">Turn</span>
+      </div>
+      <div class="bc-rule">G ≥ 7 · V ≥ 7.5 · M ≤ 6.5 · Sector &gt; 6 · above 20 DMA · Monthly</div>
+      <div class="bc-metrics">
+        <div class="bc-m"><div class="mk">Return</div><div class="mv">— <span style="font-size:9px;color:var(--dim)">new</span></div></div>
+        <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv">—</div></div>
+        <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv">—</div></div>
+        <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv">₹5.0L</div></div>
+      </div>
+      <div class="bc-foot">
+        <div class="bc-info">10 of 10 slots &nbsp;·&nbsp; Reb <b>06-Aug</b></div>
+        <span class="bc-badge seed">Seed pending</span>
+      </div>
+      <div class="bc-criteria">
+        <div class="bc-crit-row"><span class="bc-crit-label entry">Entry</span>
+          <span class="bc-crit-text">Quality trading cheap in a healthy sector, momentum washed out, turn confirmed by 20DMA · Top-10 by V-Score · ₹50k/slot · empty slots = cash</span></div>
+        <div class="bc-crit-row"><span class="bc-crit-label exit">Exit</span>
+          <span class="bc-crit-text">M ≥ 8 → book profit<span class="chip profit">PROFIT-TAKE</span> · GVM &lt; 6.8<span class="chip nightly">NIGHTLY</span> · HS −20%</span></div>
+      </div>
+    </div>
+
+    <!-- 52W BREAKOUT — cycle position 2 -->
+    <div class="bcard" style="border-top-color:var(--cyan)">
+      <div class="bc-top">
+        <div class="bc-name">52W Breakout</div>
+        <span class="bc-role role-confirm">Confirmation</span>
+      </div>
+      <div class="bc-rule">GVM ≥ 7.5 · 52W-idx ≥ 90 · Month-idx ≥ 90 · Vol ≥ 1× 21d · Monthly</div>
+      <div class="bc-metrics">
+        <div class="bc-m"><div class="mk">Return</div><div class="mv">— <span style="font-size:9px;color:var(--dim)">new</span></div></div>
+        <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv">—</div></div>
+        <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv">—</div></div>
+        <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv">₹3.5L</div></div>
+      </div>
+      <div class="bc-foot">
+        <div class="bc-info">7 of 10 slots &nbsp;·&nbsp; Reb <b>06-Aug</b></div>
+        <span class="bc-badge seed">Seed pending</span>
+      </div>
+      <div class="bc-criteria">
+        <div class="bc-crit-row"><span class="bc-crit-label entry">Entry</span>
+          <span class="bc-crit-text">Near 52-week high, at month high, on ≥1× 21-day volume · Mcap &gt; 1,000 Cr · Top-10 by 1-Y return · N &lt; 5 → full cash · ₹50k/slot</span></div>
+        <div class="bc-crit-row"><span class="bc-crit-label exit">Exit</span>
+          <span class="bc-crit-text">GVM &lt; 7.2<span class="chip nightly">NIGHTLY</span> · HS −15% (failed breakout — tightest stop in QB)</span></div>
+      </div>
+    </div>
+
+    <!-- ALPHA — cycle position 3 lead (the evidence flagship) -->
+    <div class="bcard" style="border-top-color:var(--violet)">
+      <div class="bc-top">
+        <div class="bc-name">Alpha Multicap</div>
+        <span class="bc-role role-trend">Trend</span>
+      </div>
+      <div class="bc-rule">0.5·GVM + 0.5·M · GVM ≥ 7.5 · V ≥ 7.5 · M &gt; 7 · ΔGVM(180d) &gt; +0.5 · Monthly</div>
+      <div class="bc-metrics">
+        <div class="bc-m"><div class="mk">Return</div><div class="mv pos">+9.4%</div></div>
+        <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv pos">+6.2%</div></div>
+        <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv pos">+₹47.2k</div></div>
+        <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv">₹5.5L</div></div>
+      </div>
+      <div class="bc-foot">
+        <div class="bc-info">12 positions &nbsp;·&nbsp; Reb <b>06-Aug</b></div>
+        <span class="bc-badge ok">BT 34.1% CAGR</span>
+      </div>
+      <div class="bc-criteria">
+        <div class="bc-crit-row"><span class="bc-crit-label entry">Entry</span>
+          <span class="bc-crit-text">Nifty 500 · top-12 by composite · cash if &lt;12 qualify · full-capital returns</span></div>
+        <div class="bc-crit-row"><span class="bc-crit-label exit">Exit</span>
+          <span class="bc-crit-text">Monthly max-3 outside top-25 rank · HS −20% · no HS2</span></div>
+      </div>
+    </div>
+
+    <!-- LARGE CAP -->
+    <div class="bcard" style="border-top-color:var(--grn)">
+      <div class="bc-top">
+        <div class="bc-name">Large Cap</div>
+        <span class="bc-role role-trend">Trend · Anchor</span>
+      </div>
+      <div class="bc-rule">0.5·GVM + 0.5·M · GVM ≥ 7.0 · ΔGVM(180d) &gt; +0.5 · Top 100 · Monthly</div>
+      <div class="bc-metrics">
+        <div class="bc-m"><div class="mk">Return</div><div class="mv pos">+2.0%</div></div>
+        <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv neg">−1.2%</div></div>
+        <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv pos">+₹9.9k</div></div>
+        <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv">₹5.1L</div></div>
+      </div>
+      <div class="bc-foot">
+        <div class="bc-info">10 positions &nbsp;·&nbsp; Reb <b>06-Aug</b></div>
+        <span class="bc-badge ok">No risk</span>
+      </div>
+      <div class="bc-criteria">
+        <div class="bc-crit-row"><span class="bc-crit-label entry">Entry</span>
+          <span class="bc-crit-text">Top-12 by composite · gauntlet retired · N&lt;10 → ₹50k/name + cash</span></div>
+        <div class="bc-crit-row"><span class="bc-crit-label exit">Exit</span>
+          <span class="bc-crit-text">Monthly max-3 outside top-20 rank · HS −20% · no HS2</span></div>
+      </div>
+    </div>
+
+    <!-- MID CAP -->
+    <div class="bcard" style="border-top-color:var(--blu)">
+      <div class="bc-top">
+        <div class="bc-name">Mid Cap</div>
+        <span class="bc-role role-trend">Trend</span>
+      </div>
+      <div class="bc-rule">GVM ≥ 7.5 · G ≥ 7.0 · Top-20 by M-Score · Rank 101–250 · Monthly</div>
+      <div class="bc-metrics">
+        <div class="bc-m"><div class="mk">Return</div><div class="mv pos">+7.8%</div></div>
+        <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv pos">+4.6%</div></div>
+        <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv pos">+₹38.9k</div></div>
+        <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv">₹5.4L</div></div>
+      </div>
+      <div class="bc-foot">
+        <div class="bc-info">13 positions &nbsp;·&nbsp; Reb <b>06-Aug</b></div>
+        <span class="bc-badge ok">No risk</span>
+      </div>
+      <div class="bc-criteria">
+        <div class="bc-crit-row"><span class="bc-crit-label entry">Entry</span>
+          <span class="bc-crit-text">₹25k/name equal weight · V gate dropped (dead filter, 0 exclusions)</span></div>
+        <div class="bc-crit-row"><span class="bc-crit-label exit">Exit</span>
+          <span class="bc-crit-text">HS −20% · HS2 −10% vs Nifty · monthly re-screen</span></div>
+      </div>
+    </div>
+
+    <!-- SMALL CAP -->
+    <div class="bcard" style="border-top-color:var(--amber)">
+      <div class="bc-top">
+        <div class="bc-name">Small Cap</div>
+        <span class="bc-role role-trend">Trend · Themes</span>
+      </div>
+      <div class="bc-rule">GVM ≥ 8.0 · V ≥ 7.5 · ΔGVM(180d) &gt; +0.5 · 8 themes · Quarterly</div>
+      <div class="bc-metrics">
+        <div class="bc-m"><div class="mk">Return</div><div class="mv pos">+13.2%</div></div>
+        <div class="bc-m"><div class="mk">Alpha N500</div><div class="mv pos">+10.0%</div></div>
+        <div class="bc-m"><div class="mk">P&amp;L</div><div class="mv pos">+₹52.1k</div></div>
+        <div class="bc-m"><div class="mk">Mkt Value</div><div class="mv">₹5.5L</div></div>
+      </div>
+      <div class="bc-foot">
+        <div class="bc-info">18 positions &nbsp;·&nbsp; Reb <b>01-Sep</b></div>
+        <span class="bc-badge ok">No risk</span>
+      </div>
+      <div class="bc-criteria">
+        <div class="bc-crit-row"><span class="bc-crit-label entry">Entry</span>
+          <span class="bc-crit-text">Entry-only gates · 8 themes incl Gems, Consumption, Cement-Industrial · ₹5L/N · N&lt;10 → ₹50k cap + cash</span></div>
+        <div class="bc-crit-row"><span class="bc-crit-label exit">Exit</span>
+          <span class="bc-crit-text">HS −20% · HS2 −10% vs Nifty · quarterly theme/GVM screen</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
