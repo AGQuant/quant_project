@@ -1674,6 +1674,73 @@ function FinancialsSection({ financials }) {
   );
 }
 
+// cc#541: OPERATIONAL METRICS — per-sector KPIs (NIM/GNPA/CASA for banks, volumes/realization
+// for cement, etc) extracted from concalls + investor decks, from r.operational_metrics
+// (build_ops_block). Honest empty state: renders nothing when has_data is false (never faked).
+// QoQ/YoY deltas are shown in a NEUTRAL colour on purpose — "good/bad" direction differs per KPI
+// (a falling GNPA is good, a falling NIM is bad) and the payload doesn't carry direction, so we
+// never imply a judgment the data can't support.
+function OpsMetricsSection({ ops }) {
+  if (!ops || !ops.has_data || !ops.rows || !ops.rows.length) return null;
+  const periods = ops.periods || [];
+  const fmt = (v, unit) => {
+    if (v === null || v === undefined) return "--";
+    let n = v;
+    if (typeof v === "number") n = (Math.abs(v) >= 100 ? v.toFixed(0) : (v.toFixed(2).replace(/\.?0+$/, "")));
+    return unit === "%" ? n + "%" : (unit ? n + " " + unit : "" + n);
+  };
+  const delta = (d, unit) => {
+    if (d === null || d === undefined) return <span style={{ color: C.muted }}>--</span>;
+    const sign = d > 0 ? "+" : "";
+    return <span style={{ color: C.text, fontWeight: 700, fontSize: 11 }}>{sign}{fmt(d, unit)}</span>;
+  };
+  return (
+    <div id="operational" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>Operational Metrics</div>
+        {ops.sector && <Tag color={C.muted}>{String(ops.sector).replace(/_/g, " ")}</Tag>}
+      </div>
+      <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>Sector KPIs extracted from management commentary (earnings calls &amp; investor decks). QoQ / YoY are vs the latest reported quarter.</div>
+      <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 10 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: periods.length * 76 + 300, fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              <th style={{ position: "sticky", left: 0, background: C.card, zIndex: 2, textAlign: "left", padding: "8px 12px", borderBottom: `1px solid ${C.border}`, minWidth: 180, color: C.muted, fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em" }}>Metric</th>
+              {periods.map((p, i) => (
+                <th key={i} style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 11, whiteSpace: "nowrap" }}>{p}</th>
+              ))}
+              <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 10.5 }}>QoQ</th>
+              <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 10.5 }}>YoY</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ops.rows.map(row => (
+              <tr key={row.metric_name} style={{ borderBottom: `1px solid ${C.gridLine}` }}>
+                <td style={{ position: "sticky", left: 0, background: C.card, zIndex: 1, padding: "7px 12px", whiteSpace: "nowrap", color: C.text, fontWeight: 600 }}>{row.label}</td>
+                {row.values.map((v, i) => (
+                  <td key={i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
+                    color: i === row.values.length - 1 ? C.text : C.muted, fontWeight: i === row.values.length - 1 ? 700 : 500 }}>{fmt(v, row.unit)}</td>
+                ))}
+                <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace" }}>{delta(row.qoq, row.unit)}</td>
+                <td style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace" }}>{delta(row.yoy, row.unit)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {ops.concall && (ops.concall.summary || ops.concall.guidance) && (
+        <div style={{ marginTop: 16, padding: "12px 14px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: C.text, marginBottom: 6 }}>
+            Earnings Call{ops.concall.quarter ? " — " + ops.concall.quarter : ""}{ops.concall.tone ? " · " + ops.concall.tone : ""}
+          </div>
+          {ops.concall.summary && <div style={{ fontSize: 12, color: C.muted, whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{ops.concall.summary}</div>}
+          {ops.concall.guidance && <div style={{ fontSize: 12, color: C.text, marginTop: 8 }}><b>Guidance:</b> {ops.concall.guidance}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
@@ -1948,6 +2015,8 @@ function GvmReport({ r, hist }) {
 
       {/* cc#518: FINANCIALS -- screener.in-style horizontal tables, placed LAST, above the footer */}
       <FinancialsSection financials={r.financials} />
+      {/* cc#541: OPERATIONAL METRICS -- per-sector KPIs from concalls/decks (hidden when none) */}
+      <OpsMetricsSection ops={r.operational_metrics} />
 
       <div style={{ fontSize: 12, color: C.muted, textAlign: "center", padding: "8px 0 24px" }}>
         Generated {r.generated_at} · peer benchmark computed live · {r.persisted ? "saved to DB" : "not persisted"}

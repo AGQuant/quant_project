@@ -563,6 +563,92 @@ def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
     return out
 
 
+# ─── cc#541: OPERATIONAL METRICS section — per-sector KPIs (NIM/GNPA/CASA for banks,
+# volumes/realization for cement, etc), quarterly trend + QoQ/YoY. Source: the
+# LLM-extracted sector_ops_metrics + concall_summaries. HONEST empty state: a company
+# with no extracted KPIs returns has_data=False (the frontend hides the section — nothing faked).
+
+_OPS_ACRONYMS = {"NIM", "GNPA", "NNPA", "CASA", "PCR", "ROA", "ROE", "ROCE", "EBIT",
+                 "EBITDA", "TCV", "EV", "OPM", "NPA", "AUM", "NII", "CC", "QOQ", "YOY"}
+
+
+def _ops_quarter_key(q: str):
+    """'Q4FY26' -> (2026, 4) for chronological sort; unrecognised -> (0, 0) (sorts oldest)."""
+    import re
+    m = re.match(r"Q([1-4])FY(\d{2,4})", str(q or "").upper().replace(" ", ""))
+    if not m:
+        return (0, 0)
+    quarter, fy = int(m.group(1)), int(m.group(2))
+    if fy < 100:
+        fy += 2000
+    return (fy, quarter)
+
+
+def _ops_pretty(metric_name: str) -> str:
+    """Human label from the stored metric_name (LLM writes varied casings like 'GNPA_pct',
+    'provision_coverage', 'NIM'): strip a trailing _pct/_ratio, split on '_', upper-case known
+    acronyms, title-case the rest. Falls back to the raw name — never blank."""
+    s = str(metric_name or "").strip()
+    if not s:
+        return metric_name
+    for suf in ("_pct", "_ratio", "_percent", "_pcnt"):
+        if s.lower().endswith(suf):
+            s = s[: -len(suf)]
+            break
+    parts = [p for p in s.replace("-", "_").split("_") if p]
+    out = []
+    for p in parts:
+        out.append(p.upper() if p.upper() in _OPS_ACRONYMS else p.capitalize())
+    return " ".join(out) or metric_name
+
+
+def build_ops_block(conn, symbol: str) -> Dict[str, Any]:
+    """cc#541: operational KPI block for the GVM company report. Pivots sector_ops_metrics into
+    quarters-as-columns rows (last 6 quarters, oldest -> newest, mirroring the FINANCIALS shape),
+    with a latest-quarter QoQ and YoY delta per metric where the prior periods exist, plus the
+    latest concall summary/guidance/tone. has_data=False when nothing is extracted (honest empty)."""
+    symbol = (symbol or "").strip().upper()
+    out: Dict[str, Any] = {"has_data": False, "sector": None, "periods": [], "rows": [], "concall": None}
+    with conn.cursor() as cur:
+        cur.execute("""SELECT sector, metric_name, unit, quarter, metric_value, confidence
+                       FROM sector_ops_metrics
+                       WHERE symbol=%s AND metric_value IS NOT NULL""", (symbol,))
+        rows = cur.fetchall()
+        if rows:
+            out["sector"] = rows[0][0]
+            quarters = sorted({r[3] for r in rows if r[3]}, key=_ops_quarter_key)[-6:]
+            by_metric: Dict[str, Dict[str, Any]] = {}
+            units: Dict[str, Any] = {}
+            for _sector, mname, unit, q, val, _conf in rows:
+                if q not in quarters:
+                    continue
+                by_metric.setdefault(mname, {})[q] = _f(val)
+                units.setdefault(mname, unit)
+            metric_rows = []
+            for mname, qmap in by_metric.items():
+                values = [qmap.get(q) for q in quarters]
+                if all(v is None for v in values):
+                    continue
+                latest = values[-1]
+                qoq = (round(latest - values[-2], 2) if (len(values) >= 2 and latest is not None
+                       and values[-2] is not None) else None)
+                yoy = (round(latest - values[-5], 2) if (len(values) >= 5 and latest is not None
+                       and values[-5] is not None) else None)
+                metric_rows.append({"label": _ops_pretty(mname), "metric_name": mname,
+                                    "unit": units.get(mname), "values": values,
+                                    "latest": latest, "qoq": qoq, "yoy": yoy})
+            metric_rows.sort(key=lambda r: r["label"])
+            if metric_rows:
+                out.update({"has_data": True, "periods": quarters, "rows": metric_rows})
+
+        cur.execute("""SELECT quarter, summary, guidance, tone FROM concall_summaries
+                       WHERE symbol=%s ORDER BY computed_at DESC LIMIT 1""", (symbol,))
+        c = cur.fetchone()
+        if c and (c[1] or c[2]):
+            out["concall"] = {"quarter": c[0], "summary": c[1], "guidance": c[2], "tone": c[3]}
+    return out
+
+
 def search_companies(conn, q: str, limit: int = 12) -> List[Dict[str, Any]]:
     """Autocomplete search by symbol or company name."""
     q = (q or "").strip()
