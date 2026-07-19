@@ -2167,12 +2167,43 @@ def mf_fund(scheme_code: str):
         cur.execute("""SELECT nav_date, nav FROM mf_nav_history WHERE scheme_code=%s
                        ORDER BY nav_date DESC LIMIT 400""", (code,))
         nav = [{"date": str(d), "nav": float(n)} for d, n in cur.fetchall()][::-1]
+        # cc#550: sector-level ratings for every GVM segment this fund touches. gvm_scores.segment
+        # shares the sector_ratings taxonomy, so segment exposure joins straight to a sector GVM.
+        segs = sorted({h["segment"] for h in holdings if h.get("segment")})
+        seg_ratings = {}
+        if segs:
+            cur.execute("""SELECT segment, ROUND(mcap_weighted_gvm::numeric,2) AS sector_gvm, verdict
+                           FROM sector_ratings
+                           WHERE score_date=(SELECT MAX(score_date) FROM sector_ratings)
+                             AND segment = ANY(%s)""", (segs,))
+            seg_ratings = {row[0]: {"sector_gvm": float(row[1]) if row[1] is not None else None,
+                                    "verdict": row[2]} for row in cur.fetchall()}
     # portfolio-weighted GVM (where resolved) — a real P0-A signal
     wsum = sum((h["pct_weight"] or 0) for h in holdings if h.get("gvm") is not None)
     pw_gvm = (sum((h["pct_weight"] or 0) * float(h["gvm"]) for h in holdings if h.get("gvm") is not None) / wsum) if wsum else None
+    # cc#550: segment exposure = SUM(pct_weight) grouped by the holding's GVM segment, joined to
+    # the latest sector rating. Coverage = rated-segment weight / total disclosed weight; the UI
+    # applies the same >=60% honesty gate the Q pillar uses before it shows the exposure read.
+    total_w = sum((h.get("pct_weight") or 0) for h in holdings)
+    seg_expo = {}
+    for h in holdings:
+        seg, w = h.get("segment"), h.get("pct_weight")
+        if not seg or w is None:
+            continue
+        seg_expo[seg] = seg_expo.get(seg, 0.0) + float(w)
+    segments = []
+    for seg, expo in seg_expo.items():
+        rr = seg_ratings.get(seg)
+        segments.append({"segment": seg, "exposure_pct": round(expo, 2),
+                         "sector_gvm": rr["sector_gvm"] if rr else None,
+                         "sector_verdict": rr["verdict"] if rr else None})
+    segments.sort(key=lambda x: x["exposure_pct"], reverse=True)
+    rated_w = sum(s["exposure_pct"] for s in segments if s["sector_gvm"] is not None)
+    seg_cov = round(rated_w / float(total_w) * 100, 1) if total_w else 0.0
     return {"master": master, "holdings": holdings, "nav": nav,
             "portfolio_weighted_gvm": round(pw_gvm, 2) if pw_gvm is not None else None,
-            "resolved_pct": round(wsum, 1) if holdings else None}
+            "resolved_pct": round(wsum, 1) if holdings else None,
+            "segments": segments, "segment_coverage_pct": seg_cov}
 
 
 # ── cc#500: ONE-TIME Moneycontrol full-set fill (AUM/TER/returns/holdings/manager/inception) ──

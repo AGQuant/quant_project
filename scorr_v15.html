@@ -233,16 +233,13 @@ td.sym{font-weight:700;font-size:12.5px}
 </div>
 
 <div class="card rise d5">
-  <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge">SCORR-ONLY X-RAY</span><span class="badge dim" style="margin-left:6px">PORTFOLIO GVM</span></div>
-  <div style="padding:22px 6px;text-align:center">
-    <div class="num" id="pgvm-v" style="font-size:36px;color:var(--dim);line-height:1">—</div>
-    <div id="pgvm-c" style="color:var(--dim);font-size:12px;margin-top:8px">Search a fund to see its weighted portfolio GVM</div>
-  </div>
+  <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge dim" id="xr-scorr" style="cursor:pointer" title="Show only holdings resolved to a live GVM">SCORR-ONLY X-RAY</span><span class="badge dim" id="xr-pgvm" style="margin-left:6px;cursor:pointer" title="Weighted portfolio-GVM summary">PORTFOLIO GVM</span></div>
+  <div id="xray-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to x-ray its holdings against live GVM.</div></div>
 </div>
 
 <div class="card rise d6">
-  <div class="h"><span class="eyebrow" style="flex:1">Segment exposure vs sector ratings</span></div>
-  <div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">DATA-QUALITY HOLD — segment exposure depends on the same holdings data flagged above.</div>
+  <div class="h"><span class="eyebrow" style="flex:1">Segment exposure vs sector ratings</span><span class="badge dim" id="seg-cov">—</span></div>
+  <div id="segment-body"><div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Select a fund to see its segment exposure vs sector ratings.</div></div>
 </div>
 
 <div class="card rise d6">
@@ -418,9 +415,94 @@ td.sym{font-weight:700;font-size:12.5px}
     }).join("");
   }
 
+  // cc#550: look-through x-ray + segment exposure (both formerly parked under the stale
+  // DATA-QUALITY HOLD). Holdings are now real per-fund (cc#533) and Q-scored (cc#546).
+  var XR={holdings:[],pwGvm:null,resolvedPct:null,segments:[],segCov:null,scorrOnly:false,pgvmView:false};
+  function gvmChip(g){g=Number(g);var c=g>=7?"g-hi":g>=5?"g-mid":"g-lo";return '<span class="gvm '+c+'">'+g.toFixed(1)+'</span>';}
+  function wtCell(w,maxW){
+    if(w==null)return em;
+    var fw=Math.max(3,Math.min(100,(Number(w)/(maxW||1))*100));
+    return '<span class="wt"><span class="fill" style="width:'+fw+'%"></span><b>'+Number(w).toFixed(2)+'</b></span>';
+  }
+  function segAlign(expo,sg){
+    if(sg>=6.5)return {t:(expo>=8?"Strong · high tilt":"Strong sector"),cls:"al-ok"};
+    if(sg<5.0)return {t:(expo>=6?"Weak · heavy tilt":"Weak sector"),cls:"al-bad"};
+    return {t:"Neutral",cls:""};
+  }
+  function setBadge(el,on){if(el)el.classList.toggle("dim",!on);}
+  function renderXray(){
+    var body=$("xray-body");if(!body)return;
+    var hs=XR.holdings;
+    if(!hs.length){body.innerHTML='<div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">No holdings disclosed for this fund yet.</div>';return;}
+    if(XR.pgvmView){
+      var g=XR.pwGvm,col=g!=null?(g>=7?"var(--bull)":g>=5?"var(--amber)":"var(--bear)"):"var(--dim)";
+      body.innerHTML='<div style="padding:18px 6px 20px;text-align:center">'
+        +'<div class="num" style="font-size:38px;line-height:1;color:'+col+'">'+(g!=null?g.toFixed(1):em)+'<span style="font-size:15px;color:var(--dim)"> / 10</span></div>'
+        +'<div style="color:var(--dim);font-size:12px;margin-top:9px">weighted portfolio GVM · '+(XR.resolvedPct!=null?XR.resolvedPct.toFixed(0):"—")+'% of disclosed weight resolved to a live GVM</div></div>';
+      return;
+    }
+    var maxW=Math.max.apply(null,hs.map(function(h){return Number(h.pct_weight)||0;}).concat([1]));
+    var rows=hs.filter(function(h){return XR.scorrOnly?h.gvm!=null:true;});
+    var trs=rows.map(function(h){
+      var resolved=h.gvm!=null;
+      return '<tr style="'+(resolved?'':'opacity:.42')+'">'
+        +'<td class="sym">'+esc(h.company_name)+'</td>'
+        +'<td class="num">'+wtCell(h.pct_weight,maxW)+'</td>'
+        +'<td class="num" style="color:var(--dim);font-size:11px">'+(h.resolved_nse_symbol?esc(h.resolved_nse_symbol):"—")+'</td>'
+        +'<td>'+(resolved?gvmChip(h.gvm):'<span style="color:var(--dim);font-size:10.5px">unrated</span>')+'</td>'
+        +'</tr>';
+    }).join("");
+    var hidden=hs.length-rows.length;
+    body.innerHTML='<table><thead><tr><th>Holding</th><th>Weight %</th><th>Symbol</th><th>Live GVM</th></tr></thead><tbody>'+trs+'</tbody></table>'
+      +(XR.scorrOnly&&hidden>0?'<div style="color:var(--dim);font-size:11px;padding:9px 6px 2px">'+hidden+' unresolved holding(s) hidden (foreign / unlisted / cash).</div>':'');
+  }
+  function renderSegments(){
+    var body=$("segment-body"),cov=$("seg-cov");if(!body)return;
+    var cv=XR.segCov;
+    if(cov){cov.textContent=(cv!=null?Math.round(cv)+"% mapped":"—");setBadge(cov,cv!=null&&cv>=60);}
+    if(cv==null||cv<60){
+      body.innerHTML='<div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">Insufficient segment coverage — only '+(cv!=null?Math.round(cv):0)+'% of disclosed weight maps to a rated sector (need ≥60% for a reliable exposure read).</div>';
+      return;
+    }
+    var segs=XR.segments.filter(function(s){return s.sector_gvm!=null;});
+    var maxE=Math.max.apply(null,segs.map(function(s){return s.exposure_pct;}).concat([1]));
+    var trs=segs.map(function(s){
+      var aln=segAlign(s.exposure_pct,Number(s.sector_gvm));
+      return '<tr>'
+        +'<td class="sym">'+esc(s.segment)+'</td>'
+        +'<td class="num">'+wtCell(s.exposure_pct,maxE)+'</td>'
+        +'<td>'+gvmChip(s.sector_gvm)+'</td>'
+        +'<td class="'+aln.cls+'" style="text-align:left;font-size:11px">'+aln.t+'</td>'
+        +'</tr>';
+    }).join("");
+    body.innerHTML='<table><thead><tr><th>Segment</th><th>Exposure %</th><th>Sector GVM</th><th style="text-align:left">Alignment</th></tr></thead><tbody>'+trs+'</tbody></table>';
+  }
+  function loadXray(code){
+    var xb=$("xray-body");
+    if(xb)xb.innerHTML='<div style="padding:22px 6px;text-align:center;color:var(--dim);font-size:12px">Loading holdings…</div>';
+    fetch("/api/v15/mf/fund/"+encodeURIComponent(code)).then(function(r){return r.json()}).then(function(d){
+      XR.holdings=(d&&d.holdings)||[];
+      XR.pwGvm=(d&&d.portfolio_weighted_gvm!=null)?d.portfolio_weighted_gvm:null;
+      XR.resolvedPct=(d&&d.resolved_pct!=null)?d.resolved_pct:null;
+      XR.segments=(d&&d.segments)||[];
+      XR.segCov=(d&&d.segment_coverage_pct!=null)?d.segment_coverage_pct:null;
+      XR.scorrOnly=false;XR.pgvmView=false;setBadge($("xr-scorr"),false);setBadge($("xr-pgvm"),false);
+      renderXray();renderSegments();
+    }).catch(function(){
+      if(xb)xb.innerHTML='<div style="padding:22px 6px;text-align:center;color:var(--bear);font-size:12px">Holdings unavailable.</div>';
+      var sb=$("segment-body");if(sb)sb.innerHTML='<div style="padding:22px 6px;text-align:center;color:var(--bear);font-size:12px">Segment data unavailable.</div>';
+    });
+  }
+  function bindXrayToggles(){
+    var sc=$("xr-scorr"),pg=$("xr-pgvm");
+    if(sc)sc.addEventListener("click",function(){XR.scorrOnly=!XR.scorrOnly;setBadge(sc,XR.scorrOnly);renderXray();});
+    if(pg)pg.addEventListener("click",function(){XR.pgvmView=!XR.pgvmView;setBadge(pg,XR.pgvmView);renderXray();});
+  }
+
   function loadFund(code,onNotFound){
     fetch("/api/v15/fund/"+encodeURIComponent(code)).then(function(r){return r.json()}).then(function(d){
       if(!d||!d.fund){if(onNotFound)onNotFound();return;} var f=d.fund;
+      loadXray(code);
       $("f-name").textContent=f.name||"—";
       $("f-cat").textContent=[f.category,f.plan].filter(Boolean).join(" · ")||"—";
       $("f-aum").textContent="AUM "+(f.aum_cr!=null?"₹"+Number(f.aum_cr).toLocaleString("en-IN")+" Cr":em);
@@ -529,6 +611,7 @@ td.sym{font-weight:700;font-size:12.5px}
   });
 
   // initial load
+  bindXrayToggles();
   loadStats();
   loadScreener("Flexi Cap Fund");
   loadDefaultFund();
