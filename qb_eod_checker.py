@@ -51,8 +51,14 @@ log = logging.getLogger("scorr.qb_eod")
 IST = timezone(timedelta(hours=5, minutes=30))
 NIFTY_SYMBOL   = "NIFTY50"
 NIFTYBEES_SYMBOL = "NIFTYBEES"
-HARD_STOP_PCT  = -20.0   # stock down 20% from entry
-REL_STOP_PCT   = -10.0   # stock underperforms Nifty by 10% from entry date (all baskets)
+HARD_STOP_PCT  = -20.0   # stock down 20% from entry (default)
+REL_STOP_PCT   = -10.0   # stock underperforms Nifty by 10% from entry date
+# cc#559: per-basket HS1 override + basket-specific quality exit. breakout_52w stops tighter (-15%,
+# a broken breakout) and adds a GVM<7.2 quality exit. cc#553/555: HS2 disabled for alpha+large_cap;
+# cc#559 also disables it for breakout_52w (its two clean exits are the -15% stop and the GVM exit).
+HARD_STOP_BY_BASKET = {"breakout_52w": -15.0}
+NO_HS2_BASKETS      = ("alpha_multicap", "large_cap", "breakout_52w")
+GVM_EXIT_BELOW      = {"breakout_52w": 7.2}   # exit at EOD when latest gvm_score < threshold
 
 # Robust: pull the first decimal number after "Nifty entry=" regardless of
 # surrounding separators (comma, pipe, trailing period, spaces).
@@ -234,12 +240,23 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         "basket":              basket_name,
         "run_date":            str(today),
         "positions_marked":    0,
-        "hard_stop_1_exits":   [],   # down 20%
-        "hard_stop_2_exits":   [],   # vs Nifty <= -10% (all baskets)
+        "hard_stop_1_exits":   [],   # down HS1 threshold (per-basket)
+        "hard_stop_2_exits":   [],   # vs Nifty <= -10% (baskets that keep HS2)
+        "gvm_exits":           [],   # cc#559: GVM dropped below the basket's quality floor
         "total_unrealised_pnl": 0.0,
         "total_realised_pnl":  0.0,
         "errors":              []
     }
+    # cc#559: latest GVM per symbol for baskets with a quality exit (breakout_52w). One batch read.
+    gvm_now = {}
+    if basket_name in GVM_EXIT_BELOW:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT symbol, gvm_score FROM gvm_scores "
+                            "WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)")
+                gvm_now = {s: float(g) for s, g in cur.fetchall() if g is not None}
+        except Exception as e:
+            summary["errors"].append(f"gvm_now_fetch: {e}")
 
     # ── Step 1: Get today's Nifty close ──────────────────────────────────────
     nifty_today = None
@@ -335,20 +352,27 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         curr_value = eod_close * qty if qty else None
 
         # ── Hard Stop checks ──────────────────────────────────────────────────
-        # cc#553 (id=6086) + cc#555 (id=6097): alpha_multicap AND large_cap use HS1 (-20% from
-        # entry) ONLY — HS2 (vs-Nifty) is REMOVED for both (their monthly rank-based exit is the
-        # momentum/quality stop). mid_cap + small_cap KEEP HS2 unchanged.
-        hs1_breach = stock_ret is not None and stock_ret <= HARD_STOP_PCT
-        hs2_breach = (basket_name not in ("alpha_multicap", "large_cap")
+        # cc#553/555/559: HS1 threshold is per-basket (breakout_52w -15%, others -20%). HS2
+        # (vs-Nifty) is disabled for NO_HS2_BASKETS (alpha_multicap, large_cap, breakout_52w).
+        # breakout_52w additionally has a GVM<7.2 quality exit (id=6103, founder-amended from 7.5).
+        hs1_pct    = HARD_STOP_BY_BASKET.get(basket_name, HARD_STOP_PCT)
+        hs1_breach = stock_ret is not None and stock_ret <= hs1_pct
+        hs2_breach = (basket_name not in NO_HS2_BASKETS
                       and vs_nifty is not None and vs_nifty <= REL_STOP_PCT)
+        gvm_floor  = GVM_EXIT_BELOW.get(basket_name)
+        gvm_val    = gvm_now.get(sym) if gvm_floor is not None else None
+        gvm_breach = gvm_floor is not None and gvm_val is not None and gvm_val < gvm_floor
 
         exit_reason = None
         if hs1_breach:
-            exit_reason = f"HARD_STOP_1: stock {stock_ret:.2f}% from entry (<= -20%)"
+            exit_reason = f"HARD_STOP_1: stock {stock_ret:.2f}% from entry (<= {hs1_pct:.0f}%)"
             summary["hard_stop_1_exits"].append(sym)
         elif hs2_breach:
             exit_reason = f"HARD_STOP_2: vs_nifty {vs_nifty:.2f}% (<= -10%)"
             summary["hard_stop_2_exits"].append(sym)
+        elif gvm_breach:
+            exit_reason = f"GVM_EXIT: gvm {gvm_val:.2f} < {gvm_floor}"
+            summary["gvm_exits"].append(sym)
 
         new_status = "exited_stop" if exit_reason else "open"
 
@@ -425,8 +449,8 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             """, (
                 basket_name, today, 0,
-                len(summary["hard_stop_1_exits"]) + len(summary["hard_stop_2_exits"]),
-                summary["positions_marked"] - len(summary["hard_stop_1_exits"]) - len(summary["hard_stop_2_exits"]),
+                len(summary["hard_stop_1_exits"]) + len(summary["hard_stop_2_exits"]) + len(summary["gvm_exits"]),
+                summary["positions_marked"] - len(summary["hard_stop_1_exits"]) - len(summary["hard_stop_2_exits"]) - len(summary["gvm_exits"]),
                 round(portfolio_mv, 2),
                 json.dumps({
                     "type":           "eod_stop_check",
@@ -435,6 +459,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
                     "realised_pnl":   summary["total_realised_pnl"],
                     "hard_stop_1":    summary["hard_stop_1_exits"],
                     "hard_stop_2":    summary["hard_stop_2_exits"],
+                    "gvm_exits":      summary["gvm_exits"],
                     "positions":      actions
                 })
             ))
@@ -446,6 +471,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     log.info(
         f"qb_eod done | basket={basket_name} | marked={summary['positions_marked']} | "
         f"HS1_exits={summary['hard_stop_1_exits']} | HS2_exits={summary['hard_stop_2_exits']} | "
+        f"GVM_exits={summary['gvm_exits']} | "
         f"unrealised={summary['total_unrealised_pnl']} | realised={summary['total_realised_pnl']}"
     )
     return summary

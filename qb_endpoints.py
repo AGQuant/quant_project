@@ -27,6 +27,7 @@ import qb_rebalance
 import qb_alpha_select   # cc#553: Alpha Multicap V2 FINAL selection/proposal engine (spec id=6086)
 import qb_smallcap_select # cc#554: Small Cap V2 selection/proposal engine (spec id=6094)
 import qb_composite_select # cc#555+556: parameterized Large Cap V2 (id=6097) + Mid Cap V2 (id=6098)
+import qb_breakout_select  # cc#559: 52-Week Breakout basket (5th QB) selection/proposal (spec id=6103)
 
 router = APIRouter(prefix="/api/qb", tags=["quant_basket"])
 
@@ -232,5 +233,17 @@ def qb_midcap_propose(as_of: Optional[str] = None):
     confirmed. `as_of` defaults to today."""
     try:
         return qb_composite_select.propose_midcap(as_of=as_of)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/breakout/propose")
+def qb_breakout_propose(as_of: Optional[str] = None):
+    """cc#559 (spec id=6103): DRY-RUN 52-Week Breakout proposal — screen GVM>=7.5 AND week_index_52
+    >=90 AND month_index>=90 AND mcap>1000Cr AND vol_ratio_21>=1.0 (universe_technicals x gvm_scores,
+    vol computed inline from raw_prices); N>10 -> top 10 by 1y return, 5<=N<=10 -> all, N<5 -> cash;
+    Rs 50k/slot. READ-ONLY, founder-confirmed. `as_of` defaults to today."""
+    try:
+        return qb_breakout_select.propose_rebalance(as_of=as_of)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
