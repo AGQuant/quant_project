@@ -137,7 +137,7 @@
   <div class="ph">
     <div class="ph-left">
       <div class="ph-title">Quant Basket</div>
-      <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · 5 Baskets · Click any basket for holdings</div>
+      <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · 6 Baskets · Click any basket for holdings</div>
       <!-- cc#557: V12 Basket Builder folded into the QB page (removed from top nav) -->
       <a href="/v12" title="Build & backtest your own rotation basket (V12)" style="display:inline-flex;align-items:center;gap:7px;margin-top:12px;border:1px solid var(--blu);border-radius:9px;padding:7px 14px;font-size:12.5px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.10);text-decoration:none">&#8863; Basket Builder &rarr;</a>
     </div>
@@ -176,16 +176,17 @@
 </div>
 
 <script>
-const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap',breakout_52w:'52W Breakout'};
+const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap',breakout_52w:'52W Breakout',contra_value:'Contra Value'};
 const BRULE  = {
   large_cap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.0 · ΔGVM(180d) > +0.5 · Mcap Top 100 · Monthly',
   mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · Top-20 by M-Score · Rank 101–250 · Monthly',
   small_cap:'GVM ≥ 8.0 · V ≥ 7.5 · ΔGVM(180d) > +0.5 · 8 themes · mcap rank > 250 · Quarterly',
   alpha_multicap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.5 · V ≥ 7.5 · Mom > 7 · ΔGVM(180d) > +0.5 · Nifty 500 · Monthly',
-  breakout_52w:'GVM ≥ 7.5 · Near 52W high · At month high · Vol ≥ 21d avg · Top-10 by 1Y return · Monthly'
+  breakout_52w:'GVM ≥ 7.5 · Near 52W high · At month high · Vol ≥ 21d avg · Top-10 by 1Y return · Monthly',
+  contra_value:'G ≥ 7 · V ≥ 7.5 · M ≤ 6.5 · Sector GVM > 6 · Above 20DMA · Top-10 by Value · Monthly'
 };
-const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF',breakout_52w:'#37D3E8'};
-const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap','breakout_52w'];
+const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF',breakout_52w:'#37D3E8',contra_value:'#F472B6'};
+const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap','breakout_52w','contra_value'];
 
 const BCRITERIA = {
   large_cap: {
@@ -207,6 +208,10 @@ const BCRITERIA = {
   breakout_52w: {
     entry: 'Universe: full universe, mcap > ₹1,000 Cr · Screen: GVM ≥ 7.5 AND near 52-week high (week_index_52 ≥ 90) AND at month high (month_index ≥ 90) AND volume ≥ 21-day avg (vol_ratio_21 ≥ 1.0) · Selection: >10 qualify → top 10 by 1-Year Return; 5–10 → hold all; <5 → fully cash (dead-tape trap guard) · Sizing: ₹50k/slot always (₹5L/10)',
     exit:  'HS1: −15% from entry (tighter — a broken breakout) · Quality exit: GVM drops below 7.2 (nightly EOD) · No HS2, no rank exit, no trailing — two clean reasons: failed breakout or lost quality'
+  },
+  contra_value: {
+    entry: 'Thesis: quality (G ≥ 7) trading cheap (V ≥ 7.5) in a healthy sector (avg GVM > 6), momentum washed out (M ≤ 6.5) but the turn just starting (above 20-DMA) · Universe: full universe, GVM > 7, mcap > ₹1,000 Cr · No month-high gate (contradicts the contra thesis) · Selection: max 10, top 10 by V-Score (deepest value first) · Sizing: ₹50k/slot, empty slots cash',
+    exit:  'HS1: −20% from entry (contra needs room) · Quality fail: GVM drops below 6.8 (nightly) · Profit-take: M recovers to ≥ 8 → exit with profit (M_RECOVERED — the only QB profit-taking exit; momentum recovery completes the contra thesis) · No HS2, no rank exit'
   }
 };
 

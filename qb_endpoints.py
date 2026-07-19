@@ -28,6 +28,7 @@ import qb_alpha_select   # cc#553: Alpha Multicap V2 FINAL selection/proposal en
 import qb_smallcap_select # cc#554: Small Cap V2 selection/proposal engine (spec id=6094)
 import qb_composite_select # cc#555+556: parameterized Large Cap V2 (id=6097) + Mid Cap V2 (id=6098)
 import qb_breakout_select  # cc#559: 52-Week Breakout basket (5th QB) selection/proposal (spec id=6103)
+import qb_contra_select    # cc#560: Contra Value basket (6th QB) selection/proposal (spec id=6104)
 
 router = APIRouter(prefix="/api/qb", tags=["quant_basket"])
 
@@ -245,5 +246,17 @@ def qb_breakout_propose(as_of: Optional[str] = None):
     Rs 50k/slot. READ-ONLY, founder-confirmed. `as_of` defaults to today."""
     try:
         return qb_breakout_select.propose_rebalance(as_of=as_of)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/contra/propose")
+def qb_contra_propose(as_of: Optional[str] = None):
+    """cc#560 (spec id=6104): DRY-RUN Contra Value proposal — screen GVM>7 AND G>=7 AND V>=7.5 AND
+    M<=6.5 AND sector-avg-GVM>6 AND above-20DMA AND mcap>1000Cr (universe_technicals x gvm_scores,
+    20-DMA inline from raw_prices); max 10, top 10 by V desc; Rs 50k/slot. Exits: HS1 -20% + GVM<6.8
+    + M>=8 profit-take. READ-ONLY, founder-confirmed. `as_of` defaults to today."""
+    try:
+        return qb_contra_select.propose_rebalance(as_of=as_of)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
