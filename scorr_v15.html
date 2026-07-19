@@ -233,8 +233,11 @@ td.sym{font-weight:700;font-size:12.5px}
 </div>
 
 <div class="card rise d5">
-  <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge">SCORR-ONLY X-RAY</span><span class="badge dim" style="margin-left:6px">PORTFOLIO GVM · HOLD</span></div>
-  <div style="padding:26px 6px;text-align:center;color:var(--dim);font-size:12px;line-height:1.6">DATA-QUALITY HOLD — the holdings data source is still being verified for per-fund accuracy. X-ray and Portfolio GVM activate once verified holdings are available.</div>
+  <div class="h"><span class="eyebrow" style="flex:1">Look-through holdings × live GVM</span><span class="badge">SCORR-ONLY X-RAY</span><span class="badge dim" style="margin-left:6px">PORTFOLIO GVM</span></div>
+  <div style="padding:22px 6px;text-align:center">
+    <div class="num" id="pgvm-v" style="font-size:36px;color:var(--dim);line-height:1">—</div>
+    <div id="pgvm-c" style="color:var(--dim);font-size:12px;margin-top:8px">Search a fund to see its weighted portfolio GVM</div>
+  </div>
 </div>
 
 <div class="card rise d6">
@@ -343,7 +346,7 @@ td.sym{font-weight:700;font-size:12.5px}
     // cc#528 reopened: Q pillar is permanently absent (0/14238 funds have a live rating
     // source since cc#505) -- a bare "/100" implies the full 4-pillar model backs this
     // number when it never does. Disclose the real basis instead of a misleading full score.
-    k.textContent=(basisPct!=null&&basisPct<100)?("PARTIAL BASIS · "+Math.round(basisPct)+"%"):"MQS / 100";
+    k.textContent=(basisPct!=null&&basisPct<100)?("PARTIAL BASIS · "+Math.round(basisPct)+"%"):(basisPct!=null?"FULL BASIS · Q+R+C+S":"MQS / 100");
   }
 
   function setVerdict(mqs,computedAt,basisPct,basisLabel){
@@ -357,9 +360,16 @@ td.sym{font-weight:700;font-size:12.5px}
     var label=mqs>=80?"ELITE":mqs>=65?"STRONG":mqs>=45?"AVERAGE":"WEAK";
     var cls=mqs>=80?"elite":mqs>=65?"strong":mqs>=45?"average":"weak";
     chip.classList.add(cls); chip.textContent=label;
-    var basisTxt=(basisPct!=null&&basisPct<100)
-      ?("MQS "+mqs.toFixed(1)+" on "+(basisLabel||"partial")+" ("+Math.round(basisPct)+"% basis)")
-      :("MQS "+mqs.toFixed(1)+"/100");
+    // cc#546: full 100% basis now attainable (Q+R+C+S) -- state the basis explicitly in both the
+    // full and partial cases; fall back to bare /100 only when basis_pct was never recorded.
+    var basisTxt;
+    if(basisPct!=null&&basisPct<100){
+      basisTxt="MQS "+mqs.toFixed(1)+" on "+(basisLabel||"partial")+" ("+Math.round(basisPct)+"% basis)";
+    }else if(basisPct!=null){
+      basisTxt="MQS "+mqs.toFixed(1)+" on "+(basisLabel||"Q+R+C+S")+" (100% basis)";
+    }else{
+      basisTxt="MQS "+mqs.toFixed(1)+"/100";
+    }
     var dateTxt=fmtDateShort(computedAt);
     sub.textContent=basisTxt+(dateTxt?(" · "+dateTxt):"");
     sub.title=computedAt?("Scored "+fmtIST(computedAt)):"";
@@ -383,13 +393,14 @@ td.sym{font-weight:700;font-size:12.5px}
 
   function setPortfolioGvm(f){
     var v=$("pgvm-v"),c=$("pgvm-c"); if(!v||!c)return;
-    if(f.portfolio_gvm_state==="value"&&f.portfolio_gvm!=null){
+    // cc#546: show the weighted portfolio GVM (0-10) + coverage when Q resolved (>=60% weight);
+    // "Insufficient holdings data" ONLY when coverage < 60% or zero holdings -- never merely
+    // because q_score is null for some other reason.
+    var cov=f.portfolio_gvm_coverage_pct!=null?f.portfolio_gvm_coverage_pct:f.coverage_pct;
+    if(f.portfolio_gvm!=null){
       var g=f.portfolio_gvm, col=g>=8?"var(--bull)":g>=6?"var(--amber)":"var(--bear)";
       v.textContent=g.toFixed(1); v.style.color=col;
-      c.textContent="Rated on "+(f.portfolio_gvm_coverage_pct!=null?f.portfolio_gvm_coverage_pct.toFixed(0):"—")+"% of portfolio";
-    } else if(f.portfolio_gvm_state==="insufficient_coverage"){
-      v.textContent=em; v.style.color="var(--dim)";
-      c.textContent="Insufficient coverage";
+      c.textContent=(cov!=null?cov.toFixed(0):"—")+"% holdings resolved";
     } else {
       v.textContent=em; v.style.color="var(--dim)";
       c.textContent="Insufficient holdings data";

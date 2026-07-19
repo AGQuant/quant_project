@@ -72,6 +72,15 @@ def ensure_tables(cur):
     cur.execute("""ALTER TABLE mf_scores
         ADD COLUMN IF NOT EXISTS basis_pct NUMERIC,
         ADD COLUMN IF NOT EXISTS basis_label TEXT""")
+    # cc#546: Q (portfolio-quality) pillar restored via holdings x live GVM look-through (NOT
+    # the retired external rating brand -- pure DB compute, zero LLM/HTTP). coverage_pct records
+    # the fraction of a fund's disclosed weight that resolved to a live gvm_scores row; the Q
+    # pillar (and the 100% Q+R+C+S basis) only activates when coverage_pct >= 60. Stored on every
+    # scored scheme regardless of the gate so the card can distinguish "insufficient holdings
+    # data" (coverage < 60 / none) from a merely-uncomputed pillar. Additive nullable column,
+    # same app-side ADD COLUMN IF NOT EXISTS pattern (run_sql cannot ALTER -- self-creates here).
+    cur.execute("""ALTER TABLE mf_scores
+        ADD COLUMN IF NOT EXISTS coverage_pct NUMERIC""")
     cur.execute("""CREATE TABLE IF NOT EXISTS mf_category_averages (
         category TEXT PRIMARY KEY, avg_expense_ratio NUMERIC, avg_ret_1y NUMERIC,
         avg_ret_3y NUMERIC, avg_ret_5y NUMERIC, n_funds INTEGER, updated_at TIMESTAMPTZ DEFAULT NOW())""")
@@ -97,6 +106,12 @@ EQUITY_CATEGORY_WHITELIST = (
     "Large & Mid Cap Fund", "Mid Cap Fund", "Multi Cap Fund", "Sectoral/Thematic Fund",
     "Small Cap Fund", "Value Fund/Contra Fund",
 )
+
+# cc#546: minimum % of a fund's disclosed portfolio weight that must resolve to a live GVM row
+# before the Q (portfolio-quality) pillar activates and the fund moves to the full 100% Q+R+C+S
+# basis. Below this the fund keeps its R+C+S-only basis (Q left NULL) but coverage_pct is still
+# stored, so the card distinguishes real "insufficient holdings data" from an uncomputed pillar.
+Q_COVERAGE_MIN = 60.0
 
 
 # ── founder 12-fund seed (cc#466 build_5) ──────────────────────────────────────────
@@ -1176,7 +1191,7 @@ def v15_fund(scheme_code: str):
                               m.ret_1w, m.ret_1m, m.ret_3m, m.ret_6m, m.ret_1y, m.ret_2y, m.ret_3y,
                               m.ret_5y, m.returns_asof,
                               s.mqs, s.q_score, s.r_score, s.c_score, s.s_score, s.computed_at,
-                              s.basis_pct, s.basis_label,
+                              s.basis_pct, s.basis_label, s.coverage_pct,
                               ca.avg_expense_ratio
                        FROM mf_master m
                        LEFT JOIN mf_scores s ON s.scheme_code = m.scheme_code
@@ -1192,7 +1207,7 @@ def v15_fund(scheme_code: str):
     m["plan"] = _derive_plan(m.get("name"))
     for k in ("expense_ratio", "aum_cr", "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_1y",
               "ret_2y", "ret_3y", "ret_5y", "mqs", "q_score", "r_score", "c_score", "s_score",
-              "basis_pct"):
+              "basis_pct", "coverage_pct"):
         if m.get(k) is not None:
             m[k] = float(m[k])
     m["ret_3y_state"] = _ret_window_state(m.get("ret_3y"), m.get("inception"), 3)
@@ -1200,16 +1215,20 @@ def v15_fund(scheme_code: str):
     m["inception"] = str(m["inception"]) if m.get("inception") else None
     m["returns_asof"] = str(m["returns_asof"]) if m.get("returns_asof") else None
     m["computed_at"] = str(m["computed_at"]) if m.get("computed_at") else None
-    # cc#528 item 7: Portfolio GVM (weighted-avg look-through GVM of holdings) was specced as
-    # feasible off mf_holdings, but re-verifying against live data found the June-2026 bulk
-    # holdings load is still the same fabricated/placeholder set cc#519 already flagged
-    # (identical top-5 holdings + weights to 2dp across unrelated categories, e.g. a Large Cap
-    # and a Small Cap fund). Computing a number off it would present fake portfolio composition
-    # as real -- same DATA-QUALITY HOLD this page already applies to the X-ray/segment cards
-    # below, not a fabricated score.
-    m["portfolio_gvm"] = None
-    m["portfolio_gvm_coverage_pct"] = None
-    m["portfolio_gvm_state"] = "data_quality_hold"
+    # cc#546: Portfolio GVM (weighted-avg look-through GVM of holdings) now activates off the Q
+    # pillar computed in compute_mf_scores. portfolio_gvm is the weighted GVM value on the native
+    # 0-10 scale (= q_score / 10, the inverse of the x10 pillar scaler); coverage_pct is the % of
+    # disclosed weight that resolved to a live GVM row. "Insufficient holdings data" is keyed ONLY
+    # on coverage (< 60 or none), never on q_score being NULL for some other reason.
+    cov = m.get("coverage_pct")
+    if m.get("q_score") is not None:
+        m["portfolio_gvm"] = round(m["q_score"] / 10.0, 2)
+        m["portfolio_gvm_coverage_pct"] = cov
+        m["portfolio_gvm_state"] = "value"
+    else:
+        m["portfolio_gvm"] = None
+        m["portfolio_gvm_coverage_pct"] = cov
+        m["portfolio_gvm_state"] = "insufficient_holdings"
 
     flags = []
     er, aum = m.get("expense_ratio"), m.get("aum_cr")
@@ -1774,6 +1793,52 @@ def _clip(v, lo=0.0, hi=100.0):
     return max(lo, min(hi, v))
 
 
+def compute_q_pillar(cur):
+    """cc#546: per-scheme portfolio-quality (Q) inputs from a look-through of each fund's latest
+    disclosed holdings against the latest live GVM snapshot -- PURE SQL, zero LLM/HTTP (rule
+    id=6062). Returns {scheme_code: {"q_raw": float|None, "coverage_pct": float|None}}.
+
+      • latest GVM   = gvm_scores rows on the single global MAX(score_date) (the codebase's
+                       standard "latest" convention -- one nightly snapshot covers every symbol;
+                       cf. position_news / buy_reversal_simulator / gvm_page_extras).
+      • latest month = per-scheme MAX(as_of_month) in mf_holdings (holdings are monthly-cadence).
+      • q_raw        = SUM(pct_weight * gvm_score) / SUM(pct_weight) over RESOLVED holdings only
+                       -- renormalized over resolved weight (denominator = resolved weight, not
+                       total), so an unresolved sliver never dilutes the quality reading.
+      • coverage_pct = SUM(resolved pct_weight) / SUM(all pct_weight) * 100.
+
+    Join keys: mf_holdings.scheme_code = mf_scores.scheme_code (PK on both);
+    mf_holdings.resolved_nse_symbol = gvm_scores.symbol. The 60%-coverage gate is applied by the
+    caller (compute_mf_scores), which also stores coverage_pct for EVERY scheme (gated or not)."""
+    cur.execute("""
+        WITH latest AS (
+            SELECT symbol, gvm_score FROM gvm_scores
+            WHERE score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        ),
+        h AS (
+            SELECT scheme_code, pct_weight, resolved_nse_symbol
+            FROM mf_holdings hh
+            WHERE as_of_month = (SELECT MAX(as_of_month) FROM mf_holdings h3
+                                 WHERE h3.scheme_code = hh.scheme_code)
+        )
+        SELECT h.scheme_code,
+               SUM(h.pct_weight) AS all_w,
+               SUM(CASE WHEN l.symbol IS NOT NULL THEN h.pct_weight ELSE 0 END) AS resolved_w,
+               SUM(CASE WHEN l.symbol IS NOT NULL THEN h.pct_weight * l.gvm_score ELSE 0 END) AS wsum_gvm
+        FROM h LEFT JOIN latest l ON l.symbol = h.resolved_nse_symbol
+        GROUP BY h.scheme_code""")
+    out = {}
+    for sc, all_w, resolved_w, wsum_gvm in cur.fetchall():
+        all_w = _f2(all_w) or 0.0
+        resolved_w = _f2(resolved_w) or 0.0
+        wsum_gvm = _f2(wsum_gvm) or 0.0
+        q_raw = (wsum_gvm / resolved_w) if resolved_w > 0 else None
+        coverage_pct = (resolved_w / all_w * 100.0) if all_w > 0 else None
+        out[sc] = {"q_raw": q_raw,
+                   "coverage_pct": round(coverage_pct, 1) if coverage_pct is not None else None}
+    return out
+
+
 def compute_mf_scores(conn=None):
     """step_4: MQS (Mutual Fund Quality Score) — pillar weights per the founder's
     MF_Analysis_Working_Model.xlsx: originally Quality 35% / Returns 30% / Cost 15% / Size 20%.
@@ -1831,15 +1896,28 @@ def compute_mf_scores(conn=None):
                         (list(EQUITY_CATEGORY_WHITELIST),))
             cat_aum_avg = {r[0]: _f2(r[1]) for r in cur.fetchall()}
 
+            # cc#546: Q (portfolio-quality) look-through inputs, one pass over holdings x latest GVM.
+            q_data = compute_q_pillar(cur)
+
             cur.execute("""SELECT scheme_code, category, expense_ratio, aum_cr,
                                   ret_1y, ret_3y, ret_5y
                            FROM mf_master
                            WHERE category = ANY(%s)""", (list(EQUITY_CATEGORY_WHITELIST),))
             rows = cur.fetchall()
-            scored = 0
+            scored = q_scored = 0
             for sc, cat, er, aum, r1y, r3y, r5y in rows:
                 ca = cat_avg.get(cat, {})
                 pillars, weights = {}, {}
+
+                # cc#546: Q pillar -- weighted-avg portfolio GVM (0-10) scaled x10 to the 0-100
+                # pillar scale, matching r/c/s which also emit on 0-100 (via _clip). Coverage gate:
+                # only activate Q (and the full 100% Q+R+C+S basis) when >=60% of disclosed weight
+                # resolved to a live GVM row; below that keep the R+C+S-only basis for this fund.
+                qi = q_data.get(sc) or {}
+                q_cov = qi.get("coverage_pct")
+                if qi.get("q_raw") is not None and q_cov is not None and q_cov >= Q_COVERAGE_MIN:
+                    pillars["q"] = _clip(float(qi["q_raw"]) * 10.0)
+                    weights["q"] = 0.35
 
                 fund_ret = r1y if r1y is not None else (r3y if r3y is not None else r5y)
                 cat_ret = (ca.get("r1y") if r1y is not None
@@ -1865,18 +1943,22 @@ def compute_mf_scores(conn=None):
                 # IS the basis fraction directly -- no fabricated fill-in, just an honest label
                 # of which pillars actually back this fund's mqs (Q is 0/14238 funds today).
                 basis_label = "+".join(k.upper() for k in ("q", "r", "c", "s") if k in pillars)
+                # cc#546: store coverage_pct on EVERY scored scheme (even when the gate left Q out)
+                # so the card shows "insufficient holdings data" ONLY on real coverage < 60 / none.
                 cur.execute("""INSERT INTO mf_scores (scheme_code, mqs, q_score, r_score, c_score, s_score,
-                                   basis_pct, basis_label, computed_at)
-                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                                   basis_pct, basis_label, coverage_pct, computed_at)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                                ON CONFLICT (scheme_code) DO UPDATE SET
                                    mqs=EXCLUDED.mqs, q_score=EXCLUDED.q_score, r_score=EXCLUDED.r_score,
                                    c_score=EXCLUDED.c_score, s_score=EXCLUDED.s_score,
                                    basis_pct=EXCLUDED.basis_pct, basis_label=EXCLUDED.basis_label,
-                                   computed_at=NOW()""",
+                                   coverage_pct=EXCLUDED.coverage_pct, computed_at=NOW()""",
                             (sc, round(mqs, 2), pillars.get("q"), pillars.get("r"),
                              pillars.get("c"), pillars.get("s"),
-                             round(wsum * 100, 1), basis_label))
+                             round(wsum * 100, 1), basis_label, qi.get("coverage_pct")))
                 scored += 1
+                if "q" in pillars:
+                    q_scored += 1
             # cc#520: purge any stray mf_scores rows for schemes outside the whitelist (Banking &
             # PSU debt funds scored by an older pre-exclusion pass) -- they must not surface in the
             # screener/search MQS column.
@@ -1885,9 +1967,10 @@ def compute_mf_scores(conn=None):
                            )""", (list(EQUITY_CATEGORY_WHITELIST),))
             purged = cur.rowcount
             conn.commit()
-            _oplog(cur, "MF_SCORES_COMPUTED", {"universe": len(rows), "scored": scored, "purged_stale": purged})
+            _oplog(cur, "MF_SCORES_COMPUTED", {"universe": len(rows), "scored": scored,
+                                               "q_scored": q_scored, "purged_stale": purged})
             conn.commit()
-        return {"universe": len(rows), "scored": scored, "purged_stale": purged}
+        return {"universe": len(rows), "scored": scored, "q_scored": q_scored, "purged_stale": purged}
     finally:
         if own:
             conn.close()
