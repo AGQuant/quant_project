@@ -178,7 +178,7 @@ const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',al
 const BRULE  = {
   large_cap:'GVM ≥ 7.4 · Mcap Top 100 · Monthly rebalance',
   mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · V ≥ 5.0 · Rank 101–250 · Monthly rebalance',
-  small_cap:'GVM ≥ 8.0 · 5 Thematic segments · Quarterly rebalance',
+  small_cap:'GVM ≥ 8.0 · V ≥ 7.5 · ΔGVM(180d) > +0.5 · 8 themes · mcap rank > 250 · Quarterly',
   alpha_multicap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.5 · V ≥ 7.5 · Mom > 7 · ΔGVM(180d) > +0.5 · Nifty 500 · Monthly'
 };
 const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF'};
@@ -194,8 +194,8 @@ const BCRITERIA = {
     exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −5% from entry · Filter: fails screen or drops out of top-20 at Monday open · Banking/NBFC: D/E + Interest Coverage excluded'
   },
   small_cap: {
-    entry: 'GVM ≥ 8.0 · 5 futuristic thematic segments (sector avg GVM > 6.0) · Equal weight within theme · Slot ≈ ₹23,500 per stock',
-    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −5% from entry · Filter: fails GVM or theme screen at Monday open · Quarterly rebalance'
+    entry: 'Universe: mcap rank > 250 · Hard gates: GVM ≥ 8.0 AND V ≥ 7.5 AND ΔGVM(180d) > +0.5 AND segment avg GVM ≥ 6.0 · Must map to 1 of 8 themes (Energy Transition & Grid · EV Auto Tech & Precision · Financial Inclusion & Digital Finance · Healthcare & Life Sciences · Digital India & Tech · Gold & Jewellery Consumption · Consumption & Lifestyle · Cement & Industrial Build-out) · Sizing: N qualifiers (≤20) equal ₹5L/N; N < 10 → ₹50k/name + rest cash · Entry-only (gates apply to new entries; current holdings unaffected)',
+    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −10% from entry · Quarterly theme/GVM screen · Exit rules unchanged in V2'
   },
   alpha_multicap: {
     entry: 'Composite score = GVM×0.5 + Momentum×0.5 · Universe Nifty 500 · Hard gates: GVM ≥ 7.5 AND V ≥ 7.5 AND M > 7 AND ΔGVM(180d) > +0.5 (gvm_now − gvm_180d_ago) · Top-12 by composite, equal weight (~₹41k/slot on ₹5L) · Fewer than 12 qualify → hold cash for empty slots (returns computed on full 12-slot capital)',

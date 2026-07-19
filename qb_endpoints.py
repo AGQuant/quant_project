@@ -25,6 +25,7 @@ import os
 import qb_eod_checker
 import qb_rebalance
 import qb_alpha_select   # cc#553: Alpha Multicap V2 FINAL selection/proposal engine (spec id=6086)
+import qb_smallcap_select # cc#554: Small Cap V2 selection/proposal engine (spec id=6094)
 
 router = APIRouter(prefix="/api/qb", tags=["quant_basket"])
 
@@ -193,5 +194,18 @@ def qb_alpha_propose(as_of: Optional[str] = None):
     Reproduces the manual SQL replication exactly (acceptance)."""
     try:
         return qb_alpha_select.propose_rebalance(as_of=as_of)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/smallcap/propose")
+def qb_smallcap_propose(as_of: Optional[str] = None):
+    """cc#554 (spec id=6094): DRY-RUN Small Cap V2 ENTRY proposal — qualifiers with mcap rank>250,
+    gates GVM>=8/V>=7.5/dGVM_180d>+0.5/segment-avg-GVM>=6.0, mapped to one of the 8 themes; N-based
+    equal sizing (5L/N, N<10 -> 5L/10 per name + cash brake). ENTRY-ONLY — current holdings are
+    never flagged for exit here (exits stay HS1/HS2/quarterly). READ-ONLY, founder-confirmed to
+    execute. `as_of` defaults to today."""
+    try:
+        return qb_smallcap_select.propose_rebalance(as_of=as_of)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
