@@ -335,11 +335,11 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
         curr_value = eod_close * qty if qty else None
 
         # ── Hard Stop checks ──────────────────────────────────────────────────
-        # cc#553 (spec id=6086): alpha_multicap uses HS1 (-20% from entry) ONLY — HS2 (vs-Nifty)
-        # is REMOVED for the alpha book (the monthly rank-based exit is its momentum/quality stop).
-        # The other 3 baskets keep HS2 unchanged.
+        # cc#553 (id=6086) + cc#555 (id=6097): alpha_multicap AND large_cap use HS1 (-20% from
+        # entry) ONLY — HS2 (vs-Nifty) is REMOVED for both (their monthly rank-based exit is the
+        # momentum/quality stop). mid_cap + small_cap KEEP HS2 unchanged.
         hs1_breach = stock_ret is not None and stock_ret <= HARD_STOP_PCT
-        hs2_breach = (basket_name != "alpha_multicap"
+        hs2_breach = (basket_name not in ("alpha_multicap", "large_cap")
                       and vs_nifty is not None and vs_nifty <= REL_STOP_PCT)
 
         exit_reason = None

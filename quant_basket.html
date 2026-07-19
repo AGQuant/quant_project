@@ -176,8 +176,8 @@
 <script>
 const BNAMES = {large_cap:'Large Cap',mid_cap:'Mid Cap',small_cap:'Small Cap',alpha_multicap:'Alpha Multicap'};
 const BRULE  = {
-  large_cap:'GVM ≥ 7.4 · Mcap Top 100 · Monthly rebalance',
-  mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · V ≥ 5.0 · Rank 101–250 · Monthly rebalance',
+  large_cap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.0 · ΔGVM(180d) > +0.5 · Mcap Top 100 · Monthly',
+  mid_cap:'GVM ≥ 7.5 · G ≥ 7.0 · Top-20 by M-Score · Rank 101–250 · Monthly',
   small_cap:'GVM ≥ 8.0 · V ≥ 7.5 · ΔGVM(180d) > +0.5 · 8 themes · mcap rank > 250 · Quarterly',
   alpha_multicap:'GVM×0.5 + Mom×0.5 · GVM ≥ 7.5 · V ≥ 7.5 · Mom > 7 · ΔGVM(180d) > +0.5 · Nifty 500 · Monthly'
 };
@@ -186,12 +186,12 @@ const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap'];
 
 const BCRITERIA = {
   large_cap: {
-    entry: 'GVM ≥ 7.4 · M-Score ≥ 7.0 · RSI Monthly ≥ 45 · Annual Upside ≥ 10% · PE Multiplier ≤ 1.5 · FII+DII buying · 1Y return ≥ 2.2% · Above 200 DMA · Top-20 by avg momentum (1M+3M+6M+1Y)',
-    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −10% from entry · Filter: fails screen or drops out of top-20 at Monday open'
+    entry: 'Composite = GVM×0.5 + Momentum×0.5 · Universe mcap Top 100 · Hard gates: GVM ≥ 7.0 AND ΔGVM(180d) > +0.5 · 10-filter gauntlet retired (RSI-M / PE-mult / upside / FII+DII / 1Y / 50&200 DMA / sector gates all redundant inside G/V/M) · Top-12 equal weight ₹5L/12; <10 qualify → ₹50k/name + cash',
+    exit:  'HS1: −20% from entry (nightly) · Monthly (6th): exit max 3 holdings ranked outside composite top-20, worst rank first; refills pass both gates · No HS2, no trailing stop'
   },
   mid_cap: {
-    entry: 'GVM ≥ 7.5 · G-Score ≥ 7.0 · V-Score ≥ 5.0 · M-Score ≥ 7.0 · Annual Upside ≥ 10% · Mcap rank 101–250 · Top-20 by avg momentum (1M+3M+6M+1Y)',
-    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −5% from entry · Filter: fails screen or drops out of top-20 at Monday open · Banking/NBFC: D/E + Interest Coverage excluded'
+    entry: 'Universe mcap rank 101–250 · Hard gates: GVM ≥ 7.5 AND G ≥ 7.0 (V gate dropped — excluded 0 stocks) · Rank by M-Score (8 peer-relative momentum metrics, replaces avg raw 1M+3M+6M+1Y) · Top-20 equal weight ₹5L/20 = ₹25k/name; <10 qualify → ₹50k/name + cash',
+    exit:  'HS1: −20% absolute · HS2: vs Nifty ≤ −10% from entry · Monthly re-screen: exit if not top-20 by M among gate-passers · Exit stack unchanged in V2'
   },
   small_cap: {
     entry: 'Universe: mcap rank > 250 · Hard gates: GVM ≥ 8.0 AND V ≥ 7.5 AND ΔGVM(180d) > +0.5 AND segment avg GVM ≥ 6.0 · Must map to 1 of 8 themes (Energy Transition & Grid · EV Auto Tech & Precision · Financial Inclusion & Digital Finance · Healthcare & Life Sciences · Digital India & Tech · Gold & Jewellery Consumption · Consumption & Lifestyle · Cement & Industrial Build-out) · Sizing: N qualifiers (≤20) equal ₹5L/N; N < 10 → ₹50k/name + rest cash · Entry-only (gates apply to new entries; current holdings unaffected)',

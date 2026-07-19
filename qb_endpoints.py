@@ -26,6 +26,7 @@ import qb_eod_checker
 import qb_rebalance
 import qb_alpha_select   # cc#553: Alpha Multicap V2 FINAL selection/proposal engine (spec id=6086)
 import qb_smallcap_select # cc#554: Small Cap V2 selection/proposal engine (spec id=6094)
+import qb_composite_select # cc#555+556: parameterized Large Cap V2 (id=6097) + Mid Cap V2 (id=6098)
 
 router = APIRouter(prefix="/api/qb", tags=["quant_basket"])
 
@@ -207,5 +208,29 @@ def qb_smallcap_propose(as_of: Optional[str] = None):
     execute. `as_of` defaults to today."""
     try:
         return qb_smallcap_select.propose_rebalance(as_of=as_of)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/largecap/propose")
+def qb_largecap_propose(as_of: Optional[str] = None):
+    """cc#555 (spec id=6097): DRY-RUN Large Cap V2 proposal — universe mcap rank<=100, score
+    0.5*GVM+0.5*M, gates GVM>=7.0 AND dGVM_180d>+0.5 (10-filter gauntlet retired); top-12 equal
+    weight 5L/12, <10 -> 5L/10 + cash; monthly max-3 exit outside composite top-20. READ-ONLY,
+    founder-confirmed. `as_of` defaults to today."""
+    try:
+        return qb_composite_select.propose_largecap(as_of=as_of)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/midcap/propose")
+def qb_midcap_propose(as_of: Optional[str] = None):
+    """cc#556 (spec id=6098): DRY-RUN Mid Cap V2 proposal — universe mcap rank 101-250, gates
+    GVM>=7.5 AND G>=7.0 (V gate dropped, no dGVM), ranked by M SCORE desc; top-20 equal weight
+    5L/20, <10 -> 5L/10 + cash. ENTRY-ONLY (exits UNCHANGED, HS2 kept). READ-ONLY, founder-
+    confirmed. `as_of` defaults to today."""
+    try:
+        return qb_composite_select.propose_midcap(as_of=as_of)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
