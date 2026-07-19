@@ -281,9 +281,9 @@ PWA_JS = """
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/holdings', '\\u25c6', 'Holdings'],
-    ['/v10', '\\u25b3', 'V10'],
+    ['/dashboard#index', '\\u25b3', 'Index Intel'],
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
-    ['/v14', '\\u26a1', 'V14'],
+    ['/dashboard#v14', '\\u26a1', 'V14 \\u00b7 Intraday'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler']
   ];

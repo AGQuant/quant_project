@@ -761,9 +761,11 @@ NAV_REGISTRY = {
     "/performance":  ("(removed from nav — superseded)", "typed-url"),   # cc#437
     "/quant-basket": ("QB (curated Quant Basket)", "nav"),
     "/news":         ("News (Intelligence)",  "nav"),
-    "/v10":          ("V10",                  "nav"),
+    "/v10":          ("(-> /dashboard#index · Index Intel tab; standalone retired)", "typed-url"),   # cc#542
     "/v9":           ("V9 · Pairs",           "nav"),        # cc#426 rule id=2987 (extracted from V8 tab)
-    "/v14":          ("V14 · Intraday",       "nav"),        # cc#442 rule id=2987 (intraday engine)
+    "/v14":          ("(-> /dashboard#v14 · V14 Intraday tab; standalone retired)", "typed-url"),   # cc#543
+    "/dashboard#index": ("Index Intel (V8 tab)", "nav"),     # cc#542 rule id=2987 (folded into V8)
+    "/dashboard#v14":   ("V14 · Intraday (V8 tab)", "nav"),  # cc#543 rule id=2987 (folded into V8)
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
     "/holdings":     ("Holdings",             "nav"),
