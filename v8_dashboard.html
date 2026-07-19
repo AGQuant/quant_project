@@ -4264,6 +4264,13 @@ window.addEventListener('hashchange',function(){var h=(location.hash||'').replac
     btOnBasket();
     btLoadRuns();
   };
+
+  // cc#551 fix: when the page deep-links straight to /dashboard#bt, showV8Pane('bt') runs in an
+  // EARLIER <script> block (the hash dispatcher) — before this IIFE defines window.btBoot — so the
+  // pane was shown but never booted (Run History stuck at "Loading…"). Self-boot here once the
+  // definitions exist if the BT pane is already visible.
+  var _bp=document.getElementById('pane-bt');
+  if(_bp && _bp.style.display!=='none') btBoot();
 })();
 </script>
 <script>

@@ -282,7 +282,6 @@ PWA_JS = """
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/holdings', '\\u25c6', 'Holdings'],
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
-    ['/dashboard#bt', '\\u25a9', 'V6 BT'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler']
   ];

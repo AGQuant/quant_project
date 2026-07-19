@@ -768,7 +768,7 @@ NAV_REGISTRY = {
     "/v14":          ("(-> /dashboard#v14 · V14 Intraday tab; standalone retired)", "typed-url"),   # cc#543
     "/dashboard#index": ("Index Intel (V8 tab)", "nav"),     # cc#542 rule id=2987 (folded into V8)
     "/dashboard#v14":   ("V14 · Intraday (V8 tab)", "nav"),  # cc#543 rule id=2987 (folded into V8)
-    "/dashboard#bt":    ("V6 BT (V8 tab · backtest playground)", "nav"),  # cc#544 rule id=2987 (folded into V8)
+    "/dashboard#bt":    ("V6 BT — V8 tab-only deep-link (removed from top nav)", "tab"),  # cc#551: dropped from NAV, reachable via the V8 tab bar only
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
     "/holdings":     ("Holdings",             "nav"),
