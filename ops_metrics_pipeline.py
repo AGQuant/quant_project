@@ -1385,16 +1385,6 @@ def run_extraction_backfill(conn=None, stop_event=None, time_budget_s=1200):
                 break
             r = run_company_extract_from_doctexts(sym)
             st = r["status"]
-            if processed < 15:   # cc#541 diagnostic: per-symbol branch for the first 15, to pinpoint no-op returns
-                try:
-                    with conn.cursor() as cur:
-                        _oplog(cur, "OPS_EXTRACTION_DEBUG",
-                               {"symbol": sym, "status": st, "sector": r.get("sector"),
-                                "metrics_found": r.get("metrics_found"),
-                                "n_quarters": len(r.get("quarters") or []), "error": r.get("error")})
-                        conn.commit()
-                except Exception:
-                    pass
             if st == "ok":
                 ok += 1
             elif st == "no_registry":
