@@ -202,6 +202,57 @@ def v10_maxpain(symbol: str = "NIFTY"):
         raise HTTPException(500, f"v10_maxpain failed: {e}")
 
 
+@router.get("/strike_oi")
+def v10_strike_oi(symbol: str = "NIFTY", n: int = 7):
+    """cc#542: strike-wise Call/Put OI around ATM (+/- n strikes) for the nearest expiry, for
+    NIFTY + BANKNIFTY — powers the V8 Index Intel max-pain OI histogram cards. Read-only; latest
+    OI snapshot per (strike, option_type). The max-pain marker itself comes from /maxpain (one
+    source of truth); this returns the per-strike bars + spot + ATM strike for the histogram."""
+    underlying = (symbol or "NIFTY").upper()
+    if underlying in ("NIFTY50", "NIFTY 50"):
+        underlying = "NIFTY"
+    if underlying in ("BANKNIFTY50", "NIFTYBANK", "BNF"):
+        underlying = "BANKNIFTY"
+    spot_sym = _MAXPAIN_SPOT.get(underlying, "NIFTY50")
+    n = max(1, min(int(n or 7), 25))
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT MIN(expiry) FROM option_chain WHERE underlying=%s AND expiry >= CURRENT_DATE",
+                        (underlying,))
+            er = cur.fetchone()
+            expiry = er[0] if er else None
+            cur.execute("SELECT close FROM raw_prices WHERE symbol=%s ORDER BY price_date DESC LIMIT 1",
+                        (spot_sym,))
+            sr = cur.fetchone()
+            spot = float(sr[0]) if sr and sr[0] is not None else None
+            rows = []
+            if expiry is not None:
+                cur.execute("""
+                    WITH oc AS (
+                        SELECT DISTINCT ON (strike, option_type) strike, option_type, oi
+                        FROM option_chain
+                        WHERE underlying=%s AND expiry=%s AND oi IS NOT NULL
+                        ORDER BY strike, option_type, ts DESC)
+                    SELECT strike,
+                           COALESCE(SUM(oi) FILTER (WHERE option_type='CE'), 0) AS call_oi,
+                           COALESCE(SUM(oi) FILTER (WHERE option_type='PE'), 0) AS put_oi
+                    FROM oc GROUP BY strike ORDER BY strike
+                """, (underlying, expiry))
+                rows = cur.fetchall()
+        strikes = [{"strike": float(r[0]), "call_oi": int(r[1] or 0), "put_oi": int(r[2] or 0)} for r in rows]
+        atm_strike, window = None, strikes
+        if spot is not None and strikes:
+            atm_strike = min(strikes, key=lambda x: abs(x["strike"] - spot))["strike"]
+            idx = next((i for i, x in enumerate(strikes) if x["strike"] == atm_strike), None)
+            if idx is not None:
+                window = strikes[max(0, idx - n): idx + n + 1]
+        return {"status": "ok" if window else "no_data", "symbol": underlying, "spot": spot,
+                "expiry": str(expiry) if expiry is not None else None, "atm_strike": atm_strike,
+                "n": n, "strikes": window}
+    except Exception as e:
+        raise HTTPException(500, f"v10_strike_oi failed: {e}")
+
+
 @router.get("/buildup")
 def v10_buildup(limit: int = 15):
     """Futures buildup screen — top long (price up) and short (price down) movers
