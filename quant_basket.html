@@ -113,6 +113,9 @@
   td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
   tr:last-child td{border-bottom:none}
   tr:hover td{background:var(--surface2)}
+  /* cc#552: the row highlight used --surface2 (opaque navy) which stayed dark inside the light
+     modal (unreadable). Light theme gets a soft-blue tint + dark text; dark theme keeps the navy. */
+  :root[data-theme="light"] tr:hover td{background:rgba(77,124,254,.12);color:#14213E}
 
   .summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:14px 20px;border-bottom:1px solid var(--line)}
   .sr-item .sk{font-size:10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}

@@ -403,6 +403,15 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
     summary["total_realised_pnl"]   = round(summary["total_realised_pnl"], 2)
 
     # ── Step 4: Log to quant_rebalance_log ───────────────────────────────────
+    # cc#552: total_portfolio_value is the portfolio MARKET VALUE = SUM(current_value) of open
+    # positions (same definition qb_rebalance.py uses). The prior code wrote total P&L here, which
+    # surfaced in the QB modal as a tiny "Portfolio Value" (e.g. 0.10L) sitting next to the correct
+    # rebalance-day figure (4.6L). current_value was just refreshed for every open position in the
+    # mark loop above, so this SUM is as-of today's EOD. P&L is still preserved in the actions JSON.
+    with conn.cursor() as cur:
+        cur.execute("SELECT COALESCE(SUM(current_value),0) FROM quant_paper_positions "
+                    "WHERE basket_name=%s AND status='open'", (basket_name,))
+        portfolio_mv = float(cur.fetchone()[0] or 0)
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -414,7 +423,7 @@ def run_eod_checker(conn, basket_name: str = "large_cap") -> Dict:
                 basket_name, today, 0,
                 len(summary["hard_stop_1_exits"]) + len(summary["hard_stop_2_exits"]),
                 summary["positions_marked"] - len(summary["hard_stop_1_exits"]) - len(summary["hard_stop_2_exits"]),
-                round(summary["total_unrealised_pnl"] + summary["total_realised_pnl"], 2),
+                round(portfolio_mv, 2),
                 json.dumps({
                     "type":           "eod_stop_check",
                     "nifty_today":    nifty_today,
