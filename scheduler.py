@@ -126,6 +126,7 @@ _gvm_ran_today: Optional[date] = None
 _gvm_backfill_running = False   # cc#468/470: 5yr deep-history backfill guard
 _mf_backfill_running = False    # cc#477: V15 MF returns backfill single-flight guard
 _bt14_fut_oi_running = False    # cc#538: ORB basis/OI research backfill single-flight guard
+_yahoo_new_listings_running = False   # cc#539: new-listing Yahoo EOD backfill single-flight guard
 _mf_wiring_running = False      # cc#491: V15 MF wire-all (AUM/ER/holdings/scores) single-flight guard
 _mf_weekly_manual_running = False   # cc#491 course-correct: manual /run_weekly single-flight guard
 _intraday_scan_running = False  # cc#481: intraday scanner 15-min auto-scan single-flight guard
@@ -1091,6 +1092,41 @@ def _bg_bt14_fut_oi():
         log.error(f"bt14_fut_oi: {e}")
     finally:
         _bt14_fut_oi_running = False
+
+def _bg_yahoo_new_listings():
+    """cc#539: one-shot Yahoo EOD backfill for newly-listed symbols that have GVM but ZERO
+    raw_prices (momentum pillar dark). Flag app_config.yahoo_new_listings_run='pending'
+    triggers a single run over the JSON spec list in app_config.yahoo_new_listings_specs
+    ([{nse,bse,isin,name}]); tries NSE.NS then BSE.BO, full history, UPSERT raw_prices,
+    graceful-skips non-listed InvITs. Sets flag 'done' after. Any time (Yahoo EOD),
+    single-flight. Nightly 01:30 GVM then activates the M pillar off the new bars."""
+    global _yahoo_new_listings_running
+    if _yahoo_new_listings_running:
+        return
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='yahoo_new_listings_run'")
+            r = cur.fetchone()
+        if (r[0] if r else None) != "pending":
+            return _SKIPPED
+        _yahoo_new_listings_running = True
+        import json as _json
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key='yahoo_new_listings_specs'")
+            r = cur.fetchone()
+        specs = _json.loads(r[0]) if (r and r[0]) else []
+        import yahoo_daily_update
+        rep = yahoo_daily_update.backfill_new_listings(specs, lookback="5y")
+        log.info(f"yahoo_new_listings: {rep}")
+        with _conn() as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO app_config (key,value,updated_at) "
+                        "VALUES ('yahoo_new_listings_run','done',NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET value='done', updated_at=NOW()")
+            conn.commit()
+    except Exception as e:
+        log.error(f"yahoo_new_listings: {e}")
+    finally:
+        _yahoo_new_listings_running = False
 
 def _bg_pivots():
     global _pivots_ran_today
@@ -2373,6 +2409,7 @@ async def _scheduler_loop():
         _spawn(_bg_mf_mc_discover)  # cc#500: flag-gated, checked every tick for fast dev-iteration turnaround
         _spawn(_bg_mf_mc_oneshot)   # cc#500: flag-gated one-time full-set fill, checked every tick
         _spawn(_bg_bt14_fut_oi)     # cc#538: flag-gated ORB basis/OI research backfill (probe|backfill), off-market
+        _spawn(_bg_yahoo_new_listings)  # cc#539: flag-gated one-shot Yahoo EOD backfill for new listings
         _spawn(_bg_ops_metrics_backfill)   # cc#523/524: flag-gated, checked every tick (500-company x 4Q first leg)
         _spawn(_bg_ops_text_fetch)         # cc#527: flag-gated fetch-only phase, 23:00-06:00 IST window
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)

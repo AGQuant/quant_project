@@ -248,6 +248,111 @@ async def run_async(symbols=None, lookback=None, sem=None, sleep=None, retry=Non
     return summary
 
 
+def _fetch_history_ticker(ticker, symbol, lookback="5y"):
+    """cc#539: SYNC full-history daily fetch for ONE explicit Yahoo ticker (e.g. 'AMANTA.NS'
+    or '544502.BO'). Rows already shaped for UPSERT_SQL. Returns (rows, reason). reason is
+    None on success, else a Yahoo/transport error string (so a real 'Not Found' for a
+    non-listed InvIT is distinguishable from a transport hiccup)."""
+    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/"
+           f"{urllib.parse.quote(ticker)}?interval=1d&range={lookback}")
+    try:
+        with httpx.Client(timeout=20.0,
+                          headers={"User-Agent": "Mozilla/5.0 (compatible; Scorr/1.0)"}) as client:
+            r = client.get(url)
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        return [], f"{type(e).__name__}: {str(e)[:150]}"
+    chart = data.get("chart", {}).get("result", [])
+    if not chart:
+        err = (data.get("chart", {}) or {}).get("error")
+        return [], (f"empty_chart:{err.get('code') if isinstance(err, dict) else err}"
+                    if err else "empty_chart")
+    result = chart[0]
+    tss = result.get("timestamp", []) or []
+    q = result.get("indicators", {}).get("quote", [{}])[0]
+    adj_list = result.get("indicators", {}).get("adjclose", [])
+    adj_closes = adj_list[0].get("adjclose", []) if adj_list else []
+    opens, highs, lows = q.get("open", []), q.get("high", []), q.get("low", [])
+    closes, volumes = q.get("close", []), q.get("volume", [])
+    rows = []
+    for i, ts in enumerate(tss):
+        c = closes[i] if i < len(closes) else None
+        if c is None:
+            continue
+        o = opens[i] if i < len(opens) else None
+        h = highs[i] if i < len(highs) else None
+        l = lows[i] if i < len(lows) else None
+        v = volumes[i] if i < len(volumes) else None
+        ac = adj_closes[i] if i < len(adj_closes) else c
+        dt = datetime.datetime.utcfromtimestamp(ts).date()
+        rows.append((
+            symbol, dt,
+            round(float(o), 2) if o is not None else None,
+            round(float(h), 2) if h is not None else None,
+            round(float(l), 2) if l is not None else None,
+            round(float(c), 2),
+            round(float(ac), 2) if ac is not None else None,
+            int(v) if v is not None else 0,
+        ))
+    if not rows:
+        return [], "no_valid_bars"
+    return rows, None
+
+
+def backfill_new_listings(specs, lookback="5y"):
+    """cc#539: onboard newly-listed symbols that have GVM but ZERO raw_prices (momentum
+    pillar dark). Per symbol, ONE-AT-A-TIME (Yahoo hard rule): try NSE_CODE.NS first, then
+    the BSE numeric .BO as fallback; UPSERT the full available history into raw_prices via
+    the same UPSERT_SQL as the nightly path. Graceful-skip (no ingest, documented reason)
+    when neither exchange yields a valid series (e.g. an InvIT/trust Yahoo does not carry).
+
+    specs: [{"nse": str, "bse": str|None, "isin": str, "name": str}]
+    Returns a per-symbol report list; also written to ops_log (YAHOO_NEW_LISTINGS)."""
+    import time as _t
+    report = []
+    for sp in specs:
+        nse = (sp.get("nse") or "").strip().upper()
+        bse = sp.get("bse")
+        if not nse:
+            continue
+        attempts = []
+        used = f"{nse}.NS"
+        rows, reason = _fetch_history_ticker(used, nse, lookback)
+        attempts.append({"ticker": used, "bars": len(rows), "reason": reason})
+        _t.sleep(1.0)
+        if not rows and bse:
+            bse_code = str(bse).split(".")[0].strip()   # strip screener's trailing '.0'
+            if bse_code and bse_code.lower() != "none":
+                used = f"{bse_code}.BO"
+                rows, reason = _fetch_history_ticker(used, nse, lookback)
+                attempts.append({"ticker": used, "bars": len(rows), "reason": reason})
+                _t.sleep(1.0)
+        if rows:
+            written = _commit_rows({nse: rows})
+            first = min(r[1] for r in rows)
+            last = max(r[1] for r in rows)
+            report.append({"symbol": nse, "status": "ingested", "yahoo_symbol_used": used,
+                           "bars_inserted": written, "first_date": str(first),
+                           "last_date": str(last), "isin": sp.get("isin"),
+                           "name": sp.get("name"), "attempts": attempts})
+        else:
+            report.append({"symbol": nse, "status": "skipped",
+                           "reason": reason or "no_series",
+                           "isin": sp.get("isin"), "name": sp.get("name"),
+                           "attempts": attempts})
+    try:
+        with psycopg.connect(DB_URL) as conn, conn.cursor() as cur:
+            cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                        "VALUES (CURRENT_DATE, NOW(), 'yahoo_backfill', 'YAHOO_NEW_LISTINGS', %s::jsonb)",
+                        (json.dumps(report, default=str),))
+            conn.commit()
+    except Exception as e:
+        log.warning(f"backfill_new_listings oplog: {e}")
+    log.info(f"backfill_new_listings: {report}")
+    return report
+
+
 def heal_indices(conn=None, indices=("NIFTY50", "BANKNIFTY")):
     """cc_task #72 bug_2: post-EOD verification + self-heal. After the nightly run,
     if an index's raw_prices lags the freshest universe trading day, re-fetch JUST
