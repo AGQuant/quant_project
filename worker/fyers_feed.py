@@ -2387,11 +2387,17 @@ def run(auth_code=None):
                     threading.Thread(target=_run_subscribe_sequence, args=('midmarket-boot',),
                                      daemon=True).start()
 
-            # ── cc#473 item 1: 09:05 IST daily token-staleness re-login (once/day, pre-open).
-            # Never start the trading day on yesterday's token. Boot staleness is already
-            # covered by get_valid_token; this handles a worker that has been running since
-            # before the IST midnight rollover (its in-memory token silently went stale).
-            if (relogin_day != today and is_trading_day(today)
+            # ── cc#473 item 1 / cc#540: 09:05 IST daily token-staleness re-login (once/day).
+            # Never start the day on yesterday's token. Boot staleness is already covered by
+            # get_valid_token; this handles a worker running since before the IST midnight
+            # rollover (its in-memory token silently went stale).
+            # cc#540: dropped the is_trading_day(today) gate so this fires EVERY day incl.
+            # Sat/Sun/holidays — the founder works weekends and weekend research/backfill jobs
+            # (e.g. cc#538) were blocking on auth_error because no fresh token was ever minted.
+            # Fyers TOTP autologin is one 2FA/day (not per-trading-day) and the historical-data
+            # API is 24/7. The 09:05<=t<MARKET_OPEN(09:15) window applies uniformly every day;
+            # the token-created-today short-circuit below still avoids any needless 2FA.
+            if (relogin_day != today
                     and dt_time(9, 5) <= now.time() < MARKET_OPEN):
                 relogin_day = today
                 try:
