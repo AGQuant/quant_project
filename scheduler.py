@@ -1556,6 +1556,56 @@ def _bg_log_retention():
         log.info(f"log_retention: ops={n_ops} session={n_sess} tick rows purged (>30d)")
     except Exception as e:
         log.error(f"log_retention: {e}")
+    # cc#548: drive the consolidated data-retention matrix off the same nightly retention
+    # chain (own connection + try/except, so it always runs regardless of the log purge above).
+    _bg_data_retention()
+
+def _bg_data_retention():
+    """cc#548 RETENTION MATRIX (founder-locked 19-Jul-2026): single consolidated nightly purge
+    for the 7 time-series tables. One DELETE per table/source, idempotent (INTERVAL-based, safe
+    to re-run), fault-isolated (each DELETE commits independently — one failure never aborts the
+    rest). Piggybacks the 01:52 retention chain via _bg_log_retention — NO new scheduler slot.
+    Per-table deleted counts land on a single ops_log(category=data_retention) line.
+      bt14_fut_oi      7d    research killed (id=6078)
+      option_chain     7d    5-min strike detail — index-wide + stocks ATM+/-3
+      pcr_intraday     60d   (min is ~45d today, so effectively a no-op cap for now)
+      options_oi_daily 730d  EOD OI distillation — the long memory
+      pcr_daily        730d
+      adr_daily        730d
+      intraday_prices  730d  for source IN (fyers_eq, fyers_fut, fyers_hist) — cc#381 doctrine;
+                             fyers_eq=equity spot, fyers_fut=futures, fyers_hist=backtest 5m,
+                             verified separate sources, no duplication. ALSO drops stray legacy
+                             source='yahoo' timeframe='1m' rows outright (~158 rows)."""
+    PURGES = [
+        ("bt14_fut_oi_7d",          "DELETE FROM bt14_fut_oi      WHERE ts < NOW() - INTERVAL '7 days'"),
+        ("option_chain_7d",         "DELETE FROM option_chain     WHERE ts < NOW() - INTERVAL '7 days'"),
+        ("pcr_intraday_60d",        "DELETE FROM pcr_intraday     WHERE ts < NOW() - INTERVAL '60 days'"),
+        ("options_oi_daily_730d",   "DELETE FROM options_oi_daily WHERE d < CURRENT_DATE - INTERVAL '730 days'"),
+        ("pcr_daily_730d",          "DELETE FROM pcr_daily        WHERE price_date < CURRENT_DATE - INTERVAL '730 days'"),
+        ("adr_daily_730d",          "DELETE FROM adr_daily        WHERE price_date < CURRENT_DATE - INTERVAL '730 days'"),
+        ("intraday_fyers_730d",     "DELETE FROM intraday_prices  WHERE source IN ('fyers_eq','fyers_fut','fyers_hist') AND ts < NOW() - INTERVAL '730 days'"),
+        ("intraday_yahoo_1m_stray", "DELETE FROM intraday_prices  WHERE source='yahoo' AND timeframe='1m'"),
+    ]
+    counts = {}
+    try:
+        with _conn() as conn:
+            for label, sql in PURGES:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(sql)
+                        counts[label] = cur.rowcount
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    counts[label] = f"err:{type(e).__name__}"
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO ops_log (session_date, session_ts, category, title, details) "
+                            "VALUES (CURRENT_DATE, NOW(), 'data_retention', 'retention_matrix', %s)",
+                            (Json({"deleted": counts, "task": "cc#548"}),))
+            conn.commit()
+        log.info(f"data_retention: {counts}")
+    except Exception as e:
+        log.error(f"data_retention: {e}")
 
 def _bg_fetch_stock_news():
     """cc#242 (POSITION_NEWS_PIPELINE_V1): per-stock Google News for the full active futures
