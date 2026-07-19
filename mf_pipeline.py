@@ -1986,6 +1986,12 @@ def run_mf_score_nightly(conn=None):
     own = conn is None
     conn = conn or _conn()
     try:
+        # cc#546: ensure schema first so the coverage_pct column self-creates before
+        # compute_mf_scores writes it -- makes the recompute self-sufficient regardless of call
+        # order (nightly slot, /score_recompute endpoint, or fresh boot).
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            conn.commit()
         avgs = compute_mf_category_averages(conn)
         scores = compute_mf_scores(conn)
         return {"averages": avgs, "scores": scores}
