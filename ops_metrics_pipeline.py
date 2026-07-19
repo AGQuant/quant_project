@@ -1248,6 +1248,173 @@ def run_ops_metrics_backfill(conn=None, stop_event=None):
             conn.close()
 
 
+# ── 6a. PHASE-2 EXTRACTION (cc#541) — LLM extraction sourced ONLY from stored
+# doc_texts (cc#527 phase-split fetched them). ZERO screener.in / PDF HTTP here. ─
+
+EXTRACT_CURSOR_KEY = "ops_extraction_cursor"
+EXTRACT_RUN_FLAG_KEY = "ops_extraction_run"   # 'pending' | 'running' | 'done'
+
+
+def _extract_universe(cur):
+    """cc#541 phase-2 universe: every symbol with fetched doc_texts (any status), stable
+    ORDER BY symbol for resumable cursoring. This tracks the doc_texts corpus (~476 syms),
+    NOT _build_universe's top-500 — we extract exactly what phase-1 stored."""
+    cur.execute("SELECT DISTINCT symbol FROM doc_texts ORDER BY symbol")
+    return [r[0] for r in cur.fetchall()]
+
+
+def run_company_extract_from_doctexts(symbol, conn=None, force=False):
+    """cc#541 PHASE-2: two-pass LLM extraction sourced ONLY from stored doc_texts — ZERO HTTP.
+    For each quarter of this symbol that still has 'stored' doc_texts, gather presentation +
+    transcript text, run the SAME run_extraction + write_extraction as the live path, then flip
+    those doc_texts rows to 'extracted' (the idempotency marker — a re-run skips them). Honest:
+    a metric with no signal is still written (value NULL). force=True re-extracts every quarter."""
+    own = conn is None
+    conn = conn or _conn()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            sector = _sector_for_symbol(cur, symbol)
+            registry = _registry_for_sector(cur, sector)
+            if not registry:
+                _record_failure(cur, symbol, f"no KPI registry for sector={sector}")
+                conn.commit()
+                return {"symbol": symbol, "status": "no_registry", "sector": sector}
+            status_filter = "" if force else "AND extract_status='stored'"
+            cur.execute(f"""SELECT quarter, doc_type, url, text_content
+                            FROM doc_texts
+                            WHERE symbol=%s AND text_content IS NOT NULL {status_filter}""",
+                        (symbol,))
+            rows = cur.fetchall()
+        if not rows:
+            return {"symbol": symbol, "status": "nothing_to_extract", "sector": sector}
+
+        by_q = {}
+        for quarter, doc_type, url, text in rows:
+            q = quarter or "unspecified"
+            by_q.setdefault(q, {})[doc_type] = (url, text)
+
+        quarters_done, total_found, errored = [], 0, False
+        for quarter, docs in by_q.items():
+            pres_url, pres_text = docs.get("presentation", (None, None))
+            trans_url, trans_text = docs.get("transcript", (None, None))
+            if not pres_text and not trans_text:
+                continue
+            try:
+                result = run_extraction(symbol, sector, registry, pres_text, trans_text, quarter)
+            except Exception as e:
+                errored = True
+                with conn.cursor() as cur:
+                    _record_failure(cur, symbol, f"extraction failed q={quarter}: {type(e).__name__}: {e}")
+                    conn.commit()
+                continue
+            doc_urls = [u for u in (pres_url, trans_url) if u]
+            with conn.cursor() as cur:
+                write_extraction(cur, symbol, sector, result["quarter"] or quarter,
+                                 result["metrics"], result["concall"], doc_urls)
+                cur.execute("""UPDATE doc_texts SET extract_status='extracted'
+                               WHERE symbol=%s AND quarter=%s AND extract_status='stored'""",
+                            (symbol, quarter))
+                _log_token_usage(cur, symbol, result["model_used"], result["usage"])
+                post_extraction_chain(cur, symbol, sector)
+                conn.commit()
+            n = sum(1 for m in result["metrics"].values() if m["value"] is not None)
+            total_found += n
+            quarters_done.append({"quarter": result["quarter"] or quarter,
+                                  "metrics_found": n, "model": result["model_used"]})
+
+        with conn.cursor() as cur:
+            if quarters_done:
+                _clear_failure(cur, symbol)
+            conn.commit()
+        if not quarters_done and not errored:
+            return {"symbol": symbol, "status": "no_text", "sector": sector}
+        return {"symbol": symbol, "status": "ok" if quarters_done else "error", "sector": sector,
+                "quarters": quarters_done, "metrics_found": total_found}
+    except Exception as e:
+        err_text = f"{type(e).__name__}: {e}"
+        log.error(f"run_company_extract_from_doctexts failed for {symbol}: {err_text}", exc_info=True)
+        try:
+            with conn.cursor() as cur:
+                _record_failure(cur, symbol, err_text)
+                conn.commit()
+        except Exception:
+            pass
+        return {"symbol": symbol, "status": "error", "error": err_text[:200]}
+    finally:
+        if own:
+            conn.close()
+
+
+def run_extraction_backfill(conn=None, stop_event=None, time_budget_s=1200):
+    """cc#541 PHASE-2 runner: extract sector_ops_metrics from stored doc_texts, ZERO re-fetch.
+    Resumable cursor over the doc_texts symbol universe (ops_extraction_cursor); self-limits to
+    time_budget_s per invocation and resumes next tick (LLM extraction over ~476 symbols is
+    multi-hour). Returns a summary incl. `complete`; per-run progress to ops_log."""
+    own = conn is None
+    conn = conn or _conn()
+    t0 = time.time()
+    try:
+        with conn.cursor() as cur:
+            ensure_tables(cur)
+            universe = _extract_universe(cur)
+            cursor = _cfg_get(cur, EXTRACT_CURSOR_KEY)
+            start_idx = (universe.index(cursor) + 1) if (cursor and cursor in universe) else 0
+            pending = universe[start_idx:]
+            conn.commit()
+
+        ok = noreg = notext = err = 0
+        sample_error = None
+        processed = 0
+        for sym in pending:
+            if stop_event is not None and stop_event.is_set():
+                break
+            if time.time() - t0 > time_budget_s:
+                break
+            r = run_company_extract_from_doctexts(sym)
+            st = r["status"]
+            if st == "ok":
+                ok += 1
+            elif st == "no_registry":
+                noreg += 1
+            elif st in ("no_text", "nothing_to_extract"):
+                notext += 1
+            elif st == "error":
+                err += 1
+                if sample_error is None:
+                    sample_error = r.get("error")
+            with conn.cursor() as cur:
+                _cfg_set(cur, EXTRACT_CURSOR_KEY, sym)
+                conn.commit()
+            processed += 1
+            if processed % 20 == 0:
+                with conn.cursor() as cur:
+                    _oplog(cur, "OPS_EXTRACTION_PROGRESS",
+                           {"processed": processed, "remaining": len(pending) - processed,
+                            "ok": ok, "no_registry": noreg, "no_text": notext, "errors": err,
+                            "sample_error": sample_error})
+                    conn.commit()
+                log_token_rollup(conn)
+                sample_error = None
+            time.sleep(1.0)   # gentle between companies (pure LLM+DB, lighter than the 5s scrape throttle)
+
+        complete = processed >= len(pending)
+        with conn.cursor() as cur:
+            summary = {"universe": len(universe), "processed": processed,
+                       "remaining": max(0, len(pending) - processed), "ok": ok,
+                       "no_registry": noreg, "no_text": notext, "errors": err,
+                       "complete": complete, "sample_error": sample_error}
+            _oplog(cur, "OPS_EXTRACTION_DONE" if complete else "OPS_EXTRACTION_PROGRESS", summary)
+            if complete:
+                cur.execute("DELETE FROM app_config WHERE key=%s", (EXTRACT_CURSOR_KEY,))
+            conn.commit()
+        log_token_rollup(conn)
+        return summary
+    finally:
+        if own:
+            conn.close()
+
+
 # ── 6b. ANALYTICS LAYER (cc#524) -- all computed from data already sitting in
 # sector_ops_metrics/concall_summaries, zero new scraping/data ────────────────
 
