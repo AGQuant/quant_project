@@ -280,6 +280,7 @@ PWA_JS = """
     ['/fpc', '\\u25e7', 'FPC'],
     ['/quant-basket', '\\u25eb', 'QB'],
     ['/holdings', '\\u25c6', 'Holdings'],
+    ['/tradekaro', '\\u25c8', 'Trade Karo'],
     ['/v9', '\\u25c8', 'V9 \\u00b7 Pairs'],
     ['/v15', '\\u25c9', 'V15 \\u00b7 MF'],
     ['/scheduler-master', '\\u2699', 'Scheduler']

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trade Karo</title>
+<style>
+  /* Theme-aware: platform default is LIGHT (cc#348); _MOBILE_HEAD stamps data-theme on <html>
+     before first paint. Dark palette mirrors the SmartGain holdings surface. */
+  :root{
+    --bg:#F4F6FB;--card:#FFFFFF;--border:rgba(20,32,66,.10);
+    --txt:#141F35;--mut:#5E6B8F;--dim:#8892AE;
+    --grn:#12A468;--red:#E23D4D;--blu:#3D62E0;--amber:#B45309;
+    --surface2:#EEF2FB;--well:#F8FAFF;--warnbg:rgba(180,83,9,.09);
+    --font:'Sora',-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0A0F1E;--card:#121A33;--border:rgba(148,166,210,.14);
+    --txt:#E9EEFB;--mut:#8C99BD;--dim:#5E6B8F;
+    --grn:#2FD48B;--red:#FF5C6C;--blu:#4D7CFE;--amber:#F5B453;
+    --surface2:#182241;--well:#0D1428;--warnbg:rgba(245,180,83,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:14px}
+  .wrap{max-width:720px;margin:0 auto;padding:18px 14px 90px}
+
+  /* Header */
+  .hdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+  .hdr h1{font-size:22px;font-weight:800;letter-spacing:-.01em}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;
+    font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+  .badge-dabba{background:rgba(61,98,224,.12);color:var(--blu);border:1px solid rgba(61,98,224,.3)}
+  .badge-zero{background:rgba(18,164,104,.12);color:var(--grn);border:1px solid rgba(18,164,104,.3)}
+  .hdr-spacer{flex:1}
+  .refresh-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:transparent;
+    border:1px solid var(--border);border-radius:9px;font-size:11.5px;font-weight:700;color:var(--mut);
+    cursor:pointer;font-family:inherit;transition:.15s}
+  .refresh-btn:hover{color:var(--blu);border-color:var(--blu)}
+  .refresh-btn.spinning svg{animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Twin dials */
+  .dials{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  @media(max-width:560px){.dials{grid-template-columns:1fr}}
+  .dial{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px 18px}
+  .dial-label{font-size:10px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+  .dial-val{font-size:30px;font-weight:900;font-family:'IBM Plex Mono',monospace;line-height:1;transition:color .3s}
+  .dial-sub{font-size:11.5px;color:var(--mut);font-weight:600;margin-top:5px}
+  .dial-sub b{color:var(--txt);font-weight:800}
+  .bar{height:9px;border-radius:6px;background:var(--surface2);overflow:hidden;margin-top:11px;position:relative}
+  .bar-fill{height:100%;border-radius:6px;transition:width .5s ease}
+  .bar-fill.util{background:linear-gradient(90deg,var(--blu),#6f8dff)}
+  .bar-fill.goal{background:linear-gradient(90deg,var(--grn),#4fe0a4)}
+  .bar-fill.goal.neg{background:linear-gradient(90deg,var(--red),#ff8792)}
+  .dial-foot{display:flex;justify-content:space-between;margin-top:8px;font-size:10.5px;color:var(--dim);font-weight:600}
+
+  /* Concentration warning */
+  .warn{display:none;align-items:flex-start;gap:10px;background:var(--warnbg);
+    border:1px solid rgba(180,83,9,.28);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  .warn.show{display:flex}
+  .warn-ico{font-size:16px;line-height:1.2}
+  .warn-txt{font-size:12.5px;color:var(--amber);font-weight:600;line-height:1.45}
+  .warn-txt b{font-weight:800}
+
+  /* Position cards */
+  .sec-label{font-size:10.5px;font-weight:800;color:var(--mut);text-transform:uppercase;
+    letter-spacing:.09em;margin:14px 2px 8px}
+  .pos-list{display:flex;flex-direction:column;gap:9px}
+  .pos-card{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:14px 16px;transition:border-color .2s}
+  .pos-card.loss{border-color:rgba(226,61,77,.4)}
+  .pos-r1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .pos-left{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .pos-sym{font-size:16px;font-weight:800}
+  .pos-dir{padding:3px 9px;border-radius:20px;font-size:9.5px;font-weight:800;letter-spacing:.04em}
+  .dir-long{background:rgba(18,164,104,.13);color:var(--grn);border:1px solid rgba(18,164,104,.35)}
+  .dir-short{background:rgba(226,61,77,.12);color:var(--red);border:1px solid rgba(226,61,77,.35)}
+  .earn-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;
+    font-size:9.5px;font-weight:800;letter-spacing:.02em;background:rgba(180,83,9,.13);
+    color:var(--amber);border:1px solid rgba(180,83,9,.3)}
+  .pos-mtm{font-size:19px;font-weight:900;font-family:'IBM Plex Mono',monospace;white-space:nowrap;flex-shrink:0;transition:color .3s}
+  .pos-mtm-pct{font-size:11px;font-weight:700;font-family:'IBM Plex Mono',monospace;margin-left:5px}
+  .pos-r2{display:flex;align-items:center;gap:9px;margin-top:9px;flex-wrap:wrap}
+  .chip{font-size:11.5px;color:var(--mut);font-weight:500}
+  .chip b{color:var(--txt);font-weight:700;font-family:'IBM Plex Mono',monospace}
+  .sep{color:var(--dim);font-size:9px}
+  .live-pip{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--grn);
+    margin-left:2px;vertical-align:middle;animation:blink 1.4s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  .util-chip{margin-left:auto;font-size:11px;font-weight:800;font-family:'IBM Plex Mono',monospace;color:var(--blu)}
+  .pos-unavail{font-size:11px;font-weight:700;color:var(--amber)}
+
+  .foot{margin-top:16px;padding:12px 14px;background:var(--well);border:1px solid var(--border);
+    border-radius:11px;font-size:11px;color:var(--mut);line-height:1.6}
+  .foot b{color:var(--txt)}
+  .updated{font-size:11px;color:var(--dim);text-align:right;margin-top:8px}
+  .empty,.err{text-align:center;padding:44px 20px;color:var(--mut);font-size:13px}
+  .err{color:var(--red)}
+  @keyframes flash-g{0%{background:rgba(18,164,104,.16)}100%{background:transparent}}
+  @keyframes flash-r{0%{background:rgba(226,61,77,.14)}100%{background:transparent}}
+  .flash-g{animation:flash-g .6s ease}.flash-r{animation:flash-r .6s ease}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <h1>Trade Karo</h1>
+    <span class="badge badge-dabba">◆ Dabba</span>
+    <span class="badge badge-zero">✓ Zero Brokerage</span>
+    <div class="hdr-spacer"></div>
+    <button class="refresh-btn" id="refreshBtn" onclick="load()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <div class="dials">
+    <div class="dial">
+      <div class="dial-label">Limit Utilised</div>
+      <div class="dial-val" id="utilPct" style="color:var(--blu)">—</div>
+      <div class="dial-sub">₹<b id="deployed">—</b> deployed of <b>₹30,00,000</b></div>
+      <div class="bar"><div class="bar-fill util" id="utilBar" style="width:0%"></div></div>
+      <div class="dial-foot"><span id="headroom">headroom —</span><span id="ror">RoL —</span></div>
+    </div>
+    <div class="dial">
+      <div class="dial-label">Weekly P&amp;L · Goal ₹6,000</div>
+      <div class="dial-val" id="weekPnl">—</div>
+      <div class="dial-sub"><span id="goalPctTxt">—</span> of goal &middot; Gross = Net</div>
+      <div class="bar"><div class="bar-fill goal" id="goalBar" style="width:0%"></div></div>
+      <div class="dial-foot"><span id="realTxt">realised —</span><span id="openTxt">open —</span></div>
+    </div>
+  </div>
+
+  <div class="warn" id="concWarn">
+    <span class="warn-ico">⚠️</span>
+    <span class="warn-txt" id="concTxt"></span>
+  </div>
+
+  <div class="sec-label">Positions</div>
+  <div class="pos-list" id="posList"><div class="empty">Loading…</div></div>
+
+  <div class="foot" id="foot" style="display:none"></div>
+  <div class="updated" id="updated"></div>
+</div>
+
+<script>
+var API = "/api/tradekaro/book";
+var prevMtm = {};
+
+function fmtInr(v, dec){
+  if(v===null||v===undefined) return "—";
+  var n = Number(v);
+  var s = Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0});
+  return (n<0?"−":"")+s;
+}
+function signColor(v){ return v>0?'var(--grn)':(v<0?'var(--red)':'var(--mut)'); }
+function signPrefix(v){ return v>0?'+':(v<0?'−':''); }
+
+function load(){
+  var btn=document.getElementById('refreshBtn'); btn.classList.add('spinning');
+  fetch(API,{cache:'no-store'}).then(function(r){return r.json();}).then(render)
+    .catch(function(e){ document.getElementById('posList').innerHTML='<div class="err">Failed to load: '+e+'</div>'; })
+    .finally(function(){ btn.classList.remove('spinning'); });
+}
+
+function render(d){
+  if(d.error){ document.getElementById('posList').innerHTML='<div class="err">'+d.error+'</div>'; return; }
+
+  // ── Limit utilisation dial ──
+  var lim=d.limit||{};
+  var up=document.getElementById('utilPct');
+  up.textContent=(lim.deployed_pct!=null?lim.deployed_pct.toFixed(2):'—')+'%';
+  document.getElementById('deployed').textContent=fmtInr(lim.deployed,0);
+  document.getElementById('utilBar').style.width=Math.min(100,lim.deployed_pct||0)+'%';
+  document.getElementById('headroom').textContent='headroom ₹'+fmtInr(lim.headroom,0);
+  var wk=d.weekly||{};
+  document.getElementById('ror').textContent='RoL '+(wk.return_on_limit_pct!=null?signPrefix(wk.return_on_limit_pct)+Math.abs(wk.return_on_limit_pct).toFixed(3)+'%':'—');
+
+  // ── Weekly P&L dial ──
+  var wp=document.getElementById('weekPnl');
+  wp.textContent='₹'+(wk.net>=0?'+':'−')+fmtInr(Math.abs(wk.net),0);
+  wp.style.color=signColor(wk.net);
+  var gp=wk.goal_pct!=null?wk.goal_pct:0;
+  document.getElementById('goalPctTxt').innerHTML='<b style="color:'+signColor(wk.net)+'">'+(wk.goal_pct!=null?wk.goal_pct.toFixed(0)+'%':'—')+'</b>';
+  var gb=document.getElementById('goalBar');
+  gb.style.width=Math.max(0,Math.min(100,gp))+'%';
+  gb.classList.toggle('neg',wk.net<0);
+  document.getElementById('realTxt').textContent='realised ₹'+(wk.realised>=0?'+':'−')+fmtInr(Math.abs(wk.realised),0);
+  document.getElementById('openTxt').textContent='open ₹'+(wk.open_mtm>=0?'+':'−')+fmtInr(Math.abs(wk.open_mtm),0);
+
+  // ── Concentration warning ──
+  var c=d.concentration||{}, cw=document.getElementById('concWarn');
+  if(c.flagged){
+    document.getElementById('concTxt').innerHTML='<b>Concentration:</b> '+c.symbol+' is <b>'+c.pct+'%</b> of deployed value (threshold '+c.threshold_pct+'%). Consider trimming as the book scales.';
+    cw.classList.add('show');
+  } else { cw.classList.remove('show'); }
+
+  // ── Position cards ──
+  var pl=document.getElementById('posList');
+  if(!d.positions||!d.positions.length){ pl.innerHTML='<div class="empty">No open Trade Karo positions.</div>'; }
+  else {
+    pl.innerHTML=d.positions.map(function(p){
+      var priced=p.pricing_method!=='unavailable'&&p.cmp!=null;
+      var mtmHtml, cardCls='';
+      if(priced){
+        var col=signColor(p.mtm);
+        if(p.mtm<0) cardCls=' loss';
+        var flash=''; if(prevMtm[p.id]!=null&&prevMtm[p.id]!==p.mtm){ flash=p.mtm>prevMtm[p.id]?' flash-g':' flash-r'; }
+        prevMtm[p.id]=p.mtm;
+        mtmHtml='<div class="pos-mtm'+flash+'" style="color:'+col+'">₹'+signPrefix(p.mtm)+fmtInr(Math.abs(p.mtm),0)+
+          '<span class="pos-mtm-pct" style="color:'+col+'">'+signPrefix(p.mtm_pct)+Math.abs(p.mtm_pct||0).toFixed(2)+'%</span></div>';
+      } else {
+        mtmHtml='<div class="pos-unavail">price unavailable</div>';
+      }
+      var earn=p.earnings?'<span class="earn-badge">📅 '+p.earnings.label+'</span>':'';
+      var live=p.is_live?'<span class="live-pip"></span>':'';
+      var cmpTxt=priced?('<span class="chip">LTP <b>'+fmtInr(p.cmp,2)+'</b>'+live+'</span><span class="sep">◦</span>'):'';
+      var utilTxt=p.pct_of_limit!=null?('<span class="util-chip">'+p.pct_of_limit.toFixed(2)+'% of 30L</span>'):'';
+      return '<div class="pos-card'+cardCls+'">'+
+        '<div class="pos-r1"><div class="pos-left"><span class="pos-sym">'+p.symbol+'</span>'+
+          '<span class="pos-dir '+(p.direction==='LONG'?'dir-long':'dir-short')+'">'+p.direction+'</span>'+earn+'</div>'+
+          mtmHtml+'</div>'+
+        '<div class="pos-r2"><span class="chip">Qty <b>'+p.qty+'</b></span><span class="sep">◦</span>'+
+          '<span class="chip">Entry <b>'+fmtInr(p.entry_price,2)+'</b></span><span class="sep">◦</span>'+
+          cmpTxt+utilTxt+'</div>'+
+      '</div>';
+    }).join('');
+  }
+
+  // ── Footer + updated ──
+  var f=document.getElementById('foot'); f.style.display='block';
+  f.innerHTML='<b>Trade Karo</b> is a dabba book (TradeKaro platform), isolated from SmartGain MHK40 and the lot-based client books. '+
+    'ZERO brokerage &amp; interest &mdash; Gross = Net. 50x limit = ₹30L buying power (₹35L ceiling), goal ₹6,000/week, weekly reset Monday. '+
+    'Prices: futures-LTP-first &rarr; synthetic spot+basis fallback (same rule as SmartGain M2M). Earnings badges read earnings_calendar (manual book &mdash; the UI is the blackout guard).';
+  var src=d.data_source==='live_fyers'?'live':'last session';
+  document.getElementById('updated').textContent='Source: '+src+(d.last_updated?' · as of '+new Date(d.last_updated).toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}):'')+(d.weekly?' · week from '+d.weekly.week_start:'');
+}
+
+load();
+setInterval(load, 30000);   // 30s live refresh
+</script>
+</body>
+</html>

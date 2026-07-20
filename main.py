@@ -50,6 +50,7 @@ from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
 from bt6_endpoints import router as bt6_router   # cc#544: V6 BT playground (read-mostly wrapper)
 from pcr_endpoints import router as pcr_router
 from options_chain_endpoints import router as options_chain_router   # cc#567: on-demand option chain
+from tradekaro_endpoints import router as tradekaro_router   # cc#569: Trade Karo dabba book surface
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
 from v8_backfill_endpoints import router as v8_backfill_router
@@ -195,10 +196,11 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health", "/v15", "/scheduler-master"}   # cc#392/394/398/426/442/467/525: no-store + theme/logout pills
+                     "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/tradekaro"}   # cc#392/394/398/426/442/467/525/569: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
+PROTECTED.add("/tradekaro")   # cc#569: founder-money dabba book — gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -269,6 +271,7 @@ app.include_router(v14_router)   # cc#442
 app.include_router(bt6_router)   # cc#544: /api/bt6/* V6 BT playground
 app.include_router(pcr_router)
 app.include_router(options_chain_router)   # cc#567: GET /api/options/chain on-demand
+app.include_router(tradekaro_router)   # cc#569: /tradekaro page + /api/tradekaro/book
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
 app.include_router(v8_backfill_router)
@@ -774,6 +777,7 @@ NAV_REGISTRY = {
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
     "/holdings":     ("Holdings",             "nav"),
+    "/tradekaro":    ("Trade Karo",           "nav"),   # cc#569: dabba book surface (isolated from MHK40)
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
     "/v12":          ("V12 · Quant Basket Builder — QB-page button (removed from top nav)", "tab"),  # cc#557: folded into /quant-basket
