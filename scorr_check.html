@@ -1333,7 +1333,7 @@ function _detOiStrip(o5){
 // above. 3M swing per the R16 spec. Falls back to the old zoned bar (_detFib) if no price series.
 const _FIB_ZONE_BANDS=[
   {top:123.6,bot:100,name:'Breakout',col:'var(--grn)',op:0.16},
-  {top:100,bot:78.6,name:'Resistance Test',col:'var(--red)',op:0.14},
+  {top:100,bot:78.6,name:'Resistance Test',col:'var(--grn)',op:0.14},   // cc#562: bullish (deep-retracement-held) zone -> green-tinted (was maroon), spec id=6133 Option A
   {top:78.6,bot:61.8,name:'Strength',col:'var(--grn)',op:0.09},
   {top:61.8,bot:38.2,name:'Decision',col:'var(--mut)',op:0.07},
   {top:38.2,bot:23.6,name:'Weak',col:'var(--red)',op:0.07},
@@ -1380,7 +1380,7 @@ const _FIB_DET_ZONES=[
   {lo:23.6,hi:38.2,name:'Weak',col:'var(--red)',op:0.22},
   {lo:38.2,hi:61.8,name:'Decision',col:'var(--dim)',op:0.35},
   {lo:61.8,hi:78.6,name:'Strength',col:'var(--grn)',op:0.32},
-  {lo:78.6,hi:100,name:'Resistance',col:'var(--red)',op:0.35},
+  {lo:78.6,hi:100,name:'Resistance',col:'var(--grn)',op:0.35},   // cc#562: bullish deep-retracement-held zone -> green (was maroon), spec id=6133 Option A
   {lo:100,hi:123.6,name:'Breakout',col:'var(--grn)',op:0.55}
 ];
 function _detFib(fb){
@@ -1400,7 +1400,9 @@ function _detFib(fb){
     +'<div class="v4-det-note">3M swing scored (R16). MAJOR = 3M level within ~1% of a 6M level (confluence).</div>';
 }
 function cr16Pos(pos){ // colour the zone chip like the bar
-  if(pos>=100)return 'pos'; if(pos>=78.6)return 'neg'; if(pos>=61.8)return 'pos'; if(pos>=38.2)return ''; return 'neg';
+  // cc#562 (spec id=6133): 61.8%-100% is structurally bullish (deep-retracement-held) -> green
+  // chip across the whole band (the 78.6-100 Resistance Test slice was wrongly 'neg'/red).
+  if(pos>=61.8)return 'pos'; if(pos>=38.2)return ''; return 'neg';
 }
 
 async function runInvestCheck(sym){
