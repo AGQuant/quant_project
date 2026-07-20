@@ -427,7 +427,7 @@ async function loadHoldings(smooth=false) {
       html+=`<div class="pos-card${lossCls}" id="card-${p.symbol}">
         <div class="pos-row1">
           <div style="display:flex;align-items:center;gap:8px">
-            <span class="pos-sym">${p.symbol}</span>
+            <span class="pos-sym">${p.symbol}</span>${window.ScorrRCard?ScorrRCard.pill(p.symbol):''}
             <span class="pos-dir ${dirCls}">${p.direction}</span>
           </div>
           <span class="pos-mtm" id="mtm-${p.symbol}" style="color:${unavail?'#b45309':colorOf(p.mtm)}">${mtmTxt}</span>
