@@ -167,10 +167,17 @@ async def _fetch_nse_board_meetings():
     hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
             "Referer": f"{NSE_BASE}/companies-listing/corporate-filings-board-meetings"}
+    # cc#565: WITHOUT an explicit date range the NSE board-meetings API returns only a narrow
+    # default window (near-today), so forward-dated F&O results (e.g. Bajaj Auto 21-Jul, Adani Ports
+    # 29-Jul) were silently under-captured. Query the FULL horizon so every announced meeting in the
+    # blackout window is returned. from_date=today, to_date=today+35d (buffer past the 21d blackout).
+    from_d = date.today().strftime("%d-%m-%Y")
+    to_d = (date.today() + timedelta(days=35)).strftime("%d-%m-%Y")
+    url = f"{NSE_BOARD_MEETINGS_URL}&from_date={from_d}&to_date={to_d}"
     try:
         async with httpx.AsyncClient(timeout=45, headers=hdrs, follow_redirects=True) as client:
             await client.get(NSE_BASE + "/")             # seed cookies (NSE anti-bot requirement)
-            r = await client.get(NSE_BOARD_MEETINGS_URL)
+            r = await client.get(url)
             r.raise_for_status()
             data = r.json()
     except Exception as e:
@@ -320,6 +327,24 @@ async def refresh_earnings_calendar():
             elif outcome == "updated": nse_updated += 1
             elif outcome == "rescheduled": nse_rescheduled += 1
         reported, purged = _earnings_lifecycle(cur)
+        # cc#565: F&O coverage cross-check — how many futures-universe names have an upcoming result
+        # inside the 21d blackout window, and any F&O name that DID appear in the freshly-fetched
+        # feeds but failed to land in the table (a ticker-normalization drop). Logged to ops_log so a
+        # coverage gap is observable in DATA, not just eyeballed.
+        try:
+            cur.execute("SELECT DISTINCT UPPER(symbol) FROM futures_universe WHERE is_active=true")
+            fut = {r[0] for r in cur.fetchall()}
+            cur.execute("""SELECT DISTINCT UPPER(ticker) FROM earnings_calendar
+                           WHERE status='upcoming'
+                             AND ex_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '21 days'""")
+            covered = {r[0] for r in cur.fetchall()}
+            feed_syms = {str(x["ticker"]).upper() for x in (screener_rows + nse_rows) if x.get("ex_date")}
+            fno_dropped = sorted((fut & feed_syms) - covered)   # in a feed this run but not in the table
+            cov = {"fno_universe": len(fut), "fno_upcoming_21d": len(fut & covered),
+                   "fno_in_feed_this_run": len(fut & feed_syms), "fno_dropped": fno_dropped}
+            _oplog(cur, "alert" if fno_dropped else "info", "earnings_fno_coverage", cov)
+        except Exception as _cov:
+            log.warning(f"earnings_fno_coverage check failed (non-fatal): {_cov}")
         summary = {"scraped": len(screener_rows), "inserted": inserted, "updated": updated,
                    "rescheduled": rescheduled, "reported": reported, "purged": purged,
                    "skipped_no_date": skipped,
