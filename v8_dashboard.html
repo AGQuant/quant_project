@@ -1183,10 +1183,14 @@ async function openBrDetail(symbol,basket){
   document.getElementById('mTitle').textContent=symbol+lbl;
   document.getElementById('mSub').textContent=`Loading ${nf}-filter breakdown…`;
   document.getElementById('mBody').innerHTML='<div class="loading">Loading...</div>';
-  // cc#514: Derivative Cockpit button — present on the filter-breakdown modal for all 4 baskets,
-  // opens /dashboard?dc=SYMBOL in a new tab (that route auto-triggers openDerivCockpit on load).
+  // cc#571 PART A (nav bug fix, session_log 6372): the funnel filter-breakdown Cockpit button used to
+  // window.open('/dashboard?dc=SYMBOL','_blank') — a NEW TAB whose ?dc auto-open could miss and land the
+  // founder on the master dashboard (home), and where browser-back can never return to the funnel. The
+  // funnel already lives ON /dashboard, so open the cockpit IN-PAGE for the clicked symbol instead: it
+  // stays put, no home redirect, and back (or the X) returns to the funnel. openDerivCockpit pushes a
+  // history entry so the hardware/browser Back button closes the sheet -> funnel.
   document.getElementById('mDcBtn').innerHTML=
-    `<button onclick="openDerivCockpitTab('${symbol}')" title="Open Derivative Cockpit for ${symbol}"
+    `<button onclick="openDerivCockpit('${symbol}')" title="Open Derivative Cockpit for ${symbol}"
       style="font-size:11px;font-weight:700;color:var(--mut);border:1px solid var(--line2);background:var(--panel2);
       border-radius:8px;padding:7px 11px;cursor:pointer;white-space:nowrap;margin-right:8px">&#8646; Cockpit</button>`;
   document.getElementById('infoModal').classList.add('open');
@@ -1417,7 +1421,19 @@ function _dcInjectStyle(){
   .dc-link{cursor:pointer;border-bottom:1px dashed var(--mut)}.dc-link:active{color:var(--blu)}`;
   const st=document.createElement('style');st.id='dc-style';st.textContent=css;document.head.appendChild(st);
 }
-function _dcClose(){const o=document.getElementById('dcOv');if(o)o.classList.remove('open');}
+// cc#571 PART A: browser-back integration. _dcHistoryActive tracks whether we pushed a history entry
+// for the open sheet. Closing via the X/overlay rewinds that entry (history.back -> popstate closes +
+// resets); a real Back press is handled by the popstate listener directly. Guard prevents double-close.
+let _dcHistoryActive=false;
+function _dcHide(){const o=document.getElementById('dcOv');if(o)o.classList.remove('open');}
+function _dcClose(){
+  if(_dcHistoryActive){_dcHistoryActive=false;_dcHide();try{history.back();}catch(e){}return;}
+  _dcHide();
+}
+window.addEventListener('popstate',function(){
+  // Back pressed while the cockpit is open -> just close it (stay on the funnel/dashboard, never home).
+  if(_dcHistoryActive){_dcHistoryActive=false;_dcHide();}
+});
 // cc#515: plain "YYYY-MM-DD" -> "DD-Mon" (Results chip dates; distinct from _dcFmtTs which parses
 // full timestamps).
 function _dcFmtDate(s){
@@ -1647,6 +1663,10 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
   const sheet=document.getElementById('dcSheet');
   sheet.innerHTML=_dcHeader(sym,side,qty,entry,cmp,null)+'<div class="dc-skel"></div><div class="dc-skel"></div><div class="dc-skel"></div>';
   ov.classList.add('open');
+  // cc#571 PART A: push ONE history entry the first time the sheet opens so the browser/hardware Back
+  // button closes the cockpit and returns to the funnel (never falls through to home). Re-opening for a
+  // different symbol while already open reuses the same entry (no history spam).
+  if(!_dcHistoryActive){try{history.pushState({dcOpen:true},'');}catch(e){}_dcHistoryActive=true;}
   // cc#368: never let the skeleton shimmer forever — race the fetch against a 10s timeout so the
   // sheet ALWAYS resolves (to data, or an explicit failure/timeout state).
   const _to=new Promise((_,rej)=>setTimeout(()=>rej(new Error('dc_timeout')),10000));
@@ -1664,6 +1684,10 @@ async function openDerivCockpit(sym,side,qty,entry,cmp){
 // convention as the existing ?embed flag on this page.
 function openDerivCockpitTab(sym){
   if(!sym)return;
+  // cc#571 PART A: when we're already on the dashboard (openDerivCockpit exists), open the cockpit
+  // IN-PAGE (stays put, back->funnel) instead of a new tab that could land on the master dashboard.
+  // Only genuinely off-page callers fall back to the deep-link tab.
+  if(typeof openDerivCockpit==='function'){openDerivCockpit(sym);return;}
   window.open('/dashboard?dc='+encodeURIComponent(sym), '_blank');
 }
 
@@ -4281,7 +4305,15 @@ if(window.self!==window.top||new URLSearchParams(location.search).has('embed')){
 // counterpart to openDerivCockpitTab(), which opens this URL in a new tab from other modals).
 (function(){
   const _dcSym=new URLSearchParams(location.search).get('dc');
-  if(_dcSym && typeof openDerivCockpit==='function') openDerivCockpit(_dcSym.toUpperCase());
+  if(!_dcSym)return;
+  // cc#571 PART A: harden the deep-link — retry briefly until openDerivCockpit is defined (a genuine
+  // /dashboard?dc=SYM cross-page link must open the cockpit, never silently fall through to the master
+  // dashboard). Bounded retry so a real absence can't loop forever.
+  let _tries=0;
+  (function _fire(){
+    if(typeof openDerivCockpit==='function'){openDerivCockpit(_dcSym.toUpperCase());return;}
+    if(_tries++<40)setTimeout(_fire,50);
+  })();
 })();
 </script>
 <script src="/nav_toggle.js" defer></script>
