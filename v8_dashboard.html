@@ -2166,7 +2166,7 @@ function bkGvmCls(x){return Number(x.gvm_score)>=7?'pos':Number(x.gvm_score)>=6?
 function _banChip(x){return x&&x.banned?' <span class="badge" style="background:rgba(255,92,108,.16);color:var(--red)" title="F&O ban list -- no new entries today">BAN</span>':'';}
 function bkRow(x){const st=x.status||'SIGNAL';const rc=rowClass(st);const isOpen=st==='OPEN';
   return`<tr class="${rc}">
-    <td class="sym">${x.symbol} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
+    <td class="sym">${x.symbol}${window.ScorrRCard?ScorrRCard.pill(x.symbol):''} ${statusBadge(st,x.signal_reason)}${_banChip(x)}</td>
     <td class="${cls(x.day_1d)}">${x.day_1d!=null?sign(x.day_1d,1)+'%':'--'}</td>
     <td class="${cls(x.mom_2d)}">${x.mom_2d!=null?sign(x.mom_2d,1)+'%':'--'}</td>
     <td class="${cls(x.dma_50)}">${x.dma_50!=null?num(x.dma_50,0):'--'}</td>
@@ -3924,7 +3924,7 @@ function rOpen(){
   const head=['TAG','SIDE','SYMBOL','ENTRY(F)','EQ SIG','STOP','TARGET','T·BASIS','BASIS','RESULTS','SINCE'];
   const body=D.open.length?D.open.map(p=>`<tr>
     <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
-    <td class="sym">${esc(p.symbol)}<span class="ibtn" onclick="tradeInfo('${p.id}')" title="Trade logic memory">i</span></td>
+    <td class="sym">${esc(p.symbol)}${window.ScorrRCard?ScorrRCard.pill(p.symbol):''}<span class="ibtn" onclick="tradeInfo('${p.id}')" title="Trade logic memory">i</span></td>
     <td>${num(p.entry_px)}</td>
     <td style="color:var(--mut)">${num(p.eq_signal_px)}</td>
     <td class="neg">${num(p.stop_px)}</td>
@@ -3942,7 +3942,7 @@ function rClosed(){
   const body=D.closed.length?D.closed.map(p=>`<tr>
     <td style="color:var(--mut);font-size:10px">${esc(p.trade_date)}</td>
     <td>${tagChip(p.tag)}</td><td>${sideChip(p.side)}</td>
-    <td class="sym">${esc(p.symbol)}<span class="ibtn" onclick="tradeInfo('${p.id}')" title="Trade logic memory">i</span></td>
+    <td class="sym">${esc(p.symbol)}${window.ScorrRCard?ScorrRCard.pill(p.symbol):''}<span class="ibtn" onclick="tradeInfo('${p.id}')" title="Trade logic memory">i</span></td>
     <td>${num(p.entry_px)}</td><td>${num(p.exit_px)}</td>
     <td style="color:var(--mut);font-size:10px">${esc(p.exit_reason||'')}</td>
     <td style="font-size:10px;color:var(--dim)" title="entry ${esc(p.basis_entry_sign||'')}/${esc(p.basis_dir_entry||'')} → exit ${esc(p.basis_exit_sign||'')}/${esc(p.basis_dir_exit||'')}">${num(p.basis_entry_rs,1)}→${num(p.basis_exit_rs,1)}</td>

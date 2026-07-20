@@ -955,3 +955,121 @@ def pwa_mobile_css():
 def pwa_mobile_tables_js():
     # cc#330 P4: shared table helper, injected site-wide alongside mobile.css.
     return Response(MOBILE_TABLES_JS, media_type="application/javascript", headers=_NOCACHE)
+
+
+# cc#573 (spec id=6438): ONE shared Results "R" pill + card component, injected site-wide via
+# _MOBILE_HEAD. Any page adds ScorrRCard.pill(sym) (or a <span class="rcard-pill" data-sym="SYM">R</span>)
+# next to a symbol; a delegated click opens the modal and fetches /api/results/card?symbol=X
+# (built to cc#572's response contract). Degrades gracefully if that backend isn't deployed yet.
+RESULTS_CARD_JS = """
+(function(){
+  if (window.__scorrRCard) return; window.__scorrRCard = true;
+  var css = ''
+    + '.rcard-pill{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;'
+    + 'margin-left:6px;border-radius:4px;font:700 10px/1 Sora,system-ui,sans-serif;cursor:pointer;'
+    + 'color:var(--blu,#4D7CFE);background:rgba(77,124,254,.12);border:1px solid rgba(77,124,254,.35);'
+    + 'vertical-align:middle;user-select:none;flex:none}'
+    + '.rcard-pill:hover{background:rgba(77,124,254,.22)}'
+    + '.rcard-ov{position:fixed;inset:0;z-index:99999;background:rgba(8,12,24,.55);display:none;'
+    + 'align-items:center;justify-content:center;padding:16px}'
+    + '.rcard-ov.on{display:flex}'
+    + '.rcard{background:var(--card,#fff);color:var(--txt,#101828);border:1px solid var(--line,rgba(148,166,210,.2));'
+    + 'border-radius:14px;max-width:460px;width:100%;max-height:82vh;overflow:auto;'
+    + 'box-shadow:0 18px 60px rgba(10,18,36,.35);padding:18px}'
+    + '.rcard-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}'
+    + '.rcard-sym{font:800 16px/1.1 Sora,sans-serif}'
+    + '.rcard-x{border:none;background:none;color:var(--dim,#8892a6);font-size:22px;cursor:pointer;line-height:1}'
+    + '.rcard-status{display:inline-flex;align-items:center;gap:6px;font:700 10px/1 Sora,sans-serif;'
+    + 'text-transform:uppercase;letter-spacing:.06em;padding:4px 9px;border-radius:6px;margin-top:6px}'
+    + '.rcard-st-a{color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4)}'
+    + '.rcard-st-u{color:#c98a12;background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45)}'
+    + '.rcard-st-t{color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3)}'
+    + '.rcard-body{font-size:13px;line-height:1.55;white-space:pre-wrap;margin-top:6px}'
+    + '.rcard-lbl{font:700 10px/1 Sora,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--mut,#667085);margin:14px 0 5px}'
+    + '.rcard-note{font-size:11px;color:var(--dim,#8892a6);margin-top:8px}'
+    + '.rcard-btn{margin-top:12px;border:1px solid var(--blu,#4D7CFE);background:rgba(77,124,254,.1);'
+    + 'color:var(--blu,#4D7CFE);font:700 12px Sora,sans-serif;border-radius:8px;padding:8px 14px;cursor:pointer}'
+    + '.rcard-btn:disabled{opacity:.6;cursor:progress}'
+    + '.rcard-foot{margin-top:14px;padding-top:10px;border-top:1px solid var(--line,rgba(148,166,210,.2));'
+    + 'font-size:10.5px;color:var(--dim,#8892a6);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}'
+    + '.rcard-gvm{font:700 10px/1 Sora;color:var(--mut,#667085);margin-left:8px}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  var ov = document.createElement('div'); ov.className = 'rcard-ov';
+  ov.innerHTML = '<div class="rcard" role="dialog" aria-modal="true"></div>';
+  document.body.appendChild(ov);
+  var box = ov.querySelector('.rcard');
+  function close(){ ov.classList.remove('on'); }
+  ov.addEventListener('click', function(e){ if (e.target === ov) close(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c];}); }
+  function fmtDate(s){ if(!s) return 'TBD'; var d=new Date(String(s).replace(' ','T')); if(isNaN(d.getTime())) return esc(s);
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
+
+  var _cur = null;
+  function render(d, generating){
+    var sym = _cur, status = (d && d.status) || 'date_tbd', pill, cls;
+    if (status === 'announced' || status === 'announced_no_analysis'){ pill='Announced'; cls='rcard-st-a'; }
+    else if (status === 'upcoming'){ pill='Result due ' + fmtDate(d && d.ex_date); cls='rcard-st-u'; }
+    else { pill='Date TBD'; cls='rcard-st-t'; }
+    var h = '<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
+      + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
+      + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span></div>'
+      + '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button></div>';
+    if (status === 'announced'){
+      h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)+'</div>';
+      h += '<div class=\"rcard-lbl\">Result analysis</div><div class=\"rcard-body\">'+esc(d.result_analysis||'')+'</div>';
+    } else if (status === 'announced_no_analysis'){
+      h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)+'</div>';
+      h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Analysis pending.</div>';
+    } else {
+      h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>';
+      h += '<div style=\"font-size:13px\">'+(status==='upcoming'?fmtDate(d.ex_date):'TBD')+'</div>';
+      h += '<div class=\"rcard-lbl\">Scorr View &middot; FY27 Outlook</div>';
+      if (d && d.fy27_outlook){
+        h += '<div class=\"rcard-body\">'+esc(d.fy27_outlook)+'</div>';
+        h += '<div class=\"rcard-note\">Scorr-generated qualitative view from trailing fundamentals &mdash; not a broker estimate.</div>';
+        h += '<button class=\"rcard-btn\" data-gen=\"1\"'+(generating?' disabled':'')+'>'+(generating?'Refreshing...':'Refresh')+'</button>';
+      } else {
+        h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">No Scorr view yet.</div>';
+        h += '<button class=\"rcard-btn\" data-gen=\"1\"'+(generating?' disabled':'')+'>'+(generating?'Generating...':'Generate Scorr View')+'</button>';
+      }
+    }
+    var foot = [];
+    if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));
+    if (d && d.model) foot.push(esc(d.model));
+    if (foot.length) h += '<div class=\"rcard-foot\"><span>'+foot.join('</span><span>')+'</span></div>';
+    box.innerHTML = h;
+    box.querySelector('.rcard-x').addEventListener('click', close);
+    var gb = box.querySelector('[data-gen]'); if (gb) gb.addEventListener('click', function(){ load(sym, true); });
+  }
+  function renderMsg(msg){
+    box.innerHTML = '<div class=\"rcard-hd\"><div class=\"rcard-sym\">'+esc(_cur)+'</div>'
+      + '<button class=\"rcard-x\">&times;</button></div>'
+      + '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">'+esc(msg)+'</div>';
+    box.querySelector('.rcard-x').addEventListener('click', close);
+  }
+  function load(sym, gen){
+    _cur = sym;
+    if (gen) render({status:'upcoming', ex_date:null}, true);
+    fetch('/api/results/card?symbol='+encodeURIComponent(sym)+(gen?'&generate=true':''))
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ render(d, false); })
+      .catch(function(e){ renderMsg('Results card unavailable ('+e.message+'). The backend (cc#572) may still be deploying.'); });
+  }
+  function open(sym){ if(!sym) return; _cur=sym; box.innerHTML='<div class=\"rcard-body\">Loading '+esc(sym)+'...</div>'; ov.classList.add('on'); load(sym, false); }
+  document.addEventListener('click', function(e){
+    var p = e.target.closest ? e.target.closest('.rcard-pill') : null;
+    if (p && p.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); open(p.getAttribute('data-sym')); }
+  });
+  window.ScorrRCard = { open: open,
+    pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; } };
+})();
+"""
+
+
+@router.get("/results_card.js")
+def pwa_results_card_js():
+    # cc#573: shared Results "R" pill + card modal, injected site-wide alongside mobile.css.
+    return Response(RESULTS_CARD_JS, media_type="application/javascript", headers=_NOCACHE)

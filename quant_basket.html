@@ -369,7 +369,7 @@ async function showHoldings(body){
         <th>Symbol</th><th>Entry ₹</th><th>CMP ₹</th><th>Qty</th><th>Cost</th><th>Value</th><th>P&amp;L</th><th>%</th><th>GVM</th><th>Stop ₹</th>
       </tr></thead>
       <tbody>${data.map(r=>`<tr>
-        <td><strong>${r.symbol}</strong></td>
+        <td><strong>${r.symbol}</strong>${window.ScorrRCard?ScorrRCard.pill(r.symbol):''}</td>
         <td>${r.entry_price!=null?(+r.entry_price).toFixed(0):'—'}</td>
         <td>${r.current_price!=null?(+r.current_price).toFixed(0):'—'}</td>
         <td>${r.qty||'—'}</td>

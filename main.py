@@ -213,6 +213,7 @@ _MOBILE_HEAD = (
     b'<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">'
     b'<link rel="stylesheet" href="/static/mobile.css">'
     b'<script src="/mobile_tables.js" defer></script>'   # cc#330 P4: shared table helper
+    b'<script src="/results_card.js" defer></script>'    # cc#573: shared Results R-pill + card (site-wide)
 )
 
 @app.middleware("http")
