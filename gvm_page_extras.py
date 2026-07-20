@@ -246,6 +246,16 @@ def build_page_extras(symbol: str, ladder_symbols: List[str],
                 log.warning(f"vol bars failed {symbol}: {e}")
             extras["volume"] = vol_block or None
 
+            # cc#589: delivery % 30-trading-day trend for the V (view/detail) panel. Sourced from
+            # delivery_eod (NSE EOD, nightly cc#517). Fills progressively (began 20-Jul-2026); the
+            # frontend degrades gracefully with <30 days. Reuses the deriv_metrics helper (one source).
+            try:
+                from deriv_metrics import delivery_series as _deliv_series
+                extras["delivery"] = _deliv_series(cur, symbol, 30)
+            except Exception as e:
+                log.warning(f"delivery series failed {symbol}: {e}")
+                extras["delivery"] = None
+
             # ── 3. Pivot levels (rolling-5d, now universe-wide via universe pivots job)
             try:
                 cur.execute("""

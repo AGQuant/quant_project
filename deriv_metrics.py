@@ -949,8 +949,31 @@ def _delivery_block(cur, sym) -> Optional[Dict[str, Any]]:
     label = None
     if ratio is not None:
         label = "conviction" if ratio >= 1.2 else ("churn" if ratio <= 0.7 else None)
+    ser = delivery_series(cur, sym, 30)   # cc#589: 30-trading-day deliv% trend for the V-panel sparkline
     return {"d": str(d_latest), "deliv_pct": deliv_pct, "avg21": avg21, "avg21_n": n,
-            "ratio": ratio, "label": label, "traded_qty": traded_qty}
+            "ratio": ratio, "label": label, "traded_qty": traded_qty,
+            "series": ser["series"], "avg30": ser["avg"], "avg30_n": ser["n"]}
+
+
+def delivery_series(cur, sym, days=30):
+    """cc#589: last `days` trading days of deliv_pct for `sym`, oldest->newest, for the V-panel
+    trend sparkline. Degrades gracefully — returns whatever exists (delivery_eod began 20-Jul-2026,
+    so the 30d window fills progressively). avg = simple mean of the returned non-null points."""
+    try:
+        cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name='delivery_eod'")
+        if not cur.fetchone():
+            return {"series": [], "latest": None, "avg": None, "n": 0, "days": days}
+        cur.execute("""SELECT d, deliv_pct FROM delivery_eod
+                       WHERE symbol=%s AND deliv_pct IS NOT NULL
+                       ORDER BY d DESC LIMIT %s""", (sym, days))
+        rows = cur.fetchall()[::-1]   # oldest -> newest
+        series = [{"d": str(r[0]), "deliv_pct": round(float(r[1]), 1)} for r in rows]
+        vals = [p["deliv_pct"] for p in series]
+        avg = round(sum(vals) / len(vals), 1) if vals else None
+        return {"series": series, "latest": (vals[-1] if vals else None),
+                "avg": avg, "n": len(series), "days": days}
+    except Exception:
+        return {"series": [], "latest": None, "avg": None, "n": 0, "days": days}
 
 
 def _fo_banned_today(cur, sym) -> bool:
@@ -1072,6 +1095,24 @@ def check_oi_feed_degradation(conn) -> Dict[str, Any]:
         pct = round(stale / len(universe) * 100.0, 1)
         return {"checked": len(universe), "stale": stale, "pct": pct,
                 "cutoff_session": str(cutoff) if cutoff else None}
+
+
+@deriv_router.get("/api/delivery/series")
+def delivery_series_endpoint(symbol: str, days: int = 30):
+    """cc#589: deliv_pct trend (last `days` trading days) for the V/view-detail panel on the V8 +
+    GVM screens. Graceful partial history — returns whatever delivery_eod holds (fills progressively)."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        raise HTTPException(400, "symbol required")
+    days = max(1, min(int(days or 30), 120))
+    try:
+        with _conn() as conn, conn.cursor() as cur:
+            out = delivery_series(cur, sym, days)
+        out["symbol"] = sym
+        return out
+    except Exception as e:
+        return {"symbol": sym, "series": [], "latest": None, "avg": None, "n": 0, "days": days,
+                "error": str(e)}
 
 
 @deriv_router.get("/api/deriv-metrics/{symbol}")

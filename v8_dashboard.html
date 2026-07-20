@@ -1458,6 +1458,16 @@ function _dcVC(k,label,color,sub,tip){
   return `<div class="dc-vc" style="--vc:${_dcColor(color)}"${tt}><div class="k">${k}</div>`+
     `<div class="v" style="color:${_dcColor(color)}">${label}</div>${sub?`<div class="vs">${sub}</div>`:''}</div>`;
 }
+// cc#589: compact inline deliv% sparkline for the V-panel (degrades: <2 points -> caller shows text).
+function _delivSpark(series){
+  const pts=(series||[]).map(p=>p.deliv_pct).filter(v=>v!=null);
+  if(pts.length<2)return '';
+  const w=92,h=22,lo=Math.min.apply(null,pts),hi=Math.max.apply(null,pts),rng=(hi-lo)||1;
+  const xs=i=>i/(pts.length-1)*w, ys=v=>h-2-((v-lo)/rng)*(h-4);
+  const line=pts.map((v,i)=>xs(i).toFixed(1)+','+ys(v).toFixed(1)).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" style="width:${w}px;height:${h}px;vertical-align:middle">`
+    +`<polyline points="${line}" fill="none" stroke="var(--cyan)" stroke-width="1.4"/></svg>`;
+}
 function _dcR(k,vhtml,dhtml,meaning){
   // cc#516 Part B: optional 4th arg renders the server-built interpretation line (dim, italic)
   // under the row's existing sub-description -- template-driven server-side, never client recompute.
@@ -1605,6 +1615,14 @@ function _dcRender(sym,side,qty,entry,cmp,d){
       :(dv&&dv.deliv_pct!=null?`${num(dv.deliv_pct,1)}%`:'--'),
     dv&&dv.avg21!=null?`avg ${num(dv.avg21,1)}% (${dv.avg21_n}/21)`:'',
     dvMeaning||undefined);
+  // cc#589: Delivery % 30-trading-day trend sparkline (fills progressively; delivery_eod began 20-Jul).
+  if(dv&&dv.series&&dv.series.length){
+    const dn=dv.avg30_n||dv.series.length;
+    energy+=_dcR('Delivery &middot; 30d trend',
+      (_delivSpark(dv.series)||`<span class="dc-thin">building (${dn}/30)</span>`)
+        +(dv.avg30!=null?` <small>avg ${num(dv.avg30,1)}%</small>`:''),
+      `${dn}/30 sessions`, 'delivery % last 30 trading days');
+  }
   const ad=E.ad_21d;
   energy+=_dcR('A/D &middot; 21d',
     ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',

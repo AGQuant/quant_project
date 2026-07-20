@@ -417,7 +417,23 @@ function PivotLadder({ p, cmp }) {
   );
 }
 
-function VolumePanel({ va, volRatio }) {
+// cc#589: delivery % 30-trading-day trend sparkline. Degrades gracefully (<2 sessions -> text note).
+function DelivSpark({ series }) {
+  const pts = (series || []).map(p => p.deliv_pct).filter(v => v != null);
+  if (pts.length < 2) return (
+    <div style={{ fontSize: 12, color: C.muted }}>Building — need ≥2 sessions for a trend.</div>
+  );
+  const w = 280, h = 44, lo = Math.min(...pts), hi = Math.max(...pts), rng = (hi - lo) || 1;
+  const xs = i => i / (pts.length - 1) * w, ys = v => h - 3 - ((v - lo) / rng) * (h - 6);
+  const line = pts.map((v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: "100%", height: 44, display: "block" }}>
+      <polyline points={line} fill="none" stroke={C.accent} strokeWidth={1.6} />
+    </svg>
+  );
+}
+
+function VolumePanel({ va, volRatio, deliv }) {
   if (!va || !va.bars || !va.bars.length) return (
     <div style={{ fontSize: 13.5, color: C.muted, padding: 12 }}>No volume data.</div>
   );
@@ -455,6 +471,21 @@ function VolumePanel({ va, volRatio }) {
             {va.biggest_day.d} ({va.biggest_day.direction})</b></span>
         )}
       </div>
+      {deliv && deliv.series && deliv.series.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(148,166,210,.18)" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: C.accent }}>Delivery % · 30-day trend</span>
+            <span style={{ fontSize: 12.5, color: C.muted, fontFamily: "monospace" }}>
+              latest {deliv.latest != null ? deliv.latest + "%" : "—"}{deliv.avg != null ? " · avg " + deliv.avg + "%" : ""}
+            </span>
+            <span style={{ fontSize: 11.5, color: C.muted, marginLeft: "auto" }}>{deliv.n}/{deliv.days || 30} sessions</span>
+          </div>
+          <DelivSpark series={deliv.series} />
+          <div style={{ fontSize: 11.5, color: C.muted, marginTop: 4 }}>
+            Delivery % = shares taken to demat vs traded (NSE EOD) — a cleaner accumulation read than raw volume.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2002,7 +2033,7 @@ function GvmReport({ r, hist }) {
         </div>
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 13.5, fontWeight: 700, color: C.accent, marginBottom: 4 }}>30-Day Volume · Accumulation / Distribution</div>
-          <VolumePanel va={x.volume} volRatio={x.vol_ratio_10_30} />
+          <VolumePanel va={x.volume} volRatio={x.vol_ratio_10_30} deliv={x.delivery} />
         </div>
       </div>
 
