@@ -25,7 +25,11 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const API = "https://quantproject-production.up.railway.app";
+// cc#582: was hardcoded to the Railway production URL — when the serving domain changed
+// (scorr.in / rotated Railway host) EVERY fetch on this page went cross-origin and failed
+// (CORS/404), blanking GVM search AND the top-rated fallback. Same-origin relative = always
+// talks to whatever host served the page.
+const API = "";
 const MCP = `${API}/mcp`;
 
 async function mcpCall(tool, args = {}) {
