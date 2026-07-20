@@ -49,6 +49,7 @@ from v10_endpoints import router as v10_router
 from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
 from bt6_endpoints import router as bt6_router   # cc#544: V6 BT playground (read-mostly wrapper)
 from pcr_endpoints import router as pcr_router
+from options_chain_endpoints import router as options_chain_router   # cc#567: on-demand option chain
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
 from v8_backfill_endpoints import router as v8_backfill_router
@@ -267,6 +268,7 @@ app.include_router(v10_router)
 app.include_router(v14_router)   # cc#442
 app.include_router(bt6_router)   # cc#544: /api/bt6/* V6 BT playground
 app.include_router(pcr_router)
+app.include_router(options_chain_router)   # cc#567: GET /api/options/chain on-demand
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
 app.include_router(v8_backfill_router)

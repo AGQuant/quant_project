@@ -123,24 +123,21 @@ ATM_CHECK_MINS        = 15     # re-check ATM every 15 min
 ATM_DRIFT_STRIKES     = 2      # re-subscribe if ATM drifts by this many strikes
 N_STRIKES             = 30     # cc#320: INDEX options ATM±30 (61 strikes, was ±10/21) — fixes the
                                # PCR window-drift bias where strikes exited the tracked band as spot
-                               # moved and silently dropped their OI from the PCR sums. Index only
-                               # (NIFTY/BANKNIFTY); STOCK options stay STOCK_N_STRIKES=3. 7d retention
-                               # (purge_old_bars) already covers the wider band. Capacity: index
-                               # 84->244 contracts, feed total ~4170->~4330 (< ~5000 WS budget).
+                               # moved and silently dropped their OI from the PCR sums. cc#567: INDEX
+                               # ONLY (NIFTY/BANKNIFTY) — stock options are off the WS entirely now.
+                               # 7d retention (purge_old_bars) already covers the wider band.
 # cc#189 (founder redesign 04-Jul): options subscribe ONLY when live prices are
 # fresh. No boot/REST hydration — a cold-boot/pre-market restart just waits for
 # the market + a fresh cmp_prices tick set, then computes ATM from LIVE prices.
 OPT_FRESH_MIN_FRAC    = 0.80          # >=80% of option underlyings must have a fresh tick
 OPT_FRESH_WINDOW_MIN  = 10           # "fresh" = cmp_prices tick within the last N minutes
 OPT_SUB_DEADLINE      = dt_time(9, 30)  # still unsubscribed by this IST time -> CRITICAL alert
-OPT_STOCK_SUB_MIN_TIME = dt_time(9, 25)  # cc#241: HARD floor — no stock-option subscribe/write
-                                          # before 09:25 IST (10 min for the open to settle so ATM
-                                          # anchors on a real print). Index options are NOT gated.
-OPT_STOCK_OVERFLOW_FRAC = 0.95           # cc#241: <95% stock underlyings subscribed -> overflow alert
+# cc#567: stock options removed from the WS feed entirely (STOCK_OPTIONS_OFF_WS_ONDEMAND_CHAIN_V1,
+# session_log 6339). The 09:25 stock-subscribe floor, the <95% overflow alert, and the 09:30 stock
+# ATM OI poll floor (cc#241/cc#482) are gone with the stock leg. Stock chains are on-demand only
+# (GET /api/options/chain). Index options (NIFTY/BANKNIFTY ATM±30) are the WS's ONLY option leg.
 BAR_MINUTES           = 5      # 5-min system: all rolling intraday bars at 5-min granularity
 OI_POLL_MINS          = 5      # poll futures OI via DEPTH REST every N min (quotes has NO OI)
-STOCK_OI_POLL_MIN_TIME = dt_time(9, 30)  # cc#482 fix_5: stock ATM OI poll held off till 09:30 (skips
-                                          # the noisiest opening 15 min; index OI poll unaffected, still 09:15)
 CMP_FLUSH_MINS        = 5      # flush cmp_prices every N min (was 30s; throttled 14-Jun-2026)
 OI_CALL_SPACING_SEC   = 0.35   # ~170 req/min — under Fyers 200/min data limit
 
@@ -598,68 +595,11 @@ def _canary_symbols(conn, nse_codes, n):
     return nse_codes[:n]
 
 
-def get_top50_option_underlyings(conn):
-    """Top 50 futures stocks by mcap rank from input_raw."""
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT DISTINCT fu.symbol
-                FROM futures_universe fu
-                JOIN input_raw ir ON ir.nse_code = fu.symbol
-                WHERE fu.is_active = TRUE
-                  AND ir.mcap_rank <= 50
-                ORDER BY fu.symbol
-            """)
-            return [r[0] for r in cur.fetchall()]
-    except Exception as e:
-        log.warning(f"get_top50_option_underlyings: {e}")
-        return []
-
-
-STOCK_N_STRIKES = 3   # cc#155: stock options subscribe ATM±3 (index stays N_STRIKES=±10)
-
-
-def get_all_option_underlyings(conn):
-    """cc#155 (STOCK_OPTIONS_CHAIN_SPEC_V1, session_log 1173): ALL active futures-universe
-    stock underlyings for stock options, excluding indices/SKIP_SYMBOLS (+NIFTY50). Ordered
-    by mcap rank so a pilot/limit takes the most-liquid names first. Distinct from
-    get_top50_option_underlyings (hard-capped at 50)."""
-    try:
-        excl = list(SKIP_SYMBOLS | {'NIFTY50'})
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT fu.symbol
-                FROM futures_universe fu
-                LEFT JOIN input_raw ir ON ir.nse_code = fu.symbol
-                WHERE fu.is_active = TRUE
-                  AND fu.symbol <> ALL(%s)
-                ORDER BY COALESCE(ir.mcap_rank, 999999), fu.symbol
-            """, (excl,))
-            return [r[0] for r in cur.fetchall()]
-    except Exception as e:
-        log.warning(f"get_all_option_underlyings: {e}")
-        return []
-
-
-def _stock_options_config(conn):
-    """cc#155: runtime gate for stock options, read from app_config so scope can be scaled or
-    killed LIVE (no redeploy) — the phased rollout + kill-switch the spec's HARD 8/10 design
-    requires. Defaults DISABLED => index-only feed unchanged (14-Jun lock preserved).
-      stock_options_enabled = 'true'|'false'  (default false)
-      stock_options_limit   = int underlyings  (default 20 pilot; <=0 = all 209)
-      stock_options_n       = ATM± strikes     (default 3)"""
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT key, value FROM app_config WHERE key = ANY(%s)",
-                        (['stock_options_enabled', 'stock_options_limit', 'stock_options_n'],))
-            cfg = {k: v for k, v in cur.fetchall()}
-        enabled = str(cfg.get('stock_options_enabled', 'false')).strip().lower() == 'true'
-        limit = int(cfg.get('stock_options_limit') or 20)
-        n = int(cfg.get('stock_options_n') or STOCK_N_STRIKES)
-        return enabled, limit, n
-    except Exception as e:
-        log.warning(f"_stock_options_config: {e} — defaulting to index-only")
-        return False, 20, STOCK_N_STRIKES
+# cc#567: get_top50_option_underlyings / get_all_option_underlyings / _stock_options_config
+# and STOCK_N_STRIKES removed — stock options are off the WS feed entirely
+# (STOCK_OPTIONS_OFF_WS_ONDEMAND_CHAIN_V1, session_log 6339). The WS option leg is INDEX ONLY
+# (NIFTY/BANKNIFTY ATM±N_STRIKES). Stock option chains are fetched on-demand from Fyers REST via
+# GET /api/options/chain (options_chain_endpoints.py) — never subscribed, never persisted.
 
 
 def _cmp_fresh_fraction(opt_mgr, kind=None):
@@ -744,31 +684,18 @@ class OptionSymbolManager:
         self._underlyings = []
 
     def _build_underlyings(self):
-        # cc#155 (STOCK_OPTIONS_CHAIN_SPEC_V1, session_log 1173): index underlyings are ALWAYS
-        # present at ATM±N_STRIKES (±10). Stock underlyings (ATM±stock_n, default ±3) are
-        # ADDITIVE and config-gated via app_config (_stock_options_config). Default OFF keeps
-        # the 14-Jun INDEX-ONLY lock intact; an operator enables + scales the pilot LIVE (no
-        # redeploy) and can kill it instantly. Additive-only: stock options never displace the
-        # index/eq/fut subscription (the 06-Jul regression that zeroed index ATM±10).
+        # cc#567 (STOCK_OPTIONS_OFF_WS_ONDEMAND_CHAIN_V1, session_log 6339): the WS option leg is
+        # INDEX ONLY (NIFTY/BANKNIFTY) at ATM±N_STRIKES. Stock options are OFF the WS entirely —
+        # the old app_config-gated stock leg (cc#155/cc#241) that could add ~2,908 stock contracts
+        # to the subscribe (root of the 20-Jul cc#566 reconnect explosion / feed freeze) is removed.
+        # Stock chains are fetched on-demand from Fyers REST (GET /api/options/chain), never here.
         out = []
         for name, meta in INDEX_OPTION_UNDERLYINGS.items():
             out.append({'name': name, 'step': meta['step'], 'cmp_sym': meta['cmp_sym'],
                         'n': N_STRIKES, 'kind': 'index'})
-        enabled, limit, stock_n = _stock_options_config(self.conn)
-        n_stock = 0
-        if enabled:
-            index_names = set(INDEX_OPTION_UNDERLYINGS)
-            stocks = [s for s in get_all_option_underlyings(self.conn) if s not in index_names]
-            if limit and limit > 0:
-                stocks = stocks[:limit]
-            for s in stocks:
-                out.append({'name': s, 'step': None, 'cmp_sym': s, 'n': stock_n, 'kind': 'stock'})
-            n_stock = len(stocks)
         self._underlyings = out
-        log.info(f"OptionSymbolManager: {len(out)} underlyings "
-                 f"({len(INDEX_OPTION_UNDERLYINGS)} index"
-                 + (f" + {n_stock} stock ATM±{stock_n}, limit={limit}" if enabled
-                    else "-only; stock options disabled") + ")")
+        log.info(f"OptionSymbolManager: {len(out)} INDEX underlyings "
+                 f"(ATM±{N_STRIKES}; stock options off the WS — on-demand only, cc#567)")
 
     def _get_cmp(self, cmp_sym, allow_rest=False):
         # cc#189: the AUTOMATIC subscribe path uses LIVE cmp_prices only (allow_rest
@@ -898,8 +825,8 @@ class OptionSymbolManager:
     def subscribe_health(self, kind=None):
         """cc#189: (underlyings_total, underlyings_ok, missing_names, contracts) from the last
         build — drives the subscribed-vs-expected alert (an underlying with 0 contracts = a
-        miss). cc#241: kind filters to index-only / stock-only (the stock overflow alert reads
-        kind='stock')."""
+        miss). cc#567: only INDEX underlyings exist now (stock leg removed); the kind filter is
+        retained but effectively index-only."""
         per = getattr(self, 'built_per_underlying', {})
         names = [u['name'] for u in self._underlyings if (kind is None or u.get('kind') == kind)]
         if not names and kind is None:
@@ -911,48 +838,14 @@ class OptionSymbolManager:
         return total, ok, missing, contracts
 
     def index_option_syms(self, syms):
-        """cc#155: index-only subset of the given option syms — for OI depth polling. Stock
-        options are WS-ONLY, NO REST OI (spec 1173): ~2912 stock depth calls = ~27min, which
-        would blow the 5-min bar cadence. Index OI poll (~136 syms) stays unchanged."""
+        """cc#155: index-only subset of the given option syms — for OI depth polling. cc#567: the WS
+        now only ever carries index options, so this is effectively all of them, but the filter is
+        kept as a defensive guarantee that the OI poll never touches a non-index symbol."""
         idx = set(INDEX_OPTION_UNDERLYINGS)
         return [s for s in syms if (self.sym_map.get(s) or ('',))[0] in idx]
 
-    def stock_option_syms(self, syms):
-        """cc#375: stock-only subset of the given (subscribed) option syms — for a SEPARATE OI depth
-        poll so stock option_chain rows carry OI (the WS strips it; without this poll oi stays NULL
-        and the cockpit ATM OI d/d is always '--'). Complements index_option_syms. Bounded by the
-        subscribed set (app_config stock_options_limit, pilot default 20 underlyings ~= a few hundred
-        syms), which fits the 5-min bar; at full 209-stock scale the caller's separate lock lets a
-        long cycle skip gracefully rather than delay the index poll."""
-        idx = set(INDEX_OPTION_UNDERLYINGS)
-        return [s for s in syms if s in self.sym_map and (self.sym_map.get(s) or ('',))[0] not in idx]
-
-    def stock_atm_option_syms(self, syms):
-        """cc#482: ATM CE+PE ONLY per stock underlying, for the 5-min OI DEPTH POLL only — the
-        WS tick subscription (build_initial, still ATM+-stock_n) is UNCHANGED. Cuts stock OI
-        poll load ~86% (full chain -> ~2 strikes/stock) after the 13-Jul open-burst empty-body
-        incident. ATM is recomputed FRESH from live CMP on every call (not the 15-min-cached
-        atm_map) since intraday ATM drift matters at 5-min poll granularity."""
-        idx = set(INDEX_OPTION_UNDERLYINGS)
-        stock_syms = [s for s in syms if s in self.sym_map and (self.sym_map.get(s) or ('',))[0] not in idx]
-        by_under = {}
-        for s in stock_syms:
-            und = self.sym_map[s][0]
-            by_under.setdefault(und, []).append(s)
-        out = []
-        for u in self._underlyings:
-            if u.get('kind') != 'stock' or u['name'] not in by_under:
-                continue
-            cmp = self._get_cmp(u['cmp_sym'])
-            if not cmp:
-                continue
-            step = u['step'] or auto_step(cmp)
-            atm = atm_strike(cmp, step)
-            for s in by_under[u['name']]:
-                _, strike, otype, _ = self.sym_map[s]
-                if strike == atm:
-                    out.append(s)
-        return out
+    # cc#567: stock_option_syms / stock_atm_option_syms removed — the stock OI depth poll
+    # (cc#375/cc#482) is retired with the stock WS leg. Index OI poll (index_option_syms) stays.
 
     def check_atm_drift(self):
         """Returns (add_syms, remove_syms) if any ATM has drifted >= ATM_DRIFT_STRIKES."""
@@ -1474,7 +1367,7 @@ def poll_futures_oi(token, fut_syms, agg):
 
 
 _OPT_OI_POLL_LOCK = threading.Lock()
-_STOCK_OPT_OI_POLL_LOCK = threading.Lock()   # cc#375: separate lock so a slow stock OI cycle never blocks the index poll
+# cc#567: _STOCK_OPT_OI_POLL_LOCK removed — the separate stock OI poll (cc#375) is retired.
 
 
 # ── cc#473: in-process DEAD-TOKEN detector ────────────────────────────────────────
@@ -1529,9 +1422,9 @@ def poll_options_oi(token, opt_syms, opt_store, lock=None, label="index"):
     """
     Option OI via DEPTH REST. The WS feed strips OI (Fyers SDK pops the 'OI' field),
     so depth is the only live source — same pattern as poll_futures_oi.
-    Index cycle (~136 NIFTY+BANKNIFTY ATM+/-10 syms ~= 48s) fits inside the 5-min bar.
-    cc#375: also called for the SUBSCRIBED stock options (bounded by stock_options_limit)
-    on a SEPARATE lock/thread, so their option_chain rows carry OI instead of NULL.
+    Index cycle (NIFTY+BANKNIFTY ATM±N syms) fits inside the 5-min bar.
+    cc#567: the stock-option OI poll (cc#375/cc#482) is retired — stock options are off the WS
+    entirely, so this now only ever polls INDEX options. The lock/label params are kept generic.
     Latest OI -> opt_store.last_oi[fsym] -> attached on next option bar flush.
 
     cc#482 fix_3: 13-Jul incident — an empty-body/failed depth response was silently
@@ -2320,7 +2213,7 @@ def run(auth_code=None):
         last_health_log = None        # cc_task #84
         watchdog_rung   = 0           # cc#489: 0=healthy, 1=reconnect already tried this failure episode
         opt_subscribed       = False  # cc#189: INDEX options subscribed once live prices went fresh
-        opt_stock_subscribed = False  # cc#241: STOCK options subscribed once >=09:25 + cmp fresh
+        # cc#567: opt_stock_subscribed removed — stock options are off the WS (on-demand only).
         opt_deadline_alerted = False  # cc#189: fired the 09:30 not-subscribed CRITICAL once (per day)
         opt_gate_day         = None   # cc#189: reset the gate each trading day
         starvation_day       = None   # cc#228: fyers_eq starvation check fired once per trading day
@@ -2512,37 +2405,9 @@ def run(auth_code=None):
                             f"fresh for only {fresh:.0%} of underlyings (need {OPT_FRESH_MIN_FRAC:.0%})")
                         opt_deadline_alerted = True
 
-                # ── cc#241: STOCK options — HARD 09:25 floor, subscribed SEPARATELY from index
-                # so index goes early (above) and stocks anchor ATM off the settled 09:25 print.
-                # Config-gated (app_config, default OFF); founder flips enabled=true + limit=0 on
-                # a watched morning. Additive: never touches the index/eq/fut subscription.
-                if (not opt_stock_subscribed) and opt_subscribed and now.time() >= OPT_STOCK_SUB_MIN_TIME:
-                    s_enabled, s_limit, _s_n = _stock_options_config(conn)
-                    if s_enabled:
-                        s_fresh = _cmp_fresh_fraction(opt_mgr, kind='stock')
-                        if s_fresh >= OPT_FRESH_MIN_FRAC:
-                            try:
-                                new_stock = opt_mgr.build_initial(kind='stock')   # ATM off 09:25 print
-                                if new_stock:
-                                    _batched_subscribe(fyers_ws, new_stock, action='sub', label='stock-options-0925')
-                                    option_syms.extend(new_stock)
-                                    opt_stock_subscribed = True
-                                    s_total, s_ok, s_missing, s_contracts = opt_mgr.subscribe_health(kind='stock')
-                                    log.info(f"cc#241 STOCK options subscribed at {now.time().strftime('%H:%M')}: "
-                                             f"{s_contracts} contracts, {s_ok}/{s_total} underlyings "
-                                             f"(cmp fresh {s_fresh:.0%}, limit={s_limit})")
-                                    # decision_3: alert-only if the WS silently dropped subs (<95%).
-                                    if s_total and s_ok < OPT_STOCK_OVERFLOW_FRAC * s_total:
-                                        _log_feed_incident("stock_options_ws_overflow",
-                                            f"stock options: only {s_ok}/{s_total} underlyings subscribed "
-                                            f"({s_contracts} contracts, {len(s_missing)} missing) — WS may have "
-                                            f"silently dropped subs at scale. Reduce app_config "
-                                            f"stock_options_limit LIVE if needed (no redeploy).")
-                                else:
-                                    log.warning("cc#241 stock gate: enabled + fresh but built 0 stock option symbols")
-                            except Exception as e:
-                                if not _mark_db_error(e, 'cc#241 stock options subscribe'):
-                                    log.warning(f"cc#241 stock options subscribe failed: {e}")
+                # cc#567: the STOCK options subscribe block (cc#241, 09:25 floor + app_config gate)
+                # is removed — stock options are off the WS entirely. Only the INDEX subscribe gate
+                # above runs. Stock chains are fetched on-demand via GET /api/options/chain.
 
                 # Futures OI poll every OI_POLL_MINS via DEPTH API (quotes has NO OI).
                 # Background thread: 208 depth calls ≈ 75s — must not block flushes.
@@ -2554,19 +2419,8 @@ def run(auth_code=None):
                     threading.Thread(target=poll_options_oi,
                                      args=(token, opt_mgr.index_option_syms(list(option_syms)), opt_store),
                                      daemon=True).start()
-                    # cc#375: also poll OI for the SUBSCRIBED stock options (separate lock/thread so it
-                    # never delays the index poll). Without this their WS bars carry no OI -> option_chain
-                    # oi stays NULL and the cockpit ATM OI d/d is always '--'. Only when stock options are
-                    # actually subscribed; bounded by app_config stock_options_limit (pilot default 20).
-                    # cc#482 fix_1/fix_5: ATM CE+PE only (not the full subscribed chain — 13-Jul open-burst
-                    # empty-body incident), AND held off until STOCK_OI_POLL_MIN_TIME (09:30) — skips the
-                    # noisiest opening 15 min where Fyers depth-API empty-response rate is highest. Index
-                    # OI poll above is UNCHANGED (still fires at market open, full depth).
-                    if opt_stock_subscribed and now.time() >= STOCK_OI_POLL_MIN_TIME:
-                        threading.Thread(target=poll_options_oi,
-                                         args=(token, opt_mgr.stock_atm_option_syms(list(option_syms)), opt_store),
-                                         kwargs={"lock": _STOCK_OPT_OI_POLL_LOCK, "label": "stock"},
-                                         daemon=True).start()
+                    # cc#567: the separate stock-option OI poll (cc#375/cc#482) is retired with the
+                    # stock WS leg. Only the INDEX option OI poll (above) remains.
                     last_oi_poll = now_dt
 
                 # ATM drift check every ATM_CHECK_MINS
