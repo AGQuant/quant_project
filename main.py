@@ -48,6 +48,7 @@ from v9_endpoints import router as v9_router
 from v10_endpoints import router as v10_router
 from v14_endpoints import router as v14_router   # cc#442: V14 intraday engine
 from bt6_endpoints import router as bt6_router   # cc#544: V6 BT playground (read-mostly wrapper)
+from results_endpoints import router as results_router   # cc#572: Results "R" card backend (id=6438)
 from pcr_endpoints import router as pcr_router
 from v8_replay_endpoints import router as v8_replay_router
 from v8_intra_backtest_endpoints import router as backtest_router
@@ -267,6 +268,7 @@ app.include_router(v9_router)
 app.include_router(v10_router)
 app.include_router(v14_router)   # cc#442
 app.include_router(bt6_router)   # cc#544: /api/bt6/* V6 BT playground
+app.include_router(results_router)   # cc#572: /api/results/card (Results R-card backend)
 app.include_router(pcr_router)
 app.include_router(v8_replay_router)
 app.include_router(backtest_router)
@@ -1043,12 +1045,13 @@ def admin_refresh_status(x_admin_token: Optional[str] = Header(None)):
 def mark_refresh_complete(field: str, tier: str, count: int, x_admin_token: Optional[str] = Header(None)):
     _check_admin(x_admin_token); return rt.mark_refresh_complete(field, tier, count)
 
-_ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis"}
+_ALLOWED_CONTENT_FIELDS = {"overview", "key_takeaway", "result_analysis", "fy27_outlook"}   # cc#572
 _TOP500_ONLY_FIELDS = {"key_takeaway", "result_analysis"}
 _FIELD_TO_TS_COL = {
     "overview": "last_overview_updated",
     "key_takeaway": "last_takeaway_updated",
     "result_analysis": "last_result_analysis_updated",
+    "fy27_outlook": "last_fy27_outlook_updated",   # cc#572: manual override for the FY27 outlook
 }
 
 @app.post("/api/admin/content_update")
