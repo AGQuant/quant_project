@@ -24,7 +24,8 @@ from fastapi import APIRouter
 from nifty_dwm import live_nifty_dwm
 from r6_volume import volume_ratio
 from tc_v4_dual import (_f, _r, _derive, _gates, score_card, _verdict,
-                        STYLES, _ist, SPEC_REF, VERSION)
+                        STYLES, _ist, SPEC_REF, VERSION,
+                        _sector_aggs, _nifty_ret63)   # cc#586: R18/R19 sector + nifty-RS shared helpers
 
 router = APIRouter()
 _DB = os.getenv("DATABASE_URL", "")
@@ -76,13 +77,35 @@ def _load_bulk(cur):
     for s in syms:
         D[s]["v8"] = v8map.get(s, {k: None for k in vk})
 
-    # gvm score + segment
-    cur.execute("""SELECT DISTINCT ON (symbol) symbol, gvm_score, segment FROM gvm_scores
+    # gvm score + segment (+ v_score for R17 [cc#583 parity fix], m_score for R18)
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, gvm_score, segment, v_score, m_score FROM gvm_scores
                    WHERE symbol = ANY(%s) ORDER BY symbol, score_date DESC""", (syms,))
     for r in cur.fetchall():
         D[r[0]]["gvm_score"] = _f(r[1]); D[r[0]]["segment"] = r[2]
+        D[r[0]]["v_score"] = _f(r[3]); D[r[0]]["m_score"] = _f(r[4])
     for s in syms:
         D[s].setdefault("gvm_score", None); D[s].setdefault("segment", None)
+        D[s].setdefault("v_score", None); D[s].setdefault("m_score", None)
+
+    # cc#584/585/586: R19 nifty-RS (once) + R18 sector-M / R19 sector-RS (per distinct segment, cached
+    # via the SAME shared helper as the single loader -> identical numbers) + R20 ΔGVM180 (set-based).
+    nret63 = _nifty_ret63(cur)
+    _seg_cache = {}
+    for s in syms:
+        seg = D[s].get("segment")
+        if seg not in _seg_cache:
+            _seg_cache[seg] = _sector_aggs(cur, seg)
+        sa = _seg_cache[seg]
+        D[s]["sector_m"] = sa["sector_m"]
+        D[s]["sector_ret63"] = sa["sector_ret63"]
+        D[s]["sector_n_ret"] = sa["n_ret"]
+        D[s]["nifty_ret63"] = nret63
+    cur.execute("""SELECT DISTINCT ON (symbol) symbol, gvm_score FROM gvm_history
+                   WHERE symbol = ANY(%s) AND gvm_score IS NOT NULL AND score_date <= CURRENT_DATE - 180
+                   ORDER BY symbol, score_date DESC""", (syms,))
+    gh180 = {r[0]: _f(r[1]) for r in cur.fetchall()}
+    for s in syms:
+        D[s]["gvm180"] = gh180.get(s)
 
     # peers: segment totals minus self (same numbers as the single-symbol direct query)
     cur.execute("""

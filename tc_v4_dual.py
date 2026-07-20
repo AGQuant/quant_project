@@ -12,8 +12,9 @@ every derived-metric computation; the single-symbol loader (`_load_one`) and the
 `score_card`. That is the "scanner score == single-symbol score, exactly" guarantee — one rulebook,
 never duplicated.
 
-Verdict bands (cc#583, after R16 fib + R17 valuation added): BUY max 17 — STRONG >= 14 |
-VALID 11.5 to <14 | REJECT < 11.5. SELL max 15 — STRONG >= 12.5 | VALID 10 to <12.5 | REJECT < 10.
+Verdict bands (cc#586 CEILING FINAL, after R16 fib + R17 valuation + R18 momentum + R19 relative-
+strength + R20 GVM-trend): BUY max 22 — STRONG >= 18.5 | VALID 14.4 to <18.5 | REJECT < 14.4.
+SELL max 20 — STRONG >= 17.0 | VALID 12.9 to <17.0 | REJECT < 12.9.
 SELL side = v4.1 mirror (locked same session): G1 GVM skipped (v3.3.2 short convention); all rules
 mirrored per the spec's v4_1_sell_mirror table.
 Gates (cc#583): G1 GVM (BUY-only) + G3 futures/DTE are HARD (force REJECT). G2 earnings blackout is
@@ -257,11 +258,80 @@ def _derive(d):
         d["fib_swing_hi"] = d["fib_swing_lo"] = d["fib_pos"] = None
         d["fib_range_ok"] = False
 
+    # cc#584: stock 63d return (R19 relative strength). cc#585: ΔGVM-180d (R20 GVM trend).
+    d["ret63"] = _ret63(d.get("daily"))
+    _g0, _g180 = d.get("gvm_score"), d.get("gvm180")
+    d["dgvm180"] = (_g0 - _g180) if (_g0 is not None and _g180 is not None) else None
+
     # DTE to monthly expiry (G3)
     today = _ist().date()
     exp = _current_expiry(today)
     d["dte"] = (exp - today).days
     return d
+
+
+# ── shared loaders for R18/R19/R20 (cc#584/585/586) — called by BOTH the single loader and the
+#    batch scanner so scanner score == single-symbol score, exactly (SHARED-MODULE CONTRACT) ──
+
+def _ret63(daily):
+    """Stock 63-trading-day EOD-close return. None if fewer than 64 clean closes (recent listing)."""
+    closes = [b["close"] for b in (daily or []) if b.get("close") is not None]
+    if len(closes) < 64:
+        return None
+    c0, c63 = closes[-1], closes[-64]
+    return (c0 / c63 - 1.0) if c63 else None
+
+
+def _nifty_ret63(cur):
+    """NIFTY50 63-trading-day return from raw_prices (symbol=NIFTY50). Shared market-wide read."""
+    cur.execute("""SELECT close FROM raw_prices WHERE symbol='NIFTY50' AND close IS NOT NULL
+                   ORDER BY price_date DESC LIMIT 64""")
+    cl = [_f(r[0]) for r in cur.fetchall()]
+    if len(cl) < 64:
+        return None
+    return (cl[0] / cl[63] - 1.0) if cl[63] else None
+
+
+def _sector_aggs(cur, segment):
+    """mcap-weighted segment averages: m_score (R18 sector-M) + 63d return (R19 sector-RS). Same
+    mcap-weighting method as the sector GVM ratings, over all segment constituents (NOT self-excluded
+    — this is the sector benchmark, not a peer set). Returns {sector_m, sector_ret63, n_ret}."""
+    if not segment:
+        return {"sector_m": None, "sector_ret63": None, "n_ret": 0}
+    cur.execute("""
+        WITH seg AS (
+            SELECT g.symbol, g.m_score, g.market_cap
+            FROM gvm_scores g
+            WHERE g.segment=%s AND g.market_cap IS NOT NULL AND g.market_cap > 0
+              AND g.score_date = (SELECT MAX(score_date) FROM gvm_scores)
+        ),
+        pr AS (
+            SELECT s.symbol, s.m_score, s.market_cap,
+                   (SELECT close FROM raw_prices WHERE symbol=s.symbol AND close IS NOT NULL
+                    ORDER BY price_date DESC LIMIT 1) AS c0,
+                   (SELECT close FROM raw_prices WHERE symbol=s.symbol AND close IS NOT NULL
+                    AND price_date <= CURRENT_DATE - 63 ORDER BY price_date DESC LIMIT 1) AS c63
+            FROM seg s
+        )
+        SELECT
+            SUM(m_score*market_cap) FILTER (WHERE m_score IS NOT NULL)
+              / NULLIF(SUM(market_cap) FILTER (WHERE m_score IS NOT NULL), 0)                        AS w_m,
+            SUM((c0/c63-1.0)*market_cap) FILTER (WHERE c0 IS NOT NULL AND c63 IS NOT NULL AND c63>0)
+              / NULLIF(SUM(market_cap) FILTER (WHERE c0 IS NOT NULL AND c63 IS NOT NULL AND c63>0), 0) AS w_ret,
+            COUNT(*) FILTER (WHERE c0 IS NOT NULL AND c63 IS NOT NULL AND c63>0)                     AS n_ret
+        FROM pr
+    """, (segment,))
+    r = cur.fetchone() or (None, None, 0)
+    return {"sector_m": _f(r[0]), "sector_ret63": _f(r[1]), "n_ret": int(r[2] or 0)}
+
+
+def _dgvm180(cur, symbol):
+    """gvm_score ~180 calendar days ago (nearest score_date on/before today-180d) from gvm_history.
+    None if the symbol has no history that old (recent listing) -> R20 scores 0."""
+    cur.execute("""SELECT gvm_score FROM gvm_history WHERE symbol=%s AND gvm_score IS NOT NULL
+                   AND score_date <= CURRENT_DATE - 180 ORDER BY score_date DESC LIMIT 1""", (symbol,))
+    r = cur.fetchone()
+    return _f(r[0]) if r else None
 
 
 # ── data loader (single symbol) ──────────────────────────────────────────────────
@@ -294,12 +364,21 @@ def _load_one(cur, symbol):
             "sector_week", "sector_month", "day_1d"]
     d["v8"] = {k: _f(m[i]) for i, k in enumerate(keys)} if m else {k: None for k in keys}
 
-    cur.execute("""SELECT gvm_score, segment, v_score FROM gvm_scores WHERE symbol=%s
+    cur.execute("""SELECT gvm_score, segment, v_score, m_score FROM gvm_scores WHERE symbol=%s
                    ORDER BY score_date DESC LIMIT 1""", (symbol,))
     g = cur.fetchone()
     d["gvm_score"] = _f(g[0]) if g else None
     d["segment"] = g[1] if g else None
     d["v_score"] = _f(g[2]) if g else None  # cc#583: V-pillar for R17 Valuation rule
+    d["m_score"] = _f(g[3]) if g else None  # cc#586: stock M for R18 Momentum
+
+    # cc#584/585/586: R18 sector-M + R19 sector-RS + nifty-RS + R20 ΔGVM180 inputs (shared helpers)
+    _sa = _sector_aggs(cur, d["segment"])
+    d["sector_m"] = _sa["sector_m"]
+    d["sector_ret63"] = _sa["sector_ret63"]
+    d["sector_n_ret"] = _sa["n_ret"]
+    d["nifty_ret63"] = _nifty_ret63(cur)
+    d["gvm180"] = _dgvm180(cur, symbol)
 
     d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
     if d["segment"]:
@@ -728,21 +807,71 @@ def _rules(d, style, side):
         vreq = "V >= 7.5 (6.0-7.5 = 0.5, < 6.0 = 0)"
     out.append(_R("R17", "Valuation (V)", vc, {"v_score": _r(vsc)}, required=vreq))
 
+    # R18 — Momentum (stock-M + mcap-weighted sector-M). cc#586 (id=6624). BUY rewards strong momentum
+    # both; SELL MIRRORED around the scale-midpoint (weak momentum = short candidate).
+    sm = d.get("m_score"); secm = d.get("sector_m")
+    if BUY:
+        c1 = (sm is not None and sm >= 7.5); c2 = (secm is not None and secm >= 7.0)
+        r18req = "stock M>=7.5 AND sector M>=7 (one = 1)"
+    else:
+        c1 = (sm is not None and sm <= 2.5); c2 = (secm is not None and secm <= 3.0)
+        r18req = "stock M<=2.5 AND sector M<=3 (mirror; one = 1)"
+    r18 = 2.0 if (c1 and c2) else (1.0 if (c1 or c2) else 0.0)
+    out.append(_R("R18", "Momentum (stock+sector M)", r18,
+                  {"m": _r(sm), "sector_m": _r(secm)}, required=r18req))
+
+    # R19 — Relative Strength (63d stock return vs mcap-weighted sector + vs NIFTY50). cc#584 (id=6622).
+    # SELL MIRRORED (a laggard scores high). Sector fallback: <3 clean-63d constituents -> nifty-only
+    # (effective max 1). No 63d stock history (recent listing) -> 0.
+    rst = d.get("ret63"); rnif = d.get("nifty_ret63"); rsec = d.get("sector_ret63")
+    sec_ok = (rsec is not None and (d.get("sector_n_ret") or 0) >= 3)
+    if rst is None:
+        r19 = 0.0; r19req = "no 63d history -> 0"
+        r19ev = {"ret63": None}
+    else:
+        rs_nif = (rst - rnif) if rnif is not None else None
+        rs_sec = (rst - rsec) if sec_ok else None
+        if BUY:
+            r19 = float(sum(1 for x in (rs_sec, rs_nif) if x is not None and x > 0))
+        else:  # mirror: lagging both = 2
+            r19 = float(sum(1 for x in (rs_sec, rs_nif) if x is not None and x < 0))
+        r19req = ("RS vs sector & nifty (both>0=2 / one=1 / SELL mirror: lagging)"
+                  if sec_ok else "sector <3 clean peers -> NIFTY-only (max 1)")
+        r19ev = {"ret63_pct": _r(rst * 100), "rs_nifty_pct": _r(rs_nif * 100) if rs_nif is not None else None,
+                 "rs_sector_pct": _r(rs_sec * 100) if rs_sec is not None else None,
+                 "sector_n": d.get("sector_n_ret")}
+    out.append(_R("R19", "Relative strength (63d)", r19, r19ev, required=r19req))
+
+    # R20 — GVM trend (ΔGVM 180d, graduated). cc#585 (id=6623). SELL MIRRORED (deteriorating quality =
+    # good short). No 180d history -> 0.
+    dg = d.get("dgvm180")
+    if dg is None:
+        r20 = 0.0; r20req = "no 180d history -> 0"
+    elif BUY:
+        r20 = 1.0 if dg > 0.5 else (0.5 if dg >= 0 else 0.0)
+        r20req = "ΔGVM180 >0.5=1 / 0-0.5=0.5 / <0=0"
+    else:
+        r20 = 1.0 if dg < -0.5 else (0.5 if dg <= 0 else 0.0)
+        r20req = "ΔGVM180 <-0.5=1 / -0.5-0=0.5 / >0=0 (mirror)"
+    out.append(_R("R20", "GVM trend (Δ180d)", r20, {"dgvm180": _r(dg)}, required=r20req))
+
     return out
 
 
 def _verdict(score, side="BUY"):
-    # cc#410 (id=3019): R16 fib added -> max BUY 16 / SELL 14.
-    # cc#583: R17 Valuation added (+1) -> max BUY 17 / SELL 15; STRONG floor +1, VALID floor +1.
-    if side == "SELL":   # max 15
-        if score >= 12.5:
+    # cc#410: R16 fib -> BUY 16 / SELL 14. cc#583: R17 (+1) -> 17 / 15.
+    # cc#586 CEILING FINAL (id=6625): R18 (+2) + R19 (+2) + R20 (+1) -> FINAL_MAX BUY 22 / SELL 20.
+    # STRONG BUY>=18.5 / SELL>=17.0 (proportional strictness + R20 +0.5 bump). VALID floor = original
+    # v3.3.2 floor ratio-scaled (BUY 10.5*1.375=14.44 -> 14.4 ; SELL 9*1.429=12.86 -> 12.9).
+    if side == "SELL":   # max 20
+        if score >= 17.0:
             return "STRONG"
-        if score >= 10:
+        if score >= 12.9:
             return "VALID"
         return "REJECT"
-    if score >= 14:      # BUY max 17
+    if score >= 18.5:    # BUY max 22
         return "STRONG"
-    if score >= 11.5:
+    if score >= 14.4:
         return "VALID"
     return "REJECT"
 
@@ -752,14 +881,14 @@ def score_card(d, style, side):
     cc#400: SELL drops R6+R14. cc#410: R16 fib added to both -> max BUY 16 / SELL 14, bands rescaled."""
     rules = _rules(d, style, side)
     score = round(sum(r["credit"] for r in rules), 2)
-    max_score = 15 if side == "SELL" else 17  # cc#583: R17 Valuation +1 (was 14 / 16)
+    max_score = 20 if side == "SELL" else 22  # cc#586 CEILING FINAL: R17+R18+R19+R20 (was 15 / 17)
     card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
             "score": score, "max": max_score, "verdict": _verdict(score, side), "rules": rules}
     if side == "SELL":
         card["recal"] = "RECALIBRATED 12-JUL"
-        card["bands"] = "STRONG≥12.5 / VALID 10–12.5 / REJECT<10"
+        card["bands"] = "STRONG≥17.0 / VALID 12.9–17.0 / REJECT<12.9"
     else:
-        card["bands"] = "STRONG≥14 / VALID 11.5–14 / REJECT<11.5"
+        card["bands"] = "STRONG≥18.5 / VALID 14.4–18.5 / REJECT<14.4"
     return card
 
 
@@ -984,10 +1113,10 @@ def v4_dual_health():
         "version": VERSION, "spec_ref": SPEC_REF,
         "model": "dual-style: MOMENTUM + REVERSAL card per side, higher wins",
         "gates": "G1 GVM>=6.5 (BUY only) · G3 futures & DTE>=3 [HARD] · G2 earnings = advisory amber (cc#583)",
-        "rules": "BUY 17 (R1-R17) · SELL 15 (drops R6+R14, +R17)",
-        "max_score": {"BUY": 17, "SELL": 15},
-        "verdict": {"BUY": {"STRONG": ">=14", "VALID": "11.5 to <14", "REJECT": "<11.5"},
-                    "SELL": {"STRONG": ">=12.5", "VALID": "10 to <12.5", "REJECT": "<10"}},
+        "rules": "BUY R1-R20 (max 22) · SELL drops R6+R14 (max 20); +R17 val +R18 mom +R19 RS +R20 ΔGVM",
+        "max_score": {"BUY": 22, "SELL": 20},
+        "verdict": {"BUY": {"STRONG": ">=18.5", "VALID": "14.4 to <18.5", "REJECT": "<14.4"},
+                    "SELL": {"STRONG": ">=17.0", "VALID": "12.9 to <17.0", "REJECT": "<12.9"}},
         "sides": {"BUY": "long", "SELL": "v4.1 mirror (GVM gate skipped)"},
         "status": "ok",
     }

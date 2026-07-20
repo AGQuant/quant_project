@@ -687,7 +687,7 @@
         <tbody id="scrBody"></tbody></table>
       <div id="moversWrap" style="display:none"></div>
     </div>
-    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; BUY STRONG&ge;14 / SELL STRONG&ge;12.5 (max 17 / 15, incl R16 fib + R17 valuation).</div>
+    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; BUY STRONG&ge;18.5 / SELL STRONG&ge;17.0 (max 22 / 20, incl R16 fib + R17-R20).</div>
   </div>
 
   <!-- chip popup -->
@@ -973,7 +973,22 @@ const TC_RULE_DEFS={
     BM:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
     BR:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
     SM:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
-    SR:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']]}
+    SR:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']]},
+  R18:{n:'R18 · Momentum (stock + sector M)',m:'Stock Momentum pillar (gvm_scores.m_score) paired with the mcap-weighted sector-M. BUY rewards strong momentum on both; SELL is mirrored around the scale mid-point (weak momentum = short candidate).',s:'gvm_scores.m_score + mcap-weighted segment avg m_score',w:'Momentum confirmed at both the stock and sector level is a higher-conviction trend than either alone.',
+    BM:[['2','stock M ≥ 7.5 AND sector M ≥ 7'],['1','exactly one'],['0','neither']],
+    BR:[['2','stock M ≥ 7.5 AND sector M ≥ 7'],['1','exactly one'],['0','neither']],
+    SM:[['2','stock M ≤ 2.5 AND sector M ≤ 3'],['1','exactly one'],['0','neither']],
+    SR:[['2','stock M ≤ 2.5 AND sector M ≤ 3'],['1','exactly one'],['0','neither']]},
+  R19:{n:'R19 · Relative Strength (63d)',m:'63-trading-day price return vs the mcap-weighted sector return AND vs NIFTY50. BUY rewards out-performance of both; SELL is mirrored (a laggard scores high). Thin segment (<3 clean-63d peers) → NIFTY-only (max 1). No 63d history → 0.',s:'raw_prices 63d return: stock vs mcap-weighted segment vs NIFTY50',w:'Beating both the sector and the index is the cleanest read on genuine relative leadership.',
+    BM:[['2','RS vs sector > 0 AND RS vs NIFTY > 0'],['1','exactly one'],['0','neither']],
+    BR:[['2','RS vs sector > 0 AND RS vs NIFTY > 0'],['1','exactly one'],['0','neither']],
+    SM:[['2','lagging sector AND NIFTY (RS < 0 both)'],['1','exactly one'],['0','neither']],
+    SR:[['2','lagging sector AND NIFTY (RS < 0 both)'],['1','exactly one'],['0','neither']]},
+  R20:{n:'R20 · GVM Trend (Δ 180d)',m:'Change in GVM score vs ~180 days ago (gvm_history). Graduated, not a hard gate — ports the QuantBasket ΔGVM(180d) signal into TC. SELL mirrored (deteriorating quality = good short).',s:'gvm_history (nearest score_date on/before today−180d)',w:'A rising quality score confirms the thesis is strengthening; a falling one warns it is fading.',
+    BM:[['1','Δ > +0.5'],['0.5','0 to +0.5'],['0','< 0 (or no 180d history)']],
+    BR:[['1','Δ > +0.5'],['0.5','0 to +0.5'],['0','< 0 (or no 180d history)']],
+    SM:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']],
+    SR:[['1','Δ < −0.5'],['0.5','−0.5 to 0'],['0','> 0 (or no 180d history)']]}
 };
 // cc#588: Investment Check v3.0 — Gate + Conviction rule definitions.
 // 3 hard gates (G1-G3, pass/fail disqualifiers) + 12 weighted conviction filters (F1-F12, graded).
@@ -1032,7 +1047,7 @@ function tcRuleInfo(rule, side, style){
   const vk=(side==='SELL'?'S':'B')+(style==='REVERSAL'?'R':'M');
   const bands=d[vk]||[];
   const variantLbl=(side==='SELL'?'SELL':'BUY')+' · '+(style==='REVERSAL'?'Reversal':'Momentum');
-  const bandHtml=bands.map(b=>{const cls=b[0]==='1'?'g':b[0]==='0.5'?'a':'r';
+  const bandHtml=bands.map(b=>{const cls=(b[0]==='2'||b[0]==='1')?'g':b[0]==='0.5'?'a':'r';
     return '<div class="tcinfo-band '+cls+'"><b>'+b[0]+'</b><span>'+b[1]+'</span></div>';}).join('');
   document.getElementById('tcInfoBox').innerHTML=
     '<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
@@ -1142,7 +1157,7 @@ function renderV4Dual(d, uiMode){
     + '</div>'
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
-    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?15:17))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥12.5 / VALID 10–12.5 / REJECT&lt;10':'STRONG≥14 / VALID 11.5–14 / REJECT&lt;11.5'))+'</div>'
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?20:22))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥17.0 / VALID 12.9–17.0 / REJECT&lt;12.9':'STRONG≥18.5 / VALID 14.4–18.5 / REJECT&lt;14.4'))+'</div>'
     +   '<div class="v4-gates">'+gatesHtml+'</div>'
     + '</div></div>'
     + gatedBanner
@@ -1204,7 +1219,7 @@ function renderTcDetail(box, d, uiMode){
     ? '<div class="v4-amber">⚠ '+(_eb.label||'Results imminent')+' — earnings inside 3 days; verdict stands, trade around the print.</div>' : '';
   const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'+d.best_verdict
     +(d.best_label?' · '+d.best_label:'')+'</div><div class="v4-best">'+d.symbol+' · '+(SELL?'▼ SHORT':'▲ LONG')
-    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?15:17))
+    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?20:22))
     +' · evidence audits the '+style+' card</div></div>'+gatedBanner+amberBanner;
 
   // R1 mood
@@ -1794,7 +1809,7 @@ function runScreen(){
   const card=panel.querySelector('.card');
   card.innerHTML =
     '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
-    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17 valuation); the higher card wins with its style label. BUY STRONG≥14 (max 17) / SELL STRONG≥12.5 (max 15). Tap a row for the full dual scorecard.</div>'
+    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17-R20); the higher card wins with its style label. BUY STRONG≥18.5 (max 22) / SELL STRONG≥17.0 (max 20). Tap a row for the full dual scorecard.</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<button class="v4-sw buy'+(v4BUY?' on':'')+'" id="v4swBuy" onclick="v4Toggle(\'BUY\')">&#9650; Buy</button>'
     +   '<button class="v4-sw sell'+(v4SELL?' on':'')+'" id="v4swSell" onclick="v4Toggle(\'SELL\')">&#9660; Sell</button>'
@@ -1881,7 +1896,7 @@ function setUniverse(u){
   scrMode='screener';scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · BUY STRONG≥14 (max 17) / SELL STRONG≥12.5 (max 15) · incl R16 fib + R17 valuation.';
+  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · BUY STRONG≥18.5 (max 22) / SELL STRONG≥17.0 (max 20) · incl R16 fib + R17-R20.';
   syncScrTabs();
   if(scrCache[u])renderScreen();
   else loadScreen(u);
