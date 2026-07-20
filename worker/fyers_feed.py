@@ -479,12 +479,28 @@ def _rest_quote_ok(token):
         return False, f'exc:{e}'
 
 
+def _rest_quote_ok_settle(token, tries=4, delay=3):
+    """cc#564: a freshly-minted Fyers access_token frequently returns an EMPTY body on the
+    data-REST quote endpoint for a few seconds before it propagates server-side. The boot self-test
+    ran the instant after the mint, saw the empty body, and declared the token DEAD -> os._exit(1) ->
+    Railway restart-loop that never recovered (20-Jul incident). Retry the SBIN self-test a few times
+    with a short backoff before treating empty/exception as a genuinely dead token."""
+    detail = 'EMPTY_BODY'
+    for i in range(max(1, tries)):
+        ok, detail = _rest_quote_ok(token)
+        if ok:
+            return True, detail
+        if i < tries - 1:
+            time.sleep(delay)
+    return False, detail
+
+
 def _boot_auth_selfcheck(conn, token):
     """cc#339 fix_2: BEFORE subscribing, prove the token can actually fetch a REST quote. On failure:
     CRITICAL log + ops_log(feed_token_dead) alert, retry auto-login ONCE, and if still dead exit(1)
     so Railway's restart-loop + the alert make it LOUD instead of silent warning spam. Returns the
     (possibly refreshed) valid token."""
-    ok, detail = _rest_quote_ok(token)
+    ok, detail = _rest_quote_ok_settle(token)   # cc#564: tolerate fresh-token propagation delay
     if ok:
         log.info("BOOT AUTH OK — REST quote self-test passed (NSE:SBIN-EQ)")
         _ops_log(conn, 'info', 'feed_boot_ok',
@@ -510,11 +526,14 @@ def _boot_auth_selfcheck(conn, token):
         _ops_log(conn, 'alert', 'feed_token_dead',
                  {'stage': 'relogin_exception', 'detail': str(e)[:180], 'ist': _ist_now_str()})
         os._exit(1)
-    ok2, detail2 = _rest_quote_ok(token)
+    ok2, detail2 = _rest_quote_ok_settle(token)   # cc#564: fresh token — allow propagation settle
     if ok2:
         log.info("BOOT AUTH OK after re-login — REST quote self-test passed")
         _ops_log(conn, 'info', 'feed_boot_ok',
                  {'selftest': 'NSE:SBIN-EQ', 'result': 'ok_after_relogin', 'ist': _ist_now_str()})
+        # cc#564: explicit, DATA-observable proof a fresh token was minted AND verified live.
+        _ops_log(conn, 'info', 'token_reminted_live',
+                 {'stage': 'boot_selfcheck', 'selftest': 'NSE:SBIN-EQ:ok', 'ist': _ist_now_str()})
         return token
     log.critical("TOKEN STILL DEAD after re-login — os._exit(1) so the failure is LOUD (Railway "
                  "restart-loop + feed_token_dead alert) rather than 2900 silent 'Expecting value' warns")
@@ -2295,6 +2314,10 @@ def run(auth_code=None):
             _ops_log(conn, 'info', 'feed_auth',
                      {'event': 'relogin_ok', 'reason': reason, 'recovery': 'reboot_reuses_fresh_token',
                       'ist': _ist_now_str()})
+            # cc#564: DATA-observable re-mint marker (the reboot's boot self-test then confirms live).
+            _ops_log(conn, 'info', 'token_reminted_live',
+                     {'stage': 'self_heal', 'reason': reason, 'verify': 'on_reboot_selftest',
+                      'ist': _ist_now_str()})
             log.info("cc#473 relogin OK — restarting to rebuild WS on the fresh token (reused, no re-auth)")
             _hard_restart(f"token self-heal — fresh token minted ({reason})")
             return  # not reached (execv)
@@ -2403,14 +2426,27 @@ def run(auth_code=None):
                 try:
                     row = load_tokens(conn)
                     created = row[2] if row else None
-                    if not (created and created.date() == today):
+                    if is_trading_day(today):
+                        # cc#564: UNCONDITIONAL fresh TOTP mint before the open on TRADING days.
+                        # The open must never depend on an overnight/weekend-surviving token — the
+                        # 20-Jul incident was a Sunday-minted token reused Monday whose data-endpoint
+                        # quotes came back empty. A pre-open (09:05<t<09:15) mint + clean reboot lands
+                        # a guaranteed-fresh, self-tested token before the 09:15 first tick.
+                        _ops_log(conn, 'info', 'feed_auth',
+                                 {'event': 'preopen_unconditional_remint',
+                                  'token_created': str(created) if created else None, 'ist': _ist_now_str()})
+                        log.info("cc#564 09:05 pre-open UNCONDITIONAL fresh token mint (trading day)")
+                        _self_heal_token('09:05 pre-open unconditional fresh mint (trading day)')
+                    elif not (created and created.date() == today):
+                        # Non-trading day: keep the cc#540 behaviour — mint only if the token isn't
+                        # from today (weekend research/backfill needs a live token, but no forced churn).
                         _ops_log(conn, 'alert', 'feed_auth',
                                  {'event': 'stale_token_0905',
                                   'token_created': str(created) if created else None, 'ist': _ist_now_str()})
-                        log.warning(f"cc#473 09:05 staleness: token created {created} (not today) — re-login before open")
+                        log.warning(f"cc#473 09:05 staleness: token created {created} (not today) — re-login")
                         _self_heal_token('09:05 daily staleness — token not from today')
                     else:
-                        log.info("cc#473 09:05 staleness check OK — token is from today")
+                        log.info("cc#473 09:05 staleness check OK — token is from today (non-trading day)")
                 except Exception as _sc:
                     if not _mark_db_error(_sc, '09:05 staleness check'):
                         log.warning(f"cc#473 09:05 staleness check failed (non-fatal): {_sc}")
