@@ -16,7 +16,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 from native_trade_check import compute_trade_check, compute_single_rule
-from invest_check import compute_invest_check
+from investment_check import compute_invest_check   # cc#588: v3.0 engine (was invest_check v2.0, retired)
 
 router = APIRouter()
 

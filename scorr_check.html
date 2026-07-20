@@ -235,6 +235,21 @@
   .inv-score-card.accumulate .inv-bar-fill{background:var(--cyan)}
   .inv-score-card.watch .inv-bar-fill{background:var(--amber)}
   .inv-score-card.avoid .inv-bar-fill{background:var(--red)}
+  /* cc#588 — v3.0 gate+conviction verdicts */
+  .inv-badge.strong-invest{background:var(--grn-d);color:var(--grn);border:1px solid var(--grn-b)}
+  .inv-badge.invest{background:var(--cyan-d);color:var(--cyan);border:1px solid #a5d8e8}
+  .inv-badge.watch{background:var(--amber-d);color:var(--amber);border:1px solid var(--amber-b)}
+  .inv-badge.avoid{background:var(--red-d);color:var(--red);border:1px solid var(--red-b)}
+  .inv-score-card.strong-invest{background:var(--grn-d);border-color:var(--grn-b)}
+  .inv-score-card.invest{background:var(--cyan-d);border-color:#a5d8e8}
+  .inv-score-card.strong-invest .inv-verdict-label{color:var(--grn)}
+  .inv-score-card.invest .inv-verdict-label{color:var(--cyan)}
+  .inv-score-card.strong-invest .inv-score-pill{color:var(--grn)}
+  .inv-score-card.invest .inv-score-pill{color:var(--cyan)}
+  .inv-score-card.strong-invest .inv-bar-fill{background:var(--grn)}
+  .inv-score-card.invest .inv-bar-fill{background:var(--cyan)}
+  .inv-gate-row td{background:rgba(120,140,180,.07)}
+  .inv-grouphdr td{font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim);padding:8px 10px 3px;font-weight:700;border:none}
   .inv-bar-sub{font-size:10px;color:var(--mut);display:flex;justify-content:space-between}
   .inv-rules-table{width:100%;border-collapse:separate;border-spacing:0;
     border:1px solid var(--line2);border-radius:9px;overflow:hidden;font-size:11.5px}
@@ -625,14 +640,14 @@
         </div>
         <div class="inv-bar-track"><div class="inv-bar-fill" id="invBarFill"></div></div>
         <div class="inv-bar-sub">
-          <span id="invBarSub">0 / 12 rules passed</span>
+          <span id="invBarSub">Conviction 0 / 15 · Gates 0/3</span>
           <span id="invBand"></span>
         </div>
       </div>
     </div>
     <div class="card" style="padding:14px 18px">
       <div class="tier-label">
-        <span>Investment Check v1.0 &mdash; 12 Rules</span>
+        <span>Investment Check v3.0 &mdash; 3 Gates + 12 Conviction Filters</span>
         <span class="tier-score" id="invRuleScore"></span>
       </div>
       <table class="inv-rules-table">
@@ -647,7 +662,7 @@
       <div style="margin-top:12px"><button class="v4-detail-btn" id="invDetailBtn">⊞ View Detailed — rule-by-rule evidence</button></div>
       <div class="v4-detail" id="invDetail"></div>
     </div>
-    <div class="foot">Investment Check v1.0 &middot; GVM-native &middot; Medium-long term holding &middot; Not a trade signal</div>
+    <div class="foot">Investment Check v3.0 &middot; Gate + Conviction &middot; GVM-native &middot; Medium-long term holding &middot; Not a trade signal</div>
   </div>
 
   <!-- Screener / Intraday Result -->
@@ -960,43 +975,51 @@ const TC_RULE_DEFS={
     SM:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
     SR:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']]}
 };
-// cc#456: Investment Check v1.0 rule definitions (12 rules, single-sided — no B/S variants).
-// Mirrors TC_RULE_DEFS shape (n/m/s/w) but a flat single-band list since every rule is a
-// plain pass/fail threshold (no partial-credit tiers exist in investment_check.py).
+// cc#588: Investment Check v3.0 — Gate + Conviction rule definitions.
+// 3 hard gates (G1-G3, pass/fail disqualifiers) + 12 weighted conviction filters (F1-F12, graded).
+// Peer comparisons (F3/F4/F5/F6/F10) are vs the TOP-3 highest-GVM peers in the segment (self-excluded).
 const INVEST_RULE_DEFS={
-  R1:{n:'R1 · GVM Score',m:'Composite Growth+Value+Momentum score.',s:'gvm_scores.gvm_score',w:'A single top-line quality gate before any deeper fundamental check.',
-    b:[['pass','GVM ≥ 7.0'],['fail','GVM < 7.0']]},
-  R2:{n:'R2 · Value Score (V)',m:'GVM\'s valuation pillar — cheapness vs history/peers.',s:'gvm_scores.v_score',w:'Long-term holds should not be bought expensive relative to their own valuation history.',
-    b:[['pass','V-score ≥ 6.0'],['fail','V-score < 6.0']]},
-  R3:{n:'R3 · Momentum Score (M)',m:'GVM\'s momentum pillar — price/technical strength.',s:'gvm_scores.m_score',w:'Even a buy-and-hold entry benefits from not fighting the prevailing trend.',
-    b:[['pass','M-score ≥ 6.0'],['fail','M-score < 6.0']]},
-  R4:{n:'R4 · Sales 5Y CAGR vs Peer',m:'5-year sales CAGR compared with the segment peer average.',s:'screener_raw.sales_growth_5y vs segment peer avg',w:'Growing faster than peers signals share-gain, not just a rising tide.',
-    b:[['pass','stock 5Y sales CAGR > peer segment avg'],['fail','stock ≤ peer avg']]},
-  R5:{n:'R5 · Profit 5Y CAGR',m:'5-year profit CAGR, absolute threshold.',s:'screener_raw.profit_growth_5y',w:'Durable holds need a track record of real earnings growth, not just topline.',
-    b:[['pass','5Y profit CAGR > 10%'],['fail','≤ 10%']]},
-  R6:{n:'R6 · OPM vs Peer',m:'Operating profit margin compared with the segment peer average.',s:'screener_raw.opm vs segment peer avg',w:'Above-peer margins usually mean pricing power or a structural cost edge.',
-    b:[['pass','OPM > peer segment avg'],['fail','OPM ≤ peer avg']]},
-  R7:{n:'R7 · ROCE',m:'Return on capital employed (BFSI segments exempted — ROCE is not meaningful for lenders).',s:'screener_raw.roce',w:'Capital efficiency is the core test of whether a business compounds shareholder value.',
-    b:[['pass','ROCE ≥ 15% (or BFSI segment, exempt)'],['fail','ROCE < 15% and not BFSI']]},
-  R8:{n:'R8 · Last Result',m:'Most recent quarter\'s YoY sales AND profit growth, both required positive.',s:'screener_raw.qoq_sales_growth / qoq_profit_growth',w:'The latest print should not be quietly deteriorating under a good longer-run average.',
-    b:[['pass','QoQ sales > 0 AND QoQ PAT > 0'],['fail','either ≤ 0']]},
-  R9:{n:'R9 · Volume Accumulation',m:'20-session average volume on up-close days vs down-close days.',s:'raw_prices close & volume (20 sessions)',w:'Sustained buying-day volume over selling-day volume suggests quiet accumulation.',
-    b:[['pass','avg up-day volume > avg down-day volume'],['fail','otherwise']]},
-  R10:{n:'R10 · DMA200',m:'Price deviation from the 200-day moving average.',s:'v8_metrics.dma_200',w:'Long-term trend floor — deeply below the 200-DMA is a structural, not tactical, warning.',
-    b:[['pass','> −5% (at/above or only mildly below the 200-DMA)'],['fail','≤ −5%']]},
-  R11:{n:'R11 · RSI Monthly',m:'Monthly RSI band — avoids both washed-out and overheated entries.',s:'v8_metrics.rsi_month',w:'Long-horizon entries are best made outside of monthly extremes in either direction.',
-    b:[['pass','35 – 75'],['fail','< 35 or > 75']]},
-  R12:{n:'R12 · 1Y Return',m:'Trailing 1-year absolute price return.',s:'v8_metrics.year_return',w:'A stock that has already been rewarding holders for a year is showing the market agrees with the thesis.',
-    b:[['pass','1Y return > 0%'],['fail','≤ 0%']]},
+  G1:{n:'G1 · Valuation gate (V ≥ 6)',m:'GVM Value pillar must clear 6 — a hard disqualifier, scored before any conviction filter.',s:'gvm_scores.v_score',w:'Buying into a rich valuation caps long-term return; rule it out first, don\'t average it in.',
+    b:[['pass','V-Score ≥ 6'],['fail','V-Score < 6 (missing → cannot rate → WATCH)']]},
+  G2:{n:'G2 · Quality gate (GVM ≥ 7)',m:'Composite GVM must clear 7.0 — the top-line quality bar.',s:'gvm_scores.gvm_score',w:'Only names that already rank as high quality are eligible for an INVEST rating.',
+    b:[['pass','GVM ≥ 7.0'],['fail','GVM < 7.0 (missing → cannot rate → WATCH)']]},
+  G3:{n:'G3 · Growth intact (Profit 5Y > 10%)',m:'Five-year profit CAGR must exceed 10% — the durable-earnings gate.',s:'screener_raw.profit_growth_5y',w:'A buy-and-hold thesis needs a real multi-year earnings track record, not a one-off.',
+    b:[['pass','Profit 5Y CAGR > 10%'],['fail','≤ 10% (missing → cannot rate → WATCH)']]},
+  F1:{n:'F1 · Valuation depth (V)',m:'How cheap on the Value pillar — graded, max 2.',s:'gvm_scores.v_score',w:'Deeper value = a wider margin of safety independent of the momentum read.',
+    b:[['2','V ≥ 7.5'],['1','6.0 – 7.5'],['fail','< 6.0']]},
+  F2:{n:'F2 · Growth score (G)',m:'GVM Growth pillar strength — graded, max 2.',s:'gvm_scores.g_score',w:'The growth pillar is the primary engine of a compounding hold.',
+    b:[['2','G ≥ 7.5'],['1','6.0 – 7.5'],['fail','< 6.0']]},
+  F3:{n:'F3 · Latest result vs top-3 peers',m:'Most-recent QoQ sales AND profit vs the top-3-by-GVM segment leaders — max 2.',s:'screener_raw.qoq_sales_growth / qoq_profit_growth vs top-3 peer avg',w:'Beating the segment leaders on the latest print is real share-gain, not a rising tide.',
+    b:[['2','QoQ sales AND profit both > top-3 peer avg'],['1','one of the two beats'],['fail','neither']]},
+  F4:{n:'F4 · ROCE vs top-3 peers',m:'Return on capital vs the segment leaders — max 1 (BFSI exempt).',s:'screener_raw.roce vs top-3 peer avg',w:'Capital efficiency above the best peers is the core compounding edge.',
+    b:[['1','ROCE > top-3 peer avg (or BFSI segment → exempt, credited)'],['fail','≤ top-3 peer avg']]},
+  F5:{n:'F5 · OPM vs top-3 peers',m:'Operating margin vs the segment leaders — max 1.',s:'screener_raw.opm vs top-3 peer avg',w:'Above-leader margins signal pricing power or a structural cost edge.',
+    b:[['1','OPM > top-3 peer avg'],['fail','≤ top-3 peer avg']]},
+  F6:{n:'F6 · Sales 5Y CAGR vs top-3 peers',m:'Five-year sales CAGR vs the segment leaders — max 1.',s:'screener_raw.sales_growth_5y vs top-3 peer avg',w:'Out-growing the leaders over 5 years is durable share-gain.',
+    b:[['1','5Y sales CAGR > top-3 peer avg'],['fail','≤ top-3 peer avg']]},
+  F7:{n:'F7 · Cashflow quality (CFO/PAT)',m:'Operating cash flow as a fraction of reported profit — max 1.',s:'screener_raw."Cfo by Pat"',w:'Profit that converts to cash is real; a low ratio warns of accrual or working-capital drag.',
+    b:[['1','CFO / PAT ≥ 0.8'],['fail','< 0.8 (or missing)']]},
+  F8:{n:'F8 · GVM trend (Δ 180d)',m:'Change in GVM vs its value ~180 days ago — graded, max 1.',s:'gvm_history (nearest score_date on/before today−180d)',w:'A rising quality score confirms the thesis is strengthening, not fading.',
+    b:[['1','Δ > +0.5'],['0.5','0 to +0.5'],['fail','< 0 (or < 180d history)']]},
+  F9:{n:'F9 · Net institutional (FII+DII)',m:'Combined FII + DII holding change — max 1.',s:'screener_raw.fii_change + dii_change',w:'Net institutional buying is smart-money agreement with the thesis.',
+    b:[['1','FII + DII change > 0'],['fail','≤ 0 (or missing)']]},
+  F10:{n:'F10 · 1Y return vs top-3 peers',m:'Trailing 1-year return vs the top-3-by-GVM segment leaders — max 1.',s:'v8_metrics.year_return vs top-3 peer avg',w:'Beating the leaders (not just >0) shows the market is rewarding this name specifically.',
+    b:[['1','1Y return > top-3 peer avg'],['fail','≤ top-3 peer avg']]},
+  F11:{n:'F11 · Volume accumulation',m:'3-day avg volume vs 21-day avg volume, with price rising over those 3 days — max 1.',s:'raw_prices close & volume',w:'Rising volume on a rising price is directional accumulation, not a panic spike.',
+    b:[['1','3d avg vol > 21d avg vol AND price up over 3d'],['fail','otherwise']]},
+  F12:{n:'F12 · Momentum score (M)',m:'GVM Momentum pillar — graded, max 1.',s:'gvm_scores.m_score',w:'A buy-and-hold entry still benefits from not fighting the prevailing trend.',
+    b:[['1','M ≥ 6.0'],['0.5','5.0 – 6.0'],['fail','< 5.0']]},
 };
 function investRuleInfo(rule){
   const d=INVEST_RULE_DEFS[rule]; if(!d){return;}
-  const bandHtml=(d.b||[]).map(b=>{const cls=b[0]==='pass'?'g':'r';
-    return '<div class="tcinfo-band '+cls+'"><b>'+(b[0]==='pass'?'✓':'✗')+'</b><span>'+b[1]+'</span></div>';}).join('');
+  const bandHtml=(d.b||[]).map(b=>{const k=String(b[0]);
+    const cls=(k==='pass'||k==='2'||k==='1')?'g':(k==='0.5')?'a':'r';
+    const mk=(cls==='g')?'✓':(cls==='a')?'◐':'✗';
+    return '<div class="tcinfo-band '+cls+'"><b>'+mk+'</b><span>'+b[1]+'</span></div>';}).join('');
   document.getElementById('tcInfoBox').innerHTML=
     '<button class="tcinfo-close" onclick="closeTcInfo()">&times;</button>'
     +'<div class="tcinfo-h">'+d.n+'</div>'
-    +'<div class="tcinfo-sub">Investment Check v1.0 &middot; pass/fail rule</div>'
+    +'<div class="tcinfo-sub">Investment Check v3.0 &middot; '+(rule[0]==='G'?'hard gate':'conviction filter')+'</div>'
     +'<div class="tcinfo-row"><div class="tcinfo-k">Measures</div><div class="tcinfo-v">'+d.m+'</div></div>'
     +'<div class="tcinfo-row"><div class="tcinfo-k">Criteria</div>'+bandHtml+'</div>'
     +'<div class="tcinfo-row"><div class="tcinfo-k">Data source</div><div class="tcinfo-v tcinfo-src">'+d.s+'</div></div>'
@@ -1548,48 +1571,68 @@ function renderRoom(d, side){
   document.getElementById('roomCard').classList.add('show');
 }
 
+// cc#588: Investment Check v3.0 — Gate + Conviction render (3 hard gates + 12 weighted filters, max 15).
 function renderInvest(d){
   document.getElementById('invCompany').textContent=d.company+' ('+d.symbol+')';
   document.getElementById('invSeg').textContent=d.segment||'';
   const badge=document.getElementById('invBadge');
-  // cc#456 fable_decisions(3): Health Report vocab is the PRIMARY label; legacy band name kept
-  // as a small parenthetical so the old vocabulary is still visible during the transition.
-  const verdictMap={'STRONG BUY':'🟢 STRONG BUY','ACCUMULATE':'🟡 ACCUMULATE','WATCH':'🟠 WATCH','AVOID':'🔴 AVOID'};
-  const legacy=verdictMap[d.verdict]||d.verdict;
-  badge.textContent=d.verdict_display?(d.emoji||'')+' '+d.verdict_display+' ('+(d.verdict||'')+')':legacy;
-  badge.className='inv-badge '+(d.verdict||'').replace(' ','-');
+  const css=d.verdict_css||'avoid';
+  badge.textContent=(d.emoji||'')+' '+(d.verdict_display||d.verdict)
+    +(d.insufficient_data?' · insufficient data':'');
+  badge.className='inv-badge '+css;
   document.getElementById('invCap').textContent=d.cap_category||'';
   const gvmEl=document.getElementById('invGvm');
-  if(d.gvm_verdict){gvmEl.textContent='GVM '+d.gvm_verdict;
-    const r1=(d.rules||[]).find(x=>x.rule==='R1');
-    const sc=parseFloat(r1&&r1.value)||0;
-    gvmEl.className='r-gvm '+(sc>=7?'hi':sc>=6?'mid':'lo');
-  }
+  if(d.gvm!=null){gvmEl.textContent='GVM '+Number(d.gvm).toFixed(2);
+    gvmEl.className='r-gvm '+(d.gvm>=7?'hi':d.gvm>=6?'mid':'lo');
+  }else{gvmEl.textContent='';}
   const sc=document.getElementById('invScoreCard');
-  const cssClass={'STRONG BUY':'strong-buy','ACCUMULATE':'accumulate','WATCH':'watch','AVOID':'avoid'}[d.verdict]||'avoid';
-  sc.className='inv-score-card '+cssClass;
-  document.getElementById('invVerdictLabel').textContent=d.verdict_display||legacy;
-  document.getElementById('invScorePill').textContent=d.score+'/'+d.max_score;
-  document.getElementById('invBarFill').style.width=Math.round(d.score/d.max_score*100)+'%';
-  document.getElementById('invBarSub').textContent=d.score+' of '+d.max_score+' rules passed';
-  document.getElementById('invBand').textContent='Band: '+d.band;
-  document.getElementById('invRuleScore').textContent=d.score+'/'+d.max_score+' · min 8 to buy';
+  sc.className='inv-score-card '+css;
+  document.getElementById('invVerdictLabel').textContent=d.verdict_display||d.verdict;
+  const conv=(d.conviction!=null?d.conviction:0), mx=(d.max_conviction||15);
+  document.getElementById('invScorePill').textContent=conv+'/'+mx;
+  document.getElementById('invBarFill').style.width=Math.round(conv/mx*100)+'%';
+  document.getElementById('invBarSub').textContent='Conviction '+conv+' / '+mx
+    +' · Gates '+(d.gates_passed!=null?d.gates_passed:0)+'/3 passed';
+  document.getElementById('invBand').textContent=(d.gate_fails&&d.gate_fails.length)
+    ? 'Gate fail: '+d.gate_fails.join(', ') : 'All gates clear';
+  document.getElementById('invRuleScore').textContent='Gates '+(d.gates_passed||0)+'/3 · Conviction '+conv+'/'+mx
+    +' · INVEST≥9 · STRONG≥12';
   const tbody=document.getElementById('invBody');tbody.innerHTML='';
-  (d.rules||[]).forEach(r=>{
-    const passed=r.pass===true;
-    const val=r.value!=null?r.value:'—';
-    const peer=r.peer!=null?' (peer: '+r.peer+')':'';
-    const note=r.note?' · '+r.note:'';
+  // Layer 1 — gates
+  tbody.insertAdjacentHTML('beforeend','<tr class="inv-grouphdr"><td colspan="4">Layer 1 · Hard Gates (must pass all 3)</td></tr>');
+  (d.gates||[]).forEach(g=>{
+    const st=g.pass===true?'pass':(g.pass===false?'fail':'watch');
+    const badgeTxt=g.pass===true?'PASS':(g.pass===false?'FAIL':'NO DATA');
     tbody.insertAdjacentHTML('beforeend',
-      '<tr class="'+(passed?'row-pass':'row-fail')+'">'
-      +'<td class="td-rule">'+r.rule+' '+r.name
-      +' <span class="v4-ibtn" onclick="investRuleInfo(\''+r.rule+'\')" title="Rule definition">i</span></td>'
-      +'<td class="td-cond">'+r.condition+'</td>'+'<td class="td-val">'+val+peer+note+'</td>'+'<td class="td-state">'+stateBadge(passed?'pass':'fail')+'</td></tr>');
+      '<tr class="inv-gate-row '+(st==='pass'?'row-pass':st==='fail'?'row-fail':'')+'">'
+      +'<td class="td-rule">'+g.gate+' '+g.name
+      +' <span class="v4-ibtn" onclick="investRuleInfo(\''+g.gate+'\')" title="Gate definition">i</span></td>'
+      +'<td class="td-cond">'+g.condition+'</td>'
+      +'<td class="td-val">'+(g.value!=null?g.value:'—')+'</td>'
+      +'<td class="td-state">'+stateBadge(st)+' '+badgeTxt+'</td></tr>');
   });
+  // Layer 2 — conviction filters
+  tbody.insertAdjacentHTML('beforeend','<tr class="inv-grouphdr"><td colspan="4">Layer 2 · Conviction Filters (max '+mx+')</td></tr>');
+  (d.filters||[]).forEach(f=>{
+    const full=f.points>=f.max, part=f.points>0&&f.points<f.max;
+    const rc=full?'row-pass':part?'':'row-fail';
+    const val=(f.value!=null?f.value:'—')+(f.peer!=null?' <span style="color:var(--dim)">(peers '+f.peer+')</span>':'')
+      +(f.note?' · '+f.note:'');
+    tbody.insertAdjacentHTML('beforeend',
+      '<tr class="'+rc+'">'
+      +'<td class="td-rule">'+f.code+' '+f.name
+      +' <span class="v4-ibtn" onclick="investRuleInfo(\''+f.code+'\')" title="Filter definition">i</span></td>'
+      +'<td class="td-cond">max '+f.max+'</td>'
+      +'<td class="td-val">'+val+'</td>'
+      +'<td class="td-state"><b style="color:'+(full?'var(--grn)':part?'var(--amber)':'var(--dim)')+'">'
+      +Number(f.points).toFixed(f.points%1?1:0)+'/'+f.max+'</b></td></tr>');
+  });
+  // chips: gate fails + top filter wins
   const passDiv=document.getElementById('invPasses');passDiv.innerHTML='';
-  (d.passes||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-pass-chip">✓ '+n+'</span>');});
-  (d.fails||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-fail-chip">✗ '+n+'</span>');});
-  document.getElementById('invFreshness').textContent='';   // populated once /detail loads (freshness lives there)
+  (d.gate_fails||[]).forEach(n=>{passDiv.insertAdjacentHTML('beforeend','<span class="inv-fail-chip">⛔ '+n+'</span>');});
+  (d.filters||[]).filter(f=>f.points>=f.max&&f.max>=1).forEach(f=>{
+    passDiv.insertAdjacentHTML('beforeend','<span class="inv-pass-chip">✓ '+f.code+' '+f.name+'</span>');});
+  document.getElementById('invFreshness').textContent='';   // populated once /detail loads
   document.getElementById('invDetail').classList.remove('show');
   document.getElementById('invDetail').innerHTML='';
   document.getElementById('invDetailBtn').onclick=()=>loadInvestDetail(d.symbol);
@@ -1641,61 +1684,46 @@ function _investGauge(label, val, lo, hi, unit){
     +'<div class="gbar"><div class="gfill" style="width:'+pos+'%;background:'+(inBand?'var(--grn)':'var(--red)')+'"></div></div></div>';
 }
 
+// cc#588: v3.0 detail — one panel per gate + per conviction filter (value, peer, credit) + trend sparks.
 function renderInvestDetail(box, d){
   const ev=d.evidence||{}, fr=d.freshness||{};
-  const cr={}; (d.rules||[]).forEach(r=>cr[r.rule]=r.pass?1:0);
   const P=[];
 
   document.getElementById('invFreshness').textContent=
     (fr.gvm_score_date?('GVM as of '+fr.gvm_score_date):'')
     +(fr.screener_loaded_at?(' · Fundamentals (screener) refreshed '+fr.screener_loaded_at):'');
 
-  const vcls=d.score>=10?'strong':d.score>=8?'valid':'reject';
+  const vcls=(d.verdict==='STRONG_INVEST'||d.verdict==='INVEST')?'strong':(d.verdict==='WATCH'?'valid':'reject');
   const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'
-    +(d.verdict_display||d.verdict)+' ('+d.verdict+')</div><div class="v4-best">'+d.symbol+' · '+d.company
-    +' · '+d.segment+' · score '+d.score+'/'+d.max_score+' · band '+d.band+'</div></div>';
+    +(d.emoji||'')+' '+(d.verdict_display||d.verdict)+'</div><div class="v4-best">'+d.symbol+' · '+d.company
+    +' · '+d.segment+' · Gates '+(d.gates_passed||0)+'/3 · Conviction '+d.conviction+'/'+(d.max_conviction||15)
+    +(d.gate_fails&&d.gate_fails.length?(' · fails: '+d.gate_fails.join(', ')):'')+'</div></div>';
 
-  P.push([1,_detPanel('R1','GVM Score',cr.R1,_investSpark(ev.gvm_trend,'gvm','var(--cyan)')
-    +_kv('GVM score',d.rules.find(r=>r.rule==='R1').value))]);
-  P.push([2,_detPanel('R2','Value Score (V) + valuation',cr.R2,_investSpark(ev.gvm_trend,'gvm','var(--cyan)')
-    +_kv('V-score',d.rules.find(r=>r.rule==='R2').value)
-    +_kv('PE',(ev.valuation||{}).pe)+_kv('Historical PE',(ev.valuation||{}).historical_pe)
-    +_kv('Segment PE',(ev.valuation||{}).segment_pe)
-    +'<div class="v4-det-note">peer PE '+((ev.peer||{}).pe!=null?(ev.peer.pe.toFixed(1)):'—')+'</div>')]);
-  P.push([3,_detPanel('R3','Momentum Score (M)',cr.R3,_investSpark(ev.gvm_trend,'m','var(--grn)')
-    +_kv('M-score',d.rules.find(r=>r.rule==='R3').value))]);
-  const r4=d.rules.find(r=>r.rule==='R4');
-  P.push([4,_detPanel('R4','Sales 5Y CAGR vs Peer',cr.R4,_investCompareBar('Stock',r4.value,r4.peer,'%',true))]);
-  const r5=d.rules.find(r=>r.rule==='R5');
-  P.push([5,_detPanel('R5','Profit 5Y CAGR',cr.R5,_investGauge('5Y Profit CAGR',r5.value,10,Math.max(30,(r5.value||10)+5),'%')
-    +'<div class="v4-det-note">threshold &gt; 10%</div>')]);
-  const r6=d.rules.find(r=>r.rule==='R6');
-  P.push([6,_detPanel('R6','OPM vs Peer',cr.R6,_investCompareBar('Stock OPM',r6.value,r6.peer,'%',true))]);
-  const r7=d.rules.find(r=>r.rule==='R7');
-  P.push([7,_detPanel('R7','ROCE',cr.R7,ev.bfsi
-    ?'<div class="v4-det-note">BFSI segment — ROCE exempted from this rule (not meaningful for lenders).</div>'
-    :_investGauge('ROCE',r7.value,15,Math.max(35,(r7.value||15)+5),'%')+'<div class="v4-det-note">threshold ≥ 15%</div>')]);
-  const r8=d.rules.find(r=>r.rule==='R8');
-  P.push([8,_detPanel('R8','Last Result (QoQ)',cr.R8,'<div class="v4-det-note">'+r8.value+'</div>'
-    +'<div class="v4-det-note">'+(fr.screener_loaded_at?('fundamentals refreshed '+fr.screener_loaded_at):'refresh date unavailable')+'</div>')]);
-  const vol=ev.volume||{}, au=vol.avg_up||0, ad=vol.avg_down||0, vmax=Math.max(au,ad,1);
-  P.push([9,_detPanel('R9','Volume Accumulation (20d)',cr.R9,
-    '<div class="v4-det-vbar"><span class="vl">Up-close</span><div class="vtrack"><div class="vfill pos" style="width:'+(au/vmax*100)+'%"></div></div><span class="vv">'+(au?Math.round(au).toLocaleString('en-IN'):'—')+'</span></div>'
-    +'<div class="v4-det-vbar"><span class="vl">Down-close</span><div class="vtrack"><div class="vfill neg" style="width:'+(ad/vmax*100)+'%"></div></div><span class="vv">'+(ad?Math.round(ad).toLocaleString('en-IN'):'—')+'</span></div>')]);
-  const r10=d.rules.find(r=>r.rule==='R10');
-  P.push([10,_detPanel('R10','DMA200',cr.R10,_investGauge('vs DMA200',r10.value,-5,Math.max(10,(r10.value||0)+5),'%')
-    +'<div class="v4-det-note">threshold &gt; −5%</div>')]);
-  const r11=d.rules.find(r=>r.rule==='R11');
-  P.push([11,_detPanel('R11','RSI Monthly',cr.R11,_investGauge('RSI (monthly)',r11.value,35,75,'')
-    +'<div class="v4-det-note">band 35–75</div>')]);
-  P.push([12,_detPanel('R12','1Y Return · Fib position (1Y swing)',cr.R12,
-    '<div class="v4-det-note">1Y return: '+_sgn(d.rules.find(r=>r.rule==='R12').value,1)+'%</div>'
-    +'<div id="invFib_'+d.symbol+'" class="v4-det-note">Loading 1Y fib swing…</div>')]);
+  // Gate panels
+  (d.gates||[]).forEach(g=>{
+    const cr=g.pass===true?1:(g.pass===false?0:0.5);
+    P.push(_detPanel(g.gate,g.name,cr,_kv('Condition',g.condition)+_kv('Value',g.value!=null?g.value:'—')
+      +'<div class="v4-det-note">'+(g.pass===true?'gate cleared':g.pass===false?'gate FAILED — disqualifier':'metric missing — cannot rate')+'</div>'));
+  });
+  // Filter panels — credit chip is points/max; peer comparison bar where a peer avg exists
+  const sparkFor={F1:['gvm','var(--cyan)'],F2:['g','var(--grn)'],F12:['m','var(--amber)']};
+  (d.filters||[]).forEach(f=>{
+    const cr=f.max>0?(f.points/f.max):0;   // 0..1 for the chip colour
+    let inner='';
+    if(sparkFor[f.code]) inner+=_investSpark(ev.gvm_trend,sparkFor[f.code][0],sparkFor[f.code][1]);
+    inner+=_kv('Value',f.value!=null?f.value:'—');
+    if(f.peer!=null) inner+=_kv('Top-3 peer avg',f.peer);
+    if(f.note) inner+='<div class="v4-det-note">'+f.note+'</div>';
+    inner+='<div class="v4-det-note">credit '+Number(f.points).toFixed(f.points%1?1:0)+' / '+f.max+'</div>';
+    P.push(_detPanel(f.code,f.name,cr,inner));
+  });
+  // structural context — 1Y fib swing (lazy-loaded below)
+  P.push(_detPanel('◈','Fib position (1Y swing)',null,
+    '<div id="invFib_'+d.symbol+'" class="v4-det-note">Loading 1Y fib swing…</div>'));
 
-  P.sort((a,b)=>a[0]-b[0]);
-  box.innerHTML=banner+'<div class="v4-det-grid">'+P.map(x=>x[1]).join('')+'</div>';
+  box.innerHTML=banner+'<div class="v4-det-grid">'+P.join('')+'</div>';
 
-  // R12 fib panel: lazy-load the EXISTING /api/trade-check/fibcheck (1Y lookback, INVEST is
+  // Fib panel: lazy-load the EXISTING /api/trade-check/fibcheck (1Y lookback, INVEST is
   // long-only so SELL=false), reusing _detFibChart verbatim — no new fib math, no duplication.
   fetch('/api/trade-check/fibcheck?symbol='+encodeURIComponent(d.symbol)+'&lookback=1y')
     .then(r=>r.json()).then(fb=>{
