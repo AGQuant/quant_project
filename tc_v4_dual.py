@@ -12,9 +12,12 @@ every derived-metric computation; the single-symbol loader (`_load_one`) and the
 `score_card`. That is the "scanner score == single-symbol score, exactly" guarantee — one rulebook,
 never duplicated.
 
-Verdict bands (founder-set): STRONG >= 12 | VALID 10 to <12 | REJECT < 10. Max 15.
+Verdict bands (cc#583, after R16 fib + R17 valuation added): BUY max 17 — STRONG >= 14 |
+VALID 11.5 to <14 | REJECT < 11.5. SELL max 15 — STRONG >= 12.5 | VALID 10 to <12.5 | REJECT < 10.
 SELL side = v4.1 mirror (locked same session): G1 GVM skipped (v3.3.2 short convention); all rules
 mirrored per the spec's v4_1_sell_mirror table.
+Gates (cc#583): G1 GVM (BUY-only) + G3 futures/DTE are HARD (force REJECT). G2 earnings blackout is
+ADVISORY-ONLY — an amber "trade around the print" highlight; it no longer overrides the verdict.
 
 Endpoints (new paths — do NOT collide with the live /api/trade-check/v4):
   GET/POST /api/trade-check/v4/dual   — single symbol, both cards both sides (or a chosen side)
@@ -291,11 +294,12 @@ def _load_one(cur, symbol):
             "sector_week", "sector_month", "day_1d"]
     d["v8"] = {k: _f(m[i]) for i, k in enumerate(keys)} if m else {k: None for k in keys}
 
-    cur.execute("""SELECT gvm_score, segment FROM gvm_scores WHERE symbol=%s
+    cur.execute("""SELECT gvm_score, segment, v_score FROM gvm_scores WHERE symbol=%s
                    ORDER BY score_date DESC LIMIT 1""", (symbol,))
     g = cur.fetchone()
     d["gvm_score"] = _f(g[0]) if g else None
     d["segment"] = g[1] if g else None
+    d["v_score"] = _f(g[2]) if g else None  # cc#583: V-pillar for R17 Valuation rule
 
     d.update({"peers_up1": 0, "peers_up": 0, "peers_dn1": 0, "peers_dn05": 0, "peers_dn": 0, "peer_count": 0})
     if d["segment"]:
@@ -369,7 +373,10 @@ def _load_one(cur, symbol):
 # ── hard gates ───────────────────────────────────────────────────────────────────
 
 def _gates(d, side):
-    """3 hard gates. Any fail -> REJECT, no scorecard. G1 (GVM) skipped for SELL (short convention)."""
+    """Hard gates -> REJECT, no scorecard. G1 (GVM) skipped for SELL (short convention).
+    cc#583: G2 earnings blackout DEMOTED to ADVISORY (amber highlight) — it NO LONGER forces REJECT
+    and NO LONGER overrides the computed verdict. Only G1 (BUY) + G3 remain hard (verdict-authoritative)
+    gates; G2 stays in the list for display + date citation but is excluded from `ok` and hard-fails."""
     gates = []
     ok = True
     if side == "BUY":
@@ -381,16 +388,18 @@ def _gates(d, side):
     # cc#451: G2 label derives from the SAME single evaluation as the boolean — cite the imminent
     # result date when failing ("Results 13-Jul (tomorrow)"), else the clear form. value carries the
     # ISO date (or None) so downstream never re-derives its own boolean and disagrees with the chip.
+    # cc#583: marked advisory=True — highlight-only, verdict stands; trader trades around the print.
     g2 = not d.get("event_blackout")
     if g2:
         _g2_label = "No results next 3d"
     else:
         _ed = _fmt_event_date(d.get("event_date"))
         _g2_label = f"Results {_ed}" if _ed else "Results imminent (next 3d)"
-    gates.append({"gate": "G2", "label": _g2_label, "value": d.get("event_date"), "pass": g2})
+    gates.append({"gate": "G2", "label": _g2_label, "value": d.get("event_date"), "pass": g2,
+                  "advisory": True})
     g3 = bool(d.get("is_future")) and (d.get("dte") is not None and d["dte"] >= 3)
     gates.append({"gate": "G3", "label": "Futures & DTE >= 3", "value": d.get("dte"), "pass": g3})
-    ok = ok and g2 and g3
+    ok = ok and g3
     return ok, gates
 
 
@@ -708,20 +717,32 @@ def _rules(d, style, side):
     out.append(_R("R16", "Fib position (3M)", c,
                   {"pos": _r(pos), "zone": _fib_zone_name(pos), "range_ok": d.get("fib_range_ok")}, required=req))
 
+    # R17 — Valuation (V-pillar). cc#583: gvm_scores.v_score bands, identical for BUY + SELL (a cheap
+    # name is a better long AND a safer short-cover risk; an expensive name cuts both). ADD (not replace).
+    vsc = d.get("v_score")
+    if vsc is None:
+        vc = 0.0
+        vreq = "V >= 7.5 (6.0-7.5 = 0.5); no V-score -> 0"
+    else:
+        vc = 1.0 if vsc >= 7.5 else (0.5 if vsc >= 6.0 else 0.0)
+        vreq = "V >= 7.5 (6.0-7.5 = 0.5, < 6.0 = 0)"
+    out.append(_R("R17", "Valuation (V)", vc, {"v_score": _r(vsc)}, required=vreq))
+
     return out
 
 
 def _verdict(score, side="BUY"):
-    # cc#410 (id=3019): R16 fib added -> max BUY 16 / SELL 14, bands rescaled.
-    if side == "SELL":   # max 14
-        if score >= 11.5:
+    # cc#410 (id=3019): R16 fib added -> max BUY 16 / SELL 14.
+    # cc#583: R17 Valuation added (+1) -> max BUY 17 / SELL 15; STRONG floor +1, VALID floor +1.
+    if side == "SELL":   # max 15
+        if score >= 12.5:
             return "STRONG"
-        if score >= 9:
+        if score >= 10:
             return "VALID"
         return "REJECT"
-    if score >= 13:      # BUY max 16
+    if score >= 14:      # BUY max 17
         return "STRONG"
-    if score >= 10.5:
+    if score >= 11.5:
         return "VALID"
     return "REJECT"
 
@@ -731,14 +752,14 @@ def score_card(d, style, side):
     cc#400: SELL drops R6+R14. cc#410: R16 fib added to both -> max BUY 16 / SELL 14, bands rescaled."""
     rules = _rules(d, style, side)
     score = round(sum(r["credit"] for r in rules), 2)
-    max_score = 14 if side == "SELL" else 16
+    max_score = 15 if side == "SELL" else 17  # cc#583: R17 Valuation +1 (was 14 / 16)
     card = {"style": style, "side": side, "label": f"{side}-{style[:3]}",
             "score": score, "max": max_score, "verdict": _verdict(score, side), "rules": rules}
     if side == "SELL":
         card["recal"] = "RECALIBRATED 12-JUL"
-        card["bands"] = "STRONG≥11.5 / VALID 9–11.5 / REJECT<9"
+        card["bands"] = "STRONG≥12.5 / VALID 10–12.5 / REJECT<10"
     else:
-        card["bands"] = "STRONG≥13 / VALID 10.5–13 / REJECT<10.5"
+        card["bands"] = "STRONG≥14 / VALID 11.5–14 / REJECT<11.5"
     return card
 
 
@@ -754,7 +775,9 @@ def _compute_result(d, symbol, side):
     cards, gate_map = [], {}
     for s in sides:
         ok, gates = _gates(d, s)
-        fails = [g for g in gates if not g.get("pass")]
+        # cc#583: advisory gates (G2 earnings) are NOT hard fails — kept out of `fails` so the red
+        # GATED banner never fires on earnings alone; the frontend renders them as an amber highlight.
+        fails = [g for g in gates if not g.get("pass") and not g.get("advisory")]
         gate_map[s] = {"pass": ok, "gates": gates, "fails": fails}
         for st in STYLES:
             card = score_card(d, st, s)
@@ -765,9 +788,17 @@ def _compute_result(d, symbol, side):
     pool = passing if passing else cards
     best = max(pool, key=lambda c: c["score"], default=None)
     best_gated = bool(best and best.get("gated"))
+    # cc#583: earnings advisory — highlight-only, does NOT gate. Frontend renders an amber
+    # "Results <date> (<N>d) — trade around the print" banner when active (verdict stands).
+    _eb = bool(d.get("event_blackout"))
+    _ed_iso = d.get("event_date")
+    earnings = {"blackout": _eb, "date": _ed_iso,
+                "label": (f"Results {_fmt_event_date(_ed_iso)}" if _eb and _ed_iso
+                          else ("Results imminent (next 3d)" if _eb else None))}
     return {
         "symbol": symbol, "cmp": _r(d["cmp"]), "side": side,
         "gates": gate_map,
+        "earnings": earnings,
         "best": best,
         "best_label": best["label"] if best else None,
         "best_score": best["score"] if best else None,
@@ -952,9 +983,11 @@ def v4_dual_health():
     return {
         "version": VERSION, "spec_ref": SPEC_REF,
         "model": "dual-style: MOMENTUM + REVERSAL card per side, higher wins",
-        "gates": "G1 GVM>=6.5 (BUY only) · G2 events clear · G3 futures & DTE>=3",
-        "rules": 15, "max_score": 15,
-        "verdict": {"STRONG": ">=12", "VALID": "10 to <12", "REJECT": "<10"},
+        "gates": "G1 GVM>=6.5 (BUY only) · G3 futures & DTE>=3 [HARD] · G2 earnings = advisory amber (cc#583)",
+        "rules": "BUY 17 (R1-R17) · SELL 15 (drops R6+R14, +R17)",
+        "max_score": {"BUY": 17, "SELL": 15},
+        "verdict": {"BUY": {"STRONG": ">=14", "VALID": "11.5 to <14", "REJECT": "<11.5"},
+                    "SELL": {"STRONG": ">=12.5", "VALID": "10 to <12.5", "REJECT": "<10"}},
         "sides": {"BUY": "long", "SELL": "v4.1 mirror (GVM gate skipped)"},
         "status": "ok",
     }

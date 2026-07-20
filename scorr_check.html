@@ -384,6 +384,11 @@
     border-radius:20px;background:var(--cyan-d);color:var(--cyan);border:1px solid var(--line2)}
   .v4-gated{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--red-d);
     border:1px solid var(--red-b);color:var(--red);font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13.5px;font-weight:700;line-height:1.5}   /* cc#451 fix_4: 11.5->13.5px */
+  /* cc#583 — earnings advisory (amber highlight, NOT a gate; verdict stands) */
+  .v4-amber{margin-top:12px;padding:11px 15px;border-radius:9px;background:var(--amber-d);
+    border:1px solid var(--amber-b);color:var(--amber);font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13.5px;font-weight:700;line-height:1.5}
+  .v4-gate.adv,.v4-rrow.radv .rc{color:var(--amber)!important}
+  .v4-gate.adv{background:var(--amber-d);border-color:var(--amber-b)}
   /* cc#408 — inline "View Detailed" structure panels */
   .v4-detail-btn{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;padding:9px 16px;border-radius:8px;
     border:1px solid var(--line2);background:var(--panel);color:var(--cyan);cursor:pointer;letter-spacing:.3px}
@@ -667,7 +672,7 @@
         <tbody id="scrBody"></tbody></table>
       <div id="moversWrap" style="display:none"></div>
     </div>
-    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; BUY STRONG&ge;13 / SELL STRONG&ge;11.5 (max 16 / 14, incl R16 fib).</div>
+    <div class="foot" id="scrFoot">v4 dual-style engine &middot; one pass over active futures &middot; BUY STRONG&ge;14 / SELL STRONG&ge;12.5 (max 17 / 15, incl R16 fib + R17 valuation).</div>
   </div>
 
   <!-- chip popup -->
@@ -948,7 +953,12 @@ const TC_RULE_DEFS={
     BM:[['1','>100 or 61.8–78.6'],['0.5','78.6–100 or 50–61.8'],['0','<50']],
     BR:[['1','38.2–61.8'],['0.5','23.6–38.2, 61.8–78.6, or >78.6'],['0','<23.6']],
     SM:[['1','<23.6 (incl. below swing low)'],['0.5','23.6–38.2'],['0','>38.2']],
-    SR:[['1','78.6–100'],['0.5','61.8–78.6 or >100'],['0','<61.8']]}
+    SR:[['1','78.6–100'],['0.5','61.8–78.6 or >100'],['0','<61.8']]},
+  R17:{n:'R17 · Valuation (V)',m:'Scorr Value pillar (gvm_scores.v_score, 0–10). Same bands both sides — a cheap name is a better long and a safer short-cover risk; an expensive name cuts both ways.',s:'gvm_scores.v_score (latest)',w:'Entering at a sane valuation sets the margin of safety independent of the momentum read.',
+    BM:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
+    BR:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
+    SM:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']],
+    SR:[['1','V ≥ 7.5'],['0.5','6.0 – 7.5'],['0','< 6.0 (or no V)']]}
 };
 // cc#456: Investment Check v1.0 rule definitions (12 rules, single-sided — no B/S variants).
 // Mirrors TC_RULE_DEFS shape (n/m/s/w) but a flat single-band list since every rule is a
@@ -1034,17 +1044,25 @@ function renderV4Dual(d, uiMode){
   (gate.gates||[]).forEach(g=>{if(g.gate==='G1'&&typeof g.value==='number')gvm=g.value;});
   const gvmHtml = gvm!=null
     ? '<span class="r-gvm '+(gvm>=7?'hi':gvm>=6?'mid':'lo')+'">GVM '+gvm.toFixed(2)+'</span>' : '';
-  const gatesHtml=(gate.gates||[]).map(g=>
-    '<span class="v4-gate '+(g.pass?'pass':'fail')+'">'+g.gate+' '+g.label+(g.pass?' ✓':' ✗')+'</span>').join('');
+  const gatesHtml=(gate.gates||[]).map(g=>{
+    // cc#583: an advisory gate (G2 earnings) that "fails" is an amber heads-up, not a red block.
+    if(g.advisory && !g.pass) return '<span class="v4-gate adv">'+g.gate+' '+g.label+' ⚠</span>';
+    return '<span class="v4-gate '+(g.pass?'pass':'fail')+'">'+g.gate+' '+g.label+(g.pass?' ✓':' ✗')+'</span>';
+  }).join('');
   const cards=(d.cards||[]);
   const cardHtml=c=>{
     const win=(d.best&&c.style===d.best.style&&c.side===d.best.side)?' win':'';
     // cc#513: gates render in the same 4-col table, above the scored rules.
-    const gateRows=(gate.gates||[]).map(g=>
-      '<div class="v4-rrow '+(g.pass?'rg':'rr')+'"><span class="rl">'+g.gate+'</span>'
+    const gateRows=(gate.gates||[]).map(g=>{
+      const adv=(g.advisory && !g.pass);  // cc#583: earnings advisory row -> amber ⚠, not red ✗
+      const rowCls=g.pass?'rg':(adv?'ra radv':'rr');
+      const mark=g.pass?'✓':(adv?'⚠':'✗');
+      const col=g.pass?'var(--grn)':(adv?'var(--amber)':'var(--red)');
+      return '<div class="v4-rrow '+rowCls+'"><span class="rl">'+g.gate+'</span>'
         +'<span class="rreq">'+g.label+'</span>'
         +'<span class="ract">'+(g.value!=null?g.value:'—')+'</span>'
-        +'<span class="rc" style="color:'+(g.pass?'var(--grn)':'var(--red)')+'">'+(g.pass?'✓':'✗')+'</span></div>').join('');
+        +'<span class="rc" style="color:'+col+'">'+mark+'</span></div>';
+    }).join('');
     const rules=(c.rules||[]).map(r=>{
       // cc#452/cc#513: row tint by score (1.0 green · 0.5 amber · 0 light red) + per-rule (i) definition button
       const rt=r.credit>=1?'rg':r.credit>=0.5?'ra':'rr';
@@ -1068,10 +1086,16 @@ function renderV4Dual(d, uiMode){
   const sorted=[...cards].sort((a,b)=> (b.score-a.score) || (a.style==='MOMENTUM'?-1:1));
   const winner=sorted[0]||null, loser=sorted[1]||null;
   // cc#402: gate-fail no longer blanks the cards — show them all, with a GATED banner naming the fail.
-  const fails=(gate.fails&&gate.fails.length?gate.fails:(gate.gates||[]).filter(g=>!g.pass));
+  // cc#583: advisory gates (G2 earnings) are excluded from hard fails — never trip the red banner.
+  const fails=(gate.fails&&gate.fails.length?gate.fails:(gate.gates||[]).filter(g=>!g.pass&&!g.advisory));
   const gatedBanner = (gate.pass===false && fails.length)
     ? '<div class="v4-gated">⛔ GATED — '+fails.map(_gateFail).join(' · ')   // cc#451 fix_3: failing gates only, deduped
       +' — verdict held at REJECT; scorecards shown for context.</div>'
+    : '';
+  // cc#583: earnings blackout is now a HIGHLIGHT-ONLY amber advisory — verdict stands, trade around the print.
+  const eb=d.earnings||{};
+  const amberBanner = eb.blackout
+    ? '<div class="v4-amber">⚠ '+(eb.label||'Results imminent')+' — earnings inside 3 days; verdict stands, trade around the print.</div>'
     : '';
   const cardsHtml = winner
     ? '<div class="v4-winner">'+cardHtml(winner)+'</div>'
@@ -1095,10 +1119,11 @@ function renderV4Dual(d, uiMode){
     + '</div>'
     + '<div class="verdict-card '+_vClassFor(d.best_verdict)+'">'
     +   '<div class="v-label">'+d.best_verdict+(d.best_label?' · '+d.best_label:'')+'</div>'
-    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?14:16))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥11.5 / VALID 9–11.5 / REJECT&lt;9':'STRONG≥13 / VALID 10.5–13 / REJECT&lt;10.5'))+'</div>'
+    +   '<div class="v4-best">Best style: <b>'+bestChip+'</b> · score <b>'+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+((d.best&&d.best.max)||(side==='SELL'?15:17))+'</b> · '+((d.best&&d.best.bands)||(side==='SELL'?'STRONG≥12.5 / VALID 10–12.5 / REJECT&lt;10':'STRONG≥14 / VALID 11.5–14 / REJECT&lt;11.5'))+'</div>'
     +   '<div class="v4-gates">'+gatesHtml+'</div>'
     + '</div></div>'
     + gatedBanner
+    + amberBanner
     + cardsHtml
     + '<div style="margin-top:12px"><button class="v4-detail-btn" onclick="loadDetail(\''+d.symbol+'\',\''+uiMode+'\')">⊞ View Detailed — rule-by-rule evidence</button></div>'
     + '<div class="v4-detail" id="v4Detail"></div>'
@@ -1150,10 +1175,14 @@ function renderTcDetail(box, d, uiMode){
   const fails=(d.gate_fails&&d.gate_fails.length)?d.gate_fails:[];
   const gatedBanner=(d.gated&&fails.length)
     ? '<div class="v4-gated">⛔ GATED — '+fails.map(_gateFail).join(' · ')+' — verdict held at REJECT.</div>' : '';   // cc#451 fix_3: deduped, failing gates only
+  // cc#583: earnings advisory amber banner (highlight-only, verdict stands) mirrors the summary view.
+  const _eb=d.earnings||{};
+  const amberBanner=_eb.blackout
+    ? '<div class="v4-amber">⚠ '+(_eb.label||'Results imminent')+' — earnings inside 3 days; verdict stands, trade around the print.</div>' : '';
   const banner='<div class="verdict-card '+vcls+'" style="margin-bottom:14px"><div class="v-label">'+d.best_verdict
     +(d.best_label?' · '+d.best_label:'')+'</div><div class="v4-best">'+d.symbol+' · '+(SELL?'▼ SHORT':'▲ LONG')
-    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?14:16))
-    +' · evidence audits the '+style+' card</div></div>'+gatedBanner;
+    +' · CMP '+(d.cmp!=null?d.cmp:'—')+' · best '+(d.best_score!=null?Number(d.best_score).toFixed(2):'—')+'/'+(best.max||(SELL?15:17))
+    +' · evidence audits the '+style+' card</div></div>'+gatedBanner+amberBanner;
 
   // R1 mood
   const md=ev.mood||{};
@@ -1737,7 +1766,7 @@ function runScreen(){
   const card=panel.querySelector('.card');
   card.innerHTML =
     '<div class="tier-label"><span>&#8862; TC v4 &middot; Dual-Style Scanner</span><span class="tier-score" id="v4ScanMeta">&hellip;</span></div>'
-    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib); the higher card wins with its style label. BUY STRONG≥13 (max 16) / SELL STRONG≥11.5 (max 14). Tap a row for the full dual scorecard.</div>'
+    + '<div style="font-size:11px;color:var(--dim);line-height:1.6;margin:2px 0 12px">Every active future scored on all four cards (BUY/SELL × MOMENTUM/REVERSAL, incl R16 fib + R17 valuation); the higher card wins with its style label. BUY STRONG≥14 (max 17) / SELL STRONG≥12.5 (max 15). Tap a row for the full dual scorecard.</div>'
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
     +   '<button class="v4-sw buy'+(v4BUY?' on':'')+'" id="v4swBuy" onclick="v4Toggle(\'BUY\')">&#9650; Buy</button>'
     +   '<button class="v4-sw sell'+(v4SELL?' on':'')+'" id="v4swSell" onclick="v4Toggle(\'SELL\')">&#9660; Sell</button>'
@@ -1824,7 +1853,7 @@ function setUniverse(u){
   scrMode='screener';scrUniverse=u;
   document.getElementById('icBar').style.display='none';
   document.getElementById('scrThead').innerHTML='<tr><th>#</th><th>Symbol</th><th>Score</th><th>Verdict</th><th>CMP</th><th>Pivot</th><th>Not passed</th></tr>';
-  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · BUY STRONG≥13 (max 16) / SELL STRONG≥11.5 (max 14) · incl R16 fib.';
+  document.getElementById('scrFoot').textContent='v4 dual-style engine · one pass over active futures · BUY STRONG≥14 (max 17) / SELL STRONG≥12.5 (max 15) · incl R16 fib + R17 valuation.';
   syncScrTabs();
   if(scrCache[u])renderScreen();
   else loadScreen(u);
