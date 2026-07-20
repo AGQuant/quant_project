@@ -992,7 +992,14 @@ RESULTS_CARD_JS = """
     + '.rcard-btn:disabled{opacity:.6;cursor:progress}'
     + '.rcard-foot{margin-top:14px;padding-top:10px;border-top:1px solid var(--line,rgba(148,166,210,.2));'
     + 'font-size:10.5px;color:var(--dim,#8892a6);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}'
-    + '.rcard-gvm{font:700 10px/1 Sora;color:var(--mut,#667085);margin-left:8px}';
+    + '.rcard-gvm{font:700 10px/1 Sora;color:var(--mut,#667085);margin-left:8px}'
+    + '.rcard-peer{margin-top:4px;display:flex;flex-direction:column;gap:5px}'
+    + '.rcard-peer-row{display:flex;align-items:center;gap:8px;font-size:12px}'
+    + '.rcard-peer-l{flex:1;color:var(--mut,#667085)}'
+    + '.rcard-peer-v{font:700 12px/1 Sora;font-variant-numeric:tabular-nums;min-width:52px;text-align:right}'
+    + '.rcard-peer-p{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums;min-width:64px;text-align:right}'
+    + '.rcard-beat{font:700 9px/1 Sora;color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4);border-radius:4px;padding:2px 5px}'
+    + '.rcard-miss{font:700 9px/1 Sora;color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3);border-radius:4px;padding:2px 5px}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
   var ov = document.createElement('div'); ov.className = 'rcard-ov';
@@ -1006,6 +1013,26 @@ RESULTS_CARD_JS = """
   function esc(s){ return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c];}); }
   function fmtDate(s){ if(!s) return 'TBD'; var d=new Date(String(s).replace(' ','T')); if(isNaN(d.getTime())) return esc(s);
     var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+M[d.getMonth()]+' '+d.getFullYear(); }
+
+  // cc#590: peer-comparison block — latest QoQ sales/profit vs top-3-by-GVM segment peers.
+  function peerHtml(pc){
+    if(!pc) return '';
+    function row(lbl, o){
+      if(!o) return '';
+      var st=(o.stock!=null?o.stock+'%':'--'), pr=(o.peer!=null?o.peer+'%':'--');
+      var beat=o.beat, cls=beat?'rcard-beat':'rcard-miss', tag=beat?'BEAT':'MISS';
+      return '<div class=\"rcard-peer-row\"><span class=\"rcard-peer-l\">'+lbl+'</span>'
+        +'<span class=\"rcard-peer-v\">'+esc(st)+'</span>'
+        +'<span class=\"rcard-peer-p\">vs '+esc(pr)+'</span>'
+        +'<span class=\"'+cls+'\">'+tag+'</span></div>';
+    }
+    var body=row('QoQ Sales',pc.sales)+row('QoQ Profit',pc.profit);
+    if(!body) return '';
+    return '<div class=\"rcard-lbl\">Latest result vs top-3 peers</div>'
+      +'<div class=\"rcard-peer\">'+body+'</div>'
+      +'<div class=\"rcard-note\">Peers = top-3 by GVM in '+esc(pc.segment||'segment')
+      +(pc.fallback?' (segment avg &mdash; under 3 peers)':'')+', self-excluded.</div>';
+  }
 
   var _cur = null;
   function render(d, generating){
@@ -1036,6 +1063,7 @@ RESULTS_CARD_JS = """
         h += '<button class=\"rcard-btn\" data-gen=\"1\"'+(generating?' disabled':'')+'>'+(generating?'Generating...':'Generate Scorr View')+'</button>';
       }
     }
+    h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
     var foot = [];
     if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));
     if (d && d.model) foot.push(esc(d.model));
