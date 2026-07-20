@@ -53,6 +53,13 @@ CLOCK_WINDOWS    = [((9, 30), (11, 0)), ((13, 45), (14, 45))]
 ORB_LONG_WINDOWS  = [((9, 45), (10, 30))]
 ORB_SHORT_WINDOWS = [((9, 45), (11, 0)), ((13, 45), (14, 45))]
 ORB_DAILY_PER_SIDE = 5           # cc#534: max 5 ORB longs + 5 ORB shorts opened per trade_date
+HARD_TAG_SIDE_CAP  = 2           # cc#580 fault_3: HARD backstop -- max 2 entries per (tag, side) per
+                                 # REAL trade_date, enforced regardless of bar freshness. On 20-Jul a
+                                 # stale-feed asof (Fri 17-Jul) made the dedup COUNT queries look at the
+                                 # wrong day, so 7 identical RELIANCE ORB longs (ids 43-49) leaked
+                                 # through. This cap keys on _now().date() -- the SAME date open_trade
+                                 # stamps -- so a stale asof can never bypass it. (~2/side/day is the
+                                 # natural rate per the backtest note above, so this is a true backstop.)
                                   # (the binding rule; natural backtest rate was ~2/side/day)
 TAGS             = ("ORB", "VWAP-RECLAIM", "R1-REJ")
 
@@ -636,6 +643,19 @@ def run_v14_cycle(conn) -> Dict:
     if ctx["asof"] is None:
         return {"status": "no_data"}
 
+    # cc#580 fault_3: NEVER evaluate a PRIOR session's frozen bars as if they were live. asof is
+    # MAX(fyers_eq 5m bar date); when the feed is late/down at the open (20-Jul, cc#563/566) that
+    # resolves to the previous session and the ORB gate on a frozen 15:25 close trivially "breaks
+    # out", re-firing every tick. On a live cycle the only safe as-of is TODAY -- if today's eq bars
+    # aren't present yet, manage existing exits but open NO new entries off a stale session.
+    today = _now().date()
+    if ctx["asof"] != today:
+        exits = manage_open(conn, ctx)
+        log.warning(f"v14: asof {ctx['asof']} != today {today} -- feed not live yet; "
+                    f"skipping entries (exits managed, no stale-bar trades)")
+        return {"status": "stale_feed", "asof": str(ctx["asof"]), "today": str(today),
+                "in_clock": _in_clock(), "exits": exits, "opened": []}
+
     exits = manage_open(conn, ctx)
 
     opened = []
@@ -643,15 +663,21 @@ def run_v14_cycle(conn) -> Dict:
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM v14_trades WHERE status='open'")
         n_open = int(cur.fetchone()[0])
-        cur.execute("SELECT symbol FROM v14_trades WHERE trade_date=%s", (ctx["asof"],))
+        # cc#580 fault_3: ALL dedup/caps key on the REAL trade_date (today == the date open_trade
+        # stamps), NOT ctx["asof"]. When asof drifted to a stale session these queries looked at the
+        # wrong day and enforced nothing, so 7 identical entries (ids 43-49) leaked through.
+        cur.execute("SELECT symbol FROM v14_trades WHERE trade_date=%s", (today,))
         traded_today = {r[0] for r in cur.fetchall()}   # G4: 1 trade/symbol/day, no re-entry
-        # cc#534 change 5: ORB's binding cap is 5 longs + 5 shorts opened PER DAY (not the
-        # shared concurrent-slot count above, which is just a safety ceiling).
-        cur.execute("SELECT side, COUNT(*) FROM v14_trades WHERE trade_date=%s AND tag='ORB' "
-                    "GROUP BY side", (ctx["asof"],))
+        # per-(tag,side) day counts: feeds BOTH the ORB 5/side strategy cap AND the HARD 2/side backstop.
+        cur.execute("SELECT tag, side, COUNT(*) FROM v14_trades WHERE trade_date=%s "
+                    "GROUP BY tag, side", (today,))
+        tag_side_count = {}
         orb_day_count = {"long": 0, "short": 0}
-        for s, n in cur.fetchall():
-            orb_day_count[(s or "").lower()] = int(n)
+        for tg, sd, n in cur.fetchall():
+            tg = tg or ""; sd = (sd or "").lower()
+            tag_side_count[(tg, sd)] = int(n)
+            if tg == "ORB":
+                orb_day_count[sd] = int(n)
 
     if _in_clock() and n_open < MAX_SLOTS:
         universe = sorted(ctx["top80"])
@@ -666,12 +692,18 @@ def run_v14_cycle(conn) -> Dict:
                 c["symbol"] = sym
                 if n_open >= MAX_SLOTS:
                     break
+                _tskey = (c["tag"], (c["side"] or "").lower())
+                # cc#580 fault_3: HARD backstop first -- no more than HARD_TAG_SIDE_CAP per (tag,side)/day,
+                # regardless of bar freshness. Blocks the 3rd same-tag/side entry unconditionally.
+                if tag_side_count.get(_tskey, 0) >= HARD_TAG_SIDE_CAP:
+                    continue
                 if c["tag"] == "ORB" and orb_day_count.get(c["side"], 0) >= ORB_DAILY_PER_SIDE:
                     continue   # daily per-side cap reached -- skip this candidate, try the next
                 tid = open_trade(conn, ctx, c)
                 if tid:
                     opened.append({"id": tid, "tag": c["tag"], "side": c["side"], "symbol": sym})
                     traded_today.add(sym); n_open += 1
+                    tag_side_count[_tskey] = tag_side_count.get(_tskey, 0) + 1
                     if c["tag"] == "ORB":
                         orb_day_count[c["side"]] = orb_day_count.get(c["side"], 0) + 1
                     break   # one trade/symbol/day

@@ -967,6 +967,15 @@ def _upsert_metrics(conn, sym: str, m: dict, target_date: date, sim_ts=None):
     conn.commit()
 
 
+# cc#580 fault_1: the per-symbol upsert fallback exists to skip ONE bad DATA row -- NOT to survive a
+# lock/timeout. On 20-Jul a lock on v8_metrics timed out the batch, then EACH of ~210 per-symbol
+# upserts blocked the full 90s statement_timeout in turn -- one tick ground on for ~5h, pinning its
+# worker thread (and, as ticks piled up, saturating the pool so the watchdog restart had no worker).
+# These bounds make the fallback bail fast when failures are systemic, so the tick always RETURNS.
+_FALLBACK_BUDGET_SEC      = 30    # hard wall-budget for the whole per-symbol fallback loop
+_FALLBACK_MAX_CONSEC_FAIL = 5     # abort after N consecutive fails (systemic lock, not bad rows)
+
+
 def _upsert_metrics_batch(conn, computed: dict, target_date: date, sim_ts=None) -> int:
     """cc#217 P3: upsert the whole tick's metrics in ONE executemany + ONE commit — was 212
     sequential INSERT+COMMIT, the biggest tick-latency cost.
@@ -993,14 +1002,28 @@ def _upsert_metrics_batch(conn, computed: dict, target_date: date, sim_ts=None) 
             pass
         log.warning(f"upsert_metrics batch failed ({e}) — per-symbol fallback")
     ok = 0
+    consec_fail = 0
+    deadline = perf_counter() + _FALLBACK_BUDGET_SEC
     for sym in syms:
+        # cc#580 fault_1: bail fast on a systemic lock/timeout instead of grinding all ~210 symbols
+        # at 90s each (root cause of the 20-Jul ~5h freeze). One bad DATA row still gets skipped.
+        if perf_counter() > deadline:
+            log.error(f"upsert_metrics fallback: {_FALLBACK_BUDGET_SEC}s wall-budget spent after "
+                      f"{ok}/{len(syms)} — aborting (lock/timeout, not bad rows); tick will finish")
+            break
+        if consec_fail >= _FALLBACK_MAX_CONSEC_FAIL:
+            log.error(f"upsert_metrics fallback: {consec_fail} consecutive failures — systemic "
+                      f"(lock/timeout); aborting after {ok}/{len(syms)} to free the worker")
+            break
         try:
             with conn.cursor() as cur:
                 cur.execute("SAVEPOINT sp_upsert")
                 cur.execute(_UPSERT_METRICS_SQL, _metrics_row(sym, computed[sym], target_date))
             conn.commit()
             ok += 1
+            consec_fail = 0
         except Exception as e2:
+            consec_fail += 1
             try:
                 with conn.cursor() as cur:
                     cur.execute("ROLLBACK TO SAVEPOINT sp_upsert")
@@ -1998,14 +2021,25 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     signal_ts_ist = _now_ist(sim_ts)   # cc#218
     _reset_slot_blocks()   # cc#256: fresh per-tick slot_full accumulator
 
-    _write_buy_reversal_v5_qualified(conn, all_metrics, target_date,
-                                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-    _write_sell_reversal_v61_qualified(conn, all_metrics, target_date,
-                                       gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-    _write_sell_momentum_v4_qualified(conn, all_metrics, target_date,
-                                      gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
-    _write_buy_momentum_v3_qualified(conn, all_metrics, target_date,
-                                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+    # cc#580 fault_1: isolate each basket handler so ONE bad basket (or one bad symbol inside it)
+    # cannot abort the other three or the rest of the tick. On a handler exception, rollback the
+    # aborted txn so the next handler + the end-of-tick heartbeat can still commit ("tick advances
+    # on partial failure"). The compute loop + metrics upsert are already per-symbol guarded.
+    for _handler, _bname in (
+        (_write_buy_reversal_v5_qualified,  "buy_reversal_v5"),
+        (_write_sell_reversal_v61_qualified, "sell_reversal_v61"),
+        (_write_sell_momentum_v4_qualified,  "sell_momentum_v4"),
+        (_write_buy_momentum_v3_qualified,   "buy_momentum_v3"),
+    ):
+        try:
+            _handler(conn, all_metrics, target_date,
+                     gate_fails, pivots, signal_ts_ist, sim_ts=sim_ts)
+        except Exception as _he:
+            log.error(f"_write_qualified: basket {_bname} failed — {_he}", exc_info=True)
+            try:
+                conn.rollback()   # clear the aborted txn so the next basket + heartbeat commit
+            except Exception:
+                pass
 
     # cc#256: tick complete — flush a slot_full_burst alert if any pool piled up. Live only
     # (sim_ts is None); replay/bt7 ticks accumulate harmlessly but never emit alerts.
@@ -2198,10 +2232,24 @@ def run_live_signal_writer(conn, sim_ts=None, v21_backtest=False) -> dict:
         f"gate>=1.5: legacy={old_pass} time_matched_v2={new_pass}"
     )
 
-    _write_qualified(conn, all_metrics, today, sim_ts=sim_ts, v21_backtest=v21_backtest)
+    # cc#580 fault_1: the metrics upsert already committed above. Make the downstream phases
+    # (qualified baskets, ADR, sector aggregates) NON-FATAL so a failure in any of them can never
+    # stop the tick from completing + stamping the heartbeat — a silent writer death is the exact
+    # 20-Jul failure mode. Each phase rolls back its own aborted txn so the next one can commit.
+    try:
+        _write_qualified(conn, all_metrics, today, sim_ts=sim_ts, v21_backtest=v21_backtest)
+    except Exception as _qe:
+        log.error(f"signal_writer: _write_qualified failed — {_qe}", exc_info=True)
+        try: conn.rollback()
+        except Exception: pass
 
-    _write_adr_intraday(conn, sim_ts=sim_ts)
-    _update_sector_aggregates_sql(conn, today)
+    try:
+        _write_adr_intraday(conn, sim_ts=sim_ts)
+        _update_sector_aggregates_sql(conn, today)
+    except Exception as _ae:
+        log.error(f"signal_writer: adr/sector aggregate update failed — {_ae}", exc_info=True)
+        try: conn.rollback()
+        except Exception: pass
 
     log.info(f"signal_writer: {len(computed)} updated, {no_bar} no_bar, source=live_5min")
     _write_heartbeat(conn, sim_ts=sim_ts)

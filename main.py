@@ -1157,6 +1157,25 @@ def health_feeds():
                     out.append({"source": name, "latest": latest, "records": count, "freshness": freshness, "days_old": days_old})
                 except Exception as e: out.append({"source": name, "error": str(e)})
     except Exception as e: return {"error": str(e)}
+    # cc#580 fault_4: surface the LIVE v8_metrics compute age (minutes since MAX(computed_at)) — not
+    # just the day-level score_date above — and flag stale if >10 min during market hours (09:15-15:30
+    # IST). This is the exact signal the writer watchdog uses, so a silent writer freeze (20-Jul,
+    # frozen ~5h) now shows RED on the feeds health page instead of looking fresh.
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td, time as _tt
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT EXTRACT(EPOCH FROM (NOW() - MAX(computed_at)))/60.0 FROM v8_metrics")
+            r = cur.fetchone()
+        age_min = round(float(r[0]), 1) if r and r[0] is not None else None
+        now_ist = _dt.now(_tz(_td(hours=5, minutes=30))).replace(tzinfo=None)
+        mkt = now_ist.weekday() < 5 and _tt(9, 15) <= now_ist.time() <= _tt(15, 30)
+        stale = mkt and (age_min is None or age_min > 10)
+        out.append({"source": "v8_metrics_compute", "latest": None, "records": None,
+                    "compute_age_min": age_min, "market_hours": mkt,
+                    "freshness": "stale" if stale else "ok", "days_old": None,
+                    "note": "live 5-min tick freshness (MAX computed_at); >10min in market hours = writer stalled"})
+    except Exception as e:
+        out.append({"source": "v8_metrics_compute", "error": str(e)})
     return {"checked_at": str(date.today()), "feeds": out}
 
 def api_query(sql, params=None, single=False):

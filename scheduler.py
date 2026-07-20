@@ -282,6 +282,47 @@ def _log_alert(kind: str, message: str):
         log.error(f"_log_alert failed ({kind}): {e}")
 
 
+def _alert_telegram(msg: str):
+    """cc#580 fault_2: push a Telegram alert (best-effort) so a silent writer death is impossible.
+    Reuses the proven v10_st_ema.telegram_alert sender already used by the feed watchdogs. Never
+    raises — an alert-channel failure must not break the watchdog."""
+    try:
+        import v10_st_ema
+        v10_st_ema.telegram_alert(msg)
+    except Exception as e:
+        log.warning(f"_alert_telegram failed: {e}")
+
+
+# cc#580 fault_2: emergency job-pool rebuild. When the writer has stalled AND a restart did not
+# recover it, the shared pool is likely saturated by hung/slow ticks (20-Jul: per-symbol upserts
+# each blocking the 90s statement_timeout under a lock) — so the recovery _spawn just queues
+# forever and "never gets a worker" (the 19-Jun root-cause comment at the top of this file).
+_writer_pool_rebuilds = 0
+_last_pool_rebuild_ts: Optional[datetime] = None
+POOL_REBUILD_COOLDOWN = timedelta(minutes=15)
+
+
+def _rebuild_executor(reason: str):
+    """Swap in a FRESH job pool so the next recovery tick is guaranteed a clean worker; the old
+    pool's hung threads are abandoned (they drain when their statement_timeout fires) but no longer
+    block new dispatch. Throttled so a persistent code-bug stall can't leak threads unboundedly."""
+    global _EXECUTOR, _writer_pool_rebuilds, _last_pool_rebuild_ts
+    now = _ist_now()
+    if _last_pool_rebuild_ts is not None and (now - _last_pool_rebuild_ts) < POOL_REBUILD_COOLDOWN:
+        return
+    old = _EXECUTOR
+    _EXECUTOR = ThreadPoolExecutor(max_workers=12, thread_name_prefix="sched-job")
+    _writer_pool_rebuilds += 1
+    _last_pool_rebuild_ts = now
+    log.error(f"scheduler: REBUILT job pool (#{_writer_pool_rebuilds}) — {reason}")
+    _alert_telegram(f"🔁 Scorr job-pool REBUILT (#{_writer_pool_rebuilds}): {reason} — "
+                    f"recovery tick now has a clean worker")
+    try:
+        old.shutdown(wait=False)   # let hung threads drain on the abandoned pool; don't block
+    except Exception:
+        pass
+
+
 def _reset_guards():
     """Clear stuck run-guards so the next tick can proceed cleanly."""
     global _signal_writer_started_at, _signal_writer_token
@@ -297,6 +338,10 @@ def _request_restart(reason: str):
     _watchdog_restarts += 1
     _last_restart_ts = _ist_now()
     log.error(f"scheduler RESTART requested: {reason}")
+    # cc#580 fault_2: every writer restart pings Telegram so a silent stall can never hide (the
+    # 20-Jul writer was dead ~5h with no alert reaching a human).
+    _alert_telegram(f"⚠️ Scorr signal-writer RESTART #{_watchdog_restarts} "
+                    f"({_ist_now():%H:%M:%S IST}): {reason}")
 
 
 def _tick_age_minutes() -> Optional[float]:
@@ -337,6 +382,14 @@ def _check_watchdog(now):
                        (" — restart did NOT recover it; likely a writer CODE bug needing a manual "
                         "fix (check signal_writer_crash / POST /api/v8/run_signal_writer traceback)"
                         if escalate else " — restarting live loop"))
+            # cc#580 fault_2: mirror the stall to Telegram, and if a prior restart failed to clear it
+            # the shared pool is probably saturated by hung ticks — swap in a fresh one so the next
+            # recovery _spawn is guaranteed a worker (fixes "restart never got a worker to run on").
+            _alert_telegram(f"🛑 Scorr writer STALL: v8_metrics {age:.1f} min stale in market hours "
+                            f"({_ist_now():%H:%M:%S IST})" +
+                            (" — restart did NOT recover; rebuilding pool" if escalate else ""))
+            if escalate:
+                _rebuild_executor(f"writer stale {age:.1f} min despite restart")
             _watchdog_last_alert = now
             _watchdog_alerted = True
         # cooldown: if a restart didn't help (writer-logic bug, not a hung loop),
