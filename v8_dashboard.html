@@ -1379,42 +1379,79 @@ async function openThemeDetail(theme){
 function _dcColor(c){return c==='bull'?'var(--grn)':c==='bear'?'var(--red)':c==='amber'?'var(--amber)':'var(--mut)';}
 function _dcInjectStyle(){
   if(document.getElementById('dc-style'))return;
-  const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(5,9,20,.6);display:none}
+  // cc#571 PART B: pixel-match design_refs/cockpit_v2_R1.html — dark institutional terminal, 5-block
+  // information hierarchy (Volume -> OI -> 5D-OI -> Basis -> Levels). All rules scoped under #dcOv so
+  // the cockpit's own dark palette never leaks into (or inherits from) the host page theme.
+  const css=`#dcOv{position:fixed;inset:0;z-index:11000;background:rgba(3,5,12,.66);display:none}
   #dcOv.open{display:block}
-  .dc-sheet{font-family:'Sora',system-ui,sans-serif;position:fixed;right:0;top:0;bottom:0;width:min(94vw,660px);max-width:660px;background:var(--bg);border-left:1px solid var(--line);overflow-y:auto;padding:14px 16px 18px;transform:translateX(100%);transition:transform .24s ease}
-  /* cc#427 fix_9: one-screen redesign — widen to ~50% viewport on desktop so all metrics fit in a
-     2-col grid with no vertical scroll; full-width stacked single column on mobile. */
-  @media(min-width:768px){.dc-sheet{width:min(50vw,660px)}}
-  @media(max-width:560px){.dc-sheet{width:100%;max-width:100%}}
+  #dcOv .dc-sheet{--c-bg:#0A0F1E;--c-panel:#0F1830;--c-bd:#1E2A44;--c-tx:#E6EDF7;--c-mut:#7A8AA5;--c-dim:#8a94ad;
+    --c-grn:#26D07C;--c-grnbg:#0E2A20;--c-red:#FF5169;--c-redbg:#2A0F16;--c-amb:#F5A623;--c-ambbg:#2A2110;
+    --c-blu:#4C8DFF;--c-blubg:#0E1E3C;--c-grid:#16223c;
+    font-family:'Sora',system-ui,sans-serif;position:fixed;right:0;top:0;bottom:0;width:min(94vw,460px);
+    background:var(--c-bg);color:var(--c-tx);border-left:1px solid var(--c-bd);overflow-y:auto;
+    transform:translateX(100%);transition:transform .24s ease}
+  @media(min-width:768px){#dcOv .dc-sheet{width:min(46vw,460px)}}
+  @media(max-width:520px){#dcOv .dc-sheet{width:100%}}
   #dcOv.open .dc-sheet{transform:none}
-  .dc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
-  .dc-grid .dc-row{margin-top:0}
-  @media(max-width:560px){.dc-grid{grid-template-columns:1fr}}
-  .dc-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-  .dc-hd .s{font-size:20px;font-weight:800;color:var(--txt);letter-spacing:.02em}
-  .dc-x{background:none;border:1px solid var(--line);color:var(--mut);width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;flex-shrink:0}
-  .dc-side{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;padding:4px 10px;border-radius:9px}
-  .dc-side.long{color:var(--grn);background:rgba(47,212,139,.12);border:1px solid rgba(47,212,139,.35)}
-  .dc-side.short{color:var(--red);background:rgba(255,92,108,.13);border:1px solid rgba(255,92,108,.35)}
-  .dc-sub{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--dim);margin:6px 0 10px}
-  .dc-vstrip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:9px}
-  .dc-vc{border-radius:12px;padding:9px 9px;background:var(--bg2);border:1px solid var(--line);position:relative;overflow:hidden}
-  .dc-vc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--vc,var(--mut));box-shadow:0 0 10px var(--vc,transparent)}
-  /* cc#445 fix_1: font scale MIN 10 / MAX 16 (values 14-16, labels 10-11), roomier rows. */
-  .dc-vc .k{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--dim);text-transform:uppercase}
-  .dc-vc .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:16px;font-weight:700;margin-top:4px;line-height:1.15}
-  .dc-vc .vs{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--dim);font-weight:600;margin-top:4px;line-height:1.3}
-  .dc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px 14px;margin-top:7px}
-  .dc-row .k{font-size:11px;font-weight:700;color:var(--mut)}
-  .dc-row .d{font-size:10px;color:var(--dim);font-weight:600;margin-top:3px;line-height:1.35}
-  .dc-row .v{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:15px;font-weight:700;text-align:right;color:var(--txt);line-height:1.3}
-  .dc-row .v small{font-size:11px;color:var(--dim);font-weight:600;margin-left:5px}
-  .dc-thin{color:var(--mut);font-weight:700;font-size:11px;letter-spacing:.04em}
-  .dc-chip{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;margin-left:8px;white-space:nowrap}
-  .dc-pos{color:var(--grn)}.dc-neg{color:var(--red)}
-  .dc-skel{height:56px;border-radius:12px;margin-top:7px;background:linear-gradient(90deg,var(--panel) 25%,var(--panel2) 37%,var(--panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
-  @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}
-  .dc-link{cursor:pointer;border-bottom:1px dashed var(--mut)}.dc-link:active{color:var(--blu)}`;
+  #dcOv .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+  #dcOv .up{color:var(--c-grn)} #dcOv .dn{color:var(--c-red)}
+  #dcOv .hdr{padding:14px 16px 12px;border-bottom:1px solid var(--c-bd);position:relative}
+  #dcOv .navrow{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  #dcOv .back{display:flex;align-items:center;gap:7px;color:var(--c-mut);font-size:12px;cursor:pointer;font-family:'IBM Plex Mono',ui-monospace,monospace}
+  #dcOv .back .ar{font-size:15px}
+  #dcOv .ts{font-size:10.5px;color:var(--c-grn);letter-spacing:.5px;border:1px solid #17603f;background:var(--c-grnbg);border-radius:8px;padding:5px 11px}
+  #dcOv .sym{display:flex;align-items:flex-end;justify-content:space-between}
+  #dcOv .sym .l h1{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1}
+  #dcOv .sym .l .tag{margin-top:6px;display:inline-block;font-size:10px;color:var(--c-mut);border:1px solid var(--c-bd);border-radius:5px;padding:2px 7px;letter-spacing:.5px}
+  #dcOv .sym .r{text-align:right}
+  #dcOv .sym .r .px{font-size:22px;font-weight:700}
+  #dcOv .sym .r .chg{font-size:13px;font-weight:600;margin-top:3px}
+  #dcOv .sec{padding:14px 16px;border-bottom:1px solid var(--c-bd)}
+  #dcOv .lbl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;letter-spacing:1.5px;color:var(--c-mut);text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  #dcOv .lbl .n{color:var(--c-dim);font-weight:600}
+  #dcOv .volgrid{display:grid;grid-template-columns:1.4fr 1fr;gap:10px}
+  #dcOv .vtile{background:var(--c-panel);border:1px solid var(--c-bd);border-radius:12px;padding:14px 14px 12px;overflow:hidden}
+  #dcOv .vtile .cap{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--c-mut);letter-spacing:.5px}
+  #dcOv .vtile .big{font-size:40px;font-weight:800;letter-spacing:-1px;line-height:1;margin-top:6px}
+  #dcOv .vtile .big.on{color:var(--c-grn)} #dcOv .vtile small{font-size:18px;font-weight:600;color:var(--c-mut)}
+  #dcOv .vtile .sub{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:var(--c-mut);margin-top:6px}
+  #dcOv .vbar{height:5px;border-radius:3px;background:#132038;margin-top:11px;overflow:hidden}
+  #dcOv .vbar i{display:block;height:100%;background:linear-gradient(90deg,#1c9c63,var(--c-grn))}
+  #dcOv .vtile.sm .big{font-size:30px}
+  #dcOv .oiwrap{display:flex;align-items:stretch;gap:12px}
+  #dcOv .oibox{flex:1;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:12px;padding:14px}
+  #dcOv .oibox .d{font-size:11px;margin-top:4px}
+  #dcOv .quad{flex:1.05;border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:center;background:var(--c-grnbg);border:1px solid #17603f}
+  #dcOv .quad.bear{background:var(--c-redbg);border-color:#5e2230} #dcOv .quad.neu{background:var(--c-ambbg);border-color:#5a4620}
+  #dcOv .quad .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#8fe6bb;letter-spacing:1px}
+  #dcOv .quad.bear .k{color:#f2a6b1} #dcOv .quad.neu .k{color:#e8c890}
+  #dcOv .quad .v{font-size:20px;font-weight:800;color:var(--c-grn);line-height:1.05;margin-top:6px;letter-spacing:-.4px}
+  #dcOv .quad.bear .v{color:var(--c-red)} #dcOv .quad.neu .v{color:var(--c-amb)}
+  #dcOv .quad .m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:#6fbf95;margin-top:8px}
+  #dcOv .strip{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',ui-monospace,monospace}
+  #dcOv .strip th{font-size:9.5px;color:var(--c-mut);text-align:right;font-weight:500;letter-spacing:.5px;padding:0 0 8px}
+  #dcOv .strip th:first-child{text-align:left}
+  #dcOv .strip td{font-size:12px;padding:7px 0;border-top:1px solid var(--c-grid);text-align:right}
+  #dcOv .strip td:first-child{text-align:left;color:var(--c-mut)}
+  #dcOv .qd{display:inline-block;font-size:9px;padding:2px 6px;border-radius:4px;letter-spacing:.3px}
+  #dcOv .qd.lb{background:var(--c-grnbg);color:var(--c-grn)} #dcOv .qd.su{background:var(--c-redbg);color:var(--c-red)}
+  #dcOv .qd.sc{background:var(--c-blubg);color:var(--c-blu)} #dcOv .qd.lu{background:var(--c-ambbg);color:var(--c-amb)}
+  #dcOv .qd.na{background:#141c30;color:var(--c-mut)}
+  #dcOv .basis{display:flex;align-items:center;gap:14px;background:var(--c-panel);border:1px solid var(--c-bd);border-radius:12px;padding:13px 15px}
+  #dcOv .basis .v{font-size:24px;font-weight:800;letter-spacing:-.5px}
+  #dcOv .basis .col{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--c-mut)}
+  #dcOv .basis .col b{color:var(--c-tx);font-weight:600}
+  #dcOv .chip{margin-left:auto;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;padding:5px 11px;border-radius:20px;background:var(--c-grnbg);color:var(--c-grn);border:1px solid #17603f;letter-spacing:.5px}
+  #dcOv .chip.dn{background:var(--c-redbg);color:var(--c-red);border-color:#5e2230} #dcOv .chip.neu{background:var(--c-ambbg);color:var(--c-amb);border-color:#5a4620}
+  #dcOv .lv{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  #dcOv .lvc{background:var(--c-panel);border:1px solid var(--c-bd);border-radius:11px;padding:11px 12px}
+  #dcOv .lvc .k{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.5px;color:var(--c-mut);letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
+  #dcOv .lvc .v{font-size:19px;font-weight:700;margin-top:5px;letter-spacing:-.3px}
+  #dcOv .pin{font-size:8.5px;padding:1px 6px;border-radius:4px}
+  #dcOv .pin.mag{background:var(--c-blubg);color:var(--c-blu)} #dcOv .pin.nak{background:var(--c-ambbg);color:var(--c-amb)}
+  #dcOv .foot{padding:12px 16px 18px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--c-dim);text-align:center;line-height:1.6}
+  #dcOv .dc-skel{height:64px;border-radius:12px;margin:12px 16px;background:linear-gradient(90deg,var(--c-panel) 25%,#16223c 37%,var(--c-panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
+  @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}`;
   const st=document.createElement('style');st.id='dc-style';st.textContent=css;document.head.appendChild(st);
 }
 function _dcClose(){const o=document.getElementById('dcOv');if(o)o.classList.remove('open');}
@@ -1445,12 +1482,25 @@ function _dcReadTile(read){
   </div>`;
 }
 function _dcHeader(sym,side,qty,entry,cmp,dcmp){
+  // cc#571 PART B: cockpit_v2 header — back-to-funnel (closes the sheet, returns to the funnel it
+  // opened from), live clock, big symbol + price/change. Matches design_refs/cockpit_v2_R1.html.
   const isShort=(side||'').toUpperCase()==='SHORT';
   const c=(cmp!=null?cmp:dcmp);
   const chg=(entry&&c)?((isShort?(entry-c):(c-entry))/entry*100):null;
-  return `<div class="dc-hd"><span class="s">${sym}</span><button class="dc-x" onclick="_dcClose()">&times;</button></div>
-    <div><span class="dc-side ${isShort?'short':'long'}">${side||''}${qty?(' &middot; '+qty):''}${entry?(' @ '+num(entry)):''}</span></div>
-    <div class="dc-sub">CMP ${c!=null?num(c):'--'}${chg!=null?(' &middot; '+sign(chg,2)+'% on entry'):''} &middot; Derivative Cockpit</div>`;
+  const cc=(chg==null)?'':(chg>=0?'up':'dn'), ar=(chg==null)?'':(chg>=0?'▲':'▼');
+  let clk='';try{clk=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){}
+  return `<div class="hdr">
+    <div class="navrow">
+      <div class="back mono" onclick="_dcClose()"><span class="ar">&larr;</span> V8 FUNNEL</div>
+      <div class="ts mono">&#9727; ${clk} &middot; LIVE</div>
+    </div>
+    <div class="sym">
+      <div class="l"><h1>${sym}</h1>
+        <span class="tag mono">${side||'FUT'}${qty?(' &middot; '+qty):''}${entry?(' @ '+num(entry)):''}</span></div>
+      <div class="r"><div class="px mono">${c!=null?num(c,1):'--'}</div>
+        ${chg!=null?`<div class="chg mono ${cc}">${ar} ${sign(chg,2)}%</div>`:''}</div>
+    </div>
+  </div>`;
 }
 // cc#348: strict one-screen sheet — exactly 3 verdict chips + 8 rows, fits 390x800 zero scroll.
 function _dcVC(k,label,color,sub,tip){
@@ -1536,118 +1586,90 @@ async function _dcFetchBasketStatus(sym){
     if(el)el.insertAdjacentHTML('beforeend',`<span class="dc-chip" style="background:rgba(140,153,189,.14);color:var(--mut)">${txt}</span>`);
   }catch(e){/* display-only context — silent on failure */}
 }
+// cc#571 PART B: cockpit_v2 5-block render (Volume -> OI -> 5D-OI -> Basis -> Levels), pixel-matched
+// to design_refs/cockpit_v2_R1.html. Live data from the SAME deriv-metrics payload; ATM dropped
+// (per the locked ref — stock option OI is no longer on the WS). Graceful: any block whose data is
+// absent is omitted rather than rendering an empty shell.
+function _dcQd(q){ q=(q||'').toLowerCase();
+  if(q.indexOf('long')>=0&&q.indexOf('build')>=0)return['lb','LONG B-UP'];
+  if(q.indexOf('short')>=0&&q.indexOf('build')>=0)return['su','SHORT B-UP'];
+  if(q.indexOf('cover')>=0)return['sc','SHORT COVER'];
+  if(q.indexOf('unwind')>=0)return['lu','LONG UNWIND'];
+  return['na','&middot;']; }
 function _dcRender(sym,side,qty,entry,cmp,d){
-  const V=d.verdict||{},L=d.levels||{},F=d.flow||{},E=d.energy||{},R=d.rsi||{},M=d.meanings||{};
-  const q=V.oi_quadrant, o=V.options_cost;
-  const _sm=(x,dg)=>`<small class="${x>=0?'dc-pos':'dc-neg'}">${sign(x,dg)}%</small>`;
-  const _tagCls=tg=>tg==='STRONG'?'dc-pos':tg==='WEAK'?'dc-neg':'dc-thin';
-  const _qChip=(lbl,col)=>lbl?`<span class="dc-chip ${col==='bull'?'dc-pos':'dc-neg'}">${lbl}</span>`:'';
+  const E=d.energy||{},M=d.meanings||{},F=d.flow||{},V=d.verdict||{},L=d.levels||{};
+  const pctw=(x,mx)=>x==null?0:Math.max(3,Math.min(100,Math.round(x/mx*100)));
 
-  // ── FLOW: OI Quadrant tile + Futures/ATM OI + Basis + 5d rolling ──
-  let flow=_dcSection('Flow');
-  // cc#515/516: q is always a dict (never bare null); stale reads "OI STALE since <date>"; a
-  // labeled PROXY (basis+price inferred, cc#516 Part C.3) is visually distinct and never presented
-  // as the real quadrant.
-  if(q&&q.label&&!q.proxy){
-    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant',q.label,q.color,
-             `OI ${sign(q.oi_chg_pct,1)}% &middot; Px ${sign(q.price_chg_pct,1)}%${q.source==='eod'?' &middot; EOD':''}`,
-             'OI Quadrant = futures OI d/d × price change. Long/Short Buildup, Long Unwind, Short Covering.')}</div>`;
-  }else if(q&&q.label&&q.proxy){
-    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant',q.label+' (proxy)','amber',
-             M.oi_quadrant||'inferred from basis + price — OI dark',
-             'PROXY: derived from basis + price direction because both live and EOD futures OI are dark. Never the real OI quadrant.')}</div>`;
-  }else if(q&&q.stale&&q.stale_since){
-    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant','OI STALE','amber',`since ${_dcFmtDate(q.stale_since)}`,
-             'Futures OI has not updated in over a session for this symbol — quadrant unavailable, not just thin.')}</div>`;
-  }else{
-    flow+=`<div class="dc-vstrip">${_dcVC('OI Quadrant','DATA THIN','mut','')}</div>`;
+  // 01 VOLUME — the "is the move real" hero
+  const volx=E.volx,r3=E.recent3d_vol_ratio;
+  const s1=`<div class="sec"><div class="lbl"><span class="n">01</span> VOLUME &middot; IS THE MOVE REAL</div>
+    <div class="volgrid">
+      <div class="vtile"><div class="cap">RELATIVE VOLUME &middot; VolX</div>
+        <div class="big ${volx>=1?'on':''}">${volx!=null?num(volx,1):'--'}<small>&times;</small></div>
+        <div class="sub">vs 21-day average${E.volx_asof?(' &middot; '+E.volx_asof):''}</div>
+        <div class="vbar"><i style="width:${pctw(volx,3)}%"></i></div></div>
+      <div class="vtile sm"><div class="cap">VOL 3D / 21D</div>
+        <div class="big ${r3>=1?'on':''}">${r3!=null?num(r3,1):'--'}<small>&times;</small></div>
+        <div class="sub">${M.recent3d_vol_ratio||(r3==null?'--':(r3>=1?'participation rising':'participation drying'))}</div>
+        <div class="vbar"><i style="width:${pctw(r3,2.5)}%"></i></div></div>
+    </div></div>`;
+
+  // 02 OPEN INTEREST — day OI change + OI×price quadrant
+  const fo=F.fut_oi||{},q=V.oi_quadrant||{};
+  const qcls=q.proxy?'neu':(q.color==='bull'?'':(q.color==='bear'?'bear':'neu'));
+  const qv=q.label?String(q.label).toUpperCase():(q.stale?'OI STALE':'DATA THIN');
+  const s2=`<div class="sec"><div class="lbl"><span class="n">02</span> OPEN INTEREST</div>
+    <div class="oiwrap">
+      <div class="oibox">
+        <div class="d ${(fo.chg_pct||0)>=0?'up':'dn'}" style="font-size:26px;font-weight:800;line-height:1">${fo.chg_pct!=null?sign(fo.chg_pct,1)+'%':'--'}</div>
+        <div class="d" style="color:var(--c-mut)">day OI change vs prev</div>
+        ${fo.price_chg!=null?`<div class="d" style="color:var(--c-mut)">price ${sign(fo.price_chg,1)}%</div>`:''}
+      </div>
+      <div class="quad ${qcls}"><div class="k">OI &times; PRICE QUADRANT</div>
+        <div class="v">${qv}${q.proxy?' (PROXY)':''}</div>
+        <div class="m">${q.oi_chg_pct!=null?('OI '+sign(q.oi_chg_pct,1)+'% &middot; Px '+sign(q.price_chg_pct,1)+'%'):(M.oi_quadrant||(q.stale_since?('since '+_dcFmtDate(q.stale_since)):''))}</div>
+      </div>
+    </div></div>`;
+
+  // 03 5-DAY ROLLING OI
+  const o5=F.oi_5d||{};
+  let s3='';
+  if(o5.series&&o5.series.length){
+    const rows=o5.series.map(x=>{const qd=_dcQd(x.quadrant);
+      return `<tr><td>${_dcFmtDate(x.date)}</td>
+        <td class="${(x.chg_pct||0)>=0?'up':'dn'}">${x.chg_pct==null?'&middot;':sign(x.chg_pct,1)+'%'}</td>
+        <td class="${(x.px_chg||0)>=0?'up':'dn'}">${x.px_chg==null?'&middot;':sign(x.px_chg,1)+'%'}</td>
+        <td><span class="qd ${qd[0]}">${qd[1]}</span></td></tr>`;}).join('');
+    s3=`<div class="sec"><div class="lbl"><span class="n">03</span> 5-DAY ROLLING OI</div>
+      <table class="strip"><thead><tr><th>DATE</th><th>OI &Delta;%</th><th>PRICE &Delta;%</th><th>SIGNAL</th></tr></thead>
+      <tbody>${rows}</tbody></table>${o5.net_pct!=null?`<div class="sub mono" style="text-align:right;margin-top:8px;color:var(--c-mut)">net ${sign(o5.net_pct,1)}%</div>`:''}</div>`;
   }
-  const b=F.basis, fut=d.fut, spot=d.spot;
-  flow+=_dcR('Basis',
-    (b&&b.value!=null)?`<span class="${b.value>=0?'dc-pos':'dc-neg'}">${sign(b.value,1)}</span>${b.tag?`<span class="dc-chip ${_tagCls(b.tag)}">${b.tag}</span>`:''}`:'--',
-    (fut!=null&&spot!=null)?(`Fut ${num(fut,1)} vs Eq ${num(spot,1)}`+((b&&b.percentile!=null)?(' &middot; 5d pct '+num(b.percentile,0)+'%'):''))
-                           :((b&&b.percentile!=null)?('5d pct '+num(b.percentile,0)+'%'):''),
-    M.basis);
-  const fo=F.fut_oi;
-  flow+=_dcR('Futures OI &middot; vs prev day',
-    (fo&&fo.chg_pct!=null)?`<span class="${fo.chg_pct>=0?'dc-pos':'dc-neg'}">${sign(fo.chg_pct,1)}%</span>${fo.quadrant?_qChip(fo.quadrant,fo.quadrant_color):''}`
-      :((fo&&fo.stale&&fo.stale_since)?`<span class="dc-thin">OI stale since ${_dcFmtDate(fo.stale_since)}</span>`:'<span class="dc-thin">DATA THIN</span>'),
-    (fo&&fo.price_chg!=null)?('Px '+sign(fo.price_chg,1)+'%'):'');
-  const ca=F.atm_call_oi, pa=F.atm_put_oi;
-  flow+=_dcR('ATM Call OI &middot; d/d',_dcOiVal(ca),(ca&&ca.strike!=null)?('ATM '+num(ca.strike,0)+(ca.dd_asof?(' &middot; '+ca.dd_asof):'')):'');
-  flow+=_dcR('ATM Put OI &middot; d/d',_dcOiVal(pa),(pa&&pa.strike!=null)?('ATM '+num(pa.strike,0)):'');
-  const o5=F.oi_5d;
-  if(o5&&o5.series&&o5.series.length){
-    const _dm=s=>String(s||'').slice(5).replace('-','/');
-    const bars=o5.series.map(s=>`<span title="${s.date}: OI ${s.chg_pct==null?'--':sign(s.chg_pct,1)}% · Px ${s.px_chg==null?'--':sign(s.px_chg,1)}%${s.quadrant?(' · '+s.quadrant):''}" style="display:inline-flex;flex-direction:column;align-items:center;line-height:1.4;gap:3px"><span style="font-size:11px;color:var(--dim)">${_dm(s.date)}</span><span class="${(s.chg_pct==null?0:s.chg_pct)>=0?'dc-pos':'dc-neg'}" style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700">${s.chg_pct==null?'·':sign(s.chg_pct,1)}</span><span style="font-size:10px;color:${s.quadrant_color==='bull'?'var(--grn)':s.quadrant_color==='bear'?'var(--red)':'var(--dim)'}">${s.quadrant?s.quadrant.replace(' ','&nbsp;').slice(0,12):''}</span></span>`).join('<span style="color:var(--line2);margin:0 5px;align-self:center">|</span>');
-    flow+=`<div class="dc-row" style="padding:12px 0"><div><div class="k">OI &middot; 5d rolling</div><div class="d">dated, quadrant-tagged, oldest &rarr; newest</div></div><div class="v" style="display:flex;gap:7px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-end;min-height:60px">${bars}${o5.net_pct!=null?`<span class="dc-chip ${o5.net_pct>=0?'dc-pos':'dc-neg'}">net ${sign(o5.net_pct,1)}%</span>`:''}</div></div>`;
+
+  // 04 FUTURES BASIS
+  const b=F.basis||{},fut=d.fut,spot=d.spot;
+  let s4='';
+  if(b.value!=null||fut!=null){
+    const prem=(b.value||0)>=0;
+    s4=`<div class="sec"><div class="lbl"><span class="n">04</span> FUTURES BASIS</div>
+      <div class="basis"><div class="v ${prem?'up':'dn'}">${b.value!=null?sign(b.value,1):'--'}</div>
+        <div class="col">${fut!=null?`FUT <b>${num(fut,1)}</b>`:''}${spot!=null?`${fut!=null?' &middot; ':''}EQ <b>${num(spot,1)}</b>`:''}${b.percentile!=null?`<br>5-day basis pct <b>${num(b.percentile,0)}%</b>`:''}</div>
+        <div class="chip ${prem?'':'dn'}">${prem?'PREMIUM':'DISCOUNT'}${b.tag?(' &middot; '+b.tag):''}</div>
+      </div></div>`;
   }
 
-  // ── LEVELS: VPOC today/prior · VWAP · fall-from-high ──
-  let levels=_dcSection('Levels')+'<div class="dc-grid">';
-  const vp=L.vpoc_today;
-  levels+=_dcR('VPOC &middot; today',
-    (vp&&vp.value!=null)?(num(vp.value,0)+(vp.dist_pct!=null?_sm(vp.dist_pct,1):'')+_dcInterp(vp.dist_pct)):'--',
-    (L.vpoc_prior&&L.vpoc_prior.naked)?('prior '+num(L.vpoc_prior.value,0)+' naked'):'',
-    M.vpoc_today);
-  if(L.vpoc_prior&&L.vpoc_prior.value!=null)
-    levels+=_dcR('VPOC &middot; prior',num(L.vpoc_prior.value,0)+(L.vpoc_prior.naked?' <span class="dc-chip dc-neg">naked</span>':' <span class="dc-chip dc-pos">tested</span>'),'',M.vpoc_prior);
-  const vw=L.vwap;
-  levels+=_dcR('VWAP',
-    (vw&&vw.value!=null)?(num(vw.value,1)+(vw.dist_pct!=null?_sm(vw.dist_pct,1):'')+_dcInterp(vw.dist_pct)):'--','session',M.vwap);
-  if(E.fall_from_day_high!=null||M.fall_from_day_high)
-    levels+=_dcR('Fall &middot; from day high',E.fall_from_day_high!=null?`<span class="${E.fall_from_day_high>=0?'dc-pos':'dc-neg'}">${sign(E.fall_from_day_high,2)}%</span>`:'--','',M.fall_from_day_high);
-  levels+='</div>';
+  // 05 LEVELS
+  const vp=L.vpoc_today||{},vpp=L.vpoc_prior||{},vw=L.vwap||{},dv=E.delivery||{};
+  const lvc=(k,pin,v)=>v==null?'':`<div class="lvc"><div class="k">${k}${pin||''}</div><div class="v">${v}</div></div>`;
+  let cards='';
+  cards+=lvc('VPOC &middot; TODAY',' <span class="pin mag">POC</span>',vp.value!=null?num(vp.value,0):null);
+  cards+=lvc('VPOC &middot; PRIOR',vpp.value!=null?(vpp.naked?' <span class="pin nak">NAKED</span>':' <span class="pin mag">TESTED</span>'):'',vpp.value!=null?num(vpp.value,0):null);
+  cards+=lvc('VWAP','',vw.value!=null?num(vw.value,1):null);
+  cards+=lvc('ATR &middot; 14D','',E.atr_daily!=null?num(E.atr_daily,1):null);
+  cards+=lvc('DELIVERY %','',dv.deliv_pct!=null?(num(dv.deliv_pct,1)+'<span style="font-size:12px;color:var(--c-mut)">%</span>'):null);
+  const s5=cards?`<div class="sec"><div class="lbl"><span class="n">05</span> LEVELS</div><div class="lv">${cards}</div></div>`:'';
 
-  // ── ENERGY: Vol X · Recent participation (3d/21d, cc#516 Part D) · A/D · ATR · RSI ──
-  let energy=_dcSection('Energy')+'<div class="dc-grid">';
-  energy+=_dcR('Vol X &middot; time-matched',
-    E.volx!=null?`<span class="${E.volx>=1?'dc-pos':''}">${num(E.volx,1)}×</span>${E.volx_pct!=null?` <small class="${E.volx_pct>=0?'dc-pos':'dc-neg'}">${sign(E.volx_pct,0)}%</small>`:''}`:'--',
-    'vs typical session'+(E.volx_asof?(' &middot; as of '+E.volx_asof):''),M.volx);
-  const r3=E.recent3d_vol_ratio;
-  energy+=_dcR('Recent participation &middot; 3d/21d',
-    r3!=null?`<span class="${r3>=1?'dc-pos':'dc-neg'}">${num(r3,2)}×</span>`:'--','vol(t-1..t-3) vs vol(t-1..t-21)',M.recent3d_vol_ratio);
-  // cc#517 Part A: Delivery — latest deliv% vs the symbol's OWN 21d avg (never an absolute band).
-  const dv=E.delivery;
-  const dvMeaning=[M.delivery,M.delivery_combo].filter(Boolean).join(' &middot; ');
-  energy+=_dcR('Delivery &middot; vs own 21d avg',
-    dv&&dv.ratio!=null?`<span class="${dv.ratio>=1?'dc-pos':'dc-neg'}">${num(dv.deliv_pct,1)}%</span> <small class="${dv.ratio>=1?'dc-pos':'dc-neg'}">${num(dv.ratio,2)}×</small>`
-      :(dv&&dv.deliv_pct!=null?`${num(dv.deliv_pct,1)}%`:'--'),
-    dv&&dv.avg21!=null?`avg ${num(dv.avg21,1)}% (${dv.avg21_n}/21)`:'',
-    dvMeaning||undefined);
-  // cc#589: Delivery % 30-trading-day trend sparkline (fills progressively; delivery_eod began 20-Jul).
-  if(dv&&dv.series&&dv.series.length){
-    const dn=dv.avg30_n||dv.series.length;
-    energy+=_dcR('Delivery &middot; 30d trend',
-      (_delivSpark(dv.series)||`<span class="dc-thin">building (${dn}/30)</span>`)
-        +(dv.avg30!=null?` <small>avg ${num(dv.avg30,1)}%</small>`:''),
-      `${dn}/30 sessions`, 'delivery % last 30 trading days');
-  }
-  const ad=E.ad_21d;
-  energy+=_dcR('A/D &middot; 21d',
-    ad?`<span class="${ad.label==='Accumulation'?'dc-pos':ad.label==='Distribution'?'dc-neg':'dc-thin'}">${ad.label}</span>`:'--',
-    ad?(num(ad.up_vol_pct,0)+'% up-vol'):'',M.ad_21d);
-  energy+=_dcR('ATR',
-    (E.atr_5m!=null||E.atr_daily!=null)?(`5m ${E.atr_5m!=null?num(E.atr_5m,1):'--'}${E.atr_5m_pct!=null?` (${num(E.atr_5m_pct,2)}%)`:''} &middot; D ${E.atr_daily!=null?num(E.atr_daily,1):'--'}${E.atr_daily_pct!=null?` (${num(E.atr_daily_pct,1)}%)`:''}`):'--','5m,20 · daily,14',M.atr);
-  const rd=R.d,rw=R.w;
-  energy+=_dcR('RSI &middot; D/W',
-    (rd!=null||rw!=null)?(`D ${rd!=null?num(rd,1):'--'} &middot; W ${rw!=null?num(rw,1):'--'}`):'--','daily · weekly');
-  energy+='</div>';
-
-  // ── OPTIONS: Options Cost tile + freshness ──
-  let options=_dcSection('Options');
-  let oSub='';
-  if(o){const w=o.working;
-    oSub = w ? `${num(w.strike,0)} CE @ ${num(w.ce_ltp,0)} vs fair ${num(w.ce_fair,0)} &middot; ${num(w.ce_ratio,2)}×`
-             : (o.basis==='IVP'?('IVP '+num(o.ivp,0)):(o.iv_rv!=null?num(o.iv_rv,2)+'×':''));}
-  options+=`<div class="dc-vstrip">${o ? _dcVC('Options Cost',o.label,o.color,oSub,
-             'Options Cost: ATM straddle implied vol vs 20d realised (RV20). Working shows the ATM-CE market premium vs the Black-Scholes fair premium (σ=RV20); ratio <1× = cheap.')
-         : _dcVC('Options Cost','DATA THIN','mut','')}</div>`;
-  if(M.options_cost)options+=`<div class="dc-row" style="border-style:dashed"><div><div class="d" style="font-style:italic">${M.options_cost}</div></div><div class="v"></div></div>`;
-  if(!d.has_options && !d.data_ts) options+=`<div class="dc-sub" style="color:var(--amber);margin:6px 0 0">&#9888; No option data for ${sym}</div>`;
-  else if(d.data_ts) options+=`<div class="dc-sub" style="margin:6px 0 0">Options as of ${_dcFmtTs(d.data_ts)} IST</div>`;
-
-  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+_dcSetupContext(d)+_dcReadTile(d.read)+flow+levels+energy+options;
+  const foot=`<div class="foot">DERIVATIVE COCKPIT v2 &middot; live from deriv_metrics${d.data_ts?(' &middot; options '+_dcFmtTs(d.data_ts)+' IST'):''}</div>`;
+  return _dcHeader(sym,side,qty,entry,cmp,d.cmp)+s1+s2+s3+s4+s5+foot;
 }
 // cc#368: format the naive-IST option_chain ts ("2026-07-10T10:45:00") -> "10-Jul 10:45" without
 // Date()/timezone drift (the server stamp is already IST).
