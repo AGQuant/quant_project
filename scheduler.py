@@ -220,6 +220,11 @@ def _compute_and_store_pcr(conn=None):
             # independent rows. HAVING put-OI>0 skips a broken-feed underlying
             # (BANKNIFTY currently reports put_oi=0) so it never writes a bogus pcr=0
             # and never blocks NIFTY.
+            # cc#591 fix_2: anchor on the LAST bar of the day WITH valid put-OI (last-good bar), NOT
+            # the absolute MAX(ts). The put-leg OI feed intermittently drops to 0 (BANKNIFTY-weighted,
+            # 20-Jul 13:30); with the old MAX(ts)+HAVING the close bar's zero-put skipped the whole
+            # underlying and left a daily hole. Falling back to the last put-OI>0 bar fills the day
+            # (a same-session proxy, better than nothing) and keeps the PCR mood-gate (id=1916) fed.
             cur.execute("""
                 INSERT INTO pcr_daily (price_date, underlying, put_oi, call_oi, pcr)
                 SELECT DATE(ts), underlying,
@@ -230,8 +235,11 @@ def _compute_and_store_pcr(conn=None):
                 FROM option_chain
                 WHERE DATE(ts) = CURRENT_DATE
                   AND underlying IN ('NIFTY','BANKNIFTY')
-                  AND ts = (SELECT MAX(oc2.ts) FROM option_chain oc2
-                            WHERE DATE(oc2.ts) = CURRENT_DATE AND oc2.underlying = option_chain.underlying)
+                  AND ts = (SELECT oc2.ts FROM option_chain oc2
+                            WHERE DATE(oc2.ts) = CURRENT_DATE AND oc2.underlying = option_chain.underlying
+                            GROUP BY oc2.ts
+                            HAVING SUM(CASE WHEN oc2.option_type='PE' THEN oc2.oi ELSE 0 END) > 0
+                            ORDER BY oc2.ts DESC LIMIT 1)
                 GROUP BY DATE(ts), underlying
                 HAVING SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END) > 0
                 ON CONFLICT (price_date, underlying) DO UPDATE SET
@@ -830,6 +838,8 @@ def _backfill_pcr_for_date(conn, target) -> bool:
         # (underlying/put_oi/call_oi/pcr), last snapshot of the day per underlying,
         # HAVING put-OI>0 to skip a broken-feed underlying. DO NOTHING preserves any
         # existing good row (heal-only).
+        # cc#591 fix_2: last-good put-OI bar (same fix as _compute_and_store_pcr), so a heal never
+        # skips a day whose close bar had a zeroed put leg.
         cur.execute("""
             INSERT INTO pcr_daily (price_date, underlying, put_oi, call_oi, pcr)
             SELECT DATE(ts), underlying,
@@ -840,8 +850,11 @@ def _backfill_pcr_for_date(conn, target) -> bool:
             FROM option_chain
             WHERE DATE(ts) = %(t)s
               AND underlying IN ('NIFTY','BANKNIFTY')
-              AND ts = (SELECT MAX(oc2.ts) FROM option_chain oc2
-                        WHERE DATE(oc2.ts) = %(t)s AND oc2.underlying = option_chain.underlying)
+              AND ts = (SELECT oc2.ts FROM option_chain oc2
+                        WHERE DATE(oc2.ts) = %(t)s AND oc2.underlying = option_chain.underlying
+                        GROUP BY oc2.ts
+                        HAVING SUM(CASE WHEN oc2.option_type='PE' THEN oc2.oi ELSE 0 END) > 0
+                        ORDER BY oc2.ts DESC LIMIT 1)
             GROUP BY DATE(ts), underlying
             HAVING SUM(CASE WHEN option_type='PE' THEN oi ELSE 0 END) > 0
             ON CONFLICT (price_date, underlying) DO NOTHING

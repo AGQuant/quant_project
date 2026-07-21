@@ -380,12 +380,9 @@ def create_tables():
         resolved BOOLEAN DEFAULT FALSE, raw_input JSONB, created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_hr_holdings_portfolio ON hr_holdings(portfolio_id);
-    CREATE TABLE IF NOT EXISTS v8_history_cache (
-        symbol TEXT PRIMARY KEY, cache_date DATE NOT NULL,
-        closes JSONB, highs JSONB, lows JSONB, volumes JSONB, segment TEXT,
-        vol_avg10 NUMERIC, hi_252 NUMERIC, lo_252 NUMERIC, hi_21 NUMERIC, lo_21 NUMERIC,
-        gvm_score NUMERIC, prev_day_change NUMERIC, built_at TIMESTAMP DEFAULT NOW()
-    );
+    -- cc#592: v8_history_cache DROPPED — one-time 05-Jun-2026 build, never refreshed, zero live
+    -- readers (superseded by universe_technicals cc#154 + fyers_hist cc#377; 52W-breakout reads
+    -- universe_technicals). CREATE removed so the weekend Railway-console DROP is not recreated.
     CREATE TABLE IF NOT EXISTS gvm_history (
         id SERIAL PRIMARY KEY, symbol TEXT NOT NULL, score_date DATE NOT NULL,
         g_score NUMERIC, v_score NUMERIC, m_score NUMERIC, gvm_score NUMERIC,
@@ -1136,7 +1133,7 @@ def health_feeds():
         ("screener_raw","SELECT NULL, COUNT(*) FROM screener_raw"),
         ("v8_metrics","SELECT MAX(score_date), COUNT(DISTINCT symbol) FROM v8_metrics"),
         ("v8_qualified","SELECT MAX(signal_date), COUNT(*) FROM v8_qualified"),
-        ("v8_history_cache","SELECT MAX(cache_date), COUNT(*) FROM v8_history_cache"),
+        # cc#592: v8_history_cache removed from the feed-health monitor (dead table, false 46d-stale alert)
         ("global_indices","SELECT MAX(quote_date), COUNT(DISTINCT symbol) FROM global_indices"),
         ("adr_daily","SELECT MAX(price_date), COUNT(*) FROM adr_daily"),
         ("pcr_daily","SELECT MAX(price_date), COUNT(*) FROM pcr_daily"),

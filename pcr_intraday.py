@@ -27,6 +27,7 @@ fyers restart. This module reads option_chain to match production.
 """
 
 import os
+import json
 from datetime import datetime, timedelta
 
 import psycopg
@@ -174,6 +175,33 @@ def _compute_one(conn, underlying, ts):
               pcr_atm5, put_atm, call_atm,
               pcr_total, put_total, call_total))
     conn.commit()
+
+    # cc#591 fix_3: live stale-put-OI alert. The put-leg OI feed intermittently zeroes (BANKNIFTY-
+    # weighted, 20-Jul) and silently corrupts/nulls the PCR mood-gate (id=1916). Fire ONE ops_log
+    # alert at exactly the 3rd consecutive zero-put bar in market hours (>2 bars) — was silent before.
+    if put_total == 0:
+        try:
+            mins = ts.hour * 60 + ts.minute   # option_chain bars are IST-native (09:15-15:30)
+            if 555 <= mins <= 930:
+                with conn.cursor() as cur:
+                    cur.execute("""SELECT put_oi_total FROM pcr_intraday
+                                   WHERE underlying=%s AND ts<=%s ORDER BY ts DESC LIMIT 4""",
+                                (underlying, ts))
+                    z = [r[0] for r in cur.fetchall()]
+                # exactly-3 trailing zeros (z[0..2]==0, z[3] non-zero or absent) -> fire once, no spam
+                if len(z) >= 3 and (z[0] or 0) == 0 and (z[1] or 0) == 0 and (z[2] or 0) == 0 \
+                        and (len(z) < 4 or (z[3] or 0) > 0):
+                    with conn.cursor() as cur:
+                        cur.execute("""INSERT INTO ops_log (category, title, details)
+                                       VALUES ('alert','pcr_put_oi_stale', %s::jsonb)""",
+                                    (json.dumps({"underlying": underlying, "ts": str(ts),
+                                                 "consecutive_zero_bars": 3,
+                                                 "msg": f"{underlying} put_oi_total=0 for 3 consecutive "
+                                                        "5-min bars (put-leg OI feed drop) — PCR "
+                                                        "mood-gate (id=1916) at risk"}),))
+                    conn.commit()
+        except Exception:
+            pass   # alerting must never break PCR computation
     return {
         "ts": str(ts), "underlying": underlying, "spot": spot,
         "atm_strike": atm_strike, "pcr_atm5": pcr_atm5, "pcr_total": pcr_total,
