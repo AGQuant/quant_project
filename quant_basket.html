@@ -43,14 +43,36 @@
   .ph-stat .sk{font-size:10px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px}
   .ph-stat .sv{font-size:16px;font-weight:700}
 
-  .basket-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
-  @media(max-width:780px){.basket-grid{grid-template-columns:1fr 1fr}}
-  @media(max-width:440px){.basket-grid{grid-template-columns:1fr}}
+  /* cc#561 R1 DECISION 1 — cycle strip: the six baskets read left->right as the market cycle */
+  .cycle{display:flex;align-items:center;gap:10px;margin:18px 0 14px;flex-wrap:wrap}
+  .cy-step{font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
+    padding:5px 12px;border-radius:20px;border:1px solid var(--line2);color:var(--mut)}
+  .cy-step b{font-weight:800}
+  .cy-step.turn{border-color:rgba(255,138,92,.5);color:#FF8A5C}
+  .cy-step.confirm{border-color:rgba(55,211,232,.5);color:var(--cyan)}
+  .cy-step.trend{border-color:rgba(47,212,139,.4);color:var(--grn)}
+  .cy-arrow{color:var(--dim);font-size:13px}
+
+  /* cc#561 R1 DECISION 2 — 3x2 grid (4-col breaks with 6 cards; 3+3 is the clean read) */
+  .basket-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+  @media(max-width:880px){.basket-grid{grid-template-columns:1fr 1fr}}
+  @media(max-width:540px){.basket-grid{grid-template-columns:1fr}}
 
   .bcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;
     cursor:pointer;transition:.15s;border-top:3px solid var(--blu);display:flex;flex-direction:column}
   .bcard:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(20,30,50,.09);border-color:var(--blu)}
   .bcard.active{box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+  /* cc#561 R1 DECISION 3 — role tag top-right + special-exit chips */
+  .bc-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px}
+  .bc-role{font-size:8.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
+    padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .role-turn{background:rgba(255,138,92,.13);color:#FF8A5C}
+  .role-confirm{background:rgba(55,211,232,.12);color:var(--cyan)}
+  .role-trend{background:rgba(47,212,139,.10);color:var(--grn)}
+  .chip{display:inline-block;font-size:8.5px;font-weight:800;letter-spacing:.4px;padding:1px 6px;
+    border-radius:5px;margin-left:4px;vertical-align:1px}
+  .chip.profit{background:rgba(47,212,139,.15);color:var(--grn)}
+  .chip.nightly{background:rgba(255,92,108,.12);color:var(--red)}
   .bc-name{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:2px}
   .bc-rule{font-size:10px;color:var(--dim);margin-bottom:14px;line-height:1.4}
   .bc-metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
@@ -64,6 +86,7 @@
   .bc-badge.ok{background:rgba(47,212,139,.1);color:var(--grn);border-color:#a7f3d0}
   .bc-badge.warn{background:var(--panel)beb;color:var(--amber);border-color:#fcd34d}
   .bc-badge.risk{background:rgba(255,92,108,.08);color:var(--red);border-color:#fca5a5}
+  .bc-badge.seed{background:rgba(245,185,74,.1);color:var(--amber);border-color:rgba(245,185,74,.4)}  /* cc#561 */
 
   .bc-criteria{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
   .bc-crit-row{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
@@ -137,7 +160,7 @@
   <div class="ph">
     <div class="ph-left">
       <div class="ph-title">Quant Basket</div>
-      <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · 6 Baskets · Click any basket for holdings</div>
+      <div class="ph-sub">Equity Buy &amp; Hold · GVM-Screened · <b style="color:var(--txt)">6 Baskets</b> · Full market cycle</div>
       <!-- cc#557: V12 Basket Builder folded into the QB page (removed from top nav) -->
       <a href="/v12" title="Build & backtest your own rotation basket (V12)" style="display:inline-flex;align-items:center;gap:7px;margin-top:12px;border:1px solid var(--blu);border-radius:9px;padding:7px 14px;font-size:12.5px;font-weight:700;color:var(--blu);background:rgba(77,124,254,.10);text-decoration:none">&#8863; Basket Builder &rarr;</a>
     </div>
@@ -147,6 +170,15 @@
       <div class="ph-stat"><div class="sk">Portfolio Alpha</div><div class="sv" id="s-alpha">—</div></div>
       <div class="ph-stat"><div class="sk">Positions</div><div class="sv" id="s-pos">—</div></div>
     </div>
+  </div>
+
+  <!-- cc#561 R1: cycle strip — the page tells the market-cycle story the baskets implement -->
+  <div class="cycle">
+    <span class="cy-step turn"><b>1 · BUY THE TURN</b> — Contra</span>
+    <span class="cy-arrow">→</span>
+    <span class="cy-step confirm"><b>2 · BUY CONFIRMATION</b> — 52W Breakout</span>
+    <span class="cy-arrow">→</span>
+    <span class="cy-step trend"><b>3 · HOLD THE TREND</b> — Large · Mid · Small · Alpha</span>
   </div>
 
   <div class="basket-grid" id="basket-grid">
@@ -185,8 +217,17 @@ const BRULE  = {
   breakout_52w:'GVM ≥ 7.5 · Near 52W high · At month high · Vol ≥ 21d avg · Top-10 by 1Y return · Monthly',
   contra_value:'G ≥ 7 · V ≥ 7.5 · M ≤ 6.5 · Sector GVM > 6 · Above 20DMA · Top-10 by Value · Monthly'
 };
-const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF',breakout_52w:'#37D3E8',contra_value:'#F472B6'};
-const BASKETS = ['large_cap','mid_cap','small_cap','alpha_multicap','breakout_52w','contra_value'];
+// cc#561 R1: top-border colors — Contra orange, Breakout cyan, Alpha violet, Large green, Mid blue, Small amber
+const BCOL = {large_cap:'#2FD48B',mid_cap:'#4D7CFE',small_cap:'#F5B94A',alpha_multicap:'#9B7CFF',breakout_52w:'#37D3E8',contra_value:'#FF8A5C'};
+// cc#561 R1: card grid order reads as the market cycle — Contra, Breakout, Alpha / Large, Mid, Small
+const BASKETS = ['contra_value','breakout_52w','alpha_multicap','large_cap','mid_cap','small_cap'];
+// cc#561 R1: role tag [label, css-class] — Turn / Confirmation / Trend
+const BROLE = {contra_value:['Turn','role-turn'],breakout_52w:['Confirmation','role-confirm'],
+  alpha_multicap:['Trend','role-trend'],large_cap:['Trend · Anchor','role-trend'],
+  mid_cap:['Trend','role-trend'],small_cap:['Trend · Themes','role-trend']};
+// cc#561 R1: special-exit chips appended to the Exit criteria of the two new baskets
+const BCHIPS = {contra_value:'<span class="chip profit">PROFIT-TAKE</span><span class="chip nightly">NIGHTLY</span>',
+  breakout_52w:'<span class="chip nightly">NIGHTLY</span>'};
 
 const BCRITERIA = {
   large_cap: {
@@ -236,7 +277,7 @@ async function init(){
 
     const tot=qb.total_pnl||0;
     const alp=alpha.total?.alpha;
-    document.getElementById('s-cap').textContent='₹20,00,000';
+    document.getElementById('s-cap').textContent='₹30,00,000';   // cc#561: 6 baskets × ₹5L
     document.getElementById('s-pnl').innerHTML=`<span class="${c(tot)}">${f(tot)}</span>`;
     document.getElementById('s-alpha').innerHTML=`<span class="${c(alp)}">${pct(alp)} vs N500</span>`;
     document.getElementById('s-pos').textContent=qb.total_positions||'—';
@@ -257,22 +298,30 @@ async function init(){
       const mv=d.market_value;
       const crit=BCRITERIA[key];
 
-      // HS2 thresholds per basket
-      const hs2={large_cap:-10,mid_cap:-5,small_cap:-5,alpha_multicap:-8};
+      // cc#561: per-basket exits — HS2 only on mid/small now; breakout HS1 −15% (tighter), rest −20%.
+      // Seed-pending badge on the two new baskets until they hold positions; Alpha keeps its BT badge.
+      const HS1={breakout_52w:-15}, hs1thr=HS1[key]||-20;
+      const HS2={mid_cap:-5,small_cap:-5}, hs2thr=HS2[key];
+      const isSeed=(key==='contra_value'||key==='breakout_52w');
       const allPos=(qb.positions||[]).filter(p=>p.basket===key);
-      const atRisk=allPos.filter(p=>p.pnl_pct<(hs2[key]+5));
-      let badge='<span class="bc-badge ok">No risk</span>';
-      if(atRisk.length>0){
-        const hs1=atRisk.filter(p=>p.pnl_pct<-20).length;
-        badge=hs1>0?`<span class="bc-badge risk">${hs1} near HS1</span>`:`<span class="bc-badge warn">${atRisk.length} near HS2</span>`;
-      }
+      const hs1cnt=allPos.filter(p=>p.pnl_pct<hs1thr).length;
+      const hs2cnt=(hs2thr!=null)?allPos.filter(p=>p.pnl_pct<(hs2thr+5)&&p.pnl_pct>=hs1thr).length:0;
+      let badge;
+      if(isSeed&&pos===0) badge='<span class="bc-badge seed">Seed pending</span>';
+      else if(hs1cnt>0) badge=`<span class="bc-badge risk">${hs1cnt} near HS1</span>`;
+      else if(hs2cnt>0) badge=`<span class="bc-badge warn">${hs2cnt} near HS2</span>`;
+      else if(key==='alpha_multicap') badge='<span class="bc-badge ok">BT 34.1% CAGR</span>';
+      else badge='<span class="bc-badge ok">No risk</span>';
 
       const card=document.createElement('div');
       card.className='bcard';
       card.style.borderTopColor=BCOL[key];
       card.onclick=()=>openModal(key,card);
       card.innerHTML=`
-        <div class="bc-name">${BNAMES[key]}</div>
+        <div class="bc-top">
+          <div class="bc-name">${BNAMES[key]}</div>
+          <span class="bc-role ${BROLE[key][1]}">${BROLE[key][0]}</span>
+        </div>
         <div class="bc-rule">${BRULE[key]}</div>
         <div class="bc-metrics">
           <div class="bc-m"><div class="mk">Return</div><div class="mv ${c(ret)}">${pct(ret)}</div></div>
@@ -292,26 +341,30 @@ async function init(){
           </div>
           <div class="bc-crit-row">
             <span class="bc-crit-label exit">Exit</span>
-            <span class="bc-crit-text">${crit.exit}</span>
+            <span class="bc-crit-text">${crit.exit}${BCHIPS[key]||''}</span>
           </div>
         </div>
         <div class="bc-click">↗ View holdings &amp; history</div>`;
       grid.appendChild(card);
     });
 
-    // alerts using per-basket HS2
-    const hs2thresh={large_cap:-10,mid_cap:-5,small_cap:-5,alpha_multicap:-8};
-    const atRiskAll=(qb.positions||[]).filter(p=>p.pnl_pct<(hs2thresh[p.basket]+5));
+    // cc#561: per-basket exit thresholds — HS1 Breakout −15% (tighter), rest −20%; HS2 only mid/small.
+    const HS1A={breakout_52w:-15}, HS2A={mid_cap:-5,small_cap:-5};
+    const atRiskAll=(qb.positions||[]).filter(p=>{
+      const h1=HS1A[p.basket]||-20, h2=HS2A[p.basket];
+      return p.pnl_pct<h1 || (h2!=null && p.pnl_pct<(h2+5));
+    });
     if(atRiskAll.length){
-      const rows=atRiskAll.map(p=>`
-        <div class="alert-row">
+      const rows=atRiskAll.map(p=>{
+        const h1=HS1A[p.basket]||-20, isHs1=(+p.pnl_pct<h1);
+        return `<div class="alert-row">
           <span class="ar-sym">${p.symbol}</span>
           <span class="ar-basket">${BNAMES[p.basket]||p.basket}</span>
           <span class="ar-val">${pct(p.pnl_pct)} from entry</span>
-          <span class="ar-chip ${+p.pnl_pct<-20?'hs1':'hs2'}">${+p.pnl_pct<-20?'HS1 ≤−20%':'Near HS2'}</span>
-        </div>`).join('');
+          <span class="ar-chip ${isHs1?'hs1':'hs2'}">${isHs1?('HS1 ≤'+h1+'%'):'Near HS2'}</span>
+        </div>`;}).join('');
       document.getElementById('alerts-wrap').innerHTML=`<div class="alerts-box">
-        <div class="alerts-hd">⚠ Exit Alerts · HS1=−20% · HS2: Large −10% · Mid/Small −5% · Alpha −8%</div>
+        <div class="alerts-hd">⚠ Exit Alerts · HS1: Breakout −15% · rest −20% · HS2: Mid/Small −5% only</div>
         ${rows}</div>`;
     }
 
