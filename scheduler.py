@@ -2115,6 +2115,28 @@ def _bg_ops_text_fetch():
         _ops_text_fetch_running = False
 
 
+_ops_peer_benchmark_ran_on = None   # cc#593 day-lock: nightly materialization once/day
+
+
+def _bg_ops_peer_benchmark():
+    """cc#593: nightly rebuild of the ops-metrics peer-benchmark materialization (ops_peer_benchmark)
+    from sector_ops_metrics. Day-locked, ~02:10 IST (after universe_technicals 02:05). Pure compute,
+    no scraping. The cc#596 post-T+1 chain + the app-startup seed also refresh it; this is the daily
+    floor so the peer stats never drift stale even on days with no T+1 extraction."""
+    global _ops_peer_benchmark_ran_on
+    today = _ist_now().date()
+    if _ops_peer_benchmark_ran_on == today:
+        return _SKIPPED
+    try:
+        import ops_peer_benchmark
+        res = ops_peer_benchmark.run_rebuild()
+        _ops_peer_benchmark_ran_on = today
+        log.info(f"_bg_ops_peer_benchmark: {res}")
+    except Exception as e:
+        log.error(f"_bg_ops_peer_benchmark: {e}")
+    return None
+
+
 _shareholding_q_running = False
 _shareholding_q_ran_on = None   # date of the last same-day dispatch (day-lock: 1 attempt/day in-window)
 
@@ -2570,6 +2592,7 @@ async def _scheduler_loop():
         if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)
+        if h == 2 and m == 10:  _spawn(_bg_ops_peer_benchmark)   # cc#593: nightly ops peer-benchmark rebuild
         # cc#468/470: GVM 5yr deep backfill — primary nightly kick + hourly off-market
         # resume (both no-op once flag='done' or a run is in-flight; off-market gate inside).
         if h == 2 and m == 20:  _spawn(_bg_gvm_backfill)
