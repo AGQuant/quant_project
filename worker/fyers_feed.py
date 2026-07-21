@@ -1311,6 +1311,22 @@ class OptionBarStore:
         underlying, strike, otype, expiry = meta
         # WS strips OI (Fyers SDK pops it) -> fall back to the DEPTH-poll value.
         oi = bar['oi'] if bar.get('oi') is not None else self.last_oi.get(fsym)
+        # cc#591 fix_1: NEVER write a NULL option OI. A strike freshly subscribed after an ATM-roll
+        # (or one the DEPTH-poll cycle hasn't reached yet — BANKNIFTY ATM±30 is a wide band) has no
+        # WS-OI and no last_oi -> NULL, and NULL PE rows sum to 0 -> put_oi_total=0 -> the PCR
+        # mood-gate (id=1916) corrupts/nulls (the 20-Jul 13:30 put-leg drop). Carry the symbol's last
+        # known OI from option_chain (stale-carry, queried only on the rare None) and seed last_oi so
+        # later bars reuse it without re-querying.
+        if oi is None:
+            try:
+                with self.conn.cursor() as _c:
+                    _c.execute("""SELECT oi FROM option_chain WHERE symbol=%s AND oi IS NOT NULL
+                                  ORDER BY ts DESC LIMIT 1""", (fsym,))
+                    _r = _c.fetchone()
+                if _r and _r[0] is not None:
+                    oi = int(_r[0]); self.last_oi[fsym] = oi
+            except Exception:
+                pass
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
