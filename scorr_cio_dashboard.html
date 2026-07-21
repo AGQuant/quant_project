@@ -1630,7 +1630,19 @@ function FinRowChart({ row, periods }) {
   );
 }
 
-function FinTable({ title, table }) {
+// cc#600 (nice-to-have): subtle QoQ direction arrow for a watched row (promoter holding). Compares
+// the last two non-null values; up=green ▲, down=red ▼, flat/insufficient=nothing. Kept minimal so
+// it never clutters the table.
+function _qoqArrow(values) {
+  const nn = values.filter(v => v != null);
+  if (nn.length < 2) return null;
+  const d = +(nn[nn.length - 1] - nn[nn.length - 2]).toFixed(2);
+  if (d > 0) return <span title={`QoQ +${d}`} style={{ color: C.accent, fontSize: 10 }}>▲</span>;
+  if (d < 0) return <span title={`QoQ ${d}`} style={{ color: C.red, fontSize: 10 }}>▼</span>;
+  return null;
+}
+
+function FinTable({ title, table, trendLabel }) {
   const [openRow, setOpenRow] = useState(null);   // one open row-chart per table at a time
   if (!table || !table.rows || !table.rows.length) return null;
   const displayRows = table.rows.filter(rw => rw.display !== false);
@@ -1663,6 +1675,7 @@ function FinTable({ title, table }) {
                     <span style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontWeight: 600 }}>
                       <ChartIcon onClick={() => setOpenRow(openRow === row.label ? null : row.label)} title={`${row.label} — tap for trend`} />
                       {row.label}
+                      {trendLabel && row.label === trendLabel && _qoqArrow(row.values)}
                     </span>
                   </td>
                   {row.values.map((v, i) => (
@@ -1704,7 +1717,15 @@ function FinancialsSection({ financials }) {
       <FinTable title="Balance Sheet" table={financials.balance_sheet} />
       <FinTable title="Cash Flow" table={financials.cash_flow} />
       <FinTable title="Ratios" table={financials.ratios} />
-      {financials.shareholding && <FinTable title="Shareholding Pattern" table={financials.shareholding} />}
+      {financials.shareholding && financials.shareholding.rows && financials.shareholding.rows.length
+        ? <FinTable title="Shareholding Pattern" table={financials.shareholding} trendLabel="Promoters" />
+        : (
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text, marginBottom: 8 }}>Shareholding Pattern</div>
+            <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic", padding: "8px 12px",
+              border: `1px solid ${C.border}`, borderRadius: 10 }}>Shareholding data not available.</div>
+          </div>
+        )}
     </div>
   );
 }
