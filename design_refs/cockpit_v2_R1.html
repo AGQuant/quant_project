@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Derivative Cockpit v2 — design ref</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  :root{
+    --bg:#0A0F1E; --panel:#0F1830; --panel2:#111A2E; --bd:#1E2A44; --bd2:#26324F;
+    --tx:#E6EDF7; --mut:#7A8AA5; --dim:#55618099;
+    --grn:#26D07C; --grnbg:#0E2A20; --red:#FF5169; --redbg:#2A0F16;
+    --amb:#F5A623; --ambbg:#2A2110; --blu:#4C8DFF; --blubg:#0E1E3C;
+    --grid:#16223c;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#05070F;color:var(--tx);font-family:'Sora',system-ui,sans-serif;
+    display:flex;justify-content:center;padding:22px 14px;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .phone{width:440px;background:var(--bg);border:1px solid var(--bd);border-radius:20px;overflow:hidden;
+    box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .refbar{background:var(--blubg);border-bottom:1px solid var(--bd);color:var(--blu);
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px;padding:6px 16px;text-align:center}
+
+  /* header */
+  .hdr{padding:14px 16px 12px;border-bottom:1px solid var(--bd);}
+  .navrow{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .back{display:flex;align-items:center;gap:7px;color:var(--mut);font-size:12px;font-family:'IBM Plex Mono',monospace}
+  .back .ar{font-size:15px}
+  .ts{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--grn);letter-spacing:.5px;border:1px solid #17603f;background:var(--grnbg);border-radius:8px;padding:5px 11px}
+  .sym{display:flex;align-items:flex-end;justify-content:space-between}
+  .sym .l h1{font-size:26px;font-weight:800;letter-spacing:-.5px;line-height:1}
+  .sym .l .tag{margin-top:6px;display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;
+    color:var(--mut);border:1px solid var(--bd);border-radius:5px;padding:2px 7px;letter-spacing:.5px}
+  .sym .r{text-align:right}
+  .sym .r .px{font-size:22px;font-weight:700;font-family:'IBM Plex Mono',monospace}
+  .sym .r .chg{font-size:13px;font-weight:600;color:var(--grn);font-family:'IBM Plex Mono',monospace;margin-top:3px}
+
+  .sec{padding:14px 16px;border-bottom:1px solid var(--bd)}
+  .lbl{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1.5px;color:var(--mut);
+    text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .lbl .n{color:var(--dim);font-weight:600}
+
+  /* 1. VOLUME hero */
+  .volgrid{display:grid;grid-template-columns:1.4fr 1fr;gap:10px}
+  .vtile{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:14px 14px 12px;position:relative;overflow:hidden}
+  .vtile .cap{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--mut);letter-spacing:.5px}
+  .vtile .big{font-size:40px;font-weight:800;letter-spacing:-1px;line-height:1;margin-top:6px}
+  .vtile .big.on{color:var(--grn)} .vtile small{font-size:18px;font-weight:600;color:var(--mut)}
+  .vtile .sub{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--mut);margin-top:6px}
+  .vbar{height:5px;border-radius:3px;background:#132038;margin-top:11px;overflow:hidden}
+  .vbar i{display:block;height:100%;background:linear-gradient(90deg,#1c9c63,var(--grn))}
+  .vtile.sm .big{font-size:30px}
+
+  /* 2. OI */
+  .oiwrap{display:flex;align-items:stretch;gap:12px}
+  .oibox{flex:1;background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:14px}
+  .oibox .big{font-size:30px;font-weight:800;font-family:'Sora';letter-spacing:-.5px;line-height:1}
+  .oibox .d{font-family:'IBM Plex Mono',monospace;font-size:11px;margin-top:6px}
+  .quad{flex:1.05;border-radius:12px;padding:14px;display:flex;flex-direction:column;justify-content:center;
+    background:var(--grnbg);border:1px solid #17603f}
+  .quad .k{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#8fe6bb;letter-spacing:1px}
+  .quad .v{font-size:22px;font-weight:800;color:var(--grn);line-height:1.05;margin-top:6px;letter-spacing:-.4px}
+  .quad .m{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#6fbf95;margin-top:8px}
+  .up{color:var(--grn)} .dn{color:var(--red)}
+
+  /* 3. 5-day OI strip */
+  .strip{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace}
+  .strip th{font-size:9.5px;color:var(--mut);text-align:right;font-weight:500;letter-spacing:.5px;padding:0 0 8px}
+  .strip th:first-child{text-align:left}
+  .strip td{font-size:12px;padding:7px 0;border-top:1px solid var(--grid);text-align:right}
+  .strip td:first-child{text-align:left;color:var(--mut)}
+  .qd{display:inline-block;font-size:9px;padding:2px 6px;border-radius:4px;letter-spacing:.3px}
+  .qd.lb{background:var(--grnbg);color:var(--grn)} .qd.su{background:var(--redbg);color:var(--red)}
+  .qd.sc{background:var(--blubg);color:var(--blu)} .qd.lu{background:var(--ambbg);color:var(--amb)}
+
+  /* 4. basis */
+  .basis{display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:13px 15px}
+  .basis .v{font-size:24px;font-weight:800;font-family:'Sora';letter-spacing:-.5px}
+  .basis .col{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mut)}
+  .basis .col b{color:var(--tx);font-weight:600}
+  .chip{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:5px 11px;border-radius:20px;
+    background:var(--grnbg);color:var(--grn);border:1px solid #17603f;letter-spacing:.5px}
+
+  /* 5. levels */
+  .lv{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .lvc{background:var(--panel);border:1px solid var(--bd);border-radius:11px;padding:11px 12px}
+  .lvc .k{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--mut);letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
+  .lvc .v{font-size:19px;font-weight:700;font-family:'Sora';margin-top:5px;letter-spacing:-.3px}
+  .pin{font-size:8.5px;padding:1px 6px;border-radius:4px}
+  .pin.mag{background:var(--blubg);color:var(--blu)} .pin.nak{background:var(--ambbg);color:var(--amb)}
+  .track{height:4px;background:#132038;border-radius:3px;margin-top:9px;position:relative}
+  .track i{position:absolute;top:-3px;width:10px;height:10px;border-radius:50%;background:var(--blu);border:2px solid var(--bg)}
+  .foot{padding:12px 16px 16px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="refbar">DESIGN REF · cockpit_v2_R1 · MOCK DATA — NOT LIVE</div>
+
+  <!-- HEADER + NAV -->
+  <div class="hdr">
+    <div class="navrow">
+      <div class="back"><span class="ar">&larr;</span> V8 FUNNEL</div>
+      <div class="ts mono">◷ 14:52 IST · LIVE</div>
+    </div>
+    <div class="sym">
+      <div class="l">
+        <h1>SHRIRAMFIN</h1>
+        <span class="tag mono">FUT · 26 JUN EXPIRY · LOT 600</span>
+      </div>
+      <div class="r">
+        <div class="px">3,180.4</div>
+        <div class="chg">▲ +56.2 (+1.80%)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. VOLUME (hero) -->
+  <div class="sec">
+    <div class="lbl"><span class="n">01</span> VOLUME · IS THE MOVE REAL</div>
+    <div class="volgrid">
+      <div class="vtile">
+        <div class="cap">RELATIVE VOLUME · VolX</div>
+        <div class="big on">2.4<small>×</small></div>
+        <div class="sub">vs 21-day average</div>
+        <div class="vbar"><i style="width:80%"></i></div>
+      </div>
+      <div class="vtile sm">
+        <div class="cap">VOL 3D / 21D</div>
+        <div class="big on">1.7<small>×</small></div>
+        <div class="sub">participation rising</div>
+        <div class="vbar"><i style="width:64%"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. OPEN INTEREST -->
+  <div class="sec">
+    <div class="lbl"><span class="n">02</span> OPEN INTEREST</div>
+    <div class="oiwrap">
+      <div class="oibox">
+        <div class="big">48.2<span style="font-size:15px;color:var(--mut);font-weight:600"> L</span></div>
+        <div class="d up">▲ +6.3% <span style="color:var(--mut)">day OI</span></div>
+        <div class="d" style="color:var(--mut);margin-top:3px">80,300 contracts added</div>
+      </div>
+      <div class="quad">
+        <div class="k">OI × PRICE QUADRANT</div>
+        <div class="v">LONG<br>BUILD-UP</div>
+        <div class="m">price ▲ &nbsp;+&nbsp; OI ▲</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 5-DAY ROLLING OI -->
+  <div class="sec">
+    <div class="lbl"><span class="n">03</span> 5-DAY ROLLING OI</div>
+    <table class="strip">
+      <thead><tr><th>DATE</th><th>OI Δ%</th><th>PRICE Δ%</th><th style="text-align:right">SIGNAL</th></tr></thead>
+      <tbody>
+        <tr><td>14 Jul</td><td class="dn">−2.1%</td><td class="dn">−0.8%</td><td><span class="qd sc">SHORT COVER</span></td></tr>
+        <tr><td>15 Jul</td><td class="up">+1.4%</td><td class="dn">−0.5%</td><td><span class="qd su">SHORT B-UP</span></td></tr>
+        <tr><td>16 Jul</td><td class="dn">−0.9%</td><td class="up">+0.6%</td><td><span class="qd lu">LONG UNWIND</span></td></tr>
+        <tr><td>17 Jul</td><td class="up">+3.8%</td><td class="up">+1.1%</td><td><span class="qd lb">LONG B-UP</span></td></tr>
+        <tr><td>18 Jul</td><td class="up">+6.3%</td><td class="up">+1.8%</td><td><span class="qd lb">LONG B-UP</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 4. BASIS -->
+  <div class="sec">
+    <div class="lbl"><span class="n">04</span> FUTURES BASIS</div>
+    <div class="basis">
+      <div class="v up">+12.4</div>
+      <div class="col">FUT <b>3,192.8</b> · EQ <b>3,180.4</b><br>5-day basis <b class="up">+0.51%</b></div>
+      <div class="chip">PREMIUM · STRONG</div>
+    </div>
+  </div>
+
+  <!-- 5. LEVELS -->
+  <div class="sec">
+    <div class="lbl"><span class="n">05</span> LEVELS</div>
+    <div class="lv">
+      <div class="lvc">
+        <div class="k">VPOC · TODAY <span class="pin mag">MAGNET</span></div>
+        <div class="v">3,172</div>
+        <div class="track"><i style="left:46%"></i></div>
+      </div>
+      <div class="lvc">
+        <div class="k">VPOC · PRIOR <span class="pin nak">NAKED</span></div>
+        <div class="v">3,140</div>
+        <div class="track"><i style="left:22%;background:var(--amb)"></i></div>
+      </div>
+      <div class="lvc">
+        <div class="k">VWAP</div>
+        <div class="v">3,168</div>
+        <div class="track"><i style="left:40%"></i></div>
+      </div>
+      <div class="lvc">
+        <div class="k">ATR · 14D</div>
+        <div class="v">74.2</div>
+        <div class="track"><i style="left:58%;background:var(--grn)"></i></div>
+      </div>
+      <div class="lvc">
+        <div class="k">DELIVERY %</div>
+        <div class="v">41.3<span style="font-size:12px;color:var(--mut)">%</span></div>
+        <div class="track"><i style="left:41%;background:var(--grn)"></i></div>
+      </div>
+      <div class="lvc">
+        <div class="k">DAY RANGE</div>
+        <div class="v" style="font-size:15px">3,131 – 3,196</div>
+        <div class="track"><i style="left:76%"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    DERIVATIVE COCKPIT v2 · R1 REFERENCE · SHRIRAMFIN sample<br>
+    Hierarchy: Volume → OI → 5D-OI → Basis → Levels · dark R2 palette #0A0F1E<br>
+    All numbers illustrative — CC pixel-matches layout, wires live data from deriv_metrics.
+  </div>
+</div>
+</body>
+</html>
