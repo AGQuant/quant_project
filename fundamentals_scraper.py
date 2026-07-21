@@ -194,12 +194,14 @@ def fetch_company(symbol):
 
 def fetch_shareholding(symbol):
     """cc#391 Phase 1B: the shareholding quarterly table only (Promoters/FIIs/DIIs/Government/Public/
-    No. of Shareholders per quarter). Returns (rows, consolidated_flag) or ([], None)."""
+    No. of Shareholders per quarter). Returns (rows, consolidated_flag, page_ok). cc#597: page_ok
+    distinguishes a fetch/page failure (False -> status 'failed', retry) from a page that loaded but
+    genuinely carries no shareholding section (True with empty rows -> status 'empty', never retried)."""
     soup, cons = _fetch_soup(symbol)
     if soup is None:
-        return [], None
+        return [], None, False
     rows = _parse_section(soup, "shareholding", "quarter")
-    return (rows, cons) if rows else ([], None)
+    return (rows, cons, True)
 
 
 # ── writing + status ─────────────────────────────────────────────────────────────
@@ -342,20 +344,26 @@ def run_shareholding_scrape() -> dict:
             cur.execute("SELECT DISTINCT UPPER(nse_code) FROM screener_raw "
                         "WHERE nse_code IS NOT NULL AND nse_code<>'' ORDER BY 1")
             symbols = [r[0] for r in cur.fetchall()]
-            cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE phase1b_status='ok'")
+            # cc#597: skip 'ok' AND 'empty' (a page that loaded but genuinely has no shareholding
+            # section — delisted/new/illiquid). Only NULL + 'failed' are retried.
+            cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE phase1b_status IN ('ok','empty')")
             already = {r[0] for r in cur.fetchall()}
         todo = [s for s in symbols if s not in already]
         _slog(conn, "backfill", "PHASE_1B_SHAREHOLDING_START",
-              {"universe": len(symbols), "already_ok": len(already), "to_do": len(todo)})
-        ok = failed = rows_total = 0
+              {"universe": len(symbols), "already_done": len(already), "to_do": len(todo)})
+        ok = failed = empty = rows_total = 0
         failures = []
         for i, sym in enumerate(todo, 1):
             try:
-                rows, cons = fetch_shareholding(sym)
+                rows, cons, page_ok = fetch_shareholding(sym)
                 if rows:
                     _write_symbol(conn, sym, rows, cons)
                     _set_status_1b(conn, sym, "ok", len(rows))
                     ok += 1; rows_total += len(rows)
+                elif page_ok:
+                    # cc#597: page loaded, no shareholding section -> genuinely empty, never retry
+                    _set_status_1b(conn, sym, "empty", 0)
+                    empty += 1
                 else:
                     _set_status_1b(conn, sym, "failed", 0)
                     failed += 1; failures.append(sym)
@@ -368,17 +376,24 @@ def run_shareholding_scrape() -> dict:
                 log.error(f"shareholding scrape {sym} failed: {e}")
             if i % STAGE_SIZE == 0:
                 _slog(conn, "backfill", "PHASE_1B_SHAREHOLDING_STAGE",
-                      {"done": i, "of": len(todo), "ok": ok, "failed": failed, "rows": rows_total,
-                       "elapsed_min": round((time.time()-started)/60, 1), "last": sym})
+                      {"done": i, "of": len(todo), "ok": ok, "failed": failed, "empty": empty,
+                       "rows": rows_total, "elapsed_min": round((time.time()-started)/60, 1), "last": sym})
             time.sleep(THROTTLE)
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM fundamentals_scrape_status WHERE phase1b_status='ok'")
             tot = cur.fetchone()
+            cur.execute("SELECT COUNT(*) FROM fundamentals_scrape_status WHERE phase1b_status='empty'")
+            emp_tot = cur.fetchone()
             cur.execute("SELECT COUNT(DISTINCT symbol) FROM fundamentals_history WHERE section='shareholding'")
             covered = cur.fetchone()
-        summary = {"ok": ok, "failed": failed, "skipped_already": len(already),
+            cur.execute("""SELECT COUNT(*) FROM (SELECT symbol FROM fundamentals_history
+                           WHERE section='shareholding' GROUP BY symbol HAVING COUNT(*)>=12) z""")
+            full12 = cur.fetchone()
+        summary = {"ok": ok, "failed": failed, "empty": empty, "skipped_already": len(already),
                    "rows_written_this_run": rows_total, "symbols_ok_total": int(tot[0] or 0),
+                   "symbols_empty_total": int(emp_tot[0] or 0),
                    "symbols_with_shareholding": int(covered[0] or 0),
+                   "symbols_full_12q": int(full12[0] or 0),
                    "elapsed_min": round((time.time()-started)/60, 1), "failures_sample": failures[:50]}
         _slog(conn, "data_audit", "PHASE_1B_SHAREHOLDING_COMPLETE", summary)
         try:
@@ -431,15 +446,19 @@ def run_shareholding_quarterly(target_end: date = None, today: date = None) -> d
             cur.execute("""SELECT DISTINCT symbol FROM fundamentals_history
                            WHERE section='shareholding' AND period_end >= %s""", (target_end,))
             already = {r[0] for r in cur.fetchall()}
+            # cc#597: also skip genuinely-empty symbols (delisted/new/illiquid, no section) so a
+            # quarterly pass never re-scrapes them forever.
+            cur.execute("SELECT symbol FROM fundamentals_scrape_status WHERE phase1b_status='empty'")
+            already |= {r[0] for r in cur.fetchall()}
         todo = [s for s in symbols if s not in already]
         _slog(conn, "backfill", "SHAREHOLDING_QUARTERLY_START",
               {"target_quarter_end": str(target_end), "universe": len(symbols),
                "already_have_quarter": len(already), "to_do": len(todo)})
-        ok = failed = rows_total = got_quarter = 0
+        ok = failed = empty = rows_total = got_quarter = 0
         failures = []
         for i, sym in enumerate(todo, 1):
             try:
-                rows, cons = fetch_shareholding(sym)
+                rows, cons, page_ok = fetch_shareholding(sym)
                 if rows:
                     _write_symbol(conn, sym, rows, cons)
                     _set_status_1b(conn, sym, "ok", len(rows))
@@ -447,6 +466,9 @@ def run_shareholding_quarterly(target_end: date = None, today: date = None) -> d
                     if any((r.get("period_end") is not None and r["period_end"] >= target_end)
                            for r in rows):
                         got_quarter += 1
+                elif page_ok:
+                    _set_status_1b(conn, sym, "empty", 0)   # cc#597: genuinely no section, never retry
+                    empty += 1
                 else:
                     _set_status_1b(conn, sym, "failed", 0)
                     failed += 1; failures.append(sym)
@@ -460,14 +482,14 @@ def run_shareholding_quarterly(target_end: date = None, today: date = None) -> d
             if i % STAGE_SIZE == 0:
                 _slog(conn, "backfill", "SHAREHOLDING_QUARTERLY_STAGE",
                       {"target_quarter_end": str(target_end), "done": i, "of": len(todo),
-                       "ok": ok, "failed": failed, "got_quarter": got_quarter, "rows": rows_total,
-                       "elapsed_min": round((time.time()-started)/60, 1), "last": sym})
+                       "ok": ok, "failed": failed, "empty": empty, "got_quarter": got_quarter,
+                       "rows": rows_total, "elapsed_min": round((time.time()-started)/60, 1), "last": sym})
             time.sleep(THROTTLE)
         with conn.cursor() as cur:
             cur.execute("""SELECT COUNT(DISTINCT symbol) FROM fundamentals_history
                            WHERE section='shareholding' AND period_end >= %s""", (target_end,))
             covered = cur.fetchone()
-        summary = {"target_quarter_end": str(target_end), "ok": ok, "failed": failed,
+        summary = {"target_quarter_end": str(target_end), "ok": ok, "failed": failed, "empty": empty,
                    "skipped_already_have_quarter": len(already),
                    "new_quarter_captured_this_run": got_quarter,
                    "universe_with_target_quarter": int((covered or [0])[0] or 0),
