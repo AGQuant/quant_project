@@ -105,6 +105,20 @@ _ABSOLUTE_METRICS = {
 
 _DEFAULT_DIRECTION = "higher_better"
 
+# Authoritative lower_better override — some lower_better metrics (cost_to_income, combined_ratio,
+# claims_ratio, loss_ratio) are absent from sector_kpi_registry, so a registry-only lookup would
+# default them to higher_better and INVERT their percentile. This set wins over the registry.
+_LOWER_BETTER = {
+    "gnpa_pct", "nnpa_pct", "credit_cost", "cost_to_income", "attrition_pct", "net_debt_ebitda",
+    "power_fuel_cost_per_t", "churn_pct", "alos_days", "claims_ratio", "loss_ratio", "combined_ratio",
+}
+
+
+def _direction_for(metric: str, registry_direction: Dict[str, str]) -> str:
+    if metric in _LOWER_BETTER:
+        return "lower_better"
+    return registry_direction.get(metric, _DEFAULT_DIRECTION)
+
 
 def _parse_qord(quarter: str) -> Optional[int]:
     """QxFYxx -> sortable ordinal FY*10+Q (Q4FY26 -> 264). Non-QxFYxx labels (e.g. 'FY25', 'TTM')
@@ -245,15 +259,20 @@ def rebuild(conn) -> dict:
     absolutes = 0
     for (seg, metric), members in pools.items():
         seg_set.add(seg)
-        dirn = direction.get(metric, _DEFAULT_DIRECTION)
+        dirn = _direction_for(metric, direction)
         is_absolute = metric in _ABSOLUTE_METRICS
         distinct_q = sorted({m[1] for m in members}, reverse=True)[:WINDOW_QUARTERS]
         window_cut = distinct_q[-1] if distinct_q else None
         in_window = [m for m in members if window_cut is not None and m[1] >= window_cut]
         pool_vals = [m[3] for m in in_window]
         peer_n = len(pool_vals)
-        peer_avg = round(statistics.fmean(pool_vals), 4) if pool_vals else None
-        peer_median = round(statistics.median(pool_vals), 4) if pool_vals else None
+        # Peer stats only for benchmarkable (non-absolute) metrics — a cross-peer average of an
+        # absolute (AUM, volumes, headcount ...) is size-non-neutral and misleading (7118 doctrine).
+        if is_absolute:
+            peer_avg = peer_median = None
+        else:
+            peer_avg = round(statistics.fmean(pool_vals), 4) if pool_vals else None
+            peer_median = round(statistics.median(pool_vals), 4) if pool_vals else None
         disp = display.get((metric, seg)) or next(
             (d for (mm, _s), d in display.items() if mm == metric), metric)
         tr = tier.get((metric, seg)) or next(
