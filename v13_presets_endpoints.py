@@ -50,6 +50,12 @@ def _ensure_table():
         cur.execute("ALTER TABLE v13_presets ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'v13'")
         cur.execute("ALTER TABLE v13_presets DROP CONSTRAINT IF EXISTS v13_presets_name_key")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS v13_presets_scope_name_uk ON v13_presets(scope, name)")
+        # cc#558: guarantee the full-universe base column exists before the engine references it
+        # (the nightly universe-technicals job also adds it; this covers the deploy->02:05 window).
+        try:
+            cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS vol_ratio_21 NUMERIC")
+        except Exception:
+            pass
         conn.commit()
 
 
@@ -160,11 +166,16 @@ def delete_preset(request: Request, pid: int):
 # correct), return_3y/pe/roce from the screener_raw wide dump (text -> numeric). This is the first-class
 # engine the Fable bridge validates against instead of approximate raw SQL that mis-handles semantics.
 # Whitelist: key -> (table alias, column). m=v8_metrics(latest), g=gvm_scores(latest), s=screener_raw.
+# cc#558: base moved v8_metrics (~212 futures) -> universe_technicals u (~1,811 GVM-scored syms).
+# Technicals now source "u"; futures-only fields (vol_ratio/sector_*/day_1d) stay "m" via LEFT JOIN
+# (NULL for non-futures). Added month_index + vol_ratio_21 (both "u") for the true 52W-breakout preset.
 _FIELD_MAP = {
-    "dma_20": ("m", "dma_20"), "dma_50": ("m", "dma_50"), "dma_200": ("m", "dma_200"),
-    "rsi_month": ("m", "rsi_month"), "rsi_weekly": ("m", "rsi_weekly"), "daily_rsi": ("m", "daily_rsi"),
-    "vol_ratio": ("m", "vol_ratio"), "week_return": ("m", "week_return"), "month_return": ("m", "month_return"),
-    "week_index_52": ("m", "week_index_52"), "mom_2d": ("m", "mom_2d"), "day_1d": ("m", "day_1d"),
+    "dma_20": ("u", "dma_20"), "dma_50": ("u", "dma_50"), "dma_200": ("u", "dma_200"),
+    "rsi_month": ("u", "rsi_month"), "rsi_weekly": ("u", "rsi_weekly"), "daily_rsi": ("u", "daily_rsi"),
+    "week_return": ("u", "week_return"), "month_return": ("u", "month_return"), "year_return": ("u", "year_return"),
+    "week_index_52": ("u", "week_index_52"), "month_index": ("u", "month_index"),
+    "mom_2d": ("u", "mom_2d"), "vol_ratio_21": ("u", "vol_ratio_21"),
+    "vol_ratio": ("m", "vol_ratio"), "day_1d": ("m", "day_1d"),
     "sector_week": ("m", "sector_week"), "sector_month": ("m", "sector_month"),
     "gvm_score": ("g", "gvm_score"), "g_score": ("g", "g_score"), "v_score": ("g", "v_score"),
     "m_score": ("g", "m_score"), "market_cap": ("g", "market_cap"),
@@ -185,7 +196,8 @@ def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
     unknown = [k for k in filters if k not in _FIELD_MAP]
     if unknown:
         return {"error": "unknown filter key(s): " + ", ".join(unknown), "valid_keys": sorted(_FIELD_MAP.keys())}
-    where = ["m.score_date=(SELECT MAX(score_date) FROM v8_metrics)"]
+    # cc#558: base = universe_technicals u (latest score_date) — the full ~1,811 GVM-scored universe.
+    where = ["u.score_date=(SELECT MAX(score_date) FROM universe_technicals)"]
     params = []
     for k, crit in filters.items():
         expr = _col_expr(*_FIELD_MAP[k])
@@ -195,25 +207,33 @@ def _run_screen(cur, filters, sort_key=None, sort_dir=-1, limit=10):
             if crit.get("max") is not None:
                 where.append(f"{expr} <= %s"); params.append(crit["max"])
     uses_screener = any(_FIELD_MAP[k][0] == "s" for k in filters)
-    join = ("JOIN gvm_scores g ON g.symbol=m.symbol AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores) "
-            "LEFT JOIN screener_raw s ON UPPER(s.nse_code)=UPPER(m.symbol)")
+    uses_fut = any(_FIELD_MAP[k][0] == "m" for k in filters) or (sort_key and _FIELD_MAP.get(sort_key, ("",))[0] == "m")
+    # g (gvm) is INNER (every u row is GVM-scored); s + m are LEFT (m = futures-only fields, NULL for
+    # the ~1,600 non-futures names — a filter on an m-field therefore narrows back to the futures set).
+    join = ("JOIN gvm_scores g ON g.symbol=u.symbol AND g.score_date=(SELECT MAX(score_date) FROM gvm_scores) "
+            "LEFT JOIN screener_raw s ON UPPER(s.nse_code)=UPPER(u.symbol) "
+            "LEFT JOIN v8_metrics m ON m.symbol=u.symbol AND m.score_date=(SELECT MAX(score_date) FROM v8_metrics)")
     wsql = " AND ".join(where)
     if sort_key and sort_key in _FIELD_MAP:
         order = f"ORDER BY {_col_expr(*_FIELD_MAP[sort_key])} {'ASC' if sort_dir == 1 else 'DESC'} NULLS LAST"
     else:
         order = "ORDER BY g.gvm_score DESC NULLS LAST"
     lim = max(1, min(int(limit or 10), 100))
-    cur.execute(f"SELECT COUNT(*) FROM v8_metrics m {join} WHERE {wsql}", params)
+    cur.execute(f"SELECT COUNT(*) FROM universe_technicals u {join} WHERE {wsql}", params)
     count = int(cur.fetchone()[0])
-    cur.execute(f"""SELECT m.symbol, ROUND(g.gvm_score::numeric,2) gvm_score,
-                    ROUND(m.month_return::numeric,1) month_return, ROUND(m.week_index_52::numeric,0) week_index_52,
-                    ROUND(m.dma_50::numeric,1) dma_50, ROUND(m.dma_200::numeric,1) dma_200
-                    FROM v8_metrics m {join} WHERE {wsql} {order} LIMIT {lim}""", params)
+    cur.execute(f"""SELECT u.symbol, ROUND(g.gvm_score::numeric,2) gvm_score,
+                    ROUND(u.month_return::numeric,1) month_return, ROUND(u.week_index_52::numeric,0) week_index_52,
+                    ROUND(u.month_index::numeric,0) month_index, ROUND(u.vol_ratio_21::numeric,2) vol_ratio_21,
+                    ROUND(u.dma_50::numeric,1) dma_50, ROUND(u.dma_200::numeric,1) dma_200
+                    FROM universe_technicals u {join} WHERE {wsql} {order} LIMIT {lim}""", params)
     cols = [d[0] for d in cur.description]
     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    scope = "futures ~212 (v8_metrics universe)" + (" ∩ screener_raw fundamentals" if uses_screener else "")
+    scope = "full universe ~1,811 (universe_technicals)" + (" ∩ screener_raw fundamentals" if uses_screener else "") \
+            + (" ∩ ~212 futures (m-field filter)" if uses_fut else "")
     return {"count": count, "scope_used": scope, "rows": rows,
-            "note": "dma_* = %-distance from the MA; futures-only fields (week_index_52/vol_ratio) limit scope to the ~212 futures universe"}
+            "note": "dma_* = %-distance from the MA; base is the full ~1,811 GVM universe (universe_technicals). "
+                    "Futures-only fields (vol_ratio/sector_week/sector_month/day_1d) are LEFT-joined from v8_metrics "
+                    "and are NULL for the ~1,600 non-futures names — filtering on them narrows back to the futures set."}
 
 
 @router.post("/api/v13/theme/run")

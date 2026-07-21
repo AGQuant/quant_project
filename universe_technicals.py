@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS universe_technicals (
     rsi_month NUMERIC, rsi_weekly NUMERIC, daily_rsi NUMERIC,
     week_return NUMERIC, month_return NUMERIC, year_return NUMERIC,
     mom_2d NUMERIC, week_index_52 NUMERIC, month_index NUMERIC,
+    vol_ratio_21 NUMERIC,
     pp NUMERIC, r1 NUMERIC, r2 NUMERIC, s1 NUMERIC, s2 NUMERIC,
     computed_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(symbol, score_date)
@@ -61,7 +62,23 @@ CREATE INDEX IF NOT EXISTS idx_universe_technicals_date ON universe_technicals(s
 def ensure_schema(conn):
     with conn.cursor() as cur:
         cur.execute(SCHEMA_SQL)
+        # cc#558: idempotent add for an already-created table (DDL is app-side; run_sql ALTER is
+        # blocked by MAINTENANCE_LOCK). vol_ratio_21 feeds the V13 full-universe breakout preset.
+        cur.execute("ALTER TABLE universe_technicals ADD COLUMN IF NOT EXISTS vol_ratio_21 NUMERIC")
     conn.commit()
+
+
+def _compute_vol_ratio_21(conn, symbol: str, for_date: date):
+    """cc#558: latest volume / 21-trading-day average volume (same raw_prices pass, no extra scan
+    beyond a bounded per-symbol read). None if <2 clean volume bars. Feeds the 52W-breakout preset."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT volume FROM raw_prices WHERE symbol=%s AND volume IS NOT NULL
+                       AND price_date <= %s ORDER BY price_date DESC LIMIT 21""", (symbol, for_date))
+        vols = [float(r[0]) for r in cur.fetchall() if r[0] is not None]
+    if len(vols) < 2:
+        return None
+    avg = sum(vols) / len(vols)
+    return round(vols[0] / avg, 3) if avg else None
 
 
 def _get_universe(conn):
@@ -102,12 +119,12 @@ def _upsert(conn, row: dict):
                 (symbol, score_date, dma_20, dma_50, dma_200,
                  rsi_month, rsi_weekly, daily_rsi,
                  week_return, month_return, year_return,
-                 mom_2d, week_index_52, month_index,
+                 mom_2d, week_index_52, month_index, vol_ratio_21,
                  pp, r1, r2, s1, s2)
             VALUES (%(symbol)s, %(score_date)s, %(dma_20)s, %(dma_50)s, %(dma_200)s,
                     %(rsi_month)s, %(rsi_weekly)s, %(daily_rsi)s,
                     %(week_return)s, %(month_return)s, %(year_return)s,
-                    %(mom_2d)s, %(week_index_52)s, %(month_index)s,
+                    %(mom_2d)s, %(week_index_52)s, %(month_index)s, %(vol_ratio_21)s,
                     %(pp)s, %(r1)s, %(r2)s, %(s1)s, %(s2)s)
             ON CONFLICT (symbol, score_date) DO UPDATE SET
                 dma_20=EXCLUDED.dma_20, dma_50=EXCLUDED.dma_50, dma_200=EXCLUDED.dma_200,
@@ -115,6 +132,7 @@ def _upsert(conn, row: dict):
                 week_return=EXCLUDED.week_return, month_return=EXCLUDED.month_return,
                 year_return=EXCLUDED.year_return, mom_2d=EXCLUDED.mom_2d,
                 week_index_52=EXCLUDED.week_index_52, month_index=EXCLUDED.month_index,
+                vol_ratio_21=EXCLUDED.vol_ratio_21,
                 pp=EXCLUDED.pp, r1=EXCLUDED.r1, r2=EXCLUDED.r2, s1=EXCLUDED.s1, s2=EXCLUDED.s2,
                 computed_at=NOW()
         """, row)
@@ -170,6 +188,7 @@ def run_universe_technicals(conn, target_date: date = None) -> dict:
                 "year_return": m.get("year_return"),
                 "mom_2d": m.get("mom_2d"), "week_index_52": m.get("week_index_52"),
                 "month_index": m.get("month_index"),
+                "vol_ratio_21": _compute_vol_ratio_21(conn, sym, target_date),   # cc#558
                 "pp": piv.get("pp"), "r1": piv.get("r1"), "r2": piv.get("r2"),
                 "s1": piv.get("s1"), "s2": piv.get("s2"),
             }
