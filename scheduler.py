@@ -2115,6 +2115,38 @@ def _bg_ops_text_fetch():
         _ops_text_fetch_running = False
 
 
+_shareholding_q_running = False
+_shareholding_q_ran_on = None   # date of the last same-day dispatch (day-lock: 1 attempt/day in-window)
+
+
+def _bg_shareholding_quarterly():
+    """cc#598 (SHAREHOLDING_SCRAPE_CADENCE_V1, session_log id=7121): rolling-forward shareholding
+    refresh. Self-gated to the LAST WEEK (day>=25) of Jul/Oct/Jan/Apr — SEBI LODR Reg 31 gives
+    listed cos 21 days after quarter-end to file the shareholding pattern, so ~25th catches all
+    filers. Dispatched once per day at ~09:30 IST (h==9/m==30 at the call site); day-locked here so
+    it runs at most once per calendar day, retrying daily inside the window until the just-closed
+    quarter is captured for the universe, then idling (the runner skips symbols that already carry
+    it). Reuses the cc#391 pipeline (fundamentals_scraper.run_shareholding_quarterly); scheduler.py
+    owns cadence only. Append-only (rolling 12Q); never computes GVM."""
+    global _shareholding_q_running, _shareholding_q_ran_on
+    now_ist = datetime.now(IST)
+    if now_ist.month not in (1, 4, 7, 10) or now_ist.day < 25:
+        return _SKIPPED
+    today = now_ist.date()
+    if _shareholding_q_ran_on == today or _shareholding_q_running:
+        return _SKIPPED
+    _shareholding_q_running = True
+    try:
+        import fundamentals_scraper
+        res = fundamentals_scraper.run_shareholding_quarterly()
+        _shareholding_q_ran_on = today
+        log.info(f"_bg_shareholding_quarterly: {res}")
+    except Exception as e:
+        log.error(f"_bg_shareholding_quarterly: {e}")
+    finally:
+        _shareholding_q_running = False
+
+
 # cc#524 QUARTERLY UPDATE FRAMEWORK (OPS_METRICS_FRAMEWORK_V1) supersedes cc#523's simple
 # "monthly 5th" re-arm (spec: "the earlier off-season monthly 5th sweep is REPLACED by the four
 # season-close bulk sweeps"). Three day-locked triggers below: daily T+1, Saturday scoped retry,
@@ -2533,6 +2565,8 @@ async def _scheduler_loop():
         _spawn(_bg_ops_metrics_t1)             # cc#524: daily ~08:00 IST T+1 refresh (day-locked inside)
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
+        if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 9 and m == 30:
+            _spawn(_bg_shareholding_quarterly)   # cc#598: last-week Jul/Oct/Jan/Apr shareholding refresh (day-locked inside)
         if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit
         if h == 2 and m == 0:   _spawn(_bg_v8_paper_exit_eod)  # cc_task #72 bug_0: EOD-close exit fallback (after EOD load + heal)
         if h == 2 and m == 5:   _spawn(_bg_universe_technicals)  # cc#154: full-universe technicals, after GVM (01:30) + pivots (01:45)

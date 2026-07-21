@@ -393,6 +393,95 @@ def run_shareholding_scrape() -> dict:
         conn.close()
 
 
+def _last_quarter_end(today: date) -> date:
+    """cc#598: the most recently COMPLETED calendar quarter-end on or before `today`. Aligns with
+    SHAREHOLDING_SCRAPE_CADENCE_V1 quarter_map — a run in Jul->Jun30 (Q1), Oct->Sep30 (Q2),
+    Jan->prev Dec31 (Q3), Apr->Mar31 (Q4)."""
+    y, m = today.year, today.month
+    if m >= 10:
+        return date(y, 9, 30)     # Q3 (Jul-Sep) closed
+    if m >= 7:
+        return date(y, 6, 30)     # Q2 (Apr-Jun) closed
+    if m >= 4:
+        return date(y, 3, 31)     # Q1 (Jan-Mar) closed
+    return date(y - 1, 12, 31)    # Jan-Mar -> prior Q4 (Oct-Dec) closed
+
+
+def run_shareholding_quarterly(target_end: date = None, today: date = None) -> dict:
+    """cc#598 (SHAREHOLDING_SCRAPE_CADENCE_V1, session_log id=7121): rolling-forward quarterly
+    refresh of the shareholding table. Unlike the cc#391 backfill (which skips every symbol whose
+    phase1b_status='ok', so it never re-scrapes), this appends the JUST-CLOSED quarter for the
+    full GVM universe — it skips only the symbols that ALREADY carry a shareholding row with
+    period_end >= the target quarter-end. That makes a daily retry inside the last-week window
+    cheap (re-scrapes only symbols still missing the new quarter) and self-idling once the universe
+    is captured. Append-only via _write_symbol's ON CONFLICT (rolling 12Q; consumers read last 12).
+    Same politeness pacing (THROTTLE) + phase1b_status tracking as cc#391. Completion ->
+    session_log data_audit SHAREHOLDING_QUARTERLY_RUN. Never computes GVM."""
+    import fyers_feed
+    conn = fyers_feed.get_db()
+    started = time.time()
+    today = today or date.today()
+    target_end = target_end or _last_quarter_end(today)
+    try:
+        ensure_tables(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT UPPER(nse_code) FROM screener_raw "
+                        "WHERE nse_code IS NOT NULL AND nse_code<>'' ORDER BY 1")
+            symbols = [r[0] for r in cur.fetchall()]
+            cur.execute("""SELECT DISTINCT symbol FROM fundamentals_history
+                           WHERE section='shareholding' AND period_end >= %s""", (target_end,))
+            already = {r[0] for r in cur.fetchall()}
+        todo = [s for s in symbols if s not in already]
+        _slog(conn, "backfill", "SHAREHOLDING_QUARTERLY_START",
+              {"target_quarter_end": str(target_end), "universe": len(symbols),
+               "already_have_quarter": len(already), "to_do": len(todo)})
+        ok = failed = rows_total = got_quarter = 0
+        failures = []
+        for i, sym in enumerate(todo, 1):
+            try:
+                rows, cons = fetch_shareholding(sym)
+                if rows:
+                    _write_symbol(conn, sym, rows, cons)
+                    _set_status_1b(conn, sym, "ok", len(rows))
+                    ok += 1; rows_total += len(rows)
+                    if any((r.get("period_end") is not None and r["period_end"] >= target_end)
+                           for r in rows):
+                        got_quarter += 1
+                else:
+                    _set_status_1b(conn, sym, "failed", 0)
+                    failed += 1; failures.append(sym)
+            except Exception as e:
+                try:
+                    _set_status_1b(conn, sym, "failed", 0)
+                except Exception:
+                    pass
+                failed += 1; failures.append(sym)
+                log.error(f"shareholding quarterly {sym} failed: {e}")
+            if i % STAGE_SIZE == 0:
+                _slog(conn, "backfill", "SHAREHOLDING_QUARTERLY_STAGE",
+                      {"target_quarter_end": str(target_end), "done": i, "of": len(todo),
+                       "ok": ok, "failed": failed, "got_quarter": got_quarter, "rows": rows_total,
+                       "elapsed_min": round((time.time()-started)/60, 1), "last": sym})
+            time.sleep(THROTTLE)
+        with conn.cursor() as cur:
+            cur.execute("""SELECT COUNT(DISTINCT symbol) FROM fundamentals_history
+                           WHERE section='shareholding' AND period_end >= %s""", (target_end,))
+            covered = cur.fetchone()
+        summary = {"target_quarter_end": str(target_end), "ok": ok, "failed": failed,
+                   "skipped_already_have_quarter": len(already),
+                   "new_quarter_captured_this_run": got_quarter,
+                   "universe_with_target_quarter": int((covered or [0])[0] or 0),
+                   "rows_written_this_run": rows_total,
+                   "elapsed_min": round((time.time()-started)/60, 1),
+                   "complete_for_universe": len(todo) == 0,
+                   "failures_sample": failures[:50]}
+        _slog(conn, "data_audit", "SHAREHOLDING_QUARTERLY_RUN", summary)
+        log.info(f"run_shareholding_quarterly COMPLETE: {summary}")
+        return summary
+    finally:
+        conn.close()
+
+
 def _claim_scrape_flag():
     """Consume app_config['fundamentals_scrape'] in ('test','run','pending'); return the mode or None.
     Marks 'claimed:<mode>' so it never re-fires on the next boot."""
@@ -500,3 +589,15 @@ async def run_shareholding_scrape_now(x_admin_token: Optional[str] = Header(None
     threading.Thread(target=run_shareholding_scrape, name="cc391-scrape1b-manual", daemon=True).start()
     return {"status": "started",
             "note": "Shareholding scrape running; poll /api/admin/fundamentals_scrape_status (phase1b_* fields)."}
+
+
+@router.post("/run_shareholding_quarterly")
+async def run_shareholding_quarterly_now(x_admin_token: Optional[str] = Header(None)):
+    """cc#598: force a shareholding QUARTERLY refresh out-of-band (the scheduler runs it automatically
+    in the last week of Jul/Oct/Jan/Apr). Targets the just-closed quarter; skips symbols that already
+    carry it, so a forced run is safe/idempotent. Background daemon; poll fundamentals_scrape_status."""
+    _check_admin(x_admin_token)
+    import threading
+    threading.Thread(target=run_shareholding_quarterly, name="cc598-shareholding-q-manual", daemon=True).start()
+    return {"status": "started", "target_quarter_end": str(_last_quarter_end(date.today())),
+            "note": "Shareholding quarterly refresh running; poll /api/admin/fundamentals_scrape_status (phase1b_* fields)."}
