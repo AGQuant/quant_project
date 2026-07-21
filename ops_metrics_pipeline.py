@@ -1790,7 +1790,23 @@ def _t1_refresh_company(cur, symbol):
     except Exception as e:
         log.warning(f"_t1_refresh_company fundamentals re-scrape failed for {symbol}: {e}")
     r = run_company(symbol, force=True)
-    return fh_ok or r.get("status") == "ok"
+    st = r.get("status")
+    # cc#595: the queue outcome must reflect the OPS-METRICS extraction, NOT the fundamentals
+    # re-scrape. The old `fh_ok or status=='ok'` marked a company 'done' whenever fundamentals
+    # succeeded — masking every ops-extraction failure (why sector_ops_metrics froze at the 19-Jul
+    # manual batch while the queue showed 'done'). 'ok' = a sector_ops_metrics row was written;
+    # 'no_registry' = the sector legitimately has no KPI list, nothing to extract (complete).
+    ops_ok = st in ("ok", "no_registry")
+    if not ops_ok:
+        # surface the real per-company failure mode (fetch_blocked / no_docs / error) so the live
+        # 08:00 run is diagnosable in ops_log instead of silently masked.
+        try:
+            _oplog(cur, "OPS_METRICS_T1_COMPANY_FAIL",
+                   {"symbol": symbol, "run_company_status": st, "error": r.get("error"),
+                    "fundamentals_rescraped": fh_ok}, category="ops_metrics_pull")
+        except Exception:
+            pass
+    return {"ops_ok": ops_ok, "fund_ok": fh_ok, "status": st}
 
 
 def run_t1_refresh(conn=None):
@@ -1803,9 +1819,13 @@ def run_t1_refresh(conn=None):
     try:
         with conn.cursor() as cur:
             ensure_tables(cur)
+            # cc#595: was ex_date = CURRENT_DATE-1 exactly — fragile: a status flip that lags the
+            # ex_date, or a single missed 08:00 run, permanently skipped that company. Widen to a
+            # 3-day lookback; ON CONFLICT DO NOTHING keeps it idempotent (already-queued rows aren't
+            # re-processed), so this only *adds* the lagged/missed reports, never re-runs done ones.
             cur.execute("""SELECT DISTINCT UPPER(ticker), ex_date FROM earnings_calendar
-                           WHERE status='reported' AND ex_date = (CURRENT_DATE - INTERVAL '1 day')::date
-                             AND ticker IS NOT NULL""")
+                           WHERE status='reported' AND ex_date >= (CURRENT_DATE - INTERVAL '3 days')::date
+                             AND ex_date < CURRENT_DATE AND ticker IS NOT NULL""")
             due = cur.fetchall()
             for sym, ex_date in due:
                 cur.execute("""INSERT INTO ops_metrics_t1_queue (symbol, ex_date, status)
@@ -1816,26 +1836,44 @@ def run_t1_refresh(conn=None):
             pending = cur.fetchall()
 
         ok = fail = 0
+        hist = {}          # cc#595: run_company status histogram -> makes the live failure mode visible
+        fund_only = 0      # companies where fundamentals re-scraped but ops-extraction did NOT write
+        failed_syms = []
         for sym, ex_date in pending:
             with conn.cursor() as cur:
                 try:
-                    success = _t1_refresh_company(cur, sym)
+                    res = _t1_refresh_company(cur, sym)
                 except Exception as e:
                     log.error(f"run_t1_refresh failed for {sym}: {e}")
-                    success = False
+                    res = {"ops_ok": False, "fund_ok": False, "status": "error"}
+                success = res["ops_ok"]
+                st = res.get("status") or "unknown"
+                hist[st] = hist.get(st, 0) + 1
+                if not success and res.get("fund_ok"):
+                    fund_only += 1
+                if not success:
+                    failed_syms.append(f"{sym}:{st}")
                 cur.execute("""UPDATE ops_metrics_t1_queue SET status=%s, processed_at=NOW()
                                WHERE symbol=%s AND ex_date=%s""",
                             ("done" if success else "failed", sym, ex_date))
                 conn.commit()
-            if success:
-                ok += 1
-            else:
-                fail += 1
+            ok += 1 if success else 0
+            fail += 0 if success else 1
             time.sleep(THROTTLE)
 
         with conn.cursor() as cur:
-            summary = {"due": len(pending), "ok": ok, "failed": fail}
+            summary = {"due": len(pending), "ops_written": ok, "failed": fail,
+                       "fundamentals_only": fund_only, "status_histogram": hist}
             _oplog(cur, "OPS_METRICS_T1_RUN", summary)
+            # cc#595 (diagnose 3): warn when reported companies were processed but NONE yielded an
+            # ops-metrics row — a persistent/systemic failure (screener blocked, docs unpublished, or
+            # extraction down), not a per-company miss. Was silent before -> the freeze went unnoticed.
+            if pending and ok == 0:
+                _oplog(cur, "OPS_METRICS_PERSISTENT_FAILURE",
+                       {"due": len(pending), "all_failed": True, "status_histogram": hist,
+                        "sample": failed_syms[:15],
+                        "note": "T+1 processed reported companies but wrote 0 sector_ops_metrics rows"},
+                       category="ops_metrics_pull")
             conn.commit()
         return summary
     finally:
@@ -1860,10 +1898,11 @@ def run_saturday_retry(conn=None):
         for sym, ex_date in scoped:
             with conn.cursor() as cur:
                 try:
-                    success = _t1_refresh_company(cur, sym)
+                    res = _t1_refresh_company(cur, sym)   # cc#595: dict {ops_ok,fund_ok,status}
                 except Exception as e:
                     log.error(f"run_saturday_retry failed for {sym}: {e}")
-                    success = False
+                    res = {"ops_ok": False}
+                success = res["ops_ok"]   # ops-metrics extraction success only, not fundamentals
                 cur.execute("""UPDATE ops_metrics_t1_queue SET status=%s, processed_at=NOW()
                                WHERE symbol=%s AND ex_date=%s""",
                             ("done" if success else "failed", sym, ex_date))
@@ -1917,10 +1956,11 @@ def run_season_sweep(conn=None, dry_run=False):
         for sym in stale:
             with conn.cursor() as cur:
                 try:
-                    success = _t1_refresh_company(cur, sym)
+                    res = _t1_refresh_company(cur, sym)   # cc#595: dict {ops_ok,fund_ok,status}
                 except Exception as e:
                     log.error(f"run_season_sweep failed for {sym}: {e}")
-                    success = False
+                    res = {"ops_ok": False}
+                success = res["ops_ok"]
                 conn.commit()
             ok += 1 if success else 0
             fail += 0 if success else 1
