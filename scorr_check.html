@@ -1149,7 +1149,7 @@ function renderV4Dual(d, uiMode){
   const el=document.getElementById('v4Result');
   el.innerHTML =
     '<div class="card" style="padding:16px 18px">'
-    + '<span class="r-company">'+d.symbol+'</span>'
+    + '<span class="r-company">'+d.symbol+(window.ScorrRCard?ScorrRCard.pill(d.symbol)+ScorrRCard.pillV(d.symbol):'')+'</span>'   // cc#578/579: R + V pills
     + '<div class="r-pills">'
     +   '<span class="r-side-badge '+uiMode+'">'+sideLabel+'</span>'
     +   gvmHtml

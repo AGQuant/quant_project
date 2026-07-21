@@ -999,7 +999,17 @@ RESULTS_CARD_JS = """
     + '.rcard-peer-v{font:700 12px/1 Sora;font-variant-numeric:tabular-nums;min-width:52px;text-align:right}'
     + '.rcard-peer-p{color:var(--dim,#8892a6);font-variant-numeric:tabular-nums;min-width:64px;text-align:right}'
     + '.rcard-beat{font:700 9px/1 Sora;color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4);border-radius:4px;padding:2px 5px}'
-    + '.rcard-miss{font:700 9px/1 Sora;color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3);border-radius:4px;padding:2px 5px}';
+    + '.rcard-miss{font:700 9px/1 Sora;color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3);border-radius:4px;padding:2px 5px}'
+    // cc#579: V (volume/energy) pill + card — sibling of R, same .rcard-* scaffold, green accent
+    + '.vcard-pill{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:3px;font:800 9px/1 Sora,sans-serif;color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4);border-radius:4px;cursor:pointer;vertical-align:middle;user-select:none}'
+    + '.vcard-pill:hover{background:rgba(47,212,139,.24)}'
+    + '.vcard-hero{display:flex;align-items:baseline;gap:8px;margin-top:2px}'
+    + '.vcard-big{font:800 26px/1 Sora,sans-serif;font-variant-numeric:tabular-nums}'
+    + '.vcard-sub{font-size:11.5px;color:var(--dim,#8892a6)}'
+    + '.vcard-band{margin-top:5px;font:700 11px/1.3 Sora,sans-serif;padding:5px 9px;border-radius:6px;display:inline-block}'
+    + '.vcard-bull{color:#0f9d58;background:rgba(47,212,139,.14);border:1px solid rgba(47,212,139,.4)}'
+    + '.vcard-warn{color:#c98a12;background:rgba(245,185,74,.16);border:1px solid rgba(245,185,74,.45)}'
+    + '.vcard-neu{color:var(--mut,#667085);background:rgba(148,166,210,.14);border:1px solid rgba(148,166,210,.3)}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
   var ov = document.createElement('div'); ov.className = 'rcard-ov';
@@ -1087,12 +1097,53 @@ RESULTS_CARD_JS = """
       .catch(function(e){ renderMsg('Results card unavailable ('+e.message+'). The backend (cc#572) may still be deploying.'); });
   }
   function open(sym){ if(!sym) return; _cur=sym; box.innerHTML='<div class=\"rcard-body\">Loading '+esc(sym)+'...</div>'; ov.classList.add('on'); load(sym, false); }
+
+  // cc#579: V (volume/energy) card — reuses the same overlay/box. Reads the EXISTING
+  // /api/deriv-metrics/{symbol} (zero new backend): energy.volx + recent3d_vol_ratio + meanings.
+  function renderV(d){
+    var sym=_cur, E=(d&&d.energy)||{}, M=(d&&d.meanings)||{};
+    var vx=E.volx, r3=E.recent3d_vol_ratio;
+    var h='<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
+      + '<span class=\"rcard-gvm\">Volume / Energy</span></div></div>'
+      + '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button></div>';
+    if (vx==null && r3==null){
+      h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">No volume data for this symbol.</div>';
+    } else {
+      var vb = vx==null?['vcard-neu','—']:(vx>=1.3?['vcard-bull', esc(M.volx||'energy confirming')]
+              :(vx<0.8?['vcard-warn', esc(M.volx||'quiet — move not energy-backed')]:['vcard-neu','neutral']));
+      h += '<div class=\"rcard-lbl\">VolX · relative volume</div>'
+        + '<div class=\"vcard-hero\"><span class=\"vcard-big\">'+(vx==null?'—':esc(vx)+'×')+'</span>'
+        + (E.volx_pct!=null?'<span class=\"vcard-sub\">'+(E.volx_pct>=0?'+':'')+esc(E.volx_pct)+'% vs typical</span>':'')+'</div>'
+        + '<div class=\"vcard-band '+vb[0]+'\">'+vb[1]+'</div>';
+      var rb = r3==null?['vcard-neu','—']:(r3>=1?['vcard-bull', esc(M.recent3d_vol_ratio||'participation rising')]
+              :['vcard-warn', esc(M.recent3d_vol_ratio||'participation drying up')]);
+      h += '<div class=\"rcard-lbl\">Recent participation · 3D / 21D</div>'
+        + '<div class=\"vcard-hero\"><span class=\"vcard-big\">'+(r3==null?'—':esc(r3)+'×')+'</span></div>'
+        + '<div class=\"vcard-band '+rb[0]+'\">'+rb[1]+'</div>';
+      if (E.volx_asof) h += '<div class=\"rcard-note\">VolX anchored to the '+esc(E.volx_asof)+' session.</div>';
+    }
+    box.innerHTML = h;
+    box.querySelector('.rcard-x').addEventListener('click', close);
+  }
+  function loadV(sym){
+    _cur=sym;
+    fetch('/api/deriv-metrics/'+encodeURIComponent(sym))
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ renderV(d); })
+      .catch(function(e){ renderMsg('Volume card unavailable ('+e.message+').'); });
+  }
+  function openV(sym){ if(!sym) return; _cur=sym; box.innerHTML='<div class=\"rcard-body\">Loading '+esc(sym)+'...</div>'; ov.classList.add('on'); loadV(sym); }
+
   document.addEventListener('click', function(e){
-    var p = e.target.closest ? e.target.closest('.rcard-pill') : null;
-    if (p && p.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); open(p.getAttribute('data-sym')); }
+    if (!e.target.closest) return;
+    var rp = e.target.closest('.rcard-pill');
+    if (rp && rp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); open(rp.getAttribute('data-sym')); return; }
+    var vp = e.target.closest('.vcard-pill');
+    if (vp && vp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); openV(vp.getAttribute('data-sym')); }
   });
-  window.ScorrRCard = { open: open,
-    pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; } };
+  window.ScorrRCard = { open: open, openV: openV,
+    pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; },
+    pillV: function(sym){ return sym ? '<span class=\"vcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Volume / Energy\">V</span>' : ''; } };
 })();
 """
 

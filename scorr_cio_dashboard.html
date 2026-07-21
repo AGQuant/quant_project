@@ -1849,7 +1849,11 @@ function GvmReport({ r, hist }) {
           <div style={{ flex: 1.2, minWidth: 280 }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{r.company_name}</div>
             <div style={{ fontSize: 13.5, color: C.muted, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span>{r.symbol}</span><span>·</span><span>{r.segment}</span><span>·</span>
+              <span>{r.symbol}</span>
+              {/* cc#578/579: shared R + V pills (results_card.js injected on /cio2; delegated click by class+data-sym) */}
+              <span className="rcard-pill" data-sym={r.symbol} title="Results / Scorr View">R</span>
+              <span className="vcard-pill" data-sym={r.symbol} title="Volume / Energy">V</span>
+              <span>·</span><span>{r.segment}</span><span>·</span>
               <span style={{ fontWeight: 700, color: C.accent }}>#{r.segment_rank}/{r.segment_total} in segment</span>
               {r.mcap_rank && <span>· MCap #{r.mcap_rank}</span>}
               {r.market_cap != null && <span>· ₹{fmt(r.market_cap, 0)} Cr</span>}{/* cc#450: MCap value moved to header (was /100 units bug); already in Cr */}
