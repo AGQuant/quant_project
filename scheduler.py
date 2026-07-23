@@ -454,6 +454,21 @@ def _bg_signal_writer():
     except Exception as e:
         _signal_writer_fail_streak += 1
         log.error(f"signal_writer: FAIL #{_signal_writer_fail_streak}: {e}")
+        # cc#605 fix_3: MANDATORY crash-to-ops_log. The 22-Jul writer death was invisible — the tick
+        # raised and this except only log.error'd it (app logs, not the DB), so there was NO
+        # signal_writer_crash row in ops_log all day while 24 restarts silently failed. Write the
+        # traceback to ops_log on every failure so a writer death can NEVER again be silent.
+        try:
+            import json as _json, traceback as _tb
+            with _conn() as _c, _c.cursor() as _cur:
+                _cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                                VALUES (CURRENT_DATE, NOW(), 'alert', 'signal_writer_crash', %s::jsonb)""",
+                             (_json.dumps({"fail_streak": _signal_writer_fail_streak,
+                                           "error": str(e)[:300], "traceback": _tb.format_exc()[-1600:],
+                                           "ist": _ist_now().isoformat()}),))
+                _c.commit()
+        except Exception as _le:
+            log.error(f"signal_writer: crash-to-ops_log also failed: {_le}")
         if _signal_writer_fail_streak >= 3:
             _request_restart(f"signal_writer 3 consecutive failures: {e}")
     finally:

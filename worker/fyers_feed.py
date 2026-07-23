@@ -464,6 +464,66 @@ def _ops_log(conn, category, title, details):
                 pass
 
 
+# ── cc#605: restart-surviving day flags (app_config) + futures-delivery probe ─────────────────────
+def _flag_get(conn, key):
+    """cc#605: read a persisted worker day-flag from app_config. None on miss/error (a failed read
+    just lets the guarded action proceed — safe)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_config WHERE key=%s", (key,))
+            r = cur.fetchone()
+        return r[0] if r else None
+    except Exception as e:
+        log.warning(f"_flag_get({key}): {e}")
+        return None
+
+
+def _flag_set(conn, key, val):
+    """cc#605: persist a worker day-flag to app_config so it survives a hard restart. Fresh-conn
+    fallback (like _ops_log) — persisting the mint-once / fut-restart-once flag is the anti-loop
+    guarantee, so it must not be silently lost on a stale shared conn."""
+    for target in ("shared", "fresh"):
+        hc = get_db() if target == "fresh" else conn
+        try:
+            with hc.cursor() as cur:
+                cur.execute("INSERT INTO app_config (key,value,updated_at) VALUES (%s,%s,NOW()) "
+                            "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()",
+                            (key, val))
+            hc.commit()
+            return True
+        except Exception as e:
+            log.warning(f"_flag_set({key}) via {target}: {e}")
+        finally:
+            if target == "fresh":
+                try:
+                    hc.close()
+                except Exception:
+                    pass
+    return False
+
+
+def _fut_bars_today():
+    """cc#605: count today's fyers_fut 5m bars. Returns -1 on DB error so a bad read NEVER triggers a
+    false restart (the caller acts only on an exact 0)."""
+    hc = None
+    try:
+        hc = get_db()
+        midnight = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+        with hc.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM intraday_prices WHERE timeframe='5m' "
+                        "AND source='fyers_fut' AND ts >= %s", (midnight,))
+            return cur.fetchone()[0]
+    except Exception as e:
+        log.warning(f"_fut_bars_today: {e}")
+        return -1
+    finally:
+        if hc is not None:
+            try:
+                hc.close()
+            except Exception:
+                pass
+
+
 def _rest_quote_ok(token):
     """cc#339 fix_2: ONE REST quote self-test (NSE:SBIN-EQ). Returns (ok, detail). An EMPTY body is
     the exact dead-token signature that produced the 09-Jul 'Expecting value: line 1 column 1' spam,
@@ -2367,6 +2427,8 @@ def run(auth_code=None):
         consecutive_db_failures = 0   # cc#497 fix_2b: un-blind the watchdog — see _mark_db_error below
         sub_bounce_day       = None   # cc#497 fix_1_TIMING_FINAL: 09:14 pre-open socket bounce, once/day
         sub_seq_day          = None   # cc#497 fix_1_TIMING_FINAL: canary/full sequence trigger, once/day
+        last_fut_check       = None   # cc#605 fix_2: throttle the 09:24 futures-delivery probe (>=90s apart)
+        fut_alerted          = False  # cc#605 fix_2: fired the "still 0 after the one restart" alert once
 
         def _mark_db_error(e, where):
             """cc#497 fix_2b: the 17-Jul root cause — every conn-based call in this loop caught
@@ -2426,6 +2488,31 @@ def run(auth_code=None):
                     threading.Thread(target=_run_subscribe_sequence, args=('midmarket-boot',),
                                      daemon=True).start()
 
+            # ── cc#605 fix_2: 09:24 FUTURES-DELIVERY verify + ONE clean restart ──────────────────
+            # 22-Jul futures were dead all day (a restart-storm zombie session silently swallowed the
+            # 210-fut subscribe batch) and it went undetected because post-subscribe verification checks
+            # EQUITY only. Blunt cc#497 recovery: if no fut bars by 09:24, do ONE full clean process
+            # restart (the fresh at-open boot resubscribes ALL sets). A persisted flag caps it at a
+            # single restart; if futures are STILL zero by 09:30, alert once and stop (no restart loop).
+            if (is_trading_day(today) and in_market and now.time() >= dt_time(9, 24)
+                    and (last_fut_check is None or (now_dt - last_fut_check).total_seconds() >= 90)):
+                last_fut_check = now_dt
+                if _fut_bars_today() == 0:
+                    if _flag_get(conn, 'feed_fut_restart_day') == today.isoformat():
+                        if not fut_alerted and now.time() >= dt_time(9, 30):
+                            fut_alerted = True
+                            _ops_log(conn, 'alert', 'feed_fut',
+                                     {'event': 'fut_zero_after_clean_restart',
+                                      'note': 'futures delivery still 0 after the one cc#605 09:24 restart — manual check',
+                                      'ist': _ist_now_str()})
+                            _log_feed_incident('feed_fut_dead_after_restart',
+                                               'futures delivery still 0 after the one cc#605 09:24 clean restart')
+                    else:
+                        _flag_set(conn, 'feed_fut_restart_day', today.isoformat())   # persist BEFORE restart
+                        _ops_log(conn, 'alert', 'feed_fut',
+                                 {'event': 'fut_zero_0924_clean_restart', 'ist': _ist_now_str()})
+                        _hard_restart('cc#605: 09:24 futures delivery = 0 — one clean restart + full resubscribe')
+
             # ── cc#473 item 1 / cc#540: 09:05 IST daily token-staleness re-login (once/day).
             # Never start the day on yesterday's token. Boot staleness is already covered by
             # get_valid_token; this handles a worker running since before the IST midnight
@@ -2448,11 +2535,22 @@ def run(auth_code=None):
                         # 20-Jul incident was a Sunday-minted token reused Monday whose data-endpoint
                         # quotes came back empty. A pre-open (09:05<t<09:15) mint + clean reboot lands
                         # a guaranteed-fresh, self-tested token before the 09:15 first tick.
-                        _ops_log(conn, 'info', 'feed_auth',
-                                 {'event': 'preopen_unconditional_remint',
-                                  'token_created': str(created) if created else None, 'ist': _ist_now_str()})
-                        log.info("cc#564 09:05 pre-open UNCONDITIONAL fresh token mint (trading day)")
-                        _self_heal_token('09:05 pre-open unconditional fresh mint (trading day)')
+                        # cc#605 fix_1: MINT-ONCE across restarts. relogin_day is in-memory and resets
+                        # on every hard restart, so pre-cc#605 the mint->restart re-entered this
+                        # 09:05-09:15 window and re-minted+restarted (3x on 22-Jul, halted only by the
+                        # 90s account-block breaker — THE root-cause restart storm). A persisted
+                        # IST-dated flag makes the mint fire exactly once per day even across restarts;
+                        # the post-restart boot reads it and skips, ending the loop.
+                        if _flag_get(conn, 'feed_preopen_mint_day') == today.isoformat():
+                            log.info("cc#605: 09:05 pre-open mint already done today (persisted flag) — "
+                                     "skip re-mint (restart-loop guard)")
+                        else:
+                            _flag_set(conn, 'feed_preopen_mint_day', today.isoformat())   # persist BEFORE the restart
+                            _ops_log(conn, 'info', 'feed_auth',
+                                     {'event': 'preopen_unconditional_remint',
+                                      'token_created': str(created) if created else None, 'ist': _ist_now_str()})
+                            log.info("cc#564 09:05 pre-open UNCONDITIONAL fresh token mint (trading day)")
+                            _self_heal_token('09:05 pre-open unconditional fresh mint (trading day)')
                     elif not (created and created.date() == today):
                         # Non-trading day: keep the cc#540 behaviour — mint only if the token isn't
                         # from today (weekend research/backfill needs a live token, but no forced churn).
