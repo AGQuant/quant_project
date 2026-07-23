@@ -1710,19 +1710,29 @@ function openDerivCockpitTab(sym){
 let _qaCtx=null;
 // cc#620: N (Position News) dropped from the strip — news is covered by the Position News tab and the
 // R-button result-card fallback chain (structured -> polished -> raw), so a standalone N is redundant.
+// cc#626 item_4: names VERIFIED against the actual onclick handlers (not guessed) —
+//   V -> ScorrRCard.openV  = Volume/Energy card   (NOT "View detail")
+//   R -> ScorrRCard.open   = Results card
+//   D -> openDerivCockpit  = Derivative Cockpit
+//   C -> qaChart           = Price Chart
+//   G -> qaGvm             = GVM Rating snapshot
+// `n` = short label for the one-time mobile hint; `t` = full name (title + aria-label).
 const _QA_BTNS=[
-  {k:'V',t:'Volume — relative volume & 3D/21D',   fn:s=>window.ScorrRCard?ScorrRCard.openV(s.sym):alert('Volume card unavailable')},
-  {k:'R',t:'Results — latest result card',        fn:s=>window.ScorrRCard?ScorrRCard.open(s.sym):alert('Results card unavailable')},
-  {k:'D',t:'Derivative Cockpit (full panel)',      fn:s=>openDerivCockpit(s.sym,s.side,s.qty,s.entry,s.cmp)},
-  {k:'C',t:'Chart',                                fn:s=>qaChart(s.sym)},
-  {k:'G',t:'GVM Rating snapshot',                  fn:s=>qaGvm(s.sym)},
+  {k:'V',n:'Volume', t:'Volume — relative volume & 3D/21D',   fn:s=>window.ScorrRCard?ScorrRCard.openV(s.sym):alert('Volume card unavailable')},
+  {k:'R',n:'Results',t:'Results — latest result card',        fn:s=>window.ScorrRCard?ScorrRCard.open(s.sym):alert('Results card unavailable')},
+  {k:'D',n:'Cockpit',t:'Derivative Cockpit (full panel)',     fn:s=>openDerivCockpit(s.sym,s.side,s.qty,s.entry,s.cmp)},
+  {k:'C',n:'Chart',  t:'Price Chart — equity daily & 5m',     fn:s=>qaChart(s.sym)},
+  {k:'G',n:'GVM',    t:'GVM Rating snapshot',                 fn:s=>qaGvm(s.sym)},
 ];
 function _qaInjectStyle(){
   if(document.getElementById('qa-style'))return;
   const st=document.createElement('style');st.id='qa-style';st.textContent=`
-    #qaStrip{position:fixed;z-index:11500;display:none;gap:6px;padding:6px;align-items:center;
-      background:var(--panel,#fff);border:1px solid var(--line,#e2e7ee);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
+    #qaStrip{position:fixed;z-index:11500;display:none;gap:6px;padding:6px;align-items:center;flex-wrap:wrap;
+      max-width:min(94vw,320px);background:var(--panel,#fff);border:1px solid var(--line,#e2e7ee);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
     #qaStrip.open{display:flex}
+    /* cc#626 item_4: one-time mobile hint legend (letter -> full name), own row under the buttons */
+    #qaStrip .qa-hint{flex-basis:100%;width:100%;font-family:'Sora',sans-serif;font-size:10px;color:var(--mut,#5a6b82);text-align:center;padding:2px 2px 0;line-height:1.5}
+    #qaStrip .qa-hint b{color:var(--txt,#1c2536)}
     #qaStrip .qa-sym{font-family:'Sora',sans-serif;font-weight:800;font-size:12px;color:var(--mut,#5a6b82);
       padding:0 4px 0 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #qaStrip button{width:40px;height:40px;border-radius:9px;border:1px solid var(--line2,#e8ecf2);
@@ -1740,8 +1750,14 @@ function openQuickActions(ev,sym,side,qty,entry,cmp){
   _qaCtx={sym,side:side||'',qty:Number(qty)||0,entry:(entry==null?null:Number(entry)),cmp:(cmp==null?null:Number(cmp))};
   let strip=document.getElementById('qaStrip');
   if(!strip){strip=document.createElement('div');strip.id='qaStrip';document.body.appendChild(strip);}
+  // cc#626 item_4: full name in BOTH title (desktop hover) and aria-label (a11y). Mobile has no hover,
+  // so a compact one-time hint legend (V Volume · R Results · …) is shown under the strip on the first
+  // open ever, then remembered (localStorage) — buttons themselves stay single-letter compact.
+  let _hint='';
+  try{ if(!localStorage.getItem('qaHintSeen')){ localStorage.setItem('qaHintSeen','1');
+    _hint=`<div class="qa-hint">${_QA_BTNS.map(b=>'<b>'+b.k+'</b> '+b.n).join(' &middot; ')}</div>`; } }catch(e){}
   strip.innerHTML=`<span class="qa-sym">${sym}</span>`+
-    _QA_BTNS.map(b=>`<button data-k="${b.k}" title="${b.t}" onclick="_qaHit('${b.k}')">${b.k}</button>`).join('');
+    _QA_BTNS.map(b=>`<button data-k="${b.k}" title="${b.t}" aria-label="${b.t}" onclick="_qaHit('${b.k}')">${b.k}</button>`).join('')+_hint;
   strip.classList.add('open');
   // position near the click, clamped to the viewport (drops below the row, flips above if no room).
   strip.style.visibility='hidden';strip.style.left='0px';strip.style.top='0px';
@@ -1810,7 +1826,15 @@ async function qaGvm(sym){
   }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">GVM snapshot failed to load.</div>');}
 }
 
-let _qaChartObj=null,_qaChartSym=null;
+// cc#626 item_2: timeframe + pivot/fib overlays. Overlays reuse the GVM chart's data source
+// (/api/trade-check/fibcheck — pivots from v8_paper_pivots, same fib derivation) drawn as
+// LightweightCharts price lines (the GVM chart itself is React SVG; the dashboard popup is
+// LightweightCharts, so we reuse the DATA + overlay config, not the React component).
+let _qaChartObj=null,_qaChartSym=null,_qaChartSeries=null,_qaPriceLines=[],_qaTf='3M',_qaFibCache={};
+let _qaOv={pivot:false,fib:false};
+try{const _o=localStorage.getItem('qa_chart_overlay')||'none';_qaOv={pivot:_o==='pivot'||_o==='both',fib:_o==='fib'||_o==='both'};}catch(e){}
+const _QA_TF={'5m':null,'1M':30,'3M':90,'6M':180,'1Y':365};   // null => intraday 5m; else /api/candles days
+function _qaOvStr(){return _qaOv.pivot&&_qaOv.fib?'both':_qaOv.pivot?'pivot':_qaOv.fib?'fib':'none';}
 function _qaChartEsc(e){if(e.key==='Escape')qaChartClose();}
 function qaChart(sym){
   let ov=document.getElementById('qaChartOv');
@@ -1820,9 +1844,15 @@ function qaChart(sym){
     ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.4);width:min(760px,96vw);max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)">
         <b id="qaChartTitle" style="font-size:14px"></b>
-        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
-          <button id="qaChartD" class="qa-tf" onclick="qaChartLoad('D')">Daily</button>
-          <button id="qaChartI" class="qa-tf" onclick="qaChartLoad('I')">5m</button>
+        <span style="margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <button id="qaTf_5m" class="qa-tf" onclick="qaChartLoad('5m')">5m</button>
+          <button id="qaTf_1M" class="qa-tf" onclick="qaChartLoad('1M')">1M</button>
+          <button id="qaTf_3M" class="qa-tf" onclick="qaChartLoad('3M')">3M</button>
+          <button id="qaTf_6M" class="qa-tf" onclick="qaChartLoad('6M')">6M</button>
+          <button id="qaTf_1Y" class="qa-tf" onclick="qaChartLoad('1Y')">1Y</button>
+          <span style="width:1px;height:18px;background:var(--line2);margin:0 2px"></span>
+          <button id="qaOvPiv" class="qa-tf" onclick="qaToggleOverlay('pivot')" title="Pivots — PP / R1 / R2 / S1 / S2 (v8_paper_pivots)">Pivots</button>
+          <button id="qaOvFib" class="qa-tf" onclick="qaToggleOverlay('fib')" title="Fibonacci retracement levels (same derivation as the GVM chart)">Fib</button>
           <button onclick="qaChartClose()" style="border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--mut)">&times;</button></span></div>
       <div id="qaChartBox" style="width:100%;height:420px;padding:8px 8px 0"></div>
       <div id="qaChartMsg" style="padding:6px 16px 12px;font-size:11px;color:var(--dim)"></div></div>`;
@@ -1831,43 +1861,76 @@ function qaChart(sym){
   }
   _qaInjectStyle();
   ov.style.display='flex';
-  _qaChartSym=sym;
+  _qaChartSym=sym;_qaChartSeries=null;_qaPriceLines=[];
   document.getElementById('qaChartTitle').textContent=sym+' · Price';
   document.addEventListener('keydown',_qaChartEsc);
-  qaChartLoad('D');
+  qaChartLoad(_qaTf);
+}
+function _qaSyncBtns(){
+  Object.keys(_QA_TF).forEach(k=>{const b=document.getElementById('qaTf_'+k);if(b)b.classList.toggle('on',k===_qaTf);});
+  const bp=document.getElementById('qaOvPiv'),bf=document.getElementById('qaOvFib');
+  if(bp)bp.classList.toggle('on',_qaOv.pivot);if(bf)bf.classList.toggle('on',_qaOv.fib);
 }
 async function qaChartLoad(tf){
+  _qaTf=tf;
   const box=document.getElementById('qaChartBox'),msg=document.getElementById('qaChartMsg');
-  const bD=document.getElementById('qaChartD'),bI=document.getElementById('qaChartI');
-  if(bD)bD.classList.toggle('on',tf==='D');if(bI)bI.classList.toggle('on',tf==='I');
+  _qaSyncBtns();
   if(!window.LightweightCharts){msg.textContent='Chart library not loaded — reload the page.';return;}
   if(_qaChartObj){try{_qaChartObj.remove();}catch(e){}_qaChartObj=null;}
+  _qaChartSeries=null;_qaPriceLines=[];
   box.innerHTML='';msg.textContent='Loading…';
+  const isIntraday=(_QA_TF[tf]===null);
   try{
     let data;
-    if(tf==='D'){
-      const rows=await getJSON('/api/candles/'+encodeURIComponent(_qaChartSym)+'?days=90');
+    if(!isIntraday){
+      const rows=await getJSON('/api/candles/'+encodeURIComponent(_qaChartSym)+'?days='+_QA_TF[tf]);
       data=(rows||[]).map(r=>({time:r.date,open:+r.open,high:+r.high,low:+r.low,close:+r.close})).filter(d=>isFinite(d.close));
     }else{
       const rows=await getJSON('/api/intraday/'+encodeURIComponent(_qaChartSym)+'?days=1');
       data=(rows||[]).map(r=>({time:Math.floor(new Date(String(r.ts).replace(' ','T')).getTime()/1000),
         open:+r.open,high:+r.high,low:+r.low,close:+r.close})).filter(d=>isFinite(d.close)&&isFinite(d.time));
     }
-    if(!data.length){msg.textContent='No '+(tf==='D'?'daily':'5m')+' data for '+_qaChartSym+'.';return;}
+    if(!data.length){msg.textContent='No '+(isIntraday?'5m':tf)+' data for '+_qaChartSym+'.';return;}
     const mut=(getComputedStyle(document.body).getPropertyValue('--mut')||'#5a6b82').trim();
     const c=LightweightCharts.createChart(box,{width:box.clientWidth,height:412,
       layout:{background:{color:'transparent'},textColor:mut},
       grid:{vertLines:{visible:false},horzLines:{color:'rgba(120,130,150,.12)'}},
-      timeScale:{timeVisible:tf==='I',borderVisible:false},rightPriceScale:{borderVisible:false}});
+      timeScale:{timeVisible:isIntraday,borderVisible:false},rightPriceScale:{borderVisible:false}});
     const s=c.addCandlestickSeries({upColor:'#0a9e63',downColor:'#dd3a4a',borderVisible:false,
       wickUpColor:'#0a9e63',wickDownColor:'#dd3a4a'});
-    s.setData(data);c.timeScale().fitContent();_qaChartObj=c;
-    msg.textContent=(tf==='D'?'Daily 90d · raw_prices':'5m today · intraday_prices');
+    s.setData(data);c.timeScale().fitContent();_qaChartObj=c;_qaChartSeries=s;
+    msg.textContent=(isIntraday?'5m latest session · intraday_prices (fyers_eq)':tf+' · raw_prices (equity, adjusted)');
+    qaApplyOverlays();   // cc#626 item_2: draw pivot/fib price lines if enabled
   }catch(e){msg.textContent='Chart failed to load.';}
+}
+// cc#626 item_2: pivot + fib overlays as price lines, from the GVM chart's data source
+// (/api/trade-check/fibcheck: pivots=v8_paper_pivots, fib_levels=same swing derivation). Price-level
+// overlays apply across every timeframe. Cached per symbol.
+async function qaApplyOverlays(){
+  if(!_qaChartSeries)return;
+  (_qaPriceLines||[]).forEach(pl=>{try{_qaChartSeries.removePriceLine(pl);}catch(e){}});
+  _qaPriceLines=[];
+  if(!_qaOv.pivot&&!_qaOv.fib)return;
+  let fib=_qaFibCache[_qaChartSym];
+  if(!fib){try{fib=await getJSON('/api/trade-check/fibcheck?symbol='+encodeURIComponent(_qaChartSym)+'&lookback=6m');_qaFibCache[_qaChartSym]=fib;}catch(e){return;}}
+  if(!_qaChartSeries)return;
+  if(_qaOv.pivot&&fib&&fib.pivots){const P=fib.pivots;
+    [['R2',P.r2,'#0a9e63'],['R1',P.r1,'#0a9e63'],['PP',P.pp,'#8a94ad'],['S1',P.s1,'#dd3a4a'],['S2',P.s2,'#dd3a4a']].forEach(row=>{
+      if(row[1]!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+row[1],color:row[2],lineWidth:1,lineStyle:2,axisLabelVisible:true,title:row[0]}));});
+  }
+  if(_qaOv.fib&&fib&&fib.fib_levels){fib.fib_levels.forEach(f=>{
+    if(f.price!=null)_qaPriceLines.push(_qaChartSeries.createPriceLine({price:+f.price,color:'#c98a12',lineWidth:1,lineStyle:3,axisLabelVisible:false,title:'Fib '+f.pct+'%'}));});
+  }
+}
+function qaToggleOverlay(kind){
+  _qaOv[kind]=!_qaOv[kind];
+  try{localStorage.setItem('qa_chart_overlay',_qaOvStr());}catch(e){}
+  _qaSyncBtns();qaApplyOverlays();
 }
 function qaChartClose(){
   const ov=document.getElementById('qaChartOv');if(ov)ov.style.display='none';
   if(_qaChartObj){try{_qaChartObj.remove();}catch(e){}_qaChartObj=null;}
+  _qaChartSeries=null;_qaPriceLines=[];
   document.removeEventListener('keydown',_qaChartEsc);
 }
 

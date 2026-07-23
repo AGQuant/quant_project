@@ -217,9 +217,22 @@ def get_cmp(symbol: str):
 
 @router.get("/api/intraday/{symbol}")
 def get_intraday(symbol: str, days: int = 1):
+    """cc#626 item_1/item_3: EQUITY 5m bars ONLY (source='fyers_eq'). ROOT CAUSE of the universal
+    5m-blank bug: the old query had NO source filter, so an F&O symbol returned BOTH fyers_eq AND
+    fyers_fut rows at the SAME timestamps (257 collisions/3d for HDFCBANK) — LightweightCharts
+    setData() rejects duplicate/unordered times and threw for EVERY dashboard symbol (all are F&O).
+    Also anchor to the latest session that actually has equity bars (off-market/holiday fallback) so
+    the tab is never empty on a valid symbol instead of filtering on a wall-clock `now - days`."""
     days = min(max(days, 1), 7)
-    cutoff = _ist_now() - timedelta(days=days)
-    return api_query("SELECT symbol,ts,open,high,low,close,volume FROM intraday_prices WHERE symbol=%s AND ts>=%s ORDER BY ts ASC", (symbol.upper(), cutoff))
+    sym = symbol.upper()
+    latest = api_query("SELECT MAX(ts::date)::text AS d FROM intraday_prices "
+                       "WHERE symbol=%s AND source='fyers_eq'", (sym,), single=True)
+    if not latest or not latest.get("d"):
+        return []
+    return api_query("""SELECT symbol, ts, open, high, low, close, volume
+                        FROM intraday_prices
+                        WHERE symbol=%s AND source='fyers_eq' AND ts::date > (%s::date - %s)
+                        ORDER BY ts ASC""", (sym, latest["d"], days))
 
 
 @router.get("/api/intraday_ondemand/{symbol}")
