@@ -272,6 +272,7 @@ PWA_JS = """
     ['/cio2?model=gvm', '\\u25c9', 'GVM'],
     ['/sector', '\\u2297', 'Sector'],
     ['/check', '\\u2713', 'Check'],
+    ['/result-corner', '\\u2263', 'Results'],
     ['/news', '\\ud83d\\udcf0', 'Intel'],
     ['/intraday', '\\u23f1', 'TC Scanner'],
     ['/v13', '\\u25a4', 'V13'],

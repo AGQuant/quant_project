@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Result Corner · Scorr</title>
+<style>
+  :root{ --bg:#0A0F1E; --card:#121A33; --border:rgba(148,166,210,.14); --text:#E9EEFB;
+         --muted:#8C99BD; --accent:#4D7CFE; --green:#2FD48B; --red:#FF5C6C; --gold:#F5B94A; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px}
+  #scorr-nav{}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 60px}
+  h1{font-size:20px;font-weight:800;margin:6px 0 2px}
+  .sub{color:var(--muted);font-size:12.5px;margin-bottom:16px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{padding:7px 15px;border-radius:8px;border:1px solid var(--border);background:var(--card);
+       color:var(--muted);cursor:pointer;font-weight:700;font-size:13px}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tab .n{opacity:.7;font-weight:600;margin-left:5px}
+  .tblwrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
+  table{border-collapse:collapse;width:100%;min-width:820px;font-size:13px}
+  th{position:sticky;top:0;background:var(--card);text-align:left;padding:10px 12px;color:var(--muted);
+     font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+  td{padding:10px 12px;border-bottom:1px solid rgba(148,166,210,.08)}
+  tr:hover td{background:rgba(77,124,254,.05)}
+  .co{font-weight:700}
+  .sym{color:var(--muted);font-size:11.5px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:11px;font-weight:700}
+  .t-large{background:rgba(77,124,254,.16);color:#9db8ff}
+  .t-mid{background:rgba(245,185,74,.16);color:var(--gold)}
+  .t-small{background:rgba(148,166,210,.14);color:var(--muted)}
+  .num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right}
+  .up{color:var(--green)} .dn{color:var(--red)}
+  .verdict{font-weight:700;font-size:12px}
+  a.card{color:var(--accent);text-decoration:none;font-weight:700}
+  .pager{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:16px}
+  .pager button{padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);
+     color:var(--text);cursor:pointer;font-weight:700}
+  .pager button:disabled{opacity:.4;cursor:default}
+  .empty{padding:40px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="scorr-nav"></div>
+<div class="wrap">
+  <h1>Result Corner</h1>
+  <div class="sub">Companies that have reported results — newest first. Filter by market-cap tier (AMFI rank). Snapshot = latest reported quarter Sales &amp; PAT with QoQ / YoY.</div>
+  <div class="tabs" id="tabs"></div>
+  <div class="tblwrap">
+    <table>
+      <thead><tr>
+        <th>Company</th><th>Reported</th><th>Tier</th><th>GVM</th>
+        <th class="num">Sales (Qtr)</th><th class="num">QoQ / YoY</th>
+        <th class="num">PAT (Qtr)</th><th class="num">QoQ / YoY</th><th>Analysis</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div id="empty" class="empty" style="display:none">No reported companies for this tier yet.</div>
+  <div class="pager">
+    <button id="prev">‹ Prev</button>
+    <span id="pginfo" class="sym"></span>
+    <button id="next">Next ›</button>
+  </div>
+</div>
+<script>
+var TIERS = [['all','All'],['large','Large'],['mid','Mid'],['small','Small']];
+var state = { tier:'all', page:1, pages:1 };
+
+function fmtCr(v){ if(v==null) return '—'; return Number(v).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+function delta(v){ if(v==null) return '<span class="sym">—</span>';
+  var c = v>0?'up':(v<0?'dn':''); var s=(v>0?'+':'')+v+'%'; return '<span class="'+c+'">'+s+'</span>'; }
+function tierPill(t){ if(!t) return '<span class="sym">—</span>';
+  return '<span class="pill t-'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</span>'; }
+function verdictColor(v){ if(!v) return 'var(--muted)'; var s=v.toUpperCase();
+  if(s.indexOf('BUY')>-1||s.indexOf('STRONG')>-1||s.indexOf('INVEST')>-1) return 'var(--green)';
+  if(s.indexOf('SELL')>-1||s.indexOf('AVOID')>-1) return 'var(--red)'; return 'var(--gold)'; }
+
+function renderTabs(counts){
+  var el = document.getElementById('tabs'); el.innerHTML='';
+  TIERS.forEach(function(t){
+    var b = document.createElement('div');
+    b.className = 'tab' + (state.tier===t[0]?' active':'');
+    b.innerHTML = t[1] + (counts&&counts[t[0]]!=null ? '<span class="n">'+counts[t[0]]+'</span>':'');
+    b.onclick = function(){ state.tier=t[0]; state.page=1; load(); };
+    el.appendChild(b);
+  });
+}
+
+function load(){
+  renderTabs(null);
+  fetch('/api/result-corner?tier='+state.tier+'&page='+state.page+'&per_page=30')
+    .then(function(r){return r.json()}).then(function(d){
+      state.pages = d.pages||1;
+      var tb = document.getElementById('rows'); tb.innerHTML='';
+      document.getElementById('empty').style.display = (d.total===0)?'block':'none';
+      (d.results||[]).forEach(function(x){
+        var s = x.snapshot||{};
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><div class="co">'+(x.company||x.symbol)+'</div><div class="sym">'+x.symbol+'</div></td>'+
+          '<td class="sym">'+(x.reported_date||'—')+'</td>'+
+          '<td>'+tierPill(x.tier)+'</td>'+
+          '<td>'+(x.gvm_score!=null?('<b>'+x.gvm_score.toFixed(1)+'</b>'):'—')+
+              (x.gvm_verdict?'<div class="verdict" style="color:'+verdictColor(x.gvm_verdict)+'">'+x.gvm_verdict+'</div>':'')+'</td>'+
+          '<td class="num">'+fmtCr(s.sales)+'</td>'+
+          '<td class="num">'+delta(s.sales_qoq)+' / '+delta(s.sales_yoy)+'</td>'+
+          '<td class="num">'+fmtCr(s.net_profit)+'</td>'+
+          '<td class="num">'+delta(s.pat_qoq)+' / '+delta(s.pat_yoy)+'</td>'+
+          '<td><a class="card" href="'+x.result_card_url+'">Card ›</a></td>';
+        tb.appendChild(tr);
+      });
+      document.getElementById('pginfo').textContent = 'Page '+d.page+' / '+d.pages+' · '+d.total+' reported';
+      document.getElementById('prev').disabled = d.page<=1;
+      document.getElementById('next').disabled = d.page>=d.pages;
+      renderTabs(null);
+    }).catch(function(e){ document.getElementById('empty').style.display='block'; });
+}
+document.getElementById('prev').onclick=function(){ if(state.page>1){state.page--;load();} };
+document.getElementById('next').onclick=function(){ if(state.page<state.pages){state.page++;load();} };
+load();
+</script>
+<script src="/static/pwa.js"></script>
+</body>
+</html>

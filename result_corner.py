@@ -35,6 +35,7 @@ from typing import Dict, Optional, Tuple
 
 log = logging.getLogger("scorr.result_corner")
 router = APIRouter(prefix="/api/admin/result_corner", tags=["result_corner"])
+page_router = APIRouter(tags=["result_corner_page"])   # cc#603: public page API at /api/result-corner
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 # result-announcement detectors (kept precise — these gate writes into the live earnings feed)
@@ -255,5 +256,98 @@ def status():
     conn = _conn()
     try:
         return verify(conn)
+    finally:
+        conn.close()
+
+
+# ── cc#603: Result Corner page API (tier-filtered, server-paginated reported companies) ────────────
+def _num(v):
+    """fundamentals_history metric values are strings like '34,309' / '11%' / '-16'."""
+    if v is None:
+        return None
+    s = str(v).replace(",", "").replace("%", "").strip()
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _pct(cur, prev):
+    if cur is None or prev in (None, 0):
+        return None
+    return round((cur - prev) / abs(prev) * 100.0, 1)
+
+
+def _snapshot(cur, symbol):
+    """Latest reported quarter Sales & Net Profit + QoQ (vs prev q) + YoY (vs 4q ago), from
+    fundamentals_history section='quarters' (consolidated preferred)."""
+    cur.execute("""SELECT period_label, period_end, metrics, consolidated FROM fundamentals_history
+                   WHERE symbol=%s AND section='quarters' AND period_type='quarter'
+                   ORDER BY period_end DESC NULLS LAST LIMIT 6""", (symbol,))
+    rows = cur.fetchall()
+    if not rows:
+        return {}
+    has_cons = any(r[3] for r in rows)
+    rows = [r for r in rows if bool(r[3]) == has_cons]
+    if not rows:
+        return {}
+    q = [{"label": r[0], "sales": _num((r[2] or {}).get("Sales")),
+          "pat": _num((r[2] or {}).get("Net Profit"))} for r in rows]
+    latest, prev, yoy = q[0], (q[1] if len(q) > 1 else None), (q[4] if len(q) > 4 else None)
+    return {
+        "quarter": latest["label"], "sales": latest["sales"], "net_profit": latest["pat"],
+        "sales_qoq": _pct(latest["sales"], prev["sales"]) if prev else None,
+        "sales_yoy": _pct(latest["sales"], yoy["sales"]) if yoy else None,
+        "pat_qoq": _pct(latest["pat"], prev["pat"]) if prev else None,
+        "pat_yoy": _pct(latest["pat"], yoy["pat"]) if yoy else None,
+    }
+
+
+@page_router.get("/api/result-corner")
+def result_corner_list(tier: str = "all", page: int = 1, per_page: int = 30):
+    """cc#603: reported companies (newest first), server-paginated, with mcap tier (AMFI rank by
+    market_cap DESC: Large 1-100 / Mid 101-250 / Small 251+), GVM verdict, and a result snapshot.
+    tier = large | mid | small | all. mcap_tier is computed on-the-fly from gvm_scores.market_cap."""
+    tier = (tier or "all").lower()
+    page = max(1, int(page)); per_page = min(100, max(1, int(per_page)))
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            # rank the whole scored universe by market cap -> tier; join the reported set
+            cur.execute("""
+                WITH ranked AS (
+                    SELECT symbol, market_cap, gvm_score, verdict, segment,
+                           ROW_NUMBER() OVER (ORDER BY market_cap DESC NULLS LAST) AS mrank
+                    FROM gvm_scores WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)
+                ),
+                tiered AS (
+                    SELECT *, CASE WHEN mrank<=100 THEN 'large' WHEN mrank<=250 THEN 'mid' ELSE 'small' END AS tier
+                    FROM ranked
+                ),
+                reported AS (
+                    SELECT UPPER(ticker) AS sym, MAX(ex_date) AS reported_date, MAX(company_name) AS company
+                    FROM earnings_calendar WHERE status='reported'
+                    GROUP BY UPPER(ticker)
+                )
+                SELECT r.sym, r.company, r.reported_date, t.tier, t.gvm_score, t.verdict, t.mrank
+                FROM reported r LEFT JOIN tiered t ON t.symbol=r.sym
+                WHERE (%s='all' OR t.tier=%s)
+                ORDER BY r.reported_date DESC NULLS LAST, t.mrank ASC NULLS LAST
+            """, (tier, tier))
+            allrows = cur.fetchall()
+            total = len(allrows)
+            start = (page - 1) * per_page
+            pagerows = allrows[start:start + per_page]
+            out = []
+            for sym, company, rdate, t, gscore, verdict, mrank in pagerows:
+                snap = _snapshot(cur, sym)
+                out.append({
+                    "symbol": sym, "company": company, "reported_date": str(rdate) if rdate else None,
+                    "tier": t, "mcap_rank": mrank, "gvm_score": float(gscore) if gscore is not None else None,
+                    "gvm_verdict": verdict, "snapshot": snap,
+                    "result_card_url": f"/check?symbol={sym}",
+                })
+        return {"tier": tier, "page": page, "per_page": per_page, "total": total,
+                "pages": (total + per_page - 1) // per_page, "results": out}
     finally:
         conn.close()

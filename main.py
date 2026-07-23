@@ -69,6 +69,7 @@ from sector_brief_endpoints import router as sector_brief_router, _batch_job as 
 from ops_metrics_pipeline import router as ops_metrics_router   # cc#523: sector KPI registry + concall pipeline
 from ops_peer_benchmark import router as ops_peer_benchmark_router   # cc#593: ops-metrics peer-benchmark compute
 from result_corner import router as result_corner_router   # cc#602: news-vs-calendar result coverage
+from result_corner import page_router as result_corner_page_router   # cc#603: /api/result-corner page API
 from engine_watchdog import router as engine_watchdog_router   # cc#599: engine watchdog outcome audit
 from scheduler_master import router as scheduler_master_router   # cc#525: scheduled-job registry + drift audit
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
@@ -198,10 +199,11 @@ def _is_embedded(request: Request) -> bool:
 _PWA_INJECT_PATHS = {"/app", "/cio", "/cio2", "/check", "/scanners", "/news", "/v10", "/v9", "/v14",
                      "/dashboard", "/sector", "/fpc", "/quant-basket", "/holdings", "/filters",
                      "/intraday", "/structure", "/performance", "/ask",
-                     "/v13", "/v12", "/health", "/v15", "/scheduler-master"}   # cc#392/394/398/426/442/467/525: no-store + theme/logout pills
+                     "/v13", "/v12", "/health", "/v15", "/scheduler-master", "/result-corner"}   # cc#392/394/398/426/442/467/525/603: no-store + theme/logout pills
 # cc#407: /screener retired -> 301 /v13 (V13 is the single screening surface). Not injected/protected.
 PROTECTED.add("/v13"); PROTECTED.add("/v12"); PROTECTED.add("/health"); PROTECTED.add("/v9"); PROTECTED.add("/v14"); PROTECTED.add("/v15")   # cc#392/394/398/426/442/467: gate + no-store
 PROTECTED.add("/scheduler-master")   # cc#525: gate + no-store
+PROTECTED.add("/result-corner")   # cc#603: gate + no-store
 # cc#399: /v4scan retired as a page — now a 301 -> /check (TC v4 merged into Check). Not injected/protected.
 _PWA_TAG = b'<script src="/pwa.js" defer></script>'
 
@@ -291,6 +293,7 @@ app.include_router(ops_metrics_router)   # cc#523
 app.include_router(ops_peer_benchmark_router)   # cc#593: /api/ops-peer/* peer-benchmark compute
 app.include_router(result_corner_router)   # cc#602: /api/admin/result_corner/* news-vs-calendar
 app.include_router(engine_watchdog_router)   # cc#599: /api/watchdog/gaps engine watchdog
+app.include_router(result_corner_page_router)   # cc#603: /api/result-corner page API
 app.include_router(scheduler_master_router)   # cc#525
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
@@ -723,6 +726,12 @@ def holdings_page():
     """SmartGain MHK40 holdings — gated by single password (scorr_auth PROTECTED set)."""
     with open("scorr_holdings.html", "r", encoding="utf-8") as f: return f.read()
 
+@app.get("/result-corner", response_class=HTMLResponse)
+def result_corner_page():
+    """cc#603: Result Corner — reported companies (newest first) with mcap-tier filter, GVM verdict,
+    and a result snapshot. Reads /api/result-corner (result_corner.py)."""
+    with open("scorr_result_corner.html", "r", encoding="utf-8") as f: return f.read()
+
 @app.get("/scheduler-master", response_class=HTMLResponse)
 def scheduler_master_page():
     """cc#525: Master Scheduler Registry -- every scheduled job (AST-enumerated from
@@ -777,6 +786,7 @@ NAV_REGISTRY = {
     "/dashboard#bt":    ("V6 BT — V8 tab-only deep-link (removed from top nav)", "tab"),  # cc#551: dropped from NAV, reachable via the V8 tab bar only
     "/v15":          ("V15 · MF",             "nav"),        # cc#467 rule id=2987 (MF intelligence)
     "/scheduler-master": ("Scheduler Master",  "nav"),        # cc#525: scheduled-job registry + drift audit
+    "/result-corner":    ("Result Corner",     "nav"),        # cc#603: reported-companies tier board
     "/holdings":     ("Holdings",             "nav"),
     "/v13":          ("V13 · Registry & Screener", "nav"),
     "/v4scan":       ("(-> /check · Future Scans)", "redirect"),   # cc#399 301
