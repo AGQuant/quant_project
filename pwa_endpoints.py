@@ -1039,7 +1039,7 @@ RESULTS_CARD_JS = """
     }
     var body=row('QoQ Sales',pc.sales)+row('QoQ Profit',pc.profit);
     if(!body) return '';
-    return '<div class=\"rcard-lbl\">Latest result vs top-3 peers</div>'
+    return '<div class=\"rcard-lbl\">Latest result'+(pc.quarter?' ('+esc(pc.quarter)+')':'')+' vs top-3 peers</div>'
       +'<div class=\"rcard-peer\">'+body+'</div>'
       +'<div class=\"rcard-note\">Peers = top-3 by GVM in '+esc(pc.segment||'segment')
       +(pc.fallback?' (segment avg &mdash; under 3 peers)':'')+', self-excluded.</div>';
@@ -1068,10 +1068,10 @@ RESULTS_CARD_JS = """
       if (d && d.fy27_outlook){
         h += '<div class=\"rcard-body\">'+esc(d.fy27_outlook)+'</div>';
         h += '<div class=\"rcard-note\">Scorr-generated qualitative view from trailing fundamentals &mdash; not a broker estimate.</div>';
-        h += '<button class=\"rcard-btn\" data-gen=\"1\"'+(generating?' disabled':'')+'>'+(generating?'Refreshing...':'Refresh')+'</button>';
       } else {
-        h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">No Scorr view yet.</div>';
-        h += '<button class=\"rcard-btn\" data-gen=\"1\"'+(generating?' disabled':'')+'>'+(generating?'Generating...':'Generate Scorr View')+'</button>';
+        // cc#609: app-side generation retired; the FY27 outlook batch is deferred to the Sep-2026
+        // review. No Generate button (the dead Anthropic path is gone) — a clean pending note instead.
+        h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">FY27 outlook due September 2026.</div>';
       }
     }
     h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)

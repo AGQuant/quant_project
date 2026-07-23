@@ -1,34 +1,42 @@
 """
 results_endpoints.py — cc#572 (spec id=6438): Results "R" card backend.
 
-GET /api/results/card?symbol=X[&generate=true]
+GET /api/results/card?symbol=X
 
 Branch logic:
   - earnings_calendar row with ex_date <= today -> ANNOUNCED. Return input_raw.result_analysis if
     present (with last_result_analysis_updated); else ANNOUNCED_NO_ANALYSIS (never invent figures).
-  - ex_date > today -> UPCOMING; no earnings row -> DATE_TBD. Both serve a cached (<30d) FY27
-    outlook from input_raw.fy27_outlook. If missing/stale AND generate=true -> ONE Haiku call built
-    only from real trailing data (GVM/G/V/M + 180d trend + screener_raw fundamentals), qualitative
-    only, cached. Zero-cost on a cached read; Haiku fires ONLY on an explicit generate=true.
+  - ex_date > today -> UPCOMING; no earnings row -> DATE_TBD. Serve the cached FY27 outlook from
+    input_raw.fy27_outlook if present; else set outlook_pending so the card shows a "due September"
+    note. cc#609: app-side generation is RETIRED (Anthropic key depleted 20-Jul; the FY27 outlook
+    batch is CC-authored, Max-subscription, and DEFERRED to the Sep-2026 review) — NO model is ever
+    called here and there is no `generate` path anymore.
 
 Storage: input_raw.fy27_outlook + last_fy27_outlook_updated (same convention as result_analysis;
 main.py registers fy27_outlook in _ALLOWED_CONTENT_FIELDS + _FIELD_TO_TS_COL for manual override).
 """
 import os
-import json
 import logging
-from datetime import datetime, date
+from datetime import date
 from typing import Optional
 
-import httpx
 import psycopg2
 from fastapi import APIRouter
 
 log = logging.getLogger("results_card")
 router = APIRouter()
 
-OUTLOOK_MODEL = "claude-haiku-4-5-20251001"
-OUTLOOK_FRESH_DAYS = 30
+
+def _fq_label(period_end):
+    """cc#609: 'Q1 FY27'-style label for a quarter period-end (Jun->Q1, Sep->Q2, Dec->Q3, Mar->Q4)."""
+    if not period_end:
+        return None
+    m, y = period_end.month, period_end.year
+    q = {6: 1, 9: 2, 12: 3, 3: 4}.get(m)
+    if q is None:
+        return None
+    fy = (y + 1) if m >= 4 else y
+    return f"Q{q} FY{str(fy)[-2:]}"
 
 
 def _conn():
@@ -87,9 +95,16 @@ def _peer_comparison(cur, sym, segment):
     st_p = _flt(sr[1]) if sr else None
     if st_s is None and st_p is None and peer_s is None and peer_p is None:
         return None
+    # cc#609: label which quarter the QoQ figures reflect — the stock's latest reported quarter in
+    # fundamentals_history (same vintage the screener QoQ is computed from). One line above the rows.
+    cur.execute("""SELECT MAX(period_end) FROM fundamentals_history
+                   WHERE symbol=%s AND section='quarters' AND period_type='quarter'""", (sym,))
+    qq = cur.fetchone()
+    quarter = _fq_label(qq[0]) if qq and qq[0] else None
     return {
         "peer_basis": "top-3 by GVM in segment (self-excluded)",
         "segment": segment,
+        "quarter": quarter,
         "peer_count": max(n_s, n_p),
         "fallback": (n_s < 3 or n_p < 3),
         "sales": {"stock": _f(st_s), "peer": _f(peer_s),
@@ -115,18 +130,11 @@ def _fundamentals(cur, sym):
     return {"opg": _f(r[0]), "roce": _f(r[1]), "opm": _f(r[2]), "de": _f(r[3]), "roe": _f(r[4])}
 
 
-async def _generate_outlook(sym, g, f):
-    # cc#602 (23-Jul): app-side Anthropic generation is RETIRED and the key was depleted on 20-Jul
-    # (Max-only setup — generation moved CC-side). Firing api.anthropic.com here 400'd on every
-    # 'generate outlook' tap. Disabled: never call the dead API — return None with a clear reason so
-    # results_card falls back to the cached outlook. FY27 outlooks are authored CC-side now (same
-    # model as result_analysis); a CC-side generator can repopulate input_raw.fy27_outlook in future.
-    return None, {"error": "app-side outlook generation retired 20-Jul (Anthropic key depleted); "
-                           "FY27 outlooks are CC-authored now — showing cached"}
-
-
 @router.get("/api/results/card")
 async def results_card(symbol: str, generate: bool = False):
+    # cc#609: `generate` is retained for backward-compat with any cached client URL but is IGNORED —
+    # app-side FY27-outlook generation is retired (dead Anthropic path removed). Cards serve the
+    # cached input_raw.fy27_outlook only; when none exists the card shows a "due September" note.
     sym = (symbol or "").strip().upper()
     if not sym:
         return {"error": "symbol is required"}
@@ -162,42 +170,17 @@ async def results_card(symbol: str, generate: bool = False):
             return _with_peer({"symbol": sym, "status": "announced_no_analysis", "ex_date": str(er[0]),
                     "gvm_verdict": gvm_verdict})
 
-        # Branch B (upcoming) / C (date_tbd): FY27 outlook
+        # Branch B (upcoming) / C (date_tbd): FY27 outlook — cached-only (cc#609: no generation).
         status = "upcoming" if (er and er[0] is not None) else "date_tbd"
         ed = str(er[0]) if (er and er[0] is not None) else None
 
         cur.execute("SELECT fy27_outlook, last_fy27_outlook_updated FROM input_raw WHERE nse_code=%s", (sym,))
         fo = cur.fetchone()
         cached, cached_ts = (fo[0], fo[1]) if fo else (None, None)
-        fresh = bool(cached and cached_ts and (datetime.now() - cached_ts).days < OUTLOOK_FRESH_DAYS)
-
-        if not generate or (fresh and not generate):
-            # cached read (zero cost). generate=false always returns whatever is cached (or null).
-            return _with_peer({"symbol": sym, "status": status, "ex_date": ed,
-                    "fy27_outlook": cached if cached else None,
-                    "generated_at": str(cached_ts) if cached_ts else None,
-                    "model": OUTLOOK_MODEL if cached else None, "gvm_verdict": gvm_verdict})
-
-        # generate=true AND (missing or stale) -> ONE Haiku call
-        g = _gvm_ctx(cur, sym)
-        f = _fundamentals(cur, sym)
-        try:
-            text, usage = await _generate_outlook(sym, g, f)
-        except Exception as e:
-            log.error(f"results_card generate {sym}: {e}")
-            return _with_peer({"symbol": sym, "status": status, "ex_date": ed, "fy27_outlook": cached,
-                    "error": str(e), "gvm_verdict": gvm_verdict})
-        if not text:
-            return _with_peer({"symbol": sym, "status": status, "ex_date": ed, "fy27_outlook": cached,
-                    "error": (usage or {}).get("error", "generation failed"), "gvm_verdict": gvm_verdict})
-
-        cur.execute("SELECT id FROM input_raw WHERE nse_code=%s", (sym,))
-        idr = cur.fetchone()
-        if idr:
-            cur.execute("UPDATE input_raw SET fy27_outlook=%s, last_fy27_outlook_updated=NOW() WHERE id=%s",
-                        (text, idr[0]))
-        cur.execute("INSERT INTO ops_log (category, title, details) VALUES ('info','results_fy27_outlook',%s::jsonb)",
-                    (json.dumps({"symbol": sym, "model": OUTLOOK_MODEL, "usage": usage, "chars": len(text)}),))
-        conn.commit()
-        return _with_peer({"symbol": sym, "status": status, "ex_date": ed, "fy27_outlook": text,
-                "generated_at": datetime.now().isoformat(), "model": OUTLOOK_MODEL, "gvm_verdict": gvm_verdict})
+        return _with_peer({"symbol": sym, "status": status, "ex_date": ed,
+                "fy27_outlook": cached if cached else None,
+                "generated_at": str(cached_ts) if cached_ts else None,
+                # cc#609: no cached outlook -> the card shows a "FY27 outlook due September" note
+                # (the batch is deferred to the Sep-2026 review), never a Generate button.
+                "outlook_pending": (not cached),
+                "gvm_verdict": gvm_verdict})
