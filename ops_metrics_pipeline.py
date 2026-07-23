@@ -1904,6 +1904,13 @@ def run_t1_refresh(conn=None):
                        category="ops_metrics_pull")
             conn.commit()
         summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
+        # cc#602: regenerate result_analysis for companies whose Q1FY27 fundamentals just landed via
+        # this run's re-scrape (the Result Analysis card had frozen at the 05-Jun Q4FY26 batch).
+        try:
+            import result_analysis_gen
+            summary["result_analysis"] = result_analysis_gen.regenerate(conn)
+        except Exception as e:
+            log.warning(f"cc#602 result_analysis regen after T+1 failed: {e}")
         return summary
     finally:
         if own:

@@ -71,6 +71,7 @@ from ops_peer_benchmark import router as ops_peer_benchmark_router   # cc#593: o
 from result_corner import router as result_corner_router   # cc#602: news-vs-calendar result coverage
 from result_corner import page_router as result_corner_page_router   # cc#603: /api/result-corner page API
 from engine_watchdog import router as engine_watchdog_router   # cc#599: engine watchdog outcome audit
+from result_analysis_gen import router as result_analysis_gen_router   # cc#602: result_analysis regeneration
 from scheduler_master import router as scheduler_master_router   # cc#525: scheduled-job registry + drift audit
 from scorr_auth import router as auth_router, _is_authed, PROTECTED
 from scorr_authset_probe import router as authset_probe_router
@@ -294,6 +295,7 @@ app.include_router(ops_peer_benchmark_router)   # cc#593: /api/ops-peer/* peer-b
 app.include_router(result_corner_router)   # cc#602: /api/admin/result_corner/* news-vs-calendar
 app.include_router(engine_watchdog_router)   # cc#599: /api/watchdog/gaps engine watchdog
 app.include_router(result_corner_page_router)   # cc#603: /api/result-corner page API
+app.include_router(result_analysis_gen_router)   # cc#602: /api/admin/result_analysis/regenerate
 app.include_router(scheduler_master_router)   # cc#525
 app.include_router(investment_check_router)
 app.include_router(scanner_router)
