@@ -103,10 +103,14 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     s_qoq, s_yoy = _pct(sales, sales_p), _pct(sales, sales_y)
     p_qoq, p_yoy = _pct(pat, pat_p), _pct(pat, pat_y)
 
-    cur.execute("SELECT segment, pe_raw, pe_peer, verdict FROM gvm_scores WHERE symbol=%s "
+    cur.execute("SELECT segment, verdict FROM gvm_scores WHERE symbol=%s "
                 "ORDER BY score_date DESC LIMIT 1", (symbol,))
     g = cur.fetchone()
-    segment, pe_raw, pe_peer, verdict = (g[0], _num(g[1]), _num(g[2]), g[3]) if g else (None, None, None, None)
+    segment, verdict = (g[0], g[1]) if g else (None, None)
+    # PE from screener_raw (pe/segment_pe are live; gvm_scores.pe_raw is null for ~all rows)
+    cur.execute("SELECT pe, segment_pe FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1", (symbol,))
+    pr = cur.fetchone()
+    pe_raw, pe_peer = (_num(pr[0]), _num(pr[1])) if pr else (None, None)
 
     # sector sales/PAT YoY = median of same-segment names' latest-quarter YoY (computed, not invented)
     sec_sales = sec_pat = None
@@ -133,7 +137,8 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
         if ps:
             sec_pat = round(sorted(ps)[len(ps) // 2], 1)
 
-    cur.execute("SELECT company_name FROM screener_raw WHERE UPPER(nse_code)=%s LIMIT 1", (symbol,))
+    # full company name from input_raw (screener_raw.company_name is truncated, e.g. 'Anand Rathi Wea.')
+    cur.execute("SELECT company_name FROM input_raw WHERE UPPER(nse_code)=%s LIMIT 1", (symbol,))
     r = cur.fetchone()
     company = (r[0] if r else None) or symbol
     qlabel = _fq_label(latest_end) or "Latest"
@@ -255,9 +260,10 @@ async def _startup_regen():
                 with conn.cursor() as cur:
                     cur.execute("SELECT MAX(last_result_analysis_updated) FROM input_raw")
                     latest = cur.fetchone()[0]
-                # regenerate if the batch predates the Q1FY27 season (last refresh <= 05-Jun)
-                if latest is None or latest <= date(2026, 6, 30):
-                    log.info("cc#602: result_analysis stale on boot — regenerating Q1FY27")
+                # regenerate once per day (self-healing: any logic fix propagates on the next deploy,
+                # and newly-scraped quarters are picked up); the daily T+1 hook covers ongoing refresh.
+                if latest is None or latest < date.today():
+                    log.info("cc#602: result_analysis not regenerated today — regenerating")
                     regenerate(conn)
             finally:
                 conn.close()
