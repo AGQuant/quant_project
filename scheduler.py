@@ -2152,6 +2152,30 @@ def _bg_ops_peer_benchmark():
     return None
 
 
+_engine_watchdog_ran_on = None   # cc#599 day-lock
+
+
+def _bg_engine_watchdog():
+    """cc#599 (ENGINE_WATCHDOG_V1): daily ~08:45 IST outcome/data-freshness audit of ALL scheduled
+    jobs -> watchdog_gaps. After the nightly chain (01:00-02:05) + T+1 (08:00). DETECT+WRITE+SUGGEST
+    only (no auto-fix); Claude-web reads open gaps + triggers fixes. Day-locked."""
+    global _engine_watchdog_ran_on
+    now = datetime.now(IST)
+    if not (now.hour == 8 and 45 <= now.minute < 59):
+        return _SKIPPED
+    today = now.date()
+    if _engine_watchdog_ran_on == today:
+        return _SKIPPED
+    _engine_watchdog_ran_on = today
+    try:
+        import engine_watchdog
+        res = engine_watchdog.run_watchdog_conn()
+        log.info(f"_bg_engine_watchdog: {res}")
+    except Exception as e:
+        log.error(f"_bg_engine_watchdog: {e}")
+    return None
+
+
 _result_corner_ran_on = None   # cc#602 day-lock: news-vs-calendar verify + reconcile once/day
 
 
@@ -2628,6 +2652,7 @@ async def _scheduler_loop():
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
         _spawn(_bg_result_corner_verify)       # cc#602: daily ~08:15 IST news-vs-calendar result verify + reconcile (self-gated)
+        _spawn(_bg_engine_watchdog)            # cc#599: daily ~08:45 IST engine watchdog outcome audit (self-gated)
         if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 9 and m == 30:
             _spawn(_bg_shareholding_quarterly)   # cc#598: last-week Jul/Oct/Jan/Apr shareholding refresh (day-locked inside)
         if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit
