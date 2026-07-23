@@ -1045,9 +1045,44 @@ RESULTS_CARD_JS = """
       +(pc.fallback?' (segment avg &mdash; under 3 peers)':'')+', self-excluded.</div>';
   }
 
+  var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
+  // cc#623: FY27 Est. Growth row — from input_raw.fy27_growth (Sonnet on Trendlyne consensus).
+  // Hidden when null. Shown on BOTH branches (post-result it gives actual-vs-estimate context).
+  function fy27Html(g){
+    if (g == null) return '';
+    var s = (g>=0?'+':'')+esc(g)+'%';
+    var col = g>=0 ? '#0f9d58' : '#d0433b';
+    return '<div class=\"rcard-lbl\">FY27 Est. Growth</div>'
+      + '<div style=\"font:800 15px/1.2 Sora,sans-serif;color:'+col+';font-variant-numeric:tabular-nums\">'+s+'</div>';
+  }
+  // cc#623: RAW news (last 48h) — headline + source, date desc; hidden when empty.
+  function rawNewsHtml(items){
+    if (!items || !items.length) return '';
+    var h = '<div class=\"rcard-lbl\">Raw news &middot; last 48h'+RAW_CHIP+'</div>';
+    for (var i=0;i<items.length;i++){ var it=items[i];
+      var line = it.url ? '<a href=\"'+esc(it.url)+'\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--txt,#1c2536);text-decoration:none\">'+esc(it.headline)+'</a>' : esc(it.headline);
+      h += '<div style=\"font-size:12.5px;line-height:1.5;margin-bottom:6px\">'+line
+        + '<div class=\"rcard-note\" style=\"margin-top:1px\">'+esc(it.source||'')+(it.published_at?' &middot; '+fmtDate(it.published_at):'')+'</div></div>';
+    }
+    return h;
+  }
+  // cc#623: POLISHED news (last 1 month, via polished_news.mentioned_symbols) — headline + summary +
+  // source; date desc; hidden when empty. Intel-tab quality.
+  function polNewsHtml(items){
+    if (!items || !items.length) return '';
+    var h = '<div class=\"rcard-lbl\">Polished news &middot; last 30 days</div>';
+    for (var i=0;i<items.length;i++){ var it=items[i];
+      h += '<div style=\"margin-bottom:9px\">'
+        + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+'</div>'
+        + (it.summary ? '<div class=\"rcard-body\" style=\"margin-top:3px\">'+esc(it.summary)+'</div>' : '')
+        + '<div class=\"rcard-note\" style=\"margin-top:2px\">'+esc(it.source||'')+(it.published_time?' &middot; '+fmtDate(it.published_time):'')+'</div></div>';
+    }
+    return h;
+  }
+
   var _cur = null;
-  // cc#620: ONE shared card builder — used by the R-button modal AND the Position News tab (inline).
-  // opts.close=false omits the modal close button for inline use.
+  // cc#620/623: ONE shared card builder — R-button modal AND Position News tab (inline). opts.close=false
+  // omits the modal close button. Two-branch flow (cc#623 POSITION_NEWS_CARD_V2).
   function cardHtml(d, sym, opts){
     opts = opts || {};
     var status = (d && d.status) || 'date_tbd', pill, cls;
@@ -1058,38 +1093,32 @@ RESULTS_CARD_JS = """
       + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
       + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span></div>'
       + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>';
-    // cc#620 RESULT_CARD_CONSISTENCY_V1: strict content priority chain (tier).
-    var tier = (d && d.tier) || (status==='announced' ? 'structured' : (status==='announced_no_analysis' ? 'pending' : 'outlook'));
-    var RAW = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
-    // date line
-    if (status === 'announced' || status === 'announced_no_analysis'){
+    var announced = (status === 'announced' || status === 'announced_no_analysis');
+
+    if (announced){
+      // BRANCH A order: date -> Result Analysis (current quarter) -> FY27 -> RAW 48h -> POLISH 1mo.
       h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)
         + (d && d.card_quarter ? ' &middot; '+esc(d.card_quarter) : '')+'</div>';
-    } else {
-      h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>';
-      h += '<div style=\"font-size:13px\">'+(status==='upcoming'?fmtDate(d.ex_date):'TBD')+'</div>';
-    }
-    // content by tier
-    if (tier === 'structured'){
-      h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
-        + '<div class=\"rcard-body\">'+esc(d.result_analysis||'')+'</div>';
-    } else if (tier === 'polished' || tier === 'raw'){
-      h += '<div class=\"rcard-lbl\">Latest news'+(tier==='raw'?RAW:'')+'</div>';
-      if (d && d.news_headline) h += '<div style=\"font-size:13px;font-weight:700;color:var(--txt,#1c2536)\">'+esc(d.news_headline)+'</div>';
-      if (d && d.news_summary) h += '<div class=\"rcard-body\">'+esc(d.news_summary)+'</div>';
-      if (d && d.news_source) h += '<div class=\"rcard-note\">'+esc(d.news_source)+'</div>';
-    } else if (tier === 'outlook'){
-      h += '<div class=\"rcard-lbl\">Scorr View &middot; FY27 Outlook</div>';
-      if (d && d.fy27_outlook){
-        h += '<div class=\"rcard-body\">'+esc(d.fy27_outlook)+'</div>';
-        h += '<div class=\"rcard-note\">Scorr-generated qualitative view from trailing fundamentals &mdash; not a broker estimate.</div>';
+      if (d && d.result_analysis){
+        h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
+          + '<div class=\"rcard-body\">'+esc(d.result_analysis)+'</div>';
       } else {
-        h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">FY27 outlook due September 2026.</div>';
+        h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result analysis pending for the current quarter.</div>';
       }
+      h += fy27Html(d && d.fy27_growth);
     } else {
-      h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Analysis pending.</div>';
+      // BRANCH B order: expected date + FY27 -> LAST RESULT (prior quarter, explicit label) -> RAW -> POLISH.
+      h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>'
+        + '<div style=\"font-size:13px\">'+(status==='upcoming'?fmtDate(d.ex_date):'TBD')+'</div>';
+      h += fy27Html(d && d.fy27_growth);
+      if (d && d.last_result_analysis){
+        h += '<div class=\"rcard-lbl\">Last result'+(d.last_card_quarter?' &middot; '+esc(d.last_card_quarter):'')+'</div>'
+          + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>';
+      }
     }
     h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
+    h += rawNewsHtml(d && d.raw_news);       // cc#623: last 48h
+    h += polNewsHtml(d && d.polished_news);  // cc#623: last 1 month via mentioned_symbols
     var foot = [];
     if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));
     if (d && d.model) foot.push(esc(d.model));
