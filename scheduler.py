@@ -2193,6 +2193,18 @@ def _bg_engine_watchdog():
         log.error(f"_bg_engine_watchdog: {e}")
     return None
 
+def _bg_watchdog_market():
+    """cc#618 Section D: 15-min MARKET-HOURS writer-tick freshness check (engine-watchdog subset) —
+    catches the intra-session 09:35-death class the daily 08:45 pass can't see. Gap + ops_log alert
+    on breach; auto-resolves when the writer catches up."""
+    try:
+        import engine_watchdog
+        res = engine_watchdog.run_market_checks_conn()
+        if res.get("breached"):
+            log.warning(f"_bg_watchdog_market: {res}")
+    except Exception as e:
+        log.error(f"_bg_watchdog_market: {e}")
+
 
 _result_corner_ran_on = None   # cc#602 day-lock: news-vs-calendar verify + reconcile once/day
 
@@ -2676,6 +2688,8 @@ async def _scheduler_loop():
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
         _spawn(_bg_result_corner_verify)       # cc#602: daily ~08:15 IST news-vs-calendar result verify + reconcile (self-gated)
         _spawn(_bg_engine_watchdog)            # cc#599: daily ~08:45 IST engine watchdog outcome audit (self-gated)
+        if _is_market_hours(now) and _is_trading_day(today) and m % 15 == 0:
+            _spawn(_bg_watchdog_market)         # cc#618 Section D: 15-min market-hours writer-tick freshness
         if now.month in (1, 4, 7, 10) and now.day >= 25 and h == 9 and m == 30:
             _spawn(_bg_shareholding_quarterly)   # cc#598: last-week Jul/Oct/Jan/Apr shareholding refresh (day-locked inside)
         if h == 8 and m == 45:  _spawn(_bg_scheduler_master_daily_audit)   # cc#525: registry drift audit

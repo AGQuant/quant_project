@@ -112,6 +112,20 @@ SEED_CHECKS = [
      "output_table": "v8_metrics", "ts_column": "score_date", "scope_filter": None,
      "precondition_sql": None, "cadence": "daily_trading", "sla_hours": 30, "severity": "critical",
      "suggested_action": "v8_metrics missing today — the live writer is not producing; check signal_writer_crash ops_log."},
+    # cc#618 Section D (1) writer tick freshness — v8_metrics.computed_at stale >10min DURING market
+    # hours (the 09:35-death class: rows exist for today but the live writer stalled mid-session).
+    # Evaluated every 15min in market hours by run_market_checks (not the daily 08:45 pass).
+    {"check_id": "v8_writer_tick", "job_name": "bg_signal_writer", "check_type": "data",
+     "output_table": "v8_metrics", "ts_column": "computed_at", "scope_filter": None,
+     "precondition_sql": None, "cadence": "market_15min", "sla_hours": 0.17, "severity": "critical",
+     "suggested_action": "v8_metrics.computed_at stale >10min during market hours — the live writer stalled mid-session (09:35 death class); check the scheduler _check_watchdog restart + signal_writer_crash ops_log."},
+    # cc#618 Section D (3) ops-extraction yield — no new sector_ops_metrics in >24h on a trading day
+    # while companies have reported (the doc-fetch/extraction cycle silently produced nothing).
+    {"check_id": "ops_extraction_yield", "job_name": "bg_ops_metrics_t1", "check_type": "data",
+     "output_table": "sector_ops_metrics", "ts_column": "created_at", "scope_filter": None,
+     "precondition_sql": "SELECT 1 FROM earnings_calendar WHERE status='reported' AND ex_date >= CURRENT_DATE-5 LIMIT 1",
+     "cadence": "daily_trading", "sla_hours": 24, "severity": "high",
+     "suggested_action": "ops-extraction produced no new sector_ops_metrics in >24h while companies reported — check the doc-fetch/extraction cycle (cc#595/596) + the CC extraction batch off doc_texts."},
     {"check_id": "position_news_data", "job_name": "bg_fetch_position_news", "check_type": "data",
      "output_table": "position_news", "ts_column": "fetched_at", "scope_filter": None,
      "precondition_sql": "SELECT 1 FROM (SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL) p LIMIT 1",
@@ -185,6 +199,10 @@ def _cadence_due(cadence: str, now: datetime) -> bool:
     trading day; quarterly-window jobs only inside/after their last-week window; season jobs skipped."""
     if not cadence:
         return True
+    if cadence == "market_15min":
+        # cc#618 Section D: only DURING market hours on a trading day (09:15-15:30 IST).
+        mins = now.hour * 60 + now.minute
+        return _is_trading_day(now.date()) and (555 <= mins <= 930)
     if cadence in ("daily_trading", "5min_trading"):
         return _is_trading_day(now.date())
     if cadence == "5min_trading":
@@ -323,6 +341,43 @@ def _check_filter_registry_parity(conn, now) -> dict:
     return {"checked": checked, "drift": drift}
 
 
+def _check_result_analysis_staleness(conn, now) -> dict:
+    """cc#618 Section D (4): backstop behind the Section B auto-wire. Count announced tickers whose
+    Result Analysis card PREDATES the announcement (last_result_analysis_updated < ex_date) and it has
+    been >48h since ex_date — i.e. the daily T+1 auto-regen (+ weekly sweep) missed one. Breach if any."""
+    c = {"job_name": "bg_result_corner_verify", "check_id": "result_analysis_staleness",
+         "severity": "high",
+         "suggested_action": "announced tickers still serve a pre-announcement Result Analysis card >48h "
+                             "later — the Section B auto-regen (daily T+1 wire / weekly sweep) missed them; "
+                             "regenerate result_analysis for the listed tickers (result_analysis_gen.regenerate)."}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ann AS (
+                    SELECT UPPER(ticker) AS sym, MAX(ex_date) AS ex_date
+                    FROM earnings_calendar
+                    WHERE status='reported' AND ex_date <= CURRENT_DATE - 2 AND ticker IS NOT NULL
+                    GROUP BY UPPER(ticker))
+                SELECT COUNT(*), array_agg(a.sym ORDER BY a.sym)
+                FROM ann a JOIN input_raw i ON i.nse_code = a.sym
+                WHERE i.result_analysis IS NOT NULL
+                  AND i.last_result_analysis_updated IS NOT NULL
+                  AND i.last_result_analysis_updated < a.ex_date""")
+            row = cur.fetchone()
+            n = int(row[0] or 0)
+            syms = row[1] or []
+            if n > 0:
+                _upsert_gap(cur, c, f"{n} announced tickers with pre-ex_date analysis >48h: {syms[:20]}",
+                            "0 stale announced cards", now)
+            else:
+                _resolve_gap(cur, c, "no stale announced result-analysis cards", now)
+        conn.commit()
+        return {"stale": n}
+    except Exception as e:
+        log.warning(f"result_analysis staleness check: {e}")
+        return {"stale": 0, "error": str(e)[:80]}
+
+
 def run_watchdog(conn) -> dict:
     """Seed + auto-register backstop + evaluate every active check. Breach -> upsert open gap;
     healthy -> auto-resolve. Summary -> ops_log. Returns counts."""
@@ -373,10 +428,16 @@ def run_watchdog(conn) -> dict:
     except Exception as e:
         log.warning(f"registry parity check failed: {e}")
         parity = {"checked": 0, "drift": 0, "error": str(e)[:80]}
+    # cc#618 Section D (4): announced-vs-analysis staleness backstop (nightly).
+    try:
+        ra_stale = _check_result_analysis_staleness(conn, now)
+    except Exception as e:
+        log.warning(f"result_analysis staleness check failed: {e}")
+        ra_stale = {"stale": 0, "error": str(e)[:80]}
 
     summary = {"evaluated": evaluated, "breached": breached, "auto_resolved": resolved,
                "skipped_not_due": skipped, "unverifiable": errored, "checks_total": len(checks),
-               "registry_parity": parity,
+               "registry_parity": parity, "result_analysis_staleness": ra_stale,
                "open_sample": open_gaps[:15], "ist": str(now)}
     try:
         with conn.cursor() as cur:
@@ -397,6 +458,62 @@ def run_watchdog_conn() -> dict:
     conn = fyers_feed.get_db()
     try:
         return run_watchdog(conn)
+    finally:
+        conn.close()
+
+
+def run_market_checks(conn) -> dict:
+    """cc#618 Section D: market-hours-only checks (cadence market_15min: the v8_writer tick freshness).
+    Scheduled every 15min during market hours — the daily 08:45 pass skips these (off-market). Same
+    gap/alert/auto-resolve mechanics; only logs ops_log on a breach (no 15-min healthy spam)."""
+    ensure_tables(conn)
+    _seed(conn)
+    now = _now_ist()
+    evaluated = breached = resolved = 0
+    open_gaps = []
+    with conn.cursor() as cur:
+        cur.execute("""SELECT check_id, job_name, check_type, output_table, ts_column, scope_filter,
+                              precondition_sql, cadence, sla_hours, severity, suggested_action
+                       FROM watchdog_checks WHERE active IS TRUE AND cadence='market_15min'""")
+        cols = [d[0] for d in cur.description]
+        checks = [dict(zip(cols, r)) for r in cur.fetchall()]
+    for c in checks:
+        if not _cadence_due(c.get("cadence"), now):
+            continue
+        with conn.cursor() as cur:
+            breach, observed, expected = _eval_data(cur, c, now)
+            if breach is None:
+                conn.commit()
+                continue
+            evaluated += 1
+            if breach:
+                _upsert_gap(cur, c, observed, expected, now)
+                breached += 1
+                open_gaps.append(f"{c['job_name']}/{c['check_id']}: {observed}")
+            else:
+                _resolve_gap(cur, c, observed, now)
+                resolved += 1
+            conn.commit()
+    summary = {"scope": "market_15min", "evaluated": evaluated, "breached": breached,
+               "auto_resolved": resolved, "open_sample": open_gaps, "ist": str(now)}
+    if breached:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO ops_log (session_date, session_ts, category, title, details)
+                               VALUES (CURRENT_DATE, NOW(), 'engine_watchdog', 'WATCHDOG_MARKET_ALERT', %s::jsonb)""",
+                            (json.dumps(summary, default=str),))
+            conn.commit()
+        except Exception as e:
+            log.warning(f"market watchdog log: {e}")
+    log.info(f"engine_watchdog market: {summary}")
+    return summary
+
+
+def run_market_checks_conn() -> dict:
+    import fyers_feed
+    conn = fyers_feed.get_db()
+    try:
+        return run_market_checks(conn)
     finally:
         conn.close()
 
