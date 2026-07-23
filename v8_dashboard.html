@@ -2914,11 +2914,14 @@ function _pnDayLabel(ts){
 }
 function renderPositionNews(d){
   const groups=((d&&d.groups)||[]);
-  const meta=`<div class="ptitle">Position News <span class="ct">${(d&&d.total!=null)?`${d.total} items · ${d.symbols} open position${d.symbols===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
+  // cc#611 PART B: header shows the LIVE open-position count (d.open_positions), with items +
+  // symbols-with-news reported separately — not the old symbols-with-news masquerading as positions.
+  const _openN=(d&&d.open_positions!=null)?d.open_positions:((d&&d.symbols)||0);
+  const meta=`<div class="ptitle">Position News <span class="ct">${(d&&d.total!=null)?`${d.total} item${d.total===1?'':'s'} across ${d.symbols} symbol${d.symbols===1?'':'s'} · ${_openN} open position${_openN===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
   // flatten every group's items into ONE list
   const items=[];
   groups.forEach(g=>(g.items||[]).forEach(it=>items.push(Object.assign({},it,{symbol:it.symbol||g.symbol}))));
-  if(!items.length)return meta+`<div class="empty">No open positions, or no polished news yet.</div>`;
+  if(!items.length)return meta+`<div class="empty">No news yet for the open book${_openN?` (${_openN} position${_openN===1?'':'s'})`:''} — the next fetch slot will populate it.</div>`;
   const _pnTs=s=>{const t=Date.parse(String(s||'').replace(' ','T'));return isNaN(t)?0:t;};
   items.sort((a,b)=>_pnTs(b.published_at||b.polished_at)-_pnTs(a.published_at||a.polished_at));
   let html=meta,lastDay=null;
@@ -2930,12 +2933,17 @@ function renderPositionNews(d){
       lastDay=day;
     }
     const age=ts?newsAgo(ts):'';
+    // cc#611 PART C: show the polished 2-3 sentence summary when present; otherwise render the raw
+    // headline with a subtle "raw" marker (AI summary pending via the CC polish batch) — never blank.
+    const _summary=it.summary||it.body;
+    const _rawMark=(!it.polished&&!_summary)?`<span title="Raw headline — AI summary pending" style="font-size:9px;font-weight:700;letter-spacing:.04em;color:var(--dim);border:1px solid var(--line2);border-radius:5px;padding:0 5px">RAW</span>`:'';
     html+=`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
       `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
-      (it.body?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(it.body)}</div>`:'')+
+      (_summary?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(_summary)}</div>`:'')+
       `<div style="font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center;flex-wrap:wrap">`+
         `<span>${newsEsc(it.source||'')}</span>`+
         (age?`<span>· ${newsEsc(age)}</span>`:'')+
+        _rawMark+
         (it.symbol?`<span style="font-weight:700;color:var(--blu);background:rgba(77,124,254,.12);border-radius:6px;padding:1px 7px;font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">${newsEsc(it.symbol)}</span>`:'')+
       `</div></div>`;
   });

@@ -1701,6 +1701,24 @@ def _bg_fetch_stock_news():
     except Exception as e:
         log.error(f"fetch_stock_news: {e}")
 
+def _bg_fetch_position_news():
+    """cc#611 (revive): dedicated per-open-position Google News (V8 OPEN ∪ SmartGain net) -> the
+    position_news table, 3 slots/day. The wiring was dropped ~06-Jul (cc#244 retired the old slot as
+    "superseded") and the tab silently starved to ~1 item. Restored here. Calls fetch_and_alert so a
+    silent stall (open positions but nothing fetched in >24h) raises an ops_log alert; also runs the
+    7-day purge. OFF the fyers feed -> safe any hour, every day (news breaks on weekends too)."""
+    try:
+        import position_news
+        with _conn() as conn:
+            res = position_news.fetch_and_alert(conn)
+            try:
+                position_news.purge_position_news(conn)
+            except Exception:
+                pass
+        log.info(f"fetch_position_news: {res}")
+    except Exception as e:
+        log.error(f"fetch_position_news: {e}")
+
 def _bg_stock_news_watchdog():
     """cc#245: staleness / all-blocked watchdog for the per-stock Google News fetch. Piggybacks
     the 16:00 IST retry slot (no new slot). Reads the latest ops_log title='fetch_stock_news';
@@ -2548,6 +2566,11 @@ async def _scheduler_loop():
         # gate (news_fetcher.COMPANY_STALE_HOURS) widens per-run coverage to compensate.
         if h == 0 and m == 30:
             _spawn(_bg_fetch_stock_news)               # cc#321: once daily ~00:30 IST
+        # cc#611: revived dedicated per-open-position Google News, 3 slots/day (07:35/13:35/19:35 IST),
+        # EVERY day (positions held over weekends still get fresh news). Off the fyers feed -> any hour
+        # is safe; alerting + the cc#599 watchdog freshness check catch a silent stall like the 06-Jul one.
+        if m == 35 and h in (7, 13, 19):
+            _spawn(_bg_fetch_position_news)
         if _is_trading_day(today) and m == 20 and h in (7, 16, 22):
             _spawn(_bg_tag_news)                       # cc#207 Part C: symbol tagger — off-session (backfills on first run)
         # cc#291: global intraday now runs 24x7 (was 06:00-23:30) — its symbols are commodities/

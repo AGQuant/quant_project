@@ -57,6 +57,11 @@ def ensure_schema(conn):
             )""")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_posnews_symbol_pub ON position_news(symbol, published_at DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_posnews_fetched    ON position_news(fetched_at DESC)")
+        # cc#611 PART C: polished 2-3 sentence data-rich summary (CC-batch on Max; NO Anthropic API).
+        # headline (above) is already the clean headline (publisher split off in _split_title). When
+        # `summary` is NULL the card renders the raw headline with an "unpolished" marker — never blank.
+        cur.execute("ALTER TABLE position_news ADD COLUMN IF NOT EXISTS summary TEXT")
+        cur.execute("ALTER TABLE position_news ADD COLUMN IF NOT EXISTS polished_at TIMESTAMPTZ")
     conn.commit()
 
 
@@ -210,6 +215,58 @@ def _store(conn, symbol, origin, entries):
                 dup_skipped += 1
     conn.commit()
     return parsed, dup_skipped, inserted
+
+
+def fetch_and_alert(conn=None):
+    """cc#611 PART A: run the fetch and raise an ops_log alert when the pipeline is effectively dead
+    — open positions exist but the fetch produced nothing AND no position_news row landed in >24h
+    (the silent 06-Jul stall was invisible before). This is what the scheduler slots call."""
+    own = conn is None
+    if own:
+        conn = _conn()
+    try:
+        res = fetch_position_news(conn)
+        try:
+            from datetime import datetime, timezone
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(fetched_at) FROM position_news")
+                last = cur.fetchone()[0]
+                cur.execute("""SELECT COUNT(*) FROM (
+                    SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
+                    UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL) p""")
+                open_n = cur.fetchone()[0]
+            stale = last is None or (datetime.now(timezone.utc) - last).total_seconds() > 24 * 3600
+            if open_n > 0 and ((not res.get("ok")) or (res.get("inserted", 0) == 0 and stale)):
+                nf._write_ops_log(conn, "alert", "position_news_stale",
+                                  {"open_positions": open_n, "last_fetched": str(last),
+                                   "fetch_result": res,
+                                   "note": "position_news fetch produced nothing while positions are open"})
+                log.error(f"cc#611 ALERT position_news_stale: open={open_n} last={last} res={res}")
+        except Exception as e:
+            log.warning(f"position_news alert check: {e}")
+        return res
+    finally:
+        if own:
+            conn.close()
+
+
+def backfill_if_stale(hours=18):
+    """cc#611 startup one-shot: run an immediate fetch when the newest position_news row is older
+    than `hours`, so a deploy landing after a stall self-heals the open-position feed. Server-side
+    (Railway has egress); best-effort."""
+    conn = _conn()
+    try:
+        ensure_schema(conn)
+        from datetime import datetime, timezone
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(fetched_at) FROM position_news")
+            last = cur.fetchone()[0]
+        if last is None or (datetime.now(timezone.utc) - last).total_seconds() > hours * 3600:
+            log.info("cc#611: position_news stale -> startup backfill fetch")
+            return fetch_and_alert(conn)
+        return {"ok": True, "skipped": "fresh", "last_fetched": str(last)}
+    finally:
+        conn.close()
 
 
 def purge_position_news(conn=None, days=RETENTION_DAYS):
