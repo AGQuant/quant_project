@@ -177,10 +177,11 @@ def _basis_block(cur, sym) -> Dict[str, Any]:
                    ORDER BY ts ASC LIMIT 1""", (sym, sym))
     _r0 = cur.fetchone()
     basis_open_pct = _f(_r0[0]) if _r0 else None
+    _btag, _btag_color = _basis_tag(pct, (basis is None or basis >= 0))   # cc#445 fix_2 / cc#624 item_2
     return {"fut": fut, "spot": spot,
             "basis": {"value": basis, "pct": basis_pct, "percentile": pct, "spark": spark,
                       "intraday_open_pct": basis_open_pct,
-                      "tag": _basis_tag(pct, (basis is None or basis >= 0))},   # cc#445 fix_2
+                      "tag": _btag, "tag_color": _btag_color},
             "fut_oi": {"oi": oi, "chg_pct": oi_dd_pct, "stale": oi_stale,
                        "stale_since": str(oi_last_session) if oi_last_session else None}}
 
@@ -888,14 +889,77 @@ def _build_meanings(quad, basis_block, m, opt, ad, intr, atr_d, results, recent3
 
 
 def _basis_tag(pct, is_premium):
-    """cc#445 fix_2: 5d-percentile strength tag from the buy perspective — a premium is strong at a
-    high percentile; a discount inverts (strong discount reads weak for a buyer)."""
+    """cc#445 fix_2 / cc#624 item_2: 5d-percentile basis tag as (label, color). PREMIUM keeps
+    STRONG (>=70, green) / WEAK (<=30, red) / AVERAGE (between, amber). DISCOUNT relabels to
+    DEEP (<=30, red — near the bottom of its 5d range) / FADING (>=70, green — discount shrinking
+    toward premium) / AVERAGE (amber). Founder flagged the old 'DISCOUNT · STRONG' as misleading."""
     if pct is None:
-        return None
-    strong, weak = pct >= 70, pct < 30
+        return None, None
     if is_premium:
-        return "STRONG" if strong else "WEAK" if weak else "AVERAGE"
-    return "WEAK" if strong else "STRONG" if weak else "AVERAGE"
+        if pct >= 70:
+            return "STRONG", "grn"
+        if pct <= 30:
+            return "WEAK", "red"
+        return "AVERAGE", "amb"
+    if pct <= 30:
+        return "DEEP", "red"
+    if pct >= 70:
+        return "FADING", "grn"
+    return "AVERAGE", "amb"
+
+
+def _levels_verdict(intr, delivery, price_chg, cmp_px):
+    """cc#624 item_4: LEVELS structural verdict — STRONG (green) / MODERATE (amber) / WEAK (red) from
+    5 deadbanded structural votes (deadbands kill noise-flips). Assembled from ALREADY-computed level
+    values so the chip can never drift from the tiles. ATR coiling/ignition is a caution/context line,
+    NEVER a vote (non-directional). Verdict: denominator = non-neutral votes; bull majority = STRONG,
+    bear majority = WEAK, tie or 0 = MODERATE. Display 'STRONG 3/4' = winning-side count / non-neutral."""
+    intr = intr or {}
+    votes = []
+    # V1 VWAP distance: >= +0.3% bull, <= -0.3% bear, else neutral
+    vw = (intr.get("vwap") or {}).get("dist_pct")
+    if vw is not None:
+        votes.append("bull" if vw >= 0.3 else "bear" if vw <= -0.3 else "neutral")
+    # V2 VPOC-today: CMP above by >0.3% = bull (volume support below), below by >0.3% = bear
+    #   (dist_pct is (cmp - vpoc)/vpoc*100)
+    vt = (intr.get("vpoc_today") or {}).get("dist_pct")
+    if vt is not None:
+        votes.append("bull" if vt > 0.3 else "bear" if vt < -0.3 else "neutral")
+    # V3 Prior-VPOC MAGNET (corrected direction): NAKED above CMP = bull (upward revisit pull),
+    #   NAKED below = bear (downward pull), tested = neutral
+    vp = intr.get("vpoc_prior") or {}
+    if vp.get("value") is not None and cmp_px:
+        if not vp.get("naked"):
+            votes.append("neutral")
+        elif vp["value"] > cmp_px:
+            votes.append("bull")
+        elif vp["value"] < cmp_px:
+            votes.append("bear")
+        else:
+            votes.append("neutral")
+    # V4 ORB position: Above = bull, Below = bear, Inside = neutral
+    orbpos = (intr.get("orb") or {}).get("position")
+    if orbpos:
+        votes.append("bull" if orbpos == "Above" else "bear" if orbpos == "Below" else "neutral")
+    # V5 Delivery CONFIRMS day direction: ratio >= 1.2 votes WITH the day price sign; churn (<=0.7)
+    #   is a caution line, not a vote (composite-READ doctrine)
+    caution = None
+    if delivery and delivery.get("ratio") is not None and price_chg is not None:
+        r = delivery["ratio"]
+        if r >= 1.2 and price_chg != 0:
+            votes.append("bull" if price_chg > 0 else "bear")
+        elif r <= 0.7:
+            caution = f"delivery churn ({delivery.get('deliv_pct')}%) — low conviction"
+    n_bull, n_bear = votes.count("bull"), votes.count("bear")
+    nn = n_bull + n_bear
+    if nn == 0 or n_bull == n_bear:
+        label, color = "MODERATE", "amb"
+    elif n_bull > n_bear:
+        label, color = "STRONG", "grn"
+    else:
+        label, color = "WEAK", "red"
+    return {"label": label, "color": color, "score": f"{max(n_bull, n_bear)}/{nn}",
+            "n_bull": n_bull, "n_bear": n_bear, "non_neutral": nn, "caution": caution}
 
 
 def _ad_21d(cur, sym):
@@ -1249,6 +1313,10 @@ def deriv_metrics(symbol: str, side: Optional[str] = None):
                 "vpoc_prior": intr.get("vpoc_prior"),
                 "vwap": intr.get("vwap"),
                 "orb": intr.get("orb"),   # cc#445 fix_8
+                # cc#624 item_4: structural LEVELS verdict (STRONG/MODERATE/WEAK), assembled from the
+                # already-computed level values above so it can never drift from the tiles.
+                "verdict": _safe("levels_verdict",
+                                 lambda: _levels_verdict(intr, delivery, m.get("price_chg"), cmp_px)),
             },
             "flow": {
                 "fut_oi": basis.get("fut_oi"),
