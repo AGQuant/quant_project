@@ -1789,24 +1789,28 @@ def _t1_refresh_company(cur, symbol):
             fh_ok = True
     except Exception as e:
         log.warning(f"_t1_refresh_company fundamentals re-scrape failed for {symbol}: {e}")
-    r = run_company(symbol, force=True)
+    # cc#595 (23-Jul root cause): app-side LLM extraction was REMOVED on 19-Jul (commit ed54841 —
+    # the app ANTHROPIC key is out of credits + no subscription token is wired into the app;
+    # extraction was deliberately moved to Claude Code under the Max subscription). The T+1 path,
+    # though, kept calling run_company's dead anthropic extraction, which _anthropic_call swallows
+    # (returns empty) so run_company reported status='ok' with ZERO metrics written — that is why
+    # sector_ops_metrics froze at 19-Jul while the queue showed 'done' (masking one level below the
+    # cc#595/4fc356a fix). Correct fix, aligned with the 19-Jul architecture: the T+1 job stages the
+    # fresh concall doc TEXT into doc_texts (run_company_text_fetch — NO app anthropic call) so CC's
+    # extraction always has current source; sector_ops_metrics is then appended by CC from doc_texts.
+    r = run_company_text_fetch(symbol)
     st = r.get("status")
-    # cc#595: the queue outcome must reflect the OPS-METRICS extraction, NOT the fundamentals
-    # re-scrape. The old `fh_ok or status=='ok'` marked a company 'done' whenever fundamentals
-    # succeeded — masking every ops-extraction failure (why sector_ops_metrics froze at the 19-Jul
-    # manual batch while the queue showed 'done'). 'ok' = a sector_ops_metrics row was written;
-    # 'no_registry' = the sector legitimately has no KPI list, nothing to extract (complete).
-    ops_ok = st in ("ok", "no_registry")
-    if not ops_ok:
-        # surface the real per-company failure mode (fetch_blocked / no_docs / error) so the live
-        # 08:00 run is diagnosable in ops_log instead of silently masked.
+    # success = docs staged for CC ('ok') or legitimately nothing to stage ('no_docs' = no concall
+    # filings this quarter). fetch_blocked / error are the real failures to surface.
+    fetch_ok = st in ("ok", "no_docs")
+    if not fetch_ok:
         try:
             _oplog(cur, "OPS_METRICS_T1_COMPANY_FAIL",
-                   {"symbol": symbol, "run_company_status": st, "error": r.get("error"),
+                   {"symbol": symbol, "text_fetch_status": st, "error": r.get("error"),
                     "fundamentals_rescraped": fh_ok}, category="ops_metrics_pull")
         except Exception:
             pass
-    return {"ops_ok": ops_ok, "fund_ok": fh_ok, "status": st}
+    return {"ops_ok": fetch_ok, "fund_ok": fh_ok, "status": st, "text_staged": st == "ok"}
 
 
 def run_t1_refresh(conn=None):
@@ -1835,9 +1839,11 @@ def run_t1_refresh(conn=None):
             cur.execute("""SELECT symbol, ex_date FROM ops_metrics_t1_queue WHERE status='pending'""")
             pending = cur.fetchall()
 
-        ok = fail = 0
-        hist = {}          # cc#595: run_company status histogram -> makes the live failure mode visible
-        fund_only = 0      # companies where fundamentals re-scraped but ops-extraction did NOT write
+        ok = fail = 0      # cc#595 (23-Jul): ok = doc-text staged for CC / no filings; the T+1 job no
+                           #   longer writes ops metrics itself (extraction is CC's, from doc_texts)
+        hist = {}          # text-fetch status histogram -> makes the live failure mode visible
+        fund_only = 0      # companies where fundamentals re-scraped but doc-text staging failed
+        staged = 0         # companies whose fresh concall text was actually staged into doc_texts
         failed_syms = []
         for sym, ex_date in pending:
             with conn.cursor() as cur:
@@ -1849,6 +1855,8 @@ def run_t1_refresh(conn=None):
                 success = res["ops_ok"]
                 st = res.get("status") or "unknown"
                 hist[st] = hist.get(st, 0) + 1
+                if res.get("text_staged"):
+                    staged += 1
                 if not success and res.get("fund_ok"):
                     fund_only += 1
                 if not success:
@@ -1862,17 +1870,19 @@ def run_t1_refresh(conn=None):
             time.sleep(THROTTLE)
 
         with conn.cursor() as cur:
-            summary = {"due": len(pending), "ops_written": ok, "failed": fail,
-                       "fundamentals_only": fund_only, "status_histogram": hist}
+            summary = {"due": len(pending), "docs_staged": staged, "ok_or_complete": ok, "failed": fail,
+                       "fundamentals_only": fund_only, "status_histogram": hist,
+                       "note": "T+1 stages concall doc-text into doc_texts for CC extraction; "
+                               "sector_ops_metrics is appended by CC (app anthropic retired 19-Jul)"}
             _oplog(cur, "OPS_METRICS_T1_RUN", summary)
-            # cc#595 (diagnose 3): warn when reported companies were processed but NONE yielded an
-            # ops-metrics row — a persistent/systemic failure (screener blocked, docs unpublished, or
-            # extraction down), not a per-company miss. Was silent before -> the freeze went unnoticed.
-            if pending and ok == 0:
+            # cc#595 (diagnose 3): warn when reported companies were processed but NONE had doc-text
+            # staged — a persistent/systemic fetch failure (screener blocked, docs unpublished), not a
+            # per-company miss. Was silent before -> the freeze went unnoticed.
+            if pending and staged == 0:
                 _oplog(cur, "OPS_METRICS_PERSISTENT_FAILURE",
                        {"due": len(pending), "all_failed": True, "status_histogram": hist,
                         "sample": failed_syms[:15],
-                        "note": "T+1 processed reported companies but wrote 0 sector_ops_metrics rows"},
+                        "note": "T+1 processed reported companies but staged 0 doc_texts for CC"},
                        category="ops_metrics_pull")
             conn.commit()
         return summary
