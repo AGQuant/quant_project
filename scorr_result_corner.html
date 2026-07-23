@@ -306,6 +306,39 @@ function rcOpen(html){const b=document.getElementById('rcBox');b.innerHTML='<but
 document.getElementById('rcOv').addEventListener('click',e=>{if(e.target.id==='rcOv')rcClose();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')rcClose();});
 
+// cc#630: shared TRAJECTORY + performance heat-grid renderers (from the enriched /api/gvm/snapshot).
+function _trajCell(v){return v==null?'<span style="color:var(--dim)">—</span>':`<span style="color:${v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)'}">${v>0?'+':''}${v.toFixed(2)}</span>`;}
+function _trajRow(lbl,d1,d6,bf){return `<div style="display:flex;align-items:baseline;gap:8px;font-family:var(--mono);font-size:11.5px;padding:3px 0"><span style="flex:1;color:var(--mut)">${lbl}</span><span style="width:66px;text-align:right">Δ1M ${_trajCell(d1)}</span><span style="width:74px;text-align:right">Δ6M ${_trajCell(d6)}${(bf&&d6!=null)?'<span style="color:var(--amber)">*</span>':''}</span></div>`;}
+function trajHtml(t){
+  if(!t)return'';
+  const rn=t.rank_now,r1=t.rank_1m,r6=t.rank_6m,N=t.segment_n;
+  const imp=(rn!=null&&r6!=null)?(rn<r6):null, rc=imp===true?'var(--grn)':imp===false?'var(--red)':'var(--txt)';
+  let path=(rn!=null?('#'+rn):'—');
+  if(r1!=null)path+=' <span style="color:var(--dim)">←</span> #'+r1;
+  if(r6!=null)path+=' <span style="color:var(--dim)">←</span> #'+r6;
+  if(N)path+=' <span style="color:var(--dim)">of '+N+'</span>';
+  let h='<div class="rc-lbl">Trajectory</div>';
+  h+=_trajRow('GVM',t.gvm_d21,t.gvm_d126,t.backfill_flag_6m);
+  h+=_trajRow('Momentum',t.m_d21,t.m_d126,t.backfill_flag_6m);
+  h+=_trajRow('Sector GVM',t.sector_gvm_d21,t.sector_gvm_d126,t.backfill_flag_6m);
+  h+=`<div style="display:flex;align-items:baseline;gap:8px;font-family:var(--mono);font-size:11.5px;padding:3px 0"><span style="flex:1;color:var(--mut)">Rank</span><span style="color:${rc};font-weight:700">${path}</span></div>`;
+  if(t.backfill_flag_6m)h+='<div style="font-size:9.5px;color:var(--dim);margin-top:3px">* 6M baseline partially backfilled</div>';
+  return h;
+}
+function _perfGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.3)return'n';return (v>0?'g':'r')+(a<3?'1':a<10?'2':'3');}
+function _perfTile(v){const g=_perfGrade(v),bg={g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--bg2)'}[g]||'transparent';
+  const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
+  return `<div style="flex:1;min-width:0;background:${bg};border-radius:8px;height:46px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:13px;color:${col}">${v==null?'—':(v>0?'+':'')+v.toFixed(1)+'%'}</div>`;}
+function heatHtml(d,stockName,segName){
+  const sp=d.stock_perf,se=d.sector_perf;if(!sp&&!se)return'';
+  const cols=['w1','m1','m3','y1'],hdr=['1W','1M','3M','1Y'];
+  const rowLbl=(a,b)=>`<div style="width:86px;min-width:86px"><div style="font-size:11px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a}</div><div style="font-size:9px;color:var(--dim)">${b}</div></div>`;
+  let h='<div class="rc-lbl">Performance</div>';
+  h+=`<div style="display:flex;gap:6px;margin-bottom:5px"><div style="width:86px;min-width:86px"></div>${hdr.map(x=>`<div style="flex:1;text-align:center;font-size:9.5px;color:var(--dim);font-family:var(--mono)">${x}</div>`).join('')}</div>`;
+  h+=`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">${rowLbl(stockName||'Stock','Stock')}${cols.map(k=>_perfTile(sp?sp[k]:null)).join('')}</div>`;
+  h+=`<div style="display:flex;gap:6px;align-items:center">${rowLbl(segName||'Sector','Sector')}${cols.map(k=>_perfTile(se?se[k]:null)).join('')}</div>`;
+  return h;
+}
 async function rcCard(kind,sym){
   if(kind==='R'){ if(window.ScorrRCard&&ScorrRCard.open){ScorrRCard.open(sym);return;} location.href='/check?symbol='+encodeURIComponent(sym); return; }
   rcOpen(`<h3>${esc(sym)} · ${kind==='C'?'Chart':kind==='A'?'Analysis':'Deriv'}</h3><div class="rc-lbl">Loading…</div>`);
@@ -328,6 +361,7 @@ async function rcCard(kind,sym){
           <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px"><span style="font-size:24px;font-weight:800">${gv.gvm_score==null?'—':Number(gv.gvm_score).toFixed(2)}</span><span style="font-size:12px;color:var(--mut);font-weight:700">${esc(gv.verdict||'')}</span></div>
           <div style="display:flex;gap:6px;margin-bottom:8px">${pil('Growth',gv.g_score)}${pil('Value',gv.v_score)}${pil('Momentum',gv.m_score)}</div>
           <div class="rc-tile"><div style="display:flex;gap:10px;font-size:12px"><div style="flex:1;min-width:0"><span style="color:var(--dim)">Segment</span><br><b>${esc(gv.segment||'—')}</b></div><div style="flex:1"><span style="color:var(--dim)">Sector</span><br><b>${gv.sector_rating==null?'—':Number(gv.sector_rating).toFixed(2)}</b></div><div style="flex:1"><span style="color:var(--dim)">Rank</span><br><b>${gv.segment_rank!=null?('#'+gv.segment_rank+' / '+gv.segment_total):'—'}</b></div></div></div>`; }
+      if(gv&&gv.trajectory) h+=trajHtml(gv.trajectory);   // cc#630 trajectory block (below GVM box)
       const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
       h+=`<div class="rc-lbl">Volume</div><div style="display:flex;gap:6px">
         <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Rel Volume · VolX</div><div style="font-size:20px;font-weight:800;color:${E.volx>=1?'var(--grn)':'var(--txt)'}">${E.volx==null?'—':Number(E.volx).toFixed(1)}×</div></div>
@@ -335,6 +369,7 @@ async function rcCard(kind,sym){
       const dv=E.delivery||{};
       if(dv.deliv_pct!=null){ const lc=dv.label==='conviction'?'var(--grn)':dv.label==='churn'?'var(--red)':'var(--mut)';
         h+=`<div class="rc-lbl">Delivery</div><div class="rc-tile"><span style="font-size:20px;font-weight:800">${Number(dv.deliv_pct).toFixed(1)}%</span> <span style="font-size:11px;color:var(--dim)">vs 21d ${dv.avg21==null?'—':Number(dv.avg21).toFixed(1)}%</span><span style="float:right;font-size:10px;font-weight:800;color:${lc}">${(dv.label||'neutral').toUpperCase()}</span></div>`; }
+      if(gv&&(gv.stock_perf||gv.sector_perf)) h+=heatHtml(gv, esc((gv&&gv.company_name)||sym), esc((gv&&gv.segment)||'Sector'));  // cc#630 heat grid (closing visual)
       rcOpen(h);
     } else {
       const dm=await J('/api/deriv-metrics/'+encodeURIComponent(sym));

@@ -79,6 +79,99 @@ def get_gvm(symbol: str):
     return r
 
 
+def _flt(v):
+    try:
+        return float(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _traj_point(sym, segment, days):
+    """cc#630: as-of (CURRENT_DATE-days) — segment MEDIAN gvm + this symbol's rank + member count,
+    from gvm_history nearest-prior rows (one per symbol). Cheap indexed lookup."""
+    if not segment:
+        return {}
+    return api_query("""
+        WITH latest AS (
+            SELECT DISTINCT ON (symbol) symbol, gvm_score FROM gvm_history
+            WHERE segment=%s AND score_date <= CURRENT_DATE - %s ORDER BY symbol, score_date DESC)
+        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY gvm_score) AS med,
+               COUNT(*) FILTER (WHERE gvm_score IS NOT NULL) AS n,
+               (SELECT COUNT(*) FROM latest l2 WHERE l2.gvm_score >
+                    (SELECT gvm_score FROM latest WHERE symbol=%s)) + 1 AS rnk
+        FROM latest""", (segment, days, sym), single=True) or {}
+
+
+def _trajectory(sym, segment, gvm_now, m_now):
+    """cc#630: TRAJECTORY block — stock GVM/M deltas (1M vs <=d-21, 6M vs <=d-126), sector GVM deltas
+    (median-based, same convention as the sector-delta row), and the rank path (now/1M/6M). 6M crosses
+    the backfill era (live gvm_history began 2026-05-30) -> backfill_flag_6m from the d-126 row's
+    method. gvm_history ONLY; nearest-prior; no new feeds."""
+    d21 = api_query("SELECT gvm_score, m_score FROM gvm_history WHERE symbol=%s AND score_date<=CURRENT_DATE-21 "
+                    "ORDER BY score_date DESC LIMIT 1", (sym,), single=True) or {}
+    d126 = api_query("SELECT gvm_score, m_score, method FROM gvm_history WHERE symbol=%s AND score_date<=CURRENT_DATE-126 "
+                     "ORDER BY score_date DESC LIMIT 1", (sym,), single=True) or {}
+
+    def _dd(now, then):
+        return round(now - then, 2) if (now is not None and then is not None) else None
+    p0, p1, p6 = _traj_point(sym, segment, 0), _traj_point(sym, segment, 21), _traj_point(sym, segment, 126)
+    med0, med1, med6 = _flt(p0.get("med")), _flt(p1.get("med")), _flt(p6.get("med"))
+    return {
+        "gvm_d21": _dd(gvm_now, _flt(d21.get("gvm_score"))), "gvm_d126": _dd(gvm_now, _flt(d126.get("gvm_score"))),
+        "m_d21": _dd(m_now, _flt(d21.get("m_score"))), "m_d126": _dd(m_now, _flt(d126.get("m_score"))),
+        "sector_gvm_d21": _dd(med0, med1), "sector_gvm_d126": _dd(med0, med6),
+        "rank_now": p0.get("rnk"), "rank_1m": p1.get("rnk"), "rank_6m": p6.get("rnk"),
+        "segment_n": p0.get("n"),
+        "backfill_flag_6m": bool(d126 and d126.get("method") is not None),
+    }
+
+
+_PERF_IDX = {"w1": 5, "m1": 21, "m3": 63, "y1": 252}   # trading-row offsets for 1W/1M/3M/1Y
+
+
+def _perf_from_closes(closes):
+    out = {}
+    c0 = closes[0] if closes else None
+    for k, i in _PERF_IDX.items():
+        out[k] = (round((c0 - closes[i]) / closes[i] * 100.0, 2)
+                  if (c0 is not None and len(closes) > i and closes[i]) else None)
+    return out
+
+
+def _perf_grid(sym, segment):
+    """cc#630: 2x4 price-performance heat grid (Stock / Sector × 1W/1M/3M/1Y). Stock = raw_prices close
+    latest vs the close 5/21/63/252 trading rows back. Sector = MEDIAN of segment members' same-window
+    change (raw_prices), consistent with the trajectory block's median sector math. Server-side."""
+    scl = api_query("SELECT close FROM raw_prices WHERE symbol=%s AND close IS NOT NULL "
+                    "ORDER BY price_date DESC LIMIT 260", (sym,))
+    stock_closes = [_flt(r["close"]) for r in scl] if isinstance(scl, list) else []
+    stock_perf = _perf_from_closes(stock_closes)
+    sector_perf = {k: None for k in _PERF_IDX}
+    members = []
+    if segment:
+        m = api_query("SELECT symbol FROM gvm_scores WHERE segment=%s AND "
+                      "score_date=(SELECT MAX(score_date) FROM gvm_scores)", (segment,))
+        if isinstance(m, list):
+            members = [r["symbol"] for r in m]
+    if members:
+        rows = api_query("SELECT symbol, close FROM raw_prices WHERE symbol=ANY(%s) AND close IS NOT NULL "
+                         "AND price_date >= CURRENT_DATE-400 ORDER BY symbol, price_date DESC", (members,))
+        bym = {}
+        if isinstance(rows, list):
+            for r in rows:
+                bym.setdefault(r["symbol"], []).append(_flt(r["close"]))
+        buckets = {k: [] for k in _PERF_IDX}
+        for _s, cl in bym.items():
+            p = _perf_from_closes(cl)
+            for k in _PERF_IDX:
+                if p[k] is not None:
+                    buckets[k].append(p[k])
+        for k in _PERF_IDX:
+            vals = sorted(buckets[k])
+            sector_perf[k] = round(vals[len(vals) // 2], 2) if vals else None
+    return {"stock": stock_perf, "sector": sector_perf}
+
+
 @router.get("/api/gvm/snapshot/{symbol}")
 def get_gvm_snapshot(symbol: str):
     """cc#608: compact GVM snapshot for the Open-Positions quick-action "G" popout — GVM + G/V/M
@@ -115,6 +208,18 @@ def get_gvm_snapshot(symbol: str):
         if sr:
             base["sector_rating"] = sr.get("r")
             base["sector_verdict"] = sr.get("verdict")
+    # cc#630: TRAJECTORY block (gvm/m/sector deltas + rank path, gvm_history nearest-prior) + perf
+    # heat grid (raw_prices, median sector). Best-effort — never fails the snapshot.
+    try:
+        base["trajectory"] = _trajectory(sym, base.get("segment"),
+                                         _flt(base.get("gvm_score")), _flt(base.get("m_score")))
+    except Exception:
+        base["trajectory"] = None
+    try:
+        perf = _perf_grid(sym, base.get("segment"))
+        base["stock_perf"], base["sector_perf"] = perf["stock"], perf["sector"]
+    except Exception:
+        base["stock_perf"] = base["sector_perf"] = None
     return base
 
 

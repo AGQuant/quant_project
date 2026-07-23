@@ -1830,8 +1830,41 @@ async function qaGvm(sym){
 // tiles removed from the Deriv Cockpit in cc#624 now live here), Delivery (deliv% vs 21d avg + label +
 // 30d sparkline). Zero new data sources: /api/gvm/snapshot (gvm_scores + sector_ratings) +
 // /api/deriv-metrics (energy.volx / recent3d_vol_ratio / delivery{...,series}). Mobile-first sections.
+// cc#630: shared TRAJECTORY + performance heat-grid renderers (from the enriched /api/gvm/snapshot).
+function _trajCell(v){return v==null?'<span style="color:var(--dim)">--</span>':`<span style="color:${v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)'}">${v>0?'+':''}${v.toFixed(2)}</span>`;}
+function _trajRow(lbl,d1,d6,bf){return `<div style="display:flex;align-items:baseline;gap:8px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;padding:3px 0"><span style="flex:1;color:var(--mut)">${lbl}</span><span style="width:66px;text-align:right">Δ1M ${_trajCell(d1)}</span><span style="width:74px;text-align:right">Δ6M ${_trajCell(d6)}${(bf&&d6!=null)?'<span style="color:#F5B94A">*</span>':''}</span></div>`;}
+function trajHtml(t){
+  if(!t)return'';
+  const rn=t.rank_now,r1=t.rank_1m,r6=t.rank_6m,N=t.segment_n;
+  const imp=(rn!=null&&r6!=null)?(rn<r6):null, rc=imp===true?'var(--grn)':imp===false?'var(--red)':'var(--txt)';
+  let path=(rn!=null?('#'+rn):'--');
+  if(r1!=null)path+=' <span style="color:var(--dim)">&larr;</span> #'+r1;
+  if(r6!=null)path+=' <span style="color:var(--dim)">&larr;</span> #'+r6;
+  if(N)path+=' <span style="color:var(--dim)">of '+N+'</span>';
+  let h='<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 4px">Trajectory</div>';
+  h+=_trajRow('GVM',t.gvm_d21,t.gvm_d126,t.backfill_flag_6m);
+  h+=_trajRow('Momentum',t.m_d21,t.m_d126,t.backfill_flag_6m);
+  h+=_trajRow('Sector GVM',t.sector_gvm_d21,t.sector_gvm_d126,t.backfill_flag_6m);
+  h+=`<div style="display:flex;align-items:baseline;gap:8px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;padding:3px 0"><span style="flex:1;color:var(--mut)">Rank</span><span style="color:${rc};font-weight:700">${path}</span></div>`;
+  if(t.backfill_flag_6m)h+='<div style="font-size:9.5px;color:var(--dim);margin-top:3px">* 6M baseline partially backfilled</div>';
+  return h;
+}
+function _perfGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.3)return'n';return (v>0?'g':'r')+(a<3?'1':a<10?'2':'3');}
+function _perfTile(v){const g=_perfGrade(v),bg={g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--surface2)'}[g]||'transparent';
+  const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
+  return `<div style="flex:1;min-width:0;background:${bg};border-radius:8px;height:46px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:700;font-size:13px;color:${col}">${v==null?'--':(v>0?'+':'')+v.toFixed(1)+'%'}</div>`;}
+function heatHtml(d,stockName,segName){
+  const sp=d.stock_perf,se=d.sector_perf;if(!sp&&!se)return'';
+  const cols=['w1','m1','m3','y1'],hdr=['1W','1M','3M','1Y'];
+  const rowLbl=(a,b)=>`<div style="width:86px;min-width:86px"><div style="font-size:11px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a}</div><div style="font-size:9px;color:var(--dim)">${b}</div></div>`;
+  let h='<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:16px 0 6px">Performance</div>';
+  h+=`<div style="display:flex;gap:6px;margin-bottom:5px"><div style="width:86px;min-width:86px"></div>${hdr.map(x=>`<div style="flex:1;text-align:center;font-size:9.5px;color:var(--dim);font-family:'IBM Plex Mono',ui-monospace,monospace">${x}</div>`).join('')}</div>`;
+  h+=`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">${rowLbl(stockName||'Stock','Stock')}${cols.map(k=>_perfTile(sp?sp[k]:null)).join('')}</div>`;
+  h+=`<div style="display:flex;gap:6px;align-items:center">${rowLbl(segName||'Sector','Sector')}${cols.map(k=>_perfTile(se?se[k]:null)).join('')}</div>`;
+  return h;
+}
 async function qaAnalysis(sym){
-  _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery','<div class="empty">Loading…</div>');
+  _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery · trajectory','<div class="empty">Loading…</div>');
   try{
     const [g,dm]=await Promise.all([
       getJSON('/api/gvm/snapshot/'+encodeURIComponent(sym)).catch(()=>null),
@@ -1854,6 +1887,8 @@ async function qaAnalysis(sym){
         `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Rank in segment</span><br><b style="font-size:14px">${rank}</b></div></div>`+
         `<div style="color:var(--dim);font-size:11px;margin-top:6px">180d Δ GVM ${dgs}</div>`);
     }
+    // cc#630: TRAJECTORY block — score deltas + sector rank path (below the GVM pillars/sector box)
+    if(g&&g.trajectory) h+=trajHtml(g.trajectory);
     // (2) VOLUME — VolX + 3D/21D participation (cc#624 removed these from the cockpit; they live here now)
     const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
     const vx=E.volx,r3=E.recent3d_vol_ratio;
@@ -1872,6 +1907,8 @@ async function qaAnalysis(sym){
       const lblt=dv.label?dv.label.toUpperCase():'NEUTRAL';
       h+=boxd(`<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:22px;font-weight:800;font-family:'Sora',sans-serif">${Number(dv.deliv_pct).toFixed(1)}%</span><span style="font-size:11px;color:var(--dim)">vs 21d avg ${dv.avg21==null?'--':Number(dv.avg21).toFixed(1)}%${dv.ratio!=null?(' · '+Number(dv.ratio).toFixed(2)+'x'):''}</span><span style="margin-left:auto;font-size:10px;font-weight:800;color:${lblc}">${lblt}</span></div>`+_qaSpark(dv.series||[]));
     }
+    // cc#630: performance heat grid — the closing visual (bottom of the panel), Volume/Delivery unchanged
+    if(g&&(g.stock_perf||g.sector_perf)) h+=heatHtml(g, newsEsc((g&&g.company_name)||sym), newsEsc((g&&g.segment)||'Sector'));
     _qaSetBody(h||'<div class="empty">No analysis data for '+newsEsc(sym)+'.</div>');
   }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">Analysis failed to load.</div>');}
 }
