@@ -1039,10 +1039,13 @@ RESULTS_CARD_JS = """
     }
     var body=row('QoQ Sales',pc.sales)+row('QoQ Profit',pc.profit);
     if(!body) return '';
+    // cc#625 fix_3(d): when fewer than 3 same-quarter peers exist the pool includes off-quarter peers
+    // — flag it honestly instead of silently blending quarters.
+    var mm = pc.quarter_mismatch ? ' &middot; mixed-quarter peers (under 3 same-quarter reporters)' : '';
     return '<div class=\"rcard-lbl\">Latest result'+(pc.quarter?' ('+esc(pc.quarter)+')':'')+' vs top-3 peers</div>'
       +'<div class=\"rcard-peer\">'+body+'</div>'
       +'<div class=\"rcard-note\">Peers = top-3 by GVM in '+esc(pc.segment||'segment')
-      +(pc.fallback?' (segment avg &mdash; under 3 peers)':'')+', self-excluded.</div>';
+      +(pc.fallback?' (segment avg &mdash; under 3 peers)':'')+', self-excluded.'+mm+'</div>';
   }
 
   var RAW_CHIP = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
@@ -1070,7 +1073,8 @@ RESULTS_CARD_JS = """
   // source; date desc; hidden when empty. Intel-tab quality.
   function polNewsHtml(items){
     if (!items || !items.length) return '';
-    var h = '<div class=\"rcard-lbl\">Polished news &middot; last 30 days</div>';
+    // cc#625 fix_1: clear whitespace + a rule above the POLISHED header (was flush against the block above).
+    var h = '<div class=\"rcard-lbl\" style=\"margin-top:18px;padding-top:13px;border-top:1px solid var(--line,rgba(148,166,210,.2))\">Polished news &middot; last 30 days</div>';
     for (var i=0;i<items.length;i++){ var it=items[i];
       h += '<div style=\"margin-bottom:9px\">'
         + '<div style=\"font-size:12.5px;font-weight:700;color:var(--txt,#1c2536);line-height:1.4\">'+esc(it.headline||'')+'</div>'
@@ -1116,9 +1120,11 @@ RESULTS_CARD_JS = """
           + '<div class=\"rcard-body\">'+esc(d.last_result_analysis)+'</div>';
       }
     }
-    h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
-    h += rawNewsHtml(d && d.raw_news);       // cc#623: last 48h
+    // cc#625 fix_2: spec order — Result/FY27 -> RAW 48h -> POLISH 1mo; the peer block trails as a
+    // supplement (was between peer and polished, leaving polished flush against peer — fix_1).
+    h += rawNewsHtml(d && d.raw_news);       // cc#623: last 48h (RAW above POLISHED)
     h += polNewsHtml(d && d.polished_news);  // cc#623: last 1 month via mentioned_symbols
+    h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
     var foot = [];
     if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));
     if (d && d.model) foot.push(esc(d.model));

@@ -66,13 +66,16 @@ def _fy27_growth(cur, sym):
 
 
 def _raw_news(cur, sym, hours=48):
-    """cc#623: RAW news section — the last-48h position_news headlines for this exact symbol,
-    date-sorted desc. Raw feed one-liners (RAW chip in the renderer); no polish join here."""
+    """cc#623 / cc#625 fix_2: RAW news section — the last-48h position_news headlines for this exact
+    symbol, date-sorted desc. The 48h cutoff is driven by the ARTICLE's published_at ONLY — never
+    COALESCE with fetched_at, which let a 13-day-stale article (published 10-Jul, fetched today) slip
+    through on ingest drift. published_at is 100% populated for the recent window; a null-published
+    row cannot prove freshness and is correctly excluded from the 48h section."""
     cur.execute("""
-        SELECT headline, source_name, url, COALESCE(published_at, fetched_at) AS pub
+        SELECT headline, source_name, url, published_at
         FROM position_news
-        WHERE symbol = %s AND COALESCE(published_at, fetched_at) >= NOW() - make_interval(hours => %s)
-        ORDER BY COALESCE(published_at, fetched_at) DESC NULLS LAST, id DESC
+        WHERE symbol = %s AND published_at >= NOW() - make_interval(hours => %s)
+        ORDER BY published_at DESC, id DESC
         LIMIT 12""", (sym, hours))
     return [{"headline": r[0], "source": r[1], "url": r[2],
              "published_at": r[3].isoformat() if r[3] else None} for r in cur.fetchall()]
@@ -80,13 +83,14 @@ def _raw_news(cur, sym, hours=48):
 
 def _polished_by_symbol(cur, sym, days=30):
     """cc#623 POLISHED architecture: REPLACES the cc#619 per-item url_hash lookup (2% hit rate) with a
-    symbol-section query — polished_news where the symbol is in mentioned_symbols and polished in the
-    last month, date-sorted desc. Intel-tab quality (headline_clean + full/one-line summary + source)."""
+    symbol-section query — polished_news where the symbol is in mentioned_symbols. cc#625 fix_2: the
+    1-month window is driven by the ARTICLE's published_time (not polished_at, which is when WE polished
+    it and drifts — an old article polished today would masquerade as fresh). Date-sorted desc."""
     cur.execute("""
         SELECT headline_clean, COALESCE(full_summary, summary) AS summary, source, published_time
         FROM polished_news
-        WHERE %s = ANY(mentioned_symbols) AND polished_at >= NOW() - make_interval(days => %s)
-        ORDER BY published_time DESC NULLS LAST, id DESC
+        WHERE %s = ANY(mentioned_symbols) AND published_time >= NOW() - make_interval(days => %s)
+        ORDER BY published_time DESC, id DESC
         LIMIT 15""", (sym, days))
     return [{"headline": r[0], "summary": r[1], "source": r[2],
              "published_time": r[3].isoformat() if r[3] else None} for r in cur.fetchall()]
@@ -124,13 +128,32 @@ def _gvm_ctx(cur, sym):
 
 def _peer_comparison(cur, sym, segment):
     """cc#590: latest QoQ sales & profit vs the TOP-3-by-GVM segment peers (self-excluded, non-null
-    metric, <3 -> full-segment avg fallback). IDENTICAL basis to Investment Check v3.0 F3. Zero-token."""
+    metric, <3 -> full-segment avg fallback). IDENTICAL basis to Investment Check v3.0 F3. Zero-token.
+    cc#625 fix_3(d): SAME-QUARTER rule — a peer whose latest reported quarter != the subject's quarter
+    must not fold a stale-quarter QoQ into the comparison. Restrict the pool to same-quarter reporters
+    when >=3 exist; else fall back to the full pool and FLAG the mismatch."""
     if not segment:
         return None
-    cur.execute("""SELECT g.gvm_score, s.qoq_sales_growth, s.qoq_profit_growth
+    # subject's latest reported quarter — the vintage the whole comparison is locked to.
+    cur.execute("""SELECT MAX(period_end) FROM fundamentals_history
+                   WHERE symbol=%s AND section='quarters' AND period_type='quarter'""", (sym,))
+    qq = cur.fetchone()
+    subj_q = qq[0] if qq and qq[0] else None
+    quarter = _fq_label(subj_q) if subj_q else None
+    # peers = gvm + screener QoQ + each peer's OWN latest reported quarter (fundamentals_history)
+    cur.execute("""SELECT g.gvm_score, s.qoq_sales_growth, s.qoq_profit_growth, fh.latest_q
                    FROM gvm_scores g JOIN screener_raw s ON g.symbol = s.nse_code
+                   LEFT JOIN (SELECT symbol, MAX(period_end) latest_q FROM fundamentals_history
+                              WHERE section='quarters' AND period_type='quarter' GROUP BY symbol) fh
+                          ON fh.symbol = g.symbol
                    WHERE g.segment=%s AND g.symbol<>%s""", (segment, sym))
-    peers = [(_flt(r[0]), _flt(r[1]), _flt(r[2])) for r in cur.fetchall()]
+    rows = [(_flt(r[0]), _flt(r[1]), _flt(r[2]), r[3]) for r in cur.fetchall()]
+    same = [p for p in rows if subj_q is not None and p[3] == subj_q]
+    if len(same) >= 3:
+        peers, quarter_mismatch = same, False
+    else:
+        peers = rows   # fallback: full pool, flagged
+        quarter_mismatch = (subj_q is not None and len(same) < len(rows))
 
     def _top3(idx):
         cand = [(p[0], p[idx]) for p in peers if p[idx] is not None and p[0] is not None]
@@ -148,17 +171,13 @@ def _peer_comparison(cur, sym, segment):
     st_p = _flt(sr[1]) if sr else None
     if st_s is None and st_p is None and peer_s is None and peer_p is None:
         return None
-    # cc#609: label which quarter the QoQ figures reflect — the stock's latest reported quarter in
-    # fundamentals_history (same vintage the screener QoQ is computed from). One line above the rows.
-    cur.execute("""SELECT MAX(period_end) FROM fundamentals_history
-                   WHERE symbol=%s AND section='quarters' AND period_type='quarter'""", (sym,))
-    qq = cur.fetchone()
-    quarter = _fq_label(qq[0]) if qq and qq[0] else None
     return {
-        "peer_basis": "top-3 by GVM in segment (self-excluded)",
+        "peer_basis": "top-3 by GVM in segment (self-excluded, same quarter)",
         "segment": segment,
         "quarter": quarter,
         "peer_count": max(n_s, n_p),
+        "same_quarter_peers": len(same),
+        "quarter_mismatch": quarter_mismatch,   # True -> pool includes off-quarter peers (flagged in UI)
         "fallback": (n_s < 3 or n_p < 3),
         "sales": {"stock": _f(st_s), "peer": _f(peer_s),
                   "beat": (st_s is not None and peer_s is not None and st_s > peer_s)},

@@ -127,32 +127,54 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     pr = cur.fetchone()
     pe_raw, pe_peer = (_num(pr[0]), _num(pr[1])) if pr else (None, None)
 
-    # sector sales/PAT YoY = median of same-segment names' latest-quarter YoY (computed, not invented)
+    # sector sales/PAT YoY = median of SAME-QUARTER same-segment reporters (cc#625 fix_3: never blend
+    # quarters mid-season — an unreported peer must NOT fold its prior-quarter YoY into a current-quarter
+    # median). (a) median ONLY over segment names whose latest quarter == the subject's quarter; (b) if
+    # fewer than 3 such reporters, fall back to the full-segment latest-available (prior-quarter) median
+    # with an explicit label; (c) coverage (n_same/total) is rendered on the Sector line.
     sec_sales = sec_pat = None
+    sec_cov_str = ""          # e.g. " · 8/23 reported" (or " · prior-qtr 8/23 reported" on fallback)
     if segment:
         cur.execute("""WITH q AS (
             SELECT fh.symbol, fh.metrics, fh.period_end,
                    ROW_NUMBER() OVER (PARTITION BY fh.symbol ORDER BY fh.period_end DESC) rn
             FROM fundamentals_history fh JOIN gvm_scores gs ON gs.symbol=fh.symbol
-            WHERE fh.section='quarters' AND gs.segment=%s
+            WHERE fh.section='quarters' AND fh.period_type='quarter' AND gs.segment=%s
               AND gs.score_date=(SELECT MAX(score_date) FROM gvm_scores))
-            SELECT symbol, (SELECT metrics FROM q q2 WHERE q2.symbol=q.symbol AND q2.rn=1) latest,
-                            (SELECT metrics FROM q q4 WHERE q4.symbol=q.symbol AND q4.rn=5) yoy
+            SELECT symbol,
+                   (SELECT period_end FROM q q1 WHERE q1.symbol=q.symbol AND q1.rn=1) latest_end,
+                   (SELECT metrics FROM q q2 WHERE q2.symbol=q.symbol AND q2.rn=1) latest,
+                   (SELECT metrics FROM q q5 WHERE q5.symbol=q.symbol AND q5.rn=5) yoy
             FROM q WHERE rn=1""", (segment,))
-        ss, ps = [], []
-        for _sym, latest, yoy in cur.fetchall():
-            def _rev(d):   # Sales (non-bank) or Revenue (bank)
-                return _num((d or {}).get("Sales")) if _num((d or {}).get("Sales")) is not None else _num((d or {}).get("Revenue"))
+
+        def _rev(d):   # Sales (non-bank) or Revenue (bank)
+            return _num((d or {}).get("Sales")) if _num((d or {}).get("Sales")) is not None else _num((d or {}).get("Revenue"))
+
+        same_ss, same_ps, any_ss, any_ps, n_same, total = [], [], [], [], 0, 0
+        for _sym, p_end, latest, yoy in cur.fetchall():
+            total += 1
             sv = _pct(_rev(latest), _rev(yoy))
             pv = _pct(_num((latest or {}).get("Net Profit")), _num((yoy or {}).get("Net Profit")))
             if sv is not None:
-                ss.append(sv)
+                any_ss.append(sv)
             if pv is not None:
-                ps.append(pv)
-        if ss:
-            sec_sales = round(sorted(ss)[len(ss) // 2], 1)
-        if ps:
-            sec_pat = round(sorted(ps)[len(ps) // 2], 1)
+                any_ps.append(pv)
+            if p_end == latest_end:   # same reported quarter as the subject
+                n_same += 1
+                if sv is not None:
+                    same_ss.append(sv)
+                if pv is not None:
+                    same_ps.append(pv)
+
+        def _med(xs):
+            return round(sorted(xs)[len(xs) // 2], 1) if xs else None
+
+        if n_same >= 3:
+            sec_sales, sec_pat = _med(same_ss), _med(same_ps)
+            sec_cov_str = f" · {n_same}/{total} reported"
+        elif total:
+            sec_sales, sec_pat = _med(any_ss), _med(any_ps)   # prior-quarter blend (labelled)
+            sec_cov_str = f" · prior-qtr {n_same}/{total} reported"
 
     # full company name from input_raw (screener_raw.company_name is truncated, e.g. 'Anand Rathi Wea.')
     cur.execute("SELECT company_name FROM input_raw WHERE UPPER(nse_code)=%s LIMIT 1", (symbol,))
@@ -189,7 +211,8 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
         verdict_line = "Mixed quarter; selective outperformance."
 
     def line(emoji, label, a, b, blabel, sector):
-        secpart = f"  (Sector {_sign(sector)})" if sector is not None else ""
+        # cc#625 fix_3(c): sector figure carries same-quarter coverage, e.g. "(Sector +46.7% · 8/23 reported)".
+        secpart = f"  (Sector {_sign(sector)}{sec_cov_str})" if sector is not None else ""
         return f"{emoji} {label:<7} {_sign(a):>7} QoQ  {_sign(b):>7} {blabel}{secpart}"
 
     parts = [
