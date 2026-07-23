@@ -1707,6 +1707,177 @@ function openDerivCockpitTab(sym){
   window.open('/dashboard?dc='+encodeURIComponent(sym), '_blank');
 }
 
+// ═══ cc#608: Open-Positions quick-action strip (V/R/N/D/C/G) ═══════════════════════════════════
+// Clicking a position symbol now opens an inline 6-button strip anchored to the click instead of
+// jumping straight to the cockpit. Click-outside / Esc closes; the letter keys are shortcuts while
+// the strip is open. Surfaces are all reused: V/R via the site-wide ScorrRCard component, D via the
+// existing openDerivCockpit, N/C/G via compact popouts (N filters the existing /api/news/position
+// feed by symbol; C = LightweightCharts candles from /api/candles + /api/intraday; G = the new
+// /api/gvm/snapshot mini-card). Works on desktop and PWA touch (40px targets). D preserves the full
+// current cockpit behaviour unchanged — it is now just behind the D button.
+let _qaCtx=null;
+const _QA_BTNS=[
+  {k:'V',t:'Volume — relative volume & 3D/21D',   fn:s=>window.ScorrRCard?ScorrRCard.openV(s.sym):alert('Volume card unavailable')},
+  {k:'R',t:'Results — latest result card',        fn:s=>window.ScorrRCard?ScorrRCard.open(s.sym):alert('Results card unavailable')},
+  {k:'N',t:'Position News',                        fn:s=>qaNews(s.sym)},
+  {k:'D',t:'Derivative Cockpit (full panel)',      fn:s=>openDerivCockpit(s.sym,s.side,s.qty,s.entry,s.cmp)},
+  {k:'C',t:'Chart',                                fn:s=>qaChart(s.sym)},
+  {k:'G',t:'GVM Rating snapshot',                  fn:s=>qaGvm(s.sym)},
+];
+function _qaInjectStyle(){
+  if(document.getElementById('qa-style'))return;
+  const st=document.createElement('style');st.id='qa-style';st.textContent=`
+    #qaStrip{position:fixed;z-index:11500;display:none;gap:6px;padding:6px;align-items:center;
+      background:var(--panel,#fff);border:1px solid var(--line,#e2e7ee);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
+    #qaStrip.open{display:flex}
+    #qaStrip .qa-sym{font-family:'Sora',sans-serif;font-weight:800;font-size:12px;color:var(--mut,#5a6b82);
+      padding:0 4px 0 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #qaStrip button{width:40px;height:40px;border-radius:9px;border:1px solid var(--line2,#e8ecf2);
+      background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);font-weight:800;font-size:15px;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s,border-color .12s}
+    #qaStrip button:hover,#qaStrip button:focus{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe);outline:none}
+    .qa-tf{border:1px solid var(--line2,#e8ecf2);background:var(--surface2,#f6f8fb);color:var(--txt,#1c2536);
+      border-radius:7px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
+    .qa-tf.on{background:var(--blu,#4d7cfe);color:#fff;border-color:var(--blu,#4d7cfe)}`;
+  document.head.appendChild(st);
+}
+function openQuickActions(ev,sym,side,qty,entry,cmp){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  _qaInjectStyle();
+  _qaCtx={sym,side:side||'',qty:Number(qty)||0,entry:(entry==null?null:Number(entry)),cmp:(cmp==null?null:Number(cmp))};
+  let strip=document.getElementById('qaStrip');
+  if(!strip){strip=document.createElement('div');strip.id='qaStrip';document.body.appendChild(strip);}
+  strip.innerHTML=`<span class="qa-sym">${sym}</span>`+
+    _QA_BTNS.map(b=>`<button data-k="${b.k}" title="${b.t}" onclick="_qaHit('${b.k}')">${b.k}</button>`).join('');
+  strip.classList.add('open');
+  // position near the click, clamped to the viewport (drops below the row, flips above if no room).
+  strip.style.visibility='hidden';strip.style.left='0px';strip.style.top='0px';
+  const vw=window.innerWidth,vh=window.innerHeight,w=strip.offsetWidth,h=strip.offsetHeight;
+  const cx=ev?ev.clientX:vw/2, cy=ev?ev.clientY:vh/2;
+  let x=cx-w/2, y=cy+14; x=Math.max(8,Math.min(vw-w-8,x));
+  if(y+h>vh-8)y=cy-h-14; y=Math.max(8,y);
+  strip.style.left=x+'px';strip.style.top=y+'px';strip.style.visibility='visible';
+  setTimeout(()=>{document.addEventListener('click',_qaOutside,true);document.addEventListener('keydown',_qaKey);},0);
+}
+function _qaHit(k){const b=_QA_BTNS.find(x=>x.k===k);if(b&&_qaCtx){const c=_qaCtx;_qaClose();b.fn(c);}}
+function _qaOutside(e){const s=document.getElementById('qaStrip');if(s&&!s.contains(e.target))_qaClose();}
+function _qaKey(e){if(e.key==='Escape'){_qaClose();return;}const k=(e.key||'').toUpperCase();
+  if(_QA_BTNS.some(b=>b.k===k)){e.preventDefault();_qaHit(k);}}
+function _qaClose(){const s=document.getElementById('qaStrip');if(s)s.classList.remove('open');
+  document.removeEventListener('click',_qaOutside,true);document.removeEventListener('keydown',_qaKey);}
+
+// N / G reuse the shared #infoModal; C uses a dedicated chart overlay.
+function _qaModal(title,sub,body){
+  const T=document.getElementById('mTitle'),S=document.getElementById('mSub'),B=document.getElementById('mBody'),D=document.getElementById('mDcBtn');
+  if(T)T.textContent=title;if(S)S.textContent=sub||'';if(B)B.innerHTML=body||'';if(D)D.innerHTML='';
+  document.getElementById('infoModal').classList.add('open');
+}
+function _qaSetBody(html){const B=document.getElementById('mBody');if(B)B.innerHTML=html;}
+function _qaTs(s){const t=Date.parse(String(s||'').replace(' ','T'));return isNaN(t)?0:t;}
+
+async function qaNews(sym){
+  _qaModal('Position News · '+sym,'Google News scoped to open positions (120h gate)','<div class="empty">Loading…</div>');
+  try{
+    const d=await getJSON(EP.positionNews);
+    const groups=(d&&d.groups)||[];
+    const g=groups.find(x=>String(x.symbol||'').toUpperCase()===sym.toUpperCase());
+    const items=g?(g.items||[]).slice():[];
+    if(!items.length){_qaSetBody('<div class="empty">No polished news for '+sym+' yet.</div>');return;}
+    items.sort((a,b)=>_qaTs(b.published_at||b.polished_at)-_qaTs(a.published_at||a.polished_at));
+    let html='';
+    items.forEach(it=>{const ts=it.published_at||it.polished_at;const age=ts?newsAgo(ts):'';
+      html+=`<div style="padding:10px 0;border-bottom:1px solid var(--line)">`+
+        `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
+        (it.body?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(it.body)}</div>`:'')+
+        `<div style="font-size:11px;color:var(--dim)">${newsEsc(it.source||'')}${age?' · '+newsEsc(age):''}</div></div>`;});
+    _qaSetBody(html);
+  }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">News failed to load.</div>');}
+}
+
+async function qaGvm(sym){
+  _qaModal('GVM Rating · '+sym,'Snapshot — G/V/M pillars · verdict · 180d Δ · segment rank','<div class="empty">Loading…</div>');
+  try{
+    const d=await getJSON('/api/gvm/snapshot/'+encodeURIComponent(sym));
+    const pill=(lbl,v)=>`<div style="flex:1;text-align:center;padding:10px;background:var(--surface2);border:1px solid var(--line2);border-radius:8px">`+
+      `<div style="font-size:10px;color:var(--dim);font-weight:700">${lbl}</div>`+
+      `<div style="font-size:18px;font-weight:800;font-family:'Sora',sans-serif">${v==null?'--':Number(v).toFixed(2)}</div></div>`;
+    const dg=d.dgvm_180,dgs=(dg==null?'--':(dg>=0?'+':'')+Number(dg).toFixed(2));
+    const rank=(d.segment_rank!=null&&d.segment_total!=null)?('#'+d.segment_rank+' / '+d.segment_total):'--';
+    _qaSetBody(
+      `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">`+
+        `<span style="font-size:30px;font-weight:800;font-family:'Sora',sans-serif">${d.gvm_score==null?'--':Number(d.gvm_score).toFixed(2)}</span>`+
+        `<span style="font-size:13px;font-weight:700;color:var(--mut)">${newsEsc(d.verdict||'')}</span>`+
+        `<span style="margin-left:auto;font-size:12px;color:var(--mut)">${newsEsc(d.company_name||'')}</span></div>`+
+      `<div style="display:flex;gap:8px;margin-bottom:12px">${pill('Growth',d.g_score)}${pill('Value',d.v_score)}${pill('Momentum',d.m_score)}</div>`+
+      `<div style="display:flex;gap:8px;font-size:12px">`+
+        `<div style="flex:1;padding:8px 10px;background:var(--surface2);border-radius:8px"><span style="color:var(--dim)">180d Δ GVM</span><br><b style="font-size:15px">${dgs}</b></div>`+
+        `<div style="flex:1;padding:8px 10px;background:var(--surface2);border-radius:8px"><span style="color:var(--dim)">Segment rank</span><br><b style="font-size:15px">${rank}</b>`+
+          `<span style="display:block;color:var(--dim);font-size:10px;margin-top:2px">${newsEsc(d.segment||'')}</span></div></div>`+
+      (d.punchline?`<div style="margin-top:12px;font-size:12px;color:var(--mut);line-height:1.5">${newsEsc(d.punchline)}</div>`:''));
+  }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">GVM snapshot failed to load.</div>');}
+}
+
+let _qaChartObj=null,_qaChartSym=null;
+function _qaChartEsc(e){if(e.key==='Escape')qaChartClose();}
+function qaChart(sym){
+  let ov=document.getElementById('qaChartOv');
+  if(!ov){
+    ov=document.createElement('div');ov.id='qaChartOv';
+    ov.style.cssText='position:fixed;inset:0;z-index:11600;background:rgba(10,14,20,.55);display:none;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.4);width:min(760px,96vw);max-height:92vh;overflow:hidden;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)">
+        <b id="qaChartTitle" style="font-size:14px"></b>
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <button id="qaChartD" class="qa-tf" onclick="qaChartLoad('D')">Daily</button>
+          <button id="qaChartI" class="qa-tf" onclick="qaChartLoad('I')">5m</button>
+          <button onclick="qaChartClose()" style="border:none;background:none;font-size:20px;line-height:1;cursor:pointer;color:var(--mut)">&times;</button></span></div>
+      <div id="qaChartBox" style="width:100%;height:420px;padding:8px 8px 0"></div>
+      <div id="qaChartMsg" style="padding:6px 16px 12px;font-size:11px;color:var(--dim)"></div></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click',e=>{if(e.target===ov)qaChartClose();});
+  }
+  _qaInjectStyle();
+  ov.style.display='flex';
+  _qaChartSym=sym;
+  document.getElementById('qaChartTitle').textContent=sym+' · Price';
+  document.addEventListener('keydown',_qaChartEsc);
+  qaChartLoad('D');
+}
+async function qaChartLoad(tf){
+  const box=document.getElementById('qaChartBox'),msg=document.getElementById('qaChartMsg');
+  const bD=document.getElementById('qaChartD'),bI=document.getElementById('qaChartI');
+  if(bD)bD.classList.toggle('on',tf==='D');if(bI)bI.classList.toggle('on',tf==='I');
+  if(!window.LightweightCharts){msg.textContent='Chart library not loaded — reload the page.';return;}
+  if(_qaChartObj){try{_qaChartObj.remove();}catch(e){}_qaChartObj=null;}
+  box.innerHTML='';msg.textContent='Loading…';
+  try{
+    let data;
+    if(tf==='D'){
+      const rows=await getJSON('/api/candles/'+encodeURIComponent(_qaChartSym)+'?days=90');
+      data=(rows||[]).map(r=>({time:r.date,open:+r.open,high:+r.high,low:+r.low,close:+r.close})).filter(d=>isFinite(d.close));
+    }else{
+      const rows=await getJSON('/api/intraday/'+encodeURIComponent(_qaChartSym)+'?days=1');
+      data=(rows||[]).map(r=>({time:Math.floor(new Date(String(r.ts).replace(' ','T')).getTime()/1000),
+        open:+r.open,high:+r.high,low:+r.low,close:+r.close})).filter(d=>isFinite(d.close)&&isFinite(d.time));
+    }
+    if(!data.length){msg.textContent='No '+(tf==='D'?'daily':'5m')+' data for '+_qaChartSym+'.';return;}
+    const mut=(getComputedStyle(document.body).getPropertyValue('--mut')||'#5a6b82').trim();
+    const c=LightweightCharts.createChart(box,{width:box.clientWidth,height:412,
+      layout:{background:{color:'transparent'},textColor:mut},
+      grid:{vertLines:{visible:false},horzLines:{color:'rgba(120,130,150,.12)'}},
+      timeScale:{timeVisible:tf==='I',borderVisible:false},rightPriceScale:{borderVisible:false}});
+    const s=c.addCandlestickSeries({upColor:'#0a9e63',downColor:'#dd3a4a',borderVisible:false,
+      wickUpColor:'#0a9e63',wickDownColor:'#dd3a4a'});
+    s.setData(data);c.timeScale().fitContent();_qaChartObj=c;
+    msg.textContent=(tf==='D'?'Daily 90d · raw_prices':'5m today · intraday_prices');
+  }catch(e){msg.textContent='Chart failed to load.';}
+}
+function qaChartClose(){
+  const ov=document.getElementById('qaChartOv');if(ov)ov.style.display='none';
+  if(_qaChartObj){try{_qaChartObj.remove();}catch(e){}_qaChartObj=null;}
+  document.removeEventListener('keydown',_qaChartEsc);
+}
+
 // -- Core utils --------------------------------------------------------------
 let AUTO=true,autoTimer=null;
 let MASTER_SIDE='all';                 // Master tab Long/Short toggle (cc_task #71)
@@ -2070,7 +2241,7 @@ function renderMaster(){
   const openPosTable=sortTbl('openpos',
     [["symbol","Symbol"],["entry_ts","Entry Time"],["days","Days"],["side","Side"],["entry_price","Entry"],["cmp","CMP"],["target","Target"],["stop_loss","SL"],["net_pnl","Net P&L"],["net_pnl_pct","Net P&L %"],["potential_left","Potential Left"],["day_pnl_pct","Day P&L %"],["sector_day","SEC D%"]],
     openRows,x=>`<tr>
-      <td class="sym"><span class="dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
+      <td class="sym"><span class="dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span><div style="margin-top:5px;display:block">${basketPill(x.basket)}</div></td>
       <td style="color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:11px">${fmtTs(x.entry_ts)}</td>
       <td style="text-align:center">${x.days}</td>
       <td><span class="badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></td>
@@ -2111,7 +2282,7 @@ function renderMaster(){
   // its own row so the eye lands on money first, not the timestamp. Bar tooltip drops the P&L dup.
   const openPosMobile=`<div class="mob-cards">${openRows.length?openRows.map(x=>`
     <div class="mob-card"><div class="mob-card-header"><span style="display:flex;align-items:baseline;gap:8px;min-width:0">
-        <span class="mob-sym dc-link" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
+        <span class="mob-sym dc-link" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
         <span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-size:10px;color:var(--dim);white-space:nowrap">${fmtTs(x.entry_ts)} · D${x.days}</span></span>
       <span class="mob-badge ${x.isShort?'b-short':'b-long'}">${x.side}</span></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">${basketPill(x.basket)}
@@ -2140,7 +2311,7 @@ function renderMaster(){
     return`<div style="display:flex;align-items:center;gap:20px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${accent};border-radius:5px;padding:14px 18px">
       <div style="width:210px;flex-shrink:0">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-          <span class="dc-link" style="font-size:15px;font-weight:700;letter-spacing:.04em" onclick="openDerivCockpit('${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
+          <span class="dc-link" style="font-size:15px;font-weight:700;letter-spacing:.04em" onclick="openQuickActions(event,'${x.symbol}','${x.side||''}',${Number(x.qty)||0},${Number(x.entry_price)||'null'},${Number(x.cmp)||'null'})">${x.symbol}</span>
           <span style="font-size:9px;font-weight:700;letter-spacing:.09em;padding:2px 6px;border-radius:3px;background:${badgeBg};color:${badgeFg}">${x.side}</span></div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
           ${basketPill(x.basket)}<span style="font-size:10px;color:var(--mut)">${fmtTs(x.entry_ts)}</span><span style="font-size:10px;color:var(--mut);font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums">D${x.days}</span></div></div>

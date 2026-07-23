@@ -79,6 +79,50 @@ def get_gvm(symbol: str):
     return r
 
 
+@router.get("/api/gvm/snapshot/{symbol}")
+def get_gvm_snapshot(symbol: str):
+    """cc#608: compact GVM snapshot for the Open-Positions quick-action "G" popout — GVM + G/V/M
+    pillars + verdict + punchline + 180d delta-GVM (gvm_history) + segment rank. A subset of the
+    full company report (never the whole thing). Read-only."""
+    sym = symbol.upper()
+    base = api_query("""SELECT symbol, company_name, segment, gvm_score, g_score, v_score, m_score,
+                               verdict, punchline, ROUND(price::numeric,2) AS price, market_cap
+                        FROM gvm_scores WHERE symbol=%s""", (sym,), single=True)
+    if not base:
+        raise HTTPException(404, f"{symbol} not found")
+    cur_gvm = base.get("gvm_score")
+    # 180d delta-GVM: the score ~6 months ago (nearest row in a ±20d window around T-180) vs today.
+    d = api_query("""SELECT gvm_score FROM gvm_history WHERE symbol=%s
+                     AND score_date BETWEEN CURRENT_DATE-200 AND CURRENT_DATE-160
+                     ORDER BY score_date DESC LIMIT 1""", (sym,), single=True)
+    base["dgvm_180"] = (round(float(cur_gvm) - float(d["gvm_score"]), 2)
+                        if (cur_gvm is not None and d and d.get("gvm_score") is not None) else None)
+    # segment rank by GVM (1 = best); rank = peers-with-higher-GVM + 1, out of segment total.
+    base["segment_rank"] = base["segment_total"] = None
+    if base.get("segment") and cur_gvm is not None:
+        rk = api_query("""SELECT (SELECT COUNT(*) FROM gvm_scores WHERE segment=%s AND gvm_score > %s)+1 AS rnk,
+                                 (SELECT COUNT(*) FROM gvm_scores WHERE segment=%s AND gvm_score IS NOT NULL) AS total""",
+                       (base["segment"], cur_gvm, base["segment"]), single=True)
+        if rk:
+            base["segment_rank"] = rk.get("rnk")
+            base["segment_total"] = rk.get("total")
+    return base
+
+
+@router.get("/api/candles/{symbol}")
+def get_candles(symbol: str, days: int = 90):
+    """cc#608: daily OHLC candles from raw_prices for the quick-action "C" chart popout (equity
+    symbols; the existing /api/v10/candles is index-only). Pairs with /api/intraday/{symbol} for
+    the 5m-today view. Read-only."""
+    days = min(max(days, 5), 365)
+    return api_query("""SELECT price_date::text AS date,
+                               ROUND(open::numeric,2)  AS open,  ROUND(high::numeric,2) AS high,
+                               ROUND(low::numeric,2)   AS low,   ROUND(close::numeric,2) AS close,
+                               volume
+                        FROM raw_prices WHERE symbol=%s AND price_date >= CURRENT_DATE - %s
+                        ORDER BY price_date ASC""", (symbol.upper(), days))
+
+
 @router.get("/api/gvm/top/{n}")
 def get_top(n: int, verdict: Optional[str] = None):
     n = min(max(n, 1), 100)
