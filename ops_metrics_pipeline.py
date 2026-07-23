@@ -1456,6 +1456,24 @@ def post_extraction_chain(cur, symbol, sector):
         log.warning(f"post_extraction_chain failed for {symbol}/{sector}: {e}")
 
 
+def _recompute_peer_benchmark(conn):
+    """cc#596: after an ops-metrics run completes, recompute the cc#593 peer-benchmark layer
+    (ops_peer_benchmark) so the GVM-card peer badges + the sector-aware screener reflect the latest
+    values — including the ratio-normalized + cc#594-enriched metrics once populated. This is the
+    OPS_METRICS_FRAMEWORK_V1 step-4 chain extended to the peer layer, run ONCE at the RUN level
+    (not inside per-company post_extraction_chain): peer stats are a whole-universe aggregation, so a
+    single rebuild per run is correct and far cheaper than a per-company one (~0.1s over ~1.3k rows).
+    Best-effort — a recompute failure never fails the ops-metrics run."""
+    try:
+        import ops_peer_benchmark
+        res = ops_peer_benchmark.rebuild(conn)
+        log.info(f"cc#596 peer-benchmark recompute: {res}")
+        return res
+    except Exception as e:
+        log.warning(f"cc#596 peer-benchmark recompute failed: {e}")
+        return {"error": str(e)[:200]}
+
+
 # ── 7. ENDPOINTS ─────────────────────────────────────────────────────────────────
 
 @router.get("/api/ops_metrics/registry")
@@ -1885,6 +1903,7 @@ def run_t1_refresh(conn=None):
                         "note": "T+1 processed reported companies but staged 0 doc_texts for CC"},
                        category="ops_metrics_pull")
             conn.commit()
+        summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
         return summary
     finally:
         if own:
@@ -1926,6 +1945,7 @@ def run_saturday_retry(conn=None):
                        "ok": ok, "failed": fail}
             _oplog(cur, "OPS_METRICS_SATURDAY_RETRY", summary)
             conn.commit()
+        summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
         return summary
     finally:
         if own:
@@ -1980,6 +2000,7 @@ def run_season_sweep(conn=None, dry_run=False):
             summary = {"stale_count": len(stale), "universe": len(universe), "ok": ok, "failed": fail}
             _oplog(cur, "OPS_METRICS_SEASON_SWEEP_DONE", summary)
             conn.commit()
+        summary["peer_benchmark"] = _recompute_peer_benchmark(conn)   # cc#596
         return summary
     finally:
         if own:
