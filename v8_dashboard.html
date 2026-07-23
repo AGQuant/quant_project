@@ -1691,10 +1691,11 @@ function openDerivCockpitTab(sym){
 // /api/gvm/snapshot mini-card). Works on desktop and PWA touch (40px targets). D preserves the full
 // current cockpit behaviour unchanged — it is now just behind the D button.
 let _qaCtx=null;
+// cc#620: N (Position News) dropped from the strip — news is covered by the Position News tab and the
+// R-button result-card fallback chain (structured -> polished -> raw), so a standalone N is redundant.
 const _QA_BTNS=[
   {k:'V',t:'Volume — relative volume & 3D/21D',   fn:s=>window.ScorrRCard?ScorrRCard.openV(s.sym):alert('Volume card unavailable')},
   {k:'R',t:'Results — latest result card',        fn:s=>window.ScorrRCard?ScorrRCard.open(s.sym):alert('Results card unavailable')},
-  {k:'N',t:'Position News',                        fn:s=>qaNews(s.sym)},
   {k:'D',t:'Derivative Cockpit (full panel)',      fn:s=>openDerivCockpit(s.sym,s.side,s.qty,s.entry,s.cmp)},
   {k:'C',t:'Chart',                                fn:s=>qaChart(s.sym)},
   {k:'G',t:'GVM Rating snapshot',                  fn:s=>qaGvm(s.sym)},
@@ -2889,43 +2890,20 @@ function _pnDayLabel(ts){
   return String(ist.getUTCDate()).padStart(2,'0')+' '+MON[ist.getUTCMonth()];
 }
 function renderPositionNews(d){
-  const groups=((d&&d.groups)||[]);
-  // cc#611 PART B: header shows the LIVE open-position count (d.open_positions), with items +
-  // symbols-with-news reported separately — not the old symbols-with-news masquerading as positions.
-  const _openN=(d&&d.open_positions!=null)?d.open_positions:((d&&d.symbols)||0);
-  const meta=`<div class="ptitle">Position News <span class="ct">${(d&&d.total!=null)?`${d.total} item${d.total===1?'':'s'} across ${d.symbols} symbol${d.symbols===1?'':'s'} · ${_openN} open position${_openN===1?'':'s'} (V8 + SmartGain)`:''}</span></div>`;
-  if(!groups.length)return meta+`<div class="empty">No news yet for the open book${_openN?` (${_openN} position${_openN===1?'':'s'})`:''} — the next fetch slot will populate it.</div>`;
-  // cc#611 D3: POSITION-WISE sections — each open symbol is a header (side/basket chip), its items
-  // beneath newest-first, sections ordered by most-recent item. side/basket come from the live open
-  // book (cache.paper). Each card: clean headline + polished summary (RAW marker only as fallback).
-  const _pnTs=s=>{const t=Date.parse(String(s||'').replace(' ','T'));return isNaN(t)?0:t;};
-  const posMap={};
-  ((cache.paper&&cache.paper.open_positions)||[]).forEach(p=>{if(p.symbol&&!posMap[p.symbol])posMap[p.symbol]=p;});
-  const secs=groups.map(g=>{
-    const items=(g.items||[]).slice().sort((a,b)=>_pnTs(b.published_at)-_pnTs(a.published_at));
-    return {g,items,newest:items.length?_pnTs(items[0].published_at):0};
-  }).sort((a,b)=>b.newest-a.newest);
-  let html=meta;
-  secs.forEach(({g,items})=>{
-    const p=posMap[g.symbol]||{};
-    const side=(p.side||'').toUpperCase();
-    const sideChip=side?`<span class="badge ${side==='SHORT'?'b-short':'b-long'}" style="font-size:9px">${side}</span>`:'';
-    const bChip=p.basket?basketPill(p.basket):(g.origin?`<span style="font-size:9px;font-weight:700;color:var(--dim)">${newsEsc(g.origin)}</span>`:'');
-    html+=`<div style="margin:18px 0 4px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line2);padding-bottom:5px">`+
-      `<span style="font-size:14px;font-weight:800;letter-spacing:.03em;color:var(--txt)">${newsEsc(g.symbol)}</span>${sideChip}${bChip}`+
-      `<span style="margin-left:auto;font-size:11px;color:var(--dim)">${items.length} item${items.length===1?'':'s'}</span></div>`;
-    items.forEach(it=>{
-      const ts=it.published_at, age=ts?newsAgo(ts):'';
-      const _summary=it.summary||it.body;
-      const _rawMark=(!it.polished&&!_summary)?`<span title="Raw headline — AI summary pending" style="font-size:9px;font-weight:700;letter-spacing:.04em;color:var(--dim);border:1px solid var(--line2);border-radius:5px;padding:0 5px">RAW</span>`:'';
-      html+=`<div style="padding:9px 0;border-bottom:1px solid var(--line)">`+
-        `<div style="font-size:13px;font-weight:700;color:var(--txt)">${newsEsc(it.headline||'')}</div>`+
-        (_summary?`<div style="font-size:12px;color:var(--mut);margin:3px 0 4px;line-height:1.5">${newsEsc(_summary)}</div>`:'')+
-        `<div style="font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center;flex-wrap:wrap">`+
-          `<span>${newsEsc(it.source||'')}</span>`+(age?`<span>· ${newsEsc(age)}</span>`:'')+_rawMark+
-        `</div></div>`;
-    });
-  });
+  // cc#620 RESULT_CARD_CONSISTENCY_V1: the Position News tab renders ONE shared result-card per open
+  // position (the SAME card the R button opens) via ScorrRCard.renderInline — strict priority chain:
+  // structured result (fresh quarter only) -> polished news -> raw one-liner. Supersedes the cc#611
+  // per-item feed. side/basket context still available via the shared card header + peer block.
+  const syms=(d&&d.open_symbols)||[];
+  const _openN=(d&&d.open_positions!=null)?d.open_positions:syms.length;
+  const meta=`<div class="ptitle">Position News <span class="ct">${_openN} open position${_openN===1?'':'s'} (V8 + SmartGain) · latest result or news per position</span></div>`;
+  if(!syms.length)return meta+`<div class="empty">No open positions.</div>`;
+  const cid=s=>'pncard-'+String(s).replace(/[^A-Za-z0-9]/g,'_');
+  let html=meta+`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:8px">`;
+  syms.forEach(s=>{html+=`<div id="${cid(s)}" style="border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel);box-shadow:var(--shadow)"><div class="rcard-body" style="color:var(--mut)">Loading ${newsEsc(s)}…</div></div>`;});
+  html+=`</div>`;
+  // populate each card async once the grid is in the DOM (shared renderer -> /api/results/card chain).
+  setTimeout(()=>{if(window.ScorrRCard&&ScorrRCard.renderInline)syms.forEach(s=>{const el=document.getElementById(cid(s));if(el)ScorrRCard.renderInline(el,s);});},0);
   return html;
 }
 

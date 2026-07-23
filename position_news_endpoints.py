@@ -45,10 +45,11 @@ def position_news_feed(request: Request):
                 conn.rollback()
             # PART B: live open-position count (V8 OPEN ∪ SmartGain) — independent of whether a symbol
             # has any news yet. This is the header number; the old code reported len(groups).
-            cur.execute("""SELECT COUNT(*) FROM (
+            cur.execute("""SELECT symbol FROM (
                 SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
-                UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL) p""")
-            open_positions = cur.fetchone()[0]
+                UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL) p ORDER BY symbol""")
+            open_syms = [r[0] for r in cur.fetchall()]
+            open_positions = len(open_syms)
             cur.execute("""
                 WITH pos AS (
                     SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
@@ -90,7 +91,12 @@ def position_news_feed(request: Request):
     # newest-active symbols first: biggest groups on top, then alphabetical
     ordered = sorted(groups.values(), key=lambda g: (-g["count"], g["symbol"]))
     total = sum(g["count"] for g in ordered)
-    return {"open_positions": open_positions, "symbols": len(ordered), "total": total, "groups": ordered}
+    # cc#620: symbols-with-news first (news recency), then the remaining open positions — the tab
+    # renders ONE shared result-card per open symbol via ScorrRCard.renderInline (priority chain).
+    news_syms = [g["symbol"] for g in ordered]
+    open_symbols = news_syms + [s for s in open_syms if s not in set(news_syms)]
+    return {"open_positions": open_positions, "open_symbols": open_symbols,
+            "symbols": len(ordered), "total": total, "groups": ordered}
 
 
 @router.on_event("startup")

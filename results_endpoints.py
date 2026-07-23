@@ -39,6 +39,47 @@ def _fq_label(period_end):
     return f"Q{q} FY{str(fy)[-2:]}"
 
 
+def _expected_quarter(today=None):
+    """cc#620: the LATEST quarter companies are currently reporting = the most recent COMPLETED
+    fiscal quarter-end (Mar/Jun/Sep/Dec) on or before today. A structured result card is 'fresh'
+    only if its label matches this (never show a stale-quarter card)."""
+    d = today or date.today()
+    ends = [date(d.year, 3, 31), date(d.year, 6, 30), date(d.year, 9, 30),
+            date(d.year, 12, 31), date(d.year - 1, 12, 31)]
+    prev = max(e for e in ends if e <= d)
+    return _fq_label(prev)
+
+
+def _card_quarter(text):
+    """cc#620: parse the leading 'Qn FYyy' quarter label from a result_analysis card (first line)."""
+    import re
+    m = re.match(r"\s*(Q[1-4]\s+FY\d{2})", text or "")
+    return m.group(1).strip() if m else None
+
+
+def _symbol_news(cur, sym):
+    """cc#620 fallback tiers: the most relevant position_news item for a symbol — PREFER one with a
+    polished_news match (url_hash -> raw_news -> polished_news, Intel-tab quality), else the newest
+    raw one-liner. Returns None if the symbol has no news."""
+    cur.execute("""
+        SELECT pn.headline, COALESCE(pol.full_summary, pn.summary) AS summary,
+               pn.source_name, pn.url,
+               (pol.full_summary IS NOT NULL) AS intel,
+               (COALESCE(pol.full_summary, pn.summary) IS NOT NULL) AS has_summary
+        FROM position_news pn
+        LEFT JOIN raw_news rn ON rn.url_hash = pn.url_hash
+        LEFT JOIN polished_news pol ON pol.raw_news_id = rn.id
+        WHERE pn.symbol = %s
+        ORDER BY (pol.full_summary IS NOT NULL) DESC,
+                 COALESCE(pn.published_at, pn.fetched_at) DESC NULLS LAST, pn.id DESC
+        LIMIT 1""", (sym,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    return {"headline": r[0], "summary": r[1], "source": r[2], "url": r[3],
+            "polished": bool(r[4]), "has_summary": bool(r[5])}
+
+
 def _conn():
     return psycopg2.connect(os.getenv("DATABASE_URL"))
 
@@ -159,21 +200,43 @@ async def results_card(symbol: str, generate: bool = False):
         er = cur.fetchone()
         today = date.today()
 
-        # Branch A: announced. cc#618 Section B CARD STATE MACHINE — Part 1 shows exactly ONE state,
-        # never stale: a card is "current" ONLY if its vintage (last_result_analysis_updated) is on/after
-        # the announcement (ex_date). A card that PREDATES the announcement is a pre-announcement/stale
-        # card and must NEVER render as current — it falls through to announced_no_analysis (pending,
-        # regenerating) until the auto-regen (Section B wire / T+1 / weekly sweep) refreshes it.
+        # cc#620 RESULT_CARD_CONSISTENCY_V1 — one strict content priority chain (used identically by
+        # the R button and the Position News tab):
+        #   TIER 1 structured : input_raw.result_analysis, shown ONLY if reported AND its quarter label
+        #                       == the expected latest quarter (never a stale-quarter card — the
+        #                       cc#618 Section B freshness flag: never show a quarter the data lacks).
+        #   TIER 2 polished   : the matched polished_news item (url_hash -> raw_news -> polished_news).
+        #   TIER 3 raw        : the RSS/Google feed one-liner with a RAW chip.
+        expected_q = _expected_quarter(today)
+        news = _symbol_news(cur, sym)
+
+        def _news_payload(base):
+            if news:
+                base.update({"news_summary": news["summary"], "news_headline": news["headline"],
+                             "news_source": news["source"], "news_url": news["url"],
+                             "news_polished": news["polished"]})
+            return _with_peer(base)
+
+        # Branch A: announced
         if er and er[0] is not None and er[0] <= today:
             cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))
             ra = cur.fetchone()
-            _current = ra and ra[0] and ra[1] is not None and ra[1] >= er[0]
-            if _current:
-                return _with_peer({"symbol": sym, "status": "announced", "ex_date": str(er[0]),
-                        "result_analysis": ra[0],
+            card = ra[0] if ra else None
+            card_q = _card_quarter(card) if card else None
+            # TIER 1: structured card only when its quarter matches the expected latest quarter.
+            if card and card_q and card_q == expected_q:
+                return _with_peer({"symbol": sym, "status": "announced", "tier": "structured",
+                        "ex_date": str(er[0]), "result_analysis": card, "card_quarter": card_q,
+                        "expected_quarter": expected_q,
                         "generated_at": str(ra[1]) if ra[1] else None, "gvm_verdict": gvm_verdict})
-            return _with_peer({"symbol": sym, "status": "announced_no_analysis", "ex_date": str(er[0]),
-                    "gvm_verdict": gvm_verdict})
+            # TIER 2/3: no fresh structured card -> matched polished, else raw one-liner.
+            if news and news["has_summary"]:
+                return _news_payload({"symbol": sym, "status": "announced", "ex_date": str(er[0]),
+                        "tier": "polished" if news["polished"] else "raw",
+                        "expected_quarter": expected_q, "card_quarter": card_q, "gvm_verdict": gvm_verdict})
+            return _news_payload({"symbol": sym, "status": "announced_no_analysis", "tier": "raw" if news else "pending",
+                    "ex_date": str(er[0]), "expected_quarter": expected_q,
+                    "card_quarter": card_q, "gvm_verdict": gvm_verdict})
 
         # Branch B (upcoming) / C (date_tbd): FY27 outlook — cached-only (cc#609: no generation).
         status = "upcoming" if (er and er[0] is not None) else "date_tbd"
@@ -182,10 +245,13 @@ async def results_card(symbol: str, generate: bool = False):
         cur.execute("SELECT fy27_outlook, last_fy27_outlook_updated FROM input_raw WHERE nse_code=%s", (sym,))
         fo = cur.fetchone()
         cached, cached_ts = (fo[0], fo[1]) if fo else (None, None)
-        return _with_peer({"symbol": sym, "status": status, "ex_date": ed,
+        # cc#620: not-yet-reported — no structured result. Carry the news fallback (tier 2/3) alongside
+        # the expected-date / FY27-outlook state so the shared card renders one coherent surface.
+        return _news_payload({"symbol": sym, "status": status, "ex_date": ed,
+                "tier": ("polished" if (news and news["polished"]) else ("raw" if news else "outlook")),
+                "expected_quarter": expected_q,
                 "fy27_outlook": cached if cached else None,
                 "generated_at": str(cached_ts) if cached_ts else None,
-                # cc#609: no cached outlook -> the card shows a "FY27 outlook due September" note
-                # (the batch is deferred to the Sep-2026 review), never a Generate button.
+                # cc#609: no cached outlook -> the card shows a "FY27 outlook due September" note.
                 "outlook_pending": (not cached),
                 "gvm_verdict": gvm_verdict})

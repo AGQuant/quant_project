@@ -1046,42 +1046,69 @@ RESULTS_CARD_JS = """
   }
 
   var _cur = null;
-  function render(d, generating){
-    var sym = _cur, status = (d && d.status) || 'date_tbd', pill, cls;
+  // cc#620: ONE shared card builder — used by the R-button modal AND the Position News tab (inline).
+  // opts.close=false omits the modal close button for inline use.
+  function cardHtml(d, sym, opts){
+    opts = opts || {};
+    var status = (d && d.status) || 'date_tbd', pill, cls;
     if (status === 'announced' || status === 'announced_no_analysis'){ pill='Announced'; cls='rcard-st-a'; }
     else if (status === 'upcoming'){ pill='Result due ' + fmtDate(d && d.ex_date); cls='rcard-st-u'; }
     else { pill='Date TBD'; cls='rcard-st-t'; }
     var h = '<div class=\"rcard-hd\"><div><div class=\"rcard-sym\">'+esc(sym)
       + (d && d.gvm_verdict ? '<span class=\"rcard-gvm\">GVM: '+esc(d.gvm_verdict)+'</span>' : '')
       + '</div><span class=\"rcard-status '+cls+'\">'+esc(pill)+'</span></div>'
-      + '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button></div>';
-    if (status === 'announced'){
-      h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)+'</div>';
-      h += '<div class=\"rcard-lbl\">Result analysis</div><div class=\"rcard-body\">'+esc(d.result_analysis||'')+'</div>';
-    } else if (status === 'announced_no_analysis'){
-      h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)+'</div>';
-      h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Analysis pending.</div>';
+      + (opts.close===false ? '' : '<button class=\"rcard-x\" aria-label=\"Close\">&times;</button>')+'</div>';
+    // cc#620 RESULT_CARD_CONSISTENCY_V1: strict content priority chain (tier).
+    var tier = (d && d.tier) || (status==='announced' ? 'structured' : (status==='announced_no_analysis' ? 'pending' : 'outlook'));
+    var RAW = '<span style=\"font-size:9px;font-weight:700;color:var(--mut,#667085);border:1px solid var(--line,#e2e7ee);border-radius:5px;padding:0 5px;margin-left:6px\">RAW</span>';
+    // date line
+    if (status === 'announced' || status === 'announced_no_analysis'){
+      h += '<div class=\"rcard-lbl\">Result date</div><div style=\"font-size:13px\">'+fmtDate(d.ex_date)
+        + (d && d.card_quarter ? ' &middot; '+esc(d.card_quarter) : '')+'</div>';
     } else {
       h += '<div class=\"rcard-lbl\">'+(status==='upcoming'?'Expected result':'Result date')+'</div>';
       h += '<div style=\"font-size:13px\">'+(status==='upcoming'?fmtDate(d.ex_date):'TBD')+'</div>';
+    }
+    // content by tier
+    if (tier === 'structured'){
+      h += '<div class=\"rcard-lbl\">Result analysis'+(d.card_quarter?' &middot; '+esc(d.card_quarter):'')+'</div>'
+        + '<div class=\"rcard-body\">'+esc(d.result_analysis||'')+'</div>';
+    } else if (tier === 'polished' || tier === 'raw'){
+      h += '<div class=\"rcard-lbl\">Latest news'+(tier==='raw'?RAW:'')+'</div>';
+      if (d && d.news_headline) h += '<div style=\"font-size:13px;font-weight:700;color:var(--txt,#1c2536)\">'+esc(d.news_headline)+'</div>';
+      if (d && d.news_summary) h += '<div class=\"rcard-body\">'+esc(d.news_summary)+'</div>';
+      if (d && d.news_source) h += '<div class=\"rcard-note\">'+esc(d.news_source)+'</div>';
+    } else if (tier === 'outlook'){
       h += '<div class=\"rcard-lbl\">Scorr View &middot; FY27 Outlook</div>';
       if (d && d.fy27_outlook){
         h += '<div class=\"rcard-body\">'+esc(d.fy27_outlook)+'</div>';
         h += '<div class=\"rcard-note\">Scorr-generated qualitative view from trailing fundamentals &mdash; not a broker estimate.</div>';
       } else {
-        // cc#609: app-side generation retired; the FY27 outlook batch is deferred to the Sep-2026
-        // review. No Generate button (the dead Anthropic path is gone) — a clean pending note instead.
         h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">FY27 outlook due September 2026.</div>';
       }
+    } else {
+      h += '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Analysis pending.</div>';
     }
     h += peerHtml(d && d.peer_comparison);   // cc#590: top-3-by-GVM QoQ peer block (all statuses)
     var foot = [];
     if (d && d.generated_at) foot.push('Generated '+fmtDate(d.generated_at));
     if (d && d.model) foot.push(esc(d.model));
     if (foot.length) h += '<div class=\"rcard-foot\"><span>'+foot.join('</span><span>')+'</span></div>';
-    box.innerHTML = h;
-    box.querySelector('.rcard-x').addEventListener('click', close);
-    var gb = box.querySelector('[data-gen]'); if (gb) gb.addEventListener('click', function(){ load(sym, true); });
+    return h;
+  }
+  function render(d, generating){
+    box.innerHTML = cardHtml(d, _cur, {close:true});
+    var x = box.querySelector('.rcard-x'); if (x) x.addEventListener('click', close);
+    var gb = box.querySelector('[data-gen]'); if (gb) gb.addEventListener('click', function(){ load(_cur, true); });
+  }
+  // cc#620: inline (non-modal) shared card for the Position News tab — same builder, same chain.
+  function renderInline(container, sym){
+    if (!container) return;
+    container.innerHTML = '<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Loading '+esc(sym)+'&hellip;</div>';
+    fetch('/api/results/card?symbol='+encodeURIComponent(sym))
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ container.innerHTML = cardHtml(d, sym, {close:false}); })
+      .catch(function(){ container.innerHTML='<div class=\"rcard-body\" style=\"color:var(--mut,#667085)\">Result card unavailable.</div>'; });
   }
   function renderMsg(msg){
     box.innerHTML = '<div class=\"rcard-hd\"><div class=\"rcard-sym\">'+esc(_cur)+'</div>'
@@ -1142,7 +1169,7 @@ RESULTS_CARD_JS = """
     var vp = e.target.closest('.vcard-pill');
     if (vp && vp.getAttribute('data-sym')){ e.preventDefault(); e.stopPropagation(); openV(vp.getAttribute('data-sym')); }
   });
-  window.ScorrRCard = { open: open, openV: openV,
+  window.ScorrRCard = { open: open, openV: openV, renderInline: renderInline,
     pill: function(sym){ return sym ? '<span class=\"rcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Results / Scorr View\">R</span>' : ''; },
     pillV: function(sym){ return sym ? '<span class=\"vcard-pill\" data-sym=\"'+esc(sym)+'\" title=\"Volume / Energy\">V</span>' : ''; } };
 })();
