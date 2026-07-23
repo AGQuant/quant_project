@@ -101,6 +101,9 @@ _ABSOLUTE_METRICS = {
     "bookings_units", "store_adds", "headcount_net_adds", "tcv_deal_wins", "bed_count",
     "bed_count_adds", "sip_inflows_cr", "throughput_mmt", "collections_cr", "test_volume_mn",
     "rooms_pipeline", "subscribers_net_adds", "car",
+    # cc#594 enriched absolutes — display value, no percentile (7118: benchmark the derived ratio,
+    # e.g. order_book_to_sales / book_to_bill, not the size-non-neutral absolute).
+    "order_book", "order_inflow", "cargo_volume_mt", "throughput_teu",
 }
 
 _DEFAULT_DIRECTION = "higher_better"
