@@ -200,14 +200,30 @@ def _announced_symbols(cur, since: date):
     return [r[0] for r in cur.fetchall()]
 
 
+def _regen_symbols(cur, since: date):
+    """cc#602 canonical unification: the regen candidate set = every CURRENT-SEASON announced company
+    (earnings_calendar status='reported', ex_date >= since). The flagged 'two formats behind one R
+    button' were all current-season reporters whose cards still served the 05-Jun Q4FY26 batch
+    (LICI/LAURUSLABS/Bandhan) — rebuilding this set onto the single build_card template fixes them.
+    Prior-season card-holders are deliberately NOT swept in (their cards are correct for the quarter
+    they last reported and re-dating ~500 of them would churn their vintage stamps for no gain)."""
+    return sorted(set(_announced_symbols(cur, since)))
+
+
 def regenerate(conn, since: date = None, min_quarter_end: date = None) -> dict:
-    """Regenerate result_analysis for every announced company whose fundamentals_history now carries
-    a quarter >= min_quarter_end. Idempotent; only writes when a card was built."""
+    """cc#602: rebuild result_analysis onto ONE canonical template (build_card) for every announced
+    company + every existing-card holder, on each name's LATEST available quarter — min_quarter_end
+    defaults to None so older-only names are REFORMATTED (not skipped), unifying the visual template.
+    A card is WRITTEN only when its text actually changes, so unchanged cards keep their original
+    last_result_analysis_updated (the visible 'Generated {date}' vintage stamp — founder rider). A
+    name with no fundamentals_history quarter builds nothing and keeps its existing card + date.
+    Auto-upgrades to a newer quarter as scrapes land: this SAME fn runs in the cc#596 post-T+1 chain,
+    so once a company's Q1FY27 fundamentals arrive its card rebuilds to Q1FY27 automatically. BFSI
+    mapping (banks: Revenue / Financing Margin %) is handled inside build_card."""
     since = since or date(2026, 6, 25)
-    min_quarter_end = min_quarter_end or date(2026, 6, 1)   # Q1FY27 (Jun-2026) or newer
-    written = skipped = 0
+    written = unchanged = skipped = 0
     with conn.cursor() as cur:
-        syms = _announced_symbols(cur, since)
+        syms = _regen_symbols(cur, since)
     for sym in syms:
         with conn.cursor() as cur:
             try:
@@ -215,15 +231,23 @@ def regenerate(conn, since: date = None, min_quarter_end: date = None) -> dict:
             except Exception as e:
                 log.warning(f"result_analysis build failed for {sym}: {e}")
                 card = None
-            if card:
-                cur.execute("""UPDATE input_raw SET result_analysis=%s, last_result_analysis_updated=CURRENT_DATE
-                               WHERE UPPER(nse_code)=%s""", (card, sym))
-                written += cur.rowcount
-            else:
+            if not card:
                 skipped += 1
+                conn.commit()
+                continue
+            cur.execute("SELECT result_analysis FROM input_raw WHERE UPPER(nse_code)=%s", (sym,))
+            row = cur.fetchone()
+            if row and row[0] == card:
+                unchanged += 1          # no content change -> preserve the original vintage stamp
+                conn.commit()
+                continue
+            cur.execute("""UPDATE input_raw SET result_analysis=%s, last_result_analysis_updated=CURRENT_DATE
+                           WHERE UPPER(nse_code)=%s""", (card, sym))
+            written += cur.rowcount
             conn.commit()
-    summary = {"announced": len(syms), "regenerated": written, "skipped_no_new_quarter": skipped,
-               "min_quarter_end": str(min_quarter_end)}
+    summary = {"candidates": len(syms), "regenerated": written, "unchanged": unchanged,
+               "skipped_no_fundamentals": skipped,
+               "min_quarter_end": (str(min_quarter_end) if min_quarter_end else "latest")}
     try:
         import json
         with conn.cursor() as cur:
@@ -265,14 +289,14 @@ async def _startup_regen():
             import fyers_feed
             conn = fyers_feed.get_db()
             try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT MAX(last_result_analysis_updated) FROM input_raw")
-                    latest = cur.fetchone()[0]
-                # regenerate once per day (self-healing: any logic fix propagates on the next deploy,
-                # and newly-scraped quarters are picked up); the daily T+1 hook covers ongoing refresh.
-                if latest is None or latest < date.today():
-                    log.info("cc#602: result_analysis not regenerated today — regenerating")
-                    regenerate(conn)
+                # cc#602 (canonical unification): run once per boot/deploy — the content-diff inside
+                # regenerate() only writes cards whose text actually changed, so a re-run is cheap and
+                # idempotent (no date churn, vintage stamps preserved). Running unconditionally on boot
+                # guarantees a logic/template fix propagates on THIS deploy instead of waiting a day
+                # (the old same-day guard skipped when today's batch had already bumped the max date).
+                # The daily T+1 hook (cc#596 chain) covers ongoing refresh as new quarters scrape in.
+                log.info("cc#602: startup canonical result_analysis regen")
+                regenerate(conn)
             finally:
                 conn.close()
         except Exception as e:
