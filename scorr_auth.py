@@ -18,7 +18,7 @@ PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/
 _SALT = "scorr2026"
 
 # Hardcoded password — change here to update.
-_PASSWORD = "20272028"
+_PASSWORD = "556700"
 
 
 def _js_str(s: str) -> str:
@@ -160,5 +160,4 @@ async def authdebug(request: Request):
         "all_cookie_names": list(request.cookies.keys()),
         "host": request.headers.get("host", ""),
         "x_forwarded_proto": request.headers.get("x-forwarded-proto", ""),
-        "user_agent": request.headers.get("user-agent", "")[:80],
     })
