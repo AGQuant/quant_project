@@ -117,6 +117,10 @@ def _trajectory(sym, segment, gvm_now, m_now):
     p0, p1, p6 = _traj_point(sym, segment, 0), _traj_point(sym, segment, 21), _traj_point(sym, segment, 126)
     med0, med1, med6 = _flt(p0.get("med")), _flt(p1.get("med")), _flt(p6.get("med"))
     return {
+        # cc#631: NOW values for the 3x3 matrix (sector = same segment-median basis as the deltas)
+        "gvm_now": round(gvm_now, 2) if gvm_now is not None else None,
+        "m_now": round(m_now, 2) if m_now is not None else None,
+        "sector_gvm_now": round(med0, 2) if med0 is not None else None,
         "gvm_d21": _dd(gvm_now, _flt(d21.get("gvm_score"))), "gvm_d126": _dd(gvm_now, _flt(d126.get("gvm_score"))),
         "m_d21": _dd(m_now, _flt(d21.get("m_score"))), "m_d126": _dd(m_now, _flt(d126.get("m_score"))),
         "sector_gvm_d21": _dd(med0, med1), "sector_gvm_d126": _dd(med0, med6),

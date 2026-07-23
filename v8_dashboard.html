@@ -1831,22 +1831,33 @@ async function qaGvm(sym){
 // 30d sparkline). Zero new data sources: /api/gvm/snapshot (gvm_scores + sector_ratings) +
 // /api/deriv-metrics (energy.volx / recent3d_vol_ratio / delivery{...,series}). Mobile-first sections.
 // cc#630: shared TRAJECTORY + performance heat-grid renderers (from the enriched /api/gvm/snapshot).
-function _trajCell(v){return v==null?'<span style="color:var(--dim)">--</span>':`<span style="color:${v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)'}">${v>0?'+':''}${v.toFixed(2)}</span>`;}
-function _trajRow(lbl,d1,d6,bf){return `<div style="display:flex;align-items:baseline;gap:8px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;padding:3px 0"><span style="flex:1;color:var(--mut)">${lbl}</span><span style="width:66px;text-align:right">Δ1M ${_trajCell(d1)}</span><span style="width:74px;text-align:right">Δ6M ${_trajCell(d6)}${(bf&&d6!=null)?'<span style="color:#F5B94A">*</span>':''}</span></div>`;}
+// cc#631: 3x3 tile matrix (rows GVM/Momentum/Sector GVM × cols Now/Δ1M/Δ6M) + large-font rank path.
+const _MONO="'IBM Plex Mono',ui-monospace,monospace";
+function _deltaGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.05)return'n';return (v>0?'g':'r')+(a<0.25?'1':a<0.6?'2':'3');}
+function _trajTint(g){return {g1:'rgba(47,212,139,.10)',g2:'rgba(47,212,139,.16)',g3:'rgba(47,212,139,.22)',r1:'rgba(255,92,108,.10)',r2:'rgba(255,92,108,.16)',r3:'rgba(255,92,108,.22)',n:'var(--surface2)'}[g]||'transparent';}
+function _trajValTile(v){return `<div style="flex:1;min-width:0;background:var(--surface2);border-radius:8px;height:44px;display:flex;align-items:center;justify-content:center;font-family:${_MONO};font-weight:700;font-size:13px;color:var(--txt)">${v==null?'--':Number(v).toFixed(2)}</div>`;}
+function _trajDeltaTile(v,bf){const col=v==null?'var(--dim)':v>0?'var(--grn)':v<0?'var(--red)':'var(--mut)';
+  return `<div style="flex:1;min-width:0;background:${_trajTint(_deltaGrade(v))};border-radius:8px;height:44px;display:flex;align-items:center;justify-content:center;font-family:${_MONO};font-weight:700;font-size:12.5px;color:${col}">${v==null?'--':(v>0?'+':'')+v.toFixed(2)}${(bf&&v!=null)?'<span style="color:#F5B94A;font-size:9px;vertical-align:top">*</span>':''}</div>`;}
 function trajHtml(t){
   if(!t)return'';
+  const rowLbl=a=>`<div style="width:86px;min-width:86px;font-size:11px;font-weight:700;color:var(--txt)">${a}</div>`;
+  const hdr=x=>`<div style="flex:1;text-align:center;font-size:9.5px;color:var(--dim);font-family:${_MONO}">${x}</div>`;
+  let h='<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 6px">Trajectory</div>';
+  h+=`<div style="display:flex;gap:6px;margin-bottom:5px"><div style="width:86px;min-width:86px"></div>${hdr('Now')}${hdr('Δ1M')}${hdr('Δ6M')}</div>`;
+  const row=(lbl,now,d1,d6)=>`<div style="display:flex;gap:6px;margin-bottom:6px;align-items:center">${rowLbl(lbl)}${_trajValTile(now)}${_trajDeltaTile(d1,false)}${_trajDeltaTile(d6,t.backfill_flag_6m)}</div>`;
+  h+=row('GVM',t.gvm_now,t.gvm_d21,t.gvm_d126);
+  h+=row('Momentum',t.m_now,t.m_d21,t.m_d126);
+  h+=row('Sector GVM',t.sector_gvm_now,t.sector_gvm_d21,t.sector_gvm_d126);
+  if(t.backfill_flag_6m)h+='<div style="font-size:9.5px;color:var(--dim);margin-top:2px">* 6M baseline partially backfilled</div>';
   const rn=t.rank_now,r1=t.rank_1m,r6=t.rank_6m,N=t.segment_n;
-  const imp=(rn!=null&&r6!=null)?(rn<r6):null, rc=imp===true?'var(--grn)':imp===false?'var(--red)':'var(--txt)';
-  let path=(rn!=null?('#'+rn):'--');
-  if(r1!=null)path+=' <span style="color:var(--dim)">&larr;</span> #'+r1;
-  if(r6!=null)path+=' <span style="color:var(--dim)">&larr;</span> #'+r6;
-  if(N)path+=' <span style="color:var(--dim)">of '+N+'</span>';
-  let h='<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 4px">Trajectory</div>';
-  h+=_trajRow('GVM',t.gvm_d21,t.gvm_d126,t.backfill_flag_6m);
-  h+=_trajRow('Momentum',t.m_d21,t.m_d126,t.backfill_flag_6m);
-  h+=_trajRow('Sector GVM',t.sector_gvm_d21,t.sector_gvm_d126,t.backfill_flag_6m);
-  h+=`<div style="display:flex;align-items:baseline;gap:8px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;padding:3px 0"><span style="flex:1;color:var(--mut)">Rank</span><span style="color:${rc};font-weight:700">${path}</span></div>`;
-  if(t.backfill_flag_6m)h+='<div style="font-size:9.5px;color:var(--dim);margin-top:3px">* 6M baseline partially backfilled</div>';
+  if(rn!=null){
+    const imp=(r6!=null)?(rn<r6):null, rc=imp===true?'var(--grn)':imp===false?'var(--red)':'var(--txt)';
+    let path=`<span style="color:${rc}">#${rn}</span>`;
+    if(r1!=null)path+=' <span style="color:var(--dim);font-size:15px">&larr;</span> #'+r1;
+    if(r6!=null)path+=' <span style="color:var(--dim);font-size:15px">&larr;</span> #'+r6;
+    h+='<div style="font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:13px 0 3px">Sector rank &middot; now &larr; 1M &larr; 6M</div>';
+    h+=`<div style="font-family:${_MONO};font-size:22px;font-weight:800">${path}${N?`<span style="font-size:12px;color:var(--mut);font-weight:600;margin-left:8px">of ${N}</span>`:''}</div>`;
+  }
   return h;
 }
 function _perfGrade(v){if(v==null)return null;const a=Math.abs(v);if(a<0.3)return'n';return (v>0?'g':'r')+(a<3?'1':a<10?'2':'3');}
