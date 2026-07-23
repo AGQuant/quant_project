@@ -116,36 +116,13 @@ def _fundamentals(cur, sym):
 
 
 async def _generate_outlook(sym, g, f):
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return None, {"error": "ANTHROPIC_API_KEY not set"}
-    prompt = (
-        f"You are a Scorr equity analyst writing a SHORT, qualitative FY27 outlook for {sym}, an "
-        f"Indian listed company, for retail investors.\n\n"
-        f"Use ONLY the trailing data below. Do NOT invent forward EPS, revenue, margins, or price "
-        f"targets. Give a grounded, qualitative view of the likely direction and the key things to "
-        f"watch — never a number you were not given.\n\n"
-        f"Scorr GVM model (0-10): GVM {g.get('gvm')}, Growth {g.get('g')}, Value {g.get('v')}, "
-        f"Momentum {g.get('m')}, verdict {g.get('verdict')}. 180-day GVM change: {g.get('dgvm_180')}.\n"
-        f"Trailing fundamentals (from filings): operating-profit growth {f.get('opg')}%, "
-        f"ROCE {f.get('roce')}%, operating margin {f.get('opm')}%, debt/equity {f.get('de')}, "
-        f"ROE {f.get('roe')}%.\n\n"
-        f"Write 3-4 plain sentences: (1) what the trailing quality/value/momentum picture implies, "
-        f"(2) the fundamental trend, (3) the single biggest thing to watch into FY27. "
-        f"Non-promotional. Output plain text only, no headings."
-    )
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": OUTLOOK_MODEL, "max_tokens": 400,
-                  "messages": [{"role": "user", "content": prompt}]},
-        )
-        r.raise_for_status()
-        body = r.json()
-        text = body["content"][0]["text"].strip()
-        return text, body.get("usage", {})
+    # cc#602 (23-Jul): app-side Anthropic generation is RETIRED and the key was depleted on 20-Jul
+    # (Max-only setup — generation moved CC-side). Firing api.anthropic.com here 400'd on every
+    # 'generate outlook' tap. Disabled: never call the dead API — return None with a clear reason so
+    # results_card falls back to the cached outlook. FY27 outlooks are authored CC-side now (same
+    # model as result_analysis); a CC-side generator can repopulate input_raw.fy27_outlook in future.
+    return None, {"error": "app-side outlook generation retired 20-Jul (Anthropic key depleted); "
+                           "FY27 outlooks are CC-authored now — showing cached"}
 
 
 @router.get("/api/results/card")

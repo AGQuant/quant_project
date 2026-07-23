@@ -95,11 +95,17 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
     latest_end = rows[0][0]
     if min_quarter_end and latest_end < min_quarter_end:
         return None
+    # BFSI metric mapping: banks/NBFCs report Revenue (not Sales) + Financing Margin % (not OPM %).
+    # Data-driven detection so it needs no external Industry lookup: a bank row has Revenue and no Sales.
+    lm = rows[0][1] or {}
+    is_bank = _num(lm.get("Sales")) is None and _num(lm.get("Revenue")) is not None
+    s_key = "Revenue" if is_bank else "Sales"
+    m_key = "Financing Margin %" if is_bank else "OPM %"
     def m(i, key):
         return _num((rows[i][1] or {}).get(key)) if i < len(rows) else None
-    sales, sales_p, sales_y = m(0, "Sales"), m(1, "Sales"), m(4, "Sales")
+    sales, sales_p, sales_y = m(0, s_key), m(1, s_key), m(4, s_key)
     pat, pat_p, pat_y = m(0, "Net Profit"), m(1, "Net Profit"), m(4, "Net Profit")
-    opm, opm_ly = m(0, "OPM %"), m(4, "OPM %")
+    opm, opm_ly = m(0, m_key), m(4, m_key)
     s_qoq, s_yoy = _pct(sales, sales_p), _pct(sales, sales_y)
     p_qoq, p_yoy = _pct(pat, pat_p), _pct(pat, pat_y)
 
@@ -126,7 +132,9 @@ def build_card(cur, symbol: str, min_quarter_end: date = None) -> Optional[str]:
             FROM q WHERE rn=1""", (segment,))
         ss, ps = [], []
         for _sym, latest, yoy in cur.fetchall():
-            sv = _pct(_num((latest or {}).get("Sales")), _num((yoy or {}).get("Sales")))
+            def _rev(d):   # Sales (non-bank) or Revenue (bank)
+                return _num((d or {}).get("Sales")) if _num((d or {}).get("Sales")) is not None else _num((d or {}).get("Revenue"))
+            sv = _pct(_rev(latest), _rev(yoy))
             pv = _pct(_num((latest or {}).get("Net Profit")), _num((yoy or {}).get("Net Profit")))
             if sv is not None:
                 ss.append(sv)
