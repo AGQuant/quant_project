@@ -1425,6 +1425,17 @@ function _dcInjectStyle(){
   #dcOv .pin{font-size:8.5px;padding:1px 6px;border-radius:4px}
   #dcOv .pin.mag{background:var(--c-blubg);color:var(--c-blu)} #dcOv .pin.nak{background:var(--c-ambbg);color:var(--c-amb)}
   #dcOv .foot{padding:12px 16px 18px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9px;color:var(--c-dim);text-align:center;line-height:1.6}
+  /* cc#621 Issue 2: hard single-screen WIDTH — no horizontal scroll at ~380px. Flex/grid children
+     default to min-width:auto and refuse to shrink below their content, so a long quadrant label /
+     basis chip / big number pushes the whole sheet wide. Force shrinkability + wrapping on the
+     value cells, and clip any residual overflow at the sheet edge (belt-and-suspenders). */
+  #dcOv .dc-sheet{overflow-x:hidden}
+  #dcOv .sec,#dcOv .hdr{max-width:100%}
+  #dcOv .oiwrap,#dcOv .basis,#dcOv .volgrid,#dcOv .lv,#dcOv .sym,#dcOv .navrow{max-width:100%}
+  #dcOv .oibox,#dcOv .quad,#dcOv .vtile,#dcOv .lvc,#dcOv .basis>*,#dcOv .sym>*{min-width:0}
+  #dcOv .vtile .big,#dcOv .quad .v,#dcOv .oibox .d,#dcOv .basis .v,#dcOv .basis .col,#dcOv .lvc .v{overflow-wrap:anywhere;word-break:break-word}
+  #dcOv .basis .chip,#dcOv .chip{flex-shrink:0}
+  #dcOv .sym .l h1{overflow-wrap:anywhere}
   #dcOv .dc-skel{height:64px;border-radius:12px;margin:12px 16px;background:linear-gradient(90deg,var(--c-panel) 25%,#16223c 37%,var(--c-panel) 63%);background-size:400% 100%;animation:dcsh 1.2s ease infinite}
   @keyframes dcsh{0%{background-position:100% 0}100%{background-position:-100% 0}}`;
   const st=document.createElement('style');st.id='dc-style';st.textContent=css;document.head.appendChild(st);
