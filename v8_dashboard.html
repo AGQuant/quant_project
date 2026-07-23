@@ -1710,19 +1710,19 @@ function openDerivCockpitTab(sym){
 let _qaCtx=null;
 // cc#620: N (Position News) dropped from the strip — news is covered by the Position News tab and the
 // R-button result-card fallback chain (structured -> polished -> raw), so a standalone N is redundant.
-// cc#626 item_4: names VERIFIED against the actual onclick handlers (not guessed) —
-//   V -> ScorrRCard.openV  = Volume/Energy card   (NOT "View detail")
-//   R -> ScorrRCard.open   = Results card
-//   D -> openDerivCockpit  = Derivative Cockpit
-//   C -> qaChart           = Price Chart
-//   G -> qaGvm             = GVM Rating snapshot
+// cc#627 CARD: the per-row cluster is now C-A-R-D (self-naming — every button opens a card), in
+// that order. Names VERIFIED against the actual onclick handlers. The old V (Volume) and G (GVM)
+// buttons are RETIRED — their content is merged into the new A (Analysis) panel.
+//   C -> qaChart            = Price Chart (cc#626 timeframes + pivot/fib)
+//   A -> qaAnalysis         = Analysis (GVM + sector rank/rating, Volume, Delivery)
+//   R -> ScorrRCard.open    = Result card
+//   D -> openDerivCockpit   = Derivative Cockpit
 // `n` = short label for the one-time mobile hint; `t` = full name (title + aria-label).
 const _QA_BTNS=[
-  {k:'V',n:'Volume', t:'Volume — relative volume & 3D/21D',   fn:s=>window.ScorrRCard?ScorrRCard.openV(s.sym):alert('Volume card unavailable')},
-  {k:'R',n:'Results',t:'Results — latest result card',        fn:s=>window.ScorrRCard?ScorrRCard.open(s.sym):alert('Results card unavailable')},
-  {k:'D',n:'Cockpit',t:'Derivative Cockpit (full panel)',     fn:s=>openDerivCockpit(s.sym,s.side,s.qty,s.entry,s.cmp)},
-  {k:'C',n:'Chart',  t:'Price Chart — equity daily & 5m',     fn:s=>qaChart(s.sym)},
-  {k:'G',n:'GVM',    t:'GVM Rating snapshot',                 fn:s=>qaGvm(s.sym)},
+  {k:'C',n:'Chart',    t:'Chart — price, timeframes, pivot/fib',            fn:s=>qaChart(s.sym)},
+  {k:'A',n:'Analysis', t:'Analysis — GVM + sector rank, volume, delivery',  fn:s=>qaAnalysis(s.sym)},
+  {k:'R',n:'Result',   t:'Result — latest result card',                     fn:s=>window.ScorrRCard?ScorrRCard.open(s.sym):alert('Result card unavailable')},
+  {k:'D',n:'Cockpit',  t:'Derivative Cockpit (full panel)',                 fn:s=>openDerivCockpit(s.sym,s.side,s.qty,s.entry,s.cmp)},
 ];
 function _qaInjectStyle(){
   if(document.getElementById('qa-style'))return;
@@ -1824,6 +1824,65 @@ async function qaGvm(sym){
           `<span style="display:block;color:var(--dim);font-size:10px;margin-top:2px">${newsEsc(d.segment||'')}</span></div></div>`+
       (d.punchline?`<div style="margin-top:12px;font-size:12px;color:var(--mut);line-height:1.5">${newsEsc(d.punchline)}</div>`:''));
   }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">GVM snapshot failed to load.</div>');}
+}
+
+// cc#627 A: merged Analysis panel — GVM (+ NEW sector rating/rank box), Volume (VolX + 3D/21D — the
+// tiles removed from the Deriv Cockpit in cc#624 now live here), Delivery (deliv% vs 21d avg + label +
+// 30d sparkline). Zero new data sources: /api/gvm/snapshot (gvm_scores + sector_ratings) +
+// /api/deriv-metrics (energy.volx / recent3d_vol_ratio / delivery{...,series}). Mobile-first sections.
+async function qaAnalysis(sym){
+  _qaModal('Analysis · '+sym,'GVM & sector · volume · delivery','<div class="empty">Loading…</div>');
+  try{
+    const [g,dm]=await Promise.all([
+      getJSON('/api/gvm/snapshot/'+encodeURIComponent(sym)).catch(()=>null),
+      getJSON('/api/deriv-metrics/'+encodeURIComponent(sym)).catch(()=>null)
+    ]);
+    const boxd=(inner)=>`<div style="background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:10px 12px">${inner}</div>`;
+    const secLbl=(t)=>`<div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:14px 0 6px">${t}</div>`;
+    let h='';
+    // (1) GVM ANALYSIS + sector rating/rank box
+    if(g){
+      const pill=(lbl,v)=>`<div style="flex:1;text-align:center;padding:8px;background:var(--surface2);border:1px solid var(--line2);border-radius:8px"><div style="font-size:10px;color:var(--dim);font-weight:700">${lbl}</div><div style="font-size:16px;font-weight:800;font-family:'Sora',sans-serif">${v==null?'--':Number(v).toFixed(2)}</div></div>`;
+      const dg=g.dgvm_180,dgs=(dg==null?'--':(dg>=0?'+':'')+Number(dg).toFixed(2));
+      const rank=(g.segment_rank!=null&&g.segment_total!=null)?('#'+g.segment_rank+' of '+g.segment_total):'--';
+      h+=secLbl('GVM Analysis');
+      h+=`<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px"><span style="font-size:26px;font-weight:800;font-family:'Sora',sans-serif">${g.gvm_score==null?'--':Number(g.gvm_score).toFixed(2)}</span><span style="font-size:12px;font-weight:700;color:var(--mut)">${newsEsc(g.verdict||'')}</span></div>`;
+      h+=`<div style="display:flex;gap:6px;margin-bottom:8px">${pill('Growth',g.g_score)}${pill('Value',g.v_score)}${pill('Momentum',g.m_score)}</div>`;
+      h+=boxd(`<div style="display:flex;gap:10px;font-size:12px">`+
+        `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Segment</span><br><b style="word-break:break-word">${newsEsc(g.segment||'--')}</b></div>`+
+        `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Sector rating</span><br><b style="font-size:14px">${g.sector_rating==null?'--':Number(g.sector_rating).toFixed(2)}</b> <span style="color:var(--dim);font-size:10px">${newsEsc(g.sector_verdict||'')}</span></div>`+
+        `<div style="flex:1;min-width:0"><span style="color:var(--dim)">Rank in segment</span><br><b style="font-size:14px">${rank}</b></div></div>`+
+        `<div style="color:var(--dim);font-size:11px;margin-top:6px">180d Δ GVM ${dgs}</div>`);
+    }
+    // (2) VOLUME — VolX + 3D/21D participation (cc#624 removed these from the cockpit; they live here now)
+    const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
+    const vx=E.volx,r3=E.recent3d_vol_ratio;
+    h+=secLbl('Volume');
+    if(vx==null&&r3==null){ h+=boxd('<span style="color:var(--mut);font-size:12px">No volume data.</span>'); }
+    else{
+      const vtile=(cap,val,sub)=>`<div style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--line2);border-radius:8px;padding:10px"><div style="font-size:10px;color:var(--dim);font-weight:700">${cap}</div><div style="font-size:22px;font-weight:800;font-family:'Sora',sans-serif;color:${val!=null&&val>=1?'var(--grn)':'var(--txt)'}">${val==null?'--':Number(val).toFixed(1)}&times;</div><div style="font-size:10px;color:var(--dim);margin-top:2px">${sub}</div></div>`;
+      h+=`<div style="display:flex;gap:6px">${vtile('Rel Volume · VolX',vx,'vs 21-day avg'+(E.volx_asof?(' · '+newsEsc(E.volx_asof)):''))}${vtile('Vol 3D / 21D',r3,newsEsc(M.recent3d_vol_ratio||(r3==null?'--':(r3>=1?'participation rising':'participation drying'))))}</div>`;
+    }
+    // (3) DELIVERY — deliv% vs own 21d avg + conviction/churn + 30d sparkline
+    const dv=E.delivery||{};
+    h+=secLbl('Delivery');
+    if(dv.deliv_pct==null){ h+=boxd('<span style="color:var(--mut);font-size:12px">No delivery data yet.</span>'); }
+    else{
+      const lblc=dv.label==='conviction'?'var(--grn)':dv.label==='churn'?'var(--red)':'var(--mut)';
+      const lblt=dv.label?dv.label.toUpperCase():'NEUTRAL';
+      h+=boxd(`<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-size:22px;font-weight:800;font-family:'Sora',sans-serif">${Number(dv.deliv_pct).toFixed(1)}%</span><span style="font-size:11px;color:var(--dim)">vs 21d avg ${dv.avg21==null?'--':Number(dv.avg21).toFixed(1)}%${dv.ratio!=null?(' · '+Number(dv.ratio).toFixed(2)+'x'):''}</span><span style="margin-left:auto;font-size:10px;font-weight:800;color:${lblc}">${lblt}</span></div>`+_qaSpark(dv.series||[]));
+    }
+    _qaSetBody(h||'<div class="empty">No analysis data for '+newsEsc(sym)+'.</div>');
+  }catch(e){_qaSetBody('<div class="empty" style="color:var(--red)">Analysis failed to load.</div>');}
+}
+// cc#627: compact 30d deliv% sparkline (SVG, theme cyan). <2 points -> omitted.
+function _qaSpark(series){
+  const pts=(series||[]).map(p=>p.deliv_pct).filter(v=>v!=null);
+  if(pts.length<2)return '';
+  const w=280,H=34,lo=Math.min.apply(null,pts),hi=Math.max.apply(null,pts),rng=(hi-lo)||1;
+  const xs=i=>i/(pts.length-1)*w, ys=v=>H-3-((v-lo)/rng)*(H-8);
+  const line=pts.map((v,i)=>xs(i).toFixed(1)+','+ys(v).toFixed(1)).join(' ');
+  return `<svg viewBox="0 0 ${w} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;margin-top:8px;display:block"><polyline points="${line}" fill="none" stroke="var(--cyan,#3aa0ff)" stroke-width="1.5"/></svg>`;
 }
 
 // cc#626 item_2: timeframe + pivot/fib overlays. Overlays reuse the GVM chart's data source

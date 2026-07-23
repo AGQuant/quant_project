@@ -106,6 +106,15 @@ def get_gvm_snapshot(symbol: str):
         if rk:
             base["segment_rank"] = rk.get("rnk")
             base["segment_total"] = rk.get("total")
+    # cc#627: sector RATING box — the segment's mcap-weighted GVM + verdict (sector_ratings, existing
+    # table; zero new data source) so the Analysis panel can show "segment · rating · rank".
+    base["sector_rating"] = base["sector_verdict"] = None
+    if base.get("segment"):
+        sr = api_query("SELECT ROUND(mcap_weighted_gvm::numeric,2) AS r, verdict FROM sector_ratings WHERE segment=%s",
+                       (base["segment"],), single=True)
+        if sr:
+            base["sector_rating"] = sr.get("r")
+            base["sector_verdict"] = sr.get("verdict")
     return base
 
 
