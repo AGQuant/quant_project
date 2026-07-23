@@ -138,12 +138,15 @@ def reconcile(conn, days: int = DISCOVERY_DAYS, apply: bool = True) -> dict:
                 INSERT INTO earnings_calendar
                     (company_name, ticker, ex_date, event_type, status, verified, first_seen,
                      last_updated, reschedule_log)
-                VALUES (%s,%s,%s,'Quarterly Result','reported',FALSE,NOW(),NOW(),%s)
+                VALUES (%s,%s,%s,'Quarterly Result','reported',FALSE,NOW(),NOW(),
+                        jsonb_build_array(jsonb_build_object('src','cc#602','ts',NOW()::text,'note',%s)))
                 ON CONFLICT (ticker, ex_date) DO UPDATE SET
                     status='reported', last_updated=NOW(),
-                    reschedule_log=COALESCE(earnings_calendar.reschedule_log,'')||' | cc#602 news-confirmed reported'
+                    reschedule_log=COALESCE(earnings_calendar.reschedule_log,'[]'::jsonb)
+                        || jsonb_build_array(jsonb_build_object('src','cc#602','ts',NOW()::text,
+                                                                'note','news-confirmed reported'))
                 RETURNING (xmax=0) AS inserted
-            """, (company, sym, ex_date, f"cc#602 result_corner: news-discovered ({info['headline']})"))
+            """, (company, sym, ex_date, f"news-discovered ({info['headline']})"))
             inserted = cur.fetchone()[0]
             if inserted:
                 added += 1
