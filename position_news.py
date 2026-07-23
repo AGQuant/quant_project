@@ -20,6 +20,7 @@ verbatim from news_fetcher so we stay under Google News' datacenter-IP limit.
 """
 
 import os
+import re
 import time
 import random
 import logging
@@ -27,6 +28,17 @@ from datetime import datetime, timedelta, date
 
 import psycopg
 import news_fetcher as nf
+import news_tagger   # cc#611 D1: per-stock alias/code identity + is_primary() relevance match
+
+# cc#611 D2: quote/price-page garbage — NOT news. Broker "share price / stock price / live NSE"
+# landing pages (Upstox, Groww, 5paisa, Angel One, Tickertape, …) leak into a Google News company
+# query; drop them by headline pattern OR source so only genuine articles survive.
+_JUNK_TITLE = re.compile(
+    r'(share\s*price|stock\s*price|price\s*(?:&|and)\s*chart|live\s*(?:nse|bse)\b|'
+    r'share\s*price\s*(?:live|today|target)|stock\s*quote|/\s*chart|price\s*target\b)', re.I)
+_JUNK_SOURCE = re.compile(
+    r'(upstox|groww|angel\s*one|angelone|5paisa|tickertape|moneyworks4me|trendlyne|'
+    r'stockedge|equitymaster\s*quote|screener\.in)', re.I)
 
 log = logging.getLogger("position_news")
 
@@ -145,11 +157,18 @@ def fetch_position_news(conn=None):
 
         names = _name_map(conn, list(symbols.keys()))
         parsed = dup_skipped = inserted = http_429 = http_other = empty = 0
+        alias_filtered = junk_filtered = 0
         consec_429 = 0
         aborted = False
 
         for sym, origin in symbols.items():
             query = names.get(sym) or sym
+            # cc#611 D1: per-stock alias/code identity — the SAME matcher news_fetcher uses at ingest.
+            try:
+                pats = news_tagger.headline_identity(conn, sym)
+            except Exception as e:
+                log.warning(f"headline_identity {sym}: {e}")
+                pats = None
             entries, status, bozo, retry_after = nf._fetch_feed(nf._google_news_url(query), agent=nf.BROWSER_UA)
             if status == 429:
                 http_429 += 1
@@ -170,13 +189,14 @@ def fetch_position_news(conn=None):
                 elif not entries:
                     empty += 1
                 else:
-                    p, d, i = _store(conn, sym, origin, entries)
+                    p, d, i, a, j = _store(conn, sym, origin, entries, pats)
                     parsed += p; dup_skipped += d; inserted += i
+                    alias_filtered += a; junk_filtered += j
             time.sleep(random.uniform(nf.COMPANY_SLEEP_MIN, nf.COMPANY_SLEEP_MAX))
 
         stats = {"symbols_count": len(symbols), "parsed": parsed, "dup_skipped": dup_skipped,
-                 "inserted": inserted, "http_429": http_429, "http_other": http_other,
-                 "empty": empty, "aborted": aborted}
+                 "inserted": inserted, "alias_filtered": alias_filtered, "junk_filtered": junk_filtered,
+                 "http_429": http_429, "http_other": http_other, "empty": empty, "aborted": aborted}
         nf._write_ops_log(conn, "news_fetch", "fetch_position_news", stats)
         log.info(f"fetch_position_news: {stats}")
         return {"ok": True, **stats}
@@ -188,16 +208,30 @@ def fetch_position_news(conn=None):
             conn.close()
 
 
-def _store(conn, symbol, origin, entries):
-    """Insert up to PER_SYMBOL_MAX entries for one symbol. Dedup within (symbol,url_hash)
-    only. NO quality gate. Returns (parsed, dup_skipped, inserted)."""
-    parsed = dup_skipped = inserted = 0
+def _store(conn, symbol, origin, entries, pats=None):
+    """cc#611: insert up to PER_SYMBOL_MAX entries that PASS two gates — (D2) not a quote/price-page
+    junk title/source, and (D1) the headline+desc actually NAME this stock per news_tagger.is_primary
+    against its per-stock alias identity `pats`. Strict: if pats is empty/None we do NOT store (an
+    unverifiable attribution on a live position is the dangerous case the founder flagged). Dedup
+    within (symbol,url_hash). Returns (parsed, dup_skipped, inserted, alias_filtered, junk_filtered)."""
+    parsed = dup_skipped = inserted = alias_filtered = junk_filtered = 0
     seen = set()
     with conn.cursor() as cur:
-        for e in entries[:PER_SYMBOL_MAX]:
+        for e in entries:
+            if inserted >= PER_SYMBOL_MAX:
+                break
             link = (e.get("link") or "").strip()
             headline, source = _split_title(e.get("title") or "")
             if not link or not headline:
+                continue
+            # D2: drop broker quote/price landing pages — not news
+            if _JUNK_TITLE.search(headline) or (source and _JUNK_SOURCE.search(source)):
+                junk_filtered += 1
+                continue
+            # D1: keep ONLY entries whose text names this exact stock (same gate as news_fetcher)
+            desc = nf._clean(e.get("summary") or e.get("description") or "")
+            if not (pats and news_tagger.is_primary(pats, headline + " . " + desc)):
+                alias_filtered += 1
                 continue
             h = nf._md5(link)
             if h in seen:
@@ -214,7 +248,7 @@ def _store(conn, symbol, origin, entries):
             else:
                 dup_skipped += 1
     conn.commit()
-    return parsed, dup_skipped, inserted
+    return parsed, dup_skipped, inserted, alias_filtered, junk_filtered
 
 
 def fetch_and_alert(conn=None):
