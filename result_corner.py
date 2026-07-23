@@ -209,7 +209,17 @@ def run_daily_verify(conn=None) -> dict:
     try:
         v = verify(conn)
         r = reconcile(conn, apply=True)
-        return {"verify": v, "reconcile": r}
+        # cc#618 Section B AUTO-WIRE: newly-reconciled announced names go STRAIGHT into result_analysis
+        # regeneration (canonical build_card) — the verify job detected them, now it also regenerates,
+        # so no manual batches. build_card upgrades to the latest quarter as fundamentals land (the
+        # cc#596 T+1 chain calls the same fn). Best-effort — a regen failure never fails the verify.
+        ra = None
+        try:
+            import result_analysis_gen
+            ra = result_analysis_gen.regenerate(conn)
+        except Exception as e:
+            log.warning(f"result_corner result_analysis regen wire: {e}")
+        return {"verify": v, "reconcile": r, "result_analysis": ra}
     finally:
         if own:
             conn.close()

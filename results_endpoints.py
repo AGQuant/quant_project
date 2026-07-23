@@ -159,11 +159,16 @@ async def results_card(symbol: str, generate: bool = False):
         er = cur.fetchone()
         today = date.today()
 
-        # Branch A: announced
+        # Branch A: announced. cc#618 Section B CARD STATE MACHINE — Part 1 shows exactly ONE state,
+        # never stale: a card is "current" ONLY if its vintage (last_result_analysis_updated) is on/after
+        # the announcement (ex_date). A card that PREDATES the announcement is a pre-announcement/stale
+        # card and must NEVER render as current — it falls through to announced_no_analysis (pending,
+        # regenerating) until the auto-regen (Section B wire / T+1 / weekly sweep) refreshes it.
         if er and er[0] is not None and er[0] <= today:
             cur.execute("SELECT result_analysis, last_result_analysis_updated FROM input_raw WHERE nse_code=%s", (sym,))
             ra = cur.fetchone()
-            if ra and ra[0]:
+            _current = ra and ra[0] and ra[1] is not None and ra[1] >= er[0]
+            if _current:
                 return _with_peer({"symbol": sym, "status": "announced", "ex_date": str(er[0]),
                         "result_analysis": ra[0],
                         "generated_at": str(ra[1]) if ra[1] else None, "gvm_verdict": gvm_verdict})

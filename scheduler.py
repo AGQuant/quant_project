@@ -2230,6 +2230,30 @@ def _bg_result_corner_verify():
         log.error(f"_bg_result_corner_verify: {e}")
     return None
 
+_result_analysis_sweep_ran_on = None   # cc#618 Section B: Sunday full-season completion sweep day-lock
+
+def _bg_result_analysis_weekly_sweep():
+    """cc#618 Section B weekly catch-all: Sunday ~09:00 IST full-season re-check of announced-vs-analysis
+    across the whole universe — regenerate any leftovers the daily T+1 auto-wire missed (canonical
+    build_card, latest-quarter, content-diff so unchanged cards keep their vintage). Result coverage =
+    daily auto-regen + this weekly sweep = zero manual batches. Day-locked."""
+    global _result_analysis_sweep_ran_on
+    now = datetime.now(IST)
+    if not (now.weekday() == 6 and now.hour == 9 and now.minute < 15):
+        return _SKIPPED
+    if _result_analysis_sweep_ran_on == now.date():
+        return _SKIPPED
+    _result_analysis_sweep_ran_on = now.date()
+    try:
+        import result_analysis_gen
+        from datetime import timedelta as _td
+        with _conn() as conn:
+            res = result_analysis_gen.regenerate(conn, since=now.date() - _td(days=120))
+        log.info(f"_bg_result_analysis_weekly_sweep: {res}")
+    except Exception as e:
+        log.error(f"_bg_result_analysis_weekly_sweep: {e}")
+    return None
+
 
 _shareholding_q_running = False
 _shareholding_q_ran_on = None   # date of the last same-day dispatch (day-lock: 1 attempt/day in-window)
@@ -2687,6 +2711,7 @@ async def _scheduler_loop():
         _spawn(_bg_ops_metrics_saturday)       # cc#524: Saturday 10:00 IST scoped retry (day-locked inside)
         _spawn(_bg_ops_metrics_season_sweep)   # cc#524: Sep/Dec/Mar/Jun 1st 10:00 IST bulk sweep (month-locked inside)
         _spawn(_bg_result_corner_verify)       # cc#602: daily ~08:15 IST news-vs-calendar result verify + reconcile (self-gated)
+        _spawn(_bg_result_analysis_weekly_sweep)  # cc#618 Section B: Sunday ~09:00 IST full-season result_analysis catch-all (self-gated)
         _spawn(_bg_engine_watchdog)            # cc#599: daily ~08:45 IST engine watchdog outcome audit (self-gated)
         if _is_market_hours(now) and _is_trading_day(today) and m % 15 == 0:
             _spawn(_bg_watchdog_market)         # cc#618 Section D: 15-min market-hours writer-tick freshness
