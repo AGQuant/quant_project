@@ -820,8 +820,8 @@ const TAB_ORDER=[0,1,2,4,5,7,8,9,11,12,13,14,15];   // cc#447: OH-OL (17) tab re
 // no TBD remains. Live WR (trade log) stays computed live from closed paper trades, unchanged.
 const BASKET_INFO={
   buy_reversal:{
-    label:"Buy Reversal V5",side:"BUY",version:"V5",
-    thesis:"S1-touch bounce with a strong larger frame. A stock dipped to touch its pivot S1 support in the last 4 trading days (or today's live session low), while its weekly frame is genuinely strong (TRUE weekly RSI>=70) and daily momentum has just turned up. Cheap gates (mom_2d, week_return, monthly RSI band, sector strength, month_return cap) run on the whole universe; the heavy true_weekly_rsi stage only evaluates the cheap-gate survivors. Replaces the V3 inverse-sandwich (cc#502, 18-Jul-2026). Fixed +/-3.0% exits (1:1), replacing the old R1-target/mirror-stop mechanism.",
+    label:"Buy Reversal V6",side:"BUY",version:"V6",
+    thesis:"S1-touch bounce with a strong larger frame and a green day. A stock dipped to touch its pivot S1 support in the last 4 trading days (or today's live session low), its monthly frame is strong (RSI 60-90) and today's change has turned positive. V6 (cc#606, 23-Jul-2026) removes the heavy TRUE-weekly-RSI>=70 stage — structurally empty with the S1-dip in this regime — and replaces it with day_1d>0 strict, so all 7 gates are now cheap (no per-symbol heavy stage). Replaces V5/the V3 inverse-sandwich. Fixed +/-3.0% exits (1:1), frozen at entry.",
     filters:[
       {m:"s1_touch",c:"prior-4-day low <= S1  OR  today's live day_low <= S1",dyn:false},
       {m:"mom_2d",c:">= -0.5%",dyn:false},
@@ -829,9 +829,9 @@ const BASKET_INFO={
       {m:"rsi_month",c:"60 - 90",dyn:false},
       {m:"sector_week",c:"> 0  (strict)",dyn:false},
       {m:"month_return",c:"< 5.0%",dyn:false},
-      {m:"true_weekly_rsi",c:">= 70  (FINAL heavy stage · TRUE calendar weekly RSI-14, not the synthetic)",dyn:false},
+      {m:"day_1d",c:"> 0  (strict · replaces V5's true_weekly_rsi>=70, cc#606)",dyn:false},
     ],
-    gateType:"strict AND -- all 7 must pass · no regime · standard slot pool",
+    gateType:"strict AND -- all 7 must pass · all cheap (no heavy stage) · no regime · standard slot pool",
     target:"+3.0% fixed",stop:"-3.0% fixed (true 1:1)",
     pivotEntry:"Entry: live 5-min CMP on first qualification. Target +3.0% / stop -3.0%, both FIXED at entry (never move). Max hold 15 trading days (EOD sweep).",
     sigs_eod:"~195/yr (978 total 5yr)",wr_eod:61.6,ev_eod:0.69,
@@ -931,7 +931,7 @@ const MATRIX_ROWS=[
   {label:"50-DMA distance", map:{buy_momentum:"dma_50_score"}},
   {label:"200-DMA distance",map:{buy_momentum:"dma_200",sell_reversal:"dma_200",sell_momentum:"dma_200"}},
   {sec:"RSI & momentum"},
-  {label:"Weekly RSI (FINAL heavy)",map:{buy_reversal:"true_weekly_rsi",buy_momentum:"true_weekly_rsi",sell_reversal:"true_weekly_rsi",sell_momentum:"true_weekly_rsi"}},
+  {label:"Weekly RSI (FINAL heavy)",map:{buy_momentum:"true_weekly_rsi",sell_reversal:"true_weekly_rsi",sell_momentum:"true_weekly_rsi"}},
   {label:"Monthly RSI",     map:{buy_reversal:"rsi_month",buy_momentum:"rsi_month",sell_momentum:"rsi_month"}},
   {label:"2-day momentum",  map:{buy_reversal:"mom_2d",buy_momentum:"mom_2d",sell_reversal:"mom_2d",sell_momentum:"mom_2d"}},
   {label:"Hourly momentum", map:{buy_momentum:"hourly_pct"}},
@@ -941,7 +941,7 @@ const MATRIX_ROWS=[
   {label:"Sector (week)",   map:{buy_reversal:"sector_week",buy_momentum:"sector_week",sell_reversal:"sector_week",sell_momentum:"sector_week"}},
   {label:"Sector (month)",  map:{buy_momentum:"sector_month"}},
   {label:"52-week index",   map:{buy_momentum:"week_index_52",sell_reversal:"week_index_52",sell_momentum:"week_index_52"}},
-  {label:"Day change (1D)", map:{buy_momentum:"day_1d",sell_reversal:"day_1d"}},
+  {label:"Day change (1D)", map:{buy_reversal:"day_1d",buy_momentum:"day_1d",sell_reversal:"day_1d"}},
   {sec:"Pivot geometry"},
   {label:"Pivot position",  map:{sell_reversal:"cmp_lt_pp",sell_momentum:"cmp_lt_pp"}},
   {label:"Support / rejection trigger",map:{buy_reversal:"s1_touch",sell_reversal:["r1_touch","room"],sell_momentum:"s2_clearance"}},

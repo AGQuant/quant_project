@@ -68,14 +68,16 @@ FILTER_CONFIG = {
     # -- wRSI is NEVER the shared synthetic v8_metrics.rsi_weekly (cc#353: ~16pt off), always the
     # basket-call-local _true_weekly_rsi().
     "buy_reversal": {
-        # BUY_REVERSAL_V5 (replaces the V3 inverse-sandwich). Live/pivot gates NOT shown here:
-        # S1-touch (prior-4-day raw_prices low OR today's live day_low <= S1) and the FINAL heavy
-        # stage true_weekly_rsi>=70 -- both handler-enforced in _write_buy_reversal_v5_qualified.
+        # BUY_REVERSAL_V6 (cc#606/session_log 7828, supersedes V5). The heavy true_weekly_rsi>=70
+        # FINAL stage is REMOVED from this basket; day_1d>0 strict replaces it as the 7th gate.
+        # Only S1-touch (prior-4-day raw_prices low OR today's live day_low <= S1) stays
+        # handler-enforced (not a v8_metrics column); the other 6 are shown here.
         "mom_2d":       [-0.5, None],
         "week_return":  [-2.0, None],
         "rsi_month":    [60.0, 90.0],
         "sector_week":  [0.0,  None],   # engine enforces STRICT >0
         "month_return": [None, 5.0],
+        "day_1d":       [0.0,  None],   # cc#606: engine enforces STRICT >0
     },
     "buy_momentum": {
         # BUY_MOMENTUM_V3: TWO independent layers, both handler-enforced. The 9 bands below are
