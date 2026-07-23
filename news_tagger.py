@@ -56,6 +56,15 @@ _ALIAS = {
     "TATAMOTORS": ["tata motors"],
     "BAJFINANCE": ["bajaj finance"],
     "BAJAJFINSV": ["bajaj finserv"],
+    # cc#611 D1: generic/truncated financial names whose derived core is a shared sector phrase
+    # (screener_raw truncates 'Life Insurance Corporation of India' -> 'Life Insurance', which then
+    # matched EVERY 'X Life Insurance'). Pin to the DISTINCTIVE phrase (or code-only) so HDFC Life /
+    # SBI Life / ICICI Pru / Canara HSBC Life never bleed onto LICI, and HDFC AMC never onto HDFCBANK.
+    "LICI": ["life insurance corporation"],
+    "HDFCLIFE": ["hdfc life"],
+    "SBILIFE": ["sbi life"],
+    "ICICIPRULI": ["icici prudential", "icici pru life"],
+    "HDFCAMC": ["hdfc asset management", "hdfc amc"],
 }
 
 

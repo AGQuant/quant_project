@@ -40,6 +40,54 @@ _JUNK_SOURCE = re.compile(
     r'(upstox|groww|angel\s*one|angelone|5paisa|tickertape|moneyworks4me|trendlyne|'
     r'stockedge|equitymaster\s*quote|screener\.in)', re.I)
 
+_NSE_TAG = re.compile(r'\((?:NSE|BSE)\s*:\s*([A-Z0-9&]+)\)', re.I)
+
+
+def _match_len_code(pats, low, up):
+    """Best matched-literal length across a symbol's identity patterns + whether an NSE-code
+    (case-sensitive, non-IGNORECASE) pattern hit (a code hit is a definitive attribution)."""
+    best, code_hit = 0, False
+    for p in pats:
+        t = up if (p.flags & re.IGNORECASE) == 0 else low
+        m = p.search(t)
+        if m:
+            L = m.end() - m.start()
+            if L > best:
+                best = L
+            if (p.flags & re.IGNORECASE) == 0:
+                code_hit = True
+    return best, code_hit
+
+
+def _target_is_primary(index, target, text):
+    """cc#611 D1: the article is ABOUT `target` iff — across the WHOLE-universe news_tagger index —
+    target's best name/code match is the MOST SPECIFIC (longest literal). So 'HDFC Life Insurance'
+    resolves to HDFCLIFE ('hdfc life insurance', 19) over LICI ('life insurance', 14) and is dropped
+    for LICI; 'HDFC Asset Management' never touches HDFCBANK (whose only literals are 'HDFCBANK' /
+    'hdfc bank'). An exact NSE-code hit is definitive. A headline that explicitly tags a DIFFERENT
+    listed code (NSE:XXX) and NOT the target is rejected outright. This replaces the single-symbol
+    is_primary(), whose lenient leading-word ('HDFC','Life') is the cross-company-bleed root cause."""
+    tgt = target.upper()
+    tags = {m.group(1).upper() for m in _NSE_TAG.finditer(text)}
+    if tags and tgt not in tags:
+        return False
+    tpats = index.get(tgt)
+    if not tpats:
+        return False
+    low, up = text.lower(), text.upper()
+    tbest, tcode = _match_len_code(tpats, low, up)
+    if tbest == 0:
+        return False
+    if tcode:
+        return True
+    for sym, pats in index.items():
+        if sym == tgt:
+            continue
+        b, _c = _match_len_code(pats, low, up)
+        if b > tbest:      # a different company matched more specifically -> not about target
+            return False
+    return True
+
 log = logging.getLogger("position_news")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -156,6 +204,12 @@ def fetch_position_news(conn=None):
             return {"ok": True, **stats}
 
         names = _name_map(conn, list(symbols.keys()))
+        # cc#611 D1: WHOLE-universe identity index (built once) for most-specific-wins disambiguation.
+        try:
+            index = dict(news_tagger.build_index(conn))
+        except Exception as e:
+            log.warning(f"build_index: {e}")
+            index = {}
         parsed = dup_skipped = inserted = http_429 = http_other = empty = 0
         alias_filtered = junk_filtered = 0
         consec_429 = 0
@@ -163,12 +217,6 @@ def fetch_position_news(conn=None):
 
         for sym, origin in symbols.items():
             query = names.get(sym) or sym
-            # cc#611 D1: per-stock alias/code identity — the SAME matcher news_fetcher uses at ingest.
-            try:
-                pats = news_tagger.headline_identity(conn, sym)
-            except Exception as e:
-                log.warning(f"headline_identity {sym}: {e}")
-                pats = None
             entries, status, bozo, retry_after = nf._fetch_feed(nf._google_news_url(query), agent=nf.BROWSER_UA)
             if status == 429:
                 http_429 += 1
@@ -189,7 +237,7 @@ def fetch_position_news(conn=None):
                 elif not entries:
                     empty += 1
                 else:
-                    p, d, i, a, j = _store(conn, sym, origin, entries, pats)
+                    p, d, i, a, j = _store(conn, sym, origin, entries, index)
                     parsed += p; dup_skipped += d; inserted += i
                     alias_filtered += a; junk_filtered += j
             time.sleep(random.uniform(nf.COMPANY_SLEEP_MIN, nf.COMPANY_SLEEP_MAX))
@@ -208,12 +256,12 @@ def fetch_position_news(conn=None):
             conn.close()
 
 
-def _store(conn, symbol, origin, entries, pats=None):
+def _store(conn, symbol, origin, entries, index=None):
     """cc#611: insert up to PER_SYMBOL_MAX entries that PASS two gates — (D2) not a quote/price-page
-    junk title/source, and (D1) the headline+desc actually NAME this stock per news_tagger.is_primary
-    against its per-stock alias identity `pats`. Strict: if pats is empty/None we do NOT store (an
-    unverifiable attribution on a live position is the dangerous case the founder flagged). Dedup
-    within (symbol,url_hash). Returns (parsed, dup_skipped, inserted, alias_filtered, junk_filtered)."""
+    junk title/source, and (D1) the headline+desc are PRIMARILY about this exact stock per
+    _target_is_primary (most-specific-wins over the whole-universe index; empty index => store nothing,
+    since an unverifiable attribution on a live position is the dangerous case the founder flagged).
+    Dedup within (symbol,url_hash). Returns (parsed, dup_skipped, inserted, alias_filtered, junk_filtered)."""
     parsed = dup_skipped = inserted = alias_filtered = junk_filtered = 0
     seen = set()
     with conn.cursor() as cur:
@@ -228,9 +276,9 @@ def _store(conn, symbol, origin, entries, pats=None):
             if _JUNK_TITLE.search(headline) or (source and _JUNK_SOURCE.search(source)):
                 junk_filtered += 1
                 continue
-            # D1: keep ONLY entries whose text names this exact stock (same gate as news_fetcher)
+            # D1: keep ONLY entries primarily about this exact stock (most-specific-wins disambiguation)
             desc = nf._clean(e.get("summary") or e.get("description") or "")
-            if not (pats and news_tagger.is_primary(pats, headline + " . " + desc)):
+            if not (index and _target_is_primary(index, symbol, headline + " . " + desc)):
                 alias_filtered += 1
                 continue
             h = nf._md5(link)
