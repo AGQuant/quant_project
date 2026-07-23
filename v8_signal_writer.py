@@ -29,11 +29,11 @@ strict-intersection survivors.
     week_index_52>=75, gvm_score>=7, day_1d>0, hourly_pct>0 AND NOT NULL, FINAL heavy
     true_weekly_rsi 70-85) AND SCORE>=7-of-10 V2 bands (fixed threshold, no mood-dependent
     n/n-1). Exits fixed +/-3.0%, standard slot pool.
-  BUY_REVERSAL V5 (_write_buy_reversal_v5_qualified, replaces the V3 inverse-sandwich): 7
-    conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d>=-0.5,
-    week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5, FINAL heavy
-    true_weekly_rsi>=70. Entry all-day live CMP, no CMP>PP/room/hourly gate. Exits fixed
-    +3%/-3% frozen, max hold 15 trading days, standard slot pool.
+  BUY_REVERSAL V6 (_write_buy_reversal_v6_qualified, cc#606/session_log 7828, supersedes V5): 7
+    CHEAP conditions -- S1-touch (prior-4-day low OR today's live day_low <= S1), mom_2d>=-0.5,
+    week_return>=-2, rsi_month 60-90, sector_week>0 strict, month_return<5, day_1d>0 strict.
+    V5's heavy true_weekly_rsi>=70 stage REMOVED from this basket only. Entry all-day live CMP,
+    no CMP>PP/room/hourly gate. Exits fixed +3%/-3% frozen, max hold 15 trading days, standard pool.
   SELL_REVERSAL V6.1 (_write_sell_reversal_v61_qualified, replaces V5-D): 10 conditions --
     R1-touch last 3 days (per-day pair vs that day's pivot), day_1d [-2,0], dma_20/50/200<0,
     week_index_52<50, sector_week<0 strict, mom_2d [-4,-1], month_return>=-10, FINAL heavy
@@ -1431,23 +1431,23 @@ def _true_weekly_rsi(conn, symbol: str, live_cmp: Optional[float], sim_ts=None) 
         return None
 
 
-def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date: date,
+def _write_buy_reversal_v6_qualified(conn, all_metrics: List[dict], target_date: date,
                                      gate_fails: int, pivots: dict, signal_ts_ist, sim_ts=None):
-    """cc#502 BUY_REVERSAL_V5 — replaces the V3 inverse-sandwich handler entirely. Dedicated
-    strict-AND of 7 conditions, standard slot pool + all standard guards:
+    """cc#606 BUY_REVERSAL_V6 (session_log 7828, locked 23-Jul, supersedes V5/cc#502). Dedicated
+    strict-AND of 7 conditions — ALL CHEAP now (the heavy per-symbol true_weekly_rsi stage is
+    removed FROM THIS BASKET ONLY; buy_momentum/sell_momentum/sell_reversal twr stages untouched):
       (1) S1-touch: MIN(prior-4-trading-day raw_prices low) <= today's S1, OR today's live
-          session day_low <= today's S1. [Evidence floor 356tr/62.9% used prior-touch only; the
-          live today-low leg is a legitimate live addition — entry can only happen AFTER the
-          pierce by construction, never a lookahead.]
+          session day_low <= today's S1. [Entry can only happen AFTER the pierce — never lookahead.]
       (2) mom_2d >= -0.5
       (3) week_return >= -2
       (4) rsi_month in [60, 90]
       (5) sector_week > 0 strict
       (6) month_return < 5
-      (7) FINAL heavy stage: true_weekly_rsi >= 70 (TRUE calendar weekly, cc#353)
-    Entry live CMP, all-day (no CMP>PP, no room-to-R1, no hourly gate — none of these exist in
-    V5). Exits fixed +3%/-3% frozen at entry (_auto_paper_entry's buy_reversal branch), max hold
-    15 trading days (existing basket-keyed exit logic, unchanged)."""
+      (7) day_1d > 0 STRICT (NULL fails) — replaces V5's true_weekly_rsi>=70, which was structurally
+          empty with the S1-dip in this regime (V5 live 4 sessions -> 1 qual) and unvalidated
+          (V5 356tr/62.9% may have scored on synthetic rsi_weekly, cc#353).
+    Entry live CMP, all-day. Exits fixed +3%/-3% frozen at entry (_auto_paper_entry's buy_reversal
+    branch, unchanged), max hold 15 trading days (existing basket-keyed exit logic, unchanged)."""
     basket, side = "buy_reversal", "BUY"
 
     # (1) S1-touch leg 1: prior-4-trading-day low, batched once for the whole universe via a
@@ -1469,7 +1469,7 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
                 if lo is not None:
                     prior4_low[sym] = float(lo)
     except Exception as e:
-        log.warning(f"buy_reversal_v5 prior4_low: {e}")
+        log.warning(f"buy_reversal_v6 prior4_low: {e}")
 
     base = []
     for s in all_metrics:
@@ -1489,9 +1489,13 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
         v = s.get("sector_week")
         return v is not None and float(v) > 0.0
 
-    # cc#364-style INDEPENDENT per-filter pass counts across `base` — each of the 6 cheap gates
-    # counted ALONE over the whole base, NOT cumulative survivors. true_weekly_rsi (heavy) is
-    # counted only over the strict-intersection of the 6 cheap gates below.
+    def _d1_gt0(s):     # cc#606: day_1d > 0 (STRICT, NULL fails — same strictness as sector_week)
+        v = s.get("day_1d")
+        return v is not None and float(v) > 0.0
+
+    # cc#606 BUY_REVERSAL_V6: all 7 conditions are now CHEAP (no heavy true_weekly_rsi stage).
+    # cc#364-style INDEPENDENT per-filter pass counts across `base` — each gate counted ALONE over
+    # the whole base, NOT cumulative survivors. _score_qualified = strict 7-way intersection.
     funnel = {"_universe": len(base)}
     funnel["s1_touch"]     = sum(1 for s in base if s["_s1_touch"])                             # (1)
     funnel["mom_2d"]       = sum(1 for s in base if _passes(s.get("mom_2d"), -0.5, None))       # (2)
@@ -1499,6 +1503,8 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
     funnel["rsi_month"]    = sum(1 for s in base if _passes(s.get("rsi_month"), 60.0, 90.0))    # (4)
     funnel["sector_week"]  = sum(1 for s in base if _sw_gt0(s))                                 # (5)
     funnel["month_return"] = sum(1 for s in base if _passes(s.get("month_return"), None, 5.0))  # (6)
+    funnel["day_1d"]       = sum(1 for s in base if _d1_gt0(s))                                 # (7) cc#606
+    # _stage6_survivors kept: the 6 pre-day_1d cheap gates intersected (semantics preserved from V5).
     surv = [s for s in base
             if s["_s1_touch"]
             and _passes(s.get("mom_2d"), -0.5, None)
@@ -1506,18 +1512,11 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
             and _passes(s.get("rsi_month"), 60.0, 90.0)
             and _sw_gt0(s)
             and _passes(s.get("month_return"), None, 5.0)]
-    funnel["_stage6_survivors"] = len(surv)   # denominator for the stage-7 true_weekly_rsi row
-    log.info(f"buy_reversal_v5: {len(surv)} after 6-condition cheap pre-filter")
+    funnel["_stage6_survivors"] = len(surv)
 
-    qualified = []
-    for s in surv:
-        twr = _true_weekly_rsi(conn, s["symbol"], s.get("_cmp"), sim_ts=sim_ts)
-        s["_true_weekly_rsi"] = round(twr, 2) if twr is not None else None
-        if twr is not None and twr >= 70.0:               # (7)
-            qualified.append(s)
-    funnel["true_weekly_rsi"] = len(qualified)
+    qualified = [s for s in surv if _d1_gt0(s)]            # (7) day_1d > 0 strict — cheap, no per-symbol query
     funnel["_score_qualified"] = len(qualified)
-    log.info(f"buy_reversal_v5: {len(qualified)} qualified (true_weekly_rsi>=70) [cc#502]")
+    log.info(f"buy_reversal_v6: {len(surv)} after 6 cheap gates -> {len(qualified)} qualified (day_1d>0) [cc#606]")
 
     try:
         with conn.cursor() as cur:
@@ -1529,12 +1528,12 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
             """, (basket, target_date, json.dumps(funnel)))
         conn.commit()
     except Exception as e:
-        log.warning(f"buy_reversal_v5 funnel: {e}")
+        log.warning(f"buy_reversal_v6 funnel: {e}")
 
     for s in qualified:
         sym  = s["symbol"]
         snap = {
-            "true_weekly_rsi": s.get("_true_weekly_rsi"),
+            "day_1d":          s.get("day_1d"),
             "mom_2d":          s.get("mom_2d"),
             "week_return":     s.get("week_return"),
             "rsi_month":       s.get("rsi_month"),
@@ -1542,7 +1541,7 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
             "month_return":    s.get("month_return"),
             "s1_touch":        s.get("_s1_touch"),
             "filter_score": 7, "filter_total": 7,
-            "spec": "BUY_REVERSAL_V5 cc#502",
+            "spec": "BUY_REVERSAL_V6 cc#606",
         }
         try:
             with conn.cursor() as cur:
@@ -1569,7 +1568,7 @@ def _write_buy_reversal_v5_qualified(conn, all_metrics: List[dict], target_date:
             _auto_paper_entry(conn, sym, basket, side, s.get("_cmp"), pivots.get(sym),
                               target_date, gate_fails, sim_ts=sim_ts)
         except Exception as e:
-            log.warning(f"buy_reversal_v5 insert {sym}: {e}")
+            log.warning(f"buy_reversal_v6 insert {sym}: {e}")
 
 
 def _write_sell_reversal_v61_qualified(conn, all_metrics: List[dict], target_date: date,
@@ -2026,7 +2025,7 @@ def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=No
     # aborted txn so the next handler + the end-of-tick heartbeat can still commit ("tick advances
     # on partial failure"). The compute loop + metrics upsert are already per-symbol guarded.
     for _handler, _bname in (
-        (_write_buy_reversal_v5_qualified,  "buy_reversal_v5"),
+        (_write_buy_reversal_v6_qualified,  "buy_reversal_v6"),
         (_write_sell_reversal_v61_qualified, "sell_reversal_v61"),
         (_write_sell_momentum_v4_qualified,  "sell_momentum_v4"),
         (_write_buy_momentum_v3_qualified,   "buy_momentum_v3"),
