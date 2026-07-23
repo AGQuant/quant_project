@@ -18,7 +18,7 @@ PROTECTED = {"/", "/dashboard", "/cio", "/cio2", "/ask", "/check", "/sector", "/
 _SALT = "scorr2026"
 
 # Hardcoded password — change here to update.
-_PASSWORD = "556700"
+_PASSWORD = "20272028"
 
 
 def _js_str(s: str) -> str:
@@ -29,7 +29,7 @@ def _js_str(s: str) -> str:
 def _clean(s: str) -> str:
     if s is None:
         return ""
-    for ch in ("​", "‌", "‍", "﻿", "\xa0"):
+    for ch in ("\u200b", "\u200c", "\u200d", "\ufeff", "\xa0"):
         s = s.replace(ch, "")
     return s.strip()
 
