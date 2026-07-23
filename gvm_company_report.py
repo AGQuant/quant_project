@@ -516,30 +516,36 @@ def _shareholding_table(periods: List[Dict[str, Any]]) -> Optional[Dict[str, Any
     return {"periods": [p["period_label"] for p in periods], "rows": rows}
 
 
-def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
-    """cc#518: screener.in-style horizontal financial tables, one SQL pass per symbol (6 section
-    reads, no N+1). Each table is None when that section has no rows for this symbol -- shareholding
-    is the common case (Phase 1B backfill covers 1,021/1,799 symbols so far); the frontend hides an
-    absent section entirely rather than showing an error or an empty table."""
-    symbol = (symbol or "").strip().upper()
-    out: Dict[str, Any] = {"basis": None, "quarterly": None, "profit_loss": None,
-                            "balance_sheet": None, "cash_flow": None, "ratios": None,
-                            "shareholding": None}
-    with conn.cursor() as cur:
-        q_rows,  q_basis  = _fh_rows(cur, symbol, "quarters",       "quarter", 13)
-        pl_rows, pl_basis = _fh_rows(cur, symbol, "profit-loss",    "annual",  12)
-        bs_rows, bs_basis = _fh_rows(cur, symbol, "balance-sheet",  "annual",  12)
-        cf_rows, cf_basis = _fh_rows(cur, symbol, "cash-flow",      "annual",  12)
-        ra_rows, ra_basis = _fh_rows(cur, symbol, "ratios",         "annual",  12)
-        sh_rows, sh_basis = _fh_rows(cur, symbol, "shareholding",   "quarter", 12)
+_FH_SECTIONS = [("quarters", "quarter"), ("profit-loss", "annual"), ("balance-sheet", "annual"),
+                ("cash-flow", "annual"), ("ratios", "annual"), ("shareholding", "quarter")]
 
-    out["basis"] = q_basis or pl_basis or bs_basis or cf_basis or ra_basis or sh_basis
 
+def _variant_rows(all_rows, want_consolidated, limit):
+    """cc#636: rows for ONE variant (consolidated|standalone), oldest->newest, capped at `limit`."""
+    filt = [r for r in all_rows if bool(r[0]) == want_consolidated][-limit:]
+    return [{"period_label": r[1], "period_end": str(r[2]), "metrics": r[3] or {}} for r in filt]
+
+
+def _build_one_variant(sections, want_consolidated):
+    """cc#636: full financials block for one variant, or None if the variant has no rows at all.
+    change_2: annual P&L renders the SAME canonical row set as Quarterly (no display trim)."""
+    q_rows  = _variant_rows(sections["quarters"],      want_consolidated, 13)
+    pl_rows = _variant_rows(sections["profit-loss"],   want_consolidated, 12)
+    bs_rows = _variant_rows(sections["balance-sheet"], want_consolidated, 12)
+    cf_rows = _variant_rows(sections["cash-flow"],     want_consolidated, 12)
+    ra_rows = _variant_rows(sections["ratios"],        want_consolidated, 12)
+    sh_rows = _variant_rows(sections["shareholding"],  want_consolidated, 12)
+    if not any([q_rows, pl_rows, bs_rows, cf_rows, ra_rows, sh_rows]):
+        return None
+    out = {"basis": "Consolidated" if want_consolidated else "Standalone",
+           "quarterly": None, "profit_loss": None, "balance_sheet": None,
+           "cash_flow": None, "ratios": None, "shareholding": None}
     if q_rows:
         out["quarterly"] = _build_table(q_rows, _QUARTER_ROW_DEFS)
-
     if pl_rows:
-        pl_table = _build_table(pl_rows, _PL_ROW_DEFS, display_keys=_PL_DISPLAY_KEYS)
+        # cc#636 change_2: NO display_keys -> annual P&L shows the full canonical row order, identical
+        # to Quarterly Results (missing keys still skip the row via _build_table's all-None drop).
+        pl_table = _build_table(pl_rows, _PL_ROW_DEFS)
         ttm = _build_ttm(q_rows) if q_rows else None
         pl_table["ttm"] = ttm is not None
         if ttm is not None:
@@ -547,20 +553,48 @@ def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
             for row in pl_table["rows"]:
                 row["values"].append(ttm.get(row["label"]))
         out["profit_loss"] = pl_table
-
     if bs_rows:
         out["balance_sheet"] = _build_table(bs_rows, _BS_ROW_DEFS, display_keys=_BS_DISPLAY_KEYS)
-
     if cf_rows:
         out["cash_flow"] = _build_table(cf_rows, _CF_ROW_DEFS)
-
     if ra_rows:
         out["ratios"] = _build_table(ra_rows, _RATIO_ROW_DEFS)
-
     if sh_rows:
         out["shareholding"] = _shareholding_table(sh_rows)
-
     return out
+
+
+def build_financials_block(conn, symbol: str) -> Dict[str, Any]:
+    """cc#518 / cc#636: screener.in-style horizontal financial tables. Now returns BOTH variants
+    (consolidated + standalone) keyed under `variants` so the page toggle switches all tables from one
+    state, plus the default variant's tables at the top level for backward compatibility. Each table is
+    None when that section has no rows. One indexed read per section (no N+1)."""
+    symbol = (symbol or "").strip().upper()
+    sections = {}
+    with conn.cursor() as cur:
+        for section, ptype in _FH_SECTIONS:
+            cur.execute("""SELECT consolidated, period_label, period_end, metrics FROM fundamentals_history
+                           WHERE symbol=%s AND section=%s AND period_type=%s ORDER BY period_end ASC""",
+                        (symbol, section, ptype))
+            sections[section] = cur.fetchall()
+    has_cons = any(bool(r[0]) for rows in sections.values() for r in rows)
+    has_std = any(not bool(r[0]) for rows in sections.values() for r in rows)
+    variants = {}
+    if has_cons:
+        v = _build_one_variant(sections, True)
+        if v:
+            variants["consolidated"] = v
+    if has_std:
+        v = _build_one_variant(sections, False)
+        if v:
+            variants["standalone"] = v
+    available = [k for k in ("consolidated", "standalone") if k in variants]
+    default = "consolidated" if "consolidated" in variants else ("standalone" if "standalone" in variants else None)
+    base = variants.get(default) or {"basis": None, "quarterly": None, "profit_loss": None,
+                                     "balance_sheet": None, "cash_flow": None, "ratios": None,
+                                     "shareholding": None}
+    # backward-compat: default variant's tables at top level, + the toggle metadata
+    return {**base, "variants": variants, "variants_available": available, "default_variant": default}
 
 
 # ─── cc#541: OPERATIONAL METRICS section — per-sector KPIs (NIM/GNPA/CASA for banks,

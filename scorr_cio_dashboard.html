@@ -1797,24 +1797,45 @@ function FinTable({ title, table, trendLabel }) {
 }
 
 function FinancialsSection({ financials }) {
+  // cc#636: one toggle state (Standalone / Consolidated) switches ALL statement tables together.
+  const variants = (financials && financials.variants) || {};
+  const avail = (financials && financials.variants_available) || Object.keys(variants);
+  const [variant, setVariant] = useState(null);
   if (!financials) return null;
-  const any = financials.quarterly || financials.profit_loss || financials.balance_sheet
-    || financials.cash_flow || financials.ratios || financials.shareholding;
+  // active data = the chosen variant block; fall back to the flat (default) payload for old responses.
+  const cur = (variant && variants[variant]) || (financials.default_variant && variants[financials.default_variant]) || financials;
+  const any = cur.quarterly || cur.profit_loss || cur.balance_sheet || cur.cash_flow || cur.ratios || cur.shareholding;
   if (!any) return null;
+  const VOPTS = [["standalone", "Standalone"], ["consolidated", "Consolidated"]];
+  const active = variant || financials.default_variant;
+  const showToggle = avail && avail.length > 0;
   return (
     <div id="financials" style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.text }}>Financials</div>
-        {financials.basis && <Tag color={C.muted}>{financials.basis}</Tag>}
+        {cur.basis && <Tag color={C.muted}>{cur.basis}</Tag>}
+        {showToggle && (
+          <div style={{ marginLeft: "auto", display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+            {VOPTS.map(([k, lbl]) => {
+              const has = avail.indexOf(k) >= 0;
+              const on = active === k;
+              return (
+                <span key={k} onClick={() => has && setVariant(k)} title={has ? "" : "not available"}
+                  style={{ fontSize: 11.5, fontWeight: 700, padding: "5px 13px", cursor: has ? "pointer" : "not-allowed",
+                    background: on ? C.accent : "transparent", color: on ? "#fff" : (has ? C.muted : C.gridLine) }}>{lbl}</span>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 16 }}>Tap the chart icon on any row for its trend across all periods.</div>
-      <FinTable title="Quarterly Results" table={financials.quarterly} />
-      <FinTable title="Profit & Loss" table={financials.profit_loss} />
-      <FinTable title="Balance Sheet" table={financials.balance_sheet} />
-      <FinTable title="Cash Flow" table={financials.cash_flow} />
-      <FinTable title="Ratios" table={financials.ratios} />
-      {financials.shareholding && financials.shareholding.rows && financials.shareholding.rows.length
-        ? <FinTable title="Shareholding Pattern" table={financials.shareholding} trendLabel="Promoters" />
+      <FinTable title="Quarterly Results" table={cur.quarterly} />
+      <FinTable title="Profit & Loss" table={cur.profit_loss} />
+      <FinTable title="Balance Sheet" table={cur.balance_sheet} />
+      <FinTable title="Cash Flow" table={cur.cash_flow} />
+      <FinTable title="Ratios" table={cur.ratios} />
+      {cur.shareholding && cur.shareholding.rows && cur.shareholding.rows.length
+        ? <FinTable title="Shareholding Pattern" table={cur.shareholding} trendLabel="Promoters" />
         : (
           <div style={{ marginBottom: 22 }}>
             <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text, marginBottom: 8 }}>Shareholding Pattern</div>
