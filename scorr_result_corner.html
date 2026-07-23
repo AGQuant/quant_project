@@ -5,121 +5,353 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Result Corner · Scorr</title>
 <style>
-  :root{ --bg:#0A0F1E; --card:#121A33; --border:rgba(148,166,210,.14); --text:#E9EEFB;
-         --muted:#8C99BD; --accent:#4D7CFE; --green:#2FD48B; --red:#FF5C6C; --gold:#F5B94A; }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px}
-  #scorr-nav{}
-  .wrap{max-width:1180px;margin:0 auto;padding:18px 16px 60px}
-  h1{font-size:20px;font-weight:800;margin:6px 0 2px}
-  .sub{color:var(--muted);font-size:12.5px;margin-bottom:16px}
-  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-  .tab{padding:7px 15px;border-radius:8px;border:1px solid var(--border);background:var(--card);
-       color:var(--muted);cursor:pointer;font-weight:700;font-size:13px}
-  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .tab .n{opacity:.7;font-weight:600;margin-left:5px}
-  .tblwrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px}
-  table{border-collapse:collapse;width:100%;min-width:820px;font-size:13px}
-  th{position:sticky;top:0;background:var(--card);text-align:left;padding:10px 12px;color:var(--muted);
-     font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
-  td{padding:10px 12px;border-bottom:1px solid rgba(148,166,210,.08)}
-  tr:hover td{background:rgba(77,124,254,.05)}
-  .co{font-weight:700}
-  .sym{color:var(--muted);font-size:11.5px}
-  .pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:11px;font-weight:700}
-  .t-large{background:rgba(77,124,254,.16);color:#9db8ff}
-  .t-mid{background:rgba(245,185,74,.16);color:var(--gold)}
-  .t-small{background:rgba(148,166,210,.14);color:var(--muted)}
-  .num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right}
-  .up{color:var(--green)} .dn{color:var(--red)}
-  .verdict{font-weight:700;font-size:12px}
-  a.card{color:var(--accent);text-decoration:none;font-weight:700}
-  .pager{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:16px}
-  .pager button{padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);
-     color:var(--text);cursor:pointer;font-weight:700}
-  .pager button:disabled{opacity:.4;cursor:default}
-  .empty{padding:40px;text-align:center;color:var(--muted)}
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+:root{
+  --bg:#0A0F1E; --bg2:#0D1428; --panel:#121A33; --panel2:#182241;
+  --line:rgba(148,166,210,.14); --line2:rgba(148,166,210,.24);
+  --txt:#E9EEFB; --mut:#8C99BD; --dim:#5E6B8F;
+  --grn:#2FD48B; --red:#FF5C6C; --blu:#4D7CFE; --cyan:#37D3E8; --amber:#F5B94A;
+  --grn-d:rgba(47,212,139,.12); --red-d:rgba(255,92,108,.12);
+  --font:'Sora',sans-serif; --mono:'IBM Plex Mono',monospace;
+}
+/* cc#628: light theme derives from the same structure (site theme toggle sets data-theme). */
+:root[data-theme="light"]{
+  --bg:#F4F6FB; --bg2:#EAEEF6; --panel:#FFFFFF; --panel2:#F1F4FA;
+  --line:rgba(20,40,90,.10); --line2:rgba(20,40,90,.18);
+  --txt:#101828; --mut:#5A6B82; --dim:#94A3BE;
+  --grn-d:rgba(15,157,88,.10); --red-d:rgba(208,67,59,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:26px 22px 60px}
+
+header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.h-title{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.h-title b{color:var(--cyan)}
+.h-season{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:2.5px;text-transform:uppercase;padding-bottom:5px}
+.h-spacer{flex:1}
+.h-stamp{font-family:var(--mono);font-size:11px;color:var(--mut);padding-bottom:5px}
+.h-stamp b{color:var(--grn)}
+
+.sec-label{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--cyan);
+  letter-spacing:2.5px;text-transform:uppercase;margin:30px 0 12px;display:flex;align-items:center;gap:12px}
+.sec-label::after{content:'';flex:1;height:1px;background:var(--line)}
+.sec-label .cov{color:var(--dim);letter-spacing:.5px;font-size:10px;text-transform:none}
+
+/* 01 SEASON TAPE */
+.tape{display:grid;grid-template-columns:230px 1fr 340px;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tape>div{background:var(--panel);padding:20px 22px}
+.tp-k{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:1.8px;text-transform:uppercase;margin-bottom:9px}
+.tp-big{font-family:var(--mono);font-size:34px;font-weight:700;line-height:1;letter-spacing:-1px}
+.tp-big small{font-size:15px;color:var(--dim);font-weight:500}
+.tp-sub{font-size:10.5px;color:var(--mut);margin-top:7px}
+.bar{height:7px;border-radius:4px;background:var(--bg2);margin-top:13px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blu))}
+.seg{display:flex;height:30px;border-radius:8px;overflow:hidden;margin-top:11px;font-family:var(--mono)}
+.seg span{display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:#0A0F1E;min-width:0}
+.seg .s-pos{background:var(--grn)} .seg .s-neg{background:var(--red)} .seg .s-flat{background:#3A4666;color:var(--mut)}
+.seg-legend{display:flex;gap:16px;margin-top:9px;font-size:10.5px;color:var(--mut);flex-wrap:wrap}
+.seg-legend b{font-family:var(--mono);color:var(--txt)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px;vertical-align:1px}
+.medians{display:grid;grid-template-columns:1fr 1fr;gap:14px 22px}
+.md-k{font-family:var(--mono);font-size:9.5px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase}
+.md-v{font-family:var(--mono);font-size:21px;font-weight:700;margin-top:3px}
+.pos{color:var(--grn)}.neg{color:var(--red)}
+.tiers{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}
+.tier-chip{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:20px;
+  background:var(--bg2);border:1px solid var(--line2);color:var(--mut)}
+.tier-chip b{color:var(--txt)}
+
+/* 02 SECTOR TABLE + 03 COMPANY TABLE */
+.tbl-card{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
+table{width:100%;border-collapse:collapse}
+th{font-family:var(--mono);font-size:9.5px;font-weight:600;color:var(--dim);letter-spacing:1.5px;
+  text-transform:uppercase;text-align:right;padding:11px 14px;background:var(--panel2);
+  border-bottom:1px solid var(--line2);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td{padding:10px 14px;text-align:right;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:12px;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+#sectorTbl tbody tr{cursor:pointer;transition:background .12s}
+#sectorTbl tbody tr:hover{background:var(--bg2)}
+#sectorTbl tbody tr.sel{background:rgba(55,211,232,.07);box-shadow:inset 3px 0 0 var(--cyan)}
+.sect-name{font-family:var(--font);font-weight:600;color:var(--txt);font-size:12.5px}
+.cov-cell{color:var(--dim);font-size:11px}
+.cov-cell b{color:var(--mut)}
+.g1{background:rgba(47,212,139,.06)}.g2{background:rgba(47,212,139,.13)}.g3{background:rgba(47,212,139,.22)}
+.r1{background:rgba(255,92,108,.06)}.r2{background:rgba(255,92,108,.13)}.r3{background:rgba(255,92,108,.22)}
+.gvm-chip{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:5px;font-family:var(--mono)}
+.gvm-good{background:var(--grn-d);color:var(--grn)}
+.gvm-avg{background:rgba(245,185,74,.12);color:var(--amber)}
+.gvm-weak{background:var(--red-d);color:var(--red)}
+.pct-pos-bar{display:inline-block;width:44px;height:5px;border-radius:3px;background:var(--bg2);margin-left:8px;vertical-align:2px;overflow:hidden}
+.pct-pos-bar i{display:block;height:100%;background:var(--grn)}
+
+.filters{display:flex;gap:7px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+.f-chip{font-size:11.5px;font-weight:600;padding:6px 15px;border-radius:8px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line2);color:var(--mut);transition:.12s}
+.f-chip:hover{color:var(--txt)}
+.f-chip.on{background:var(--blu);border-color:var(--blu);color:#fff}
+.f-sector{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--cyan);
+  border:1px solid rgba(55,211,232,.35);border-radius:20px;padding:4px 12px;display:none;cursor:pointer}
+.f-sector.show{display:block}
+.co-name{font-family:var(--font);font-weight:700;color:var(--txt);font-size:12.5px;line-height:1.25}
+.co-tkr{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.5px}
+.qq{font-size:11px}
+.qq .yy{color:var(--dim);margin:0 3px}
+.gvm-cell{line-height:1.2}
+.gvm-cell b{font-size:13px}
+.gvm-cell span{font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;display:block}
+.v-good{color:var(--amber)}.v-exc{color:var(--grn)}.v-weak{color:var(--red)}.v-avg{color:var(--mut)}
+.card-cluster{display:inline-flex;gap:5px}
+.cbtn{width:27px;height:27px;border-radius:7px;border:1px solid var(--line2);background:var(--bg2);
+  color:var(--mut);font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;transition:.12s}
+.cbtn:hover{transform:translateY(-1px)}
+.cbtn.c:hover{border-color:var(--cyan);color:var(--cyan)}
+.cbtn.a:hover{border-color:var(--amber);color:var(--amber)}
+.cbtn.r:hover{border-color:var(--grn);color:var(--grn)}
+.cbtn.d:hover{border-color:var(--red);color:var(--red)}
+.tbl-scroll{overflow-x:auto}
+.empty{padding:36px;text-align:center;color:var(--mut);font-size:12.5px}
+
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;letter-spacing:.5px}
+
+/* C-A-R-D modal */
+#rcOv{position:fixed;inset:0;z-index:12000;background:rgba(6,10,20,.62);display:none;align-items:center;justify-content:center;padding:16px}
+#rcOv.on{display:flex}
+#rcBox{background:var(--panel);border:1px solid var(--line2);border-radius:14px;width:min(460px,96vw);max-height:88vh;overflow:auto;padding:16px 18px;box-shadow:0 18px 60px rgba(0,0,0,.5)}
+#rcBox h3{font-size:15px;font-weight:800}
+.rc-x{float:right;border:none;background:none;color:var(--mut);font-size:22px;line-height:1;cursor:pointer}
+.rc-lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin:14px 0 6px}
+.rc-tile{flex:1;min-width:0;background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:9px 11px}
+
+@media(max-width:860px){ .tape{grid-template-columns:1fr} .wrap{padding:18px 12px 50px} }
+@media (prefers-reduced-motion: reduce){ *{transition:none!important} }
 </style>
 </head>
 <body>
 <div id="scorr-nav"></div>
 <div class="wrap">
-  <h1>Result Corner</h1>
-  <div class="sub">Companies that have reported results — newest first. Filter by market-cap tier (AMFI rank). Snapshot = latest reported quarter Sales &amp; PAT with QoQ / YoY.</div>
-  <div class="tabs" id="tabs"></div>
-  <div class="tblwrap">
-    <table>
-      <thead><tr>
-        <th>Company</th><th>Reported</th><th>Tier</th><th>GVM</th>
-        <th class="num">Sales (Qtr)</th><th class="num">QoQ / YoY</th>
-        <th class="num">PAT (Qtr)</th><th class="num">QoQ / YoY</th><th>Analysis</th>
-      </tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </div>
-  <div id="empty" class="empty" style="display:none">No reported companies for this tier yet.</div>
-  <div class="pager">
-    <button id="prev">‹ Prev</button>
-    <span id="pginfo" class="sym"></span>
-    <button id="next">Next ›</button>
-  </div>
+
+<header>
+  <div><div class="h-title">Result <b>Corner</b></div></div>
+  <div class="h-season" id="hSeason">— · Results Season</div>
+  <div class="h-spacer"></div>
+  <div class="h-stamp" id="hStamp">—</div>
+</header>
+
+<div class="sec-label">01 · Season Summary <span class="cov">same-quarter reporters only</span></div>
+<div id="tape" class="tape"><div style="grid-column:1/-1"><div class="empty">Loading season…</div></div></div>
+
+<div class="sec-label">02 · Sector Performance <span class="cov">tap a sector to filter companies · sorted by PAT YoY</span></div>
+<div class="tbl-card tbl-scroll">
+<table id="sectorTbl">
+<thead><tr><th>Sector</th><th>Reported</th><th>Sales YoY</th><th>PAT YoY</th><th>% Growing</th><th>Sector GVM</th></tr></thead>
+<tbody id="sectorRows"><tr><td colspan="6" class="empty">Loading sectors…</td></tr></tbody>
+</table>
 </div>
+
+<div class="sec-label">03 · Companies <span class="cov">newest first · dash = quarter not in data yet</span></div>
+<div class="filters">
+  <span class="f-chip on" data-tier="all">All</span>
+  <span class="f-chip" data-tier="Large">Large</span>
+  <span class="f-chip" data-tier="Mid">Mid</span>
+  <span class="f-chip" data-tier="Small">Small</span>
+  <span class="f-sector" id="secFilter" title="Clear sector filter">✕ <span id="secName"></span></span>
+</div>
+<div class="tbl-card tbl-scroll">
+<table id="coTbl">
+<thead><tr>
+  <th>Company</th><th>Reported</th><th>Tier</th><th>GVM</th>
+  <th>Sales (Qtr)</th><th>QoQ / YoY</th><th>PAT (Qtr)</th><th>QoQ / YoY</th><th>Analysis</th>
+</tr></thead>
+<tbody id="coRows"><tr><td colspan="9" class="empty">Loading companies…</td></tr></tbody>
+</table>
+</div>
+
+<footer>
+  <span>RESULT CORNER V2 · same-quarter aggregates · coverage always shown</span>
+  <span>C Chart · A Analysis · R Result · D Deriv</span>
+</footer>
+</div>
+
+<div id="rcOv"><div id="rcBox"></div></div>
+
 <script>
-var TIERS = [['all','All'],['large','Large'],['mid','Mid'],['small','Small']];
-var state = { tier:'all', page:1, pages:1 };
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const inr=v=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
+const pctS=v=>v==null?'—':(v>=0?'+':'−')+Math.abs(v).toFixed(1)+'%';
+const cls=v=>v==null?'':(v>0?'pos':(v<0?'neg':''));
+async function J(u){const r=await fetch(u);if(!r.ok)throw new Error(r.status);return r.json();}
 
-function fmtCr(v){ if(v==null) return '—'; return Number(v).toLocaleString('en-IN',{maximumFractionDigits:0}); }
-function delta(v){ if(v==null) return '<span class="sym">—</span>';
-  var c = v>0?'up':(v<0?'dn':''); var s=(v>0?'+':'')+v+'%'; return '<span class="'+c+'">'+s+'</span>'; }
-function tierPill(t){ if(!t) return '<span class="sym">—</span>';
-  return '<span class="pill t-'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</span>'; }
-function verdictColor(v){ if(!v) return 'var(--muted)'; var s=v.toUpperCase();
-  if(s.indexOf('BUY')>-1||s.indexOf('STRONG')>-1||s.indexOf('INVEST')>-1) return 'var(--green)';
-  if(s.indexOf('SELL')>-1||s.indexOf('AVOID')>-1) return 'var(--red)'; return 'var(--gold)'; }
+// intensity grade for the sector heat cells (green good / red bad by magnitude)
+function grade(v){ if(v==null)return ''; const a=Math.abs(v),t=v>=0?'g':'r';
+  return (a<10?t+'1':a<25?t+'2':t+'3')+' '+(v>=0?'pos':'neg'); }
+function gvmChipCls(g){ return g==null?'gvm-avg':(g>=7?'gvm-good':g>=6?'gvm-avg':'gvm-weak'); }
+function verdictCls(v){ v=(v||'').toLowerCase();
+  return v==='excellent'?'v-exc':v==='good'?'v-good':v==='weak'?'v-weak':'v-avg'; }
 
-function renderTabs(counts){
-  var el = document.getElementById('tabs'); el.innerHTML='';
-  TIERS.forEach(function(t){
-    var b = document.createElement('div');
-    b.className = 'tab' + (state.tier===t[0]?' active':'');
-    b.innerHTML = t[1] + (counts&&counts[t[0]]!=null ? '<span class="n">'+counts[t[0]]+'</span>':'');
-    b.onclick = function(){ state.tier=t[0]; state.page=1; load(); };
-    el.appendChild(b);
+let DATA=null, tier='all', selSector=null;
+
+function render(){
+  const d=DATA; if(!d) return;
+  // header
+  document.getElementById('hSeason').textContent=(d.season&&d.season.quarter?d.season.quarter:'—')+' · Results Season';
+  try{ const now=new Date(); document.getElementById('hStamp').innerHTML=
+    now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' · '+
+    now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' IST · <b>LIVE</b>'; }catch(e){}
+
+  // ── 01 SEASON TAPE ──
+  const s=d.summary||{};
+  const g=s.pat_growing||0, fl=s.pat_flat||0, ng=s.pat_declining||0, tot3=(g+fl+ng)||1;
+  const seg=(c,v,extra)=>v>0?`<span class="${c}" style="flex:${v}">${v}</span>`:'';
+  const t=s.tiers||{};
+  const tchip=(k)=>`<span class="tier-chip">${k} <b>${(t[k]&&t[k].reported)||0}/${(t[k]&&t[k].total)||0}</b></span>`;
+  document.getElementById('tape').innerHTML=`
+    <div>
+      <div class="tp-k">Reported</div>
+      <div class="tp-big">${s.reported||0}<small> / ${s.total||0}</small></div>
+      <div class="tp-sub">${s.pct||0}% of the universe has declared ${d.season?d.season.quarter:''}</div>
+      <div class="bar"><i style="width:${s.pct||0}%"></i></div>
+    </div>
+    <div>
+      <div class="tp-k">PAT YoY · The season's shape</div>
+      <div class="seg">${seg('s-pos',g)}${seg('s-flat',fl)}${seg('s-neg',ng)}</div>
+      <div class="seg-legend">
+        <span><i class="dot" style="background:var(--grn)"></i>Growing <b>${g}</b></span>
+        <span><i class="dot" style="background:#3A4666"></i>Flat <b>${fl}</b></span>
+        <span><i class="dot" style="background:var(--red)"></i>Declining <b>${ng}</b></span>
+        <span style="margin-left:auto">Beat their sector: <b style="color:var(--grn)">${s.beats_sector||0}</b></span>
+      </div>
+      <div class="tiers">${tchip('Large')}${tchip('Mid')}${tchip('Small')}</div>
+    </div>
+    <div>
+      <div class="medians">
+        <div><div class="md-k">Median Sales YoY</div><div class="md-v ${cls(s.median_sales_yoy)}">${pctS(s.median_sales_yoy)}</div></div>
+        <div><div class="md-k">Median PAT YoY</div><div class="md-v ${cls(s.median_pat_yoy)}">${pctS(s.median_pat_yoy)}</div></div>
+        <div><div class="md-k">Median Sales QoQ</div><div class="md-v ${cls(s.median_sales_qoq)}">${pctS(s.median_sales_qoq)}</div></div>
+        <div><div class="md-k">Median PAT QoQ</div><div class="md-v ${cls(s.median_pat_qoq)}">${pctS(s.median_pat_qoq)}</div></div>
+      </div>
+    </div>`;
+
+  // ── 02 SECTOR TABLE ──
+  const secs=d.sectors||[];
+  document.getElementById('sectorRows').innerHTML = secs.length ? secs.map(x=>{
+    const pos=x.pct_positive; const gv=x.gvm;
+    return `<tr data-sector="${esc(x.sector)}">
+      <td class="sect-name">${esc(x.sector)}</td>
+      <td class="cov-cell"><b>${x.reported}</b> / ${x.total}</td>
+      <td class="${grade(x.sales_yoy)}">${pctS(x.sales_yoy)}</td>
+      <td class="${grade(x.pat_yoy)}">${pctS(x.pat_yoy)}</td>
+      <td>${pos==null?'—':pos+'%'}${pos==null?'':`<span class="pct-pos-bar"><i style="width:${pos}%"></i></span>`}</td>
+      <td>${gv==null?'—':`<span class="gvm-chip ${gvmChipCls(gv)}">${gv.toFixed(1)}</span>`}</td>
+    </tr>`;}).join('') : `<tr><td colspan="6" class="empty">No sector has a same-quarter reporter yet.</td></tr>`;
+  document.querySelectorAll('#sectorTbl tbody tr[data-sector]').forEach(row=>{
+    row.onclick=()=>{ const sc=row.dataset.sector;
+      if(selSector===sc){ selSector=null; row.classList.remove('sel'); document.getElementById('secFilter').classList.remove('show'); }
+      else{ document.querySelectorAll('#sectorTbl tbody tr').forEach(r=>r.classList.remove('sel'));
+        selSector=sc; row.classList.add('sel'); document.getElementById('secName').textContent=sc;
+        document.getElementById('secFilter').classList.add('show');
+        document.getElementById('coTbl').scrollIntoView({behavior:'smooth',block:'nearest'}); }
+      applyCo(); };
+  });
+
+  renderCo();
+}
+
+function renderCo(){
+  const rows=(DATA.companies||[]);
+  document.getElementById('coRows').innerHTML = rows.length ? rows.map(c=>{
+    const qq=(a,b)=>`<span class="${cls(a)}">${pctS(a)}</span><span class="yy">/</span><span class="${cls(b)}">${pctS(b)}</span>`;
+    return `<tr data-tier="${esc(c.tier)}" data-sector="${esc(c.segment)}">
+      <td><div class="co-name">${esc(c.company||c.symbol)}</div><div class="co-tkr">${esc(c.symbol)}</div></td>
+      <td class="cov-cell">${c.reported_date?fmtD(c.reported_date):'—'}</td>
+      <td><span class="tier-chip">${esc(c.tier)}</span></td>
+      <td class="gvm-cell"><b>${c.gvm==null?'—':c.gvm.toFixed(1)}</b><span class="${verdictCls(c.verdict)}">${esc(c.verdict||'')}</span></td>
+      <td class="${(c.sales!=null&&c.sales<0)?'neg':''}">${inr(c.sales)}</td>
+      <td class="qq">${qq(c.sales_qoq,c.sales_yoy)}</td>
+      <td class="${(c.pat!=null&&c.pat<0)?'neg':''}">${inr(c.pat)}</td>
+      <td class="qq">${qq(c.pat_qoq,c.pat_yoy)}</td>
+      <td><span class="card-cluster">
+        <button class="cbtn c" title="Chart" onclick="rcCard('C','${esc(c.symbol)}')">C</button>
+        <button class="cbtn a" title="Analysis" onclick="rcCard('A','${esc(c.symbol)}')">A</button>
+        <button class="cbtn r" title="Result" onclick="rcCard('R','${esc(c.symbol)}')">R</button>
+        <button class="cbtn d" title="Deriv" onclick="rcCard('D','${esc(c.symbol)}')">D</button></span></td>
+    </tr>`;}).join('') : `<tr><td colspan="9" class="empty">No reported companies yet.</td></tr>`;
+  applyCo();
+}
+function applyCo(){
+  document.querySelectorAll('#coTbl tbody tr[data-tier]').forEach(r=>{
+    const okT=tier==='all'||r.dataset.tier===tier;
+    const okS=!selSector||r.dataset.sector===selSector;
+    r.style.display=(okT&&okS)?'':'none';
   });
 }
+function fmtD(s){ try{const d=new Date(s+'T00:00:00');const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return d.getDate()+' '+M[d.getMonth()];}catch(e){return s;} }
 
-function load(){
-  renderTabs(null);
-  fetch('/api/result-corner?tier='+state.tier+'&page='+state.page+'&per_page=30')
-    .then(function(r){return r.json()}).then(function(d){
-      state.pages = d.pages||1;
-      var tb = document.getElementById('rows'); tb.innerHTML='';
-      document.getElementById('empty').style.display = (d.total===0)?'block':'none';
-      (d.results||[]).forEach(function(x){
-        var s = x.snapshot||{};
-        var tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td><div class="co">'+(x.company||x.symbol)+'</div><div class="sym">'+x.symbol+'</div></td>'+
-          '<td class="sym">'+(x.reported_date||'—')+'</td>'+
-          '<td>'+tierPill(x.tier)+'</td>'+
-          '<td>'+(x.gvm_score!=null?('<b>'+x.gvm_score.toFixed(1)+'</b>'):'—')+
-              (x.gvm_verdict?'<div class="verdict" style="color:'+verdictColor(x.gvm_verdict)+'">'+x.gvm_verdict+'</div>':'')+'</td>'+
-          '<td class="num">'+fmtCr(s.sales)+'</td>'+
-          '<td class="num">'+delta(s.sales_qoq)+' / '+delta(s.sales_yoy)+'</td>'+
-          '<td class="num">'+fmtCr(s.net_profit)+'</td>'+
-          '<td class="num">'+delta(s.pat_qoq)+' / '+delta(s.pat_yoy)+'</td>'+
-          '<td><a class="card" href="'+x.result_card_url+'">Card ›</a></td>';
-        tb.appendChild(tr);
-      });
-      document.getElementById('pginfo').textContent = 'Page '+d.page+' / '+d.pages+' · '+d.total+' reported';
-      document.getElementById('prev').disabled = d.page<=1;
-      document.getElementById('next').disabled = d.page>=d.pages;
-      renderTabs(null);
-    }).catch(function(e){ document.getElementById('empty').style.display='block'; });
+document.querySelectorAll('.f-chip').forEach(ch=>ch.onclick=()=>{
+  document.querySelectorAll('.f-chip').forEach(x=>x.classList.remove('on'));
+  ch.classList.add('on'); tier=ch.dataset.tier; applyCo(); });
+document.getElementById('secFilter').onclick=()=>{ selSector=null;
+  document.querySelectorAll('#sectorTbl tbody tr').forEach(x=>x.classList.remove('sel'));
+  document.getElementById('secFilter').classList.remove('show'); applyCo(); };
+
+// ── C-A-R-D cluster (reuses existing JSON endpoints; R prefers the site-wide ScorrRCard) ──
+function rcClose(){document.getElementById('rcOv').classList.remove('on');}
+function rcOpen(html){const b=document.getElementById('rcBox');b.innerHTML='<button class="rc-x" onclick="rcClose()">&times;</button>'+html;document.getElementById('rcOv').classList.add('on');}
+document.getElementById('rcOv').addEventListener('click',e=>{if(e.target.id==='rcOv')rcClose();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')rcClose();});
+
+async function rcCard(kind,sym){
+  if(kind==='R'){ if(window.ScorrRCard&&ScorrRCard.open){ScorrRCard.open(sym);return;} location.href='/check?symbol='+encodeURIComponent(sym); return; }
+  rcOpen(`<h3>${esc(sym)} · ${kind==='C'?'Chart':kind==='A'?'Analysis':'Deriv'}</h3><div class="rc-lbl">Loading…</div>`);
+  try{
+    if(kind==='C'){
+      const rows=await J('/api/candles/'+encodeURIComponent(sym)+'?days=120');
+      const cl=(rows||[]).map(r=>+r.close).filter(isFinite);
+      if(cl.length<2){rcOpen(`<h3>${esc(sym)} · Chart</h3><div class="empty">No daily data.</div>`);return;}
+      const w=400,H=140,lo=Math.min(...cl),hi=Math.max(...cl),rng=(hi-lo)||1;
+      const pts=cl.map((v,i)=>(i/(cl.length-1)*w).toFixed(1)+','+(H-6-((v-lo)/rng)*(H-14)).toFixed(1)).join(' ');
+      const up=cl[cl.length-1]>=cl[0];
+      rcOpen(`<h3>${esc(sym)} · Chart <span style="font-family:var(--mono);font-size:12px;color:var(--mut)">${cl[cl.length-1].toLocaleString('en-IN')}</span></h3>
+        <div class="rc-lbl">Daily close · last ${cl.length} sessions (raw_prices, equity)</div>
+        <svg viewBox="0 0 ${w} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px"><polyline points="${pts}" fill="none" stroke="${up?'var(--grn)':'var(--red)'}" stroke-width="1.6"/></svg>`);
+    } else if(kind==='A'){
+      const [gv,dm]=await Promise.all([J('/api/gvm/snapshot/'+encodeURIComponent(sym)).catch(()=>null),J('/api/deriv-metrics/'+encodeURIComponent(sym)).catch(()=>null)]);
+      let h=`<h3>${esc(sym)} · Analysis</h3>`;
+      if(gv){ const pil=(l,v)=>`<div class="rc-tile" style="text-align:center"><div style="font-size:10px;color:var(--dim);font-weight:700">${l}</div><div style="font-size:16px;font-weight:800">${v==null?'—':Number(v).toFixed(2)}</div></div>`;
+        h+=`<div class="rc-lbl">GVM Analysis</div>
+          <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px"><span style="font-size:24px;font-weight:800">${gv.gvm_score==null?'—':Number(gv.gvm_score).toFixed(2)}</span><span style="font-size:12px;color:var(--mut);font-weight:700">${esc(gv.verdict||'')}</span></div>
+          <div style="display:flex;gap:6px;margin-bottom:8px">${pil('Growth',gv.g_score)}${pil('Value',gv.v_score)}${pil('Momentum',gv.m_score)}</div>
+          <div class="rc-tile"><div style="display:flex;gap:10px;font-size:12px"><div style="flex:1;min-width:0"><span style="color:var(--dim)">Segment</span><br><b>${esc(gv.segment||'—')}</b></div><div style="flex:1"><span style="color:var(--dim)">Sector</span><br><b>${gv.sector_rating==null?'—':Number(gv.sector_rating).toFixed(2)}</b></div><div style="flex:1"><span style="color:var(--dim)">Rank</span><br><b>${gv.segment_rank!=null?('#'+gv.segment_rank+' / '+gv.segment_total):'—'}</b></div></div></div>`; }
+      const E=(dm&&dm.energy)||{},M=(dm&&dm.meanings)||{};
+      h+=`<div class="rc-lbl">Volume</div><div style="display:flex;gap:6px">
+        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Rel Volume · VolX</div><div style="font-size:20px;font-weight:800;color:${E.volx>=1?'var(--grn)':'var(--txt)'}">${E.volx==null?'—':Number(E.volx).toFixed(1)}×</div></div>
+        <div class="rc-tile"><div style="font-size:10px;color:var(--dim)">Vol 3D / 21D</div><div style="font-size:20px;font-weight:800">${E.recent3d_vol_ratio==null?'—':Number(E.recent3d_vol_ratio).toFixed(1)}×</div></div></div>`;
+      const dv=E.delivery||{};
+      if(dv.deliv_pct!=null){ const lc=dv.label==='conviction'?'var(--grn)':dv.label==='churn'?'var(--red)':'var(--mut)';
+        h+=`<div class="rc-lbl">Delivery</div><div class="rc-tile"><span style="font-size:20px;font-weight:800">${Number(dv.deliv_pct).toFixed(1)}%</span> <span style="font-size:11px;color:var(--dim)">vs 21d ${dv.avg21==null?'—':Number(dv.avg21).toFixed(1)}%</span><span style="float:right;font-size:10px;font-weight:800;color:${lc}">${(dv.label||'neutral').toUpperCase()}</span></div>`; }
+      rcOpen(h);
+    } else {
+      const dm=await J('/api/deriv-metrics/'+encodeURIComponent(sym));
+      const rd=(dm&&dm.read)||{}, q=((dm&&dm.verdict)||{}).oi_quadrant||{}, b=((dm&&dm.flow)||{}).basis||{}, lv=((dm&&dm.levels)||{}).verdict||{};
+      const lc=c=>c==='bull'||c==='grn'?'var(--grn)':c==='bear'||c==='red'?'var(--red)':'var(--amber)';
+      rcOpen(`<h3>${esc(sym)} · Deriv</h3>
+        <div class="rc-lbl">Composite READ</div><div class="rc-tile"><b style="font-size:14px">${esc(rd.label||'NO READ')}</b><div style="font-size:11px;color:var(--mut);margin-top:3px">${esc(rd.sentence||'')}</div></div>
+        <div class="rc-lbl">OI × Price</div><div class="rc-tile"><b style="color:${lc(q.color)}">${esc((q.label||'DATA THIN'))}</b>${q.oi_chg_pct!=null?` <span style="font-size:11px;color:var(--dim)">OI ${pctS(q.oi_chg_pct)} · Px ${pctS(q.price_chg_pct)}</span>`:''}</div>
+        <div class="rc-lbl">Futures basis · Levels</div><div class="rc-tile">${b.value!=null?`Basis <b>${Number(b.value).toFixed(1)}</b> ${b.tag?('· '+esc(b.tag)):''}`:'Basis —'}${lv.label?` <span style="float:right;font-weight:800;color:${lc(lv.color)}">${esc(lv.label)} ${esc(lv.score||'')}</span>`:''}</div>`);
+    }
+  }catch(e){ rcOpen(`<h3>${esc(sym)} · ${kind}</h3><div class="empty">Failed to load.</div>`); }
 }
-document.getElementById('prev').onclick=function(){ if(state.page>1){state.page--;load();} };
-document.getElementById('next').onclick=function(){ if(state.page<state.pages){state.page++;load();} };
-load();
+
+(async function(){
+  try{ DATA=await J('/api/result-corner/v2'); render(); }
+  catch(e){ document.getElementById('tape').innerHTML='<div style="grid-column:1/-1"><div class="empty">Result Corner data unavailable — the backend may still be deploying.</div></div>'; }
+})();
 </script>
 <script src="/static/pwa.js"></script>
 </body>

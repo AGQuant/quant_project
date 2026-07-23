@@ -313,6 +313,155 @@ def _snapshot(cur, symbol):
     }
 
 
+def _fq_label(period_end):
+    """'Q1 FY27' for a quarter period-end (Jun->Q1, Sep->Q2, Dec->Q3, Mar->Q4)."""
+    if not period_end:
+        return None
+    m, y = period_end.month, period_end.year
+    q = {6: 1, 9: 2, 12: 3, 3: 4}.get(m)
+    if q is None:
+        return None
+    fy = (y + 1) if m >= 4 else y
+    return f"Q{q} FY{str(fy)[-2:]}"
+
+
+def _median(xs):
+    xs = sorted(x for x in xs if x is not None)
+    if not xs:
+        return None
+    n = len(xs)
+    return round(xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2.0, 1)
+
+
+@page_router.get("/api/result-corner/v2")
+def result_corner_v2():
+    """cc#628 RESULT CORNER V2 — one payload driving all three sections. HONESTY DOCTRINE (cc#625
+    fix_3): every aggregate is over SAME-QUARTER reporters only (a company whose latest fundamentals
+    quarter == the season quarter), and coverage counts (n/total) are always returned. season quarter
+    = the modal latest fundamentals quarter across the scored universe (the quarter the bulk are on).
+    Zero new feeds: gvm_scores + fundamentals_history + sector_ratings + earnings_calendar."""
+    from collections import Counter, defaultdict
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            # 1) scored universe -> tier (AMFI mcap rank) + segment + GVM
+            cur.execute("""SELECT symbol, company_name, segment, market_cap, gvm_score, verdict,
+                                  ROW_NUMBER() OVER (ORDER BY market_cap DESC NULLS LAST) mrank
+                           FROM gvm_scores WHERE score_date=(SELECT MAX(score_date) FROM gvm_scores)""")
+            uni = {}
+            for sym, co, seg, mc, g, v, mr in cur.fetchall():
+                tier = "Large" if mr <= 100 else "Mid" if mr <= 250 else "Small"
+                uni[sym] = {"company": co, "segment": seg or "Unclassified",
+                            "gvm": float(g) if g is not None else None, "verdict": v, "tier": tier}
+            # 2) bulk recent quarters, grouped per symbol (consolidated-preferred, newest first)
+            cur.execute("""SELECT symbol, period_end, metrics, consolidated, period_label
+                           FROM fundamentals_history
+                           WHERE section='quarters' AND period_type='quarter' AND period_end IS NOT NULL
+                             AND period_end >= (CURRENT_DATE - INTERVAL '520 days')
+                           ORDER BY symbol, period_end DESC""")
+            rowsby = defaultdict(list)
+            for sym, pe, metrics, cons, plabel in cur.fetchall():
+                rowsby[sym].append((pe, metrics or {}, cons, plabel))
+            fund = {}
+            for sym, rows in rowsby.items():
+                has_cons = any(r[2] for r in rows)
+                rws = [r for r in rows if bool(r[2]) == has_cons] or rows
+
+                def _rev(md):
+                    s = _num(md.get("Sales"))
+                    return s if s is not None else _num(md.get("Revenue"))
+                q = [{"pe": r[0], "sales": _rev(r[1]), "pat": _num(r[1].get("Net Profit"))} for r in rws]
+                latest = q[0]; prev = q[1] if len(q) > 1 else None; yoy = q[4] if len(q) > 4 else None
+                fund[sym] = {"latest_q": latest["pe"], "sales": latest["sales"], "pat": latest["pat"],
+                             "sales_qoq": _pct(latest["sales"], prev["sales"]) if prev else None,
+                             "sales_yoy": _pct(latest["sales"], yoy["sales"]) if yoy else None,
+                             "pat_qoq": _pct(latest["pat"], prev["pat"]) if prev else None,
+                             "pat_yoy": _pct(latest["pat"], yoy["pat"]) if yoy else None}
+            # 3) season quarter = the LIVE season = the NEWEST quarter-end anyone has reported (the one
+            # currently being declared), NOT the modal/last-fully-scraped quarter. Same-quarter reporters
+            # are those who have already filed it; everyone else shows a dash + coverage grows through the
+            # season (honesty doctrine — "90 of 1600 have declared Q1 so far", not last quarter restated).
+            if not fund:
+                return {"season": None, "summary": {}, "sectors": [], "companies": []}
+            season_end = max(f["latest_q"] for f in fund.values())
+            same = [s for s in fund if fund[s]["latest_q"] == season_end and s in uni]
+            # 4) sector GVM ratings + reported dates
+            cur.execute("SELECT segment, ROUND(mcap_weighted_gvm::numeric,2), verdict FROM sector_ratings")
+            secrt = {r[0]: {"rating": float(r[1]) if r[1] is not None else None, "verdict": r[2]} for r in cur.fetchall()}
+            cur.execute("""SELECT UPPER(ticker), MAX(ex_date) FROM earnings_calendar
+                           WHERE status='reported' GROUP BY UPPER(ticker)""")
+            repdate = {r[0]: r[1] for r in cur.fetchall()}
+
+        # ── per-segment same-quarter medians (needed for beats-vs-sector) ──
+        seg_syms = defaultdict(list)
+        for s in same:
+            seg_syms[uni[s]["segment"]].append(s)
+        seg_pat_median = {}
+        sectors = []
+        seg_total = Counter(uni[s]["segment"] for s in uni)
+        for seg, syms in seg_syms.items():
+            sy = [fund[s]["sales_yoy"] for s in syms]
+            py = [fund[s]["pat_yoy"] for s in syms]
+            pat_med = _median(py)
+            seg_pat_median[seg] = pat_med
+            pos = sum(1 for s in syms if (fund[s]["pat_yoy"] or 0) > 0)
+            pat_vals = [s for s in syms if fund[s]["pat_yoy"] is not None]
+            sectors.append({
+                "sector": seg, "reported": len(syms), "total": seg_total.get(seg, len(syms)),
+                "sales_yoy": _median(sy), "pat_yoy": pat_med,
+                "pct_positive": round(pos / len(pat_vals) * 100) if pat_vals else None,
+                "gvm": (secrt.get(seg) or {}).get("rating"),
+                "gvm_verdict": (secrt.get(seg) or {}).get("verdict"),
+            })
+        sectors.sort(key=lambda x: (x["pat_yoy"] is None, -(x["pat_yoy"] or 0)))
+
+        # ── section 01 summary (same-quarter only) ──
+        def _band(x):
+            return "flat" if (x is None or abs(x) < 0.5) else ("pos" if x > 0 else "neg")
+        pos = sum(1 for s in same if _band(fund[s]["pat_yoy"]) == "pos")
+        neg = sum(1 for s in same if _band(fund[s]["pat_yoy"]) == "neg")
+        flat = len(same) - pos - neg
+        beats = sum(1 for s in same if fund[s]["pat_yoy"] is not None
+                    and seg_pat_median.get(uni[s]["segment"]) is not None
+                    and fund[s]["pat_yoy"] > seg_pat_median[uni[s]["segment"]])
+        tier_split = {}
+        for t in ("Large", "Mid", "Small"):
+            tot = sum(1 for s in uni if uni[s]["tier"] == t)
+            rep = sum(1 for s in same if uni[s]["tier"] == t)
+            tier_split[t] = {"reported": rep, "total": tot}
+        summary = {
+            "reported": len(same), "total": len(uni),
+            "pct": round(len(same) / len(uni) * 100) if uni else 0,
+            "pat_growing": pos, "pat_flat": flat, "pat_declining": neg, "beats_sector": beats,
+            "median_sales_yoy": _median([fund[s]["sales_yoy"] for s in same]),
+            "median_pat_yoy": _median([fund[s]["pat_yoy"] for s in same]),
+            "median_sales_qoq": _median([fund[s]["sales_qoq"] for s in same]),
+            "median_pat_qoq": _median([fund[s]["pat_qoq"] for s in same]),
+            "tiers": tier_split,
+        }
+
+        # ── section 03 companies: same-quarter reporters (numbers) + reported-but-unscraped (dashes) ──
+        season_win = date.today() - timedelta(days=45)
+        listed = set(same) | {s for s, d in repdate.items() if s in uni and d and d >= season_win}
+        companies = []
+        for s in listed:
+            u = uni[s]; f = fund.get(s); is_same = s in fund and fund[s]["latest_q"] == season_end
+            companies.append({
+                "symbol": s, "company": u["company"], "segment": u["segment"], "tier": u["tier"],
+                "gvm": u["gvm"], "verdict": u["verdict"],
+                "reported_date": str(repdate.get(s)) if repdate.get(s) else None,
+                # HONESTY: figures ONLY for same-quarter reporters; else dash (quarter not in data yet)
+                "sales": f["sales"] if is_same else None, "pat": f["pat"] if is_same else None,
+                "sales_qoq": f["sales_qoq"] if is_same else None, "sales_yoy": f["sales_yoy"] if is_same else None,
+                "pat_qoq": f["pat_qoq"] if is_same else None, "pat_yoy": f["pat_yoy"] if is_same else None,
+            })
+        companies.sort(key=lambda c: (c["reported_date"] is None, c["reported_date"] or "", ), reverse=True)
+        return {"season": {"quarter": _fq_label(season_end), "quarter_end": str(season_end)},
+                "summary": summary, "sectors": sectors, "companies": companies}
+    finally:
+        conn.close()
+
+
 @page_router.get("/api/result-corner")
 def result_corner_list(tier: str = "all", page: int = 1, per_page: int = 30):
     """cc#603: reported companies (newest first), server-paginated, with mcap tier (AMFI rank by
