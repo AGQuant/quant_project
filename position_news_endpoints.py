@@ -54,15 +54,25 @@ def position_news_feed(request: Request):
                     SELECT symbol FROM v8_paper_positions WHERE status='OPEN' AND symbol IS NOT NULL
                     UNION SELECT symbol FROM smartgain_holdings WHERE symbol IS NOT NULL
                 )
-                SELECT pn.id, pn.symbol, pn.origin, pn.headline, pn.summary, pn.source_name, pn.url,
+                -- cc#619: PREFER the polished_news summary for this exact article when one exists —
+                -- join position_news.url_hash -> raw_news.url_hash (globally unique) -> polished_news
+                -- (Intel-tab quality). Fall back to the CC one-liner (pn.summary), else the raw
+                -- headline. Read-only: no writes to polished_news, no new polish pipeline.
+                SELECT pn.id, pn.symbol, pn.origin, pn.headline,
+                       COALESCE(pol.full_summary, pn.summary) AS summary,
+                       pn.source_name, pn.url,
                        COALESCE(pn.published_at, pn.fetched_at) AS published_at,
-                       (pn.summary IS NOT NULL) AS polished
-                FROM position_news pn JOIN pos ON pos.symbol = pn.symbol
+                       (COALESCE(pol.full_summary, pn.summary) IS NOT NULL) AS polished,
+                       (pol.full_summary IS NOT NULL) AS intel
+                FROM position_news pn
+                JOIN pos ON pos.symbol = pn.symbol
+                LEFT JOIN raw_news rn ON rn.url_hash = pn.url_hash
+                LEFT JOIN polished_news pol ON pol.raw_news_id = rn.id
                 WHERE COALESCE(pn.published_at, pn.fetched_at) >= NOW() - INTERVAL '7 days'
                 ORDER BY pn.symbol ASC,
                          COALESCE(pn.published_at, pn.fetched_at) DESC NULLS LAST, pn.id DESC
             """)
-            for pid, sym, origin, headline, summary, source, url, pub, polished in cur.fetchall():
+            for pid, sym, origin, headline, summary, source, url, pub, polished, intel in cur.fetchall():
                 g = groups.get(sym)
                 if g is None:
                     g = {"symbol": sym, "origin": origin, "count": 0, "items": []}
@@ -70,7 +80,8 @@ def position_news_feed(request: Request):
                 g["count"] += 1
                 g["items"].append({
                     "headline": headline, "summary": summary, "body": summary,   # body kept for the renderer
-                    "source": source, "url": url, "symbol": sym, "polished": bool(polished),
+                    "source": source, "url": url, "symbol": sym,
+                    "polished": bool(polished), "intel": bool(intel),   # intel = Intel-tab polished match
                     "published_at": pub.isoformat() if pub else None,
                 })
     except Exception as e:
