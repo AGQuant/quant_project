@@ -165,3 +165,103 @@ def v9_best_combo():
         GROUP BY combo_id, z_entry, z_exit, z_stop, zscore_window, hedge_recompute
         ORDER BY total_pnl DESC LIMIT 1
     """, single=True)
+
+
+# ── cc#629: V9 SECTOR PAIRS "BRAHMASTRA" paper book (v9_paper_engine) ────────────────────────────
+# Backtest context strip (session_log 8169) — clearly labelled BACKTEST alongside live paper numbers.
+V9_BACKTEST = {"avg_monthly_pct": 2.70, "sharpe": 1.63, "months": 57, "pos_months_pct": 69,
+               "annualized_pct": 32, "label": "BACKTEST 57mo (before costs) · paper is the judge"}
+
+
+def _f(v):
+    try:
+        return float(v) if v is not None else None
+    except Exception:
+        return None
+
+
+@router.get("/paper/open")
+def v9_paper_open():
+    """cc#629: OPEN Brahmastra pairs with live MTM per leg + spread P&L (long: cur-entry; short:
+    entry-cur; ×lot). Current price = latest raw_prices close. Held to the next monthly rebalance."""
+    rows = api_query("""SELECT id, rebalance_date, segment, long_symbol, short_symbol, long_lot,
+                               short_lot, long_entry, short_entry, gvm_long, gvm_short, gvm_gap,
+                               dm_mag_long, dm_mag_short, entry_date
+                        FROM v9_paper_positions WHERE status='OPEN'
+                        ORDER BY rebalance_date DESC, segment""")
+    if isinstance(rows, dict):
+        return rows
+    syms = sorted({r["long_symbol"] for r in rows} | {r["short_symbol"] for r in rows})
+    cur_px = {}
+    if syms:
+        px = api_query("""SELECT DISTINCT ON (symbol) symbol, close FROM raw_prices
+                          WHERE symbol = ANY(%s) AND close IS NOT NULL
+                          ORDER BY symbol, price_date DESC""", (syms,))
+        if isinstance(px, list):
+            cur_px = {r["symbol"]: _f(r["close"]) for r in px}
+    out = []
+    for r in rows:
+        le, se = _f(r["long_entry"]), _f(r["short_entry"])
+        lc, sc = cur_px.get(r["long_symbol"]), cur_px.get(r["short_symbol"])
+        llot, slot = int(r["long_lot"] or 1), int(r["short_lot"] or 1)
+        long_pnl = (lc - le) * llot if (lc is not None and le is not None) else None
+        short_pnl = (se - sc) * slot if (sc is not None and se is not None) else None
+        spread = (long_pnl or 0) + (short_pnl or 0) if (long_pnl is not None and short_pnl is not None) else None
+        notional = (le * llot + se * slot) if (le and se) else None
+        out.append({**r,
+                    "long_cmp": lc, "short_cmp": sc,
+                    "long_pnl": round(long_pnl, 2) if long_pnl is not None else None,
+                    "short_pnl": round(short_pnl, 2) if short_pnl is not None else None,
+                    "spread_pnl": round(spread, 2) if spread is not None else None,
+                    "ret_pct": round(spread / notional * 100, 2) if (spread is not None and notional) else None})
+    return {"open_pairs": out, "count": len(out), "backtest": V9_BACKTEST}
+
+
+@router.get("/paper/closed")
+def v9_paper_closed(limit: int = 120):
+    """cc#629: closed Brahmastra pairs — monthly history, newest exit first."""
+    return api_query("""SELECT rebalance_date, exit_date, segment, long_symbol, short_symbol,
+                               long_lot, short_lot, long_entry, long_exit, short_entry, short_exit,
+                               spread_pnl, ret_pct, hold_days
+                        FROM v9_paper_trades ORDER BY exit_date DESC, id DESC LIMIT %s""",
+                     (min(max(limit, 1), 500),))
+
+
+@router.get("/paper/summary")
+def v9_paper_summary():
+    """cc#629: summary tiles — months live, avg monthly %, win-rate, cumulative % (closed trades),
+    plus the labelled backtest context. Live = paper only; backtest shown separately."""
+    trades = api_query("""SELECT exit_date, ret_pct FROM v9_paper_trades WHERE ret_pct IS NOT NULL""")
+    if isinstance(trades, dict):
+        return trades
+    from collections import defaultdict
+    by_month = defaultdict(list)
+    for t in trades:
+        ed = t["exit_date"]
+        key = ed.strftime("%Y-%m") if hasattr(ed, "strftime") else str(ed)[:7]
+        by_month[key].append(_f(t["ret_pct"]) or 0.0)
+    month_rets = {m: round(sum(v) / len(v), 2) for m, v in by_month.items()} if by_month else {}
+    n_months = len(month_rets)
+    avg_monthly = round(sum(month_rets.values()) / n_months, 2) if n_months else None
+    pos_months = sum(1 for v in month_rets.values() if v > 0)
+    wins = sum(1 for t in trades if (_f(t["ret_pct"]) or 0) > 0)
+    wr = round(wins / len(trades) * 100, 1) if trades else None
+    cumulative = round(sum(_f(t["ret_pct"]) or 0 for t in trades), 2) if trades else 0.0
+    open_ct = api_query("SELECT COUNT(*) AS n FROM v9_paper_positions WHERE status='OPEN'", single=True)
+    return {"months_live": n_months, "avg_monthly_pct": avg_monthly,
+            "pos_months": pos_months, "closed_trades": len(trades),
+            "win_rate": wr, "cumulative_pct": cumulative,
+            "open_pairs": (open_ct or {}).get("n", 0) if isinstance(open_ct, dict) else 0,
+            "backtest": V9_BACKTEST}
+
+
+@router.post("/paper/rebalance")
+def v9_paper_rebalance(x_admin_token: Optional[str] = Header(None)):
+    """cc#629: manual trigger of the monthly Brahmastra rebalance (idempotent per date). The scheduled
+    run is the nightly first-trading-day job; this is the admin arm for the same engine."""
+    _check_admin(x_admin_token)
+    try:
+        import v9_paper_engine
+        return v9_paper_engine.run_monthly()
+    except Exception as e:
+        raise HTTPException(500, str(e))

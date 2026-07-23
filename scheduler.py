@@ -2312,6 +2312,31 @@ def _bg_futures_gap_backfill():
     return None
 
 
+_v9_paper_ran_month = None   # cc#629: (year,month) of the last V9 Brahmastra monthly rebalance
+
+def _bg_v9_paper_monthly():
+    """cc#629: V9 SECTOR PAIRS "Brahmastra" monthly rebalance — FIRST trading day of the month,
+    ~01:50 IST (after the nightly GVM at 01:30). Month-locked here + idempotent per calendar month in
+    the engine. PAPER-ONLY, strictly separate book (v9_paper_*); never touches any V8 table."""
+    global _v9_paper_ran_month
+    now = datetime.now(IST)
+    if not (now.hour == 1 and now.minute == 50):
+        return _SKIPPED
+    if now.day > 7 or not _is_trading_day(now.date()):   # first trading day window
+        return _SKIPPED
+    mkey = (now.year, now.month)
+    if _v9_paper_ran_month == mkey:
+        return _SKIPPED
+    _v9_paper_ran_month = mkey
+    try:
+        import v9_paper_engine
+        res = v9_paper_engine.run_monthly()
+        log.info(f"_bg_v9_paper_monthly: {res}")
+    except Exception as e:
+        log.error(f"_bg_v9_paper_monthly: {e}")
+    return None
+
+
 _shareholding_q_running = False
 _shareholding_q_ran_on = None   # date of the last same-day dispatch (day-lock: 1 attempt/day in-window)
 
@@ -2745,6 +2770,7 @@ async def _scheduler_loop():
         if h == 1 and m == 47:  _spawn(_bg_universe_pivots)    # cc#342: full-universe v8_paper_pivots refresh
         if h == 1 and m == 55:  _spawn(_check_pivots_health)   # cc_task #68 Bug 1: pivot watchdog
         if h == 1 and m == 50:  _spawn(_bg_cleanup_news)   # task #38: 30-day news purge
+        if h == 1 and m == 50:  _spawn(_bg_v9_paper_monthly)   # cc#629: V9 Brahmastra monthly rebalance (first trading day, month-locked)
         if h == 1 and m == 52:  _spawn(_bg_log_retention)  # cc#469: 30d tick-class telemetry purge
         # cc#499 (session_log id=5415, 18-Jul-2026): ALL scheduled MF scraping OFF after 17-Jul --
         # the scrape build was a one-time model exercise, go-forward = data vendor. The three

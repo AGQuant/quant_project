@@ -40,6 +40,17 @@
   tbody tr:hover{background:rgba(148,166,210,.07)}
   .loading{color:var(--mut);font-size:13px;padding:22px 4px}
   .empty{color:var(--dim);font-size:13px;padding:22px 12px;text-align:center}
+  /* cc#629 PAPER LIVE tiles + backtest strip */
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:4px 0 14px}
+  .tile{background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:13px 15px}
+  .tile .k{font-size:10px;color:var(--dim);letter-spacing:1.2px;text-transform:uppercase}
+  .tile .v{font-size:23px;font-weight:800;margin-top:5px;font-variant-numeric:tabular-nums}
+  .tile .s{font-size:10.5px;color:var(--mut);margin-top:3px}
+  .bt-strip{display:flex;gap:16px;flex-wrap:wrap;align-items:center;background:linear-gradient(135deg,rgba(245,185,74,.08),var(--panel));
+    border:1px solid rgba(245,185,74,.3);border-radius:12px;padding:11px 16px;margin-bottom:16px;font-size:12px;color:var(--mut)}
+  .bt-strip .lbl{font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--amber);border:1px solid rgba(245,185,74,.4);border-radius:6px;padding:3px 9px}
+  .bt-strip b{color:var(--txt);font-variant-numeric:tabular-nums}
+  .pos{color:var(--grn)} .neg{color:var(--red)}
 </style>
 </head>
 <body>
@@ -52,8 +63,14 @@
   <div id="v9root"><div class="loading">Loading V9 Sector Pairs&hellip;</div></div>
 </div>
 <script>
-const EP={v9Pairs:"/api/v8/v9_pairs_sectors"};   // cc#385/426: live 23-sector eligible pool
+const EP={v9Pairs:"/api/v8/v9_pairs_sectors",   // cc#385/426: live eligible sector pool
+  open:"/api/v9/paper/open", closed:"/api/v9/paper/closed", summary:"/api/v9/paper/summary"};  // cc#629 paper book
 const cache={};
+const nf=(v,d=0)=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:d,minimumFractionDigits:d});
+const pc=v=>v==null?'—':(v>=0?'+':'−')+Math.abs(v).toFixed(2)+'%';
+const rup=v=>v==null?'—':(v>=0?'+':'−')+'₹'+Number(Math.abs(v)).toLocaleString('en-IN',{maximumFractionDigits:0});
+const cls=v=>v==null?'':(v>0?'pos':(v<0?'neg':''));
+const dt=s=>{if(!s)return'—';try{const d=new Date(s+'T00:00:00');const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return d.getDate()+' '+M[d.getMonth()]+" '"+String(d.getFullYear()).slice(2);}catch(e){return s;}};
 async function getJSON(u){const r=await fetch(u,{headers:{'Accept':'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 
 // -- sort helper (verbatim from the V8 dashboard, cc#262) ----------------------
@@ -79,45 +96,88 @@ function tblSort(uid,k){
   const el=document.getElementById('tw_'+uid);if(el)el.innerHTML=drawTbl(uid);
 }
 
-// -- V9 Sector Pairs (cc#385, standalone cc#426) — DESIGN-stage concept + live pool ----
+// -- cc#629: V9 Sector Pairs "Brahmastra" — PAPER LIVE (Spec V3, session_log 8169) --------------
 function renderV9Pairs(){
-  const card=`<div class="ptitle">V9 Sector Pairs <span class="ct" style="background:rgba(245,185,74,.12);border-color:var(--amber);color:var(--amber)">DESIGN</span></div>
-    <div style="background:linear-gradient(135deg,var(--panel2),var(--panel));border:1px solid var(--line2);border-radius:14px;padding:18px 20px;margin-bottom:16px">
-      <div style="font-size:15px;font-weight:800;letter-spacing:.3px;margin-bottom:10px;color:var(--txt)">Sector-neutral long-short pairs</div>
-      <div style="font-size:13px;color:var(--mut);line-height:1.7">
-        Within each futures-universe sector holding <b style="color:var(--txt)">4+ stocks</b> (23 sectors, e.g. Private Banks 11, Pharma 11, IT 10), rank stocks by <b style="color:var(--txt)">strength</b> &mdash; GVM quality, rising momentum (1M + 3M), above DMA50 &amp; DMA200, 50DMA &gt; 200DMA.
-        <span style="color:var(--grn);font-weight:700">LONG the strongest</span>, <span style="color:var(--red);font-weight:700">SHORT the weakest</span>, 1 lot each.
-        Sector and market beta cancel by construction &mdash; no hedge ratios, no z-scores; the spread is a quality-momentum divergence, not a statistical artifact. Rebalance monthly or on rank-flip.
+  const sum=cache.summary||{}, bt=(sum.backtest)||(cache.open&&cache.open.backtest)||{};
+  // header + PAPER LIVE chip
+  let h=`<div class="ptitle">V9 Sector Pairs &middot; Brahmastra
+    <span class="ct" style="background:var(--grn-d);border-color:var(--grn);color:var(--grn)">PAPER LIVE</span></div>`;
+
+  // summary tiles (LIVE paper) + labelled BACKTEST strip
+  const tile=(k,v,s)=>`<div class="tile"><div class="k">${k}</div><div class="v ${cls(typeof v==='number'?v:null)}">${v}</div>${s?`<div class="s">${s}</div>`:''}</div>`;
+  h+=`<div class="tiles">
+    ${tile('Months live',sum.months_live??0,(sum.open_pairs??0)+' open · '+(sum.closed_trades??0)+' closed')}
+    ${tile('Avg monthly',pc(sum.avg_monthly_pct),(sum.pos_months??0)+' positive months')}
+    ${tile('Win rate',sum.win_rate==null?'—':sum.win_rate+'%','closed pairs')}
+    ${tile('Cumulative',pc(sum.cumulative_pct),'sum of pair returns')}
+  </div>`;
+  h+=`<div class="bt-strip"><span class="lbl">BACKTEST</span>
+    <span><b>+${(bt.avg_monthly_pct??2.70)}%</b>/mo</span>
+    <span>Sharpe <b>${bt.sharpe??1.63}</b></span>
+    <span><b>${bt.pos_months_pct??69}%</b> pos months</span>
+    <span><b>${bt.months??57}</b> mo · ~${bt.annualized_pct??32}%/yr</span>
+    <span style="margin-left:auto;color:var(--dim)">before costs · paper is the judge</span></div>`;
+
+  // concept card (updated to the Brahmastra dM selection + PAPER LIVE status)
+  h+=`<div style="background:linear-gradient(135deg,var(--panel2),var(--panel));border:1px solid var(--line2);border-radius:14px;padding:16px 20px;margin-bottom:16px">
+      <div style="font-size:14px;font-weight:800;margin-bottom:8px">Sector-neutral momentum pairs — 1 lot each leg</div>
+      <div style="font-size:12.5px;color:var(--mut);line-height:1.7">
+        In each GVM segment with <b style="color:var(--txt)">&gt;4 futures stocks</b>, momentum <b style="color:var(--txt)">dM</b> is measured over <b style="color:var(--txt)">10d + 42d</b>.
+        <span style="color:var(--grn);font-weight:700">LONG the steepest improver</span> (M rising over both), <span style="color:var(--red);font-weight:700">SHORT the steepest decliner</span> — rank-1 only, max 1 pair/sector.
+        Live <b style="color:var(--txt)">dV</b> overlay confirms value direction; hard filter keeps the <b style="color:var(--txt)">GVM gap in 1.0–2.0</b>.
+        EOD-close entry, <b style="color:var(--txt)">held to the next monthly rebalance</b> — no take-profit, no stop (distortion is the trend).
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
         <span class="chip-info" style="background:var(--grn-d);color:var(--grn)">Sector-neutral</span>
-        <span class="chip-info" style="background:var(--grn-d);color:var(--grn)">Market-beta cancelled</span>
-        <span class="chip-info" style="background:rgba(77,124,254,.12);color:var(--blu)">GVM + momentum rank</span>
-        <span class="chip-info" style="background:rgba(55,211,232,.12);color:var(--cyan)">Monthly / rank-flip rebalance</span>
-      </div>
-      <div style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6;border-top:1px solid var(--line);padding-top:12px">
-        <b style="color:var(--amber)">Status: DESIGN.</b> 5-yr technical backtest + GVM overlay pending backfills &mdash; (a) cc#377 Phase A 1-yr 5-min history and (b) GVM / fundamental backfill from the Screener scrape. This page is the concept + live eligible pool; the engine ships after both land.
+        <span class="chip-info" style="background:rgba(77,124,254,.12);color:var(--blu)">dM 10+42 rank-1</span>
+        <span class="chip-info" style="background:rgba(55,211,232,.12);color:var(--cyan)">GVM gap 1.0–2.0</span>
+        <span class="chip-info" style="background:rgba(245,185,74,.12);color:var(--amber)">Monthly rebalance</span>
       </div>
     </div>`;
-  const d=cache.v9pairs;
-  let table;
-  if(!d){table='<div class="loading">Loading sector pool&hellip;</div>';}
-  else{
-    const secs=d.sectors||[];
-    const head=`<div class="ptitle">Eligible sector pool <span class="ct">${d.sector_count??secs.length} sectors &middot; ${d.total_stocks??''} stocks &middot; &ge;${d.min_stocks??4} each &middot; live</span></div>`;
-    table=head+sortTbl('v9pairs',
-      [["segment","Sector (GVM segment)"],["stock_count","Stocks"]],
-      secs,x=>`<tr>
-        <td class="sym">${x.segment}</td>
-        <td><span style="font-family:'Sora',sans-serif;font-variant-numeric:tabular-nums;font-weight:700;color:${x.stock_count>=8?'var(--grn)':x.stock_count>=6?'var(--cyan)':'var(--mut)'}">${x.stock_count}</span></td></tr>`,
-      {sortKey:'stock_count',dir:-1,empty:"No eligible sectors",wrapClass:''});
-  }
-  return card+table;
+
+  // OPEN pairs (live MTM)
+  const op=(cache.open&&cache.open.open_pairs)||[];
+  h+=`<div class="ptitle">Open pairs <span class="ct">${op.length} live &middot; MTM at latest close</span></div>`;
+  h+=sortTbl('v9open',
+    [["segment","Sector"],["long_symbol","Long"],["short_symbol","Short"],["gvm_gap","GVM gap"],
+     ["long_pnl","Long P&L"],["short_pnl","Short P&L"],["spread_pnl","Spread P&L"],["ret_pct","Return"],["entry_date","Entry"]],
+    op,x=>`<tr>
+      <td class="sym">${x.segment}</td>
+      <td class="sym"><span class="pos">${x.long_symbol}</span><div style="font-size:10px;color:var(--dim)">${nf(x.long_entry,1)}→${nf(x.long_cmp,1)}</div></td>
+      <td class="sym"><span class="neg">${x.short_symbol}</span><div style="font-size:10px;color:var(--dim)">${nf(x.short_entry,1)}→${nf(x.short_cmp,1)}</div></td>
+      <td>${nf(x.gvm_gap,2)}</td>
+      <td class="${cls(x.long_pnl)}">${rup(x.long_pnl)}</td>
+      <td class="${cls(x.short_pnl)}">${rup(x.short_pnl)}</td>
+      <td class="${cls(x.spread_pnl)}" style="font-weight:700">${rup(x.spread_pnl)}</td>
+      <td class="${cls(x.ret_pct)}" style="font-weight:700">${pc(x.ret_pct)}</td>
+      <td style="color:var(--mut)">${dt(x.entry_date)}</td></tr>`,
+    {sortKey:'ret_pct',dir:-1,empty:"No open pairs — a cash month is a valid outcome (zero qualifying pairs).",wrapClass:'',scrollCls:''});
+
+  // CLOSED history
+  const cl=(cache.closed&&Array.isArray(cache.closed))?cache.closed:[];
+  h+=`<div class="ptitle" style="margin-top:20px">Closed pairs &middot; monthly history <span class="ct">${cl.length} closed</span></div>`;
+  h+=sortTbl('v9closed',
+    [["exit_date","Exit"],["segment","Sector"],["long_symbol","Long"],["short_symbol","Short"],
+     ["spread_pnl","Spread P&L"],["ret_pct","Return"],["hold_days","Held"],["rebalance_date","Entry"]],
+    cl,x=>`<tr>
+      <td class="sym" style="color:var(--mut)">${dt(x.exit_date)}</td>
+      <td class="sym">${x.segment}</td>
+      <td class="sym"><span class="pos">${x.long_symbol}</span></td>
+      <td class="sym"><span class="neg">${x.short_symbol}</span></td>
+      <td class="${cls(x.spread_pnl)}" style="font-weight:700">${rup(x.spread_pnl)}</td>
+      <td class="${cls(x.ret_pct)}" style="font-weight:700">${pc(x.ret_pct)}</td>
+      <td style="color:var(--mut)">${x.hold_days==null?'—':x.hold_days+'d'}</td>
+      <td style="color:var(--dim)">${dt(x.rebalance_date)}</td></tr>`,
+    {sortKey:'exit_date',dir:-1,empty:"No closed pairs yet — first rebalance opens the book; pairs close at the next monthly rebalance.",wrapClass:''});
+
+  return h;
 }
 
 async function boot(){
   const root=document.getElementById('v9root');
-  try{cache.v9pairs=await getJSON(EP.v9Pairs);}catch(e){/* render concept card even if the pool fails */}
+  const [su,op,cl]=await Promise.all([
+    getJSON(EP.summary).catch(()=>({})), getJSON(EP.open).catch(()=>({})), getJSON(EP.closed).catch(()=>([]))]);
+  cache.summary=su; cache.open=op; cache.closed=cl;
   root.innerHTML=renderV9Pairs();
 }
 boot();
