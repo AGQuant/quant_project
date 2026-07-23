@@ -39,6 +39,12 @@ import os
 import time
 
 from nse_holidays import is_trading_day
+# cc#607 Phase A: the basket filter registry is the single source of truth (declared adjacent to the
+# handlers in v8_signal_writer.py). FILTER_CONFIG basket bounds, the funnel stage rows, the per-stock
+# pass-count breakdown and the /api/v8/filters payload all GENERATE from it — no hand-maintained
+# copies (the source of the ghost true-weekly-RSI row on buy_reversal).
+from v8_signal_writer import (BASKET_FILTERS, BASKET_SPEC, basket_filter_config,
+                              basket_stage_rows, basket_funnel_keys)
 
 router = APIRouter(prefix="/api/v8", tags=["v8"])
 
@@ -58,34 +64,20 @@ def _market_open() -> bool:
     return open_t <= now <= close_t
 
 
+# cc#607 Phase A: FILTER_CONFIG basket bounds are now GENERATED from the BASKET_FILTERS registry
+# in v8_signal_writer.py (single source of truth) — the hand-maintained per-basket dicts (the source
+# of the cc#607 ghost true-weekly-RSI drift) are deleted. buy_reversal / sell_reversal / sell_momentum
+# derive directly (their FILTER_CONFIG set == their v8_metrics-column funnel gates). buy_momentum is
+# the exception: its FILTER_CONFIG is the SEPARATE SCORE-band layer (SCORE>=7-of-10, dma_50[8,25]…),
+# NOT its hard-gate funnel (dma_50[5,12]…) — those live/heavy hard gates are in the registry and drive
+# the funnel; the score bands below mirror the handler's SCORE_BANDS dict (Phase B lifts that to the
+# registry too). live/pivot legs (s1_touch/r1_touch/room/cmp_lt_pp/s2_clearance) + the heavy
+# true_weekly_rsi FINAL stage are excluded from FILTER_CONFIG (handler-enforced; never v8_metrics cols).
 FILTER_CONFIG = {
-    # cc#502 V8 SUITE REBUILD (18-Jul-2026): sell_overbought + buy_s1_bounce entries REMOVED
-    # (both baskets retired entirely). All four remaining baskets are dedicated strict-AND
-    # handlers in v8_signal_writer.py -- this dict is DISPLAY/ENDPOINT REFERENCE ONLY (the
-    # generic score-gate loop that used to read it live is retired). Each entry carries the
-    # v8_metrics-computable subset of that basket's filters; live/pivot/price-history gates and
-    # the heavy true_weekly_rsi (wRSI) FINAL stage are handler-enforced only and noted in comments
-    # -- wRSI is NEVER the shared synthetic v8_metrics.rsi_weekly (cc#353: ~16pt off), always the
-    # basket-call-local _true_weekly_rsi().
-    "buy_reversal": {
-        # BUY_REVERSAL_V6 (cc#606/session_log 7828, supersedes V5). The heavy true_weekly_rsi>=70
-        # FINAL stage is REMOVED from this basket; day_1d>0 strict replaces it as the 7th gate.
-        # Only S1-touch (prior-4-day raw_prices low OR today's live day_low <= S1) stays
-        # handler-enforced (not a v8_metrics column); the other 6 are shown here.
-        "mom_2d":       [-0.5, None],
-        "week_return":  [-2.0, None],
-        "rsi_month":    [60.0, 90.0],
-        "sector_week":  [0.0,  None],   # engine enforces STRICT >0
-        "month_return": [None, 5.0],
-        "day_1d":       [0.0,  None],   # cc#606: engine enforces STRICT >0
-    },
-    "buy_momentum": {
-        # BUY_MOMENTUM_V3: TWO independent layers, both handler-enforced. The 9 bands below are
-        # the SCORE layer (SCORE>=7-of-10 fixed threshold, no mood-dependent n/n-1; the 10th band
-        # is wRSI 60-85 via true_weekly_rsi, not a stored column). A SEPARATE, stricter HARD-gate
-        # layer (all strict-AND, not shown here) also applies: dma_50 in [5,12] (tighter than the
-        # score band below), dma_20>0, week_index_52>=75, gvm_score>=7, day_1d>0, hourly_pct>0 AND
-        # NOT NULL (blocks entries before ~10:15), FINAL heavy true_weekly_rsi in [70,85].
+    "buy_reversal":  basket_filter_config("buy_reversal"),
+    "sell_reversal": basket_filter_config("sell_reversal"),
+    "sell_momentum": basket_filter_config("sell_momentum"),
+    "buy_momentum": {   # SCORE-band layer (mirrors _write_buy_momentum_v3_qualified's SCORE_BANDS + gvm)
         "gvm_score":    [7.0,  10.0],
         "dma_50":       [8.0,  25.0],
         "dma_200":      [8.0,  40.0],
@@ -95,32 +87,6 @@ FILTER_CONFIG = {
         "mom_2d":       [0.0,   6.0],
         "sector_week":  [0.0,   6.0],
         "sector_month": [0.0,   6.0],
-    },
-    "sell_reversal": {
-        # SELL_REVERSAL_V6.1 (replaces V5-D). Live/pivot gates NOT shown here: R1-touch last 3
-        # days (per-day high vs that day's r1) and the FINAL heavy stage true_weekly_rsi<=45 --
-        # both handler-enforced in _write_sell_reversal_v61_qualified. RAW: no market gate, no
-        # kill-switch. Target S1-or-S2 dynamic (room>=2%), stop 1:1 mirror (handler-computed).
-        "day_1d":        [-2.0,  0.0],
-        "dma_20":        [None,  0.0],
-        "dma_50":        [None,  0.0],
-        "dma_200":       [None,  0.0],
-        "week_index_52": [None, 50.0],
-        "sector_week":   [None,  0.0],   # engine enforces STRICT <0
-        "mom_2d":        [-4.0, -1.0],
-        "month_return":  [-10.0, None],
-    },
-    "sell_momentum": {
-        # SELL_MOMENTUM_V4 (renamed from V3): twr tightened <=45 -> <=40, mom_2d tightened
-        # [-4,-1] -> [-4,-2] (both cc#502). Live/pivot gates NOT shown here: CMP<PP,
-        # S2-clearance>=3%, FINAL heavy true_weekly_rsi<=40 -- handler-enforced in
-        # _write_sell_momentum_v4_qualified.
-        "rsi_month":     [None, 40.0],    # weak monthly (engine enforces STRICT <40)
-        "mom_2d":        [-4.0, -2.0],    # recent down-momentum
-        "dma_200":       [None,  2.0],    # below / near 200-DMA
-        "week_return":   [-10.0, -0.5],   # weak week
-        "sector_week":   [None,  0.0],    # weak sector (engine enforces STRICT <0)
-        "week_index_52": [20.0,  60.0],   # mid 52-week band
     },
 }
 
@@ -308,6 +274,23 @@ def _passes_filter(value, mn, mx) -> bool:
     v = float(value)
     if mn is not None and v < mn: return False
     if mx is not None and v > mx: return False
+    return True
+
+
+def _passes_registry_band(value, f) -> bool:
+    """cc#607: evaluate a BASKET_FILTERS band gate honouring the registry's `strict` flag exactly as
+    the handler does — a strict min gate is > (e.g. sector_week>0, day_1d>0), a strict max gate is <
+    (e.g. dma_20<0, rsi_month<40); non-strict uses inclusive _passes_filter (mirrors _passes)."""
+    if value is None:
+        return False
+    v = float(value)
+    mn, mx, strict = f.get("min"), f.get("max"), f.get("strict", False)
+    if mn is not None:
+        if (v <= mn) if strict else (v < mn):
+            return False
+    if mx is not None:
+        if (v >= mx) if strict else (v > mx):
+            return False
     return True
 
 
@@ -1046,11 +1029,20 @@ def filter_config(basket: str):
                          "min_display": "" if mn is None else mn,
                          "max_display": "" if mx is None else mx,
                          "dynamic": False})
+        # cc#607 Phase A: the full ordered gate list (incl. the s1_touch custom leg) is served from
+        # the BASKET_FILTERS registry as `registry_gates` so the dashboard i-button can render it
+        # from the single source instead of a hardcoded list (the ghost-twr drift source). Each row:
+        # key, label, condition strings, type (band|custom). `spec_label` drives the header pill.
+        spec = BASKET_SPEC.get("buy_reversal", {})
+        registry_gates = [{"key": f["key"], "label": f["label"], "type": f["type"],
+                           "cond_min": f.get("cond_min", ""), "cond_max": f.get("cond_max", "")}
+                          for f in BASKET_FILTERS["buy_reversal"]]
         # cc#502 V5 / cc#606 V6: no Nifty regime; daily-metric gates shown here, S1-touch enforced
         # live in the dedicated handler. cc#606 dropped the heavy true_weekly_rsi>=70 FINAL stage —
         # replaced by a cheap day_1d>0 gate (in the metric rows above).
         return {
             "basket": basket, "filters": rows, "count": len(rows),
+            "registry_gates": registry_gates, "spec_label": spec.get("label"), "version": spec.get("version"),
             "regime": "V6", "nifty_1m_return": round(nifty_1m, 2),
             "live_gates": ["S1-touch (prior-4-day low OR today's live day_low <= S1)"],
             "entry_exit": "entry live CMP, target +3.0% fixed, stop -3.0% fixed (true 1:1)",
@@ -1510,20 +1502,13 @@ def _sr_dynamic_target(cmp, s1, s2):
     return None, None
 
 
-# cc#502 BUY_REVERSAL_V5 / cc#606 V6: the funnel is CAPTURED by the writer
-# (_write_buy_reversal_v6_qualified -> v8_funnel_counts) and reshaped here — never recomputed from
-# FILTER_CONFIG. Static stage order + display labels (labels carry spaces so the dashboard renders
-# them verbatim via metric.replace). cc#606: dropped the heavy true_weekly_rsi>=70 FINAL stage for
-# this basket; replaced by a cheap day_1d>0 gate counted over the full universe like the others.
-_BR_V5_STAGES = [
-    ("s1_touch",        "S1 touch (prior-4d low or today's low)", "<= S1",   ""),
-    ("mom_2d",          "mom 2d",                                 ">= -0.5", ""),
-    ("week_return",     "week return",                            ">= -2",   ""),
-    ("rsi_month",       "monthly RSI",                            ">= 60",   "<= 90"),
-    ("sector_week",     "sector week",                            "> 0",     ""),
-    ("month_return",    "month return",                           "",        "< 5"),
-    ("day_1d",          "day 1d",                                 "> 0",     ""),
-]
+# cc#607 Phase A: the funnel stage list is GENERATED from the BASKET_FILTERS registry (single source)
+# — the funnel counts are CAPTURED by the writer (_write_buy_reversal_v6_qualified -> v8_funnel_counts)
+# and reshaped here against these registry rows (never recomputed from FILTER_CONFIG). Drop a gate in
+# the registry+handler and it disappears from this funnel automatically. Labels carry spaces so the
+# dashboard renders them verbatim via metric.replace. (cc#606: buy_reversal V6 = 7 cheap gates,
+# day_1d>0 replaced the heavy true_weekly_rsi>=70 FINAL stage.)
+_BR_V5_STAGES = basket_stage_rows("buy_reversal")
 
 def br_funnel_detail():
     """cc#502/cc#606: 7-stage funnel for BUY_REVERSAL_V6, reshaped from the handler-written
@@ -1559,20 +1544,13 @@ def br_funnel_detail():
         raise HTTPException(500, f"br_funnel_detail failed: {e}")
 
 
-# cc#502/cc#606: BUY_REVERSAL_V6 pass-count gates — the 3 cheap daily-metric gates. sector_week
-# (strict >0) + month_return (strict <5) + s1_touch (prior-4d low / today's live low) + day_1d
-# (strict >0) are handled inline in br_stock_passcount, mirroring _write_buy_reversal_v6_qualified.
-_BR_V5_PASSCOUNT_GATES = [
-    ("mom_2d",      -0.5, None),   # (2)
-    ("week_return", -2.0, None),   # (3)
-    ("rsi_month",   60.0, 90.0),   # (4)
-]
-
 def br_stock_passcount():
-    """cc#502/cc#606: BUY_REVERSAL_V6 pass-count = n/7, all 7 gates cheap. S1-touch + 3 cheap daily
-    gates + sector_week + month_return + day_1d are evaluated for ALL stocks (cc#606 dropped the
-    DB-heavy true_weekly_rsi FINAL stage; day_1d>0 strict is the cheap replacement). Display only —
-    mirrors _write_buy_reversal_v6_qualified, never qualifies."""
+    """cc#607 Phase A: BUY_REVERSAL_V6 pass-count = n/7, all 7 gates cheap — GENERATED from the
+    BASKET_FILTERS["buy_reversal"] registry (single source). Each registry filter is evaluated for
+    ALL stocks: band gates via _passes_registry_band (strict-aware, mirrors the handler), the
+    s1_touch custom leg via prior-4d/today-low vs S1. Drop a gate in the registry and it disappears
+    from this pass-count in one deploy (matching the funnel). Display only, never qualifies."""
+    reg = BASKET_FILTERS["buy_reversal"]
     try:
         with _conn() as conn, conn.cursor() as cur:
             all_rows = _basket_universe(cur)
@@ -1585,37 +1563,29 @@ def br_stock_passcount():
                 sym = s["symbol"]
                 passed, failed = [], []
                 actuals = {}
-                for metric, mn, mx in _BR_V5_PASSCOUNT_GATES:
-                    actuals[metric] = s.get(metric)
-                    (passed if _passes_filter(s.get(metric), mn, mx) else failed).append(metric)
-                mr = s.get("month_return")
-                actuals["month_return"] = mr
-                (passed if (mr is not None and float(mr) < 5.0) else failed).append("month_return")
-                sw = s.get("sector_week")
-                actuals["sector_week"] = sw
-                (passed if (sw is not None and float(sw) > 0.0) else failed).append("sector_week")
                 pv   = pivots.get(sym)
                 s1   = pv.get("s1") if pv else None
                 p4lo = prior4_low.get(sym)
                 tlo  = today_low.get(sym)
-                s1_ok = s1 is not None and ((p4lo is not None and p4lo <= s1) or (tlo is not None and tlo <= s1))
-                # cc#514: actual = the 5d/today low tested against S1 (whichever cleared it, else the
-                # 5d low as the representative value shown in the funnel-row expansion).
-                actuals["s1_touch"] = (p4lo if (p4lo is not None and s1 is not None and p4lo <= s1)
-                                        else (tlo if (tlo is not None and s1 is not None and tlo <= s1)
-                                              else (p4lo if p4lo is not None else tlo)))
-                (passed if s1_ok else failed).append("s1_touch")
-                # cc#606: day_1d > 0 strict — cheap gate 7, evaluated for ALL stocks
-                d1 = s.get("day_1d")
-                actuals["day_1d"] = d1
-                (passed if (d1 is not None and float(d1) > 0.0) else failed).append("day_1d")
-                out.append({"symbol": sym, "passed": len(passed), "total": 7,
+                for f in reg:
+                    key = f["key"]
+                    if key == "s1_touch":
+                        s1_ok = s1 is not None and ((p4lo is not None and p4lo <= s1) or (tlo is not None and tlo <= s1))
+                        # cc#514: actual = the 5d/today low tested against S1 (whichever cleared it).
+                        actuals["s1_touch"] = (p4lo if (p4lo is not None and s1 is not None and p4lo <= s1)
+                                                else (tlo if (tlo is not None and s1 is not None and tlo <= s1)
+                                                      else (p4lo if p4lo is not None else tlo)))
+                        (passed if s1_ok else failed).append(key)
+                    else:   # band gate — strict-aware, mirrors the handler
+                        actuals[key] = s.get(key)
+                        (passed if _passes_registry_band(s.get(key), f) else failed).append(key)
+                out.append({"symbol": sym, "passed": len(passed), "total": len(reg),
                             "passed_filters": passed, "failed_filters": failed,
                             "gvm_score": s.get("gvm_score"), "mom_2d": s.get("mom_2d"),
                             "v21_pass": None, "actuals": actuals})
         out.sort(key=lambda x: (x["passed"], x["gvm_score"] if x["gvm_score"] is not None else -1), reverse=True)
         return {"basket": "buy_reversal", "score_date": str(date.today()),
-                "universe": len(out), "filter_count": 7, "stocks": out,
+                "universe": len(out), "filter_count": len(reg), "stocks": out,
                 "v21_enabled": False, **BASKET_META.get("buy_reversal", {})}
     except Exception as e:
         raise HTTPException(500, f"br_stock_passcount failed: {e}")
@@ -1651,27 +1621,34 @@ def br_stock_detail(symbol: str):
         def _fmt(v, d):
             return "--" if v is None else f"{v:.{d}f}"
 
+        # cc#607: rows GENERATED from the BASKET_FILTERS["buy_reversal"] registry (single source),
+        # so the modal, the pass-count card and the funnel always show the same gate set.
+        valmap = {"mom_2d": mom2d, "week_return": wret, "rsi_month": rmon,
+                  "sector_week": swk, "month_return": mret, "day_1d": d1}
+        pct_keys = {"mom_2d", "week_return", "month_return", "day_1d"}
         s1_ok = s1 is not None and ((p4lo is not None and p4lo <= s1) or (tlo is not None and tlo <= s1))
-        p_mom  = _passes_filter(mom2d, -0.5, None)
-        p_wret = _passes_filter(wret, -2.0, None)
-        p_rm   = _passes_filter(rmon, 60.0, 90.0)
-        p_sw   = swk is not None and swk > 0.0
-        p_mret = mret is not None and mret < 5.0
-        p_d1   = d1 is not None and d1 > 0.0     # cc#606 cheap gate 7
-
         low_lbl = f"prior4d {_fmt(p4lo,2)} / today {_fmt(tlo,2)} vs S1 {_fmt(s1,2)}"
-        rows = [
-            {"filter": "s1_touch",        "required": "<= S1",    "actual": low_lbl,             "pass": s1_ok},
-            {"filter": "mom_2d",          "required": ">= -0.5",  "actual": _fmt(mom2d, 2) + "%","pass": p_mom},
-            {"filter": "week_return",     "required": ">= -2",    "actual": _fmt(wret, 2) + "%", "pass": p_wret},
-            {"filter": "rsi_month",       "required": "60 to 90", "actual": _fmt(rmon, 1),       "pass": p_rm},
-            {"filter": "sector_week",     "required": "> 0",      "actual": _fmt(swk, 2),        "pass": p_sw},
-            {"filter": "month_return",    "required": "< 5",      "actual": _fmt(mret, 2) + "%", "pass": p_mret},
-            {"filter": "day_1d",          "required": "> 0",      "actual": _fmt(d1, 2) + "%",   "pass": p_d1},
-        ]
+
+        def _req_str(f):
+            cmn, cmx = f.get("cond_min", ""), f.get("cond_max", "")
+            if f.get("min") is not None and f.get("max") is not None:
+                return f"{f['min']:g} to {f['max']:g}"
+            return cmn or cmx or ""
+
+        rows = []
+        for f in BASKET_FILTERS["buy_reversal"]:
+            key = f["key"]
+            if key == "s1_touch":
+                rows.append({"filter": "s1_touch", "required": "<= S1", "actual": low_lbl, "pass": s1_ok})
+            else:
+                v = valmap.get(key)
+                dec = 1 if key == "rsi_month" else 2
+                act = _fmt(v, dec) + ("%" if key in pct_keys else "")
+                rows.append({"filter": key, "required": _req_str(f),
+                             "actual": act, "pass": _passes_registry_band(v, f)})
         passed = sum(1 for r in rows if r["pass"])
         return {"symbol": sym, "cmp": cmp, "pp": pp, "s1": s1,
-                "passed": passed, "total": 7, "rows": rows,
+                "passed": passed, "total": len(rows), "rows": rows,
                 "spec": "BUY_REVERSAL_V6 cc#606"}
     except HTTPException:
         raise
@@ -1682,19 +1659,7 @@ def br_stock_detail(symbol: str):
 # cc#502 SELL_REVERSAL_V6.1 (replaces V5-D) funnel stages — SELL mirror pattern. Cheap-first,
 # true_weekly_rsi last (heavy, only on cheap-intersection survivors). Labels carry spaces for
 # verbatim render.
-_SR_V61_STAGES = [
-    ("r1_touch",        "R1 touch (last 3 days)", "",       ""),
-    ("day_1d",          "day change",             ">= -2",  "<= 0"),
-    ("dma_20",           "dma 20",                "",       "< 0"),
-    ("dma_50",           "dma 50",                "",       "< 0"),
-    ("dma_200",         "dma 200",                "",       "< 0"),
-    ("week_index_52",   "52w index",              "",       "< 50"),
-    ("sector_week",     "sector week",            "",       "< 0"),
-    ("mom_2d",          "mom 2d",                 ">= -4",  "<= -1"),
-    ("month_return",    "month return",           ">= -10", ""),
-    ("room",            "room to S1/S2",          ">= 2%",  ""),
-    ("true_weekly_rsi", "true weekly RSI",        "",       "<= 45"),
-]
+_SR_V61_STAGES = basket_stage_rows("sell_reversal")   # cc#607 Phase A: generated from BASKET_FILTERS
 
 def sr_funnel_detail():
     """cc#502/514: 11-stage funnel for SELL_REVERSAL_V6.1, reshaped from the handler-written
@@ -1881,17 +1846,7 @@ def sr_stock_detail(symbol: str):
 # cc#502 SELL_MOMENTUM_V4 (renamed from V3): twr<=45->40, mom_2d[-4,-1]->[-4,-2], else unchanged.
 # Cheap-first, true_weekly_rsi last (heavy, only on the 8-cheap-gate intersection). Labels carry
 # spaces for verbatim render.
-_SM_V3_STAGES = [
-    ("rsi_month",       "monthly RSI",     "",       "< 40"),
-    ("mom_2d",          "mom 2d",          ">= -4",  "<= -2"),
-    ("dma_200",         "dma 200",         "",       "<= 2"),
-    ("week_return",     "week return",     ">= -10", "<= -0.5"),
-    ("sector_week",     "sector week",     "",       "< 0"),
-    ("week_index_52",   "52w index",       ">= 20",  "<= 60"),
-    ("cmp_lt_pp",       "CMP < PP",        "",       ""),
-    ("s2_clearance",    "S2 clearance",    ">= 3%",  ""),
-    ("true_weekly_rsi", "true weekly RSI", "",       "<= 40"),
-]
+_SM_V3_STAGES = basket_stage_rows("sell_momentum")   # cc#607 Phase A: generated from BASKET_FILTERS
 
 def sm_funnel_detail():
     """cc#502: 9-stage funnel for SELL_MOMENTUM_V4, reshaped from the handler-written
@@ -2059,15 +2014,7 @@ def sm_stock_detail(symbol: str):
 # cheap-first convention), true_weekly_rsi last (heavy, only on the 6-cheap-gate intersection).
 # A stage-8 SCORE row (>=7 of 10 V2 bands, fixed threshold) is appended separately below since it
 # is a second independent layer, not part of the 7 hard gates.
-_BM_V3_STAGES = [
-    ("dma_50",         "dma 50",          ">= 5",   "<= 12"),
-    ("dma_20",         "dma 20",          "> 0",    ""),
-    ("week_index_52",  "52w index",       ">= 75",  ""),
-    ("gvm_score",      "gvm score",       ">= 7",   ""),
-    ("day_1d",         "day change",      "> 0",    ""),
-    ("hourly_pct",     "hourly % (from ~10:15)", "> 0", "NOT NULL"),
-    ("true_weekly_rsi","true weekly RSI", ">= 70",  "<= 85"),
-]
+_BM_V3_STAGES = basket_stage_rows("buy_momentum")   # cc#607 Phase A: generated from BASKET_FILTERS
 
 def bm_funnel_detail():
     """cc#502: BUY_MOMENTUM_V3 8-stage funnel, reshaped from the handler-written v8_funnel_counts

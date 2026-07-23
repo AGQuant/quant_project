@@ -2006,6 +2006,108 @@ def _write_buy_momentum_v3_qualified(conn, all_metrics: List[dict], target_date:
             log.warning(f"buy_momentum_v3 insert {sym}: {e}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# cc#607 PHASE A — BASKET_FILTER_REGISTRY (single source of truth for basket gates)
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# The four dedicated handlers above ARE the trading-logic truth. This registry is DATA declared
+# adjacent to them, enumerating each basket's live gates in funnel/display order — key, display
+# label + condition strings, machine bounds (min/max/strict), and type. v8_endpoints.py imports
+# BASKET_FILTERS so the funnel rows, per-stock pass-count breakdown, /api/v8/filters payload and the
+# dashboard i-button ALL generate from this one list instead of hand-maintained copies (the source
+# of the cc#607 ghost true-weekly-RSI row on buy_reversal). Drop a gate here (and in the handler)
+# and it disappears from every display surface in one deploy; the cc#599 watchdog parity check
+# alerts if a handler's live funnel keys ever drift from this registry.
+#
+# Per-filter fields:
+#   key        v8_funnel_counts key (== the funnel key the handler writes) / v8_metrics column
+#   label      display label (spaces preserved for verbatim dashboard render)
+#   cond_min   left-hand condition string (e.g. ">= -0.5", "> 0", "");  cond_max  right-hand ("<= 90")
+#   min/max    machine bounds for FILTER_CONFIG-shape derivation (None = open side)
+#   type       "band"   = a v8_metrics column gate (feeds FILTER_CONFIG + pass-count band loop)
+#              "custom" = a live/pivot/price-history leg the handler computes inline (s1_touch,
+#                         r1_touch, room, cmp_lt_pp, s2_clearance) — NOT a v8_metrics column
+#   heavy      True only for the per-symbol true_weekly_rsi FINAL stage (funnel denom = survivors)
+#   denom_key  for a heavy stage: the v8_funnel_counts survivor-count key its denominator reads
+# NOTE (Phase A): trading logic still lives in each handler; Phase B (future task) has the handlers
+# consume min/max FROM this registry so bounds are literal-single-source too. Keys/order/bounds here
+# MUST mirror the handler exactly — funnel counts are byte-identical pre/post (metadata-only change).
+BASKET_FILTERS = {
+    # BUY_REVERSAL_V6 (cc#606) — 7 CHEAP gates, no heavy true_weekly_rsi stage (day_1d>0 replaced it).
+    "buy_reversal": [
+        {"key": "s1_touch",     "label": "S1 touch (prior-4d low or today's low)", "cond_min": "<= S1",   "cond_max": "",     "min": None,  "max": None,  "type": "custom"},
+        {"key": "mom_2d",       "label": "mom 2d",       "cond_min": ">= -0.5", "cond_max": "",     "min": -0.5,  "max": None,  "type": "band"},
+        {"key": "week_return",  "label": "week return",  "cond_min": ">= -2",   "cond_max": "",     "min": -2.0,  "max": None,  "type": "band"},
+        {"key": "rsi_month",    "label": "monthly RSI",  "cond_min": ">= 60",   "cond_max": "<= 90","min": 60.0,  "max": 90.0,  "type": "band"},
+        {"key": "sector_week",  "label": "sector week",  "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
+        {"key": "month_return", "label": "month return", "cond_min": "",        "cond_max": "< 5",  "min": None,  "max": 5.0,   "type": "band"},
+        {"key": "day_1d",       "label": "day 1d",       "cond_min": "> 0",     "cond_max": "",     "min": 0.0,   "max": None,  "type": "band", "strict": True},
+    ],
+    # SELL_REVERSAL_V6.1 (cc#502) — 10 cheap conditions + heavy true_weekly_rsi<=45 FINAL stage.
+    "sell_reversal": [
+        {"key": "r1_touch",       "label": "R1 touch (last 3 days)", "cond_min": "",       "cond_max": "",      "min": None,   "max": None, "type": "custom"},
+        {"key": "day_1d",         "label": "day change",   "cond_min": ">= -2",  "cond_max": "<= 0",  "min": -2.0,  "max": 0.0,  "type": "band"},
+        {"key": "dma_20",         "label": "dma 20",       "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "dma_50",         "label": "dma 50",       "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "dma_200",        "label": "dma 200",      "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "week_index_52",  "label": "52w index",    "cond_min": "",       "cond_max": "< 50",  "min": None,  "max": 50.0, "type": "band", "strict": True},
+        {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "< 0",   "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -1", "min": -4.0,  "max": -1.0, "type": "band"},
+        {"key": "month_return",   "label": "month return", "cond_min": ">= -10", "cond_max": "",      "min": -10.0, "max": None, "type": "band"},
+        {"key": "room",           "label": "room to S1/S2","cond_min": ">= 2%",  "cond_max": "",      "min": None,  "max": None, "type": "custom"},
+        {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": "",     "cond_max": "<= 45", "min": None,  "max": 45.0, "type": "band", "heavy": True, "denom_key": "_stage9_survivors"},
+    ],
+    # SELL_MOMENTUM_V4 (cc#502) — 8 cheap gates + heavy true_weekly_rsi<=40 FINAL stage.
+    "sell_momentum": [
+        {"key": "rsi_month",      "label": "monthly RSI",  "cond_min": "",       "cond_max": "< 40",   "min": None,  "max": 40.0, "type": "band", "strict": True},
+        {"key": "mom_2d",         "label": "mom 2d",       "cond_min": ">= -4",  "cond_max": "<= -2",  "min": -4.0,  "max": -2.0, "type": "band"},
+        {"key": "dma_200",        "label": "dma 200",      "cond_min": "",       "cond_max": "<= 2",   "min": None,  "max": 2.0,  "type": "band"},
+        {"key": "week_return",    "label": "week return",  "cond_min": ">= -10", "cond_max": "<= -0.5","min": -10.0, "max": -0.5, "type": "band"},
+        {"key": "sector_week",    "label": "sector week",  "cond_min": "",       "cond_max": "< 0",    "min": None,  "max": 0.0,  "type": "band", "strict": True},
+        {"key": "week_index_52",  "label": "52w index",    "cond_min": ">= 20",  "cond_max": "<= 60",  "min": 20.0,  "max": 60.0, "type": "band"},
+        {"key": "cmp_lt_pp",      "label": "CMP < PP",     "cond_min": "",       "cond_max": "",       "min": None,  "max": None, "type": "custom"},
+        {"key": "s2_clearance",   "label": "S2 clearance", "cond_min": ">= 3%",  "cond_max": "",       "min": None,  "max": None, "type": "custom"},
+        {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": "",     "cond_max": "<= 40",  "min": None,  "max": 40.0, "type": "band", "heavy": True, "denom_key": "_stage8_survivors"},
+    ],
+    # BUY_MOMENTUM_V3 (cc#502) — 6 cheap HARD gates + heavy true_weekly_rsi[70,85] FINAL stage.
+    # (A separate SCORE>=7-of-10 V2-band layer also applies; it is a second layer, not a funnel gate.)
+    "buy_momentum": [
+        {"key": "dma_50",         "label": "dma 50",       "cond_min": ">= 5",  "cond_max": "<= 12", "min": 5.0,  "max": 12.0, "type": "band"},
+        {"key": "dma_20",         "label": "dma 20",       "cond_min": "> 0",   "cond_max": "",      "min": 0.0,  "max": None, "type": "band", "strict": True},
+        {"key": "week_index_52",  "label": "52w index",    "cond_min": ">= 75", "cond_max": "",      "min": 75.0, "max": None, "type": "band"},
+        {"key": "gvm_score",      "label": "gvm score",    "cond_min": ">= 7",  "cond_max": "",      "min": 7.0,  "max": None, "type": "band"},
+        {"key": "day_1d",         "label": "day change",   "cond_min": "> 0",   "cond_max": "",      "min": 0.0,  "max": None, "type": "band", "strict": True},
+        {"key": "hourly_pct",     "label": "hourly % (from ~10:15)", "cond_min": "> 0", "cond_max": "NOT NULL", "min": 0.0, "max": None, "type": "custom"},
+        {"key": "true_weekly_rsi","label": "true weekly RSI","cond_min": ">= 70","cond_max": "<= 85","min": 70.0, "max": 85.0, "type": "band", "heavy": True, "denom_key": "_stage6_survivors"},
+    ],
+}
+
+# Header-pill spec label per basket (dashboard reads this via /api/v8/filters).
+BASKET_SPEC = {
+    "buy_reversal":  {"version": "V6",   "cc": "cc#606", "label": "Buy Reversal V6"},
+    "sell_reversal": {"version": "V6.1", "cc": "cc#502", "label": "Sell Reversal V6.1"},
+    "sell_momentum": {"version": "V4",   "cc": "cc#502", "label": "Sell Momentum V4"},
+    "buy_momentum":  {"version": "V3",   "cc": "cc#502", "label": "Buy Momentum V3"},
+}
+
+# FILTER_CONFIG-shape derivation: the v8_metrics-column ("band") subset per basket, {key: [min,max]}.
+# v8_endpoints.py builds its FILTER_CONFIG from this (replacing the hand-maintained basket dicts).
+# Excludes "custom" legs (s1_touch/r1_touch/room/cmp_lt_pp/s2_clearance — not v8_metrics columns) AND
+# the heavy true_weekly_rsi stage (computed per-symbol, never a stored column). NOTE: buy_momentum's
+# FILTER_CONFIG is its SEPARATE SCORE-band layer (dma_50[8,25]…), NOT these hard-gate funnel bounds
+# (dma_50[5,12]…) — v8_endpoints.py keeps that one literal; this helper is used for the other 3.
+def basket_filter_config(basket: str) -> dict:
+    return {f["key"]: [f["min"], f["max"]] for f in BASKET_FILTERS.get(basket, [])
+            if f["type"] == "band" and not f.get("heavy")}
+
+# Funnel/display stage tuples (key, label, cond_min, cond_max) — the endpoints' stage lists.
+def basket_stage_rows(basket: str) -> list:
+    return [(f["key"], f["label"], f.get("cond_min", ""), f.get("cond_max", "")) for f in BASKET_FILTERS.get(basket, [])]
+
+# Live funnel keys the handler is expected to write for a basket (parity-check target, cc#599).
+def basket_funnel_keys(basket: str) -> set:
+    return {f["key"] for f in BASKET_FILTERS.get(basket, [])}
+
+
 def _write_qualified(conn, all_metrics: List[dict], target_date: date, sim_ts=None, v21_backtest=False):
     """cc#502: the generic FILTER_CONFIG score-gate loop is retired — all four baskets are now
     dedicated strict-AND handlers (zero baskets were left running through it). This is now just

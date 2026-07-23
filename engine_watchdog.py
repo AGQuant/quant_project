@@ -272,6 +272,52 @@ def _resolve_gap(cur, c, observed, now):
                 (now, now, f"auto-resolved: {observed}", c["job_name"], c["check_id"]))
 
 
+_REGISTRY_BASKETS = ("buy_reversal", "sell_reversal", "sell_momentum", "buy_momentum")
+
+
+def _check_filter_registry_parity(conn, now) -> dict:
+    """cc#607 Phase A parity guard: the BASKET_FILTERS registry (v8_signal_writer.py) is the single
+    source for each basket's gates. Compare its keys against the keys the live handler actually wrote
+    to v8_funnel_counts on the latest score_date — if a handler ever adds/drops a gate without the
+    registry (or vice-versa), the funnel/pass-count/i-button would silently drift. Drift -> open a
+    watchdog gap (DETECT-only, per cc#599 no-auto-remediation). Healthy/absent -> auto-resolve."""
+    checked = drift = 0
+    try:
+        from v8_signal_writer import basket_funnel_keys
+    except Exception as e:
+        log.warning(f"registry parity: cannot import registry: {e}")
+        return {"checked": 0, "drift": 0, "error": str(e)[:80]}
+    with conn.cursor() as cur:
+        for basket in _REGISTRY_BASKETS:
+            reg_keys = basket_funnel_keys(basket)
+            if not reg_keys:
+                continue
+            cur.execute("""SELECT counts FROM v8_funnel_counts WHERE basket=%s
+                           ORDER BY score_date DESC LIMIT 1""", (basket,))
+            r = cur.fetchone()
+            if not r or not r[0]:
+                continue   # no live funnel yet -> can't verify, not drift
+            counts = r[0] if isinstance(r[0], dict) else json.loads(r[0])
+            live_keys = {k for k in counts.keys() if not k.startswith("_")}
+            checked += 1
+            c = {"job_name": "bg_signal_writer", "check_id": f"filter_registry_parity_{basket}",
+                 "severity": "high",
+                 "suggested_action": f"BASKET_FILTERS['{basket}'] keys drifted from the live "
+                                     f"v8_funnel_counts keys — reconcile the registry in "
+                                     f"v8_signal_writer.py with the handler so funnel/pass-count/"
+                                     f"i-button stay single-sourced (cc#607)."}
+            if live_keys != reg_keys:
+                missing = sorted(reg_keys - live_keys)   # in registry, not written by handler
+                extra   = sorted(live_keys - reg_keys)   # written by handler, not in registry
+                observed = f"registry={sorted(reg_keys)} live={sorted(live_keys)} missing={missing} extra={extra}"
+                _upsert_gap(cur, c, observed, "registry keys == live funnel keys", now)
+                drift += 1
+            else:
+                _resolve_gap(cur, c, f"registry matches live funnel ({len(reg_keys)} gates)", now)
+    conn.commit()
+    return {"checked": checked, "drift": drift}
+
+
 def run_watchdog(conn) -> dict:
     """Seed + auto-register backstop + evaluate every active check. Breach -> upsert open gap;
     healthy -> auto-resolve. Summary -> ops_log. Returns counts."""
@@ -316,8 +362,16 @@ def run_watchdog(conn) -> dict:
                 resolved += 1
             conn.commit()
 
+    # cc#607 Phase A: basket filter-registry ↔ live-funnel-keys parity guard (drift -> gap).
+    try:
+        parity = _check_filter_registry_parity(conn, now)
+    except Exception as e:
+        log.warning(f"registry parity check failed: {e}")
+        parity = {"checked": 0, "drift": 0, "error": str(e)[:80]}
+
     summary = {"evaluated": evaluated, "breached": breached, "auto_resolved": resolved,
                "skipped_not_due": skipped, "unverifiable": errored, "checks_total": len(checks),
+               "registry_parity": parity,
                "open_sample": open_gaps[:15], "ist": str(now)}
     try:
         with conn.cursor() as cur:
