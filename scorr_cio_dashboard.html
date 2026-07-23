@@ -222,6 +222,92 @@ function TrendChart({ points }) {
   );
 }
 
+// cc#634: shared click-to-expand chart modal (GVM Trend + Price, up to 5Y). Range pills 3M/1Y/3Y/5Y,
+// default 5Y. Reads /api/gvm/trend (gvm_history + raw_prices, downsampled <=260 pts). Same overlay
+// pattern as the R-card modal (backdrop + X + Esc). GVM mode: composite bold + G/V/M thin (toggle) +
+// v_score-backfill footnote. Price mode: EOD line + high/low + range return%.
+function ChartExpandModal({ mode, symbol, onClose }) {
+  const [range, setRange] = useState("5y");
+  const [data, setData] = useState(null);
+  const [showComp, setShowComp] = useState(true);
+  useEffect(() => {
+    let alive = true; setData(null);
+    apiGet(`/api/gvm/trend/${encodeURIComponent(symbol)}?range=${range}`)
+      .then(x => { if (alive && x && !x.error) setData(x); }).catch(() => {});
+    return () => { alive = false; };
+  }, [symbol, range]);
+  useEffect(() => {
+    const h = e => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", h); return () => document.removeEventListener("keydown", h);
+  }, [onClose]);
+  const isGvm = mode === "gvm";
+  const valOf = p => isGvm ? p.gvm : p.close;
+  const pts = (data ? (isGvm ? (data.gvm || []) : (data.price || [])) : []).filter(p => valOf(p) != null);
+  const W = 680, H = 320, L = 46, R = 12, T = 16, B = 26;
+  let content = null;
+  if (!data) content = <div style={{ padding: "90px 0", textAlign: "center", color: C.muted }}>loading…</div>;
+  else if (pts.length < 2) content = <div style={{ padding: "90px 0", textAlign: "center", color: C.muted }}>no data for this range</div>;
+  else {
+    let allV = []; const keys = isGvm ? (showComp ? ["gvm", "g", "v", "m"] : ["gvm"]) : ["close"];
+    pts.forEach(p => keys.forEach(k => { const v = k === "close" ? p.close : p[k]; if (v != null) allV.push(v); }));
+    const lo = Math.min(...allV), hi = Math.max(...allV), padv = (hi - lo) * 0.08 || 1;
+    const ymin = lo - padv, ymax = hi + padv;
+    const X = i => L + i / (pts.length - 1) * (W - L - R);
+    const Y = v => T + (ymax - v) / (ymax - ymin) * (H - T - B);
+    const path = key => pts.map((p, i) => { const v = key === "close" ? p.close : p[key]; return v == null ? "" : ((i === 0 ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1)); }).join(" ");
+    const mainV = pts.map(valOf);
+    const iHi = mainV.indexOf(Math.max(...mainV)), iLo = mainV.indexOf(Math.min(...mainV));
+    const ticks = [0, 1, 2, 3, 4].map(t => ymin + (ymax - ymin) * t / 4);
+    const xlab = [0, Math.floor(pts.length / 2), pts.length - 1];
+    const cc = { g: C.gPillar, v: C.vPillar, m: C.mPillar };
+    content = (
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {ticks.map((tv, i) => (
+          <g key={i}>
+            <line x1={L} y1={Y(tv)} x2={W - R} y2={Y(tv)} stroke={C.gridLine} strokeWidth="0.5" strokeOpacity="0.5" />
+            <text x={L - 6} y={Y(tv) + 3} fontSize="9" fill={C.muted} textAnchor="end" fontFamily="monospace">{isGvm ? tv.toFixed(1) : fmt(tv, 0)}</text>
+          </g>
+        ))}
+        {xlab.map((xi, i) => (
+          <text key={i} x={X(xi)} y={H - 6} fontSize="9" fill={C.muted} textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"} fontFamily="monospace">{(pts[xi].d || "").slice(0, 7)}</text>
+        ))}
+        {isGvm && showComp && ["g", "v", "m"].map(k => (<path key={k} d={path(k)} fill="none" stroke={cc[k]} strokeWidth="1" strokeOpacity="0.4" />))}
+        <path d={path(isGvm ? "gvm" : "close")} fill="none" stroke={C.accent} strokeWidth="2" strokeLinejoin="round" />
+        <circle cx={X(iHi)} cy={Y(mainV[iHi])} r="3" fill={C.green} />
+        <circle cx={X(iLo)} cy={Y(mainV[iLo])} r="3" fill={C.red} />
+      </svg>
+    );
+  }
+  let headStat = null;
+  if (pts.length >= 2) {
+    const mainV = pts.map(valOf), first = mainV[0], last = mainV[mainV.length - 1];
+    const ret = first ? (last - first) / first * 100 : null;
+    const hi = Math.max(...mainV), lo = Math.min(...mainV);
+    headStat = isGvm
+      ? <span style={{ fontFamily: "monospace", fontSize: 13, color: C.muted }}>H {hi.toFixed(2)} · L {lo.toFixed(2)}</span>
+      : <span style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: ret >= 0 ? C.green : C.red }}>{range.toUpperCase()} {signFmt(ret, 0)}% <span style={{ color: C.muted, fontWeight: 400 }}>· H {fmt(hi, 0)} · L {fmt(lo, 0)}</span></span>;
+  }
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(6,10,20,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: C.card || C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 14, width: "min(720px,96vw)", maxHeight: "90vh", overflow: "auto", padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <b style={{ fontSize: 15 }}>{symbol} · {isGvm ? "GVM Trend" : "Price"}</b>
+          <span style={{ marginLeft: "auto" }}>{headStat}</span>
+          <button onClick={onClose} style={{ border: "none", background: "none", color: C.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {["3m", "1y", "3y", "5y"].map(p => (
+            <span key={p} onClick={() => setRange(p)} style={{ fontSize: 11.5, fontWeight: 700, padding: "5px 12px", borderRadius: 8, cursor: "pointer", border: `1px solid ${range === p ? C.accent : C.gridLine}`, background: range === p ? C.accent : "transparent", color: range === p ? "#fff" : C.muted }}>{p.toUpperCase()}</span>
+          ))}
+          {isGvm && <span onClick={() => setShowComp(s => !s)} style={{ marginLeft: "auto", fontSize: 11, padding: "5px 10px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.gridLine}`, color: showComp ? C.accent : C.muted }}>G/V/M {showComp ? "on" : "off"}</span>}
+        </div>
+        {content}
+        {isGvm && data && data.v_backfill_era && <div style={{ fontSize: 9.5, color: C.muted, marginTop: 8 }}>* v_score held constant in the backfill era (pre ~Apr-2026) — GVM before then is G/M-driven.</div>}
+      </div>
+    </div>
+  );
+}
+
 function PillarRadar({ company, sector }) {
   if (!company) return null;
   const W = 90, H = 90, cx = W/2, cy = H/2 + 4, R = 32;
@@ -1514,7 +1600,7 @@ function PriceSparkline({ symbol, onExpand }) {
   const ser = ((d && d.series) || []).filter(p => p.close != null);
   const W = 264, H = 74, PAD = 4;
   const wrap = kids => (
-    <div style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "10px 12px" }}>{kids}</div>
+    <div onClick={onExpand} title="Tap to expand — up to 5Y" style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>{kids}</div>
   );
   if (ser.length < 2) {
     return wrap(
@@ -1549,7 +1635,7 @@ function PriceSparkline({ symbol, onExpand }) {
       </svg>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3 }}>
         <span style={{ fontSize: 9.5, fontFamily: "monospace", color: C.muted }}>L {fmt(lo, 1)} · H {fmt(hi, 1)}</span>
-        <span onClick={onExpand} style={{ fontSize: 11, color: C.accent, cursor: "pointer" }}>expand</span>
+        <span style={{ fontSize: 9.5, fontFamily: "monospace", color: C.muted, opacity: .7 }}>Price · 3M</span>
       </div>
     </React.Fragment>
   );
@@ -1800,6 +1886,7 @@ function OpsMetricsSection({ ops }) {
 function GvmReport({ r, hist }) {
   const [view, setView] = useState("matrix");
   const [fibOpen, setFibOpen] = useState(false);   // cc#300: Fibcheck popout
+  const [chartExpand, setChartExpand] = useState(null);   // cc#634: 'gvm' | 'price' | null
   const [chartRow, setChartRow] = useState(null);  // cc#507: per-metric peer-ladder chart modal
   const s = r.scores || {};
   const vc = verdictColor(r.verdict);
@@ -1842,6 +1929,7 @@ function GvmReport({ r, hist }) {
   return (
     <div style={{ paddingBottom: 80 }}>
       {fibOpen && <FibPopout symbol={r.symbol} onClose={() => setFibOpen(false)} />}
+      {chartExpand && <ChartExpandModal mode={chartExpand} symbol={r.symbol} onClose={() => setChartExpand(null)} />}
       {chartRow && <PeerLadderModal b={chartRow} sym={r.symbol} onClose={() => setChartRow(null)} />}
       <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <button onClick={() => window.print()}
@@ -1902,11 +1990,13 @@ function GvmReport({ r, hist }) {
 
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             {trendPoints && (
-              <div style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div onClick={() => setChartExpand("gvm")} title="Tap to expand — up to 5Y"
+                   style={{ minWidth: 280, background: C.bg, border: `1px solid ${C.gridLine}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
                 <TrendChart points={trendPoints} />
               </div>
             )}
-            <PriceSparkline symbol={r.symbol} onExpand={() => setFibOpen(true)} />
+            {/* cc#634: whole price tile is the tap target -> 5Y expand modal (was a small "expand" text link) */}
+            <PriceSparkline symbol={r.symbol} onExpand={() => setChartExpand("price")} />
           </div>
 
           {/* cc#450: right info block removed (Prev Close date/price, MCap line, %-of-52W/from-high,

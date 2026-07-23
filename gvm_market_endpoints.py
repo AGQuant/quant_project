@@ -176,6 +176,37 @@ def _perf_grid(sym, segment):
     return {"stock": stock_perf, "sector": sector_perf}
 
 
+_TREND_RANGE_DAYS = {"3m": 95, "1y": 372, "3y": 1100, "5y": 1830}
+
+
+@router.get("/api/gvm/trend/{symbol}")
+def get_gvm_trend(symbol: str, range: str = "5y"):
+    """cc#634: GVM + Price series for the click-to-expand chart (up to 5Y). gvm_history (composite +
+    G/V/M) and raw_prices EOD close, over range 3m|1y|3y|5y, each downsampled to <=260 points for
+    payload sanity (weekly-ish at 5Y). v_backfill_era flags that v_score was held constant pre-live
+    (method IS NOT NULL) — same honesty disclosure as the trajectory 6M asterisk."""
+    days = _TREND_RANGE_DAYS.get((range or "5y").lower(), 1830)
+    sym = symbol.upper()
+
+    def _ds(rows):
+        if not isinstance(rows, list) or len(rows) <= 260:
+            return rows if isinstance(rows, list) else []
+        n = len(rows); step = n / 260.0
+        return [rows[min(int(i * step), n - 1)] for i in range(260)]
+
+    gv = api_query("""SELECT score_date::text AS d, ROUND(gvm_score::numeric,2) AS gvm,
+                             ROUND(g_score::numeric,2) AS g, ROUND(v_score::numeric,2) AS v,
+                             ROUND(m_score::numeric,2) AS m, (method IS NOT NULL) AS backfill
+                      FROM gvm_history WHERE symbol=%s AND score_date >= CURRENT_DATE - %s
+                      ORDER BY score_date ASC""", (sym, days))
+    px = api_query("""SELECT price_date::text AS d, ROUND(close::numeric,2) AS close FROM raw_prices
+                      WHERE symbol=%s AND price_date >= CURRENT_DATE - %s AND close IS NOT NULL
+                      ORDER BY price_date ASC""", (sym, days))
+    v_backfill = bool(isinstance(gv, list) and any(r.get("backfill") for r in gv))
+    return {"symbol": sym, "range": (range or "5y").lower(),
+            "gvm": _ds(gv), "price": _ds(px), "v_backfill_era": v_backfill}
+
+
 @router.get("/api/gvm/snapshot/{symbol}")
 def get_gvm_snapshot(symbol: str):
     """cc#608: compact GVM snapshot for the Open-Positions quick-action "G" popout — GVM + G/V/M
