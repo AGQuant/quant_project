@@ -2067,6 +2067,7 @@ function renderMood(m){
       <div class="big">${m.mood||'--'}<span class="pill" style="background:${bg};color:${fg};margin-left:8px">${m.fails} fails</span></div>
       ${metricRow('openVix()','India VIX','vixInline')}
       ${metricRow('openAdr()','ADR','adrInline')}
+      <div style="margin-top:7px"><button onclick="openIdxPos()" title="Index open positions — live V10 NIFTY/BankNifty (read-only)" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--cyan);background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:7px 11px;min-height:36px;line-height:1">&#9673; Index Positions</button></div>
       ${metricRow('openNiftyPcr()','NIFTY PCR','niftyPcrInline')}
       ${metricRow('openBankniftyPcr()','BankNifty PCR','bankniftyPcrInline')}</div>
     <div class="mood-right">
