@@ -259,6 +259,72 @@ SECTOR_REGISTRY_SEED = {
         ("net_debt_ebitda", "Net Debt/EBITDA", "x", "lower_better", "core"),
         ("capacity_util_pct", "Capacity Utilization", "%", "higher_better", "extended"),
     ],
+    # cc#632 KPI TAXONOMY V2 (founder-specified, 23-Jul): sector-specific KPIs for the 10 sectors that
+    # previously fell through to the generic 3-metric fallback (~225 symbols). Canonical lowercase
+    # snake_case names. Missing KPI = absent row, never estimated (extractor emits only what's in text).
+    "Pharma": [   # founder spine: ANDA filings + US revenue + R&D spend
+        ("us_revenue_mix_pct", "US Revenue Mix", "%", "higher_better", "core"),
+        ("anda_filings_count", "ANDA Filings", "count", "higher_better", "core"),
+        ("anda_approvals_count", "ANDA Approvals", "count", "higher_better", "core"),
+        ("rnd_spend_pct_sales", "R&D Spend % Sales", "%", "higher_better", "core"),
+        ("gross_margin_pct", "Gross Margin", "%", "higher_better", "core"),
+        ("domestic_growth_yoy", "Domestic Growth YoY", "%", "higher_better", "extended"),
+        ("price_erosion_pct", "US Price Erosion", "%", "lower_better", "extended"),
+    ],
+    "FMCG": [
+        ("volume_growth_pct", "Volume Growth", "%", "higher_better", "core"),
+        ("price_led_growth_pct", "Price-led Growth", "%", "higher_better", "core"),
+        ("gross_margin_pct", "Gross Margin", "%", "higher_better", "core"),
+        ("rural_urban_commentary", "Rural vs Urban", "text", "higher_better", "extended"),
+        ("ad_spend_pct_sales", "Ad Spend % Sales", "%", "higher_better", "extended"),
+    ],
+    "Chemicals": [
+        ("volume_growth_pct", "Volume Growth", "%", "higher_better", "core"),
+        ("realization_trend_pct", "Realization Trend", "%", "higher_better", "core"),
+        ("capacity_utilisation_pct", "Capacity Utilisation", "%", "higher_better", "core"),
+        ("export_mix_pct", "Export Mix", "%", "higher_better", "extended"),
+        ("gross_margin_pct", "Gross Margin", "%", "higher_better", "core"),
+    ],
+    "Power_Energy": [
+        ("plf_pct", "PLF", "%", "higher_better", "core"),
+        ("generation_mu", "Generation", "MU", "higher_better", "core"),
+        ("capacity_mw_adds", "Capacity Adds", "MW", "higher_better", "core"),
+        ("merchant_vs_ppa_mix", "Merchant vs PPA Mix", "%", "higher_better", "extended"),
+        ("receivables_days", "Receivables Days", "days", "lower_better", "extended"),
+    ],
+    "Capital_Goods_Engineering": [
+        ("order_inflows_cr", "Order Inflows", "₹cr", "higher_better", "core"),
+        ("order_book_cr", "Order Book", "₹cr", "higher_better", "core"),
+        ("book_to_bill", "Book-to-Bill", "x", "higher_better", "core"),
+        ("execution_growth_yoy", "Execution Growth YoY", "%", "higher_better", "core"),
+        ("working_capital_days", "Working Capital Days", "days", "lower_better", "extended"),
+    ],
+    "Consumer_Durables_Electronics": [
+        ("volume_growth_pct", "Volume Growth", "%", "higher_better", "core"),
+        ("channel_inventory_days", "Channel Inventory Days", "days", "lower_better", "core"),
+        ("market_share_commentary", "Market Share", "text", "higher_better", "extended"),
+        ("gross_margin_pct", "Gross Margin", "%", "higher_better", "core"),
+    ],
+    "Media_Digital": [
+        ("subscribers_or_mau", "Subscribers / MAU", "count", "higher_better", "core"),
+        ("arpu_or_realization", "ARPU / Realization", "₹", "higher_better", "core"),
+        ("ad_revenue_growth_pct", "Ad Revenue Growth", "%", "higher_better", "core"),
+    ],
+    "City_Gas": [
+        ("volumes_mmscmd", "Volumes", "mmscmd", "higher_better", "core"),
+        ("margin_per_scm", "Margin/scm", "₹/scm", "higher_better", "core"),
+        ("cng_station_adds", "CNG Station Adds", "count", "higher_better", "extended"),
+    ],
+    "Ports_Logistics": [
+        ("volume_teu_mt", "Volume", "TEU/MT", "higher_better", "core"),
+        ("realisation_per_teu_mt", "Realisation/TEU-MT", "₹", "higher_better", "core"),
+        ("capacity_utilisation_pct", "Capacity Utilisation", "%", "higher_better", "extended"),
+    ],
+    "Exchanges_Ratings": [
+        ("adtv_cr", "ADTV", "₹cr", "higher_better", "core"),
+        ("transaction_revenue_growth", "Transaction Revenue Growth", "%", "higher_better", "core"),
+        ("market_share_pct", "Market Share", "%", "higher_better", "core"),
+    ],
 }
 
 # cc#523 spec: "remaining 12 existing sectors: carry over current metric names into the
@@ -270,12 +336,12 @@ GENERIC_CORE_METRICS = [
     ("ebitda_margin_pct", "EBITDA Margin", "%", "higher_better", "core"),
     ("pat_growth_yoy", "PAT Growth YoY", "%", "higher_better", "core"),
 ]
+# cc#632: the taxonomy'd sectors above moved OUT of the generic fallback. What remains here still uses
+# GENERIC_CORE_METRICS until it gets its own taxonomy (no founder KPI list yet for these).
 OTHER_SECTORS = [
-    "Pharma", "Chemicals", "FMCG", "Realty", "Power_Energy",
-    "Capital_Goods_Engineering", "Textiles_Apparel", "Consumer_Durables_Electronics",
-    "Paper_Packaging", "Financial_Services_Markets", "Media_Digital_Services", "Diversified_Others",
+    "Real_Estate", "Textiles_Apparel", "Paper_Packaging", "Diversified_Others",
 ]
-ALL_SECTORS = list(SECTOR_REGISTRY_SEED.keys()) + OTHER_SECTORS   # 22 total
+ALL_SECTORS = list(SECTOR_REGISTRY_SEED.keys()) + OTHER_SECTORS
 
 
 def _infer_sector(segment):
@@ -317,8 +383,12 @@ def _infer_sector(segment):
                                                       "Edible Oil", "Sugar & Agri")):
         return "FMCG"
     if s.startswith("Realty") or s == "REITs" or "Infrastructure" in s:
-        return "Realty"
-    if any(k in s for k in ("Power", "Renewable Energy", "Solar", "City Gas",
+        return "Real_Estate"   # cc#632: canonical label (was "Realty")
+    if "City Gas" in s or "Gas Distribution" in s:   # cc#632: split out of Power_Energy
+        return "City_Gas"
+    if any(k in s for k in ("Ports", "Logistics", "Shipping", "Marine", "Container")):
+        return "Ports_Logistics"   # cc#632
+    if any(k in s for k in ("Power", "Renewable Energy", "Solar",
                              "Oil Services", "Refineries")):
         return "Power_Energy"
     if any(k in s for k in ("Capital Goods", "Engineering", "Electrical", "Electronics",
@@ -335,8 +405,38 @@ def _infer_sector(segment):
         return "Financial_Services_Markets"
     if any(k in s for k in ("Broadcasting", "Entertainment", "Print Media",
                              "Digital Aggregators", "Internet & Digital")):
-        return "Media_Digital_Services"
+        return "Media_Digital"   # cc#632: canonical label (was "Media_Digital_Services")
+    if any(k in s for k in ("Broking", "Capital Markets", "Exchanges", "Rating")):
+        return "Exchanges_Ratings"   # cc#632: was "Financial_Services_Markets"
     return "Diversified_Others"
+
+
+# cc#632 NAME NORMALIZATION — canonical labels enforced at WRITE time (migration handles the backlog).
+_SECTOR_CANON = {
+    "Realty": "Real_Estate", "IT_Tech": "IT", "Steel_Tubes": "Metals_Steel",
+    "Auto_Components": "Auto", "Capital_Markets": "Exchanges_Ratings",
+    "Financial_Services_Markets": "Exchanges_Ratings", "Media_Digital_Services": "Media_Digital",
+}
+# metric renames beyond pure casing (the rest are handled by lower())
+_METRIC_CANON = {
+    "ebitda_margin": "ebitda_margin_pct", "arpob_day": "arpob",
+}
+
+
+def _canon_sector(sector):
+    """cc#632: canonical sector label (merge dupes), write-time enforcement."""
+    if not sector:
+        return sector
+    return _SECTOR_CANON.get(sector, sector)
+
+
+def _canon_metric(name):
+    """cc#632: canonical metric_name = lowercase snake_case, with a few semantic renames
+    (EBITDA_margin -> ebitda_margin_pct). Enforced at write time."""
+    if not name:
+        return name
+    low = str(name).strip().lower()
+    return _METRIC_CANON.get(low, low)
 
 
 def seed_registry(conn=None):
@@ -752,8 +852,10 @@ def write_extraction(cur, symbol, sector, quarter, metrics, concall, doc_urls):
     # since cc#523 was failing with "column computed_at does not exist" on this exact INSERT;
     # internal confidence comparisons (_merge_pass/_should_escalate) stay lowercase, only the
     # value written to the DB is upper-cased here.
+    sector = _canon_sector(sector)   # cc#632: canonical label at write time
     for name, m in metrics.items():
         confidence = m["confidence"].upper() if m["confidence"] else None
+        name = _canon_metric(name)   # cc#632: canonical lowercase snake_case metric_name
         cur.execute("""INSERT INTO sector_ops_metrics
             (symbol, sector, metric_name, metric_value, unit, quarter, confidence,
              source_1, source_1_value, source_2, source_2_value, discrepancy_pct, updated_at)
