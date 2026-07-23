@@ -1733,8 +1733,18 @@ function FinTable({ title, table, trendLabel }) {
   if (!table || !table.rows || !table.rows.length) return null;
   const displayRows = table.rows.filter(rw => rw.display !== false);
   if (!displayRows.length) return null;
-  const periods = table.periods;
-  const ttmIdx = table.ttm ? periods.length - 1 : -1;
+  // cc#635: collapse a DUPLICATE trailing TTM — the source period list sometimes carries a plain TTM
+  // column immediately followed by a highlighted TTM with identical values. Keep exactly ONE terminal
+  // TTM, rendered as the highlighted column. Case-insensitive so it holds for any company/table.
+  const isTTM = p => /ttm/i.test(String(p == null ? "" : p));
+  const srcP = table.periods || [];
+  let keep = srcP.map((_, i) => i);
+  if (srcP.length >= 2 && isTTM(srcP[srcP.length - 1]) && isTTM(srcP[srcP.length - 2])) {
+    keep = keep.filter(i => i !== srcP.length - 2);
+  }
+  const rowVals = row => keep.map(i => row.values[i]);
+  const periods = keep.map(i => srcP[i]);
+  const ttmIdx = (table.ttm || isTTM(periods[periods.length - 1])) ? periods.length - 1 : -1;
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text, marginBottom: 8 }}>{title}</div>
@@ -1764,7 +1774,7 @@ function FinTable({ title, table, trendLabel }) {
                       {trendLabel && row.label === trendLabel && _qoqArrow(row.values)}
                     </span>
                   </td>
-                  {row.values.map((v, i) => (
+                  {rowVals(row).map((v, i) => (
                     <td key={i} style={{ padding: "7px 10px", textAlign: "right", fontFamily: "monospace",
                       color: i === ttmIdx ? C.gold : C.text, fontWeight: i === ttmIdx ? 800 : 500,
                       background: i === ttmIdx ? C.gold + "08" : "transparent" }}>{_finFmt(v, row.unit)}</td>
@@ -1773,7 +1783,7 @@ function FinTable({ title, table, trendLabel }) {
                 {openRow === row.label && (
                   <tr>
                     <td colSpan={periods.length + 1} style={{ padding: "6px 12px 16px", background: C.bg }}>
-                      <FinRowChart row={row} periods={periods} />
+                      <FinRowChart row={{ ...row, values: rowVals(row) }} periods={periods} />
                     </td>
                   </tr>
                 )}
